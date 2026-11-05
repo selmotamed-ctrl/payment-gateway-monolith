@@ -1,0 +1,623 @@
+/* Academy — lab area styles. Tokens only (--pg-*), logical properties, no gradients.
+ * Shared vocabulary lives in base.css; add area-specific rules here with the .ac-lab- prefix. */
+
+.ac-lab {
+  min-inline-size: 0;
+}
+
+/* Authored lab text is English even in RTL: it carries dir="auto" (correct punctuation / run order); its
+ * alignment on RTL pages is set in base.css next to the other authored-text rules. */
+
+.ac-lab [tabindex="-1"]:focus-visible {
+  border-radius: var(--pg-radius-xs);
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: 4px;
+}
+
+.ac-lab-main {
+  min-inline-size: 0;
+}
+
+.ac-lab-heading {
+  overflow-wrap: anywhere;
+}
+
+/* ---- Training strip ------------------------------------------------------- */
+/* A calm reminder (warning tokens, hairline), sticky under the app bar. The tint is painted as an
+ * inset shadow over an opaque surface so content never shows through it while it is stuck. */
+.ac-lab-ribbon {
+  position: sticky;
+  inset-block-start: calc(var(--v-layout-top, 56px) + 8px);
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-block-size: 36px;
+  margin-block-end: 16px;
+  padding: 6px 12px;
+  border: 1px solid var(--pg-status-warning-border);
+  border-radius: var(--pg-radius-md);
+  background-color: var(--pg-bg-surface);
+  box-shadow: inset 0 0 0 100vmax var(--pg-status-warning-bg);
+  color: var(--pg-status-warning-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1.4;
+}
+
+html[dir="rtl"] .ac-lab-ribbon {
+  letter-spacing: 0;
+}
+
+.ac-lab-ribbon__text {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+.ac-lab-ribbon__tag {
+  flex: none;
+  margin-inline-start: auto;
+}
+
+/* The ribbon is sticky too: keep the sticky aside below it. */
+.ac-lab .ac-aside {
+  inset-block-start: calc(var(--v-layout-top, 56px) + 60px);
+}
+
+/* ---- Progress aside ------------------------------------------------------- */
+.ac-lab-aside__block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 20px;
+}
+
+.ac-lab-aside__value {
+  color: var(--pg-ink-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ac-lab-aside__steps {
+  border-block: 1px solid var(--pg-border-subtle);
+}
+
+.ac-lab-aside__mark {
+  margin: 0;
+}
+
+/* ---- Briefing ------------------------------------------------------------- */
+.ac-lab-prose {
+  max-inline-size: 78ch;
+  overflow-wrap: anywhere;
+}
+
+/* Facts as hairline-divided cells (a 1px grid gap shows the border colour; no nested card). */
+.ac-lab-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-sm);
+  background: var(--pg-border-subtle);
+}
+
+.ac-lab-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-inline-size: 0;
+  padding: 12px 16px;
+  background: var(--pg-bg-surface);
+}
+
+.ac-lab-fact dt {
+  color: var(--pg-ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+html[dir="rtl"] .ac-lab-fact dt {
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ac-lab-fact dd {
+  margin: 0;
+  color: var(--pg-ink-primary);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ac-lab-fact dd.ac-lab-fact__sub {
+  color: var(--pg-ink-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.ac-lab-best {
+  align-items: flex-start;
+  color: var(--pg-ink-muted);
+}
+
+.ac-lab-best p {
+  margin: 0;
+}
+
+/* ---- Task stage ----------------------------------------------------------- */
+.ac-lab-eyebrow {
+  font-variant-numeric: tabular-nums;
+}
+
+.ac-lab-panels {
+  --ac-min: 280px;
+}
+
+.ac-lab-answer {
+  min-inline-size: 0;
+}
+
+.ac-lab-hintline {
+  margin: 0;
+}
+
+.ac-lab-hint {
+  margin-block-start: 16px;
+}
+
+.ac-lab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-block-start: 16px;
+}
+
+.ac-lab-actions__primary {
+  margin-inline-start: auto;
+}
+
+.ac-lab-feedback:not(:empty) {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-block-start: 16px;
+}
+
+.ac-lab-line {
+  margin: 4px 0 0;
+}
+
+.ac-lab-line:first-child {
+  margin-block-start: 0;
+}
+
+/* ---- Answer rows ---------------------------------------------------------- */
+.ac-lab-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-inline-size: 0;
+  max-inline-size: 860px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ac-lab-opt {
+  min-inline-size: 0;
+}
+
+/* Feedback under a locked row, aligned with the row's label text (14px padding + 16px box + 12px gap). */
+.ac-lab-opt__note {
+  padding-inline: 42px 14px;
+}
+
+.ac-lab .ac-choice:has(input:focus-visible) {
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: 2px;
+}
+
+.ac-lab .ac-choice--locked input {
+  cursor: default;
+}
+
+/* ---- Ordering ------------------------------------------------------------- */
+.ac-lab-order {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-inline-size: 0;
+  max-inline-size: 860px;
+}
+
+.ac-lab-order__item {
+  align-items: center;
+}
+
+.ac-lab-order__pos {
+  flex: none;
+  inline-size: 22px;
+  color: var(--pg-ink-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.ac-lab-order__moves {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  margin-inline-start: auto;
+}
+
+.ac-lab-order__moves .v-btn.v-btn--icon {
+  inline-size: 32px;
+  block-size: 32px;
+  min-inline-size: 32px;
+  border-color: var(--pg-border-subtle);
+  color: var(--pg-ink-secondary);
+}
+
+.ac-lab-order__solution {
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--pg-border-subtle);
+}
+
+.ac-lab-ol,
+.ac-lab-ul {
+  margin: 6px 0 0;
+  padding-inline-start: 1.4em;
+  color: var(--pg-ink-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ---- Inputs --------------------------------------------------------------- */
+.ac-lab-numeric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-inline-size: 360px;
+}
+
+.ac-lab-label {
+  color: var(--pg-ink-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ac-lab-input {
+  box-sizing: border-box;
+  inline-size: 100%;
+  block-size: 36px;
+  padding-inline: 12px;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-sm);
+  background: var(--pg-bg-surface);
+  color: var(--pg-ink-primary);
+  font: inherit;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.ac-lab-input:hover:not(:disabled) {
+  border-color: var(--pg-border-strong);
+}
+
+.ac-lab-input:focus-visible {
+  border-color: var(--pg-border-focus);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--pg-border-focus);
+}
+
+.ac-lab-input[aria-invalid="true"] {
+  border-color: var(--pg-status-danger-dot);
+}
+
+.ac-lab-input:disabled {
+  background: var(--pg-bg-surface-subtle);
+  color: var(--pg-ink-secondary);
+}
+
+.ac-lab-input--cell {
+  block-size: 32px;
+  min-inline-size: 96px;
+  padding-inline: 10px;
+  text-align: end;
+}
+
+.ac-lab-help {
+  color: var(--pg-ink-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.ac-lab-help--error {
+  color: var(--pg-status-danger-text);
+}
+
+.ac-lab-expected-answer {
+  margin: 4px 0 0;
+}
+
+/* ---- Tables (ledger and evidence panels): the unified table look --------- */
+.ac-lab-tablewrap {
+  max-inline-size: 100%;
+  overflow-x: auto;
+  border-radius: var(--pg-radius-sm);
+}
+
+.ac-lab-table {
+  inline-size: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--pg-ink-primary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ac-lab-table--ledger {
+  min-inline-size: 420px;
+}
+
+.ac-lab-table caption {
+  padding: 0 0 10px;
+  color: var(--pg-ink-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: start;
+  caption-side: top;
+}
+
+.ac-lab-table thead th {
+  block-size: 36px;
+  padding: 0 14px;
+  border-block-end: 1px solid var(--pg-border-subtle);
+  background: var(--pg-bg-surface-subtle);
+  color: var(--pg-ink-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: start;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+html[dir="rtl"] .ac-lab-table thead th {
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ac-lab-table tbody th,
+.ac-lab-table td {
+  padding: 6px 14px;
+  border-block-end: 1px solid var(--pg-border-subtle);
+  line-height: 1.4;
+  text-align: start;
+  vertical-align: middle;
+  overflow-wrap: break-word;
+}
+
+.ac-lab-table tbody th {
+  font-weight: 500;
+}
+
+.ac-lab-table tbody tr:last-child > th,
+.ac-lab-table tbody tr:last-child > td {
+  border-block-end: 0;
+}
+
+.ac-lab-table tfoot th,
+.ac-lab-table tfoot td {
+  padding: 8px 14px;
+  border-block-start: 1px solid var(--pg-border-subtle);
+  background: var(--pg-bg-surface-subtle);
+  font-weight: 600;
+  text-align: start;
+}
+
+/* Amount columns are right-aligned in both directions (numbers stay LTR). */
+.ac-lab-table .ac-lab-num {
+  text-align: end;
+}
+
+.ac-lab-expected {
+  display: block;
+  color: var(--pg-ink-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.ac-lab-ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-inline-size: 0;
+}
+
+/* ---- Evidence panels ------------------------------------------------------ */
+.ac-lab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.ac-lab-panel__title {
+  margin: 0;
+  color: var(--pg-ink-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ac-lab-panel__lead {
+  margin: 0;
+  color: var(--pg-ink-primary);
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.55;
+}
+
+.ac-lab-panel__text {
+  margin: 0;
+  color: var(--pg-ink-secondary);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.ac-lab-kv {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.ac-lab-kv__row {
+  display: grid;
+  grid-template-columns: minmax(84px, 38%) minmax(0, 1fr);
+  gap: 12px;
+  padding-block: 7px;
+  border-block-start: 1px solid var(--pg-border-subtle);
+}
+
+.ac-lab-kv__row:first-child {
+  padding-block-start: 0;
+  border-block-start: 0;
+}
+
+.ac-lab-kv dt {
+  color: var(--pg-ink-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.ac-lab-kv dd {
+  margin: 0;
+  color: var(--pg-ink-primary);
+  font-size: 13.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ac-lab-timeline {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ac-lab-timeline__item {
+  display: grid;
+  grid-template-columns: 56px 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding-block: 7px;
+  border-block-start: 1px solid var(--pg-border-subtle);
+  color: var(--pg-ink-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ac-lab-timeline__item:first-child {
+  padding-block-start: 0;
+  border-block-start: 0;
+}
+
+.ac-lab-timeline__time {
+  color: var(--pg-ink-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ac-lab-timeline .ac-state {
+  inline-size: 18px;
+  block-size: 18px;
+}
+
+/* ---- Verdict and review --------------------------------------------------- */
+.ac-lab-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.ac-lab-verdict__main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  min-inline-size: 0;
+}
+
+.ac-lab-verdict__score {
+  margin: 0;
+  color: var(--pg-ink-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.ac-lab-review__item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ac-lab-review__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.ac-lab-review__head .ac-grow {
+  flex-basis: 12ch;
+}
+
+.ac-lab-review__item p {
+  margin: 0;
+}
+
+.ac-lab-notes {
+  padding-block-start: 10px;
+  border-block-start: 1px solid var(--pg-border-subtle);
+}
+
+.ac-lab-refs {
+  line-height: 1.7;
+}
+
+/* ---- Small screens -------------------------------------------------------- */
+@media (max-width: 600px) {
+  .ac-lab-aside__block {
+    padding-inline: 16px;
+  }
+  .ac-lab-verdict {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .ac-lab-opt__note {
+    padding-inline-start: 28px;
+  }
+  .ac-lab-actions .v-btn {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ac-lab-input {
+    transition: none;
+  }
+}

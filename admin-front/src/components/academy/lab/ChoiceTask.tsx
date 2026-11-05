@@ -1,9 +1,8 @@
 import { defineComponent, type PropType } from "vue";
 import { useLocale } from "vuetify";
-import { VIcon } from "vuetify/components";
 import type { ChoiceTask as ChoiceTaskType } from "@/content/academy";
 import type { ChoiceAnswer } from "../labScoring";
-import { labBorder, renderInline } from "./PanelView";
+import { choiceTag, renderInline } from "./PanelView";
 
 export const ChoiceTask = defineComponent({
     name: "AcademyLabChoiceTask",
@@ -16,39 +15,42 @@ export const ChoiceTask = defineComponent({
     setup(props) {
         const { t } = useLocale();
         return () => (
-            <fieldset style={{ border: "none", padding: 0, margin: 0, display: "grid", gap: "8px" }}>
-                <legend style={{ position: "absolute", width: "1px", height: "1px", overflow: "hidden" }}>{props.task.title}</legend>
-                {props.task.options.map((option) => {
-                    const chosen = props.answer?.selected === option.id;
-                    const showFeedback = props.locked && (chosen || option.correct);
-                    return (
-                        <div style={{ border: labBorder, borderRadius: "8px", padding: "8px 12px" }}>
-                            <label style={{ display: "flex", gap: "10px", alignItems: "flex-start", cursor: props.locked ? "default" : "pointer" }}>
-                                <input
-                                    type="radio"
-                                    name={`choice-${props.task.id}`}
-                                    value={option.id}
-                                    checked={chosen}
-                                    disabled={props.locked}
-                                    style={{ marginTop: "4px" }}
-                                    onChange={() => props.onChange({ ...(props.answer ?? { selected: null }), selected: option.id })}
-                                />
-                                <span style={{ flex: 1 }}>{renderInline(option.label)}</span>
-                                {props.locked && option.correct ? (
-                                    <span style={{ whiteSpace: "nowrap" }}>
-                                        <VIcon icon="mdi-check-circle" color="success" size={18} aria-hidden="true" /> {t("Correct answer")}
+            <fieldset class="ac-lab-fieldset">
+                <legend class="ac-sr-only">{props.task.title}</legend>
+                <div class="ac-choices">
+                    {props.task.options.map((option) => {
+                        const chosen = props.answer?.selected === option.id;
+                        const showFeedback = props.locked && (chosen || option.correct);
+                        const noteId = `choice-${props.task.id}-${option.id}-note`;
+                        // Locked: the right answer is green, a wrong pick red, the rest are inert.
+                        const state = props.locked ? (option.correct ? "good" : chosen ? "bad" : "locked") : chosen ? "selected" : "";
+                        return (
+                            <div class="ac-lab-opt" key={option.id}>
+                                <label class={["ac-choice", state ? `ac-choice--${state}` : "", props.locked ? "ac-choice--locked" : ""]}>
+                                    <input
+                                        type="radio"
+                                        name={`choice-${props.task.id}`}
+                                        value={option.id}
+                                        checked={chosen}
+                                        disabled={props.locked}
+                                        aria-describedby={showFeedback ? noteId : undefined}
+                                        onChange={() => props.onChange({ ...(props.answer ?? { selected: null }), selected: option.id })}
+                                    />
+                                    <span class="ac-choice__label" dir="auto">
+                                        {renderInline(option.label)}
                                     </span>
+                                    {props.locked && option.correct ? choiceTag("good", t("Correct answer")) : null}
+                                    {props.locked && chosen && !option.correct ? choiceTag("bad", t("Your choice")) : null}
+                                </label>
+                                {showFeedback ? (
+                                    <p id={noteId} class="ac-choice__note ac-lab-opt__note" dir="auto">
+                                        {option.feedback}
+                                    </p>
                                 ) : null}
-                                {props.locked && chosen && !option.correct ? (
-                                    <span style={{ whiteSpace: "nowrap" }}>
-                                        <VIcon icon="mdi-close-circle" color="error" size={18} aria-hidden="true" /> {t("Your choice")}
-                                    </span>
-                                ) : null}
-                            </label>
-                            {showFeedback ? <p style={{ margin: "6px 0 0", paddingInlineStart: "28px" }}>{option.feedback}</p> : null}
-                        </div>
-                    );
-                })}
+                            </div>
+                        );
+                    })}
+                </div>
             </fieldset>
         );
     },

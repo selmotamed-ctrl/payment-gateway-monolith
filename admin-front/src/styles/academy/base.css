@@ -1,0 +1,567 @@
+/* ============================================================================
+ * Employee Academy — shared vocabulary (visual system v2)
+ *
+ * Rules: tokens only (--pg-*), logical properties (RTL-safe), flat hairline
+ * surfaces, no gradients, no decorative shadows, tabular numerals for numbers.
+ * Page width comes from ScreenContainer (1600px): the Academy never caps the
+ * page. Only reading text (.ac-prose) has a measure.
+ * ========================================================================== */
+
+.ac-wrap {
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+/* ---- Section navigation (segmented look, but real links) ----------------- */
+.ac-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-block-end: 20px;
+}
+
+.ac-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-block-size: 34px;
+  max-inline-size: 100%;
+  padding: 3px;
+  overflow-x: auto;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-sm);
+  background: var(--pg-bg-surface-subtle);
+}
+
+.ac-nav__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  block-size: 26px;
+  padding-inline: 10px;
+  border: 1px solid transparent;
+  border-radius: var(--pg-radius-xs);
+  color: var(--pg-ink-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+
+.ac-nav__link:hover {
+  color: var(--pg-ink-primary);
+}
+
+.ac-nav__link--on {
+  border-color: var(--pg-border-subtle);
+  background: var(--pg-bg-surface);
+  box-shadow: var(--pg-shadow-xs);
+  color: var(--pg-ink-primary);
+  font-weight: 600;
+}
+
+.ac-nav__link:focus-visible,
+.ac-card--link:focus-visible,
+.ac-choice:focus-visible,
+.ac-step__title:focus-visible,
+.ac-link:focus-visible {
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: 2px;
+}
+
+.ac-footer {
+  margin-block-start: 32px;
+  padding-block-start: 14px;
+  border-block-start: 1px solid var(--pg-border-subtle);
+  color: var(--pg-ink-muted);
+  font-size: 12.5px;
+}
+
+.ac-footer a,
+.ac-link {
+  color: var(--pg-accent-interactive);
+  text-decoration: none;
+}
+
+.ac-footer a:hover,
+.ac-link:hover {
+  text-decoration: underline;
+}
+
+/* ---- Layout -------------------------------------------------------------- */
+.ac-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-inline-size: 0;
+}
+.ac-stack--sm { gap: 10px; }
+.ac-stack--lg { gap: 20px; }
+
+.ac-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-inline-size: 0;
+}
+.ac-row--wrap { flex-wrap: wrap; }
+.ac-between {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.ac-grow { flex: 1 1 auto; min-inline-size: 0; }
+
+/* Auto-fit card grid. Override the minimum card width with --ac-min. */
+.ac-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--ac-min, 300px)), 1fr));
+  gap: 16px;
+  min-inline-size: 0;
+}
+
+/* Main column + sticky aside. --ac-main caps the main column for reading/answering pages. */
+.ac-split {
+  display: grid;
+  grid-template-columns: minmax(0, var(--ac-main, 1fr)) minmax(300px, 360px);
+  gap: 20px;
+  align-items: start;
+  min-inline-size: 0;
+}
+
+.ac-split--reading { --ac-main: 920px; }
+
+.ac-aside {
+  position: sticky;
+  inset-block-start: calc(var(--v-layout-top, 56px) + 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-inline-size: 0;
+}
+
+@media (max-width: 1100px) {
+  .ac-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ac-aside {
+    position: static;
+  }
+  /* A page whose aside must come first on narrow screens (timer, key facts). */
+  .ac-split--aside-first > .ac-aside {
+    order: -1;
+  }
+}
+
+@media (max-width: 600px) {
+  .ac-grid { --ac-min: 100%; }
+}
+
+/* ---- Typography ---------------------------------------------------------- */
+.ac-eyebrow {
+  margin: 0 0 4px;
+  color: var(--pg-ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+html[dir="rtl"] .ac-eyebrow {
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ac-title {
+  margin: 0;
+  color: var(--pg-ink-primary);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ac-h2 {
+  margin: 0;
+  color: var(--pg-ink-primary);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ac-h3 {
+  margin: 0;
+  color: var(--pg-ink-primary);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ac-muted {
+  color: var(--pg-ink-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.ac-text {
+  margin: 0;
+  color: var(--pg-ink-secondary);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.ac-lead {
+  max-inline-size: 72ch;
+  margin: 0;
+  color: var(--pg-ink-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.ac-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reading text: the only place a measure applies (design rule: 75ch). */
+.ac-prose {
+  max-inline-size: 75ch;
+  color: var(--pg-ink-primary);
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.ac-prose .guide-markdown {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* The card (or page) supplies the spacing above the first block. */
+.ac-prose .guide-markdown > :first-child {
+  margin-block-start: 0;
+}
+
+/* ---- Surfaces ------------------------------------------------------------ */
+/* .ac-card is the Academy's flat card surface and also the layout-test hook:
+ * cards never nest (no box-in-a-box). SurfaceCard instances add this class too. */
+.ac-card {
+  min-inline-size: 0;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+  background: var(--pg-bg-surface);
+  box-shadow: var(--pg-shadow-xs);
+}
+
+.ac-card--pad {
+  padding: 20px;
+}
+
+.ac-card--link {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.ac-card--link:hover {
+  border-color: var(--pg-border-strong);
+  background: var(--pg-bg-surface-hover);
+}
+
+.ac-card--active {
+  border-color: var(--pg-accent-interactive);
+  box-shadow: 0 0 0 1px var(--pg-accent-interactive), var(--pg-shadow-xs);
+}
+
+/* Icon tile: the only "illustration" the Academy uses. */
+.ac-tile {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  inline-size: 36px;
+  block-size: 36px;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-sm);
+  background: var(--pg-bg-surface-subtle);
+  color: var(--pg-ink-secondary);
+}
+.ac-tile--lg { inline-size: 44px; block-size: 44px; border-radius: var(--pg-radius-md); }
+.ac-tile--success { border-color: var(--pg-status-success-border); background: var(--pg-status-success-bg); color: var(--pg-status-success-text); }
+.ac-tile--warning { border-color: var(--pg-status-warning-border); background: var(--pg-status-warning-bg); color: var(--pg-status-warning-text); }
+.ac-tile--danger { border-color: var(--pg-status-danger-border); background: var(--pg-status-danger-bg); color: var(--pg-status-danger-text); }
+.ac-tile--info { border-color: var(--pg-status-info-border); background: var(--pg-status-info-bg); color: var(--pg-status-info-text); }
+
+/* Hero panel on My learning (flat, two columns, no gradient). */
+.ac-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr);
+  gap: 24px 32px;
+  align-items: center;
+  padding: 24px;
+}
+
+@media (max-width: 960px) {
+  .ac-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- Callouts ------------------------------------------------------------ */
+.ac-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+  background: var(--pg-bg-surface-subtle);
+  color: var(--pg-ink-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ac-callout__icon { flex: none; margin-block-start: 1px; }
+.ac-callout__body { min-inline-size: 0; }
+.ac-callout__title { display: block; margin-block-end: 2px; font-weight: 600; color: inherit; }
+.ac-callout--info { border-color: var(--pg-status-info-border); background: var(--pg-status-info-bg); color: var(--pg-status-info-text); }
+.ac-callout--success { border-color: var(--pg-status-success-border); background: var(--pg-status-success-bg); color: var(--pg-status-success-text); }
+.ac-callout--warning { border-color: var(--pg-status-warning-border); background: var(--pg-status-warning-bg); color: var(--pg-status-warning-text); }
+.ac-callout--danger { border-color: var(--pg-status-danger-border); background: var(--pg-status-danger-bg); color: var(--pg-status-danger-text); }
+
+/* ---- Progress ------------------------------------------------------------ */
+.ac-bar {
+  display: block;
+  inline-size: 100%;
+  block-size: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--pg-bg-surface-subtle);
+  box-shadow: inset 0 0 0 1px var(--pg-border-subtle);
+}
+.ac-bar > span {
+  display: block;
+  block-size: 100%;
+  border-radius: inherit;
+  background: var(--pg-accent-interactive);
+  transition: inline-size 0.2s ease;
+}
+.ac-bar--success > span { background: var(--pg-status-success-dot); }
+.ac-bar--warning > span { background: var(--pg-status-warning-dot); }
+.ac-bar--danger > span { background: var(--pg-status-danger-dot); }
+.ac-bar--lg { block-size: 8px; }
+
+.ac-ring {
+  margin: 0;
+  text-align: center;
+}
+.ac-ring figcaption {
+  margin-block-start: 6px;
+  color: var(--pg-ink-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+.ac-ring text { font-variant-numeric: tabular-nums; }
+
+/* ---- Step lists (lessons, labs, requirements) ---------------------------- */
+.ac-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ac-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-block-size: 44px;
+  padding-block: 9px;
+  border-block-start: 1px solid var(--pg-border-subtle);
+}
+.ac-step:first-child { border-block-start: 0; }
+.ac-steps--flush .ac-step { padding-inline: 20px; }
+.ac-step--current { background: var(--pg-bg-surface-active); }
+
+.ac-step__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 1px;
+  min-inline-size: 0;
+}
+
+.ac-step__title {
+  overflow-wrap: anywhere;
+  color: var(--pg-ink-primary);
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-decoration: none;
+}
+a.ac-step__title:hover { color: var(--pg-accent-interactive); text-decoration: underline; }
+
+.ac-step__sub { color: var(--pg-ink-muted); font-size: 12px; }
+.ac-step__meta {
+  flex: none;
+  color: var(--pg-ink-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ac-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  inline-size: 22px;
+  block-size: 22px;
+  color: var(--pg-ink-faint);
+}
+.ac-state--done { color: var(--pg-status-success-dot); }
+.ac-state--current { color: var(--pg-accent-interactive); }
+.ac-state--partial { color: var(--pg-status-warning-dot); }
+.ac-state--failed { color: var(--pg-status-danger-dot); }
+.ac-state--locked { color: var(--pg-ink-muted); }
+
+/* ---- Selectable answer rows (practice checks, lab tasks, exam options) --- */
+.ac-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ac-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  inline-size: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+  background: var(--pg-bg-surface);
+  color: var(--pg-ink-primary);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.55;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.ac-choice:hover:not(:disabled):not(.ac-choice--locked) {
+  border-color: var(--pg-border-strong);
+  background: var(--pg-bg-surface-hover);
+}
+
+.ac-choice input[type="radio"],
+.ac-choice input[type="checkbox"] {
+  flex: none;
+  inline-size: 16px;
+  block-size: 16px;
+  margin: 3px 0 0;
+  accent-color: var(--pg-accent-interactive);
+}
+
+.ac-choice__label {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+.ac-choice__tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: auto;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ac-choice__note {
+  margin: 6px 0 0;
+  color: var(--pg-ink-secondary);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.ac-choice--selected { border-color: var(--pg-accent-interactive); background: var(--pg-accent-interactive-soft); }
+.ac-choice--good { border-color: var(--pg-status-success-border); background: var(--pg-status-success-bg); color: var(--pg-status-success-text); }
+.ac-choice--bad { border-color: var(--pg-status-danger-border); background: var(--pg-status-danger-bg); color: var(--pg-status-danger-text); }
+.ac-choice--missed { border-color: var(--pg-status-warning-border); background: var(--pg-status-warning-bg); color: var(--pg-status-warning-text); }
+.ac-choice--locked { cursor: default; }
+.ac-choice:disabled { cursor: default; opacity: 1; }
+
+/* ---- Loading ------------------------------------------------------------- */
+.ac-skel {
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+  background: var(--pg-bg-surface-subtle);
+  animation: ac-pulse 1.4s ease-in-out infinite;
+}
+.ac-skel + .ac-skel { margin-block-start: 12px; }
+
+@keyframes ac-pulse {
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ac-skel { animation: none; }
+  .ac-bar > span,
+  .ac-nav__link,
+  .ac-card--link,
+  .ac-choice { transition: none; }
+}
+
+/* ---- RTL ----------------------------------------------------------------- */
+html[dir="rtl"] .ac-flip {
+  transform: scaleX(-1);
+}
+
+/* Identifiers, numbers and codes stay left-to-right inside RTL text. */
+.ac-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.ac-sr-only {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media print {
+  .ac-toolbar,
+  .ac-footer {
+    display: none !important;
+  }
+}
+
+/* Authored English (lesson, lab and exam content) carries dir="auto" so punctuation and run order are right.
+ * An auto-direction element resolves to LTR and `start` would then mean left, leaving a wide gap after the
+ * radio of an RTL row. Chrome also resolves `match-parent` to the element's own start, so state it outright:
+ * on RTL pages these blocks sit against the row's start (right) edge. LTR pages need no override. */
+html[dir="rtl"] .ac-choice__label[dir="auto"],
+html[dir="rtl"] .ac-lesson-stem,
+html[dir="rtl"] .ac-exam-stem,
+html[dir="rtl"] .ac-exam-rev__stem,
+html[dir="rtl"] .ac-lab [dir="auto"] {
+  text-align: right;
+}

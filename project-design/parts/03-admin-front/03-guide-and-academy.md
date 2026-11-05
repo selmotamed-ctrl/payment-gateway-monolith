@@ -3,7 +3,7 @@ id: admin-ui.guide
 title: Admin Guide and Academy
 status: partial
 confidence: high
-last_verified: 2026-11-04
+last_verified: 2026-11-05
 verified_against: working-tree
 code:
   - admin-front/scripts/extract-guide-content.ts
@@ -15,6 +15,8 @@ code:
   - admin-front/src/components/academy/**
   - admin-front/src/pages/academy/**
   - admin-front/src/constants/i18nAcademy/**
+  - admin-front/src/styles/academy/**
+  - admin-front/src/components/academy/ui/**
   - admin-back/api/protected/academy.ts
   - core-back/api/internal/academy.ts
   - core-back/engine/academy/**
@@ -33,6 +35,7 @@ tests:
   - tests/unit/academy-lab-scoring.test.ts
   - tests/unit/academy-progress-merge.test.ts
   - tests/unit/academy-next-step.test.ts
+  - tests/unit/academy-lesson-body.test.ts
   - tests/e2e/admin/guide-reader.spec.ts
   - tests/e2e/admin/guide-palette.spec.ts
   - tests/e2e/admin/guide-context.spec.ts
@@ -48,7 +51,7 @@ tests:
   - core-back/test/academy-team.test.ts
   - admin-back/test/academy-progress.test.ts
 gaps:
-  - The five Academy Playwright specs (`tests/e2e/admin/academy-*.spec.ts`) have been written and listed but not yet run against a live stack: they need a back-office account with a known password and MFA off (seeded accounts are `INVITED`, MFA required). The Prisma-backed academy store (compare-and-swap on `users.updated_at`) is exercised only through fake-store tests.
+  - The five Academy Playwright specs (`tests/e2e/admin/academy-*.spec.ts`) have been written and listed but not yet run against a live stack (their assertions were replayed against a mocked API after the 2026-11-05 visual redesign, see 7.6): they need a back-office account with a known password and MFA off (seeded accounts are `INVITED`, MFA required). The Prisma-backed academy store (compare-and-swap on `users.updated_at`) is exercised only through fake-store tests.
   - The Arabic article set (`articles.ar.json`) is not supplied; the loader falls back to English and the reader shows an "Arabic version pending" chip. Academy lesson/lab/exam CONTENT is English only (spec I-2); the Academy UI chrome is bilingual.
   - Labs are practice and are graded in the browser by design; their results are recorded but are not independently verified by the server. Only exams are server-graded.
   - Academy content labels that do not match the built UI and behaviour doubts are recorded in `design/07-guides-and-academy/academy_content_fixes.md` and `academy_content_questions.md` (for example the unbuilt **Reverse** adjustment action and the Fake Rails drill labels, which follow the older Fake Rails design).
@@ -196,6 +199,37 @@ Endpoints under `/api/v1/admin/academy/` (admin-back proxy → `core-back` `/int
 
 `GET team` (`SECURITY_ADMIN` role, audited) returns one row per back-office user (`merchantId` null, status not `DISABLED`): name (email local part), role, maker/checker flags, required tracks, lessons/labs done vs required, badges with expiry, last activity and a status with precedence `RECERTIFICATION_REQUIRED` > `EXPIRING_SOON` (within 30 days) > `CERTIFIED` > `EXAM_READY` > `IN_PROGRESS` > `NOT_STARTED`. No question text, answers or per-question results. The page filters by role/status/search and exports the visible rows as CSV with a formula-injection guard.
 
+### 7.6 Visual system v2 (2026-11-05)
+
+The first rebuild (7.1-7.5) was functionally complete but visually foreign: it injected a private UI kit (`.ac-btn`, `.ac-chip`, `.ac-card`, `.ac-nav`, `.ac-skel`) through a runtime `<style innerHTML>` on every page, used glyph/emoji icons, mixed `--pg-*` and `--v-theme-*` tokens, and capped the whole Academy at `max-inline-size: 820px` inside the 1600 px `ScreenContainer` (the system container; the 820 px figure is the Guide's *reading measure*, not a page width). v2 re-expresses the same screens, content and behaviour in the admin design system (`00-ui-system.md`).
+
+**Frame.** `components/academy/AcademyShell.tsx` renders `ScreenContainer > .ac-wrap > [page header, section toolbar, body, footer]`. Each page file passes its own `PageHeader` through the `header` render prop (the compliance gate requires the literal `PageHeader` in every route entry). The toolbar holds `ui/AcademyNav` (a segmented-tabs look built from real links; keeps `nav[aria-label="Academy sections"]`, the section stays lit on sub-pages, `aria-current="page"` only on the exact route) and the "not saved yet" `MetaPill`. The shell still loads the progress record on mount and flushes unsent patches on leave.
+
+**Width and layout.** No page-level cap. Pages are grids: `.ac-grid` (auto-fill cards, `--ac-min`), `.ac-split` (main + sticky `.ac-aside`, one column below 1100 px; `.ac-split--reading` caps the main column at 920 px for the lesson, exam runner and review), `.ac-hero` (My learning). Only reading text has a measure (`.ac-prose`, 75 ch).
+
+**Styles.** `src/styles/academy/{base,learner,lesson,lab,exam,team}.css`, imported once through `styles/academy/index.css` from `main.ts`. Tokens only (`--pg-*`), logical properties, flat hairline surfaces, no gradients, `prefers-reduced-motion` honoured, RTL via logical properties and `.ac-flip` for directional icons. The runtime `<style>` block is gone.
+
+**Components.** Pages compose the shared primitives (`PageHeader`, `SurfaceCard`, `StatusBadge`, `MetaPill`, `MetricStrip`, `SegmentedTabs`, `EmptyState`, `DescriptionList`, `VBtn`) plus Academy atoms in `components/academy/ui/`: `StateIcon` (MDI state marker, always paired with words), `ProgressBar`, `Callout` (inline status message), `IconTile`, `trackMeta` (track icons, badge-state → tone). `BadgeChip` is now a `StatusBadge` inside `span.ac-chip[data-track]`; `ProgressRing` is a thin flat ring. Date helpers live in `components/academy/format.ts`.
+
+**Screens (what changed).**
+
+| Route | v2 |
+| :--- | :--- |
+| `/academy` | Hero card (active track, next-step sentence, one primary **Continue** link, three rings) + split: your tracks (progress, badge, make active) / certificates list with links, Guide reading, quick links. |
+| `/academy/tracks` | Filter tabs (All · For my role · Certified) over a card grid with icon, badge state, facts, progress and Required/Active markers. |
+| `/academy/track/:id` | Summary + timeline-style module cards; sticky **Exam readiness** aside (status, facts, missing prerequisites in words, exam link). |
+| `/academy/module/:id` | Module list with "Up next" marker and previous/next module links. |
+| `/academy/lesson/:id` | 75 ch article, Read now, progressive practice checks, finish card; sticky aside with the lesson checklist and the module outline; previous/next tiles. |
+| `/academy/lab/:id` | Calm TRAINING/SANDBOX strip (warning tokens, no solid fill), task stage + sticky lab-progress aside, panels grid, token-based answer rows, ledger as a unified-table look with a Balanced badge, task-by-task result. |
+| `/academy/exam/:id` | Briefing facts strip + requirements + integrity + coverage; runner with sticky timer/progress/question navigator aside; result with verdict, metrics, filterable review (All · Incorrect · Critical). |
+| `/academy/certificate/:id` | Formal sheet (print CSS unchanged) + status/actions aside. |
+| `/academy/team` | Status summary strip + the unified table surface (`pg-table-card`/toolbar/footer), `StatusBadge` statuses and mini progress bars; CSV export unchanged. |
+| `/academy/help` | Topic rail + `.ac-prose` page; live drills as expandable cards. |
+
+**Defects fixed while verifying the redesign.** (1) Strings with `{placeholders}` were translated without their values (`fmt(t("Continue: lesson {title}"), …)`), but vue-i18n consumes placeholders at translation time, so titles, counts and "x of y" rendered blank; every call now passes the values to `t(key, values)` (`fmt` removed) and content titles are bidi-isolated (`format.ts` `isolate`) inside Arabic sentences. (2) Lesson bodies end with the structural `### Read now` / `### Check yourself` sections (a link list and raw check ids) that the page renders as its own cards; `components/academy/lessonBody.ts` `lessonProse()` stops the displayed prose before them (the content itself is untouched; unit test `tests/unit/academy-lesson-body.test.ts`). (3) The old `.ac-btn` painted a fixed white label on `--pg-accent-primary`, which is near-white in dark mode. (4) `kt-dc` `dc((props) => …)` only declares runtime props when the options argument lists them (`{ props: [...] }`); the exam, certificate and team components now do. (5) Partial-credit lab points are shown with at most two decimals (`pts()`). (6) An independent review of the redesign found and fixed: authored English (`dir="auto"`) sitting at the far edge of RTL option rows (Chrome resolves `text-align: match-parent` to the element's own start, so `html[dir="rtl"]` rules in `base.css` state `right` outright), the lesson checklist reporting "0 of 0 / done" before the checks had loaded (totals now come from `lesson.checkIds`), the exam runner's visual order differing from its DOM order on narrow screens (the aside now follows the question in both; a visual-only clock repeats in the question header), the Team person cell losing its `th scope="row"` role, and the Team 403 state losing its heading.
+
+**Test hooks kept** (see `tests/e2e/admin/academy-*.spec.ts`, `academy-live.ts`): `.ac-wrap`, `.ac-nav`, `.ac-card` (never nested, so the overlap check holds), `.ac-chip[data-track]`, `aria-busy` skeletons, every heading/button/label/region name the specs query. No logic file changed (`useAcademyProgress`, `progressMerge`, `nextStep`, `labScoring`, `useEligibility`, `readingOpened`).
+
 ## 8. Contracts and invariants
 
 1. The design file content is the single source of truth; article prose is never retyped into TSX.
@@ -209,6 +243,8 @@ Endpoints under `/api/v1/admin/academy/` (admin-back proxy → `core-back` `/int
 9. Exam keys, `critical` flags and explanations never reach the browser before submit; the browser cannot write `exams` or `badges`.
 10. The Academy never changes `is_maker`, `is_checker`, a role or an authority.
 11. Academy content is never retyped into TSX; labels are corrected only in the design file and logged in `academy_content_fixes.md`.
+12. The Academy composes the shared admin primitives and `src/styles/academy/*.css`; it defines no parallel button/chip/card kit, applies no page-width cap (only `.ac-prose` has a measure), never nests `.ac-card` (the e2e `layoutProblems` helper asserts no overlap) and keeps `PageHeader` literally present in every `pages/academy/*.tsx` entry (UI compliance gate).
+13. Strings with `{placeholders}` are translated with their values (`t("Continue: lesson {title}", { title })`); never format after translating. Authored English content interpolated into a translated sentence is wrapped with `isolate()`.
 
 ## 9. Verification
 

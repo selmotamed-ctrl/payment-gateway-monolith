@@ -13,6 +13,7 @@ import '@vuepic/vue-datepicker/dist/main.css';
 import "@/styles/fintech-minimal.css";
 import "@/styles/command-palette.css";
 import "@/styles/guide.css";
+import "@/styles/academy/index.css";
 
 
 import { VueDatePicker } from '@vuepic/vue-datepicker';

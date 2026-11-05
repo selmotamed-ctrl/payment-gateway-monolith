@@ -1,17 +1,20 @@
 import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "vuetify";
-import { VBtn } from "vuetify/components";
-import { AcademyShell } from "@/components/academy/AcademyShell";
+import { AcademyShell, Skeleton } from "@/components/academy/AcademyShell";
 import { CertificateView } from "@/components/academy/CertificateView";
 import { badgeStateOf, useAcademyProgress } from "@/components/academy/useAcademyProgress";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { loadMeta, loadPages, loadTracks, type Track } from "@/content/academy";
 import { user } from "@/state/user";
 
 const CertificatePage = dc(() => {
     const { t } = useLocale();
     const route = useRoute();
+    const router = useRouter();
     const academy = useAcademyProgress();
     const ready = ref(false);
     const tracks = ref<Track[]>([]);
@@ -40,15 +43,28 @@ const CertificatePage = dc(() => {
         const b = badge.value;
         const trackTitle = tracks.value.find((track) => track.id === b?.track)?.title ?? b?.track ?? "";
         return (
-            <AcademyShell title={t("Certificate")} backTo={{ name: "AdminAcademy", label: t("Back to Academy") }}>
+            <AcademyShell
+                header={() => (
+                    <PageHeader
+                        title={t("Certificate")}
+                        breadcrumbs={[{ label: t("Academy"), to: router.resolve({ name: "AdminAcademy" }).fullPath }, { label: t("Certificate") }]}
+                    />
+                )}
+            >
                 {!ready.value ? (
-                    <div role="status" aria-busy="true" style={{ blockSize: "160px", borderRadius: "12px", background: "var(--pg-bg-surface-subtle)", maxInlineSize: "820px" }} />
+                    <Skeleton rows={2} split />
                 ) : !b ? (
-                    <div role="status" style={{ maxInlineSize: "620px", display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <h2 style={{ margin: 0 }}>{t("We could not find that certificate")}</h2>
-                        <p style={{ margin: 0 }}>{t("It may belong to another person, or it may not have been issued yet. Certificates you have earned are listed on your Academy home page.")}</p>
-                        <div><VBtn color="primary" to={{ name: "AdminAcademy" }}>{t("Back to Academy")}</VBtn></div>
-                    </div>
+                    <SurfaceCard class="ac-card">
+                        <EmptyState
+                            icon="mdi-certificate-outline"
+                            title={t("We could not find that certificate")}
+                            description={t("It may belong to another person, or it may not have been issued yet. Certificates you have earned are listed on your Academy home page.")}
+                            actionLabel={t("Back to Academy")}
+                            actionVariant="flat"
+                            actionColor="primary"
+                            onAction={() => void router.push({ name: "AdminAcademy" })}
+                        />
+                    </SurfaceCard>
                 ) : (
                     <CertificateView badge={b} trackTitle={trackTitle} holderName={holderName.value} template={template.value} state={badgeStateOf(b, recertifyFrom.value)} />
                 )}

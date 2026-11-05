@@ -1,7 +1,9 @@
 import { computed, defineComponent, ref, type PropType } from "vue";
-import { RouterLink } from "vue-router";
+import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
+import { VIcon } from "vuetify/components";
 import type { Question } from "@/content/academy";
+import { Callout } from "./ui/Callout";
 
 const shuffle = <T,>(items: T[]): T[] => {
     const copy = [...items];
@@ -12,17 +14,24 @@ const shuffle = <T,>(items: T[]): T[] => {
     return copy;
 };
 
-/** One practice check. Never blocks progress: wrong answers can be retried. */
+/**
+ * One practice check. Never blocks progress: wrong answers can be retried.
+ * Contract (specs): `<section aria-labelledby>` named "Practice check N", the stem as an exact text node,
+ * option buttons whose name is the option text (+ " Correct" / " Not correct"), and a polite live result area.
+ */
 export const LessonCheck = defineComponent({
     name: "AcademyLessonCheck",
     props: {
         question: { type: Object as PropType<Question>, required: true },
         index: { type: Number, required: true },
+        /** How many checks the lesson has (progress dots only). */
+        total: { type: Number, default: 2 },
         titles: { type: Object as PropType<Record<string, string>>, default: () => ({}) },
     },
     emits: { answered: (_firstTry: boolean) => true },
     setup(props, { emit }) {
         const { t } = useLocale();
+        const router = useRouter();
         const options = computed(() => shuffle(props.question.options));
         const picked = ref<string[]>([]);
         const solved = ref(false);
@@ -42,58 +51,98 @@ export const LessonCheck = defineComponent({
         return () => {
             const q = props.question;
             const lastWrong = !solved.value && picked.value.length > 0;
+            const stemId = `ac-stem-${q.id}`;
             return (
-                <section class="ac-card" aria-labelledby={`ac-q-${q.id}`}>
-                    <h3 id={`ac-q-${q.id}`} class="ac-h3">
-                        {t("Practice check")} {props.index + 1}
-                    </h3>
-                    <p class="ac-stem">{q.stem}</p>
-                    <ul class="ac-options" role="list">
+                <section class="ac-card ac-lesson-check" aria-labelledby={`ac-q-${q.id}`}>
+                    <div class="ac-lesson-check__head">
+                        <h3 id={`ac-q-${q.id}`} class="ac-h3">
+                            {t("Practice check")} {props.index + 1}
+                        </h3>
+                        <span class="ac-lesson-dots" aria-hidden="true">
+                            {Array.from({ length: Math.max(props.total, props.index + 1) }, (_, i) => (
+                                <span
+                                    key={i}
+                                    class={[
+                                        "ac-lesson-dot",
+                                        i < props.index || (i === props.index && solved.value) ? "ac-lesson-dot--done" : i === props.index ? "ac-lesson-dot--current" : "",
+                                    ]}
+                                />
+                            ))}
+                        </span>
+                    </div>
+                    <p id={stemId} class="ac-lesson-stem" dir="auto">
+                        {q.stem}
+                    </p>
+                    <ul class="ac-choices ac-lesson-options" role="list" aria-labelledby={stemId}>
                         {options.value.map((option) => {
                             const wasPicked = picked.value.includes(option.id);
-                            const good = wasPicked && option.correct;
+                            const good = wasPicked && Boolean(option.correct);
                             const bad = wasPicked && !option.correct;
                             return (
-                                <li key={option.id}>
+                                <li key={option.id} class="ac-lesson-option">
                                     <button
                                         type="button"
-                                        class={["ac-option", good ? "ac-option--good" : "", bad ? "ac-option--bad" : ""]}
+                                        class={["ac-choice", good ? "ac-choice--good" : "", bad ? "ac-choice--bad" : "", solved.value && !wasPicked ? "ac-lesson-choice--dim" : ""]}
                                         disabled={solved.value || wasPicked}
                                         aria-pressed={wasPicked}
                                         onClick={() => choose(option.id)}
                                     >
-                                        <span aria-hidden="true" class="ac-option-icon">{good ? "✓" : bad ? "✗" : "○"}</span>
-                                        <span>{option.text}</span>
-                                        {good && <span class="ac-option-tag">{t("Correct")}</span>}
-                                        {bad && <span class="ac-option-tag">{t("Not correct")}</span>}
+                                        <VIcon
+                                            class="ac-lesson-choice__icon"
+                                            icon={good ? "mdi-check-circle" : bad ? "mdi-close-circle" : "mdi-circle-outline"}
+                                            size={18}
+                                            aria-hidden="true"
+                                        />
+                                        <span class="ac-choice__label" dir="auto">
+                                            {option.text}
+                                        </span>
+                                        {good && (
+                                            <>
+                                                {" "}
+                                                <span class="ac-choice__tag">{t("Correct")}</span>
+                                            </>
+                                        )}
+                                        {bad && (
+                                            <>
+                                                {" "}
+                                                <span class="ac-choice__tag">{t("Not correct")}</span>
+                                            </>
+                                        )}
                                     </button>
-                                    {wasPicked && option.note && <p class="ac-note">{option.note}</p>}
+                                    {wasPicked && option.note && (
+                                        <p class={["ac-choice__note", "ac-lesson-note", good ? "ac-lesson-note--good" : "ac-lesson-note--bad"]} dir="auto">
+                                            {option.note}
+                                        </p>
+                                    )}
                                 </li>
                             );
                         })}
                     </ul>
-                    <div aria-live="polite" class="ac-result">
+                    <div aria-live="polite" class="ac-lesson-result">
                         {solved.value && (
-                            <p class="ac-result--good">
-                                <strong>✓ {t("Correct.")}</strong> {q.why}
-                            </p>
+                            <Callout tone="success" role="none" title={t("Correct.")}>
+                                {q.why ? <span dir="auto">{q.why}</span> : null}
+                            </Callout>
                         )}
                         {lastWrong && (
-                            <p class="ac-result--bad">
-                                <strong>✗ {t("Not quite.")}</strong> {t("Read the note and try another option.")}
-                            </p>
+                            <Callout tone="warning" role="none" title={t("Not quite.")}>
+                                {t("Read the note and try another option.")}
+                            </Callout>
                         )}
                         {solved.value && q.refs.length > 0 && (
-                            <p class="ac-muted">
-                                {t("More in the Guide")}:{" "}
-                                {q.refs.map((id, i) => (
-                                    <span key={id}>
-                                        {i > 0 ? ", " : ""}
-                                        <RouterLink to={{ name: "AdminGuideArticle", params: { articleId: id } }} target="_blank">
-                                            {props.titles[id] ?? id}
-                                        </RouterLink>
-                                    </span>
-                                ))}
+                            <p class="ac-muted ac-lesson-refs">
+                                <VIcon icon="mdi-book-open-page-variant-outline" size={16} aria-hidden="true" />
+                                <span>
+                                    {t("More in the Guide")}:{" "}
+                                    {q.refs.map((id, i) => (
+                                        <span key={id}>
+                                            {i > 0 ? ", " : ""}
+                                            <a class="ac-link" href={router.resolve({ name: "AdminGuideArticle", params: { articleId: id } }).href} target="_blank" rel="noopener" dir="auto">
+                                                {props.titles[id] ?? id}
+                                            </a>
+                                        </span>
+                                    ))}
+                                </span>
                             </p>
                         )}
                     </div>

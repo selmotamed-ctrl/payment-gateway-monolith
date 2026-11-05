@@ -1,10 +1,14 @@
 import { dc } from "kt-dc";
 import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { VBtn } from "vuetify/components";
 import { AcademyShell } from "@/components/academy/AcademyShell";
 import { TeamTable } from "@/components/academy/TeamTable";
-import { fmtDateTime } from "@/components/academy/exam/ExamBriefing";
+import { fmtDateTime } from "@/components/academy/format";
+import { Callout } from "@/components/academy/ui/Callout";
+import { IconTile } from "@/components/academy/ui/IconTile";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { loadTracks } from "@/content/academy";
 import type { TeamResponse } from "@/content/academy/apiTypes";
 import { api } from "@/state/api";
@@ -13,6 +17,7 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 
 const TeamPage = dc(() => {
     const { t } = useLocale();
+    const router = useRouter();
     const data = ref<TeamResponse | null>(null);
     const trackTitles = ref<Record<string, string>>({});
     const loading = ref(true);
@@ -39,23 +44,49 @@ const TeamPage = dc(() => {
     };
     onMounted(() => void load());
 
+    const header = () => (
+        <PageHeader
+            title={t("Team progress")}
+            subtitle={data.value ? `${t("Updated")} ${fmtDateTime(data.value.generatedAt)} · ${t("Content version")} ${data.value.contentVersion}` : ""}
+            breadcrumbs={[{ label: t("My learning"), to: router.resolve({ name: "AdminAcademy" }).fullPath }, { label: t("Team progress") }]}
+            end={() => (
+                <VBtn variant="outlined" size="small" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
+                    {t("Refresh")}
+                </VBtn>
+            )}
+        />
+    );
+
+    /** Same silhouette as the loaded page (status strip + table card) so nothing jumps. */
+    const skeleton = () => (
+        <div role="status" aria-busy="true">
+            <div class="ac-skel ac-team-skel-strip" />
+            <div class="ac-skel ac-team-skel-table" />
+            <span class="ac-sr-only">{t("Loading")}</span>
+        </div>
+    );
+
     return () => (
-        <AcademyShell title={t("Team progress")} subtitle={data.value ? `${t("Updated")} ${fmtDateTime(data.value.generatedAt)} · ${t("Content version")} ${data.value.contentVersion}` : undefined} backTo={{ name: "AdminAcademy", label: t("Back to Academy") }} wide>
-            {loading.value ? (
-                <div role="status" aria-busy="true" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {[0, 1, 2, 3, 4].map((i) => <div key={i} style={{ blockSize: "44px", borderRadius: "8px", background: "var(--pg-bg-surface-subtle)" }} />)}
-                    <span style={{ position: "absolute", insetInlineStart: "-9999px" }}>{t("Loading")}</span>
-                </div>
+        <AcademyShell header={header}>
+            {loading.value && !data.value ? (
+                skeleton()
             ) : forbidden.value ? (
-                <div role="alert" style={{ maxInlineSize: "620px" }}>
-                    <h2 style={{ marginBlock: 0 }}>{t("You are not allowed to see this page")}</h2>
-                    <p>{t("Team progress is available to security administrators only.")}</p>
-                </div>
+                <section class="ac-card ac-team-forbidden" role="alert">
+                    <IconTile icon="mdi-lock-outline" large />
+                    <h2 class="ac-h2">{t("You are not allowed to see this page")}</h2>
+                    <p class="ac-text">{t("Team progress is available to security administrators only.")}</p>
+                </section>
             ) : error.value || !data.value ? (
-                <div role="alert" style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-                    <span>{t("We could not load team progress.")} {error.value}</span>
-                    <VBtn variant="outlined" onClick={() => void load()}>{t("Retry")}</VBtn>
-                </div>
+                <Callout tone="danger">
+                    <div class="ac-between">
+                        <span>
+                            {t("We could not load team progress.")} {error.value}
+                        </span>
+                        <VBtn variant="outlined" size="small" onClick={() => void load()}>
+                            {t("Retry")}
+                        </VBtn>
+                    </div>
+                </Callout>
             ) : (
                 <TeamTable rows={data.value.rows} trackTitles={trackTitles.value} />
             )}

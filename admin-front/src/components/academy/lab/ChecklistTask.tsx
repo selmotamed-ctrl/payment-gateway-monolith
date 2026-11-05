@@ -1,9 +1,8 @@
 import { defineComponent, type PropType } from "vue";
 import { useLocale } from "vuetify";
-import { VIcon } from "vuetify/components";
 import type { ChecklistTask as ChecklistTaskType } from "@/content/academy";
 import type { ChecklistAnswer } from "../labScoring";
-import { labBorder, renderInline } from "./PanelView";
+import { choiceTag, renderInline } from "./PanelView";
 
 export const ChecklistTask = defineComponent({
     name: "AcademyLabChecklistTask",
@@ -23,42 +22,46 @@ export const ChecklistTask = defineComponent({
         return () => {
             const ticked = new Set(props.answer?.ticked ?? []);
             return (
-                <fieldset style={{ border: "none", padding: 0, margin: 0, display: "grid", gap: "8px" }}>
-                    <legend style={{ position: "absolute", width: "1px", height: "1px", overflow: "hidden" }}>
-                        {t("Tick every item that applies")}
-                    </legend>
-                    <p style={{ margin: 0, opacity: 0.8 }}>{t("Tick every item that applies")}</p>
-                    {props.task.items.map((item) => {
-                        const isOn = ticked.has(item.id);
-                        const right = isOn === item.shouldTick;
-                        return (
-                            <div style={{ border: labBorder, borderRadius: "8px", padding: "8px 12px" }}>
-                                <label style={{ display: "flex", gap: "10px", alignItems: "flex-start", cursor: props.locked ? "default" : "pointer" }}>
-                                    <input
-                                        type="checkbox"
-                                        value={item.id}
-                                        checked={isOn}
-                                        disabled={props.locked}
-                                        style={{ marginTop: "4px" }}
-                                        onChange={(event: Event) => toggle(item.id, (event.target as HTMLInputElement).checked)}
-                                    />
-                                    <span style={{ flex: 1 }}>{renderInline(item.label)}</span>
-                                    {props.locked ? (
-                                        <span style={{ whiteSpace: "nowrap" }}>
-                                            <VIcon
-                                                icon={right ? "mdi-check-circle" : "mdi-close-circle"}
-                                                color={right ? "success" : "error"}
-                                                size={18}
-                                                aria-hidden="true"
-                                            />{" "}
-                                            {right ? t("Right") : item.shouldTick ? t("Should be ticked") : t("Should not be ticked")}
+                <fieldset class="ac-lab-fieldset">
+                    <legend class="ac-sr-only">{t("Tick every item that applies")}</legend>
+                    <p class="ac-muted ac-lab-hintline">{t("Tick every item that applies")}</p>
+                    <div class="ac-choices">
+                        {props.task.items.map((item) => {
+                            const isOn = ticked.has(item.id);
+                            const right = isOn === item.shouldTick;
+                            const noteId = `check-${props.task.id}-${item.id}-note`;
+                            // Locked: right = green; a missed tick = amber; a wrong tick = red.
+                            const state = props.locked ? (right ? "good" : item.shouldTick ? "missed" : "bad") : isOn ? "selected" : "";
+                            return (
+                                <div class="ac-lab-opt" key={item.id}>
+                                    <label class={["ac-choice", state ? `ac-choice--${state}` : "", props.locked ? "ac-choice--locked" : ""]}>
+                                        <input
+                                            type="checkbox"
+                                            value={item.id}
+                                            checked={isOn}
+                                            disabled={props.locked}
+                                            aria-describedby={props.locked ? noteId : undefined}
+                                            onChange={(event: Event) => toggle(item.id, (event.target as HTMLInputElement).checked)}
+                                        />
+                                        <span class="ac-choice__label" dir="auto">
+                                            {renderInline(item.label)}
                                         </span>
+                                        {props.locked
+                                            ? choiceTag(
+                                                  right ? "good" : item.shouldTick ? "missed" : "bad",
+                                                  right ? t("Right") : item.shouldTick ? t("Should be ticked") : t("Should not be ticked"),
+                                              )
+                                            : null}
+                                    </label>
+                                    {props.locked ? (
+                                        <p id={noteId} class="ac-choice__note ac-lab-opt__note" dir="auto">
+                                            {item.why}
+                                        </p>
                                     ) : null}
-                                </label>
-                                {props.locked ? <p style={{ margin: "6px 0 0", paddingInlineStart: "28px" }}>{item.why}</p> : null}
-                            </div>
-                        );
-                    })}
+                                </div>
+                            );
+                        })}
+                    </div>
                 </fieldset>
             );
         };

@@ -1,0 +1,447 @@
+/* ============================================================================
+ * Academy · learner area: My learning, Tracks, Track, Module.
+ * Prefix ac-learner-. Tokens and base.css vocabulary only; logical properties.
+ * ========================================================================== */
+
+/* ---- My learning: hero ---------------------------------------------------- */
+.ac-learner-hero__main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  min-inline-size: 0;
+}
+
+.ac-learner-hero__main > * {
+  max-inline-size: 100%;
+}
+
+.ac-learner-hero__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-inline-size: 0;
+}
+
+.ac-learner-hero__head .ac-title {
+  min-inline-size: 0;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.ac-learner-next {
+  margin: 0;
+  color: var(--pg-ink-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.ac-learner-next__kind {
+  color: var(--pg-ink-primary);
+  font-weight: 600;
+}
+
+.ac-learner-hero__rings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-evenly;
+  gap: 16px 24px;
+  align-self: stretch;
+  min-inline-size: 0;
+  padding-inline-start: 32px;
+  border-inline-start: 1px solid var(--pg-border-subtle);
+}
+
+@media (max-width: 960px) {
+  .ac-learner-hero__rings {
+    justify-content: flex-start;
+    padding-inline-start: 0;
+    padding-block-start: 20px;
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--pg-border-subtle);
+  }
+}
+
+/* Three rings always share one row on phones. */
+@media (max-width: 480px) {
+  .ac-learner-hero__rings {
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    gap: 8px;
+  }
+}
+
+/* The primary call to action may carry a long lesson title: let it wrap instead of overflowing. */
+.ac-learner-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  max-inline-size: 100%;
+}
+
+.ac-learner-cta__btn.v-btn {
+  max-inline-size: 100%;
+  min-block-size: 44px;
+  padding-block: 8px;
+}
+
+.ac-learner-cta__btn .v-btn__content,
+.ac-learner-pager__btn .v-btn__content {
+  white-space: normal;
+  text-align: start;
+}
+
+/* A badge label with a date can be long: allow it to wrap in narrow rows. */
+.ac-learner-hero__head .pg-status-badge,
+.ac-learner-track-row__end .pg-status-badge {
+  height: auto !important;
+  min-height: 22px;
+  padding-block: 3px !important;
+  line-height: 1.35 !important;
+  white-space: normal !important;
+  text-align: start;
+}
+
+/* ---- My learning: tracks list and aside ---------------------------------- */
+.ac-learner-track-row {
+  flex-wrap: wrap;
+  padding-block: 14px;
+}
+
+.ac-learner-track-row .ac-step__main {
+  flex: 1 1 220px;
+  gap: 2px;
+}
+
+.ac-learner-track-row .ac-bar {
+  max-inline-size: 360px;
+  margin-block-start: 6px;
+}
+
+.ac-learner-track-row__end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 10px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  margin-inline-start: auto;
+}
+
+.ac-learner-cert {
+  padding-block: 12px;
+}
+
+.ac-learner-cert__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-block-start: 4px;
+}
+
+.ac-learner-nowrap {
+  flex: none;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* Whole row is the link target: 44 px tall, chevron at the end. */
+.ac-learner-linkrow {
+  padding-block: 0;
+}
+
+.ac-learner-linkrow__a {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-block-size: 44px;
+}
+
+.ac-learner-linkrow__a .v-icon {
+  color: var(--pg-ink-faint);
+}
+
+/* ---- Tracks --------------------------------------------------------------- */
+.ac-learner-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  max-inline-size: 100%;
+}
+
+.ac-learner-track {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-inline-size: 0;
+  padding: 18px 20px;
+}
+
+.ac-learner-track__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-inline-size: 0;
+}
+
+.ac-learner-track__titles {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-inline-size: 0;
+}
+
+.ac-learner-track__link,
+.ac-learner-module__link {
+  color: inherit;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.ac-learner-track__link:hover,
+.ac-learner-module__link:hover {
+  color: var(--pg-accent-interactive);
+  text-decoration: underline;
+}
+
+.ac-learner-track__link:focus-visible,
+.ac-learner-module__link:focus-visible {
+  border-radius: var(--pg-radius-xs);
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: 2px;
+}
+
+/* Description: three lines at most, with room reserved so facts line up across a grid row. */
+.ac-learner-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  min-block-size: 4.8em;
+  overflow: hidden;
+}
+
+.ac-learner-facts {
+  display: grid;
+  /* The time range is the widest fact ("11-15 hours"): size its column to its content so it never wraps. */
+  grid-template-columns: auto repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+  padding-block: 12px;
+  border-block: 1px solid var(--pg-border-subtle);
+}
+
+.ac-learner-fact {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  min-inline-size: 0;
+}
+
+.ac-learner-fact dt {
+  margin: 0;
+  color: var(--pg-ink-muted);
+  font-size: 11.5px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.ac-learner-fact dd {
+  margin: 0;
+  color: var(--pg-ink-primary);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 400px) {
+  .ac-learner-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.ac-learner-requires {
+  margin: 0;
+}
+
+.ac-learner-requires__label {
+  color: var(--pg-ink-secondary);
+  font-weight: 500;
+}
+
+.ac-learner-track__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-block-start: auto;
+}
+
+.ac-learner-track__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ac-learner-track__open {
+  align-self: flex-start;
+}
+
+/* ---- Track page ----------------------------------------------------------- */
+.ac-learner-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px 32px;
+  align-items: center;
+}
+
+.ac-learner-summary__facts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  min-inline-size: 0;
+}
+
+.ac-learner-summary__facts .ac-learner-facts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  inline-size: 100%;
+}
+
+.ac-learner-summary__facts .ac-muted {
+  margin: 0;
+}
+
+.ac-learner-summary__rings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 16px 20px;
+  padding-inline-start: 32px;
+  border-inline-start: 1px solid var(--pg-border-subtle);
+}
+
+@media (max-width: 760px) {
+  .ac-learner-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ac-learner-summary__rings {
+    justify-content: flex-start;
+    padding-inline-start: 0;
+    padding-block-start: 16px;
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--pg-border-subtle);
+  }
+}
+
+.ac-learner-section {
+  margin-block-start: 4px;
+}
+
+/* ---- Module cards (track and module pages) -------------------------------- */
+.ac-learner-modules {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ac-learner-module__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 14px 20px;
+}
+
+.ac-learner-module__head--ruled {
+  border-block-end: 1px solid var(--pg-border-subtle);
+}
+
+.ac-learner-module__head > .ac-tile {
+  color: var(--pg-ink-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ac-learner-module__titles {
+  display: flex;
+  flex: 1 1 200px;
+  flex-direction: column;
+  gap: 2px;
+  min-inline-size: 0;
+}
+
+.ac-learner-module__bar {
+  flex: 0 1 180px;
+  min-inline-size: 120px;
+}
+
+.ac-learner-module__objective {
+  margin: 0;
+  padding: 12px 20px;
+  border-block-end: 1px solid var(--pg-border-subtle);
+}
+
+.ac-learner-steptitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-inline-size: 0;
+}
+
+/* ---- Module page ---------------------------------------------------------- */
+.ac-learner-meta {
+  margin: 0;
+}
+
+.ac-learner-pager {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ac-learner-pager__btn.v-btn {
+  justify-content: flex-start;
+  max-inline-size: 100%;
+  min-block-size: 52px;
+  padding-block: 8px;
+}
+
+.ac-learner-pager__text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-inline-size: 0;
+}
+
+.ac-learner-pager__btn--next .ac-learner-pager__text {
+  align-items: flex-end;
+}
+
+.ac-learner-pager__dir {
+  color: var(--pg-ink-muted);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.ac-learner-pager__title {
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}

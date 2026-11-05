@@ -1,9 +1,13 @@
 import { dc } from "kt-dc";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VDialog } from "vuetify/components";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { VBtn, VDialog, VIcon } from "vuetify/components";
+import { MetaPill } from "@/components/ui/MetaPill";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import type { ExamAnswer, ExamQuestionPublic, ExamStartResponse } from "@/content/academy/apiTypes";
+import { Callout } from "../ui/Callout";
+import { ProgressBar } from "../ui/ProgressBar";
+import { StateIcon } from "../ui/StateIcon";
 
 type Props = {
     session: ExamStartResponse;
@@ -172,26 +176,27 @@ export const ExamRunner = dc((props: Props) => {
         props.onSubmit(buildAnswers());
     };
 
-    const radioStyle = {
-        display: "flex",
-        gap: "10px",
-        alignItems: "flex-start",
-        padding: "10px 12px",
-        border: "1px solid var(--pg-border-subtle)",
-        borderRadius: "10px",
-        cursor: "pointer",
-        lineHeight: 1.55,
-    } as const;
+    const answeredCount = computed(() => questions.length - unanswered.value);
+
+    /** Visual tone of the clock only (the spoken announcements above are unchanged). */
+    const clockTone = computed<"neutral" | "warning" | "danger">(() => (remaining.value < 60000 ? "danger" : remaining.value < 300000 ? "warning" : "neutral"));
+    const CLOCK_ICON = { neutral: "mdi-timer-outline", warning: "mdi-timer-alert-outline", danger: "mdi-timer-alert" } as const;
+    const clockNote = computed(() => {
+        if (remaining.value <= 0) return t("The time limit has passed. Please submit your answers now.");
+        if (remaining.value < 60000) return t("Less than a minute left");
+        if (remaining.value < 300000) return t("Less than 5 minutes left");
+        return "";
+    });
 
     const renderQuestion = (q: ExamQuestionPublic) => {
         const a = answers.value[q.qid];
         if (q.type === "single" || q.type === "truefalse") {
             return (
-                <div role="radiogroup" aria-labelledby={`stem-${q.qid}`} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <div role="radiogroup" aria-labelledby={`stem-${q.qid}`} class="ac-choices">
                     {q.options.map((o) => (
-                        <label key={o.oid} style={radioStyle}>
-                            <input type="radio" name={`q-${q.qid}`} checked={a === o.oid} onChange={() => setAnswer(q, o.oid)} style={{ marginBlockStart: "4px" }} />
-                            <span>{o.text}</span>
+                        <label key={o.oid} class={["ac-choice", a === o.oid ? "ac-choice--selected" : ""]}>
+                            <input type="radio" name={`q-${q.qid}`} checked={a === o.oid} onChange={() => setAnswer(q, o.oid)} />
+                            <span class="ac-choice__label" dir="auto">{o.text}</span>
                         </label>
                     ))}
                 </div>
@@ -200,22 +205,23 @@ export const ExamRunner = dc((props: Props) => {
         if (q.type === "multi") {
             const chosen = Array.isArray(a) ? a : [];
             return (
-                <div role="group" aria-labelledby={`stem-${q.qid}`} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    <span style={{ fontSize: "12px", opacity: 0.7 }}>{t("Select all that apply.")}</span>
-                    {q.options.map((o) => (
-                        <label key={o.oid} style={radioStyle}>
-                            <input
-                                type="checkbox"
-                                checked={chosen.includes(o.oid)}
-                                onChange={(event: Event) => {
-                                    const on = (event.target as HTMLInputElement).checked;
-                                    setAnswer(q, on ? [...chosen, o.oid] : chosen.filter((id) => id !== o.oid));
-                                }}
-                                style={{ marginBlockStart: "4px" }}
-                            />
-                            <span>{o.text}</span>
-                        </label>
-                    ))}
+                <div role="group" aria-labelledby={`stem-${q.qid}`} class="ac-stack ac-stack--sm">
+                    <span class="ac-muted">{t("Select all that apply.")}</span>
+                    <div class="ac-choices">
+                        {q.options.map((o) => (
+                            <label key={o.oid} class={["ac-choice", chosen.includes(o.oid) ? "ac-choice--selected" : ""]}>
+                                <input
+                                    type="checkbox"
+                                    checked={chosen.includes(o.oid)}
+                                    onChange={(event: Event) => {
+                                        const on = (event.target as HTMLInputElement).checked;
+                                        setAnswer(q, on ? [...chosen, o.oid] : chosen.filter((id) => id !== o.oid));
+                                    }}
+                                />
+                                <span class="ac-choice__label" dir="auto">{o.text}</span>
+                            </label>
+                        ))}
+                    </div>
                 </div>
             );
         }
@@ -223,141 +229,236 @@ export const ExamRunner = dc((props: Props) => {
             const list = orderOf(q);
             const text = (oid: string) => q.options.find((o) => o.oid === oid)?.text ?? oid;
             return (
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    <span style={{ fontSize: "12px", opacity: 0.7 }}>{t("Put the items in the correct order using the Up and Down buttons.")}</span>
-                    <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "8px" }}>
+                <div class="ac-stack ac-stack--sm">
+                    <span class="ac-muted">{t("Put the items in the correct order using the Up and Down buttons.")}</span>
+                    <ol class="ac-choices ac-exam-order">
                         {list.map((oid, position) => (
-                            <li key={oid} style={{ ...radioStyle, cursor: "default", alignItems: "center", justifyContent: "space-between" }}>
-                                <span><strong>{position + 1}.</strong> {text(oid)}</span>
-                                <span style={{ display: "flex", gap: "4px" }}>
-                                    <VBtn size="small" variant="outlined" disabled={position === 0} data-move={`${oid}--1`} aria-label={`${t("Move up")}: ${text(oid)}`} onClick={() => moveItem(q, position, -1)}>↑ {t("Up")}</VBtn>
-                                    <VBtn size="small" variant="outlined" disabled={position === list.length - 1} data-move={`${oid}-1`} aria-label={`${t("Move down")}: ${text(oid)}`} onClick={() => moveItem(q, position, 1)}>↓ {t("Down")}</VBtn>
+                            <li key={oid} class="ac-choice ac-choice--locked ac-exam-order__row">
+                                <span class="ac-exam-order__pos ac-num">{position + 1}.</span>
+                                <span class="ac-choice__label" dir="auto">{text(oid)}</span>
+                                <span class="ac-row ac-exam-order__moves">
+                                    <VBtn
+                                        class="ac-exam-move"
+                                        size="small"
+                                        variant="outlined"
+                                        icon="mdi-arrow-up"
+                                        disabled={position === 0}
+                                        data-move={`${oid}--1`}
+                                        aria-label={`${t("Move up")}: ${text(oid)}`}
+                                        {...{ title: t("Up") }}
+                                        onClick={() => moveItem(q, position, -1)}
+                                    />
+                                    <VBtn
+                                        class="ac-exam-move"
+                                        size="small"
+                                        variant="outlined"
+                                        icon="mdi-arrow-down"
+                                        disabled={position === list.length - 1}
+                                        data-move={`${oid}-1`}
+                                        aria-label={`${t("Move down")}: ${text(oid)}`}
+                                        {...{ title: t("Down") }}
+                                        onClick={() => moveItem(q, position, 1)}
+                                    />
                                 </span>
                             </li>
                         ))}
                     </ol>
                     {!isAnswered(q) && (
-                        <div><VBtn size="small" variant="tonal" onClick={() => setAnswer(q, [...list])}>{t("Keep this order as my answer")}</VBtn></div>
+                        <div>
+                            <VBtn size="small" variant="tonal" onClick={() => setAnswer(q, [...list])}>
+                                {t("Keep this order as my answer")}
+                            </VBtn>
+                        </div>
                     )}
                 </div>
             );
         }
         // number
+        const typed = numText.value[q.qid] ?? "";
         return (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxInlineSize: "320px" }}>
-                <label for={`num-${q.qid}`} style={{ fontSize: "13px" }}>{t("Your answer (a number; use a dot for decimals)")}</label>
+            <div class="ac-stack ac-stack--sm ac-exam-numberfield">
+                <label for={`num-${q.qid}`} class="ac-h3">
+                    {t("Your answer (a number; use a dot for decimals)")}
+                </label>
                 <input
                     id={`num-${q.qid}`}
+                    class="ac-exam-number"
                     type="text"
                     inputmode="decimal"
                     autocomplete="off"
                     dir="ltr"
                     value={numText.value[q.qid] ?? (typeof a === "string" ? a : "")}
                     onInput={(event: Event) => onNumber(q, (event.target as HTMLInputElement).value)}
-                    style={{ padding: "10px 12px", border: "1px solid var(--pg-border-subtle)", borderRadius: "8px", fontSize: "16px", background: "transparent", color: "inherit" }}
                 />
-                {(numText.value[q.qid] ?? "") !== "" && !NUMBER_RE.test(numText.value[q.qid] ?? "") && (
-                    <span style={{ fontSize: "12px", opacity: 0.75 }}>{t("Not counted as answered yet: enter a complete number.")}</span>
-                )}
+                {typed !== "" && !NUMBER_RE.test(typed) && <span class="ac-muted">{t("Not counted as answered yet: enter a complete number.")}</span>}
             </div>
         );
     };
 
+    const renderNavigator = () => (
+        <nav aria-label={t("Question navigator")} class="ac-exam-nav">
+            {questions.map((item, i) => {
+                const done = isAnswered(item);
+                const flag = flagged.value.includes(item.qid);
+                const current = i === index.value;
+                const state = `${done ? t("answered") : t("not answered")}${flag ? `, ${t("flagged for review")}` : ""}`;
+                return (
+                    <button
+                        key={item.qid}
+                        type="button"
+                        class={["ac-exam-qbtn", done ? "ac-exam-qbtn--done" : "", flag ? "ac-exam-qbtn--flag" : "", current ? "ac-exam-qbtn--current" : ""]}
+                        aria-label={`${t("Question")} ${i + 1}: ${state}`}
+                        aria-current={current ? "step" : undefined}
+                        onClick={() => go(i)}
+                    >
+                        <span class="ac-exam-qbtn__n ac-num" aria-hidden="true">{i + 1}</span>
+                        {flag && <VIcon class="ac-exam-qbtn__flag" icon="mdi-flag" size={11} />}
+                        {done && <VIcon class="ac-exam-qbtn__check" icon="mdi-check" size={11} />}
+                    </button>
+                );
+            })}
+        </nav>
+    );
+
     return () => {
         const q = questions[index.value];
         const flaggedCount = flagged.value.length;
+        const tone = clockTone.value;
         return (
-            <div ref={root} style={{ display: "flex", flexDirection: "column", gap: "14px", maxInlineSize: "900px" }}>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontWeight: 600 }}>
-                        {t("Question")} {index.value + 1} / {questions.length} · {questions.length - unanswered.value} {t("answered")}
-                    </span>
-                    <span role="timer" aria-live="off" aria-label={t("Time remaining")} style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
-                        {t("Time remaining")}: <span dir="ltr">{formatClock(remaining.value)}</span>
-                    </span>
-                </div>
-                <div aria-live="polite" role="status" style={{ position: "absolute", inlineSize: "1px", blockSize: "1px", overflow: "hidden", clip: "rect(0 0 0 0)" }}>{announcement.value}</div>
+            <div ref={root} class="ac-exam-runner">
+                <div aria-live="polite" role="status" class="ac-sr-only">{announcement.value}</div>
 
-                <nav aria-label={t("Question navigator")} style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                    {questions.map((item, i) => {
-                        const done = isAnswered(item);
-                        const flag = flagged.value.includes(item.qid);
-                        const state = `${done ? t("answered") : t("not answered")}${flag ? `, ${t("flagged for review")}` : ""}`;
-                        return (
-                            <button
-                                key={item.qid}
-                                type="button"
-                                aria-label={`${t("Question")} ${i + 1}: ${state}`}
-                                aria-current={i === index.value ? "step" : undefined}
-                                onClick={() => go(i)}
-                                style={{
-                                    minInlineSize: "40px",
-                                    blockSize: "36px",
-                                    padding: "0 6px",
-                                    borderRadius: "8px",
-                                    cursor: "pointer",
-                                    color: "inherit",
-                                    border: i === index.value ? "2px solid var(--pg-ink-primary, currentColor)" : "1px solid var(--pg-border-subtle)",
-                                    background: done ? "var(--pg-status-success-bg)" : "transparent",
-                                    fontWeight: i === index.value ? 700 : 500,
-                                }}
-                            >
-                                {i + 1}{done ? " ✓" : ""}{flag ? " ⚑" : ""}
-                            </button>
-                        );
-                    })}
-                </nav>
-                <span style={{ fontSize: "12px", opacity: 0.7 }}>✓ {t("answered")} · ⚑ {t("flagged for review")}</span>
+                <div class="ac-split ac-split--reading">
+                    <div class="ac-stack">
+                        {q && (
+                            <SurfaceCard key={q.qid} class="ac-card">
+                                <div class="ac-stack">
+                                    <div class="ac-between">
+                                        <span class="ac-eyebrow ac-exam-qeyebrow">{`${t("Question")} ${index.value + 1}`}</span>
+                                        <span class={["ac-exam-clock-compact", `ac-exam-clock-compact--${tone}`]} aria-hidden="true" dir="ltr">
+                                            <VIcon icon={CLOCK_ICON[tone]} size={14} />
+                                            {formatClock(remaining.value)}
+                                        </span>
+                                        {flagged.value.includes(q.qid) && (
+                                            <MetaPill color="warning" prependIcon="mdi-flag">
+                                                {t("Flagged for review")}
+                                            </MetaPill>
+                                        )}
+                                    </div>
+                                    <h2 id={`stem-${q.qid}`} ref={heading} tabindex={-1} class="ac-exam-stem" dir="auto">
+                                        {q.stem}
+                                    </h2>
+                                    {renderQuestion(q)}
+                                    <label class="ac-exam-flag">
+                                        <input type="checkbox" checked={flagged.value.includes(q.qid)} onChange={() => toggleFlag(q.qid)} />
+                                        <VIcon icon="mdi-flag-outline" size={16} />
+                                        <span>{t("Flag this question for review")}</span>
+                                    </label>
+                                </div>
+                            </SurfaceCard>
+                        )}
 
-                {q && (
-                    <SurfaceCard key={q.qid}>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                            <h2 id={`stem-${q.qid}`} ref={heading} tabindex={-1} style={{ fontSize: "16px", fontWeight: 600, lineHeight: 1.6, margin: 0, outline: "none", whiteSpace: "pre-wrap" }}>
-                                {q.stem}
-                            </h2>
-                            {renderQuestion(q)}
-                            <div>
-                                <label style={{ display: "inline-flex", gap: "8px", alignItems: "center", cursor: "pointer" }}>
-                                    <input type="checkbox" checked={flagged.value.includes(q.qid)} onChange={() => toggleFlag(q.qid)} />
-                                    <span>{t("Flag this question for review")}</span>
-                                </label>
-                            </div>
-                        </SurfaceCardText>
-                    </SurfaceCard>
-                )}
+                        <div class="ac-between ac-exam-actions">
+                            <span class="ac-row ac-exam-pager">
+                                <VBtn variant="outlined" prependIcon="mdi-chevron-left" disabled={index.value === 0} onClick={() => go(index.value - 1)}>
+                                    {t("Previous")}
+                                </VBtn>
+                                <VBtn variant="outlined" appendIcon="mdi-chevron-right" disabled={index.value >= questions.length - 1} onClick={() => go(index.value + 1)}>
+                                    {t("Next")}
+                                </VBtn>
+                            </span>
+                            <VBtn color="primary" loading={props.submitting} disabled={props.submitting} onClick={() => (confirmOpen.value = true)}>
+                                {t("Submit exam")}
+                            </VBtn>
+                        </div>
 
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", justifyContent: "space-between" }}>
-                    <span style={{ display: "flex", gap: "8px" }}>
-                        <VBtn variant="outlined" disabled={index.value === 0} onClick={() => go(index.value - 1)}>{t("Previous")}</VBtn>
-                        <VBtn variant="outlined" disabled={index.value >= questions.length - 1} onClick={() => go(index.value + 1)}>{t("Next")}</VBtn>
-                    </span>
-                    <VBtn color="primary" loading={props.submitting} disabled={props.submitting} onClick={() => (confirmOpen.value = true)}>{t("Submit exam")}</VBtn>
-                </div>
-
-                {props.submitError && (
-                    <div role="alert" style={{ padding: "12px", border: "1px solid var(--pg-status-danger-border)", background: "var(--pg-status-danger-bg)", color: "var(--pg-status-danger-text)", borderRadius: "10px", display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-                        <span>{props.submitError} {t("Your answers are still here and nothing has been lost.")}</span>
-                        <VBtn size="small" variant="outlined" disabled={props.submitting} onClick={doSubmit}>{t("Try again")}</VBtn>
+                        {props.submitError && (
+                            <Callout tone="danger">
+                                <div class="ac-between">
+                                    <span>
+                                        {props.submitError} {t("Your answers are still here and nothing has been lost.")}
+                                    </span>
+                                    <VBtn size="small" variant="outlined" disabled={props.submitting} onClick={doSubmit}>
+                                        {t("Try again")}
+                                    </VBtn>
+                                </div>
+                            </Callout>
+                        )}
                     </div>
-                )}
+
+                    <aside class="ac-aside ac-exam-aside">
+                        <SurfaceCard class="ac-card" color={tone === "warning" ? "warning" : tone === "danger" ? "error" : ""}>
+                            <div class={["ac-exam-timer", `ac-exam-timer--${tone}`]}>
+                                <VIcon class="ac-exam-timer__icon" icon={CLOCK_ICON[tone]} size={26} />
+                                <div class="ac-exam-timer__body">
+                                    <span class="ac-exam-timer__label">{t("Time remaining")}</span>
+                                    <span role="timer" aria-live="off" aria-label={t("Time remaining")} class="ac-exam-clock ac-num" dir="ltr">
+                                        {formatClock(remaining.value)}
+                                    </span>
+                                    {clockNote.value && <span class="ac-exam-timer__note">{clockNote.value}</span>}
+                                </div>
+                            </div>
+                        </SurfaceCard>
+
+                        <SurfaceCard class="ac-card">
+                            <div class="ac-stack">
+                                <div class="ac-stack ac-stack--sm">
+                                    <p class="ac-h3 ac-num">{`${t("Question")} ${index.value + 1} / ${questions.length} · ${answeredCount.value} ${t("answered")}`}</p>
+                                    <ProgressBar value={answeredCount.value} max={questions.length} label={`${answeredCount.value} / ${questions.length} ${t("answered")}`} />
+                                </div>
+                                <div class="ac-stack ac-stack--sm">
+                                    <h3 class="ac-h3">{t("Question navigator")}</h3>
+                                    {renderNavigator()}
+                                    <ul class="ac-exam-legend">
+                                        <li>
+                                            <span class="ac-exam-swatch ac-exam-swatch--done"><VIcon icon="mdi-check" size={11} /></span>
+                                            {t("Answered")}
+                                        </li>
+                                        <li>
+                                            <span class="ac-exam-swatch"></span>
+                                            {t("Not answered")}
+                                        </li>
+                                        <li>
+                                            <span class="ac-exam-swatch ac-exam-swatch--flag"><VIcon icon="mdi-flag" size={11} /></span>
+                                            {t("Flagged for review")}
+                                        </li>
+                                        <li>
+                                            <span class="ac-exam-swatch ac-exam-swatch--current"></span>
+                                            {t("Current question")}
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </SurfaceCard>
+                    </aside>
+                </div>
 
                 <VDialog modelValue={confirmOpen.value} onUpdate:modelValue={(v: boolean) => (confirmOpen.value = v)} maxWidth="480">
-                    <SurfaceCard>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <h2 style={{ fontSize: "18px", margin: 0 }}>{t("Submit your exam?")}</h2>
-                            <ul style={{ margin: 0, paddingInlineStart: "20px", lineHeight: 1.7 }}>
-                                <li>{unanswered.value} {t("unanswered")}</li>
-                                <li>{flaggedCount} {t("flagged for review")}</li>
+                    <SurfaceCard title={t("Submit your exam?")}>
+                        <div class="ac-stack">
+                            <ul class="ac-steps">
+                                <li class="ac-step">
+                                    <StateIcon state={unanswered.value > 0 ? "partial" : "done"} />
+                                    <span class="ac-step__title ac-num">{`${unanswered.value} ${t("unanswered")}`}</span>
+                                </li>
+                                <li class="ac-step">
+                                    <StateIcon state={flaggedCount > 0 ? "partial" : "done"} />
+                                    <span class="ac-step__title ac-num">{`${flaggedCount} ${t("flagged for review")}`}</span>
+                                </li>
                             </ul>
-                            <p style={{ margin: 0, fontSize: "13px" }}>{t("Once you submit, the exam is graded and you cannot change your answers.")}</p>
-                            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", flexWrap: "wrap" }}>
-                                <VBtn variant="outlined" onClick={() => (confirmOpen.value = false)}>{t("Keep working")}</VBtn>
-                                <VBtn color="primary" onClick={doSubmit}>{t("Submit answers")}</VBtn>
+                            <p class="ac-text">{t("Once you submit, the exam is graded and you cannot change your answers.")}</p>
+                            <div class="ac-row ac-exam-confirm__actions">
+                                <VBtn variant="outlined" onClick={() => (confirmOpen.value = false)}>
+                                    {t("Keep working")}
+                                </VBtn>
+                                <VBtn color="primary" onClick={doSubmit}>
+                                    {t("Submit answers")}
+                                </VBtn>
                             </div>
-                        </SurfaceCardText>
+                        </div>
                     </SurfaceCard>
                 </VDialog>
             </div>
         );
     };
-});
+}, { props: ["session", "submitting", "submitError", "onSubmit"] });

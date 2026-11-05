@@ -1,0 +1,8 @@
+/* Employee Academy — visual system v2. One entry point, imported once from main.ts.
+ * base.css is the shared vocabulary; the other files are owned by one area each. */
+@import "./base.css";
+@import "./learner.css";
+@import "./lesson.css";
+@import "./lab.css";
+@import "./exam.css";
+@import "./team.css";

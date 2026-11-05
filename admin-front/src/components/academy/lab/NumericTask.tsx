@@ -2,7 +2,6 @@ import { defineComponent, type PropType } from "vue";
 import { useLocale } from "vuetify";
 import type { NumericTask as NumericTaskType } from "@/content/academy";
 import { parseDecimal, type NumericAnswer } from "../labScoring";
-import { labBorder } from "./PanelView";
 
 export const NumericTask = defineComponent({
     name: "AcademyLabNumericTask",
@@ -19,13 +18,14 @@ export const NumericTask = defineComponent({
             const value = props.answer?.value ?? "";
             const invalid = value.trim() !== "" && parseDecimal(value) === null;
             return (
-                <div style={{ display: "grid", gap: "6px", maxWidth: "360px" }}>
-                    <label for={id()} style={{ fontWeight: 600 }}>
+                <div class="ac-lab-numeric">
+                    <label for={id()} class="ac-lab-label">
                         {t("Your answer")}
                         {props.task.unit ? ` (${props.task.unit})` : ""}
                     </label>
                     <input
                         id={id()}
+                        class="ac-lab-input"
                         type="text"
                         inputmode="decimal"
                         autocomplete="off"
@@ -34,14 +34,13 @@ export const NumericTask = defineComponent({
                         disabled={props.locked}
                         aria-invalid={invalid ? "true" : undefined}
                         aria-describedby={`${id()}-help`}
-                        style={{ border: labBorder, borderRadius: "8px", padding: "8px 12px", font: "inherit", background: "transparent", color: "inherit" }}
                         onInput={(event: Event) => props.onChange({ ...(props.answer ?? {}), value: (event.target as HTMLInputElement).value })}
                     />
-                    <span id={`${id()}-help`} role={invalid ? "alert" : undefined} style={{ opacity: 0.8 }}>
+                    <span id={`${id()}-help`} role={invalid ? "alert" : undefined} class={["ac-lab-help", invalid ? "ac-lab-help--error" : ""]}>
                         {invalid ? t("Enter a plain number such as -57 or 12.50.") : t("Use digits, a minus sign and a decimal point only.")}
                     </span>
                     {props.locked ? (
-                        <p style={{ margin: 0 }}>
+                        <p class="ac-text ac-lab-expected-answer">
                             <strong>{t("Expected answer")}:</strong> <bdi>{props.task.answer}</bdi>
                             {props.task.unit ? ` ${props.task.unit}` : ""}
                         </p>

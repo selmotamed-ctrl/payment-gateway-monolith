@@ -53,7 +53,7 @@ test.describe("academy learning journey (live stack)", () => {
       await expect(section.getByText(check.stem, { exact: true })).toBeVisible();
       const right = check.options.find((o) => o.correct)!;
       await section.getByRole("button", { name: optionName(right.text) }).click();
-      await expect(section.getByText("✓ Correct.").first()).toBeVisible();
+      await expect(section.getByText("Correct.", { exact: true }).first()).toBeVisible();
     }
     // Reading not opened yet (lessons that list reading) -> still disabled.
     if (lesson!.reading.length > 0) {

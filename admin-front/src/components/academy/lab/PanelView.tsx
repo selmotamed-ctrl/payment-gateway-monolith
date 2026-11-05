@@ -1,9 +1,12 @@
-import { defineComponent, type CSSProperties, type PropType, type VNode } from "vue";
+import { defineComponent, type PropType, type VNode } from "vue";
 import { useLocale } from "vuetify";
 import { VIcon } from "vuetify/components";
 import type { Panel } from "@/content/academy";
 
 /** Safe inline renderer: turns `**bold**` into <strong>; everything else stays plain text (no v-html). */
+/** Points are fractions of a task (partial credit): show at most two decimals, never a raw float. */
+export const pts = (value: number): string => String(Math.round(value * 100) / 100);
+
 export const renderInline = (text: string): (VNode | string)[] => {
     const out: (VNode | string)[] = [];
     const re = /\*\*(.+?)\*\*/g;
@@ -19,28 +22,32 @@ export const renderInline = (text: string): (VNode | string)[] => {
     return out;
 };
 
-export const labBorder = "1px solid rgba(var(--v-border-color), var(--v-border-opacity))";
-export const labCard: CSSProperties = {
-    border: labBorder,
-    borderRadius: "10px",
-    padding: "12px 16px",
-    background: "rgb(var(--v-theme-surface))",
+/** Plain text of an authored inline string (accessible names, step lists): the `**` markers removed. */
+export const plainInline = (text: string): string => String(text ?? "").replace(/\*\*/g, "");
+
+export type ChoiceTagTone = "good" | "bad" | "missed";
+
+const TAG_ICON: Record<ChoiceTagTone, string> = {
+    good: "mdi-check-circle",
+    bad: "mdi-close-circle",
+    missed: "mdi-alert-circle-outline",
 };
-export const srOnly: CSSProperties = {
-    position: "absolute",
-    width: "1px",
-    height: "1px",
-    overflow: "hidden",
-    clip: "rect(0 0 0 0)",
-    whiteSpace: "nowrap",
-};
+
+/** Locked-state tag at the end of an answer row: MDI icon + the state in words (never colour alone). */
+export const choiceTag = (tone: ChoiceTagTone, text: string): VNode => (
+    <span class="ac-choice__tag">
+        <VIcon icon={TAG_ICON[tone]} size={16} aria-hidden="true" />
+        {text}
+    </span>
+);
 
 const FLAGS = {
-    ok: { icon: "mdi-check-circle", color: "success", label: "OK" },
-    warn: { icon: "mdi-alert", color: "warning", label: "Warning" },
-    bad: { icon: "mdi-close-circle", color: "error", label: "Problem" },
+    ok: { icon: "mdi-check-circle", state: "done", label: "OK" },
+    warn: { icon: "mdi-alert", state: "partial", label: "Warning" },
+    bad: { icon: "mdi-close-circle", state: "failed", label: "Problem" },
 } as const;
 
+/** One evidence panel of a lab task (key/value rows, table, timeline or text). A flat hairline card. */
 export const PanelView = defineComponent({
     name: "AcademyLabPanelView",
     props: { panel: { type: Object as PropType<Panel>, required: true } },
@@ -51,25 +58,23 @@ export const PanelView = defineComponent({
             let body: VNode | null = null;
             if (Array.isArray(panel.rows)) {
                 body = (
-                    <dl style={{ display: "grid", gridTemplateColumns: "minmax(110px, max-content) 1fr", gap: "4px 16px", margin: 0 }}>
+                    <dl class="ac-lab-kv">
                         {panel.rows.map((row: [string, string]) => (
-                            <>
-                                <dt style={{ opacity: 0.7 }}>{row[0]}</dt>
-                                <dd style={{ margin: 0, overflowWrap: "anywhere" }}>{row[1]}</dd>
-                            </>
+                            <div class="ac-lab-kv__row">
+                                <dt>{row[0]}</dt>
+                                <dd dir="auto">{row[1]}</dd>
+                            </div>
                         ))}
                     </dl>
                 );
             } else if (panel.table) {
                 body = (
-                    <div style={{ overflowX: "auto" }}>
-                        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                    <div class="ac-lab-tablewrap">
+                        <table class="ac-lab-table">
                             <thead>
                                 <tr>
                                     {panel.table.columns.map((column: string) => (
-                                        <th scope="col" style={{ textAlign: "start", padding: "4px 12px 4px 0", borderBottom: labBorder }}>
-                                            {column}
-                                        </th>
+                                        <th scope="col">{column}</th>
                                     ))}
                                 </tr>
                             </thead>
@@ -77,7 +82,7 @@ export const PanelView = defineComponent({
                                 {panel.table.rows.map((row: string[]) => (
                                     <tr>
                                         {row.map((cell) => (
-                                            <td style={{ padding: "4px 12px 4px 0", borderBottom: labBorder }}>{cell}</td>
+                                            <td dir="auto">{cell}</td>
                                         ))}
                                     </tr>
                                 ))}
@@ -87,16 +92,16 @@ export const PanelView = defineComponent({
                 );
             } else if (Array.isArray(panel.timeline)) {
                 body = (
-                    <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "6px" }}>
+                    <ol class="ac-lab-timeline">
                         {panel.timeline.map((entry: { t: string; text: string; flag?: "ok" | "warn" | "bad" }) => {
                             const flag = entry.flag ? FLAGS[entry.flag] : null;
                             return (
-                                <li style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>
-                                    <span style={{ minWidth: "64px", opacity: 0.7, fontVariantNumeric: "tabular-nums" }}>{entry.t}</span>
-                                    {flag ? (
-                                        <VIcon icon={flag.icon} color={flag.color} size={18} aria-hidden="true" />
-                                    ) : null}
-                                    <span>
+                                <li class="ac-lab-timeline__item">
+                                    <span class="ac-lab-timeline__time ac-ltr">{entry.t}</span>
+                                    <span class={["ac-state", flag ? `ac-state--${flag.state}` : ""]} aria-hidden="true">
+                                        <VIcon icon={flag ? flag.icon : "mdi-circle-small"} size={16} />
+                                    </span>
+                                    <span dir="auto">
                                         {flag ? <strong>{t(flag.label)}: </strong> : null}
                                         {entry.text}
                                     </span>
@@ -106,20 +111,30 @@ export const PanelView = defineComponent({
                     </ol>
                 );
             } else if (typeof panel.text === "string") {
-                body = <p style={{ margin: 0 }}>{renderInline(panel.text)}</p>;
+                body = (
+                    <p class="ac-lab-panel__text" dir="auto">
+                        {renderInline(panel.text)}
+                    </p>
+                );
             }
             return (
-                <section style={labCard} aria-label={panel.title}>
+                <section class="ac-card ac-lab-panel" aria-label={panel.title}>
                     {body ? (
                         <>
-                            <h3 style={{ margin: "0 0 8px", fontSize: "0.95rem", fontWeight: 600 }}>{panel.title}</h3>
+                            <h3 class="ac-lab-panel__title" dir="auto">
+                                {panel.title}
+                            </h3>
                             {body}
                         </>
                     ) : (
-                        <p style={{ margin: 0, fontWeight: 500 }}>{renderInline(panel.title)}</p>
+                        <p class="ac-lab-panel__lead" dir="auto">
+                            {renderInline(panel.title)}
+                        </p>
                     )}
                 </section>
             );
         };
     },
 });
+
+export default PanelView;

@@ -1,0 +1,372 @@
+/* Academy — lesson area styles. Tokens only (--pg-*), logical properties, no gradients.
+ * Shared vocabulary lives in base.css; add area-specific rules here with the .ac-<area>- prefix.
+ *
+ * Layout: .ac-split.ac-split--reading = main column (<= 920px) + sticky aside.
+ * Main, in DOM (= tab) order: article, "Read now", practice checks, finish card, previous/next tiles. */
+
+/* ---- Article ------------------------------------------------------------- */
+.ac-lesson-article {
+  min-inline-size: 0;
+  padding: 26px 30px 30px;
+}
+
+/* The six lesson sections arrive as `###` headings: a quiet hairline-separated rhythm. */
+.ac-lesson-article .guide-markdown {
+  color: var(--pg-ink-primary);
+}
+
+.ac-lesson-article .guide-markdown h3 {
+  margin-block: 30px 8px;
+  padding-block-start: 18px;
+  border-block-start: 1px solid var(--pg-border-subtle);
+  color: var(--pg-ink-primary);
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ac-lesson-article .guide-markdown > div:first-child > h3:first-child {
+  margin-block-start: 0;
+  padding-block-start: 0;
+  border-block-start: 0;
+}
+
+.ac-lesson-article .guide-markdown p {
+  margin-block: 0.6em;
+}
+
+.ac-lesson-article .guide-markdown ul,
+.ac-lesson-article .guide-markdown ol {
+  margin-block: 0.4em 0.8em;
+  padding-inline-start: 1.35em;
+}
+
+.ac-lesson-article .guide-markdown li {
+  margin-block: 0.4em;
+  padding-inline-start: 0.2em;
+}
+
+.ac-lesson-article .guide-markdown li::marker {
+  color: var(--pg-ink-faint);
+}
+
+.ac-lesson-article .guide-markdown strong {
+  font-weight: 600;
+}
+
+.ac-lesson-article .guide-markdown a {
+  text-decoration: underline;
+  text-decoration-color: var(--pg-border-strong);
+  text-underline-offset: 3px;
+}
+
+.ac-lesson-article .guide-markdown a:hover {
+  text-decoration-color: currentColor;
+}
+
+.ac-lesson-article .guide-markdown .callout {
+  border-radius: var(--pg-radius-md);
+}
+
+/* Wide blocks scroll inside the card, never the page. */
+.ac-lesson-article .guide-markdown pre,
+.ac-lesson-article .guide-markdown .guide-table-wrap {
+  max-inline-size: 100%;
+}
+
+.ac-lesson-article .guide-markdown img {
+  max-inline-size: 100%;
+  block-size: auto;
+}
+
+/* ---- Card header shared by "Read now" and the finish card ---------------- */
+.ac-lesson-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 20px 12px;
+}
+
+.ac-lesson-head .ac-muted {
+  margin: 0;
+}
+
+/* ---- Read now ------------------------------------------------------------ */
+.ac-lesson-list {
+  border-block-start: 1px solid var(--pg-border-subtle);
+}
+
+.ac-lesson-empty {
+  margin: 0;
+  padding: 0 20px 16px;
+}
+
+.ac-lesson-link__icon {
+  margin-inline-start: 6px;
+  color: var(--pg-ink-faint);
+  vertical-align: -2px;
+}
+
+.ac-lesson-link:hover .ac-lesson-link__icon,
+.ac-lesson-link:focus-visible .ac-lesson-link__icon {
+  color: var(--pg-accent-interactive);
+}
+
+.ac-lesson-state--read {
+  color: var(--pg-status-success-text);
+}
+
+/* ---- Practice check ------------------------------------------------------ */
+.ac-lesson-check {
+  padding: 20px 24px 22px;
+}
+
+.ac-lesson-check__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-block-end: 10px;
+}
+
+.ac-lesson-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ac-lesson-dot {
+  inline-size: 8px;
+  block-size: 8px;
+  border: 1px solid var(--pg-border-strong);
+  border-radius: 999px;
+}
+
+.ac-lesson-dot--current {
+  border-color: var(--pg-accent-interactive);
+}
+
+.ac-lesson-dot--done {
+  border-color: var(--pg-status-success-dot);
+  background: var(--pg-status-success-dot);
+}
+
+.ac-lesson-stem {
+  max-inline-size: 75ch;
+  margin: 0 0 14px;
+  color: var(--pg-ink-primary);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.ac-lesson-option {
+  min-inline-size: 0;
+}
+
+.ac-lesson-choice__icon {
+  flex: none;
+  margin-block-start: 1px;
+  color: var(--pg-ink-faint);
+}
+
+.ac-choice--good .ac-lesson-choice__icon,
+.ac-choice--bad .ac-lesson-choice__icon {
+  color: inherit;
+}
+
+.ac-lesson-choice--dim {
+  color: var(--pg-ink-muted);
+}
+
+.ac-lesson-option .ac-lesson-note {
+  margin-block: 6px 2px;
+  margin-inline: 14px 0;
+  padding-inline: 12px 0;
+  border-inline-start: 2px solid var(--pg-border-strong);
+}
+
+.ac-lesson-option .ac-lesson-note--good {
+  border-inline-start-color: var(--pg-status-success-dot);
+}
+
+.ac-lesson-option .ac-lesson-note--bad {
+  border-inline-start-color: var(--pg-status-danger-dot);
+}
+
+/* The live region is always in the DOM (so it announces); it only takes space when it has content. */
+.ac-lesson-result:not(:empty) {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-block-start: 14px;
+}
+
+.ac-lesson-refs {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+}
+
+.ac-lesson-refs .v-icon {
+  flex: none;
+  margin-block-start: 1px;
+}
+
+/* ---- Finish card --------------------------------------------------------- */
+.ac-lesson-finish {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 24px 22px;
+}
+
+.ac-lesson-missing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ac-lesson-missing li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--pg-ink-secondary);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.ac-lesson-missing .ac-state {
+  margin-block-start: -1px;
+}
+
+.ac-lesson-finish__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ---- Previous / next lesson tiles ---------------------------------------- */
+.ac-lesson-pager {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.ac-lesson-tile {
+  gap: 6px;
+  min-block-size: 80px;
+  padding-block: 14px;
+}
+
+.ac-lesson-tile--next {
+  grid-column: 2;
+  align-items: flex-end;
+  text-align: end;
+}
+
+.ac-lesson-tile__dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pg-ink-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ac-lesson-tile__title {
+  color: var(--pg-ink-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  transition: color 0.12s ease;
+}
+
+.ac-lesson-tile:hover .ac-lesson-tile__title {
+  color: var(--pg-accent-interactive);
+}
+
+/* ---- Aside: checklist + module outline ----------------------------------- */
+.ac-lesson-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 20px 14px;
+  border-block-end: 1px solid var(--pg-border-subtle);
+}
+
+.ac-lesson-outline .ac-step {
+  position: relative;
+}
+
+.ac-lesson-outline .ac-step--current::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 3px;
+  background: var(--pg-accent-interactive);
+}
+
+.ac-lesson-outline .ac-step--current .ac-step__title {
+  font-weight: 600;
+}
+
+@media (min-width: 1101px) {
+  /* A tall outline scrolls inside the sticky aside instead of running off the viewport. */
+  .ac-lesson-aside {
+    max-block-size: calc(100vh - var(--v-layout-top, 56px) - 32px);
+    padding-block-end: 2px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* Cards clip their own content (overflow: hidden), so keep flex from squeezing them. */
+  .ac-lesson-aside > * {
+    flex: none;
+  }
+}
+
+/* ---- Narrow screens ------------------------------------------------------ */
+@media (max-width: 600px) {
+  .ac-lesson-article {
+    padding: 18px 16px 22px;
+  }
+
+  .ac-lesson-check,
+  .ac-lesson-finish {
+    padding: 16px;
+  }
+
+  .ac-lesson-head {
+    padding: 14px 16px 10px;
+  }
+
+  .ac-lesson-empty {
+    padding: 0 16px 14px;
+  }
+
+  .ac-lesson-pager {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ac-lesson-tile--next {
+    grid-column: auto;
+  }
+
+  .ac-lesson-progress {
+    padding-inline: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ac-lesson-tile__title {
+    transition: none;
+  }
+}

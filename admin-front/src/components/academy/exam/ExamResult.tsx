@@ -1,10 +1,20 @@
 import { dc } from "kt-dc";
-import { useLocale } from "vuetify";
+import { computed, ref } from "vue";
 import { RouterLink } from "vue-router";
-import { VBtn } from "vuetify/components";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
+import { useLocale } from "vuetify";
+import { VBtn, VIcon } from "vuetify/components";
+import { DescriptionList } from "@/components/ui/DescriptionList";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { MetaPill } from "@/components/ui/MetaPill";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import type { ExamResult as ExamResultPayload, ExamResultItem } from "@/content/academy/apiTypes";
-import { fmtDate, fmtDateTime } from "./ExamBriefing";
+import { fmtDate, fmtDateTime } from "../format";
+import { Callout } from "../ui/Callout";
+import { IconTile } from "../ui/IconTile";
+import { ProgressBar } from "../ui/ProgressBar";
 
 type Props = {
     result: ExamResultPayload;
@@ -13,81 +23,137 @@ type Props = {
     articleTitles: Record<string, string>;
 };
 
-const mark = (ok: boolean) => (ok ? "✓" : "✗");
-const tone = (ok: boolean) => (ok ? "success" : "danger");
+type Filter = "all" | "incorrect" | "critical";
 
-const Bar = ({ value, label }: { value: number; label: string }) => (
-    <div style={{ flex: 1, minInlineSize: "120px", blockSize: "10px", borderRadius: "5px", background: "var(--pg-bg-surface-subtle)", border: "1px solid var(--pg-border-subtle)", overflow: "hidden" }} role="img" aria-label={label}>
-        <div style={{ inlineSize: `${Math.min(100, Math.max(0, value))}%`, blockSize: "100%", background: value >= 70 ? "var(--pg-status-success-text)" : "var(--pg-status-danger-text)" }} />
-    </div>
-);
+/** Module scores below this are "worth a second look" (same threshold the server uses for `reviewRequired`). */
+const MODULE_PASS = 70;
 
 export const ExamResult = dc((props: Props) => {
     const { t } = useLocale();
+    const filter = ref<Filter>("all");
+
+    const indexed = computed(() => props.result.items.map((item, index) => ({ item, index })));
+    const counts = computed(() => ({
+        all: props.result.items.length,
+        incorrect: props.result.items.filter((item) => !item.correct).length,
+        critical: props.result.items.filter((item) => item.critical).length,
+    }));
+    const visible = computed(() =>
+        indexed.value.filter(({ item }) => (filter.value === "incorrect" ? !item.correct : filter.value === "critical" ? item.critical : true)),
+    );
 
     const renderItem = (item: ExamResultItem, index: number) => {
         const optionText = (oid: string) => item.order?.items.find((o) => o.oid === oid)?.text ?? oid;
+        const verdict = item.correct ? "good" : item.answered ? "bad" : "muted";
+        const verdictIcon = item.correct ? "mdi-check-circle" : item.answered ? "mdi-close-circle" : "mdi-minus-circle-outline";
+        const verdictWord = item.correct ? t("Correct") : item.answered ? t("Incorrect") : t("Not answered");
         return (
-            <li key={item.qid} style={{ listStyle: "none", padding: "14px", border: "1px solid var(--pg-border-subtle)", borderRadius: "10px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                    <strong style={{ color: `var(--pg-status-${tone(item.correct)}-text)` }}>
-                        {mark(item.correct)} {item.correct ? t("Correct") : item.answered ? t("Incorrect") : t("Not answered")}
-                    </strong>
-                    {item.critical && <span style={{ padding: "1px 8px", border: "1px solid var(--pg-status-warning-border)", background: "var(--pg-status-warning-bg)", color: "var(--pg-status-warning-text)", borderRadius: "999px", fontSize: "12px" }}>⚠ {t("critical")}</span>}
-                    <span style={{ fontSize: "12px", opacity: 0.7 }}>{props.moduleTitles[item.module] ?? item.module}</span>
-                </div>
-                <div style={{ fontWeight: 600, whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{index + 1}. {item.stem}</div>
-
-                {item.options && (
-                    <ul style={{ margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
-                        {item.options.map((o) => (
-                            <li key={o.oid} style={{ listStyle: "none", padding: "8px 10px", borderRadius: "8px", border: `1px solid ${o.correct ? "var(--pg-status-success-border)" : o.selected ? "var(--pg-status-danger-border)" : "var(--pg-border-subtle)"}` }}>
-                                <div>
-                                    <span aria-hidden="true">{o.correct ? "✓" : o.selected ? "✗" : "•"} </span>
-                                    {o.text}
-                                    {o.selected && <em style={{ opacity: 0.75 }}> — {t("your answer")}</em>}
-                                    {o.correct && <em style={{ opacity: 0.75 }}> — {t("correct answer")}</em>}
-                                </div>
-                                {o.note && <div style={{ fontSize: "12px", opacity: 0.8, marginBlockStart: "4px" }}>{o.note}</div>}
-                            </li>
-                        ))}
-                    </ul>
-                )}
-
-                {item.order && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "24px" }}>
-                        <div>
-                            <strong style={{ fontSize: "13px" }}>{t("Your order")}</strong>
-                            {item.order.yourOrder.length === 0 ? <div style={{ opacity: 0.7 }}>{t("Not answered")}</div> : (
-                                <ol style={{ margin: "4px 0 0", paddingInlineStart: "22px" }}>{item.order.yourOrder.map((oid) => <li key={oid}>{optionText(oid)}</li>)}</ol>
-                            )}
-                        </div>
-                        <div>
-                            <strong style={{ fontSize: "13px" }}>{t("Correct order")}</strong>
-                            <ol style={{ margin: "4px 0 0", paddingInlineStart: "22px" }}>{item.order.correctOrder.map((oid) => <li key={oid}>{optionText(oid)}</li>)}</ol>
-                        </div>
-                    </div>
-                )}
-
-                {item.number && (
-                    <div style={{ lineHeight: 1.7 }}>
-                        <div>{t("Your answer")}: <strong dir="ltr">{item.number.yourAnswer ?? "—"}</strong></div>
-                        <div>{t("Correct answer")}: <strong dir="ltr">{item.number.correctAnswer}</strong>{item.number.tolerance ? <span> ({t("tolerance")} <span dir="ltr">{item.number.tolerance}</span>)</span> : null}</div>
-                    </div>
-                )}
-
-                {item.why && <div style={{ fontSize: "13px", lineHeight: 1.6 }}><strong>{t("Why")}: </strong>{item.why}</div>}
-                {item.refs.length > 0 && (
-                    <div style={{ fontSize: "13px" }}>
-                        <strong>{t("Guide references")}: </strong>
-                        {item.refs.map((ref, i) => (
-                            <span key={ref}>
-                                {i > 0 ? ", " : ""}
-                                <RouterLink to={{ name: "AdminGuideArticle", params: { articleId: ref } }}>{props.articleTitles[ref] ?? ref}</RouterLink>
+            <li key={item.qid}>
+                <SurfaceCard class="ac-card">
+                    <div class="ac-stack ac-stack--sm">
+                        <div class="ac-row ac-row--wrap ac-exam-rev__head">
+                            <span class={["ac-exam-rev__verdict", `ac-exam-rev__verdict--${verdict}`]}>
+                                <VIcon icon={verdictIcon} size={18} />
+                                {verdictWord}
                             </span>
-                        ))}
+                            {item.critical && (
+                                <MetaPill color="warning" prependIcon="mdi-alert-outline">
+                                    {t("Critical")}
+                                </MetaPill>
+                            )}
+                            <span class="ac-muted">{props.moduleTitles[item.module] ?? item.module}</span>
+                        </div>
+                        <p class="ac-exam-rev__stem" dir="auto">
+                            <span class="ac-num ac-exam-rev__n">{index + 1}.</span> {item.stem}
+                        </p>
+
+                        {item.options && (
+                            <ul class="ac-choices">
+                                {item.options.map((o) => {
+                                    const tone = o.correct ? "good" : o.selected ? "bad" : "";
+                                    return (
+                                        <li key={o.oid} class={["ac-choice", "ac-choice--locked", tone ? `ac-choice--${tone}` : ""]}>
+                                            <VIcon class="ac-exam-rev__mark" icon={o.correct ? "mdi-check-circle-outline" : o.selected ? "mdi-close-circle-outline" : "mdi-circle-small"} size={18} />
+                                            <div class="ac-choice__label">
+                                                <span dir="auto">{o.text}</span>
+                                                {(o.selected || o.correct) && (
+                                                    <span class="ac-exam-rev__tags">
+                                                        {o.selected && <span class="ac-exam-rev__tag">{t("your answer")}</span>}
+                                                        {o.correct && <span class="ac-exam-rev__tag">{t("correct answer")}</span>}
+                                                    </span>
+                                                )}
+                                                {o.note && <p class="ac-choice__note" dir="auto">{o.note}</p>}
+                                            </div>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        )}
+
+                        {item.order && (
+                            <div class="ac-exam-rev__orders">
+                                <div class="ac-stack ac-stack--sm">
+                                    <h3 class="ac-h3">{t("Your order")}</h3>
+                                    {item.order.yourOrder.length === 0 ? (
+                                        <span class="ac-muted">{t("Not answered")}</span>
+                                    ) : (
+                                        <ol class="ac-exam-rev__ol" dir="auto">
+                                            {item.order.yourOrder.map((oid) => (
+                                                <li key={oid}>{optionText(oid)}</li>
+                                            ))}
+                                        </ol>
+                                    )}
+                                </div>
+                                <div class="ac-stack ac-stack--sm">
+                                    <h3 class="ac-h3">{t("Correct order")}</h3>
+                                    <ol class="ac-exam-rev__ol" dir="auto">
+                                        {item.order.correctOrder.map((oid) => (
+                                            <li key={oid}>{optionText(oid)}</li>
+                                        ))}
+                                    </ol>
+                                </div>
+                            </div>
+                        )}
+
+                        {item.number && (
+                            <div class="ac-stack ac-stack--sm ac-exam-rev__numbers">
+                                <div class="ac-row ac-row--wrap">
+                                    <span class="ac-muted">{t("Your answer")}</span>
+                                    <strong class="ac-ltr ac-num">{item.number.yourAnswer ?? "—"}</strong>
+                                </div>
+                                <div class="ac-row ac-row--wrap">
+                                    <span class="ac-muted">{t("Correct answer")}</span>
+                                    <strong class="ac-ltr ac-num">{item.number.correctAnswer}</strong>
+                                    {item.number.tolerance ? (
+                                        <span class="ac-muted">
+                                            ({t("tolerance")} <span class="ac-ltr ac-num">{item.number.tolerance}</span>)
+                                        </span>
+                                    ) : null}
+                                </div>
+                            </div>
+                        )}
+
+                        {item.why && (
+                            <p class="ac-exam-rev__why" dir="auto">
+                                <strong>{t("Why")}: </strong>
+                                {item.why}
+                            </p>
+                        )}
+                        {item.refs.length > 0 && (
+                            <p class="ac-text">
+                                <strong>{t("Guide references")}: </strong>
+                                {item.refs.map((ref, i) => (
+                                    <span key={ref}>
+                                        {i > 0 ? ", " : ""}
+                                        <RouterLink class="ac-link" to={{ name: "AdminGuideArticle", params: { articleId: ref } }}>
+                                            {props.articleTitles[ref] ?? ref}
+                                        </RouterLink>
+                                    </span>
+                                ))}
+                            </p>
+                        )}
                     </div>
-                )}
+                </SurfaceCard>
             </li>
         );
     };
@@ -95,82 +161,131 @@ export const ExamResult = dc((props: Props) => {
     return () => {
         const r = props.result;
         const modules = Object.entries(r.moduleScores);
+        const tone = r.passed ? "pass" : "fail";
+        const emptyText = filter.value === "incorrect" ? t("You answered every question correctly.") : t("No questions in this view.");
         return (
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px", maxInlineSize: "900px" }}>
-                <div
-                    role="status"
-                    aria-live="polite"
-                    style={{ padding: "16px", borderRadius: "12px", border: `1px solid var(--pg-status-${tone(r.passed)}-border)`, background: `var(--pg-status-${tone(r.passed)}-bg)`, color: `var(--pg-status-${tone(r.passed)}-text)` }}
-                >
-                    <div style={{ fontSize: "20px", fontWeight: 700 }}>
-                        {mark(r.passed)} {r.passed ? t("You passed") : t("Not passed this time")} — {r.scorePercent}%
+            <div class="ac-exam-result">
+                <div class={["ac-exam-verdict", `ac-exam-verdict--${tone}`]} role="status" aria-live="polite">
+                    <VIcon class="ac-exam-verdict__icon" icon={r.passed ? "mdi-check-circle" : "mdi-close-circle"} size={32} />
+                    <div class="ac-exam-verdict__body">
+                        <p class="ac-exam-verdict__title">{`${r.passed ? t("You passed") : t("Not passed this time")} — ${r.scorePercent}%`}</p>
+                        <p class="ac-exam-verdict__sub">
+                            {t("Pass mark")}: {r.passPercent}% · {t("Attempt")} {r.attemptNumber} · {props.trackTitle}
+                        </p>
+                        {r.expired && <p class="ac-exam-verdict__sub">{t("This submission arrived after the time limit, so it was not scored.")}</p>}
+                        {!r.passed && !r.expired && r.scorePercent >= r.passPercent && r.criticalMissed > 0 && (
+                            <p class="ac-exam-verdict__sub">{t("Your percentage was high enough, but a critical question was missed.")}</p>
+                        )}
+                        {!r.passed && <p class="ac-exam-verdict__sub">{t("This is part of learning. Review the topics below and try again when you are ready.")}</p>}
                     </div>
-                    <div style={{ marginBlockStart: "4px" }}>
-                        {t("Pass mark")}: {r.passPercent}% · {t("Attempt")} {r.attemptNumber} · {props.trackTitle}
-                    </div>
-                    {r.expired && <div style={{ marginBlockStart: "6px" }}>{t("This submission arrived after the time limit, so it was not scored.")}</div>}
-                    {!r.passed && !r.expired && r.scorePercent >= r.passPercent && r.criticalMissed > 0 && (
-                        <div style={{ marginBlockStart: "6px" }}>{t("Your percentage was high enough, but a critical question was missed.")}</div>
-                    )}
-                    {!r.passed && <div style={{ marginBlockStart: "6px" }}>{t("This is part of learning. Review the topics below and try again when you are ready.")}</div>}
                 </div>
 
-                <SurfaceCard>
-                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        <div style={{ display: "flex", gap: "24px", flexWrap: "wrap" }}>
-                            <div><div style={{ fontSize: "12px", opacity: 0.65 }}>{t("Score")}</div><strong>{r.scorePercent}%</strong></div>
-                            <div><div style={{ fontSize: "12px", opacity: 0.65 }}>{t("Pass mark")}</div><strong>{r.passPercent}%</strong></div>
-                            <div><div style={{ fontSize: "12px", opacity: 0.65 }}>{t("Critical questions missed")}</div><strong>{r.criticalMissed}</strong></div>
-                            <div><div style={{ fontSize: "12px", opacity: 0.65 }}>{t("Time taken")}</div><strong>{Math.floor(r.durationSeconds / 60)} {t("min")} {r.durationSeconds % 60} {t("sec")}</strong></div>
-                        </div>
-                        <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.6 }}>
-                            {t("Critical questions cover things that could cause real harm if misunderstood. Missing any one of them fails the exam regardless of the percentage.")}
-                        </p>
-                        {!r.passed && r.cooldownUntil && (
-                            <p style={{ margin: 0, fontWeight: 600 }}>{t("You can try again at")} {fmtDateTime(r.cooldownUntil)}.</p>
-                        )}
-                    </SurfaceCardText>
-                </SurfaceCard>
+                <MetricStrip
+                    items={[
+                        { key: "score", label: t("Score"), value: `${r.scorePercent}%` },
+                        { key: "pass", label: t("Pass mark"), value: `${r.passPercent}%` },
+                        { key: "critical", label: t("Critical questions missed"), value: r.criticalMissed },
+                        { key: "time", label: t("Time taken"), value: `${Math.floor(r.durationSeconds / 60)} ${t("min")} ${r.durationSeconds % 60} ${t("sec")}` },
+                    ]}
+                />
 
-                {r.passed && r.badge && (
-                    <SurfaceCard>
-                        <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                            <h2 style={{ fontSize: "18px", margin: 0 }}>🏅 {props.trackTitle}</h2>
-                            <div>{t("Badge earned")} {fmtDate(r.badge.earnedAt)} · {t("valid until")} {fmtDate(r.badge.expiresAt)}</div>
-                            <div><VBtn color="primary" to={{ name: "AdminAcademyCertificate", params: { badgeId: r.badge.id } }}>{t("View certificate")}</VBtn></div>
-                        </SurfaceCardText>
-                    </SurfaceCard>
-                )}
-
-                <SurfaceCard>
-                    <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                        <h2 style={{ fontSize: "18px", margin: 0 }}>{t("Score by module")}</h2>
-                        {modules.map(([id, value]) => (
-                            <div key={id} style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-                                <span style={{ flex: "0 1 280px", minInlineSize: "140px" }}>{props.moduleTitles[id] ?? id}</span>
-                                <Bar value={value} label={`${props.moduleTitles[id] ?? id}: ${value}%`} />
-                                <strong style={{ minInlineSize: "48px" }}>{value}%</strong>
-                            </div>
-                        ))}
-                        {r.reviewRequired.length > 0 && (
+                <div class="ac-split">
+                    <section aria-labelledby="exam-review-heading" class="ac-stack">
+                        <div class="ac-stack ac-stack--sm">
+                            <h2 id="exam-review-heading" class="ac-title">
+                                {t("Your answers, question by question")}
+                            </h2>
+                            <p class="ac-muted">{t("These answers are shown only to you, only now. Please do not share them.")}</p>
+                            <p class="ac-muted">
+                                {t("Critical questions cover things that could cause real harm if misunderstood. Missing any one of them fails the exam regardless of the percentage.")}
+                            </p>
                             <div>
-                                <strong>{t("Worth a second look (below 70%)")}</strong>
-                                <ul style={{ margin: "4px 0 0", paddingInlineStart: "20px", lineHeight: 1.8 }}>
-                                    {r.reviewRequired.map((id) => (
-                                        <li key={id}><RouterLink to={{ name: "AdminAcademyModule", params: { moduleId: id } }}>{props.moduleTitles[id] ?? id}</RouterLink></li>
-                                    ))}
-                                </ul>
+                                <SegmentedTabs
+                                    modelValue={filter.value}
+                                    ariaLabel={t("Filter your answers")}
+                                    tabs={[
+                                        { value: "all", label: t("All"), count: counts.value.all },
+                                        { value: "incorrect", label: t("Incorrect"), count: counts.value.incorrect },
+                                        { value: "critical", label: t("Critical"), count: counts.value.critical },
+                                    ]}
+                                    onUpdate:modelValue={(value: string) => (filter.value = value as Filter)}
+                                />
                             </div>
+                        </div>
+                        {visible.value.length === 0 ? (
+                            <SurfaceCard class="ac-card">
+                                <EmptyState icon="mdi-check-circle-outline" title={emptyText} />
+                            </SurfaceCard>
+                        ) : (
+                            <ol class="ac-stack ac-exam-rev__list">{visible.value.map(({ item, index }) => renderItem(item, index))}</ol>
                         )}
-                    </SurfaceCardText>
-                </SurfaceCard>
+                    </section>
 
-                <section aria-labelledby="exam-review-heading" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    <h2 id="exam-review-heading" style={{ fontSize: "18px", margin: 0 }}>{t("Your answers, question by question")}</h2>
-                    <p style={{ margin: 0, fontSize: "13px", opacity: 0.8 }}>{t("These answers are shown only to you, only now. Please do not share them.")}</p>
-                    <ol style={{ margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "10px" }}>{r.items.map(renderItem)}</ol>
-                </section>
+                    <aside class="ac-aside">
+                        {r.passed && r.badge && (
+                            <SurfaceCard class="ac-card">
+                                <div class="ac-stack">
+                                    <div class="ac-row">
+                                        <IconTile icon="mdi-certificate-outline" tone="success" large />
+                                        <div class="ac-grow">
+                                            <h2 class="ac-h2">{props.trackTitle}</h2>
+                                            <StatusBadge status="valid" label={t("Certified")} toneOverride="success" />
+                                        </div>
+                                    </div>
+                                    <DescriptionList
+                                        items={[
+                                            { label: t("Issued"), value: fmtDate(r.badge.earnedAt) },
+                                            { label: t("Valid until"), value: fmtDate(r.badge.expiresAt) },
+                                        ]}
+                                    />
+                                    <VBtn color="primary" block prependIcon="mdi-certificate-outline" to={{ name: "AdminAcademyCertificate", params: { badgeId: r.badge.id } }}>
+                                        {t("View certificate")}
+                                    </VBtn>
+                                </div>
+                            </SurfaceCard>
+                        )}
+
+                        <SurfaceCard class="ac-card" title={t("Score by module")}>
+                            <div class="ac-stack">
+                                <ul class="ac-steps ac-exam-mods">
+                                    {modules.map(([id, value]) => {
+                                        const title = props.moduleTitles[id] ?? id;
+                                        return (
+                                            <li key={id} class="ac-step">
+                                                <div class="ac-step__main">
+                                                    <span class="ac-step__title">{title}</span>
+                                                    <ProgressBar value={value} max={100} tone={value >= MODULE_PASS ? "success" : "danger"} label={`${title}: ${value}%`} />
+                                                </div>
+                                                <span class="ac-step__meta ac-exam-mods__value">{value}%</span>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                                {r.reviewRequired.length > 0 && (
+                                    <div class="ac-stack ac-stack--sm ac-exam-review-links">
+                                        <h3 class="ac-h3">{t("Worth a second look (below 70%)")}</h3>
+                                        <ul class="ac-exam-linklist">
+                                            {r.reviewRequired.map((id) => (
+                                                <li key={id}>
+                                                    <RouterLink class="ac-link" to={{ name: "AdminAcademyModule", params: { moduleId: id } }}>
+                                                        {props.moduleTitles[id] ?? id}
+                                                    </RouterLink>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        </SurfaceCard>
+
+                        {!r.passed && r.cooldownUntil && (
+                            <Callout tone="info" icon="mdi-timer-sand">
+                                {t("You can try again at")} <strong class="ac-num">{fmtDateTime(r.cooldownUntil)}</strong>.
+                            </Callout>
+                        )}
+                    </aside>
+                </div>
             </div>
         );
     };
-});
+}, { props: ["result", "trackTitle", "moduleTitles", "articleTitles"] });

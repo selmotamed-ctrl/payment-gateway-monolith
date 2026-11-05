@@ -1,25 +1,19 @@
 import { dc } from "kt-dc";
-import { computed, ref } from "vue";
+import { computed, ref, type VNodeChild } from "vue";
 import { useLocale } from "vuetify";
 import { VBtn } from "vuetify/components";
-import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { GuideMarkdown } from "@/components/guide/GuideMarkdown";
-import type { Eligibility, OpenExamSession } from "@/content/academy/apiTypes";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import type { ExamBlueprintPublic } from "@/content/academy";
+import type { Eligibility, OpenExamSession } from "@/content/academy/apiTypes";
+import { fmtDateTime } from "../format";
+import { Callout } from "../ui/Callout";
+import { ProgressBar } from "../ui/ProgressBar";
+import { StateIcon } from "../ui/StateIcon";
 
-export const fmtDateTime = (value: string | null | undefined): string => {
-    if (!value) return "—";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "—";
-    return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
-};
-
-export const fmtDate = (value: string | null | undefined): string => {
-    if (!value) return "—";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "—";
-    return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "long", day: "numeric" }).format(date);
-};
+/** Date helpers moved to `components/academy/format.ts`; re-exported here until every importer migrates. */
+export { fmtDate, fmtDateTime } from "../format";
 
 type Props = {
     blueprint: ExamBlueprintPublic | null;
@@ -36,9 +30,6 @@ type Props = {
     onStart: () => void;
 };
 
-const cardStyle = { display: "flex", flexDirection: "column", gap: "10px" } as const;
-const factStyle = { display: "flex", flexDirection: "column", gap: "2px", minInlineSize: "120px" } as const;
-
 export const ExamBriefing = dc((props: Props) => {
     const { t } = useLocale();
     const accepted = ref(false);
@@ -50,101 +41,171 @@ export const ExamBriefing = dc((props: Props) => {
     });
     const canStart = computed(() => Boolean(props.open) || (props.eligibility !== null && blockers.value.length === 0 && cooldownMs.value === 0));
 
-    return () => {
-        const bp = props.blueprint;
+    /** One requirement row: state icon, the text, and the state in words (colour and icon are never the only signal). */
+    const requirementRow = (key: string, state: "done" | "current" | "todo" | "locked", word: string, body: VNodeChild) => (
+        <li key={key} class="ac-step">
+            <StateIcon state={state} />
+            <div class="ac-step__main">
+                <span class="ac-step__title">{body}</span>
+            </div>
+            <span class="ac-step__meta">{word}</span>
+        </li>
+    );
+
+    const renderRequirements = () => {
+        if (props.eligibilityLoading && !props.eligibility) {
+            return (
+                <div role="status" aria-busy="true">
+                    <div class="ac-skel ac-exam-skel" />
+                    <span class="ac-sr-only">{t("Loading…")}</span>
+                </div>
+            );
+        }
+        if (props.eligibilityError) {
+            return (
+                <Callout tone="danger">
+                    <div class="ac-between">
+                        <span>
+                            {t("We could not check your requirements.")} {props.eligibilityError}
+                        </span>
+                        <VBtn size="small" variant="outlined" onClick={props.onRetryEligibility}>
+                            {t("Retry")}
+                        </VBtn>
+                    </div>
+                </Callout>
+            );
+        }
+        if (props.open) {
+            return (
+                <ul class="ac-steps">
+                    {requirementRow(
+                        "open",
+                        "current",
+                        t("In progress"),
+                        <>
+                            {t("You have an exam in progress. Resume it to carry on with the same questions. It closes at")} <strong>{fmtDateTime(props.open.expiresAt)}</strong>.
+                        </>,
+                    )}
+                </ul>
+            );
+        }
+        if (blockers.value.length === 0 && cooldownMs.value === 0) {
+            return <ul class="ac-steps">{requirementRow("met", "done", t("Done"), t("You meet every requirement for this exam."))}</ul>;
+        }
         const minutesLeft = Math.ceil(cooldownMs.value / 60000);
         return (
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px", maxInlineSize: "860px" }}>
-                <SurfaceCard>
-                    <SurfaceCardText style={cardStyle}>
-                        <h2 style={{ fontSize: "18px", margin: 0 }}>{t("About this exam")}</h2>
-                        {bp ? (
+            <div class="ac-stack ac-stack--sm">
+                <p class="ac-text">{t("Please finish these first. Nothing is lost, and you can come back any time.")}</p>
+                <ul class="ac-steps">
+                    {blockers.value.map((item) => requirementRow(`${item.kind}-${item.id}`, "todo", t("To do"), item.text))}
+                    {cooldownMs.value > 0 &&
+                        requirementRow(
+                            "cooldown",
+                            "locked",
+                            t("Locked"),
                             <>
-                                <div style={{ display: "flex", flexWrap: "wrap", gap: "20px" }}>
-                                    <div style={factStyle}><span style={{ opacity: 0.65, fontSize: "12px" }}>{t("Questions")}</span><strong>{bp.questionCount}</strong></div>
-                                    <div style={factStyle}><span style={{ opacity: 0.65, fontSize: "12px" }}>{t("Pass mark")}</span><strong>{bp.passPercent}%</strong></div>
-                                    <div style={factStyle}><span style={{ opacity: 0.65, fontSize: "12px" }}>{t("Time limit")}</span><strong>{bp.timeLimitMinutes} {t("minutes")}</strong></div>
-                                    <div style={factStyle}><span style={{ opacity: 0.65, fontSize: "12px" }}>{t("Wait after a failed attempt")}</span><strong>{bp.cooldownMinutes} {t("minutes")}</strong></div>
-                                </div>
-                                <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.6 }}>
-                                    {t("Missing any question marked critical fails the exam, whatever your percentage. Questions come one at a time and you can go back, flag questions for review and change answers until you submit. Only the server grades your answers.")}
-                                </p>
-                                <div>
-                                    <strong style={{ fontSize: "13px" }}>{t("What is covered")}</strong>
-                                    <ul style={{ margin: "6px 0 0", paddingInlineStart: "20px", fontSize: "13px", lineHeight: 1.7 }}>
-                                        {bp.composition.map((entry) => (
-                                            <li key={entry.module}>{props.moduleTitles[entry.module] ?? entry.module} — {entry.count} {t("questions")}</li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            </>
-                        ) : (
-                            <p style={{ margin: 0 }}>{t("This exam could not be found.")}</p>
+                                {t("You can try again at")} <span class="ac-num">{fmtDateTime(props.eligibility?.cooldownUntil)}</span> (<span class="ac-num">{minutesLeft}</span> {t("minutes from now")}).
+                            </>,
                         )}
-                    </SurfaceCardText>
-                </SurfaceCard>
-
-                <SurfaceCard>
-                    <SurfaceCardText style={cardStyle}>
-                        <h2 style={{ fontSize: "18px", margin: 0 }}>{t("Before you start")}</h2>
-                        <div aria-live="polite">
-                            {props.eligibilityLoading && !props.eligibility ? (
-                                <div style={{ blockSize: "48px", borderRadius: "8px", background: "var(--pg-bg-surface-subtle)" }} aria-busy="true">
-                                    <span style={{ position: "absolute", insetInlineStart: "-9999px" }}>{t("Loading")}</span>
-                                </div>
-                            ) : props.eligibilityError ? (
-                                <div role="alert" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-                                    <span>{t("We could not check your requirements.")} {props.eligibilityError}</span>
-                                    <VBtn size="small" variant="outlined" onClick={props.onRetryEligibility}>{t("Retry")}</VBtn>
-                                </div>
-                            ) : props.open ? (
-                                <p style={{ margin: 0 }}>✓ {t("You have an exam in progress. Resume it to carry on with the same questions. It closes at")} <strong>{fmtDateTime(props.open.expiresAt)}</strong>.</p>
-                            ) : blockers.value.length === 0 && cooldownMs.value === 0 ? (
-                                <p style={{ margin: 0 }}>✓ {t("You meet every requirement for this exam.")}</p>
-                            ) : (
-                                <div>
-                                    <p style={{ margin: "0 0 6px" }}>{t("Please finish these first. Nothing is lost, and you can come back any time.")}</p>
-                                    <ul style={{ margin: 0, paddingInlineStart: "20px", lineHeight: 1.7 }}>
-                                        {blockers.value.map((item) => (
-                                            <li key={`${item.kind}-${item.id}`}><span aria-hidden="true">✗ </span>{item.text}</li>
-                                        ))}
-                                        {cooldownMs.value > 0 && (
-                                            <li><span aria-hidden="true">✗ </span>{t("You can try again at")} {fmtDateTime(props.eligibility?.cooldownUntil)} ({minutesLeft} {t("minutes from now")}).</li>
-                                        )}
-                                    </ul>
-                                </div>
-                            )}
-                            {(props.eligibility?.reviewRequired ?? []).length > 0 && (
-                                <p style={{ margin: "8px 0 0" }}>
-                                    {t("Please re-read these modules before the next attempt")}: {(props.eligibility?.reviewRequired ?? []).map((id) => props.moduleTitles[id] ?? id).join(", ")}.
-                                </p>
-                            )}
-                        </div>
-                    </SurfaceCardText>
-                </SurfaceCard>
-
-                <SurfaceCard>
-                    <SurfaceCardText style={cardStyle}>
-                        <h2 style={{ fontSize: "18px", margin: 0 }}>{t("Integrity statement")}</h2>
-                        <GuideMarkdown source={props.integrityText} />
-                        <label style={{ display: "flex", gap: "10px", alignItems: "flex-start", cursor: "pointer", fontWeight: 600 }}>
-                            <input
-                                type="checkbox"
-                                checked={accepted.value}
-                                style={{ inlineSize: "20px", blockSize: "20px", marginBlockStart: "2px" }}
-                                onChange={(event: Event) => (accepted.value = (event.target as HTMLInputElement).checked)}
-                            />
-                            <span>{t("I have read and I agree to this integrity statement.")}</span>
-                        </label>
-                        {props.startError && <div role="alert" style={{ color: "var(--pg-status-danger-text)" }}>{props.startError}</div>}
-                        <div>
-                            <VBtn color="primary" disabled={!accepted.value || !canStart.value || props.starting} loading={props.starting} onClick={props.onStart}>
-                                {props.open ? t("Resume exam") : t("Start exam")}
-                            </VBtn>
-                        </div>
-                    </SurfaceCardText>
-                </SurfaceCard>
+                </ul>
             </div>
         );
     };
-});
+
+    const renderCoverage = (bp: ExamBlueprintPublic) => {
+        const largest = Math.max(1, ...bp.composition.map((entry) => entry.count));
+        return (
+            <ul class="ac-steps ac-exam-cover">
+                {bp.composition.map((entry) => {
+                    const title = props.moduleTitles[entry.module] ?? entry.module;
+                    return (
+                        <li key={entry.module} class="ac-step">
+                            <div class="ac-step__main">
+                                <span class="ac-step__title">{title}</span>
+                                <ProgressBar value={entry.count} max={largest} tone="info" label={`${title}: ${entry.count} ${t("questions")}`} />
+                            </div>
+                            <span class="ac-step__meta">
+                                {entry.count} {t("questions")}
+                            </span>
+                        </li>
+                    );
+                })}
+            </ul>
+        );
+    };
+
+    return () => {
+        const bp = props.blueprint;
+        const reviewRequired = props.eligibility?.reviewRequired ?? [];
+        return (
+            <>
+                {bp && (
+                    <MetricStrip
+                        items={[
+                            { key: "questions", label: t("Questions"), value: bp.questionCount },
+                            { key: "pass", label: t("Pass mark"), value: `${bp.passPercent}%` },
+                            { key: "time", label: t("Time limit"), value: `${bp.timeLimitMinutes} ${t("minutes")}` },
+                            { key: "wait", label: t("Wait after a failed attempt"), value: `${bp.cooldownMinutes} ${t("minutes")}` },
+                        ]}
+                    />
+                )}
+                <div class="ac-split">
+                    <div class="ac-stack">
+                        <SurfaceCard class="ac-card" title={t("Before you start")}>
+                            <div class="ac-stack ac-stack--sm" aria-live="polite">
+                                {renderRequirements()}
+                                {reviewRequired.length > 0 && (
+                                    <Callout tone="warning" role="none" icon="mdi-book-open-page-variant-outline">
+                                        {t("Please re-read these modules before the next attempt")}: {reviewRequired.map((id) => props.moduleTitles[id] ?? id).join(", ")}.
+                                    </Callout>
+                                )}
+                            </div>
+                        </SurfaceCard>
+
+                        <SurfaceCard class="ac-card" title={t("Integrity statement")}>
+                            <div class="ac-stack">
+                                <div class="ac-prose" dir="auto">
+                                    <GuideMarkdown source={props.integrityText} />
+                                </div>
+                                <label class={["ac-choice", "ac-exam-accept", accepted.value ? "ac-choice--selected" : ""]}>
+                                    <input
+                                        type="checkbox"
+                                        checked={accepted.value}
+                                        onChange={(event: Event) => (accepted.value = (event.target as HTMLInputElement).checked)}
+                                    />
+                                    <span class="ac-choice__label">{t("I have read and I agree to this integrity statement.")}</span>
+                                </label>
+                                {props.startError && <Callout tone="danger">{props.startError}</Callout>}
+                                <div>
+                                    <VBtn color="primary" disabled={!accepted.value || !canStart.value || props.starting} loading={props.starting} onClick={props.onStart}>
+                                        {props.open ? t("Resume exam") : t("Start exam")}
+                                    </VBtn>
+                                </div>
+                            </div>
+                        </SurfaceCard>
+                    </div>
+
+                    <aside class="ac-aside">
+                        <SurfaceCard class="ac-card" title={t("About this exam")}>
+                            {bp ? (
+                                <div class="ac-stack">
+                                    <p class="ac-text">
+                                        {t(
+                                            "Missing any question marked critical fails the exam, whatever your percentage. Questions come one at a time and you can go back, flag questions for review and change answers until you submit. Only the server grades your answers.",
+                                        )}
+                                    </p>
+                                    <div class="ac-stack ac-stack--sm">
+                                        <h3 class="ac-h3">{t("What is covered")}</h3>
+                                        {renderCoverage(bp)}
+                                    </div>
+                                </div>
+                            ) : (
+                                <p class="ac-text">{t("This exam could not be found.")}</p>
+                            )}
+                        </SurfaceCard>
+                    </aside>
+                </div>
+            </>
+        );
+    };
+}, { props: ["blueprint", "trackTitle", "moduleTitles", "eligibility", "eligibilityLoading", "eligibilityError", "onRetryEligibility", "integrityText", "open", "starting", "startError", "onStart"] });

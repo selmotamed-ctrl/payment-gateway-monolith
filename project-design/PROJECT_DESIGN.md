@@ -8090,6 +8090,7 @@ However, the stale files are still physically present:
 - Rendering money: use `MoneyDisplay`/`MoneyText` or decimal-backed utilities; never format money with floating point.
 - Adding a drawer/modal: use `SlideOverDrawer`/`FormModal` so focus, padding, and footer behavior stay consistent.
 - Changing the theme: edit `plugins/vuetify.ts` and the `--pg-*` tokens together; do not add page-local hard-coded palettes.
+- Learning surfaces: the Guide (`styles/guide.css`) and the Academy (`styles/academy/*.css`, see `03-guide-and-academy.md` §7.6) are built from these primitives and tokens. A feature area may add its own stylesheet under `src/styles/` imported from `main.ts`, but must not inject runtime `<style>` blocks, introduce a second palette, or cap the page width below the `ScreenContainer`; only reading text takes a measure (75 ch).
 - Deploy-time visibility: set `ADMIN_SHOW_CHECKLISTS` and `ADMIN_SHOW_HELP_PANELS` in `deploy.env`; the deploy engine writes `runtime-config.js`. Rebuilding the SPA is not required for the runtime flags to change.
 
 ## 7. Status and deviations
@@ -8247,7 +8248,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 31 | `/rails` | `Rails` | `gateways.edit` | 3 / 3.2 | Rail catalog, collection modes and customer fields. |
 | 32 | `/routes` | `GatewayRoutes` | `gateways.edit` | 3 / 3.2 | Route priority, limits, credential policy and circuit-breaker health. |
 | 33 | `/guide` | `AdminGuide` | none (intentional) | 1 / 1.1 | Interactive admin system guide, glossary, simulators and checklists. |
-| 34 | `/academy` | `AdminAcademy` | none (intentional learning) | 1 / 1.1 | Employee Academy home: active track, Continue, badges. Sub-routes `AdminAcademyTracks`, `AdminAcademyTrack`, `AdminAcademyModule`, `AdminAcademyLesson`, `AdminAcademyLab`, `AdminAcademyExam`, `AdminAcademyCertificate`, `AdminAcademyHelp` (none gated) and `AdminAcademyTeam` (role `SECURITY_ADMIN`); see `03-guide-and-academy.md` §7. |
+| 34 | `/academy` | `AdminAcademy` | none (intentional learning) | 1 / 1.1 | Employee Academy home (full-width hero with the single Continue action and progress rings, tracks, certificates list, Guide reading). Sub-routes `AdminAcademyTracks`, `AdminAcademyTrack`, `AdminAcademyModule`, `AdminAcademyLesson`, `AdminAcademyLab`, `AdminAcademyExam`, `AdminAcademyCertificate`, `AdminAcademyHelp` (none gated) and `AdminAcademyTeam` (role `SECURITY_ADMIN`); see `03-guide-and-academy.md` §7. |
 | 35 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
 | 36 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | 4 / 4.2 | Checkout support config, preview, version history and diff. |
 | 37 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | none | WAL/daemon/target health, backup history, drills and policy. |
@@ -8684,7 +8685,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 <a id="admin-uiguide"></a>
 
-> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-04 · **Verified against:** `working-tree`
+> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `working-tree`
 
 # Admin Guide and Academy
 
@@ -8827,6 +8828,37 @@ Endpoints under `/api/v1/admin/academy/` (admin-back proxy → `core-back` `/int
 
 `GET team` (`SECURITY_ADMIN` role, audited) returns one row per back-office user (`merchantId` null, status not `DISABLED`): name (email local part), role, maker/checker flags, required tracks, lessons/labs done vs required, badges with expiry, last activity and a status with precedence `RECERTIFICATION_REQUIRED` > `EXPIRING_SOON` (within 30 days) > `CERTIFIED` > `EXAM_READY` > `IN_PROGRESS` > `NOT_STARTED`. No question text, answers or per-question results. The page filters by role/status/search and exports the visible rows as CSV with a formula-injection guard.
 
+### 7.6 Visual system v2 (2026-11-05)
+
+The first rebuild (7.1-7.5) was functionally complete but visually foreign: it injected a private UI kit (`.ac-btn`, `.ac-chip`, `.ac-card`, `.ac-nav`, `.ac-skel`) through a runtime `<style innerHTML>` on every page, used glyph/emoji icons, mixed `--pg-*` and `--v-theme-*` tokens, and capped the whole Academy at `max-inline-size: 820px` inside the 1600 px `ScreenContainer` (the system container; the 820 px figure is the Guide's *reading measure*, not a page width). v2 re-expresses the same screens, content and behaviour in the admin design system (`00-ui-system.md`).
+
+**Frame.** `components/academy/AcademyShell.tsx` renders `ScreenContainer > .ac-wrap > [page header, section toolbar, body, footer]`. Each page file passes its own `PageHeader` through the `header` render prop (the compliance gate requires the literal `PageHeader` in every route entry). The toolbar holds `ui/AcademyNav` (a segmented-tabs look built from real links; keeps `nav[aria-label="Academy sections"]`, the section stays lit on sub-pages, `aria-current="page"` only on the exact route) and the "not saved yet" `MetaPill`. The shell still loads the progress record on mount and flushes unsent patches on leave.
+
+**Width and layout.** No page-level cap. Pages are grids: `.ac-grid` (auto-fill cards, `--ac-min`), `.ac-split` (main + sticky `.ac-aside`, one column below 1100 px; `.ac-split--reading` caps the main column at 920 px for the lesson, exam runner and review), `.ac-hero` (My learning). Only reading text has a measure (`.ac-prose`, 75 ch).
+
+**Styles.** `src/styles/academy/{base,learner,lesson,lab,exam,team}.css`, imported once through `styles/academy/index.css` from `main.ts`. Tokens only (`--pg-*`), logical properties, flat hairline surfaces, no gradients, `prefers-reduced-motion` honoured, RTL via logical properties and `.ac-flip` for directional icons. The runtime `<style>` block is gone.
+
+**Components.** Pages compose the shared primitives (`PageHeader`, `SurfaceCard`, `StatusBadge`, `MetaPill`, `MetricStrip`, `SegmentedTabs`, `EmptyState`, `DescriptionList`, `VBtn`) plus Academy atoms in `components/academy/ui/`: `StateIcon` (MDI state marker, always paired with words), `ProgressBar`, `Callout` (inline status message), `IconTile`, `trackMeta` (track icons, badge-state → tone). `BadgeChip` is now a `StatusBadge` inside `span.ac-chip[data-track]`; `ProgressRing` is a thin flat ring. Date helpers live in `components/academy/format.ts`.
+
+**Screens (what changed).**
+
+| Route | v2 |
+| :--- | :--- |
+| `/academy` | Hero card (active track, next-step sentence, one primary **Continue** link, three rings) + split: your tracks (progress, badge, make active) / certificates list with links, Guide reading, quick links. |
+| `/academy/tracks` | Filter tabs (All · For my role · Certified) over a card grid with icon, badge state, facts, progress and Required/Active markers. |
+| `/academy/track/:id` | Summary + timeline-style module cards; sticky **Exam readiness** aside (status, facts, missing prerequisites in words, exam link). |
+| `/academy/module/:id` | Module list with "Up next" marker and previous/next module links. |
+| `/academy/lesson/:id` | 75 ch article, Read now, progressive practice checks, finish card; sticky aside with the lesson checklist and the module outline; previous/next tiles. |
+| `/academy/lab/:id` | Calm TRAINING/SANDBOX strip (warning tokens, no solid fill), task stage + sticky lab-progress aside, panels grid, token-based answer rows, ledger as a unified-table look with a Balanced badge, task-by-task result. |
+| `/academy/exam/:id` | Briefing facts strip + requirements + integrity + coverage; runner with sticky timer/progress/question navigator aside; result with verdict, metrics, filterable review (All · Incorrect · Critical). |
+| `/academy/certificate/:id` | Formal sheet (print CSS unchanged) + status/actions aside. |
+| `/academy/team` | Status summary strip + the unified table surface (`pg-table-card`/toolbar/footer), `StatusBadge` statuses and mini progress bars; CSV export unchanged. |
+| `/academy/help` | Topic rail + `.ac-prose` page; live drills as expandable cards. |
+
+**Defects fixed while verifying the redesign.** (1) Strings with `{placeholders}` were translated without their values (`fmt(t("Continue: lesson {title}"), …)`), but vue-i18n consumes placeholders at translation time, so titles, counts and "x of y" rendered blank; every call now passes the values to `t(key, values)` (`fmt` removed) and content titles are bidi-isolated (`format.ts` `isolate`) inside Arabic sentences. (2) Lesson bodies end with the structural `### Read now` / `### Check yourself` sections (a link list and raw check ids) that the page renders as its own cards; `components/academy/lessonBody.ts` `lessonProse()` stops the displayed prose before them (the content itself is untouched; unit test `tests/unit/academy-lesson-body.test.ts`). (3) The old `.ac-btn` painted a fixed white label on `--pg-accent-primary`, which is near-white in dark mode. (4) `kt-dc` `dc((props) => …)` only declares runtime props when the options argument lists them (`{ props: [...] }`); the exam, certificate and team components now do. (5) Partial-credit lab points are shown with at most two decimals (`pts()`). (6) An independent review of the redesign found and fixed: authored English (`dir="auto"`) sitting at the far edge of RTL option rows (Chrome resolves `text-align: match-parent` to the element's own start, so `html[dir="rtl"]` rules in `base.css` state `right` outright), the lesson checklist reporting "0 of 0 / done" before the checks had loaded (totals now come from `lesson.checkIds`), the exam runner's visual order differing from its DOM order on narrow screens (the aside now follows the question in both; a visual-only clock repeats in the question header), the Team person cell losing its `th scope="row"` role, and the Team 403 state losing its heading.
+
+**Test hooks kept** (see `tests/e2e/admin/academy-*.spec.ts`, `academy-live.ts`): `.ac-wrap`, `.ac-nav`, `.ac-card` (never nested, so the overlap check holds), `.ac-chip[data-track]`, `aria-busy` skeletons, every heading/button/label/region name the specs query. No logic file changed (`useAcademyProgress`, `progressMerge`, `nextStep`, `labScoring`, `useEligibility`, `readingOpened`).
+
 ## 8. Contracts and invariants
 
 1. The design file content is the single source of truth; article prose is never retyped into TSX.
@@ -8840,6 +8872,8 @@ Endpoints under `/api/v1/admin/academy/` (admin-back proxy → `core-back` `/int
 9. Exam keys, `critical` flags and explanations never reach the browser before submit; the browser cannot write `exams` or `badges`.
 10. The Academy never changes `is_maker`, `is_checker`, a role or an authority.
 11. Academy content is never retyped into TSX; labels are corrected only in the design file and logged in `academy_content_fixes.md`.
+12. The Academy composes the shared admin primitives and `src/styles/academy/*.css`; it defines no parallel button/chip/card kit, applies no page-width cap (only `.ac-prose` has a measure), never nests `.ac-card` (the e2e `layoutProblems` helper asserts no overlap) and keeps `PageHeader` literally present in every `pages/academy/*.tsx` entry (UI compliance gate).
+13. Strings with `{placeholders}` are translated with their values (`t("Continue: lesson {title}", { title })`); never format after translating. Authored English content interpolated into a translated sentence is wrapped with `isolate()`.
 
 ## 9. Verification
 
@@ -14704,7 +14738,7 @@ This catalog is derived by counting literal declarations and inspecting the suit
 
 ### Employee Academy suites (2026-11-04)
 
-- `tests/unit/academy-content.test.ts` (extractor determinism, spec counts, references, blueprint pool depth, key-leak guard, corrupted-source failures), `academy-lab-scoring.test.ts` (all 18 published lab vectors + edge cases), `academy-progress-merge.test.ts`, `academy-next-step.test.ts`.
+- `tests/unit/academy-content.test.ts` (extractor determinism, spec counts, references, blueprint pool depth, key-leak guard, corrupted-source failures), `academy-lab-scoring.test.ts` (all 18 published lab vectors + edge cases), `academy-progress-merge.test.ts`, `academy-next-step.test.ts`, `academy-lesson-body.test.ts` (the displayed lesson prose never includes the structural Read now / Check yourself sections or raw check ids).
 - `core-back/test/academy-exam-engine.test.ts`, `academy-progress.test.ts`, `academy-team.test.ts`: DB-free, fake store with injected clock/ids (`bun test test/academy-`).
 - `admin-back/test/academy-progress.test.ts`: proxy validation, 429 and `SECURITY_ADMIN` gate (rate-limit tests use a mini app so they do not feed the shared per-IP admin limiter).
 - `tests/e2e/admin/academy-{learning,lab,exam,team,a11y}.spec.ts` (+ helper `academy-live.ts`): live-stack specs, skipped unless `E2E_LIVE=1` and `PG_PASSWORD`; written and listed, not yet run (no loginable account on the local stack).

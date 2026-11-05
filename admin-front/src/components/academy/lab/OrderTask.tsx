@@ -1,9 +1,9 @@
-import { defineComponent, ref, type PropType } from "vue";
+import { defineComponent, nextTick, ref, type PropType } from "vue";
 import { useLocale } from "vuetify";
-import { VBtn, VIcon } from "vuetify/components";
+import { VBtn } from "vuetify/components";
 import type { OrderTask as OrderTaskType } from "@/content/academy";
 import type { OrderAnswer } from "../labScoring";
-import { labBorder, renderInline, srOnly } from "./PanelView";
+import { choiceTag, plainInline, renderInline } from "./PanelView";
 
 /** Deterministic starting order: authored order, reversed when the authored order is already the answer. */
 export const initialOrder = (task: OrderTaskType): string[] => {
@@ -23,8 +23,19 @@ export const OrderTask = defineComponent({
     setup(props) {
         const { t } = useLocale();
         const announcement = ref("");
+        const root = ref<HTMLElement | null>(null);
         const currentOrder = (): string[] => props.answer?.order ?? initialOrder(props.task);
         const labelOf = (id: string) => props.task.items.find((item) => item.id === id)?.label ?? id;
+
+        /** A moved row is re-inserted by the renderer, which drops focus: put it back on the same item. */
+        const refocus = (id: string, direction: "up" | "down") => {
+            const buttons = Array.from(root.value?.querySelectorAll<HTMLButtonElement>("button[data-order-id]") ?? []).filter(
+                (button) => button.dataset.orderId === id,
+            );
+            const preferred = buttons.find((button) => button.dataset.orderDir === direction && !button.disabled);
+            (preferred ?? buttons.find((button) => !button.disabled))?.focus();
+        };
+
         const move = (index: number, delta: -1 | 1) => {
             const order = [...currentOrder()];
             const target = index + delta;
@@ -34,44 +45,40 @@ export const OrderTask = defineComponent({
             if (moved === undefined || other === undefined) return;
             order[index] = other;
             order[target] = moved;
-            announcement.value = `${labelOf(moved).replace(/\*\*/g, "")}: ${t("position")} ${target + 1} / ${order.length}`;
+            announcement.value = `${plainInline(labelOf(moved))}: ${t("position")} ${target + 1} / ${order.length}`;
             props.onChange({ ...(props.answer ?? {}), order });
+            void nextTick(() => refocus(moved, delta < 0 ? "up" : "down"));
         };
         return () => {
             const order = currentOrder();
             return (
-                <div style={{ display: "grid", gap: "8px" }}>
-                    <p style={{ margin: 0, opacity: 0.8 }}>{t("Use the Up and Down buttons to put the steps in order.")}</p>
-                    <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "8px" }}>
+                <div class="ac-lab-order" ref={root}>
+                    <p class="ac-muted ac-lab-hintline">{t("Use the Up and Down buttons to put the steps in order.")}</p>
+                    <ol class="ac-choices ac-lab-order__list">
                         {order.map((id, index) => {
                             const right = props.task.correctOrder[index] === id;
                             const label = labelOf(id);
+                            const state = props.locked ? (right ? "good" : "bad") : "";
                             return (
-                                <li
-                                    style={{
-                                        display: "flex",
-                                        gap: "10px",
-                                        alignItems: "center",
-                                        border: labBorder,
-                                        borderRadius: "8px",
-                                        padding: "8px 12px",
-                                    }}
-                                >
-                                    <span style={{ fontWeight: 700, minWidth: "1.5em" }}>{index + 1}.</span>
-                                    <span style={{ flex: 1 }}>{renderInline(label)}</span>
+                                <li key={id} class={["ac-choice", "ac-choice--locked", "ac-lab-order__item", state ? `ac-choice--${state}` : ""]}>
+                                    <span class="ac-lab-order__pos ac-ltr" aria-hidden="true">
+                                        {index + 1}
+                                    </span>
+                                    <span class="ac-choice__label" dir="auto">
+                                        {renderInline(label)}
+                                    </span>
                                     {props.locked ? (
-                                        <span style={{ whiteSpace: "nowrap" }}>
-                                            <VIcon icon={right ? "mdi-check-circle" : "mdi-close-circle"} color={right ? "success" : "error"} size={18} aria-hidden="true" />{" "}
-                                            {right ? t("Right place") : t("Wrong place")}
-                                        </span>
+                                        choiceTag(right ? "good" : "bad", right ? t("Right place") : t("Wrong place"))
                                     ) : (
-                                        <span style={{ display: "inline-flex", gap: "4px" }}>
+                                        <span class="ac-lab-order__moves">
                                             <VBtn
                                                 size="small"
                                                 variant="outlined"
                                                 icon="mdi-arrow-up"
                                                 disabled={index === 0}
-                                                aria-label={`${t("Move up")}: ${label.replace(/\*\*/g, "")}`}
+                                                aria-label={`${t("Move up")}: ${plainInline(label)}`}
+                                                data-order-id={id}
+                                                data-order-dir="up"
                                                 onClick={() => move(index, -1)}
                                             />
                                             <VBtn
@@ -79,7 +86,9 @@ export const OrderTask = defineComponent({
                                                 variant="outlined"
                                                 icon="mdi-arrow-down"
                                                 disabled={index === order.length - 1}
-                                                aria-label={`${t("Move down")}: ${label.replace(/\*\*/g, "")}`}
+                                                aria-label={`${t("Move down")}: ${plainInline(label)}`}
+                                                data-order-id={id}
+                                                data-order-dir="down"
                                                 onClick={() => move(index, 1)}
                                             />
                                         </span>
@@ -88,15 +97,17 @@ export const OrderTask = defineComponent({
                             );
                         })}
                     </ol>
-                    <div aria-live="polite" role="status" style={srOnly}>
+                    <div aria-live="polite" role="status" class="ac-sr-only">
                         {announcement.value}
                     </div>
                     {props.locked ? (
-                        <div>
-                            <strong>{t("Correct order")}:</strong>
-                            <ol style={{ margin: "4px 0 0", paddingInlineStart: "1.5em" }}>
+                        <div class="ac-lab-order__solution">
+                            <strong class="ac-h3">{t("Correct order")}:</strong>
+                            <ol class="ac-lab-ol">
                                 {props.task.correctOrder.map((id) => (
-                                    <li>{renderInline(labelOf(id))}</li>
+                                    <li key={id} dir="auto">
+                                        {renderInline(labelOf(id))}
+                                    </li>
                                 ))}
                             </ol>
                         </div>

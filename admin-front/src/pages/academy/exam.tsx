@@ -1,8 +1,8 @@
 import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "vuetify";
-import { AcademyShell } from "@/components/academy/AcademyShell";
+import { AcademyShell, Skeleton } from "@/components/academy/AcademyShell";
 import { useAcademyProgress } from "@/components/academy/useAcademyProgress";
 import { useEligibility } from "@/components/academy/useEligibility";
 import { ExamBriefing } from "@/components/academy/exam/ExamBriefing";
@@ -10,6 +10,7 @@ import { ExamRunner, clearExamDraft } from "@/components/academy/exam/ExamRunner
 import { ExamResult } from "@/components/academy/exam/ExamResult";
 import { loadExamBlueprints, loadModules, loadPages, loadTracks, type ExamBlueprintPublic } from "@/content/academy";
 import type { ExamAnswer, ExamResult as ExamResultPayload, ExamStartResponse } from "@/content/academy/apiTypes";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { loadArticles } from "@/content/guide";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -35,6 +36,7 @@ const errorCode = (error: unknown): string => {
 const ExamPage = dc(() => {
     const { t } = useLocale();
     const route = useRoute();
+    const router = useRouter();
     const examId = computed(() => String(route.params.examId ?? ""));
     const academy = useAcademyProgress();
     const { eligibility, loading: eligibilityLoading, error: eligibilityError, refresh } = useEligibility(examId);
@@ -142,15 +144,13 @@ const ExamPage = dc(() => {
 
     return () => {
         const title = trackTitle.value ? `${trackTitle.value} — ${t("certification exam")}` : t("Certification exam");
+        const breadcrumbs = trackId.value
+            ? [{ label: trackTitle.value, to: router.resolve({ name: "AdminAcademyTrack", params: { trackId: trackId.value } }).fullPath }, { label: t("Certification exam") }]
+            : [{ label: t("Academy"), to: router.resolve({ name: "AdminAcademy" }).fullPath }, { label: t("Certification exam") }];
         return (
-            <AcademyShell
-                title={title}
-                backTo={trackId.value ? { name: "AdminAcademyTrack", params: { trackId: trackId.value }, label: t("Back to track") } : { name: "AdminAcademy", label: t("Back to Academy") }}
-            >
+            <AcademyShell header={() => <PageHeader title={title} breadcrumbs={breadcrumbs} />}>
                 {initialising.value || (starting.value && stage.value === "briefing" && !startError.value && openSession.value && academy.progress.value.integrityAcceptedAt && !session.value) ? (
-                    <div role="status" aria-busy="true" style={{ blockSize: "120px", borderRadius: "12px", background: "var(--pg-bg-surface-subtle)", maxInlineSize: "860px", display: "grid", placeItems: "center" }}>
-                        {t("Loading")}…
-                    </div>
+                    <Skeleton rows={3} split />
                 ) : stage.value === "runner" && session.value ? (
                     <ExamRunner key={session.value.sessionId} session={session.value} submitting={submitting.value} submitError={submitError.value} onSubmit={submit} />
                 ) : stage.value === "result" && result.value ? (

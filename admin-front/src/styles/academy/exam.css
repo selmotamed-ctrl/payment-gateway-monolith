@@ -1,0 +1,657 @@
+/* Academy — exam area styles (briefing, runner, result) and the certificate page.
+ * Tokens only (--pg-*), logical properties, flat hairline surfaces, no gradients.
+ * Shared vocabulary lives in base.css; everything here is prefixed ac-exam- / ac-cert-.
+ * The certificate print rules are injected with the certificate page (CertificateView.tsx), never globally. */
+
+/* ---- Briefing ------------------------------------------------------------ */
+.ac-exam-skel {
+  block-size: 56px;
+}
+
+.ac-exam-accept {
+  align-items: center;
+  font-weight: 600;
+}
+
+.ac-exam-cover .ac-bar {
+  margin-block-start: 6px;
+}
+
+/* ---- Runner: question card ----------------------------------------------- */
+.ac-exam-runner {
+  position: relative;
+  min-inline-size: 0;
+}
+
+.ac-exam-qeyebrow {
+  margin: 0;
+}
+
+.ac-exam-stem {
+  margin: 0;
+  color: var(--pg-ink-primary);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.55;
+  text-align: start;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+
+.ac-exam-stem:focus-visible {
+  border-radius: var(--pg-radius-xs);
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: 4px;
+}
+
+/* Radios, checkboxes and the integrity checkbox sit inside a label row: show the keyboard ring on the row. */
+.ac-exam-runner .ac-choice:has(input:focus-visible),
+.ac-exam-accept:has(input:focus-visible) {
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: 2px;
+}
+
+/* Ordering rows: position, text, Up / Down. */
+.ac-exam-order__row {
+  align-items: center;
+}
+
+.ac-exam-order__pos {
+  flex: none;
+  min-inline-size: 1.6em;
+  color: var(--pg-ink-muted);
+  font-weight: 600;
+}
+
+.ac-exam-order__moves {
+  flex: none;
+  gap: 6px;
+}
+
+.ac-exam-order .ac-exam-move.v-btn {
+  inline-size: 32px;
+  block-size: 32px;
+  min-inline-size: 32px;
+}
+
+/* Number question. */
+.ac-exam-numberfield {
+  max-inline-size: 320px;
+}
+
+.ac-exam-number {
+  inline-size: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+  background: var(--pg-bg-surface);
+  color: var(--pg-ink-primary);
+  font: inherit;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ac-exam-number:hover {
+  border-color: var(--pg-border-strong);
+}
+
+.ac-exam-number:focus-visible {
+  border-color: var(--pg-accent-interactive);
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: 2px;
+}
+
+/* Flag-for-review toggle. */
+.ac-exam-flag {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 8px;
+  min-block-size: 32px;
+  color: var(--pg-ink-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ac-exam-flag input {
+  flex: none;
+  inline-size: 16px;
+  block-size: 16px;
+  margin: 0;
+  accent-color: var(--pg-accent-interactive);
+}
+
+.ac-exam-flag:has(input:checked) {
+  color: var(--pg-status-warning-text);
+}
+
+.ac-exam-flag:has(input:focus-visible) {
+  border-radius: var(--pg-radius-xs);
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: 2px;
+}
+
+/* Previous / Next / Submit. */
+.ac-exam-actions {
+  gap: 10px 12px;
+}
+
+.ac-exam-pager {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+html[dir="rtl"] .ac-exam-pager .v-btn__prepend,
+html[dir="rtl"] .ac-exam-pager .v-btn__append {
+  transform: scaleX(-1);
+}
+
+/* Confirm dialog. */
+.ac-exam-confirm__actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ---- Runner: aside (clock, progress, navigator) -------------------------- */
+.ac-exam-timer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--pg-ink-primary);
+}
+
+.ac-exam-timer__icon {
+  flex: none;
+  color: var(--pg-ink-muted);
+}
+
+.ac-exam-timer__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-inline-size: 0;
+}
+
+.ac-exam-timer__label {
+  color: var(--pg-ink-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ac-exam-clock {
+  color: inherit;
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+}
+
+.ac-exam-timer__note {
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* Tone shifts are visual only (the spoken announcements are separate). */
+.ac-exam-timer--warning,
+.ac-exam-timer--warning .ac-exam-timer__icon,
+.ac-exam-timer--warning .ac-exam-timer__label {
+  color: var(--pg-status-warning-text);
+}
+
+.ac-exam-timer--danger,
+.ac-exam-timer--danger .ac-exam-timer__icon,
+.ac-exam-timer--danger .ac-exam-timer__label {
+  color: var(--pg-status-danger-text);
+}
+
+/* Question navigator: a grid of square buttons. */
+.ac-exam-nav {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 36px);
+  gap: 6px;
+  min-inline-size: 0;
+}
+
+.ac-exam-qbtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 36px;
+  block-size: 36px;
+  padding: 0;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-sm);
+  background: var(--pg-bg-surface);
+  color: var(--pg-ink-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.ac-exam-qbtn:hover {
+  border-color: var(--pg-border-strong);
+  background: var(--pg-bg-surface-hover);
+}
+
+.ac-exam-qbtn:focus-visible {
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: 2px;
+}
+
+.ac-exam-qbtn--done {
+  border-color: var(--pg-status-success-border);
+  background: var(--pg-status-success-bg);
+  color: var(--pg-status-success-text);
+}
+
+.ac-exam-qbtn--done:hover {
+  border-color: var(--pg-status-success-dot);
+  background: var(--pg-status-success-bg);
+}
+
+/* Current question: a strong two-pixel outline without shifting the cell. */
+.ac-exam-qbtn--current,
+.ac-exam-qbtn--current:hover {
+  border-color: var(--pg-ink-primary);
+  box-shadow: inset 0 0 0 1px var(--pg-ink-primary);
+  color: var(--pg-ink-primary);
+  font-weight: 700;
+}
+
+.ac-exam-qbtn .ac-exam-qbtn__flag,
+.ac-exam-qbtn .ac-exam-qbtn__check {
+  position: absolute;
+}
+
+.ac-exam-qbtn .ac-exam-qbtn__flag {
+  inset-block-start: 2px;
+  inset-inline-end: 2px;
+  color: var(--pg-status-warning-text);
+}
+
+.ac-exam-qbtn .ac-exam-qbtn__check {
+  inset-block-end: 2px;
+  inset-inline-end: 2px;
+}
+
+.ac-exam-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--pg-ink-muted);
+  font-size: 12px;
+}
+
+.ac-exam-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ac-exam-swatch {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  inline-size: 16px;
+  block-size: 16px;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-xs);
+  background: var(--pg-bg-surface);
+}
+
+.ac-exam-swatch--done {
+  border-color: var(--pg-status-success-border);
+  background: var(--pg-status-success-bg);
+  color: var(--pg-status-success-text);
+}
+
+.ac-exam-swatch--flag {
+  color: var(--pg-status-warning-text);
+}
+
+.ac-exam-swatch--current {
+  border-color: var(--pg-ink-primary);
+  box-shadow: inset 0 0 0 1px var(--pg-ink-primary);
+}
+
+/* Narrow screens: the aside comes first (ac-split--aside-first), so keep it compact. */
+@media (max-width: 1100px) {
+  .ac-exam-nav {
+    grid-template-columns: repeat(auto-fill, 32px);
+    gap: 4px;
+  }
+
+  .ac-exam-qbtn {
+    inline-size: 32px;
+    block-size: 32px;
+    font-size: 12px;
+  }
+
+  .ac-exam-clock {
+    font-size: 24px;
+  }
+}
+
+@media (max-width: 600px) {
+  .ac-exam-stem {
+    font-size: 16px;
+  }
+}
+
+/* ---- Result -------------------------------------------------------------- */
+.ac-exam-result {
+  min-inline-size: 0;
+}
+
+.ac-exam-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-block-end: 16px;
+  padding: 16px 20px;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+}
+
+.ac-exam-verdict--pass {
+  border-color: var(--pg-status-success-border);
+  background: var(--pg-status-success-bg);
+  color: var(--pg-status-success-text);
+}
+
+.ac-exam-verdict--fail {
+  border-color: var(--pg-status-danger-border);
+  background: var(--pg-status-danger-bg);
+  color: var(--pg-status-danger-text);
+}
+
+.ac-exam-verdict__icon {
+  flex: none;
+}
+
+.ac-exam-verdict__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-inline-size: 0;
+}
+
+.ac-exam-verdict__title {
+  margin: 0;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ac-exam-verdict__sub {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+/* Review list: one card per question, siblings (never nested). */
+.ac-exam-rev__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ac-exam-rev__list > li {
+  min-inline-size: 0;
+}
+
+.ac-exam-rev__head {
+  gap: 6px 12px;
+}
+
+.ac-exam-rev__verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.ac-exam-rev__verdict--good {
+  color: var(--pg-status-success-text);
+}
+
+.ac-exam-rev__verdict--bad {
+  color: var(--pg-status-danger-text);
+}
+
+.ac-exam-rev__verdict--muted {
+  color: var(--pg-ink-muted);
+}
+
+.ac-exam-rev__stem {
+  margin: 0;
+  color: var(--pg-ink-primary);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ac-exam-rev__n {
+  margin-inline-end: 2px;
+  color: var(--pg-ink-muted);
+}
+
+.ac-exam-rev__mark {
+  flex: none;
+  margin-block-start: 1px;
+}
+
+.ac-exam-rev__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin-block-start: 2px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ac-exam-rev__orders {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 16px;
+}
+
+.ac-exam-rev__ol {
+  margin: 0;
+  padding-inline-start: 22px;
+  color: var(--pg-ink-primary);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.ac-exam-rev__numbers {
+  font-size: 13.5px;
+}
+
+.ac-exam-rev__why {
+  margin: 0;
+  padding-block-start: 10px;
+  border-block-start: 1px solid var(--pg-border-subtle);
+  color: var(--pg-ink-secondary);
+  font-size: 13.5px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.ac-exam-rev__why strong {
+  color: var(--pg-ink-primary);
+}
+
+/* Aside: score by module. */
+.ac-exam-mods .ac-bar {
+  margin-block-start: 6px;
+}
+
+.ac-exam-mods__value {
+  color: var(--pg-ink-primary);
+  font-weight: 600;
+}
+
+.ac-exam-review-links {
+  padding-block-start: 14px;
+  border-block-start: 1px solid var(--pg-border-subtle);
+}
+
+.ac-exam-linklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  font-size: 13.5px;
+  list-style: none;
+}
+
+/* ---- Certificate --------------------------------------------------------- */
+.ac-cert__main {
+  min-inline-size: 0;
+}
+
+/* The sheet: a hairline double border (outer + inner frame), flat, centred in the main column. */
+.ac-cert-sheet {
+  max-inline-size: 820px;
+  margin-inline: auto;
+  padding: 10px;
+  border: 1px solid var(--pg-border-strong);
+  border-radius: var(--pg-radius-md);
+  background: var(--pg-bg-surface);
+  box-shadow: var(--pg-shadow-xs);
+  color: var(--pg-ink-primary);
+}
+
+.ac-cert-frame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  min-inline-size: 0;
+  padding: 48px clamp(20px, 6vw, 56px);
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-sm);
+  text-align: center;
+}
+
+.ac-cert-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.ac-cert-mark {
+  inline-size: 44px;
+  block-size: 44px;
+  margin-block-end: 6px;
+}
+
+.ac-cert-eyebrow {
+  margin: 0;
+  color: var(--pg-ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+html[dir="rtl"] .ac-cert-eyebrow {
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ac-cert-title {
+  margin: 0;
+  color: var(--pg-ink-primary);
+  font-size: clamp(22px, 5vw, 28px);
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.ac-cert-track {
+  margin: 0;
+  color: var(--pg-ink-primary);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.ac-cert-body {
+  max-inline-size: 60ch;
+  color: var(--pg-ink-secondary);
+  font-size: 15px;
+  line-height: 1.8;
+  text-align: center;
+}
+
+.ac-cert-body strong {
+  color: var(--pg-ink-primary);
+  font-weight: 700;
+}
+
+.ac-cert-foot {
+  inline-size: min(100%, 420px);
+  margin-block-start: 8px;
+  padding-block-start: 14px;
+  border-block-start: 1px solid var(--pg-border-subtle);
+}
+
+.ac-cert-id {
+  color: var(--pg-ink-muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.ac-cert-back {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  min-block-size: 32px;
+  font-size: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ac-exam-qbtn {
+    transition: none;
+  }
+}
+
+/* Narrow screens: the aside (real timer) sits below the question, so the clock is repeated, visually only,
+ * in the question header. The role=timer element in the aside stays the single announced timer. */
+.ac-exam-clock-compact {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--pg-ink-secondary);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.ac-exam-clock-compact--warning { color: var(--pg-status-warning-text); }
+.ac-exam-clock-compact--danger { color: var(--pg-status-danger-text); }
+
+@media (max-width: 1100px) {
+  .ac-exam-clock-compact { display: inline-flex; }
+}

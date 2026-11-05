@@ -2,8 +2,13 @@ import { computed, defineComponent, reactive, ref, watch, type PropType } from "
 import { useLocale } from "vuetify";
 import { VBtn, VIcon } from "vuetify/components";
 import type { Lab, LabTask } from "@/content/academy";
-import { scoreLab, scoreTask, type LabScore, type TaskAnswer, type TaskScore } from "../labScoring";
-import { PanelView, labBorder, labCard, renderInline, srOnly } from "./PanelView";
+import { MetaPill } from "@/components/ui/MetaPill";
+import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { Callout, type CalloutTone } from "../ui/Callout";
+import { ProgressBar } from "../ui/ProgressBar";
+import { StateIcon, type StepState } from "../ui/StateIcon";
+import { parseDecimal, scoreLab, scoreTask, type LabScore, type TaskAnswer, type TaskScore } from "../labScoring";
+import { PanelView, plainInline, renderInline, pts } from "./PanelView";
 import { ChoiceTask } from "./ChoiceTask";
 import { MultiTask } from "./MultiTask";
 import { LedgerTask } from "./LedgerTask";
@@ -11,7 +16,6 @@ import { OrderTask, initialOrder } from "./OrderTask";
 import { ChecklistTask } from "./ChecklistTask";
 import { NumericTask } from "./NumericTask";
 import { LabResult } from "./LabResult";
-import { parseDecimal } from "../labScoring";
 
 export interface LabBest {
     bestScore: number;
@@ -116,171 +120,268 @@ export const LabRunner = defineComponent({
         const feedbackFor = (current: LabTask): string | null =>
             current.kind === "ledger" || current.kind === "order" || current.kind === "numeric" ? current.feedback : null;
 
+        /* ------------------------------------------------------------------ pieces */
+
+        /** Calm training strip: a reminder, not an alarm (warning tokens, hairline border). */
         const ribbon = () => (
-            <div
-                role="note"
-                style={{
-                    position: "sticky",
-                    top: 0,
-                    zIndex: 2,
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: "8px",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "8px 16px",
-                    borderRadius: "8px",
-                    fontWeight: 700,
-                    letterSpacing: "0.04em",
-                    background: "rgb(var(--v-theme-warning))",
-                    color: "rgb(var(--v-theme-on-warning))",
-                }}
-            >
-                <span>
-                    <VIcon icon="mdi-school" size={18} aria-hidden="true" /> {t("TRAINING — nothing here is real")}
-                </span>
-                <span
-                    style={{
-                        border: "2px solid currentColor",
-                        borderRadius: "4px",
-                        padding: "0 8px",
-                        fontSize: "0.8rem",
-                    }}
-                >
+            <div role="note" class="ac-lab-ribbon">
+                <VIcon icon="mdi-school-outline" size={18} aria-hidden="true" />
+                <span class="ac-lab-ribbon__text">{t("TRAINING — nothing here is real")}</span>
+                <MetaPill class="ac-lab-ribbon__tag" color="warning" variant="outlined" size="x-small">
                     {t("SANDBOX")}
-                </span>
+                </MetaPill>
             </div>
         );
 
-        return () => {
-            let body;
-            if (stage.value === "brief") {
-                body = (
-                    <section style={{ ...labCard, display: "grid", gap: "12px" }}>
-                        <h2 ref={heading} tabindex={-1} style={{ margin: 0, fontSize: "1.2rem" }}>
-                            {t("Briefing")}
-                        </h2>
-                        <p style={{ margin: 0 }}>{renderInline(props.lab.briefing)}</p>
-                        <p style={{ margin: 0, opacity: 0.85 }}>
-                            {`${props.lab.tasks.length} ${t("tasks")} · ${props.lab.minutes} ${t("min")} · ${t("Pass mark")}: ${props.lab.passPercent}% ${t("with no critical error")}`}
-                        </p>
-                        <p style={{ margin: 0 }}>
-                            {props.best && props.best.attempts > 0
+        const taskState = (i: number, current: LabTask): StepState => {
+            const outcome = checked[current.id];
+            if (outcome) return outcome.correct ? "done" : outcome.score > 0 ? "partial" : "failed";
+            return stage.value === "task" && i === index.value ? "current" : "todo";
+        };
+
+        const stateWords = (state: StepState): string => {
+            switch (state) {
+                case "done":
+                    return t("Correct");
+                case "partial":
+                    return t("Partly correct");
+                case "failed":
+                    return t("Not correct");
+                case "current":
+                    return t("Current task");
+                default:
+                    return t("To do");
+            }
+        };
+
+        const aside = () => {
+            const done = Object.keys(checked).length;
+            const earned = Object.values(checked).reduce((sum, outcome) => sum + outcome.score, 0);
+            const possible = props.lab.tasks.reduce((sum, entry) => sum + entry.points, 0);
+            return (
+                <aside class="ac-aside" aria-label={t("Lab progress")}>
+                    <SurfaceCard class="ac-card" title={t("Lab progress")} noPadding>
+                        <div class="ac-lab-aside__block">
+                            <div class="ac-between">
+                                <span class="ac-muted">{t("Tasks checked")}</span>
+                                <span class="ac-lab-aside__value ac-num">{`${done} / ${total.value}`}</span>
+                            </div>
+                            <ProgressBar value={done} max={total.value} label={`${t("Tasks checked")}: ${done} / ${total.value}`} />
+                        </div>
+                        <ol class="ac-steps ac-steps--flush ac-lab-aside__steps" aria-label={t("Tasks")}>
+                            {props.lab.tasks.map((entry, i) => {
+                                const state = taskState(i, entry);
+                                const outcome = checked[entry.id];
+                                return (
+                                    <li key={entry.id} class={["ac-step", state === "current" ? "ac-step--current" : ""]} aria-current={state === "current" ? "step" : undefined}>
+                                        <StateIcon state={state} lab size={20} />
+                                        <div class="ac-step__main">
+                                            <span class="ac-step__title" dir="auto">
+                                                {plainInline(entry.title)}
+                                            </span>
+                                            <span class="ac-step__sub">{stateWords(state)}</span>
+                                        </div>
+                                        <span class="ac-step__meta">
+                                            {outcome ? `${pts(outcome.score)} / ${pts(outcome.maxScore)}` : pts(entry.points)} {t("points")}
+                                        </span>
+                                    </li>
+                                );
+                            })}
+                        </ol>
+                        <div class="ac-lab-aside__block">
+                            {stage.value !== "brief" ? (
+                                <div class="ac-between">
+                                    <span class="ac-muted">{t("Points so far")}</span>
+                                    <span class="ac-lab-aside__value ac-num">{`${pts(earned)} / ${pts(possible)}`}</span>
+                                </div>
+                            ) : null}
+                            <p class="ac-muted ac-lab-aside__mark">
+                                {`${t("Pass mark")}: ${props.lab.passPercent}% ${t("with no critical error")}`}
+                            </p>
+                        </div>
+                    </SurfaceCard>
+                </aside>
+            );
+        };
+
+        const briefStage = () => {
+            const tried = Boolean(props.best && props.best.attempts > 0);
+            const passed = Boolean(props.best?.passedAt);
+            return (
+                <SurfaceCard class="ac-card" bodyGap="16px">
+                    <h2 ref={heading} tabindex={-1} class="ac-h2 ac-lab-heading">
+                        {t("Briefing")}
+                    </h2>
+                    <p class="ac-lead ac-lab-prose" dir="auto">
+                        {renderInline(props.lab.briefing)}
+                    </p>
+                    <dl class="ac-lab-facts">
+                        <div class="ac-lab-fact">
+                            <dt>{t("Tasks")}</dt>
+                            <dd class="ac-num">{props.lab.tasks.length}</dd>
+                        </div>
+                        <div class="ac-lab-fact">
+                            <dt>{t("Duration")}</dt>
+                            <dd class="ac-num">{`${props.lab.minutes} ${t("min")}`}</dd>
+                        </div>
+                        <div class="ac-lab-fact">
+                            <dt>{t("Pass mark")}</dt>
+                            <dd class="ac-num">{`${props.lab.passPercent}%`}</dd>
+                            <dd class="ac-lab-fact__sub">{t("with no critical error")}</dd>
+                        </div>
+                    </dl>
+                    <div class="ac-row ac-lab-best">
+                        <VIcon icon={passed ? "mdi-trophy-outline" : tried ? "mdi-history" : "mdi-flask-empty-outline"} size={18} aria-hidden="true" />
+                        <p class="ac-text">
+                            {props.best && tried
                                 ? `${t("Your best score")}: ${props.best.bestScore}% (${props.best.attempts} ${t("attempts")})${props.best.passedAt ? " — " + t("Passed") : ""}`
                                 : t("You have not tried this lab yet.")}
                         </p>
-                        <div>
-                            <VBtn color="primary" size="large" onClick={() => { stage.value = "task"; focusHeading(); }}>
-                                {props.best && props.best.attempts > 0 ? t("Start again") : t("Start lab")}
-                            </VBtn>
-                        </div>
-                    </section>
-                );
-            } else if (stage.value === "task") {
-                const current = task.value;
-                const outcome = checked[current.id];
-                const locked = Boolean(outcome);
-                const feedback = feedbackFor(current);
-                body = (
-                    <div style={{ display: "grid", gap: "14px" }}>
-                        <div style={{ opacity: 0.8 }} aria-live="off">
+                    </div>
+                    <div>
+                        <VBtn
+                            color="primary"
+                            size="large"
+                            onClick={() => {
+                                stage.value = "task";
+                                focusHeading();
+                            }}
+                        >
+                            {tried ? t("Start again") : t("Start lab")}
+                        </VBtn>
+                    </div>
+                </SurfaceCard>
+            );
+        };
+
+        const feedbackBlock = (current: LabTask, outcome: TaskScore) => {
+            const feedback = feedbackFor(current);
+            const tone: CalloutTone = outcome.correct ? "success" : outcome.score > 0 ? "warning" : "danger";
+            const label = outcome.correct ? t("Correct") : outcome.score > 0 ? t("Partly correct") : t("Not correct");
+            return (
+                <>
+                    <Callout
+                        tone={tone}
+                        role="none"
+                        icon={outcome.correct ? "mdi-check-circle-outline" : outcome.score > 0 ? "mdi-circle-half-full" : "mdi-close-circle-outline"}
+                        title={`${label} — ${pts(outcome.score)} / ${pts(outcome.maxScore)} ${t("points")}`}
+                    >
+                        {outcome.hintPenalty ? <p class="ac-lab-line">{t("Includes the 1 point hint cost.")}</p> : null}
+                        {feedback ? (
+                            <p class="ac-lab-line" dir="auto">
+                                {feedback}
+                            </p>
+                        ) : null}
+                    </Callout>
+                    {outcome.criticalError ? (
+                        <Callout tone="danger" role="alert" icon="mdi-alert-octagon-outline" title={t("Critical error")}>
+                            <p class="ac-lab-line">
+                                {t("This choice would be seriously harmful in real life. A lab with a critical error cannot be passed, whatever the score.")}
+                            </p>
+                        </Callout>
+                    ) : null}
+                </>
+            );
+        };
+
+        const taskStage = () => {
+            const current = task.value;
+            const outcome = checked[current.id];
+            const locked = Boolean(outcome);
+            const lastTask = index.value + 1 >= total.value;
+            return (
+                <>
+                    <SurfaceCard class="ac-card" bodyGap="8px">
+                        <p class="ac-eyebrow ac-lab-eyebrow" aria-live="off">
                             {`${t("Task")} ${index.value + 1} / ${total.value} · ${current.points} ${t("points")}`}
-                        </div>
-                        <h2 ref={heading} tabindex={-1} style={{ margin: 0, fontSize: "1.2rem" }}>
+                        </p>
+                        <h2 ref={heading} tabindex={-1} class="ac-title ac-lab-heading" dir="auto">
                             {current.title}
                         </h2>
-                        {current.panels.length ? (
-                            <div style={{ display: "grid", gap: "10px", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-                                {current.panels.map((panel) => (
-                                    <PanelView panel={panel} />
-                                ))}
+                        <p class="ac-lead ac-lab-prose" dir="auto">
+                            {renderInline(current.prompt)}
+                        </p>
+                    </SurfaceCard>
+
+                    {current.panels.length ? (
+                        <div class="ac-grid ac-lab-panels">
+                            {current.panels.map((panel, i) => (
+                                <PanelView key={`${current.id}-${i}`} panel={panel} />
+                            ))}
+                        </div>
+                    ) : null}
+
+                    <SurfaceCard class="ac-card" key={current.id}>
+                        <div class="ac-lab-answer">{renderTask(current, locked)}</div>
+                        {!locked && current.hint && hintShown[current.id] ? (
+                            <div class="ac-callout ac-lab-hint" role="note">
+                                <VIcon class="ac-callout__icon" icon="mdi-lightbulb-on-outline" size={18} aria-hidden="true" />
+                                <div class="ac-callout__body" dir="auto">
+                                    <strong>{t("Hint")}:</strong> {renderInline(current.hint)}{" "}
+                                    <span class="ac-muted">({t("This hint costs 1 point.")})</span>
+                                </div>
                             </div>
                         ) : null}
-                        <p style={{ margin: 0, fontSize: "1.05rem" }}>{renderInline(current.prompt)}</p>
-                        {renderTask(current, locked)}
-                        {!locked && current.hint ? (
-                            hintShown[current.id] ? (
-                                <div style={{ ...labCard, borderStyle: "dashed" }} role="note">
-                                    <strong>{t("Hint")}:</strong> {renderInline(current.hint)}{" "}
-                                    <span style={{ opacity: 0.8 }}>({t("This hint costs 1 point.")})</span>
-                                </div>
-                            ) : (
-                                <div>
-                                    <VBtn variant="text" prependIcon="mdi-lightbulb-outline" onClick={() => { hintShown[current.id] = true; }}>
+                        {!locked ? (
+                            <div class="ac-lab-actions">
+                                {current.hint && !hintShown[current.id] ? (
+                                    <VBtn
+                                        variant="text"
+                                        prependIcon="mdi-lightbulb-outline"
+                                        onClick={() => {
+                                            hintShown[current.id] = true;
+                                        }}
+                                    >
                                         {t("Show hint (costs 1 point)")}
                                     </VBtn>
-                                </div>
-                            )
-                        ) : null}
-                        {!locked ? (
-                            <div>
-                                <VBtn color="primary" disabled={!canCheck.value} onClick={check}>
+                                ) : null}
+                                <VBtn class="ac-lab-actions__primary" color="primary" disabled={!canCheck.value} onClick={check}>
                                     {t("Check")}
                                 </VBtn>
                             </div>
                         ) : null}
-                        <div aria-live="polite" role="status">
-                            {outcome ? (
-                                <div style={{ display: "grid", gap: "10px" }}>
-                                    <div
-                                        style={{
-                                            ...labCard,
-                                            borderInlineStart: `6px solid rgb(var(--v-theme-${outcome.correct ? "success" : outcome.score > 0 ? "warning" : "error"}))`,
-                                        }}
-                                    >
-                                        <strong>
-                                            <VIcon
-                                                icon={outcome.correct ? "mdi-check-circle" : "mdi-close-circle"}
-                                                color={outcome.correct ? "success" : "error"}
-                                                size={20}
-                                                aria-hidden="true"
-                                            />{" "}
-                                            {outcome.correct ? t("Correct") : outcome.score > 0 ? t("Partly correct") : t("Not correct")}
-                                            {` — ${outcome.score} / ${outcome.maxScore} ${t("points")}`}
-                                        </strong>
-                                        {outcome.hintPenalty ? <div style={{ opacity: 0.85 }}>{t("Includes the 1 point hint cost.")}</div> : null}
-                                        {feedback ? <p style={{ margin: "8px 0 0" }}>{feedback}</p> : null}
-                                    </div>
-                                    {outcome.criticalError ? (
-                                        <div
-                                            role="alert"
-                                            style={{
-                                                border: "2px solid rgb(var(--v-theme-error))",
-                                                borderRadius: "10px",
-                                                padding: "12px 16px",
-                                            }}
-                                        >
-                                            <strong>
-                                                <VIcon icon="mdi-alert-octagon" color="error" size={20} aria-hidden="true" /> {t("Critical error")}
-                                            </strong>
-                                            <p style={{ margin: "6px 0 0" }}>
-                                                {t("This choice would be seriously harmful in real life. A lab with a critical error cannot be passed, whatever the score.")}
-                                            </p>
-                                        </div>
-                                    ) : null}
-                                    <div>
-                                        <VBtn color="primary" onClick={next}>
-                                            {index.value + 1 < total.value ? t("Next") : t("See results")}
-                                        </VBtn>
-                                    </div>
-                                </div>
-                            ) : null}
+                        <div aria-live="polite" role="status" class="ac-lab-feedback">
+                            {outcome ? feedbackBlock(current, outcome) : null}
                         </div>
-                    </div>
-                );
+                        {outcome ? (
+                            <div class="ac-lab-actions">
+                                <VBtn class="ac-lab-actions__primary" color="primary" onClick={next}>
+                                    {lastTask ? t("See results") : t("Next")}
+                                </VBtn>
+                            </div>
+                        ) : null}
+                    </SurfaceCard>
+                </>
+            );
+        };
+
+        return () => {
+            let body;
+            if (stage.value === "brief") {
+                body = briefStage();
+            } else if (stage.value === "task") {
+                body = taskStage();
             } else {
                 body = result.value ? (
-                    <LabResult lab={props.lab} result={result.value} answers={{ ...submitted }} onRetry={reset} headingRef={(el: HTMLElement | null) => (heading.value = el)} />
+                    <LabResult
+                        lab={props.lab}
+                        result={result.value}
+                        answers={{ ...submitted }}
+                        onRetry={reset}
+                        headingRef={(el: HTMLElement | null) => (heading.value = el)}
+                    />
                 ) : null;
             }
             return (
-                <div style={{ display: "grid", gap: "14px" }}>
+                <div class="ac-lab">
                     {ribbon()}
-                    <div style={{ borderBottom: labBorder }} aria-hidden="true" />
-                    <span style={srOnly} role="status" aria-live="polite">
+                    <span class="ac-sr-only" role="status" aria-live="polite">
                         {stage.value === "task" ? `${t("Task")} ${index.value + 1} / ${total.value}` : ""}
                     </span>
-                    {body}
+                    <div class="ac-split">
+                        <div class="ac-stack ac-lab-main">{body}</div>
+                        {aside()}
+                    </div>
                 </div>
             );
         };

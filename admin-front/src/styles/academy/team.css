@@ -1,0 +1,358 @@
+/* Academy — team + help area styles. Tokens only (--pg-*), logical properties, no gradients.
+ * Shared vocabulary lives in base.css; area rules use the .ac-team- / .ac-help prefixes. */
+
+/* ==========================================================================
+ * Team progress
+ * ========================================================================== */
+.ac-team {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+/* Status summary. MetricStrip paints its 1px grid gaps with the border colour, so a last row with fewer
+ * cells shows a grey filler block. Give every cell its own end/bottom hairline instead (tucked under the
+ * strip's outer border) and let the empty space be the surface colour. */
+.ac-team-strip > section {
+  gap: 0 !important;
+  background-color: var(--pg-bg-surface) !important;
+}
+
+.ac-team-strip > section > div {
+  margin-inline-end: -1px;
+  margin-block-end: -1px;
+  border-inline-end: 1px solid var(--pg-border-subtle);
+  border-block-end: 1px solid var(--pg-border-subtle);
+}
+
+/* Loading silhouette: status strip + table card (same footprint as the loaded page). */
+.ac-team-skel-strip {
+  block-size: 84px;
+}
+.ac-team-skel-table {
+  block-size: 360px;
+}
+
+/* ---- Toolbar (the unified table toolbar supplies padding, border, background) ---- */
+.ac-team-filters {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+}
+
+.ac-team-filters > .ac-team-select {
+  flex: 0 1 176px;
+  inline-size: 176px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.ac-team-filters > .ac-team-select--status {
+  flex-basis: 224px;
+  inline-size: 224px;
+}
+
+/* Same 36px control height as the search field and buttons in every other table toolbar. */
+.ac-team-select .v-field {
+  block-size: 36px;
+  min-block-size: 36px;
+}
+
+.ac-team-select .v-field__input {
+  min-block-size: 34px;
+  font-size: 13px;
+}
+
+.ac-team-actions {
+  flex: 0 0 auto;
+  gap: 12px;
+}
+
+/* ---- Table cells (global table rules own height, padding and borders) ---- */
+.ac-team-scroll {
+  /* Positioned so visually-hidden (absolute) text inside far-away cells is clipped here instead of widening the page. */
+  position: relative;
+  max-inline-size: 100%;
+  overflow-x: auto;
+}
+
+.ac-team-table th,
+.ac-team-table td {
+  text-align: start;
+}
+
+/* The person cell is the row header (screen readers announce who a row is about). The global table rules
+ * style `td`, so mirror them for this one `th`. */
+.ac-team-table tbody > tr > th.ac-team-rowhead {
+  block-size: 40px;
+  padding: 6px 14px;
+  padding-inline-start: 20px;
+  border-block-end: 1px solid var(--pg-border-subtle);
+  color: var(--pg-ink-primary);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: start;
+  vertical-align: middle;
+  white-space: nowrap;
+  transition: background-color 0.1s ease;
+}
+.ac-team-table tbody > tr:last-child > th.ac-team-rowhead { border-block-end: 0; }
+.ac-team-table tbody > tr:hover > th.ac-team-rowhead { background-color: var(--pg-bg-surface-hover); }
+
+.ac-team-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.ac-team-person__name {
+  min-inline-size: 0;
+  color: var(--pg-ink-primary);
+  font-weight: 600;
+}
+
+.ac-team-person__email {
+  min-inline-size: 0;
+  color: var(--pg-ink-muted);
+  font-size: 12.5px;
+}
+
+.ac-team-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ac-team-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ac-team-progress__num {
+  min-inline-size: 4.5ch;
+}
+
+.ac-team-bar {
+  display: inline-block;
+  flex: none;
+  inline-size: 64px;
+}
+
+.ac-team-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ac-team-badge {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---- Narrow screens: controls wrap; the table scrolls inside its card, never the page ---- */
+@media (max-width: 600px) {
+  .ac-team-filters > .pg-table-search,
+  .ac-team-filters > .ac-team-select,
+  .ac-team-filters > .ac-team-select--status {
+    flex: 1 1 100%;
+    inline-size: 100%;
+  }
+
+  .ac-team-actions {
+    inline-size: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* ==========================================================================
+ * Help: left rail + selected page, then the optional live drills
+ * ========================================================================== */
+.ac-help {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  min-inline-size: 0;
+}
+
+.ac-help__main {
+  min-inline-size: 0;
+}
+
+.ac-help__rail {
+  position: sticky;
+  inset-block-start: calc(var(--v-layout-top, 56px) + 16px);
+  min-inline-size: 0;
+}
+
+.ac-help__eyebrow {
+  margin-block: 0 8px;
+  padding-inline: 12px;
+}
+
+.ac-help__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ac-help__link {
+  display: flex;
+  align-items: center;
+  inline-size: 100%;
+  min-block-size: 34px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--pg-radius-sm);
+  background: transparent;
+  color: var(--pg-ink-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: start;
+  cursor: pointer;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+
+.ac-help__link:hover {
+  background: var(--pg-bg-surface-hover);
+  color: var(--pg-ink-primary);
+}
+
+.ac-help__link--on,
+.ac-help__link--on:hover {
+  border-color: var(--pg-border-subtle);
+  background: var(--pg-bg-surface);
+  box-shadow: var(--pg-shadow-xs);
+  color: var(--pg-ink-primary);
+  font-weight: 600;
+}
+
+.ac-help__link:focus-visible {
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: 2px;
+}
+
+/* ---- Optional live drills ---- */
+.ac-help-drills {
+  align-items: start;
+}
+
+.ac-help-drill {
+  overflow: hidden;
+}
+
+.ac-help-drill__summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-block-size: 48px;
+  padding: 10px 16px;
+  color: var(--pg-ink-primary);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  list-style: none;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.ac-help-drill__summary::-webkit-details-marker {
+  display: none;
+}
+
+.ac-help-drill__summary::marker {
+  content: "";
+}
+
+.ac-help-drill__summary:hover {
+  background: var(--pg-bg-surface-hover);
+}
+
+.ac-help-drill__summary:focus-visible {
+  outline: 2px solid var(--pg-border-focus);
+  outline-offset: -2px;
+}
+
+.ac-help-drill__title {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.ac-help-drill__chev {
+  flex: none;
+  color: var(--pg-ink-muted);
+  transition: transform 0.15s ease;
+}
+
+.ac-help-drill[open] > .ac-help-drill__summary {
+  border-block-end: 1px solid var(--pg-border-subtle);
+}
+
+.ac-help-drill[open] .ac-help-drill__chev {
+  transform: rotate(180deg);
+}
+
+.ac-help-drill__body {
+  padding: 4px 16px 14px;
+}
+
+/* ---- Help on narrow screens: the rail becomes a horizontal strip of topic buttons ---- */
+@media (max-width: 900px) {
+  .ac-help {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .ac-help__rail {
+    position: static;
+    overflow-x: auto;
+    padding-block-end: 2px;
+  }
+
+  .ac-help__eyebrow {
+    display: none;
+  }
+
+  .ac-help__list {
+    flex-direction: row;
+    gap: 6px;
+  }
+
+  .ac-help__link {
+    inline-size: auto;
+    flex: none;
+    border-color: var(--pg-border-subtle);
+    white-space: nowrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ac-help__link,
+  .ac-help-drill__summary,
+  .ac-help-drill__chev {
+    transition: none;
+  }
+}
+
+/* 403: a heading (not an EmptyState title) so the page keeps its h2 for assistive tech. */
+.ac-team-forbidden {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 24px;
+  text-align: center;
+}
+.ac-team-forbidden .ac-text { max-inline-size: 52ch; }
