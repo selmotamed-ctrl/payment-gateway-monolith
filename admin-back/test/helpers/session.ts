@@ -68,11 +68,61 @@ export const mlroToken = (): string =>
     authorities: ["aml:read", "aml:write"],
   });
 
+/**
+ * An operations user with broad back office authorities. It deliberately carries NO
+ * `aml:*` and NO `security:*` authority, so the confidential and the backup write routes
+ * stay closed for it.
+ */
+export const OPERATOR_AUTHORITIES = [
+  "merchant:read",
+  "merchant:write",
+  "gateway:read",
+  "gateway:write",
+  "gateway:test",
+  "credential:read",
+  "credential:write",
+  "user:read",
+  "user:write",
+  "kyb:read",
+  "kyb:write",
+  "approval:read",
+  "approval:check",
+  "approval:write",
+  "case:read",
+  "case:write",
+  "operator:read",
+  "operator:write",
+  "attempt:read",
+  "attempt:inquire",
+  "dispute:read",
+  "dispute:write",
+  "finance:read",
+  "finance:write",
+  "cashout:read",
+  "cashout:review",
+  "commission:read",
+  "commission:write",
+  "velocity:read",
+  "velocity:write",
+  "reconciliation:read",
+  "reconciliation:write",
+  "settings:read",
+  "settings:write",
+];
+
+/** Every non confidential back office authority plus the security ones (a full staff session). */
+export const fullStaffToken = (): string =>
+  signSession({
+    sub: "u-full-staff",
+    role: "SECURITY_ADMIN",
+    authorities: [...OPERATOR_AUTHORITIES, "security:read", "security:write", "aml:read", "aml:write", "compliance:read", "compliance:write"],
+  });
+
 export const operatorToken = (): string =>
   signSession({
     sub: "u-operator",
     role: "OPERATOR",
-    authorities: ["merchant:read", "gateway:read"],
+    authorities: OPERATOR_AUTHORITIES,
   });
 
 /** A session that only carries the aml authority, without a confidential role. */

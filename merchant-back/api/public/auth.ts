@@ -1,6 +1,7 @@
 import express, { type Request, type Response } from "express";
 import rateLimiter from "express-rate-limit";
 import { z } from "zod";
+import { digestKeyPart, lazyLimiter, rateLimitKey } from "../../lib/clientIp";
 import { env } from "../../lib/env";
 import { ApiError } from "../../lib/error";
 import { zEmail, zMfaCode, zPassword, zPhone } from "../../lib/zReady";
@@ -16,20 +17,49 @@ import { coreForward } from "../forward";
 
 const router = express.Router();
 
-const authLimiter = rateLimiter({
-  windowMs: 15 * 60 * 1000,
-  max: () => env.AUTH_RATE_LIMIT_MAX,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({
-      code: "RATE_LIMITED",
-      message: "Too many authentication attempts, please retry later",
-    });
-  },
-});
+const limited = (_req: Request, res: Response) => {
+  res.status(429).json({
+    code: "RATE_LIMITED",
+    message: "Too many authentication attempts, please retry later",
+  });
+};
+
+/** Per verified client ip (trusted-proxy aware resolution, never a raw header). */
+const authLimiter = lazyLimiter(() =>
+  rateLimiter({
+    windowMs: env.AUTH_RATE_LIMIT_WINDOW_MS,
+    max: () => env.AUTH_RATE_LIMIT_MAX,
+    keyGenerator: (req) => rateLimitKey(req),
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: limited,
+  }),
+);
+
+const accountOf = (req: Request): string | undefined => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  for (const field of ["identifier", "email", "phone", "challengeId"]) {
+    const value = body[field];
+    if (typeof value === "string" && value.length > 0) return (field === "challengeId" ? "challenge:" : "account:") + value.toLowerCase().trim();
+  }
+  return undefined;
+};
+
+/** Per account / mfa challenge regardless of the client ip, so distributed guessing is throttled too. */
+const accountLimiter = lazyLimiter(() =>
+  rateLimiter({
+    windowMs: env.AUTH_RATE_LIMIT_WINDOW_MS,
+    max: () => env.AUTH_RATE_LIMIT_MAX,
+    skip: (req) => req.method !== "POST" || accountOf(req) === undefined,
+    keyGenerator: (req) => digestKeyPart(accountOf(req) ?? ""),
+    standardHeaders: false,
+    legacyHeaders: false,
+    handler: limited,
+  }),
+);
 
 router.use(authLimiter);
+router.use(accountLimiter);
 
 const registerSchema = z
   .object({

@@ -1,26 +1,53 @@
 import express from "express";
 import rateLimiter from "express-rate-limit";
 import { z } from "zod";
+import { digestKeyPart, lazyLimiter, rateLimitKey } from "../../lib/clientIp";
 import { env } from "../../lib/env";
 import { zMfaCode, zPassword } from "../../lib/zReady";
 import { coreForward } from "../forward";
 
 const router = express.Router();
 
-const authLimiter = rateLimiter({
-  windowMs: 15 * 60 * 1000,
+const limited = (_req: express.Request, res: express.Response) => {
+  res.status(429).json({
+    code: "RATE_LIMITED",
+    message: "Too many authentication attempts, please retry later",
+  });
+};
+
+/** Per client ip (resolved through the trusted proxy list, never a raw header). */
+const authLimiter = lazyLimiter(() => rateLimiter({
+  windowMs: env.AUTH_RATE_LIMIT_WINDOW_MS,
   max: () => env.AUTH_RATE_LIMIT_MAX,
+  keyGenerator: (req) => rateLimitKey(req),
   standardHeaders: true,
   legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({
-      code: "RATE_LIMITED",
-      message: "Too many authentication attempts, please retry later",
-    });
-  },
-});
+  handler: limited,
+}));
+
+const bodyField = (req: express.Request, field: string): string | undefined => {
+  const value = (req.body as Record<string, unknown> | undefined)?.[field];
+  return typeof value === "string" && value.length > 0 ? value.toLowerCase().trim() : undefined;
+};
+
+/**
+ * Per account, independent of the client ip, so a distributed guessing run against one
+ * identifier (login) or one mfa challenge is throttled as well.
+ */
+const accountLimiter = lazyLimiter(() => rateLimiter({
+  windowMs: env.AUTH_RATE_LIMIT_WINDOW_MS,
+  max: () => env.AUTH_RATE_LIMIT_MAX,
+  skip: (req) => bodyField(req, "identifier") === undefined && bodyField(req, "challengeId") === undefined,
+  keyGenerator: (req) =>
+    `account:${digestKeyPart(bodyField(req, "identifier") ?? bodyField(req, "challengeId") ?? "")}`,
+  validate: { keyGeneratorIpFallback: false },
+  standardHeaders: false,
+  legacyHeaders: false,
+  handler: limited,
+}));
 
 router.use(authLimiter);
+router.post(["/login", "/mfa"], accountLimiter);
 
 const loginSchema = z
   .object({

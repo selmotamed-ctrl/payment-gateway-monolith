@@ -6,7 +6,29 @@ type LogType = "info" | "warn" | "error";
 const REDACTED = "[REDACTED]";
 
 const SENSITIVE_KEY_PATTERN =
-  /(password|passwd|passphrase|secret|token|otp|pin|cvv|cvc|pan|card[_-]?number|authorization|api[_-]?key|private[_-]?key|credential|cookie|session|signature|nonce|client[_-]?secret|encryption[_-]?key|mtls|key)/i;
+  /(password|passwd|passphrase|secret|token|otp|pin|cvv|cvc|pan|card[_-]?number|authorization|api[_-]?key|private[_-]?key|credential|cookie|session|signature|nonce|client[_-]?secret|encryption[_-]?key|mtls|key|e[_-]?mail|phone|msisdn|mobile|iban|account[_-]?(number|no)|full[_-]?name|first[_-]?name|last[_-]?name|^name$|holder[_-]?name|identity|national[_-]?id|id[_-]?number|passport|dob|birth|address)/i;
+
+/**
+ * Path segments that carry a capability (attempt tokens, link keys, channel path tokens) are
+ * replaced before a URL is logged. Rules capture the secret segment in group 1.
+ */
+const SENSITIVE_PATH_RULES: RegExp[] = [/\/external\/links\/([^/?]+)/];
+
+export const redactUrl = (url: string): string => {
+  const queryIndex = url.indexOf("?");
+  let path = queryIndex === -1 ? url : url.slice(0, queryIndex);
+  for (const rule of SENSITIVE_PATH_RULES) {
+    path = path.replace(rule, (whole, secret: string) => whole.replace(secret, REDACTED));
+  }
+  if (queryIndex === -1) return path;
+  const params = new URLSearchParams(url.slice(queryIndex + 1));
+  const parts: string[] = [];
+  for (const [key, value] of params.entries()) {
+    parts.push(SENSITIVE_KEY_PATTERN.test(key) ? key + "=" + REDACTED : key + "=" + encodeURIComponent(value.slice(0, 64)));
+  }
+  return parts.length > 0 ? path + "?" + parts.join("&") : path;
+};
+
 
 const MAX_STRING_LENGTH = 256;
 
@@ -132,7 +154,7 @@ const createRequestLogger = (request: Request, response: Response): RequestLogge
       const header =
         `${palette.dim}${startedAt.toISOString()} ${requestId}${palette.reset} ` +
         `${methodColor(request.method)}${palette.bold}${request.method.padEnd(6)}${palette.reset}` +
-        `${palette.white}${request.originalUrl}${palette.reset} ` +
+        `${palette.white}${redactUrl(request.originalUrl)}${palette.reset} ` +
         `${statusColor(statusCode)}${palette.bold}${statusCode}${palette.reset} ` +
         `${palette.dim}${formatDuration(durationMs)}${palette.reset}`;
       const body = entries.map((entry) => {

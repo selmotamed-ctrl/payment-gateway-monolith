@@ -154,19 +154,19 @@ describe("merchant external pg_live_ api", () => {
 
   test("accepts a pg_live_ token and forwards it unchanged", async () => {
     const response = await fetch(`${edgeUrl}/api/v1/external/links/LINKKEY123`, {
-      headers: { authorization: "Bearer pg_live_abc123" },
+      headers: { authorization: "Bearer pg_live_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
     });
     expect(response.status).toBe(200);
     const forwarded = core.requests.at(-1);
     expect(forwarded?.url).toBe("/internal/merchant/external/links/LINKKEY123");
-    expect(forwarded?.headers.authorization).toBe("Bearer pg_live_abc123");
+    expect(forwarded?.headers.authorization).toBe("Bearer pg_live_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
   });
 
   test("merchant link creation carries the amount for core revalidation", async () => {
     const response = await fetch(`${edgeUrl}/api/v1/external/links`, {
       method: "POST",
       headers: {
-        authorization: "Bearer pg_live_abc123",
+        authorization: "Bearer pg_live_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "content-type": "application/json",
       },
       body: JSON.stringify({
@@ -187,7 +187,7 @@ describe("merchant external pg_live_ api", () => {
     const response = await fetch(`${edgeUrl}/api/v1/external/links`, {
       method: "POST",
       headers: {
-        authorization: "Bearer pg_live_abc123",
+        authorization: "Bearer pg_live_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "content-type": "application/json",
       },
       body: JSON.stringify({ title: "Invoice 43", currency: "LYD" }),

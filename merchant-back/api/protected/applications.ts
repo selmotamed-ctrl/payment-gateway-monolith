@@ -1,4 +1,4 @@
-import { zIdentifier, zListQuery } from "../../lib/zReady";
+import { zIdentifier, zListQuery, zWebsite } from "../../lib/zReady";
 import express from "express";
 import { z } from "zod";
 import {
@@ -32,7 +32,7 @@ const applicationFields = {
   assignedWalletId: zIdentifier.optional(),
   railWhitelist: z.array(z.string().min(1).max(64)).min(1).optional(),
   redirectDomainAllowlist: z.array(z.string().min(1).max(200)).min(1).optional(),
-  website: z.string().max(200).optional(),
+  website: zWebsite.optional(),
   category: z.string().min(2).max(64).optional(),
   settlementCurrency: z.string().regex(/^[A-Z]{3}$/).optional(),
   contactEmail: z.string().min(3).max(160).optional(),

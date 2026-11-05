@@ -72,6 +72,21 @@ export const apiErrorHandler = (
     next(error);
     return;
   }
+  const parserStatus = (error as { status?: unknown; type?: unknown } | null)?.status;
+  if (
+    typeof parserStatus === "number" &&
+    parserStatus >= 400 &&
+    parserStatus < 500 &&
+    typeof (error as { type?: unknown }).type === "string"
+  ) {
+    // body-parser failures (payload too large, malformed json, bad encoding): a client error.
+    const tooLarge = parserStatus === 413;
+    res.status(parserStatus).json({
+      code: tooLarge ? "PAYLOAD_TOO_LARGE" : "BAD_REQUEST",
+      message: tooLarge ? "The request body exceeds the size limit" : "The request body could not be parsed",
+    } satisfies ApiErrorEnvelope);
+    return;
+  }
   if (!isApiError(error)) {
     console.error("Unhandled edge error", error instanceof Error ? error.message : String(error));
     res.status(500).json({

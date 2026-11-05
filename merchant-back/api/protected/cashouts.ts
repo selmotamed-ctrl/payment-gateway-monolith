@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import { zAmount, zCurrency, zIdentifier, zJsonObject } from "../../lib/zReady";
 import { coreCashoutCreateSchema, toCoreCashoutCreate } from "../contract";
@@ -36,8 +36,19 @@ router.get(
   }),
 );
 
+/** core requires an idempotency key: accept it as the body field or as an Idempotency-Key header. */
+const idempotencyKeyFromHeader = (req: Request, _res: Response, next: NextFunction) => {
+  const header = req.header("idempotency-key");
+  const body = req.body as Record<string, unknown> | undefined;
+  if (header !== undefined && body && typeof body === "object" && body.idempotencyKey === undefined) {
+    body.idempotencyKey = header;
+  }
+  next();
+};
+
 router.post(
   "/",
+  idempotencyKeyFromHeader,
   coreForward({
     method: "POST",
     path: () => "/internal/merchant/cashouts",

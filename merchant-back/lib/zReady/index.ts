@@ -51,6 +51,22 @@ export const zIdempotencyKey = z
   .max(128)
   .regex(/^[A-Za-z0-9_.:-]+$/, "invalid idempotency key");
 
+/**
+ * A website the merchant publishes: http(s) only (a bare domain is read as https). Schemes such
+ * as javascript: or data: are never accepted because the value is rendered as a link by the portals.
+ */
+export const zWebsite = z
+  .string()
+  .max(200)
+  .refine((value) => {
+    try {
+      const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : "https://" + value);
+      return (url.protocol === "https:" || url.protocol === "http:") && url.hostname.includes(".");
+    } catch {
+      return false;
+    }
+  }, "must be an http(s) url");
+
 export const zCidrList = z.array(z.string().min(3).max(64)).max(64);
 
 export const zPassword = z

@@ -98,7 +98,12 @@ export const descriptiveEditSchema = z
   .object({
     tradeName: z.string().min(2).max(200).optional(),
     displayName: z.string().max(200).optional(),
-    logoUrl: z.string().url().max(500).optional(),
+    logoUrl: z
+      .string()
+      .url()
+      .max(500)
+      .refine((value) => ["https:", "http:"].includes(new URL(value).protocol), "must be an http(s) url")
+      .optional(),
     supportEmail: z.string().email().max(160).optional(),
     supportPhone: z.string().min(6).max(40).optional(),
     baseVersion: zBaseVersion.optional(),
