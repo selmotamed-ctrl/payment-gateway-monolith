@@ -206,14 +206,15 @@ export const buildWalGMirrorCommand = (
   if (source.startsWith("s3://") || destination.startsWith("s3://") || destination.startsWith("rclone:")) {
     return {
       command: "rclone",
-      args: ["sync", source, destination],
+      // copy never deletes at the destination; true mirroring (sync) is an explicit opt-in.
+      args: [config.BACKUP_SECONDARY_MIRROR_DELETE ? "sync" : "copy", source, destination],
       env: walGEnvironment(config, target),
       timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
     };
   }
   return {
     command: "rsync",
-    args: ["-a", "--delete", `${trimTrailingSlash(source)}/`, `${trimTrailingSlash(destination)}/`],
+    args: ["-a", ...(config.BACKUP_SECONDARY_MIRROR_DELETE ? ["--delete"] : []), `${trimTrailingSlash(source)}/`, `${trimTrailingSlash(destination)}/`],
     timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
   };
 };
@@ -814,13 +815,19 @@ export class WalGEngine implements BackupEngine {
       throw new BackupEngineError(`backup-fetch failed: ${errorText(fetch)}`, request.target, "full");
     }
     const escapedTargetTime = request.targetTime.toISOString().replace(/'/g, "''");
-    const restoreEnv = Object.entries(env)
-      .filter(([key]) => key.startsWith("WALG_") || key.startsWith("AWS_"))
-      .map(([key, value]) => `${key}=${shellQuote(value)}`)
-      .join(" ");
+    // restore_command is a postgresql.conf single-quoted literal: every inner
+    // single quote MUST be doubled. With WALG_ENV_FILE configured the secrets
+    // stay in that 0640 file and only the (non-secret) prefix is on the line.
+    const walFetch = this.config.WALG_ENV_FILE
+      ? `WALG_S3_PREFIX=${shellQuote(env.WALG_S3_PREFIX ?? "")} sh -c ${shellQuote(`set -a; . ${shellQuote(this.config.WALG_ENV_FILE)}; exec ${shellQuote(this.config.WALG_BIN)} wal-fetch %f %p`)}`
+      : `${Object.entries(env)
+        .filter(([key]) => key.startsWith("WALG_") || key.startsWith("AWS_"))
+        .map(([key, value]) => `${key}=${shellQuote(value)}`)
+        .join(" ")} ${shellQuote(this.config.WALG_BIN)} wal-fetch %f %p`;
+    const restoreCommand = walFetch.replace(/'/g, "''");
     return {
       recoveryConf:
-        `restore_command = '${restoreEnv} ${this.config.WALG_BIN} wal-fetch %f %p'\n` +
+        `restore_command = '${restoreCommand}'\n` +
         `recovery_target_time = '${escapedTargetTime}'\n` +
         "recovery_target_action = 'promote'\n",
     };

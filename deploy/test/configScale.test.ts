@@ -8,8 +8,8 @@ DB_SSH_KEY_PATH="~/.ssh/db"
 DB_PRIVATE_IP="10.10.0.10"
 DB_NAME="gateway"
 DB_USER="gw"
-DB_PASSWORD="ultra-strong-db-password"
-DATABASE_URL="postgresql://gw:ultra-strong-db-password@10.10.0.10:5432/gateway"
+DB_PASSWORD="ultra-strong-db-K7p2Zq9w"
+DATABASE_URL="postgresql://gw:ultra-strong-db-K7p2Zq9w@10.10.0.10:5432/gateway"
 CORE_SSH_HOST="10.10.0.20"
 CORE_SSH_KEY_PATH="~/.ssh/core"
 CORE_PRIVATE_IP="10.10.0.20"
@@ -24,7 +24,7 @@ CHECKOUT_SSH_HOST="203.0.113.20"
 CHECKOUT_SSH_KEY_PATH="~/.ssh/checkout"
 CHECKOUT_PRIVATE_IP="10.10.0.50"
 CHECKOUT_DOMAIN="pay.example.ly"
-KMS_MASTER_KEY="0123456789abcdef0123456789abcdef"
+KMS_MASTER_KEY="kms-Q7x9Lm2Zr4Vb8Nc1Wd5Tg3Hy6Jp0Sa2"
 `;
 
 const withOverrides = (overrides: string): string => `${BASE}\n${overrides}\n`;
@@ -121,7 +121,7 @@ PG_REPLICA_NODES="pg-rep-1@10.0.1.11:22:10.1.1.11:5432"
     const database = effectiveDatabase(requireConfig(BASE));
     expect(database.name).toBe("gateway");
     expect(database.user).toBe("gw");
-    expect(database.password).toBe("ultra-strong-db-password");
+    expect(database.password).toBe("ultra-strong-db-K7p2Zq9w");
     expect(database.host).toBe("10.10.0.10");
   });
 
@@ -131,14 +131,14 @@ PG_MANAGE_VIA_SSH="true"
 PG_PRIMARY_NODE="pg-pri@10.0.1.10:22:10.1.1.10:5432"
 PG_DB_NAME="pg_authoritative"
 PG_DB_USER="pg_authoritative_user"
-PG_DB_PASSWORD="strong-pg-password"
+PG_DB_PASSWORD="strong-pg-Xk7Qm2Zr"
 PG_SSH_KEY_PATH="~/.ssh/pg"
 `));
     const database = effectiveDatabase(config);
     expect(database.engine).toBe("postgresql");
     expect(database.name).toBe("pg_authoritative");
     expect(database.user).toBe("pg_authoritative_user");
-    expect(database.password).toBe("strong-pg-password");
+    expect(database.password).toBe("strong-pg-Xk7Qm2Zr");
     expect(database.host).toBe("10.1.1.10");
     expect(database.port).toBe(5432);
   });
@@ -150,7 +150,7 @@ BACKUP_NODE="backup-1@10.0.3.10:22:10.1.3.10:4090"
 BACKUP_SSH_KEY_PATH="~/.ssh/backup"
 BACKUP_PRIMARY_S3_ENDPOINT="s3.example.invalid"
 BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/prod"
-BACKUP_ENCRYPTION_KEY_HEX="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+BACKUP_ENCRYPTION_KEY_HEX="9f3a7c1e5b2d84f06a1c3e7b9d2f4a8c5e0b6d1a3f7c9e2b4d8a0c6e1f5b3a79"
 `));
     expect(result.ok).toBe(false);
     expect(result.problems.join(" ")).toContain("BACKUP_PRIMARY_S3_ENDPOINT must be an absolute http(s) URL");
@@ -170,7 +170,13 @@ BACKUP_SSH_KEY_PATH="~/.ssh/backup"
   });
 
   test("the shipped example env remains a valid legacy single-host configuration", () => {
-    const example = requireConfig(require("node:fs").readFileSync("deploy.env.example", "utf8"));
+    const text: string = require("node:fs").readFileSync("deploy.env.example", "utf8");
+    // The example ships placeholders on purpose: it must NOT validate as-is...
+    expect(loadDeployConfig(text).ok).toBe(false);
+    // ...but is otherwise structurally valid once every placeholder secret is replaced with a real-looking value.
+    const filled = text.replace(/^([A-Z_]+)="[^"\n]*(?:change-me|changeme)[^"\n]*"/gim, (m, key: string) => (key === "DATABASE_URL" ? m : `${key}="Xk7Qm2Zr-${key.length}-9Lp4Vn8Bc3Wd6Th-Hy5Jp0Sa2Fg7"`))
+      .replace("postgresql://pg_core_user:change-me-strong-db-password@", "postgresql://pg_core_user:Xk7Qm2Zr-db_password-9Lp4Vn8Bc3Wd6Th@");
+    const example = requireConfig(filled);
     expect(example.PG_VERSION).toBe("18");
     expect(example.PGBOUNCER_PORT).toBe(6432);
     expect(example.BACKUP_DAEMON_PORT).toBe(4090);

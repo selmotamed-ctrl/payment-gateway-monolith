@@ -1,4 +1,10 @@
 import { hasOneOfAuthorities } from "@/state/user";
+import { resolveRouteRequirement } from "@/utils/routeAuthorities";
+
+const canOpenRoute = (name: string): boolean => {
+    const requirement = resolveRouteRequirement(name);
+    return requirement.allowed && hasOneOfAuthorities(requirement.authorities);
+};
 import type { UserAuthorityType } from "@/utils/authorities";
 import { useLocale } from "vuetify";
 
@@ -17,40 +23,7 @@ export type Section = {
     if?: () => boolean;
 };
 
-export const routesAuthorities: {
-    [key: string]: undefined | null | UserAuthorityType[];
-} = {
-    Dashboard: [],
-    JoinRequests: ["joinrequests.review"],
-    JoinRequestNew: ["joinrequests.review"],
-    JoinRequestDetail: ["joinrequests.review"],
-    KybReview: ["kyb.review"],
-    KybReviewDetail: ["kyb.review"],
-    Merchants: ["merchants.read", "support.read_merchant"],
-    MerchantDetail: ["merchants.read", "support.read_merchant"],
-    Approvals: ["approvals.approve", "approvals.reject"],
-    AdminUsers: [],
-    AuditLog: ["security:read"],
-    AmlCases: ["aml.read_confidential"],
-    AmlScreenings: ["aml.read_confidential"],
-    AmlRules: ["aml.read_confidential"],
-    AmlReports: ["aml.read_confidential"],
-    OperatorCases: ["case:read", "operator:read"],
-    OperatorCaseDetail: ["case:read", "operator:read"],
-    GatewayInquirySchedules: ["case:read", "operator:read"],
-    Disputes: ["dispute:read"],
-    Adjustments: ["adjustments.propose"],
-    CashOuts: ["cashout.process"],
-    Reconciliation: ["reconciliation.run", "reconciliation.resolve"],
-    Profitability: ["profit.read"],
-    Liquidity: ["liquidity.read"],
-    Invariant: ["profit.read", "liquidity.read"],
-    Gateways: ["gateways.edit"],
-    GatewayWizard: ["gateways.edit"],
-    Rails: ["gateways.edit"],
-    GatewayRoutes: ["gateways.edit"],
-    SystemBackups: ["security:read", "gateway:read"],
-};
+export { routesAuthorities } from "@/utils/routeAuthorities";
 
 export const routesRoles: {
     [key: string]: undefined | null | string[];
@@ -124,6 +97,7 @@ export const useSections = () => {
                     label: t("Admin Users"),
                     name: "AdminUsers",
                     icon: "mdi-account-cog-outline",
+                    if: () => canOpenRoute("AdminUsers"),
                 },
                 {
                     label: t("AML Cases"),
@@ -201,11 +175,13 @@ export const useSections = () => {
                     label: t("Platform Settings"),
                     name: "AdminPlatformSettings",
                     icon: "mdi-cog-transfer-outline",
+                    if: () => canOpenRoute("AdminPlatformSettings"),
                 },
                 {
                     label: t("Checkout Help"),
                     name: "AdminCheckoutHelp",
                     icon: "mdi-help-circle-outline",
+                    if: () => canOpenRoute("AdminCheckoutHelp"),
                 },
             ],
         },
@@ -217,7 +193,7 @@ export const useSections = () => {
                     label: t("Pricing & Limits"),
                     name: "PricingControls",
                     icon: "mdi-tune-variant",
-                    if: () => hasOneOfAuthorities(["profit.read", "liquidity.read"]),
+                    if: () => canOpenRoute("PricingControls"),
                 },
                 {
                     label: t("Profitability"),

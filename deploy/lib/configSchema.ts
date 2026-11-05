@@ -147,12 +147,40 @@ export const parseNodeList = (value: string | undefined | null): NodeSpec[] => {
 };
 
 const nodeList = z.string().trim().max(20_000).default("");
-const optionalSecret = z.string().max(512).default("");
+/**
+ * Secrets are interpolated into SQL, pgbouncer files, .pgpass, env files and
+ * shell scripts. Everything is escaped at the use site, but the charset is also
+ * restricted so a value can never carry a quote, backslash, '$', backtick,
+ * whitespace, newline or NUL (portable between bash, systemd EnvironmentFile,
+ * dotenv/Bun and libpq files).
+ */
+export const SECRET_CHARSET = /^[A-Za-z0-9!#%&()*+,./:;<=>?@[\]^_{|}~-]+$/;
+const SECRET_CHARSET_MESSAGE = "may only contain letters, digits and !#%&()*+,./:;<=>?@[]^_{|}~- (no quotes, backslash, $, backtick, whitespace or control characters)";
+const secretChars = (message = SECRET_CHARSET_MESSAGE) => (value: string) => value === "" || SECRET_CHARSET.test(value) ? true : message;
+const optionalSecret = z.string().max(512).superRefine((value, ctx) => {
+  const result = secretChars()(value);
+  if (result !== true) ctx.addIssue({ code: "custom", message: result });
+}).default("");
+const secretValue = (min: number, max = 512) => z.string().min(min).max(max).regex(SECRET_CHARSET, SECRET_CHARSET_MESSAGE);
+
+/** Unix account name used for SSH / sudo. */
+const unixUser = z.string().trim().min(1).max(64).regex(/^[A-Za-z_][A-Za-z0-9_-]*$/, "must be a plain unix user name ([A-Za-z0-9_-])");
+/** Absolute path made only of path-safe characters (safe to place in shell commands and unit files, still quoted at use). */
+export const SAFE_ABS_PATH = /^\/[A-Za-z0-9._+@/-]*$/;
+const noDotDot = (value: string) => !value.split("/").includes("..");
+const safeDir = (max = 200) => z.string().trim().min(1).max(max).regex(SAFE_ABS_PATH, "must be an absolute path using only [A-Za-z0-9._+@/-]").refine(noDotDot, "must not contain '..'");
+const optionalSafeDir = (max = 300) => z.string().trim().max(max).refine((value) => value === "" || (SAFE_ABS_PATH.test(value) && noDotDot(value)), "must be empty or an absolute path using only [A-Za-z0-9._+@/-]");
+const optionalSafeFile = (max = 300) => z.string().trim().max(max).refine((value) => value === "" || (SAFE_ABS_PATH.test(value) && noDotDot(value)), "must be an absolute path using only [A-Za-z0-9._+@/-]").optional();
+const cronExpr = z.string().trim().min(1).max(120).regex(/^[0-9A-Za-z*/,@ -]+$/, "must be a cron expression (letters, digits and * / , - @ only)");
+const hostLike = z.string().trim().max(253).regex(/^[A-Za-z0-9._:@/~,[\] *-]*$/, "contains characters that are not allowed in a host/target");
+const binName = z.string().trim().min(1).max(300).regex(/^[A-Za-z0-9._+@/-]+$/, "must be a command name or path ([A-Za-z0-9._+@/-])");
 
 const base = z.strictObject({
   // 0. Global
   DEPLOY_MODE: z.enum(DEPLOY_MODES).default("auto"),
-  DEPLOY_ENV: z.enum(["development", "staging", "production"]).default("development"),
+  // Fail-safe: an unset DEPLOY_ENV is production. Test tooling (Fake Rails, test-server flags)
+  // needs an explicit DEPLOY_ENV of development, staging or test.
+  DEPLOY_ENV: z.enum(["development", "staging", "test", "production"]).default("production"),
   KEEP_RELEASES: z.coerce.number().int().min(1).max(100).default(5),
   ROTATE_MTLS_CERTS: booleanish.default(false),
   MTLS_VALIDITY_DAYS: z.coerce.number().int().min(1).max(3650).default(825),
@@ -163,7 +191,7 @@ const base = z.strictObject({
   DB_MANAGE_VIA_SSH: booleanish.default(true),
   DB_SSH_HOST: ipv4.optional(),
   DB_SSH_PORT: port.default(22),
-  DB_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
+  DB_SSH_USER: unixUser.default("ubuntu"),
   DB_SSH_KEY_PATH: sshPath.optional(),
   DB_SUDO_PASSWORD: z.string().max(256).default(""),
   DB_PRIVATE_IP: ipv4.optional(),
@@ -183,7 +211,7 @@ const base = z.strictObject({
     .max(64)
     .regex(/^[A-Za-z0-9_]+$/, "must be an identifier")
     .optional(),
-  DB_PASSWORD: z.string().min(8).max(256).optional(),
+  DB_PASSWORD: secretValue(8, 256).optional(),
   DATABASE_URL: z.string().trim().min(1).max(1000).optional(),
 
   // 1b. Horizontal compute node arrays (override the single-host fields above)
@@ -196,18 +224,18 @@ const base = z.strictObject({
   // 2. Core
   CORE_SSH_HOST: ipv4.optional(),
   CORE_SSH_PORT: port.default(22),
-  CORE_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
+  CORE_SSH_USER: unixUser.default("ubuntu"),
   CORE_SSH_KEY_PATH: sshPath.optional(),
   CORE_SUDO_PASSWORD: z.string().max(256).default(""),
   CORE_PRIVATE_IP: ipv4.optional(),
   CORE_PORT: port.default(4000),
-  CORE_REMOTE_DIR: z.string().trim().min(1).max(200).default("/var/www/pg-core"),
+  CORE_REMOTE_DIR: safeDir().default("/var/www/pg-core"),
   RUN_PRISMA_SEED: booleanish.default(false),
 
   // 3. Admin
   ADMIN_SSH_HOST: ipv4.optional(),
   ADMIN_SSH_PORT: port.default(22),
-  ADMIN_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
+  ADMIN_SSH_USER: unixUser.default("ubuntu"),
   ADMIN_SSH_KEY_PATH: sshPath.optional(),
   ADMIN_SUDO_PASSWORD: z.string().max(256).default(""),
   ADMIN_PRIVATE_IP: ipv4.optional(),
@@ -215,7 +243,7 @@ const base = z.strictObject({
   ADMIN_NGINX_LAN_PORT: port.default(8443),
   ADMIN_SSL: booleanish.default(true),
   ADMIN_DOMAIN: serverName.default("admin.internal"),
-  ADMIN_REMOTE_DIR: z.string().trim().min(1).max(200).default("/var/www/pg-admin"),
+  ADMIN_REMOTE_DIR: safeDir().default("/var/www/pg-admin"),
   ADMIN_SHOW_CHECKLISTS: booleanish.optional(),
   ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST: booleanish.default(true),
   ADMIN_SHOW_HELP_PANELS: booleanish.default(true),
@@ -223,7 +251,7 @@ const base = z.strictObject({
   // 4. Merchant
   MERCHANT_SSH_HOST: ipv4.optional(),
   MERCHANT_SSH_PORT: port.default(22),
-  MERCHANT_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
+  MERCHANT_SSH_USER: unixUser.default("ubuntu"),
   MERCHANT_SSH_KEY_PATH: sshPath.optional(),
   MERCHANT_SUDO_PASSWORD: z.string().max(256).default(""),
   MERCHANT_PRIVATE_IP: ipv4.optional(),
@@ -235,14 +263,14 @@ const base = z.strictObject({
   MERCHANT_LAN_SSL: booleanish.default(true),
   MERCHANT_DOMAIN: serverName,
   MERCHANT_SSL_MODE: z.enum(SSL_MODES).default("certbot"),
-  MERCHANT_SSL_CERT_PATH: z.string().trim().max(300).optional(),
-  MERCHANT_SSL_KEY_PATH: z.string().trim().max(300).optional(),
-  MERCHANT_REMOTE_DIR: z.string().trim().min(1).max(200).default("/var/www/pg-merchant"),
+  MERCHANT_SSL_CERT_PATH: optionalSafeFile(),
+  MERCHANT_SSL_KEY_PATH: optionalSafeFile(),
+  MERCHANT_REMOTE_DIR: safeDir().default("/var/www/pg-merchant"),
 
   // 5. Checkout
   CHECKOUT_SSH_HOST: ipv4.optional(),
   CHECKOUT_SSH_PORT: port.default(22),
-  CHECKOUT_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
+  CHECKOUT_SSH_USER: unixUser.default("ubuntu"),
   CHECKOUT_SSH_KEY_PATH: sshPath.optional(),
   CHECKOUT_SUDO_PASSWORD: z.string().max(256).default(""),
   CHECKOUT_PRIVATE_IP: ipv4.optional(),
@@ -254,13 +282,13 @@ const base = z.strictObject({
   CHECKOUT_LAN_SSL: booleanish.default(true),
   CHECKOUT_DOMAIN: serverName,
   CHECKOUT_SSL_MODE: z.enum(SSL_MODES).default("certbot"),
-  CHECKOUT_SSL_CERT_PATH: z.string().trim().max(300).optional(),
-  CHECKOUT_SSL_KEY_PATH: z.string().trim().max(300).optional(),
-  CHECKOUT_REMOTE_DIR: z.string().trim().min(1).max(200).default("/var/www/pg-checkout"),
+  CHECKOUT_SSL_CERT_PATH: optionalSafeFile(),
+  CHECKOUT_SSL_KEY_PATH: optionalSafeFile(),
+  CHECKOUT_REMOTE_DIR: safeDir().default("/var/www/pg-checkout"),
   PAY_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1_000_000).default(120),
 
   // 6. Core-only secrets
-  KMS_MASTER_KEY: z.string().min(16).max(512),
+  KMS_MASTER_KEY: secretValue(32),
   KMS_MASTER_KEY_ID: z.string().trim().max(64).default("v1"),
   KMS_MASTER_KEY_HEX: z.string().trim().regex(/^[0-9a-fA-F]{64}$/).or(z.literal("")).default(""),
   STORAGE_SHARD_COUNT: z.coerce.number().int().min(1).max(32).default(16),
@@ -276,7 +304,7 @@ const base = z.strictObject({
   FAKE_RAILS_NODE: nodeList,
   FAKE_RAILS_SSH_HOST: ipv4.optional(),
   FAKE_RAILS_SSH_PORT: port.default(22),
-  FAKE_RAILS_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
+  FAKE_RAILS_SSH_USER: unixUser.default("ubuntu"),
   FAKE_RAILS_SSH_KEY_PATH: sshPath.optional(),
   FAKE_RAILS_SUDO_PASSWORD: z.string().max(256).default(""),
   FAKE_RAILS_PRIVATE_IP: ipv4.optional(),
@@ -286,13 +314,13 @@ const base = z.strictObject({
   FAKE_RAILS_SSL_MODE: z.enum(SSL_MODES).default("self_signed"),
   FAKE_RAILS_DOMAIN: serverName.default("fakerails.internal"),
   FAKE_RAILS_PUBLIC_BASE_URL: z.string().url().default("http://127.0.0.1:8444"),
-  FAKE_RAILS_REMOTE_DIR: z.string().trim().min(1).max(200).default("/var/www/pg-fake-rails"),
+  FAKE_RAILS_REMOTE_DIR: safeDir().default("/var/www/pg-fake-rails"),
   FAKE_RAILS_ALLOWED_CIDRS: cidrList.default("127.0.0.1/32,10.0.0.0/8,192.168.0.0/16"),
-  FAKE_RAILS_ALLOWED_HOSTS: z.string().trim().default("127.0.0.1,localhost"),
-  FAKE_RAILS_ADMIN_USER: z.string().trim().min(4).max(128).optional(),
-  FAKE_RAILS_ADMIN_PASSWORD: z.string().min(12).max(512).optional(),
-  FAKE_RAILS_JWT_SECRET: z.string().min(16).max(512).optional(),
-  FAKE_RAILS_SEEDER_TOKEN: z.string().min(16).max(512).optional(),
+  FAKE_RAILS_ALLOWED_HOSTS: hostLike.default("127.0.0.1,localhost"),
+  FAKE_RAILS_ADMIN_USER: z.string().trim().min(4).max(128).regex(/^[A-Za-z0-9._@-]+$/, "may only contain [A-Za-z0-9._@-]").optional(),
+  FAKE_RAILS_ADMIN_PASSWORD: secretValue(12).optional(),
+  FAKE_RAILS_JWT_SECRET: secretValue(32).optional(),
+  FAKE_RAILS_SEEDER_TOKEN: secretValue(32).optional(),
   SEED_FAKE_RAILS_BLUEPRINTS: booleanish.default(true),
 
   // 9. PostgreSQL 18 relational core, replicas and PgBouncer
@@ -300,7 +328,7 @@ const base = z.strictObject({
   PG_VERSION: z.string().trim().regex(/^\d{1,2}$/, "must be a PostgreSQL major version").default("18"),
   PG_PRIMARY_NODE: z.string().trim().max(500).default(""),
   PG_REPLICA_NODES: z.string().trim().max(20_000).default(""),
-  PG_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
+  PG_SSH_USER: unixUser.default("ubuntu"),
   PG_SSH_PORT: port.default(22),
   PG_SSH_KEY_PATH: sshPath.optional(),
   PG_SUDO_PASSWORD: z.string().max(256).default(""),
@@ -332,13 +360,19 @@ const base = z.strictObject({
   PGBOUNCER_DEFAULT_POOL_SIZE: z.coerce.number().int().min(1).max(10_000).default(50),
   PGBOUNCER_MAX_CLIENT_CONN: z.coerce.number().int().min(1).max(100_000).default(2000),
   PGBOUNCER_MAX_PREPARED_STATEMENTS: z.coerce.number().int().min(0).max(10_000).default(256),
-  PG_DATA_DIR: z.string().trim().max(300).default(""),
-  PG_AUDIT_DATA_DIR: z.string().trim().max(300).default(""),
+  // Optional node RAM in GB: derives shared_buffers (25%), effective_cache_size (75%), maintenance_work_mem.
+  PG_RAM_GB: z.coerce.number().int().min(1).max(4096).optional(),
+  // io_uring needs kernel/container support, so the safe default is "worker".
+  PG_IO_METHOD: z.enum(["worker", "io_uring", "sync"]).default("worker"),
+  // Explicit opt-in to wipe and re-clone a replica that already has PG_VERSION and is in recovery.
+  PG_REPLICA_REBUILD: booleanish.default(false),
+  PG_DATA_DIR: optionalSafeDir().default(""),
+  PG_AUDIT_DATA_DIR: optionalSafeDir().default(""),
 
   // 10. Redis cache / velocity engine
   REDIS_MANAGE_VIA_SSH: booleanish.default(false),
   REDIS_NODES: nodeList,
-  REDIS_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
+  REDIS_SSH_USER: unixUser.default("ubuntu"),
   REDIS_SSH_PORT: port.default(22),
   REDIS_SSH_KEY_PATH: sshPath.optional(),
   REDIS_SUDO_PASSWORD: z.string().max(256).default(""),
@@ -348,7 +382,7 @@ const base = z.strictObject({
   // 11. Dedicated tamper-evident audit database
   AUDIT_DB_MANAGE_VIA_SSH: booleanish.default(false),
   AUDIT_DB_NODE: z.string().trim().max(500).default(""),
-  AUDIT_DB_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
+  AUDIT_DB_SSH_USER: unixUser.default("ubuntu"),
   AUDIT_DB_SSH_PORT: port.default(22),
   AUDIT_DB_SSH_KEY_PATH: sshPath.optional(),
   AUDIT_DB_SUDO_PASSWORD: z.string().max(256).default(""),
@@ -371,7 +405,7 @@ const base = z.strictObject({
   // 12. Dedicated operational/step log database
   LOG_DB_MANAGE_VIA_SSH: booleanish.default(false),
   LOG_DB_NODE: z.string().trim().max(500).default(""),
-  LOG_DB_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
+  LOG_DB_SSH_USER: unixUser.default("ubuntu"),
   LOG_DB_SSH_PORT: port.default(22),
   LOG_DB_SSH_KEY_PATH: sshPath.optional(),
   LOG_DB_SUDO_PASSWORD: z.string().max(256).default(""),
@@ -395,7 +429,7 @@ const base = z.strictObject({
   // 13. Backup & PITR verification engine
   BACKUP_ENABLED: booleanish.default(false),
   BACKUP_NODE: z.string().trim().max(500).default(""),
-  BACKUP_SSH_USER: z.string().trim().min(1).max(64).default("ubuntu"),
+  BACKUP_SSH_USER: unixUser.default("ubuntu"),
   BACKUP_SSH_PORT: port.default(22),
   BACKUP_SSH_KEY_PATH: sshPath.optional(),
   BACKUP_SUDO_PASSWORD: z.string().max(256).default(""),
@@ -420,35 +454,47 @@ const base = z.strictObject({
   BACKUP_MINIO_BINARY_URL: z.string().trim().max(500).default(""),
   BACKUP_MINIO_VERSION: z.string().trim().max(64).default("latest"),
   BACKUP_PRIMARY_S3_BUCKET: z.string().trim().max(500).default(""),
-  BACKUP_PRIMARY_S3_ACCESS_KEY: z.string().max(500).default(""),
-  BACKUP_PRIMARY_S3_SECRET_KEY: z.string().max(500).default(""),
+  BACKUP_PRIMARY_S3_ACCESS_KEY: optionalSecret,
+  BACKUP_PRIMARY_S3_SECRET_KEY: optionalSecret,
   BACKUP_CORE_S3_PREFIX: z.string().trim().max(1000).default(""),
   BACKUP_AUDIT_S3_PREFIX: z.string().trim().max(1000).default(""),
-  BACKUP_SECONDARY_SSH_TARGET: z.string().trim().max(500).default(""),
-  BACKUP_FULL_CRON: z.string().trim().min(1).max(120).default("0 2 * * 0"),
-  BACKUP_DELTA_CRON: z.string().trim().min(1).max(120).default("0 2 * * 1-6"),
-  BACKUP_DRILL_CRON: z.string().trim().min(1).max(120).default("0 4 * * 0"),
+  BACKUP_SECONDARY_SSH_TARGET: hostLike.default(""),
+  BACKUP_SECONDARY_MIRROR_DELETE: booleanish.default(false),
+  BACKUP_FULL_CRON: cronExpr.default("0 2 * * 0"),
+  BACKUP_DELTA_CRON: cronExpr.default("0 2 * * 1-6"),
+  BACKUP_DRILL_CRON: cronExpr.default("0 4 * * 0"),
   BACKUP_RETENTION_FULL_COUNT: z.coerce.number().int().min(1).max(365).default(8),
   BACKUP_RETENTION_WAL_DAYS: z.coerce.number().int().min(1).max(3650).default(14),
   BACKUP_ALERT_LAG_SECONDS: z.coerce.number().int().min(1).max(86_400).default(300),
   BACKUP_DAEMON_PORT: port.default(4090),
   BACKUP_SCHEDULER_ENABLED: booleanish.default(true),
   BACKUP_SCHEDULER_TICK_MS: z.coerce.number().int().positive().max(3_600_000).default(30_000),
-  BACKUP_DAEMON_BIND_HOST: z.string().trim().max(64).default(""),
-  BACKUP_DAEMON_CERT_DIR: z.string().trim().max(300).default("/var/lib/pg-backup/shared/certs"),
-  BACKUP_CATALOG_PATH: z.string().trim().max(300).default("/var/lib/pg-backup/catalog.json"),
-  BACKUP_PGPASSFILE: z.string().trim().max(300).default("/var/lib/pg-backup/.pgpass"),
-  BACKUP_SCRATCH_DIR: z.string().trim().max(300).default("/var/lib/pg-backup/scratch"),
-  BACKUP_SCRATCH_AUDIT_DIR: z.string().trim().max(300).default(""),
+  // Subject CNs (or DNS SANs) of the mTLS client certificates allowed to call the backup daemon.
+  BACKUP_ALLOWED_CLIENT_CNS: z.string().trim().min(1).max(500).regex(/^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$/, "must be a comma separated list of certificate names").default("backup-client"),
+  BACKUP_DAEMON_BIND_HOST: hostLike.default(""),
+  BACKUP_DAEMON_CERT_DIR: safeDir(300).default("/var/lib/pg-backup/shared/certs"),
+  BACKUP_CATALOG_PATH: safeDir(300).default("/var/lib/pg-backup/catalog.json"),
+  BACKUP_PGPASSFILE: safeDir(300).default("/var/lib/pg-backup/.pgpass"),
+  BACKUP_SCRATCH_DIR: safeDir(300).default("/var/lib/pg-backup/scratch"),
+  BACKUP_SCRATCH_AUDIT_DIR: optionalSafeDir().default(""),
   BACKUP_SCRATCH_PORT: port.default(55432),
   BACKUP_SCRATCH_AUDIT_PORT: port.default(55433),
   BACKUP_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().max(86_400_000).default(1_800_000),
   BACKUP_ALLOW_INSECURE_HTTP: booleanish.default(false),
-  BACKUP_WALG_BIN: z.string().trim().min(1).max(300).default("wal-g"),
-  BACKUP_BARMAN_BIN: z.string().trim().min(1).max(300).default("barman"),
-  BACKUP_BARMAN_CLOUD_BIN: z.string().trim().min(1).max(300).default("barman-cloud-backup"),
-  BACKUP_REDIS_CLI_BIN: z.string().trim().min(1).max(300).default("redis-cli"),
-  BARMAN_AUDIT_SERVER: z.string().trim().max(200).default(""),
+  BACKUP_WALG_BIN: binName.default("wal-g"),
+  // Pinned WAL-G release. The downloaded asset is verified against BACKUP_WALG_SHA256 (REQUIRED for wal-g mode).
+  BACKUP_WALG_VERSION: z.string().trim().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/, "must be a release such as 3.0.9").default("3.0.9"),
+  BACKUP_WALG_ASSET: z.string().trim().regex(/^[A-Za-z0-9._-]+$/, "must be a release asset file name").default("wal-g-pg-24.04-amd64"),
+  BACKUP_WALG_SHA256: z.string().trim().regex(/^[0-9a-fA-F]{64}$/, "must be a 64 hex character SHA-256").or(z.literal("")).default(""),
+  BACKUP_BARMAN_VERSION: z.string().trim().regex(/^[0-9]+\.[0-9]+(\.[0-9]+)?$/, "must be a barman release such as 3.10.1").default("3.10.1"),
+  // Bun on the deployed hosts: pinned release verified by SHA-256 (no curl | bash). Without BUN_SHA256 an
+  // already installed bun is used and a missing one fails the deploy.
+  BUN_VERSION: z.string().trim().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/, "must be a Bun release such as 1.3.5").default("1.3.5"),
+  BUN_SHA256: z.string().trim().regex(/^[0-9a-fA-F]{64}$/, "must be a 64 hex character SHA-256 of bun-linux-x64.zip").or(z.literal("")).default(""),
+  BACKUP_BARMAN_BIN: binName.default("barman"),
+  BACKUP_BARMAN_CLOUD_BIN: binName.default("barman-cloud-backup"),
+  BACKUP_REDIS_CLI_BIN: binName.default("redis-cli"),
+  BARMAN_AUDIT_SERVER: z.string().trim().max(200).regex(/^[A-Za-z0-9_-]*$/, "must be a barman server name").default(""),
 
   // 8. Synthetic operational data seeder (test servers with Fake Rails only)
   RUN_SYNTHETIC_HISTORY_SEED: booleanish.default(false),
@@ -575,6 +621,80 @@ export const effectiveDatabase = (config: DeployConfig): {
   };
 };
 
+const PLACEHOLDER_MARKERS = ["change-me", "changeme", "change_me", "replace-me", "replaceme", "replace_me", "your-", "your_", "example", "placeholder", "password", "passwd", "admin", "default", "secret123", "xxxx"];
+
+/** Returns a reason when a secret looks like a placeholder or is low entropy; undefined when it looks fine. */
+export const weakSecretReason = (value: string): string | undefined => {
+  const lower = value.toLowerCase();
+  const marker = PLACEHOLDER_MARKERS.find((entry) => lower.includes(entry));
+  if (marker) return `contains the placeholder/guessable word '${marker}' - replace this placeholder with a generated secret (e.g. 'openssl rand -base64 36')`;
+  if (/^(.)\1+$/.test(value)) return "is a single repeated character";
+  for (let unit = 1; unit <= 16; unit += 1) {
+    if (value.length >= unit * 2 && value.length % unit === 0 && value === value.slice(0, unit).repeat(value.length / unit)) {
+      return "is a repeated pattern";
+    }
+  }
+  let ascending = 1;
+  let descending = 1;
+  for (let i = 1; i < value.length; i += 1) {
+    const delta = value.charCodeAt(i) - value.charCodeAt(i - 1);
+    ascending = delta === 1 ? ascending + 1 : 1;
+    descending = delta === -1 ? descending + 1 : 1;
+    if (ascending >= 8 || descending >= 8) return "contains a sequential run (e.g. 01234567 / abcdefgh)";
+  }
+  const distinct = new Set(value).size;
+  if (value.length >= 24 && distinct < 10) return "has too few distinct characters (low entropy)";
+  if (value.length >= 12 && distinct < 6) return "has too few distinct characters (low entropy)";
+  return undefined;
+};
+
+/** Placeholder / low-entropy secret rejection (applies in every DEPLOY_ENV). */
+export const weakSecretProblems = (config: DeployConfig): string[] => {
+  const problems: string[] = [];
+  const secrets: Array<[string, string | undefined]> = [
+    ["KMS_MASTER_KEY", config.KMS_MASTER_KEY],
+    ["PG_DB_PASSWORD", config.PG_DB_PASSWORD],
+    ["PG_REPLICATION_PASSWORD", config.PG_REPLICATION_PASSWORD],
+    ["REDIS_PASSWORD", config.REDIS_PASSWORD],
+    ["AUDIT_DB_PASSWORD", config.AUDIT_DB_PASSWORD],
+    ["LOG_DB_PASSWORD", config.LOG_DB_PASSWORD],
+    ["DB_PASSWORD", config.DB_PASSWORD],
+    ["BACKUP_ENCRYPTION_KEY_HEX", config.BACKUP_ENCRYPTION_KEY_HEX],
+    ["FAKE_RAILS_ADMIN_PASSWORD", config.FAKE_RAILS_ADMIN_PASSWORD],
+    ["FAKE_RAILS_JWT_SECRET", config.FAKE_RAILS_JWT_SECRET],
+    ["FAKE_RAILS_SEEDER_TOKEN", config.FAKE_RAILS_SEEDER_TOKEN],
+  ];
+  for (const [name, value] of secrets) {
+    if (!value) continue;
+    const reason = weakSecretReason(value);
+    if (reason) problems.push(`${name} ${reason}`);
+  }
+  if (config.KMS_MASTER_KEY_HEX) {
+    const reason = weakSecretReason(config.KMS_MASTER_KEY_HEX);
+    if (reason) problems.push(`KMS_MASTER_KEY_HEX ${reason}`);
+  }
+  if (config.FAKE_RAILS_JWT_SECRET && config.FAKE_RAILS_JWT_SECRET === config.FAKE_RAILS_SEEDER_TOKEN) {
+    problems.push("FAKE_RAILS_JWT_SECRET and FAKE_RAILS_SEEDER_TOKEN must differ");
+  }
+  return problems;
+};
+
+/**
+ * Test/sandbox tooling is refused whenever DEPLOY_ENV is production - which is
+ * also what an unset DEPLOY_ENV means. Needs an explicit
+ * DEPLOY_ENV=development|staging|test.
+ */
+export const productionGuardProblems = (config: DeployConfig): string[] => {
+  if (config.DEPLOY_ENV !== "production") return [];
+  const hint = 'DEPLOY_ENV is "production" (also the default when unset); set DEPLOY_ENV=development|staging|test explicitly for a non-production deployment';
+  const problems: string[] = [];
+  if (config.FAKE_RAILS_ENABLED) problems.push(`FAKE_RAILS_PRODUCTION_GUARD_BLOCKED: FAKE_RAILS_ENABLED is refused: ${hint}`);
+  if (config.IS_TEST_SERVER) problems.push(`IS_TEST_SERVER is refused: ${hint}`);
+  if (config.FAKE_RAILS_ALLOW_IN_PRODUCTION) problems.push("FAKE_RAILS_ALLOW_IN_PRODUCTION=true is refused when DEPLOY_ENV is production");
+  if (config.RUN_SYNTHETIC_HISTORY_SEED) problems.push(`RUN_SYNTHETIC_HISTORY_SEED is refused: ${hint}`);
+  return problems;
+};
+
 /**
  * Cross-field rules. A value can be valid in isolation and still make the
  * topology impossible (the database URL not matching the engine, a certbot
@@ -583,6 +703,8 @@ export const effectiveDatabase = (config: DeployConfig): {
 export const validateDeployConfig = (config: DeployConfig): string[] => {
   const problems: string[] = [];
   const pgConfigured = pgStorageConfigured(config);
+  problems.push(...weakSecretProblems(config));
+  problems.push(...productionGuardProblems(config));
 
   if (pgConfigured && config.DB_ENGINE !== "postgresql") {
     problems.push("DB_ENGINE must be 'postgresql' when PostgreSQL 18 storage fields are configured");
@@ -718,6 +840,9 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     if (!config.BACKUP_SSH_KEY_PATH) problems.push("BACKUP_SSH_KEY_PATH is required when BACKUP_ENABLED=true");
     if (!config.BACKUP_PRIMARY_S3_BUCKET) problems.push("BACKUP_PRIMARY_S3_BUCKET is required when BACKUP_ENABLED=true");
     if (!config.BACKUP_ENCRYPTION_KEY_HEX) problems.push("BACKUP_ENCRYPTION_KEY_HEX is required when BACKUP_ENABLED=true");
+    if (config.BACKUP_ENGINE_MODE === "wal-g" && !config.BACKUP_WALG_SHA256) {
+      problems.push("BACKUP_WALG_SHA256 is required when BACKUP_ENGINE_MODE=wal-g (SHA-256 of the pinned WAL-G release asset; the install fails closed without it)");
+    }
     const endpointIsHttpUrl = (() => {
       try {
         const endpoint = new URL(config.BACKUP_PRIMARY_S3_ENDPOINT);
@@ -941,9 +1066,6 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   if (config.RUN_SYNTHETIC_HISTORY_SEED) {
     if (!config.IS_TEST_SERVER) problems.push("RUN_SYNTHETIC_HISTORY_SEED requires IS_TEST_SERVER=true");
     if (!config.FAKE_RAILS_ENABLED) problems.push("RUN_SYNTHETIC_HISTORY_SEED requires FAKE_RAILS_ENABLED=true");
-    if (config.DEPLOY_ENV === "production" && !config.FAKE_RAILS_ALLOW_IN_PRODUCTION) {
-      problems.push("RUN_SYNTHETIC_HISTORY_SEED requires FAKE_RAILS_ALLOW_IN_PRODUCTION=true in production");
-    }
   }
 
   return problems;
@@ -987,11 +1109,50 @@ export interface ConfigLoadResult {
   problems: string[];
 }
 
+/** Luhn mod-10 check for a digit string. */
+const luhnValid = (digits: string): boolean => {
+  let sum = 0;
+  let double = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = digits.charCodeAt(i) - 48;
+    if (double) { d *= 2; if (d > 9) d -= 9; }
+    sum += d;
+    double = !double;
+  }
+  return sum % 10 === 0;
+};
+
+/** True when the text contains a standalone Luhn-valid 13-19 digit run (card PAN shape). */
+export const looksLikeCardPan = (text: string): boolean => {
+  for (const match of text.matchAll(/(?<![\w-])\d(?:[ -]?\d){12,18}(?![\w-])/g)) {
+    const digits = match[0].replace(/[ -]/g, "");
+    if (digits.length >= 13 && digits.length <= 19 && luhnValid(digits)) return true;
+  }
+  return false;
+};
+
+const PAN_KEY = /(^|_)(PAN|CVV|CVV2|CVC|CVC2|CARD_NUMBER|CARD_NO|PAN_RAIL|PAN_RAILS|CARD_RAIL|CARD_RAILS)(_|$)/;
+
+/**
+ * GAP-026 PAN-rail guard: the gateway is out of PCI cardholder-data scope
+ * (docs/pci-scope.md). Deploy config must not carry PAN rails or card data.
+ */
+export const panRailGuardProblems = (env: Record<string, string>): string[] => {
+  const problems: string[] = [];
+  for (const [key, value] of Object.entries(env)) {
+    if (PAN_KEY.test(key)) problems.push(`PAN_RAIL_GUARD: ${key} is refused: card PAN/CVV rails are out of PCI scope (docs/pci-scope.md)`);
+    else if (looksLikeCardPan(value)) problems.push(`PAN_RAIL_GUARD: ${key} holds card-PAN-shaped data (Luhn-valid 13-19 digits); refused`);
+  }
+  return problems;
+};
+
 /** Parses and validates a `deploy.env` source. */
 export const loadDeployConfig = (source: string): ConfigLoadResult => {
   const env = parseDeployEnv(source);
   const resolvedEngine = resolveBackupEngineMode(env);
   if (resolvedEngine) env.BACKUP_ENGINE_MODE = resolvedEngine;
+  const panProblems = panRailGuardProblems(env);
+  if (panProblems.length > 0) return { ok: false, problems: panProblems };
   const parsed = base.safeParse(env);
   if (!parsed.success) {
     return {

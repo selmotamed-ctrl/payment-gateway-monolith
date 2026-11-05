@@ -3,7 +3,7 @@ id: edge.admin
 title: Admin Edge BFF
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - admin-back/index.ts
@@ -18,6 +18,7 @@ design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#163-admin-back-lan-only-api-apiv1admin---forwards-to-core-back-internaladmin
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#5-host-aware-ufw-firewall--network-isolation-provisioning
 tests:
+  - admin-back/test/session-cookie-and-logout.test.ts
   - admin-back/test/admin-surface.test.ts
   - admin-back/test/core-contract.test.ts
   - admin-back/test/core-internal-client.test.ts
@@ -25,12 +26,14 @@ tests:
   - admin-back/test/backups.test.ts
   - admin-back/test/academy-progress.test.ts
   - admin-back/test/env-isolation.test.ts
+  - admin-back/test/security-regressions.test.ts
 gaps:
   - Edge authority gating decodes JWT claims without verifying the signature or expiry; it is advisory and forgeable, and core remains the only enforcement point.
   - Most admin routes are protected only by the presence of an Authorization header; AML and backup routes are the only edge-level authority checks.
   - The login/MFA rate limiter uses a fixed 15-minute window and ignores AUTH_RATE_LIMIT_WINDOW_MS.
-  - CORS reflects any origin and the LAN guard's trust in forwarded IP headers depends on the reverse-proxy topology.
+  - CORS headers are emitted only when `CORS_ALLOWED_ORIGINS` is set (historically `origin: true`), and the LAN guard's trust in forwarded IP headers depends on the reverse-proxy topology.
   - The admin KYB join-request upload route forwards the file without the shared MIME/magic-byte validation used by merchant uploads and reconciliation.
+  - "Cookie session mode is opt-in (`SESSION_COOKIE_MODE`, default off); with it off the token still lives in browser storage (GAP-019 residual)."
 ---
 
 # Admin Edge BFF
@@ -63,7 +66,7 @@ The admin surface is intentionally broad: users, join requests and KYB, merchant
 
 - `x-powered-by` disabled;
 - `trust proxy` disabled at the Express layer (`app.set("trust proxy", false)`);
-- CORS with `origin: true` and `credentials: false`;
+- CORS: no headers unless `CORS_ALLOWED_ORIGINS` is set (credentials disabled), plus hand-written security headers (nosniff, no-referrer, X-Frame-Options, `frame-ancestors 'none'`, CORP, default no-store);
 - request logging middleware;
 - an unauthenticated `GET /health` returning `{ status: "ok", service: "admin-back", uptime }`;
 - JSON and URL-encoded body parsers limited by `MAX_JSON_BODY_BYTES`;
@@ -84,7 +87,7 @@ The listener binds to `ADMIN_BIND_HOST` (default `127.0.0.1`). The deploy engine
 | Search limiter | `POST /search` has its own 120-requests-per-minute limiter keyed by a SHA-256 hash of the bearer token or IP. |
 | Upload middleware | Multer memory storage with `MAX_UPLOAD_BYTES`; the reconciliation route validates the detected MIME type and magic bytes through `assertAllowedUpload`, while the join-request KYB route forwards the raw file without that check. |
 
-`extractAuthorityHints()` does not verify the token signature and does not check `exp` or `nbf`. It rejects a token only when a present `typ` is not `session`, a present `iss` is not `payment-gateway-core`, or a present `aud` does not include `payment-gateway-edge`. A caller can therefore craft a token that satisfies the edge's AML or backup gate; `core-back` will still reject it. This is documented as advisory gating, not authentication.
+`extractAuthorityHints()` does not verify the token signature and does not check `exp` or `nbf`. It rejects a token only when a present `typ` is not `session`, a present `iss` is not `payment-gateway-core`, or a present `aud` does not include `payment-gateway-admin` (the admin channel audience; the former `payment-gateway-edge` is no longer accepted, GAP-020). A caller can therefore craft a token that satisfies the edge's AML or backup gate; `core-back` will still reject it. This is documented as advisory gating, not authentication.
 
 `ADMIN_AUTHORITY_HINTS` filters which requested authority strings the edge checks. If the configured list is empty, the edge skips the check. If a requested authority is not in the configured list, it is not counted as expected; if no expected authorities remain, the route passes.
 
@@ -162,7 +165,7 @@ The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "am
 | `CORE_BACK_URLS` | optional | Core pool. |
 | `MTLS_CLIENT_CERT_PATH`, `MTLS_CLIENT_KEY_PATH`, `MTLS_CA_CERT_PATH` | required | Edge mTLS material. |
 | `CORE_REQUEST_TIMEOUT_MS` | `60000` | Core request timeout. |
-| `TRUSTED_PROXY_CIDRS` | loopback plus RFC1918 ranges | Peers whose forwarded IP headers are trusted. |
+| `TRUSTED_PROXY_CIDRS` | loopback only (`127.0.0.0/8,::1/128`; deploy sets `127.0.0.1/32,::1/128`) | Peers whose forwarded IP headers are trusted. |
 | `ADMIN_LAN_CIDRS` | loopback plus RFC1918 ranges | Allowed admin clients. |
 | `ADMIN_AUTHORITY_HINTS` | roles plus `aml:*` and `security:*` | Edge-checkable authority vocabulary. |
 | `MAX_JSON_BODY_BYTES` | `4194304` | JSON limit. |
@@ -222,7 +225,7 @@ bun run typecheck
 
 - A forged token with acceptable `typ`/`iss`/`aud` can pass edge AML or backup gating. Core rejects it, but the edge response differs from an outright authentication failure and may leak route existence.
 - Core verifies the session signature, expiry, user status and authorities, but it does not enforce per-call MFA state, session revocation or a per-user admin IP allowlist. The edge does not add those checks.
-- CORS reflects any origin. The LAN guard is the compensating control; do not expose `:8443` outside the LAN.
+- CORS is off unless `CORS_ALLOWED_ORIGINS` is set (cross-origin dev frontends need it). The LAN guard remains a control; do not expose `:8443` outside the LAN.
 - `app.set("trust proxy", false)` means Express's `req.ip` is the socket peer. The LAN guard implements its own trusted-proxy logic; the two can disagree if a new proxy is introduced.
 - The join-request KYB upload forwards the client-declared MIME type without magic-byte validation. Core must treat the file as untrusted.
 - Protected admin routes accept any non-empty bearer string; core is the only authentication authority.
@@ -272,3 +275,13 @@ The tests use a local HTTPS/HTTP stub and do not require PostgreSQL or Redis. A 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+- **authorityGuard.** Rejects `alg: none` and non-HS256 tokens and bad signature segment shape; requires `typ`, `iss`, `aud` and `exp` and enforces `exp`/`nbf`. `ADMIN_AUTHORITY_HINTS` (default empty) can only restrict, never skip a guard. Matching is case-sensitive. `requireSession` returns `401 AUTH_INVALID` for tokens that are not live core-shaped sessions. `*` is honoured at the edge; core re-verifies (the edge cannot verify signatures because the key lives in core).
+- **Deny-by-default any-of authority lists** on: users, join-requests, kyb-documents, merchants suspend/close, approvals, gateways, gateway-versions, rails, routes, assets, credential-sets, reconciliation, settings (restore-preview is a read, restore-apply a write), audit-logs, operator-cases, gateway-inquiries, attempts, disputes, adjustments, cashouts, commission-profiles, velocity-rules, finance and system/backups. Search, academy, options and stats are left to core.
+- **Backups.** Policy cron is validated (5 fields; minimum gaps full 60, delta 5, drill 60 minutes); retention floors full >= 7 days and WAL >= 3 days unless `approvalRequestId` is supplied. Backup trigger and drill require an `Idempotency-Key` header (8-128 URL-safe characters) relayed to core, with `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
+- **KYB uploads.** Upload runs `assertAllowedUpload` (png/jpeg/pdf) plus zod validation; the content route forces `Content-Disposition: attachment`, a CSP sandbox and a Content-Type allow-list. `logoUrl` must be http(s).
+- **Limiters** key on the resolved client IP plus a per-account limiter on login/MFA. Admin `x-pg-min-lsn` is validated (400).
+- **Logout and session cookie (GAP-019, RESOLVED 2026-11-05).** `POST /api/v1/admin/auth/logout` (public router, `logoutHandler`) forwards to core `POST /internal/admin/auth/logout`, which revokes the session `jti`, and clears the session cookie. With `SESSION_COOKIE_MODE=true` (default `false`) login and MFA responses move the token into the `pg_admin_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/admin`, 12 h, `Secure` unless `SESSION_COOKIE_SECURE=false`, default `true`) and return `sessionCookie: true` instead of `token` (`captureSessionToken`); the `cookieSession` middleware, mounted first on the admin router, converts the cookie into the `Authorization: Bearer` header when the caller sent none and requires `x-pg-csrf: 1` on unsafe methods (`403 CSRF_HEADER_REQUIRED`). Both settings are validated by `admin-back/lib/env`.
+- **Session audience and breaker (GAP-020, GAP-021).** The advisory authority guard now requires `aud=payment-gateway-admin`. The core upstream client removes a node from rotation only after `CORE_FAILURE_THRESHOLD = 3` consecutive failures. Sessions minted before the audience change are rejected and administrators must sign in again.

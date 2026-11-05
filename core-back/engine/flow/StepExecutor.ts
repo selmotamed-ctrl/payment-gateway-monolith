@@ -213,6 +213,8 @@ export interface StepExecutorOptions {
   fetch?: typeof fetch;
   transformPipeline?: TransformPipeline;
   allowedHosts?: readonly string[];
+  /** Explicit opt-out: an empty `allowedHosts` otherwise fails closed. */
+  allowAnyHost?: boolean;
   dnsLookup?: (hostname: string) => Promise<string[]>;
   dnsGuard?: (hostname: string) => Promise<void>;
   logger?: StepExecutorLogger;
@@ -794,6 +796,8 @@ export class StepExecutor {
     // so a placeholder base URL was always treated as non-Fake-Rails.
     const resolvedForAllowlist = compileUrl(step.url_template, query, {
       allowedHosts: this.options.allowedHosts,
+      allowAnyHost: true,
+      allowPrivateHosts: true,
       requireHttps: false,
       parameters: pathParameters,
       destination: "URL",
@@ -804,6 +808,8 @@ export class StepExecutor {
     );
     const url = compileUrl(step.url_template, query, {
       allowedHosts: this.options.allowedHosts,
+      allowAnyHost: this.allowAnyHost(),
+      allowPrivateHosts: true,
       requireHttps: !fakeRailsTarget,
       parameters: pathParameters,
       destination: "URL",
@@ -1036,11 +1042,23 @@ export class StepExecutor {
     };
   }
 
+  /**
+   * The executor-level list is not the egress allowlist (the per-gateway
+   * ApiConsumer is). Without an explicit list or opt-out the executor does not
+   * apply a host allowlist of its own; private/loopback destinations are
+   * refused by the DNS/literal checks of assertUrlAllowed.
+   */
+  private allowAnyHost(): boolean {
+    return this.options.allowAnyHost ?? this.options.allowedHosts === undefined;
+  }
+
   private async assertUrlAllowed(url: string): Promise<void> {
     const candidate = new URL(url);
     const fakeRailsTarget = isFakeRailsHostAllowed(candidate.hostname, this.options.allowedHosts);
     const parsed = validateFinalUrl(url, {
       allowedHosts: this.options.allowedHosts,
+      allowAnyHost: this.allowAnyHost(),
+      allowPrivateHosts: true,
       requireHttps: !fakeRailsTarget,
     });
     const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");

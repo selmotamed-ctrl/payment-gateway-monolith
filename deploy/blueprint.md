@@ -6,7 +6,7 @@ Generated from: `deploy.topology`, `deploy.planner`, `deploy.pki`, `deploy.firew
 
 ## Deploy Topology and Configuration
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -229,7 +229,7 @@ Start with `--dry-run`: it validates the real file, builds the plan and prints e
 - No JSON schema export or `deploy.env` autocomplete.
 - No validation of explicit `CORE_BACK_URLS` entries in the deploy schema (they are passed through and later used by the edge env).
 - No requirement that `PG_VERSION` be exactly `18`.
-- No explicit requirement for `PG_REPLICATION_PASSWORD` when replicas are configured.
+- No explicit requirement for `PG_REPLICATION_PASSWORD` when replicas are configured (the replica `.pgpass` is now streamed over stdin, GAP-028).
 
 ### Known bugs / risks
 
@@ -290,9 +290,22 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 - `deploy/test-matrix/topologies.ts` renders every topology derived from the multi-machine lab config (see `testing.multi-machine-matrix`; the two-host example keeps the T1-T8 aliases) and `deploy/test/testMatrix.test.ts` validates every rendered file through `loadDeployConfig` and `planHosts`.
 - The node grammar accepts only IPv4 for `sshHost` and `privateIp`, and SSH user/key/sudo are per tier, not per host; the lab config enforces both.
 
+## Security hardening (2026-11-05)
+
+- **Environment.** `DEPLOY_ENV` now defaults to `production` and gains `test`. In production `FAKE_RAILS_ENABLED`, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION=true` and the synthetic seeder are refused. `deploy.env.example` ships `DEPLOY_ENV=production` and placeholders, so it deliberately fails validation until replaced.
+- **Secrets.** `weakSecretReason` rejects placeholders (`change-me`, `password`, `admin`, `example`...), repeated/sequential patterns and low entropy. `KMS_MASTER_KEY` needs at least 32 characters; the JWT secret must differ from the seeder token.
+- **Schema.** Charsets are restricted for secrets, SSH users, `*_REMOTE_DIR`, `PG_DATA_DIR`, backup/cert paths (absolute, no `..`), cron expressions, binary names and hosts.
+- **New optional keys.** `BACKUP_WALG_VERSION` (default 3.0.9), `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION` (3.10.1), `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; required `BACKUP_WALG_SHA256` in wal-g mode; lab key `LAB_WALG_SHA256`.
+- `PG_REPLICATION_*` is no longer written to the core app env.
+
+## Gap resolutions (2026-11-05)
+
+- **PAN-rail guard (GAP-026, partially resolved).** `loadDeployConfig` runs `panRailGuardProblems` over the environment: a key naming a PAN/CVV/card-number rail (`PAN`, `CVV`, `CVV2`, `CVC`, `CVC2`, `CARD_NUMBER`, `CARD_NO`, `PAN_RAIL(S)`, `CARD_RAIL(S)` as an underscore-delimited token) or a value containing a Luhn-valid 13-19 digit run is refused with a `PAN_RAIL_GUARD` problem. The scope statement is `deploy/docs/pci-scope.md` (see `platform.security`); the core-back guard is still open.
+- **GAP-023 remains open:** real WAL-G, bun and barman SHA256 values are operator-supplied.
+
 ## Host Planner
 
-> Status: `implemented` · Last verified: 2026-11-04
+> Status: `implemented` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -570,6 +583,10 @@ The suites cover five-host, two-host and single-host scenarios; firewall source 
 - Merchant and checkout each render both a public and a LAN vhost. Both previously used `pg_<role>_backend`, so `nginx -t` failed with `duplicate upstream`.
 - `upstreamFor()` now accepts a site suffix; public and LAN sites render distinct upstreams while still targeting the same backend node pool.
 - Admin remains `pg_admin_backend` because it has a single vhost; Fake Rails remains `pg_fake_rails_backend`.
+
+## Security hardening (2026-11-05)
+
+The planner's config validation now rejects weak secrets and restricts charsets for hosts, users, remote dirs and paths (see `deploy.topology`). `DEPLOY_ENV` defaults to `production`. Runtime services are still forced to `NODE_ENV=production`. Edge `TRUSTED_PROXY_CIDRS` is written as `127.0.0.1/32,::1/128`.
 
 ## Internal PKI and mTLS Certificates
 
@@ -860,7 +877,7 @@ Not covered by automated tests:
 
 ## Firewall Policy and Application
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -1111,9 +1128,13 @@ Not covered:
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
 
+## Security hardening (2026-11-05)
+
+The Fake Rails nginx vhost now also applies `allow`/`deny` rules from `FAKE_RAILS_ALLOWED_CIDRS` (the application-level check compares `socket.remoteAddress`, not `X-Forwarded-For`). All six nginx templates set `server_tokens off` and `limit_req` with `limit_req_status 429`. UFW rules are unchanged.
+
 ## Deployment Pipeline
 
-> Status: `partial` · Last verified: 2026-11-04
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -1179,9 +1200,9 @@ The legacy path creates the database/role when `DB_MANAGE_VIA_SSH` and no PG tie
 
 #### Pre-migration backup details
 
-`preMigrationBackup()` resolves the primary direct port (never PgBouncer) and the PG or legacy credentials, then builds `PGPASSWORD="<password>" pg_dump -h <host> -p <port> -U <user> -Fc <db> > <target>.dump`. `backupDatabase()` creates `<CORE_REMOTE_DIR>/shared/backups`, chowns it to the effective target user (the SSH user for a remote host, the orchestrator's OS user for a local target), and runs the command on the **core host** as that user. The file is `pre-migrate-<releaseTimestamp>.dump`.
+`preMigrationBackup()` resolves the primary direct port (never PgBouncer) and the PG or legacy credentials, then builds `PGPASSFILE=<private passfile> pg_dump -h <host> -p <port> -U <user> -Fc <db> > <target>.dump`. `backupDatabase()` creates `<CORE_REMOTE_DIR>/shared/backups`, chowns it to the effective target user (the SSH user for a remote host, the orchestrator's OS user for a local target), and runs the command on the **core host** as that user. The file is `pre-migrate-<releaseTimestamp>.dump`.
 
-No dump is taken on a fresh install. A failure aborts before migrations. `pg_dump` must already exist (the bootstrap package list omits `postgresql-client`), `PGPASSWORD` appears in the verbose remote command, and the dump is not automatically verified or restored.
+No dump is taken on a fresh install. A failure aborts before migrations. `pg_dump` must already exist (the bootstrap package list omits `postgresql-client`), the password no longer appears on the command line (PGPASSFILE), and the dump is not automatically verified or restored.
 
 #### Backup daemon source deployment
 
@@ -1374,7 +1395,7 @@ It then prints `Deployment complete.` There is no post-deploy state file and no 
 
 ### Known bugs / risks
 
-- `PGPASSWORD` is embedded in the remote command string and can appear in verbose logs.
+- The pre-migrate dump uses a PGPASSFILE (no PGPASSWORD on the command line). Credential handling of the health-step storage probes was not re-audited in this change.
 - The pre-migration dump can fail on a minimal core host without PostgreSQL client tools.
 - A rolling batch failure leaves earlier batches on the new release and later batches untouched; there is no automatic compensation.
 - `pm2 delete` + `pm2 start` creates a restart gap for a single-node service; the deploy itself does not provide zero downtime.
@@ -1445,9 +1466,22 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 - **Orphaned PM2 apps**: `retireOrphanedPm2Apps` runs before each service start and deletes same-tier PM2 apps (`<base>` or `<base>-*`) that are not in the plan. Leftover `pg-core-back-core-1/2` and `pg-checkout-back-chk-1/2` from an earlier two-instance topology kept ports 4000/4001 bound with stale credentials, so the new core died with `EADDRINUSE` while `/health` probes hit the stale process and reported `QUEUE_HEALTH_UNAVAILABLE`.
 - **Synthetic seed**: an already-seeded database under another seed key is skipped instead of failing (see `01-core-back/10-synthetic-seeder.md` §3.10); the deploy log reports it as skipped.
 
+## Security hardening (2026-11-05)
+
+- **Quoting.** `deploy/lib/quoting.ts` is the single helper set (`shellQuote`, `sqlLiteral`, `sqlIdent`, `dollarTag`, `pgbouncerQuoted`, `pgpassField`, `assertSingleLine`, `envAssign`). Paths are shell-quoted in rm/chown/mkdir/ln/xargs/pm2 commands.
+- **Pre-migrate dump.** `pg_dump` uses `PGPASSFILE` (never `PGPASSWORD`), runs under `umask 077` into a 0700 backups directory, and only the newest `KEEP_RELEASES` dumps are kept. The earlier statements in this part that the dump embeds `PGPASSWORD` are superseded.
+- **Migrations.** `planMigrations()` is exported; only the first core node migrates. `--fresh` against a non-empty database is refused unless `--force-fresh` or `DEPLOY_FORCE_FRESH=1`. Update deploys run `migrate deploy` when migrations are pending or unknown. The dump is taken before migrating in both modes when the database is non-empty or unknown.
+- **sshRunner** local-sudo writes use an `mkdtemp` 0700 directory removed in `finally`.
+- **Bun** is installed from a pinned download verified against `BUN_SHA256` (no `curl | bash`).
+- **nginx templates**: `server_tokens off` and `limit_req` (with `limit_req_status 429`) in all six; the fakerails vhost gets `allow`/`deny` from `FAKE_RAILS_ALLOWED_CIDRS`, `script-src 'self'`, `object-src 'none'`, `frame-ancestors 'self'` (previously `'self' *`); the checkout CSP is unchanged.
+- **scripts/deploy-localhost.sh** refuses `NODE_ENV=production` unless `LOCAL_TARGET=1`, no longer falls back to default secrets (random secrets via `openssl rand` go to a 0600 `.local/secrets.env` or `LOCAL_SECRETS_FILE`), and requires `DB_PASSWORD`.
+- **CI and legacy deploy workflows (GAP-014, RESOLVED 2026-11-05).** `.github/workflows/ci.yml` (jobs `design`, `backend`, `frontend`; triggers push to `main`/`ayoub`, pull requests and manual dispatch; `contents: read`; concurrency-cancelled per ref) runs the AGENTS.md gate: `bun scripts/project-design/build.ts --check`, then for `core-back`, `deploy`, `deploy/backup-daemon`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` a frozen-lockfile install, typecheck and `bun test`, and for `admin-front`, `merchant-front`, `checkout-front` and `fake-rails-front` a frozen-lockfile install and `bun run build`. Suites that need PostgreSQL 18 and Redis skip themselves when the services are absent. The per-service `*/.github/workflows/deploy.yml` workflows are now legacy and manual only (`workflow_dispatch` with a typed `deploy` confirmation): they run the service typecheck/tests first, run the deploy job in the `legacy-deploy` environment, use `StrictHostKeyChecking=yes` with a pinned `known_hosts` taken from the **`SSH_KNOWN_HOSTS` secret (which operators must now create, with the server's verified host key lines)**, sync additively (no `rsync --delete`) and never scan the host key on first use. The supported deploy path remains the multi-host engine in `deploy/`. Tests: `deploy/test/ci-workflows.test.ts`.
+- **Replica pgpass (GAP-028, RESOLVED).** The replica `.pgpass` is streamed over stdin; see `deploy.storage`.
+- **Still open.** GAP-023: real WAL-G/bun/barman SHA256 values must be supplied by the operator.
+
 ## Storage Provisioners
 
-> Status: `partial` · Last verified: 2026-11-04
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -1575,7 +1609,7 @@ The retention function only drops partitions whose names match the monthly suffi
 `provisionBackupEngine()` installs:
 
 - `barman`, `zstd`, `lz4`, `brotli`, `xz-utils`, `rclone`, `curl`, `ca-certificates`;
-- WAL-G when `BACKUP_ENGINE_MODE=wal-g`, by downloading `wal-g-pg-ubuntu-20.04-amd64` from the GitHub "latest" release and chmod +x;
+- WAL-G when `BACKUP_ENGINE_MODE=wal-g`, by downloading the pinned asset (`BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`) and verifying it against the required `BACKUP_WALG_SHA256` (fail closed), then chmod +x;
 - the `pgbackup` system user and `/var/lib/pg-backup`, log and cert directories;
 - `/etc/pg-backup/backup.env` from `backupDaemonEnv()`;
 - `/etc/pg-backup/wal-g.env` for the core target;
@@ -1808,9 +1842,26 @@ Not covered:
 - `provisionBackupEngine()` waits after the core and audit archive restarts, restarts PgBouncer after the last PostgreSQL restart, and waits for PgBouncer on `PGBOUNCER_PORT`. The audit target can share the primary cluster, so its restart could otherwise leave PgBouncer caching `the database system is shutting down (server_login_retry)` when the core release runs migrations through `:6432`.
 - These waits prevent the core migration step from racing a PostgreSQL restart on single-machine and co-located audit deployments.
 
+## Security hardening (2026-11-05)
+
+- **Quoting.** Provisioners (postgres18, auditAndLogDb, backupEngine) use `deploy/lib/quoting.ts`: SQL literals are escaped, DO blocks use collision-free dollar tags, and `pgbouncer.ini`, `userlist` and `.pgpass` are escaped. `backup.env` and `wal-g.env` are rendered `KEY='value'` (a single quote in a value is rejected).
+- **Credentials.** `pg_basebackup` uses `PGPASSFILE`, never `PGPASSWORD`. Bootstrap/audit/log/archive SQL lives in a private 0700 postgres-owned directory, mode 0600, removed by trap/finally.
+- **WAL-G.** `restore_command` is a valid `postgresql.conf` literal (inner quotes doubled). The daemon setting `WALG_ENV_FILE` keeps S3/encryption secrets out of that line; the provisioner writes `/etc/pg-backup/wal-g.env` 0640 root:postgres. WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed with required `BACKUP_WALG_SHA256`; barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`).
+- **Mirror and restore.** The off-site mirror uses `rclone copy`/`rsync` without `--delete` unless `BACKUP_SECONDARY_MIRROR_DELETE=true`. The scratch restore cluster starts with `-c archive_mode=off`.
+- **PostgreSQL.** `listen_addresses = 127.0.0.1,<private IP>`; memory settings derive from optional `PG_RAM_GB` (unset keeps 8GB/24GB/1GB); `PG_IO_METHOD` defaults to `worker` (io_uring is opt-in); an existing standby (PG_VERSION and `standby.signal` present) is not rebuilt unless `PG_REPLICA_REBUILD=true`.
+- **Still open.** Real SHA256 values for WAL-G/bun/barman must be supplied by the operator (GAP-023). GAP-022 and GAP-028 are resolved (see the gap resolutions below).
+
+## Gap resolutions (2026-11-05)
+
+- **PostgreSQL TLS and hostssl-only (GAP-022, RESOLVED).** `postgresTlsSnippet` appends `ssl = on`, `ssl_cert_file`/`ssl_key_file` under `<cluster hba dir>/tls`, `ssl_min_protocol_version = 'TLSv1.2'` and `password_encryption = 'scram-sha-256'` to each cluster's configuration. `pgTlsCommands` idempotently creates a self-signed RSA-4096 certificate (825 days, 0600 key owned by `postgres`) on the primary and replicas unless an operator already installed one. `pgHbaSnippet` now emits only `hostssl` rules (loopback `127.0.0.1/32` and `::1/128`, every allowed source for data and replication); the plain `host` rules were removed. Replica `pg_basebackup` runs with `PGSSLMODE=require` and PgBouncer uses `server_tls_sslmode = require`.
+- **Backup daemon user (GAP-022).** The backup engine provisioner runs the daemon systemd unit as `User=pgbackup`/`Group=pgbackup` with `SupplementaryGroups=postgres`, adds `postgres` to the `pgbackup` group, and owns `/var/lib/pg-backup`, the daemon certificate directory, the log directory, the barman state directory, `BACKUP_PGPASSFILE` and `/etc/pg-backup/wal-g.env` (`root:pgbackup`, 0640) accordingly.
+- **Replica pgpass over stdin (GAP-028, RESOLVED).** `replicaPgpassContent` renders the replication `.pgpass` line and `provisionPostgres18` streams it to `/var/lib/postgresql/.pgpass` (0600) with the remote-file writer; the replication password no longer appears in any command argv. `replicaCommands` only checks and `chown`/`chmod`s the file.
+- **UTC (GAP-030).** The cluster configuration also sets `timezone = 'UTC'` and `log_timezone = 'UTC'` (the engine pins its own sessions, see `core.storage`).
+- **Still open.** GAP-023: real SHA256 values for WAL-G, bun and barman (`BACKUP_WALG_SHA256`, `BUN_SHA256`) must be supplied by the operator for each release.
+
 ## Backup Daemon
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -2029,9 +2080,15 @@ Not covered: a real WAL-G/Barman backup or restore; a real PostgreSQL 18 scratch
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
 
+## Security hardening (2026-11-05)
+
+- **mTLS authorization.** In TLS mode a `node:tls` front listener verifies the client certificate and checks its CN or DNS SAN against `BACKUP_ALLOWED_CLIENT_CNS` (default `backup-client`); anything else gets 403. It is bridged to `Bun.serve` over a private unix socket (a loopback port on win32). Verified live on Windows only; the Linux unix-socket path is untested.
+- New daemon setting `WALG_ENV_FILE` keeps secrets out of the `restore_command` line. The daemon mirror does not delete unless `BACKUP_SECONDARY_MIRROR_DELETE=true`.
+- **Daemon user (GAP-022, RESOLVED 2026-11-05).** The provisioned systemd unit runs as `pgbackup` (`SupplementaryGroups=postgres`) instead of `postgres`, and PostgreSQL accepts only TLS connections (`hostssl`-only `pg_hba`, see `deploy.storage`). The daemon code itself is unchanged.
+
 ## Health Verification, Rollback and Recovery
 
-> Status: `partial` · Last verified: 2026-11-04
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -2272,7 +2329,7 @@ Use the backup daemon's `/v1/drills/run` or the admin backup control to verify a
 
 ### Security notes
 
-- Keep `deploy.env` at 0600 and `deploy/.certs` private; the CA key never leaves the workstation. Secrets are streamed over SSH stdin, but the pre-migration `PGPASSWORD` is embedded in the verbose command and may appear in logs.
+- Keep `deploy.env` at 0600 and `deploy/.certs` private; the CA key never leaves the workstation. Secrets are streamed over SSH stdin, but (superseded for the pre-migration dump, which now uses a PGPASSFILE) the following was recorded earlier: the pre-migration `PGPASSWORD` was embedded in the verbose command and may appear in logs.
 - The core port is private and mTLS-only; edge hosts never receive `DATABASE_URL` or `KMS_MASTER_KEY`.
 - Protect the edge host and make the backup key readable by `pgbackup`.
 - The deploy's `--skip-verify` is not a security control and should not be used for production acceptance.
@@ -2353,3 +2410,7 @@ Not covered: a real edge-to-core handshake, Nginx reload/vhost probe, PostgreSQL
 - `probeBackupDaemon()` now branches on `BACKUP_ALLOW_INSECURE_HTTP`. The previous unconditional HTTPS probe failed with `wrong version number` against a daemon explicitly configured for plain HTTP.
 - The probe label is `backup-daemon /health (mTLS)` or `backup-daemon /health (HTTP)` so the verification report shows which mode was tested.
 - The mTLS path is unchanged and remains the default.
+
+## Security hardening (2026-11-05)
+
+The pre-migration dump is taken before migrating in both modes when the database is non-empty or unknown, uses `PGPASSFILE`, and only the newest `KEEP_RELEASES` dumps are kept (see the pipeline part). Migrations remain forward-only. Real WAL-G/bun/barman SHA256 values must be supplied before recovery tooling can be installed (GAP-023).

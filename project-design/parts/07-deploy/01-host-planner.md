@@ -3,8 +3,8 @@ id: deploy.planner
 title: Host Planner
 status: implemented
 confidence: high
-last_verified: 2026-11-04
-verified_against: working-tree
+last_verified: 2026-11-05
+verified_against: 5a24f6f+working-tree
 code:
   - deploy/test-matrix/gates.ts
   - deploy/lib/hostPlanner.ts
@@ -308,3 +308,7 @@ The suites cover five-host, two-host and single-host scenarios; firewall source 
 - Merchant and checkout each render both a public and a LAN vhost. Both previously used `pg_<role>_backend`, so `nginx -t` failed with `duplicate upstream`.
 - `upstreamFor()` now accepts a site suffix; public and LAN sites render distinct upstreams while still targeting the same backend node pool.
 - Admin remains `pg_admin_backend` because it has a single vhost; Fake Rails remains `pg_fake_rails_backend`.
+
+## Security hardening (2026-11-05)
+
+The planner's config validation now rejects weak secrets and restricts charsets for hosts, users, remote dirs and paths (see `deploy.topology`). `DEPLOY_ENV` defaults to `production`. Runtime services are still forced to `NODE_ENV=production`. Edge `TRUSTED_PROXY_CIDRS` is written as `127.0.0.1/32,::1/128`.

@@ -1,6 +1,7 @@
-import { getBaseUrl, resolveUploadPath } from "@/constants/baseUrl";
+import { getBaseUrl } from "@/constants/baseUrl";
 import axios from "axios";
 import { logout, user } from "../user";
+import { sessionHeaders } from "@/utils/security/sessionToken";
 import { extractApiError, isAppSuspendedError } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import router from "@/router";
@@ -12,8 +13,8 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-    if (user.value?.token) {
-        config.headers["Authorization"] = `Bearer ${user.value.token}`;
+    for (const [name, value] of Object.entries(sessionHeaders(user.value?.token))) {
+        config.headers[name] = value;
     }
     config.headers["X-Client-Channel"] = "admin";
     return config;
@@ -37,7 +38,3 @@ api.interceptors.response.use(undefined, (error) => {
     }
     throw error;
 });
-
-export const resolveUploadPathWithMat = (path: string) => {
-    return `${resolveUploadPath(path)}?mat=${encodeURIComponent(user.value?.token || "")}`;
-};

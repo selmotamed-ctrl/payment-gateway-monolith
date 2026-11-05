@@ -3,7 +3,7 @@ id: testing.strategy
 title: Testing Strategy
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - deploy/test-matrix/**
@@ -22,6 +22,7 @@ tests:
   - core-back/test/storage-engine/**
   - tests/e2e/**
   - tests/e2e-live/**
+  - tests/unit/frontend-security-admin.test.ts
 gaps:
   - The multi-machine matrix (`testing.multi-machine-matrix`) has no live certification run yet; topologies and gates are only unit-verified.
   - The claimed 38,500 assertions are not present; the working tree has about 1,807 literal test declarations.
@@ -294,3 +295,7 @@ This part is verified by inspecting the runner, configs and suite files. It has 
 - `cli.ts` validates, plans, bootstraps, runs, tears down and writes reports carrying the config hash and resolved intensity.
 
 See `testing.multi-machine-matrix` for the as-built details and gaps.
+
+## Security regression coverage (2026-11-05)
+
+Security regression suites exist for core-back (`test/security-regressions/`), the three edges, deploy, the backup daemon, fake-rails-back and the three frontends (`tests/unit/frontend-security-*.test.ts`). Run them with `bun test ./path`. The older `tests/unit` tests that need the vitest `@` alias do not run under bun, and vitest is currently broken on the development machine (missing rolldown native binding). True concurrency tests need PostgreSQL 18. Known test drift: `core-back/test/helpers/retentionFake.ts` cannot parse the new InvariantVerifier query.

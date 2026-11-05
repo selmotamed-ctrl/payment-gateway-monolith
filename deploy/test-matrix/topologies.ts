@@ -58,7 +58,7 @@ export const renderTopologyEnv = ({ config, topology, secrets, intensity, sudoPa
 
   return {
     DEPLOY_MODE: topology.deployMode,
-    DEPLOY_ENV: "production",
+    DEPLOY_ENV: "test",
     ROLLING_BATCH_SIZE: "1",
     KEEP_RELEASES: "3",
     LAN_ALLOWED_CIDRS: lanCidrs(config),
@@ -120,6 +120,9 @@ export const renderTopologyEnv = ({ config, topology, secrets, intensity, sudoPa
     BACKUP_ENCRYPTION_KEY_HEX: secrets.backupEncryptionKeyHex,
     // The lab provisions its own object store; the engine must not install one.
     BACKUP_S3_MODE: "external",
+    // WAL-G is installed from a pinned release and verified by SHA-256 (fails closed). Set LAB_WALG_SHA256 to the
+    // real checksum of the release asset; the all-zero fallback can never verify and makes the install abort.
+    BACKUP_WALG_SHA256: process.env.LAB_WALG_SHA256 ?? "0".repeat(64),
     BACKUP_PRIMARY_S3_ENDPOINT: objectStore && objectStoreMachine ? `http://${machinePrivateIp(objectStoreMachine)}:${objectStore.port}` : "",
     BACKUP_PRIMARY_S3_BUCKET: objectStore ? `s3://${objectStore.bucket}` : "",
     BACKUP_PRIMARY_S3_ACCESS_KEY: secrets.objectStoreAccessKey,

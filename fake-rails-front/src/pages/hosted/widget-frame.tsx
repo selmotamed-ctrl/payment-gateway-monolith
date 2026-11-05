@@ -3,7 +3,8 @@ import { computed } from "vue";
 import { VAlert } from "vuetify/components";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { api } from "@/utils/api";
+import { postHostedAction } from "@/utils/api";
+import { resolveCheckoutOrigin } from "@/utils/security";
 
 const WidgetFramePage = dc(() => {
   const params = new URLSearchParams(window.location.search);
@@ -18,16 +19,22 @@ const WidgetFramePage = dc(() => {
   const rail = params.get("rail") ?? "moamalat";
 
   const post = (type: string, payload: Record<string, unknown>) => {
-    window.parent?.postMessage({ type, payload }, "*");
+    // Never "*": post only to the known checkout origin (VITE_CHECKOUT_ORIGIN, else the embedding parent).
+    const targetOrigin = resolveCheckoutOrigin(
+      import.meta.env.VITE_CHECKOUT_ORIGIN,
+      window.location.ancestorOrigins?.[0],
+      document.referrer,
+    );
+    if (!targetOrigin) {
+      return;
+    }
+    window.parent?.postMessage({ type, payload }, targetOrigin);
   };
 
   const complete = async (serverPayment: boolean) => {
     if (serverPayment && reference) {
       try {
-        await api(`/portal-api/hosted/session/${encodeURIComponent(reference)}/action`, {
-          method: "POST",
-          body: { action: "APPROVE" },
-        });
+        await postHostedAction(reference, "APPROVE");
       } catch {
         // The widget still reports completion so the T-06 spoof test is possible.
       }
@@ -38,10 +45,7 @@ const WidgetFramePage = dc(() => {
   const decline = async () => {
     if (reference) {
       try {
-        await api(`/portal-api/hosted/session/${encodeURIComponent(reference)}/action`, {
-          method: "POST",
-          body: { action: "DECLINE" },
-        });
+        await postHostedAction(reference, "DECLINE");
       } catch {
         // ignore
       }

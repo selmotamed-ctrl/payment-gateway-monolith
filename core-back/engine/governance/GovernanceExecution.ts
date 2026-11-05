@@ -1,5 +1,7 @@
 import { Decimal } from "decimal.js";
 import { ApiError } from "../../lib/error";
+import { lockWalletLedgerBalance } from "../../lib/cashoutBalance";
+import { payoutAccountHash } from "../../lib/joinRequestOnboarding";
 import { nextKybReviewAt, parseKybRefreshPolicy } from "../../lib/kybReview";
 import {
   MERCHANT_CLOSE_REASON_CODES,
@@ -936,6 +938,21 @@ export async function executeMerchantPatch(
       idempotent: true,
     };
   }
+  if (touched.has("payoutBankDetailsJson")) {
+    // GAP-017: a payout-account change reaches this point only through the
+    // maker-checker merchant edit. The KYB hash that binds cash-out destinations
+    // is re-derived from the approved account, and an account that yields no
+    // hash (removed or incomplete) is refused instead of silently unbinding.
+    const hash = payoutAccountHash(data.payoutBankDetailsJson);
+    if (!hash) {
+      throw new ApiError(
+        422,
+        "PAYOUT_ACCOUNT_HASH_REQUIRED",
+        "The payout account must include a bank and an account number or IBAN",
+      );
+    }
+    data.payoutAccountHash = hash;
+  }
   data.version = merchantVersion(merchant) + 1;
   await merchants.update({ where: { id: input.merchantId }, data });
 
@@ -1089,12 +1106,25 @@ export async function executeUserAuthorityChange(
   if (role !== undefined) {
     data.role = role;
   }
+  // Maker/checker flags and activation are only ever applied through an approval.
+  if (typeof payload.isMaker === "boolean") {
+    data.isMaker = payload.isMaker;
+  }
+  if (typeof payload.isChecker === "boolean") {
+    data.isChecker = payload.isChecker;
+  }
+  if (payload.status === "ACTIVE") {
+    data.status = "ACTIVE";
+  }
   if (Object.keys(data).length === 0) {
     throw new ApiError(
       409,
       "USER_APPROVAL_NO_FIELDS",
-      "The approval carries neither an authorities map nor a role change",
+      "The approval carries no authorities map, role, maker/checker flag or activation",
     );
+  }
+  if (input.checkerUserId === input.userId) {
+    throw new ApiError(409, "APPROVAL_SELF_CHANGE", "A user cannot approve a change to their own account");
   }
   const updated = await users.update({ where: { id: input.userId }, data });
   await writeAudit(ctx, tx, {
@@ -1103,8 +1133,20 @@ export async function executeUserAuthorityChange(
     action: "USER_AUTHORITY_UPDATED",
     entityType: "USER",
     entityId: input.userId,
-    beforeJson: { role: String(user.role), authoritiesMap: user.authoritiesMap },
-    afterJson: { role: String(updated.role), authoritiesMap: updated.authoritiesMap },
+    beforeJson: {
+      role: String(user.role),
+      authoritiesMap: user.authoritiesMap,
+      isMaker: user.isMaker,
+      isChecker: user.isChecker,
+      status: String(user.status),
+    },
+    afterJson: {
+      role: String(updated.role),
+      authoritiesMap: updated.authoritiesMap,
+      isMaker: updated.isMaker,
+      isChecker: updated.isChecker,
+      status: String(updated.status),
+    },
     approvalRequestId: input.approvalId,
   });
   return {
@@ -1298,9 +1340,18 @@ const resolveAmlHoldAmounts = async (
   tx: Tx,
   amlCase: any,
   attempt: any,
-): Promise<{ amount: Decimal; commission: Decimal; merchantAmount: Decimal }> => {
+  options: { requireEscrow?: boolean } = {},
+): Promise<{ amount: Decimal; commission: Decimal; merchantAmount: Decimal; escrowed: boolean }> => {
   let held = new Decimal(0);
-  const holdEntryId = amlCase.holdJournalEntryId ? String(amlCase.holdJournalEntryId) : null;
+  // GAP-015: the escrow is booked when the gateway capture is verified, so it
+  // is looked up by the attempt when the case does not point at it.
+  let holdEntryId = amlCase.holdJournalEntryId ? String(amlCase.holdJournalEntryId) : null;
+  if (!holdEntryId && attempt?.id) {
+    const entry = await modelOf(tx, "journalEntry").findFirst({
+      where: { refType: "PAYMENT_ATTEMPT", refId: String(attempt.id) },
+    });
+    holdEntryId = entry?.id ? String(entry.id) : null;
+  }
   if (holdEntryId) {
     const glAccounts = modelOf(tx, "glAccount");
     const journalLines = modelOf(tx, "journalLine");
@@ -1313,6 +1364,13 @@ const resolveAmlHoldAmounts = async (
       }
     }
   }
+  if (options.requireEscrow && !held.gt(0)) {
+    throw new ApiError(
+      409,
+      "AML_HOLD_CAPTURE_NOT_VERIFIED",
+      "The held payment has no verified gateway capture (no AML_HOLD escrow), so it cannot be released",
+    );
+  }
   const amount = held.gt(0) ? held : toDecimal(attempt?.totalChargedAmount);
   if (!amount.gt(0)) {
     throw new ApiError(409, "AML_HOLD_AMOUNT_UNRESOLVED", "The held amount of the AML case could not be resolved");
@@ -1322,7 +1380,7 @@ const resolveAmlHoldAmounts = async (
   if (merchantAmount.lt(0)) {
     throw new ApiError(409, "AML_HOLD_AMOUNT_INCONSISTENT", "The platform commission exceeds the held amount");
   }
-  return { amount, commission, merchantAmount };
+  return { amount, commission, merchantAmount, escrowed: held.gt(0) };
 };
 
 const linkCountOf = (row: any, camel: string, snake: string, fallback = 0): number => {
@@ -1520,7 +1578,7 @@ export async function executeAmlCaseResolution(
   } else if (merchantDirect) {
     postingReason = "CASE_ONLY_NO_POSTING";
   } else {
-    const amounts = await resolveAmlHoldAmounts(tx, amlCase, attempt);
+    const amounts = await resolveAmlHoldAmounts(tx, amlCase, attempt, { requireEscrow: action === "RELEASE" });
     const merchantId = attempt?.merchantId ? String(attempt.merchantId) : null;
     if (!merchantId) {
       throw new ApiError(
@@ -1529,27 +1587,32 @@ export async function executeAmlCaseResolution(
         "The merchant of the held payment could not be resolved, so the hold cannot be released",
       );
     }
-    const refId = attempt ? String(attempt.id) : String(amlCase.id);
-    const journal: JournalTemplate = action === "RELEASE"
-      ? buildLedgerTemplate("AML_HOLD_AND_RELEASE", {
-        amount: amounts.amount,
-        commissionAmount: amounts.commission,
-        merchantAmount: amounts.merchantAmount,
-        stage: "RELEASE",
-      })
-      : buildLedgerTemplate("AML_VOID", {
-        amount: amounts.amount,
-        commissionAmount: amounts.commission,
-        merchantAmount: amounts.merchantAmount,
-      });
-    journal.refId = refId;
-    const posted = await ctx.ledgerPoster.post(
-      journal,
-      await walletLedgerContext(tx, merchantId),
-      tx as never,
-    );
-    journalEntryId = posted.entry.id;
-    template = action === "RELEASE" ? "AML_HOLD_AND_RELEASE" : "AML_VOID";
+    if (action === "REJECT" && !amounts.escrowed) {
+      // Nothing was captured at the gateway, so there is no escrow to void.
+      postingReason = "NO_CAPTURE_NOTHING_TO_VOID";
+    } else {
+      const refId = attempt ? String(attempt.id) : String(amlCase.id);
+      const journal: JournalTemplate = action === "RELEASE"
+        ? buildLedgerTemplate("AML_HOLD_AND_RELEASE", {
+          amount: amounts.amount,
+          commissionAmount: amounts.commission,
+          merchantAmount: amounts.merchantAmount,
+          stage: "RELEASE",
+        })
+        : buildLedgerTemplate("AML_VOID", {
+          amount: amounts.amount,
+          commissionAmount: amounts.commission,
+          merchantAmount: amounts.merchantAmount,
+        });
+      journal.refId = refId;
+      const posted = await ctx.ledgerPoster.post(
+        journal,
+        await walletLedgerContext(tx, merchantId),
+        tx as never,
+      );
+      journalEntryId = posted.entry.id;
+      template = action === "RELEASE" ? "AML_HOLD_AND_RELEASE" : "AML_VOID";
+    }
   }
 
   await amlCases.update({
@@ -2453,6 +2516,18 @@ export async function executeCashout(
     throw new ApiError(400, "CASHOUT_AMOUNT_INVALID", "The cash-out amount must be greater than zero");
   }
 
+  // The state machine: PENDING -> COMPLETE (approve) or PENDING -> REJECTED (reject).
+  // COMPLETE, SUBTRACTED and REJECTED are terminal and immutable. Repeating the decision
+  // that already happened is an idempotent no-op; the opposite decision is a conflict.
+  const OPEN_STATES = ["PENDING", "PROCESSING"];
+  const conflict = (): ApiError =>
+    new ApiError(
+      409,
+      "CASHOUT_STATE_INVALID",
+      `The cash-out is '${state}' and cannot be ${input.decision === "APPROVE" ? "approved" : "rejected"}`,
+      { cashoutId: String(cashout.id), state, decision: input.decision },
+    );
+
   if (input.decision === "REJECT") {
     if (state === "REJECTED") {
       return {
@@ -2461,6 +2536,17 @@ export async function executeCashout(
         entityId: String(cashout.id),
         idempotent: true,
       };
+    }
+    if (!OPEN_STATES.includes(state)) {
+      throw conflict();
+    }
+    // Atomic conditional transition: only the request that still finds an open state wins.
+    const claimed = await cashouts.updateMany({
+      where: { id: String(cashout.id), state: { in: OPEN_STATES } },
+      data: { state: "REJECTED" },
+    });
+    if (claimed.count !== 1) {
+      throw conflict();
     }
     const reason = input.reason?.trim() ? input.reason.trim() : "No reason supplied";
     const adjustment = await modelOf(tx, "adjustment").create({
@@ -2475,7 +2561,7 @@ export async function executeCashout(
     });
     const updated = await cashouts.update({
       where: { id: String(cashout.id) },
-      data: { state: "REJECTED", adjustmentId: String(adjustment.id) },
+      data: { adjustmentId: String(adjustment.id) },
     });
     await writeAudit(ctx, tx, {
       actorId: input.actorUserId,
@@ -2506,6 +2592,39 @@ export async function executeCashout(
       idempotent: true,
     };
   }
+  if (!OPEN_STATES.includes(state)) {
+    throw conflict();
+  }
+  if (wallet.status !== "ACTIVE") {
+    throw new ApiError(409, "WALLET_NOT_ACTIVE", "Cash-outs can only be paid from an active wallet", {
+      walletStatus: String(wallet.status),
+    });
+  }
+  const merchant = await modelOf(tx, "merchant").findUnique({ where: { id: String(cashout.merchantId) } });
+  if (!merchant || String(merchant.status) !== "ACTIVE") {
+    throw new ApiError(409, "MERCHANT_NOT_ACTIVE", "Cash-outs can only be paid to an active merchant");
+  }
+
+  // Atomic conditional transition (UPDATE ... WHERE id = ? AND state IN (...)): two concurrent
+  // approvals cannot both pass, the second one updates 0 rows and fails. The row stays locked
+  // until commit, so the balance check and the journal below run for exactly one approver.
+  const claimed = await cashouts.updateMany({
+    where: { id: String(cashout.id), state: { in: OPEN_STATES } },
+    data: { state: "PROCESSING" },
+  });
+  if (claimed.count !== 1) {
+    throw conflict();
+  }
+
+  // Available-balance check under the wallet shard lock.
+  const balance = await lockWalletLedgerBalance(tx, String(wallet.glAccountId));
+  if (balance.lt(amount)) {
+    throw new ApiError(409, "CASHOUT_INSUFFICIENT_BALANCE", "The wallet balance does not cover this cash-out", {
+      cashoutId: String(cashout.id),
+      balance: balance.toFixed(4),
+      amount: amount.toFixed(4),
+    });
+  }
 
   const adjustment = await modelOf(tx, "adjustment").create({
     data: {
@@ -2519,7 +2638,9 @@ export async function executeCashout(
   });
 
   const journal = buildLedgerTemplate("CASHOUT", { amount });
-  journal.refId = String(adjustment.id);
+  // The journal reference is the cash-out id: a stable idempotency key, so the ledger itself
+  // refuses a second payout of the same request.
+  journal.refId = String(cashout.id);
   const posted = await ctx.ledgerPoster.post(
     journal,
     { accounts: { MERCHANT_WALLET: String(wallet.glAccountId) } },

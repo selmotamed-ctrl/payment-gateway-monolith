@@ -1,6 +1,7 @@
-import { getBaseUrl, resolveUploadPath } from "@/constants/baseUrl";
+import { getBaseUrl } from "@/constants/baseUrl";
 import axios from "axios";
 import { logout, user } from "../user";
+import { sessionHeaders } from "@/utils/security/sessionToken";
 import { extractApiError, isAppSuspendedError } from "@/utils/errors/extractor";
 
 export const api = axios.create({
@@ -10,17 +11,20 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-    if (user.value?.token) {
-        config.headers["Authorization"] = `Bearer ${user.value.token}`;
+    for (const [name, value] of Object.entries(sessionHeaders(user.value?.token))) {
+        config.headers[name] = value;
     }
-    config.headers["X-Client-Channel"] = "admin";
+    config.headers["X-Client-Channel"] = "merchant";
     return config;
 });
 
 api.interceptors.response.use(undefined, (error) => {
     const extractedError = extractApiError(error);
     if (extractedError) {
-        if (extractedError.status == 401) {
+        // A 401 from the credential endpoints is a failed sign-in, not an expired session.
+        const url = String(error?.config?.url ?? "");
+        const isCredentialRequest = url.includes("/auth/login") || url.includes("/auth/mfa");
+        if (extractedError.status == 401 && !isCredentialRequest && user.value?.token) {
             void logout();
         } else if (isAppSuspendedError(extractedError)) {
             void logout();
@@ -28,7 +32,3 @@ api.interceptors.response.use(undefined, (error) => {
     }
     throw error;
 });
-
-export const resolveUploadPathWithMat = (path: string) => {
-    return `${resolveUploadPath(path)}?mat=${encodeURIComponent(user.value?.token || "")}`;
-};

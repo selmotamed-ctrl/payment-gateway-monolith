@@ -6,3 +6,25 @@
 # local all-in-one deployment
 .local/
 **/*.Identifier
+# secrets, keys and local data (defense in depth; sub-folder ignores still apply)
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.crt
+**/certs/
+**/.certs/
+deploy.env
+**/*.sqlite
+**/*.sqlite-shm
+**/*.sqlite-wal
+**/*.dump
+**/*.sql.gz
+**/*.log
+**/coverage/
+**/playwright-report/
+**/blob-report/
+**/tsconfig.tsbuildinfo

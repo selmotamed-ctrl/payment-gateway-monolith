@@ -3,7 +3,7 @@ id: admin-ui.routes
 title: Admin Route and Page Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-04
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - admin-front/src/router/index.ts
@@ -14,6 +14,7 @@ code:
   - merchant-front/src/pages/**
   - checkout-front/src/router/index.ts
   - checkout-front/src/pages/**
+  - admin-front/src/utils/routeAuthorities.ts
 design_sources:
   - design/06-ui/portal_ui_implementation_plan.md
   - design/10-fixes/_0001_operator_cases.md
@@ -24,6 +25,7 @@ tests:
   - tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts
   - tests/e2e/exhaustive/exhaustive-checkout-surface.spec.ts
   - tests/e2e/admin/global-search.spec.ts
+  - tests/unit/frontend-security-admin.test.ts
 gaps:
   - Eight admin route names have no effective UI authority gate; AdminGuide and AdminAcademy are deliberate learning surfaces, while AdminUsers, AdminUserDetail, PricingControls, GatewayAiImport, AdminPlatformSettings, and AdminCheckoutHelp are privilege gaps.
   - The merchant Statements route has no router-level authority entry even though navigation hides it without statement authority.
@@ -265,3 +267,7 @@ These suites require a running stack and are skipped without the live/edge servi
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical route catalog. Confirms 37 admin protected routes and 16 merchant portal routes, records missing UI authority gates, the broken 9.4 help chapter placement, and the checkout 404 recovery bug.
+
+## Security hardening (2026-11-05)
+
+The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard: `PUBLIC_FOR_AUTHENTICATED` is Dashboard, AdminGuide and AdminAcademy; `AUTHORITY_ALIASES` normalizes dotted and colon forms. Entries were added for AdminUsers, AdminUserDetail, AdminPlatformSettings, PricingControls, GatewayAiImport and AdminCheckoutHelp. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.

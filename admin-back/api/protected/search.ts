@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
+import { requestClientIp } from "../../lib/clientIp";
 import { coreForward } from "../forward";
 
 const router = express.Router();
@@ -20,13 +21,22 @@ const WINDOW_MS = 60_000;
 const MAX_REQUESTS = 120;
 const buckets = new Map<string, { count: number; resetAt: number }>();
 
-const sessionKey = (request: Request): string => {
-  const token =
-    (typeof request.headers.authorization === "string" && request.headers.authorization) ||
-    request.ip ||
-    "anonymous";
-  return createHash("sha256").update(token).digest("hex").slice(0, 32);
+/** Session subject claim (unverified, only used to bucket) so the raw credential is never a key. */
+const subjectOf = (request: Request): string => {
+  const token = request.headers.authorization?.split(" ")[1] ?? "";
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as { sub?: unknown };
+    return typeof payload.sub === "string" ? payload.sub : "";
+  } catch {
+    return "";
+  }
 };
+
+const sessionKey = (request: Request): string =>
+  createHash("sha256")
+    .update(`${requestClientIp(request)}|${subjectOf(request)}`)
+    .digest("hex")
+    .slice(0, 32);
 
 const rateLimit = (request: Request, response: Response, next: NextFunction): void => {
   const now = Date.now();

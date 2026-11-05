@@ -63,6 +63,13 @@ const readWindow = (
 export const createReconciliationUploadHandler = (
   deps: ReconciliationUploadDeps,
 ) => async (request: Request, response: Response): Promise<void> => {
+  // The audit actor is the authenticated principal. The client controlled
+  // `x-upload-metadata` header may only carry the checklist and the period,
+  // never an identity.
+  const principal = request.principal;
+  if (!principal?.userId) {
+    throw new ApiError(401, "AUTH_REQUIRED", "An authenticated staff principal is required");
+  }
   const raw = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
   if (raw.byteLength === 0) {
     throw new ApiError(400, "STATEMENT_FILE_REQUIRED", "A statement file payload is required");
@@ -84,8 +91,18 @@ export const createReconciliationUploadHandler = (
     if (!source) {
       throw new ApiError(404, "STATEMENT_SOURCE_NOT_FOUND", "Statement source not found");
     }
-    // The file hash is unique: the same statement never produces two runs.
-    const existingRun = await deps.repositories.reconciliation.findRunByFileHash(tx, fileHash);
+    // (source, file_hash) is unique: the same statement never produces two runs
+    // for one source (GAP-018); another source may legitimately hold the same bytes.
+    const existingRun = await deps.repositories.reconciliation.findRunByFileHash(tx, fileHash, sourceId);
+    // Defence in depth: the lookup is source-scoped, but a run of another
+    // statement source must never be answered as this source's run.
+    if (existingRun && String(existingRun.statementSourceId) !== sourceId) {
+      throw new ApiError(
+        409,
+        "STATEMENT_FILE_HASH_CONFLICT",
+        "This statement file was already uploaded for a different statement source",
+      );
+    }
     const run = existingRun ?? await deps.repositories.reconciliation.createRun(tx, {
       statementSourceId: sourceId,
       windowStart,
@@ -124,8 +141,8 @@ export const createReconciliationUploadHandler = (
     : [];
   await writeAudit(deps.db, {
     data: {
-      actorId: typeof metadata.actorId === "string" ? metadata.actorId : "system",
-      role: typeof metadata.actorRole === "string" ? metadata.actorRole : "OPERATOR",
+      actorId: principal.userId,
+      role: principal.role ?? "UNKNOWN",
       action: "RECONCILIATION_UPLOAD_CHECKLIST",
       entityType: "RECONCILIATION_RUN",
       entityId: resolved.runId,

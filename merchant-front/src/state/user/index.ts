@@ -1,6 +1,9 @@
 import type { UserAuthorityType, UserAuthoritiesMapType } from "@/utils/authorities";
 import router from "@/router";
 import { nextTick, ref } from "vue";
+import { getBaseUrl } from "@/constants/baseUrl";
+import { urlsMap } from "@/constants/urlsMap";
+import { revokeServerSession } from "@/utils/security/sessionToken";
 import { mapHasAllAuthorities, mapHasAuthority, type MerchantRole } from "@/utils/authorities";
 
 export type MerchantUserInfo = {
@@ -40,6 +43,8 @@ export const loggingOut = ref(false);
 
 export const logout = async () => {
     loggingOut.value = true;
+    // Server-side revoke (GAP-019): best effort, the local session is cleared regardless.
+    await revokeServerSession(fetch, `${getBaseUrl()}/${urlsMap.authLogout}`, user.value?.token);
     setUserState(null);
     await nextTick();
     await router.push({ name: "Login" }).catch(() => undefined);

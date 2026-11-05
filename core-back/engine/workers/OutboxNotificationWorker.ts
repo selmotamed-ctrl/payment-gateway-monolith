@@ -1,4 +1,5 @@
 import { assertNoTippingOff, redactAmlPayload, renderTemplate } from "../compliance/tippingOff";
+import { openMfaCode } from "../../lib/auth/mfaChallenges";
 import { toCamelRows } from "../db/rawRows";
 import type { NotificationRow, Tx } from "../db/ports";
 import type { RenderedNotification } from "../notifications/NotificationTransport";
@@ -44,14 +45,21 @@ export class OutboxNotificationWorker extends BaseWorker {
   }
 
   private async lockQueuedNotifications(now: Date): Promise<NotificationRow[]> {
+    // One statement in one transaction: lock with SKIP LOCKED and lease the
+    // rows by pushing next_attempt_at forward. Delivery then runs outside the
+    // transaction and every outcome rewrites next_attempt_at / status.
     const sql =
-      "SELECT * FROM notifications" +
+      "WITH claimed AS (" +
+      "SELECT id FROM notifications" +
       " WHERE status = 'QUEUED'" +
       " AND (next_attempt_at IS NULL OR next_attempt_at <= $1)" +
       " ORDER BY next_attempt_at ASC" +
       " LIMIT $2" +
-      " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(sql, now, this.batchSize);
+      " FOR UPDATE SKIP LOCKED)" +
+      " UPDATE notifications n SET next_attempt_at = $3, updated_at = now()" +
+      " FROM claimed WHERE n.id = claimed.id RETURNING n.*";
+    const leaseUntil = new Date(now.getTime() + this.claimLeaseSeconds * 1000);
+    const result = await this.inTransaction((tx) => tx.$queryRawUnsafe(sql, now, this.batchSize, leaseUntil));
     return toCamelRows<NotificationRow>(result);
   }
 
@@ -79,7 +87,17 @@ export class OutboxNotificationWorker extends BaseWorker {
       return;
     }
 
-    const payloadRaw = (notification.payloadJson ?? {}) as Record<string, unknown>;
+    const payloadRaw = { ...((notification.payloadJson ?? {}) as Record<string, unknown>) };
+    // MFA codes are stored encrypted (never in plaintext in payload_json); open them for delivery only.
+    if (typeof payloadRaw.codeCiphertext === "string") {
+      try {
+        payloadRaw.code = await openMfaCode(payloadRaw.codeCiphertext);
+      } catch {
+        await this.fail(notification, now, "MFA code could not be decrypted", 0);
+        return;
+      }
+      delete payloadRaw.codeCiphertext;
+    }
     const payload = redactAmlPayload(payloadRaw, template.confidentialityClass);
     const subject = template.subjectTemplate ? renderTemplate(template.subjectTemplate, payload) : null;
     const body = renderTemplate(template.bodyTemplate, payload);

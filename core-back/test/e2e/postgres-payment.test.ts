@@ -33,6 +33,7 @@ import { createPlatformRuntime } from "../../engine/runtime/platform";
 import { InvariantVerifier } from "../../engine/ledger/InvariantVerifier";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { seedSystemGlAccounts } from "../../prisma/seedGlAccounts";
+import { withLedgerMaintenance } from "../helpers/ledgerMaintenance";
 import type { DynamicAttempt } from "../../engine/flow/DynamicRailEngine";
 
 /**
@@ -753,16 +754,20 @@ const cleanup = async (): Promise<void> => {
   // The attempts and their journal entries reference the gateway version, so
   // they have to go first.
   await client.paymentAttempt.deleteMany({ where: { id: { in: [catalog.attemptId, catalog.secondAttemptId] } } });
-  await client.journalLine.deleteMany({
-    where: { entry: { refType: "PAYMENT_ATTEMPT", refId: { in: [catalog.attemptId, catalog.secondAttemptId] } } },
+  // The journal is append-only (GAP-013): cleanup needs the maintenance flag.
+  const cleanupCatalog = catalog;
+  await withLedgerMaintenance(client, async (tx) => {
+    await tx.journalLine.deleteMany({
+      where: { entry: { refType: "PAYMENT_ATTEMPT", refId: { in: [cleanupCatalog.attemptId, cleanupCatalog.secondAttemptId] } } },
+    });
+    await tx.journalEntry.deleteMany({
+      where: { refType: "PAYMENT_ATTEMPT", refId: { in: [cleanupCatalog.attemptId, cleanupCatalog.secondAttemptId] } },
+    });
   });
-  await client.journalEntry.deleteMany({
-    where: { refType: "PAYMENT_ATTEMPT", refId: { in: [catalog.attemptId, catalog.secondAttemptId] } },
-  });
-  await client.gateway.update({ where: { id: catalog.gatewayId }, data: { activeVersionId: null } });
-  await client.gatewayVersion.deleteMany({ where: { id: catalog.gatewayVersionId } });
-  await client.attemptGroup.deleteMany({ where: { id: catalog.attemptGroupId } });
-  await client.paymentLink.deleteMany({ where: { id: catalog.linkId } });
+  await client.gateway.update({ where: { id: cleanupCatalog.gatewayId }, data: { activeVersionId: null } });
+  await client.gatewayVersion.deleteMany({ where: { id: cleanupCatalog.gatewayVersionId } });
+  await client.attemptGroup.deleteMany({ where: { id: cleanupCatalog.attemptGroupId } });
+  await client.paymentLink.deleteMany({ where: { id: cleanupCatalog.linkId } });
   await client.commissionProfile.deleteMany({ where: { id: catalog.commissionProfileId } });
   // The application references its assigned wallet, so it goes first.
   await client.application.deleteMany({ where: { id: catalog.applicationId } });

@@ -21,27 +21,37 @@ export const envSchema = z.object({
   MTLS_CLIENT_KEY_PATH: z.string().min(1),
   MTLS_CA_CERT_PATH: z.string().min(1),
   CORE_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(60000),
-  TRUSTED_PROXY_CIDRS: z
-    .string()
-    .default("127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
+  // Peers whose forwarded client-ip headers are honoured. Loopback only by default: a deploy
+  // that fronts the edge with a proxy on another address must list that address explicitly.
+  TRUSTED_PROXY_CIDRS: z.string().default("127.0.0.0/8,::1/128"),
+  // Comma separated list of exact origins allowed to call this service cross-origin.
+  // Empty (default) means no CORS headers are emitted at all.
+  CORS_ALLOWED_ORIGINS: z.string().default(""),
+  // Upper bound for a buffered (non streaming) core response.
+  CORE_MAX_RESPONSE_BYTES: z.coerce.number().int().min(1024).max(536870912).default(67108864),
+  // Total wall clock budget of one buffered core call (idle timeout is CORE_REQUEST_TIMEOUT_MS).
+  CORE_TOTAL_DEADLINE_MS: z.coerce.number().int().min(1000).max(1800000).default(300000),
+  // Concurrent SSE streams one client ip may hold open through this edge.
+  MAX_STREAMS_PER_IP: z.coerce.number().int().min(1).max(1000).default(5),
   ADMIN_LAN_CIDRS: z
     .string()
     .default("127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
-  // Accepted authority hints for the confidential admin routes. Core issues the role name
-  // (`role`) and the granted authorities (`authorities`, e.g. `aml:read`) in the session
-  // token, so both vocabularies have to be listed here.
-  ADMIN_AUTHORITY_HINTS: z
-    .string()
-    .default(
-      "GATEWAY_ADMIN,SECURITY_ADMIN,FINANCE,OPERATOR,COMPLIANCE,MLRO,SUPPORT,aml:read,aml:write,security:read,security:write",
-    ),
+  // Optional RESTRICTION list for the edge authority guards (exact, case-sensitive strings).
+  // Empty (default) = no restriction. When set, a guard none of whose required authorities is
+  // listed denies the request (fail closed); it can never switch a guard off.
+  ADMIN_AUTHORITY_HINTS: z.string().default(""),
   MAX_JSON_BODY_BYTES: z.coerce.number().int().min(1024).max(20971520).default(4194304),
   MAX_UPLOAD_BYTES: z.coerce.number().int().min(1024).max(52428800).default(20971520),
   UPLOAD_ALLOWED_MIME: z.string().default("text/csv,application/vnd.ms-excel,application/json"),
   ADMIN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(600),
   ADMIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60000),
+  // Backup trigger / drill requests one client may start per 10 minutes.
+  BACKUP_JOB_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(6),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(900000),
+  // GAP-019: "true" moves the session token into an HttpOnly cookie (never exposed to JS).
+  SESSION_COOKIE_MODE: z.enum(["true", "false"]).default("false"),
+  SESSION_COOKIE_SECURE: z.enum(["true", "false"]).default("true"),
   RECONCILIATION_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600000).default(120000),
 });
 

@@ -92,7 +92,18 @@ export const zGatewayCode = z
 
 export const zVersionNumber = z.coerce.number().int().min(1).max(100000);
 
+const BINARY_SIGNATURES: { mime: string; signature: number[] }[] = [
+  { mime: "image/png", signature: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
+  { mime: "image/jpeg", signature: [0xff, 0xd8, 0xff] },
+  { mime: "application/pdf", signature: [0x25, 0x50, 0x44, 0x46, 0x2d] },
+];
+
 export const detectUploadMime = (buffer: Buffer): string | null => {
+  for (const candidate of BINARY_SIGNATURES) {
+    if (buffer.byteLength >= candidate.signature.length && candidate.signature.every((byte, index) => buffer[index] === byte)) {
+      return candidate.mime;
+    }
+  }
   const csv = buffer.subarray(0, 4096).toString("utf8");
   if (buffer.byteLength >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) return "text/csv";
   if (buffer.byteLength >= 2 && buffer[0] === 0xef && buffer[1] === 0xbb) return "text/csv";

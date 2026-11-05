@@ -1,10 +1,31 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { env } from "../lib/env";
-import { parseOrThrow } from "../lib/error";
+import { ApiError, parseOrThrow } from "../lib/error";
 import { callCoreResponse, type CoreHttpMethod } from "../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../lib/net";
 import { resolveRequestId } from "../lib/requestLogger";
+
+/** A postgres LSN as exchanged in `x-pg-min-lsn` (`<hex>/<hex>`). */
+const LSN_PATTERN = /^[0-9A-Fa-f]{1,16}\/[0-9A-Fa-f]{1,16}$/;
+
+const minLsnOf = (req: Request): string | undefined => {
+  const value = req.header("x-pg-min-lsn");
+  if (value === undefined || value.length === 0) return undefined;
+  if (!LSN_PATTERN.test(value)) {
+    throw new ApiError(400, "INVALID_MIN_LSN", "x-pg-min-lsn must look like <hex>/<hex>");
+  }
+  return value;
+};
+
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+
+/** Relays a well formed Idempotency-Key so core can recognise a replayed mutation. */
+const withIdempotencyKey = (req: Request, headers: Record<string, string> | undefined) => {
+  const key = req.header("idempotency-key");
+  if (key === undefined || !IDEMPOTENCY_KEY_PATTERN.test(key)) return headers;
+  return { ...(headers ?? {}), "idempotency-key": key };
+};
 
 export interface ForwardContext {
   params: Record<string, string>;
@@ -69,12 +90,12 @@ export const coreForward =
         path,
         body,
         query: scalarQuery(query),
-        headers: options.headers,
+        headers: withIdempotencyKey(req, options.headers),
         requestId: resolveRequestId(req),
         clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
         userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
         authorization,
-        minLsn: req.header("x-pg-min-lsn") ?? undefined,
+        minLsn: minLsnOf(req),
       });
 
     if (options.splitBodyFrom) {

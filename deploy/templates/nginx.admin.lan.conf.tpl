@@ -1,3 +1,6 @@
+# Per-client request limiting (http context; the zone name is unique per template).
+limit_req_zone $binary_remote_addr zone=pg_admin_req:10m rate=50r/s;
+
 # LAN-only admin back office.
 # Bound to the private interface; there is no public virtual host and no router
 # port-forward for this listener. TLS is optional (ADMIN_SSL).
@@ -9,6 +12,9 @@ server {
     listen {{LISTEN_PORT}};
 {{/SSL}}
     server_name {{SERVER_NAME}};
+    server_tokens off;
+    limit_req zone=pg_admin_req burst=100 nodelay;
+    limit_req_status 429;
 
     # The nginx allowlist is the outer ring; admin-back enforces
     # ADMIN_LAN_CIDRS again on every request (defence in depth).

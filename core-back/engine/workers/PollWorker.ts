@@ -98,16 +98,29 @@ export class PollWorker extends BaseWorker {
   private async lockDueAttempts(now: Date): Promise<PaymentAttemptRow[]> {
     const statusPlaceholders = postgresPlaceholders(POLLABLE_STATUSES.length, 2);
     const limitPlaceholder = `$${POLLABLE_STATUSES.length + 2}`;
+    // The claim is ONE statement inside ONE transaction: the rows are locked
+    // with FOR UPDATE SKIP LOCKED and leased by pushing next_check_at forward
+    // before the lock is released at commit. The inquiry then runs OUTSIDE the
+    // transaction (a held row lock would deadlock the engine, which updates the
+    // same attempt on another connection). Every outcome below rewrites
+    // next_check_at; a crashed node's rows become due again after the lease.
+    const leaseParam = "$" + String(POLLABLE_STATUSES.length + 3);
     const sql =
-      "SELECT * FROM payment_attempts" +
+      "WITH claimed AS (" +
+      "SELECT id FROM payment_attempts" +
       " WHERE next_check_at IS NOT NULL" +
       " AND next_check_at <= $1" +
       " AND terminal_at IS NULL" +
       ` AND status IN (${statusPlaceholders})` +
       " ORDER BY next_check_at ASC" +
       ` LIMIT ${limitPlaceholder}` +
-      " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(sql, now, ...POLLABLE_STATUSES, this.batchSize);
+      " FOR UPDATE SKIP LOCKED)" +
+      ` UPDATE payment_attempts p SET next_check_at = ${leaseParam}, updated_at = now()` +
+      " FROM claimed WHERE p.id = claimed.id RETURNING p.*";
+    const leaseUntil = new Date(now.getTime() + this.claimLeaseSeconds * 1000);
+    const result = await this.inTransaction((tx) =>
+      tx.$queryRawUnsafe(sql, now, ...POLLABLE_STATUSES, this.batchSize, leaseUntil),
+    );
     return toCamelRows<PaymentAttemptRow>(result);
   }
 

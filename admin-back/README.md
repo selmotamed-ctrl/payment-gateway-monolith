@@ -34,7 +34,7 @@ Trust model: the edge is untrusted from core's point of view. The edge authentic
 
 1. Disables `x-powered-by`.
 2. Sets Express `trust proxy` to `false`; the LAN guard resolves forwarded IPs itself.
-3. Enables CORS with `origin: true` and `credentials: false`.
+3. Emits no CORS headers unless `CORS_ALLOWED_ORIGINS` is set (no credentials), plus hand-written security headers.
 4. Installs request logging with request-id resolution and secret redaction.
 5. Serves unauthenticated `GET /health`.
 6. Parses JSON and URL-encoded bodies with `MAX_JSON_BODY_BYTES`.
@@ -163,7 +163,7 @@ Important consequences:
 | `MTLS_CLIENT_KEY_PATH` | yes | none | Client private key. |
 | `MTLS_CA_CERT_PATH` | yes | none | Internal CA certificate. |
 | `CORE_REQUEST_TIMEOUT_MS` | no | `60000` | Per-request and agent timeout. |
-| `TRUSTED_PROXY_CIDRS` | no | loopback plus RFC1918 ranges | Peers whose forwarded IP headers are trusted. |
+| `TRUSTED_PROXY_CIDRS` | no | loopback only (`127.0.0.0/8,::1/128`) | Peers whose forwarded IP headers are trusted. |
 | `ADMIN_LAN_CIDRS` | no | loopback plus RFC1918 ranges | Allowed admin client networks. |
 | `ADMIN_AUTHORITY_HINTS` | no | `GATEWAY_ADMIN,SECURITY_ADMIN,FINANCE,OPERATOR,COMPLIANCE,MLRO,SUPPORT,aml:read,aml:write,security:read,security:write` | Authority vocabulary the edge may check. |
 | `MAX_JSON_BODY_BYTES` | no | `4194304` | JSON and URL-encoded body limit. |
@@ -228,7 +228,7 @@ Common failures:
 - No database, KMS or migration material is present at the edge. Environment-isolation tests assert this boundary.
 - The client certificate CN must be exactly `admin-back`; core's mTLS guard rejects a valid certificate on the wrong namespace with `403 FORBIDDEN_SERVICE_IDENTITY`.
 - TLS 1.3 is fixed in both directions; core verifies the internal CA and the edge verifies the core server certificate.
-- CORS reflects any origin with credentials disabled. The LAN guard and reverse proxy are the compensating controls. Do not expose the admin vhost outside the LAN.
+- CORS is off unless `CORS_ALLOWED_ORIGINS` is set (cross-origin dev frontends need it). The LAN guard and reverse proxy are the compensating controls. Do not expose the admin vhost outside the LAN.
 - The admin LAN check uses `x-real-ip` first and `x-real-client-ip` only as a fallback, and only from trusted proxy peers. `app.set("trust proxy", false)` means Express `req.ip` is the socket peer; the guard implements its own trust logic.
 - Raw body handling: reconciliation uploads are validated for declared MIME, magic bytes and size before raw forwarding. Join-request KYB uploads are forwarded with the client-declared MIME and SHA-256 but do not use the shared MIME/magic-byte validator; core must treat those files as untrusted.
 - Upload limits: JSON bodies 4 MiB, multipart 20 MiB, reconciliation forwarding timeout 120 seconds. Core's raw-body limit is higher than the edge limit.
@@ -244,3 +244,7 @@ Common failures:
 - [`project-design/parts/00-platform/02-security-and-mtls.md`](../project-design/parts/00-platform/02-security-and-mtls.md)
 - [`project-design/appendices/api-route-matrix.md`](../project-design/appendices/api-route-matrix.md)
 - [`project-design/appendices/env-and-config-matrix.md`](../project-design/appendices/env-and-config-matrix.md)
+
+## Security hardening (2026-11-05)
+
+`authorityGuard` rejects `alg: none`/non-HS256 tokens and requires `typ`, `iss`, `aud` and `exp`; authority lists are deny-by-default per route group (`ADMIN_AUTHORITY_HINTS` can only restrict). `requireSession` returns `401 AUTH_INVALID` for non-session tokens. Backup trigger/drill require an `Idempotency-Key` header (8-128 URL-safe chars) and are limited by `BACKUP_JOB_RATE_LIMIT_MAX`; policy cron, minimum gaps and retention floors are validated; KYB uploads are restricted to png/jpeg/pdf and served as attachments with a CSP sandbox. Admin logout is still client-only (no revoke endpoint).

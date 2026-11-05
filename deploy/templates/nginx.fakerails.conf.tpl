@@ -1,3 +1,6 @@
+# Per-client request limiting (http context; the zone name is unique per template).
+limit_req_zone $binary_remote_addr zone=pg_fakerails_req:10m rate=20r/s;
+
 # Standalone Fake Payment Rails: tester portal, hosted checkout simulator and
 # the twenty emulated gateway APIs. This vhost is isolated from the gateway
 # edge; the emulator owns its own SQLite store.
@@ -11,6 +14,12 @@ server {
     listen [::]:{{LISTEN_PORT}};
 {{/SSL}}
     server_name {{SERVER_NAME}};
+    server_tokens off;
+    limit_req zone=pg_fakerails_req burst=40 nodelay;
+    limit_req_status 429;
+
+    # Network allowlist (FAKE_RAILS_ALLOWED_CIDRS); anything else is refused by nginx.
+{{LAN_ALLOW_RULES}}
 
 {{#SSL}}
     ssl_certificate     {{SSL_CERT_PATH}};
@@ -24,7 +33,7 @@ server {
 {{/SSL}}
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "no-referrer" always;
-    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'self' *; base-uri 'self'; form-action 'self'" always;
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'" always;
 
     client_max_body_size 25m;
 

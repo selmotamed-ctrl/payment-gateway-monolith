@@ -3,7 +3,7 @@ import type { Request } from "express";
 import { resolveLanClientIp } from "../api/middleware/lanGuard";
 import { CORE_SCHEMAS } from "./helpers/core-schema";
 import { createTestPki, startTestCore, type TestCore, type TestPki } from "./helpers/core";
-import { amlAuthorityToken, complianceToken, mlroToken, operatorToken, signSession } from "./helpers/session";
+import { amlAuthorityToken, complianceToken, fullStaffToken, mlroToken, operatorToken, signSession } from "./helpers/session";
 
 const pki: TestPki = createTestPki("admin-back");
 const core: TestCore = await startTestCore(pki);
@@ -17,6 +17,7 @@ let edgeServer: ReturnType<ReturnType<typeof createApp>["listen"]>;
 const operator = operatorToken();
 const compliance = complianceToken();
 const mlro = mlroToken();
+const fullStaff = fullStaffToken();
 
 beforeAll(() => {
   process.env.NODE_ENV = "test";
@@ -180,23 +181,24 @@ describe("admin authority hints", () => {
     expect(response.status).toBe(200);
   });
 
-  test("denies an aml route when the credential cannot be read as a session", async () => {
+  test("refuses an aml route when the credential cannot be read as a session", async () => {
     const response = await call("GET", "/api/v1/admin/aml/screenings", { token: "opaque-session" });
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
     const payload = (await response.json()) as { code: string };
-    expect(payload.code).toBe("EDGE_AUTHORITY_DENIED");
+    expect(payload.code).toBe("AUTH_INVALID");
   });
 
   test("denies an aml route for an mfa challenge token", async () => {
     const challenge = signSession({ sub: "u-compliance", role: "COMPLIANCE", typ: "mfa" });
     const response = await call("GET", "/api/v1/admin/aml/screenings", { token: challenge });
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
   });
 
-  test("leaves non jwt credentials on ordinary routes to the authoritative core", async () => {
+  test("refuses non jwt credentials on ordinary routes without loading core", async () => {
+    const before = core.requests.length;
     const response = await call("GET", "/api/v1/admin/merchants", { token: "opaque-session" });
-    expect(response.status).toBe(200);
-    expect(core.requests.at(-1)?.url).toBe("/internal/admin/merchants");
+    expect(response.status).toBe(401);
+    expect(core.requests.length).toBe(before);
   });
 
   test("requires a bearer token on protected admin routes", async () => {
@@ -367,7 +369,7 @@ describe("admin statement upload", () => {
     form.set("statement", new Blob([new Uint8Array(Buffer.from("txn_ref,amount\nREF-1,10.0000\n"))], { type: "text/csv" }), "statement.csv");
     const response = await fetch(`${edgeUrl}/api/v1/admin/reconciliation/upload`, {
       method: "POST",
-      headers: { authorization: `Bearer ${compliance}` },
+      headers: { authorization: `Bearer ${fullStaff}` },
       body: form,
     });
     expect(response.status).toBe(202);
@@ -396,7 +398,7 @@ describe("admin statement upload", () => {
     form.set("statement", new Blob([new Uint8Array(Buffer.from([0x00, 0x01, 0x02, 0x03]))], { type: "text/csv" }), "bad.csv");
     const response = await fetch(`${edgeUrl}/api/v1/admin/reconciliation/upload`, {
       method: "POST",
-      headers: { authorization: `Bearer ${compliance}` },
+      headers: { authorization: `Bearer ${fullStaff}` },
       body: form,
     });
     expect(response.status).toBe(415);
@@ -1314,7 +1316,7 @@ describe("admin route surface", () => {
     test(`${route.method} ${route.path} is routed to core`, async () => {
       const before = core.requests.length;
       const response = await call(route.method, route.path, {
-        token: compliance,
+        token: fullStaff,
         body: route.body,
       });
       expect(response.status).not.toBe(404);

@@ -1,3 +1,4 @@
+import { devLog } from "@/utils/devLog";
 import type { RulesList } from "@/utils/clientValidationRules";
 import { bytesValueToReadable } from "@/utils/common";
 import { fileToBase64 } from "@/utils/FileToB64";
@@ -121,7 +122,7 @@ const InputField = dc(
             const t = locale.t;
             const f = props;
 
-            console.log("rendering field", f);
+            devLog("rendering field", f);
             if (f.type == "b64-file-input") {
                 return (
                     <VFileInput

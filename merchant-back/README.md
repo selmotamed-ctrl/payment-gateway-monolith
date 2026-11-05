@@ -42,7 +42,7 @@ The backend binds to `BIND_HOST` (default `0.0.0.0` in the service schema). Depl
 
 1. Disables `x-powered-by`.
 2. Sets Express `trust proxy` to `false`.
-3. Enables CORS with `origin: true` and `credentials: false`.
+3. Emits no CORS headers unless `CORS_ALLOWED_ORIGINS` is set (no credentials), plus hand-written security headers.
 4. Installs request logging with request-id resolution and secret redaction.
 5. Serves unauthenticated `GET /health`.
 6. Parses JSON and URL-encoded bodies with `MAX_JSON_BODY_BYTES`.
@@ -91,7 +91,7 @@ All routes are under `/api/v1`. `GET /health` is at the process root and is unau
 | Method | Path | Notes |
 | :--- | :--- | :--- |
 | POST | `/register` | Public at the edge; creates a registration. |
-| POST | `/verify-identity` | Public at the edge; identity type, number, phone and OTP. |
+| POST | `/verify-identity` | Retired: core always answers `410 IDENTITY_VERIFICATION_RETIRED`. |
 | POST | `/accept-invitation` | Public at the edge; invitation token and password. |
 | POST | `/login` | Public at the edge; identifier and password. |
 | POST | `/google` | Public at the edge; validates a Google `idToken`. Core answers `501 GOOGLE_IDENTITY_NOT_CONFIGURED`. |
@@ -231,7 +231,7 @@ Money rules:
 | `MTLS_CLIENT_KEY_PATH` | yes | none | Client private key. |
 | `MTLS_CA_CERT_PATH` | yes | none | Internal CA certificate. |
 | `CORE_REQUEST_TIMEOUT_MS` | no | `30000` | Per-request and agent timeout. |
-| `TRUSTED_PROXY_CIDRS` | no | loopback plus RFC1918 ranges | Peers whose forwarded IP headers are trusted. |
+| `TRUSTED_PROXY_CIDRS` | no | loopback only (`127.0.0.0/8,::1/128`) | Peers whose forwarded IP headers are trusted. |
 | `MAX_JSON_BODY_BYTES` | no | `2097152` | JSON and URL-encoded body limit. |
 | `MAX_UPLOAD_BYTES` | no | `10485760` | Multipart upload limit. |
 | `UPLOAD_ALLOWED_MIME` | no | `image/png,image/jpeg,application/pdf` | Allowed upload MIME types. |
@@ -298,10 +298,10 @@ Common failures:
 - No database, KMS or migration material is present at the edge. Environment-isolation tests assert this boundary.
 - The client certificate CN must be exactly `merchant-back`; core's mTLS guard rejects a valid certificate on another namespace.
 - TLS 1.3 is fixed in both directions; core verifies the internal CA and the edge verifies the core server certificate.
-- CORS reflects any origin with credentials disabled. The public reverse proxy, CSP and bearer-token model are the browser-facing controls.
+- CORS headers are emitted only when `CORS_ALLOWED_ORIGINS` is set (cross-origin dev frontends need it); the reverse proxy, CSP and bearer-token model remain the browser-facing controls.
 - Portal authentication is only a header-presence check at the edge. Core verifies the session and scopes data by merchant. Do not assume the edge rejected an invalid token.
 - The external token prefix check is not a credential check. Core hashes the token, checks revocation and enforces the optional IP allowlist.
-- `x-real-client-ip` is preferred over `x-real-ip` in `merchant-back/lib/net/index.ts`. When the backend is loopback-bound this is safe; if it is ever exposed and a direct peer is inside `TRUSTED_PROXY_CIDRS`, the peer can spoof its client IP.
+- (Superseded) `resolveClientIp` honours forwarded headers only from trusted peers and requires a single valid IP (`x-real-ip` preferred, `x-real-client-ip` fallback); the edge overwrites `x-real-client-ip` towards core. Previously `x-real-client-ip` was preferred over `x-real-ip` in `merchant-back/lib/net/index.ts`. When the backend is loopback-bound this is safe; if it is ever exposed and a direct peer is inside `TRUSTED_PROXY_CIDRS`, the peer can spoof its client IP.
 - Raw body handling: KYB uploads are forwarded byte for byte after MIME/magic-byte/size validation. Dispute evidence is base64 encoded into JSON and is not forwarded as raw bytes.
 - Upload limits: JSON bodies 2 MiB, multipart 10 MiB, evidence file 712,704 bytes, POS stream timeout 15 minutes. Core has its own limits and must re-check uploads.
 - Logs redact sensitive keys and truncate long strings, but tokens, signatures, credentials and document contents must never be logged by application code.
@@ -316,3 +316,7 @@ Common failures:
 - [`project-design/parts/00-platform/02-security-and-mtls.md`](../project-design/parts/00-platform/02-security-and-mtls.md)
 - [`project-design/appendices/api-route-matrix.md`](../project-design/appendices/api-route-matrix.md)
 - [`project-design/appendices/env-and-config-matrix.md`](../project-design/appendices/env-and-config-matrix.md)
+
+## Security hardening (2026-11-05)
+
+Token creation rejects malformed CIDRs and ranges broader than /8 (IPv4) or /32 (IPv6); scopes are lowercase `resource:action`, unique, at most `TOKEN_MAX_SCOPES` (20); `expiresAt` must be a future ISO date within `TOKEN_MAX_TTL_DAYS` (365), default `TOKEN_DEFAULT_TTL_DAYS` (90); `pg_live_` tokens are `pg_live_` plus 43 base64url characters. The external limiter keys on token hash plus IP. Uploads require a bearer token and Content-Length (411) and are size-checked (413) before buffering (`UPLOAD_RATE_LIMIT_MAX`). Cash-out creation forwards `idempotencyKey` (body or `Idempotency-Key` header). Rate-limit windows: `AUTH_/API_/EXTERNAL_RATE_LIMIT_WINDOW_MS`.

@@ -5,6 +5,7 @@ import {
   buildCoreHeaders,
   callCoreRaw,
   CORE_CHANNEL_PREFIX,
+  CORE_FAILURE_THRESHOLD,
   CORE_SERVICE_NAME,
   consistencyHeader,
   openCoreStream,
@@ -321,9 +322,13 @@ describe("multi-upstream selection and failover", () => {
     configure([upstream.url]);
     setCoreClock(() => now);
     try {
-      const failed = await request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/half-open` });
-      expect(failed.statusCode).toBe(503);
-      expect(upstream.requests.length).toBe(1);
+      // GAP-021: the node only leaves rotation after CORE_FAILURE_THRESHOLD consecutive failures.
+      for (let i = 0; i < CORE_FAILURE_THRESHOLD; i += 1) {
+        const failed = await request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/half-open`, maxAttempts: 1 });
+        expect(failed.statusCode).toBe(503);
+      }
+      const tripped = upstream.requests.length;
+      expect(tripped).toBe(CORE_FAILURE_THRESHOLD);
 
       available = true;
       let unavailable: ApiError | undefined;
@@ -333,16 +338,16 @@ describe("multi-upstream selection and failover", () => {
         unavailable = error as ApiError;
       }
       expect(unavailable?.code).toBe("CORE_UNAVAILABLE");
-      expect(upstream.requests.length).toBe(1);
+      expect(upstream.requests.length).toBe(tripped);
 
       now += 5000;
       const probe = await request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/half-open` });
       expect(probe.statusCode).toBe(200);
-      expect(upstream.requests.length).toBe(2);
+      expect(upstream.requests.length).toBe(tripped + 1);
 
       const recovered = await request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/half-open` });
       expect(recovered.statusCode).toBe(200);
-      expect(upstream.requests.length).toBe(3);
+      expect(upstream.requests.length).toBe(tripped + 2);
     } finally {
       await closeUpstreams(upstream);
     }
@@ -355,10 +360,15 @@ describe("multi-upstream selection and failover", () => {
     await closeUpstreams(first, second);
     configure(urls);
     let error: ApiError | undefined;
-    try {
-      await request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/down`, maxAttempts: 2 });
-    } catch (caught) {
-      error = caught as ApiError;
+    for (let i = 0; i < CORE_FAILURE_THRESHOLD; i += 1) {
+      error = undefined;
+      try {
+        await request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/down`, maxAttempts: 2 });
+      } catch (caught) {
+        error = caught as ApiError;
+      }
+      // Below the threshold the transport error surfaces; at the threshold the pool is exhausted.
+      if (i < CORE_FAILURE_THRESHOLD - 1) expect(error?.code).not.toBe("CORE_UNAVAILABLE");
     }
     expect(error).toBeInstanceOf(ApiError);
     expect(error?.code).toBe("CORE_UNAVAILABLE");

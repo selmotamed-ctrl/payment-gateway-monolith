@@ -3,7 +3,7 @@ id: platform.security
 title: Security and mTLS
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/index.ts
@@ -11,6 +11,11 @@ code:
   - core-back/api/middleware/authDoubleCheck.ts
   - core-back/api/middleware/makerCheckerGuard.ts
   - core-back/lib/auth/index.ts
+  - core-back/lib/auth/revocation.ts
+  - core-back/lib/auth/sharedState.ts
+  - admin-back/lib/security/sessionCookie.ts
+  - merchant-back/lib/security/sessionCookie.ts
+  - deploy/docs/pci-scope.md
   - core-back/lib/auth/uiAuthorities.ts
   - core-back/lib/auth/confidentialAccess.ts
   - core-back/engine/crypto/Vault.ts
@@ -31,6 +36,9 @@ design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
   - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#41-core-back-mtls-server--channel-bound-cn-guard
 tests:
+  - core-back/test/security-regressions/gap-019-020-027-session.test.ts
+  - admin-back/test/session-cookie-and-logout.test.ts
+  - merchant-back/test/session-cookie-and-logout.test.ts
   - core-back/test/phase1-mtls-and-schema.test.ts
   - core-back/test/exhaustive/05-api-matrix/mtls-channel-isolation.test.ts
   - core-back/test/exhaustive/08-security-edge/stride-24-and-15-safeguards.test.ts
@@ -39,6 +47,13 @@ tests:
   - admin-back/test/env-isolation.test.ts
   - merchant-back/test/env-isolation.test.ts
   - checkout-back/test/env-isolation.test.ts
+  - admin-back/test/security-regressions.test.ts
+  - merchant-back/test/security-regressions.test.ts
+  - checkout-back/test/security-regressions.test.ts
+  - core-back/test/security-regressions/c2-mfa.test.ts
+  - core-back/test/security-regressions/h1h2-authz.test.ts
+  - core-back/test/security-regressions/m10-ssrf.test.ts
+  - deploy/backup-daemon/test/mtlsAuthorization.test.ts
 gaps:
   - Session JWTs are stateless; there is no session revocation table and no per-call MFA claim enforcement.
   - API-token scopes are stored but not enforced per merchant endpoint.
@@ -46,6 +61,9 @@ gaps:
   - Google OIDC login returns 501.
   - Storage mTLS certificates are generated but not consumed by PostgreSQL/Redis.
   - The backup daemon certificate environment names are not aligned with core.
+  - "Residual (GAP-019): httpOnly cookie storage is opt-in (`SESSION_COOKIE_MODE`, default off) and exists for admin and merchant only; the Fake Rails tester portal still keeps its token in localStorage."
+  - "Residual (GAP-027): without `REDIS_URL`, or while Redis is failing, throttle counters and the revoke list degrade to per-process memory (deliberate availability-over-strictness); the durable MFA guarantee remains the attempt counter on `mfa_challenges`."
+  - "Residual (GAP-026): the PCI scope statement and the deploy-config PAN guard exist, but the core-back PAN guard (rail registration and request-field rejection) is not implemented."
 ---
 
 # Security and mTLS
@@ -133,14 +151,15 @@ There is no mapping from a certificate to a specific core node or tenant. One ce
    - Returns a principal with `kind: "apiToken"`, `role: "MERCHANT_API"`, the token merchant/application, and the scopes as both authorities and scopes.
 
 2. **Session JWT (anything else).**
-   - Verifies the HS256 signature, issuer `payment-gateway-core` and audience `payment-gateway-edge`.
+   - Verifies the HS256 signature, issuer `payment-gateway-core` and a channel audience: `payment-gateway-admin`, `payment-gateway-merchant` or `payment-gateway-checkout` (the old shared `payment-gateway-edge` audience is rejected). The admin router additionally requires the admin channel and the merchant router the merchant channel (`401 SESSION_AUDIENCE_INVALID`).
+   - Rejects a session whose `jti` is on the revoke list with `401 SESSION_REVOKED`.
    - Rejects an invalid or expired token with `401 SESSION_INVALID`.
    - Loads the user and rejects a missing user with `401 SESSION_USER_MISSING`.
    - Rejects a non-`ACTIVE` user with `403 SESSION_USER_INACTIVE`.
    - Reads `authoritiesMap` from the database, not from the JWT; empty authorities are rejected with `403 SESSION_AUTHORITIES_EMPTY`.
    - Returns `kind: "session"`, user id, role, merchant id, authorities and `sessionId` equal to the JWT subject.
 
-The session key and MFA-challenge key are derived with HKDF-SHA256 from `KMS_MASTER_KEY` using the purposes `session-signing` and `mfa-challenge`. Session lifetime is 12 hours; MFA challenge lifetime is 10 minutes. The JWT includes a `mfa` boolean claim and an `appScopeIds` array.
+(Superseded for MFA: challenges are now rows in `mfa_challenges`, 5-minute lifetime; the `mfa-challenge` HKDF purpose no longer signs a challenge token. See section 11.) The session key and the legacy MFA-challenge key are derived with HKDF-SHA256 from `KMS_MASTER_KEY` using the purposes `session-signing` and `mfa-challenge`. Session lifetime is 12 hours; MFA challenge lifetime is 10 minutes. The JWT includes a `mfa` boolean claim and an `appScopeIds` array.
 
 ### 3.4 Actual MFA, revocation and IP behavior
 
@@ -154,7 +173,7 @@ The session key and MFA-challenge key are derived with HKDF-SHA256 from `KMS_MAS
 | Authority source | DB `authoritiesMap` | DB `authoritiesMap` | Token scopes | Session JWT authorities are not trusted for authorization decisions |
 | Google OIDC | N/A | 501 | N/A | Merchant `/auth/google` is a stub |
 
-The `pg_live_` token IP check trusts `x-real-client-ip` without checking that the immediate peer is a trusted proxy. That is acceptable only because core is expected to be reachable solely through the mTLS edge and a private network; a direct core access path would make the header spoofable.
+The `pg_live_` token IP check trusts `x-real-client-ip` (always overwritten by the edge with the validated resolved IP; core's `edgeReportedClientIp` falls back to `request.ip` for an invalid value) without checking that the immediate peer is a trusted proxy. That is acceptable only because core is expected to be reachable solely through the mTLS edge and a private network; a direct core access path would make the header spoofable.
 
 The admin edge also enforces `ADMIN_LAN_CIDRS` through `enforceLanAccess`, resolving the client IP through `TRUSTED_PROXY_CIDRS`. That is an edge control; core itself has no admin IP guard.
 
@@ -210,7 +229,7 @@ The executable subject coverage is uneven. `executeApprovalSubject` handles `AML
 Outbound gateway calls run through `StepExecutor` and/or `ApiConsumer`. Both enforce:
 
 - **HTTPS only**, except for the explicitly scoped Fake Rails host.
-- **Host allowlist:** the final URL host must appear in the gateway version's `allowed_hosts` when the list is non-empty.
+- **Host allowlist:** the final URL host must appear in the gateway version's `allowed_hosts`. An empty list fails closed (`HOST_ALLOWLIST_EMPTY`) unless `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST=true`; private/loopback/link-local literals are blocked at compile time unless `allowPrivateHosts`.
 - **No userinfo, no fragments, no backslashes, no encoded path separators, no `.`/`..` traversal.**
 - **No control characters** in URLs, headers, query keys/values.
 - **No redirects:** fetch uses `redirect: "manual"` and a 3xx response becomes `GATEWAY_REDIRECT_BLOCKED`.
@@ -246,10 +265,10 @@ The inbox stores `content-type` and `content-length` in `redactedHeadersJson`, n
 - Admin auth has a 10-request/15-minute limiter; admin protected routes have a 600-request/60-second limiter.
 - Merchant auth has a 20-request/15-minute limiter; portal API 300/60s; external API 120/60s.
 - Checkout pay has 120/60s; inbound webhook has 600/60s.
-- Upload limits: admin 20 MiB, merchant 10 MiB, checkout inbound 3 MiB at the edge; core raw-body limit is 25 MiB.
+- Upload limits: admin 20 MiB, merchant 10 MiB, checkout inbound 1 MiB at the edge (`MAX_INBOUND_BODY_BYTES`); core raw-body limit is 25 MiB.
 - KYB uploads are checked by declared MIME and magic bytes in both the edge and core; core stores the detected type, not the declared one.
 - The admin edge's authority guard is advisory; core re-checks authorities.
-- CORS is `origin: true` with credentials disabled on all three edges. The source of truth for browser safety is the reverse proxy/CSP and the bearer-token model, not CORS.
+- CORS: admin-back and merchant-back emit no CORS headers unless `CORS_ALLOWED_ORIGINS` is set; checkout-back is permissive without credentials unless it is set. The source of truth for browser safety is the reverse proxy/CSP and the bearer-token model, not CORS.
 
 ## 4. Contracts and invariants
 
@@ -414,3 +433,31 @@ No test run was performed for this documentation change. Integration suites that
 ## 10. Change history
 
 - 2026-11-03: Initial canonical security part written against `5a24f6f+working-tree`; records actual MFA/revocation/IP enforcement and the merchant authorization gap.
+
+## 11. Security hardening (2026-11-05)
+
+### Authentication and authorization (core)
+- MFA challenges are `mfa_challenges` rows (opaque UUID, HMAC-stored code, single-use, channel-bound, 5 guesses then a 15-minute cool-down, 5-minute expiry). Login throttles (per identifier, per IP, MFA per IP) use the shared auth state (`core-back/lib/auth/sharedState.ts`): Redis when `REDIS_URL` is set (shared by every core instance), otherwise, or when a Redis call fails, per-process memory; the DB attempt counter on `mfa_challenges` is the durable guarantee (GAP-027).
+- Principal separation: staff and merchant principals cannot cross routers (`STAFF_PRINCIPAL_REQUIRED`, `MERCHANT_PRINCIPAL_REQUIRED`); API tokens may only call `/external/*`. Merchant authority catalogue, escalation guards and token expiry are described in the core API part.
+- Authorities remain enforced by core. The edge guard is advisory but now deny-by-default. `*` is honoured at the edge only because core re-verifies; the edge cannot verify signatures because the key lives in core.
+
+### Edge client IP and headers
+- `TRUSTED_PROXY_CIDRS` defaults to loopback only (`127.0.0.0/8,::1/128`; deploy sets `127.0.0.1/32,::1/128` explicitly). `resolveClientIp` honours forwarded headers only from trusted peers and requires a single valid IP (`x-real-ip` preferred, `x-real-client-ip` fallback). The edge always overwrites `x-real-client-ip` towards core.
+- Hand-written security headers on all edges: `nosniff`, `no-referrer`, `X-Frame-Options`, `frame-ancestors 'none'`, CORP, default `no-store`.
+- Redaction now covers PII keys (email, phone, msisdn, iban, account number, names, identity, national id, passport, dob, address). `redactUrl` masks sensitive query values and path tokens (inbound path tokens, link keys, attempt tokens, `/logs/` ids, `/external/links/` keys).
+- Limiters key on the resolved client IP, with an extra per-account limiter on admin login/MFA and merchant auth POSTs. Window envs: `AUTH_RATE_LIMIT_WINDOW_MS`, `ADMIN_RATE_LIMIT_WINDOW_MS`, `API_RATE_LIMIT_WINDOW_MS`, `EXTERNAL_RATE_LIMIT_WINDOW_MS`, `PAY_RATE_LIMIT_WINDOW_MS`, `INBOUND_RATE_LIMIT_WINDOW_MS`.
+- Ops note: cross-origin development frontends need `CORS_ALLOWED_ORIGINS`.
+
+### Outbound and inbound engine controls
+See the core engine part: empty `allowed_hosts` fails closed, unkeyed SHA256 webhooks are rejected, timestamp requirements and capped unverified inbound storage.
+
+### Still open
+Fake Rails tester tokens stay in localStorage (GAP-019 residual); httpOnly cookies are opt-in (`SESSION_COOKIE_MODE`, default off); throttle and revoke state degrade to per-process memory without Redis (GAP-027 residual); the core-back PAN guard (GAP-026 residual). The `x-real-client-ip` trust in core still depends on the private mTLS boundary.
+
+## Gap resolutions (2026-11-05)
+
+- **Session identity, revocation and per-channel audience (GAP-019, GAP-020; RESOLVED).** `signSession(claims, channel)` mints HS256 tokens with a unique `jti` and the audience of the channel: `admin` -> `payment-gateway-admin`, `merchant` -> `payment-gateway-merchant`, `checkout` -> `payment-gateway-checkout` (`SESSION_AUDIENCES`). `verifySessionToken(token, channel?)` accepts any of the three audiences, or exactly the given channel, and exposes `jti`, `exp` and `channel` on `SessionClaims`. Because the audience changed, **sessions issued before this deploy (audience `payment-gateway-edge`) are rejected and every admin and merchant user must sign in again.** Revocation: `POST /internal/{admin,merchant}/auth/logout` calls `revokePrincipalSession`, which stores `revoked:<jti>` in the shared auth state until the token's own expiry (`core-back/lib/auth/revocation.ts`, 12 h bound), and `resolveSessionPrincipal` refuses revoked sessions. The edges proxy `POST /api/v1/admin/auth/logout` and the merchant equivalent; `admin-front` calls the admin logout best effort from its user store and always clears the local session.
+- **Optional httpOnly session cookie (GAP-019).** `SESSION_COOKIE_MODE` (`true`/`false`, default `false`) and `SESSION_COOKIE_SECURE` (default `true`; set `false` only for plain-HTTP local development) are validated in the admin-back and merchant-back env. In cookie mode login/MFA responses set the token as an `HttpOnly; SameSite=Strict` cookie (`pg_admin_session` path `/api/v1/admin`, `pg_merchant_session` path `/api/v1/merchant`, 12 h, `Secure` unless disabled) and the body carries `sessionCookie: true` instead of `token`; the edge turns the cookie back into the `Authorization: Bearer` header it forwards to core when the caller sent none, so core verifies the same JWT. Cookie-authenticated unsafe methods must carry the `x-pg-csrf: 1` header (`403 CSRF_HEADER_REQUIRED`). The fronts keep a non-secret `cookie-session` sentinel (`utils/security/sessionToken.ts`) and send the CSRF header instead of a bearer token. Bearer headers keep working unchanged in both modes. The mode is off by default; enabling it needs HTTPS (or `SESSION_COOKIE_SECURE=false` locally).
+- **Shared throttle state (GAP-027).** `core-back/lib/auth/sharedState.ts` exposes an `AuthStateStore` (`incrWindow`, `setFlag`, `flagRemainingMs`, `del`, `clear`) backed by Redis when `REDIS_URL` is configured and by a bounded in-memory store (20,000 entries, oldest half dropped under a key flood) otherwise or when a Redis call fails. Login, MFA and the revoke list use it; keys are hashed, never a clear identifier. The policy is availability over strictness: login keeps working during a Redis outage.
+- **PCI scope (GAP-026, partially resolved).** `deploy/docs/pci-scope.md` is the normative scope statement: the gateway is out of PCI DSS cardholder-data scope by design (no PAN, CVV/CVC, PIN or track data is received, processed, stored or logged; only opaque processor tokens, statuses and at most last four digits plus brand). `deploy/lib/configSchema.ts` `panRailGuardProblems` makes `loadDeployConfig` reject any `deploy.env` key naming a PAN/CVV/card-number rail and any value holding a Luhn-valid 13-19 digit token. **Still open:** the core-back guard (rejecting PAN-capable rails at registration and PAN-shaped request fields, and redacting PAN-shaped log strings) is not implemented.
+- **Still open.** GAP-023 (operator-supplied SHA256 values) and GAP-025 (real malware scanner).

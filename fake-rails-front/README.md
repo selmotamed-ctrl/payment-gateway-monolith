@@ -274,3 +274,7 @@ Related implementation:
 
 - [`fake-rails-back/README.md`](../fake-rails-back/README.md)
 - [`deploy/README.md`](../deploy/README.md)
+
+## Security notes (2026-11-05)
+
+The postMessage target is `VITE_CHECKOUT_ORIGIN` (otherwise the embedding parent's origin, never `*`) and `redirect_url` must be http(s) without credentials. The SSE token is still in the query string and `/hosted/*` is still public with no token on the action POST (open gap).

@@ -1,6 +1,9 @@
+import { getBaseUrl } from "../baseUrl";
+
 export const urlsMap = {
     options: (kind: string) => `v1/merchant/options/${kind}`,
     authLogin: "v1/merchant/auth/login",
+    authLogout: "v1/merchant/auth/logout",
     authRegister: "v1/merchant/auth/register",
     authVerifyIdentity: "v1/merchant/auth/verify-identity",
     authGoogle: "v1/merchant/auth/google",
@@ -31,7 +34,8 @@ export const urlsMap = {
     posTerminals: "v1/merchant/pos/terminals",
     posTerminalDetail: (id: string) => `v1/merchant/pos/terminals/${id}`,
     posScreens: (id: string) => `v1/merchant/pos/terminals/${id}/screens`,
-    posScreenStream: (code: string) => `v1/merchant/pos/screens/${code}/stream`,
+    // Opened with fetch() (not axios), so it must be an absolute path under the API base.
+    posScreenStream: (code: string) => `${getBaseUrl()}/v1/merchant/pos/screens/${encodeURIComponent(code)}/stream`,
 
     paymentsList: "v1/merchant/payments",
 

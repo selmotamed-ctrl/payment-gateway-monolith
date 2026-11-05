@@ -3,7 +3,7 @@ id: fake-rails.backend
 title: Fake Rails Backend Architecture
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - fake-rails-back/index.ts
@@ -15,15 +15,18 @@ design_sources:
   - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#2-deployment-engine-integration-production-guardrails
   - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#3-single-user-authentication-architecture
 tests:
+  - fake-rails-back/test/security.test.ts
   - fake-rails-back/test/api.test.ts
   - fake-rails-back/test/crypto.test.ts
   - fake-rails-back/test/exhaustive/05-api-matrix/fake-rails-portal-and-chaos-api.test.ts
+  - fake-rails-back/test/security.test.ts
 gaps:
   - Inbound rail requests are not authenticated or signature-verified.
   - Default outbound webhook URL includes an extra /webhook path segment.
   - The service has no direct TLS listener; deployment relies on Nginx.
   - Portal rate limiting is in-process and resets on restart.
   - Stored step events contain raw headers and bodies without redaction.
+  - "Residual (GAP-019): the tester portal session token is still kept in browser localStorage by `fake-rails-front`."
 ---
 
 # Fake Rails Backend Architecture
@@ -139,9 +142,9 @@ Indexes cover reference lookup, creation time, rail/status, provider reference, 
 
 - `/auth/login` and everything under `/hosted/` are public.
 - `/internal/*` requires `x-fake-rails-seeder-token` equal to `FAKE_RAILS_SEEDER_TOKEN`.
-- Everything else requires a Bearer token or `?token=` query token with `role=FAKE_RAILS_TESTER`.
+- Everything else requires a Bearer token with `role=FAKE_RAILS_TESTER`; the SSE stream alone also accepts a 30-second single-use `?ticket=` (see the gap resolutions below).
 
-`lib/jwt.ts` is a small HS256 implementation using HMAC-SHA256, base64url, expiry checking and `timingSafeEqual`. There is no issuer, audience, revocation or refresh-token mechanism.
+`lib/jwt.ts` is a small HS256 implementation using HMAC-SHA256, base64url, expiry checking and `timingSafeEqual`. There is no issuer, audience, revocation or refresh-token mechanism (the secret must now be at least 32 characters and pass the weak-secret checks).
 
 ### 3.6 Portal routers and event hub
 
@@ -296,3 +299,10 @@ bun run start
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+- The JWT secret and seeder token must be at least 32 characters and pass the same weak-secret checks as deploy. The seeder token compare is constant-time. The session token is never accepted from the query string; `/transactions/stream` takes a single-use `?ticket=` instead (GAP-024).
+- `FAKE_RAILS_ALLOWED_CIDRS` is enforced against `socket.remoteAddress` (not `X-Forwarded-For`); behind nginx the real allowlist is the nginx `allow`/`deny` block. `FAKE_RAILS_TRUST_PROXY` defaults to loopback. `FAKE_RAILS_PORTAL_ACCOUNT_LOCKOUT` (default 5 per username) locks repeated failed portal logins.
+- **Hosted action token and stream ticket (GAP-024, RESOLVED 2026-11-05).** `GET /hosted/session/:reference` now returns `action_token`, a JWT bound to that transaction id with the purpose role `FAKE_RAILS_HOSTED_ACTION` (15 minutes); the approve/decline action POST must send it in `X-Hosted-Action-Token` or gets `401 HOSTED_ACTION_TOKEN_REQUIRED`. `POST /portal-api/transactions/stream-ticket` (tester session required) issues a `FAKE_RAILS_SSE_TICKET` JWT (30 seconds, unique `jti`); `portalAuthGuard` accepts it only on `/transactions/stream` and consumes it once (`consumeSseTicket`; replay is `401`). Both tokens are signed with the portal JWT secret but carry their own `role` (helpers in `fake-rails-back/lib/tickets.ts`), so neither works as a tester session and a tester session works as neither. The used-ticket map is in-process and pruned on use. `/hosted/*` session reads remain public.
+- **Residual.** `fake-rails-front` still keeps the tester token in localStorage (GAP-019 does not cover this portal).

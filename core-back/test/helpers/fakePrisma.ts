@@ -48,7 +48,22 @@ const matches = (model: string, row: FakeRow, where: Record<string, unknown>): b
       }
       continue;
     }
-    if (isPlainObject(value)) {
+    if (
+      isPlainObject(value)
+      && !(value instanceof Date)
+      && ["gte", "gt", "lte", "lt"].some((operator) => operator in value)
+    ) {
+      // Comparison operators (Date or number columns).
+      const actual = row[key] instanceof Date ? (row[key] as Date).getTime() : (row[key] as number);
+      const bound = (candidate: unknown): number =>
+        candidate instanceof Date ? candidate.getTime() : (candidate as number);
+      if (value.gte !== undefined && !(actual >= bound(value.gte))) return false;
+      if (value.gt !== undefined && !(actual > bound(value.gt))) return false;
+      if (value.lte !== undefined && !(actual <= bound(value.lte))) return false;
+      if (value.lt !== undefined && !(actual < bound(value.lt))) return false;
+      continue;
+    }
+    if (isPlainObject(value) && !(value instanceof Date)) {
       if (key === "gateway" && model === "railRoute") {
         const gateway = table("gateway").find((entry) => entry.code === value.code);
         if (!gateway || row.gatewayId !== gateway.id) {
@@ -61,6 +76,11 @@ const matches = (model: string, row: FakeRow, where: Record<string, unknown>): b
           return false;
         }
       }
+      continue;
+    }
+    if (value === null) {
+      // A missing column reads as NULL, as it does on a real row.
+      if (row[key] !== null && row[key] !== undefined) return false;
       continue;
     }
     if (row[key] !== value) {
@@ -79,6 +99,18 @@ const stripNested = <T extends FakeRow>(row: T): T => {
   delete copy.parameters;
   delete copy.outputs;
   return copy as T;
+};
+
+/** Applies Prisma update data, including the `{ increment }` numeric operation. */
+const applyData = (row: FakeRow, data: FakeRow): void => {
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined) continue;
+    if (isPlainObject(value) && !(value instanceof Date) && typeof value.increment === "number") {
+      row[key] = ((row[key] as number | undefined) ?? 0) + value.increment;
+    } else {
+      row[key] = value;
+    }
+  }
 };
 
 const model = (name: string) => {
@@ -129,8 +161,18 @@ const model = (name: string) => {
       if (!row) {
         throw new Error(`Fake '${name}' row not found`);
       }
-      Object.assign(row, args.data);
+      applyData(row, args.data);
       return row;
+    },
+    async updateMany(args: { where: Record<string, unknown>; data: FakeRow }): Promise<{ count: number }> {
+      const targets = rows().filter((row) => matches(name, row, args.where ?? {}));
+      for (const row of targets) {
+        applyData(row, args.data);
+      }
+      return { count: targets.length };
+    },
+    async count(args: { where?: Record<string, unknown> } = {}): Promise<number> {
+      return args.where ? rows().filter((row) => matches(name, row, args.where ?? {})).length : rows().length;
     },
     async deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }> {
       const remaining = rows().filter((row) => !matches(name, row, args.where));
@@ -210,6 +252,8 @@ const flowModel = () => {
 export const createFakePrisma = (): PrismaClient => {
   const client = {
     user: model("user"),
+    mfaChallenge: model("mfaChallenge"),
+    notification: model("notification"),
     gateway: model("gateway"),
     gatewayVersion: model("gatewayVersion"),
     gatewayEnvironment: model("gatewayEnvironment"),

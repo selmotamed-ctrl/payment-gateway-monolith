@@ -1,6 +1,9 @@
 import type { UserAuthorityType, UserAuthoritiesMapType } from "@/utils/authorities";
 import router from "@/router";
 import { nextTick, ref } from "vue";
+import { getBaseUrl } from "@/constants/baseUrl";
+import { urlsMap } from "@/constants/urlsMap";
+import { revokeServerSession } from "@/utils/security/sessionToken";
 import { mapHasAllAuthorities, mapHasAuthority, type AdminRole } from "@/utils/authorities";
 
 export type AdminUserInfo = {
@@ -37,6 +40,8 @@ export const loggingOut = ref(false);
 
 export const logout = async (options?: { redirect?: string }) => {
     loggingOut.value = true;
+    // Server-side revoke (GAP-019): best effort, the local session is cleared regardless.
+    await revokeServerSession(fetch, `${getBaseUrl()}/${urlsMap.authLogout}`, user.value?.token);
     setUserState(null);
     await nextTick();
     const redirect = options?.redirect && options.redirect !== "/login" ? options.redirect : undefined;
@@ -73,4 +78,4 @@ export const hasOneOfAuthorities = (required?: UserAuthorityType[] | null): bool
 export const hasAllAuthorities = (required?: UserAuthorityType[] | null): boolean =>
     mapHasAllAuthorities(user.value?.userInfo?.authoritiesMap, required);
 
-export const isAuthenticated = () => import.meta.env.VITE_AUTHORIZED || (!!user.value?.token && !!user.value?.userInfo);
+export const isAuthenticated = () => !!user.value?.token && !!user.value?.userInfo;

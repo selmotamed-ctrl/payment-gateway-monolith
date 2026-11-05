@@ -83,12 +83,12 @@ describe("PrismaRepositories field mapping", () => {
     expect(call?.args.where).toEqual({ key: "link-key" });
   });
 
-  test("finds an attempt by idempotency key with the camelCase where clause", async () => {
+  test("finds an attempt by idempotency key scoped to the link", async () => {
     const { client, calls } = createRecordingClient();
     const repositories = new PrismaRepositories(client as never);
-    await repositories.payments.findAttemptByIdempotencyKey(client as never, "idem-1");
+    await repositories.payments.findAttemptByIdempotencyKey(client as never, "idem-1", "link-1");
     const call = calls.find((entry) => entry.method === "paymentAttempt.findFirst");
-    expect(call?.args.where).toEqual({ idempotencyKey: "idem-1" });
+    expect(call?.args.where).toEqual({ linkId: "link-1", idempotencyKey: "idem-1" });
   });
 
   test("lists approval requests with the camelCase where and orderBy clauses", async () => {

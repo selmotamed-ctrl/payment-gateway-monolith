@@ -1,4 +1,4 @@
-import { isDev } from "@/constants/env";
+import { isDev } from "../env";
 import { trimSlashes } from "kt-common";
 
 export const getBaseUrl = (): string => {

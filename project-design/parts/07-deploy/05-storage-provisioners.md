@@ -3,8 +3,8 @@ id: deploy.storage
 title: Storage Provisioners
 status: partial
 confidence: high
-last_verified: 2026-11-04
-verified_against: working-tree
+last_verified: 2026-11-05
+verified_against: 5a24f6f+working-tree
 code:
   - deploy/test/testMatrix.test.ts
   - deploy/provisioners/postgres18Provisioner.ts
@@ -14,23 +14,26 @@ code:
   - deploy/lib/configSchema.ts
   - deploy/lib/hostPlanner.ts
   - deploy/lib/healthVerifier.ts
+  - deploy/lib/quoting.ts
 design_sources:
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#4-segment-3--postgresql-18-ddl-partialcoveringgin-indexes--dedicated-auditlog-schemas
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#63-individual-storage-solution-provisioners-in-deployprovisioners
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
 tests:
+  - deploy/test/gap-hardening.test.ts
   - deploy/test/testMatrix.test.ts
   - deploy/test/provisioners.test.ts
   - deploy/test/exhaustive-deploy-matrix.test.ts
   - deploy/test/healthVerifierScale.test.ts
   - deploy/test/configScale.test.ts
+  - deploy/test/security-regressions.test.ts
 gaps:
   - The audit/log provisioner assumes the Debian cluster names `audit` and `log`; a custom name is not configurable.
   - Storage mTLS is generated but not consumed; PostgreSQL, PgBouncer, Redis, audit and log databases do not request client certificates.
-  - PostgreSQL SSL material is not configured by the provisioner; hostssl rules rely on the distribution's default TLS setup.
+  - "PostgreSQL TLS is provisioned with a self-signed per-cluster certificate (GAP-022); there is no CA-signed server certificate or client-certificate verification, so `verify-full` is not possible yet."
   - Redis has no TLS listener.
-  - PgBouncer uses `server_tls_sslmode = prefer` and no client certificate because the deploy does not install PostgreSQL TLS material.
-  - The WAL-G download uses a GitHub "latest" Ubuntu 20.04 binary URL and is not pinned or checksum-verified.
+  - PgBouncer uses `server_tls_sslmode = require` toward PostgreSQL and no client certificate (the self-signed server certificate is not verified).
+  - (Superseded) WAL-G is now pinned and sha256-verified; see Security hardening. Real SHA256 values must still be supplied by the operator.
 ---
 
 # Storage Provisioners
@@ -161,7 +164,7 @@ The retention function only drops partitions whose names match the monthly suffi
 `provisionBackupEngine()` installs:
 
 - `barman`, `zstd`, `lz4`, `brotli`, `xz-utils`, `rclone`, `curl`, `ca-certificates`;
-- WAL-G when `BACKUP_ENGINE_MODE=wal-g`, by downloading `wal-g-pg-ubuntu-20.04-amd64` from the GitHub "latest" release and chmod +x;
+- WAL-G when `BACKUP_ENGINE_MODE=wal-g`, by downloading the pinned asset (`BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`) and verifying it against the required `BACKUP_WALG_SHA256` (fail closed), then chmod +x;
 - the `pgbackup` system user and `/var/lib/pg-backup`, log and cert directories;
 - `/etc/pg-backup/backup.env` from `backupDaemonEnv()`;
 - `/etc/pg-backup/wal-g.env` for the core target;
@@ -393,3 +396,20 @@ Not covered:
 - `provisionPostgres18()` waits for `pg_isready` on the primary port after restarting PostgreSQL.
 - `provisionBackupEngine()` waits after the core and audit archive restarts, restarts PgBouncer after the last PostgreSQL restart, and waits for PgBouncer on `PGBOUNCER_PORT`. The audit target can share the primary cluster, so its restart could otherwise leave PgBouncer caching `the database system is shutting down (server_login_retry)` when the core release runs migrations through `:6432`.
 - These waits prevent the core migration step from racing a PostgreSQL restart on single-machine and co-located audit deployments.
+
+## Security hardening (2026-11-05)
+
+- **Quoting.** Provisioners (postgres18, auditAndLogDb, backupEngine) use `deploy/lib/quoting.ts`: SQL literals are escaped, DO blocks use collision-free dollar tags, and `pgbouncer.ini`, `userlist` and `.pgpass` are escaped. `backup.env` and `wal-g.env` are rendered `KEY='value'` (a single quote in a value is rejected).
+- **Credentials.** `pg_basebackup` uses `PGPASSFILE`, never `PGPASSWORD`. Bootstrap/audit/log/archive SQL lives in a private 0700 postgres-owned directory, mode 0600, removed by trap/finally.
+- **WAL-G.** `restore_command` is a valid `postgresql.conf` literal (inner quotes doubled). The daemon setting `WALG_ENV_FILE` keeps S3/encryption secrets out of that line; the provisioner writes `/etc/pg-backup/wal-g.env` 0640 root:postgres. WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed with required `BACKUP_WALG_SHA256`; barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`).
+- **Mirror and restore.** The off-site mirror uses `rclone copy`/`rsync` without `--delete` unless `BACKUP_SECONDARY_MIRROR_DELETE=true`. The scratch restore cluster starts with `-c archive_mode=off`.
+- **PostgreSQL.** `listen_addresses = 127.0.0.1,<private IP>`; memory settings derive from optional `PG_RAM_GB` (unset keeps 8GB/24GB/1GB); `PG_IO_METHOD` defaults to `worker` (io_uring is opt-in); an existing standby (PG_VERSION and `standby.signal` present) is not rebuilt unless `PG_REPLICA_REBUILD=true`.
+- **Still open.** Real SHA256 values for WAL-G/bun/barman must be supplied by the operator (GAP-023). GAP-022 and GAP-028 are resolved (see the gap resolutions below).
+
+## Gap resolutions (2026-11-05)
+
+- **PostgreSQL TLS and hostssl-only (GAP-022, RESOLVED).** `postgresTlsSnippet` appends `ssl = on`, `ssl_cert_file`/`ssl_key_file` under `<cluster hba dir>/tls`, `ssl_min_protocol_version = 'TLSv1.2'` and `password_encryption = 'scram-sha-256'` to each cluster's configuration. `pgTlsCommands` idempotently creates a self-signed RSA-4096 certificate (825 days, 0600 key owned by `postgres`) on the primary and replicas unless an operator already installed one. `pgHbaSnippet` now emits only `hostssl` rules (loopback `127.0.0.1/32` and `::1/128`, every allowed source for data and replication); the plain `host` rules were removed. Replica `pg_basebackup` runs with `PGSSLMODE=require` and PgBouncer uses `server_tls_sslmode = require`.
+- **Backup daemon user (GAP-022).** The backup engine provisioner runs the daemon systemd unit as `User=pgbackup`/`Group=pgbackup` with `SupplementaryGroups=postgres`, adds `postgres` to the `pgbackup` group, and owns `/var/lib/pg-backup`, the daemon certificate directory, the log directory, the barman state directory, `BACKUP_PGPASSFILE` and `/etc/pg-backup/wal-g.env` (`root:pgbackup`, 0640) accordingly.
+- **Replica pgpass over stdin (GAP-028, RESOLVED).** `replicaPgpassContent` renders the replication `.pgpass` line and `provisionPostgres18` streams it to `/var/lib/postgresql/.pgpass` (0600) with the remote-file writer; the replication password no longer appears in any command argv. `replicaCommands` only checks and `chown`/`chmod`s the file.
+- **UTC (GAP-030).** The cluster configuration also sets `timezone = 'UTC'` and `log_timezone = 'UTC'` (the engine pins its own sessions, see `core.storage`).
+- **Still open.** GAP-023: real SHA256 values for WAL-G, bun and barman (`BACKUP_WALG_SHA256`, `BUN_SHA256`) must be supplied by the operator for each release.

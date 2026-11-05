@@ -1,5 +1,6 @@
 import { parseNodeList, type DeployConfig } from "../lib/configSchema";
 import type { SshTarget } from "../lib/hostPlanner";
+import { dollarTag, shellQuote, sqlIdent, sqlLiteral } from "../lib/quoting";
 import { bootstrapCommands, pgClusterFor, pgHbaSnippet, postgresMainConfigPath, postgresMainConfigSnippet, type PgCluster, type ProvisionReport, type ProvisionRunner } from "./postgres18Provisioner";
 
 /**
@@ -186,7 +187,7 @@ CREATE INDEX IF NOT EXISTS http_access_logs_created_brin_idx
   ON http_access_logs USING brin (created_at);
 `;
 
-const sqlIdentifier = (value: string): string => `"${value.replace(/"/g, '""')}"`;
+const sqlIdentifier = (value: string): string => sqlIdent(value);
 
 /** Least-privilege runtime grants for the audit writer (append-only). */
 export const auditRuntimeGrants = (role: string): string => {
@@ -326,9 +327,15 @@ const repositorySql = (config: DeployConfig, kind: "audit" | "log"): string => {
   const name = kind === "audit" ? config.AUDIT_DB_NAME : config.LOG_DB_NAME;
   const user = kind === "audit" ? config.AUDIT_DB_USER : config.LOG_DB_USER;
   const password = kind === "audit" ? config.AUDIT_DB_PASSWORD : config.LOG_DB_PASSWORD;
+  const ident = sqlIdent(user, "role");
+  const lit = sqlLiteral(user, "role");
+  const pw = sqlLiteral(password, "password");
+  const body = `IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${lit}) THEN CREATE ROLE ${ident} LOGIN PASSWORD ${pw}; ELSE ALTER ROLE ${ident} PASSWORD ${pw}; END IF;`;
+  const tag = dollarTag(body);
+  const createDb = sqlLiteral(`CREATE DATABASE ${sqlIdent(name, "database")} OWNER ${ident}`);
   return [
-    `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${user}') THEN CREATE ROLE "${user}" LOGIN PASSWORD '${password}'; ELSE ALTER ROLE "${user}" PASSWORD '${password}'; END IF; END $$;`,
-    `SELECT 'CREATE DATABASE "${name}" OWNER "${user}"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${name}')\\gexec`,
+    `DO ${tag} BEGIN ${body} END ${tag};`,
+    `SELECT ${createDb} WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = ${sqlLiteral(name, "database")})\\gexec`,
   ].join("\n") + "\n";
 };
 
@@ -341,8 +348,11 @@ const applySql = (
   database: string,
   port = 5432,
 ): void => {
-  runner.writeRemoteFile({ target: ssh, path, content: sql, mode: 0o644, sudo: true });
-  runner.run(ssh, `runuser -u postgres -- psql -p ${port} -v ON_ERROR_STOP=1 -d ${database} -f ${path}`, { sudo: true });
+  // SQL may carry role passwords: keep it in a private postgres-owned 0700 dir, mode 0600, removed on exit.
+  const dir = path.slice(0, path.lastIndexOf("/"));
+  runner.run(ssh, `install -d -m 0700 -o postgres -g postgres ${shellQuote(dir)}`, { sudo: true });
+  runner.writeRemoteFile({ target: ssh, path, content: sql, mode: 0o600, sudo: true });
+  runner.run(ssh, `chown postgres:postgres ${shellQuote(path)}; trap ${shellQuote(`rm -rf ${shellQuote(dir)}`)} EXIT; runuser -u postgres -- psql -p ${port} -v ON_ERROR_STOP=1 -d ${shellQuote(database)} -f ${shellQuote(path)}`, { sudo: true });
 };
 
 export interface AuditLogProvisionInput {
@@ -369,11 +379,12 @@ const configureAuditLogHost = (
   ssh: SshTarget,
   config: DeployConfig,
   cluster: PgCluster,
+  privateIp: string,
 ): void => {
   runner.writeRemoteFile({
     target: ssh,
     path: postgresMainConfigPath(config, cluster),
-    content: postgresMainConfigSnippet(config, cluster),
+    content: postgresMainConfigSnippet(config, cluster, privateIp),
     mode: 0o644,
     sudo: true,
   });
@@ -403,10 +414,10 @@ export const provisionAuditAndLogDb = (input: AuditLogProvisionInput): Provision
       commands.push(command);
       runner.run(ssh, command, { sudo: true });
     }
-    configureAuditLogHost(runner, ssh, config, cluster);
-    const repoPath = `/tmp/pg-audit-bootstrap-${process.pid}.sql`;
+    configureAuditLogHost(runner, ssh, config, cluster, auditSpec.privateIp);
+    const repoPath = `/var/lib/postgresql/.pg-audit-bootstrap-${process.pid}/script.sql`;
     applySql(runner, ssh, repoPath, repositorySql(config, "audit"), config, "postgres", cluster.port);
-    const ddlPath = `/tmp/pg-audit-ddl-${process.pid}.sql`;
+    const ddlPath = `/var/lib/postgresql/.pg-audit-ddl-${process.pid}/script.sql`;
     applySql(runner, ssh, ddlPath, auditDatabaseDdl(config), config, config.AUDIT_DB_NAME, cluster.port);
     commands.push("apply audit_records DDL + immutability trigger");
   }
@@ -419,10 +430,10 @@ export const provisionAuditAndLogDb = (input: AuditLogProvisionInput): Provision
       commands.push(command);
       runner.run(ssh, command, { sudo: true });
     }
-    configureAuditLogHost(runner, ssh, config, cluster);
-    const repoPath = `/tmp/pg-log-bootstrap-${process.pid}.sql`;
+    configureAuditLogHost(runner, ssh, config, cluster, logSpec.privateIp);
+    const repoPath = `/var/lib/postgresql/.pg-log-bootstrap-${process.pid}/script.sql`;
     applySql(runner, ssh, repoPath, repositorySql(config, "log"), config, "postgres", cluster.port);
-    const ddlPath = `/tmp/pg-log-ddl-${process.pid}.sql`;
+    const ddlPath = `/var/lib/postgresql/.pg-log-ddl-${process.pid}/script.sql`;
     applySql(runner, ssh, ddlPath, `${logDatabaseDdl(config)}\n${ensureLogPartitions(input.now ?? new Date(), 6, config.LOG_RETENTION_MONTHS)}`, config, config.LOG_DB_NAME, cluster.port);
     const cronPath = "/etc/cron.d/pg-log-partitions";
     runner.writeRemoteFile({ target: ssh, path: cronPath, content: `${logPartitionCronLine(config)}\n`, mode: 0o644, sudo: true });

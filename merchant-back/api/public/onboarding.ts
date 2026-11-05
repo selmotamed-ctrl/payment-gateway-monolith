@@ -1,22 +1,25 @@
 import express, { type Request, type Response } from "express";
 import rateLimiter from "express-rate-limit";
 import { z } from "zod";
+import { lazyLimiter, rateLimitKey } from "../../lib/clientIp";
 import { env } from "../../lib/env";
 import { parseOrThrow } from "../../lib/error";
-import { zIdentifier } from "../../lib/zReady";
+import { zIdentifier, zWebsite } from "../../lib/zReady";
 import {
   coreBeneficialOwnerSchema,
   coreJoinRequestSchema,
   coreOnboardingSubmitSchema,
 } from "../contract";
 import { coreForward } from "../forward";
-import { forwardUpload, uploadSingle } from "../upload";
+import { requireBearer } from "../forward";
+import { forwardUpload, uploadGuards, uploadSingle } from "../upload";
 
 const router = express.Router();
 
-const onboardingLimiter = rateLimiter({
-  windowMs: 60_000,
+const onboardingLimiter = lazyLimiter(() => rateLimiter({
+  windowMs: env.API_RATE_LIMIT_WINDOW_MS,
   max: () => env.API_RATE_LIMIT_MAX,
+  keyGenerator: (req) => rateLimitKey(req),
   standardHeaders: true,
   legacyHeaders: false,
   handler: (_req, res) => {
@@ -25,9 +28,15 @@ const onboardingLimiter = rateLimiter({
       message: "Too many onboarding requests, please retry later",
     });
   },
-});
+}));
 
 router.use(onboardingLimiter);
+// Every onboarding route acts on the caller's own application: a bearer is mandatory and is
+// checked before any request body is parsed or buffered (core still verifies it).
+router.use((req, _res, next) => {
+  requireBearer(req);
+  next();
+});
 
 const joinRequestSchema = z
   .object({
@@ -40,7 +49,7 @@ const joinRequestSchema = z
     address: z.string().min(4).max(400).optional(),
     phone: z.string().min(6).max(20).optional(),
     email: z.string().min(3).max(160).optional(),
-    website: z.string().max(200).optional(),
+    website: zWebsite.optional(),
     locale: z.enum(["ar", "en"]).optional(),
   })
   .strict();
@@ -115,6 +124,7 @@ router.get(
 
 router.post(
   "/kyb-documents",
+  ...uploadGuards,
   uploadSingle("document"),
   async (req: Request, res: Response) => {
     const metadata = parseOrThrow(kybDocumentSchema, req.body ?? {});

@@ -933,11 +933,37 @@ model User {
   detailChangeLogs          DetailChangeLog[]        @relation("DetailChangeLogActor")
   auditLogs                 AuditLog[]               @relation("AuditLogActor")
   notifications             Notification[]           @relation("NotificationRecipient")
+  mfaChallenges             MfaChallenge[]
 
   @@index([merchantId])
   @@index([role])
   @@index([merchantId, status])
   @@map("users")
+}
+
+/// A server-side, single-use MFA challenge. The client only ever holds the
+/// opaque `id`; the code is stored as an HMAC (never in plaintext), every wrong
+/// guess increments `attempts`, and the challenge dies at `maxAttempts`,
+/// on first success (`consumedAt`) or at `expiresAt`. `channel` binds it to
+/// the router (ADMIN or MERCHANT) that issued it after a completed password step.
+model MfaChallenge {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+  userId      String    @map("user_id") @db.Uuid
+  channel     String    @db.Text
+  codeHash    String    @map("code_hash") @db.Char(64)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5) @map("max_attempts")
+  consumedAt  DateTime? @map("consumed_at")
+  lockedAt    DateTime? @map("locked_at")
+  expiresAt   DateTime  @map("expires_at")
+  ip          String?   @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+  @@map("mfa_challenges")
 }
 
 model Application {
@@ -1000,6 +1026,7 @@ model AccessToken {
   ipWhitelistEnabled Boolean   @default(false) @map("ip_whitelist_enabled")
   revokedAt          DateTime? @map("revoked_at")
   lastUsedAt         DateTime? @map("last_used_at")
+  expiresAt          DateTime? @map("expires_at")
 
   merchant    Merchant        @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   application Application     @relation(fields: [applicationId], references: [id], onDelete: Restrict)
@@ -1284,6 +1311,10 @@ model CashoutRequest {
   destinationBankJson Json         @map("destination_bank_json")
   state               CashoutState @default(PENDING)
   adjustmentId        String?      @map("adjustment_id") @db.Uuid
+  /// The merchant supplied idempotency key of the request: a retried POST never creates a second cash-out.
+  idempotencyKey      String?      @map("idempotency_key") @db.Text
+  /// The merchant user who requested the cash-out (the maker).
+  requestedByUserId   String?      @map("requested_by_user_id") @db.Uuid
 
   merchant   Merchant    @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   wallet     Wallet      @relation(fields: [walletId], references: [id], onDelete: Restrict)
@@ -1291,6 +1322,7 @@ model CashoutRequest {
 
   @@index([merchantId])
   @@index([walletId])
+  @@unique([merchantId, idempotencyKey])
   @@index([merchantId, state, createdAt])
   @@index([walletId, createdAt])
   @@map("cashout_requests")
@@ -2136,7 +2168,7 @@ model ReconciliationRun {
   statementSourceId String    @map("statement_source_id") @db.Uuid
   windowStart       DateTime  @map("window_start")
   windowEnd         DateTime  @map("window_end")
-  fileHash          String    @unique @map("file_hash") @db.Char(64)
+  fileHash          String    @map("file_hash") @db.Char(64)
   statsJson         Json      @map("stats_json")
   /// The name of the uploaded statement file.
   fileName          String?   @map("file_name") @db.Text
@@ -2151,6 +2183,9 @@ model ReconciliationRun {
   statementSource StatementSource      @relation(fields: [statementSourceId], references: [id], onDelete: Restrict)
   items           ReconciliationItem[]
 
+  /// GAP-018: the same bytes may be uploaded once per statement source.
+  @@unique([statementSourceId, fileHash])
+  @@index([fileHash])
   @@index([statementSourceId])
   @@index([ingestedAt])
   @@index([createdAt])

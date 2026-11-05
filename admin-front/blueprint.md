@@ -6,7 +6,7 @@ Generated from: `admin-ui.system`, `admin-ui.routes`, `admin-ui.tables`, `admin-
 
 ## Admin UI System
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -270,9 +270,18 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 - 2026-11-03 — Initial canonical part created from the v1/v2 UI designs and working-tree code. Records the 13-primitive contract, 248/56 shell, Fake Rails partial rollout, removed app scaling, and the still-present stale files.
 
+## Security hardening (2026-11-05)
+
+- Blob previews whitelist png/jpeg/pdf and open with `noopener`; `ApiImage` renders raster images only; `resolveUploadPathWithMat` was removed.
+- `console.log` is gated through `utils/devLog.ts` (DEV builds only).
+- A fresh clone should `cp .env.example .env`; the real `.env` is no longer tracked.
+- Catalogue keys added (EN and AR): "This file type cannot be previewed." and the full-backup confirmation text.
+- **Logout and cookie sessions (GAP-019, RESOLVED).** The user store logout calls `POST v1/admin/auth/logout` (`urlsMap.authLogout`) through `revokeServerSession` (best effort, never throws) and always clears the local session. `utils/security/sessionToken.ts` handles the cookie mode: a login payload with `sessionCookie: true` is kept as the non-secret `cookie-session` sentinel and requests send `X-Pg-Csrf: 1` instead of a bearer token.
+- **XLSX 0.20.3 (GAP-029).** `xlsx` is pinned to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` (the maintained SheetJS build; the npm registry copy 0.18.5 is vulnerable) and `@types/xlsx` was dropped. The shared XLSX pipeline is unchanged. `@prisma/client` is still listed in `admin-front/package.json` although nothing imports it (residual).
+
 ## Admin Route and Page Catalog
 
-> Status: `partial` · Last verified: 2026-11-04
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -508,9 +517,13 @@ These suites require a running stack and are skipped without the live/edge servi
 
 - 2026-11-03 — Initial canonical route catalog. Confirms 37 admin protected routes and 16 merchant portal routes, records missing UI authority gates, the broken 9.4 help chapter placement, and the checkout 404 recovery bug.
 
+## Security hardening (2026-11-05)
+
+The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard: `PUBLIC_FOR_AUTHENTICATED` is Dashboard, AdminGuide and AdminAcademy; `AUTHORITY_ALIASES` normalizes dotted and colon forms. Entries were added for AdminUsers, AdminUserDetail, AdminPlatformSettings, PricingControls, GatewayAiImport and AdminCheckoutHelp. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
+
 ## Tables Filters and Exports
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -614,7 +627,7 @@ This is a hybrid: the first fetch is server-side, but pagination beyond the fetc
 
 ### 3.6 XLSX pipeline
 
-`admin-front/src/utils/xlsx/templateDownload.ts` is the shared spreadsheet engine. It uses `exceljs` for styled workbooks and `xlsx` for reading/upload and CSV conversion.
+`admin-front/src/utils/xlsx/templateDownload.ts` is the shared spreadsheet engine. It uses `exceljs` for styled workbooks and `xlsx` (SheetJS 0.20.3, installed from `cdn.sheetjs.com` since GAP-029) for reading/upload and CSV conversion.
 
 `xlsxUIPipeline` exposes:
 
@@ -1057,7 +1070,7 @@ The integration points are the 22 action areas named in the guide design: approv
 
 ## Backups Settings and Operations
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -1344,3 +1357,7 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical operations part. Records backup/target/drill/policy behavior, settings versioning/restore, checkout-support history/diff, academy reporting, export/checklist behavior, and the authority/workflow gaps.
+
+## Security hardening (2026-11-05)
+
+Backups page: actions are disabled unless backups are configured and the daemon is reachable; a full backup of all targets needs an extra confirmation; trigger and drill send an `Idempotency-Key` header (required by admin-back); policy form validation mirrors the edge rules (cron, minimum gaps, retention floors); server error text is sanitized and clipped.

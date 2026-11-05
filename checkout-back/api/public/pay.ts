@@ -1,6 +1,7 @@
 import express, { type Request, type Response } from "express";
 import rateLimiter from "express-rate-limit";
 import { z } from "zod";
+import { lazyLimiter, rateLimitKey } from "../../lib/clientIp";
 import { env } from "../../lib/env";
 import { parseOrThrow } from "../../lib/error";
 import { callCore, proxyCoreStream, type CoreCallOptions } from "../../lib/mtlsClient";
@@ -20,9 +21,10 @@ import {
 
 const router = express.Router();
 
-const payLimiter = rateLimiter({
-  windowMs: 60_000,
+const payLimiter = lazyLimiter(() => rateLimiter({
+  windowMs: env.PAY_RATE_LIMIT_WINDOW_MS,
   max: () => env.PAY_RATE_LIMIT_MAX,
+  keyGenerator: (req) => rateLimitKey(req),
   standardHeaders: true,
   legacyHeaders: false,
   handler: (_req, res) => {
@@ -31,7 +33,7 @@ const payLimiter = rateLimiter({
       message: "Too many checkout requests, please retry later",
     });
   },
-});
+}));
 
 router.use(payLimiter);
 

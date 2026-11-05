@@ -6,7 +6,7 @@ Generated from: `edge.shared`, `edge.merchant`.
 
 ## Shared Core Upstream Client
 
-> Status: `implemented` · Last verified: 2026-11-03
+> Status: `implemented` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -75,7 +75,7 @@ Each node state tracks `url`, `agent`, `healthy`, `inFlight`, `failures`, `lastF
 
 ### 3.3 Failure marking and retries
 
-`markNodeFailure()` sets `healthy=false`, increments `failures`, records `lastFailureAt` and sets `cooldownUntil = now + CORE_FAILURE_COOLDOWN_MS` (5 seconds). `markNodeHealthy()` clears all failure state.
+`markNodeFailure()` increments `failures`, records `lastFailureAt` and sets `cooldownUntil = now + CORE_FAILURE_COOLDOWN_MS` (5 seconds); it only sets `healthy=false` once `failures` reaches `CORE_FAILURE_THRESHOLD` (3 consecutive failures, GAP-021). `markNodeHealthy()` clears all failure state.
 
 Retry eligibility is controlled by `retryAttemptsFor()`:
 
@@ -171,7 +171,7 @@ There is no true fallback to polling at the edge. Checkout and POS SSE are imple
 | `MTLS_CLIENT_KEY_PATH` | yes | all BFFs | Client private key. |
 | `MTLS_CA_CERT_PATH` | yes | all BFFs | Internal CA certificate. |
 | `CORE_REQUEST_TIMEOUT_MS` | no | all BFFs | Per-request and agent timeout. Defaults: admin 60000, merchant/checkout 30000. |
-| `TRUSTED_PROXY_CIDRS` | no | all BFFs | Peers whose forwarded IP headers are trusted. |
+| `TRUSTED_PROXY_CIDRS` | no | all BFFs | Peers whose forwarded IP headers are trusted. Default loopback only (`127.0.0.0/8,::1/128`). |
 | `POS_STREAM_TIMEOUT_MS` | no | merchant | Stream timeout passed by the POS SSE route (default 900000). |
 
 ### Deployment surface
@@ -261,9 +261,21 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
 
+## Security hardening (2026-11-05)
+
+Applies to all three copies of the client:
+- Only transport/TLS errors and 502/503/504 mark a node unhealthy.
+- Header names and values are validated as printable ASCII (`400 CORE_HEADER_INVALID`); edge-owned headers are applied last, and `x-real-client-ip` is always overwritten with the resolved IP.
+- PUT/DELETE are replayed after send only with an `Idempotency-Key`/opt-in, or on a connect-phase failure.
+- SSE streams use their own agent pool (128 sockets) with `MAX_STREAMS_PER_IP` (default 5) and abort upstream on early client disconnect.
+- Buffered responses are capped (`CORE_MAX_RESPONSE_BYTES` default 64 MiB, `CORE_TOTAL_DEADLINE_MS` default 300000).
+- Admin `x-pg-min-lsn` is validated against `^hex/hex$` (400 otherwise).
+- `resolveClientIp` honours forwarded headers only from trusted peers and requires a single valid IP (`x-real-ip` preferred, `x-real-client-ip` fallback).
+- A node leaves rotation only after `CORE_FAILURE_THRESHOLD = 3` consecutive failures (GAP-021, RESOLVED 2026-11-05; identical in the admin, merchant and checkout copies). A success resets the count.
+
 ## Merchant Edge BFF
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -290,7 +302,7 @@ All operations are forwarded over mTLS 1.3 with `CN=merchant-back`. The edge val
 
 - disables `x-powered-by`;
 - sets `trust proxy` to false;
-- enables CORS with any origin and no credentials;
+- emits no CORS headers unless `CORS_ALLOWED_ORIGINS` is set (no credentials), plus hand-written security headers;
 - installs request logging;
 - serves unauthenticated `GET /health`;
 - parses JSON and URL-encoded bodies with `MAX_JSON_BODY_BYTES`;
@@ -389,7 +401,7 @@ The external merchant server API is mounted under `/api/v1/external`:
 Portal auth routes are public at the edge (`requireAuth: false`) and forward to `/internal/merchant/auth/*`:
 
 - `POST /register` validates phone/email, password, name and optional identity fields, then creates a registration.
-- `POST /verify-identity` validates an identity type, number, phone and OTP code.
+- `POST /verify-identity` is retired: core always answers `410 IDENTITY_VERIFICATION_RETIRED`.
 - `POST /accept-invitation` validates an invitation token and password.
 - `POST /login` validates an identifier and password.
 - `POST /google` validates a Google `idToken` shape and forwards it, but `core-back` answers `501 NOT_IMPLEMENTED` with `Google sign-in requires a configured OIDC provider` (`core-back/api/internal/merchant.ts:853`). The capability is not implemented at the core.
@@ -422,7 +434,7 @@ The merchant portal session is a core-issued token. The edge never verifies its 
 | `CORE_BACK_URLS` | optional | Core pool. |
 | `MTLS_CLIENT_CERT_PATH`, `MTLS_CLIENT_KEY_PATH`, `MTLS_CA_CERT_PATH` | required | Edge mTLS material. |
 | `CORE_REQUEST_TIMEOUT_MS` | `30000` | Core request timeout. |
-| `TRUSTED_PROXY_CIDRS` | loopback plus RFC1918 ranges | Trusted forwarded-IP peers. |
+| `TRUSTED_PROXY_CIDRS` | loopback only (`127.0.0.0/8,::1/128`) | Trusted forwarded-IP peers. |
 | `MAX_JSON_BODY_BYTES` | `2097152` | JSON limit. |
 | `MAX_UPLOAD_BYTES` | `10485760` | Multipart limit. |
 | `UPLOAD_ALLOWED_MIME` | `image/png,image/jpeg,application/pdf` | Allowed upload MIME types. |
@@ -482,7 +494,7 @@ bun run typecheck
 
 - `requireAuthHeader` is a no-op and should not be mistaken for a guard.
 - The auth limiter uses a hard-coded 15-minute window; `AUTH_RATE_LIMIT_WINDOW_MS` has no effect.
-- `x-real-client-ip` is preferred over `x-real-ip` in `merchant-back/lib/net/index.ts`. When the backend is loopback-bound this is safe; if it is ever exposed and a direct peer is inside `TRUSTED_PROXY_CIDRS`, the peer can spoof its client IP.
+- (Superseded) `resolveClientIp` now honours forwarded headers only from trusted peers, requires a single valid IP and prefers `x-real-ip` over `x-real-client-ip`; the edge always overwrites `x-real-client-ip` towards core. Historical note: `x-real-client-ip` was preferred over `x-real-ip` in `merchant-back/lib/net/index.ts`. When the backend is loopback-bound this is safe; if it is ever exposed and a direct peer is inside `TRUSTED_PROXY_CIDRS`, the peer can spoof its client IP.
 - The options router is dead code; a frontend calling `/api/v1/merchant/options/:kind` receives a 404.
 - The external prefix check is not a credential check; do not log or expose token values.
 
@@ -535,3 +547,17 @@ These suites do not require PostgreSQL or Redis. The Google route is expected to
 ## 11. Cross-node POS updates (2026-11-03)
 
 The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` and `realtime:pos` topics. A cashier request processed by a merchant-back/core pair on one host reaches a paired screen whose stream is held by a merchant-back node on the other host. The existing 3-second database poll remains as a fallback.
+
+## Security hardening (2026-11-05)
+
+- **Token creation.** Malformed CIDRs and ranges broader than /8 (IPv4) or /32 (IPv6) are rejected. Scopes are lowercase `resource:action`, unique, at most `TOKEN_MAX_SCOPES` (20); core restricts them further to `link:write`, `link:read`, `payment:read`. `expiresAt` must be a future ISO date within `TOKEN_MAX_TTL_DAYS` (365); default `TOKEN_DEFAULT_TTL_DAYS` (90). `pg_live_` tokens must be `pg_live_` plus 43 base64url characters.
+- **External limiter** keys on token hash plus IP.
+- **Uploads** require a bearer token and Content-Length (`411`) and are size-checked (`413`) before buffering; `UPLOAD_RATE_LIMIT_MAX` applies. Website fields accept http(s) only.
+- **Cash-out create** keeps and forwards `idempotencyKey` (body or `Idempotency-Key` header) to core.
+- **Auth** POSTs have a per-account limiter in addition to the per-IP limiter. `/verify-identity` is retired (410).
+- Redaction and `redactUrl` cover PII keys and path tokens.
+
+## Gap resolutions (2026-11-05)
+
+- **Logout and session cookie (GAP-019, RESOLVED).** `POST /api/v1/merchant/auth/logout` forwards to core `POST /internal/merchant/auth/logout` (session `jti` revocation) and clears the cookie. `SESSION_COOKIE_MODE` (default `false`) and `SESSION_COOKIE_SECURE` (default `true`) are validated in `merchant-back/lib/env`; in cookie mode the token is set as the `pg_merchant_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/merchant`, 12 h), the body carries `sessionCookie: true`, and cookie-authenticated writes require `x-pg-csrf: 1`. The mode is off by default.
+- **Audience and breaker (GAP-020, GAP-021).** Merchant sessions carry `aud=payment-gateway-merchant`; a session minted for another channel is refused by core (`401 SESSION_AUDIENCE_INVALID`). The upstream client uses `CORE_FAILURE_THRESHOLD = 3`.

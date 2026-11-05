@@ -3,7 +3,7 @@ id: merchant-ui.portal
 title: Merchant Portal
 status: partial
 confidence: high
-last_verified: 2026-11-04
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - merchant-front/src/router/index.ts
@@ -28,6 +28,7 @@ tests:
   - merchant-front/src/content/__tests__/content-completeness.test.ts
   - merchant-front/src/content/__tests__/landing-content.test.ts
   - tests/e2e/merchant/landing.spec.ts
+  - tests/unit/frontend-security-merchant.test.ts
 gaps:
   - The Statements route has no router-level authority entry, so direct navigation is allowed even when the navigation item is hidden.
   - Merchant guide and developer-guide routes are intentionally open to any authenticated merchant; this is a learning surface, not a data boundary.
@@ -36,6 +37,8 @@ gaps:
   - The portal has no route-level maker-checker visualization for pending application changes beyond status badges and pending states.
   - The public landing page's developer CTA targets `/portal/guide/developers`, which requires sign-in; the login page always lands on the dashboard (no return-to), so a visitor must navigate to the guide again after signing in.
   - FIXED 2026-11-04: the developer guide content (D-01/D-04/D-05) and the code generator now use the real edge schema (`title`, `maxUses`, no `redirectUrl`/`applicationId`/`infiniteUse`) and the real `201` response (`key`, `state`, `visibleRails`). Remaining: the webhook sample in the generator is unverified (no outbound merchant webhooks are implemented).
+  - POS screen stream uses fetch streaming with Authorization and reconnect backoff; not verified against live merchant-back.
+  - "Residual (GAP-019/GAP-029): the merchant session token lives in client storage unless the edge runs `SESSION_COOKIE_MODE=true`; `@prisma/client` is still listed (unused) in `merchant-front/package.json`."
 ---
 
 # Merchant Portal
@@ -401,3 +404,19 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 - 2026-11-03 — Initial canonical merchant portal part. Confirms 16 portal routes, the 248/56 shell, onboarding and money/commerce/developer pages, guide surfaces, and the Statements/route authority and Google OIDC gaps.
 - 2026-11-04 — Public landing page redesigned (§3.1a): hero payment simulator, money-flow track, product bento with fee preview, stats, lazy developer section with a schema-accurate snippet, security, onboarding, FAQ; EN/AR landing catalogue; motion/reduced-motion/RTL rules; new landing unit and e2e tests. Removed unverifiable claims from the old page (fixed "3.00%" commission, "LYD · USD · EUR", "Live"/"All systems operational" badges) and nested `<a><button>` CTAs. `SegmentedTabs` arrow keys now follow the rendered direction in RTL.
 - 2026-11-04 — Landing visual system v2 "Aurora Ledger" (design note §9): new type system (Inter/Geist/Instrument Serif/Readex Pro, self-hosted), aurora/grid/grain backdrop, glass header with scroll progress and active section, word-by-word headline, tilting product stage, rail ticker with pause control, spotlight bento, live BigInt ledger ticker, gradient CTA. Fixed: cramped word spacing (all four portals), dark theme painting only one screen, tiled backgrounds not repeating, RTL chip placement, light-theme contrast. axe-core 0 violations (6 configurations), Playwright merchant 17/17.
+
+## Security hardening (2026-11-05)
+
+- `X-Client-Channel` is `merchant`. The 401 handler exempts `/auth/login` and `/auth/mfa` and acts only when a token exists.
+- **Cash-out:** an `idempotencyKey` per intent; amount validated against `^\d{1,14}(\.\d{1,4})?$` and greater than zero; a confirm dialog before submit.
+- **Google login/register** send a fixed `redirectUri` path and payload; `payload.redirectUrl` must be https on `VITE_IDENTITY_HOSTS` (default `accounts.google.com`).
+- **Checkout links** are built from `VITE_CHECKOUT_BASE_URL` (fallback `location.origin`).
+- **POS screen stream** uses fetch streaming with `Authorization` and reconnect backoff (not verified against live merchant-back).
+- `resolveUploadPathWithMat` was removed. The landing page no longer names internal ledger accounts (`CUSTOMER_PAYMENT`, `YOUR_WALLET`, `PLATFORM_FEE`) or internal action names.
+- New env: `VITE_CHECKOUT_BASE_URL` (optional), `VITE_IDENTITY_HOSTS`. `.env.example` ships; copy to `.env`.
+- Catalogue keys added (EN and AR): "Enter a valid amount greater than zero (up to 4 decimals).", "Confirm Cash-Out", landing "Customer payment" and "Illustrative".
+
+## Gap resolutions (2026-11-05)
+
+- **Logout and cookie sessions (GAP-019).** Logout calls the merchant-back logout route (server-side revoke, cookie cleared) and clears the local session; `utils/security/sessionToken.ts` supports the `cookie-session` sentinel and the `x-pg-csrf` header used when `SESSION_COOKIE_MODE=true`. The POS stream (`sseFetch`) and the API client use the same header helper.
+- **XLSX 0.20.3 (GAP-029).** `xlsx` comes from `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` and `@types/xlsx` was dropped.

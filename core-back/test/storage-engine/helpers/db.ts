@@ -14,6 +14,7 @@ import { createClient as createRedisClient } from "redis";
 import { PrismaClient } from "../../../generated/prisma/client";
 import { buildPostgresPoolConfig } from "../../../lib/db/connectionConfig";
 import { DedicatedAuditDatabaseDriver } from "../../../lib/storageEngine/auditAndLogAdapters";
+import { withLedgerMaintenance } from "../../helpers/ledgerMaintenance";
 
 export const DATABASE_URL =
   process.env.STORAGE_TEST_DATABASE_URL ??
@@ -412,17 +413,22 @@ export const cleanupLedger = async (
   accountIds: string[],
   refPrefix: string,
 ): Promise<void> => {
-  if (accountIds.length > 0) {
-    await client.journalLine.deleteMany({
-      where: { glAccountId: { in: accountIds } },
+  // The journal is append-only (GAP-013): cleanup needs the maintenance flag.
+  await withLedgerMaintenance(client, async (tx) => {
+    if (accountIds.length > 0) {
+      await tx.journalLine.deleteMany({
+        where: { glAccountId: { in: accountIds } },
+      });
+    }
+    await tx.journalEntry.deleteMany({
+      where: { refId: { startsWith: refPrefix } },
     });
+  });
+  if (accountIds.length > 0) {
     await client.glAccountShard.deleteMany({
       where: { glAccountId: { in: accountIds } },
     });
   }
-  await client.journalEntry.deleteMany({
-    where: { refId: { startsWith: refPrefix } },
-  });
   if (accountIds.length > 0) {
     await client.glAccount.deleteMany({ where: { id: { in: accountIds } } });
   }

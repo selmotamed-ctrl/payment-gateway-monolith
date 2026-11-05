@@ -10,7 +10,7 @@ import {
   toCoreDisputeEvidence,
 } from "../contract";
 import { coreCallContext, coreForward, requireBearer } from "../forward";
-import { uploadSingleAny } from "../upload";
+import { uploadGuards, uploadSingleAny } from "../upload";
 
 const router = express.Router();
 
@@ -53,6 +53,7 @@ router.get(
  */
 router.post(
   "/:id/evidence",
+  ...uploadGuards,
   uploadSingleAny(["evidence", "file"]),
   async (req: Request, res: Response): Promise<void> => {
     requireBearer(req);

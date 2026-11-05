@@ -251,3 +251,7 @@ Relevant browser suites (from `tests/`): merchant shell, auth, accessibility and
   - [Merchant Guide and Developer API](../project-design/parts/04-merchant-front/01-guide-and-developer-api.md)
 - Generated appendices: [environment and config matrix](../project-design/appendices/env-and-config-matrix.md), [API route matrix](../project-design/appendices/api-route-matrix.md), [test inventory](../project-design/appendices/test-inventory.md)
 - Related: [Admin Guide v2](../project-design/parts/03-admin-front/06-guide-v2.md) (admin portal only; the merchant guide is separate)
+
+## Environment file (2026-11-05)
+
+The real `.env` is no longer tracked. On a fresh clone run `cp .env.example .env`. Optional: `VITE_CHECKOUT_BASE_URL` (checkout link base; falls back to `location.origin`) and `VITE_IDENTITY_HOSTS` (https hosts allowed for Google sign-in redirects; default `accounts.google.com`). See `project-design/parts/` for the frontend security notes and `project-design/TRACKER.md` for open gaps.

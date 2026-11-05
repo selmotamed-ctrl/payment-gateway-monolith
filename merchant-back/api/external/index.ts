@@ -1,6 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import rateLimiter from "express-rate-limit";
 import { z } from "zod";
+import { digestKeyPart, lazyLimiter, rateLimitKey } from "../../lib/clientIp";
 import { env } from "../../lib/env";
 import { ApiError } from "../../lib/error";
 import { zAmount, zCurrency, zIdentifier, zJsonObject } from "../../lib/zReady";
@@ -9,23 +10,57 @@ import { coreForward } from "../forward";
 
 const router = express.Router();
 
-const externalLimiter = rateLimiter({
-  windowMs: 60_000,
-  max: () => env.EXTERNAL_RATE_LIMIT_MAX,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({
-      code: "RATE_LIMITED",
-      message: "Too many external API requests, please retry later",
-    });
-  },
-});
+const limited = (_req: Request, res: Response) => {
+  res.status(429).json({
+    code: "RATE_LIMITED",
+    message: "Too many external API requests, please retry later",
+  });
+};
 
+const tokenOf = (req: Request): string => (req.headers.authorization ?? "").split(" ")[1] ?? "";
+
+/** Per token (hashed) AND client ip: one integration cannot burn another one's budget. */
+const externalLimiter = lazyLimiter(() =>
+  rateLimiter({
+    windowMs: env.EXTERNAL_RATE_LIMIT_WINDOW_MS,
+    max: () => env.EXTERNAL_RATE_LIMIT_MAX,
+    keyGenerator: (req) => rateLimitKey(req, digestKeyPart(tokenOf(req))),
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: limited,
+  }),
+);
+
+/** Coarse per ip ceiling over all tokens, so spraying random tokens does not evade the limit. */
+const externalClientLimiter = lazyLimiter(() =>
+  rateLimiter({
+    windowMs: env.EXTERNAL_RATE_LIMIT_WINDOW_MS,
+    max: () => env.EXTERNAL_RATE_LIMIT_MAX * 5,
+    keyGenerator: (req) => rateLimitKey(req),
+    standardHeaders: false,
+    legacyHeaders: false,
+    handler: limited,
+  }),
+);
+
+/** Core issues `<prefix>` + base64url(32 random bytes): 43 url safe characters. */
+const TOKEN_BODY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+/**
+ * Edge format check (the edge cannot validate the token itself; core does). Anything that is
+ * not shaped like an issued token is refused without loading core.
+ */
 export const requirePgLiveToken = (req: Request, _res: Response, next: NextFunction) => {
   const header = req.headers.authorization ?? "";
-  const [scheme, token] = header.split(" ");
-  if (scheme?.toLowerCase() !== "bearer" || !token || !token.startsWith(env.PG_LIVE_TOKEN_PREFIX)) {
+  const parts = header.split(" ");
+  const [scheme, token] = parts;
+  if (
+    parts.length !== 2 ||
+    scheme?.toLowerCase() !== "bearer" ||
+    !token ||
+    !token.startsWith(env.PG_LIVE_TOKEN_PREFIX) ||
+    !TOKEN_BODY_PATTERN.test(token.slice(env.PG_LIVE_TOKEN_PREFIX.length))
+  ) {
     throw new ApiError(401, "INVALID_API_TOKEN", "A valid pg_live_ bearer token is required");
   }
   next();
@@ -58,8 +93,9 @@ const cancelSchema = z
   })
   .strict();
 
-router.use(externalLimiter);
+router.use(externalClientLimiter);
 router.use(requirePgLiveToken);
+router.use(externalLimiter);
 
 router.post(
   "/links",

@@ -66,9 +66,22 @@ export const api = async <T = unknown>(
   return (await response.text()) as unknown as T;
 };
 
-export const streamUrl = (): string => {
-  const token = encodeURIComponent(getToken());
-  return `/portal-api/transactions/stream?token=${token}`;
+/** The stream URL carries a 30s single-use ticket, never the session token (GAP-024). */
+export const streamUrl = async (): Promise<string> => {
+  const { ticket } = await api<{ ticket: string }>("/portal-api/transactions/stream-ticket", { method: "POST", body: {} });
+  return `/portal-api/transactions/stream?ticket=${encodeURIComponent(ticket)}`;
+};
+
+export const HOSTED_ACTION_HEADER = "x-hosted-action-token";
+
+/** Loads a hosted session and posts one tester action with the session-bound action token. */
+export const postHostedAction = async <T = unknown>(reference: string, action: string): Promise<T> => {
+  const session = await api<{ action_token?: string }>(`/portal-api/hosted/session/${encodeURIComponent(reference)}`);
+  return api<T>(`/portal-api/hosted/session/${encodeURIComponent(reference)}/action`, {
+    method: "POST",
+    body: { action },
+    headers: session.action_token ? { [HOSTED_ACTION_HEADER]: session.action_token } : {},
+  });
 };
 
 export const download = async (path: string, body: unknown, filename: string): Promise<void> => {

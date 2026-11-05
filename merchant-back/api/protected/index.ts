@@ -1,5 +1,6 @@
 import express from "express";
 import rateLimiter from "express-rate-limit";
+import { lazyLimiter, rateLimitKey } from "../../lib/clientIp";
 import { env } from "../../lib/env";
 import { applicationsRouter } from "./applications";
 import { cashoutsRouter } from "./cashouts";
@@ -15,9 +16,10 @@ import { walletsRouter } from "./wallets";
 
 const router = express.Router();
 
-const apiLimiter = rateLimiter({
-  windowMs: 60_000,
+const apiLimiter = lazyLimiter(() => rateLimiter({
+  windowMs: env.API_RATE_LIMIT_WINDOW_MS,
   max: () => env.API_RATE_LIMIT_MAX,
+  keyGenerator: (req) => rateLimitKey(req),
   standardHeaders: true,
   legacyHeaders: false,
   handler: (_req, res) => {
@@ -26,7 +28,7 @@ const apiLimiter = rateLimiter({
       message: "Too many merchant portal requests, please retry later",
     });
   },
-});
+}));
 
 router.use(apiLimiter);
 

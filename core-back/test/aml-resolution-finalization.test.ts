@@ -42,6 +42,8 @@ const buildFixture = (link: {
   useCount?: number;
   confirmedCount?: number;
   activeLockedCount?: number;
+  /** "case": the case points at the escrow; "lookup": only the attempt does; "none": no capture. */
+  escrow?: "case" | "lookup" | "none";
 } = {}): Fixture => {
   resetFakeDatabase();
   const client = createFakePrisma();
@@ -108,18 +110,21 @@ const buildFixture = (link: {
     activeLockedCount: link.activeLockedCount ?? 1,
     state: "PENDING",
   });
-  client.journalEntry.create({
-    data: { id: "hold-entry", refType: "PAYMENT_ATTEMPT", refId: "attempt-1", description: "AML threshold hold" },
-  });
-  client.journalLine.create({
-    data: {
-      id: "hold-line",
-      entryId: "hold-entry",
-      glAccountId: "acc-aml-hold",
-      direction: "CREDIT",
-      amount: new Decimal(100),
-    },
-  });
+  const escrow = link.escrow ?? "case";
+  if (escrow !== "none") {
+    client.journalEntry.create({
+      data: { id: "hold-entry", refType: "PAYMENT_ATTEMPT", refId: "attempt-1", description: "AML threshold hold" },
+    });
+    client.journalLine.create({
+      data: {
+        id: "hold-line",
+        entryId: "hold-entry",
+        glAccountId: "acc-aml-hold",
+        direction: "CREDIT",
+        amount: new Decimal(100),
+      },
+    });
+  }
   client.amlCase.create({
     data: {
       id: "aml-case-1",
@@ -129,7 +134,7 @@ const buildFixture = (link: {
       severity: "HIGH",
       severityInputsJson: {},
       status: "OPEN",
-      holdJournalEntryId: "hold-entry",
+      holdJournalEntryId: escrow === "case" ? "hold-entry" : null,
       confidential: true,
     },
   });
@@ -251,5 +256,44 @@ describe("F-NEW-3: an AML resolution finalises the attempt and the link slot", (
     expect(link?.confirmedCount).toBe(1);
     expect(link?.activeLockedCount).toBe(0);
     expect(link?.state).toBe("PENDING");
+  });
+});
+
+describe("GAP-015: a release needs a verified gateway capture", () => {
+  test("RELEASE without an escrow is refused and nothing is posted or finalised", async () => {
+    const fixture = buildFixture({ escrow: "none" });
+    const journalCount = fakeTable("journalEntry").length;
+
+    await expect(resolve(fixture, "RELEASE")).rejects.toMatchObject({
+      code: "AML_HOLD_CAPTURE_NOT_VERIFIED",
+      statusCode: 409,
+    });
+
+    expect(fakeTable("journalEntry")).toHaveLength(journalCount);
+    expect(entryOf("AML_RELEASE")).toBeUndefined();
+    expect(attemptRow()?.status).toBe("CREATED");
+    expect(attemptRow()?.terminalAt).toBeNull();
+    expect(linkRow()?.confirmedCount).toBe(0);
+  });
+
+  test("the escrow booked by the engine is found through the attempt", async () => {
+    const fixture = buildFixture({ escrow: "lookup" });
+
+    const result = await resolve(fixture, "RELEASE");
+
+    expect(result.status).toBe("EXECUTED");
+    expect(entryOf("AML_RELEASE")).toBeDefined();
+    expect(attemptRow()?.status).toBe("SUCCEEDED");
+  });
+
+  test("REJECT without a capture voids the case without an AML_VOID posting", async () => {
+    const fixture = buildFixture({ escrow: "none", useCount: 5 });
+
+    const result = await resolve(fixture, "REJECT");
+
+    expect(result.status).toBe("EXECUTED");
+    expect(entryOf("AML_VOID")).toBeUndefined();
+    expect(attemptRow()?.status).toBe("FAILED");
+    expect(linkRow()?.activeLockedCount).toBe(0);
   });
 });

@@ -2,6 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { writeAudit } from "../../../lib/audit/writeAudit";
 import { createLedgerPoster } from "../../../lib/storageEngine/ledgerPosterFactory";
 import { loadShardBalanceRows } from "../../../lib/storageEngine/shardBalances";
+import { withLedgerMaintenance } from "../../helpers/ledgerMaintenance";
 import {
   DATABASE_URL,
   cleanupLedger,
@@ -59,7 +60,7 @@ describeDatabase("write-path benchmark (live PostgreSQL)", () => {
       expect(elapsed).toBeLessThan(10_000);
     } finally {
       await client.auditOutbox.deleteMany({ where: { id: { in: ids } } });
-      await client.auditLog.deleteMany({ where: { id: { in: ids } } });
+      await withLedgerMaintenance(client, (tx) => tx.auditLog.deleteMany({ where: { id: { in: ids } } }));
     }
   });
 

@@ -123,13 +123,27 @@ export const parseIpList = (value: string | undefined | null): string[] => {
 
 export const remoteAddressOf = (req: Request): string => normalizeIp(req.socket?.remoteAddress ?? "");
 
+const headerIp = (value: string | string[] | undefined): string => {
+  if (typeof value !== "string") return "";
+  const candidate = normalizeIp(value);
+  return isValidIp(candidate) ? candidate : "";
+};
+
+/**
+ * Resolves the client ip of a proxied request.
+ *
+ * Forwarded headers are honoured ONLY when the immediate peer is a trusted proxy
+ * (loopback by default, see TRUSTED_PROXY_CIDRS); for any other peer the socket address is
+ * the answer and every forwarded header is ignored. A forwarded value must be a single valid
+ * ip address, otherwise it is ignored too.
+ *
+ * `x-real-ip` is the header the shipped reverse proxies overwrite with the real peer
+ * address (`proxy_set_header X-Real-IP $remote_addr`), so it is authoritative.
+ * `x-real-client-ip` is only a fallback behind a trusted proxy. The edge always overwrites
+ * the `x-real-client-ip` it forwards to core with the value resolved here.
+ */
 export const resolveClientIp = (req: Request, trustedProxyCidrs: string[]): string => {
   const remote = remoteAddressOf(req);
-  const forwarded = req.headers["x-real-client-ip"];
-  const forwardedIp = typeof forwarded === "string" ? normalizeIp(forwarded) : "";
-  if (forwardedIp && isInCidrList(trustedProxyCidrs, remote)) return forwardedIp;
-  const realIp = req.headers["x-real-ip"];
-  const realIpValue = typeof realIp === "string" ? normalizeIp(realIp) : "";
-  if (realIpValue && isInCidrList(trustedProxyCidrs, remote)) return realIpValue;
-  return remote;
+  if (!isInCidrList(trustedProxyCidrs, remote)) return remote;
+  return headerIp(req.headers["x-real-ip"]) || headerIp(req.headers["x-real-client-ip"]) || remote;
 };

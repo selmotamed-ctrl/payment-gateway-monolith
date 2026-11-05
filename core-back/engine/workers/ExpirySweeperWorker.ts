@@ -32,6 +32,10 @@ export class ExpirySweeperWorker extends BaseWorker {
   private readonly inquiry: InquiryPort | undefined;
   private inquirySupport = new Map<string, boolean>();
 
+  protected override get singleton(): boolean {
+    return true;
+  }
+
   constructor(deps: ExpirySweeperWorkerDeps) {
     super(deps);
     this.inquiry = deps.inquiry;
@@ -72,12 +76,12 @@ export class ExpirySweeperWorker extends BaseWorker {
       " ORDER BY expires_at ASC" +
       ` LIMIT ${limitPlaceholder}` +
       " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(
-      sql,
-      now,
-      ...EXPIRABLE_STATUSES,
-      AML_HOLD_SUBSTATUS,
-      this.batchSize,
+    // The claim runs inside a transaction (a SKIP LOCKED lock outside one is
+    // released immediately). There is no lease column for expiry, so cluster
+    // exclusivity comes from the advisory-lock leader election (singleton) and
+    // the conditional terminal transition below stays the last line of defence.
+    const result = await this.inTransaction((tx) =>
+      tx.$queryRawUnsafe(sql, now, ...EXPIRABLE_STATUSES, AML_HOLD_SUBSTATUS, this.batchSize),
     );
     return toCamelRows<PaymentAttemptRow>(result);
   }

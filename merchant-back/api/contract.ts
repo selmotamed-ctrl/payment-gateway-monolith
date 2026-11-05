@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { zWebsite } from "../lib/zReady";
 
 /**
  * Canonical contract of the merchant channel.
@@ -200,6 +201,7 @@ export const coreCashoutCreateSchema = z
     walletId: coreId,
     amount: coreAmount,
     destinationBank: coreJsonRecord,
+    idempotencyKey: z.string().min(8).max(128).optional(),
   })
   .strict();
 
@@ -237,7 +239,7 @@ export const coreJoinRequestSchema = z
     address: z.string().min(4).max(400).optional(),
     phone: z.string().min(6).max(20).optional(),
     email: z.email().optional(),
-    website: z.string().max(200).optional(),
+    website: zWebsite.optional(),
     locale: z.enum(["ar", "en"]).optional(),
   })
   .strict();
@@ -430,6 +432,7 @@ export const toCoreCashoutCreate = (body: PublicPayload): CorePayload =>
     walletId: body.walletId,
     amount: body.amount,
     destinationBank: normalizeDestinationBank(body.destinationBank ?? body.bankAccountId),
+    idempotencyKey: body.idempotencyKey,
   });
 
 /** POST /pos/terminals */

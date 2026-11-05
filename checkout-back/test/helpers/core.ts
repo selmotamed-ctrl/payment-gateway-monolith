@@ -163,6 +163,18 @@ export const startTestCore = async (pki: TestPki): Promise<TestCore> => {
         response.end();
         return;
       }
+      if (url.includes("/inbound/") && url.endsWith("/denied-channel")) {
+        response.writeHead(403, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            code: "INBOUND_GATEWAY_MISMATCH",
+            message: "The inbound gateway does not match the channel",
+            details: { expectedGateway: "secret-gateway" },
+            reference: "ref-internal-1",
+          }),
+        );
+        return;
+      }
       if (url.includes("/inbound/")) {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ received: body.byteLength }));

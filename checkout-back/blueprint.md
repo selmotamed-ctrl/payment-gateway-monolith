@@ -6,7 +6,7 @@ Generated from: `edge.shared`, `edge.checkout`.
 
 ## Shared Core Upstream Client
 
-> Status: `implemented` · Last verified: 2026-11-03
+> Status: `implemented` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -75,7 +75,7 @@ Each node state tracks `url`, `agent`, `healthy`, `inFlight`, `failures`, `lastF
 
 ### 3.3 Failure marking and retries
 
-`markNodeFailure()` sets `healthy=false`, increments `failures`, records `lastFailureAt` and sets `cooldownUntil = now + CORE_FAILURE_COOLDOWN_MS` (5 seconds). `markNodeHealthy()` clears all failure state.
+`markNodeFailure()` increments `failures`, records `lastFailureAt` and sets `cooldownUntil = now + CORE_FAILURE_COOLDOWN_MS` (5 seconds); it only sets `healthy=false` once `failures` reaches `CORE_FAILURE_THRESHOLD` (3 consecutive failures, GAP-021). `markNodeHealthy()` clears all failure state.
 
 Retry eligibility is controlled by `retryAttemptsFor()`:
 
@@ -171,7 +171,7 @@ There is no true fallback to polling at the edge. Checkout and POS SSE are imple
 | `MTLS_CLIENT_KEY_PATH` | yes | all BFFs | Client private key. |
 | `MTLS_CA_CERT_PATH` | yes | all BFFs | Internal CA certificate. |
 | `CORE_REQUEST_TIMEOUT_MS` | no | all BFFs | Per-request and agent timeout. Defaults: admin 60000, merchant/checkout 30000. |
-| `TRUSTED_PROXY_CIDRS` | no | all BFFs | Peers whose forwarded IP headers are trusted. |
+| `TRUSTED_PROXY_CIDRS` | no | all BFFs | Peers whose forwarded IP headers are trusted. Default loopback only (`127.0.0.0/8,::1/128`). |
 | `POS_STREAM_TIMEOUT_MS` | no | merchant | Stream timeout passed by the POS SSE route (default 900000). |
 
 ### Deployment surface
@@ -261,9 +261,21 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
 
+## Security hardening (2026-11-05)
+
+Applies to all three copies of the client:
+- Only transport/TLS errors and 502/503/504 mark a node unhealthy.
+- Header names and values are validated as printable ASCII (`400 CORE_HEADER_INVALID`); edge-owned headers are applied last, and `x-real-client-ip` is always overwritten with the resolved IP.
+- PUT/DELETE are replayed after send only with an `Idempotency-Key`/opt-in, or on a connect-phase failure.
+- SSE streams use their own agent pool (128 sockets) with `MAX_STREAMS_PER_IP` (default 5) and abort upstream on early client disconnect.
+- Buffered responses are capped (`CORE_MAX_RESPONSE_BYTES` default 64 MiB, `CORE_TOTAL_DEADLINE_MS` default 300000).
+- Admin `x-pg-min-lsn` is validated against `^hex/hex$` (400 otherwise).
+- `resolveClientIp` honours forwarded headers only from trusted peers and requires a single valid IP (`x-real-ip` preferred, `x-real-client-ip` fallback).
+- A node leaves rotation only after `CORE_FAILURE_THRESHOLD = 3` consecutive failures (GAP-021, RESOLVED 2026-11-05; identical in the admin, merchant and checkout copies). A success resets the count.
+
 ## Checkout Edge BFF
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -292,7 +304,7 @@ The return URL is an untrusted browser hint. Core inspects the attempt, triggers
 
 - disables `x-powered-by`;
 - sets `trust proxy` to false;
-- enables CORS with any origin and no credentials;
+- emits permissive CORS without credentials unless `CORS_ALLOWED_ORIGINS` is set, plus hand-written security headers;
 - installs request logging;
 - serves unauthenticated `GET /health`;
 - mounts `/api/v1/inbound` with `inboundRouter` **before** the JSON body parser, so the inbound router can install its own raw parser;
@@ -309,7 +321,7 @@ The listener binds to `BIND_HOST` (default `0.0.0.0`). The deploy engine writes 
 | `payLimiter` | 60-second window, `PAY_RATE_LIMIT_MAX` (default 120), on the pay router. |
 | `returnLimiter` | 60-second window, `PAY_RATE_LIMIT_MAX`, on the return router. |
 | `inboundLimiter` | 60-second window, `INBOUND_RATE_LIMIT_MAX` (default 600), on the inbound router. |
-| Raw parser | `express.raw({ type: () => true, limit: MAX_INBOUND_BODY_BYTES })`, applied to every inbound request. |
+| Raw parser | `express.raw({ type: () => true, limit: MAX_INBOUND_BODY_BYTES })`, applied after the inbound limiter; only GET/HEAD/POST are accepted; parser errors return 413/400. |
 | `assertNoMonetaryFields` | Recursively rejects forbidden monetary keys (amount, currency, total, fee, commission, price, net/gross/debit/credit amounts, and close variants) with `400 AMOUNT_NOT_ACCEPTED`. Applied to initiate, confirm, resend, cancel and client-event. |
 | Schema validation | Zod schemas for link keys, attempt ids, rail codes, sub-modes, form data, OTPs, evidence, idempotency keys and client events. |
 | Header allowlist | Inbound forwards only `content-type`, `user-agent`, `content-length`, `x-signature`, `x-gateway-signature`, `x-hub-signature-256`, `x-moomalat-signature`, `x-timestamp` and `x-nonce`. |
@@ -382,9 +394,9 @@ Browser return `GET|POST /return/:attemptToken`:
 | `CORE_BACK_URLS` | optional | Core pool. |
 | `MTLS_CLIENT_CERT_PATH`, `MTLS_CLIENT_KEY_PATH`, `MTLS_CA_CERT_PATH` | required | Edge mTLS material. |
 | `CORE_REQUEST_TIMEOUT_MS` | `30000` | Default core timeout (inbound explicitly uses 10 seconds). |
-| `TRUSTED_PROXY_CIDRS` | loopback plus RFC1918 ranges | Trusted forwarded-IP peers. |
+| `TRUSTED_PROXY_CIDRS` | loopback only (`127.0.0.0/8,::1/128`) | Trusted forwarded-IP peers. |
 | `MAX_JSON_BODY_BYTES` | `1048576` | JSON limit. |
-| `MAX_INBOUND_BODY_BYTES` | `3145728` | Raw webhook limit. |
+| `MAX_INBOUND_BODY_BYTES` | `1048576` | Raw webhook limit (was 3 MiB). |
 | `CHECKOUT_FRONT_BASE_URL` | `http://localhost:5103` | Redirect base. |
 | `CHECKOUT_FRONT_STATUS_PATH` | `/pay/status` | Redirect path. |
 | `PAY_RATE_LIMIT_MAX`, `PAY_RATE_LIMIT_WINDOW_MS` | `120`, `60000` | Pay and return limiters. |
@@ -495,3 +507,13 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 - `core-back` republishes every `attempt:transition` event on the Redis-backed `realtime:attempt` topic.
 - The checkout status stream subscribes to that topic and emits `event: status` immediately; the existing 2-second database poll remains as a fallback.
 - The merchant POS stream subscribes to `realtime:attempt` and `realtime:pos`, filtering by merchant id, so a screen on one host receives an update processed by a core node on the other host.
+
+## Security hardening (2026-11-05)
+
+- **Inbound.** The limiter runs before the raw body parser; buckets are per resolved IP plus channel and a coarse per-IP bucket (5x). Only GET/HEAD/POST; body limit `MAX_INBOUND_BODY_BYTES` default 1 MiB (was 3 MiB); body-parser errors return 413/400. Core errors map to public codes `INBOUND_REJECTED`, `INBOUND_NOT_FOUND`, `INBOUND_CONFLICT`, `PAYLOAD_TOO_LARGE`, `RATE_LIMITED`, `INBOUND_UNAVAILABLE`; 401/403/404/410 collapse to 404.
+- **Pay routes.** Confirm accepts only `otp` (evidence ignored); BLOCK/HOLD responses carry no internal reasons.
+- **Window envs** `PAY_RATE_LIMIT_WINDOW_MS` and `INBOUND_RATE_LIMIT_WINDOW_MS` are wired. Redaction masks link keys, attempt tokens, `/logs/` ids and inbound path tokens in logs.
+
+## Gap resolutions (2026-11-05)
+
+- The checkout upstream client uses the same `CORE_FAILURE_THRESHOLD = 3` consecutive-failure threshold before a core node leaves rotation (GAP-021). Checkout sessions use the `payment-gateway-checkout` audience (GAP-020).

@@ -364,6 +364,7 @@ describe("production callback verifier", () => {
   };
 
   const attempt = attemptRow({ providerReference: "GW-REF-1" });
+  const nowSec = () => Math.floor(Date.now() / 1000);
 
   const sign = (rawBody: string): string =>
     createHash("sha256").update(rawBody).digest("hex") && require("node:crypto")
@@ -374,7 +375,7 @@ describe("production callback verifier", () => {
   test("accepts a correctly signed callback and correlates the attempt", async () => {
     const { client } = createFakeClient({ channel, credentialSet, attempt });
     const verifier = new PrismaCallbackVerifier(client);
-    const rawBody = JSON.stringify({ reference: "GW-REF-1", status: "00", amount: "100.0000", currency: "LYD" });
+    const rawBody = JSON.stringify({ reference: "GW-REF-1", status: "00", amount: "100.0000", currency: "LYD", timestamp: nowSec() });
     const result = await verifier.verify("token-abc", {
       rawBody: Buffer.from(rawBody, "utf8"),
       headers: { "x-signature": sign(rawBody) },
@@ -388,7 +389,7 @@ describe("production callback verifier", () => {
   test("rejects a tampered body", async () => {
     const { client } = createFakeClient({ channel, credentialSet, attempt });
     const verifier = new PrismaCallbackVerifier(client);
-    const rawBody = JSON.stringify({ reference: "GW-REF-1", status: "00", amount: "100.0000" });
+    const rawBody = JSON.stringify({ reference: "GW-REF-1", status: "00", amount: "100.0000", timestamp: nowSec() });
     const result = await verifier.verify("token-abc", {
       rawBody: Buffer.from(rawBody, "utf8"),
       headers: { "x-signature": sign(`${rawBody}tampered`) },
@@ -401,7 +402,7 @@ describe("production callback verifier", () => {
   test("rejects a callback from outside the IP allowlist", async () => {
     const { client } = createFakeClient({ channel, credentialSet, attempt });
     const verifier = new PrismaCallbackVerifier(client);
-    const rawBody = JSON.stringify({ reference: "GW-REF-1", status: "00" });
+    const rawBody = JSON.stringify({ reference: "GW-REF-1", status: "00", timestamp: nowSec() });
     const result = await verifier.verify("token-abc", {
       rawBody: Buffer.from(rawBody, "utf8"),
       headers: { "x-signature": sign(rawBody) },
@@ -428,7 +429,7 @@ describe("production callback verifier", () => {
   test("refuses to trust an unknown correlation", async () => {
     const { client } = createFakeClient({ channel, credentialSet, attempt });
     const verifier = new PrismaCallbackVerifier(client);
-    const rawBody = JSON.stringify({ reference: "GW-UNKNOWN", status: "00" });
+    const rawBody = JSON.stringify({ reference: "GW-UNKNOWN", status: "00", timestamp: nowSec() });
     const result = await verifier.verify("token-abc", {
       rawBody: Buffer.from(rawBody, "utf8"),
       headers: { "x-signature": sign(rawBody) },

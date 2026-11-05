@@ -1,3 +1,4 @@
+import { devLog } from "@/utils/devLog";
 import { dc } from "kt-dc";
 
 import { ref, onMounted, onBeforeUnmount } from "vue";
@@ -72,7 +73,7 @@ const CordsInputMap = dc(
 
         const setMapRef = async (r: HTMLElement | null) => {
             if (r) {
-                console.log("Setting map ", r   );
+                devLog("Setting map ", r   );
                 if (map) {
                     return;
                 }

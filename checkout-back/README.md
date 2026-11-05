@@ -47,7 +47,7 @@ The backend binds to `BIND_HOST` (default `0.0.0.0` in the service schema). Depl
 
 1. Disables `x-powered-by`.
 2. Sets Express `trust proxy` to `false`.
-3. Enables CORS with `origin: true` and `credentials: false`.
+3. Emits permissive CORS without credentials unless `CORS_ALLOWED_ORIGINS` is set, plus hand-written security headers.
 4. Installs request logging with request-id resolution and secret redaction.
 5. Serves unauthenticated `GET /health`.
 6. Mounts `/api/v1/inbound` **before** the JSON body parser so the inbound router can install its own raw parser.
@@ -164,9 +164,9 @@ Important consequences:
 | `MTLS_CLIENT_KEY_PATH` | yes | none | Client private key. |
 | `MTLS_CA_CERT_PATH` | yes | none | Internal CA certificate. |
 | `CORE_REQUEST_TIMEOUT_MS` | no | `30000` | Default core timeout. Inbound explicitly uses 10 seconds; the status stream uses 10 minutes. |
-| `TRUSTED_PROXY_CIDRS` | no | loopback plus RFC1918 ranges | Peers whose forwarded IP headers are trusted. |
+| `TRUSTED_PROXY_CIDRS` | no | loopback only (`127.0.0.0/8,::1/128`) | Peers whose forwarded IP headers are trusted. |
 | `MAX_JSON_BODY_BYTES` | no | `1048576` | JSON and URL-encoded body limit. |
-| `MAX_INBOUND_BODY_BYTES` | no | `3145728` | Raw inbound webhook body limit at the edge. |
+| `MAX_INBOUND_BODY_BYTES` | no | `1048576` | Raw inbound webhook body limit at the edge. |
 | `CHECKOUT_FRONT_BASE_URL` | no | `http://localhost:5103` | Redirect base for browser returns. Accepts HTTP or HTTPS; use HTTPS in production. |
 | `CHECKOUT_FRONT_STATUS_PATH` | no | `/pay/status` | Redirect path for browser returns. |
 | `PAY_RATE_LIMIT_MAX` | no | `120` | Pay and return requests per fixed 60-second window. |
@@ -229,9 +229,9 @@ Common failures:
 - There is no edge session, cookie or authority check. Payer authorization is capability-based and fully validated by core.
 - The zero-monetary-field assertion scans nested objects and arrays up to a bounded depth and node budget. It is a UX guard; core must still resolve and validate money from the link.
 - Raw body handling: inbound webhook bytes are forwarded unchanged with the original `content-type`. Only the allowlisted headers cross the boundary. `authorization`, `cookie` and arbitrary `x-*` headers are dropped.
-- Inbound bodies are limited to 3 MiB at the edge. Core's raw-body limit is larger, so core must enforce its own limit.
+- Inbound bodies are limited to `MAX_INBOUND_BODY_BYTES` (default 1 MiB, previously 3 MiB) at the edge, after a per-IP/channel limiter; only GET/HEAD/POST are accepted and core errors map to public codes (`INBOUND_REJECTED`, `INBOUND_NOT_FOUND`, `INBOUND_CONFLICT`, `PAYLOAD_TOO_LARGE`, `RATE_LIMITED`, `INBOUND_UNAVAILABLE`). Core's raw-body limit is larger, so core must enforce its own limit.
 - The edge does not pre-validate signatures, compute HMACs or dedupe. Core must do all of that.
-- CORS reflects any origin with credentials disabled. The public reverse proxy and CSP are the browser-facing controls.
+- CORS is permissive without credentials unless `CORS_ALLOWED_ORIGINS` is set. The public reverse proxy and CSP are the browser-facing controls.
 - `CHECKOUT_FRONT_BASE_URL` accepts HTTP or HTTPS in the schema. Production deployment writes HTTPS; do not use HTTP.
 - `BIND_HOST` defaults to `0.0.0.0`; only the deploy override to loopback prevents direct exposure.
 - Logs redact sensitive keys and truncate long strings, but gateway signatures, body contents and payer data must never be logged by application code.

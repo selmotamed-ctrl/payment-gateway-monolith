@@ -226,6 +226,10 @@ describe("the statement reconciliation upload", () => {
   const upload = async (client: FakePrisma, body: string): Promise<{ status: number; body: Record<string, unknown> }> => {
     const app = express();
     app.use(express.raw({ type: () => true, limit: "25mb" }));
+    app.use((request, _response, next) => {
+      request.principal = { kind: "session", userId: "finance-user", role: "FINANCE", merchantId: null, applicationId: null, authorities: ["reconciliation:write"], scopes: [], tokenId: null, sessionId: "finance-user" };
+      next();
+    });
     app.post(
       "/internal/admin/reconciliation/upload",
       createReconciliationUploadHandler({

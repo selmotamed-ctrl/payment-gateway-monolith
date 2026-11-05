@@ -3,7 +3,7 @@ id: deploy.firewall
 title: Firewall Policy and Application
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - deploy/lib/firewallConfigurator.ts
@@ -20,6 +20,7 @@ tests:
   - deploy/test/hostPlannerScale.test.ts
   - deploy/test/exhaustive-deploy-matrix.test.ts
   - deploy/test/fakeRails.test.ts
+  - deploy/test/security-regressions.test.ts
 gaps:
   - Firewall application is not verified after the fact; the deploy only reads `ufw status verbose` for the log.
   - If `ufw` cannot be installed, the deploy warns and continues without a firewall.
@@ -278,3 +279,7 @@ Not covered:
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+The Fake Rails nginx vhost now also applies `allow`/`deny` rules from `FAKE_RAILS_ALLOWED_CIDRS` (the application-level check compares `socket.remoteAddress`, not `X-Forwarded-For`). All six nginx templates set `server_tokens off` and `limit_req` with `limit_req_status 429`. UFW rules are unchanged.

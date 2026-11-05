@@ -1,15 +1,16 @@
-import cors from "cors";
 import express from "express";
 import { apiRouter } from "./api";
 import { env } from "./lib/env";
 import { apiErrorHandler, notFoundHandler } from "./lib/error";
 import { requestLoggerMiddleware } from "./lib/requestLogger";
+import { corsAllowList, securityHeaders } from "./lib/security";
 
 export const createApp = () => {
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", false);
-  app.use(cors({ origin: true, credentials: false }));
+  app.use(securityHeaders);
+  app.use(corsAllowList());
   app.use(requestLoggerMiddleware);
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", service: "merchant-back", uptime: process.uptime() });

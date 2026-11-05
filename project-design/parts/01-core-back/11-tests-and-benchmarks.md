@@ -3,7 +3,7 @@ id: core.tests
 title: Tests and Benchmarks
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/test/**
@@ -17,6 +17,16 @@ tests:
   - core-back/test/**
   - deploy/backup-daemon/test/**
   - tests/**
+  - core-back/test/security-regressions/c1-forged-success.test.ts
+  - core-back/test/security-regressions/c2-mfa.test.ts
+  - core-back/test/security-regressions/h1h2-authz.test.ts
+  - core-back/test/security-regressions/h3-admin-users-and-approvals.test.ts
+  - core-back/test/security-regressions/h4-cashout.test.ts
+  - core-back/test/security-regressions/h7-rounding.test.ts
+  - core-back/test/security-regressions/h8-webhook.test.ts
+  - core-back/test/security-regressions/m4-idempotency.test.ts
+  - core-back/test/security-regressions/m9-m12-upload-kyb.test.ts
+  - core-back/test/security-regressions/m10-ssrf.test.ts
 gaps:
   - The historical 38,500+ assertion target is not met; the working tree has about 1,964 literal test declarations.
   - `core-back/test/exhaustive/09-storage-backup/` does not exist; the runner substitutes storage-engine and backup-admin suites.
@@ -24,6 +34,7 @@ gaps:
   - There is no benchmark for 1,000+ TPS, 50M-500M record scale, deep search or a live restore.
   - The backup-daemon restore drill tests use fake command runners, not real WAL-G/Barman recovery.
   - UI Playwright suites use preview servers and mocked APIs; live cross-service journeys require `E2E_LIVE=1`.
+  - True concurrency tests need PostgreSQL 18; RetentionWorker fake parser (test/helpers/retentionFake.ts) cannot parse the new InvariantVerifier query (test drift, not a product bug).
 ---
 
 # Tests and Benchmarks
@@ -398,3 +409,9 @@ Database-backed suites require PostgreSQL 18; Redis-backed suites require Redis.
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical extraction. Records the actual test inventory, database/Redis/browser/live skip behavior, the missing exhaustive storage suite, the benchmark scripts and thresholds, and the absent 1,000+ TPS, scale, deep-search and restore benchmarks. See `project-design/TRACKER.md`.
+
+## 11. Security regression suites (2026-11-05)
+
+New suites in `core-back/test/security-regressions/`: `c1-forged-success`, `c2-mfa`, `h1h2-authz`, `h3-admin-users-and-approvals`, `h4-cashout`, `h7-rounding`, `h8-webhook`, `m4-idempotency`, `m9-m12-upload-kyb`, `m10-ssrf`. Existing tests that asserted insecure behaviour were updated (for example the RBAC fuzz now mints well-formed tokens).
+
+Known gaps: true concurrency needs PostgreSQL 18 and is not exercised; the RetentionWorker fake parser (`test/helpers/retentionFake.ts`) cannot parse the new InvariantVerifier query (test drift, not a product bug).

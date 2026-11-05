@@ -82,6 +82,8 @@ export interface ApiConsumerConfig {
   env: string;
   credentialSetId: string;
   allowedHosts: readonly string[];
+  /** Explicit opt-out: an empty `allowedHosts` otherwise fails closed. */
+  allowAnyHost?: boolean;
   auth: GatewayAuthConfig;
   credentials?: Record<string, string | Buffer> | readonly CredentialEntry[];
   baseUrl?: string;
@@ -494,6 +496,11 @@ export class ApiConsumer {
     const url = compileUrl(request.url, request.query, {
       allowedHosts: this.config.allowedHosts,
       requireHttps: !fakeRailsTarget,
+      allowAnyHost: this.config.allowAnyHost,
+      // Private/loopback destinations are refused by assertDnsAllowed below
+      // (with the scoped Fake Rails exception); the compile step must not
+      // pre-empt that decision.
+      allowPrivateHosts: true,
     });
     const parsed = new URL(url);
     await this.assertDnsAllowed(parsed.hostname);
@@ -516,7 +523,12 @@ export class ApiConsumer {
     const body = this.serializeBody(rawBody, headers);
     this.applyAuthentication(auth, headers, query, body);
     const finalUrl = query.toString();
-    validateFinalUrl(finalUrl, { allowedHosts: this.config.allowedHosts, requireHttps: !fakeRailsTarget });
+    validateFinalUrl(finalUrl, {
+      allowedHosts: this.config.allowedHosts,
+      requireHttps: !fakeRailsTarget,
+      allowAnyHost: this.config.allowAnyHost,
+      allowPrivateHosts: true,
+    });
 
     const controller = new AbortController();
     const removeExternalAbort = combineSignals(controller, request.signal);
@@ -735,6 +747,8 @@ export class ApiConsumer {
     const url = compileUrl(endpoint, undefined, {
       allowedHosts: this.config.allowedHosts,
       requireHttps: true,
+      allowAnyHost: this.config.allowAnyHost,
+      allowPrivateHosts: true,
     });
     const parsed = new URL(url);
     await this.assertDnsAllowed(parsed.hostname);

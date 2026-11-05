@@ -23,6 +23,11 @@ export const DEFAULT_JOIN_REQUEST_DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
  * timers are for.
  */
 export class JoinRequestExpiryWorker extends BaseWorker {
+  /** Cluster singleton: only the advisory-lock leader ticks (GAP-012). */
+  protected override get singleton(): boolean {
+    return true;
+  }
+
   private readonly draftTtlMs: number;
 
   constructor(deps: JoinRequestExpiryWorkerDeps) {

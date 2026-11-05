@@ -21,17 +21,35 @@ export const envSchema = z.object({
   MTLS_CLIENT_KEY_PATH: z.string().min(1),
   MTLS_CA_CERT_PATH: z.string().min(1),
   CORE_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(30000),
-  TRUSTED_PROXY_CIDRS: z
-    .string()
-    .default("127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
+  // Peers whose forwarded client-ip headers are honoured. Loopback only by default: a deploy
+  // that fronts the edge with a proxy on another address must list that address explicitly.
+  TRUSTED_PROXY_CIDRS: z.string().default("127.0.0.0/8,::1/128"),
+  // Comma separated list of exact origins allowed to call this service cross-origin.
+  // Empty (default) means no CORS headers are emitted at all.
+  CORS_ALLOWED_ORIGINS: z.string().default(""),
+  // Upper bound for a buffered (non streaming) core response.
+  CORE_MAX_RESPONSE_BYTES: z.coerce.number().int().min(1024).max(536870912).default(67108864),
+  // Total wall clock budget of one buffered core call (idle timeout is CORE_REQUEST_TIMEOUT_MS).
+  CORE_TOTAL_DEADLINE_MS: z.coerce.number().int().min(1000).max(1800000).default(300000),
+  // Concurrent SSE streams one client ip may hold open through this edge.
+  MAX_STREAMS_PER_IP: z.coerce.number().int().min(1).max(1000).default(5),
   MAX_JSON_BODY_BYTES: z.coerce.number().int().min(1024).max(10485760).default(2097152),
   MAX_UPLOAD_BYTES: z.coerce.number().int().min(1024).max(26214400).default(10485760),
   UPLOAD_ALLOWED_MIME: z
     .string()
     .default("image/png,image/jpeg,application/pdf"),
+  // Access token issuance policy enforced at the edge (core stays the authority).
+  TOKEN_DEFAULT_TTL_DAYS: z.coerce.number().int().min(1).max(3650).default(90),
+  TOKEN_MAX_TTL_DAYS: z.coerce.number().int().min(1).max(3650).default(365),
+  TOKEN_MAX_SCOPES: z.coerce.number().int().min(1).max(50).default(20),
+  // Stricter per client ip budget of the document upload routes (per minute).
+  UPLOAD_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   PG_LIVE_TOKEN_PREFIX: z.string().min(4).max(32).default("pg_live_"),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
   AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(900000),
+  // GAP-019: "true" moves the session token into an HttpOnly cookie (never exposed to JS).
+  SESSION_COOKIE_MODE: z.enum(["true", "false"]).default("false"),
+  SESSION_COOKIE_SECURE: z.enum(["true", "false"]).default("true"),
   API_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(300),
   API_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60000),
   EXTERNAL_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(120),

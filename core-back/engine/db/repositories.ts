@@ -484,9 +484,9 @@ export class PrismaRepositories implements Repositories {
     findAttemptByReference: async (tx, reference) => {
       return (await model(tx, "paymentAttempt").findUnique({ where: { reference } })) as PaymentAttemptRow | null;
     },
-    findAttemptByIdempotencyKey: async (tx, idempotencyKey) => {
+    findAttemptByIdempotencyKey: async (tx, idempotencyKey, linkId) => {
       return (await model(tx, "paymentAttempt").findFirst({
-        where: { idempotencyKey: idempotencyKey },
+        where: { linkId, idempotencyKey },
       })) as PaymentAttemptRow | null;
     },
     findAttemptByProviderReference: async (tx, providerReference) => {
@@ -759,8 +759,17 @@ export class PrismaRepositories implements Repositories {
     listStatementSources: async (tx) => {
       return rows<StatementSourceRow>(await model(tx, "statementSource").findMany());
     },
-    findRunByFileHash: async (tx, fileHash) => {
-      return (await model(tx, "reconciliationRun").findUnique({ where: { fileHash: fileHash } })) as ReconciliationRunRow | null;
+    findRunByFileHash: async (tx, fileHash, statementSourceId) => {
+      if (statementSourceId) {
+        // GAP-018: unique (statement_source_id, file_hash).
+        return (await model(tx, "reconciliationRun").findUnique({
+          where: { statementSourceId_fileHash: { statementSourceId, fileHash } },
+        })) as ReconciliationRunRow | null;
+      }
+      return (await model(tx, "reconciliationRun").findFirst({
+        where: { fileHash },
+        orderBy: { createdAt: "asc" },
+      })) as ReconciliationRunRow | null;
     },
     findRunById: async (tx, id) => {
       return (await model(tx, "reconciliationRun").findUnique({ where: { id } })) as ReconciliationRunRow | null;

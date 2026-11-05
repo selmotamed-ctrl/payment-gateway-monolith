@@ -3,7 +3,7 @@ id: admin-ui.operations
 title: Backups Settings and Operations
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - admin-front/src/pages/system/backups/**
@@ -22,6 +22,7 @@ tests:
   - tests/e2e/admin/backups.spec.ts
   - core-back/test/backup-admin/backup-admin-routes.test.ts
   - admin-front/src/content/__tests__/content-completeness.test.ts
+  - tests/unit/frontend-security-admin.test.ts
 gaps:
   - Backup policy edits create an approval request but the backup page has no direct approvalRequestId continuation; the checker must use the general Approvals queue.
   - The Approvals filter/registry subject-type list does not include `BACKUP_POLICY`, so the subject cannot be selected from the shared filter options.
@@ -318,3 +319,7 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical operations part. Records backup/target/drill/policy behavior, settings versioning/restore, checkout-support history/diff, academy reporting, export/checklist behavior, and the authority/workflow gaps.
+
+## Security hardening (2026-11-05)
+
+Backups page: actions are disabled unless backups are configured and the daemon is reachable; a full backup of all targets needs an extra confirmation; trigger and drill send an `Idempotency-Key` header (required by admin-back); policy form validation mirrors the edge rules (cron, minimum gaps, retention floors); server error text is sanitized and clipped.

@@ -73,7 +73,7 @@ describe("WAL-G command builders", () => {
     );
     expect(buildWalGVerifyBucketCommand(auditConfig, "audit_db").args).toEqual(["st", "ls"]);
     expect(buildWalGMirrorCommand({ ...auditConfig, BACKUP_SECONDARY_SSH_TARGET: "vault@host:/mnt/vault" }, "audit_db")?.args).toEqual([
-      "sync",
+      "copy",
       "s3://libya-pg-backups-primary/prod/audit_db",
       "vault@host:/mnt/vault",
     ]);
@@ -100,7 +100,7 @@ describe("WAL-G command builders", () => {
   test("mirrors S3 archives with rclone and local archives with rsync", () => {
     expect(buildWalGMirrorCommand(config)).toMatchObject({
       command: "rclone",
-      args: ["sync", "s3://libya-pg-backups-primary/prod/postgres_core", "backup-vault@198.51.100.99:/mnt/offsite-vault/pg"],
+      args: ["copy", "s3://libya-pg-backups-primary/prod/postgres_core", "backup-vault@198.51.100.99:/mnt/offsite-vault/pg"],
     });
     const localConfig = makeConfig({
       BACKUP_PRIMARY_S3_BUCKET: "/srv/pg-backups/",
@@ -108,9 +108,11 @@ describe("WAL-G command builders", () => {
     });
     expect(buildWalGMirrorCommand(localConfig)).toMatchObject({
       command: "rsync",
-      args: ["-a", "--delete", "/srv/pg-backups/postgres_core/", "vault@host:/mnt/vault/"],
+      args: ["-a", "/srv/pg-backups/postgres_core/", "vault@host:/mnt/vault/"],
     });
     expect(buildWalGMirrorCommand(makeConfig())).toBeNull();
+    expect(buildWalGMirrorCommand({ ...config, BACKUP_SECONDARY_MIRROR_DELETE: true })).toMatchObject({ command: "rclone", args: ["sync", expect.any(String), expect.any(String)] });
+    expect(buildWalGMirrorCommand({ ...localConfig, BACKUP_SECONDARY_MIRROR_DELETE: true })?.args).toContain("--delete");
   });
 
   test("verifies the primary bucket through wal-g storage", () => {

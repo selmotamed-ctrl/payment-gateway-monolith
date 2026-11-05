@@ -81,7 +81,7 @@ describe("the attempt-creation guard (design §9.1 rule 2)", () => {
     expect(fixture.state.slotDeltas).toEqual([1]);
   });
 
-  test("an AML rule that matches produces the AML_HOLD escrow and an AML case", async () => {
+  test("an AML rule that matches holds the attempt for the case without booking an escrow", async () => {
     const fixture = createGuardFixture({ amlRules: [amlRule()] });
     const pipeline = buildPipeline(fixture);
 
@@ -92,26 +92,17 @@ describe("the attempt-creation guard (design §9.1 rule 2)", () => {
     expect(decision.amlCaseId).toBeTruthy();
     expect(decision.customerMessageCode).toBe("PAYMENT_UNDER_REVIEW");
 
-    // The case points at the escrow, so the checker releases or voids it.
     const attemptId = decision.attemptId ?? "";
     const amlCase = fixture.state.amlCases[0];
     expect(amlCase?.subjectId).toBe(attemptId);
-    expect(amlCase?.holdJournalEntryId).toBeTruthy();
 
-    // The escrow is `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` (design §11.3
-    // entry 7) and it balances.
-    expect(fixture.state.journalEntries).toHaveLength(1);
-    const entry = fixture.state.journalEntries[0];
-    expect(entry?.refType).toBe("PAYMENT_ATTEMPT");
-    expect(entry?.refId).toBe(attemptId);
-    const lines = fixture.state.journalLines.filter((line) => line.entryId === entry?.id);
-    expect(lines).toHaveLength(2);
-    const debit = lines.find((line) => line.direction === "DEBIT");
-    const credit = lines.find((line) => line.direction === "CREDIT");
-    expect(debit?.glAccountId).toBe("gl-clearing");
-    expect(credit?.glAccountId).toBe("gl-aml-hold");
-    expect(debit?.amount).toBe("100.0000");
-    expect(credit?.amount).toBe(debit?.amount);
+    // GAP-015: the guard runs before any gateway capture, so it books NO escrow
+    // and the case carries no hold entry yet. The engine escrows the money
+    // (Dr GATEWAY_CLEARING / Cr AML_HOLD) once the capture is verified.
+    expect(amlCase?.holdJournalEntryId ?? null).toBeNull();
+    expect(fixture.state.journalEntries).toHaveLength(0);
+    expect(fixture.state.journalLines).toHaveLength(0);
+    expect(decision.reasons).toContain("AML_HOLD_PENDING_CAPTURE");
 
     // The attempt waits for the case: it never settles and it is polled by
     // nobody.
@@ -309,7 +300,8 @@ describe("the guard against the production repositories", () => {
     expect(decision.outcome).toBe("HOLD");
     expect(decision.holdRequired).toBe(true);
     expect(fixture.state.amlCases).toHaveLength(1);
-    expect(fixture.state.journalEntries).toHaveLength(1);
+    // GAP-015: no escrow before the gateway capture is verified.
+    expect(fixture.state.journalEntries).toHaveLength(0);
     expect(fixture.state.slotDeltas).toEqual([1]);
   });
 

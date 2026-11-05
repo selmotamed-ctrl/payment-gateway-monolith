@@ -1,7 +1,9 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { env } from "../../lib/env";
 import { ApiError } from "../../lib/error";
 import { verifyJwt, type JwtPayload } from "../../lib/jwt";
+import { consumeSseTicket } from "../../lib/tickets";
 
 declare global {
   namespace Express {
@@ -12,6 +14,15 @@ declare global {
 }
 
 const publicPaths = new Set(["/auth/login"]);
+
+/**
+ * Only the SSE stream may take a credential in the query string (EventSource cannot set
+ * headers), and it is a 30s single-use `ticket`, never the session token (GAP-024).
+ */
+const TICKET_PATHS = new Set(["/transactions/stream"]);
+
+const digest = (value: string): Buffer => createHash("sha256").update(value, "utf8").digest();
+const constantTimeEquals = (left: string, right: string): boolean => timingSafeEqual(digest(left), digest(right));
 
 /**
  * Protects `/portal-api/*`. The login route and the hosted checkout simulator
@@ -26,7 +37,7 @@ export const portalAuthGuard = (request: Request, _response: Response, next: Nex
   }
   if (relative.startsWith("/internal/")) {
     const token = request.header("x-fake-rails-seeder-token") ?? "";
-    if (!token || token !== env.FAKE_RAILS_SEEDER_TOKEN) {
+    if (!token || !constantTimeEquals(token, env.FAKE_RAILS_SEEDER_TOKEN)) {
       next(new ApiError(401, "INVALID_SEEDER_TOKEN", "A valid X-Fake-Rails-Seeder-Token header is required"));
       return;
     }
@@ -34,9 +45,17 @@ export const portalAuthGuard = (request: Request, _response: Response, next: Nex
     return;
   }
 
+  if (TICKET_PATHS.has(relative) && typeof request.query.ticket === "string") {
+    if (!consumeSseTicket(request.query.ticket)) {
+      next(new ApiError(401, "UNAUTHENTICATED", "The stream ticket is invalid, expired or already used"));
+      return;
+    }
+    next();
+    return;
+  }
+
   const header = request.header("authorization") ?? "";
-  const queryToken = typeof request.query.token === "string" ? request.query.token : "";
-  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : queryToken;
+  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
   const payload = token ? verifyJwt(token, env.FAKE_RAILS_JWT_SECRET) : null;
   if (!payload || payload.role !== "FAKE_RAILS_TESTER") {
     next(new ApiError(401, "UNAUTHENTICATED", "A valid tester session is required"));

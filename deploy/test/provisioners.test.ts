@@ -41,8 +41,8 @@ const SOURCE = `
 DB_MANAGE_VIA_SSH="false"
 DB_NAME="gateway"
 DB_USER="gw"
-DB_PASSWORD="ultra-strong-db-password"
-DATABASE_URL="postgresql://gw:ultra-strong-db-password@10.10.10.10:5432/gateway"
+DB_PASSWORD="ultra-strong-db-K7p2Zq9w"
+DATABASE_URL="postgresql://gw:ultra-strong-db-K7p2Zq9w@10.10.10.10:5432/gateway"
 DB_ENGINE="postgresql"
 CORE_NODES="core-1@10.10.1.11:22:10.10.1.11:4000,core-2@10.10.1.12:22:10.10.1.12:4000"
 CORE_SSH_KEY_PATH="~/.ssh/core"
@@ -54,27 +54,27 @@ MERCHANT_DOMAIN="merchant.example.ly"
 CHECKOUT_NODES="chk-1@10.10.4.11:22:10.10.4.11:4103"
 CHECKOUT_SSH_KEY_PATH="~/.ssh/checkout"
 CHECKOUT_DOMAIN="pay.example.ly"
-KMS_MASTER_KEY="0123456789abcdef0123456789abcdef"
+KMS_MASTER_KEY="kms-Q7x9Lm2Zr4Vb8Nc1Wd5Tg3Hy6Jp0Sa2"
 PG_MANAGE_VIA_SSH="true"
 PG_PRIMARY_NODE="pg-pri@10.10.10.10:22:10.10.10.10:5432"
 PG_REPLICA_NODES="pg-rep-1@10.10.10.11:22:10.10.10.11:5432"
 PG_SSH_KEY_PATH="~/.ssh/pg"
-PG_DB_PASSWORD="ultra-strong-pg-password"
-PG_REPLICATION_PASSWORD="ultra-strong-repl-password"
+PG_DB_PASSWORD="ultra-strong-pg-K7p2Zq9w"
+PG_REPLICATION_PASSWORD="ultra-strong-repl-K7p2Zq9w"
 PG_AUDIT_DATA_DIR="/var/lib/postgresql/18/audit"
 PGBOUNCER_ENABLED="true"
 REDIS_MANAGE_VIA_SSH="true"
 REDIS_NODES="redis-1@10.10.11.10:22:10.10.11.10:6379"
 REDIS_SSH_KEY_PATH="~/.ssh/redis"
-REDIS_PASSWORD="ultra-strong-redis-password"
+REDIS_PASSWORD="ultra-strong-redis-K7p2Zq9w"
 AUDIT_DB_MANAGE_VIA_SSH="true"
 AUDIT_DB_NODE="audit-db@10.10.12.10:22:10.10.12.10:5432"
 AUDIT_DB_SSH_KEY_PATH="~/.ssh/audit"
-AUDIT_DB_PASSWORD="ultra-strong-audit-password"
+AUDIT_DB_PASSWORD="ultra-strong-audit-K7p2Zq9w"
 LOG_DB_MANAGE_VIA_SSH="true"
 LOG_DB_NODE="log-db@10.10.12.20:22:10.10.12.20:5432"
 LOG_DB_SSH_KEY_PATH="~/.ssh/log"
-LOG_DB_PASSWORD="ultra-strong-log-password"
+LOG_DB_PASSWORD="ultra-strong-log-K7p2Zq9w"
 LOG_RETENTION_MONTHS="12"
 BACKUP_ENABLED="true"
 BACKUP_NODE="backup-1@10.10.13.10:22:10.10.13.10:4090"
@@ -84,7 +84,7 @@ BACKUP_PRIMARY_S3_ENDPOINT="https://s3.example.invalid"
 BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/prod"
 BACKUP_PRIMARY_S3_ACCESS_KEY="access"
 BACKUP_PRIMARY_S3_SECRET_KEY="secret"
-BACKUP_ENCRYPTION_KEY_HEX="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+BACKUP_ENCRYPTION_KEY_HEX="9f3a7c1e5b2d84f06a1c3e7b9d2f4a8c5e0b6d1a3f7c9e2b4d8a0c6e1f5b3a79"
 BACKUP_SECONDARY_SSH_TARGET="vault@198.51.100.99:/mnt/offsite"
 `;
 
@@ -119,7 +119,7 @@ describe("PostgreSQL 18 provisioner", () => {
       "effective_cache_size = 24GB",
       "work_mem = 32MB",
       "maintenance_work_mem = 1GB",
-      "io_method = 'io_uring'",
+      "io_method = 'worker'",
       "synchronous_commit = on",
       "wal_level = replica",
       "max_wal_senders = 16",
@@ -147,9 +147,11 @@ describe("PostgreSQL 18 provisioner", () => {
       { nodeId: "pg-rep-1", privateIp: "10.10.10.11", servicePort: 5432 },
       config(),
     ).join("\n");
-    expect(commands).toContain("PGPASSWORD=");
+    // The password is read from the 0600 .pgpass, never passed as PGPASSWORD on a command line.
+    expect(commands).toContain("PGPASSFILE=/var/lib/postgresql/.pgpass");
+    expect(commands).not.toContain("PGPASSWORD=");
     expect(commands).toContain("/var/lib/postgresql/.pgpass");
-    expect(commands).toContain("pg_basebackup -h 10.10.10.10 -p 5432 -U pg_replicator");
+    expect(commands).toContain("pg_basebackup -h '10.10.10.10' -p 5432 -U 'pg_replicator'");
     expect(commands).toContain("-Fp -Xs -P -R -S");
     expect(commands).toContain("primary_slot_name");
   });
@@ -159,7 +161,7 @@ describe("PostgreSQL 18 provisioner", () => {
     expect(ini).toContain("listen_addr = 0.0.0.0");
     expect(ini).toContain("listen_port = 6432");
     expect(ini).toContain("pool_mode = transaction");
-    expect(ini).toContain("server_tls_sslmode = prefer");
+    expect(ini).toContain("server_tls_sslmode = require");
     expect(ini).toContain("max_client_conn = 2000");
     expect(ini).toContain("default_pool_size = 50");
     expect(ini).toContain("reserve_pool_size = 10");
@@ -208,7 +210,7 @@ describe("Redis provisioner", () => {
   test("binds the private IP, requires a password and saves hourly", () => {
     const snippet = redisConfigSnippet(config(), "10.10.11.10");
     expect(snippet).toContain("bind 10.10.11.10 127.0.0.1");
-    expect(snippet).toContain("requirepass ultra-strong-redis-password");
+    expect(snippet).toContain("requirepass ultra-strong-redis-K7p2Zq9w");
     expect(snippet).toContain("save 3600 1");
     expect(snippet).toContain("maxmemory 4gb");
     expect(redisFirewallCommands(config()).join("\n")).toContain("10.10.1.11");
@@ -231,7 +233,7 @@ describe("Redis provisioner", () => {
     const restart = runner.runs.find((run) => run.command.includes("redis-cli"));
     expect(restart?.command).toContain("systemctl daemon-reload");
     expect(restart?.command).toContain('CONFIG SET save ""');
-    expect(restart?.command).toContain("REDISCLI_AUTH='ultra-strong-redis-password'");
+    expect(restart?.command).toContain("REDISCLI_AUTH='ultra-strong-redis-K7p2Zq9w'");
     expect(restart?.command).toContain("redis-cli -p 6379 PING");
     expect(runner.runs.some((run) => run.command.includes("redis-server"))).toBe(true);
   });
@@ -319,7 +321,8 @@ describe("Backup engine provisioner", () => {
     expect(unit).toContain("WorkingDirectory=/opt/pg-backup-daemon");
     expect(unit).toContain("ExecStart=/usr/local/bin/bun run src/index.ts");
     expect(unit).toContain("EnvironmentFile=/etc/pg-backup/backup.env");
-    expect(unit).toContain("User=postgres");
+    expect(unit).toContain("User=pgbackup");
+    expect(unit).not.toContain("User=postgres");
     expect(unit).toContain("ReadWritePaths=/var/lib/pg-backup /var/log/pg-backup");
     expect(backupCronEntries(cfg)).toEqual([]);
     expect(backupCronFile(cfg)).toContain("scheduler");
@@ -376,7 +379,7 @@ BACKUP_REDIS_CLI_BIN="/opt/bin/redis-cli"
 
   test("uses per-target WAL-G prefixes when the engine mode is wal-g", () => {
     const source = SOURCE
-      .replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="wal-g"')
+      .replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="wal-g"\nBACKUP_WALG_SHA256="5d41402abc4b2a76b9719d911017c592a1b2c3d4e5f60718293a4b5c6d7e8f90"')
       .replace('BACKUP_NODE="backup-1@10.10.13.10:22:10.10.13.10:4090"', 'BACKUP_NODE="backup-1@10.10.10.10:22:10.10.10.10:4090"');
     const cfg = loadDeployConfig(source);
     expect(cfg.ok).toBe(true);
@@ -469,7 +472,7 @@ ${extra}`.replace(/BACKUP_NODE="[^"]*"/, 'BACKUP_NODE="backup-1@10.10.10.10:22:1
     expect(all).toContain("/pg-bkp'");
     expect(all).not.toContain("dl.min.io");
     const env = runner.writes.find((w) => w.path === "/etc/default/minio");
-    expect(env?.content).toContain("MINIO_ROOT_USER=minio-admin");
+    expect(env?.content).toContain("MINIO_ROOT_USER='minio-admin'");
     expect(env?.content).toContain("--address 127.0.0.1:9000");
     expect(env?.mode).toBe(0o600);
     expect(runner.writes.some((w) => w.path === "/etc/systemd/system/minio.service")).toBe(true);
@@ -483,7 +486,9 @@ ${extra}`.replace(/BACKUP_NODE="[^"]*"/, 'BACKUP_NODE="backup-1@10.10.10.10:22:1
 
   test("BACKUP_ENGINE_MODE=auto picks wal-g when co-located and barman otherwise", () => {
     const pg = SOURCE.match(/PG_PRIMARY_NODE="[^@"]*@[^:"]*:\d+:([^:"]*):/)?.[1] ?? "";
-    const same = loadDeployConfig(SOURCE.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="auto"').replace(/BACKUP_NODE="[^"]*"/, `BACKUP_NODE="backup-1@${pg}:22:${pg}:4090"`));
+    const same = loadDeployConfig(`${SOURCE}
+BACKUP_WALG_SHA256="${"a".repeat(64)}"`.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="auto"').replace(/BACKUP_NODE="[^"]*"/, `BACKUP_NODE="backup-1@${pg}:22:${pg}:4090"`));
+    expect(same.problems).toEqual([]);
     expect(same.config?.BACKUP_ENGINE_MODE).toBe("wal-g");
     const diff = loadDeployConfig(SOURCE.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="auto"'));
     expect(diff.config?.BACKUP_ENGINE_MODE).toBe("barman");

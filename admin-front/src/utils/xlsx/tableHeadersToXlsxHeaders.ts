@@ -1,3 +1,4 @@
+import { devLog } from "@/utils/devLog";
 import type { TableHeader } from "@/components/Table/types";
 import type { XlsxHeader } from "./templateDownload";
 import { t } from "@/plugins/localization";
@@ -16,13 +17,13 @@ export const downloadTableData = async (props: { title: string; data: any[]; hea
                 [key: string]: any;
             };
             for (const header of translatedHeaders) {
-                console.log("header key", header.key)
+                devLog("header key", header.key)
                 item[header.key] =
                     typeof header.originalHeader.value == "function"
                         ? header.originalHeader.value?.(d, index)
                         : recursiveSelect(header.originalHeader.value || "", d);
             }
-            console.log("translated item", item)
+            devLog("translated item", item)
             return item;
         }),
     });
@@ -38,7 +39,7 @@ export const translateTableHeadersToXlsxHeader = (
     })[] = [];
     for (const th of headers) {
         if (!th.value) {
-            console.log("skipping header", th);
+            devLog("skipping header", th);
             continue;
         }
         translatedHeaders.push({

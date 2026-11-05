@@ -1,3 +1,4 @@
+import { devLog } from "@/utils/devLog";
 import { Table } from "./Table";
 import TableFilters, { createTableFilterSurface, tableFilterSurfaceKey } from "./TableFilters";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -63,7 +64,7 @@ export const ApiTable = defineComponent(
         const refresh = async ({ queryParams, nextSkip }: { queryParams?: any; nextSkip: number }) => {
             const apiHeaders = props.apiHeaders;
             const url = props.url;
-            console.log("called Refresh...", {
+            devLog("called Refresh...", {
                 apiHeaders,
                 url,
                 queryParams,
@@ -77,7 +78,7 @@ export const ApiTable = defineComponent(
                     headers: apiHeaders,
                 });
                 rawData.value = result.data;
-                console.log("result", title.value, {
+                devLog("result", title.value, {
                     queryParams,
                     nextSkip,
                     result: result.data,
@@ -159,7 +160,7 @@ export const ApiTable = defineComponent(
 
         const goToPage = (targetPageNumber: number) => {
             if (targetPageNumber <= numberOfPages.value && targetPageNumber > 0 && targetPageNumber != currentPage.value) {
-                console.log("going to page", targetPageNumber);
+                devLog("going to page", targetPageNumber);
                 const newSkipValue = numberOfItemsPerPage.value * (targetPageNumber - 1);
 
                 props.onRefresh(

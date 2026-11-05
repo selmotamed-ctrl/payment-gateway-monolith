@@ -59,7 +59,7 @@ describe("request logger redaction", () => {
       nested: { token: "pg_live_1", authorization: "Bearer abc", otp: "1234" },
       list: [{ apiKey: "key-1" }],
     }) as Record<string, unknown>;
-    expect(redacted.email).toBe("merchant@example.com");
+    expect(redacted.email).toBe("[REDACTED]");
     expect(redacted.password).toBe("[REDACTED]");
     const nested = redacted.nested as Record<string, unknown>;
     expect(nested.token).toBe("[REDACTED]");

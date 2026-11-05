@@ -103,7 +103,7 @@ It serves:
 | Fake Rails portal | `http://127.0.0.1:5104` |
 | Core mTLS API | `https://127.0.0.1:4000` |
 
-The script reads `deploy/deploy.env` when present and lets explicit environment variables win. Its defaults include `DEV_PASSWORD=DevPassword123!`, Fake Rails tester `tester_admin` / `Strong-Tester-Pass-2026!`, and the local KMS key `local-payment-gateway-master-key-32chars!`. Change these before using a shared or deployed environment.
+The script reads `deploy/deploy.env` when present and lets explicit environment variables win. It refuses `NODE_ENV=production` unless `LOCAL_TARGET=1`, requires `DB_PASSWORD`, and no longer ships default secrets: random secrets are generated with `openssl rand` into a mode 0600 `.local/secrets.env` (or the file named by `LOCAL_SECRETS_FILE`). Frontends read `.env`; on a fresh clone run `cp .env.example .env` in `admin-front`, `merchant-front` and `checkout-front` (the real `.env` files are no longer tracked).
 
 ### 2. Core service only
 
@@ -113,7 +113,7 @@ bun install
 bun run generate-mtls-certs
 
 export DATABASE_URL=postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith
-export KMS_MASTER_KEY=local-payment-gateway-master-key-32chars!
+export KMS_MASTER_KEY="$(openssl rand -base64 32)"   # use a strong random value, at least 32 chars
 
 bun run migrate-generate
 bun run migrate-deploy
@@ -175,12 +175,12 @@ bun run migrate-generate    # regenerate the Prisma client
 bun run db-seed             # platform settings, GL accounts, blueprints, templates, guides
 bun run seed-fake-rails     # point seeded gateways at Fake Rails
 bun run seed-synthetic-history
-bun run create-admin --email admin@example.com --password 'Str0ngPassw0rd!'
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com
 bun run create-dev-users
 bun run generate-mtls-certs
 ```
 
-`create-admin` activates a seeded administrator (the baseline seed intentionally leaves passwords unset). `create-dev-users` refuses production unless `--allow-production` or `DEV_USERS_ALLOW_PRODUCTION=true` is supplied.
+`create-admin` activates a seeded administrator (the baseline seed intentionally leaves passwords unset). The password is read from `ADMIN_PASSWORD`; `--password` on the command line is rejected, and MFA is on by default (`--no-mfa` or `ADMIN_MFA=false` disables it). `create-dev-users` refuses production unless `--allow-production` or `DEV_USERS_ALLOW_PRODUCTION=true` is supplied.
 
 ## Testing and benchmarks
 

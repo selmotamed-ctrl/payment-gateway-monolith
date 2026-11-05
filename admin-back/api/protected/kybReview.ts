@@ -19,6 +19,16 @@ import {
 } from "../contract";
 
 const router = express.Router();
+
+const KYB_CONTENT_TYPES = new Set(["image/png", "image/jpeg", "application/pdf"]);
+
+/** Always `attachment`; keeps core's file name only when it is a plain safe token. */
+const safeAttachmentDisposition = (upstream: string | string[] | undefined, id: string): string => {
+  const raw = typeof upstream === "string" ? upstream : "";
+  const match = /filename="?([A-Za-z0-9._-]{1,120})"?/.exec(raw);
+  const name = match?.[1] ?? `kyb-document-${id.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64)}`;
+  return `attachment; filename="${name}"`;
+};
 const idParamsSchema = z.object({ id: zIdentifier });
 
 export const kybReviewSchema = z
@@ -143,12 +153,14 @@ router.get("/:id/content", async (req: Request, res: Response): Promise<void> =>
   if (upstream.statusCode >= 400) {
     throw mapCoreHttpError(upstream.statusCode, parseJsonBuffer(upstream.body));
   }
+  // The stored document is untrusted content: it is only ever served as a download, in a
+  // sandbox, with a content type from a fixed allow-list (anything else is octet-stream).
   const contentType = upstream.headers["content-type"];
-  const contentDisposition = upstream.headers["content-disposition"];
-  const cacheControl = upstream.headers["cache-control"];
-  if (typeof contentType === "string") res.setHeader("Content-Type", contentType);
-  if (typeof contentDisposition === "string") res.setHeader("Content-Disposition", contentDisposition);
-  if (typeof cacheControl === "string") res.setHeader("Cache-Control", cacheControl);
+  const baseType = typeof contentType === "string" ? (contentType.split(";")[0] ?? "").trim().toLowerCase() : "";
+  res.setHeader("Content-Type", KYB_CONTENT_TYPES.has(baseType) ? baseType : "application/octet-stream");
+  res.setHeader("Content-Disposition", safeAttachmentDisposition(upstream.headers["content-disposition"], id));
+  res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
+  res.setHeader("Cache-Control", "private, no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.status(upstream.statusCode).send(upstream.body);
 });

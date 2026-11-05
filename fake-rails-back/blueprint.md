@@ -6,7 +6,7 @@ Generated from: `fake-rails.backend`, `fake-rails.protocol`, `fake-rails.chaos`,
 
 ## Fake Rails Backend Architecture
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -119,9 +119,9 @@ Indexes cover reference lookup, creation time, rail/status, provider reference, 
 
 - `/auth/login` and everything under `/hosted/` are public.
 - `/internal/*` requires `x-fake-rails-seeder-token` equal to `FAKE_RAILS_SEEDER_TOKEN`.
-- Everything else requires a Bearer token or `?token=` query token with `role=FAKE_RAILS_TESTER`.
+- Everything else requires a Bearer token with `role=FAKE_RAILS_TESTER`; the SSE stream alone also accepts a 30-second single-use `?ticket=` (see the gap resolutions below).
 
-`lib/jwt.ts` is a small HS256 implementation using HMAC-SHA256, base64url, expiry checking and `timingSafeEqual`. There is no issuer, audience, revocation or refresh-token mechanism.
+`lib/jwt.ts` is a small HS256 implementation using HMAC-SHA256, base64url, expiry checking and `timingSafeEqual`. There is no issuer, audience, revocation or refresh-token mechanism (the secret must now be at least 32 characters and pass the weak-secret checks).
 
 ### 3.6 Portal routers and event hub
 
@@ -276,6 +276,13 @@ bun run start
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+- The JWT secret and seeder token must be at least 32 characters and pass the same weak-secret checks as deploy. The seeder token compare is constant-time. The session token is never accepted from the query string; `/transactions/stream` takes a single-use `?ticket=` instead (GAP-024).
+- `FAKE_RAILS_ALLOWED_CIDRS` is enforced against `socket.remoteAddress` (not `X-Forwarded-For`); behind nginx the real allowlist is the nginx `allow`/`deny` block. `FAKE_RAILS_TRUST_PROXY` defaults to loopback. `FAKE_RAILS_PORTAL_ACCOUNT_LOCKOUT` (default 5 per username) locks repeated failed portal logins.
+- **Hosted action token and stream ticket (GAP-024, RESOLVED 2026-11-05).** `GET /hosted/session/:reference` now returns `action_token`, a JWT bound to that transaction id with the purpose role `FAKE_RAILS_HOSTED_ACTION` (15 minutes); the approve/decline action POST must send it in `X-Hosted-Action-Token` or gets `401 HOSTED_ACTION_TOKEN_REQUIRED`. `POST /portal-api/transactions/stream-ticket` (tester session required) issues a `FAKE_RAILS_SSE_TICKET` JWT (30 seconds, unique `jti`); `portalAuthGuard` accepts it only on `/transactions/stream` and consumes it once (`consumeSseTicket`; replay is `401`). Both tokens are signed with the portal JWT secret but carry their own `role` (helpers in `fake-rails-back/lib/tickets.ts`), so neither works as a tester session and a tester session works as neither. The used-ticket map is in-process and pruned on use. `/hosted/*` session reads remain public.
+- **Residual.** `fake-rails-front` still keeps the tester token in localStorage (GAP-019 does not cover this portal).
 
 ## Fake Rails Protocol Matrix
 
@@ -584,7 +591,7 @@ Only the outbound webhook path computes signatures (`FakeCryptoSigner` plus six 
 
 ## Fake Rails Chaos Engine and Tester Portal
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -923,9 +930,13 @@ curl -X POST http://127.0.0.1:4104/portal-api/webhooks/$TX_ID/fire \
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
 
+## Security hardening (2026-11-05)
+
+fake-rails-front: the postMessage target is `VITE_CHECKOUT_ORIGIN`, otherwise the embedding parent's origin, never `*`; `redirect_url` is validated as http(s) without credentials. The live feed opens its EventSource with a 30-second single-use ticket obtained from `POST /portal-api/transactions/stream-ticket` (`streamUrl()` is now async), never the session token, and the hosted redirect page and widget frame post approve/decline with the session-bound `X-Hosted-Action-Token` (`postHostedAction`) (GAP-024, resolved 2026-11-05). The tester token itself remains in localStorage. New env: `VITE_CHECKOUT_ORIGIN`.
+
 ## Core Integration and Deployment
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -1232,3 +1243,7 @@ bun run deploy.ts --only=fake-rails
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+Core's outbound URL compile now fails closed on an empty `allowed_hosts` (`HOST_ALLOWLIST_EMPTY`) unless `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST=true`, and blocks private/loopback/link-local literals unless `allowPrivateHosts`; the Fake Rails exception (three-part allowlist) is unchanged. Seed blueprints for generic `input.code`, `mpgs` and `mypay` set `timestampToleranceSec = 0` because they carry no timestamp field. In production deploys `FAKE_RAILS_ENABLED`, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION=true` and the synthetic seeder are refused.

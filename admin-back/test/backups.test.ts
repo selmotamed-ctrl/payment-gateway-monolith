@@ -163,6 +163,7 @@ beforeAll(() => {
   process.env.MTLS_CA_CERT_PATH = pki.caCert;
   process.env.ADMIN_LAN_CIDRS = "10.0.0.0/8,192.168.0.0/16,127.0.0.1/32";
   process.env.ADMIN_AUTHORITY_HINTS = "security:read,security:write,gateway:read";
+  process.env.BACKUP_JOB_RATE_LIMIT_MAX = "1000";
 });
 
 beforeAll(async () => {
@@ -182,11 +183,14 @@ afterAll(async () => {
 const call = (
   method: string,
   path: string,
-  options: { token?: string; body?: unknown } = {},
+  options: { token?: string; body?: unknown; idempotencyKey?: string } = {},
 ) => {
   const headers: Record<string, string> = {};
   if (options.token) headers.authorization = `Bearer ${options.token}`;
   if (options.body !== undefined) headers["content-type"] = "application/json";
+  if (method === "POST" && /\/system\/backups\/(trigger|drill)$/.test(path)) {
+    headers["idempotency-key"] = options.idempotencyKey ?? "test-idempotency-key";
+  }
   return fetch(`${edgeUrl}${path}`, {
     method,
     headers,

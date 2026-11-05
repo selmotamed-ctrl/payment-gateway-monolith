@@ -5,6 +5,7 @@ import { ApiError, parseOrThrow } from "../../lib/error";
 import { webhookDispatcher } from "../../engine/webhooks/WebhookDispatcher";
 import { resolveRail } from "../../engine/chaos/DefaultRailScenarios";
 import { broadcast } from "./eventHub";
+import { issueHostedActionToken, verifyHostedActionToken } from "../../lib/tickets";
 
 const actionSchema = z.object({
   action: z.enum([
@@ -36,12 +37,17 @@ export const createHostedRouter = (): Router => {
     response.json({
       transaction,
       rail: resolveRail(transaction.rail_code) ?? null,
+      // GAP-024: the approve/decline POST must present this transaction-bound token.
+      action_token: issueHostedActionToken(transaction.id),
     });
   });
 
   router.post("/session/:id/action", (request, response) => {
     const transaction = findTransactionAnyReference(request.params.id ?? "");
     if (!transaction) throw new ApiError(404, "SESSION_NOT_FOUND", "Unknown hosted session");
+    if (!verifyHostedActionToken(request.header("x-hosted-action-token"), transaction.id)) {
+      throw new ApiError(401, "HOSTED_ACTION_TOKEN_REQUIRED", "A valid X-Hosted-Action-Token for this session is required");
+    }
     const body = parseOrThrow(actionSchema, request.body);
     const base = process.env.FAKE_RAILS_PUBLIC_BASE_URL?.replace(/\/$/, "") ?? "";
     let redirectUrl = transaction.return_url ?? `${base}/hosted/done`;

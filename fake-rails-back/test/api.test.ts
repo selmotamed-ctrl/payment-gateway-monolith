@@ -6,8 +6,8 @@ const dbPath = `/tmp/fake-rails-api-test-${process.pid}-${Date.now()}.sqlite`;
 process.env.NODE_ENV = "test";
 process.env.FAKE_RAILS_ADMIN_USER = "tester_admin";
 process.env.FAKE_RAILS_ADMIN_PASSWORD = "Strong-Tester-Pass-2026!";
-process.env.FAKE_RAILS_JWT_SECRET = "0123456789abcdef0123456789abcdef";
-process.env.FAKE_RAILS_SEEDER_TOKEN = "0123456789abcdef0123456789abcdef";
+process.env.FAKE_RAILS_JWT_SECRET = "jwt-Rk7Qm2Xv9Lp4Zn8Bc3Wd6Th1Yg5Js0Af";
+process.env.FAKE_RAILS_SEEDER_TOKEN = "seed-Hv3Tn8Yq1Dz6Mk4Pw9Xc2Lb7Rg5Fj0Ua";
 process.env.FAKE_RAILS_DATA_DIR = "/tmp/fake-rails-api-test-data";
 process.env.FAKE_RAILS_DB_PATH = dbPath;
 process.env.FAKE_RAILS_PUBLIC_BASE_URL = "http://127.0.0.1:8444";
@@ -47,7 +47,7 @@ afterAll(() => {
 
 const request = async (
   path: string,
-  options: { method?: string; body?: unknown; token?: string; seeder?: boolean; raw?: string } = {},
+  options: { method?: string; body?: unknown; token?: string; seeder?: boolean; raw?: string; headers?: Record<string, string> } = {},
 ): Promise<Response> =>
   fetch(`${baseUrl}${path}`, {
     method: options.method ?? "GET",
@@ -55,6 +55,7 @@ const request = async (
       "content-type": "application/json",
       ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
       ...(options.seeder ? { "x-fake-rails-seeder-token": process.env.FAKE_RAILS_SEEDER_TOKEN! } : {}),
+      ...(options.headers ?? {}),
     },
     ...(options.raw !== undefined
       ? { body: options.raw }
@@ -270,9 +271,18 @@ describe("fake-rails-back API", () => {
     const created = (await verify.json()) as { transaction_id: string };
     const session = await request(`/portal-api/hosted/session/${encodeURIComponent(created.transaction_id)}`);
     expect(session.status).toBe(200);
-    const action = await request(`/portal-api/hosted/session/${encodeURIComponent(created.transaction_id)}/action`, {
+    const { action_token: actionToken } = (await session.json()) as { action_token: string };
+    expect(typeof actionToken).toBe("string");
+    const path = `/portal-api/hosted/session/${encodeURIComponent(created.transaction_id)}/action`;
+    // GAP-024: the action POST is no longer anonymous.
+    expect((await request(path, { method: "POST", body: { action: "APPROVE" } })).status).toBe(401);
+    expect(
+      (await request(path, { method: "POST", body: { action: "APPROVE" }, headers: { "x-hosted-action-token": "not-a-token" } })).status,
+    ).toBe(401);
+    const action = await request(path, {
       method: "POST",
       body: { action: "APPROVE" },
+      headers: { "x-hosted-action-token": actionToken },
     });
     expect(action.status).toBe(200);
     const body = (await action.json()) as { transaction: { status: string } };

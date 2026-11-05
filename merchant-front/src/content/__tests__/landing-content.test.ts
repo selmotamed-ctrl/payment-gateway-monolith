@@ -116,9 +116,9 @@ describe("landing hero simulator", () => {
         }
     });
 
-    test("rail modes map to the five checkout client actions", () => {
-        expect(LANDING_RAIL_MODES.map((mode) => mode.action).sort()).toEqual(
-            ["HTTP_REDIRECT", "RENDER_EMBEDDED", "SHOW_OTP_FORM", "SHOW_PUSH_OR_TRANSFER", "SHOW_QR_OR_CODE"].sort(),
+    test("rail modes map to the five payer experiences (generic ids, no internal action names)", () => {
+        expect(LANDING_RAIL_MODES.map((mode) => mode.experience).sort()).toEqual(
+            ["app-approval", "bank-redirect", "card-form", "code-entry", "qr-code"].sort(),
         );
     });
 });

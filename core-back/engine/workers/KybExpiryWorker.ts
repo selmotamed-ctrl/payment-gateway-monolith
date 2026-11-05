@@ -28,6 +28,11 @@ import { writeAudit } from "../../lib/audit/writeAudit";
  * uses the unique outbox event id, so a retried tick never spams a merchant.
  */
 export class KybExpiryWorker extends BaseWorker {
+  /** Cluster singleton: only the advisory-lock leader ticks (GAP-012). */
+  protected override get singleton(): boolean {
+    return true;
+  }
+
   protected async tick(): Promise<void> {
     const now = this.clock();
     const db = this.db as unknown as PrismaClient;

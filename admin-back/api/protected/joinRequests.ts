@@ -13,9 +13,23 @@ import { env } from "../../lib/env";
 import { parseCidrList, resolveClientIp } from "../../lib/net";
 import { resolveRequestId } from "../../lib/requestLogger";
 import { uploadSingle } from "../upload";
-import { ApiError } from "../../lib/error";
+import { assertAllowedUpload } from "../../lib/zReady";
+import { ApiError, parseOrThrow } from "../../lib/error";
 
 const router = express.Router();
+
+const KYB_ALLOWED_MIME = ["image/png", "image/jpeg", "application/pdf"];
+
+const kybUploadFieldsSchema = z
+  .object({
+    documentType: z.string().regex(/^[A-Za-z0-9_]{2,64}$/).default("OTHER"),
+    expiresOn: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .refine((value) => !Number.isNaN(Date.parse(value)), "must be a calendar date")
+      .optional(),
+  })
+  .strict();
 
 const idParamsSchema = z.object({ id: zIdentifier });
 
@@ -177,10 +191,16 @@ router.post(
     if (!file) {
       throw new ApiError(400, "UPLOAD_REQUIRED", "A KYB document file is required");
     }
+    const fields = parseOrThrow(kybUploadFieldsSchema, {
+      documentType: req.body?.documentType,
+      expiresOn: req.body?.expiresOn,
+    });
+    // Same content sniffing the statement uploads get: declared type, size and magic bytes.
+    const detectedType = assertAllowedUpload(file.buffer, file.mimetype, KYB_ALLOWED_MIME, env.MAX_UPLOAD_BYTES);
     const metadata = {
-      documentType: typeof req.body?.documentType === "string" ? req.body.documentType : "OTHER",
+      documentType: fields.documentType,
       fileName: file.originalname.slice(0, 255),
-      expiresOn: typeof req.body?.expiresOn === "string" ? req.body.expiresOn : undefined,
+      expiresOn: fields.expiresOn,
     };
     const result = await callCoreResponse({
       method: "POST",
@@ -188,7 +208,7 @@ router.post(
       rawBody: file.buffer,
       rawContentType: "application/octet-stream",
       headers: {
-        "x-upload-content-type": file.mimetype,
+        "x-upload-content-type": detectedType,
         "x-upload-sha256": createHash("sha256").update(file.buffer).digest("hex"),
         "x-upload-size": String(file.buffer.byteLength),
         "x-upload-metadata": Buffer.from(JSON.stringify(metadata), "utf8").toString("base64url"),

@@ -106,13 +106,27 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
     }
 
     const payload = parsePayload(request.rawBody, String(channel.bodyFormat ?? "JSON"));
-    const timestamp = this.readTimestamp(payload, request.headers, channel);
+    const verifyMethod = String(channel.verifyMethod ?? "NONE_PLUS_INQUIRY");
+    const keyedMethod = verifyMethod !== "IP_ONLY" && verifyMethod !== "NONE_PLUS_INQUIRY";
+    const toleranceRaw = Number(channel.timestampToleranceSec ?? 300);
+    const tolerance = Number.isFinite(toleranceRaw) ? toleranceRaw : 300;
+    const timestamp = this.readTimestamp(
+      payload,
+      request.headers,
+      channel,
+      String((channel.cryptoProfile as Record<string, unknown> | null)?.canonicalizationMode ?? "RAW_BODY"),
+    );
     if (timestamp !== null) {
-      const tolerance = Number(channel.timestampToleranceSec ?? 300);
-      const driftSeconds = Math.abs((Date.now() - timestamp) / 1000);
-      if (driftSeconds > tolerance) {
-        return { verified: false, reason: "INBOUND_TIMESTAMP_OUTSIDE_WINDOW" };
+      if (tolerance > 0) {
+        const driftSeconds = Math.abs((Date.now() - timestamp) / 1000);
+        if (driftSeconds > tolerance) {
+          return { verified: false, reason: "INBOUND_TIMESTAMP_OUTSIDE_WINDOW" };
+        }
       }
+    } else if (keyedMethod && tolerance > 0) {
+      // A replay window is configured but no SIGNED timestamp is available:
+      // fail closed. (Set timestampToleranceSec = 0 to opt a channel out.)
+      return { verified: false, reason: "INBOUND_TIMESTAMP_MISSING" };
     }
 
     const correlation = readSelector(payload, channel.correlationSelector as string | null);
@@ -133,7 +147,6 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
       return { verified: false, reason: "INBOUND_ATTEMPT_UNKNOWN" };
     }
 
-    const verifyMethod = String(channel.verifyMethod ?? "NONE_PLUS_INQUIRY");
     if (verifyMethod === "IP_ONLY") {
       return {
         verified: true,
@@ -192,7 +205,10 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
       verified: true,
       attemptId: attempt.id,
       evidence,
-      mustInquire: Boolean(channel.mustInquire),
+      // Safer default: when the channel does not say, ask the gateway.
+      mustInquire: channel.mustInquire === undefined || channel.mustInquire === null
+        ? true
+        : Boolean(channel.mustInquire),
     };
   }
 
@@ -211,6 +227,12 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
     const outputEncoding = String(profile?.outputEncoding ?? "HEX_LOWER") as HashOutputEncoding;
     const canonicalization = String(profile?.canonicalizationMode ?? "RAW_BODY");
 
+    // An unkeyed digest proves nothing: anyone can compute it. Only keyed
+    // (HMAC) or asymmetric (RSA) methods may verify a callback.
+    if (algorithm !== "HMAC_SHA256" && algorithm !== "HMAC_SHA512" && algorithm !== "RSA_SHA256") {
+      return false;
+    }
+
     try {
       if (algorithm === "RSA_SHA256") {
         const canonical = this.canonicalString(canonicalization, payload, rawBody, timestamp);
@@ -224,9 +246,7 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
       const canonical = this.canonicalString(canonicalization, payload, rawBody, timestamp);
       const expected = algorithm === "HMAC_SHA512"
         ? this.crypto.hmacSha512(secret.value, canonical, keyEncoding, outputEncoding)
-        : algorithm === "SHA256"
-          ? this.crypto.sha256(canonical, outputEncoding)
-          : this.crypto.hmacSha256(secret.value, canonical, keyEncoding, outputEncoding);
+        : this.crypto.hmacSha256(secret.value, canonical, keyEncoding, outputEncoding);
       return this.crypto.constantTimeEqual(expected, signature);
     } catch {
       return false;
@@ -315,9 +335,15 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
     payload: unknown,
     headers: Record<string, string>,
     channel: Record<string, unknown>,
+    canonicalization: string,
   ): number | null {
+    // Only a SIGNED timestamp may drive freshness. A body field is covered by
+    // the signature; a header is covered only when the canonical string embeds
+    // it (TIMESTAMP_DOT_RAW_BODY). Any other header is attacker-controlled.
     const fromPayload = readSelector(payload, channel.timestampSelector as string | null);
-    const headerValue = headers["x-timestamp"] ?? headers["x-gateway-timestamp"];
+    const headerValue = canonicalization === "TIMESTAMP_DOT_RAW_BODY"
+      ? headers["x-timestamp"] ?? headers["x-gateway-timestamp"]
+      : undefined;
     const raw = fromPayload ?? headerValue ?? null;
     if (raw === null) {
       return null;
@@ -357,7 +383,8 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
     const fields = asRecord(payload);
     const rawStatus = fields.status ?? fields.result ?? fields.ActionCode ?? fields.action;
     if (rawStatus === undefined || rawStatus === null) {
-      return "SUCCESS";
+      // No status in the payload is NOT a success signal.
+      return "UNKNOWN";
     }
     const key = String(rawStatus);
     const mapped = eventMap[key] ?? eventMap[key.toUpperCase()];

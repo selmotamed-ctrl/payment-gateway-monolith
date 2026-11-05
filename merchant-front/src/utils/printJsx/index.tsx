@@ -1,3 +1,4 @@
+import { devLog } from "@/utils/devLog";
 import { dc, type DCExpose } from "kt-dc";
 import { render } from "vue";
 import { useTheme } from "vuetify";
@@ -24,14 +25,14 @@ export const PrintProvider = dc(
                 el.value = target;
             },
             getPrintTargetRef() {
-                console.log("getting reference of mounted print target on print provider");
+                devLog("getting reference of mounted print target on print provider");
                 return new Promise<Element | globalThis.ComponentPublicInstance>((resolve, reject) => {
                     getPrintTargetPromise = {
                         resolve,
                         reject,
                         resolved: false,
                         timer: setTimeout(() => {
-                            console.log("Timeout Failed to get ref", "providing old ref if available");
+                            devLog("Timeout Failed to get ref", "providing old ref if available");
                             if (getPrintTargetPromise) {
                                 if (oldRef.value) {
                                     resolve(oldRef.value);
@@ -56,7 +57,7 @@ export const PrintProvider = dc(
                         }}
                         ref={(r) => {
                             if (!!r && getPrintTargetPromise && !getPrintTargetPromise.resolved) {
-                                console.log("Print Target Wrapper provided ref", r, getPrintTargetPromise);
+                                devLog("Print Target Wrapper provided ref", r, getPrintTargetPromise);
                                 getPrintTargetPromise.resolve(r);
                                 clearTimeout(getPrintTargetPromise.timer);
                                 getPrintTargetPromise = null;
@@ -85,7 +86,7 @@ export const PrintProvider = dc(
 async function printElement(element: Element) {
     // Clone node to avoid moving original DOM
     const cloned = element.cloneNode(true) as Element;
-    console.log("Cloned Element for print", cloned);
+    devLog("Cloned Element for print", cloned);
     // Create hidden iframe
     const iframe = document.createElement("iframe");
     iframe.style.position = "fixed";
@@ -172,15 +173,15 @@ export const printTsx = async (element: JSX.Element) => {
         throw new Error("There is no print provider mounted");
     }
 
-    console.log("Mounting print target", element);
+    devLog("Mounting print target", element);
     printProvider.value.setPrintTarget(element);
-    console.log("Retrieving print target mount ref...");
+    devLog("Retrieving print target mount ref...");
     const reference = await printProvider.value.getPrintTargetRef();
-    console.log("Retrieved print target mount ref", reference);
+    devLog("Retrieved print target mount ref", reference);
 
     const dom = getDomFromRefOrInstance(reference as any);
     if (!dom) throw new Error("Failed to resolve DOM element for printing");
-    console.log("Extracted element from reference", dom);
+    devLog("Extracted element from reference", dom);
     // Print it
     await printElement(dom.firstElementChild || dom);
 

@@ -119,6 +119,7 @@ const CORE_CONTRACTS: Record<string, Record<string, CoreField>> = {
     walletId: { type: "string", required: true },
     amount: { type: "string", required: true, pattern: /^\d{1,14}(\.\d{1,4})?$/ },
     destinationBank: { type: "object", required: true },
+    idempotencyKey: { type: "string", required: false },
   },
   "POST /pos/terminals": {
     applicationId: { type: "string", required: true },
@@ -369,6 +370,7 @@ describe("canonical core contract of the merchant channel", () => {
       walletId: "wal_1",
       amount: "250.0000",
       destinationBank: { bankAccountId: "bank_1" },
+      idempotencyKey: "idem-00000001",
     });
     assertCorePayload("POST /cashouts", mapped);
   });

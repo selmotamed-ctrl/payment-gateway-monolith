@@ -1,3 +1,4 @@
+import { GOOGLE_REDIRECT_PATHS, isAllowedIdentityRedirect, parseIdentityHosts } from "@/utils/security/identityRedirect";
 import { dc } from "kt-dc";
 import { VAlert, VBtn, VTextField } from "vuetify/components";
 import { useLocale } from "vuetify";
@@ -5,6 +6,7 @@ import { ref } from "vue";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { setUserState, type UserState } from "@/state/user";
+import { tokenFromLoginPayload } from "@/utils/security/sessionToken";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { setLocale } from "@/plugins/localization";
 import router from "@/router";
@@ -24,7 +26,7 @@ const LoginPage = dc(() => {
     const showPassword = ref(false);
 
     const buildSession = (payload: any): UserState => ({
-        token: payload?.token,
+        token: tokenFromLoginPayload(payload) as string,
         refreshToken: payload?.refreshToken ?? null,
         userInfo: {
             id: String(payload?.userInfo?.id ?? payload?.user?.id ?? ""),
@@ -47,9 +49,12 @@ const LoginPage = dc(() => {
         error.value = null;
         loading.value = true;
         try {
-            const response = await api.post(urlsMap.authGoogle, { redirectUri: location.href });
+            const response = await api.post(urlsMap.authGoogle, { redirectUri: GOOGLE_REDIRECT_PATHS.login });
             const payload = response.data?.data ?? response.data ?? {};
             if (payload?.redirectUrl) {
+                if (!isAllowedIdentityRedirect(payload.redirectUrl, parseIdentityHosts(import.meta.env.VITE_IDENTITY_HOSTS))) {
+                    throw new Error("untrusted redirect");
+                }
                 window.location.assign(payload.redirectUrl);
                 return;
             }

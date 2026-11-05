@@ -6,7 +6,7 @@ Generated from: `fake-rails.chaos`, `fake-rails.integration`.
 
 ## Fake Rails Chaos Engine and Tester Portal
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -345,9 +345,13 @@ curl -X POST http://127.0.0.1:4104/portal-api/webhooks/$TX_ID/fire \
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
 
+## Security hardening (2026-11-05)
+
+fake-rails-front: the postMessage target is `VITE_CHECKOUT_ORIGIN`, otherwise the embedding parent's origin, never `*`; `redirect_url` is validated as http(s) without credentials. The live feed opens its EventSource with a 30-second single-use ticket obtained from `POST /portal-api/transactions/stream-ticket` (`streamUrl()` is now async), never the session token, and the hosted redirect page and widget frame post approve/decline with the session-bound `X-Hosted-Action-Token` (`postHostedAction`) (GAP-024, resolved 2026-11-05). The tester token itself remains in localStorage. New env: `VITE_CHECKOUT_ORIGIN`.
+
 ## Core Integration and Deployment
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -654,3 +658,7 @@ bun run deploy.ts --only=fake-rails
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+Core's outbound URL compile now fails closed on an empty `allowed_hosts` (`HOST_ALLOWLIST_EMPTY`) unless `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST=true`, and blocks private/loopback/link-local literals unless `allowPrivateHosts`; the Fake Rails exception (three-part allowlist) is unchanged. Seed blueprints for generic `input.code`, `mpgs` and `mypay` set `timestampToleranceSec = 0` because they carry no timestamp field. In production deploys `FAKE_RAILS_ENABLED`, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION=true` and the synthetic seeder are refused.

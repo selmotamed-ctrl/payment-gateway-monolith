@@ -268,6 +268,7 @@ describe("merchant write routes are translated into the canonical core payload",
       walletId: "wal_1",
       amount: "250.0000",
       destinationBank: { bankAccountId: "bank_1" },
+      idempotencyKey: "idem-00000001",
     });
   });
 

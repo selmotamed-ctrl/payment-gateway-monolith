@@ -3,7 +3,7 @@ id: core.backup
 title: Backup Control
 status: partial
 confidence: high
-last_verified: 2026-11-04
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/api/internal/backups.ts
@@ -190,7 +190,7 @@ WAL-G mode:
 - base backup: `wal-g backup-push <data-dir>`;
 - delta: `wal-g backup-push --delta <data-dir>`;
 - verify: `wal-g st ls <prefix>`;
-- mirror: `rclone sync` for S3/rclone destinations, otherwise `rsync -a --delete` to the secondary target;
+- mirror: `rclone copy` for S3/rclone destinations, otherwise `rsync -a` to the secondary target; neither deletes extraneous files unless `BACKUP_SECONDARY_MIRROR_DELETE=true` (then `rclone sync` / `rsync --delete`);
 - list: `wal-g backup-list --json`;
 - prune: `wal-g delete retain FULL <BACKUP_RETENTION_FULL_COUNT> --confirm`;
 - recover: `wal-g backup-fetch <dir> LATEST` plus a generated `recovery_target_time` and `recovery_target_action = 'promote'` config;
@@ -325,7 +325,7 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 - For a policy change, submit without an approval id, then have a different `security:write` user submit with the returned id.
 - Watch `archiveLagSeconds` against `BACKUP_ALERT_LAG_SECONDS`. A non-zero lag with a healthy bucket usually means archive_command, credentials or the archive process is failing.
 - Inspect `backup_catalog_runs` and `backup_restore_drills` for the local copy and the daemon catalog for the in-process view. A failed drill's three checks identify double-entry, parity or audit-chain failure.
-- After a real restore, verify schema version 9, the ledger invariant, shard parity and audit chain.
+- After a real restore, verify schema version 10, the ledger invariant, shard parity and audit chain.
 - Do not rely on policy `fullRetentionDays` for WAL-G pruning; WAL-G uses `BACKUP_RETENTION_FULL_COUNT` and Barman uses its server-side policy.
 
 ## 7. Status and deviations
@@ -451,3 +451,9 @@ Core backup-admin route tests that touch PostgreSQL skip when the database is un
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical extraction. Records the core API, daemon API, WAL-G/Barman engines, UTC scheduler, JSON catalog, policy maker-checker, restore drill, catalog sync and target-aware behavior, plus the certificate ownership, audit role, Barman slot, WAL lag, retention, secondary mirroring, Redis schedule, UTC cron and Barman health gaps. See `project-design/TRACKER.md`.
+
+## 11. Security hardening (2026-11-05)
+
+- Off-site mirroring no longer deletes by default; set `BACKUP_SECONDARY_MIRROR_DELETE=true` to opt in.
+- Admin edge backup trigger/drill calls require an `Idempotency-Key` header that is relayed to core; policy cron and retention floors are validated at the edge (see the admin edge part).
+- The backup daemon authorizes its mTLS clients by certificate CN/SAN; see the backup daemon part.

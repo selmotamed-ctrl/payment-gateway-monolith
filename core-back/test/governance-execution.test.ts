@@ -572,7 +572,8 @@ describe("governance execution", () => {
 
     expect(result.status).toBe("EXECUTED");
     const adjustment = rowsOf("adjustment")[0];
-    const entry = entryOf("ADJUSTMENT", String(adjustment?.id));
+    // The payout journal is keyed by the cash-out id (stable idempotency key), not by a fresh adjustment id.
+    const entry = entryOf("ADJUSTMENT", "cashout-1");
     expect(entry).toBeDefined();
     const byAccount = new Map(line(String(entry?.id)).map((row) => [String(row.glAccountId), row]));
     expect(String(byAccount.get("acc-wallet")?.direction)).toBe("DEBIT");

@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
+import rateLimiter from "express-rate-limit";
+import { lazyLimiter, rateLimitKey } from "../lib/clientIp";
 import { env } from "../lib/env";
+import { requireBearer } from "./forward";
 import { ApiError } from "../lib/error";
 import { callCore } from "../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../lib/net";
@@ -17,6 +20,43 @@ export const getUploader = (): multer.Multer => {
   });
   return uploader;
 };
+
+/** multipart framing overhead tolerated on top of the file size limit */
+const MULTIPART_OVERHEAD_BYTES = 256 * 1024;
+
+const uploadLimiter = lazyLimiter(() =>
+  rateLimiter({
+    windowMs: env.API_RATE_LIMIT_WINDOW_MS,
+    max: () => env.UPLOAD_RATE_LIMIT_MAX,
+    keyGenerator: (req) => rateLimitKey(req, "upload"),
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).json({ code: "RATE_LIMITED", message: "Too many uploads, please retry later" });
+    },
+  }),
+);
+
+/**
+ * Runs BEFORE the multipart parser: strict per ip budget, mandatory bearer, and a declared
+ * length above the upload limit is refused without buffering a single byte.
+ */
+export const uploadGuards: Array<(req: Request, res: Response, next: NextFunction) => void> = [
+  uploadLimiter,
+  (req, _res, next) => {
+    requireBearer(req);
+    const declared = Number(req.headers["content-length"]);
+    if (!Number.isFinite(declared) || declared <= 0) {
+      next(new ApiError(411, "LENGTH_REQUIRED", "A Content-Length header is required for uploads"));
+      return;
+    }
+    if (declared > env.MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES) {
+      next(new ApiError(413, "UPLOAD_TOO_LARGE", "The uploaded document exceeds the size limit"));
+      return;
+    }
+    next();
+  },
+];
 
 const handleUploadError = (error: unknown, next: NextFunction): void => {
   const code = (error as { code?: string })?.code;

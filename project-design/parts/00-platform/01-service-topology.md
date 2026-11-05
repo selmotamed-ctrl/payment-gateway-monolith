@@ -3,7 +3,7 @@ id: platform.topology
 title: Service Topology
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/index.ts
@@ -125,14 +125,14 @@ Inside the admin router, `/health` is public over the mTLS channel; authenticati
 
 All three edge backends use the same pattern:
 
-- Express 5 app, `x-powered-by` disabled, `trust proxy` false, CORS enabled with `origin: true, credentials: false`.
+- Express 5 app, `x-powered-by` disabled, `trust proxy` false, CORS enabled with `origin: true, credentials: false` (core is private behind mTLS; the edges no longer emit CORS headers unless `CORS_ALLOWED_ORIGINS` is set).
 - A request logger and a `/health` endpoint returning service name and uptime.
 - Body parsers with a per-edge JSON limit: admin `4 MiB`, merchant `2 MiB`, checkout `1 MiB`.
 - A request validator at the edge and a second validator inside core (the Double-Check Rule).
 - A mTLS HTTPS agent built from `MTLS_CLIENT_CERT_PATH`, `MTLS_CLIENT_KEY_PATH` and `MTLS_CA_CERT_PATH`, with `minVersion` and `maxVersion` fixed to TLS 1.3 and `rejectUnauthorized: true`.
 - `CORE_BACK_URLS` parsed into an ordered pool; `CORE_BACK_URL` remains the first-node compatibility value.
 - Least-in-flight selection with a round-robin tie-break, a 5-second failure cooldown, passive health marking on transport errors and `502`/`503`, and retries for idempotent methods (or when `retryIfUnavailable` is set).
-- Forwarded headers: `x-request-id`, `x-real-client-ip`, `x-client-user-agent`, `x-edge-service`, and `authorization` when present. `x-pg-min-lsn` is propagated when a route declares a consistency LSN.
+- Forwarded headers: `x-request-id`, `x-real-client-ip` (always overwritten by the edge with the resolved client IP), `x-client-user-agent`, `x-edge-service`, and `authorization` when present. Edge-owned headers are applied last and header names/values are validated. `x-pg-min-lsn` is propagated when a route declares a consistency LSN.
 
 `admin-back` adds `enforceLanAccess`, which resolves the client IP through trusted proxy CIDRs and checks `ADMIN_LAN_CIDRS`. `merchant-back` adds rate limits for auth, portal API and external API. `checkout-back` mounts the raw inbound router before the JSON parser so webhook bytes and signature headers survive.
 
@@ -173,7 +173,7 @@ Core can reach a Fake Rails host only through a three-part allowlist: `ALLOW_FAK
 - `DATABASE_URL`, `DATABASE_REPLICA_URLS`, `AUDIT_DATABASE_URL`, `LOG_DATABASE_URL`, `REDIS_URL` and `KMS_MASTER_KEY` are core-only.
 - Edge env schemas do not contain those keys; edge packages do not depend on `pg` or Prisma.
 - Edge services can only mutate state through core's internal API.
-- The frontend packages list `@prisma/client` as a dependency, but no frontend source imports Prisma and no frontend receives a database URL; it is not a data-plane credential.
+- `admin-front` and `merchant-front` still list `@prisma/client` as a dependency (`checkout-front` no longer does, GAP-029), but no frontend source imports Prisma and no frontend receives a database URL; it is not a data-plane credential.
 
 ### 4.3 Request consistency
 
@@ -358,3 +358,7 @@ These are unit/integration tests. No live multi-host deployment was run for this
 ## 10. Change history
 
 - 2026-11-03: Initial canonical topology part written against `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+Edge to core: the shared upstream client only marks a node unhealthy on transport/TLS errors and 502/503/504, caps buffered responses and total deadline, uses a separate SSE agent pool, and replays PUT/DELETE only with an idempotency key. Details are in the shared upstream client part. Edge TRUSTED_PROXY_CIDRS now defaults to loopback only.

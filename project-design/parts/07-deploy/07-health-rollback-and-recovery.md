@@ -3,8 +3,8 @@ id: deploy.health
 title: Health Verification, Rollback and Recovery
 status: partial
 confidence: high
-last_verified: 2026-11-04
-verified_against: working-tree
+last_verified: 2026-11-05
+verified_against: 5a24f6f+working-tree
 code:
   - deploy/lib/healthVerifier.ts
   - deploy/deploy.ts
@@ -23,6 +23,7 @@ tests:
   - deploy/test/pipeline.test.ts
   - deploy/test/rollingDeploy.test.ts
   - deploy/backup-daemon/test/restoreDrillRunner.test.ts
+  - deploy/test/security-regressions.test.ts
 gaps:
   - A single-node service restart is not zero-downtime; PM2 delete + start creates a gap and the deploy does not drain connections.
   - There is no automatic rollback after a failed batch or failed end-to-end verification.
@@ -273,7 +274,7 @@ Use the backup daemon's `/v1/drills/run` or the admin backup control to verify a
 
 ### Security notes
 
-- Keep `deploy.env` at 0600 and `deploy/.certs` private; the CA key never leaves the workstation. Secrets are streamed over SSH stdin, but the pre-migration `PGPASSWORD` is embedded in the verbose command and may appear in logs.
+- Keep `deploy.env` at 0600 and `deploy/.certs` private; the CA key never leaves the workstation. Secrets are streamed over SSH stdin, but (superseded for the pre-migration dump, which now uses a PGPASSFILE) the following was recorded earlier: the pre-migration `PGPASSWORD` was embedded in the verbose command and may appear in logs.
 - The core port is private and mTLS-only; edge hosts never receive `DATABASE_URL` or `KMS_MASTER_KEY`.
 - Protect the edge host and make the backup key readable by `pgbackup`.
 - The deploy's `--skip-verify` is not a security control and should not be used for production acceptance.
@@ -354,3 +355,7 @@ Not covered: a real edge-to-core handshake, Nginx reload/vhost probe, PostgreSQL
 - `probeBackupDaemon()` now branches on `BACKUP_ALLOW_INSECURE_HTTP`. The previous unconditional HTTPS probe failed with `wrong version number` against a daemon explicitly configured for plain HTTP.
 - The probe label is `backup-daemon /health (mTLS)` or `backup-daemon /health (HTTP)` so the verification report shows which mode was tested.
 - The mTLS path is unchanged and remains the default.
+
+## Security hardening (2026-11-05)
+
+The pre-migration dump is taken before migrating in both modes when the database is non-empty or unknown, uses `PGPASSFILE`, and only the newest `KEEP_RELEASES` dumps are kept (see the pipeline part). Migrations remain forward-only. Real WAL-G/bun/barman SHA256 values must be supplied before recovery tooling can be installed (GAP-023).

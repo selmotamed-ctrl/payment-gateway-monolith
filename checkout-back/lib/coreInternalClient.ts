@@ -2,6 +2,7 @@ import fs from "node:fs";
 import https from "node:https";
 import type { IncomingHttpHeaders } from "node:http";
 import type { ClientRequest } from "node:http";
+import type { TLSSocket } from "node:tls";
 import { Readable } from "node:stream";
 import type { Request, Response } from "express";
 import { coreBackUrls, env } from "./env";
@@ -11,8 +12,13 @@ import { isValidIp } from "./net";
 export const CORE_SERVICE_NAME = "checkout-back";
 export const CORE_CHANNEL_PREFIX = "/internal/checkout";
 export const CORE_FAILURE_COOLDOWN_MS = 5000;
+/** Consecutive node failures required before a node leaves rotation (GAP-021). */
+export const CORE_FAILURE_THRESHOLD = 3;
 
 const DEFAULT_MAX_ATTEMPTS = 2;
+const MAX_STREAM_SOCKETS = 128;
+/** Methods whose replay after the request reached the wire cannot duplicate an effect. */
+const REPLAY_SAFE_METHODS = new Set<CoreHttpMethod>(["GET", "HEAD", "OPTIONS"]);
 const IDEMPOTENT_METHODS = new Set<CoreHttpMethod>([
   "GET",
   "HEAD",
@@ -75,6 +81,8 @@ export interface CoreStream {
 export interface CoreNodeState {
   url: string;
   agent: https.Agent;
+  /** Dedicated pool for long-lived SSE streams so they cannot starve request/response traffic. */
+  streamAgent: https.Agent;
   healthy: boolean;
   inFlight: number;
   failures: number;
@@ -117,6 +125,49 @@ const TLS_ERROR_CODES = new Set([
   "ERR_SSL_PACKET_LENGTH_TOO_LONG",
 ]);
 
+const errorCodeOf = (error: unknown): string =>
+  typeof error === "object" && error !== null ? String((error as { code?: unknown }).code ?? "") : "";
+
+const NODE_FAILURE_CODES = new Set([
+  "ETIMEDOUT",
+  "ESOCKETTIMEDOUT",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EPIPE",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  ...TLS_ERROR_CODES,
+]);
+
+/**
+ * Only connect/transport failures may take a core node out of rotation. Local pre-flight
+ * exceptions (invalid header characters, oversized responses) and client aborts say nothing
+ * about the health of the node and must never trip the circuit breaker.
+ */
+export const isNodeFailure = (error: unknown): boolean => NODE_FAILURE_CODES.has(errorCodeOf(error));
+
+const isClientAbort = (error: unknown): boolean => errorCodeOf(error) === "ABORT_ERR";
+
+const isLocalRequestError = (error: unknown): boolean =>
+  (error as { localRequestError?: boolean } | null)?.localRequestError === true;
+
+const HEADER_NAME_PATTERN = /^[a-z0-9!#$%&'*+.^_`|~-]+$/;
+const HEADER_VALUE_PATTERN = /^[\t\x20-\x7e]*$/;
+
+/** Rejects header names/values that are not printable ASCII before anything is dispatched. */
+export const assertHeaderSafe = (headers: Record<string, string>): void => {
+  for (const [name, value] of Object.entries(headers)) {
+    if (!HEADER_NAME_PATTERN.test(name) || typeof value !== "string" || !HEADER_VALUE_PATTERN.test(value)) {
+      throw new ApiError(400, "CORE_HEADER_INVALID", "A forwarded header contains invalid characters");
+    }
+  }
+};
+
+const sanitizeUserAgent = (value: string | undefined): string =>
+  (value ?? "").replace(/[^\x20-\x7e]/g, "").slice(0, 512);
+
 const parseCoreEnvelope = (
   payload: unknown,
 ): { code?: string; message?: string; details?: unknown; reference?: string } | null => {
@@ -158,6 +209,15 @@ export const mapCoreTransportError = (error: unknown): ApiError => {
   if (isApiErrorLike(error)) return error;
   const code =
     typeof error === "object" && error !== null ? String((error as { code?: unknown }).code ?? "") : "";
+  if (code === "ABORT_ERR") {
+    return new ApiError(499, "CLIENT_CLOSED_REQUEST", "The request was aborted before core answered");
+  }
+  if (code === "CORE_RESPONSE_TOO_LARGE") {
+    return new ApiError(502, "CORE_RESPONSE_TOO_LARGE", "Core response exceeded the edge size limit");
+  }
+  if (code === "ERR_INVALID_CHAR" || code === "ERR_HTTP_INVALID_HEADER_VALUE" || code === "ERR_INVALID_HTTP_TOKEN") {
+    return new ApiError(400, "CORE_HEADER_INVALID", "A forwarded header contains invalid characters");
+  }
   if (code === "ETIMEDOUT" || code === "ESOCKETTIMEDOUT") {
     return new ApiError(504, "CORE_TIMEOUT", "Core service did not respond before the deadline");
   }
@@ -244,7 +304,7 @@ const readMaterial = (path: string, label: string): Buffer => {
   }
 };
 
-const createCoreAgent = (): https.Agent =>
+const createCoreAgent = (maxSockets = 64): https.Agent =>
   new https.Agent({
     cert: readMaterial(env.MTLS_CLIENT_CERT_PATH, "client certificate"),
     key: readMaterial(env.MTLS_CLIENT_KEY_PATH, "client private key"),
@@ -254,7 +314,7 @@ const createCoreAgent = (): https.Agent =>
     rejectUnauthorized: true,
     keepAlive: true,
     keepAliveMsecs: 30000,
-    maxSockets: 64,
+    maxSockets,
     timeout: env.CORE_REQUEST_TIMEOUT_MS,
   });
 
@@ -275,7 +335,10 @@ export const setCoreClockForTests = setCoreClock;
 export const resetCoreClockForTests = resetCoreClock;
 
 const destroyNodes = (): void => {
-  for (const node of nodes) node.agent.destroy();
+  for (const node of nodes) {
+    node.agent.destroy();
+    node.streamAgent.destroy();
+  }
   nodes = [];
   poolSignature = "";
   roundRobinCursor = 0;
@@ -296,6 +359,7 @@ const ensureNodes = (): CoreNodeState[] => {
     nodes = configured.map((url) => ({
       url,
       agent: createCoreAgent(),
+      streamAgent: createCoreAgent(MAX_STREAM_SOCKETS),
       healthy: true,
       inFlight: 0,
       failures: 0,
@@ -337,9 +401,10 @@ const hasSelectableNode = (excluded: Set<string>): boolean => eligiblePool(exclu
 
 const markNodeFailure = (node: CoreNodeState): void => {
   const now = clock();
-  node.healthy = false;
   node.failures += 1;
   node.lastFailureAt = now;
+  if (node.failures < CORE_FAILURE_THRESHOLD) return;
+  node.healthy = false;
   node.cooldownUntil = now + CORE_FAILURE_COOLDOWN_MS;
 };
 
@@ -356,6 +421,23 @@ const normalizeMaxAttempts = (value: number | undefined): number => {
   if (value === undefined || !Number.isFinite(value)) return DEFAULT_MAX_ATTEMPTS;
   return Math.max(1, Math.floor(value));
 };
+
+const isNodeFailureStatus = (status: number): boolean => status === 502 || status === 503 || status === 504;
+
+/**
+ * A request that already reached the wire is only replayed when that cannot duplicate an
+ * effect: read-only methods, an explicit caller opt-in, or a request carrying an idempotency key.
+ * Connect-phase failures (nothing was sent) are always safe to retry.
+ */
+const mayReplayAfterSend = (
+  method: CoreHttpMethod,
+  headers: Record<string, string>,
+  options: { retryIdempotent?: boolean; retryIfUnavailable?: boolean },
+): boolean =>
+  REPLAY_SAFE_METHODS.has(method) ||
+  options.retryIdempotent === true ||
+  options.retryIfUnavailable === true ||
+  typeof headers["idempotency-key"] === "string";
 
 const retryAttemptsFor = (
   method: CoreHttpMethod,
@@ -375,6 +457,7 @@ const buildRequestHeaders = (options: CoreRequestOptions): Record<string, string
   }
   const lsn = options.minLsn ?? options.consistencyLsn;
   if (lsn !== undefined && lsn.trim().length > 0) headers["x-pg-min-lsn"] = lsn;
+  assertHeaderSafe(headers);
   return headers;
 };
 
@@ -382,21 +465,25 @@ export const consistencyHeader = (lsn?: string): Record<string, string> =>
   lsn !== undefined && lsn.trim().length > 0 ? { "x-pg-min-lsn": lsn } : {};
 
 export const buildCoreHeaders = (options: CoreCallOptions): Record<string, string> => {
-  const headers: Record<string, string> = {
-    "x-request-id": options.requestId,
-    "x-real-client-ip": options.clientIp,
-    "x-client-user-agent": options.userAgent ?? "",
-    "x-edge-service": CORE_SERVICE_NAME,
-    accept: "application/json",
-  };
-  if (options.authorization) headers.authorization = options.authorization;
-  if (options.rawContentType) headers["content-type"] = options.rawContentType;
-  else if (options.body !== undefined) headers["content-type"] = "application/json";
+  // Caller supplied headers go in first; every edge-owned header is applied afterwards so a
+  // caller can never override the service identity, the resolved client ip or the credential.
+  const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(options.headers ?? {})) {
     headers[key.toLowerCase()] = value;
   }
+  headers.accept = "application/json";
+  headers["x-request-id"] = options.requestId;
+  headers["x-real-client-ip"] = options.clientIp;
+  headers["x-client-user-agent"] = sanitizeUserAgent(options.userAgent);
+  headers["x-edge-service"] = CORE_SERVICE_NAME;
+  if (options.authorization) headers.authorization = options.authorization;
+  else delete headers.authorization;
+  if (options.rawContentType) headers["content-type"] = options.rawContentType;
+  else if (options.body !== undefined) headers["content-type"] = "application/json";
+  else delete headers["content-type"];
   const lsn = options.minLsn ?? options.consistencyLsn;
   if (lsn !== undefined && lsn.trim().length > 0) headers["x-pg-min-lsn"] = lsn;
+  assertHeaderSafe(headers);
   return headers;
 };
 
@@ -410,19 +497,39 @@ const createNodeRequest = (
   node: CoreNodeState,
   options: CoreRequestOptions,
   headers: Record<string, string>,
+  agent: https.Agent = node.agent,
 ): ClientRequest => {
-  const url = resolveCoreUrlAgainst(node.url, options.path, options.query);
-  return https.request({
-    agent: node.agent,
-    method: options.method,
-    protocol: "https:",
-    hostname: url.hostname,
-    port: Number(url.port || 443),
-    path: `${url.pathname}${url.search}`,
-    headers,
-    ...(isValidIp(url.hostname) ? {} : { servername: url.hostname }),
-    rejectUnauthorized: true,
-    timeout: options.timeoutMs ?? env.CORE_REQUEST_TIMEOUT_MS,
+  try {
+    const url = resolveCoreUrlAgainst(node.url, options.path, options.query);
+    return https.request({
+      agent,
+      method: options.method,
+      protocol: "https:",
+      hostname: url.hostname,
+      port: Number(url.port || 443),
+      path: `${url.pathname}${url.search}`,
+      headers,
+      ...(isValidIp(url.hostname) ? {} : { servername: url.hostname }),
+      rejectUnauthorized: true,
+      timeout: options.timeoutMs ?? env.CORE_REQUEST_TIMEOUT_MS,
+    });
+  } catch (error) {
+    // Raised before anything touched the network: never a statement about node health.
+    if (typeof error === "object" && error !== null) {
+      (error as { localRequestError?: boolean }).localRequestError = true;
+    }
+    throw error;
+  }
+};
+
+const markWireStarted = (clientRequest: ClientRequest, onStarted: () => void): void => {
+  clientRequest.on("socket", (socket) => {
+    const tls = socket as TLSSocket;
+    if (tls.connecting || (tls as unknown as { _secureEstablished?: boolean })._secureEstablished === false) {
+      tls.once("secureConnect", onStarted);
+    } else {
+      onStarted();
+    }
   });
 };
 
@@ -438,23 +545,35 @@ const performRequest = (
 ): Promise<CoreResponse> =>
   new Promise<CoreResponse>((resolve, reject) => {
     let settled = false;
-    let clientRequest: ClientRequest;
+    let wireStarted = false;
+    let received = 0;
+    let clientRequest: ClientRequest | undefined;
+    const maxBytes = env.CORE_MAX_RESPONSE_BYTES;
+    const deadlineMs = Math.max(env.CORE_TOTAL_DEADLINE_MS, options.timeoutMs ?? 0);
+    const deadline = setTimeout(() => clientRequest?.destroy(timeoutError()), deadlineMs);
     const cleanup = () => {
+      clearTimeout(deadline);
       if (options.signal) options.signal.removeEventListener("abort", onAbort);
     };
     const fail = (error: unknown) => {
       if (settled) return;
       settled = true;
       cleanup();
+      if (typeof error === "object" && error !== null && !wireStarted) {
+        (error as { connectPhase?: boolean }).connectPhase = true;
+      }
       reject(error);
     };
-    const onAbort = () => clientRequest.destroy(abortError());
+    const onAbort = () => clientRequest?.destroy(abortError());
     try {
       clientRequest = createNodeRequest(node, options, headers);
     } catch (error) {
       fail(error);
       return;
     }
+    markWireStarted(clientRequest, () => {
+      wireStarted = true;
+    });
     if (options.signal) {
       if (options.signal.aborted) {
         clientRequest.destroy(abortError());
@@ -465,9 +584,18 @@ const performRequest = (
     clientRequest.on("timeout", () => clientRequest.destroy(timeoutError()));
     clientRequest.on("error", fail);
     clientRequest.on("response", (response) => {
+      wireStarted = true;
       const chunks: Buffer[] = [];
       response.on("data", (chunk: Buffer | string) => {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        const piece = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        received += piece.length;
+        if (received > maxBytes) {
+          // Settle first so a trailing `end` can never resolve with a truncated body.
+          fail(Object.assign(new Error("core response too large"), { code: "CORE_RESPONSE_TOO_LARGE" }));
+          clientRequest?.destroy();
+          return;
+        }
+        chunks.push(piece);
       });
       response.on("end", () => {
         if (settled) return;
@@ -500,6 +628,7 @@ export const request = async (options: CoreRequestOptions): Promise<CoreResponse
     options.maxAttempts,
   );
   const headers = buildRequestHeaders(options);
+  const replayAfterSend = mayReplayAfterSend(options.method, headers, options);
   const attempted = new Set<string>();
   let lastError: unknown;
   let lastResponse: CoreResponse | undefined;
@@ -510,31 +639,34 @@ export const request = async (options: CoreRequestOptions): Promise<CoreResponse
     node.inFlight += 1;
     try {
       const response = await performRequest(node, options, headers);
-      if (response.statusCode === 502 || response.statusCode === 503) {
+      if (isNodeFailureStatus(response.statusCode)) {
         markNodeFailure(node);
         lastResponse = response;
         lastError = undefined;
+        if (!replayAfterSend) break;
         continue;
       }
       markNodeHealthy(node);
       return response;
     } catch (error) {
-      markNodeFailure(node);
       lastError = error;
       lastResponse = undefined;
+      if (isLocalRequestError(error) || isClientAbort(error) || !isNodeFailure(error)) break;
+      markNodeFailure(node);
+      if (!replayAfterSend && (error as { connectPhase?: boolean }).connectPhase !== true) break;
     } finally {
       node.inFlight -= 1;
     }
   }
   if (lastResponse) return lastResponse;
   if (lastError !== undefined) {
-    if (!hasSelectableNode(new Set())) throw coreUnavailable();
+    if (isNodeFailure(lastError) && !hasSelectableNode(new Set())) throw coreUnavailable();
     throw mapCoreTransportError(lastError);
   }
   throw coreUnavailable();
 };
 
-export const callCoreRaw = (options: CoreCallOptions): Promise<CoreResponse> =>
+export const callCoreRaw = async (options: CoreCallOptions): Promise<CoreResponse> =>
   request({
     method: options.method,
     path: options.path,
@@ -624,6 +756,7 @@ const performStreamRequest = (
           consistencyLsn: options.consistencyLsn,
         },
         headers,
+        node.streamAgent,
       );
     } catch (error) {
       fail(error);
@@ -710,7 +843,7 @@ export const openCoreStream = async (options: CoreCallOptions): Promise<CoreStre
     node.inFlight += 1;
     try {
       const stream = await performStreamRequest(node, options, headers);
-      if (stream.statusCode === 502 || stream.statusCode === 503) {
+      if (isNodeFailureStatus(stream.statusCode)) {
         markNodeFailure(node);
         const canRetry =
           attempt + 1 < maxAttempts && hasSelectableNode(attempted);
@@ -725,27 +858,80 @@ export const openCoreStream = async (options: CoreCallOptions): Promise<CoreStre
       markNodeHealthy(node);
       return stream;
     } catch (error) {
-      markNodeFailure(node);
       lastError = error;
+      if (isLocalRequestError(error) || isClientAbort(error) || !isNodeFailure(error)) break;
+      markNodeFailure(node);
     }
   }
   if (lastStream) return lastStream;
   if (lastError !== undefined) {
-    if (!hasSelectableNode(new Set())) throw coreUnavailable();
+    if (isNodeFailure(lastError) && !hasSelectableNode(new Set())) throw coreUnavailable();
     throw mapCoreTransportError(lastError);
   }
   throw coreUnavailable();
 };
+
+const activeStreamsByIp = new Map<string, number>();
+
+/** Test hook: number of SSE streams currently open for an address. */
+export const activeCoreStreamsFor = (ip: string): number => activeStreamsByIp.get(ip) ?? 0;
 
 export const proxyCoreStream = async (
   req: Request,
   res: Response,
   options: CoreCallOptions,
 ): Promise<void> => {
-  const upstream = await openCoreStream(options);
+  const key = options.clientIp || "unknown";
+  const open = activeStreamsByIp.get(key) ?? 0;
+  if (open >= env.MAX_STREAMS_PER_IP) {
+    throw new ApiError(429, "STREAM_LIMIT_REACHED", "Too many concurrent event streams for this client");
+  }
+  activeStreamsByIp.set(key, open + 1);
+  let released = false;
+  const releaseSlot = () => {
+    if (released) return;
+    released = true;
+    const current = activeStreamsByIp.get(key) ?? 1;
+    if (current <= 1) activeStreamsByIp.delete(key);
+    else activeStreamsByIp.set(key, current - 1);
+  };
+
+  // Listen for the client going away BEFORE awaiting core so an early disconnect aborts the
+  // upstream request instead of leaking it. `res` 'close' is the reliable signal for that:
+  // it fires when the connection drops, while `req` 'close' fires once the request is read.
+  const controller = new AbortController();
+  let upstream: CoreStream | undefined;
+  const onClientGone = () => {
+    if (res.writableFinished) return;
+    controller.abort();
+    upstream?.abort();
+  };
+  res.once("close", () => {
+    onClientGone();
+    releaseSlot();
+  });
+  req.once("aborted", onClientGone);
+  if (options.signal) {
+    if (options.signal.aborted) controller.abort();
+    else options.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
+  try {
+    upstream = await openCoreStream({ ...options, signal: controller.signal });
+  } catch (error) {
+    releaseSlot();
+    if (controller.signal.aborted) return;
+    throw error;
+  }
+  if (controller.signal.aborted) {
+    upstream.abort();
+    releaseSlot();
+    return;
+  }
   if (upstream.statusCode >= 400) {
     const payload = parseJsonBuffer(await drainStream(upstream.stream));
     upstream.abort();
+    releaseSlot();
     throw mapCoreHttpError(upstream.statusCode, payload);
   }
   res.status(upstream.statusCode);
@@ -757,6 +943,5 @@ export const proxyCoreStream = async (
   upstream.stream.on("error", () => {
     res.end();
   });
-  req.on("close", () => upstream.abort());
   upstream.stream.pipe(res);
 };

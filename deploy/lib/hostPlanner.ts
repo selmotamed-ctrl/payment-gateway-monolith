@@ -259,8 +259,6 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
       PG_DB_NAME: config.PG_DB_NAME,
       PG_DB_USER: config.PG_DB_USER,
       PG_DB_PASSWORD: config.PG_DB_PASSWORD,
-      PG_REPLICATION_USER: config.PG_REPLICATION_USER,
-      PG_REPLICATION_PASSWORD: config.PG_REPLICATION_PASSWORD,
     } : {}),
     PG_REPLICA_HOSTS: replicas.map((node) => `${node.privateIp}:${node.servicePort}`).join(","),
     PG_REPLICA_NODES: config.PG_REPLICA_NODES,

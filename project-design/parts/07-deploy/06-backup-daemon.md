@@ -3,7 +3,7 @@ id: deploy.backup
 title: Backup Daemon
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - deploy/backup-daemon/src/**
@@ -28,6 +28,7 @@ tests:
   - deploy/backup-daemon/test/scheduler.test.ts
   - deploy/backup-daemon/test/server.test.ts
   - deploy/test/provisioners.test.ts
+  - deploy/backup-daemon/test/mtlsAuthorization.test.ts
 gaps:
   - Backup daemon server/client key files are uploaded as root-owned 0600; the daemon runs as pgbackup and the deploy does not chown the certificate files. Startup/health readiness is unproven.
   - Barman health checks reuse the WAL-G `st ls` command, so Barman mode depends on a WAL-G binary and does not fully validate Barman.
@@ -36,6 +37,7 @@ gaps:
   - Log-database backups are not part of the daemon targets (core, audit and optional Redis only).
   - The daemon authenticates any CA-signed client certificate; it does not authorize a client CN per route.
   - The weekly shell drill installed by the provisioner only checks the core double-entry invariant, not the full audit/balance drill.
+  - mTLS front listener verified live on Windows only; the Linux unix-socket path is untested.
 ---
 
 # Backup Daemon
@@ -256,3 +258,9 @@ Not covered: a real WAL-G/Barman backup or restore; a real PostgreSQL 18 scratch
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## Security hardening (2026-11-05)
+
+- **mTLS authorization.** In TLS mode a `node:tls` front listener verifies the client certificate and checks its CN or DNS SAN against `BACKUP_ALLOWED_CLIENT_CNS` (default `backup-client`); anything else gets 403. It is bridged to `Bun.serve` over a private unix socket (a loopback port on win32). Verified live on Windows only; the Linux unix-socket path is untested.
+- New daemon setting `WALG_ENV_FILE` keeps secrets out of the `restore_command` line. The daemon mirror does not delete unless `BACKUP_SECONDARY_MIRROR_DELETE=true`.
+- **Daemon user (GAP-022, RESOLVED 2026-11-05).** The provisioned systemd unit runs as `pgbackup` (`SupplementaryGroups=postgres`) instead of `postgres`, and PostgreSQL accepts only TLS connections (`hostssl`-only `pg_hba`, see `deploy.storage`). The daemon code itself is unchanged.

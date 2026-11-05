@@ -5,6 +5,14 @@ import { VAlert, VBtn } from "vuetify/components";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import type { EmbeddedClientAction } from "./types";
+import {
+    createBridgeHandler,
+    getEmbedAllowlist,
+    isAllowedEmbedUrl,
+    isNonProductionBuild,
+    planEmbedScripts,
+    sanitizeSandbox,
+} from "@/utils/security/embedPolicy";
 
 export type EmbeddedWidgetRendererProps = {
     action: EmbeddedClientAction;
@@ -14,45 +22,19 @@ export type EmbeddedWidgetRendererProps = {
     onError?: (message: string) => void;
 };
 
-const SCRIPT_ALLOWLIST_HOSTS = [
-    "https://payments.moamalat.ly",
-    "https://secure.moamalat.ly",
-    "https://test.mpgmerchant.test",
-    "https://pay.evowallet.net",
-    "https://js.numo-pay.com",
-];
-
-const isAllowlistedScript = (url: string): boolean => {
-    try {
-        const parsed = new URL(url);
-        if (parsed.protocol !== "https:") {
-            return false;
-        }
-        return SCRIPT_ALLOWLIST_HOSTS.some((host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`));
-    } catch {
-        return false;
-    }
-};
-
-const buildIntegrityAttributes = (url: string, sriHashes: string[]): string[] => {
-    const index = SCRIPT_ALLOWLIST_HOSTS.findIndex((host) => {
-        try {
-            return new URL(url).hostname.endsWith(host);
-        } catch {
-            return false;
-        }
-    });
-    const hash = sriHashes[index] ?? sriHashes[0];
-    return hash ? [hash] : [];
-};
+const embedAllowlist = getEmbedAllowlist(isNonProductionBuild());
 
 export const EmbeddedWidgetRenderer = dc(
     (props: EmbeddedWidgetRendererProps) => {
         const { t } = useLocale();
         const loading = ref(true);
         const localError = ref<string | null>(null);
-        const allowedScripts = computed(() =>
-            (props.action.script_urls ?? []).filter((url) => isAllowlistedScript(url)),
+        const iframeRef = ref<HTMLIFrameElement | null>(null);
+        const scriptPlan = computed(() =>
+            planEmbedScripts(props.action.script_urls, props.action.script_sri_hashes, embedAllowlist),
+        );
+        const iframeSrc = computed(() =>
+            isAllowedEmbedUrl(props.action.iframe_src, embedAllowlist) ? (props.action.iframe_src as string) : null,
         );
 
         const onScriptLoad = () => {
@@ -66,16 +48,12 @@ export const EmbeddedWidgetRenderer = dc(
             props.onError?.(t("Something went wrong"));
         };
 
-        const bridgeHandler = (event: MessageEvent) => {
-            const origin = String(event.origin ?? "");
-            const allowedOrigins = props.action.allowed_origins ?? [];
-            if (allowedOrigins.length && !allowedOrigins.includes(origin)) {
-                return;
-            }
-            const data = (event.data ?? {}) as Record<string, unknown>;
-            const eventName = String(data.event ?? data.type ?? "callback");
-            props.onCallback?.({ event: eventName, data });
-        };
+        const bridgeHandler = (event: MessageEvent) =>
+            createBridgeHandler({
+                allowedOrigins: props.action.allowed_origins,
+                getIframeWindow: () => iframeRef.value?.contentWindow ?? null,
+                onCallback: (payload) => props.onCallback?.(payload),
+            })(event);
 
         onBeforeUnmount(() => {
             window.removeEventListener("message", bridgeHandler);
@@ -84,25 +62,31 @@ export const EmbeddedWidgetRenderer = dc(
 
         onMounted(() => {
             window.addEventListener("message", bridgeHandler);
-            if (!allowedScripts.value.length) {
+            if (props.action.iframe_src && !iframeSrc.value) {
                 loading.value = false;
                 localError.value = t("Security Policy");
                 return;
             }
-            allowedScripts.value.forEach((url, index) => {
+            if (iframeSrc.value) {
+                loading.value = false;
+                return;
+            }
+            if (!scriptPlan.value.length) {
+                loading.value = false;
+                localError.value = t("Security Policy");
+                return;
+            }
+            scriptPlan.value.forEach(({ url, integrity }) => {
                 const script = document.createElement("script");
                 script.src = url;
                 script.async = true;
                 script.referrerPolicy = "no-referrer";
-                const integrity = buildIntegrityAttributes(url, props.action.script_sri_hashes ?? []);
-                if (integrity.length) {
-                    script.integrity = integrity[0]!;
-                    script.crossOrigin = "anonymous";
-                }
+                script.integrity = integrity;
+                script.crossOrigin = "anonymous";
+                script.setAttribute("data-checkout-embed", "1");
                 script.addEventListener("load", onScriptLoad);
                 script.addEventListener("error", onScriptError);
                 document.head.appendChild(script);
-                void index;
             });
         });
 
@@ -122,9 +106,11 @@ export const EmbeddedWidgetRenderer = dc(
                 )}
 
                 {props.action.iframe_src ? (
+                    iframeSrc.value && (
                     <iframe
-                        src={props.action.iframe_src}
-                        sandbox={props.action.iframe_sandbox || "allow-scripts allow-forms"}
+                        ref={iframeRef}
+                        src={iframeSrc.value}
+                        sandbox={sanitizeSandbox(props.action.iframe_sandbox)}
                         referrerpolicy="no-referrer"
                         title={t("Embedded Widget")}
                         style={{
@@ -135,6 +121,7 @@ export const EmbeddedWidgetRenderer = dc(
                             backgroundColor: "var(--pg-bg-surface)",
                         }}
                     ></iframe>
+                    )
                 ) : (
                     <div
                         id={`checkout-embed-${props.action.sdk_driver}`}

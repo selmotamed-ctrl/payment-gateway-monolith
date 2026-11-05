@@ -11,12 +11,15 @@ import {
   uniqueId,
   uniqueUuid,
 } from "./helpers/db";
+import { withLedgerMaintenance } from "../helpers/ledgerMaintenance";
 
 const client: PrismaClient = createPrisma({ max: 35 });
 const uow = new PostgresUnitOfWorkAdapter(client);
 
 const cleanupRefs = async (refPrefix: string): Promise<void> => {
-  await client.journalEntry.deleteMany({ where: { refId: { startsWith: refPrefix } } });
+  await withLedgerMaintenance(client, (tx) =>
+    tx.journalEntry.deleteMany({ where: { refId: { startsWith: refPrefix } } }),
+  );
   await client.outboxEvent.deleteMany({ where: { aggregateId: { startsWith: refPrefix } } });
   await client.auditOutbox.deleteMany({ where: { entityId: { startsWith: refPrefix } } });
 };

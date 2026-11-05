@@ -3,7 +3,7 @@ id: platform.runtime
 title: Runtime and Configuration
 status: partial
 confidence: high
-last_verified: 2026-11-04
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/index.ts
@@ -39,8 +39,11 @@ tests:
   - admin-back/test/env-isolation.test.ts
   - merchant-back/test/env-isolation.test.ts
   - checkout-back/test/env-isolation.test.ts
+  - admin-back/test/security-regressions.test.ts
+  - merchant-back/test/security-regressions.test.ts
+  - checkout-back/test/security-regressions.test.ts
 gaps:
-  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 9.
+  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 10.
   - LOG_LEVEL is declared but not used by the console or access logger.
   - WORKER_CONCURRENCY and WORKER_REQUEST_TIMEOUT_MS are accepted but not passed to the production worker runtime.
   - Console request-log correlation uses a separate short id from x-request-id.
@@ -182,8 +185,8 @@ The synthetic seeder and Fake Rails seed script read several of these directly f
 | Edge | Key group |
 | :--- | :--- |
 | `admin-back` | `NODE_ENV`, `PORT` (`4101`), `ADMIN_BIND_HOST` (`127.0.0.1`), `CORE_BACK_URL`, optional `CORE_BACK_URLS`, `MTLS_CLIENT_CERT_PATH`, `MTLS_CLIENT_KEY_PATH`, `MTLS_CA_CERT_PATH`, `CORE_REQUEST_TIMEOUT_MS` (`60000`), `TRUSTED_PROXY_CIDRS`, `ADMIN_LAN_CIDRS`, `ADMIN_AUTHORITY_HINTS`, `MAX_JSON_BODY_BYTES` (`4194304`), `MAX_UPLOAD_BYTES` (`20971520`), `UPLOAD_ALLOWED_MIME`, `ADMIN_RATE_LIMIT_MAX/WINDOW_MS`, `AUTH_RATE_LIMIT_MAX/WINDOW_MS`, `RECONCILIATION_TIMEOUT_MS` |
-| `merchant-back` | `PORT` (`4102`), `BIND_HOST` (`0.0.0.0`), core URL(s), mTLS paths, `CORE_REQUEST_TIMEOUT_MS` (`30000`), `TRUSTED_PROXY_CIDRS`, `MAX_JSON_BODY_BYTES` (`2097152`), `MAX_UPLOAD_BYTES` (`10485760`), `UPLOAD_ALLOWED_MIME`, `PG_LIVE_TOKEN_PREFIX` (`pg_live_`), `AUTH_RATE_LIMIT_*`, `API_RATE_LIMIT_*`, `EXTERNAL_RATE_LIMIT_*`, `POS_STREAM_TIMEOUT_MS` (`900000`) |
-| `checkout-back` | `PORT` (`4103`), `BIND_HOST` (`0.0.0.0`), core URL(s), mTLS paths, `CORE_REQUEST_TIMEOUT_MS` (`30000`), `TRUSTED_PROXY_CIDRS`, `MAX_JSON_BODY_BYTES` (`1048576`), `MAX_INBOUND_BODY_BYTES` (`3145728`), `CHECKOUT_FRONT_BASE_URL`, `CHECKOUT_FRONT_STATUS_PATH` (`/pay/status`), `PAY_RATE_LIMIT_*`, `INBOUND_RATE_LIMIT_*` |
+| `merchant-back` | `PORT` (`4102`), `BIND_HOST` (`0.0.0.0`), core URL(s), mTLS paths, `CORE_REQUEST_TIMEOUT_MS` (`30000`), `TRUSTED_PROXY_CIDRS` (default loopback only), `MAX_JSON_BODY_BYTES` (`2097152`), `MAX_UPLOAD_BYTES` (`10485760`), `UPLOAD_ALLOWED_MIME`, `PG_LIVE_TOKEN_PREFIX` (`pg_live_`), `AUTH_RATE_LIMIT_*`, `API_RATE_LIMIT_*`, `EXTERNAL_RATE_LIMIT_*` (each with `*_WINDOW_MS`), `TOKEN_MAX_SCOPES` (`20`), `TOKEN_MAX_TTL_DAYS` (`365`), `TOKEN_DEFAULT_TTL_DAYS` (`90`), `UPLOAD_RATE_LIMIT_MAX`, `CORS_ALLOWED_ORIGINS`, `POS_STREAM_TIMEOUT_MS` (`900000`) |
+| `checkout-back` | `PORT` (`4103`), `BIND_HOST` (`0.0.0.0`), core URL(s), mTLS paths, `CORE_REQUEST_TIMEOUT_MS` (`30000`), `TRUSTED_PROXY_CIDRS`, `MAX_JSON_BODY_BYTES` (`1048576`), `MAX_INBOUND_BODY_BYTES` (`1048576`), `CHECKOUT_FRONT_BASE_URL`, `CHECKOUT_FRONT_STATUS_PATH` (`/pay/status`), `PAY_RATE_LIMIT_*`, `INBOUND_RATE_LIMIT_*` (each with `*_WINDOW_MS`), `CORS_ALLOWED_ORIGINS` |
 | `fake-rails-back` | `HOST` (`127.0.0.1`), `PORT` (`4104`), `LOG_LEVEL`, `FAKE_RAILS_ENABLED` (`true`), `FAKE_RAILS_ALLOW_IN_PRODUCTION`, `FAKE_RAILS_PUBLIC_BASE_URL` (`http://127.0.0.1:8444`), `FAKE_RAILS_DATA_DIR` (`shared/data`), `CORE_INBOUND_BASE_URL` (`http://127.0.0.1:4103/api/v1/inbound`), admin credentials, JWT secret, seeder token, allowed CIDRs, webhook timeout, max body, portal rate limits |
 
 The Fake Rails loader refuses to start without a strong non-default admin password, a seeder token and a JWT secret, and refuses production unless `FAKE_RAILS_ALLOW_IN_PRODUCTION=true`.
@@ -205,7 +208,7 @@ The storage engine is constructed before `listen`, but after the server object i
 
 ### 3.5 Schema version check
 
-`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 9`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
+`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 10`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
 
 ```sql
 SELECT "version" FROM "schema_versions" WHERE "id" = 1
@@ -258,7 +261,7 @@ It does not probe the storage engine, replicas, Redis, audit/log databases, back
 - `routePattern` is `req.route?.path ?? req.path`.
 - `statusCode`, duration, `dbQueries: 0` and `dbDurationMs: 0`.
 - `actorId: null`; no actor is attached to the access record.
-- `clientIp` from `x-real-client-ip` first, then `req.ip`.
+- `clientIp` from `x-real-client-ip` (validated as an IP by `edgeReportedClientIp`) first, then `req.ip`.
 
 `LOG_LEVEL` is not consulted. Console correlation and access-log correlation can differ because of the separate short id. The access log write is wrapped in a try/catch and never fails the request.
 
@@ -308,7 +311,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 5. **The raw body is preserved before JSON parsing.** Webhook signatures and uploaded document bytes must be exact.
 6. **A request id is always returned.** Invalid or missing client values are replaced with a UUID.
 7. **Redis is never authoritative for money.** When Redis is unavailable the cache/velocity adapter falls back to memory and invalidation stays local.
-8. **Schema version 9 is the contract.** Seeders enforce it; migrations are deployed separately.
+8. **Schema version 10 is the contract.** Seeders enforce it; migrations are deployed separately.
 9. **Workers are stateless across nodes.** Coordination is by database claims, not by an in-memory scheduler.
 10. **The admin UI flags are deployment-owned.** A source build uses the frontend defaults; a deployed build receives the deploy engine's values.
 
@@ -337,7 +340,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 | Backup daemon | No | Backup routes return 503 |
 | Notification webhook | No | Log transport reports SENT |
 | Fake Rails | No | Only required by synthetic seeding/seeding routes |
-| Schema version 9 | Yes at seed time | Seeders fail; server boot does not check |
+| Schema version 10 | Yes at seed time | Seeders fail; server boot does not check |
 
 ### 5.3 Config consumers outside the env proxy
 
@@ -472,3 +475,10 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 ## 10. Change history
 
 - 2026-11-03: Initial canonical runtime/config part written against `5a24f6f+working-tree`; records schema-version, logging and worker-control gaps.
+
+## 11. Security hardening config changes (2026-11-05)
+
+- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); `KYB_SCANNER_MODE` unset fails closed (`eicar` is dev/test only); `REQUIRED_SCHEMA_VERSION = 10`.
+- Edges: `TRUSTED_PROXY_CIDRS` default loopback only; `MAX_INBOUND_BODY_BYTES` default 1 MiB; `CORS_ALLOWED_ORIGINS` (no CORS headers on admin/merchant when unset); newly wired rate-limit window envs `AUTH_/ADMIN_/API_/EXTERNAL_/PAY_/INBOUND_RATE_LIMIT_WINDOW_MS`; `CORE_MAX_RESPONSE_BYTES` (64 MiB), `CORE_TOTAL_DEADLINE_MS` (300000), `MAX_STREAMS_PER_IP` (5), `ADMIN_AUTHORITY_HINTS` (default empty, restrict-only), merchant `TOKEN_MAX_SCOPES`, `TOKEN_MAX_TTL_DAYS`, `TOKEN_DEFAULT_TTL_DAYS`, `UPLOAD_RATE_LIMIT_MAX`, admin `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
+- Frontends: `VITE_CHECKOUT_BASE_URL`, `VITE_IDENTITY_HOSTS` (merchant), `VITE_CHECKOUT_ORIGIN` (fake-rails). Real `.env` files in the frontends are no longer tracked; copy `.env.example` to `.env` on a fresh clone.
+- Deploy and daemon keys are listed in the deploy parts.

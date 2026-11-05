@@ -26,8 +26,12 @@ export const LiveTransactionFeed = dc(
       }
     };
 
-    onMounted(() => {
-      source = new EventSource(streamUrl());
+    onMounted(async () => {
+      try {
+        source = new EventSource(await streamUrl());
+      } catch {
+        return;
+      }
       source.addEventListener("ready", () => { connected.value = true; });
       source.addEventListener("rail.request", (event) => push("rail.request", (event as MessageEvent).data));
       source.addEventListener("webhook.sent", (event) => push("webhook.sent", (event as MessageEvent).data));

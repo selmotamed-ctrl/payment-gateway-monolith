@@ -3,7 +3,7 @@ id: core.api
 title: Core API Surface
 status: partial
 confidence: high
-last_verified: 2026-11-04
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/api/index.ts
@@ -19,6 +19,10 @@ code:
   - core-back/lib/listQuery.ts
   - core-back/lib/approvalQueue.ts
   - core-back/engine/governance/GovernanceExecution.ts
+  - core-back/lib/auth/merchantAuthorities.ts
+  - core-back/lib/auth/mfaChallenges.ts
+  - core-back/lib/auth/throttle.ts
+  - core-back/lib/cashoutBalance.ts
 design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#16-complete-multi-service-api-surface-mapping
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#161-checkout-back-public-api-apiv1pay-apiv1inbound--forwards-to-core-back-internalcheckout
@@ -37,6 +41,12 @@ tests:
   - core-back/test/backup-admin/backup-admin-routes.test.ts
   - core-back/test/exhaustive/05-api-matrix/admin-endpoints-rbac-fuzz.test.ts
   - core-back/test/exhaustive/05-api-matrix/list-query-filters-all-27-endpoints.test.ts
+  - core-back/test/security-regressions/c2-mfa.test.ts
+  - core-back/test/security-regressions/h1h2-authz.test.ts
+  - core-back/test/security-regressions/h3-admin-users-and-approvals.test.ts
+  - core-back/test/security-regressions/h4-cashout.test.ts
+  - core-back/test/security-regressions/m4-idempotency.test.ts
+  - core-back/test/security-regressions/c1-forged-success.test.ts
 gaps:
   - APPLICATION approvals have no executable handler and remain pending.
   - Cashout processing, some settings writes, commission creation and velocity-rule creation execute without the approval queue.
@@ -275,7 +285,7 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | Domain | Routes |
 | :--- | :--- |
 | Health | `GET /health` |
-| Auth (public within channel) | `POST /auth/register`, `/auth/verify-identity`, `/auth/accept-invitation`, `/auth/login`, `/auth/google` (501), `/auth/mfa/verify`, `GET /auth/me` |
+| Auth (public within channel) | `POST /auth/register`, `/auth/verify-identity` (retired: always `410 IDENTITY_VERIFICATION_RETIRED`), `/auth/accept-invitation`, `/auth/login`, `/auth/google` (501), `/auth/mfa/verify`, `GET /auth/me` |
 | Options | `GET /options/:kind` |
 | Onboarding | `GET/PUT /onboarding/join-request`, `GET /onboarding/kyb-revalidations`, `POST /onboarding/kyb-documents`, `GET/POST /onboarding/beneficial-owners`, `DELETE /onboarding/beneficial-owners/:id`, `POST /onboarding/submit` |
 | Wallets | `GET/POST /wallets`, `GET /wallets/:id`, `GET /wallets/:id/balance`, `GET /wallets/:id/statements`, `GET /wallets/:id/statements/:month/export` |
@@ -489,7 +499,7 @@ A wrong channel certificate fails at the CN guard. A missing/invalid session fai
 1. `GET /internal/checkout/pay/:linkKey` -> visible rails.
 2. `POST /internal/checkout/pay/:linkKey/initiate` with `railCode`, `formData`, `idempotencyKey`.
 3. Poll `GET .../logs/:attemptId/status` or wait for the gateway webhook.
-4. `POST .../confirm` with OTP/evidence if the rail requires it.
+4. `POST .../confirm` with the OTP if the rail requires it (payer `evidence` is ignored).
 5. `POST .../cancel` only before the point of no return.
 
 ### 6.3 Add a new admin list endpoint
@@ -596,3 +606,40 @@ No build or test was run for this documentation change. Database-backed route te
 ## 10. Change history
 
 - 2026-11-03: Initial canonical core API part written against `5a24f6f+working-tree`; records the complete namespace map, the approval-handler gap and the synchronous webhook path.
+
+## 11. Security hardening (2026-11-05)
+
+### Checkout and idempotency
+- `POST /pay/:linkKey/logs/:attemptId/confirm` accepts only `otp`; `evidence` is accepted but ignored.
+- Public checkout BLOCK/HOLD responses no longer include internal `reasons`; only the customer message `code` is returned. Reasons stay in guard audit rows and AML cases.
+- The idempotency lookup is scoped to `(linkId, idempotencyKey)`; a unique-constraint race on create is treated as a replay.
+
+### MFA and login
+- MFA challenges are rows in `mfa_challenges`: the client sees an opaque UUID, the code is stored as an HMAC, the challenge is single-use and bound to a channel (`ADMIN`/`MERCHANT`). Five wrong guesses kill the challenge and trigger a 15-minute user cool-down. Challenges expire after 5 minutes; at most 5 SMS sends per 15 minutes; a new challenge supersedes open ones. The password step is required before a challenge is issued. `signMfaChallenge`/`verifyMfaChallengeToken` were removed.
+- `/internal/merchant/auth/verify-identity` is retired and always returns `410 IDENTITY_VERIFICATION_RETIRED`.
+- The SMS code is no longer stored in plaintext in `notifications.payload_json`: a Vault-encrypted `codeCiphertext` is opened by `OutboxNotificationWorker` at send time.
+- Login performs a dummy bcrypt for unknown users. Throttles: per identifier (5 failures lock for 15 minutes), per IP (30 failures), MFA verify per IP (20 failures). These counters are in-process memory (per instance); the DB attempt counter is the durable guarantee.
+- Principal separation: the admin router rejects merchant users and API tokens (`STAFF_PRINCIPAL_REQUIRED`); the merchant router rejects staff (`MERCHANT_PRINCIPAL_REQUIRED`). Admin login refuses merchant users and vice versa with the unknown-user answer. `/stats/overview`, `/options/:kind` and `/search` now require authorities (the `users` option kind needs `user:read` or `security:read`). Session JWTs now carry a per-channel `aud` and a `jti` (GAP-020/GAP-019, see the platform security part): `/internal/admin/*` accepts only `payment-gateway-admin` sessions and `/internal/merchant/*` only `payment-gateway-merchant` (`401 SESSION_AUDIENCE_INVALID`), a revoked session is `401 SESSION_REVOKED`, and `POST /internal/admin/auth/logout` and `POST /internal/merchant/auth/logout` revoke the presented session (`400 NOT_A_SESSION` for an API token).
+
+### Merchant authorization
+A closed catalogue in `lib/auth/merchantAuthorities.ts` is enforced route by route in `merchant.ts`.
+- Coarse: `merchant:read`, `merchant:write`, `link:write`, `payment:read`.
+- Fine-grained: `link:read`, `wallet:create`, `application:manage`, `pos:manage`, `onboarding:write`, `dispute:respond`, `cashout:read`, `cashout:request`, `user:manage`, `token:manage`, `credential:manage`.
+- API token scopes are limited to `link:write`, `link:read`, `payment:read`. Clients can never supply `*` or unknown strings (`UNKNOWN_AUTHORITY`, `UNKNOWN_TOKEN_SCOPE`). Callers can only grant authorities they hold (`AUTHORITY_ESCALATION_FORBIDDEN`); only `MERCHANT_ADMIN` can grant the admin role (`ROLE_ESCALATION_FORBIDDEN`); no self-modification (`SELF_MODIFICATION_FORBIDDEN`); user create/patch is audited.
+- API tokens may only call `/external/*` (`API_TOKEN_SCOPE_VIOLATION`). Token `expiresAt` is validated, stored, listed and enforced (`TOKEN_EXPIRY_INVALID`, `ACCESS_TOKEN_EXPIRED`). `*` is honoured only for staff principals.
+- Legacy: `merchant:write` implies the non-privileged fine-grained set for any role and the privileged four (`user:manage`, `token:manage`, `credential:manage`, `cashout:request`) only for `MERCHANT_ADMIN`. Existing tokens with other scope strings fail the external routes.
+
+### Cash-outs
+- Merchant `POST /cashouts` requires an idempotency key (body `idempotencyKey` or `Idempotency-Key` header; replay returns 200, a different payload returns `409 IDEMPOTENCY_KEY_REUSED`, a missing key `IDEMPOTENCY_KEY_REQUIRED`). It checks the ledger balance minus open cash-outs, records `requestedByUserId` and audits. The destination is a typed structure (bank, account number, IBAN, holder, SWIFT). The merchant must have a KYB `payoutAccountHash` (else `403 CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED`) and the destination must hash to it (else `403 CASHOUT_DESTINATION_NOT_VERIFIED`); the destination is stored `payoutVerified:true`. Payout-account changes go only through the maker-checker merchant edit and the hash is recomputed on approval (GAP-017, resolved 2026-11-05).
+- Staff process route requires `cashout:review` (`finance:write` alone no longer suffices); the maker is a merchant user, the checker is staff. State machine and ledger rules are in the governance part.
+
+### Admin user routes
+- `POST /internal/admin/users` returns `approvalRequestId` when maker/checker flags were requested. `PATCH /users` and `/users/:id` send authority, role, flag and ACTIVE changes through maker-checker (only suspend/disable apply directly). Details in the governance part.
+- Reconciliation upload takes audit actor/role from `request.principal` (401 if missing); a file hash already owned by another statement source returns `409 STATEMENT_FILE_HASH_CONFLICT`. Statement export filters by wallet currency.
+
+## Gap resolutions (2026-11-05)
+
+- `POST /internal/admin/auth/logout` and `POST /internal/merchant/auth/logout` (behind the principal guards) put the session `jti` on the revoke list until its original expiry and answer `{ revoked: true }`. Login and MFA handlers `await` the shared throttle (`assertLoginAllowed`, `recordLoginFailure`, `recordLoginSuccess`, `assertMfaAllowed`, `recordMfaFailure`).
+- Admin join-request `submit` returns `409 JOIN_REQUEST_PAYOUT_HASH_REQUIRED` and merchant `propose-edit` returns `422 PAYOUT_ACCOUNT_HASH_REQUIRED` for a payout account that yields no hash (GAP-017).
+- AML case release returns `409 AML_HOLD_CAPTURE_NOT_VERIFIED` when no escrow exists; verified callbacks/finalisation on terminal attempts return `409 ATTEMPT_TERMINAL` (GAP-015/GAP-016).
+- The reconciliation upload looks the duplicate run up per `(source, file_hash)` (GAP-018).

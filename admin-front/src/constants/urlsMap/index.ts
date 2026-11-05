@@ -3,6 +3,7 @@ export const urlsMap = {
     auditLogDetail: (id: string) => `v1/admin/audit-logs/${encodeURIComponent(id)}`,
     options: (kind: string) => `v1/admin/options/${kind}`,
     authLogin: "v1/admin/auth/login",
+    authLogout: "v1/admin/auth/logout",
     authMfa: "v1/admin/auth/mfa",
     profileMe: "v1/admin/auth/me",
     auditLogs: "v1/admin/audit-logs",

@@ -3,7 +3,7 @@ id: core.engine
 title: Core Engine
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/engine/runtime/index.ts
@@ -33,6 +33,7 @@ design_sources:
   - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#15-smart-ai-assisted-provider-onboarding-bring-your-own-ai
   - design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md
 tests:
+  - core-back/test/gaps/gap-015-018-regressions.test.ts
   - core-back/test/engine/step-executor.test.ts
   - core-back/test/engine/api-consumer.test.ts
   - core-back/test/engine/api-consumer-primitives.test.ts
@@ -47,6 +48,9 @@ tests:
   - core-back/test/spec-materializer.test.ts
   - core-back/test/phase3-dynamic-engine-and-blueprints.test.ts
   - core-back/test/exhaustive/04-rail-engine/all-20-gateways-24-scenarios.test.ts
+  - core-back/test/security-regressions/c1-forged-success.test.ts
+  - core-back/test/security-regressions/h8-webhook.test.ts
+  - core-back/test/security-regressions/m10-ssrf.test.ts
 gaps:
   - CAPTURE and SETTLEMENT_FETCH are database/spec enum values but have no engine runtime executor.
   - CANCEL is in the runtime FlowPhase union and flow provider mapping but no engine method or caller executes the CANCEL flow.
@@ -192,12 +196,13 @@ Every transition calls `attempts.updateAttempt`, then publishes `attempt:transit
 - Loads the current attempt; an already-`SUCCEEDED` attempt returns its persisted state.
 - If a `claim` function is provided, calls it. Only the winner continues; a loser returns the persisted state without contacting the gateway. The winner sets `AUTHORIZING`, `pointOfNoReturn=true`, publishes the transition and executes.
 - Without a claim, an `UNKNOWN` attempt with `pointOfNoReturn` throws `409 POINT_OF_NO_RETURN`; otherwise it transitions to `AUTHORIZING` with `pointOfNoReturn=true`.
-- Executes the `SUBMIT` stack.
+- Executes the `SUBMIT` stack. The only customer input forwarded is the OTP; payer `evidence` is ignored (see section 11).
 - `UNKNOWN` -> transition `UNKNOWN`.
 - `AWAITING_CUSTOMER` with a `RETRYABLE_OTP` error -> increments `otpAttempts`; at the max it transitions `FAILED` and releases the slot, otherwise it returns to `AWAITING_CUSTOMER`.
 - `FAILED` -> transition `FAILED`, release the slot.
 - `VERIFYING` -> transition `VERIFYING`.
-- Otherwise, combines the request evidence with the response, verifies the five trusted-success facts, and either transitions `UNKNOWN` with `TRUSTED_SUCCESS_FACTS_FAILED` or finalizes success.
+- A `SUBMIT` phase with zero steps runs `inquire()` (the `VERIFY` steps) instead of counting as success; without `VERIFY` steps the attempt stays `AWAITING_CUSTOMER`.
+- Otherwise verifies the five trusted-success facts against the SUBMIT step response only (the payer's evidence is never merged in), and either transitions `UNKNOWN` with `TRUSTED_SUCCESS_FACTS_FAILED` or finalizes success.
 
 `verifyCallback(channel, rawRequest)`:
 - Requires a callback verifier; otherwise `501 CALLBACK_VERIFIER_MISSING`.
@@ -250,7 +255,7 @@ The engine has a `FlowPhase` union of `PRE_INITIATE`, `INITIATE`, `SUBMIT`, `VER
 
 ### 3.5 Trusted success and finalization
 
-`verifyTrustedSuccessFacts(evidence, attempt)` reads either `evidence.trustedFacts` or the evidence itself and requires:
+`verifyTrustedSuccessFacts(evidence, attempt)` reads the evidence object it is given (the `evidence.trustedFacts` unwrapping was removed) and requires:
 
 | Fact | Check |
 | :--- | :--- |
@@ -260,7 +265,7 @@ The engine has a `FlowPhase` union of `PRE_INITIATE`, `INITIATE`, `SUBMIT`, `VER
 | `currency` | Present and equal to the attempt currency (case-insensitive) |
 | `environment` | Present and equal to the attempt `env` |
 
-All five must be true. A missing environment fact makes the result untrusted. The callback verifier derives the environment from the attempt, so webhook evidence is safe; a declarative sync response must map an environment value for confirmation to succeed.
+All five must be true. A missing environment fact makes the result untrusted. The callback verifier derives the environment from the attempt, so webhook evidence is safe; a declarative sync response must map an environment value for confirmation to succeed. Success facts may come only from the SUBMIT step response, a verified webhook or an inquiry.
 
 `finalizeSuccess` runs inside the runtime transaction when available:
 
@@ -676,3 +681,13 @@ No build or test was run for this documentation change. Tests that require Postg
 ## 10. Change history
 
 - 2026-11-03: Initial canonical core engine part written against `5a24f6f+working-tree`; records the seven runtime phases plus separate credential check, 39 transforms, and the reserved/unwired phases and native adapters.
+
+## 11. Security hardening (2026-11-05)
+
+- **Confirm input.** `POST /pay/:linkKey/logs/:attemptId/confirm` accepts only `otp` as customer input. Payer `evidence` is accepted by the schema for wire compatibility but ignored. The `evidence.trustedFacts` path was removed; success facts come only from the SUBMIT step response, a verified webhook or an inquiry. A SUBMIT phase with no steps runs `inquire()` (VERIFY steps) rather than counting as success.
+- **Webhook verification.** Unkeyed `SHA256` is not a valid inbound verification algorithm; only `HMAC_SHA256`, `HMAC_SHA512` and `RSA_SHA256` verify. A payload without a status derives `UNKNOWN`, not `SUCCESS`. When `timestampToleranceSec > 0` a signed timestamp is required: a header timestamp counts only under `TIMESTAMP_DOT_RAW_BODY`, otherwise the result is `INBOUND_TIMESTAMP_MISSING`. `timestampToleranceSec = 0` is the explicit opt-out; the seed blueprints for the generic `input.code`, `mpgs` and `mypay` channels set it to 0 because they carry no timestamp field. A production channel configured the same way needs tolerance 0 or a signed timestamp field. `mustInquire` defaults to true only when it is null/undefined (the database column default is still false).
+- **Inbound events.** Deduplication applies only to verified rows. Unverified rows get a unique pending key and capped body storage (64 KB); the canonical `dedupeKey` is claimed only after verification (a P2002 race maps to `DUPLICATE`). Signature and timestamp headers are stored. `x-real-client-ip` is trusted only because the mTLS edge sets it; `edgeReportedClientIp` validates it as an IP and otherwise falls back to `request.ip`.
+- **Outbound URL compile.** An empty `allowed_hosts` list fails closed (`HOST_ALLOWLIST_EMPTY`) unless `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST=true` (default false). Private, loopback and link-local literals are blocked at compile time unless `allowPrivateHosts` is set. Consumer layers keep their own DNS/literal guards and the Fake Rails exception.
+- **Tests.** `core-back/test/security-regressions/{c1-forged-success,h8-webhook,m10-ssrf}`.
+- **Re-finalize guard (GAP-016, RESOLVED 2026-11-05).** `finalizeGuardFor(status)` classifies an attempt: `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` are `IDEMPOTENT` (already settled), `CANCELLED` and `BLOCKED` are `REFUSE`, everything else (including `FAILED` and `EXPIRED`, so a late success is still recovered) is `ALLOW`. `verifyCallback` applies it before the trusted-facts check: a duplicate of the trusted success on a settled attempt is a no-op that returns the current state, a contradicting (failure/untrusted) signal on a settled attempt throws `409 ATTEMPT_TERMINAL`, and a callback for a cancelled/blocked attempt throws `409 ATTEMPT_TERMINAL`. `finalizeSuccess` re-reads the attempt status first so a stale in-memory attempt cannot settle twice (idempotent settled attempts return `COMMITTED`, or `SUSPENSE` for `SUSPENSE_SETTLEMENT`, with the stored ledger entry id).
+- **AML hold escrow after capture (GAP-015, RESOLVED 2026-11-05).** The guard pipeline no longer books escrow when it decides `HOLD` (no money has been captured yet, so `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` would fabricate a balance); the decision reason is now `AML_HOLD_PENDING_CAPTURE` and `hold_journal_entry_id` is no longer written on the case. When a verified gateway capture of an AML-held attempt reaches `finalizeSuccess`, `escrowHeldCapture` books the escrow (`AML_HOLD_AND_RELEASE` scenario, idempotent per `PAYMENT_ATTEMPT`/attempt id, in the transaction runner when present) and returns the new `SlotCommitResult.outcome` `HELD`: the attempt is NOT settled, the slot is NOT committed, and the result keeps the `AML_HOLD` substatus. The checker's release (see `core.governance`) settles it and is refused until the escrow exists. Residual: a merchant-direct (`MERCHANT_DIRECT`) held attempt holds no platform cash, so nothing is booked (`AML_HOLD_NO_ESCROW`) and release/void have no escrow to move.

@@ -4,9 +4,10 @@ import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
 import { VBtn } from "vuetify/components";
 import { StateView } from "@/components/StateView";
-import { api } from "@/state/api";
+import { user } from "@/state/user";
+import { openSseStream } from "@/utils/security/sseFetch";
+import { sessionHeaders } from "@/utils/security/sessionToken";
 import { urlsMap } from "@/constants/urlsMap";
-import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
@@ -35,50 +36,65 @@ const PosScreenPage = dc(() => {
     const error = ref<string | null>(null);
     const loading = ref(true);
 
-    let source: EventSource | null = null;
+    let source: { close: () => void } | null = null;
+    let retryTimer: number | null = null;
+    let retries = 0;
 
     const code = () => String(route.params.code ?? "");
 
-    const load = async () => {
-        loading.value = true;
-        error.value = null;
+    const applyFrame = (data: string) => {
         try {
-            const response = await api.get(urlsMap.posScreenStream(code()));
-            const payload = response.data?.data ?? response.data ?? {};
+            const payload = JSON.parse(data);
             state.value = payload.screen ?? payload;
-        } catch (e) {
-            error.value = extractApiErrorMessage(e);
-        } finally {
-            loading.value = false;
+            error.value = null;
+        } catch {
+            error.value = t("Something went wrong");
         }
     };
 
+    // fetch-streaming (not EventSource) so the Authorization header is sent: the stream is authenticated.
     const connect = () => {
-        if (typeof EventSource === "undefined") {
-            error.value = "realtime streaming is not available in this browser";
-            return;
-        }
         source?.close();
-        source = new EventSource(`${urlsMap.posScreenStream(code())}`);
-        source.onopen = () => {
-            connected.value = true;
-        };
-        source.onmessage = (event) => {
-            try {
-                const payload = JSON.parse(event.data);
-                state.value = payload.screen ?? payload;
-            } catch {
-                error.value = "received an unreadable realtime frame";
-            }
-        };
-        source.onerror = () => {
-            connected.value = false;
-        };
+        if (retryTimer !== null) {
+            window.clearTimeout(retryTimer);
+            retryTimer = null;
+        }
+        loading.value = state.value === null;
+        const token = user.value?.token;
+        source = openSseStream({
+            url: urlsMap.posScreenStream(code()),
+            headers: token ? { ...sessionHeaders(token), "X-Client-Channel": "merchant" } : {},
+            onOpen: () => {
+                connected.value = true;
+                loading.value = false;
+                retries = 0;
+            },
+            onFrame: (frame) => applyFrame(frame.data),
+            onClose: () => {
+                connected.value = false;
+                loading.value = false;
+                retries += 1;
+                if (retries > 8) {
+                    error.value = t("Something went wrong");
+                    return;
+                }
+                retryTimer = window.setTimeout(connect, Math.min(30000, 1000 * 2 ** retries));
+            },
+        });
     };
 
-    void load().then(() => connect());
+    const load = async () => {
+        error.value = null;
+        retries = 0;
+        connect();
+    };
+
+    void load();
 
     onBeforeUnmount(() => {
+        if (retryTimer !== null) {
+            window.clearTimeout(retryTimer);
+        }
         source?.close();
         source = null;
     });

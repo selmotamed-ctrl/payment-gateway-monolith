@@ -327,7 +327,7 @@ It expects PostgreSQL 18 on `127.0.0.1:5432`, generates certificates if missing,
 | `pg-checkout-front` | 5103 |
 | `pg-fake-rails-front` | 5104 |
 
-It reads `deploy/deploy.env` when present, but explicit environment variables win. Development defaults include `DEV_PASSWORD=DevPassword123!`, Fake Rails tester `tester_admin` / `Strong-Tester-Pass-2026!` and the local KMS key. Change these outside a disposable workstation.
+It reads `deploy/deploy.env` when present, but explicit environment variables win. It no longer ships default secrets: random secrets go to a mode 0600 `.local/secrets.env` (or `LOCAL_SECRETS_FILE`), `DB_PASSWORD` is required and `NODE_ENV=production` is refused unless `LOCAL_TARGET=1`.
 
 After the stack is up:
 
@@ -423,3 +423,7 @@ Core `/health` always returns HTTP 200; read `status` and `queue.degraded` in th
 - [`../project-design/appendices/api-route-matrix.md`](../project-design/appendices/api-route-matrix.md) — route surfaces exercised by the API matrices.
 
 Historical test plans live under [`../design/`](../design/). They are reference only. Current behavior and coverage are the parts plus the code.
+
+## Security regression suites (2026-11-05)
+
+Run new suites directly with `bun test ./path`: `core-back/test/security-regressions/`, `{admin,merchant,checkout}-back/test/security-regressions.test.ts`, `deploy/test/security-regressions.test.ts`, `deploy/backup-daemon/test/mtlsAuthorization.test.ts`, `fake-rails-back/test/security.test.ts` and `tests/unit/frontend-security-{admin,checkout,merchant}.test.ts`. Older `tests/unit` tests that need the vitest `@` alias do not run under bun, and vitest is broken on the dev machine (missing rolldown native binding).

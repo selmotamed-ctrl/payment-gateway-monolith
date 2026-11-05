@@ -1565,4 +1565,6 @@ export const appCatalogue: Record<string, [string, string]> = {
     "MB": ["MB", "م.ب"],
     "GB": ["GB", "ج.ب"],
     "TB": ["TB", "ت.ب"],
+    "This file type cannot be previewed.": ["This file type cannot be previewed.", "لا يمكن معاينة هذا النوع من الملفات."],
+    "This starts a full backup of every target and can load production databases. Continue?": ["This starts a full backup of every target and can load production databases. Continue?", "سيبدأ هذا نسخة احتياطية كاملة لجميع الأهداف وقد يضغط على قواعد بيانات الإنتاج. هل تريد المتابعة؟"],
 };

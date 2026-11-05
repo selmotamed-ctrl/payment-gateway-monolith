@@ -1,3 +1,4 @@
+import { GOOGLE_REDIRECT_PATHS, isAllowedIdentityRedirect, parseIdentityHosts } from "@/utils/security/identityRedirect";
 import { dc } from "kt-dc";
 import { VAlert, VBtn, VTextField } from "vuetify/components";
 import { useLocale } from "vuetify";
@@ -28,9 +29,12 @@ const RegisterPage = dc(() => {
         notice.value = null;
         loading.value = true;
         try {
-            const response = await api.post(urlsMap.authGoogle, { redirectUri: location.href, mode: "register" });
+            const response = await api.post(urlsMap.authGoogle, { redirectUri: GOOGLE_REDIRECT_PATHS.register, mode: "register" });
             const payload = response.data?.data ?? response.data ?? {};
             if (payload?.redirectUrl) {
+                if (!isAllowedIdentityRedirect(payload.redirectUrl, parseIdentityHosts(import.meta.env.VITE_IDENTITY_HOSTS))) {
+                    throw new Error("untrusted redirect");
+                }
                 window.location.assign(payload.redirectUrl);
                 return;
             }

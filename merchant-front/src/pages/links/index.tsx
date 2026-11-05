@@ -1,3 +1,4 @@
+import { buildCheckoutUrl } from "@/utils/security/checkoutUrl";
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
@@ -98,7 +99,8 @@ const LinksPage = dc(() => {
 
     void load();
 
-    const checkoutUrl = (link: PaymentLink) => `${location.origin}/pay/${link.linkKey}`;
+    const checkoutUrl = (link: PaymentLink) =>
+        buildCheckoutUrl(link.linkKey, import.meta.env.VITE_CHECKOUT_BASE_URL, location.origin);
 
     const createLink = async () => {
         actionLoading.value = true;
