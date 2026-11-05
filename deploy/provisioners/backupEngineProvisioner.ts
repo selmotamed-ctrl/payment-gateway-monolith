@@ -256,6 +256,15 @@ ${barmanServerSection({
 }) : ""}`;
 };
 
+/**
+ * Account the backup daemon runs as. WAL-G's base backup reads PGDATA directly
+ * (0700, owned by postgres) and connects over the local socket as `postgres`
+ * (peer auth), so in wal-g mode the daemon must run as postgres. Barman pulls
+ * over the replication protocol and keeps the dedicated, unprivileged account.
+ */
+export const backupDaemonUser = (config: Pick<DeployConfig, "BACKUP_ENGINE_MODE">): "postgres" | "pgbackup" =>
+  config.BACKUP_ENGINE_MODE === "wal-g" ? "postgres" : "pgbackup";
+
 export const backupDaemonSystemdUnit = (config: DeployConfig): string => `[Unit]
 Description=Payment Gateway pg-backup-daemon (WAL-G / Barman control plane)
 After=network-online.target
@@ -263,8 +272,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pgbackup
-Group=pgbackup
+User=${backupDaemonUser(config)}
+Group=${backupDaemonUser(config)}
 SupplementaryGroups=postgres
 WorkingDirectory=/opt/pg-backup-daemon
 EnvironmentFile=/etc/pg-backup/backup.env
@@ -275,6 +284,7 @@ RestartSec=3
 LimitNOFILE=65536
 NoNewPrivileges=true
 ProtectSystem=strict
+PrivateTmp=true
 ReadWritePaths=${[
   "/var/lib/pg-backup",
   "/var/log/pg-backup",
@@ -351,8 +361,8 @@ export const backupCronEntries = (config: DeployConfig): string[] =>
   config.BACKUP_SCHEDULER_ENABLED
     ? []
     : [
-        `${config.BACKUP_FULL_CRON} pgbackup /usr/local/bin/pg-backup-daemon-trigger full`,
-        `${config.BACKUP_DELTA_CRON} pgbackup /usr/local/bin/pg-backup-daemon-trigger delta`,
+        `${config.BACKUP_FULL_CRON} ${backupDaemonUser(config)} /usr/local/bin/pg-backup-daemon-trigger full`,
+        `${config.BACKUP_DELTA_CRON} ${backupDaemonUser(config)} /usr/local/bin/pg-backup-daemon-trigger delta`,
         `${config.BACKUP_DRILL_CRON} root /usr/local/bin/pg-backup-restore-drill`,
       ];
 
@@ -602,7 +612,7 @@ fi`,
     "id -u pgbackup >/dev/null 2>&1 || useradd --system --home /var/lib/pg-backup --shell /usr/sbin/nologin pgbackup",
     "usermod -aG pgbackup postgres 2>/dev/null || true",
     "id -u barman >/dev/null 2>&1 || useradd --system --home /var/lib/barman --shell /usr/sbin/nologin barman",
-    `install -d -m 0750 -o pgbackup -g pgbackup /var/lib/pg-backup ${shellQuote(config.BACKUP_DAEMON_CERT_DIR)} /var/log/pg-backup && chown -R pgbackup:pgbackup ${shellQuote(config.BACKUP_DAEMON_CERT_DIR)}`,
+    `install -d -m 0750 -o ${backupDaemonUser(config)} -g ${backupDaemonUser(config)} /var/lib/pg-backup ${shellQuote(config.BACKUP_DAEMON_CERT_DIR)} /var/log/pg-backup && chown -R ${backupDaemonUser(config)}:${backupDaemonUser(config)} /var/lib/pg-backup /var/log/pg-backup ${shellQuote(config.BACKUP_DAEMON_CERT_DIR)}`,
     "install -d -m 0755 /etc/pg-backup",
     "systemctl daemon-reload",
   ]) {
@@ -625,7 +635,7 @@ fi`,
     sudo: true,
   });
   // restore_command (run by the scratch postgres as user postgres) sources this file.
-  runner.run(ssh, "chown root:pgbackup /etc/pg-backup/wal-g.env && chmod 0640 /etc/pg-backup/wal-g.env", { sudo: true });
+  runner.run(ssh, `chown root:${backupDaemonUser(config)} /etc/pg-backup/wal-g.env && chmod 0640 /etc/pg-backup/wal-g.env`, { sudo: true });
   runner.writeRemoteFile({
     target: ssh,
     path: "/etc/systemd/system/pg-backup-daemon.service",

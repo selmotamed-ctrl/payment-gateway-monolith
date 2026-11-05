@@ -184,7 +184,7 @@
 | `deploy/test/configScale.test.ts` | 185 | 13 |
 | `deploy/test/exhaustive-deploy-matrix.test.ts` | 311 | 20 |
 | `deploy/test/fakeRails.test.ts` | 107 | 7 |
-| `deploy/test/gap-hardening.test.ts` | 102 | 9 |
+| `deploy/test/gap-hardening.test.ts` | 113 | 10 |
 | `deploy/test/healthVerifierScale.test.ts` | 140 | 4 |
 | `deploy/test/hostPlanner.test.ts` | 311 | 23 |
 | `deploy/test/hostPlannerScale.test.ts` | 157 | 6 |
@@ -257,4 +257,4 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 
 - Total files: **251**
-- Total literal test declarations: **2542**
+- Total literal test declarations: **2543**

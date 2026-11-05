@@ -10,7 +10,7 @@ import {
   replicaCommands,
   replicaPgpassContent,
 } from "../provisioners/postgres18Provisioner";
-import { backupDaemonSystemdUnit } from "../provisioners/backupEngineProvisioner";
+import { backupDaemonSystemdUnit, backupDaemonUser } from "../provisioners/backupEngineProvisioner";
 import { looksLikeCardPan, loadDeployConfig, panRailGuardProblems } from "../lib/configSchema";
 import { readFileSync } from "node:fs";
 
@@ -46,12 +46,23 @@ describe("GAP-022 TLS + hostssl + backup user", () => {
     const cfg = loaded();
     if (cfg) expect(pgbouncerIni(cfg)).toContain("server_tls_sslmode = require");
   });
-  test("backup daemon unit is not the postgres user", () => {
+  test("backup daemon account follows the engine: barman keeps pgbackup, wal-g runs as postgres", () => {
+    // wal-g backup-push reads PGDATA (0700 postgres) and connects over the socket as postgres (peer auth);
+    // a dedicated account cannot do either, so the earlier pgbackup-for-wal-g change broke base backups.
+    expect(backupDaemonUser({ BACKUP_ENGINE_MODE: "barman" })).toBe("pgbackup");
+    expect(backupDaemonUser({ BACKUP_ENGINE_MODE: "wal-g" })).toBe("postgres");
     const cfg = loaded();
     if (!cfg) return;
     const unit = backupDaemonSystemdUnit(cfg);
-    expect(unit).toContain("User=pgbackup");
-    expect(unit).not.toContain("User=postgres");
+    expect(unit).toContain(`User=${backupDaemonUser(cfg)}`);
+  });
+  test("backup daemon unit has a private writable /tmp so the mTLS front can create its unix socket", () => {
+    const cfg = loaded();
+    if (!cfg) return;
+    const unit = backupDaemonSystemdUnit(cfg);
+    // ProtectSystem=strict makes /tmp read-only; the daemon mkdtemp()s there at start-up in mTLS mode.
+    expect(unit).toContain("ProtectSystem=strict");
+    expect(unit).toContain("PrivateTmp=true");
   });
 });
 
