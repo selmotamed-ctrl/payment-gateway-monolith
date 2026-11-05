@@ -14,6 +14,7 @@ import {
   listTriggers,
 } from "../_harness";
 import { createRow, insertRow } from "../_dbFactory";
+import { withLedgerMaintenance } from "../../helpers/ledgerMaintenance";
 
 const db = exhaustiveClient();
 const describeDb = databaseIsReachable ? describe : describe.skip;
@@ -61,7 +62,11 @@ const makeJournalLine = async (direction: "DEBIT" | "CREDIT", amount: string): P
 };
 
 const removeJournalLines = async (): Promise<void> => {
-  await db.$executeRawUnsafe('DELETE FROM "journal_lines" WHERE "entry_id" = $1', journalEntryId);
+  // journal_lines is append-only (GAP-013); the test database owner may delete its own fixtures
+  // inside a transaction that sets the maintenance flag.
+  await withLedgerMaintenance(db, (tx) =>
+    tx.$executeRawUnsafe('DELETE FROM "journal_lines" WHERE "entry_id" = $1', journalEntryId),
+  );
 };
 
 const tryUpdateLink = async (

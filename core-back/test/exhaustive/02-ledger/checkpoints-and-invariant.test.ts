@@ -11,6 +11,7 @@ import {
   verifyInvariant,
 } from "../_harness";
 import { createRow } from "../_dbFactory";
+import { withLedgerMaintenance } from "../../helpers/ledgerMaintenance";
 import {
   LedgerPoster,
   type LedgerAccountType,
@@ -66,14 +67,17 @@ const maxLineDate = async (accountId: string): Promise<Date> => {
 
 const cleanup = async (): Promise<void> => {
   await resetCheckpoints();
-  await db.$executeRawUnsafe(
-    'DELETE FROM "journal_lines" WHERE "entry_id" IN (SELECT "id" FROM "journal_entries" WHERE "ref_id" LIKE $1)',
-    `${PREFIX}%`,
-  );
-  await db.$executeRawUnsafe(
-    'DELETE FROM "journal_entries" WHERE "ref_id" LIKE $1',
-    `${PREFIX}%`,
-  );
+  // journal tables are append-only (GAP-013): fixture cleanup runs under the maintenance flag.
+  await withLedgerMaintenance(db, async (tx) => {
+    await tx.$executeRawUnsafe(
+      'DELETE FROM "journal_lines" WHERE "entry_id" IN (SELECT "id" FROM "journal_entries" WHERE "ref_id" LIKE $1)',
+      `${PREFIX}%`,
+    );
+    await tx.$executeRawUnsafe(
+      'DELETE FROM "journal_entries" WHERE "ref_id" LIKE $1',
+      `${PREFIX}%`,
+    );
+  });
   if (accountIds.length > 0) {
     await db.$executeRawUnsafe(
       `DELETE FROM "gl_account_shards" WHERE "gl_account_id" IN (${placeholders(accountIds.length)})`,
