@@ -42,12 +42,12 @@
 | `core-back/test/engine/suspense-settlement.test.ts` | 554 | 9 |
 | `core-back/test/engine/transform-pipeline.test.ts` | 225 | 33 |
 | `core-back/test/engine/visible-rails.test.ts` | 307 | 15 |
-| `core-back/test/exhaustive/01-schema/check-constraints-and-triggers.test.ts` | 314 | 15 |
+| `core-back/test/exhaustive/01-schema/check-constraints-and-triggers.test.ts` | 319 | 15 |
 | `core-back/test/exhaustive/01-schema/indexes-and-query-plans.test.ts` | 164 | 6 |
 | `core-back/test/exhaustive/01-schema/models-and-columns.test.ts` | 299 | 23 |
 | `core-back/test/exhaustive/01-schema/unique-and-fk-constraints.test.ts` | 321 | 15 |
 | `core-back/test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` | 228 | 8 |
-| `core-back/test/exhaustive/02-ledger/checkpoints-and-invariant.test.ts` | 231 | 6 |
+| `core-back/test/exhaustive/02-ledger/checkpoints-and-invariant.test.ts` | 235 | 6 |
 | `core-back/test/exhaustive/02-ledger/commission-hierarchy-and-bearers.test.ts` | 214 | 4 |
 | `core-back/test/exhaustive/02-ledger/property-fuzzer-10k.test.ts` | 215 | 2 |
 | `core-back/test/exhaustive/03-transforms-crypto/crypto-profiles-and-vault.test.ts` | 530 | 32 |
@@ -60,7 +60,7 @@
 | `core-back/test/exhaustive/05-api-matrix/admin-endpoints-rbac-fuzz.test.ts` | 392 | 18 |
 | `core-back/test/exhaustive/05-api-matrix/list-query-filters-all-27-endpoints.test.ts` | 304 | 4 |
 | `core-back/test/exhaustive/05-api-matrix/mtls-channel-isolation.test.ts` | 111 | 7 |
-| `core-back/test/exhaustive/06-concurrency/confirm-webhook-return-race.test.ts` | 208 | 4 |
+| `core-back/test/exhaustive/06-concurrency/confirm-webhook-return-race.test.ts` | 212 | 4 |
 | `core-back/test/exhaustive/06-concurrency/multi-node-workers-skip-locked.test.ts` | 181 | 5 |
 | `core-back/test/exhaustive/06-concurrency/single-and-multi-use-slot-races.test.ts` | 164 | 5 |
 | `core-back/test/exhaustive/07-workflows/onboarding-and-aml.test.ts` | 421 | 34 |
@@ -91,6 +91,7 @@
 | `core-back/test/kyb-review.test.ts` | 83 | 7 |
 | `core-back/test/list-query-keyset.test.ts` | 89 | 7 |
 | `core-back/test/list-query.test.ts` | 89 | 6 |
+| `core-back/test/load/ledger-load.ts` | 282 | 0 |
 | `core-back/test/merchant-operations.test.ts` | 57 | 4 |
 | `core-back/test/notifications-and-gl-accounts.test.ts` | 522 | 20 |
 | `core-back/test/onboarding-four-eyes.test.ts` | 200 | 18 |
@@ -247,7 +248,7 @@
 | `tests/unit/academy-progress-merge.test.ts` | 148 | 9 |
 | `tests/unit/authorities.test.ts` | 27 | 4 |
 | `tests/unit/checkout-redirect.test.ts` | 34 | 5 |
-| `tests/unit/frontend-security-admin.test.ts` | 177 | 19 |
+| `tests/unit/frontend-security-admin.test.ts` | 186 | 21 |
 | `tests/unit/frontend-security-checkout.test.ts` | 333 | 42 |
 | `tests/unit/frontend-security-merchant.test.ts` | 165 | 17 |
 | `tests/unit/global-search.test.ts` | 199 | 9 |
@@ -256,5 +257,5 @@
 | `tests/unit/guide-widgets.test.ts` | 221 | 25 |
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 
-- Total files: **251**
-- Total literal test declarations: **2543**
+- Total files: **252**
+- Total literal test declarations: **2545**
