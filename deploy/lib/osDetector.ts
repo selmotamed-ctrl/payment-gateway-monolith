@@ -30,7 +30,7 @@ export const detectHostOs = (runner: SshRunner, host: HostPlan): HostOs => {
 export const bootstrapPackagesCommand = (os: HostOs): string => {
   switch (os) {
     case "arch":
-      return "pacman -Sy --noconfirm --needed nginx rsync ufw curl ca-certificates nodejs npm unzip";
+      return "pacman -S --noconfirm --needed nginx rsync ufw curl ca-certificates nodejs npm unzip";
     case "debian":
       return "apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y nginx rsync ufw curl ca-certificates nodejs unzip";
     default:

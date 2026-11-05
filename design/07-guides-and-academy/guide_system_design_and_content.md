@@ -614,10 +614,10 @@ A request is **idempotent** if sending it twice has the same effect as sending i
 
 @@article id=b01-07 book=1 order=7 title="Secrets and trust: passwords, tokens, MFA, encryption, signatures, certificates" roles=ALL minutes=2 ui=AVAILABLE related=b11-02,b11-03,b06-06
 ### Passwords and MFA
-A **password** proves you know something. **MFA** (multi-factor authentication) adds a second proof, usually a six-digit code from an app on your phone. Both are required for every admin here.
+A **password** proves you know something. **MFA** (multi-factor authentication) adds a second proof, usually a six-digit code sent by SMS to the phone number registered on your account. Both are required for every admin here.
 
 ### One-time code (OTP)
-An **OTP** is a code valid once for a short time. Customers get OTPs by SMS to confirm a payment. Staff use OTPs for MFA.
+An **OTP** is a code valid once for a short time. Customers get OTPs by SMS to confirm a payment. Staff receive their MFA code by SMS as well.
 
 ### Token and API key
 A **token** or **API key** is a long secret string that lets a program prove who it is. It is a password for software. Anyone who has it can act as that program.
@@ -828,8 +828,8 @@ Three properties matter to everyone:
 
 @@article id=b03-01 book=3 order=1 title="Signing in, MFA, sessions, language and theme" roles=ALL minutes=1 ui=AVAILABLE related=b03-02,b11-03
 1. Open the Back Office address your manager gave you. It only works from the office network (or an approved VPN). If it does not open from home, that is intentional.
-2. Enter your e-mail and password. Then enter the six-digit **MFA** code from your authenticator app.
-3. Sessions are short on purpose. If you are signed out, sign in again; do not ask anyone to extend it.
+2. Enter your e-mail and password. Then enter the six-digit **MFA** code sent by SMS to the phone number registered on your account. If your account has no phone number, ask the Security Admin before your first sign-in.
+3. Sessions are short on purpose. Use **Sign out** when you finish: it ends the session on the server, not only in the browser. If you are signed out, sign in again; do not ask anyone to extend it.
 4. Language and theme controls are in the top bar. Switching language re-translates menu and screens immediately; Arabic is right-to-left. Numbers and money keep their meaning in both.
 
 :::danger Never
@@ -852,7 +852,7 @@ Your **role** is your job family. The seven staff roles are:
 | `SUPPORT` | read-only look at merchants, history and payment status; no money, no AML data |
 
 ### Authorities
-A role is only a label. What you can actually do is decided by your **authorities** — a list of specific permissions on your account. **An account with no authorities can do nothing**, whatever its role.
+A role is only a label. What you can actually do is decided by your **authorities** — a list of specific permissions on your account. **An account with no authorities can do nothing**, whatever its role. The authority list is closed: nobody can grant an authority they do not hold, and nobody can change their own account; both go through the approval flow.
 
 ### Maker and checker switches
 Two switches on your account decide whether you may *propose* sensitive changes (**maker**) and/or *decide* them (**checker**). Roles come with typical settings, but **your account's switches are what count**. You can never be both for the same request.
@@ -860,6 +860,9 @@ Two switches on your account decide whether you may *propose* sensitive changes 
 :::note How to find out what you can do
 Your menu only shows screens you may open. Buttons you cannot use are hidden or refused. If you need something you cannot see, ask your manager; the Security Admin changes permissions under two-person control.
 :::
+
+### The Admin Users screen
+`SECURITY_ADMIN` can list, invite, edit and disable staff accounts on **Admin Users**. Changing a role, an authority, a maker/checker flag or activating an account creates an approval for a different `SECURITY_ADMIN`; nobody can change their own account. The detail page shows the account's current authorities and its recent changes.
 @@end
 
 @@article id=b03-03 book=3 order=3 title="The menu, screen by screen" roles=ALL minutes=2 ui=AVAILABLE related=b03-05,b13-02
@@ -870,13 +873,19 @@ Your menu only shows screens you may open. Buttons you cannot use are hidden or 
 | Onboarding | **KYB Review** | check uploaded documents | COMPLIANCE, OPERATOR | [[a:b05-04]] |
 | Onboarding | **Merchants** | look up, edit, suspend, reinstate | OPERATOR, COMPLIANCE, SUPPORT (read) | [[a:b05-08]] |
 | Governance | **Approvals** | decide requests made by others | checkers | [[a:b04-03]] |
+| Governance | **Audit Log** | search and export the audit trail | SECURITY_ADMIN | [[a:b04-07]] |
+| Governance | **Admin Users** | staff accounts, roles, authorities, maker/checker flags | SECURITY_ADMIN | [[a:b03-02]] |
 | Governance | **AML Cases / Screenings / Rules / Reports** | the compliance program | COMPLIANCE, MLRO | Book 9 |
 | Operations | **Operator Cases** | stuck, conflicting or odd payments | OPERATOR | [[a:b07-04]] |
+| Operations | **Inquiry Schedule** | when the platform asks a partner for a payment's status | OPERATOR | [[a:b07-09]] |
 | Operations | **Disputes** | chargebacks and disputes | FINANCE | [[a:b08-09]] |
 | Operations | **Adjustments** | refunds, chargebacks, corrections | FINANCE | [[a:b08-08]] |
 | Operations | **Cash-Outs** | merchant payouts | FINANCE | [[a:b08-07]] |
 | Operations | **Reconciliation** | match partner statements to our books | FINANCE | [[a:b08-06]] |
+| Operations | **Backups** | backup engine, schedule, last backup and restore drill | SECURITY_ADMIN | [[a:b12-07]] |
+| Operations | **Platform Settings** | versioned platform settings, export and restore | SECURITY_ADMIN, GATEWAY_ADMIN | [[a:b12-07]] |
 | Operations | **Checkout Help** | the help payers see at checkout | admins | [[a:b07-10]] |
+| Finance | **Pricing & Limits** | commission profiles and velocity rules | FINANCE | [[a:b08-03]] |
 | Finance | **Profitability / Liquidity / Invariant** | profit, cash cover, ledger integrity | FINANCE | [[a:b08-11]] |
 | Gateways | **Gateways / Rails / Routes** | partner connections | GATEWAY_ADMIN | Book 6 |
 | Learning | **Interactive Guide / Employee Academy** | this guide and training | everyone | — |
@@ -949,20 +958,15 @@ Never try to "work around" a refusal by using another person's session, changing
 :::
 @@end
 
-@@article id=b03-08 book=3 order=8 title="Features that do not have a screen yet" roles=ALL minutes=2 ui=PARTIAL related=b04-05
-The design includes several controls that are **not yet available as Back Office screens**. When you meet one of these topics, you cannot do it yourself by clicking; here is who does it today.
+@@article id=b03-08 book=3 order=8 title="Features that are only partially available" roles=ALL minutes=1 ui=PARTIAL related=b04-05
+Almost every Back Office control now has a screen. One area is still partial:
 
-| Capability | Status | Who performs it now |
+| Capability | Status | What to do today |
 | :--- | :--- | :--- |
-| Creating or changing staff accounts, roles and authorities | no screen | Security Admin, through engineering tools under two-person control |
-| Commission profile creation and changes | no screen | Finance proposes; engineering applies through the approval flow |
-| Velocity rule changes | no screen | Finance/Compliance propose; engineering applies |
-| Searching the audit log | no screen | Security Admin via engineering tools |
-| Platform settings other than **Checkout Help** | no screen | engineering, under approval where the setting is sensitive |
-| Statement source creation (the columns of a partner statement) | partial | Finance chooses an existing source in **Reconciliation**; new sources through engineering |
+| Statement source creation (the columns of a partner statement) | partial | Finance edits an existing source in **Reconciliation**; a new source is created through engineering |
 
 :::note
-If the screens change, this article is updated. If an article elsewhere tells you to click something that is missing, treat it as this article's topic and ask.
+If a screen changes, this article is updated. If an article elsewhere tells you to click something that is missing, treat it as this article's topic and ask.
 :::
 @@end
 
@@ -1061,7 +1065,7 @@ An authorised user may suspend a merchant at once. The system creates a request 
 | Merchant suspension | OPERATOR, COMPLIANCE | emergency: immediate, ratified within 24 h by MLRO or another COMPLIANCE | merchant suspended |
 | Merchant reinstatement | OPERATOR, COMPLIANCE | COMPLIANCE or MLRO (different), never emergency | merchant active |
 | Gateway version going LIVE; credentials, routes, payout-bank edits | GATEWAY_ADMIN | SECURITY_ADMIN | version promoted, security alert |
-| Staff account / role / authority change | SECURITY_ADMIN | a different SECURITY_ADMIN | permissions updated, sessions revoked |
+| Staff account / role / authority change | SECURITY_ADMIN | a different SECURITY_ADMIN | permissions re-read on the next request; a disabled account is refused |
 | Compliance platform settings | COMPLIANCE, FINANCE | MLRO or SECURITY_ADMIN | new setting version |
 
 :::note
@@ -1086,7 +1090,7 @@ Passwords, OTPs, full card numbers, national ID numbers. And for AML matters, no
 :::
 @@end
 
-@@article id=b04-07 book=4 order=7 title="Audit trails: what is recorded about every action" roles=ALL minutes=1 ui=PARTIAL related=b04-06,b11-03
+@@article id=b04-07 book=4 order=7 title="Audit trails: what is recorded about every action" roles=ALL minutes=1 ui=AVAILABLE related=b04-06,b11-03
 Everything you do that changes something is recorded in three independent places:
 
 * **Audit log**: who (user and role), what action, which object, the state before and after, the linked approval request, when. Cannot be edited.
@@ -1096,7 +1100,7 @@ Everything you do that changes something is recorded in three independent places
 Payment activity has its own forensic trail: every outbound call to a partner is logged (secrets scrubbed) and every inbound webhook is stored *before* processing and never deleted.
 
 :::note Searching these logs
-A screen for searching the audit log is not yet available (article b03-08). Ask the Security Admin.
+The **Audit Log** screen lets `SECURITY_ADMIN` filter by actor, action, object and date and export the result. Ask the Security Admin if you need an audit extract.
 :::
 @@end
 
@@ -2201,6 +2205,9 @@ An **inquiry** asks the partner "what is the true status of this payment?" using
 2. **Bulk Inquiry** sends many calls. Use it after an outage, filtered to the affected route and period. Open [[c:sg-bulk-inquiry]].
 3. **Read the answer in the step log.** "Not found" is not the same as "failed". Many partners answer "not found" for a payment that is still being processed.
 
+### The Inquiry Schedule screen
+**Inquiry Schedule** lists the persisted automatic inquiries (scheduled, running, settled and stopped) with the attempt, route and next run. An operator can run one now, retry a failed, expired or cancelled inquiry, or cancel a schedule. These actions change the inquiry plan, not the payment attempt itself.
+
 ### Rails with no status question
 Some partners (some wallets, and some aggregator routes) offer **no way to ask**. For these:
 * an inquiry is impossible; the screen will say so;
@@ -2354,7 +2361,7 @@ Older design documents list ten account kinds. The code has eleven, because gate
 :::
 @@end
 
-@@article id=b08-03 book=8 order=3 title="Commission, fee bearers and rounding, with worked numbers" roles=FINANCE,OPERATOR,SUPPORT minutes=2 ui=PARTIAL related=b01-05,b08-04,b03-08
+@@article id=b08-03 book=8 order=3 title="Commission, fee bearers and rounding, with worked numbers" roles=FINANCE,OPERATOR,SUPPORT minutes=2 ui=AVAILABLE related=b01-05,b08-04
 ### Two separate fees
 * **Commission**: what we charge the merchant. Our revenue.
 * **Gateway fee**: what the payment company charges us. Our cost.
@@ -2387,8 +2394,8 @@ Money is stored with four decimal places. Commission is rounded using the profil
 ### Revenue is not recognised early
 Commission on money held by compliance is **not** counted as income until the hold is released.
 
-:::note Why this article is marked partial
-Commission profiles and velocity rules have no screen yet to create or change them (see [[a:b03-08]]). Finance proposes; engineering applies through the approval flow.
+:::note Where to change it
+Commission profiles and velocity rules are managed on the **Pricing & Limits** screen. Changes are versioned and go through the approval flow ([[a:b04-05]]).
 :::
 @@end
 
@@ -2478,7 +2485,7 @@ A payment company is another record-keeper. Our books say what *we* think happen
 A **statement source** describes where statements come from (`API`, `SFTP` or `UPLOAD`), how often, and how to read the file: format (CSV, XLSX or JSON), encoding, separator, which row has the headers, which column holds which field, the date format and the **time zone**. It also records the **settlement lag**, how many days the partner takes to pay us (for example T+2).
 
 ### Running it
-On the **Reconciliation** screen choose a source, choose or upload the file and use **Run File**. A live preview shows how the columns will be read before anything is matched. The same file cannot be loaded twice (its fingerprint is unique). Open the checklist [[c:sg-run-reconciliation]] first.
+On the **Reconciliation** screen choose a source, choose or upload the file and use **Run File**. A live preview shows how the columns will be read before anything is matched. The same file cannot be loaded twice for the same source; another source may load the same bytes, because each source keeps its own fingerprint. Open the checklist [[c:sg-run-reconciliation]] first.
 
 ### The results for each line
 | Result | Meaning | Usual action |
@@ -2790,7 +2797,7 @@ Each screening stores exactly which list versions were checked and a fingerprint
 When a list changes, all active subjects are re-screened. A new match on an active merchant opens a case and **restricts cash-out immediately**. Payments continue unless severity is `CRITICAL`.
 @@end
 
-@@article id=b09-04 book=9 order=4 title="Rules: velocity limits, AML rules and how they change" roles=COMPLIANCE,MLRO,FINANCE minutes=3 ui=PARTIAL related=b09-05,b04-05,b03-08
+@@article id=b09-04 book=9 order=4 title="Rules: velocity limits, AML rules and how they change" roles=COMPLIANCE,MLRO,FINANCE minutes=3 ui=AVAILABLE related=b09-05,b04-05
 ### Two different tools
 * **Velocity rules** limit *how often or how much* in a window: for example no more than N payments from one phone number in an hour. Action: `REJECT` (the attempt becomes `BLOCKED`) or `FLAG`. Velocity rules never move money.
 * **AML rules** look for suspicious *patterns or amounts*. Their actions can hold money or open cases.
@@ -2827,8 +2834,8 @@ Rules evaluate by *subject* (merchant, owner, payer identifier), so splitting a 
 ### Rule quality
 A rule whose precision falls (many holds that end in release) is flagged for retuning, so reviewers are not buried in noise.
 
-:::note Why this article is marked partial
-The **AML Rules** screen manages AML rules. **Velocity rules** have no screen yet; they are proposed by Finance or Compliance and applied by engineering ([[a:b03-08]]).
+:::note Where to change it
+The **AML Rules** screen manages AML rules. **Velocity rules** are managed on the **Pricing & Limits** screen. Both need a second person ([[a:b04-05]]).
 :::
 @@end
 
@@ -3225,7 +3232,7 @@ The layers protect against attackers who attack the system. You protect against 
 4. **Lock your screen** whenever you step away.
 5. **Do not sign in on shared or personal computers.**
 6. **Back Office only from the office network** (or the approved VPN).
-7. **Short sessions are normal.** Sign in again; do not ask for an extension.
+7. **Short sessions are normal.** Sign in again; do not ask for an extension. Use **Sign out** when you finish; it revokes the session on the server.
 8. **Report a lost device or a suspected leak** the same minute ([[a:b10-07]]).
 9. **Sensitive actions re-ask for sign-in** (for example creating an API token). This is protection, not a bug.
 @@end
@@ -3398,7 +3405,10 @@ Each deployment creates a dated release folder. A `current` link points to the r
 Because old releases remain, going back is switching the link and restarting. If the end-to-end check fails during deployment, this happens automatically.
 
 ### Backups
-Before database changes, a compressed backup is saved. Keep backups protected like production data.
+Before database changes, a compressed backup is saved. The **Backups** screen shows the engine, the schedule, the latest full and delta backups and the latest restore drill. `SECURITY_ADMIN` can start a backup or a drill and propose a policy change; a second person must approve the policy. A drill restores into an isolated scratch database and checks the ledger invariants without touching production. Keep backups protected like production data.
+
+### Platform settings
+**Platform Settings** lists every setting key with its versions and effective date. `SECURITY_ADMIN` can create or edit a setting, export a settings backup and preview a restore; sensitive changes go through approval. Payer-facing checkout copy stays on **Checkout Help** ([[a:b07-10]]).
 
 ### Health checks
 The tool checks: the core over mutual TLS, each edge service's health address, each edge's handshake with the core on its own channel, and each public address. Use these results before telling anyone the system is "up".
@@ -3681,7 +3691,7 @@ This is the *typical* pattern. Your account's own maker and checker switches and
 @@term slug=aml-confidential term="AML-confidential" aliases="confidential" ar="سري" related=tipping-off :: Data only Compliance, the MLRO and audit may see.
 @@term slug=cbl term="CBL" aliases="Central Bank of Libya" ar="مصرف ليبيا المركزي" related=aml :: The Central Bank of Libya, our regulator.
 @@term slug=retention term="Retention" aliases="record keeping" ar="الاحتفاظ بالسجلات" related=aml :: How long records must be kept.
-@@term slug=mfa term="MFA" aliases="multi-factor;2FA" ar="التحقق متعدد العوامل" related=otp :: A second proof of identity, usually a code from an app.
+@@term slug=mfa term="MFA" aliases="multi-factor;2FA" ar="التحقق متعدد العوامل" related=otp :: A second proof of identity, usually a six-digit code sent by SMS to your registered phone.
 @@term slug=phishing term="Phishing" aliases="social engineering" ar="التصيد" related=secret :: Tricking a person into giving away secrets or acting wrongly.
 @@term slug=runbook term="Runbook" aliases="RB" ar="دليل الإجراءات" related=incident :: A step-by-step procedure for a known incident.
 @@term slug=incident term="Incident" aliases="" ar="حادثة" related=runbook :: Anything threatening money, customers or trust.

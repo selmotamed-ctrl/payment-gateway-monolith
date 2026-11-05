@@ -2,7 +2,8 @@ import { dirname } from "node:path";
 import { parseNodeList, resolveBackupS3Mode, type DeployConfig } from "../lib/configSchema";
 import type { SshTarget } from "../lib/hostPlanner";
 import { envAssign, pgpassField, shellQuote } from "../lib/quoting";
-import { pgClusterFor, type ProvisionReport, type ProvisionRunner } from "./postgres18Provisioner";
+import { ensurePackagesScript, isChanged, outcomeBounced, pipPinnedGuard, type ApplyOutcome, type ProvisionRunner } from "../lib/converge";
+import { applyPgbouncer, applyPostgresCluster, isSameCluster, pgClusterFor, type ProvisionReport } from "./postgres18Provisioner";
 
 /**
  * Backup/PITR engine provisioning.
@@ -13,6 +14,9 @@ import { pgClusterFor, type ProvisionReport, type ProvisionRunner } from "./post
  */
 
 export type BackupTarget = "postgres_core" | "audit_db";
+
+/** Printed by the archive-config script: did ALTER SYSTEM change postgresql.auto.conf? */
+const ARCHIVE_MARKER = "__PG_ARCHIVE__=";
 
 const isAuditTarget = (target: BackupTarget | string): boolean =>
   target === "audit_db" || target === "audit";
@@ -174,7 +178,7 @@ export const walGInstallCommand = (config: DeployConfig): string => {
 
 /** Pinned barman install for distributions without the package (pacman path). */
 const barmanPipInstall = (config: DeployConfig): string =>
-  `python3 -m pip install --break-system-packages ${shellQuote(`barman==${config.BACKUP_BARMAN_VERSION}`)}`;
+  pipPinnedGuard("barman", config.BACKUP_BARMAN_VERSION, `python3 -m pip install --break-system-packages ${shellQuote(`barman==${config.BACKUP_BARMAN_VERSION}`)}`);
 
 export const walGEnvironment = (
   config: DeployConfig,
@@ -569,13 +573,13 @@ export const archiveCommandSql = (config: DeployConfig, target: BackupTarget | s
   `ALTER SYSTEM SET archive_command = '${archiveCommand(config, target).replace(/'/g, "''")}';`,
   `ALTER SYSTEM SET restore_command = '${restoreCommand(config, target).replace(/'/g, "''")}';`,
   `ALTER SYSTEM SET archive_timeout = '60s';`,
-  `SELECT pg_reload_conf();`,
+  // No pg_reload_conf() here: applyPostgresCluster reloads (and restarts only on
+  // pending_restart) when postgresql.auto.conf actually changed.
 ].join("\n");
 
 export const barmanStreamingSql = (): string => [
   `ALTER SYSTEM SET wal_level = 'replica';`,
   `ALTER SYSTEM SET archive_mode = 'off';`,
-  `SELECT pg_reload_conf();`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_replication_slots WHERE slot_name = 'barman') THEN PERFORM pg_create_physical_replication_slot('barman'); END IF; END $$;`,
 ].join("\n");
 
@@ -593,31 +597,45 @@ export interface BackupDaemonDeployment {
 
 export interface BackupProvisionReport extends ProvisionReport {
   daemon?: BackupDaemonDeployment;
+  /**
+   * True when the daemon's environment, systemd unit or archive environment
+   * changed. deployBackupDaemon restarts the daemon only then (or when the
+   * source changed or it is down): a restart can interrupt a running backup.
+   */
+  daemonConfigChanged: boolean;
 }
 
 export interface BackupProvisionInput {
   runner: ProvisionRunner;
   config: DeployConfig;
   dryRun?: boolean;
+  /** Restart every service even when nothing changed (`--force-restart`). */
+  forceRestart?: boolean;
 }
 
 export const provisionBackupEngine = (input: BackupProvisionInput): BackupProvisionReport => {
   const { runner, config } = input;
   const commands: string[] = [];
   const nodes: string[] = [];
+  const outcomes: Record<string, ApplyOutcome> = {};
+  const forceRestart = input.forceRestart === true;
   const ssh = backupSsh(config);
-  if (!ssh) return { commands, nodes };
+  if (!ssh) return { commands, nodes, outcomes, daemonConfigChanged: false };
   const spec = backupSpec(config);
+  let daemonConfigChanged = false;
+  const writeTracked = (input: { target: SshTarget; path: string; content: string; mode: number }): boolean => {
+    const changed = isChanged(runner.writeRemoteFile({ ...input, sudo: true }));
+    if (changed) daemonConfigChanged = true;
+    return changed;
+  };
 
   nodes.push(ssh.host);
   for (const command of [
-    `if command -v apt-get >/dev/null 2>&1; then
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y barman zstd lz4 brotli xz-utils rclone curl ca-certificates
-elif command -v pacman >/dev/null 2>&1; then
-  pacman -Sy --noconfirm zstd lz4 brotli xz rclone curl ca-certificates python-pip
-  ${barmanPipInstall(config)}
-fi`,
+    ensurePackagesScript({
+      debian: ["barman", "zstd", "lz4", "brotli", "xz-utils", "rclone", "curl", "ca-certificates"],
+      arch: ["zstd", "lz4", "brotli", "xz", "rclone", "curl", "ca-certificates", "python-pip"],
+      after: `if ! command -v apt-get >/dev/null 2>&1 && command -v pacman >/dev/null 2>&1; then ${barmanPipInstall(config)}; fi`,
+    }),
     ...(config.BACKUP_ENGINE_MODE === "wal-g" ? [walGInstallCommand(config)] : []),
     "id -u pgbackup >/dev/null 2>&1 || useradd --system --home /var/lib/pg-backup --shell /usr/sbin/nologin pgbackup",
     "usermod -aG pgbackup postgres 2>/dev/null || true",
@@ -630,33 +648,30 @@ fi`,
     runner.run(ssh, command, { sudo: true });
   }
 
-  runner.writeRemoteFile({
+  writeTracked({
     target: ssh,
     path: "/etc/pg-backup/backup.env",
     content: renderEnvFile(backupDaemonEnv(config)),
     mode: 0o600,
-    sudo: true,
   });
   for (const [envPath, target] of [
     ["/etc/pg-backup/wal-g-core.env", "postgres_core"],
     ["/etc/pg-backup/wal-g-audit.env", "audit_db"],
   ] as const) {
-    runner.writeRemoteFile({
+    writeTracked({
       target: ssh,
       path: envPath,
       content: renderEnvFile(walGEnvironment(config, target)),
       mode: 0o640,
-      sudo: true,
     });
     // restore_command (run by the scratch postgres as user postgres) sources these files.
     runner.run(ssh, `chown root:${backupDaemonUser(config)} ${envPath} && chmod 0640 ${envPath}`, { sudo: true });
   }
-  runner.writeRemoteFile({
+  writeTracked({
     target: ssh,
     path: "/etc/systemd/system/pg-backup-daemon.service",
     content: backupDaemonSystemdUnit(config),
     mode: 0o644,
-    sudo: true,
   });
   runner.writeRemoteFile({
     target: ssh,
@@ -723,13 +738,11 @@ fi`,
           walGInstallCommand(config),
         ]
       : [
-          `if command -v apt-get >/dev/null 2>&1; then
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y barman
-elif command -v pacman >/dev/null 2>&1; then
-  pacman -Sy --noconfirm python-pip
-  ${barmanPipInstall(config)}
-fi`,
+          ensurePackagesScript({
+            debian: ["barman"],
+            arch: ["python-pip"],
+            after: `if ! command -v apt-get >/dev/null 2>&1 && command -v pacman >/dev/null 2>&1; then ${barmanPipInstall(config)}; fi`,
+          }),
         ];
     for (const command of commandsForHost) {
       commands.push(command);
@@ -737,7 +750,40 @@ fi`,
     }
   };
 
+  /**
+   * Applies archive_mode / archive_command to a cluster. The ALTER SYSTEM SQL is
+   * idempotent; the cluster is reloaded and restarted ONLY when a setting is
+   * actually `pending_restart` (archive_mode off -> on, the first deploy).
+   */
+  const applyArchiveConfig = (input: {
+    target: SshTarget;
+    archiveDir: string;
+    sql: string;
+    port: number;
+    database: string;
+    cluster: ReturnType<typeof pgClusterFor> | null;
+  }): ApplyOutcome => {
+    const archivePath = `${input.archiveDir}/archive.sql`;
+    runner.run(input.target, `install -d -m 0700 -o postgres -g postgres ${shellQuote(input.archiveDir)}`, { sudo: true });
+    runner.writeRemoteFile({ target: input.target, path: archivePath, content: `${input.sql}\n`, mode: 0o600, sudo: true });
+    // ALTER SYSTEM rewrites postgresql.auto.conf with identical bytes when the
+    // values already match, so hashing it before/after tells us whether the
+    // archive settings really changed (and thus whether a reload is needed).
+    const autoConf = input.cluster ? shellQuote(`${input.cluster.dataDir}/postgresql.auto.conf`) : null;
+    const hash = autoConf ? `$(sha256sum ${autoConf} 2>/dev/null | cut -d' ' -f1)` : "none";
+    const command = `chown postgres:postgres ${shellQuote(archivePath)}; trap ${shellQuote(`rm -rf ${shellQuote(input.archiveDir)}`)} EXIT; before=${hash}; runuser -u postgres -- psql -p ${input.port} -v ON_ERROR_STOP=1 -d ${shellQuote(input.database)} -f ${shellQuote(archivePath)} || exit $?; after=${hash}; if [ "$before" = "$after" ]; then echo ${ARCHIVE_MARKER}unchanged; else echo ${ARCHIVE_MARKER}changed; fi`;
+    commands.push(command);
+    const archiveChanged = !String(runner.capture(input.target, command, { sudo: true })).includes(`${ARCHIVE_MARKER}unchanged`);
+    if (!input.cluster) {
+      commands.push("systemctl reload postgresql");
+      runner.run(input.target, "systemctl reload postgresql || true", { sudo: true });
+      return "reloaded";
+    }
+    return applyPostgresCluster({ runner, ssh: input.target, cluster: input.cluster, changed: archiveChanged, force: forceRestart, commands, outcomes });
+  };
+
   const primary = pgSsh(config);
+  let clusterBounced = false;
   if (primary && (config.PG_MANAGE_VIA_SSH || config.BACKUP_ENABLED)) {
     installArchiveClient(primary);
     if (config.BACKUP_ENGINE_MODE === "wal-g") {
@@ -746,28 +792,16 @@ fi`,
     const archiveSql = config.BACKUP_ENGINE_MODE === "barman"
       ? barmanStreamingSql()
       : archiveCommandSql(config, "postgres_core");
-    const archiveDir = `/var/lib/postgresql/.pg-archive-config-${process.pid}`;
-    const archivePath = `${archiveDir}/archive.sql`;
-    runner.run(primary, `install -d -m 0700 -o postgres -g postgres ${shellQuote(archiveDir)}`, { sudo: true });
-    runner.writeRemoteFile({ target: primary, path: archivePath, content: `${archiveSql}\n`, mode: 0o600, sudo: true });
     const primarySpec = parseNodeList(config.PG_PRIMARY_NODE)[0];
-    const primaryPort = primarySpec?.servicePort ?? 5432;
-    const command = `chown postgres:postgres ${shellQuote(archivePath)}; trap ${shellQuote(`rm -rf ${shellQuote(archiveDir)}`)} EXIT; runuser -u postgres -- psql -p ${primaryPort} -v ON_ERROR_STOP=1 -d ${shellQuote(config.PG_DB_NAME)} -f ${shellQuote(archivePath)}`;
-    commands.push(command);
-    runner.run(primary, command, { sudo: true });
-    const primaryService = primarySpec ? pgClusterFor(config, "primary", primarySpec).service : "postgresql";
-    commands.push(`systemctl restart ${primaryService}`);
-    runner.run(primary, `systemctl restart ${primaryService}`, { sudo: true });
-    const primaryReady = `for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p ${primaryPort} >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`;
-    commands.push(primaryReady);
-    runner.run(primary, primaryReady, { sudo: true });
-    if (config.PGBOUNCER_ENABLED) {
-      commands.push("systemctl restart pgbouncer");
-      runner.run(primary, "systemctl restart pgbouncer || true", { sudo: true });
-      const poolerReady = `for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p ${config.PGBOUNCER_PORT} >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`;
-      commands.push(poolerReady);
-      runner.run(primary, poolerReady, { sudo: true });
-    }
+    const outcome = applyArchiveConfig({
+      target: primary,
+      archiveDir: `/var/lib/postgresql/.pg-archive-config-${process.pid}`,
+      sql: archiveSql,
+      port: primarySpec?.servicePort ?? 5432,
+      database: config.PG_DB_NAME,
+      cluster: primarySpec ? pgClusterFor(config, "primary", primarySpec) : null,
+    });
+    clusterBounced = clusterBounced || outcomeBounced(outcome);
     runner.writeRemoteFile({
       target: primary,
       path: "/etc/cron.d/pg-journal-partitions",
@@ -783,41 +817,53 @@ fi`,
     if (config.BACKUP_ENGINE_MODE === "wal-g") {
       writeWalGEnvironment(audit, walGEnvFile("audit_db"), "audit_db");
     }
-    const archiveSql = config.BACKUP_ENGINE_MODE === "barman"
-      ? barmanStreamingSql()
-      : archiveCommandSql(config, "audit_db");
-    const auditDir = `/var/lib/postgresql/.pg-audit-archive-config-${process.pid}`;
-    const auditPath = `${auditDir}/archive.sql`;
-    runner.run(audit, `install -d -m 0700 -o postgres -g postgres ${shellQuote(auditDir)}`, { sudo: true });
-    runner.writeRemoteFile({ target: audit, path: auditPath, content: `${archiveSql}\n`, mode: 0o600, sudo: true });
     const auditSpec = parseNodeList(config.AUDIT_DB_NODE)[0];
-    const auditPort = auditSpec?.servicePort ?? 5432;
-    const command = `chown postgres:postgres ${shellQuote(auditPath)}; trap ${shellQuote(`rm -rf ${shellQuote(auditDir)}`)} EXIT; runuser -u postgres -- psql -p ${auditPort} -v ON_ERROR_STOP=1 -d ${shellQuote(config.AUDIT_DB_NAME)} -f ${shellQuote(auditPath)}`;
-    commands.push(command);
-    runner.run(audit, command, { sudo: true });
-    const auditService = auditSpec ? pgClusterFor(config, "audit", auditSpec).service : "postgresql";
-    commands.push(`systemctl restart ${auditService}`);
-    runner.run(audit, `systemctl restart ${auditService}`, { sudo: true });
-    const auditReady = `for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p ${auditPort} >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`;
-    commands.push(auditReady);
-    runner.run(audit, auditReady, { sudo: true });
+    // Audit living inside the core cluster (same host and port) shares ONE WAL
+    // stream. Re-pointing archive_command at the audit prefix here would undo
+    // the core setting above and flip it on every deploy, so the core target
+    // owns the stream and the audit step leaves the cluster alone.
+    if (isSameCluster(parseNodeList(config.PG_PRIMARY_NODE)[0], auditSpec) && primary) {
+      commands.push("audit_db shares the primary cluster: archive_command stays owned by the postgres_core target");
+    } else {
+      const archiveSql = config.BACKUP_ENGINE_MODE === "barman"
+        ? barmanStreamingSql()
+        : archiveCommandSql(config, "audit_db");
+      const outcome = applyArchiveConfig({
+        target: audit,
+        archiveDir: `/var/lib/postgresql/.pg-audit-archive-config-${process.pid}`,
+        sql: archiveSql,
+        port: auditSpec?.servicePort ?? 5432,
+        database: config.AUDIT_DB_NAME,
+        cluster: auditSpec ? pgClusterFor(config, "audit", auditSpec) : null,
+      });
+      clusterBounced = clusterBounced || outcomeBounced(outcome);
+    }
   }
 
-  // The audit target can share the primary cluster, so its archive restart may
-  // have happened after the earlier PgBouncer restart. Restart the pooler last
-  // and clear any cached "database system is shutting down" login failure
-  // before the core release runs migrations through PgBouncer.
-  if (primary && config.PGBOUNCER_ENABLED) {
-    commands.push("systemctl restart pgbouncer");
-    runner.run(primary, "systemctl restart pgbouncer || true", { sudo: true });
-    const poolerReady = `for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p ${config.PGBOUNCER_PORT} >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`;
-    commands.push(poolerReady);
-    runner.run(primary, poolerReady, { sudo: true });
+  // PgBouncer only needs attention when a cluster behind it was restarted: its
+  // server connections are gone and a cached "database system is shutting down"
+  // login failure would otherwise linger before core runs migrations through
+  // it. It used to be restarted twice, unconditionally (2 x 90 s on a pool with
+  // live clients).
+  if (primary && config.PGBOUNCER_ENABLED && clusterBounced) {
+    const primarySpec = parseNodeList(config.PG_PRIMARY_NODE)[0];
+    applyPgbouncer({
+      runner,
+      ssh: primary,
+      config,
+      serverPort: primarySpec?.servicePort ?? 5432,
+      upstreamBounced: true,
+      force: forceRestart,
+      commands,
+      outcomes,
+    });
   }
 
   return {
     commands,
     nodes,
+    outcomes,
+    daemonConfigChanged,
     daemon: {
       nodeId: spec?.nodeId,
       sshHost: ssh.host,

@@ -1,6 +1,8 @@
 import { parseNodeList, type DeployConfig } from "../lib/configSchema";
 import type { SshTarget } from "../lib/hostPlanner";
 import { dollarTag, shellQuote, sqlIdent, sqlLiteral } from "../lib/quoting";
+import { applyPostgresCluster, isSameCluster } from "./postgres18Provisioner";
+import { isChanged, type ApplyOutcome } from "../lib/converge";
 import { bootstrapCommands, pgClusterFor, pgHbaSnippet, postgresMainConfigPath, postgresMainConfigSnippet, type PgCluster, type ProvisionReport, type ProvisionRunner } from "./postgres18Provisioner";
 
 /**
@@ -360,6 +362,8 @@ export interface AuditLogProvisionInput {
   config: DeployConfig;
   dryRun?: boolean;
   now?: Date;
+  /** Restart even when nothing changed (`--force-restart`). */
+  forceRestart?: boolean;
 }
 
 const auditLogConfigSnippet = (): string => `listen_addresses = '*'
@@ -374,36 +378,52 @@ const allowedAuditLogSources = (config: DeployConfig): string[] => [
   ...parseNodeList(config.BACKUP_NODE).map((node) => node.privateIp),
 ];
 
+/**
+ * True when the audit/log node is the very cluster the PostgreSQL tier already
+ * manages (same host and port, e.g. everything co-located on 5432). That tier
+ * owns the cluster's postgresql.conf and pg_hba.conf (its source list is a
+ * superset of the audit/log one), so rewriting them here would flip-flop the
+ * file on every deploy and reload or restart the cluster a second time.
+ */
+const sharesManagedPrimary = (config: DeployConfig, spec: { sshHost: string; servicePort: number }): boolean => {
+  if (!config.PG_MANAGE_VIA_SSH) return false;
+  return isSameCluster(parseNodeList(config.PG_PRIMARY_NODE)[0], spec);
+};
+
 const configureAuditLogHost = (
   runner: ProvisionRunner,
   ssh: SshTarget,
   config: DeployConfig,
   cluster: PgCluster,
   privateIp: string,
+  options: { shared: boolean; force?: boolean; commands: string[]; outcomes: Record<string, ApplyOutcome> },
 ): void => {
-  runner.writeRemoteFile({
-    target: ssh,
-    path: postgresMainConfigPath(config, cluster),
-    content: postgresMainConfigSnippet(config, cluster, privateIp),
-    mode: 0o644,
-    sudo: true,
-  });
-  runner.writeRemoteFile({
-    target: ssh,
-    path: cluster.hbaPath,
-    content: pgHbaSnippet(config, allowedAuditLogSources(config)),
-    mode: 0o640,
-    sudo: true,
-  });
-  runner.run(ssh, `chown postgres:postgres ${cluster.hbaPath} && chmod 0640 ${cluster.hbaPath}`, { sudo: true });
-  runner.run(ssh, `systemctl restart ${cluster.service}`, { sudo: true });
-  runner.run(ssh, `for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p ${cluster.port} >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`, { sudo: true });
+  let changed = false;
+  if (!options.shared) {
+    changed = isChanged(runner.writeRemoteFile({
+      target: ssh,
+      path: postgresMainConfigPath(config, cluster),
+      content: postgresMainConfigSnippet(config, cluster, privateIp),
+      mode: 0o644,
+      sudo: true,
+    })) || changed;
+    changed = isChanged(runner.writeRemoteFile({
+      target: ssh,
+      path: cluster.hbaPath,
+      content: pgHbaSnippet(config, allowedAuditLogSources(config)),
+      mode: 0o640,
+      sudo: true,
+    })) || changed;
+    runner.run(ssh, `chown postgres:postgres ${cluster.hbaPath} && chmod 0640 ${cluster.hbaPath}`, { sudo: true });
+  }
+  applyPostgresCluster({ runner, ssh, cluster, changed, force: options.force, commands: options.commands, outcomes: options.outcomes });
 };
 
 export const provisionAuditAndLogDb = (input: AuditLogProvisionInput): ProvisionReport => {
   const { runner, config } = input;
   const commands: string[] = [];
   const nodes: string[] = [];
+  const outcomes: Record<string, ApplyOutcome> = {};
   const install = (cluster: PgCluster) => bootstrapCommands(config, "replica", cluster);
   const auditSpec = parseNodeList(config.AUDIT_DB_NODE)[0];
   if (auditSpec && config.AUDIT_DB_MANAGE_VIA_SSH) {
@@ -414,7 +434,7 @@ export const provisionAuditAndLogDb = (input: AuditLogProvisionInput): Provision
       commands.push(command);
       runner.run(ssh, command, { sudo: true });
     }
-    configureAuditLogHost(runner, ssh, config, cluster, auditSpec.privateIp);
+    configureAuditLogHost(runner, ssh, config, cluster, auditSpec.privateIp, { shared: sharesManagedPrimary(config, auditSpec), force: input.forceRestart, commands, outcomes });
     const repoPath = `/var/lib/postgresql/.pg-audit-bootstrap-${process.pid}/script.sql`;
     applySql(runner, ssh, repoPath, repositorySql(config, "audit"), config, "postgres", cluster.port);
     const ddlPath = `/var/lib/postgresql/.pg-audit-ddl-${process.pid}/script.sql`;
@@ -430,7 +450,7 @@ export const provisionAuditAndLogDb = (input: AuditLogProvisionInput): Provision
       commands.push(command);
       runner.run(ssh, command, { sudo: true });
     }
-    configureAuditLogHost(runner, ssh, config, cluster, logSpec.privateIp);
+    configureAuditLogHost(runner, ssh, config, cluster, logSpec.privateIp, { shared: sharesManagedPrimary(config, logSpec), force: input.forceRestart, commands, outcomes });
     const repoPath = `/var/lib/postgresql/.pg-log-bootstrap-${process.pid}/script.sql`;
     applySql(runner, ssh, repoPath, repositorySql(config, "log"), config, "postgres", cluster.port);
     const ddlPath = `/var/lib/postgresql/.pg-log-ddl-${process.pid}/script.sql`;
@@ -439,5 +459,5 @@ export const provisionAuditAndLogDb = (input: AuditLogProvisionInput): Provision
     runner.writeRemoteFile({ target: ssh, path: cronPath, content: `${logPartitionCronLine(config)}\n`, mode: 0o644, sudo: true });
     commands.push(`install ${cronPath}`);
   }
-  return { commands, nodes };
+  return { commands, nodes, outcomes };
 };

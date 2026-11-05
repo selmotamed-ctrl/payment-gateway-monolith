@@ -249,8 +249,11 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
   // Replicas are read directly on their own PostgreSQL port. Routing them
   // through a single PgBouncer port would point every co-located replica back
   // at the primary and silently defeat read scaling.
+  // pg_hba.conf of a deploy-managed cluster has only `hostssl` rules (GAP-022),
+  // so every direct (not PgBouncer-fronted) connection must negotiate TLS.
+  const pgManaged = config.PG_MANAGE_VIA_SSH;
   const replicaUrls = replicas.map((node) =>
-    `postgresql://${encodeURIComponent(database.user)}:${encodeURIComponent(database.password)}@${node.privateIp}:${node.servicePort}/${database.name}`,
+    `postgresql://${encodeURIComponent(database.user)}:${encodeURIComponent(database.password)}@${node.privateIp}:${node.servicePort}/${database.name}${directTlsQuery(pgManaged)}`,
   );
   return {
     ...(primary ? {
@@ -268,8 +271,8 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
     PGBOUNCER_MAX_CLIENT_CONN: String(config.PGBOUNCER_MAX_CLIENT_CONN),
     PGBOUNCER_MAX_PREPARED_STATEMENTS: String(config.PGBOUNCER_MAX_PREPARED_STATEMENTS),
     ...(replicaUrls.length > 0 ? { DATABASE_REPLICA_URLS: replicaUrls.join(",") } : {}),
-    ...(config.AUDIT_DB_NODE ? { AUDIT_DATABASE_URL: `postgresql://${encodeURIComponent(config.AUDIT_DB_USER)}:${encodeURIComponent(config.AUDIT_DB_PASSWORD)}@${parseNodeList(config.AUDIT_DB_NODE)[0]?.privateIp}:${parseNodeList(config.AUDIT_DB_NODE)[0]?.servicePort}/${config.AUDIT_DB_NAME}` } : {}),
-    ...(config.LOG_DB_NODE ? { LOG_DATABASE_URL: `postgresql://${encodeURIComponent(config.LOG_DB_USER)}:${encodeURIComponent(config.LOG_DB_PASSWORD)}@${parseNodeList(config.LOG_DB_NODE)[0]?.privateIp}:${parseNodeList(config.LOG_DB_NODE)[0]?.servicePort}/${config.LOG_DB_NAME}` } : {}),
+    ...(config.AUDIT_DB_NODE ? { AUDIT_DATABASE_URL: `postgresql://${encodeURIComponent(config.AUDIT_DB_USER)}:${encodeURIComponent(config.AUDIT_DB_PASSWORD)}@${parseNodeList(config.AUDIT_DB_NODE)[0]?.privateIp}:${parseNodeList(config.AUDIT_DB_NODE)[0]?.servicePort}/${config.AUDIT_DB_NAME}${directTlsQuery(config.AUDIT_DB_MANAGE_VIA_SSH)}` } : {}),
+    ...(config.LOG_DB_NODE ? { LOG_DATABASE_URL: `postgresql://${encodeURIComponent(config.LOG_DB_USER)}:${encodeURIComponent(config.LOG_DB_PASSWORD)}@${parseNodeList(config.LOG_DB_NODE)[0]?.privateIp}:${parseNodeList(config.LOG_DB_NODE)[0]?.servicePort}/${config.LOG_DB_NAME}${directTlsQuery(config.LOG_DB_MANAGE_VIA_SSH)}` } : {}),
     ...(config.BACKUP_ENABLED ? {
       BACKUP_DAEMON_URL: `https://${backupPrivateIp(config) ?? "127.0.0.1"}:${config.BACKUP_DAEMON_PORT}`,
       BACKUP_DAEMON_CA_CERT_PATH: "shared/certs/internal-ca.crt",
@@ -278,6 +281,15 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
     } : {}),
   };
 };
+
+/**
+ * Query string for a direct PostgreSQL connection to a deploy-managed cluster.
+ * The server certificate is self-signed per cluster, so `no-verify` (encrypt,
+ * do not verify) is the mode node-postgres understands for that posture;
+ * `require` would reject the certificate. Externally managed databases keep
+ * the operator's URL untouched.
+ */
+export const directTlsQuery = (managedByDeploy: boolean): string => (managedByDeploy ? "?sslmode=no-verify" : "");
 
 const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> => {
   const database = effectiveDatabase(config);

@@ -1,11 +1,14 @@
 import { parseNodeList, type DeployConfig } from "../lib/configSchema";
+import { ensurePackagesScript, isChanged, parseApplyOutcome, redisApplyScript, redisUnitDetectScript, type ApplyOutcome, type ProvisionRunner } from "../lib/converge";
 import type { SshTarget } from "../lib/hostPlanner";
-import type { ProvisionReport, ProvisionRunner } from "./postgres18Provisioner";
+import type { ProvisionReport } from "./postgres18Provisioner";
 
 export interface RedisProvisionInput {
   runner: ProvisionRunner;
   config: DeployConfig;
   dryRun?: boolean;
+  /** Restart even when nothing changed (`--force-restart`). */
+  forceRestart?: boolean;
 }
 
 const nodeSsh = (config: DeployConfig, spec: { sshHost: string; sshPort: number }): SshTarget => ({
@@ -61,70 +64,53 @@ export const provisionRedis = (input: RedisProvisionInput): ProvisionReport => {
   const { runner, config } = input;
   const commands: string[] = [];
   const nodes: string[] = [];
+  const outcomes: Record<string, ApplyOutcome> = {};
   for (const spec of parseNodeList(config.REDIS_NODES)) {
     const ssh = nodeSsh(config, spec);
     nodes.push(spec.privateIp);
     for (const command of [
-      `if command -v apt-get >/dev/null 2>&1; then
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server
-elif command -v pacman >/dev/null 2>&1; then
-  pacman -Sy --noconfirm valkey
-fi
-install -d -m 0750 /var/lib/pg-redis && (chown redis:redis /var/lib/pg-redis 2>/dev/null || chown valkey:valkey /var/lib/pg-redis 2>/dev/null || true)
-systemctl enable --now redis-server 2>/dev/null || systemctl enable --now valkey 2>/dev/null || true`,
+      `${ensurePackagesScript({ debian: ["redis-server"], arch: ["valkey"] })}
+install -d -m 0750 /var/lib/pg-redis && (chown redis:redis /var/lib/pg-redis 2>/dev/null || chown valkey:valkey /var/lib/pg-redis 2>/dev/null || true)`,
     ]) {
       commands.push(command);
       runner.run(ssh, command, { sudo: true });
     }
+    // Which unit does this host actually run? Only that flavour's files decide
+    // whether a restart is needed; the other flavour's files are written for
+    // portability but must not trigger a restart of an unrelated service.
+    const detected = String(runner.capture(ssh, redisUnitDetectScript(), { sudo: false })).trim();
+    const unit = detected || "redis-server";
     const snippet = redisConfigSnippet(config, spec.privateIp, spec.servicePort);
-    runner.writeRemoteFile({
-      target: ssh,
-      path: "/etc/redis/redis.conf.d/zz-pg-switch.conf",
-      content: snippet,
-      mode: 0o640,
-      sudo: true,
-    });
-    // Debian's redis.conf includes /etc/redis/redis.conf.d only on newer builds;
-    // write the effective file too so the bind/requirepass always apply.
-    runner.writeRemoteFile({
-      target: ssh,
-      path: "/etc/redis/redis.conf",
-      content: snippet,
-      mode: 0o640,
-      sudo: true,
-    });
-    // Arch's valkey package reads /etc/valkey/valkey.conf.
-    runner.writeRemoteFile({
-      target: ssh,
-      path: "/etc/valkey/valkey.conf",
-      content: snippet,
-      mode: 0o640,
-      sudo: true,
-    });
-    for (const unit of ["redis-server", "valkey"]) {
-      runner.writeRemoteFile({
-        target: ssh,
-        path: `/etc/systemd/system/${unit}.service.d/zz-pg-switch.conf`,
-        content: redisSystemdDropIn(),
-        mode: 0o644,
-        sudo: true,
-      });
-    }
+    const write = (path: string, content: string, mode: number): boolean =>
+      isChanged(runner.writeRemoteFile({ target: ssh, path, content, mode, sudo: true }));
+    const confChanged = [
+      write("/etc/redis/redis.conf.d/zz-pg-switch.conf", snippet, 0o640),
+      // Debian's redis.conf includes /etc/redis/redis.conf.d only on newer builds;
+      // write the effective file too so the bind/requirepass always apply.
+      write("/etc/redis/redis.conf", snippet, 0o640),
+      // Arch's valkey package reads /etc/valkey/valkey.conf.
+      write("/etc/valkey/valkey.conf", snippet, 0o640),
+    ];
+    const dropInChanged = ["redis-server", "valkey"].map((flavour) =>
+      write(`/etc/systemd/system/${flavour}.service.d/zz-pg-switch.conf`, redisSystemdDropIn(), 0o644),
+    );
+    const relevantConf = unit === "valkey" ? confChanged[2]! : confChanged[0]! || confChanged[1]!;
+    const relevantDropIn = unit === "valkey" ? dropInChanged[1]! : dropInChanged[0]!;
     for (const command of redisFirewallCommands(config, spec.servicePort)) {
       commands.push(command);
       runner.run(ssh, command, { sudo: true });
     }
     runner.run(ssh, "chown root:redis /etc/redis/redis.conf 2>/dev/null || chown root:valkey /etc/redis/redis.conf 2>/dev/null || true; chown root:redis /etc/valkey/valkey.conf 2>/dev/null || chown root:valkey /etc/valkey/valkey.conf 2>/dev/null || true", { sudo: true });
     const auth = config.REDIS_PASSWORD ? `REDISCLI_AUTH=${shellQuote(config.REDIS_PASSWORD)} ` : "";
-    const ping = `${auth}redis-cli -p ${spec.servicePort} PING`;
-    // Disable save-on-shutdown on the currently running instance before the
-    // restart. An instance started under the distro sandbox with a read-only
-    // dir refuses to exit when its shutdown save fails, which would hang
-    // systemctl with TimeoutStopSec=0. The new config restores saving.
-    const restart = `systemctl daemon-reload; ${auth}redis-cli -p ${spec.servicePort} CONFIG SET save "" >/dev/null 2>&1 || true; systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || systemctl restart valkey 2>/dev/null || true; sleep 1; ${ping}`;
-    commands.push(restart);
-    runner.run(ssh, restart, { sudo: true });
+    const script = redisApplyScript({
+      unit,
+      port: spec.servicePort,
+      auth,
+      changed: input.forceRestart === true || relevantConf || relevantDropIn,
+      daemonReload: relevantDropIn,
+    });
+    commands.push(script);
+    outcomes[`${ssh.host}:${unit}`] = parseApplyOutcome(String(runner.capture(ssh, script, { sudo: true, timeoutMs: 5 * 60_000 })));
   }
-  return { commands, nodes };
+  return { commands, nodes, outcomes };
 };

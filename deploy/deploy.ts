@@ -5,11 +5,13 @@ import { join, resolve } from "node:path";
 import { effectiveDatabase, loadDeployConfig, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
 import { buildPki, certFilesForHost, readMaterial, verifyPki } from "./lib/pkiManager";
-import { effectiveTargetHome, effectiveTargetUser, SshRunner, shellQuote } from "./lib/sshRunner";
+import { collectSecretValues, effectiveTargetHome, effectiveTargetUser, SshRunner, shellQuote } from "./lib/sshRunner";
 import { dollarTag, pgpassField, sqlIdent, sqlLiteral } from "./lib/quoting";
 import { applyFirewall, readFirewallStatus } from "./lib/firewallConfigurator";
 import { probeCoreService, probeEdgeService, renderVerification, verifyDeployment } from "./lib/healthVerifier";
 import { bootstrapPackagesCommand, detectHostOs } from "./lib/osDetector";
+import { parseApplyOutcome } from "./lib/converge";
+import { startFrontendBuilds, type FrontendBuildHandle } from "./lib/frontendBuild";
 import { provisionPostgres18 } from "./provisioners/postgres18Provisioner";
 import { provisionRedis } from "./provisioners/redisProvisioner";
 import { provisionAuditAndLogDb } from "./provisioners/auditAndLogDbProvisioner";
@@ -45,6 +47,10 @@ interface CliOptions {
   skipBuild: boolean;
   skipVerify: boolean;
   rotateCerts: boolean;
+  /** Restart PostgreSQL/PgBouncer/Redis/the backup daemon even when nothing changed. */
+  forceRestart: boolean;
+  /** Ignore the frontend build cache and rebuild every SPA. */
+  rebuild: boolean;
   keepReleases?: number;
   rollingBatch?: number;
   nodes?: Set<string>;
@@ -75,6 +81,8 @@ const parseArgs = (argv: string[]): CliOptions => {
     skipBuild: false,
     skipVerify: false,
     rotateCerts: false,
+    forceRestart: false,
+    rebuild: false,
   };
   for (const raw of argv) {
     if (raw === "--dry-run") options.dryRun = true;
@@ -85,6 +93,8 @@ const parseArgs = (argv: string[]): CliOptions => {
     else if (raw === "--skip-build") options.skipBuild = true;
     else if (raw === "--skip-verify") options.skipVerify = true;
     else if (raw === "--rotate-certs") options.rotateCerts = true;
+    else if (raw === "--force-restart") options.forceRestart = true;
+    else if (raw === "--rebuild") options.rebuild = true;
     else if (raw.startsWith("--env=")) options.envPath = resolve(REPO_ROOT, raw.slice(6));
     else if (raw.startsWith("--only=")) {
       for (const role of raw.slice(7).split(",")) {
@@ -108,10 +118,24 @@ const parseArgs = (argv: string[]): CliOptions => {
 };
 
 const log = (message = ""): void => console.log(message);
+const stepTimes: Array<{ index: number; title: string; startedAt: number }> = [];
 const step = (index: number, title: string): void => {
+  stepTimes.push({ index, title, startedAt: Date.now() });
   log();
   log(`\u001b[1m[${index}/14] ${title}\u001b[0m`);
 };
+
+/** Wall-clock per step, so a slow phase is visible without reading the whole log. */
+export const renderStepTimings = (steps: ReadonlyArray<{ index: number; title: string; startedAt: number }>, endedAt: number): string =>
+  steps
+    .map((entry, position) => {
+      const next = steps[position + 1]?.startedAt ?? endedAt;
+      return `  ${String(entry.index).padStart(2)}  ${((next - entry.startedAt) / 1000).toFixed(1).padStart(7)}s  ${entry.title}`;
+    })
+    .join("\n");
+
+let activeRunner: SshRunner | undefined;
+let activeBuilds: FrontendBuildHandle | undefined;
 const warn = (message: string): void => console.warn(`  ! ${message}`);
 
 const timestamp = (): string => new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
@@ -409,7 +433,7 @@ const deployService = (input: {
       target: host.ssh,
       local: dist,
       remote: `${releaseDir}/${frontend}/dist`,
-      excludes: [],
+      excludes: [".pg-build-stamp"],
     });
     // Deployment-specific UI visibility is resolved when the release is
     // assembled, so it can be changed without rebuilding the SPA. The file is
@@ -472,7 +496,12 @@ const deployService = (input: {
       }
     }
     if (config.RUN_PRISMA_SEED) {
+      const seedStarted = Date.now();
       runner.run(host.ssh, `${bun} run db-seed`, { cwd: appDir, sudo: false });
+      const seedMs = Date.now() - seedStarted;
+      if (!input.migration?.fresh && seedMs >= 3000) {
+        log(`  hint: db-seed took ${(seedMs / 1000).toFixed(1)}s on every deploy; it is first-deploy reference data, so set RUN_PRISMA_SEED=false once it has run`);
+      }
     }
   }
 
@@ -505,37 +534,58 @@ const deployService = (input: {
   return releaseDir;
 };
 
-/** Copies the daemon source to BACKUP_NODE and (re)starts its systemd unit. */
+/**
+ * Copies the daemon source to BACKUP_NODE and brings its systemd unit up.
+ * The daemon is restarted only when something it runs on changed (its source,
+ * environment or unit) or it is down: a blind restart can interrupt a backup
+ * or restore drill in progress.
+ */
 const deployBackupDaemon = (input: {
   runner: SshRunner;
   config: DeployConfig;
   host: HostPlan;
+  /** The provisioner rewrote the daemon's env/unit/archive environment. */
+  configChanged?: boolean;
+  forceRestart?: boolean;
 }): void => {
   const { runner, config, host } = input;
   const installDir = "/opt/pg-backup-daemon";
   const sourceDir = join(REPO_ROOT, "deploy", "backup-daemon");
   const targetUser = effectiveTargetUser(host.ssh);
+  // Hand the source tree (never node_modules, which postgres owns and which can
+  // hold thousands of files) to the deploy user for rsync, and back afterwards.
+  const chownSource = (owner: string): string =>
+    `find ${shellQuote(installDir)} -path ${shellQuote(`${installDir}/node_modules`)} -prune -o -exec chown ${shellQuote(owner)} {} +`;
   runner.run(
     host.ssh,
-    `install -d -m 0755 -o ${shellQuote(targetUser)} -g ${shellQuote(targetUser)} ${shellQuote(installDir)} && chown -R ${shellQuote(`${targetUser}:${targetUser}`)} ${shellQuote(installDir)}`,
+    `install -d -m 0755 -o ${shellQuote(targetUser)} -g ${shellQuote(targetUser)} ${shellQuote(installDir)} && ${chownSource(`${targetUser}:${targetUser}`)}`,
     { sudo: true },
   );
-  runner.sync({
+  const synced = runner.sync({
     target: host.ssh,
     local: sourceDir,
     remote: installDir,
     delete: true,
     excludes: ["node_modules", ".git", "dist", "test", "*.log", ".env"],
   });
-  runner.run(host.ssh, `chown -R postgres:postgres ${shellQuote(installDir)}`, { sudo: true });
+  // Ownership and dependencies only need work when the source changed (or the
+  // dependency tree is missing).
   runner.run(host.ssh, bunInstallCommand(config), { sudo: true });
-  runner.run(host.ssh, "/usr/local/bin/bun install --frozen-lockfile", { cwd: installDir, sudo: true, sudoUser: "postgres" });
   runner.run(
     host.ssh,
-    "systemctl daemon-reload && systemctl enable pg-backup-daemon && systemctl restart pg-backup-daemon",
+    `${chownSource("postgres:postgres")}; if [ ${synced.changed ? 1 : 0} = 1 ] || [ ! -d ${shellQuote(`${installDir}/node_modules`)} ]; then install -d -o postgres -g postgres ${shellQuote(`${installDir}/node_modules`)} && cd ${shellQuote(installDir)} && runuser -u postgres -- /usr/local/bin/bun install --frozen-lockfile; fi`,
     { sudo: true },
   );
-  log(`  backup daemon source -> ${host.ssh.host}:${installDir} (BACKUP_DAEMON_PORT=${config.BACKUP_DAEMON_PORT})`);
+  const restart = input.forceRestart === true || synced.changed || input.configChanged !== false;
+  const outcome = parseApplyOutcome(runner.capture(
+    host.ssh,
+    `systemctl daemon-reload && systemctl enable pg-backup-daemon >/dev/null 2>&1
+if ! systemctl is-active --quiet pg-backup-daemon; then systemctl start pg-backup-daemon; echo __PG_APPLY__=started
+elif [ ${restart ? 1 : 0} = 1 ]; then systemctl restart pg-backup-daemon; echo __PG_APPLY__=restarted
+else echo __PG_APPLY__=unchanged; fi`,
+    { sudo: true },
+  ));
+  log(`  backup daemon ${outcome === "unknown" ? "applied" : outcome} -> ${host.ssh.host}:${installDir} (BACKUP_DAEMON_PORT=${config.BACKUP_DAEMON_PORT})`);
 };
 
 /**
@@ -771,13 +821,11 @@ const frontendRuntimeConfig = (frontend: string, config: DeployConfig): Record<s
   return null;
 };
 
-const buildFrontends = async (runner: SshRunner, config: DeployConfig): Promise<void> => {
-  const frontends = ["admin-front", "merchant-front", "checkout-front"];
-  if (config.FAKE_RAILS_ENABLED) frontends.push("fake-rails-front");
-  for (const frontend of frontends) {
-    await runner.localStreaming("bun run build", join(REPO_ROOT, frontend), frontendBuildEnv(frontend, config));
-    log(`  built ${frontend}/dist`);
-  }
+/** The SPAs the selected roles actually deploy (an `--only=core` run builds none). */
+const frontendsToBuild = (config: DeployConfig, options: CliOptions): string[] => {
+  const wanted: Array<[DeployRole, string]> = [["admin", "admin-front"], ["merchant", "merchant-front"], ["checkout", "checkout-front"]];
+  if (config.FAKE_RAILS_ENABLED) wanted.push(["fake-rails", "fake-rails-front"]);
+  return wanted.filter(([role]) => shouldRun(options, role)).map(([, frontend]) => frontend);
 };
 
 const shouldRun = (options: CliOptions, role: DeployRole): boolean =>
@@ -797,6 +845,13 @@ const deploymentUnits = (
       .filter((service) => !nodes || (service.nodeId !== undefined && nodes.has(service.nodeId)))
       .map((service) => ({ host, service })),
   );
+
+/** One line per managed service: what the convergence did (started / restarted / reloaded / unchanged). */
+const logOutcomes = (outcomes: Record<string, string> | undefined): void => {
+  const entries = Object.entries(outcomes ?? {});
+  if (entries.length === 0) return;
+  log(`  services: ${entries.map(([service, outcome]) => `${service}=${outcome}`).join(", ")}`);
+};
 
 const main = async (): Promise<void> => {
   const options = parseArgs(process.argv.slice(2));
@@ -824,13 +879,33 @@ const main = async (): Promise<void> => {
   }
 
   const runner = new SshRunner({ dryRun: options.dryRun, verbose: true });
+  // Mask every credential value (pgpass lines, connection URLs...) in logs and errors.
+  runner.addSecrets(collectSecretValues(config));
+  activeRunner = runner;
 
-  // ---- Step 2: build the three SPAs locally ------------------------------
-  step(2, "Build the frontend SPAs");
+  // ---- Step 2: build the SPAs locally ------------------------------------
+  // Started in the background (content-addressed cache, parallel): the builds
+  // overlap with storage provisioning and each one is awaited right before the
+  // tier that ships it.
+  step(2, "Build the frontend SPAs (background, cached)");
+  let builds: FrontendBuildHandle | undefined;
   if (options.skipBuild || options.dryRun) {
     log(`  skipped (${options.dryRun ? "--dry-run" : "--skip-build"})`);
   } else {
-    await buildFrontends(runner, config);
+    const frontends = frontendsToBuild(config, options);
+    if (frontends.length === 0) {
+      log("  nothing to build (--only excludes every portal)");
+    } else {
+      builds = startFrontendBuilds({
+        repoRoot: REPO_ROOT,
+        frontends,
+        envFor: (frontend) => frontendBuildEnv(frontend, config),
+        force: options.rebuild,
+        logger: log,
+      });
+      activeBuilds = builds;
+      log(`  building in the background: ${frontends.join(", ")}`);
+    }
   }
 
   // ---- Step 3: PKI -------------------------------------------------------
@@ -897,26 +972,30 @@ const main = async (): Promise<void> => {
   const releaseTimestamp = timestamp();
 
   if (config.PG_MANAGE_VIA_SSH && shouldRunStorage(options, ["pg", "pg-primary", "pg-replica", "pgbouncer"])) {
-    const report = provisionPostgres18({ runner, config, dryRun: options.dryRun });
+    const report = provisionPostgres18({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });
     log(`  PostgreSQL ${config.PG_VERSION} primary/replicas: ${report.nodes.join(", ") || "none"}`);
     log(`  PgBouncer ${config.PGBOUNCER_ENABLED ? `:${config.PGBOUNCER_PORT}` : "disabled"}`);
+    logOutcomes(report.outcomes);
   } else if (pgStorageConfigured(config)) {
     log("  PostgreSQL: skipped (--only excludes pg)");
   }
   if (config.REDIS_MANAGE_VIA_SSH && shouldRunStorage(options, ["redis"])) {
-    const report = provisionRedis({ runner, config, dryRun: options.dryRun });
+    const report = provisionRedis({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });
     log(`  Redis nodes: ${report.nodes.join(", ") || "none"}`);
+    logOutcomes(report.outcomes);
   }
   if ((config.AUDIT_DB_MANAGE_VIA_SSH || config.LOG_DB_MANAGE_VIA_SSH) && shouldRunStorage(options, ["audit-db", "log-db"])) {
-    const report = provisionAuditAndLogDb({ runner, config, dryRun: options.dryRun });
+    const report = provisionAuditAndLogDb({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });
     log(`  Audit/log databases: ${report.nodes.join(", ") || "none"}`);
+    logOutcomes(report.outcomes);
   }
   if (config.BACKUP_ENABLED && shouldRunStorage(options, ["backup"])) {
-    const report = provisionBackupEngine({ runner, config, dryRun: options.dryRun });
+    const report = provisionBackupEngine({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });
     log(`  Backup engine (${config.BACKUP_ENGINE_MODE}) on: ${report.nodes.join(", ") || "none"}; object store: ${resolveBackupS3Mode(config)}`);
+    logOutcomes(report.outcomes);
     const backupHost = plan.hosts.find((host) => host.roles.includes("backup"));
     if (backupHost) {
-      deployBackupDaemon({ runner, config, host: backupHost });
+      deployBackupDaemon({ runner, config, host: backupHost, configChanged: report.daemonConfigChanged, forceRestart: options.forceRestart });
     } else {
       warn("BACKUP_ENABLED but the plan has no backup host; the daemon was not deployed");
     }
@@ -957,6 +1036,10 @@ const main = async (): Promise<void> => {
       throw new Error(`The plan has no ${target.role} host`);
     }
     const allUnits = deploymentUnits(plan, target.role);
+    if (builds && target.role !== "core") {
+      const result = await builds.wait(FRONTENDS[target.role]);
+      if (!result.cached) log(`  ${FRONTENDS[target.role]} build ready (${(result.ms / 1000).toFixed(1)}s)`);
+    }
     const batchSize = options.rollingBatch ?? config.ROLLING_BATCH_SIZE;
     const batches = rollingBatches(units, batchSize);
     for (const [batchIndex, batch] of batches.entries()) {
@@ -983,7 +1066,7 @@ const main = async (): Promise<void> => {
           : probeEdgeService(runner, unit.host, unit.service);
         if (!probe.ok) {
           throw new Error(
-            `Rolling batch ${batchIndex + 1} failed health check on ${probe.host} ${probe.check}: ${probe.detail}`,
+            runner.scrub(`Rolling batch ${batchIndex + 1} failed health check on ${probe.host} ${probe.check}: ${probe.detail}`),
           );
         }
         log(`  PASS ${probe.host} ${probe.check}`);
@@ -1035,7 +1118,7 @@ const main = async (): Promise<void> => {
     log("  skipped");
   } else {
     const verification = verifyDeployment(runner, plan, config);
-    log(renderVerification(verification));
+    log(runner.scrub(renderVerification(verification)));
     if (!verification.ok) {
       throw new Error("Deployment verification failed; the previous release is still on disk for a rollback");
     }
@@ -1064,15 +1147,30 @@ const main = async (): Promise<void> => {
       log(`  cert ${certificate.name}: expires ${certificate.notAfter} (${certificate.expiresInDays} days)`);
     }
   }
+  const finishedAt = Date.now();
+  log("");
+  log("Timing (wall clock per step):");
+  log(renderStepTimings(stepTimes, finishedAt));
+  if (!options.dryRun) {
+    const slowest = runner.slowest(5).filter((entry) => entry.ms >= 1000);
+    if (slowest.length > 0) {
+      log("Slowest remote commands:");
+      for (const entry of slowest) log(`  ${(entry.ms / 1000).toFixed(1).padStart(7)}s  ${entry.host}  ${entry.command.slice(0, 110)}`);
+    }
+  }
+  runner.close();
   log("");
   log("Deployment complete.");
 };
 
-export { parseArgs, absoluteEnv, renderEnvFile, pm2Ecosystem, frontendRuntimeConfig };
+export { parseArgs, absoluteEnv, renderEnvFile, pm2Ecosystem, frontendRuntimeConfig, frontendsToBuild };
 
 if (import.meta.main) {
   main().catch((error: unknown) => {
-    console.error(`\nDeployment failed: ${(error as Error).message}`);
+    const message = (error as Error).message;
+    console.error(`\nDeployment failed: ${activeRunner ? activeRunner.scrub(message) : message}`);
+    activeBuilds?.abort();
+    activeRunner?.close();
     process.exit(1);
   });
 }

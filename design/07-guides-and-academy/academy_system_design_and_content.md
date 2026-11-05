@@ -631,7 +631,7 @@ Questions: c-l-m1-4-1, c-l-m1-4-2
 - Explain mutual TLS in one sentence.
 
 ### Key ideas
-- **MFA** adds a second proof, usually a code from your phone. Never share it.
+- **MFA** adds a second proof, usually a six-digit code sent by SMS to the phone number on your account. Never share it.
 - A **token** or API key is a secret string that proves identity. Ours start with `pg_live_` and are shown once.
 - **Encryption** locks data so only a key holder can read it. A **hash** is a one-way fingerprint.
 - A **signature** is a seal proving a message came from someone who knows a shared secret and was not changed.

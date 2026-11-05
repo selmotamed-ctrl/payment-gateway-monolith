@@ -108,11 +108,56 @@ is then only a compatibility fallback.
 | `--update` | Do not bootstrap; also disables an environment `fresh`. |
 | `--enforce-firewall` | Apply the current UFW plan without a full bootstrap. |
 | `--skip-build` | Reuse the existing `*/dist` builds. Missing edge dist files fail later. |
+| `--rebuild` | Ignore the frontend build cache and rebuild every SPA. |
+| `--force-restart` | Restart PostgreSQL, PgBouncer, Redis and the backup daemon even when nothing changed (normally they are only reloaded or restarted when their configuration changed). |
 | `--skip-verify` | Skip step 12. A deploy can then report success without a live probe. |
 | `--rotate-certs` | Regenerate the internal CA and every leaf certificate. |
 | `--dry-run` | Validate and print commands; execute no remote command and skip local builds/verification. |
 
 Unknown options and unknown `--only` roles abort before any SSH connection.
+
+### Convergence: reload when you can, restart only when you must
+
+Storage services are **converged**, not bounced. Every config file is written
+only if its bytes changed (the runner compares before writing), and each service
+is then handled by the least disruptive action:
+
+| Service | Down | Config changed | Nothing changed |
+| :--- | :--- | :--- | :--- |
+| PostgreSQL | start | `reload`, then **restart only if** `pg_settings.pending_restart` | nothing |
+| PgBouncer | start | `reload` (SIGHUP); restart only for restart-only settings (`listen_*`, `unix_socket_*`...) or after PostgreSQL restarted | nothing |
+| Redis / Valkey | start | restart (this flushes the L2 cache and velocity counters) | nothing |
+| Backup daemon | start | restart when its source, env or unit changed | nothing |
+| MinIO | install + start | n/a (left alone while healthy) | nothing |
+
+The deploy prints one `services:` line per provisioner (`started`, `restarted`,
+`reloaded` or `unchanged`). PgBouncer gets a systemd drop-in
+(`KillSignal=SIGINT`, `TimeoutStopSec=15s`): PgBouncer 1.23+ treats SIGTERM as
+"wait for every client to disconnect", so a pool with live clients never stopped
+and systemd waited out its 90 s timeout (3 times per deploy before this change).
+Packages are installed only when missing, and `pacman -Sy` (a partial upgrade)
+is never used.
+
+### Frontend builds and the timing report
+
+Frontend builds start in the background at step 2 (in parallel, at most
+`ceil(cores/2)` at once) and overlap with storage provisioning; each SPA is
+awaited right before the tier that ships it. A build is **skipped** when the
+SHA-256 of the frontend source tree plus its deploy-injected build environment
+matches the stamp in `dist/.pg-build-stamp` (`--rebuild` forces it). Only the
+SPAs of the selected roles are built.
+
+The run ends with the wall-clock time of every step and the slowest remote
+commands; any single command over 30 s is flagged as it finishes. Remote
+commands over ssh share one multiplexed connection per host
+(`PG_DEPLOY_SSH_MUX=0` disables it), and every configured credential value is
+masked in logs and error messages.
+
+### Stress-testing the deploy
+
+`bun run stress` (from `deploy/`) drives the real engine against this machine's
+real services under load, faults and tampering. See
+[`stress/README.md`](stress/README.md).
 
 ### Roles accepted by `--only`
 

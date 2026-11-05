@@ -961,6 +961,10 @@ The first rebuild (7.1-7.5) was functionally complete but visually foreign: it i
 
 **Test hooks kept** (see `tests/e2e/admin/academy-*.spec.ts`, `academy-live.ts`): `.ac-wrap`, `.ac-nav`, `.ac-card` (never nested, so the overlap check holds), `.ac-chip[data-track]`, `aria-busy` skeletons, every heading/button/label/region name the specs query. No logic file changed (`useAcademyProgress`, `progressMerge`, `nextStep`, `labScoring`, `useEligibility`, `readingOpened`).
 
+### 7.7 Content accuracy pass (2026-11-05)
+
+The guide was checked against the built admin screens and the current core behaviour. Stale "no screen" claims were removed: staff user management (Admin Users), audit search (Audit Log), commission/velocity changes (Pricing & Limits) and versioned platform settings (Platform Settings) all have screens. The menu table now lists Audit Log, Admin Users, Inquiry Schedule, Backups, Platform Settings and Pricing & Limits, and the Admin Users, Inquiry Schedule and Platform Settings articles describe those screens. MFA is described as an SMS code to the registered phone (not an authenticator app), sign-out is documented as server-side revocation, the authority catalogue is described as closed with no self-escalation, reconciliation fingerprints are per statement source, and the Backups screen/drill/policy flow is described. Academy `l-m1-5` uses the same SMS wording. The exact corrections are logged in `guide_content_fixes.md` and `academy_content_fixes.md`.
+
 ## 8. Contracts and invariants
 
 1. The design file content is the single source of truth; article prose is never retyped into TSX.

@@ -39,6 +39,8 @@ Flags:
 | `--update` | Never touch the OS or the firewall. |
 | `--enforce-firewall` | Re-apply the UFW rules without a full bootstrap. |
 | `--skip-build` | Reuse the existing `*/dist` builds. |
+| `--rebuild` | Ignore the frontend build cache (an unchanged SPA is otherwise not rebuilt). |
+| `--force-restart` | Restart PostgreSQL, PgBouncer, Redis and the backup daemon even if nothing changed. |
 | `--skip-verify` | Skip the end-to-end mTLS health verification. |
 | `--rotate-certs` | Regenerate the internal CA **and** every leaf certificate. |
 | `--keep=<n>` | Releases kept per host (default `KEEP_RELEASES`). |
@@ -68,6 +70,12 @@ them:
 * **TLS for every vhost**, including the LAN-only admin. When a public vhost is
   in `self_signed` mode, or the admin vhost has no certificate, the deploy mints
   a certificate bound to the server name so `nginx -t` always passes.
+
+Storage services (PostgreSQL, PgBouncer, Redis, the backup daemon) are converged,
+not restarted: a config change is applied by reload, and a restart happens only
+when a setting genuinely needs one (see "Convergence" in `deploy/README.md`). A
+second deploy of an unchanged configuration therefore leaves every storage
+process running, keeps the Redis cache, and takes seconds instead of minutes.
 
 PM2 applications are restarted with `pm2 delete` + `pm2 start` on every deploy,
 not `startOrReload`: PM2 keeps the old `script`/`cwd` when an app is reloaded by

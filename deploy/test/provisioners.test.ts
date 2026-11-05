@@ -101,7 +101,9 @@ class FakeRunner implements ProvisionRunner {
   run(target: SshTarget, command: string): void {
     this.runs.push({ target, command });
   }
-  capture(): string {
+  readonly captures: Array<{ target: SshTarget; command: string }> = [];
+  capture(target: SshTarget, command: string): string {
+    this.captures.push({ target, command });
     return "";
   }
   writeRemoteFile(input: { target: SshTarget; path: string; content: string | Buffer; mode?: number }): void {
@@ -230,11 +232,12 @@ describe("Redis provisioner", () => {
     expect(runner.writes.some((write) => write.path === "/etc/redis/redis.conf")).toBe(true);
     expect(runner.writes.some((write) => write.path === "/etc/systemd/system/redis-server.service.d/zz-pg-switch.conf")).toBe(true);
     expect(runner.writes.some((write) => write.path === "/etc/systemd/system/valkey.service.d/zz-pg-switch.conf")).toBe(true);
-    const restart = runner.runs.find((run) => run.command.includes("redis-cli"));
-    expect(restart?.command).toContain("systemctl daemon-reload");
-    expect(restart?.command).toContain('CONFIG SET save ""');
-    expect(restart?.command).toContain("REDISCLI_AUTH='ultra-strong-redis-K7p2Zq9w'");
-    expect(restart?.command).toContain("redis-cli -p 6379 PING");
+    // The restart decision lives in the apply script (run through capture so its outcome marker is read).
+    const apply = runner.captures.find((run) => run.command.includes("redis-cli"));
+    expect(apply?.command).toContain("systemctl daemon-reload");
+    expect(apply?.command).toContain('CONFIG SET save ""');
+    expect(apply?.command).toContain("REDISCLI_AUTH='ultra-strong-redis-K7p2Zq9w'");
+    expect(apply?.command).toContain("redis-cli -p 6379 PING");
     expect(runner.runs.some((run) => run.command.includes("redis-server"))).toBe(true);
   });
 });

@@ -1154,11 +1154,15 @@ It also requires atomic releases, a symlinked `current`, least-privilege environ
 
 `main()` parses CLI options, checks that `deploy.env` exists, loads and validates it, runs `findSshConflicts()`, calls `planHosts()`, prints `renderTopology()` and creates an `SshRunner` with `verbose: true`.
 
+`--force-restart` and `--rebuild` are the two engine-level overrides of the convergence and build-cache behaviour. After loading the config, the runner registers every credential value (any key matching PASSWORD/SECRET/TOKEN/MASTER_KEY/ACCESS_KEY/ENCRYPTION_KEY/JWT/SEED_KEY with a value of at least 8 characters) and masks it **wherever it appears** in logs, the timing report, thrown error messages, the verification report and the final failure line. `redactSecrets` alone only recognised `NAME=value`; the health verifier's pgpass lines (`host:port:db:user:PASSWORD`) and connection URLs were printed in clear before this change.
+
 A missing file, schema error, cross-field error or SSH credential conflict aborts before any remote command. With `--dry-run`, every later command is logged instead of executed. Every logged command line passes through `redactSecrets` (`deploy/lib/sshRunner.ts`), which masks the value of any `NAME=value` whose name contains PASSWORD, PASSWD, SECRET, TOKEN, AUTH, API_KEY, ACCESS_KEY or MASTER_KEY (for example `PGPASSWORD=`, `REDISCLI_AUTH=`); before 2026-11-04 these were printed in the clear.
 
-### 3.2 Step 2: build SPAs locally
+### 3.2 Step 2: build SPAs locally (background, cached)
 
-`buildFrontends()` runs `bun run build` locally for `admin-front`, `merchant-front`, `checkout-front` and, when enabled, `fake-rails-front`. Admin builds receive `VITE_SHOW_CHECKLISTS`, `VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST` and `VITE_SHOW_HELP_PANELS` from the deploy config. The step is skipped with `--skip-build` or `--dry-run`; it builds all three SPAs regardless of `--only`.
+`startFrontendBuilds()` (`deploy/lib/frontendBuild.ts`) starts `bun run build` for the SPAs of the **selected roles** (`admin-front`, `merchant-front`, `checkout-front`, and `fake-rails-front` when enabled; an `--only=core` run builds none) and **returns immediately**: at most `ceil(cores/2)` (max 4) run at once, output goes to a log file (never a pipe, so a parent blocked in a synchronous ssh call cannot stall a build), and the main loop `await`s each SPA right before the tier that ships it, so the builds overlap with storage provisioning (step 5). A failing build rejects with its log tail where it is awaited; on a failed deploy the remaining builds are killed. Admin builds receive `VITE_SHOW_CHECKLISTS`, `VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST` and `VITE_SHOW_HELP_PANELS`; merchant and Fake Rails builds receive their checkout origin.
+
+**Build cache:** the fingerprint is the SHA-256 of the frontend's source tree (file paths and bytes; `node_modules`, `dist`, `.vite`, coverage and `*.log` excluded; `.env*` included) plus the sorted deploy-injected build environment. A build is skipped when `dist/index.html` exists and `dist/.pg-build-stamp` equals the fingerprint. The stamp records the **post-build** state, because some builds rewrite tracked sources (`unplugin-vue-components` regenerates `src/components.d.ts`), which made a pre-build stamp miss on every run. `--rebuild` ignores the cache; `--skip-build` and `--dry-run` skip the step. `.pg-build-stamp` is excluded from the rsync of `dist`.
 
 ### 3.3 Step 3: PKI
 
@@ -1189,6 +1193,8 @@ The firewall is only applied in fresh or enforce mode. An ordinary `--update` do
 
 The step requires a core host in the plan.
 
+Provisioning **converges** rather than restarts (see `deploy.storage` section 16): a second run with unchanged configuration leaves PostgreSQL, PgBouncer, Redis and the backup daemon running and the step takes seconds (it took 4m53s when every service was restarted and PgBouncer waited out three 90 s stop timeouts). Each provisioner reports `started` / `restarted` / `reloaded` / `unchanged` per service on a `services:` line; `--force-restart` restarts them regardless.
+
 Provisioning is gated by `--only` and by the management flags:
 
 - PostgreSQL 18 primary/replicas/PgBouncer when `PG_MANAGE_VIA_SSH` and the relevant `--only` selection;
@@ -1208,12 +1214,12 @@ No dump is taken on a fresh install. A failure aborts before migrations. `pg_dum
 
 After `provisionBackupEngine()`, `deployBackupDaemon()`:
 
-- creates `/opt/pg-backup-daemon` owned by the effective target user (the SSH user remotely, the orchestrator's OS user locally);
+- creates `/opt/pg-backup-daemon` owned by the effective target user (the SSH user remotely, the orchestrator's OS user locally) and hands the source tree (not `node_modules`) to that user for the rsync;
 - rsyncs `deploy/backup-daemon` with `--delete`, excluding `node_modules`, `.git`, `dist`, `test`, `*.log` and `.env`;
-- chowns the install directory to `postgres:postgres` (the daemon's service user);
+- hands the source tree back to `postgres:postgres` (the daemon's service user);
 - ensures Bun exists and installs a real copy at `/usr/local/bin/bun` (not a symlink through the SSH user's home, which may not be traversable by `postgres`);
-- runs `bun install --frozen-lockfile` as `postgres`;
-- runs `systemctl daemon-reload && systemctl enable pg-backup-daemon && systemctl restart pg-backup-daemon`.
+- runs `bun install --frozen-lockfile` as `postgres` only when the rsync changed something or `node_modules` is missing;
+- runs `systemctl daemon-reload && systemctl enable pg-backup-daemon`, then **starts the unit if it is down and restarts it only if the source, env, unit or archive environment changed** (or `--force-restart`), logging `backup daemon started|restarted|unchanged`.
 
 The systemd unit and `/etc/pg-backup/backup.env` are written by the provisioner, not by `deployBackupDaemon()`. If `BACKUP_ENABLED` is true but the plan has no backup host, the deploy warns and skips the daemon; validation normally prevents that.
 
@@ -1292,6 +1298,12 @@ Prune old releases
 ```
 
 Actual pruning already happened inside each `deployService()` call. The guide's statements that pruning is step 13 or step 11 are historical/wrong. Because pruning is per service, a host with several services prunes each service's release tree separately.
+
+### 3.11a Runner behaviour and the timing report
+
+- **Timings:** every command and write is timed (secrets scrubbed). A command that takes 30 s or more is flagged as it finishes (`! slow command`). After step 14 the deploy prints wall-clock per step and the slowest commands over 1 s.
+- **Change detection:** `writeRemoteFile()` returns whether the content changed; `sync()` returns `{ changed, files }` from `rsync --itemize-changes` (directory mtime touches do not count).
+- **Multiplexing:** remote targets share one ssh connection per host (`ControlMaster=auto`, `ControlPersist=120`, sockets in a private 0700 `mkdtemp` directory, closed by `SshRunner.close()` at the end or on failure). `PG_DEPLOY_SSH_MUX=0` disables it. Local targets and dry runs never use it.
 
 ### 3.12 Step 14: audit summary
 
@@ -1417,7 +1429,7 @@ Relevant suites:
 - `deploy/test/provisioners.test.ts`: provisioner command builders.
 - `deploy/test/exhaustive-deploy-matrix.test.ts`: broad plan behavior.
 
-No test performs a real multi-host deployment, migration, PM2 restart or Nginx reload. A live staging run is required for those.
+The unit tests mock the runner. `deploy/stress` (see `testing.deploy-stress`) drives the real engine against real services on the dev box, including the real ssh transport (via `127.0.0.2`), PM2 restarts, Nginx reloads and multi-node rolling deploys; a genuinely separate-machine run is still the job of the multi-machine matrix.
 
 ## 9. Source references
 
@@ -1537,7 +1549,7 @@ The file contains no `ssl`, `ssl_cert_file`, `ssl_key_file`, `ssl_ca_file` or `s
 
 The primary source list includes the primary itself, every replica, every core private IP, and the backup/audit/log node private IPs. The replica source list includes the primary and the backup nodes.
 
-The provisioner writes `pg_hba.conf`, applies the bootstrap SQL through `su - postgres`, restarts PostgreSQL, and installs `/etc/cron.d/pg-journal-partitions`:
+The provisioner writes `postgresql.conf` and `pg_hba.conf` (only when their bytes changed), **applies the cluster** (section 16: start if down, reload on change, restart only on `pending_restart`), then runs the bootstrap SQL through `runuser -u postgres -- psql -p <port>` against the now-running cluster, and installs `/etc/cron.d/pg-journal-partitions`:
 
 ```text
 30 1 * * * root su - postgres -c "psql -d <PG_DB_NAME> -c 'SELECT ensure_journal_line_partitions(18)'" >/var/log/pg-journal-partitions.log 2>&1
@@ -1560,7 +1572,7 @@ The slots are created on the primary by `primaryBootstrapSql()`. Replication is 
 
 ### 3.3 PgBouncer
 
-When `PGBOUNCER_ENABLED=true`, PgBouncer is installed and configured on the primary and every replica. `/etc/pgbouncer/pgbouncer.ini` sets `listen_addr=0.0.0.0`, `listen_port=6432`, transaction pooling, `server_tls_sslmode=prefer`, the configured client/pool limits, reserve 10, prepared statements, SCRAM auth and `/etc/pgbouncer/userlist.txt`. The userlist contains the application and replication users with plaintext passwords, mode 0600. PgBouncer is restarted after writing it.
+When `PGBOUNCER_ENABLED=true`, PgBouncer is installed and configured on the primary and every replica. `/etc/pgbouncer/pgbouncer.ini` sets `listen_addr=0.0.0.0`, `listen_port=6432`, transaction pooling, `server_tls_sslmode=prefer`, the configured client/pool limits, reserve 10, prepared statements, SCRAM auth and `/etc/pgbouncer/userlist.txt`. The userlist contains the application and replication users with plaintext passwords, mode 0600. PgBouncer is applied by reload, or restarted only when needed (section 16).
 
 After writing both files, the provisioner resolves the service account from `systemctl show -p User --value pgbouncer` (falling back to `pgbouncer`, then `postgres`) and applies `0640` to the ini and `0600` to the userlist. This is required because Ubuntu's unit runs as `postgres` and does not create a `pgbouncer` system user; a root-owned `0640` file otherwise fails with `could not load file "/etc/pgbouncer/pgbouncer.ini": Permission denied`.
 
@@ -1575,13 +1587,13 @@ The core environment points `PG_PRIMARY_PORT` and `DATABASE_REPLICA_URLS` at `PG
 
 ### 3.4 Redis
 
-`redisProvisioner.ts` installs `redis-server`, enables it, and writes both `/etc/redis/redis.conf.d/zz-pg-switch.conf` and `/etc/redis/redis.conf` with a deduplicated private-IP + loopback bind, `protected-mode yes`, the node port, `requirepass <REDIS_PASSWORD>`, `save 3600 1`, maxmemory/policy `allkeys-lru`, no append-only file, `daemonize no`, `supervised systemd` and `dir /var/lib/pg-redis`. It writes a systemd drop-in for `redis-server` and `valkey` granting `ReadWritePaths=/var/lib/pg-redis`, runs `systemctl daemon-reload`, runs `ufw allow` for core and backup sources, restarts Redis and verifies with `REDISCLI_AUTH=<password> redis-cli -p <port> PING`.
+`redisProvisioner.ts` installs `redis-server`, enables it, and writes both `/etc/redis/redis.conf.d/zz-pg-switch.conf` and `/etc/redis/redis.conf` with a deduplicated private-IP + loopback bind, `protected-mode yes`, the node port, `requirepass <REDIS_PASSWORD>`, `save 3600 1`, maxmemory/policy `allkeys-lru`, no append-only file, `daemonize no`, `supervised systemd` and `dir /var/lib/pg-redis`. It writes a systemd drop-in for `redis-server` and `valkey` granting `ReadWritePaths=/var/lib/pg-redis`, runs `systemctl daemon-reload`, runs `ufw allow` for core and backup sources, restarts Redis **only if its effective config or drop-in changed (or it is down)** and verifies with `REDISCLI_AUTH=<password> redis-cli -p <port> PING`.
 
 There is no `tls-port`, `tls-cert-file`, `tls-key-file`, `tls-ca-cert-file` or `tls-auth-clients` setting. Redis traffic is plaintext inside the private network. The generated `redis-client` certificate is unused.
 
 ### 3.5 Audit database
 
-`auditAndLogDbProvisioner.ts` installs PostgreSQL on `AUDIT_DB_NODE` when `AUDIT_DB_MANAGE_VIA_SSH` is true, applies a minimal PostgreSQL config (`listen_addresses='*'`, `wal_level=replica`, senders/slots), writes a `pg_hba` restricted to core and backup sources, restarts PostgreSQL, creates the audit role/database, and applies:
+`auditAndLogDbProvisioner.ts` installs PostgreSQL on `AUDIT_DB_NODE` when `AUDIT_DB_MANAGE_VIA_SSH` is true, applies a minimal PostgreSQL config (`listen_addresses='*'`, `wal_level=replica`, senders/slots), writes a `pg_hba` restricted to core and backup sources (both skipped when the node is the primary's own cluster; see section 16), applies the cluster, creates the audit role/database, and applies:
 
 - `pg_trgm`;
 - `audit_records` with `seq_no` identity, UUID primary key, actor/action/entity fields, before/after JSON, `prev_hash`, `row_hash`;
@@ -1621,7 +1633,7 @@ The retention function only drops partitions whose names match the monthly suffi
 
 Archive configuration:
 
-- WAL-G: writes `/etc/pg-backup/wal-g-core.env` on the primary and sets `archive_mode=on`, `archive_command` to `wal-g wal-push %p` with the core prefix, `restore_command` to `wal-g wal-fetch`, and `archive_timeout=60s`; restarts PostgreSQL.
+- WAL-G: writes `/etc/pg-backup/wal-g-core.env` on the primary and sets `archive_mode=on`, `archive_command` to `wal-g wal-push %p` with the core prefix, `restore_command` to `wal-g wal-fetch`, and `archive_timeout=60s`; the cluster is reloaded only if `postgresql.auto.conf` changed and restarted only if a setting is `pending_restart` (`archive_mode` off -> on on the first deploy).
 - Barman: sets `wal_level=replica`, `archive_mode=off`, creates the `barman` slot and uses `barman-wal-archive <backupIp> <server> %p` from `streaming_archiver=on`. It writes `/etc/barman.conf` with a server section using the replication user, a `slot_name`, and `backup_method=postgres`.
 
 The same archive configuration is applied to the audit database when `AUDIT_DB_MANAGE_VIA_SSH` is true, with `archive_command` targeting the audit prefix/server.
@@ -1713,7 +1725,7 @@ sudo systemctl status pg-backup-daemon
 sudo journalctl -u pg-backup-daemon --since '1 hour ago'
 ```
 
-If PgBouncer is enabled, add a `[databases]` section to `pgbouncer.ini` and restart it before declaring the pooler usable.
+If PgBouncer is enabled, add a `[databases]` section to `pgbouncer.ini` and reload (or, if a restart-only setting changed, restart) it before declaring the pooler usable.
 
 ## 7. Status and deviations
 
@@ -1754,7 +1766,7 @@ If PgBouncer is enabled, add a `[databases]` section to `pgbouncer.ini` and rest
 - The audit/log `pg_hba` uses `hostssl` but the provisioner does not set SSL files, so the effective TLS depends on distribution defaults.
 - The log retention function is destructive; a bad `LOG_RETENTION_MONTHS` can drop recent partitions.
 - `listen_addresses='*'` with UFW-only protection means a firewall misconfiguration exposes the database ports.
-- The backup provisioner restarts PostgreSQL after changing `archive_command`; a failure can leave the cluster stopped.
+- The backup provisioner restarts PostgreSQL only when `archive_mode` (or another postmaster setting) actually changes; that first restart can still fail and leave the cluster stopped.
 
 ## 8. Verification and tests
 
@@ -1839,9 +1851,37 @@ Not covered:
 
 ## 15. PostgreSQL/pooler readiness (2026-11-04)
 
-- `provisionPostgres18()` waits for `pg_isready` on the primary port after restarting PostgreSQL.
-- `provisionBackupEngine()` waits after the core and audit archive restarts, restarts PgBouncer after the last PostgreSQL restart, and waits for PgBouncer on `PGBOUNCER_PORT`. The audit target can share the primary cluster, so its restart could otherwise leave PgBouncer caching `the database system is shutting down (server_login_retry)` when the core release runs migrations through `:6432`.
+- `applyPostgresCluster()` waits for `pg_isready` on the cluster port after every start/reload/restart.
+- `provisionBackupEngine()` waits after an archive-config restart, re-applies PgBouncer (restart) only if a PostgreSQL cluster actually restarted, and waits for PgBouncer on `PGBOUNCER_PORT`. The audit target can share the primary cluster, so its restart could otherwise leave PgBouncer caching `the database system is shutting down (server_login_retry)` when the core release runs migrations through `:6432`.
 - These waits prevent the core migration step from racing a PostgreSQL restart on single-machine and co-located audit deployments.
+
+## 16. Convergence instead of restarts (2026-11-05)
+
+**Problem (measured):** a no-op `--update` storage deploy took 4m53s. PgBouncer 1.26 handles `SIGTERM` as "wait for all clients to disconnect"; core-back keeps pooled client connections open, so `systemctl restart pgbouncer` waited out systemd's 90 s `TimeoutStopSec` and then `SIGKILL`ed it. The deploy restarted PgBouncer three times per run (PostgreSQL provisioner, then the backup provisioner twice), PostgreSQL up to three times, Redis (flushing the L2 cache and velocity counters) and the backup daemon (possibly mid-backup), all unconditionally.
+
+**Design (`deploy/lib/converge.ts`, pure script builders; applied by the provisioners):**
+
+- `SshRunner.writeRemoteFile()` returns whether the bytes changed (remote `cmp -s`, then `install`/atomic `mv`; the mode is re-asserted when unchanged). A runner that returns nothing (test fakes) counts as "changed".
+- PostgreSQL (`applyPostgresCluster`): inactive -> `enable --now`; `--force-restart` -> restart; config/hba/auto.conf changed -> `systemctl reload`, wait for `pg_conf_load_time()` to move, then restart **only if** `count(*) FROM pg_settings WHERE pending_restart` is non-zero; else nothing. Always waits for `pg_isready`. The cluster is now applied before the bootstrap SQL runs (the SQL needs a running server and uses `-p <cluster port>`).
+- PgBouncer (`applyPgbouncer`): writes `pgbouncer.ini`, `userlist.txt`, the drop-in and a restart signature. The drop-in `/etc/systemd/system/pgbouncer.service.d/zz-pg-switch.conf` sets `KillSignal=SIGINT` (safe shutdown, exits in ~0.1 s with idle clients attached; verified against SIGTERM, which never exits) and `TimeoutStopSec=15s`. Down -> start; PostgreSQL restarted in this run, the restart signature (`listen_addr`, `listen_port`, `unix_socket_*`, `so_reuseport`, `pidfile`, `logfile`) changed, or `--force-restart` -> restart; any other ini/userlist change -> `reload`; else nothing.
+- Redis/Valkey: the installed unit is detected from real unit files (`redis-server`, `redis`, `valkey`; a drop-in-only stub does not count). Only that flavour's config files and drop-in decide the restart, which still runs `CONFIG SET save ""` first.
+- Backup daemon (`deployBackupDaemon`): rsync reports changes (`--itemize-changes`); the unit is started if down and restarted only if the source, `backup.env`, the unit or the archive environment changed. Ownership of the source tree is handed to the deploy user and back without touching `node_modules`.
+- Packages: `ensurePackagesScript` installs only what is missing (`dpkg-query` / `pacman -Qq`); `apt-get update` runs only when something is missing; `pacman -Sy <pkg>` (an unsupported partial upgrade) is never used (also removed from `bootstrapPackagesCommand`); the pinned barman `pip install` is skipped when the version already matches.
+- Audit/log databases whose node is the primary's own cluster (`isSameCluster`: same SSH host and service port) no longer rewrite that cluster's `postgresql.conf`/`pg_hba.conf` (the primary's source list is a superset; the two provisioners used to flip-flop the file and reload twice). Likewise the backup provisioner no longer re-points the shared cluster's `archive_command` at the `audit_db` prefix after setting the `postgres_core` one: before this change a co-located deploy left the cluster archiving WAL to `<bucket>/audit_db` and changed `archive_command` twice per run. The core target now owns the stream.
+- Pooler login verification (`poolerLoginScript`): after PgBouncer is applied, the PostgreSQL provisioner proves a real login and `SELECT 1` through `:<PGBOUNCER_PORT>` (up to 45 s, private 0600 PGPASSFILE). PgBouncer caches a failed server login for `server_login_retry` (15 s), so after a database is dropped and recreated (fresh seed, restore) it answers `database "x" does not exist` and an immediately following `prisma migrate deploy` fails; the old unconditional restart hid this. Found by the destructive stress scenario.
+- Latent bugs fixed on the way: the generated Arch/custom-cluster unit had `ExecReload=/bin/kill -HUP ` (the unquoted heredoc expanded `$MAINPID` to nothing, so `systemctl reload` could not work) and no `KillSignal`; replica clusters now get their config applied (they were only started); a bootstrap `psql` ran without `-p`, so a non-5432 primary would have bootstrapped the wrong cluster.
+
+**Result on the dev box (live, same stack):** first run after the change 6.9 s (one deliberate, fast PgBouncer restart to install the drop-in), every later no-op storage run 5.1-5.4 s with every service `unchanged`; full no-op update 23 s, of which 11 s is the core release. See `testing.deploy-stress` for the repeatable proof.
+
+## 17. Direct PostgreSQL URLs must use TLS (audit-logs 500, 2026-11-05)
+
+**Symptom:** `GET /api/v1/admin/audit-logs` returned 500 on the admin portal while `/audit-logs/summary` returned 200. Core's audit store failed with `no pg_hba.conf entry for host "127.0.0.1", user "gw_audit_user", database "pg_audit_db", no encryption`.
+
+**Root cause (pre-existing, not an environment problem):** commit `167aec5` (GAP-022) made `pgHbaSnippet()` emit only `hostssl` rules, but `hostPlanner` still generated `AUDIT_DATABASE_URL`, `LOG_DATABASE_URL` and `DATABASE_REPLICA_URLS` without a TLS parameter. Core's audit/log pools are plain `pg.Pool({ connectionString })`, so as soon as a deploy applied the new `pg_hba.conf` every direct connection was rejected: the audit-log list/export/detail reads, and the audit and log writers behind the same pools. Only the PgBouncer-fronted `DATABASE_URL` kept working (PgBouncer's client side is plain; it speaks TLS to PostgreSQL itself). No test tied the generated URLs to the generated `pg_hba`.
+
+**Fix:** `directTlsQuery()` in `hostPlanner.ts` appends `?sslmode=no-verify` to those three URLs when the deploy manages the target (`PG_MANAGE_VIA_SSH`, `AUDIT_DB_MANAGE_VIA_SSH`, `LOG_DB_MANAGE_VIA_SSH`). `no-verify` is the mode node-postgres (`pg-connection-string` 2.x) maps to `ssl: { rejectUnauthorized: false }`: encrypted, certificate not verified, which is exactly the documented posture of the self-signed per-cluster certificate; `require` would reject that certificate. Externally managed databases keep the operator's URL. Regression tests (`deploy/test/converge.test.ts`) assert that the generated `pg_hba` has no non-TLS rule, that all three URLs carry the parameter for managed clusters and not for external ones, and that the parameter parses to `rejectUnauthorized: false`.
+
+**Still open:** `DATABASE_URL` when `PGBOUNCER_ENABLED=false` goes straight to PostgreSQL without TLS and would be rejected the same way; it cannot simply take `sslmode=no-verify` because Prisma's schema engine does not understand that value. Verifying server certificates (`verify-full` with a CA-signed server certificate) remains GAP-022.
 
 ## Security hardening (2026-11-05)
 
@@ -1963,7 +2003,7 @@ A failed restore, start or check still produces a signed `FAILED` report through
 
 `backupEngineProvisioner.ts` writes `/etc/systemd/system/pg-backup-daemon.service`: `User/Group=pgbackup`, `WorkingDirectory=/opt/pg-backup-daemon`, `EnvironmentFile=/etc/pg-backup/backup.env`, `ExecStart=/usr/local/bin/bun run src/index.ts`, `Restart=always`, `RestartSec=3`, `LimitNOFILE=65536`, `NoNewPrivileges=true`, `ProtectSystem=strict`, and `ReadWritePaths` for backup, log, catalog, cert, scratch and pgpass directories.
 
-`deploy.ts` copies `deploy/backup-daemon` to `/opt/pg-backup-daemon` with rsync `--delete`, excludes `node_modules`, `.git`, `dist`, `test`, `*.log` and `.env`, chowns to `pgbackup`, runs `bun install --frozen-lockfile` as `pgbackup`, and enables/restarts the unit.
+`deploy.ts` copies `deploy/backup-daemon` to `/opt/pg-backup-daemon` with rsync `--delete`, excludes `node_modules`, `.git`, `dist`, `test`, `*.log` and `.env`, hands the source tree (never `node_modules`) to the deploy user for the rsync and back to the daemon user afterwards, runs `bun install --frozen-lockfile` only when the source changed or `node_modules` is missing, and enables the unit. The unit is **started if down and restarted only if** the source, `backup.env`, the unit file or the WAL-G archive environment changed (`BackupProvisionReport.daemonConfigChanged`, rsync `--itemize-changes`) or `--force-restart` was given: a blind restart could interrupt a running backup or restore drill.
 
 The provisioner writes `/etc/cron.d/pg-backup`: when the scheduler is enabled only a comment; otherwise full/delta trigger lines as `pgbackup` and the drill script as root. `/usr/local/bin/pg-backup-restore-drill` restores core and checks double-entry only; it is narrower than the in-process drill.
 

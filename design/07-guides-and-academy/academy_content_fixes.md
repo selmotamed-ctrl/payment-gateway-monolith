@@ -30,3 +30,9 @@ l-m5-4 (×2) | **Bulk Inquiry** | **Inquire selected** | `admin-front/src/pages/
 lab-incident-unknown | **Mark succeeded** | **Resolve as succeeded** | `admin-front/src/pages/operator-cases/[id].tsx:190`
 lab-compliance-desk | **Propose** | **Propose resolution** | `admin-front/src/pages/aml/cases/index.tsx:656`
 drill-breaker | **Open Circuit Breakers** (Dashboard tile) | **Open breaker** (Route health card) | `admin-front/src/pages/dashboard/index.tsx:509`
+
+## Content corrections verified against the code (2026-11-05)
+
+| Item | Old claim | Corrected claim | Evidence |
+| :--- | :--- | :--- | :--- |
+| `l-m1-5` | MFA is "usually a code from your phone" | six-digit code sent by SMS to the phone number on the account | `core-back/lib/auth/mfaChallenges.ts` |
