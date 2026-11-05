@@ -9,8 +9,8 @@ DB_SSH_KEY_PATH="~/.ssh/db"
 DB_PRIVATE_IP="10.10.0.10"
 DB_NAME="gateway"
 DB_USER="gw"
-DB_PASSWORD="ultra-strong-db-password"
-DATABASE_URL="postgresql://gw:ultra-strong-db-password@10.10.0.10:5432/gateway"
+DB_PASSWORD="ultra-strong-db-K7p2Zq9w"
+DATABASE_URL="postgresql://gw:ultra-strong-db-K7p2Zq9w@10.10.0.10:5432/gateway"
 CORE_SSH_HOST="10.10.0.20"
 CORE_SSH_KEY_PATH="~/.ssh/core"
 CORE_PRIVATE_IP="10.10.0.20"
@@ -25,7 +25,7 @@ CHECKOUT_SSH_HOST="203.0.113.20"
 CHECKOUT_SSH_KEY_PATH="~/.ssh/checkout"
 CHECKOUT_PRIVATE_IP="10.10.0.50"
 CHECKOUT_DOMAIN="pay.example.ly"
-KMS_MASTER_KEY="0123456789abcdef0123456789abcdef"
+KMS_MASTER_KEY="kms-Q7x9Lm2Zr4Vb8Nc1Wd5Tg3Hy6Jp0Sa2"
 `;
 
 const withOverrides = (overrides: string): string => `${base}\n${overrides}\n`;
@@ -85,7 +85,7 @@ describe("deploy config validation", () => {
   });
 
   test("rejects a non-PostgreSQL DATABASE_URL", () => {
-    const result = loadDeployConfig(withOverrides(`DATABASE_URL="http://gw:ultra-strong-db-password@10.10.0.10:5432/gateway"`));
+    const result = loadDeployConfig(withOverrides(`DATABASE_URL="http://gw:ultra-strong-db-K7p2Zq9w@10.10.0.10:5432/gateway"`));
     expect(result.ok).toBe(false);
     expect(result.problems.join(" ")).toContain("DATABASE_URL must start with postgresql://");
   });

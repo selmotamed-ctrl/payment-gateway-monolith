@@ -42,12 +42,25 @@ const clearFailures = (ip: string): void => {
   attempts.delete(ip);
 };
 
+// Per-account lockout (independent of the client IP): rotating source addresses
+// cannot be used to guess one account's password.
+const accountKey = (username: string): string => `acct:${username.trim().toLowerCase()}`;
+const isAccountLocked = (username: string): boolean => {
+  const key = accountKey(username);
+  const now = Date.now();
+  const window = attempts.get(key) ?? { failures: [] };
+  window.failures = window.failures.filter((at) => now - at < env.FAKE_RAILS_PORTAL_RATE_WINDOW_MS);
+  attempts.set(key, window);
+  return window.failures.length >= env.FAKE_RAILS_PORTAL_ACCOUNT_LOCKOUT;
+};
+
 export const createAuthRouter = (): Router => {
   const router = Router();
 
   router.post("/login", (request, response) => {
     const ip = request.ip ?? "unknown";
-    if (isRateLimited(ip)) {
+    const attemptedUser = typeof request.body?.username === "string" ? request.body.username : "";
+    if (isRateLimited(ip) || (attemptedUser && isAccountLocked(attemptedUser))) {
       throw new ApiError(429, "TOO_MANY_ATTEMPTS", "Too many failed login attempts; try again later");
     }
     const body = parseOrThrow(loginSchema, request.body);
@@ -55,9 +68,11 @@ export const createAuthRouter = (): Router => {
     const validPassword = constantTimeEquals(body.password, env.FAKE_RAILS_ADMIN_PASSWORD);
     if (!validUser || !validPassword) {
       recordFailure(ip);
+      recordFailure(accountKey(body.username));
       throw new ApiError(401, "INVALID_CREDENTIALS", "Invalid username or password");
     }
     clearFailures(ip);
+    clearFailures(accountKey(body.username));
     const token = signJwt(
       {
         sub: env.FAKE_RAILS_ADMIN_USER,

@@ -1,9 +1,15 @@
+# Per-client request limiting (http context; the zone name is unique per template).
+limit_req_zone $binary_remote_addr zone=pg_merchant_req:10m rate=50r/s;
+
 # Merchant portal + merchant server API.
 {{#SSL}}
 server {
     listen {{HTTP_PORT}};
     listen [::]:{{HTTP_PORT}};
     server_name {{SERVER_NAME}};
+    server_tokens off;
+    limit_req zone=pg_merchant_req burst=100 nodelay;
+    limit_req_status 429;
 
     location /.well-known/acme-challenge/ {
         root /var/www/acme;
@@ -26,6 +32,9 @@ server {
     listen [::]:{{HTTP_PORT}};
 {{/SSL}}
     server_name {{SERVER_NAME}};
+    server_tokens off;
+    limit_req zone=pg_merchant_req burst=100 nodelay;
+    limit_req_status 429;
 
 {{#SSL}}
     ssl_certificate     {{SSL_CERT_PATH}};

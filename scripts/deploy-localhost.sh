@@ -9,7 +9,39 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCAL="$ROOT/.local"
+umask 077
 mkdir -p "$LOCAL/fake-rails-data" "$LOCAL/logs"
+
+# Safety: this script starts everything on THIS machine in production mode with
+# the Fake Rails test tier enabled. Refuse when the environment says production
+# unless the operator explicitly confirms the local target.
+if [[ "${NODE_ENV:-}" == "production" && "${LOCAL_TARGET:-}" != "1" ]]; then
+  echo "Refusing to run: NODE_ENV=production is set. This is a local, test-tier deployment (Fake Rails enabled)." >&2
+  echo "Set LOCAL_TARGET=1 to confirm that this machine is a local workstation, not a production host." >&2
+  exit 1
+fi
+
+# Secrets are generated once with openssl and kept in a 0600 file; no secret has
+# a hard-coded fallback. Explicit environment variables still win.
+SECRETS_FILE="${LOCAL_SECRETS_FILE:-$LOCAL/secrets.env}"
+command -v openssl >/dev/null 2>&1 || { echo "openssl is required to generate local secrets" >&2; exit 1; }
+if [[ -f "$SECRETS_FILE" ]]; then
+  chmod 600 "$SECRETS_FILE"
+  # shellcheck disable=SC1090
+  . "$SECRETS_FILE"
+fi
+gen_secret() { openssl rand -hex 24 | cut -c1-40; }
+ensure_secret() {
+  local name="$1"
+  if [[ -z "${!name:-}" ]]; then
+    local value
+    value="$(gen_secret)"
+    printf -v "$name" '%s' "$value"
+    printf '%s=%q\n' "$name" "$value" >> "$SECRETS_FILE"
+    chmod 600 "$SECRETS_FILE"
+  fi
+}
+touch "$SECRETS_FILE"; chmod 600 "$SECRETS_FILE"
 
 # The orchestrator (deploy/deploy.ts) keeps its credentials in deploy/deploy.env
 # and the fake-rails nginx vhost proxies to this backend. Read the same values
@@ -40,19 +72,26 @@ deploy_value() {
 DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_PORT="${DB_PORT:-5432}"
 DB_USER="${DB_USER:-postgres}"
-DB_PASSWORD="${DB_PASSWORD:-postgres}"
+if [[ -z "${DB_PASSWORD:-}" ]]; then
+  echo "DB_PASSWORD (the password of DB_USER on the local PostgreSQL) must be provided in the environment." >&2
+  exit 1
+fi
 DB_NAME="${DB_NAME:-payment_gateway_monolith}"
 DB_ADMIN_DB="${DB_ADMIN_DB:-postgres}"
 DATABASE_URL="${DATABASE_URL:-postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}}"
 
-KMS_MASTER_KEY="${KMS_MASTER_KEY:-local-payment-gateway-master-key-32chars!}"
+ensure_secret KMS_MASTER_KEY
+ensure_secret DEV_PASSWORD
 FAKE_RAILS_BASE_URL="${FAKE_RAILS_BASE_URL:-$(deploy_value FAKE_RAILS_PUBLIC_BASE_URL http://127.0.0.1:4104)}"
 FAKE_RAILS_PUBLIC_BASE_URL="${FAKE_RAILS_PUBLIC_BASE_URL:-$FAKE_RAILS_BASE_URL}"
 FAKE_RAILS_BACK_PORT="${FAKE_RAILS_BACK_PORT:-$(deploy_value FAKE_RAILS_BACK_PORT 4104)}"
 FAKE_RAILS_ADMIN_USER="${FAKE_RAILS_ADMIN_USER:-$(deploy_value FAKE_RAILS_ADMIN_USER tester_admin)}"
-FAKE_RAILS_ADMIN_PASSWORD="${FAKE_RAILS_ADMIN_PASSWORD:-$(deploy_value FAKE_RAILS_ADMIN_PASSWORD Strong-Tester-Pass-2026!)}"
-FAKE_RAILS_JWT_SECRET="${FAKE_RAILS_JWT_SECRET:-$(deploy_value FAKE_RAILS_JWT_SECRET 0123456789abcdef0123456789abcdef)}"
-FAKE_RAILS_SEEDER_TOKEN="${FAKE_RAILS_SEEDER_TOKEN:-$(deploy_value FAKE_RAILS_SEEDER_TOKEN 0123456789abcdef0123456789abcdef)}"
+FAKE_RAILS_ADMIN_PASSWORD="${FAKE_RAILS_ADMIN_PASSWORD:-$(deploy_value FAKE_RAILS_ADMIN_PASSWORD '')}"
+FAKE_RAILS_JWT_SECRET="${FAKE_RAILS_JWT_SECRET:-$(deploy_value FAKE_RAILS_JWT_SECRET '')}"
+FAKE_RAILS_SEEDER_TOKEN="${FAKE_RAILS_SEEDER_TOKEN:-$(deploy_value FAKE_RAILS_SEEDER_TOKEN '')}"
+ensure_secret FAKE_RAILS_ADMIN_PASSWORD
+ensure_secret FAKE_RAILS_JWT_SECRET
+ensure_secret FAKE_RAILS_SEEDER_TOKEN
 FAKE_RAILS_REMOTE_DIR="${FAKE_RAILS_REMOTE_DIR:-$(deploy_value FAKE_RAILS_REMOTE_DIR /var/www/pg-fake-rails)}"
 if [[ -z "${FAKE_RAILS_DATA_DIR:-}" ]]; then
   if [[ -d "$FAKE_RAILS_REMOTE_DIR/shared/data" ]]; then
@@ -102,7 +141,7 @@ step "Development administrator & merchant accounts"
   MTLS_CA_CERT_PATH="$ROOT/core-back/certs/internal-ca.crt" \
   MTLS_SERVER_CERT_PATH="$ROOT/core-back/certs/core-back.crt" \
   MTLS_SERVER_KEY_PATH="$ROOT/core-back/certs/core-back.key" \
-  DEV_USERS_ALLOW_PRODUCTION="true" DEV_PASSWORD="${DEV_PASSWORD:-DevPassword123!}" \
+  DEV_USERS_ALLOW_PRODUCTION="true" DEV_PASSWORD="$DEV_PASSWORD" \
   bun run create-dev-users)
 
 step "Seed the Fake Rails gateway catalog"
@@ -226,7 +265,7 @@ cat <<TXT
 Admin portal      http://127.0.0.1:5101
 Merchant portal   http://127.0.0.1:5102
 Checkout portal   http://127.0.0.1:5103/pay/<linkKey>
-Fake Rails portal http://127.0.0.1:5104  ($FAKE_RAILS_ADMIN_USER / $FAKE_RAILS_ADMIN_PASSWORD)
+Fake Rails portal http://127.0.0.1:5104  (user $FAKE_RAILS_ADMIN_USER; generated credentials are in $SECRETS_FILE, mode 0600)
 Core mTLS         https://127.0.0.1:4000
 PM2 status        pm2 list
 Logs              pm2 logs <name>   (or $LOCAL/logs)

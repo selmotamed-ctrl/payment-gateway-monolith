@@ -22,9 +22,9 @@ const TWO_HOST = join(MATRIX_DIR, "machines.two-host-lab.example.json");
 
 const SECRETS: LabSecrets = {
   ...generateLabSecrets(),
-  kmsMasterKeyHex: "a".repeat(64),
-  backupEncryptionKeyHex: "b".repeat(64),
-  pgDbPassword: "unit-test-pg-password",
+  kmsMasterKeyHex: "7e1f4b9a3c6d2058e1a7b4c9d3f6082a5b1c8e4d7a0f3b6c9e2d5a8f1b4c7e03",
+  backupEncryptionKeyHex: "c4a81f7d2e6b3095a8d1c4f7e2b60395d8a1c4f7b2e5063a9d8c1f4e7b2a5068",
+  pgDbPassword: "unit-test-pg-Xk7Qm2Zr",
 };
 
 const minimal = (patch: Partial<LabConfigInput> = {}): LabConfigInput => ({
@@ -60,7 +60,8 @@ describe("lab config validation", () => {
   });
 
   test("machines.schema.json is in sync with the Zod schema", () => {
-    expect(readFileSync(SCHEMA_PATH, "utf8")).toBe(generateJsonSchema());
+    // Normalise CRLF checkouts (core.autocrlf) before comparing.
+    expect(readFileSync(SCHEMA_PATH, "utf8").replaceAll("\r\n", "\n")).toBe(generateJsonSchema());
   });
 
   test("literal secrets are rejected with a fix hint", () => {

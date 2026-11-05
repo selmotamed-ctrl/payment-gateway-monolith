@@ -1,3 +1,6 @@
+# Per-client request limiting (http context; the zone name is unique per template).
+limit_req_zone $binary_remote_addr zone=pg_checkoutlan_req:10m rate=50r/s;
+
 # Checkout payer page + API on the local network, no domain name required.
 # Access it as http(s)://<host-ip>:<port>; TLS is optional (CHECKOUT_LAN_SSL).
 server {
@@ -10,6 +13,9 @@ server {
     listen [::]:{{LISTEN_PORT}} default_server;
 {{/SSL}}
     server_name {{SERVER_NAME}} _;
+    server_tokens off;
+    limit_req zone=pg_checkoutlan_req burst=100 nodelay;
+    limit_req_status 429;
 
 {{LAN_ALLOW_RULES}}
 

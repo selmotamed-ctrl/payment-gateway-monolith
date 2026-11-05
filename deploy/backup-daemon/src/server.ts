@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { promises as nodeFs } from "node:fs";
+import { promises as nodeFs, chmodSync, mkdtempSync, rmSync } from "node:fs";
+import net from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import tls from "node:tls";
 import { z } from "zod";
 import type { BackupEngine, BackupStorageTarget, WalHealth } from "./backupEngine";
 import { BACKUP_KINDS, BACKUP_TARGETS } from "./backupEngine";
@@ -416,15 +420,121 @@ export interface RunningBackupDaemonServer extends HandlerBundle {
   stop: (closeActiveConnections?: boolean) => void;
 }
 
+/** Identity of the TLS peer as exposed by `tls.TLSSocket#getPeerCertificate()`. */
+export interface PeerCertificateLike {
+  subject?: { CN?: string | string[] };
+  subjectaltname?: string;
+}
+
+export const parseAllowedClientCns = (value: string | undefined): string[] =>
+  (value ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+/**
+ * mTLS authorization: a certificate signed by the internal CA is only
+ * authenticated, not authorized. The peer's subject CN (or a DNS SAN) must be
+ * in the allowlist (BACKUP_ALLOWED_CLIENT_CNS, default `backup-client`).
+ */
+export const isAllowedClientIdentity = (cert: PeerCertificateLike | undefined, allowed: string[]): boolean => {
+  if (!cert || allowed.length === 0) return false;
+  const cn = cert.subject?.CN;
+  const cns = Array.isArray(cn) ? cn : cn ? [cn] : [];
+  if (cns.some((value) => allowed.includes(value))) return true;
+  const dnsNames = (cert.subjectaltname ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.startsWith("DNS:"))
+    .map((entry) => entry.slice(4));
+  return dnsNames.some((value) => allowed.includes(value));
+};
+
+const FORBIDDEN_BODY = JSON.stringify({ error: { code: "forbidden", message: "client certificate is not authorized" } });
+const FORBIDDEN_RESPONSE =
+  "HTTP/1.1 403 Forbidden\r\ncontent-type: application/json; charset=utf-8\r\nconnection: close\r\n" +
+  `content-length: ${Buffer.byteLength(FORBIDDEN_BODY)}\r\n\r\n${FORBIDDEN_BODY}`;
+
+/**
+ * Bun.serve cannot expose the peer certificate, so the public TLS listener is a
+ * node:tls server that verifies the client certificate, checks its identity
+ * against the allowlist (403 otherwise) and only then bridges the decrypted
+ * stream to the Bun HTTP handler on a private unix socket (loopback port on
+ * Windows).
+ */
+const startMtlsGateway = async (
+  options: BackupDaemonServerOptions,
+  tlsOptions: Bun.TLSOptions,
+  bundle: HandlerBundle,
+): Promise<RunningBackupDaemonServer> => {
+  const allowed = parseAllowedClientCns(options.config.BACKUP_ALLOWED_CLIENT_CNS);
+  const fail = (error: Error): Response => {
+    options.logger?.error("server error", error);
+    return new Response(
+      JSON.stringify({ error: { code: "internal_error", message: "internal server error" } }),
+      { status: 500, headers: { "content-type": "application/json; charset=utf-8" } },
+    );
+  };
+  let socketDir: string | undefined;
+  let inner: ReturnType<typeof Bun.serve>;
+  let upstream: net.NetConnectOpts;
+  if (process.platform === "win32") {
+    inner = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: bundle.handler, error: fail });
+    upstream = { host: "127.0.0.1", port: inner.port ?? 0 };
+  } else {
+    socketDir = mkdtempSync(join(tmpdir(), "pg-backup-daemon-"));
+    chmodSync(socketDir, 0o700);
+    const socketPath = join(socketDir, "api.sock");
+    inner = Bun.serve({ unix: socketPath, fetch: bundle.handler, error: fail });
+    upstream = { path: socketPath };
+  }
+  const front = tls.createServer(
+    {
+      cert: tlsOptions.cert as string,
+      key: tlsOptions.key as string,
+      ca: tlsOptions.ca as string,
+      requestCert: true,
+      rejectUnauthorized: true,
+    },
+    (socket) => {
+      const peer = socket.getPeerCertificate();
+      if (!socket.authorized || !isAllowedClientIdentity(peer, allowed)) {
+        options.logger?.warn("rejected mTLS client: certificate identity not in BACKUP_ALLOWED_CLIENT_CNS");
+        socket.on("error", () => undefined);
+        socket.end(FORBIDDEN_RESPONSE);
+        return;
+      }
+      const backend = net.connect(upstream);
+      socket.on("error", () => backend.destroy());
+      backend.on("error", () => socket.destroy());
+      socket.pipe(backend);
+      backend.pipe(socket);
+    },
+  );
+  await new Promise<void>((resolveListen, rejectListen) => {
+    front.once("error", rejectListen);
+    front.listen(options.config.BACKUP_DAEMON_PORT, options.config.BACKUP_DAEMON_BIND_HOST, () => resolveListen());
+  });
+  return {
+    ...bundle,
+    server: inner,
+    stop: () => {
+      front.close();
+      inner.stop(true);
+      if (socketDir) rmSync(socketDir, { recursive: true, force: true });
+    },
+  };
+};
+
 export const startBackupDaemonServer = async (
   options: BackupDaemonServerOptions,
 ): Promise<RunningBackupDaemonServer> => {
-  const tls = await loadTlsOptions(options.config);
+  const tlsOptions = await loadTlsOptions(options.config);
   const bundle = createBackupDaemonHandler(options);
+  if (tlsOptions) return startMtlsGateway(options, tlsOptions, bundle);
   const server = Bun.serve({
     hostname: options.config.BACKUP_DAEMON_BIND_HOST,
     port: options.config.BACKUP_DAEMON_PORT,
-    ...(tls ? { tls } : {}),
     fetch: bundle.handler,
     error: (error) => {
       options.logger?.error("server error", error);

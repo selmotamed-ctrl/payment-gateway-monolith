@@ -53,6 +53,8 @@ export const backupDaemonEnvSchema = z
     BACKUP_CORE_S3_PREFIX: optionalNonEmpty,
     BACKUP_AUDIT_S3_PREFIX: optionalNonEmpty,
     BACKUP_SECONDARY_SSH_TARGET: optionalNonEmpty,
+    // Off-site copy never deletes by default; set true to mirror deletions (rclone sync / rsync --delete).
+    BACKUP_SECONDARY_MIRROR_DELETE: booleanish.default(false),
     BACKUP_FULL_CRON: cron.default("0 2 * * 0"),
     BACKUP_DELTA_CRON: cron.default("0 2 * * 1-6"),
     BACKUP_DRILL_CRON: cron.default("0 4 * * 0"),
@@ -64,6 +66,10 @@ export const backupDaemonEnvSchema = z
     BACKUP_DAEMON_CERT_PATH: optionalNonEmpty,
     BACKUP_DAEMON_KEY_PATH: optionalNonEmpty,
     BACKUP_DAEMON_CA_CERT_PATH: optionalNonEmpty,
+    // Comma separated subject CNs (or DNS SANs) of client certificates allowed to call the API.
+    BACKUP_ALLOWED_CLIENT_CNS: nonEmpty.default("backup-client"),
+    // Optional env file that restore_command sources instead of embedding S3/encryption secrets in postgresql.auto.conf.
+    WALG_ENV_FILE: optionalNonEmpty,
     PG_PRIMARY_HOST: nonEmpty.default("127.0.0.1"),
     PG_PRIMARY_PORT: port.default(5432),
     PG_PRIMARY_USER: nonEmpty.default("postgres"),

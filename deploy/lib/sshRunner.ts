@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync, chmodSync, rmSync } from "node:fs";
-import { homedir, networkInterfaces } from "node:os";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { homedir, networkInterfaces, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import type { SshTarget } from "./hostPlanner";
 
 /**
@@ -45,7 +45,8 @@ export const isLocalTarget = (target: SshTarget): boolean => {
   return false;
 };
 
-const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
+import { shellQuote } from "./quoting";
+export { shellQuote };
 
 const sshArgs = (target: SshTarget): string[] => [
   "-i", expandHome(target.keyPath),
@@ -216,9 +217,12 @@ export class SshRunner {
         // sudo. The sudo password is never mixed with the file bytes: a
         // cached sudo timestamp would otherwise leave the password line at the
         // top of the installed file.
-        const temporary = `/tmp/pg-deploy-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        writeFileSync(temporary, input.content, { mode });
-        chmodSync(temporary, mode);
+        // A private 0700 directory (mkdtemp) holds the 0600 file; both are removed in `finally`.
+        const privateDir = mkdtempSync(join(tmpdir(), "pg-deploy-"));
+        chmodSync(privateDir, 0o700);
+        const temporary = join(privateDir, "payload");
+        writeFileSync(temporary, input.content, { mode: 0o600 });
+        chmodSync(temporary, 0o600);
         try {
           const args = ["-S", "-p", "", "install", "-D", "-m", mode.toString(8), temporary, input.path];
           const result = spawnSync("sudo", args, {
@@ -230,7 +234,7 @@ export class SshRunner {
             throw new Error(`write ${input.path} locally failed (exit ${result.status}): ${(result.stderr ?? "").slice(-1000)}`);
           }
         } finally {
-          rmSync(temporary, { force: true });
+          rmSync(privateDir, { recursive: true, force: true });
         }
       } else {
         mkdirSync(dirname(input.path), { recursive: true });

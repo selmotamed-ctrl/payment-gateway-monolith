@@ -5,7 +5,8 @@ import { join, resolve } from "node:path";
 import { effectiveDatabase, loadDeployConfig, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
 import { buildPki, certFilesForHost, readMaterial, verifyPki } from "./lib/pkiManager";
-import { SshRunner } from "./lib/sshRunner";
+import { SshRunner, shellQuote } from "./lib/sshRunner";
+import { dollarTag, pgpassField, sqlIdent, sqlLiteral } from "./lib/quoting";
 import { applyFirewall, readFirewallStatus } from "./lib/firewallConfigurator";
 import { probeCoreService, probeEdgeService, renderVerification, verifyDeployment } from "./lib/healthVerifier";
 import { bootstrapPackagesCommand, detectHostOs } from "./lib/osDetector";
@@ -37,6 +38,8 @@ interface CliOptions {
   only: Set<OnlyRole>;
   dryRun: boolean;
   fresh: boolean;
+  /** Explicit opt-in to run a fresh deploy (migrations from scratch) against a non-empty database. */
+  forceFresh: boolean;
   update: boolean;
   enforceFirewall: boolean;
   skipBuild: boolean;
@@ -66,6 +69,7 @@ const parseArgs = (argv: string[]): CliOptions => {
     only: new Set(),
     dryRun: false,
     fresh: false,
+    forceFresh: process.env.DEPLOY_FORCE_FRESH === "1",
     update: false,
     enforceFirewall: false,
     skipBuild: false,
@@ -75,6 +79,7 @@ const parseArgs = (argv: string[]): CliOptions => {
   for (const raw of argv) {
     if (raw === "--dry-run") options.dryRun = true;
     else if (raw === "--fresh") options.fresh = true;
+    else if (raw === "--force-fresh") { options.fresh = true; options.forceFresh = true; }
     else if (raw === "--update") options.update = true;
     else if (raw === "--enforce-firewall") options.enforceFirewall = true;
     else if (raw === "--skip-build") options.skipBuild = true;
@@ -203,7 +208,7 @@ const resolvePublicCertificate = (
     const localKey = `/etc/ssl/pg/${domain}.key`;
     const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(domain);
     const san = isIp ? `IP:${domain}` : `DNS:${domain}`;
-    runner.run(host.ssh, `mkdir -p /etc/ssl/pg && openssl req -x509 -newkey rsa:2048 -nodes -keyout ${localKey} -out ${localCert} -days 365 -subj "/CN=${domain}" -addext "subjectAltName=${san}"`, { sudo: true });
+    runner.run(host.ssh, `mkdir -p /etc/ssl/pg && openssl req -x509 -newkey rsa:2048 -nodes -keyout ${shellQuote(localKey)} -out ${shellQuote(localCert)} -days 365 -subj ${shellQuote(`/CN=${domain}`)} -addext ${shellQuote(`subjectAltName=${san}`)}`, { sudo: true });
     return { certPath: localCert, keyPath: localKey };
   }
   if (mode === "certbot") {
@@ -305,13 +310,13 @@ const renderNginx = (host: HostPlan, config: DeployConfig, runner: SshRunner, ro
           : site.role === "fake-rails"
             ? config.FAKE_RAILS_BACK_PORT
             : config.CHECKOUT_BACK_PORT,
-      lanAllowedCidrs: config.LAN_ALLOWED_CIDRS,
+      lanAllowedCidrs: site.role === "fake-rails" ? config.FAKE_RAILS_ALLOWED_CIDRS : config.LAN_ALLOWED_CIDRS,
       upstreamName: site.upstreamName,
       upstreamServers: site.upstreamServers,
     });
     const available = `/etc/nginx/sites-available/pg-${site.site}.conf`;
     runner.writeRemoteFile({ target: host.ssh, path: available, content: rendered, mode: 0o644, sudo: true });
-    runner.run(host.ssh, `ln -sfn ${available} /etc/nginx/sites-enabled/pg-${site.site}.conf && rm -f /etc/nginx/sites-enabled/default`, { sudo: true });
+    runner.run(host.ssh, `ln -sfn ${shellQuote(available)} ${shellQuote(`/etc/nginx/sites-enabled/pg-${site.site}.conf`)} && rm -f /etc/nginx/sites-enabled/default`, { sudo: true });
     runner.run(host.ssh, "nginx -t", { sudo: true });
     runner.run(host.ssh, "systemctl reload nginx", { sudo: true });
     log(`  nginx ${site.site} -> ${site.serverName}:${site.listenPort} (${site.ssl ? "https" : "http"})`);
@@ -326,7 +331,8 @@ const deployService = (input: {
   pki: ReturnType<typeof buildPki>;
   releaseTimestamp: string;
   keepReleases: number;
-  runMigrations?: boolean;
+  /** Set for core services; only the first core node actually migrates. */
+  migration?: { fresh: boolean; forceFresh: boolean; firstCoreNode: boolean };
 }): string => {
   const { runner, host, service, config, pki, releaseTimestamp } = input;
   const remote = service.remoteDir;
@@ -339,7 +345,7 @@ const deployService = (input: {
   // The tree lives under /var/www, so creating it needs sudo; everything the
   // application reads afterwards (keys, .env, PM2 files, the release tree) is
   // owned by the SSH user so PM2 — never root — can read it.
-  runner.run(host.ssh, "mkdir -p " + [releaseDir, `${remote}/shared/certs`, `${remote}/shared/backups`, `${remote}/shared/pm2`, `${remote}/shared/data`].join(" ") + ` && chown -R ${owner} ${remote}`, { sudo: true });
+  runner.run(host.ssh, "mkdir -p " + [releaseDir, `${remote}/shared/certs`, `${remote}/shared/backups`, `${remote}/shared/pm2`, `${remote}/shared/data`].map(shellQuote).join(" ") + ` && chown -R ${shellQuote(owner)} ${shellQuote(remote)}`, { sudo: true });
 
   // 1. The backend source.
   runner.sync({
@@ -356,7 +362,7 @@ const deployService = (input: {
       throw new Error(`The ${frontend} build is missing (${dist}); run without --skip-build`);
     }
     // rsync creates only the final path component, so make the parent first.
-    runner.run(host.ssh, `mkdir -p ${releaseDir}/${frontend}`, { sudo: false });
+    runner.run(host.ssh, `mkdir -p ${shellQuote(`${releaseDir}/${frontend}`)}`, { sudo: false });
     runner.sync({
       target: host.ssh,
       local: dist,
@@ -397,15 +403,31 @@ const deployService = (input: {
   const env = absoluteEnv(service.env, remote);
   const envPath = `${remote}/shared/${service.envFileName ?? ".env"}`;
   runner.writeRemoteFile({ target: host.ssh, path: envPath, content: renderEnvFile(env), mode: 0o600, sudo: false });
-  runner.run(host.ssh, `ln -sfn ${envPath} ${appDir}/.env`, { sudo: false });
+  runner.run(host.ssh, `ln -sfn ${shellQuote(envPath)} ${shellQuote(`${appDir}/.env`)}`, { sudo: false });
 
   // 5. Dependencies and, for the core, the schema.
   const bun = 'PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun';
   runner.run(host.ssh, `${bun} install --frozen-lockfile`, { cwd: appDir, sudo: false });
   if (service.role === "core") {
     runner.run(host.ssh, `${bun}x prisma generate`, { cwd: appDir, sudo: false });
-    if (input.runMigrations !== false) {
-      runner.run(host.ssh, `${bun} run migrate-deploy`, { cwd: appDir, sudo: false });
+    if (input.migration?.firstCoreNode) {
+      const state = probeMigrationState({ runner, config, host, appDir, releaseTimestamp });
+      const migrationPlan = planMigrations({
+        fresh: input.migration.fresh,
+        firstCoreNode: true,
+        databaseNonEmpty: state.databaseNonEmpty,
+        pendingMigrations: state.pendingMigrations,
+        forceFresh: input.migration.forceFresh,
+      });
+      if (migrationPlan.refuse) throw new Error(migrationPlan.refuse);
+      if (migrationPlan.dumpBeforeMigrate) {
+        backupDatabase({ runner, config, host, releaseTimestamp });
+      }
+      if (migrationPlan.runMigrate) {
+        runner.run(host.ssh, `${bun} run migrate-deploy`, { cwd: appDir, sudo: false });
+      } else {
+        log("  no pending migrations");
+      }
     }
     if (config.RUN_PRISMA_SEED) {
       runner.run(host.ssh, `${bun} run db-seed`, { cwd: appDir, sudo: false });
@@ -415,14 +437,14 @@ const deployService = (input: {
   // 6. Atomic symlink switch. Multi-node hosts use a per-node link so two
   //    instances of the same tier never overwrite each other.
   const currentLink = service.currentLink ?? `${remote}/current`;
-  runner.run(host.ssh, `ln -sfn ${releaseDir} ${currentLink}`, { sudo: false });
+  runner.run(host.ssh, `ln -sfn ${shellQuote(releaseDir)} ${shellQuote(currentLink)}`, { sudo: false });
 
   // 7. PM2.
   const ecosystem = `${remote}/shared/pm2/${service.name}.config.cjs`;
   runner.writeRemoteFile({ target: host.ssh, path: ecosystem, content: pm2Ecosystem(service, releaseDir), mode: 0o644, sudo: false });
   runner.run(
     host.ssh,
-    `"$HOME/.bun/bin/pm2" delete ${service.name} >/dev/null 2>&1 || true; "$HOME/.bun/bin/pm2" start ${ecosystem} --update-env && "$HOME/.bun/bin/pm2" save`,
+    `"$HOME/.bun/bin/pm2" delete ${shellQuote(service.name)} >/dev/null 2>&1 || true; "$HOME/.bun/bin/pm2" start ${shellQuote(ecosystem)} --update-env && "$HOME/.bun/bin/pm2" save`,
     { sudo: false },
   );
 
@@ -432,7 +454,7 @@ const deployService = (input: {
   // 9. Prune.
   runner.run(
     host.ssh,
-    `ls -1dt ${releaseRoot}/*/ 2>/dev/null | tail -n +${input.keepReleases + 1} | xargs -r rm -rf`,
+    `ls -1dt -- ${shellQuote(releaseRoot)}/*/ 2>/dev/null | tail -n +${input.keepReleases + 1} | xargs -r -d '\\n' rm -rf --`,
     { sudo: false },
   );
 
@@ -451,7 +473,7 @@ const deployBackupDaemon = (input: {
   const sourceDir = join(REPO_ROOT, "deploy", "backup-daemon");
   runner.run(
     host.ssh,
-    `install -d -m 0755 -o ${host.ssh.user} -g ${host.ssh.user} ${installDir} && chown -R ${host.ssh.user}:${host.ssh.user} ${installDir}`,
+    `install -d -m 0755 -o ${shellQuote(host.ssh.user)} -g ${shellQuote(host.ssh.user)} ${shellQuote(installDir)} && chown -R ${shellQuote(`${host.ssh.user}:${host.ssh.user}`)} ${shellQuote(installDir)}`,
     { sudo: true },
   );
   runner.sync({
@@ -461,9 +483,8 @@ const deployBackupDaemon = (input: {
     delete: true,
     excludes: ["node_modules", ".git", "dist", "test", "*.log", ".env"],
   });
-  runner.run(host.ssh, `chown -R postgres:postgres ${installDir}`, { sudo: true });
-  runner.run(host.ssh, 'command -v /usr/local/bin/bun >/dev/null 2>&1 || (command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | bash)', { sudo: false });
-  runner.run(host.ssh, `test -x /usr/local/bin/bun || ln -sfn /home/${host.ssh.user}/.bun/bin/bun /usr/local/bin/bun`, { sudo: true });
+  runner.run(host.ssh, `chown -R postgres:postgres ${shellQuote(installDir)}`, { sudo: true });
+  runner.run(host.ssh, bunInstallCommand(config), { sudo: true });
   runner.run(host.ssh, "/usr/local/bin/bun install --frozen-lockfile", { cwd: installDir, sudo: true, sudoUser: "postgres" });
   runner.run(
     host.ssh,
@@ -471,6 +492,21 @@ const deployBackupDaemon = (input: {
     { sudo: true },
   );
   log(`  backup daemon source -> ${host.ssh.host}:${installDir} (BACKUP_DAEMON_PORT=${config.BACKUP_DAEMON_PORT})`);
+};
+
+/**
+ * Installs Bun system-wide without `curl | bash`: a pinned release is
+ * downloaded and verified against BUN_SHA256. Without BUN_SHA256 an already
+ * installed bun is reused, otherwise the command fails closed.
+ */
+export const bunInstallCommand = (config: Pick<DeployConfig, "BUN_VERSION" | "BUN_SHA256">): string => {
+  const sha = config.BUN_SHA256.trim().toLowerCase();
+  const link = 'ln -sfn bun /usr/local/bin/bunx';
+  const missing = `echo ${shellQuote(`bun is not installed and BUN_SHA256 is not set: install bun ${config.BUN_VERSION} manually or set BUN_SHA256 (SHA-256 of bun-linux-x64.zip) in deploy.env`)} >&2; exit 1`;
+  const download = sha
+    ? `d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && curl -fsSL ${shellQuote(`https://github.com/oven-sh/bun/releases/download/bun-v${config.BUN_VERSION}/bun-linux-x64.zip`)} -o "$d/bun.zip" && echo ${shellQuote(`${sha}  `)}"$d/bun.zip" | sha256sum -c - && unzip -q -o "$d/bun.zip" -d "$d" && install -m 0755 "$d/bun-linux-x64/bun" /usr/local/bin/bun`
+    : missing;
+  return `if [ ! -x /usr/local/bin/bun ]; then if command -v bun >/dev/null 2>&1; then ln -sfn "$(command -v bun)" /usr/local/bin/bun; else ${download}; fi; fi; ${link}`;
 };
 
 const provisionDatabase = (input: {
@@ -487,17 +523,24 @@ const provisionDatabase = (input: {
   // application credential is never used to create the database, and it never
   // leaves the core host. The SQL is streamed to a temporary file instead of
   // quoted on the command line.
+  const roleBody = `IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${sqlLiteral(config.DB_USER ?? "", "DB_USER")}) THEN CREATE ROLE ${sqlIdent(config.DB_USER ?? "", "DB_USER")} LOGIN PASSWORD ${sqlLiteral(config.DB_PASSWORD ?? "", "DB_PASSWORD")}; END IF;`;
+  const tag = dollarTag(roleBody);
   const createSql = [
-    `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${config.DB_USER}') THEN CREATE ROLE "${config.DB_USER}" LOGIN PASSWORD '${config.DB_PASSWORD}'; END IF; END $$;`,
-    `SELECT 'CREATE DATABASE "${config.DB_NAME}" OWNER "${config.DB_USER}"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${config.DB_NAME}')\\gexec`,
+    `DO ${tag} BEGIN ${roleBody} END ${tag};`,
+    `SELECT ${sqlLiteral(`CREATE DATABASE ${sqlIdent(config.DB_NAME ?? "", "DB_NAME")} OWNER ${sqlIdent(config.DB_USER ?? "", "DB_USER")}`)} WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = ${sqlLiteral(config.DB_NAME ?? "", "DB_NAME")})\\gexec`,
   ].join("\n");
 
-  const sqlPath = `/tmp/pg-db-init-${timestamp()}.sql`;
-  runner.writeRemoteFile({ target: host.ssh, path: sqlPath, content: `${createSql}\n`, mode: 0o600 });
+  // Secret-bearing SQL lives in a private postgres-owned 0700 dir, mode 0600,
+  // and is always removed afterwards.
+  const sqlDir = `/var/lib/postgresql/.pg-db-init-${timestamp()}`;
+  const sqlPath = `${sqlDir}/init.sql`;
+  runner.run(host.ssh, `install -d -m 0700 -o postgres -g postgres ${shellQuote(sqlDir)}`, { sudo: true });
   try {
-    runner.run(host.ssh, `psql -f ${sqlPath}`, { sudo: true, sudoUser: "postgres" });
+    runner.writeRemoteFile({ target: host.ssh, path: sqlPath, content: `${createSql}\n`, mode: 0o600, sudo: true });
+    runner.run(host.ssh, `chown postgres:postgres ${shellQuote(sqlPath)}`, { sudo: true });
+    runner.run(host.ssh, `psql -f ${shellQuote(sqlPath)}`, { sudo: true, sudoUser: "postgres" });
   } finally {
-    runner.run(host.ssh, `rm -f ${sqlPath}`);
+    runner.run(host.ssh, `rm -rf ${shellQuote(sqlDir)}`, { sudo: true });
   }
   log(`  database ${config.DB_NAME} and user ${config.DB_USER} ready on ${config.DB_PRIVATE_IP ?? host.ssh.host}`);
 };
@@ -506,7 +549,7 @@ const provisionDatabase = (input: {
 export const preMigrationBackup = (
   config: DeployConfig,
   target: string,
-): { command: string; host: string; port: number; database: string; user: string } => {
+): { command: string; host: string; port: number; database: string; user: string; pgpassPath: string; pgpassContent: string } => {
   const database = effectiveDatabase(config);
   const primary = parseNodeList(config.PG_PRIMARY_NODE)[0];
   const pgStorage = pgStorageConfigured(config);
@@ -515,26 +558,120 @@ export const preMigrationBackup = (
   const name = pgStorage ? config.PG_DB_NAME : database.name;
   const user = pgStorage ? config.PG_DB_USER : database.user;
   const password = pgStorage ? config.PG_DB_PASSWORD : database.password;
+  // The password never goes on a command line: it is streamed into a 0600
+  // PGPASSFILE (see backupDatabase) and pg_dump reads it from there.
+  const pgpassPath = `${target}.pgpass`;
   return {
     host,
     port,
     database: name,
     user,
-    command: `PGPASSWORD=${JSON.stringify(password)} pg_dump -h ${host} -p ${port} -U ${user} -Fc ${name} > ${target}.dump`,
+    pgpassPath,
+    pgpassContent: `${pgpassField(host)}:${port}:*:${pgpassField(user)}:${pgpassField(password)}\n`,
+    command: `(umask 077; PGPASSFILE=${shellQuote(pgpassPath)} pg_dump --no-password -h ${shellQuote(host)} -p ${port} -U ${shellQuote(user)} -Fc -f ${shellQuote(`${target}.dump`)} ${shellQuote(name)})`,
   };
+};
+
+/** Result of probing the target database before a migration run. */
+export interface MigrationPlanInput {
+  fresh: boolean;
+  /** Only the first core node ever runs migrations. */
+  firstCoreNode: boolean;
+  /** true/false when probed, undefined when unknown (dry run, probe failure). */
+  databaseNonEmpty: boolean | undefined;
+  /** true/false when probed, undefined when unknown. */
+  pendingMigrations: boolean | undefined;
+  forceFresh: boolean;
+}
+
+export interface MigrationPlan {
+  runMigrate: boolean;
+  /** pg_dump taken BEFORE `prisma migrate deploy`. */
+  dumpBeforeMigrate: boolean;
+  /** Set when the deploy must stop. */
+  refuse?: string;
+}
+
+/**
+ * The single decision point for schema migrations (pure, unit-tested):
+ *  - only the first core node migrates;
+ *  - `--fresh` against a non-empty database is refused unless --force-fresh;
+ *  - update deploys run `migrate deploy` whenever migrations are (or may be) pending;
+ *  - a dump is always taken first when the database is (or may be) non-empty.
+ */
+export const planMigrations = (input: MigrationPlanInput): MigrationPlan => {
+  if (!input.firstCoreNode) return { runMigrate: false, dumpBeforeMigrate: false };
+  const maybeNonEmpty = input.databaseNonEmpty !== false;
+  if (input.fresh) {
+    if (input.databaseNonEmpty === true && !input.forceFresh) {
+      return {
+        runMigrate: false,
+        dumpBeforeMigrate: false,
+        refuse: "--fresh refused: the target database is not empty. Re-run with --force-fresh (or DEPLOY_FORCE_FRESH=1) only if you intend to migrate over existing data; a pre-migration dump is taken first.",
+      };
+    }
+    return { runMigrate: true, dumpBeforeMigrate: maybeNonEmpty };
+  }
+  const runMigrate = input.pendingMigrations !== false;
+  return { runMigrate, dumpBeforeMigrate: runMigrate && maybeNonEmpty };
 };
 
 const backupDatabase = (input: { runner: SshRunner; config: DeployConfig; host: HostPlan; releaseTimestamp: string }): void => {
   const { runner, config, host, releaseTimestamp } = input;
   const backupDir = `${config.CORE_REMOTE_DIR}/shared/backups`;
   const target = `${backupDir}/pre-migrate-${releaseTimestamp}`;
-  const { command } = preMigrationBackup(config, target);
+  const { command, pgpassPath, pgpassContent } = preMigrationBackup(config, target);
   // The tree lives under /var/www and may not exist yet on an update deploy, so
-  // the directory is created as root and handed to the SSH user before the
-  // dump writes into it.
-  runner.run(host.ssh, `mkdir -p ${backupDir} && chown ${host.ssh.user}:${host.ssh.user} ${backupDir}`, { sudo: true });
-  runner.run(host.ssh, command, { sudo: false });
-  log(`  pre-migration backup -> ${target}`);
+  // the directory is created as root and handed to the SSH user (0700) before
+  // the dump writes into it.
+  runner.run(host.ssh, `mkdir -p ${shellQuote(backupDir)} && chown ${shellQuote(`${host.ssh.user}:${host.ssh.user}`)} ${shellQuote(backupDir)} && chmod 0700 ${shellQuote(backupDir)}`, { sudo: true });
+  try {
+    runner.writeRemoteFile({ target: host.ssh, path: pgpassPath, content: pgpassContent, mode: 0o600, sudo: false });
+    runner.run(host.ssh, command, { sudo: false });
+  } finally {
+    runner.run(host.ssh, `rm -f ${shellQuote(pgpassPath)}`, { sudo: false });
+  }
+  // Keep only the newest dumps (they contain the whole database).
+  runner.run(host.ssh, `ls -1t -- ${shellQuote(backupDir)}/pre-migrate-*.dump 2>/dev/null | tail -n +${Math.max(1, config.KEEP_RELEASES) + 1} | xargs -r rm -f --`, { sudo: false });
+  log(`  pre-migration backup -> ${target}.dump`);
+};
+
+/** Probes whether the database has tables and whether `prisma migrate` has pending work. */
+const probeMigrationState = (input: {
+  runner: SshRunner;
+  config: DeployConfig;
+  host: HostPlan;
+  appDir: string;
+  releaseTimestamp: string;
+}): { databaseNonEmpty: boolean | undefined; pendingMigrations: boolean | undefined } => {
+  const { runner, config, host, appDir, releaseTimestamp } = input;
+  if (runner.dryRun) return { databaseNonEmpty: undefined, pendingMigrations: undefined };
+  const backupDir = `${config.CORE_REMOTE_DIR}/shared/backups`;
+  const probe = preMigrationBackup(config, `${backupDir}/probe-${releaseTimestamp}`);
+  let databaseNonEmpty: boolean | undefined;
+  try {
+    runner.writeRemoteFile({ target: host.ssh, path: probe.pgpassPath, content: probe.pgpassContent, mode: 0o600, sudo: false });
+    const out = runner.capture(
+      host.ssh,
+      `PGPASSFILE=${shellQuote(probe.pgpassPath)} psql --no-password -h ${shellQuote(probe.host)} -p ${probe.port} -U ${shellQuote(probe.user)} -d ${shellQuote(probe.database)} -Atc ${shellQuote("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")}`,
+      { sudo: false },
+    );
+    databaseNonEmpty = /^\d+$/.test(out) ? Number(out) > 0 : undefined;
+  } catch {
+    databaseNonEmpty = undefined;
+  } finally {
+    runner.run(host.ssh, `rm -f ${shellQuote(probe.pgpassPath)}`, { sudo: false });
+  }
+  let pendingMigrations: boolean | undefined;
+  try {
+    runner.run(host.ssh, 'PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bunx prisma migrate status', { cwd: appDir, sudo: false });
+    pendingMigrations = false;
+  } catch {
+    // Non-zero: pending migrations, an unmanaged database, or an unreachable one.
+    // `migrate deploy` then either applies them or fails loudly.
+    pendingMigrations = true;
+  }
+  return { databaseNonEmpty, pendingMigrations };
 };
 
 /**
@@ -667,12 +804,10 @@ const main = async (): Promise<void> => {
         } else {
           warn(`unknown OS on ${host.ssh.host}; install nginx/rsync/curl/nodejs manually`);
         }
-        runner.run(host.ssh, "command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | bash", { sudo: false });
-        // PM2 is a Node program and its shebang is `node`; expose Bun on a
-        // stable absolute path so the PM2 interpreter setting always resolves.
-        runner.run(host.ssh, `ln -sfn /home/${host.ssh.user}/.bun/bin/bun /usr/local/bin/bun`, { sudo: true });
+        // PM2 is a Node program and its shebang is `node`; Bun lives on a stable
+        // absolute path (/usr/local/bin/bun, pinned + checksum verified).
+        runner.run(host.ssh, bunInstallCommand(config), { sudo: true });
         runner.run(host.ssh, 'test -x "$HOME/.bun/bin/pm2" || PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun add -g pm2', { sudo: false });
-        runner.run(host.ssh, `ln -sfn /home/${host.ssh.user}/.bun/bin/bunx /usr/local/bin/bunx`, { sudo: true });
         // Best effort: re-register the PM2 process list on boot.
         const pm2Path = `/home/${host.ssh.user}/.bun/bin:/usr/local/bin:/usr/bin:/bin`;
         runner.run(
@@ -728,16 +863,12 @@ const main = async (): Promise<void> => {
   if (!pgStorageConfigured(config) && (shouldRun(options, "db") || shouldRun(options, "core"))) {
     const dbHost = plan.hosts.find((host) => host.roles.includes("db")) ?? coreHost;
     provisionDatabase({ runner, config, host: dbHost });
-    if (!fresh) {
-      backupDatabase({ runner, config, host: coreHost, releaseTimestamp });
-    }
   } else if (!pgStorageConfigured(config)) {
     log("  skipped (--only excludes db/core)");
-  } else if (!fresh && shouldRun(options, "core")) {
-    // PostgreSQL storage: dump the primary directly (never through PgBouncer)
-    // before the core release runs migrate-deploy.
-    backupDatabase({ runner, config, host: coreHost, releaseTimestamp });
   }
+  // The pre-migration dump (primary direct port, never PgBouncer) is taken by
+  // deployService on the first core node, BEFORE `migrate deploy`, in both
+  // fresh and update mode whenever the database is non-empty (see planMigrations).
 
   // ---- Steps 6-9: deploy the services in dependency order ---------------
   const deployTargets: Array<{ index: number; role: "core" | "admin" | "merchant" | "checkout" | "fake-rails"; title: string }> = [
@@ -776,7 +907,9 @@ const main = async (): Promise<void> => {
           pki,
           releaseTimestamp,
           keepReleases: options.keepReleases ?? config.KEEP_RELEASES,
-          runMigrations: target.role === "core" ? fresh && unit.service.nodeId === plan.nodes.core[0]?.nodeId : undefined,
+          migration: target.role === "core"
+            ? { fresh, forceFresh: options.forceFresh, firstCoreNode: unit.service.nodeId === plan.nodes.core[0]?.nodeId }
+            : undefined,
         });
       }
       if (options.dryRun) continue;

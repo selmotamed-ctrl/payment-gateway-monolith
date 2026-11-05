@@ -2,6 +2,7 @@ import express from "express";
 import http from "node:http";
 import { createApiRouter } from "./api";
 import { env } from "./lib/env";
+import { parseTrustProxy, peerAllowlist } from "./lib/security";
 import { requestLoggerMiddleware } from "./lib/requestLogger";
 import { getDb } from "./engine/db";
 import { listScenarios } from "./engine/chaos/scenarioStore";
@@ -11,7 +12,10 @@ import { broadcast } from "./api/portal/eventHub";
 export const createApp = () => {
   const app = express();
   app.disable("x-powered-by");
-  app.set("trust proxy", true);
+  // Only trust X-Forwarded-* from the configured proxies (default: loopback, i.e. the local nginx).
+  app.set("trust proxy", parseTrustProxy(env.FAKE_RAILS_TRUST_PROXY));
+  // Real-peer network allowlist (not spoofable through X-Forwarded-For).
+  app.use(peerAllowlist(env.FAKE_RAILS_ALLOWED_CIDRS));
   app.use(requestLoggerMiddleware);
   app.use(createApiRouter());
   return app;

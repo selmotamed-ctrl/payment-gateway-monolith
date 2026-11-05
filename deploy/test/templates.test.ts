@@ -9,7 +9,7 @@ const template = (name: string): string => readFileSync(join(TEMPLATES, name), "
 describe("deploy CLI arguments", () => {
   test("defaults to deploy/deploy.env and no role filter", () => {
     const options = parseArgs([]);
-    expect(options.envPath.endsWith("deploy/deploy.env")).toBe(true);
+    expect(options.envPath.replaceAll("\\", "/").endsWith("deploy/deploy.env")).toBe(true);
     expect(options.only.size).toBe(0);
     expect(options.dryRun).toBe(false);
   });
@@ -20,7 +20,7 @@ describe("deploy CLI arguments", () => {
     expect(options.dryRun).toBe(true);
     expect(options.fresh).toBe(true);
     expect(options.update).toBe(true);
-    expect(options.envPath.endsWith("deploy/other.env")).toBe(true);
+    expect(options.envPath.replaceAll("\\", "/").endsWith("deploy/other.env")).toBe(true);
     expect(options.keepReleases).toBe(3);
   });
 

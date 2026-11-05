@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { weakSecretReason } from "../security";
 
 /**
  * Startup configuration of the standalone Fake Payment Rails service.
@@ -38,9 +39,13 @@ export const envSchema = z.object({
 
   FAKE_RAILS_ADMIN_USER: z.string().min(4).max(128),
   FAKE_RAILS_ADMIN_PASSWORD: z.string().min(12).max(512),
-  FAKE_RAILS_JWT_SECRET: z.string().min(16).max(512),
-  FAKE_RAILS_SEEDER_TOKEN: z.string().min(16).max(512),
+  FAKE_RAILS_JWT_SECRET: z.string().min(32).max(512),
+  FAKE_RAILS_SEEDER_TOKEN: z.string().min(32).max(512),
 
+  // Express "trust proxy" setting: "loopback" (default), a CIDR/keyword list, a hop count or "false".
+  FAKE_RAILS_TRUST_PROXY: z.string().default("loopback"),
+  // Failed logins per account (any IP) before it is locked for the rate window.
+  FAKE_RAILS_PORTAL_ACCOUNT_LOCKOUT: z.coerce.number().int().positive().max(1000).default(5),
   FAKE_RAILS_ALLOWED_CIDRS: z.string().default("127.0.0.1/32,10.0.0.0/8,192.168.0.0/16"),
   FAKE_RAILS_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(10_000),
   FAKE_RAILS_MAX_BODY_BYTES: z.coerce.number().int().positive().max(50 * 1024 * 1024).default(10 * 1024 * 1024),
@@ -78,6 +83,21 @@ const parse = (): FakeRailsEnv => {
   }
   if (DEFAULT_PASSWORDS.has(value.FAKE_RAILS_ADMIN_PASSWORD)) {
     process.stderr.write("FAKE_RAILS_WEAK_CREDENTIALS: FAKE_RAILS_ADMIN_PASSWORD must not be a default value\n");
+    process.exit(1);
+  }
+  for (const [name, secret] of [
+    ["FAKE_RAILS_ADMIN_PASSWORD", value.FAKE_RAILS_ADMIN_PASSWORD],
+    ["FAKE_RAILS_JWT_SECRET", value.FAKE_RAILS_JWT_SECRET],
+    ["FAKE_RAILS_SEEDER_TOKEN", value.FAKE_RAILS_SEEDER_TOKEN],
+  ] as const) {
+    const reason = weakSecretReason(secret);
+    if (reason) {
+      process.stderr.write(`FAKE_RAILS_WEAK_CREDENTIALS: ${name} ${reason}; replace this placeholder with a generated secret\n`);
+      process.exit(1);
+    }
+  }
+  if (value.FAKE_RAILS_JWT_SECRET === value.FAKE_RAILS_SEEDER_TOKEN) {
+    process.stderr.write("FAKE_RAILS_WEAK_CREDENTIALS: FAKE_RAILS_JWT_SECRET and FAKE_RAILS_SEEDER_TOKEN must differ\n");
     process.exit(1);
   }
   if (value.FAKE_RAILS_ADMIN_USER === value.FAKE_RAILS_ADMIN_PASSWORD) {
