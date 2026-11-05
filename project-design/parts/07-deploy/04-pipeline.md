@@ -18,6 +18,7 @@ design_sources:
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#2-complete-deploy-directory-structure
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#61-upgraded-deploydeployenvexample-horizontal-node-arrays--individual-storage-solutions
 tests:
+  - deploy/test/ci-workflows.test.ts
   - deploy/test/pipeline.test.ts
   - deploy/test/rollingDeploy.test.ts
   - deploy/test/templates.test.ts
@@ -31,7 +32,6 @@ gaps:
   - There is no automatic rollback after a failed batch or failed verification; earlier batches remain on the new release.
   - Single-node services restart with pm2 delete + pm2 start, so a single-node edge or core restart is not zero-downtime.
   - The deployment guide's DEPLOY_MODE=auto description does not match the code.
-  - No CI at the repo root; legacy per-service deploy.yml workflows deploy with no tests, StrictHostKeyChecking=no and rsync --delete (TRACKER GAP-014).
 ---
 
 # Deployment Pipeline
@@ -358,4 +358,6 @@ No test performs a real multi-host deployment, migration, PM2 restart or Nginx r
 - **Bun** is installed from a pinned download verified against `BUN_SHA256` (no `curl | bash`).
 - **nginx templates**: `server_tokens off` and `limit_req` (with `limit_req_status 429`) in all six; the fakerails vhost gets `allow`/`deny` from `FAKE_RAILS_ALLOWED_CIDRS`, `script-src 'self'`, `object-src 'none'`, `frame-ancestors 'self'` (previously `'self' *`); the checkout CSP is unchanged.
 - **scripts/deploy-localhost.sh** refuses `NODE_ENV=production` unless `LOCAL_TARGET=1`, no longer falls back to default secrets (random secrets via `openssl rand` go to a 0600 `.local/secrets.env` or `LOCAL_SECRETS_FILE`), and requires `DB_PASSWORD`.
-- **Still open.** No CI at the repo root; legacy per-service `deploy.yml` workflows deploy without tests, with `StrictHostKeyChecking=no` and `rsync --delete` (GAP-014). Replica `.pgpass` is still written via `printf` argv (GAP-028).
+- **CI and legacy deploy workflows (GAP-014, RESOLVED 2026-11-05).** `.github/workflows/ci.yml` (jobs `design`, `backend`, `frontend`; triggers push to `main`/`ayoub`, pull requests and manual dispatch; `contents: read`; concurrency-cancelled per ref) runs the AGENTS.md gate: `bun scripts/project-design/build.ts --check`, then for `core-back`, `deploy`, `deploy/backup-daemon`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` a frozen-lockfile install, typecheck and `bun test`, and for `admin-front`, `merchant-front`, `checkout-front` and `fake-rails-front` a frozen-lockfile install and `bun run build`. Suites that need PostgreSQL 18 and Redis skip themselves when the services are absent. The per-service `*/.github/workflows/deploy.yml` workflows are now legacy and manual only (`workflow_dispatch` with a typed `deploy` confirmation): they run the service typecheck/tests first, run the deploy job in the `legacy-deploy` environment, use `StrictHostKeyChecking=yes` with a pinned `known_hosts` taken from the **`SSH_KNOWN_HOSTS` secret (which operators must now create, with the server's verified host key lines)**, sync additively (no `rsync --delete`) and never scan the host key on first use. The supported deploy path remains the multi-host engine in `deploy/`. Tests: `deploy/test/ci-workflows.test.ts`.
+- **Replica pgpass (GAP-028, RESOLVED).** The replica `.pgpass` is streamed over stdin; see `deploy.storage`.
+- **Still open.** GAP-023: real WAL-G/bun/barman SHA256 values must be supplied by the operator.

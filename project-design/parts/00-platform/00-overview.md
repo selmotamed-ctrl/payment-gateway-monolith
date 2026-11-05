@@ -270,4 +270,4 @@ No build or test was run for this documentation change. Database-backed suites r
 
 ## Security hardening (2026-11-05)
 
-A cross-cutting security hardening pass touched core payment engine, auth/authorization, edge backends, deploy, frontends and tests. Details live in the owning parts: `core.engine`, `core.api`, `core.governance`, `core.data`, `platform.security`, `edge.*`, `deploy.*`, `fake-rails.*`, the frontend parts and `testing.*`. Remaining risks are tracked in TRACKER section 3 (GAP-011 onward).
+A cross-cutting security hardening pass touched core payment engine, auth/authorization, edge backends, deploy, frontends and tests. Details live in the owning parts: `core.engine`, `core.api`, `core.governance`, `core.data`, `platform.security`, `edge.*`, `deploy.*`, `fake-rails.*`, the frontend parts and `testing.*`. Remaining risks are tracked in TRACKER section 3 (GAP-011 onward); most of GAP-011 to GAP-031 were resolved or narrowed on 2026-11-05, and GAP-023 and GAP-025 stay open.

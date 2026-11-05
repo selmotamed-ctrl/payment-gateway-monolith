@@ -36,7 +36,6 @@ gaps:
   - Client certificates are read when the per-node HTTPS agent is created; replacing files on disk does not reload them until the pool is reset or the process restarts.
   - An upstream HTTP 502/503 is always treated as a node failure, even when it is a legitimate application response.
   - Stream retries can only re-open a stream before it is established; there is no resume or polling fallback at the edge.
-  - The circuit breaker has no consecutive-failure threshold (TRACKER GAP-021).
 ---
 
 # Shared Core Upstream Client
@@ -108,7 +107,7 @@ Each node state tracks `url`, `agent`, `healthy`, `inFlight`, `failures`, `lastF
 
 ### 3.3 Failure marking and retries
 
-`markNodeFailure()` sets `healthy=false`, increments `failures`, records `lastFailureAt` and sets `cooldownUntil = now + CORE_FAILURE_COOLDOWN_MS` (5 seconds). `markNodeHealthy()` clears all failure state.
+`markNodeFailure()` increments `failures`, records `lastFailureAt` and sets `cooldownUntil = now + CORE_FAILURE_COOLDOWN_MS` (5 seconds); it only sets `healthy=false` once `failures` reaches `CORE_FAILURE_THRESHOLD` (3 consecutive failures, GAP-021). `markNodeHealthy()` clears all failure state.
 
 Retry eligibility is controlled by `retryAttemptsFor()`:
 
@@ -304,4 +303,4 @@ Applies to all three copies of the client:
 - Buffered responses are capped (`CORE_MAX_RESPONSE_BYTES` default 64 MiB, `CORE_TOTAL_DEADLINE_MS` default 300000).
 - Admin `x-pg-min-lsn` is validated against `^hex/hex$` (400 otherwise).
 - `resolveClientIp` honours forwarded headers only from trusted peers and requires a single valid IP (`x-real-ip` preferred, `x-real-client-ip` fallback).
-- Not done: a consecutive-failure threshold for the breaker (GAP-021).
+- A node leaves rotation only after `CORE_FAILURE_THRESHOLD = 3` consecutive failures (GAP-021, RESOLVED 2026-11-05; identical in the admin, merchant and checkout copies). A success resets the count.

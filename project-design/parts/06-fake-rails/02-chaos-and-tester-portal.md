@@ -371,4 +371,4 @@ curl -X POST http://127.0.0.1:4104/portal-api/webhooks/$TX_ID/fire \
 
 ## Security hardening (2026-11-05)
 
-fake-rails-front: the postMessage target is `VITE_CHECKOUT_ORIGIN`, otherwise the embedding parent's origin, never `*`; `redirect_url` is validated as http(s) without credentials. The SSE token is still passed in the query string, and `/hosted/*` is still public with no token on the action POST (GAP-024). New env: `VITE_CHECKOUT_ORIGIN`.
+fake-rails-front: the postMessage target is `VITE_CHECKOUT_ORIGIN`, otherwise the embedding parent's origin, never `*`; `redirect_url` is validated as http(s) without credentials. The live feed opens its EventSource with a 30-second single-use ticket obtained from `POST /portal-api/transactions/stream-ticket` (`streamUrl()` is now async), never the session token, and the hosted redirect page and widget frame post approve/decline with the session-bound `X-Hosted-Action-Token` (`postHostedAction`) (GAP-024, resolved 2026-11-05). The tester token itself remains in localStorage. New env: `VITE_CHECKOUT_ORIGIN`.

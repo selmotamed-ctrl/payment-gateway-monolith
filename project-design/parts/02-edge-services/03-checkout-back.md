@@ -275,3 +275,7 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 - **Inbound.** The limiter runs before the raw body parser; buckets are per resolved IP plus channel and a coarse per-IP bucket (5x). Only GET/HEAD/POST; body limit `MAX_INBOUND_BODY_BYTES` default 1 MiB (was 3 MiB); body-parser errors return 413/400. Core errors map to public codes `INBOUND_REJECTED`, `INBOUND_NOT_FOUND`, `INBOUND_CONFLICT`, `PAYLOAD_TOO_LARGE`, `RATE_LIMITED`, `INBOUND_UNAVAILABLE`; 401/403/404/410 collapse to 404.
 - **Pay routes.** Confirm accepts only `otp` (evidence ignored); BLOCK/HOLD responses carry no internal reasons.
 - **Window envs** `PAY_RATE_LIMIT_WINDOW_MS` and `INBOUND_RATE_LIMIT_WINDOW_MS` are wired. Redaction masks link keys, attempt tokens, `/logs/` ids and inbound path tokens in logs.
+
+## Gap resolutions (2026-11-05)
+
+- The checkout upstream client uses the same `CORE_FAILURE_THRESHOLD = 3` consecutive-failure threshold before a core node leaves rotation (GAP-021). Checkout sessions use the `payment-gateway-checkout` audience (GAP-020).

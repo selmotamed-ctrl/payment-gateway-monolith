@@ -19,6 +19,7 @@ design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#162-merchant-back-public-api-apiv1merchant--apiv1external---forwards-to-core-back-internalmerchant
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#5-host-aware-ufw-firewall--network-isolation-provisioning
 tests:
+  - merchant-back/test/session-cookie-and-logout.test.ts
   - core-back/test/storage-engine/telemetry-and-realtime.test.ts
   - merchant-back/test/core-forwarding.test.ts
   - merchant-back/test/core-contract.test.ts
@@ -316,3 +317,8 @@ The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` an
 - **Cash-out create** keeps and forwards `idempotencyKey` (body or `Idempotency-Key` header) to core.
 - **Auth** POSTs have a per-account limiter in addition to the per-IP limiter. `/verify-identity` is retired (410).
 - Redaction and `redactUrl` cover PII keys and path tokens.
+
+## Gap resolutions (2026-11-05)
+
+- **Logout and session cookie (GAP-019, RESOLVED).** `POST /api/v1/merchant/auth/logout` forwards to core `POST /internal/merchant/auth/logout` (session `jti` revocation) and clears the cookie. `SESSION_COOKIE_MODE` (default `false`) and `SESSION_COOKIE_SECURE` (default `true`) are validated in `merchant-back/lib/env`; in cookie mode the token is set as the `pg_merchant_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/merchant`, 12 h), the body carries `sessionCookie: true`, and cookie-authenticated writes require `x-pg-csrf: 1`. The mode is off by default.
+- **Audience and breaker (GAP-020, GAP-021).** Merchant sessions carry `aud=payment-gateway-merchant`; a session minted for another channel is refused by core (`401 SESSION_AUDIENCE_INVALID`). The upstream client uses `CORE_FAILURE_THRESHOLD = 3`.

@@ -18,6 +18,7 @@ design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#163-admin-back-lan-only-api-apiv1admin---forwards-to-core-back-internaladmin
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#5-host-aware-ufw-firewall--network-isolation-provisioning
 tests:
+  - admin-back/test/session-cookie-and-logout.test.ts
   - admin-back/test/admin-surface.test.ts
   - admin-back/test/core-contract.test.ts
   - admin-back/test/core-internal-client.test.ts
@@ -32,7 +33,7 @@ gaps:
   - The login/MFA rate limiter uses a fixed 15-minute window and ignores AUTH_RATE_LIMIT_WINDOW_MS.
   - CORS headers are emitted only when `CORS_ALLOWED_ORIGINS` is set (historically `origin: true`), and the LAN guard's trust in forwarded IP headers depends on the reverse-proxy topology.
   - The admin KYB join-request upload route forwards the file without the shared MIME/magic-byte validation used by merchant uploads and reconciliation.
-  - Admin logout is client-only; admin-back has no revoke endpoint (TRACKER GAP-019).
+  - "Cookie session mode is opt-in (`SESSION_COOKIE_MODE`, default off); with it off the token still lives in browser storage (GAP-019 residual)."
 ---
 
 # Admin Edge BFF
@@ -86,7 +87,7 @@ The listener binds to `ADMIN_BIND_HOST` (default `127.0.0.1`). The deploy engine
 | Search limiter | `POST /search` has its own 120-requests-per-minute limiter keyed by a SHA-256 hash of the bearer token or IP. |
 | Upload middleware | Multer memory storage with `MAX_UPLOAD_BYTES`; the reconciliation route validates the detected MIME type and magic bytes through `assertAllowedUpload`, while the join-request KYB route forwards the raw file without that check. |
 
-`extractAuthorityHints()` does not verify the token signature and does not check `exp` or `nbf`. It rejects a token only when a present `typ` is not `session`, a present `iss` is not `payment-gateway-core`, or a present `aud` does not include `payment-gateway-edge`. A caller can therefore craft a token that satisfies the edge's AML or backup gate; `core-back` will still reject it. This is documented as advisory gating, not authentication.
+`extractAuthorityHints()` does not verify the token signature and does not check `exp` or `nbf`. It rejects a token only when a present `typ` is not `session`, a present `iss` is not `payment-gateway-core`, or a present `aud` does not include `payment-gateway-admin` (the admin channel audience; the former `payment-gateway-edge` is no longer accepted, GAP-020). A caller can therefore craft a token that satisfies the edge's AML or backup gate; `core-back` will still reject it. This is documented as advisory gating, not authentication.
 
 `ADMIN_AUTHORITY_HINTS` filters which requested authority strings the edge checks. If the configured list is empty, the edge skips the check. If a requested authority is not in the configured list, it is not counted as expected; if no expected authorities remain, the route passes.
 
@@ -282,4 +283,5 @@ The tests use a local HTTPS/HTTP stub and do not require PostgreSQL or Redis. A 
 - **Backups.** Policy cron is validated (5 fields; minimum gaps full 60, delta 5, drill 60 minutes); retention floors full >= 7 days and WAL >= 3 days unless `approvalRequestId` is supplied. Backup trigger and drill require an `Idempotency-Key` header (8-128 URL-safe characters) relayed to core, with `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
 - **KYB uploads.** Upload runs `assertAllowedUpload` (png/jpeg/pdf) plus zod validation; the content route forces `Content-Disposition: attachment`, a CSP sandbox and a Content-Type allow-list. `logoUrl` must be http(s).
 - **Limiters** key on the resolved client IP plus a per-account limiter on login/MFA. Admin `x-pg-min-lsn` is validated (400).
-- **Still open.** Admin logout is client-only (GAP-019).
+- **Logout and session cookie (GAP-019, RESOLVED 2026-11-05).** `POST /api/v1/admin/auth/logout` (public router, `logoutHandler`) forwards to core `POST /internal/admin/auth/logout`, which revokes the session `jti`, and clears the session cookie. With `SESSION_COOKIE_MODE=true` (default `false`) login and MFA responses move the token into the `pg_admin_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/admin`, 12 h, `Secure` unless `SESSION_COOKIE_SECURE=false`, default `true`) and return `sessionCookie: true` instead of `token` (`captureSessionToken`); the `cookieSession` middleware, mounted first on the admin router, converts the cookie into the `Authorization: Bearer` header when the caller sent none and requires `x-pg-csrf: 1` on unsafe methods (`403 CSRF_HEADER_REQUIRED`). Both settings are validated by `admin-back/lib/env`.
+- **Session audience and breaker (GAP-020, GAP-021).** The advisory authority guard now requires `aud=payment-gateway-admin`. The core upstream client removes a node from rotation only after `CORE_FAILURE_THRESHOLD = 3` consecutive failures. Sessions minted before the audience change are rejected and administrators must sign in again.

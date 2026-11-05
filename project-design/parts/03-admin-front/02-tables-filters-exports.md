@@ -3,7 +3,7 @@ id: admin-ui.tables
 title: Tables Filters and Exports
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - admin-front/src/components/Table/**
@@ -131,7 +131,7 @@ This is a hybrid: the first fetch is server-side, but pagination beyond the fetc
 
 ### 3.6 XLSX pipeline
 
-`admin-front/src/utils/xlsx/templateDownload.ts` is the shared spreadsheet engine. It uses `exceljs` for styled workbooks and `xlsx` for reading/upload and CSV conversion.
+`admin-front/src/utils/xlsx/templateDownload.ts` is the shared spreadsheet engine. It uses `exceljs` for styled workbooks and `xlsx` (SheetJS 0.20.3, installed from `cdn.sheetjs.com` since GAP-029) for reading/upload and CSV conversion.
 
 `xlsxUIPipeline` exposes:
 

@@ -35,7 +35,7 @@ tests:
 gaps:
   - Fake Rails receives only a partial shared-UI rollout; it has separate portal/hosted shells and is not covered by the admin compliance test.
   - Shared primitives are copied per workspace rather than published as one package, so drift is possible.
-  - Admin logout is client-only (no admin-back revoke endpoint) and tokens are not in httpOnly cookies (TRACKER GAP-019).
+  - "Residual (GAP-019/GAP-029): the admin session token lives in client storage unless the edge runs `SESSION_COOKIE_MODE=true`; `@prisma/client` is still listed (unused) in `admin-front/package.json`."
 ---
 
 # Admin UI System
@@ -307,4 +307,5 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 - `console.log` is gated through `utils/devLog.ts` (DEV builds only).
 - A fresh clone should `cp .env.example .env`; the real `.env` is no longer tracked.
 - Catalogue keys added (EN and AR): "This file type cannot be previewed." and the full-backup confirmation text.
-- Admin logout is still client-only (GAP-019).
+- **Logout and cookie sessions (GAP-019, RESOLVED).** The user store logout calls `POST v1/admin/auth/logout` (`urlsMap.authLogout`) through `revokeServerSession` (best effort, never throws) and always clears the local session. `utils/security/sessionToken.ts` handles the cookie mode: a login payload with `sessionCookie: true` is kept as the non-secret `cookie-session` sentinel and requests send `X-Pg-Csrf: 1` instead of a bearer token.
+- **XLSX 0.20.3 (GAP-029).** `xlsx` is pinned to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` (the maintained SheetJS build; the npm registry copy 0.18.5 is vulnerable) and `@types/xlsx` was dropped. The shared XLSX pipeline is unchanged. `@prisma/client` is still listed in `admin-front/package.json` although nothing imports it (residual).

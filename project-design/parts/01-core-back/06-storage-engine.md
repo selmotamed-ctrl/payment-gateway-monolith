@@ -3,7 +3,7 @@ id: core.storage
 title: Storage Engine
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-05
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/lib/storageEngine/telemetry.ts
@@ -27,6 +27,8 @@ gaps:
   - Access logging records `dbQueries` and `dbDurationMs` as zero.
   - Storage health is exposed only through the adapter API, not through `/health`.
   - Replica reads cover global search, the admin merchant list and three merchant list endpoints; other lists/exports still read the primary.
+  - "Residual (GAP-030): `core-back/prisma/client/base.ts` still builds its Prisma client without the UTC startup option, so a database whose own default timezone is not UTC reaches that client unpinned; the provisioners set the cluster default to UTC."
+  - "The leader election holds one extra dedicated PostgreSQL connection per core node and cannot run through PgBouncer transaction pooling (GAP-012)."
 ---
 
 # Storage Engine
@@ -171,7 +173,7 @@ No dashboard aggregate, export or other list uses the router.
 - returns count, amount, count-violation and amount-violation flags;
 - refreshes the key TTL.
 
-On any Redis error, `incrWindowCounter` falls back to the in-memory adapter (`redisCacheAndVelocityAdapter.ts:326-328`). `del` uses Redis `KEYS` followed by `DEL` (`redisCacheAndVelocityAdapter.ts:269-280`), which is a blocking scan on a large keyspace and is not production-safe at scale. `getOrLoad` exists but is not used by the core read paths; the main cache consumer is the attempt guard velocity store (`core-back/engine/guards/AttemptGuardPipeline.ts:1205-1216`). Redis invalidation is published through a separate invalidation bus, not `CachePort.publishInvalidation`.
+On a Redis error or timeout, `incrWindowCounter` follows the velocity failure policy (`REDIS_VELOCITY_FAILURE_POLICY`, default `local-fallback`, which counts in this node's memory; see section 12). `del` uses Redis `KEYS` followed by `DEL` (`redisCacheAndVelocityAdapter.ts`), which is a blocking scan on a large keyspace and is not production-safe at scale. `getOrLoad` exists but is not used by the core read paths; the main cache consumer is the attempt guard velocity store (`core-back/engine/guards/AttemptGuardPipeline.ts`). Redis invalidation is published through a separate invalidation bus, not `CachePort.publishInvalidation`.
 
 ### 3.7 Audit database adapter
 
@@ -231,8 +233,8 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 - Outbox handlers must be idempotent: a claimed batch is retried after a crash because `processed_at` is updated only after the handler completes.
 - The outbox relay processes rows in ascending id order and never deletes them.
 - Read consistency is one of `primary`, `replica` or `{ atLeastLsn, maxWaitMs? }`. A replica query failure falls back to the primary; callers must not assume a replica served the read.
-- Cache contents are not authoritative. A Redis failure must not fail a payment; velocity falls back to local memory.
-- The in-memory velocity fallback is per process and does not coordinate across core nodes.
+- Cache contents are not authoritative. A Redis failure must not fail a payment under the default policy; velocity follows `REDIS_VELOCITY_FAILURE_POLICY` (`local-fallback` default, `fail-open`, `fail-closed`).
+- The in-memory velocity fallback (`local-fallback`) is per process and does not coordinate across core nodes: a cluster of N nodes tolerates up to N times the limit during an outage.
 - The log sink is best-effort. It may drop the oldest step log when its buffer is full, may drop access logs on a failed flush and does not spool to disk.
 - `gl_account_shards.shard_id` is limited to `0..15`; the default shard count is 16 and `MERCHANT_WALLET` is always one shard.
 - Backup daemon calls are mTLS when the base URL is HTTPS; a missing client certificate is not silently replaced by an insecure channel.
@@ -263,6 +265,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 | `AUDIT_DATABASE_URL` | Dedicated audit DB URL | unset |
 | `LOG_DATABASE_URL` | Dedicated log DB URL | unset |
 | `REDIS_URL` / `REDIS_NODES` | Redis cache/velocity | unset / empty |
+| `REDIS_VELOCITY_FAILURE_POLICY` | Velocity behaviour when Redis is down: `local-fallback`, `fail-open`, `fail-closed` (unknown values fall back to the default) | `local-fallback` |
 | `STORAGE_QUERY_TIMEOUT_MS` | Default query timeout budget | `5000` |
 | `STORAGE_LOG_BUFFER_MAX` | Log buffer bound | `5000` |
 | `STORAGE_LOG_FLUSH_INTERVAL_MS` | Log flush interval | `250` |
@@ -285,7 +288,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 - Send writes through `UnitOfWorkPort`; do not write `outbox_events` or `audit_outbox` directly in new code.
 - Use `readThroughReplicaOrPrimary` with the `x-pg-min-lsn` request header for read-after-write consistency. The header is consumed by the search route and the three merchant list routes.
 - Inspect the storage snapshot through `getStorageEngine().health()` or the tests; do not assume `/health` includes storage checks.
-- Treat Redis as disposable. If Redis is down, velocity evaluation uses process-local memory and does not coordinate across nodes.
+- Treat Redis as disposable. If Redis is down, velocity evaluation follows `REDIS_VELOCITY_FAILURE_POLICY`: by default process-local memory without cross-node coordination; `fail-open` skips counting; `fail-closed` refuses attempts with `VelocityUnavailableError`.
 - Monitor `audit_outbox` growth directly. The shipper marks rows shipped but does not remove them, so a retention job is required outside this code.
 - Use `scripts/run-benchmarks.sh` with a real PostgreSQL 18 test database and, optionally, Redis to reproduce write-path numbers.
 
@@ -428,3 +431,9 @@ There is no benchmark in this part that proves the blueprint's 1,000+ TPS sustai
 - `AuditShipperWorker` no longer computes `prev_hash`/`row_hash` in Node. Inserts omit both columns and the audit database trigger computes them under `pg_advisory_xact_lock(994001)`; `RETURNING` supplies the actual hashes.
 - `verifyHashChainIntegrity` reads `before_json::text`/`after_json::text` so it verifies the trigger canonical form.
 - Attempt transitions are bridged to `realtime:attempt` on the existing Redis-backed invalidation bus; checkout SSE and merchant POS streams subscribe to it while retaining the database poll fallback.
+
+## Gap resolutions (2026-11-05)
+
+- **UTC pinning (GAP-030, RESOLVED with a residual).** `core-back/lib/storageEngine/utcSession.ts` pins every connection the storage engine opens to `timezone=UTC` through the connection-URL startup option `options=-c timezone=UTC` (`pinUtcInConnectionUrl`; any other `timezone` option already in the URL is replaced, because node-postgres lets the connection string override explicit config). `createUtcPinnedClient` builds the Prisma client, the audit and log pools and the leader-election connection use the same pinned URL, and `readSessionTimeZone` reports `SHOW timezone`. The deploy provisioner also writes `timezone = 'UTC'` and `log_timezone = 'UTC'` into every cluster's `postgresql.conf` (see `deploy.storage`). Residual: `core-back/prisma/client/base.ts` is still unpinned (tracked in the gap list above).
+- **Redis velocity failure policy (GAP-031, RESOLVED).** `REDIS_VELOCITY_FAILURE_POLICY` (parsed by `parseVelocityFailurePolicy`, wired in `createStorageEngine`, overridable with `velocityFailurePolicy`) defines what the Redis velocity counter does when Redis is unreachable, errors or exceeds the command timeout. `local-fallback` (default) fails open degraded: the window is counted in this node's memory, so limits still apply per node and are lost on restart. `fail-open` allows without counting (empty `windowStats`). `fail-closed` throws `VelocityUnavailableError` so the caller refuses the attempt. `onVelocityDegraded` is invoked with the policy and the error. Velocity is a risk signal, not a ledger invariant, so the default does not stop payments during an outage; use `fail-closed` only when a missed limit is worse than an outage. Tests: `core-back/test/storage-engine/velocity-failure-policy.test.ts`.
+- **Leader election (GAP-012).** `StorageEngine.leaderElection` is a `PgAdvisoryLeaderElection` built from the primary URL (see `core.workers` for the semantics and the PgBouncer transaction-pooling caveat); it is closed with the engine.

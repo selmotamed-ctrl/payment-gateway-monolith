@@ -173,7 +173,7 @@ Core can reach a Fake Rails host only through a three-part allowlist: `ALLOW_FAK
 - `DATABASE_URL`, `DATABASE_REPLICA_URLS`, `AUDIT_DATABASE_URL`, `LOG_DATABASE_URL`, `REDIS_URL` and `KMS_MASTER_KEY` are core-only.
 - Edge env schemas do not contain those keys; edge packages do not depend on `pg` or Prisma.
 - Edge services can only mutate state through core's internal API.
-- The frontend packages list `@prisma/client` as a dependency, but no frontend source imports Prisma and no frontend receives a database URL; it is not a data-plane credential.
+- `admin-front` and `merchant-front` still list `@prisma/client` as a dependency (`checkout-front` no longer does, GAP-029), but no frontend source imports Prisma and no frontend receives a database URL; it is not a data-plane credential.
 
 ### 4.3 Request consistency
 

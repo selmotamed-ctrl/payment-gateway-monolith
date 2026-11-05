@@ -33,6 +33,7 @@ design_sources:
   - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#15-smart-ai-assisted-provider-onboarding-bring-your-own-ai
   - design/08-ai-onboarding/smart_ai_rail_and_voucher_onboarding_plan.md
 tests:
+  - core-back/test/gaps/gap-015-018-regressions.test.ts
   - core-back/test/engine/step-executor.test.ts
   - core-back/test/engine/api-consumer.test.ts
   - core-back/test/engine/api-consumer-primitives.test.ts
@@ -58,7 +59,6 @@ gaps:
   - Partial refunds post the FULL_REFUND/INTERNAL_REFUND scenario rather than a partial-refund scenario.
   - Trusted success requires an environment fact; a sync response that does not map environment becomes UNKNOWN.
   - The credential-check probe is generic HTTP when a version has no CREDENTIAL_CHECK flow.
-  - Re-finalize guard for terminal attempts in verifyCallback/finalizeSuccess is not implemented (TRACKER GAP-016).
 ---
 
 # Core Engine
@@ -689,4 +689,5 @@ No build or test was run for this documentation change. Tests that require Postg
 - **Inbound events.** Deduplication applies only to verified rows. Unverified rows get a unique pending key and capped body storage (64 KB); the canonical `dedupeKey` is claimed only after verification (a P2002 race maps to `DUPLICATE`). Signature and timestamp headers are stored. `x-real-client-ip` is trusted only because the mTLS edge sets it; `edgeReportedClientIp` validates it as an IP and otherwise falls back to `request.ip`.
 - **Outbound URL compile.** An empty `allowed_hosts` list fails closed (`HOST_ALLOWLIST_EMPTY`) unless `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST=true` (default false). Private, loopback and link-local literals are blocked at compile time unless `allowPrivateHosts` is set. Consumer layers keep their own DNS/literal guards and the Fake Rails exception.
 - **Tests.** `core-back/test/security-regressions/{c1-forged-success,h8-webhook,m10-ssrf}`.
-- **Still open.** Re-finalize guard for terminal attempts (GAP-016); AML HOLD escrow ordering (GAP-015). See TRACKER section 3.
+- **Re-finalize guard (GAP-016, RESOLVED 2026-11-05).** `finalizeGuardFor(status)` classifies an attempt: `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` are `IDEMPOTENT` (already settled), `CANCELLED` and `BLOCKED` are `REFUSE`, everything else (including `FAILED` and `EXPIRED`, so a late success is still recovered) is `ALLOW`. `verifyCallback` applies it before the trusted-facts check: a duplicate of the trusted success on a settled attempt is a no-op that returns the current state, a contradicting (failure/untrusted) signal on a settled attempt throws `409 ATTEMPT_TERMINAL`, and a callback for a cancelled/blocked attempt throws `409 ATTEMPT_TERMINAL`. `finalizeSuccess` re-reads the attempt status first so a stale in-memory attempt cannot settle twice (idempotent settled attempts return `COMMITTED`, or `SUSPENSE` for `SUSPENSE_SETTLEMENT`, with the stored ledger entry id).
+- **AML hold escrow after capture (GAP-015, RESOLVED 2026-11-05).** The guard pipeline no longer books escrow when it decides `HOLD` (no money has been captured yet, so `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` would fabricate a balance); the decision reason is now `AML_HOLD_PENDING_CAPTURE` and `hold_journal_entry_id` is no longer written on the case. When a verified gateway capture of an AML-held attempt reaches `finalizeSuccess`, `escrowHeldCapture` books the escrow (`AML_HOLD_AND_RELEASE` scenario, idempotent per `PAYMENT_ATTEMPT`/attempt id, in the transaction runner when present) and returns the new `SlotCommitResult.outcome` `HELD`: the attempt is NOT settled, the slot is NOT committed, and the result keeps the `AML_HOLD` substatus. The checker's release (see `core.governance`) settles it and is refused until the escrow exists. Residual: a merchant-direct (`MERCHANT_DIRECT`) held attempt holds no platform cash, so nothing is booked (`AML_HOLD_NO_ESCROW`) and release/void have no escrow to move.

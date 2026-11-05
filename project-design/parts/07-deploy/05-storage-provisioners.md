@@ -20,6 +20,7 @@ design_sources:
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#63-individual-storage-solution-provisioners-in-deployprovisioners
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
 tests:
+  - deploy/test/gap-hardening.test.ts
   - deploy/test/testMatrix.test.ts
   - deploy/test/provisioners.test.ts
   - deploy/test/exhaustive-deploy-matrix.test.ts
@@ -29,11 +30,10 @@ tests:
 gaps:
   - The audit/log provisioner assumes the Debian cluster names `audit` and `log`; a custom name is not configurable.
   - Storage mTLS is generated but not consumed; PostgreSQL, PgBouncer, Redis, audit and log databases do not request client certificates.
-  - PostgreSQL SSL material is not configured by the provisioner; hostssl rules rely on the distribution's default TLS setup.
+  - "PostgreSQL TLS is provisioned with a self-signed per-cluster certificate (GAP-022); there is no CA-signed server certificate or client-certificate verification, so `verify-full` is not possible yet."
   - Redis has no TLS listener.
-  - PgBouncer uses `server_tls_sslmode = prefer` and no client certificate because the deploy does not install PostgreSQL TLS material.
+  - PgBouncer uses `server_tls_sslmode = require` toward PostgreSQL and no client certificate (the self-signed server certificate is not verified).
   - (Superseded) WAL-G is now pinned and sha256-verified; see Security hardening. Real SHA256 values must still be supplied by the operator.
-  - Backup daemon runs as the postgres user and PostgreSQL TLS/hostssl-only provisioning is absent (TRACKER GAP-022).
 ---
 
 # Storage Provisioners
@@ -370,4 +370,12 @@ Not covered:
 - **WAL-G.** `restore_command` is a valid `postgresql.conf` literal (inner quotes doubled). The daemon setting `WALG_ENV_FILE` keeps S3/encryption secrets out of that line; the provisioner writes `/etc/pg-backup/wal-g.env` 0640 root:postgres. WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed with required `BACKUP_WALG_SHA256`; barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`).
 - **Mirror and restore.** The off-site mirror uses `rclone copy`/`rsync` without `--delete` unless `BACKUP_SECONDARY_MIRROR_DELETE=true`. The scratch restore cluster starts with `-c archive_mode=off`.
 - **PostgreSQL.** `listen_addresses = 127.0.0.1,<private IP>`; memory settings derive from optional `PG_RAM_GB` (unset keeps 8GB/24GB/1GB); `PG_IO_METHOD` defaults to `worker` (io_uring is opt-in); an existing standby (PG_VERSION and `standby.signal` present) is not rebuilt unless `PG_REPLICA_REBUILD=true`.
-- **Still open.** The backup daemon runs as the postgres user and there is no PostgreSQL TLS/hostssl-only provisioning (GAP-022); real SHA256 values for WAL-G/bun/barman must be supplied (GAP-023); replica `.pgpass` is written via `printf` argv (GAP-028).
+- **Still open.** Real SHA256 values for WAL-G/bun/barman must be supplied by the operator (GAP-023). GAP-022 and GAP-028 are resolved (see the gap resolutions below).
+
+## Gap resolutions (2026-11-05)
+
+- **PostgreSQL TLS and hostssl-only (GAP-022, RESOLVED).** `postgresTlsSnippet` appends `ssl = on`, `ssl_cert_file`/`ssl_key_file` under `<cluster hba dir>/tls`, `ssl_min_protocol_version = 'TLSv1.2'` and `password_encryption = 'scram-sha-256'` to each cluster's configuration. `pgTlsCommands` idempotently creates a self-signed RSA-4096 certificate (825 days, 0600 key owned by `postgres`) on the primary and replicas unless an operator already installed one. `pgHbaSnippet` now emits only `hostssl` rules (loopback `127.0.0.1/32` and `::1/128`, every allowed source for data and replication); the plain `host` rules were removed. Replica `pg_basebackup` runs with `PGSSLMODE=require` and PgBouncer uses `server_tls_sslmode = require`.
+- **Backup daemon user (GAP-022).** The backup engine provisioner runs the daemon systemd unit as `User=pgbackup`/`Group=pgbackup` with `SupplementaryGroups=postgres`, adds `postgres` to the `pgbackup` group, and owns `/var/lib/pg-backup`, the daemon certificate directory, the log directory, the barman state directory, `BACKUP_PGPASSFILE` and `/etc/pg-backup/wal-g.env` (`root:pgbackup`, 0640) accordingly.
+- **Replica pgpass over stdin (GAP-028, RESOLVED).** `replicaPgpassContent` renders the replication `.pgpass` line and `provisionPostgres18` streams it to `/var/lib/postgresql/.pgpass` (0600) with the remote-file writer; the replication password no longer appears in any command argv. `replicaCommands` only checks and `chown`/`chmod`s the file.
+- **UTC (GAP-030).** The cluster configuration also sets `timezone = 'UTC'` and `log_timezone = 'UTC'` (the engine pins its own sessions, see `core.storage`).
+- **Still open.** GAP-023: real SHA256 values for WAL-G, bun and barman (`BACKUP_WALG_SHA256`, `BUN_SHA256`) must be supplied by the operator for each release.

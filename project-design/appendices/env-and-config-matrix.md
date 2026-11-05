@@ -291,6 +291,8 @@
 | `admin-back/lib/env/index.ts` | `BACKUP_JOB_RATE_LIMIT_MAX` |
 | `admin-back/lib/env/index.ts` | `AUTH_RATE_LIMIT_MAX` |
 | `admin-back/lib/env/index.ts` | `AUTH_RATE_LIMIT_WINDOW_MS` |
+| `admin-back/lib/env/index.ts` | `SESSION_COOKIE_MODE` |
+| `admin-back/lib/env/index.ts` | `SESSION_COOKIE_SECURE` |
 | `admin-back/lib/env/index.ts` | `RECONCILIATION_TIMEOUT_MS` |
 | `merchant-back/lib/env/index.ts` | `NODE_ENV` |
 | `merchant-back/lib/env/index.ts` | `PORT` |
@@ -316,6 +318,8 @@
 | `merchant-back/lib/env/index.ts` | `PG_LIVE_TOKEN_PREFIX` |
 | `merchant-back/lib/env/index.ts` | `AUTH_RATE_LIMIT_MAX` |
 | `merchant-back/lib/env/index.ts` | `AUTH_RATE_LIMIT_WINDOW_MS` |
+| `merchant-back/lib/env/index.ts` | `SESSION_COOKIE_MODE` |
+| `merchant-back/lib/env/index.ts` | `SESSION_COOKIE_SECURE` |
 | `merchant-back/lib/env/index.ts` | `API_RATE_LIMIT_MAX` |
 | `merchant-back/lib/env/index.ts` | `API_RATE_LIMIT_WINDOW_MS` |
 | `merchant-back/lib/env/index.ts` | `EXTERNAL_RATE_LIMIT_MAX` |

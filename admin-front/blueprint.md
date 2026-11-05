@@ -275,7 +275,8 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 - `console.log` is gated through `utils/devLog.ts` (DEV builds only).
 - A fresh clone should `cp .env.example .env`; the real `.env` is no longer tracked.
 - Catalogue keys added (EN and AR): "This file type cannot be previewed." and the full-backup confirmation text.
-- Admin logout is still client-only (GAP-019).
+- **Logout and cookie sessions (GAP-019, RESOLVED).** The user store logout calls `POST v1/admin/auth/logout` (`urlsMap.authLogout`) through `revokeServerSession` (best effort, never throws) and always clears the local session. `utils/security/sessionToken.ts` handles the cookie mode: a login payload with `sessionCookie: true` is kept as the non-secret `cookie-session` sentinel and requests send `X-Pg-Csrf: 1` instead of a bearer token.
+- **XLSX 0.20.3 (GAP-029).** `xlsx` is pinned to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` (the maintained SheetJS build; the npm registry copy 0.18.5 is vulnerable) and `@types/xlsx` was dropped. The shared XLSX pipeline is unchanged. `@prisma/client` is still listed in `admin-front/package.json` although nothing imports it (residual).
 
 ## Admin Route and Page Catalog
 
@@ -514,7 +515,7 @@ The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `sr
 
 ## Tables Filters and Exports
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-05
 
 ## 1. Purpose and scope
 
@@ -618,7 +619,7 @@ This is a hybrid: the first fetch is server-side, but pagination beyond the fetc
 
 ### 3.6 XLSX pipeline
 
-`admin-front/src/utils/xlsx/templateDownload.ts` is the shared spreadsheet engine. It uses `exceljs` for styled workbooks and `xlsx` for reading/upload and CSV conversion.
+`admin-front/src/utils/xlsx/templateDownload.ts` is the shared spreadsheet engine. It uses `exceljs` for styled workbooks and `xlsx` (SheetJS 0.20.3, installed from `cdn.sheetjs.com` since GAP-029) for reading/upload and CSV conversion.
 
 `xlsxUIPipeline` exposes:
 

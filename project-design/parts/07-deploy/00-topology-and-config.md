@@ -19,6 +19,7 @@ design_sources:
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#3-multi-host-configuration-architecture-deployenv--zod-4-validator
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts
 tests:
+  - deploy/test/gap-hardening.test.ts
   - deploy/test/testMatrix.test.ts
   - deploy/test/configScale.test.ts
   - deploy/test/hostPlanner.test.ts
@@ -258,7 +259,7 @@ Start with `--dry-run`: it validates the real file, builds the plan and prints e
 - No JSON schema export or `deploy.env` autocomplete.
 - No validation of explicit `CORE_BACK_URLS` entries in the deploy schema (they are passed through and later used by the edge env).
 - No requirement that `PG_VERSION` be exactly `18`.
-- No explicit requirement for `PG_REPLICATION_PASSWORD` when replicas are configured (replica `.pgpass` is still written via `printf` argv; GAP-028).
+- No explicit requirement for `PG_REPLICATION_PASSWORD` when replicas are configured (the replica `.pgpass` is now streamed over stdin, GAP-028).
 
 ### Known bugs / risks
 
@@ -326,3 +327,8 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 - **Schema.** Charsets are restricted for secrets, SSH users, `*_REMOTE_DIR`, `PG_DATA_DIR`, backup/cert paths (absolute, no `..`), cron expressions, binary names and hosts.
 - **New optional keys.** `BACKUP_WALG_VERSION` (default 3.0.9), `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION` (3.10.1), `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; required `BACKUP_WALG_SHA256` in wal-g mode; lab key `LAB_WALG_SHA256`.
 - `PG_REPLICATION_*` is no longer written to the core app env.
+
+## Gap resolutions (2026-11-05)
+
+- **PAN-rail guard (GAP-026, partially resolved).** `loadDeployConfig` runs `panRailGuardProblems` over the environment: a key naming a PAN/CVV/card-number rail (`PAN`, `CVV`, `CVV2`, `CVC`, `CVC2`, `CARD_NUMBER`, `CARD_NO`, `PAN_RAIL(S)`, `CARD_RAIL(S)` as an underscore-delimited token) or a value containing a Luhn-valid 13-19 digit run is refused with a `PAN_RAIL_GUARD` problem. The scope statement is `deploy/docs/pci-scope.md` (see `platform.security`); the core-back guard is still open.
+- **GAP-023 remains open:** real WAL-G, bun and barman SHA256 values are operator-supplied.

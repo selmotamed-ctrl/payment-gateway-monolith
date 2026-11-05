@@ -4,7 +4,7 @@
 
 | File | Lines | Literal test declarations |
 | :--- | ---: | ---: |
-| `core-back/test/aml-resolution-finalization.test.ts` | 256 | 4 |
+| `core-back/test/aml-resolution-finalization.test.ts` | 300 | 7 |
 | `core-back/test/approval-queue.test.ts` | 86 | 4 |
 | `core-back/test/background-jobs.test.ts` | 631 | 11 |
 | `core-back/test/backup-admin/backup-admin-routes.test.ts` | 475 | 9 |
@@ -16,13 +16,13 @@
 | `core-back/test/create-admin-plan.test.ts` | 69 | 5 |
 | `core-back/test/db-connection-config.test.ts` | 46 | 4 |
 | `core-back/test/dev-users-plan.test.ts` | 114 | 6 |
-| `core-back/test/e2e/postgres-payment.test.ts` | 974 | 0 |
+| `core-back/test/e2e/postgres-payment.test.ts` | 979 | 0 |
 | `core-back/test/edge-cases/catalog-140.test.ts` | 3540 | 18 |
 | `core-back/test/edge-cases/catalog.ts` | 191 | 0 |
 | `core-back/test/edge-cases/helpers.ts` | 772 | 0 |
 | `core-back/test/engine/api-consumer-primitives.test.ts` | 92 | 12 |
 | `core-back/test/engine/api-consumer.test.ts` | 406 | 24 |
-| `core-back/test/engine/attempt-guard-pipeline.test.ts` | 333 | 14 |
+| `core-back/test/engine/attempt-guard-pipeline.test.ts` | 325 | 14 |
 | `core-back/test/engine/attempt-state-machine.test.ts` | 400 | 17 |
 | `core-back/test/engine/checkout-slot-composition.test.ts` | 184 | 3 |
 | `core-back/test/engine/compile-url.test.ts` | 158 | 23 |
@@ -69,17 +69,20 @@
 | `core-back/test/expiry-sweeper-aml.test.ts` | 91 | 3 |
 | `core-back/test/fake-rails-allowlist.test.ts` | 33 | 3 |
 | `core-back/test/fixtures/otpSpec.ts` | 270 | 0 |
+| `core-back/test/gaps/gap-015-018-regressions.test.ts` | 182 | 11 |
 | `core-back/test/gateway-inquiry-schedules.test.ts` | 91 | 4 |
 | `core-back/test/gateway-rollback-go-live.test.ts` | 168 | 4 |
 | `core-back/test/globalSearch.test.ts` | 223 | 10 |
 | `core-back/test/governance-execution.test.ts` | 1208 | 27 |
 | `core-back/test/guides-support.test.ts` | 169 | 8 |
-| `core-back/test/helpers/backgroundJobFake.ts` | 411 | 0 |
+| `core-back/test/hardening-gap-regressions.test.ts` | 463 | 29 |
+| `core-back/test/helpers/backgroundJobFake.ts` | 423 | 0 |
 | `core-back/test/helpers/fakePrisma.ts` | 281 | 0 |
 | `core-back/test/helpers/fakeRepositories.ts` | 329 | 0 |
 | `core-back/test/helpers/governanceFake.ts` | 235 | 0 |
 | `core-back/test/helpers/guardsFake.ts` | 785 | 0 |
-| `core-back/test/helpers/retentionFake.ts` | 586 | 1 |
+| `core-back/test/helpers/ledgerMaintenance.ts` | 20 | 0 |
+| `core-back/test/helpers/retentionFake.ts` | 623 | 3 |
 | `core-back/test/internal-routes.test.ts` | 127 | 9 |
 | `core-back/test/kyb-review.test.ts` | 83 | 7 |
 | `core-back/test/list-query-keyset.test.ts` | 89 | 7 |
@@ -102,8 +105,9 @@
 | `core-back/test/runtime/rotating-refresh-token.test.ts` | 106 | 2 |
 | `core-back/test/screening-and-caps.test.ts` | 515 | 13 |
 | `core-back/test/security-regressions/c1-forged-success.test.ts` | 119 | 8 |
-| `core-back/test/security-regressions/c2-mfa.test.ts` | 232 | 17 |
-| `core-back/test/security-regressions/h1h2-authz.test.ts` | 211 | 15 |
+| `core-back/test/security-regressions/c2-mfa.test.ts` | 245 | 18 |
+| `core-back/test/security-regressions/gap-019-020-027-session.test.ts` | 153 | 7 |
+| `core-back/test/security-regressions/h1h2-authz.test.ts` | 212 | 15 |
 | `core-back/test/security-regressions/h3-admin-users-and-approvals.test.ts` | 121 | 10 |
 | `core-back/test/security-regressions/h4-cashout.test.ts` | 164 | 12 |
 | `core-back/test/security-regressions/h7-rounding.test.ts` | 88 | 5 |
@@ -117,17 +121,18 @@
 | `core-back/test/storage-engine/audit-chain.test.ts` | 237 | 6 |
 | `core-back/test/storage-engine/cache-velocity.test.ts` | 274 | 10 |
 | `core-back/test/storage-engine/engine-factory.test.ts` | 107 | 3 |
-| `core-back/test/storage-engine/helpers/db.ts` | 510 | 0 |
+| `core-back/test/storage-engine/helpers/db.ts` | 516 | 0 |
 | `core-back/test/storage-engine/ledger-shards.test.ts` | 243 | 3 |
 | `core-back/test/storage-engine/log-sink.test.ts` | 233 | 8 |
 | `core-back/test/storage-engine/outbox-workers.test.ts` | 349 | 6 |
 | `core-back/test/storage-engine/performance/storage-performance.test.ts` | 363 | 11 |
-| `core-back/test/storage-engine/performance/write-path-benchmark.test.ts` | 110 | 2 |
+| `core-back/test/storage-engine/performance/write-path-benchmark.test.ts` | 111 | 2 |
 | `core-back/test/storage-engine/primitives.test.ts` | 181 | 15 |
 | `core-back/test/storage-engine/read-store.test.ts` | 281 | 14 |
 | `core-back/test/storage-engine/telemetry-and-realtime.test.ts` | 38 | 2 |
-| `core-back/test/storage-engine/uow.test.ts` | 363 | 10 |
-| `core-back/test/storage-engine/write-path.integration.test.ts` | 134 | 3 |
+| `core-back/test/storage-engine/uow.test.ts` | 366 | 10 |
+| `core-back/test/storage-engine/velocity-failure-policy.test.ts` | 139 | 8 |
+| `core-back/test/storage-engine/write-path.integration.test.ts` | 135 | 3 |
 | `core-back/test/synthetic-seeder.test.ts` | 161 | 9 |
 | `core-back/test/ui-authorities.test.ts` | 35 | 3 |
 | `core-back/test/worker-runtime-health.test.ts` | 134 | 7 |
@@ -135,7 +140,7 @@
 | `admin-back/test/admin-surface.test.ts` | 1337 | 53 |
 | `admin-back/test/backups.test.ts` | 421 | 18 |
 | `admin-back/test/core-contract.test.ts` | 1594 | 55 |
-| `admin-back/test/core-internal-client.test.ts` | 483 | 16 |
+| `admin-back/test/core-internal-client.test.ts` | 493 | 16 |
 | `admin-back/test/env-isolation.test.ts` | 24 | 1 |
 | `admin-back/test/helpers/core-schema.ts` | 891 | 0 |
 | `admin-back/test/helpers/core.ts` | 242 | 6 |
@@ -144,17 +149,19 @@
 | `admin-back/test/mtls-client.test.ts` | 83 | 8 |
 | `admin-back/test/search.test.ts` | 83 | 2 |
 | `admin-back/test/security-regressions.test.ts` | 504 | 31 |
+| `admin-back/test/session-cookie-and-logout.test.ts` | 130 | 6 |
 | `merchant-back/test/core-contract.test.ts` | 569 | 29 |
 | `merchant-back/test/core-forwarding.test.ts` | 309 | 14 |
-| `merchant-back/test/core-internal-client.test.ts` | 482 | 16 |
+| `merchant-back/test/core-internal-client.test.ts` | 492 | 16 |
 | `merchant-back/test/env-isolation.test.ts` | 24 | 1 |
 | `merchant-back/test/helpers/core.ts` | 215 | 1 |
 | `merchant-back/test/helpers/upstream.ts` | 106 | 0 |
 | `merchant-back/test/merchant-kyb-and-external.test.ts` | 211 | 15 |
 | `merchant-back/test/mtls-client.test.ts` | 85 | 8 |
 | `merchant-back/test/security-regressions.test.ts` | 388 | 25 |
+| `merchant-back/test/session-cookie-and-logout.test.ts` | 135 | 6 |
 | `checkout-back/test/checkout-zero-trust.test.ts` | 353 | 23 |
-| `checkout-back/test/core-internal-client.test.ts` | 481 | 16 |
+| `checkout-back/test/core-internal-client.test.ts` | 491 | 16 |
 | `checkout-back/test/env-isolation.test.ts` | 24 | 1 |
 | `checkout-back/test/error-and-logger.test.ts` | 78 | 7 |
 | `checkout-back/test/exhaustive/05-api-matrix/checkout-zero-trust-matrix.test.ts` | 265 | 16 |
@@ -162,22 +169,24 @@
 | `checkout-back/test/helpers/upstream.ts` | 106 | 0 |
 | `checkout-back/test/mtls-client.test.ts` | 149 | 14 |
 | `checkout-back/test/security-regressions.test.ts` | 225 | 13 |
-| `fake-rails-back/test/api.test.ts` | 282 | 11 |
+| `fake-rails-back/test/api.test.ts` | 292 | 11 |
 | `fake-rails-back/test/chaos.test.ts` | 66 | 7 |
 | `fake-rails-back/test/crypto.test.ts` | 53 | 5 |
 | `fake-rails-back/test/exhaustive/05-api-matrix/fake-rails-portal-and-chaos-api.test.ts` | 364 | 30 |
-| `fake-rails-back/test/security.test.ts` | 113 | 6 |
+| `fake-rails-back/test/security.test.ts` | 139 | 7 |
+| `deploy/test/ci-workflows.test.ts` | 37 | 2 |
 | `deploy/test/configScale.test.ts` | 185 | 13 |
 | `deploy/test/exhaustive-deploy-matrix.test.ts` | 310 | 20 |
 | `deploy/test/fakeRails.test.ts` | 106 | 7 |
+| `deploy/test/gap-hardening.test.ts` | 102 | 9 |
 | `deploy/test/healthVerifierScale.test.ts` | 130 | 3 |
 | `deploy/test/hostPlanner.test.ts` | 311 | 23 |
 | `deploy/test/hostPlannerScale.test.ts` | 157 | 6 |
 | `deploy/test/pipeline.test.ts` | 95 | 4 |
 | `deploy/test/pkiScale.test.ts` | 112 | 5 |
-| `deploy/test/provisioners.test.ts` | 395 | 18 |
+| `deploy/test/provisioners.test.ts` | 396 | 18 |
 | `deploy/test/rollingDeploy.test.ts` | 52 | 5 |
-| `deploy/test/security-regressions.test.ts` | 379 | 34 |
+| `deploy/test/security-regressions.test.ts` | 378 | 34 |
 | `deploy/test/templates.test.ts` | 228 | 16 |
 | `deploy/test/testMatrix.test.ts` | 414 | 33 |
 | `deploy/backup-daemon/test/backupEngine.test.ts` | 352 | 18 |
@@ -221,5 +230,5 @@
 | `tests/unit/global-search.test.ts` | 199 | 9 |
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 
-- Total files: **216**
-- Total literal test declarations: **2145**
+- Total files: **225**
+- Total literal test declarations: **2230**

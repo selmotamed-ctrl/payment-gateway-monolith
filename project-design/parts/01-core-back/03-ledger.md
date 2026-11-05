@@ -15,6 +15,7 @@ code:
   - core-back/lib/storageEngine/uowAdapter.ts
   - core-back/prisma/seedGlAccounts.ts
   - core-back/prisma/schema.prisma
+  - core-back/prisma/migrations/20261105090000_append_only_ledger_guards/migration.sql
   - core-back/lib/cashoutBalance.ts
 design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#11
@@ -33,6 +34,7 @@ tests:
   - core-back/test/storage-engine/write-path.integration.test.ts
   - core-back/test/security-regressions/h7-rounding.test.ts
   - core-back/test/security-regressions/h4-cashout.test.ts
+  - core-back/test/hardening-gap-regressions.test.ts
 gaps:
   - "`CheckpointService` is not scheduled or wired into the production runtime; no checkpoint history table exists."
   - "Merchant balance fallbacks add every journal line to `checkpoint_balance`, so a captured checkpoint would be double counted."
@@ -40,8 +42,7 @@ gaps:
   - "Shard rows are projected on write but are not rebuilt or reconciled; a missing shard falls back to journal-line reads."
   - "Idempotent replay returns the existing entry with an empty line list and does not compare the replay payload with the original posting."
   - "Historical design and two test titles still say 15/16 templates even though the code defines 17 scenarios and 20 matrix variants."
-  - Ledger checkpoint is not atomic, mixes app and DB clocks, and there is no runtime shard-vs-journal parity check (TRACKER GAP-011).
-  - No append-only protection on journal_entries/journal_lines/audit_log and the application is the DB owner (TRACKER GAP-013).
+  - "Production must connect as the non-owner role `pgw_app`; if it connects as the owner that ran the migrations the REVOKE layer is moot (the triggers still reject UPDATE/DELETE/TRUNCATE). GAP-013 resolved 2026-11-05 with this operational caveat."
 ---
 
 # Double-Entry Ledger
@@ -408,5 +409,6 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 
 - **Commission math.** `buildBreakdown` rounds the commission once, honouring the commission profile's `roundingMode` (`HALF_UP` default, `HALF_EVEN`, `HALF_DOWN`, `UP`, `DOWN`, `CEILING`, `FLOOR`; 4 decimal places). Net, payer share and surcharge are derived by exact subtraction so journals balance. The gateway fee and refund split are each rounded once, explicitly.
 - **Cash-out ledger rules.** Approval journals use the cash-out id as `refId`. Balance is verified under a `FOR UPDATE` lock on the wallet's shards (`lib/cashoutBalance.ts`); `lockGlAccountShardsSorted` orders shards by byte order to keep lock ordering deterministic.
-- **Still open.** The ledger checkpoint (`CheckpointService`) is not atomic and mixes application and database clocks; there is no runtime shard-vs-journal parity check (GAP-011, P0). `journal_entries`, `journal_lines` and `audit_log` have no append-only protection (triggers/REVOKE) and the application is the DB owner (GAP-013, P0).
-- **Tests.** `core-back/test/security-regressions/{h7-rounding,h4-cashout}`. True concurrency needs PostgreSQL 18 and is not covered.
+- **Checkpoint is transactional on the DB clock, with shard parity (GAP-011, RESOLVED 2026-11-05).** `CheckpointService.captureCheckpoint` runs the account row lock (`SELECT ... FOR UPDATE`), the snapshot sum, the parity check and the `gl_accounts` write in ONE database transaction (`$transaction`, 30 s timeout; a narrow test double without `$transaction` runs the same steps directly). When the caller passes no `asOf`, the checkpoint instant is the database clock (`clock_timestamp()` read after the lock is held), never the application clock, because journal lines carry database timestamps and a skewed node could otherwise include or skip lines at the boundary. The shard parity check compares, per account that has `gl_account_shards` rows, the shard total with `checkpoint_balance` plus the journal lines after `checkpoint_at`, in ONE SQL statement (one snapshot, so a concurrent posting cannot cause a false mismatch). `CheckpointServiceOptions.parity` is `enforce` (default: the capture throws `ShardParityError`, code `LEDGER_SHARD_PARITY_MISMATCH`), `warn` (captures and reports through `onParityMismatch`) or `off`. `CheckpointService.verifyShardParity(accountIds?)` and the exported `checkShardParity` run the read-only check and return the mismatches without throwing. The service is still not scheduled by the production runtime and there is no checkpoint history table (see the frontmatter gaps).
+- **Append-only ledger and audit trail (GAP-013, RESOLVED 2026-11-05).** Migration `20261105090000_append_only_ledger_guards` installs `BEFORE UPDATE OR DELETE` row triggers and `BEFORE TRUNCATE` statement triggers on `journal_entries`, `journal_lines` (the parent and every partition; row triggers are cloned to future partitions, TRUNCATE triggers are installed on each existing partition) and `audit_log`. They raise `55000` for any caller, including the table owner. Two narrow bypasses exist: (1) maintenance, a transaction that sets `pgw.ledger_maintenance = 'on'` AND whose session user is a superuser or a member of the role `pgw_ledger_maintenance` (the application role is not a member); (2) retention, `DELETE` on `audit_log` only, in a transaction that sets `pgw.audit_retention = 'on'` (the `RetentionWorker` purge; the journal is never purged by retention). The migration also creates, best effort (a managed PostgreSQL may forbid `CREATE ROLE`; it then emits a notice and the roles must be provisioned manually), the NOLOGIN roles `pgw_ledger_maintenance` and the non-owner application role `pgw_app`, grants `pgw_app` the DML it needs and revokes `UPDATE`/`DELETE`/`TRUNCATE` on the journal tables and `UPDATE`/`TRUNCATE` on `audit_log` from it (`audit_log` keeps `DELETE` for the retention purge, still gated by the trigger). REVOKE alone does nothing against the table owner, which is why the triggers exist. **Production must connect as `pgw_app` (or another non-owner member of it), never as the owner that ran the migrations**; migrations still run as the owner. Test fixtures open the maintenance bypass through `core-back/test/helpers/ledgerMaintenance.ts`.
+- **Tests.** `core-back/test/security-regressions/{h7-rounding,h4-cashout}` and `core-back/test/hardening-gap-regressions.test.ts` (checkpoint, parity, append-only guards). True concurrency needs PostgreSQL 18 and is not covered.

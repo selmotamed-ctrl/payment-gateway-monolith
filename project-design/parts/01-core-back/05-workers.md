@@ -9,6 +9,7 @@ code:
   - deploy/provisioners/auditAndLogDbProvisioner.ts
   - core-back/engine/workers/workerRuntime.ts
   - core-back/engine/workers/productionRuntime.ts
+  - core-back/lib/storageEngine/leaderElection.ts
   - core-back/engine/workers/ExpirySweeperWorker.ts
   - core-back/engine/workers/PollWorker.ts
   - core-back/engine/workers/InboundInboxWorker.ts
@@ -59,7 +60,7 @@ gaps:
   - "`JoinRequestExpiryWorker` uses raw updates without audit rows or merchant notifications."
   - "Per-worker health and metrics are not exposed; `/health` reports only durable-queue depth/age."
   - "`WORKER_CONCURRENCY` exists in env validation but is not used by the worker runtime."
-  - PollWorker/ExpirySweeper/InboundInbox/OutboxNotification claim rows with SKIP LOCKED outside a transaction; singleton workers have no leader election or advisory lock (TRACKER GAP-012).
+  - "Singleton leader election uses a session-level advisory lock on one dedicated connection, so it does not work through PgBouncer transaction pooling; `claimLeaseSeconds` (default 120) must exceed the longest per-row processing time (GAP-012, resolved 2026-11-05 with this caveat)."
 ---
 
 # Background Workers and Outboxes
@@ -412,5 +413,5 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 ## 11. Security hardening (2026-11-05)
 
 - `OutboxNotificationWorker` opens the Vault-encrypted `codeCiphertext` of SMS MFA notifications at send time; `notifications.payload_json` no longer carries the plaintext code.
-- **Multi-node limitation (open, P0, GAP-012).** `PollWorker`, `ExpirySweeper`, `InboundInbox` and `OutboxNotification` claim rows with `SKIP LOCKED` outside a transaction, and singleton workers have no leader election or advisory lock. Do not assume safe multi-instance operation of these workers until fixed.
-- The re-finalize guard for terminal attempts in `verifyCallback`/`finalizeSuccess` is not implemented (GAP-016).
+- **Multi-node claiming and leader election (GAP-012, RESOLVED 2026-11-05).** Every `FOR UPDATE SKIP LOCKED` claim now runs inside a transaction (`BaseWorker.inTransaction`, 15 s timeout, 5 s max wait; a test double without `$transaction` runs the callback directly), because a SKIP LOCKED lock taken outside a transaction is released the instant the statement ends. `PollWorker` (`payment_attempts.next_check_at`) and `OutboxNotificationWorker` (`notifications.next_attempt_at`) claim and lease in ONE statement: the claimed rows are updated to `now + claimLeaseSeconds` (`WorkerOptions.claimLeaseSeconds`, default 120 s) before the lock is released at commit, the inquiry/delivery then runs outside the transaction (a held row lock would deadlock the engine, which updates the same attempt on another connection), every outcome rewrites the schedule column, and a crashed node's rows become due again when the lease expires. `ExpirySweeperWorker` and `InboundInboxWorker` have no lease column, so they are cluster singletons whose exclusivity comes from leader election (the conditional terminal transition remains the last line of defence for expiry; a webhook must never be handled twice). Singleton workers (`BaseWorker.singleton`): `ExpirySweeper`, `InboundInbox`, `JoinRequestExpiry`, `KybExpiry`, `LedgerInvariant`, `PeriodicScreening` and `Retention`. Their tick runs only on the node that holds the PostgreSQL advisory lock for `worker:<name>` (`PgAdvisoryLeaderElection`, `core-back/lib/storageEngine/leaderElection.ts`; the lock name is `<namespace>:worker:<name>`, default namespace `pgw`, hashed with `hashtextextended`). It uses `pg_try_advisory_lock` on ONE dedicated, non-pooled connection (`application_name=pg-core-back-leader`); a leader re-validates with `SELECT 1` on every tick, a dropped connection clears the held keys (PostgreSQL releases the lock server side, which is the failover) and any election error fails closed (the singleton skips the tick). The storage engine creates the election from the primary URL (`StorageEngine.leaderElection`, disable with `leaderElection: false`) and `createProductionWorkerRuntime` passes it to the workers; without one (unit tests, single-process) workers behave as before. **Caveat: advisory locks are session-level, so point the election at PostgreSQL or a session-pooled endpoint, never at PgBouncer in transaction-pooling mode.**
+- The re-finalize guard for terminal attempts in `verifyCallback`/`finalizeSuccess` is implemented in the engine (GAP-016, RESOLVED 2026-11-05; see `core.engine`). `PollWorker`/`ExpirySweeper` still never settle an AML-held attempt (`AML_HOLD` substatus).

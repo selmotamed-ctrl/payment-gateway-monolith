@@ -315,6 +315,10 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 - Catalogue keys added (EN and AR): Network Error Try Again, Too Many Requests, Invalid Payment Details, Payment Attempt Expired, Payment Temporarily Unavailable. `.env.example` ships; copy to `.env`.
 - Confirm sends only the OTP.
 
+## Gap resolutions (2026-11-05)
+
+- **XLSX and dependencies (GAP-029, RESOLVED).** `xlsx` is pinned to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`, `@types/xlsx` was dropped and the unused `@prisma/client` dependency was removed from `checkout-front/package.json`.
+
 ## Checkout Help Center
 
 > Status: `partial` · Last verified: 2026-11-03

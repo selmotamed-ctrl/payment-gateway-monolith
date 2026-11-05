@@ -38,7 +38,7 @@ gaps:
   - The public landing page's developer CTA targets `/portal/guide/developers`, which requires sign-in; the login page always lands on the dashboard (no return-to), so a visitor must navigate to the guide again after signing in.
   - The developer guide content (D-01/D-04/D-05) and the operations-guide code generator still document `useCount`, `redirectUrl`, `railWhitelist` and a `checkoutUrl`/`id` create-link response that core-back's strict `linkCreateSchema` does not accept/return (and they omit the required `title`); the landing page snippet uses the real schema.
   - POS screen stream uses fetch streaming with Authorization and reconnect backoff; not verified against live merchant-back.
-  - Tokens are client-stored; no revoke endpoint (TRACKER GAP-019).
+  - "Residual (GAP-019/GAP-029): the merchant session token lives in client storage unless the edge runs `SESSION_COOKIE_MODE=true`; `@prisma/client` is still listed (unused) in `merchant-front/package.json`."
 ---
 
 # Merchant Portal
@@ -414,3 +414,8 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 - `resolveUploadPathWithMat` was removed. The landing page no longer names internal ledger accounts (`CUSTOMER_PAYMENT`, `YOUR_WALLET`, `PLATFORM_FEE`) or internal action names.
 - New env: `VITE_CHECKOUT_BASE_URL` (optional), `VITE_IDENTITY_HOSTS`. `.env.example` ships; copy to `.env`.
 - Catalogue keys added (EN and AR): "Enter a valid amount greater than zero (up to 4 decimals).", "Confirm Cash-Out", landing "Customer payment" and "Illustrative".
+
+## Gap resolutions (2026-11-05)
+
+- **Logout and cookie sessions (GAP-019).** Logout calls the merchant-back logout route (server-side revoke, cookie cleared) and clears the local session; `utils/security/sessionToken.ts` supports the `cookie-session` sentinel and the `x-pg-csrf` header used when `SESSION_COOKIE_MODE=true`. The POS stream (`sseFetch`) and the API client use the same header helper.
+- **XLSX 0.20.3 (GAP-029).** `xlsx` comes from `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` and `@types/xlsx` was dropped.

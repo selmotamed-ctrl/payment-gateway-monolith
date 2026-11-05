@@ -40,6 +40,7 @@ design_sources:
   - design/90-archive/superseded-architecture/Dynamic-Payment-Gateway-Management-Design-v2.md#13
   - design/10-fixes/_0001_operator_cases.md
 tests:
+  - core-back/test/gaps/gap-015-018-regressions.test.ts
   - core-back/test/engine/governance.test.ts
   - core-back/test/governance-execution.test.ts
   - core-back/test/approval-queue.test.ts
@@ -68,9 +69,9 @@ gaps:
   - "AML layer L4 deferred/batch monitoring, rule dry-run, and emergency tightening with 24-hour ratification are not implemented."
   - "Retention is opt-in and does not cover AML cases, screenings, KYB documents, or regulatory reports."
   - "Manual regulatory-report payloads are stored as plaintext JSON in `payload_ciphertext`; evaluator-generated reports are encrypted."
-  - Payout-account changes have no approval step and the KYB payout hash is not mandatory (TRACKER GAP-017).
+  - "Residual (GAP-015): an AML case does not carry the escrow journal entry id any more (`hold_journal_entry_id` is not written; release/void look the escrow up by the attempt), and a merchant-direct held attempt has no escrow at all."
   - No real malware scanner; KYB scanning is content sniffing only (TRACKER GAP-025).
-  - Per-source statement file_hash uniqueness needs a schema and repository change (TRACKER GAP-018).
+  - "Residual (GAP-018): two concurrent uploads of the same statement bytes for one source race past the application-level duplicate check and the loser hits the unique index as a raw Prisma `P2002` instead of the friendly duplicate response."
 ---
 
 # Governance and Compliance
@@ -418,5 +419,12 @@ Some governance tests use fake clients; database-backed suites require PostgreSQ
 - **KYB scan.** `KYB_SCANNER_MODE` unset fails closed (everything `PENDING`, not previewable). Active content (HTML/SVG/script, PDF with `/JS` `/OpenAction` `/Launch` `/EmbeddedFile`, MZ/ELF/Mach-O/shebang) is `INFECTED` in every mode; EICAR is always detected; only `KYB_SCANNER_MODE=eicar` (dev/tests) yields `CLEAN`. Content sniffing is not a malware engine; a real scanner is still required.
 - **Disputes.** Evidence is accepted only from `OPENED` or `EVIDENCE_REQUESTED` (`DISPUTE_NOT_ACCEPTING_EVIDENCE`).
 - **Merchant authorities** and principal separation are described in the API surface part (section 11).
-- **Public checkout** BLOCK/HOLD responses omit internal `reasons`; reasons remain in guard audit and AML cases. AML HOLD still books escrow before capture and RELEASE credits without gateway verification (GAP-015).
+- **Public checkout** BLOCK/HOLD responses omit internal `reasons`; reasons remain in guard audit and AML cases. The AML HOLD escrow is booked after the verified gateway capture and RELEASE requires it (GAP-015, see the gap resolutions below).
 - **Tests.** `core-back/test/security-regressions/{h1h2-authz,h3-admin-users-and-approvals,h4-cashout,m9-m12-upload-kyb}`.
+
+## Gap resolutions (2026-11-05)
+
+- **AML escrow and release (GAP-015, RESOLVED with residuals).** `resolveAmlHoldAmounts` looks the escrow up by the case's `holdJournalEntryId` or, when absent, by the `PAYMENT_ATTEMPT` journal entry of the attempt. A `RELEASE` calls it with `requireEscrow` and is refused with `409 AML_HOLD_CAPTURE_NOT_VERIFIED` when there is no held amount (no verified gateway capture, so no `AML_HOLD` escrow). A `REJECT` of a case with no escrow posts nothing (`postingReason` `NO_CAPTURE_NOTHING_TO_VOID`); with an escrow it posts `AML_VOID`. The escrow itself is booked by the engine at capture time (see `core.engine`). Residuals: merchant-direct held attempts have no escrow, and the case row no longer records the escrow entry id.
+- **Payout account maker-checker and mandatory hash (GAP-017, RESOLVED).** A cash-out requires a KYB `payoutAccountHash` on the merchant (`403 CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED` otherwise) and the destination must hash to it (`403 CASHOUT_DESTINATION_NOT_VERIFIED`); destinations are always stored `payoutVerified: true`, so the unverified-destination path no longer exists. Join-request submit is refused with `409 JOIN_REQUEST_PAYOUT_HASH_REQUIRED` unless the payout details yield a hash. A payout-account change only happens through the maker-checker merchant edit (`propose-edit`): a replacement of `/payoutBankDetailsJson` must carry a bank and an account number or IBAN and a `remove` is refused (`422 PAYOUT_ACCOUNT_HASH_REQUIRED`); `executeMerchantPatch` recomputes `payoutAccountHash` from the approved account on execution and refuses an account that yields no hash.
+- **Per-source statement file hash (GAP-018, RESOLVED with a residual).** Migration `20261105130000_statement_unique_source_file_hash` drops the global `reconciliation_runs_file_hash_key` index and creates the unique index `reconciliation_runs_statement_source_id_file_hash_key` on `(statement_source_id, file_hash)` plus a non-unique `reconciliation_runs_file_hash_idx`. The same bytes may now be uploaded for two sources; one source never gets two runs. `findRunByFileHash(tx, fileHash, sourceId)` is source-scoped and the upload handler keeps a defence-in-depth check that a run of another source is never answered as this source's. Residual: the concurrent duplicate-upload race described in the frontmatter gaps.
+- **Still open.** GAP-025: KYB scanning is content sniffing plus EICAR only; a real malware scanner is not integrated.
