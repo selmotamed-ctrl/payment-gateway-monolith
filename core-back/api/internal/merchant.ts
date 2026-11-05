@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import express, { type Request, type Response } from "express";
+import * as ipaddr from "ipaddr.js";
 import { z } from "zod";
 import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
@@ -11,17 +12,23 @@ import { queueKybNotification } from "../../lib/kybNotifications";
 import { scanKybBytes } from "../../lib/kybScan";
 import { buildListQuery, countUnlessSkipped, listResponse } from "../../lib/listQuery";
 import { buildMerchantUserInfo } from "../../lib/auth/uiAuthorities";
+import { generateAccessToken, hashAccessToken, hashPassword, signSession, verifyPasswordOrDummy } from "../../lib/auth";
+import { issueMfaChallenge, verifyMfaChallenge } from "../../lib/auth/mfaChallenges";
 import {
-  generateAccessToken,
-  generateMfaCode,
-  hashAccessToken,
-  hashMfaCode,
-  hashPassword,
-  signMfaChallenge,
-  signSession,
-  verifyMfaChallengeToken,
-  verifyPassword,
-} from "../../lib/auth";
+  assertLoginAllowed,
+  assertMfaAllowed,
+  recordLoginFailure,
+  recordLoginSuccess,
+  recordMfaFailure,
+} from "../../lib/auth/throttle";
+import {
+  assertGrantableMerchantAuthorities,
+  assertGrantableMerchantRole,
+  assertKnownMerchantAuthorities,
+  assertKnownTokenScopes,
+  assertMerchantAuthority,
+} from "../../lib/auth/merchantAuthorities";
+import { lockWalletLedgerBalance, openCashoutTotal } from "../../lib/cashoutBalance";
 import { Vault } from "../../engine/crypto/Vault";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { loadLiveAccountBalances } from "../../lib/storageEngine/shardBalances";
@@ -37,7 +44,13 @@ import { WATCHLIST_SETTING_KEY } from "../../engine/guards/AttemptGuardPipeline"
 import { publishWatchlist } from "../../engine/guards/ScreeningProvider";
 import { asStringArray, resolveVisibleRails } from "../../engine/flow/VisibleRailsCatalog";
 import { json, jsonOptional } from "./json";
-import { requireAuthentication, requireMerchantScope, principalOf } from "../middleware/authDoubleCheck";
+import {
+  clientIp,
+  principalOf,
+  requireAuthentication,
+  requireMerchantPrincipal,
+  requireMerchantScope,
+} from "../middleware/authDoubleCheck";
 import { publishRealtimePos, subscribeRealtimeAttempt, subscribeRealtimePos } from "../../lib/realtimeBus";
 import { writeAudit } from "../../lib/audit/writeAudit";
 
@@ -763,40 +776,18 @@ router.post("/auth/register", async (request: Request, response: Response) => {
   });
 });
 
-router.post("/auth/verify-identity", async (request: Request, response: Response) => {
-  const body = parseOrThrow(verifyIdentitySchema, request.body);
-  const phone = normalizePhone(body.phone);
-  const identity = await client.userIdentity.findFirst({
-    where: { kind: "PHONE", identifierNormalized: phone },
-    include: { user: true },
-  });
-  if (!identity) {
-    throw new ApiError(404, "IDENTITY_NOT_FOUND", "The phone number is not registered");
-  }
-  const code = generateMfaCode();
-  await client.userIdentity.update({
-    where: { id: identity.id },
-    data: { verifiedAt: new Date(), lastUsedAt: new Date() },
-  });
-  await client.notification.create({
-    data: {
-      eventId: randomBytes(16).toString("hex"),
-      recipientUserId: identity.userId,
-      templateCode: "IDENTITY_VERIFICATION",
-      channel: "SMS",
-      lang: "EN",
-      payloadJson: json({ code }),
-      addressCiphertext: "",
-      status: "QUEUED",
-      addressMasked: phone.slice(-4),
-    },
-  });
-  response.json({ verified: true, challengeId: signMfaChallenge({
-    userId: identity.userId,
-    code,
-    role: identity.user.role,
-    merchantId: identity.user.merchantId,
-  }) });
+// The phone-only verify-identity entrypoint is retired. It accepted any code, marked the
+// identity verified and returned a challenge that /auth/mfa/verify exchanged for a full
+// session: an account takeover from a phone number. The response is identical for every
+// phone number so it can no longer be used to enumerate accounts. Identity verification
+// happens through the authenticated onboarding flow; sign-in is password then MFA.
+router.post("/auth/verify-identity", async (request: Request, _response: Response) => {
+  parseOrThrow(verifyIdentitySchema, request.body);
+  throw new ApiError(
+    410,
+    "IDENTITY_VERIFICATION_RETIRED",
+    "Phone-only identity verification is no longer available. Sign in with your password and verification code",
+  );
 });
 
 router.post("/auth/accept-invitation", async (request: Request, response: Response) => {
@@ -849,7 +840,9 @@ router.post("/auth/login", async (request: Request, response: Response) => {
   const identifier = body.identifier.includes("@")
     ? normalizeEmail(body.identifier)
     : normalizePhone(body.identifier);
-  const user = identifier.includes("@")
+  const ip = clientIp(request);
+  assertLoginAllowed(identifier, ip);
+  const found = identifier.includes("@")
     ? await client.user.findFirst({
         where: {
           OR: [
@@ -861,37 +854,27 @@ router.post("/auth/login", async (request: Request, response: Response) => {
     : await client.user.findFirst({
         where: { OR: [{ phone: identifier }, { identities: { some: { kind: "PHONE", identifierNormalized: identifier } } }] },
       });
-  if (!user || !user.passwordHash) {
-    throw new ApiError(401, "INVALID_CREDENTIALS", "The supplied credentials are not valid");
-  }
-  const valid = await verifyPassword(body.password, user.passwordHash);
-  if (!valid) {
+  // Staff principals never authenticate on the merchant channel; they get the same
+  // answer as an unknown user.
+  const user = found && found.merchantId !== null && String(found.role).startsWith("MERCHANT_") ? found : null;
+  const valid = await verifyPasswordOrDummy(body.password, user?.passwordHash);
+  if (!user || !valid) {
+    recordLoginFailure(identifier, ip);
     throw new ApiError(401, "INVALID_CREDENTIALS", "The supplied credentials are not valid");
   }
   if (user.status !== "ACTIVE") {
     throw new ApiError(403, "ACCOUNT_NOT_ACTIVE", "The account is not active");
   }
+  recordLoginSuccess(identifier);
   if (user.mfaRequired) {
-    const code = generateMfaCode();
-    const challengeId = signMfaChallenge({
-      userId: user.id,
-      code,
-      role: user.role,
-      merchantId: user.merchantId,
-    });
-    await client.notification.create({
-      data: {
-        eventId: randomBytes(16).toString("hex"),
-        recipientUserId: user.id,
-        templateCode: "LOGIN_MFA",
-        channel: "SMS",
-        lang: "EN",
-        payloadJson: json({ code }),
-        addressCiphertext: "",
-        status: "QUEUED",
-        addressMasked: (user.phone ?? "").slice(-4),
-      },
-    });
+    const { challengeId } = await client.$transaction((tx) =>
+      issueMfaChallenge(tx as never, {
+        userId: user.id,
+        channel: "MERCHANT",
+        phoneLast4: (user.phone ?? "").slice(-4),
+        ip,
+      }),
+    );
     response.json({ mfaRequired: true, challengeId });
     return;
   }
@@ -912,18 +895,22 @@ router.post("/auth/mfa/verify", async (request: Request, response: Response) => 
   if (!body.challengeId) {
     throw new ApiError(400, "MFA_CHALLENGE_REQUIRED", "An MFA challenge identifier is required");
   }
-  let claims;
+  const ip = clientIp(request);
+  assertMfaAllowed(ip);
+  // Not wrapped in a transaction: a wrong guess must persist its attempt counter.
+  let verified;
   try {
-    claims = verifyMfaChallengeToken(body.challengeId);
-  } catch {
-    throw new ApiError(401, "MFA_CHALLENGE_INVALID", "The MFA challenge is invalid or expired");
+    verified = await verifyMfaChallenge(client as never, {
+      challengeId: body.challengeId,
+      code: body.code,
+      channel: "MERCHANT",
+    });
+  } catch (error) {
+    recordMfaFailure(ip);
+    throw error;
   }
-  const expected = hashMfaCode(claims.sub, body.code);
-  if (expected !== claims.codeHash) {
-    throw new ApiError(401, "MFA_CODE_INVALID", "The supplied MFA code is not valid");
-  }
-  const user = await client.user.findUnique({ where: { id: claims.sub } });
-  if (!user || user.status !== "ACTIVE") {
+  const user = await client.user.findUnique({ where: { id: verified.userId } });
+  if (!user || user.status !== "ACTIVE" || user.merchantId === null || !String(user.role).startsWith("MERCHANT_")) {
     throw new ApiError(403, "ACCOUNT_NOT_ACTIVE", "The account is not active");
   }
   response.json(buildSession(user, true));
@@ -938,6 +925,17 @@ router.get("/auth/me", (_request: Request, response: Response) => {
 });
 
 router.use(requireAuthentication);
+// Principal-type separation: staff never reach a merchant route, and an API token only
+// reaches the external API (it can never manage users, tokens or its own IP allowlist).
+router.use(requireMerchantPrincipal);
+router.use((request, _response, next) => {
+  const principal = principalOf(request);
+  if (principal.kind === "apiToken" && !request.path.startsWith("/external/")) {
+    next(new ApiError(403, "API_TOKEN_SCOPE_VIOLATION", "API access tokens can only call the external API"));
+    return;
+  }
+  next();
+});
 
 const OPTION_LIMIT = 100;
 
@@ -1008,6 +1006,7 @@ router.get("/onboarding/join-request", async (request: Request, response: Respon
 });
 
 router.put("/onboarding/join-request", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["onboarding:write"]);
   const merchantId = merchantIdOf(request);
   const body = parseOrThrow(
     z
@@ -1067,6 +1066,7 @@ router.get("/onboarding/kyb-revalidations", async (request: Request, response: R
 });
 
 router.post("/onboarding/kyb-documents", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["onboarding:write"]);
   const merchantId = merchantIdOf(request);
   const principal = principalOf(request);
   const raw = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
@@ -1243,6 +1243,7 @@ router.get("/onboarding/beneficial-owners", async (request: Request, response: R
 });
 
 router.post("/onboarding/beneficial-owners", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["onboarding:write"]);
   const merchantId = merchantIdOf(request);
   const body = parseOrThrow(
     z
@@ -1276,6 +1277,7 @@ router.post("/onboarding/beneficial-owners", async (request: Request, response: 
 });
 
 router.delete("/onboarding/beneficial-owners/:id", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["onboarding:write"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const owner = await client.beneficialOwner.findFirst({ where: { id, merchantId } });
@@ -1287,6 +1289,7 @@ router.delete("/onboarding/beneficial-owners/:id", async (request: Request, resp
 });
 
 router.post("/onboarding/submit", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["onboarding:write"]);
   const merchantId = merchantIdOf(request);
   parseOrThrow(
     z.object({ acknowledgement: z.literal(true), idempotencyKey: z.string().min(8).max(128).optional() }).strict(),
@@ -1383,6 +1386,7 @@ router.get("/wallets", async (request: Request, response: Response) => {
 });
 
 router.post("/wallets", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["wallet:create"]);
   const merchantId = merchantIdOf(request);
   const body = parseOrThrow(
     z.object({ currency: z.string().length(3).default("LYD"), label: z.string().max(80).optional() }).strict(),
@@ -1476,7 +1480,7 @@ router.get("/wallets/:id/statements/:month/export", async (request: Request, res
   // any older month came back empty or truncated.
   const range = monthRangeUtc(month);
   const attempts = await client.paymentAttempt.findMany({
-    where: { merchantId, status: "SUCCEEDED", createdAt: { gte: range.from, lt: range.to } },
+    where: { merchantId, status: "SUCCEEDED", currency: wallet.currency, createdAt: { gte: range.from, lt: range.to } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 50_000,
     select: {
@@ -1523,6 +1527,7 @@ router.get("/applications", async (request: Request, response: Response) => {
 });
 
 router.post("/applications", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["application:manage"]);
   const merchantId = merchantIdOf(request);
   const body = parseOrThrow(
     z
@@ -1567,6 +1572,7 @@ router.get("/applications/:id", async (request: Request, response: Response) => 
 });
 
 router.patch("/applications/:id", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["application:manage"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
@@ -1735,6 +1741,7 @@ router.get("/links", async (request: Request, response: Response) => {
 });
 
 router.post("/links", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["link:write"]);
   const merchantId = merchantIdOf(request);
   const body = parseOrThrow(linkCreateSchema, request.body);
   const { link, visible } = await createLink(merchantId, body);
@@ -1767,6 +1774,7 @@ router.get("/links/:id", async (request: Request, response: Response) => {
 });
 
 router.post("/links/:id/cancel", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["link:write"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const link = await client.paymentLink.findFirst({ where: { id, application: { merchantId } } });
@@ -1871,6 +1879,7 @@ router.get("/disputes/:id", async (request: Request, response: Response) => {
 });
 
 router.post("/disputes/:id/evidence", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["dispute:respond"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
@@ -1881,17 +1890,29 @@ router.post("/disputes/:id/evidence", async (request: Request, response: Respons
   if (!dispute) {
     throw new ApiError(404, "DISPUTE_NOT_FOUND", "The dispute does not exist");
   }
-  const updated = await client.dispute.update({
-    where: { id: dispute.id },
+  // Evidence is only accepted while the dispute is waiting for it; the conditional update
+  // keeps a concurrent decision (won / lost / closed) from being overwritten.
+  const EVIDENCE_OPEN_STATUSES = ["OPENED", "EVIDENCE_REQUESTED"];
+  if (!EVIDENCE_OPEN_STATUSES.includes(String(dispute.status))) {
+    throw new ApiError(409, "DISPUTE_NOT_ACCEPTING_EVIDENCE", "The dispute is not accepting evidence", {
+      status: String(dispute.status),
+    });
+  }
+  const evidenceUpdate = await client.dispute.updateMany({
+    where: { id: dispute.id, status: { in: EVIDENCE_OPEN_STATUSES as never } },
     data: {
       status: "EVIDENCE_SUBMITTED",
       evidenceJson: json({ ...(dispute.evidenceJson as Record<string, unknown> | null), ...body.evidence }),
     },
   });
-  response.json({ id: updated.id, status: updated.status });
+  if (evidenceUpdate.count !== 1) {
+    throw new ApiError(409, "DISPUTE_NOT_ACCEPTING_EVIDENCE", "The dispute is not accepting evidence");
+  }
+  response.json({ id: dispute.id, status: "EVIDENCE_SUBMITTED" });
 });
 
 router.get("/cashouts", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["cashout:read","cashout:request"]);
   const merchantId = merchantIdOf(request);
   const built = buildListQuery(request.query, {
     search: ["walletId"],
@@ -1909,38 +1930,141 @@ router.get("/cashouts", async (request: Request, response: Response) => {
   response.json(listResponse("cashouts", cashouts.map((entry) => ({ ...entry, requestedAt: entry.createdAt })), total, built));
 });
 
+const cashoutDestinationSchema = z
+  .object({
+    bankName: z.string().min(2).max(120).optional(),
+    bank: z.string().min(2).max(120).optional(),
+    accountNumber: z.string().regex(/^[0-9A-Za-z\- ]{4,40}$/).optional(),
+    iban: z.string().regex(/^[A-Za-z]{2}[0-9]{2}[0-9A-Za-z ]{10,34}$/).optional(),
+    accountHolder: z.string().min(2).max(140).optional(),
+    swift: z.string().regex(/^[A-Za-z]{6}[A-Za-z0-9]{2}([A-Za-z0-9]{3})?$/).optional(),
+    bankAccountId: z.string().min(1).max(64).optional(),
+  })
+  .strict()
+  .refine((value) => Boolean(value.accountNumber || value.iban || value.bankAccountId), {
+    error: "an account number, an IBAN or a bank account id is required",
+  });
+
 router.post("/cashouts", async (request: Request, response: Response) => {
   const merchantId = merchantIdOf(request);
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["cashout:request"]);
   const body = parseOrThrow(
     z
       .object({
         walletId: z.string().min(1).max(64),
         amount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/),
-        destinationBank: z.record(z.string().max(64), z.unknown()),
+        destinationBank: cashoutDestinationSchema,
+        idempotencyKey: z.string().min(8).max(128).optional(),
       })
       .strict(),
     request.body,
   );
-  const wallet = await client.wallet.findFirst({ where: { id: body.walletId, merchantId } });
-  if (!wallet) {
-    throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
+  const headerKey = request.header("idempotency-key");
+  const idempotencyKey = body.idempotencyKey ?? (headerKey && headerKey.length >= 8 && headerKey.length <= 128 ? headerKey : undefined);
+  if (!idempotencyKey) {
+    throw new ApiError(400, "IDEMPOTENCY_KEY_REQUIRED", "An idempotency key (8 to 128 characters) is required to request a cash-out");
   }
   if (decimal(body.amount).lte(0)) {
     throw new ApiError(400, "CASHOUT_AMOUNT_INVALID", "The cash-out amount must be greater than zero");
   }
-  const cashout = await client.cashoutRequest.create({
-    data: {
-      merchantId,
-      walletId: wallet.id,
-      amount: new Prisma.Decimal(body.amount),
-      destinationBankJson: json(body.destinationBank),
-      state: "PENDING",
-    },
+  const merchant = await client.merchant.findUnique({ where: { id: merchantId } });
+  if (!merchant || merchant.status !== "ACTIVE") {
+    throw new ApiError(409, "MERCHANT_NOT_ACTIVE", "Cash-outs are only available to active merchants");
+  }
+  const wallet = await client.wallet.findFirst({ where: { id: body.walletId, merchantId } });
+  if (!wallet) {
+    throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
+  }
+  if (wallet.status !== "ACTIVE") {
+    throw new ApiError(409, "WALLET_NOT_ACTIVE", "Cash-outs are only available from an active wallet");
+  }
+  // The payout destination is bound to the KYB-verified payout account when one is on
+  // record: a cash-out can never be redirected to a different account by a session alone.
+  const destinationHash = payoutAccountHash(body.destinationBank);
+  if (merchant.payoutAccountHash) {
+    if (!destinationHash || destinationHash !== merchant.payoutAccountHash) {
+      throw new ApiError(
+        403,
+        "CASHOUT_DESTINATION_NOT_VERIFIED",
+        "The destination account does not match the payout account verified during onboarding",
+      );
+    }
+  }
+  const destination = { ...body.destinationBank, payoutVerified: Boolean(merchant.payoutAccountHash) };
+  const existing = await client.cashoutRequest.findFirst({ where: { merchantId, idempotencyKey } });
+  const replay = (row: { id: string; state: string; walletId: string; amount: unknown }) => {
+    if (row.walletId !== wallet.id || !decimal(row.amount as never).eq(decimal(body.amount))) {
+      throw new ApiError(409, "IDEMPOTENCY_KEY_REUSED", "The idempotency key was already used for a different cash-out");
+    }
+    response.status(200).json({ id: row.id, state: row.state, idempotent: true });
+  };
+  if (existing) {
+    replay(existing as never);
+    return;
+  }
+  let freshlyCreated = false;
+  const created = await client.$transaction(async (tx) => {
+    // Serialise concurrent requests of the wallet, then check the available balance:
+    // the ledger balance minus the cash-outs that are already waiting.
+    const ledgerBalance = await lockWalletLedgerBalance(tx, wallet.glAccountId);
+    const reserved = await openCashoutTotal(tx, wallet.id);
+    if (ledgerBalance.minus(reserved).lt(decimal(body.amount))) {
+      throw new ApiError(409, "INSUFFICIENT_BALANCE", "The available balance does not cover this cash-out");
+    }
+    const row = await tx.cashoutRequest.create({
+      data: {
+        merchantId,
+        walletId: wallet.id,
+        amount: new Prisma.Decimal(body.amount),
+        destinationBankJson: json(destination),
+        state: "PENDING",
+        idempotencyKey,
+        requestedByUserId: principal.userId,
+      },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: principal.userId ?? merchantId,
+        role: principal.role ?? "MERCHANT_API",
+        action: "CASHOUT_REQUESTED",
+        entityType: "CASHOUT_REQUEST",
+        entityId: row.id,
+        beforeJson: {},
+        afterJson: { walletId: wallet.id, amount: body.amount, payoutVerified: destination.payoutVerified },
+      },
+    });
+    freshlyCreated = true;
+    return row;
+  }).catch(async (error: unknown) => {
+    // A concurrent retry with the same key lost the unique index race: answer with the winner.
+    if ((error as { code?: string })?.code === "P2002") {
+      return client.cashoutRequest.findFirst({ where: { merchantId, idempotencyKey } });
+    }
+    throw error;
   });
-  response.status(201).json({ id: cashout.id, state: cashout.state });
+  if (!created) {
+    throw new ApiError(409, "CASHOUT_CONFLICT", "The cash-out could not be created");
+  }
+  if (freshlyCreated) {
+    response.status(201).json({ id: created.id, state: created.state });
+    return;
+  }
+  replay(created as never);
 });
 
+const cidrSchema = z.string().min(3).max(64).refine((value) => {
+  try {
+    const [network, prefix] = value.split("/");
+    ipaddr.parse(network ?? "");
+    return prefix === undefined || (/^\d{1,3}$/.test(prefix) && Number(prefix) <= 128);
+  } catch {
+    return false;
+  }
+}, "must be an IP address or a CIDR range");
+
 router.get("/tokens", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["token:manage"]);
   const merchantId = merchantIdOf(request);
   const rawRevoked = typeof request.query.revoked === "string" ? request.query.revoked : undefined;
   const built = buildListQuery(request.query, {
@@ -1964,6 +2088,7 @@ router.get("/tokens", async (request: Request, response: Response) => {
     name: token.name,
     lastFour: token.lastFour,
     scopes: token.scopes,
+    expiresAt: token.expiresAt,
     ipWhitelistEnabled: token.ipWhitelistEnabled,
     revokedAt: token.revokedAt,
     lastUsedAt: token.lastUsedAt,
@@ -1972,6 +2097,7 @@ router.get("/tokens", async (request: Request, response: Response) => {
 });
 
 router.post("/tokens", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["token:manage"]);
   const merchantId = merchantIdOf(request);
   const principal = principalOf(request);
   const body = parseOrThrow(
@@ -1979,13 +2105,23 @@ router.post("/tokens", async (request: Request, response: Response) => {
       .object({
         name: z.string().min(2).max(120),
         scopes: z.array(z.string().min(2).max(64)).min(1).max(50),
-        allowedCidrs: z.array(z.string().min(3).max(64)).max(64).optional(),
+        allowedCidrs: z.array(cidrSchema).max(64).optional(),
         applicationId: z.string().min(1).max(64).optional(),
-        expiresAt: z.string().max(64).optional(),
+        expiresAt: z.string().datetime().optional(),
       })
       .strict(),
     request.body,
   );
+  assertKnownTokenScopes(body.scopes);
+  assertGrantableMerchantAuthorities(principal, body.scopes);
+  let tokenExpiresAt: Date | null = null;
+  if (body.expiresAt) {
+    tokenExpiresAt = new Date(body.expiresAt);
+    const maxLifetimeMs = 2 * 365 * 24 * 60 * 60 * 1000;
+    if (tokenExpiresAt.getTime() <= Date.now() || tokenExpiresAt.getTime() > Date.now() + maxLifetimeMs) {
+      throw new ApiError(400, "TOKEN_EXPIRY_INVALID", "The expiry must be in the future and within two years");
+    }
+  }
   const application = body.applicationId
     ? await client.application.findFirst({ where: { id: body.applicationId, merchantId } })
     : await client.application.findFirst({ where: { merchantId } });
@@ -2001,6 +2137,7 @@ router.post("/tokens", async (request: Request, response: Response) => {
       tokenHash: hashAccessToken(plaintext),
       lastFour: plaintext.slice(-4),
       scopes: body.scopes,
+      expiresAt: tokenExpiresAt,
       ipWhitelistEnabled: Boolean(body.allowedCidrs?.length),
       ips: body.allowedCidrs
         ? { create: body.allowedCidrs.map((cidr) => ({ cidr })) }
@@ -2027,9 +2164,10 @@ router.post("/tokens", async (request: Request, response: Response) => {
 });
 
 router.put("/tokens/:id/ips", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["token:manage"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
-  const body = parseOrThrow(z.object({ allowedCidrs: z.array(z.string().min(3).max(64)).max(64) }).strict(), request.body);
+  const body = parseOrThrow(z.object({ allowedCidrs: z.array(cidrSchema).max(64) }).strict(), request.body);
   const token = await client.accessToken.findFirst({ where: { id, merchantId } });
   if (!token) {
     throw new ApiError(404, "ACCESS_TOKEN_NOT_FOUND", "The access token does not exist");
@@ -2050,6 +2188,7 @@ router.put("/tokens/:id/ips", async (request: Request, response: Response) => {
 });
 
 router.delete("/tokens/:id", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["token:manage"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const token = await client.accessToken.findFirst({ where: { id, merchantId } });
@@ -2061,6 +2200,7 @@ router.delete("/tokens/:id", async (request: Request, response: Response) => {
 });
 
 router.get("/credential-sets", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["credential:manage"]);
   const merchantId = merchantIdOf(request);
   const built = buildListQuery(request.query, {
     search: ["externalMerchantId", "gateway.code"],
@@ -2087,6 +2227,7 @@ router.get("/credential-sets", async (request: Request, response: Response) => {
 });
 
 router.post("/credential-sets", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["credential:manage"]);
   const merchantId = merchantIdOf(request);
   const body = parseOrThrow(
     z
@@ -2150,6 +2291,7 @@ router.post("/credential-sets", async (request: Request, response: Response) => 
 });
 
 router.put("/credential-sets/:id", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["credential:manage"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
@@ -2193,6 +2335,7 @@ router.put("/credential-sets/:id", async (request: Request, response: Response) 
 });
 
 router.get("/credential-sets/:id", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["credential:manage"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const credentialSet = await client.credentialSet.findFirst({
@@ -2226,6 +2369,7 @@ router.get("/credential-sets/:id", async (request: Request, response: Response) 
  * verification time, or `FAILING`).
  */
 router.post("/credential-sets/:id/verify", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["credential:manage"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const credentialSet = await client.credentialSet.findFirst({
@@ -2254,6 +2398,7 @@ router.post("/credential-sets/:id/verify", async (request: Request, response: Re
 });
 
 router.get("/users", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["user:manage"]);
   const merchantId = merchantIdOf(request);
   const built = buildListQuery(request.query, {
     search: ["email", "phone"],
@@ -2279,6 +2424,7 @@ router.get("/users", async (request: Request, response: Response) => {
 });
 
 router.post("/users", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["user:manage"]);
   const merchantId = merchantIdOf(request);
   const body = parseOrThrow(
     z
@@ -2292,79 +2438,119 @@ router.post("/users", async (request: Request, response: Response) => {
       .strict(),
     request.body,
   );
+  const creator = principalOf(request);
+  assertKnownMerchantAuthorities(body.authoritiesMap);
+  assertGrantableMerchantAuthorities(creator, body.authoritiesMap);
+  assertGrantableMerchantRole(creator, body.role);
   const existing = await client.user.findFirst({ where: { email: normalizeEmail(body.email) } });
   if (existing) {
     throw new ApiError(409, "USER_ALREADY_EXISTS", "A user with this email already exists");
   }
-  const user = await client.user.create({
-    data: {
-      merchantId,
-      email: normalizeEmail(body.email),
-      phone: body.phone ? normalizePhone(body.phone) : null,
-      passwordHash: await hashPassword(body.password),
-      role: body.role,
-      authoritiesMap: body.authoritiesMap,
-      mfaRequired: true,
-      status: "INVITED",
-    },
+  const passwordHash = await hashPassword(body.password);
+  const user = await client.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: {
+        merchantId,
+        email: normalizeEmail(body.email),
+        phone: body.phone ? normalizePhone(body.phone) : null,
+        passwordHash,
+        role: body.role,
+        authoritiesMap: body.authoritiesMap,
+        mfaRequired: true,
+        status: "INVITED",
+        invitedById: creator.userId,
+      },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: creator.userId ?? merchantId,
+        role: creator.role ?? "MERCHANT_API",
+        action: "MERCHANT_USER_CREATED",
+        entityType: "USER",
+        entityId: created.id,
+        beforeJson: {},
+        afterJson: { role: created.role, authoritiesMap: body.authoritiesMap, status: created.status },
+      },
+    });
+    return created;
   });
   response.status(201).json({ id: user.id, email: user.email, role: user.role, status: user.status });
 });
 
-router.patch("/users", async (request: Request, response: Response) => {
-  const merchantId = merchantIdOf(request);
-  const body = parseOrThrow(
-    z
-      .object({
-        id: z.string().min(1).max(64),
-        authoritiesMap: z.array(z.string().min(2).max(64)).max(50).optional(),
-        role: z.enum(["MERCHANT_ADMIN", "MERCHANT_STAFF", "MERCHANT_CASHIER"]).optional(),
-        status: z.enum(["INVITED", "ACTIVE", "SUSPENDED", "DISABLED"]).optional(),
-      })
-      .strict(),
-    request.body,
-  );
-  const user = await client.user.findFirst({ where: { id: body.id, merchantId } });
-  if (!user) {
-    throw new ApiError(404, "USER_NOT_FOUND", "The user does not exist");
-  }
-  const updated = await client.user.update({
-    where: { id: user.id },
-    data: {
-      authoritiesMap: body.authoritiesMap,
-      role: body.role,
-      status: body.status,
-    },
-  });
-  response.json({ id: updated.id, role: updated.role, status: updated.status });
-});
+const merchantUserPatchSchema = z
+  .object({
+    authoritiesMap: z.array(z.string().min(2).max(64)).max(50).optional(),
+    role: z.enum(["MERCHANT_ADMIN", "MERCHANT_STAFF", "MERCHANT_CASHIER"]).optional(),
+    status: z.enum(["INVITED", "ACTIVE", "SUSPENDED", "DISABLED"]).optional(),
+  })
+  .strict();
 
-router.patch("/users/:id", async (request: Request, response: Response) => {
-  const merchantId = merchantIdOf(request);
-  const { id } = parseOrThrow(idSchema, request.params);
-  const body = parseOrThrow(
-    z
-      .object({
-        authoritiesMap: z.array(z.string().min(2).max(64)).max(50).optional(),
-        role: z.enum(["MERCHANT_ADMIN", "MERCHANT_STAFF", "MERCHANT_CASHIER"]).optional(),
-        status: z.enum(["INVITED", "ACTIVE", "SUSPENDED", "DISABLED"]).optional(),
-      })
-      .strict(),
-    request.body,
-  );
+const applyMerchantUserPatch = async (
+  request: Request,
+  response: Response,
+  merchantId: string,
+  id: string,
+  body: z.infer<typeof merchantUserPatchSchema>,
+): Promise<void> => {
+  const principal = principalOf(request);
   const user = await client.user.findFirst({ where: { id, merchantId } });
   if (!user) {
     throw new ApiError(404, "USER_NOT_FOUND", "The user does not exist");
   }
-  const updated = await client.user.update({
-    where: { id: user.id },
-    data: {
-      authoritiesMap: body.authoritiesMap,
-      role: body.role,
-      status: body.status,
-    },
+  if (user.id === principal.userId) {
+    throw new ApiError(403, "SELF_MODIFICATION_FORBIDDEN", "You cannot change your own account");
+  }
+  if (user.role === "MERCHANT_ADMIN" && principal.role !== "MERCHANT_ADMIN") {
+    throw new ApiError(403, "ROLE_ESCALATION_FORBIDDEN", "Only a merchant administrator can change an administrator");
+  }
+  if (body.authoritiesMap) {
+    assertKnownMerchantAuthorities(body.authoritiesMap);
+    assertGrantableMerchantAuthorities(principal, body.authoritiesMap);
+  }
+  if (body.role) {
+    assertGrantableMerchantRole(principal, body.role);
+  }
+  const updated = await client.$transaction(async (tx) => {
+    const row = await tx.user.update({
+      where: { id: user.id },
+      data: {
+        authoritiesMap: body.authoritiesMap,
+        role: body.role,
+        status: body.status,
+      },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: principal.userId ?? merchantId,
+        role: principal.role ?? "MERCHANT_API",
+        action: "MERCHANT_USER_UPDATED",
+        entityType: "USER",
+        entityId: user.id,
+        beforeJson: { role: user.role, status: user.status, authoritiesMap: user.authoritiesMap },
+        afterJson: { role: row.role, status: row.status, authoritiesMap: row.authoritiesMap },
+      },
+    });
+    return row;
   });
   response.json({ id: updated.id, role: updated.role, status: updated.status });
+};
+
+router.patch("/users", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["user:manage"]);
+  const merchantId = merchantIdOf(request);
+  const { id, ...body } = parseOrThrow(
+    merchantUserPatchSchema.extend({ id: z.string().min(1).max(64) }).strict(),
+    request.body,
+  );
+  await applyMerchantUserPatch(request, response, merchantId, id, body);
+});
+
+router.patch("/users/:id", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["user:manage"]);
+  const merchantId = merchantIdOf(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(merchantUserPatchSchema, request.body);
+  await applyMerchantUserPatch(request, response, merchantId, id, body);
 });
 
 router.get("/pos/terminals", async (request: Request, response: Response) => {
@@ -2385,6 +2571,7 @@ router.get("/pos/terminals", async (request: Request, response: Response) => {
 });
 
 router.post("/pos/terminals", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["pos:manage"]);
   const merchantId = merchantIdOf(request);
   const body = parseOrThrow(
     z
@@ -2425,6 +2612,7 @@ router.get("/pos/terminals/:id", async (request: Request, response: Response) =>
 });
 
 router.patch("/pos/terminals/:id", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["pos:manage"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
@@ -2449,6 +2637,7 @@ router.patch("/pos/terminals/:id", async (request: Request, response: Response) 
 });
 
 router.post("/pos/terminals/:id/screens", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["pos:manage"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const terminal = await client.posTerminal.findFirst({ where: { id, application: { merchantId } } });
@@ -2677,6 +2866,7 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
 
 router.post("/external/links", async (request: Request, response: Response) => {
   const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["link:write"]);
   if (principal.kind !== "apiToken") {
     throw new ApiError(403, "API_TOKEN_REQUIRED", "An API access token is required for the external API");
   }
@@ -2701,6 +2891,7 @@ router.post("/external/links", async (request: Request, response: Response) => {
 
 router.get("/external/links/:key", async (request: Request, response: Response) => {
   const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["link:read","link:write"]);
   const merchantId = requireMerchantId(principal);
   const key = String(request.params.key ?? "");
   const link = await client.paymentLink.findFirst({
@@ -2721,6 +2912,7 @@ router.get("/external/links/:key", async (request: Request, response: Response) 
 
 router.post("/external/links/:key/cancel", async (request: Request, response: Response) => {
   const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["link:write"]);
   const merchantId = requireMerchantId(principal);
   const key = String(request.params.key ?? "");
   const link = await client.paymentLink.findFirst({
@@ -2735,6 +2927,7 @@ router.post("/external/links/:key/cancel", async (request: Request, response: Re
 
 router.get("/external/payments/:reference", async (request: Request, response: Response) => {
   const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["payment:read"]);
   const merchantId = requireMerchantId(principal);
   const reference = String(request.params.reference ?? "");
   const attempt = await client.paymentAttempt.findFirst({

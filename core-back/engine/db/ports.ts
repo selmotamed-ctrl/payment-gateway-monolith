@@ -670,7 +670,8 @@ export interface PaymentRepository {
    */
   lockAttemptById?(tx: Tx, id: string): Promise<PaymentAttemptRow | null>;
   findAttemptByReference(tx: Tx, reference: string): Promise<PaymentAttemptRow | null>;
-  findAttemptByIdempotencyKey(tx: Tx, idempotencyKey: string): Promise<PaymentAttemptRow | null>;
+  /** Idempotency keys are unique PER LINK ((linkId, idempotencyKey)), never global. */
+  findAttemptByIdempotencyKey(tx: Tx, idempotencyKey: string, linkId: string): Promise<PaymentAttemptRow | null>;
   findAttemptByProviderReference(tx: Tx, providerReference: string): Promise<PaymentAttemptRow | null>;
   updateAttempt(tx: Tx, id: string, patch: Partial<PaymentAttemptRow>): Promise<PaymentAttemptRow>;
   collectWindowStats(tx: Tx, filter: AttemptWindowFilter): Promise<AttemptWindowStats>;

@@ -484,9 +484,9 @@ export class PrismaRepositories implements Repositories {
     findAttemptByReference: async (tx, reference) => {
       return (await model(tx, "paymentAttempt").findUnique({ where: { reference } })) as PaymentAttemptRow | null;
     },
-    findAttemptByIdempotencyKey: async (tx, idempotencyKey) => {
+    findAttemptByIdempotencyKey: async (tx, idempotencyKey, linkId) => {
       return (await model(tx, "paymentAttempt").findFirst({
-        where: { idempotencyKey: idempotencyKey },
+        where: { linkId, idempotencyKey },
       })) as PaymentAttemptRow | null;
     },
     findAttemptByProviderReference: async (tx, providerReference) => {

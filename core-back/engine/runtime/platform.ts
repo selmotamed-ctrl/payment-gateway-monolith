@@ -103,6 +103,10 @@ export const createPlatformRuntime = (
     // this executor-level list is only the scoped Fake Rails relaxation used
     // by assertUrlAllowed before the consumer is resolved.
     allowedHosts: env.FAKE_RAILS_ALLOWED_HOSTS.split(",").map((entry) => entry.trim()).filter(Boolean),
+    // The executor-level list above is NOT the egress allowlist: the real
+    // request is sent by the per-gateway ApiConsumer, which fails closed on an
+    // empty `allowed_hosts`. Private/loopback literals stay blocked here.
+    allowAnyHost: true,
     computeRegistry: createComputeRegistry({ db, vault, crypto }),
     apiConsumerResolver: async (context) => {
       const attempt = context.attempt as
@@ -341,6 +345,7 @@ export const loadConsumerConfig = async (
     env: key.env,
     credentialSetId: key.credentialSetId,
     allowedHosts,
+    allowAnyHost: env.ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST,
     baseUrl,
     timeoutMs: version?.setting?.timeoutMs ?? 15000,
     credentials,

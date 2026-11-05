@@ -76,7 +76,7 @@ const bearerToken = (request: Request): string | null => {
   return match ? match[1]?.trim() ?? null : null;
 };
 
-const clientIp = (request: Request): string | null => {
+export const clientIp = (request: Request): string | null => {
   const forwarded = request.headers["x-real-client-ip"];
   if (typeof forwarded === "string" && forwarded.length > 0) {
     return forwarded;
@@ -102,6 +102,9 @@ const resolveApiTokenPrincipal = async (token: string, request: Request): Promis
     if (!ipAllowed(clientIp(request), cidrs)) {
       throw new ApiError(403, "ACCESS_TOKEN_IP_NOT_ALLOWED", "The request origin is not allowed for this access token");
     }
+  }
+  if (record.expiresAt && record.expiresAt.getTime() <= Date.now()) {
+    throw new ApiError(401, "ACCESS_TOKEN_EXPIRED", "The supplied access token has expired");
   }
   await client.accessToken.update({
     where: { id: record.id },
@@ -183,13 +186,53 @@ export const principalOf = (request: Request): Principal => {
   return principal;
 };
 
+/** Platform staff: a session principal that is not bound to a merchant and holds a staff role. */
+export const isStaffPrincipal = (principal: Principal): boolean =>
+  principal.kind === "session"
+  && principal.merchantId === null
+  && typeof principal.role === "string"
+  && !principal.role.startsWith("MERCHANT_");
+
+/** A merchant user session, or a merchant API token. */
+export const isMerchantPrincipal = (principal: Principal): boolean =>
+  principal.merchantId !== null
+  && (principal.kind === "apiToken"
+    || (typeof principal.role === "string" && principal.role.startsWith("MERCHANT_")));
+
+/** Admin channel guard: refuses merchant users and API tokens even when their authority strings overlap. */
+export const requireStaffPrincipal = (request: Request, _response: Response, next: NextFunction): void => {
+  try {
+    if (!isStaffPrincipal(principalOf(request))) {
+      throw new ApiError(403, "STAFF_PRINCIPAL_REQUIRED", "This channel is reserved for platform staff");
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Merchant channel guard: refuses staff principals. */
+export const requireMerchantPrincipal = (request: Request, _response: Response, next: NextFunction): void => {
+  try {
+    if (!isMerchantPrincipal(principalOf(request))) {
+      throw new ApiError(403, "MERCHANT_PRINCIPAL_REQUIRED", "This channel is reserved for merchant principals");
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const requireAuthorities = (request: Request, required: readonly string[]): Principal => {
   const principal = principalOf(request);
   if (required.length === 0) {
     return principal;
   }
   const granted = new Set(principal.authorities);
-  const allowed = required.some((authority) => granted.has(authority) || granted.has("*"));
+  // The wildcard is a staff-only grant. A merchant user or API token never
+  // satisfies a requirement through "*", whatever its authorities map says.
+  const wildcard = granted.has("*") && isStaffPrincipal(principal);
+  const allowed = required.some((authority) => granted.has(authority) || wildcard);
   if (!allowed) {
     throw new ApiError(403, "AUTHORITY_REQUIRED", "The principal lacks the required authority", {
       required,

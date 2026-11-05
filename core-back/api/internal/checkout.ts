@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { isIP } from "node:net";
 import { Decimal } from "decimal.js";
 import express, { type Request, type Response } from "express";
 import { z } from "zod";
@@ -198,6 +199,32 @@ interface CommissionBreakdown {
   feeBearer: "MERCHANT_ABSORBS" | "PAYER_SURCHARGE" | "SPLIT";
 }
 
+/**
+ * Maps a commission profile `roundingMode` to a decimal.js rounding mode.
+ * Unknown / missing values fall back to HALF_UP (the platform default).
+ */
+const MONEY_SCALE = 4;
+const roundingModeOf = (mode: unknown): Decimal.Rounding => {
+  switch (String(mode ?? "HALF_UP").toUpperCase().replace(/^ROUND_/, "")) {
+    case "HALF_EVEN":
+    case "BANKERS":
+      return Decimal.ROUND_HALF_EVEN;
+    case "HALF_DOWN":
+      return Decimal.ROUND_HALF_DOWN;
+    case "UP":
+      return Decimal.ROUND_UP;
+    case "DOWN":
+      return Decimal.ROUND_DOWN;
+    case "CEILING":
+    case "CEIL":
+      return Decimal.ROUND_CEIL;
+    case "FLOOR":
+      return Decimal.ROUND_FLOOR;
+    default:
+      return Decimal.ROUND_HALF_UP;
+  }
+};
+
 const commissionForProfile = (
   profile: {
     calcType: string;
@@ -277,10 +304,16 @@ const buildBreakdown = (
     minFee: Prisma.Decimal;
     maxFee: Prisma.Decimal | null;
     tiersJson: unknown;
+    roundingMode?: string | null;
   },
 ): CommissionBreakdown => {
-  const amount = decimal(link.amount);
-  const commission = commissionForProfile(profile, link.amount);
+  const amount = decimal(link.amount).toDecimalPlaces(MONEY_SCALE, Decimal.ROUND_HALF_UP);
+  const mode = roundingModeOf(profile.roundingMode);
+  // The commission is computed ONCE and rounded ONCE to the money scale per
+  // the profile's rounding mode. Every other figure is derived from that
+  // rounded value by exact subtraction, so the journal always balances
+  // (commission + merchant == amount, never off by a rounding residue).
+  const commission = commissionForProfile(profile, link.amount).toDecimalPlaces(MONEY_SCALE, mode);
   const feeBearer = link.feeBearer;
   if (feeBearer === "MERCHANT_ABSORBS") {
     return {
@@ -301,7 +334,7 @@ const buildBreakdown = (
     };
   }
   const platformShare = splitRatio(link.splitRatioJson);
-  const payerShare = commission.mul(platformShare);
+  const payerShare = commission.mul(platformShare).toDecimalPlaces(MONEY_SCALE, mode);
   return {
     commission: commission.toFixed(4),
     payerSurcharge: payerShare.toFixed(4),
@@ -651,7 +684,9 @@ const gatewayFeeForRoute = (
   if (model.max !== undefined && cost.gt(decimal(model.max))) {
     cost = decimal(model.max);
   }
-  return cost.toFixed(4);
+  // Rounded once, half-up, to the money scale. This single figure is booked
+  // under both fee names, so the journal cannot drift from a second rounding.
+  return cost.toDecimalPlaces(MONEY_SCALE, Decimal.ROUND_HALF_UP).toFixed(MONEY_SCALE);
 };
 
 /**
@@ -1113,9 +1148,7 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
   const graceExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-  const clientIp = typeof request.headers["x-real-client-ip"] === "string"
-    ? (request.headers["x-real-client-ip"] as string)
-    : request.ip ?? null;
+  const clientIp = edgeReportedClientIp(request);
   const userAgent = typeof request.headers["x-client-user-agent"] === "string"
     ? (request.headers["x-client-user-agent"] as string)
     : null;
@@ -1132,7 +1165,7 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
   // leaves a terminal BLOCKED attempt behind and a held payment leaves its
   // money escrowed in `AML_HOLD`.
   const platform = getPlatformRuntime(client as never);
-  const transaction = await platform.runTransactionWithLsn(async (tx) =>
+  const runGuard = () => platform.runTransactionWithLsn(async (tx) =>
     platform.guardPipeline.guard(
       {
         linkKey,
@@ -1182,19 +1215,31 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
       tx as never,
     ),
   );
+  let transaction: Awaited<ReturnType<typeof runGuard>>;
+  try {
+    transaction = await runGuard();
+  } catch (error) {
+    // A concurrent create with the same (link, idempotency key) won the unique
+    // constraint: this request is a replay. Run once more; the lookup inside
+    // the guard now finds the winner and returns IDEMPOTENT_REPLAY.
+    if ((error as { code?: string })?.code !== "P2002") {
+      throw error;
+    }
+    transaction = await runGuard();
+  }
   const decision = transaction.data;
   response.setHeader("x-pg-min-lsn", transaction.commitLsn);
   response.setHeader("x-pg-lsn", transaction.commitLsn);
 
   if (decision.outcome === "BLOCK") {
-    // The customer sees a generic message: the reason of the refusal stays
-    // internal (design §20).
+    // The customer sees a generic message code only: the reasons (AML / velocity
+    // / watchlist signals) stay in the guard audit and case records and are
+    // never returned to the payer (design §20).
     response.status(decision.customerMessageCode === "PAYMENT_IN_PROGRESS" ? 409 : 403).json({
       attemptId: decision.attemptId,
       reference: decision.reference,
       status: "BLOCKED",
       code: decision.customerMessageCode,
-      reasons: decision.reasons,
       clientAction: null,
     });
     return;
@@ -1208,7 +1253,6 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
       reference: decision.reference,
       status: "CREATED",
       code: decision.customerMessageCode,
-      reasons: decision.reasons,
       hold: true,
       clientAction: null,
     });
@@ -1413,10 +1457,10 @@ route.post("/pay/:linkKey/logs/:attemptId/confirm", async (request: Request, res
   // The SUBMIT stack, the trusted success facts and the ledger posting are
   // owned by the universal rail engine.
   const platform = getPlatformRuntime(client as never);
-  const evidence: Record<string, unknown> = {
-    ...((body.evidence ?? {}) as Record<string, unknown>),
-    ...(body.otp ? { otp: body.otp } : {}),
-  };
+  // Payer input is limited to the OTP. `body.evidence` is accepted for wire
+  // compatibility but is never forwarded: a payer must not be able to supply
+  // trusted success facts (status/reference/amount/...).
+  const evidence: Record<string, unknown> = body.otp ? { otp: body.otp } : {};
   const idempotencyKeyHash = confirmIdempotencyHash(body.idempotencyKey);
   const result = await platform.engine.confirm(attempt as unknown as DynamicAttempt, evidence, {
     claim: async (targetAttemptId) =>
@@ -1530,6 +1574,30 @@ route.post("/return/:attemptToken", async (request: Request, response: Response)
   });
 });
 
+const UNVERIFIED_BODY_STORAGE_CAP = 64 * 1024;
+const INBOUND_VERIFIER_HEADERS = [
+  "x-signature",
+  "x-gateway-signature",
+  "x-hub-signature-256",
+  "signature",
+  "x-timestamp",
+  "x-gateway-timestamp",
+];
+
+/**
+ * Client IP as reported by the edge. core-back is only reachable over mTLS
+ * (see requireEdgeIdentity), so `x-real-client-ip` is authoritative ONLY
+ * because the authenticated edge sets/overwrites it; the edge must never
+ * forward a caller-supplied value. A malformed value is ignored.
+ */
+const edgeReportedClientIp = (request: Request): string | null => {
+  const header = request.headers["x-real-client-ip"];
+  if (typeof header === "string" && isIP(header.trim()) !== 0) {
+    return header.trim();
+  }
+  return request.ip ?? null;
+};
+
 route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, response: Response) => {
   const gatewayCode = String(request.params.gateway ?? "");
   const environment = String(request.params.env ?? "").toUpperCase();
@@ -1557,16 +1625,17 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
     throw new ApiError(403, "INBOUND_ENVIRONMENT_NOT_BOUND", "The inbound channel is not bound to this environment");
   }
 
+  // The canonical dedupe key is claimed ONLY by a VERIFIED event. An unsigned
+  // or forged copy is stored under a unique pending key, so it can never make
+  // the genuine delivery look like a duplicate.
   const dedupeKey = createHash("sha256")
     .update(`${channel.id}:${rawBody.toString("base64")}`, "utf8")
     .digest("hex");
 
-  const sourceIp = typeof request.headers["x-real-client-ip"] === "string"
-    ? (request.headers["x-real-client-ip"] as string)
-    : request.ip ?? "0.0.0.0";
+  const sourceIp = edgeReportedClientIp(request) ?? "0.0.0.0";
 
   const existing = await client.inboundEvent.findFirst({
-    where: { channelId: channel.id, dedupeKey },
+    where: { channelId: channel.id, dedupeKey, verified: true },
   });
   if (existing) {
     response.status(channel.ackStatus).send(
@@ -1575,20 +1644,37 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
     return;
   }
 
+  // Headers the verifier needs to re-verify the stored event later (signature
+  // and timestamp). They are signatures / timestamps, never credentials.
+  const signatureHeaderName = typeof channel.signatureHeader === "string"
+    ? channel.signatureHeader.toLowerCase()
+    : null;
+  const storedHeaders: Record<string, unknown> = {
+    "content-type": request.headers["content-type"] ?? null,
+    "content-length": rawBody.byteLength,
+  };
+  for (const name of new Set([
+    ...INBOUND_VERIFIER_HEADERS,
+    ...(signatureHeaderName ? [signatureHeaderName] : []),
+  ])) {
+    const value = request.headers[name];
+    if (typeof value === "string") {
+      storedHeaders[name] = value.slice(0, 1024);
+    }
+  }
+
   const stored = await client.inboundEvent.create({
     data: {
       channelId: channel.id,
       gatewayId: channel.gatewayVersion.gatewayId,
       env: environment,
-      rawBodyBytes: new Uint8Array(rawBody),
-      redactedHeadersJson: json({
-        "content-type": request.headers["content-type"] ?? null,
-        "content-length": rawBody.byteLength,
-      }),
+      // An unverified body is attacker-controlled: cap what is persisted.
+      rawBodyBytes: new Uint8Array(rawBody.subarray(0, UNVERIFIED_BODY_STORAGE_CAP)),
+      redactedHeadersJson: json(storedHeaders),
       sourceIp,
       verified: false,
       verificationError: "VERIFICATION_PENDING",
-      dedupeKey,
+      dedupeKey: createHash("sha256").update(`${channel.id}:pending:${randomUUID()}`, "utf8").digest("hex"),
       receivedAt: new Date(),
     },
   });
@@ -1638,15 +1724,29 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
     processingResult = "REJECTED";
   }
 
-  await client.inboundEvent.update({
-    where: { id: stored.id },
-    data: {
-      verified,
-      verificationError,
-      processedAt: new Date(),
-      processingResult,
-    },
-  });
+  const finalData = {
+    verified,
+    verificationError,
+    processedAt: new Date(),
+    processingResult,
+    ...(verified ? { rawBodyBytes: new Uint8Array(rawBody) } : {}),
+  };
+  try {
+    await client.inboundEvent.update({
+      where: { id: stored.id },
+      data: verified ? { ...finalData, dedupeKey } : finalData,
+    });
+  } catch (error) {
+    if (verified && (error as { code?: string })?.code === "P2002") {
+      // A concurrent verified delivery already claimed the canonical key.
+      await client.inboundEvent.update({
+        where: { id: stored.id },
+        data: { ...finalData, processingResult: "DUPLICATE" },
+      });
+    } else {
+      throw error;
+    }
+  }
 
   response.status(channel.ackStatus).send(
     channel.ackBodyTemplate

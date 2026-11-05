@@ -350,7 +350,8 @@ describe("blueprint catalogue", () => {
       for (const gateway of allGateways(blueprint)) {
         for (const channel of gateway.channels) {
           expect(channel.pathToken.length).toBeGreaterThanOrEqual(8);
-          expect(channel.timestampToleranceSec).toBeGreaterThan(0);
+          // 0 is the explicit opt-out of the replay window (channels with no signed timestamp field).
+          expect(channel.timestampToleranceSec).toBeGreaterThanOrEqual(0);
           if (["IP_ONLY", "NONE_PLUS_INQUIRY", "SHARED_TOKEN"].includes(channel.verifyMethod)) {
             expect(channel.mustInquire).toBe(true);
           }

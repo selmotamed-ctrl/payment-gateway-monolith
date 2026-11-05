@@ -1,4 +1,5 @@
 import { assertNoTippingOff, redactAmlPayload, renderTemplate } from "../compliance/tippingOff";
+import { openMfaCode } from "../../lib/auth/mfaChallenges";
 import { toCamelRows } from "../db/rawRows";
 import type { NotificationRow, Tx } from "../db/ports";
 import type { RenderedNotification } from "../notifications/NotificationTransport";
@@ -79,7 +80,17 @@ export class OutboxNotificationWorker extends BaseWorker {
       return;
     }
 
-    const payloadRaw = (notification.payloadJson ?? {}) as Record<string, unknown>;
+    const payloadRaw = { ...((notification.payloadJson ?? {}) as Record<string, unknown>) };
+    // MFA codes are stored encrypted (never in plaintext in payload_json); open them for delivery only.
+    if (typeof payloadRaw.codeCiphertext === "string") {
+      try {
+        payloadRaw.code = await openMfaCode(payloadRaw.codeCiphertext);
+      } catch {
+        await this.fail(notification, now, "MFA code could not be decrypted", 0);
+        return;
+      }
+      delete payloadRaw.codeCiphertext;
+    }
     const payload = redactAmlPayload(payloadRaw, template.confidentialityClass);
     const subject = template.subjectTemplate ? renderTemplate(template.subjectTemplate, payload) : null;
     const body = renderTemplate(template.bodyTemplate, payload);

@@ -87,32 +87,32 @@ describe("compileUrl query encoding", () => {
     const url = compileUrl("https://pay.example.com/api", {
       filter: { status: "PAID" },
       ids: ["a", "b"],
-    });
+    }, { allowAnyHost: true });
     expect(url).toContain("filter[status]=PAID");
     expect(url).toContain("ids[0]=a");
     expect(url).toContain("ids[1]=b");
   });
 
   test("can percent encode brackets", () => {
-    const url = compileUrl("https://pay.example.com/api", { ids: ["a"] }, { encodeBrackets: true });
+    const url = compileUrl("https://pay.example.com/api", { ids: ["a"] }, { encodeBrackets: true, allowAnyHost: true });
     expect(url).toContain("ids%5B0%5D=a");
   });
 
   test("supports the repeat array format", () => {
     const url = compileUrl("https://pay.example.com/api", { ids: ["a", "b"] }, {
-      arrayFormat: "repeat",
+      arrayFormat: "repeat", allowAnyHost: true,
     });
     expect(url).toContain("ids=a");
     expect(url).toContain("ids=b");
   });
 
   test("percent encodes reserved characters", () => {
-    const url = compileUrl("https://pay.example.com/api", { note: "a b&c=d" });
+    const url = compileUrl("https://pay.example.com/api", { note: "a b&c=d" }, { allowAnyHost: true });
     expect(url).toContain("note=a%20b%26c%3Dd");
   });
 
   test("drops null and undefined values", () => {
-    const url = compileUrl("https://pay.example.com/api", { a: null, b: undefined, c: "1" });
+    const url = compileUrl("https://pay.example.com/api", { a: null, b: undefined, c: "1" }, { allowAnyHost: true });
     expect(url).toContain("c=1");
     expect(url).not.toContain("a=");
     expect(url).not.toContain("b=");
@@ -122,7 +122,7 @@ describe("compileUrl query encoding", () => {
 describe("compileUrl path parameter substitution", () => {
   test("encodes path parameters and validates the final URL", () => {
     const url = compileUrl("https://pay.example.com/orders/{id}/confirm", undefined, {
-      parameters: { id: "a b" },
+      parameters: { id: "a b" }, allowAnyHost: true,
     });
     expect(url).toBe("https://pay.example.com/orders/a%20b/confirm");
   });

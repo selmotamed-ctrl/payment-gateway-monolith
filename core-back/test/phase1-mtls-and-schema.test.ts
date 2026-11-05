@@ -21,6 +21,7 @@ process.env.KMS_MASTER_KEY =
 const designModelNames = [
   "Merchant",
   "User",
+  "MfaChallenge",
   "Application",
   "Wallet",
   "AccessToken",

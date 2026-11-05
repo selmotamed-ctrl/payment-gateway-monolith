@@ -78,15 +78,15 @@ import {
 } from "../../lib/merchantOps";
 import { scanKybBytes } from "../../lib/kybScan";
 import { postgresPlaceholders } from "../../engine/db/rawRows";
+import { hashPassword, signSession, verifyPasswordOrDummy } from "../../lib/auth";
+import { issueMfaChallenge, verifyMfaChallenge } from "../../lib/auth/mfaChallenges";
 import {
-  generateMfaCode,
-  hashMfaCode,
-  hashPassword,
-  signMfaChallenge,
-  signSession,
-  verifyMfaChallengeToken,
-  verifyPassword,
-} from "../../lib/auth";
+  assertLoginAllowed,
+  assertMfaAllowed,
+  recordLoginFailure,
+  recordLoginSuccess,
+  recordMfaFailure,
+} from "../../lib/auth/throttle";
 import { buildAdminUserInfo } from "../../lib/auth/uiAuthorities";
 import { hasConfidentialAmlAccess } from "../../lib/auth/confidentialAccess";
 import { executeGlobalSearch } from "../../lib/globalSearch";
@@ -132,7 +132,13 @@ import { createComputeRegistry } from "../../engine/runtime/computeRegistry";
 import type { Tx } from "../../engine/db/ports";
 import { validateTransformUsage, type TransformPipe, type TransformUsage } from "../../engine/transforms/TransformPipeline";
 import { json, jsonOptional } from "./json";
-import { requireAuthentication, requireAuthorities, principalOf } from "../middleware/authDoubleCheck";
+import {
+  clientIp,
+  principalOf,
+  requireAuthentication,
+  requireAuthorities,
+  requireStaffPrincipal,
+} from "../middleware/authDoubleCheck";
 import { actorFromRequest, assertCheckerAuthority, assertCheckerIsNotMaker, SYSTEM_AUTOMATION_PRINCIPAL } from "../middleware/makerCheckerGuard";
 import { writeAudit } from "../../lib/audit/writeAudit";
 
@@ -571,6 +577,8 @@ router.post("/auth/login", async (request: Request, response: Response) => {
     request.body,
   );
   const identifier = body.identifier.includes("@") ? body.identifier.trim().toLowerCase() : body.identifier.trim();
+  const ip = clientIp(request);
+  assertLoginAllowed(identifier, ip);
   const user = await client.user.findFirst({
     where: {
       OR: [
@@ -580,55 +588,46 @@ router.post("/auth/login", async (request: Request, response: Response) => {
       ],
     },
   });
-  if (!user || !user.passwordHash) {
+  // Merchant principals never authenticate on the admin channel; they get the
+  // same answer as an unknown user.
+  const staffUser = user && user.merchantId === null && !String(user.role).startsWith("MERCHANT_") ? user : null;
+  const passwordOk = await verifyPasswordOrDummy(body.password, staffUser?.passwordHash);
+  if (!staffUser || !passwordOk) {
+    recordLoginFailure(identifier, ip);
     throw new ApiError(401, "INVALID_CREDENTIALS", "The supplied credentials are not valid");
   }
-  if (!await verifyPassword(body.password, user.passwordHash)) {
-    throw new ApiError(401, "INVALID_CREDENTIALS", "The supplied credentials are not valid");
-  }
-  if (user.status !== "ACTIVE") {
+  if (staffUser.status !== "ACTIVE") {
     throw new ApiError(403, "ACCOUNT_NOT_ACTIVE", "The account is not active");
   }
-  if (user.mfaRequired) {
-    const code = generateMfaCode();
-    const challengeId = signMfaChallenge({
-      userId: user.id,
-      code,
-      role: user.role,
-      merchantId: user.merchantId,
-    });
-    await client.notification.create({
-      data: {
-        eventId: randomBytes(16).toString("hex"),
-        recipientUserId: user.id,
-        templateCode: "LOGIN_MFA",
-        channel: "SMS",
-        lang: "EN",
-        payloadJson: json({ code }),
-        addressCiphertext: "",
-        status: "QUEUED",
-        addressMasked: (user.phone ?? "").slice(-4),
-      },
-    });
+  recordLoginSuccess(identifier);
+  if (staffUser.mfaRequired) {
+    const { challengeId } = await client.$transaction((tx) =>
+      issueMfaChallenge(tx as never, {
+        userId: staffUser.id,
+        channel: "ADMIN",
+        phoneLast4: (staffUser.phone ?? "").slice(-4),
+        ip,
+      }),
+    );
     response.json({ mfaRequired: true, challengeId });
     return;
   }
-  const authorities = Array.isArray(user.authoritiesMap)
-    ? user.authoritiesMap.map(String)
-    : Object.entries((user.authoritiesMap ?? {}) as Record<string, unknown>)
+  const authorities = Array.isArray(staffUser.authoritiesMap)
+    ? staffUser.authoritiesMap.map(String)
+    : Object.entries((staffUser.authoritiesMap ?? {}) as Record<string, unknown>)
       .filter(([, enabled]) => enabled === true)
       .map(([authority]) => authority);
   response.json({
     token: signSession({
-      sub: user.id,
-      role: user.role,
-      merchantId: user.merchantId,
+      sub: staffUser.id,
+      role: staffUser.role,
+      merchantId: staffUser.merchantId,
       authorities,
-      appScopeIds: Array.isArray(user.appScopeIds) ? user.appScopeIds.map(String) : [],
+      appScopeIds: Array.isArray(staffUser.appScopeIds) ? staffUser.appScopeIds.map(String) : [],
       mfa: false,
     }),
     expiresInSeconds: 12 * 60 * 60,
-    userInfo: buildAdminUserInfo(user, authorities),
+    userInfo: buildAdminUserInfo(staffUser, authorities),
   });
 });
 
@@ -637,17 +636,22 @@ router.post("/auth/mfa", async (request: Request, response: Response) => {
     z.object({ code: z.string().regex(/^\d{6}$/), challengeId: z.string().min(4).max(4096) }).strict(),
     request.body,
   );
-  let claims;
+  const ip = clientIp(request);
+  assertMfaAllowed(ip);
+  // Not wrapped in a transaction: a wrong guess must persist its attempt counter.
+  let verified;
   try {
-    claims = verifyMfaChallengeToken(body.challengeId);
-  } catch {
-    throw new ApiError(401, "MFA_CHALLENGE_INVALID", "The MFA challenge is invalid or expired");
+    verified = await verifyMfaChallenge(client as never, {
+      challengeId: body.challengeId,
+      code: body.code,
+      channel: "ADMIN",
+    });
+  } catch (error) {
+    recordMfaFailure(ip);
+    throw error;
   }
-  if (hashMfaCode(claims.sub, body.code) !== claims.codeHash) {
-    throw new ApiError(401, "MFA_CODE_INVALID", "The supplied MFA code is not valid");
-  }
-  const user = await client.user.findUnique({ where: { id: claims.sub } });
-  if (!user || user.status !== "ACTIVE") {
+  const user = await client.user.findUnique({ where: { id: verified.userId } });
+  if (!user || user.status !== "ACTIVE" || user.merchantId !== null || String(user.role).startsWith("MERCHANT_")) {
     throw new ApiError(403, "ACCOUNT_NOT_ACTIVE", "The account is not active");
   }
   const authorities = Array.isArray(user.authoritiesMap)
@@ -679,9 +683,31 @@ router.get("/auth/me", (_request: Request, response: Response) => {
 
 
 router.use(requireAuthentication);
+// Principal-type separation: merchant users and API tokens never reach an admin route,
+// even when their authority strings (for example merchant:read) overlap.
+router.use(requireStaffPrincipal);
 router.use("/system/backups", backupInternalRouter);
 
+/** Any staff read authority: the floor for the cross-cutting dashboard, lookup and search routes. */
+const STAFF_READ_AUTHORITIES = [
+  "merchant:read",
+  "finance:read",
+  "gateway:read",
+  "case:read",
+  "operator:read",
+  "kyb:read",
+  "compliance:read",
+  "aml:read",
+  "security:read",
+  "reconciliation:read",
+  "approval:read",
+  "cashout:read",
+  "dispute:read",
+  "attempt:read",
+] as const;
+
 router.post("/search", async (request: Request, response: Response) => {
+  requireAuthorities(request, STAFF_READ_AUTHORITIES);
   response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   const principal = principalOf(request);
   const result = await readThroughReplicaOrPrimary(
@@ -761,6 +787,7 @@ router.get("/stats/recent-activity/export", async (request: Request, response: R
 });
 
 router.get("/stats/overview", async (request: Request, response: Response) => {
+  requireAuthorities(request, STAFF_READ_AUTHORITIES);
   const now = new Date();
   const period = merchantPeriodLabel(request.query.period);
   const since = merchantStatsSince(period);
@@ -955,6 +982,7 @@ const OPTION_LIMIT = 100;
 
 router.get("/options/:kind", async (request: Request, response: Response) => {
   const kind = String(request.params.kind ?? "");
+  requireAuthorities(request, kind === "users" ? ["user:read", "security:read"] : STAFF_READ_AUTHORITIES);
   const rawSearch = typeof request.query.search === "string" ? request.query.search.trim() : "";
   const limit = Math.min(OPTION_LIMIT, Math.max(1, Number(request.query.limit ?? 50) || 50));
   const ownerId = typeof request.query.ownerId === "string" ? request.query.ownerId.trim() : "";
@@ -1281,6 +1309,31 @@ router.get("/users/:id", async (request: Request, response: Response) => {
   response.json({ user, approvalHistory, auditTrail });
 });
 
+const STAFF_ROLES = [
+  "GATEWAY_ADMIN",
+  "SECURITY_ADMIN",
+  "FINANCE",
+  "OPERATOR",
+  "COMPLIANCE",
+  "MLRO",
+  "SUPPORT",
+] as const;
+
+/**
+ * No self-escalation: a staff user can only hand out authorities they hold
+ * themselves. The wildcard can only be granted by a holder of the wildcard.
+ */
+const assertGrantableAuthorities = (principal: { authorities: readonly string[] }, requested: readonly string[]): void => {
+  const held = new Set(principal.authorities);
+  const holdsWildcard = held.has("*");
+  const excess = requested.filter((authority) => authority === "*" ? !holdsWildcard : !holdsWildcard && !held.has(authority));
+  if (excess.length > 0) {
+    throw new ApiError(403, "AUTHORITY_ESCALATION_FORBIDDEN", "You cannot grant authorities you do not hold", {
+      authorities: excess,
+    });
+  }
+};
+
 router.post("/users", async (request: Request, response: Response) => {
   requireAuthorities(request, ["user:write", "security:write"]);
   const body = parseOrThrow(
@@ -1289,16 +1342,8 @@ router.post("/users", async (request: Request, response: Response) => {
         email: z.string().email(),
         phone: z.string().min(6).max(20).optional(),
         password: z.string().min(10).max(128).optional(),
-        role: z.enum([
-          "GATEWAY_ADMIN",
-          "SECURITY_ADMIN",
-          "FINANCE",
-          "OPERATOR",
-          "COMPLIANCE",
-          "MLRO",
-          "SUPPORT",
-        ]),
-        authoritiesMap: z.array(z.string().min(2).max(64)).max(60).default([]),
+        role: z.enum(STAFF_ROLES),
+        authoritiesMap: z.array(z.string().min(1).max(64)).max(60).default([]),
         isMaker: z.boolean().default(false),
         isChecker: z.boolean().default(false),
         checklist: z.array(z.enum([
@@ -1311,20 +1356,45 @@ router.post("/users", async (request: Request, response: Response) => {
       .strict(),
     request.body,
   );
-  const user = await client.user.create({
-    data: {
-      email: body.email.trim().toLowerCase(),
-      phone: body.phone ?? null,
-      passwordHash: body.password ? await hashPassword(body.password) : null,
-      role: body.role,
-      authoritiesMap: body.authoritiesMap,
-      isMaker: body.isMaker,
-      isChecker: body.isChecker,
-      mfaRequired: true,
-      status: "INVITED",
-    },
-  });
+  const creator = principalOf(request);
+  assertGrantableAuthorities(creator, body.authoritiesMap);
   const actor = actorFromRequest(request);
+  // The maker/checker flags are never granted at creation: the user is created
+  // INVITED with both off and, when they were requested, a maker-checker
+  // approval carries the request.
+  const wantsFlags = body.isMaker || body.isChecker;
+  const { user, flagsApprovalId } = await client.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: {
+        email: body.email.trim().toLowerCase(),
+        phone: body.phone ?? null,
+        passwordHash: body.password ? await hashPassword(body.password) : null,
+        role: body.role,
+        authoritiesMap: body.authoritiesMap,
+        isMaker: false,
+        isChecker: false,
+        mfaRequired: true,
+        status: "INVITED",
+        invitedById: actor.userId,
+      },
+    });
+    let approvalId: string | null = null;
+    if (wantsFlags) {
+      const approval = await tx.approvalRequest.create({
+        data: {
+          subjectType: "USER",
+          subjectId: created.id,
+          payloadDiffJson: { isMaker: body.isMaker, isChecker: body.isChecker, checklist: body.checklist ?? [] },
+          mode: "STANDARD",
+          makerUserId: actor.userId,
+          state: "PENDING_REVIEW",
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      });
+      approvalId = approval.id;
+    }
+    return { user: created, flagsApprovalId: approvalId };
+  });
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -1336,8 +1406,43 @@ router.post("/users", async (request: Request, response: Response) => {
       afterJson: { email: user.email, role: user.role, checklist: body.checklist ?? [] },
     },
   });
-  response.status(201).json({ id: user.id, email: user.email, role: user.role, status: user.status });
+  response.status(201).json({
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    ...(flagsApprovalId ? { approvalRequestId: flagsApprovalId, approvalStatus: "PENDING_REVIEW" } : {}),
+  });
 });
+
+/**
+ * Authority, role, maker/checker flag and activation changes of a staff user are
+ * maker-checker requests; only restrictive changes (suspend, disable, back to
+ * invited) are applied directly. Nobody changes their own record.
+ */
+const requiresUserApproval = (body: {
+  authoritiesMap?: unknown;
+  role?: unknown;
+  isMaker?: unknown;
+  isChecker?: unknown;
+  status?: unknown;
+}): boolean =>
+  body.authoritiesMap !== undefined
+  || body.role !== undefined
+  || body.isMaker !== undefined
+  || body.isChecker !== undefined
+  || body.status === "ACTIVE";
+
+const loadManagedStaffUser = async (request: Request, id: string) => {
+  const user = await client.user.findUnique({ where: { id } });
+  if (!user || user.merchantId !== null || String(user.role).startsWith("MERCHANT_")) {
+    throw new ApiError(404, "USER_NOT_FOUND", "The user does not exist");
+  }
+  if (user.id === principalOf(request).userId) {
+    throw new ApiError(403, "SELF_MODIFICATION_FORBIDDEN", "You cannot change your own account");
+  }
+  return user;
+};
 
 router.patch("/users", async (request: Request, response: Response) => {
   requireAuthorities(request, ["user:write", "security:write"]);
@@ -1345,8 +1450,8 @@ router.patch("/users", async (request: Request, response: Response) => {
     z
       .object({
         id: z.string().min(1).max(64),
-        authoritiesMap: z.array(z.string().min(2).max(64)).max(60).optional(),
-        role: z.string().max(40).optional(),
+        authoritiesMap: z.array(z.string().min(1).max(64)).max(60).optional(),
+        role: z.enum(STAFF_ROLES).optional(),
         status: z.enum(["INVITED", "ACTIVE", "SUSPENDED", "DISABLED"]).optional(),
         isMaker: z.boolean().optional(),
         isChecker: z.boolean().optional(),
@@ -1360,12 +1465,12 @@ router.patch("/users", async (request: Request, response: Response) => {
       .strict(),
     request.body,
   );
-  const user = await client.user.findUnique({ where: { id: body.id } });
-  if (!user) {
-    throw new ApiError(404, "USER_NOT_FOUND", "The user does not exist");
-  }
+  const user = await loadManagedStaffUser(request, body.id);
   const actor = actorFromRequest(request);
-  if (body.authoritiesMap || body.role) {
+  if (body.authoritiesMap) {
+    assertGrantableAuthorities(principalOf(request), body.authoritiesMap);
+  }
+  if (requiresUserApproval(body)) {
     const approval = await client.approvalRequest.create({
       data: {
         subjectType: "USER",
@@ -1412,8 +1517,8 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
   const body = parseOrThrow(
     z
       .object({
-        authoritiesMap: z.array(z.string().min(2).max(64)).max(60).optional(),
-        role: z.string().max(40).optional(),
+        authoritiesMap: z.array(z.string().min(1).max(64)).max(60).optional(),
+        role: z.enum(STAFF_ROLES).optional(),
         status: z.enum(["INVITED", "ACTIVE", "SUSPENDED", "DISABLED"]).optional(),
         checklist: z.array(z.enum([
           "SELECTION_REVIEWED",
@@ -1425,11 +1530,11 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
       .strict(),
     request.body,
   );
-  const user = await client.user.findUnique({ where: { id } });
-  if (!user) {
-    throw new ApiError(404, "USER_NOT_FOUND", "The user does not exist");
+  const user = await loadManagedStaffUser(request, id);
+  if (body.authoritiesMap) {
+    assertGrantableAuthorities(principalOf(request), body.authoritiesMap);
   }
-  if (body.authoritiesMap || body.role) {
+  if (requiresUserApproval(body)) {
     const actor = actorFromRequest(request);
     const approval = await client.approvalRequest.create({
       data: {
@@ -1438,6 +1543,7 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
         payloadDiffJson: {
           ...(body.authoritiesMap ? { authoritiesMap: body.authoritiesMap } : {}),
           ...(body.role ? { role: body.role } : {}),
+          ...(body.status === "ACTIVE" ? { status: "ACTIVE" } : {}),
           checklist: body.checklist ?? [],
         },
         mode: "STANDARD",
@@ -6018,6 +6124,25 @@ router.get("/approvals/:id", async (request: Request, response: Response) => {
   });
 });
 
+/**
+ * Claims a pending approval inside the decision transaction with a conditional update
+ * (UPDATE ... WHERE id = ? AND state IN ('PENDING_REVIEW','DRAFT')): two concurrent
+ * decisions cannot both pass the pending check done before the transaction started.
+ */
+const claimPendingApproval = async (
+  tx: { approvalRequest: { updateMany: (args: never) => Promise<{ count: number }> } },
+  approvalId: string,
+  checkerUserId: string,
+): Promise<void> => {
+  const claimed = await tx.approvalRequest.updateMany({
+    where: { id: approvalId, state: { in: ["PENDING_REVIEW", "DRAFT"] } },
+    data: { checkerUserId },
+  } as never);
+  if (claimed.count !== 1) {
+    throw new ApiError(409, "APPROVAL_NOT_PENDING", "The approval request is not pending review");
+  }
+};
+
 router.post("/approvals/:id/approve", async (request: Request, response: Response) => {
   requireAuthorities(request, ["approval:check", "approval:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
@@ -6089,6 +6214,7 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
       updatedBy: actor.userId ?? undefined,
     });
     const executed = await client.$transaction(async (tx) => {
+      await claimPendingApproval(tx as never, id, actor.userId);
       const row = await tx.approvalRequest.update({
         where: { id },
         data: {
@@ -6131,6 +6257,7 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
     // never invents a checker, it executes with the one that is recorded on
     // the approval request.
     const { updated, job } = await client.$transaction(async (tx) => {
+      await claimPendingApproval(tx as never, id, actor.userId);
       const updatedApproval = await tx.approvalRequest.update({
         where: { id },
         data: {
@@ -6165,6 +6292,7 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
   // The approved change is executed, not just recorded: the ledger posting,
   // the state change of the subject and the audit trail share one transaction.
   const { updated, execution } = await client.$transaction(async (tx) => {
+    await claimPendingApproval(tx as never, id, actor.userId);
     const result = await executeApprovalSubject(governanceContext(platform), tx as never, {
       approval: {
         id: approval.id,
@@ -6281,7 +6409,11 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
       "The principal's role cannot check this merchant change",
     );
   }
+  if (approval.state !== "PENDING_REVIEW" && approval.state !== "DRAFT") {
+    throw new ApiError(409, "APPROVAL_NOT_PENDING", "The approval request is not pending review");
+  }
   const updated = await client.$transaction(async (tx) => {
+    await claimPendingApproval(tx as never, id, actor.userId);
     const row = await tx.approvalRequest.update({
       where: { id },
       data: { checkerUserId: actor.userId, state: "REJECTED", rejectionReason: body.reason },
@@ -14224,7 +14356,10 @@ router.get("/cashouts/:id", async (request: Request, response: Response) => {
 });
 
 router.post("/cashouts/:id/process", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["cashout:review", "finance:write"]);
+  // The checker authority of a cash-out is cashout:review (finance:write alone no longer
+  // processes money). The maker is the merchant user who requested it: a different principal
+  // type that can never reach this staff route.
+  requireAuthorities(request, ["cashout:review"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
     z.object({

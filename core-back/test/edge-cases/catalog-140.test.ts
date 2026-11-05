@@ -2552,7 +2552,8 @@ const checks: Record<string, Check> = {
 
   async cashout_destination_snapshot() {
     const source = readSource("api/internal/merchant.ts");
-    expect(source).toContain("destinationBankJson: json(body.destinationBank)");
+    // The typed destination (plus the payout-verified flag) is what gets snapshotted on the request.
+    expect(source).toContain("destinationBankJson: json(destination)");
     const sql = readMigrationSql();
     expect(sql).toContain('"destination_bank_json"');
   },

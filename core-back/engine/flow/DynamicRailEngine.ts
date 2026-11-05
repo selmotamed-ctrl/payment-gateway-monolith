@@ -292,11 +292,28 @@ function successStatus(value: unknown): boolean {
   return ["SUCCESS", "SUCCEEDED", "PAID", "CAPTURED", "CONFIRMED", "APPROVED"].includes(value.toUpperCase());
 }
 
+/**
+ * Payer-supplied confirm input is NEVER a source of trusted success facts.
+ * Only these customer inputs may flow into the SUBMIT stack; everything else
+ * the payer sends is dropped. Success is derived solely from the gateway/step
+ * response, a verified callback, or an inquiry.
+ */
+const CONFIRM_CUSTOMER_INPUT_ALLOWLIST: readonly string[] = ["otp"];
+
+function allowListedCustomerInput(input: AdapterEvidence | undefined): AdapterFormData {
+  const result: Record<string, unknown> = {};
+  if (input && typeof input === "object") {
+    for (const key of CONFIRM_CUSTOMER_INPUT_ALLOWLIST) {
+      if (Object.prototype.hasOwnProperty.call(input, key) && input[key] !== undefined) {
+        result[key] = input[key];
+      }
+    }
+  }
+  return result;
+}
+
 function nestedEvidence(evidence: AdapterEvidence): Record<string, unknown> {
-  const nested = evidence.trustedFacts;
-  return nested && typeof nested === "object" && !Array.isArray(nested)
-    ? nested as Record<string, unknown>
-    : evidence;
+  return evidence;
 }
 
 interface PhaseExecution {
@@ -305,6 +322,8 @@ interface PhaseExecution {
   canonicalError?: string;
   response?: unknown;
   rawText?: string;
+  /** Number of steps the phase stack contained (0 = the phase had no steps). */
+  stepCount?: number;
   outputs: {
     state: Record<string, unknown>;
     public: Record<string, unknown>;
@@ -432,7 +451,7 @@ export class DynamicRailEngine {
       }
       await this.transition(current, "AUTHORIZING", { pointOfNoReturn: true });
     }
-    const execution = await this.executePhase("SUBMIT", current, evidence);
+    const execution = await this.executePhase("SUBMIT", current, allowListedCustomerInput(evidence));
     await this.persistOutputs(current, execution);
     if (execution.status === "UNKNOWN") {
       await this.transition(current, "UNKNOWN");
@@ -450,10 +469,17 @@ export class DynamicRailEngine {
       await this.transition(current, "VERIFYING");
       return this.toResult(current, execution);
     }
-    const combinedEvidence = {
-      ...evidence,
-      ...(execution.response && typeof execution.response === "object" ? execution.response as Record<string, unknown> : {}),
-    };
+    if (execution.stepCount === 0) {
+      // A rail without a SUBMIT stack (redirect / webhook / inquiry-confirmed)
+      // cannot be confirmed by the payer: the outcome is established by a
+      // verified callback or an inquiry, never by the confirm call itself.
+      return this.inquire(current);
+    }
+    // Success facts come ONLY from the gateway/step response. The payer's
+    // confirm input is deliberately excluded.
+    const combinedEvidence: AdapterEvidence = execution.response && typeof execution.response === "object"
+      ? { ...(execution.response as Record<string, unknown>) }
+      : {};
     const trusted = this.verifyTrustedSuccessFacts(combinedEvidence, current);
     if (!trusted.trusted) {
       await this.transition(current, "UNKNOWN", { canonicalError: "TRUSTED_SUCCESS_FACTS_FAILED" });
@@ -878,6 +904,7 @@ export class DynamicRailEngine {
     const status = this.phaseStatus(phase, steps.length > 0);
     return {
       status,
+      stepCount: steps.length,
       response,
       rawText,
       outputs: {
@@ -1205,7 +1232,10 @@ export class DynamicRailEngine {
 
   private refundSplit(attempt: DynamicAttempt, amount: Decimal): { commission: Decimal; merchant: Decimal } {
     const total = decimal(attempt.totalChargedAmount);
-    const commission = total.isZero() ? new Decimal(0) : this.commissionForAttempt(attempt).mul(amount).div(total);
+    // Rounded once to the money scale; the merchant share is the exact remainder.
+    const commission = total.isZero()
+      ? new Decimal(0)
+      : this.commissionForAttempt(attempt).mul(amount).div(total).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
     return { commission, merchant: amount.minus(commission) };
   }
 

@@ -1658,7 +1658,7 @@ const blueprint4: BlueprintCatalogEntry = {
           pathToken: "mypay-webhook",
           verifyMethod: "HMAC_BODY",
           signatureHeader: "X-MYPAY-SIGNATURE",
-          timestampToleranceSec: 300,
+          timestampToleranceSec: 0, // no signed timestamp field: replay window opted out explicitly (0), see callbackVerifier
           ipAllowlist: [],
           bodyFormat: "JSON",
           correlationSelector: "custom_ref",
@@ -2152,7 +2152,7 @@ const hybridGateway = (input: {
       pathToken: `${input.code}-webhook`,
       verifyMethod: "HMAC_BODY",
       signatureHeader: "X-Signature",
-      timestampToleranceSec: 300,
+      timestampToleranceSec: 0, // generic signed channel without a timestamp field: explicit opt-out (0)
       ipAllowlist: ["192.0.2.0/24"],
       bodyFormat: "JSON",
       correlationSelector: "reference",
@@ -2586,7 +2586,7 @@ const blueprint6: BlueprintCatalogEntry = {
           pathToken: "mpgs-webhook",
           verifyMethod: "HMAC_BODY",
           signatureHeader: "X-Notification-Secret",
-          timestampToleranceSec: 300,
+          timestampToleranceSec: 0, // no signed timestamp field: explicit opt-out (0); mustInquire is true
           ipAllowlist: ["192.0.2.0/24"],
           bodyFormat: "JSON",
           correlationSelector: "order.id",

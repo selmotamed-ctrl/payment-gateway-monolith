@@ -6,7 +6,6 @@ import { env } from "../env";
 const SESSION_ISSUER = "payment-gateway-core";
 const SESSION_AUDIENCE = "payment-gateway-edge";
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
-const MFA_CHALLENGE_TTL_SECONDS = 10 * 60;
 
 const deriveKey = (purpose: string): Buffer =>
   Buffer.from(
@@ -32,14 +31,6 @@ export interface SessionClaims {
   mfa: boolean;
 }
 
-export interface MfaChallengeClaims {
-  sub: string;
-  typ: "mfa";
-  codeHash: string;
-  role: string;
-  merchantId: string | null;
-}
-
 export const hashPassword = async (plaintext: string): Promise<string> => hash(plaintext, 12);
 
 export const verifyPassword = async (plaintext: string, passwordHash: string): Promise<boolean> => {
@@ -48,6 +39,25 @@ export const verifyPassword = async (plaintext: string, passwordHash: string): P
   } catch {
     return false;
   }
+};
+
+let dummyPasswordHash: Promise<string> | undefined;
+
+/**
+ * Verifies a password in constant time with respect to account existence: an
+ * unknown user (or one without a password) is compared against a throwaway
+ * bcrypt hash so the response time does not reveal whether the account exists.
+ */
+export const verifyPasswordOrDummy = async (
+  plaintext: string,
+  passwordHash: string | null | undefined,
+): Promise<boolean> => {
+  if (!passwordHash) {
+    dummyPasswordHash ??= hash(randomBytes(16).toString("hex"), 12);
+    await compare(plaintext, await dummyPasswordHash);
+    return false;
+  }
+  return verifyPassword(plaintext, passwordHash);
 };
 
 export const hashAccessToken = (token: string): string =>
@@ -75,29 +85,6 @@ export const signSession = (claims: Omit<SessionClaims, "typ">): string =>
     } satisfies SignOptions,
   );
 
-export const signMfaChallenge = (input: {
-  userId: string;
-  code: string;
-  role: string;
-  merchantId: string | null;
-}): string =>
-  sign(
-    {
-      sub: input.userId,
-      typ: "mfa",
-      codeHash: hashMfaCode(input.userId, input.code),
-      role: input.role,
-      merchantId: input.merchantId,
-    },
-    mfaKey,
-    {
-      algorithm: "HS256",
-      issuer: SESSION_ISSUER,
-      audience: SESSION_AUDIENCE,
-      expiresIn: MFA_CHALLENGE_TTL_SECONDS,
-    } satisfies SignOptions,
-  );
-
 export const verifySessionToken = (token: string): SessionClaims => {
   const payload = verify(token, sessionKey, {
     algorithms: ["HS256"],
@@ -115,24 +102,6 @@ export const verifySessionToken = (token: string): SessionClaims => {
     authorities: Array.isArray(payload.authorities) ? payload.authorities.map(String) : [],
     appScopeIds: Array.isArray(payload.appScopeIds) ? payload.appScopeIds.map(String) : [],
     mfa: payload.mfa === true,
-  };
-};
-
-export const verifyMfaChallengeToken = (token: string): MfaChallengeClaims => {
-  const payload = verify(token, mfaKey, {
-    algorithms: ["HS256"],
-    issuer: SESSION_ISSUER,
-    audience: SESSION_AUDIENCE,
-  }) as JwtPayload;
-  if (payload.typ !== "mfa" || typeof payload.sub !== "string" || typeof payload.codeHash !== "string") {
-    throw new Error("MFA challenge payload is invalid");
-  }
-  return {
-    sub: payload.sub,
-    typ: "mfa",
-    codeHash: payload.codeHash,
-    role: typeof payload.role === "string" ? payload.role : "SUPPORT",
-    merchantId: typeof payload.merchantId === "string" ? payload.merchantId : null,
   };
 };
 

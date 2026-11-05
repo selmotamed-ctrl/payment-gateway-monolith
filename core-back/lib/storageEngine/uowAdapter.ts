@@ -62,7 +62,7 @@ export class PostgresUnitOfWorkAdapter implements UnitOfWorkPort {
               ).values(),
             ).sort((left, right) =>
               left.glAccountId !== right.glAccountId
-                ? left.glAccountId.localeCompare(right.glAccountId)
+                ? (left.glAccountId < right.glAccountId ? -1 : 1) // byte order, as in SQL ORDER BY on uuid
                 : left.shardId - right.shardId,
             );
 

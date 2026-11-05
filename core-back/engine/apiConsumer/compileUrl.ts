@@ -20,6 +20,41 @@ export interface CompileUrlOptions {
   destination?: UrlDestination;
   parameters?: Record<string, unknown>;
   allowFragment?: boolean;
+  /**
+   * Explicit opt-out of the host allowlist. Without it an EMPTY allowlist
+   * fails closed (an empty list must never mean "any host" - SSRF).
+   */
+  allowAnyHost?: boolean;
+  /**
+   * Permit a private / loopback host literal. Only the scoped Fake Rails
+   * relaxation (an explicitly allowlisted host) may set this.
+   */
+  allowPrivateHosts?: boolean;
+}
+
+function isPrivateHostLiteral(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
+    return true;
+  }
+  const mapped = host.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  const v4 = mapped ? mapped[1]! : host;
+  const octets = v4.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (octets) {
+    const [a, b] = [Number(octets[1]), Number(octets[2])];
+    return a === 0 || a === 10 || a === 127
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168)
+      || (a === 192 && b === 0)
+      || (a === 198 && (b === 18 || b === 19))
+      || a >= 224;
+  }
+  if (host.includes(":")) {
+    return host === "::" || host === "::1" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host);
+  }
+  return false;
 }
 
 function urlError(code: string, message: string, statusCode = 400): ApiError {
@@ -101,7 +136,7 @@ function assertPathIntegrity(value: string): void {
 
 export function validateFinalUrl(
   value: string,
-  options: Pick<CompileUrlOptions, "allowedHosts" | "requireHttps" | "allowFragment"> = {},
+  options: Pick<CompileUrlOptions, "allowedHosts" | "requireHttps" | "allowFragment" | "allowAnyHost" | "allowPrivateHosts"> = {},
 ): URL {
   assertNoControlCharacters(value, "URL");
   assertPathIntegrity(value);
@@ -125,6 +160,12 @@ export function validateFinalUrl(
     throw urlError("URL_FRAGMENT_BLOCKED", "URL fragments are forbidden");
   }
   const allowedHosts = (options.allowedHosts ?? []).map(normalizeAllowedHost).filter(Boolean);
+  if (allowedHosts.length === 0 && !options.allowAnyHost) {
+    throw urlError("HOST_ALLOWLIST_EMPTY", "No outbound host allowlist is configured; refusing the request");
+  }
+  if (!options.allowPrivateHosts && isPrivateHostLiteral(parsed.hostname)) {
+    throw urlError("PRIVATE_HOST_BLOCKED", "Private, loopback and link-local hosts are not allowed");
+  }
   if (allowedHosts.length > 0) {
     const hostname = normalizeAllowedHost(parsed.hostname);
     const host = normalizeAllowedHost(parsed.host);

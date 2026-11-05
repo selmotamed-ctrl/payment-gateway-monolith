@@ -17,8 +17,8 @@ describe("create-admin bootstrap", () => {
 
   test("parses flags and environment variables", () => {
     const fromFlags = parseCreateAdminArgs(
-      ["--email", "Admin@Example.com", "--password", "Str0ngPassword!", "--role", "finance", "--mfa"],
-      {},
+      ["--email", "Admin@Example.com", "--role", "finance", "--mfa"],
+      { ADMIN_PASSWORD: "Str0ngPassword!" },
     );
     expect(fromFlags.ok).toBe(true);
     if (!fromFlags.ok) return;
@@ -34,20 +34,28 @@ describe("create-admin bootstrap", () => {
     expect(fromEnv.ok).toBe(true);
     if (!fromEnv.ok) return;
     expect(fromEnv.args.role).toBe("GATEWAY_ADMIN");
-    expect(fromEnv.args.mfaRequired).toBe(false);
+    expect(fromEnv.args.mfaRequired).toBe(true); // MFA is on by default
     expect(fromEnv.args.roleProvided).toBe(false);
   });
 
   test("rejects an invalid email, role, missing password and unknown flag", () => {
-    expect(parseCreateAdminArgs(["--email", "nope", "--password", "Str0ngPassword!"], {}).ok).toBe(false);
-    expect(parseCreateAdminArgs(["--email", "a@b.co", "--password", "Str0ngPassword!", "--role", "WIZARD"], {}).ok).toBe(false);
+    const env = { ADMIN_PASSWORD: "Str0ngPassword!" };
+    expect(parseCreateAdminArgs(["--email", "nope"], env).ok).toBe(false);
+    expect(parseCreateAdminArgs(["--email", "a@b.co", "--role", "WIZARD"], env).ok).toBe(false);
     expect(parseCreateAdminArgs(["--email", "a@b.co"], {}).ok).toBe(false);
-    expect(parseCreateAdminArgs(["--email", "a@b.co", "--password", "Str0ngPassword!", "--wat"], {}).ok).toBe(false);
-    expect(parseCreateAdminArgs(["--email", "a@b.co", "--password", "weak"], {}).ok).toBe(false);
+    expect(parseCreateAdminArgs(["--email", "a@b.co", "--wat"], env).ok).toBe(false);
+    expect(parseCreateAdminArgs(["--email", "a@b.co"], { ADMIN_PASSWORD: "weak" }).ok).toBe(false);
+  });
+
+  test("refuses a password on the command line and keeps MFA switchable only explicitly", () => {
+    const argvPassword = parseCreateAdminArgs(["--email", "a@b.co", "--password", "Str0ngPassword!"], {});
+    expect(argvPassword.ok).toBe(false);
+    const off = parseCreateAdminArgs(["--email", "a@b.co", "--no-mfa"], { ADMIN_PASSWORD: "Str0ngPassword!" });
+    expect(off.ok && off.args.mfaRequired).toBe(false);
   });
 
   test("builds an ACTIVE user with the role authorities and four-eyes flags", () => {
-    const parsed = parseCreateAdminArgs(["--email", "a@b.co", "--password", "Str0ngPassword!"], {});
+    const parsed = parseCreateAdminArgs(["--email", "a@b.co"], { ADMIN_PASSWORD: "Str0ngPassword!" });
     if (!parsed.ok) throw new Error("expected valid args");
     const data = buildAdminUserData(parsed.args, "$2b$12$hash");
     expect(data.status).toBe("ACTIVE");

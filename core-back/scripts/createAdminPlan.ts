@@ -66,7 +66,8 @@ export const parseCreateAdminArgs = (
   let email = env.ADMIN_EMAIL?.trim() ?? "";
   let password = env.ADMIN_PASSWORD ?? "";
   let role: string = env.ADMIN_ROLE?.trim().toUpperCase() ?? "GATEWAY_ADMIN";
-  let mfaRequired = (env.ADMIN_MFA ?? "").toLowerCase() === "true";
+  // MFA is ON unless it is switched off explicitly (--no-mfa or ADMIN_MFA=false).
+  let mfaRequired = (env.ADMIN_MFA ?? "true").toLowerCase() !== "false";
   let roleProvided = Boolean(env.ADMIN_ROLE);
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -83,7 +84,8 @@ export const parseCreateAdminArgs = (
       if (flag === "--email") {
         email = next().trim();
       } else if (flag === "--password") {
-        password = next();
+        // A password on the command line leaks through the process list and the shell history.
+        return { ok: false, error: "--password is not accepted: pass the password in the ADMIN_PASSWORD environment variable" };
       } else if (flag === "--role") {
         role = next().trim().toUpperCase();
         roleProvided = true;
@@ -103,7 +105,7 @@ export const parseCreateAdminArgs = (
 
   if (!email) return { ok: false, error: "an email is required (--email or ADMIN_EMAIL)" };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: `'${email}' is not a valid email address` };
-  if (!password) return { ok: false, error: "a password is required (--password or ADMIN_PASSWORD)" };
+  if (!password) return { ok: false, error: "a password is required (ADMIN_PASSWORD environment variable)" };
   const passwordProblem = validatePassword(password);
   if (passwordProblem) return { ok: false, error: passwordProblem };
   if (!(ADMIN_ROLES as readonly string[]).includes(role)) {
@@ -138,12 +140,13 @@ export const buildAdminUserData = (args: CreateAdminArgs, passwordHash: string):
   status: "ACTIVE",
 });
 
-export const USAGE = `Usage: bun run create-admin --email <email> --password <password> [--role <ROLE>] [--mfa]
+export const USAGE = `Usage: ADMIN_PASSWORD=<password> bun run create-admin --email <email> [--role <ROLE>] [--no-mfa]
 
 Creates or re-provisions an administrator. The account is set to ACTIVE and its
-password is set to the supplied value. MFA is OFF unless --mfa is passed.
+password is set to the value of ADMIN_PASSWORD (never a command line argument).
+MFA is ON unless --no-mfa (or ADMIN_MFA=false) is passed.
 
-Environment equivalents: ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_ROLE, ADMIN_MFA=true.
+Environment equivalents: ADMIN_EMAIL, ADMIN_ROLE, ADMIN_MFA=false.
 
 Roles: ${ADMIN_ROLES.join(", ")}
 Password: ${PASSWORD_POLICY}.`;

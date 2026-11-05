@@ -375,7 +375,12 @@ export class AttemptGuardPipeline {
       const cardAlias = customer.cardAlias ?? null;
 
       if (request.idempotencyKey) {
-        const existing = await this.repositories.payments.findAttemptByIdempotencyKey(tx, request.idempotencyKey);
+        // The key is scoped to the link: the same key on another link is a
+        // different payment, never a replay.
+        const keyLink = await this.repositories.payments.findLinkByKey(tx, request.linkKey);
+        const existing = keyLink
+          ? await this.repositories.payments.findAttemptByIdempotencyKey(tx, request.idempotencyKey, keyLink.id)
+          : null;
         if (existing) {
           const settlementTarget = request.pinnedRoute?.settlementTarget
             ?? await this.repositories.payments.resolveSettlementTarget(tx, {
@@ -862,9 +867,20 @@ export class AttemptGuardPipeline {
       };
     };
 
-    return transaction
-      ? run(transaction)
-      : (this.db.$transaction(run) as Promise<GuardDecision>);
+    if (transaction) {
+      return run(transaction);
+    }
+    try {
+      return await (this.db.$transaction(run) as Promise<GuardDecision>);
+    } catch (error) {
+      // A concurrent request with the same (link, idempotency key) won the
+      // unique constraint: this one is a replay, so run once more in a fresh
+      // transaction, where the lookup now finds the winner.
+      if (request.idempotencyKey && (error as { code?: string })?.code === "P2002") {
+        return this.db.$transaction(run) as Promise<GuardDecision>;
+      }
+      throw error;
+    }
   }
 
   private async resolveMerchant(

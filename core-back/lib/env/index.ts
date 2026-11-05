@@ -173,6 +173,12 @@ export const envSchema = z.strictObject({
   IS_TEST_SERVER: booleanFromEnvironment.default(false),
   FAKE_RAILS_PUBLIC_BASE_URL: z.url().optional(),
   ALLOW_FAKE_RAILS_HOSTS: booleanFromEnvironment.default(false),
+  /**
+   * Explicit opt-out of the outbound host allowlist. By default a gateway
+   * environment with an EMPTY `allowed_hosts` fails closed (SSRF). Set this
+   * only for local/test stacks; never in production.
+   */
+  ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST: booleanFromEnvironment.default(false),
   FAKE_RAILS_ALLOWED_HOSTS: z.string().default(""),
   FAKE_RAILS_SEEDER_TOKEN: z.string().min(16).optional(),
   FAKE_RAILS_ALLOWED_CIDRS: z.string().default(""),
@@ -275,6 +281,7 @@ const resolveEnvironment = (): CoreEnv => {
     IS_TEST_SERVER: false,
     FAKE_RAILS_PUBLIC_BASE_URL: undefined,
     ALLOW_FAKE_RAILS_HOSTS: false,
+    ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST: false,
     FAKE_RAILS_ALLOWED_HOSTS: "",
     FAKE_RAILS_SEEDER_TOKEN: undefined,
     FAKE_RAILS_ALLOWED_CIDRS: "",

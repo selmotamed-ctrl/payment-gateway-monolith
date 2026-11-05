@@ -164,6 +164,19 @@ const ROLE_ALIASES: Record<string, string[]> = {
   MLRO: ["AML:READ", "AML:WRITE"],
 };
 
+/**
+ * The edge now refuses anything that is not shaped like a core session (HS256 header, 43 character
+ * signature, exp claim). It cannot verify the signature, so a well-formed placeholder is enough.
+ */
+const wellFormedToken = (payload: Record<string, unknown>): string => {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" }), "utf8").toString("base64url");
+  const body = Buffer.from(
+    JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600, ...payload }),
+    "utf8",
+  ).toString("base64url");
+  return `${header}.${body}.${"A".repeat(43)}`;
+};
+
 const tokenFor = (role: string, authorities: readonly string[]): string => {
   const payload = {
     sub: `user-${role}`,
@@ -173,7 +186,7 @@ const tokenFor = (role: string, authorities: readonly string[]): string => {
     role,
     authorities,
   };
-  return `header.${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}.signature`;
+  return wellFormedToken(payload);
 };
 
 const requestWith = (authorization?: string): Request =>
@@ -251,7 +264,7 @@ describe("Suite 05 · authority hint extraction", () => {
         "gateway:read": ["read"],
       },
     };
-    const token = `x.${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}.y`;
+    const token = wellFormedToken(payload);
     const hints = extractAuthorityHints(`Bearer ${token}`);
     expect(hints?.roles).toEqual(["OPERATOR", "SUPPORT"]);
     expect(hints?.authorities).toContain("merchant:read");
