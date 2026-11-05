@@ -25,7 +25,17 @@ import type {
 } from "@/components/renderers/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
-import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { extractApiError } from "@/utils/errors/extractor";
+import { errorKeyForCode } from "@/utils/security/errorMessages";
+import {
+    clearAttemptId,
+    clearIdempotencyKey,
+    generateIdempotencyKey,
+    getOrCreateIdempotencyKey,
+    loadAttemptId,
+    saveAttemptId,
+} from "@/utils/security/idempotency";
+import { isTerminalStatus, startStatusPolling } from "@/utils/security/statusPolling";
 import { buildRailFormSchema, normalizeFormValues } from "@/utils/zReady";
 import { adaptedLocale } from "@/plugins/localization";
 
@@ -40,8 +50,6 @@ import {
 } from "@/components/ui";
 type Phase = "SUMMARY" | "FORM" | "ACTION" | "CONFIRMING" | "RECEIPT" | "ERROR";
 
-const newIdempotencyKey = () =>
-    `chk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
 const PayPage = dc(() => {
     const { t } = useLocale();
@@ -69,8 +77,45 @@ const PayPage = dc(() => {
     let expiresAt: number | null = null;
     const remainingSeconds = ref<number | null>(null);
 
+    let poller: { stop: () => void } | null = null;
+    // One confirm key per distinct OTP intent; reused on retry of the same OTP.
+    let confirmIntent: { otp: string; key: string } | null = null;
+
+    // Never show raw server text: map the error code to a translated message.
+    const safeError = (e: unknown): string => {
+        const extracted = extractApiError(e);
+        return t(errorKeyForCode(extracted?.code, extracted?.status));
+    };
+
     const linkKey = computed(() => String(route.params.linkKey ?? ""));
     const currentLocale = computed<"ar" | "en">(() => (adaptedLocale.current.value === "ar" ? "ar" : "en"));
+
+    const resumeAttempt = async () => {
+        const savedId = loadAttemptId(linkKey.value);
+        if (!savedId) {
+            return;
+        }
+        try {
+            const response = await api.get(urlsMap.payLogs(linkKey.value, savedId));
+            const snapshot = (response.data?.data ?? response.data) as AttemptSnapshot;
+            if (!snapshot?.attemptId) {
+                clearAttemptId(linkKey.value);
+                return;
+            }
+            reference.value = snapshot.reference ?? null;
+            phase.value = "ACTION";
+            applySnapshot(snapshot);
+            if (!isTerminalStatus(snapshot.status)) {
+                openStream(snapshot.attemptId);
+                const ca = snapshot.clientAction;
+                if (ca && "expires_at" in ca) {
+                    startCountdown(ca.expires_at);
+                }
+            }
+        } catch {
+            clearAttemptId(linkKey.value);
+        }
+    };
 
     const loadSummary = async () => {
         loading.value = true;
@@ -84,8 +129,9 @@ const PayPage = dc(() => {
                 selectedRail.value = rails[0]!;
             }
             phase.value = "FORM";
+            await resumeAttempt();
         } catch (e) {
-            loadError.value = extractApiErrorMessage(e);
+            loadError.value = safeError(e);
             phase.value = "ERROR";
         } finally {
             loading.value = false;
@@ -158,8 +204,9 @@ const PayPage = dc(() => {
     };
 
     const openStream = (attemptId: string) => {
-        stream?.close();
+        closeStream();
         if (typeof EventSource === "undefined") {
+            startPolling(attemptId);
             return;
         }
         stream = new EventSource(urlsMap.payStatusStream(linkKey.value, attemptId));
@@ -173,9 +220,24 @@ const PayPage = dc(() => {
             }
         };
         stream.onerror = () => {
+            // Stream failed or closed: fall back to polling the logs endpoint (backoff, stops on terminal state).
             stream?.close();
             stream = null;
+            if (!isTerminalStatus(attemptStatus.value)) {
+                startPolling(attemptId);
+            }
         };
+    };
+
+    const startPolling = (attemptId: string) => {
+        poller?.stop();
+        poller = startStatusPolling<AttemptSnapshot>({
+            fetchSnapshot: async () => {
+                const response = await api.get(urlsMap.payLogs(linkKey.value, attemptId));
+                return (response.data?.data ?? response.data) as AttemptSnapshot;
+            },
+            onSnapshot: (snapshot) => applySnapshot(snapshot),
+        });
     };
 
     const applySnapshot = (snapshot: AttemptSnapshot) => {
@@ -186,6 +248,10 @@ const PayPage = dc(() => {
         }
         if (snapshot.reference) {
             reference.value = snapshot.reference;
+        }
+        if (isTerminalStatus(snapshot.status)) {
+            clearAttemptId(linkKey.value);
+            clearIdempotencyKey("initiate", linkKey.value);
         }
         if (snapshot.status === "SUCCEEDED") {
             phase.value = "RECEIPT";
@@ -205,6 +271,8 @@ const PayPage = dc(() => {
     const closeStream = () => {
         stream?.close();
         stream = null;
+        poller?.stop();
+        poller = null;
     };
 
     const startCountdown = (isoDate?: string | null) => {
@@ -241,9 +309,10 @@ const PayPage = dc(() => {
             const response = await api.post(urlsMap.payInitiate(linkKey.value), {
                 railCode: rail.code,
                 formData: formValues.value,
-                idempotencyKey: newIdempotencyKey(),
+                idempotencyKey: getOrCreateIdempotencyKey("initiate", linkKey.value),
             });
             const payload = (response.data?.data ?? response.data ?? {}) as InitiateResponse;
+            saveAttemptId(linkKey.value, payload.attemptId);
             reference.value = payload.reference ?? null;
             attemptStatus.value = payload.status ?? "CREATED";
             clientAction.value = payload.clientAction ?? null;
@@ -259,7 +328,12 @@ const PayPage = dc(() => {
                 startCountdown(payload.clientAction.expires_at);
             }
         } catch (e) {
-            actionError.value = extractApiErrorMessage(e);
+            const status = extractApiError(e)?.status ?? 0;
+            // A definitive client error means this intent is dead: the next click is a new intent.
+            if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
+                clearIdempotencyKey("initiate", linkKey.value);
+            }
+            actionError.value = safeError(e);
         } finally {
             submitting.value = false;
         }
@@ -274,7 +348,12 @@ const PayPage = dc(() => {
         try {
             const response = await api.post(urlsMap.payConfirm(linkKey.value, attempt.value.attemptId), {
                 otp,
-                idempotencyKey: newIdempotencyKey(),
+                idempotencyKey: (() => {
+                    if (!confirmIntent || confirmIntent.otp !== otp) {
+                        confirmIntent = { otp, key: generateIdempotencyKey() };
+                    }
+                    return confirmIntent.key;
+                })(),
             });
             const payload = (response.data?.data ?? response.data ?? {}) as AttemptSnapshot;
             applySnapshot(payload);
@@ -282,7 +361,7 @@ const PayPage = dc(() => {
                 phase.value = "CONFIRMING";
             }
         } catch (e) {
-            actionError.value = extractApiErrorMessage(e);
+            actionError.value = safeError(e);
         } finally {
             submitting.value = false;
         }
@@ -296,7 +375,7 @@ const PayPage = dc(() => {
             await api.post(urlsMap.payResend(linkKey.value, attempt.value.attemptId), {});
             showNotice(t("Resend Code"));
         } catch (e) {
-            actionError.value = extractApiErrorMessage(e);
+            actionError.value = safeError(e);
         }
     };
 
@@ -309,7 +388,7 @@ const PayPage = dc(() => {
             closeStream();
             phase.value = "ERROR";
         } catch (e) {
-            actionError.value = extractApiErrorMessage(e);
+            actionError.value = safeError(e);
         }
     };
 
@@ -346,7 +425,7 @@ const PayPage = dc(() => {
                 payload: data,
             });
         } catch (e) {
-            actionError.value = extractApiErrorMessage(e);
+            actionError.value = safeError(e);
         }
     };
 

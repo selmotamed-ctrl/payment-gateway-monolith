@@ -581,4 +581,9 @@ export const appCatalogue: Record<string, [string, string]> = {
     "Complete KYB, payout, and storefront details for activation.": ["Complete KYB, payout, and storefront details for activation.", "أكمل بيانات KYB والدفع وواجهة المتجر للتفعيل."],
     "Store operations, fees, disputes, and API guidance.": ["Store operations, fees, disputes, and API guidance.", "عمليات المتجر والرسوم والنزاعات وإرشادات API."],
     "Secure integration patterns, API reference, and code examples.": ["Secure integration patterns, API reference, and code examples.", "أنماط تكامل آمنة ومرجع API وأمثلة شيفرة."],
+    "Network Error Try Again": ["Network error. Please try again.", "خطأ في الشبكة. يرجى المحاولة مرة أخرى."],
+    "Too Many Requests": ["Too many requests. Please wait and try again.", "طلبات كثيرة جدًا. يرجى الانتظار ثم المحاولة مرة أخرى."],
+    "Invalid Payment Details": ["Please check the payment details and try again.", "يرجى التحقق من بيانات الدفع والمحاولة مرة أخرى."],
+    "Payment Attempt Expired": ["This payment attempt has expired.", "انتهت صلاحية محاولة الدفع هذه."],
+    "Payment Temporarily Unavailable": ["Payment is temporarily unavailable.", "الدفع غير متاح مؤقتًا."],
 };

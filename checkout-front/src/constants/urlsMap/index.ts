@@ -1,8 +1,13 @@
+import { getBaseUrl } from "../baseUrl";
+
+// Streams are opened with EventSource, which does NOT go through the axios baseURL,
+// so the status stream path must be absolute under the API base.
 export const urlsMap = {
     payLink: (linkKey: string) => `v1/pay/${linkKey}`,
     payInitiate: (linkKey: string) => `v1/pay/${linkKey}/initiate`,
     payLogs: (linkKey: string, attemptId: string) => `v1/pay/${linkKey}/logs/${attemptId}`,
-    payStatusStream: (linkKey: string, attemptId: string) => `v1/pay/${linkKey}/logs/${attemptId}/status`,
+    payStatusStream: (linkKey: string, attemptId: string) =>
+        `${getBaseUrl()}/v1/pay/${encodeURIComponent(linkKey)}/logs/${encodeURIComponent(attemptId)}/status`,
     payConfirm: (linkKey: string, attemptId: string) => `v1/pay/${linkKey}/logs/${attemptId}/confirm`,
     payResend: (linkKey: string, attemptId: string) => `v1/pay/${linkKey}/logs/${attemptId}/resend`,
     payCancel: (linkKey: string, attemptId: string) => `v1/pay/${linkKey}/logs/${attemptId}/cancel`,

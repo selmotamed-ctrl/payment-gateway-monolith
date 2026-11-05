@@ -35,6 +35,8 @@ export const setUserState = (userData: UserState | null) => {
 
 export const loggingOut = ref(false);
 
+// TODO(backend): admin-back exposes no logout/revoke endpoint yet, so this only clears the client session;
+// the bearer token stays valid server-side until it expires. Call a revoke endpoint here once one exists.
 export const logout = async (options?: { redirect?: string }) => {
     loggingOut.value = true;
     setUserState(null);
@@ -73,4 +75,4 @@ export const hasOneOfAuthorities = (required?: UserAuthorityType[] | null): bool
 export const hasAllAuthorities = (required?: UserAuthorityType[] | null): boolean =>
     mapHasAllAuthorities(user.value?.userInfo?.authoritiesMap, required);
 
-export const isAuthenticated = () => import.meta.env.VITE_AUTHORIZED || (!!user.value?.token && !!user.value?.userInfo);
+export const isAuthenticated = () => !!user.value?.token && !!user.value?.userInfo;

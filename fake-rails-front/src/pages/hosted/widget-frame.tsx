@@ -4,6 +4,7 @@ import { VAlert } from "vuetify/components";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { api } from "@/utils/api";
+import { resolveCheckoutOrigin } from "@/utils/security";
 
 const WidgetFramePage = dc(() => {
   const params = new URLSearchParams(window.location.search);
@@ -18,7 +19,16 @@ const WidgetFramePage = dc(() => {
   const rail = params.get("rail") ?? "moamalat";
 
   const post = (type: string, payload: Record<string, unknown>) => {
-    window.parent?.postMessage({ type, payload }, "*");
+    // Never "*": post only to the known checkout origin (VITE_CHECKOUT_ORIGIN, else the embedding parent).
+    const targetOrigin = resolveCheckoutOrigin(
+      import.meta.env.VITE_CHECKOUT_ORIGIN,
+      window.location.ancestorOrigins?.[0],
+      document.referrer,
+    );
+    if (!targetOrigin) {
+      return;
+    }
+    window.parent?.postMessage({ type, payload }, targetOrigin);
   };
 
   const complete = async (serverPayment: boolean) => {

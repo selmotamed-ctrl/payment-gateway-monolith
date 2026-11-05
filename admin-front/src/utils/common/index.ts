@@ -1,3 +1,4 @@
+import { devLog } from "@/utils/devLog";
 import { adaptedLocale } from "@/plugins/localization";
 
 export type Merge<T, U> = T & Omit<U, keyof T>;
@@ -48,7 +49,7 @@ export function copyToClipboard(text: string) {
     try {
         navigator.clipboard.writeText(text);
     } catch (error) {
-        console.log("Default Copy Approach Error", error);
+        devLog("Default Copy Approach Error", error);
 
         const textarea = document.createElement("textarea");
         textarea.value = text;
@@ -59,7 +60,7 @@ export function copyToClipboard(text: string) {
 
         try {
             const successful = document.execCommand("copy");
-            console.log(successful ? "Copied!" : "Copy failed");
+            devLog(successful ? "Copied!" : "Copy failed");
         } catch (err) {
             console.error("Fallback copy error:", err);
         }

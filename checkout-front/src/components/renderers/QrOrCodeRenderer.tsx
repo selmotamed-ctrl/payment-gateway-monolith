@@ -6,6 +6,7 @@ import QRCode from "qrcode";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import type { QrOrCodeClientAction } from "./types";
+import { safeDeepLink } from "@/utils/security/deepLink";
 
 export type QrOrCodeRendererProps = {
     action: QrOrCodeClientAction;
@@ -27,7 +28,8 @@ export const QrOrCodeRenderer = dc(
                     errorCorrectionLevel: "M",
                 });
             } catch (e) {
-                qrError.value = e instanceof Error ? e.message : String(e);
+                void e;
+                qrError.value = t("Something went wrong");
             }
         };
 
@@ -103,9 +105,10 @@ export const QrOrCodeRenderer = dc(
                     </ThemedText>
                 )}
 
-                {props.action.deep_link_url && (
+                {safeDeepLink(props.action.deep_link_url) && (
                     <a
-                        href={props.action.deep_link_url}
+                        href={safeDeepLink(props.action.deep_link_url) as string}
+                        rel="noopener noreferrer"
                         style={{
                             fontSize: "13px",
                             color: "var(--pg-accent-interactive)",

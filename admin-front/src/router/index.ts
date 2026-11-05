@@ -1,4 +1,5 @@
-import { routesAuthorities, routesRoles } from "@/layouts/sections";
+import { routesRoles } from "@/layouts/sections";
+import { resolveRouteRequirement } from "@/utils/routeAuthorities";
 import { hasOneOfAuthorities, isAuthenticated, user } from "@/state/user";
 import { showSnackBar } from "@/utils/snackBar";
 import { createRouter, createWebHistory } from "vue-router";
@@ -261,8 +262,10 @@ router.beforeEach((to, from) => {
     }
 
     const routeName = String(to.name ?? "");
-    const requiredAuthorities = routesAuthorities[routeName];
-    if (requiredAuthorities?.length && !hasOneOfAuthorities(requiredAuthorities)) {
+    // Public routes (Login/NotFound) have no matched requiresAuth record and are not gated here.
+    const gated = to.matched.some((r) => r.meta?.requiresAuth);
+    const requirement = resolveRouteRequirement(routeName);
+    if (gated && routeName && (!requirement.allowed || !hasOneOfAuthorities(requirement.authorities))) {
         showSnackBar({
             message: "you are not allowed to access this resource",
             type: "error",

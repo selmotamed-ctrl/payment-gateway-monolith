@@ -1,3 +1,4 @@
+import { safePreviewMime } from "@/utils/safeBlob";
 import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
@@ -549,14 +550,17 @@ const JoinRequestDetailPage = dc(() => {
     };
 
     const previewDocument = async (document: KybDocument) => {
-        const tab = window.open("", "_blank");
+        const mime = safePreviewMime(document.mime);
+        if (!mime) {
+            showSnackBar({ type: "warning", message: t("This file type cannot be previewed.") });
+            return;
+        }
         try {
             const response = await api.get(urlsMap.kybDocumentContent(document.id), { responseType: "blob" });
-            const url = URL.createObjectURL(new Blob([response.data], { type: document.mime }));
-            if (tab) tab.location.href = url;
+            const url = URL.createObjectURL(new Blob([response.data], { type: mime }));
+            window.open(url, "_blank", "noopener,noreferrer");
             setTimeout(() => URL.revokeObjectURL(url), 60_000);
         } catch (cause) {
-            tab?.close();
             showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
         }
     };

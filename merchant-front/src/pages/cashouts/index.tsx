@@ -13,6 +13,8 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { showConfirm } from "@/utils/confirm";
+import { isValidPositiveAmount } from "@/utils/security/amount";
 
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
@@ -47,6 +49,8 @@ const CashoutsPage = dc(() => {
     const iban = ref("");
     const walletOptions = ref<{ title: string; value: string }[]>([]);
     const formError = ref("");
+    // One idempotency key per cash-out intent: reused when the same request is retried, renewed after success or when the dialog is reopened.
+    let intentKey = crypto.randomUUID();
 
     const loadWallets = async () => {
         const response = await api.get(urlsMap.options("wallets"), { params: { limit: 100 } });
@@ -78,12 +82,33 @@ const CashoutsPage = dc(() => {
     void load();
 
     const request = async () => {
-        actionLoading.value = true;
+        if (actionLoading.value) {
+            return;
+        }
         formError.value = "";
+        if (!isValidPositiveAmount(amount.value)) {
+            formError.value = t("Enter a valid amount greater than zero (up to 4 decimals).");
+            return;
+        }
+        const confirmed = await showConfirm({
+            title: t("Confirm Cash-Out"),
+            message: `${t("Amount")}: ${amount.value.trim()} ${currency.value.toUpperCase()}
+${t("Bank name")}: ${bankName.value}
+${t("Account number")}: ${accountNumber.value}${iban.value ? `
+${t("IBAN (optional)")}: ${iban.value}` : ""}`,
+            submitButtonLabel: t("Confirm"),
+            type: "warning",
+            onConfirm: async () => undefined,
+        });
+        if (!confirmed) {
+            return;
+        }
+        actionLoading.value = true;
         try {
             await api.post(urlsMap.cashoutsList, {
+                idempotencyKey: `cashout-${intentKey}`,
                 walletId: walletId.value,
-                amount: amount.value,
+                amount: amount.value.trim(),
                 currency: currency.value.toUpperCase(),
                 destinationBank: {
                     bankName: bankName.value,
@@ -91,6 +116,7 @@ const CashoutsPage = dc(() => {
                     ...(iban.value ? { iban: iban.value } : {}),
                 },
             });
+            intentKey = crypto.randomUUID();
             dialogOpen.value = false;
             showSnackBar({ type: "success", message: t("Request Cash-Out") });
             await load();
@@ -160,6 +186,7 @@ const CashoutsPage = dc(() => {
                                 accountNumber.value = "";
                                 iban.value = "";
                                 formError.value = "";
+                                intentKey = crypto.randomUUID();
                                 void loadWallets();
                                 dialogOpen.value = true;
                             }}

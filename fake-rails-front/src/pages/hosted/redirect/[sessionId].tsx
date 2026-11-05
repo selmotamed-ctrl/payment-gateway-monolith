@@ -7,6 +7,7 @@ import { TableRowActions } from "@/components/Table/TableRowActions";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { api } from "@/utils/api";
+import { isSafeRedirectUrl } from "@/utils/security";
 
 interface HostedSession {
   transaction: {
@@ -45,8 +46,10 @@ const HostedRedirectPage = dc(() => {
         `/portal-api/hosted/session/${encodeURIComponent(String(route.params.sessionId))}/action`,
         { method: "POST", body: { action } },
       );
-      if (result.redirect_url) {
+      if (result.redirect_url && isSafeRedirectUrl(result.redirect_url)) {
         window.location.assign(result.redirect_url);
+      } else if (result.redirect_url) {
+        error.value = "Refusing to follow an unsafe redirect URL";
       } else {
         await load();
       }

@@ -1,5 +1,6 @@
 import { resolvePublicUploadPath, resolveUploadPath } from "@/constants/baseUrl";
 import { api } from "@/state/api";
+import { safeRasterImageMime } from "@/utils/safeBlob";
 import { dc } from "kt-dc";
 import type { StyleValue } from "vue";
 
@@ -7,7 +8,6 @@ const ApiImage = dc(
     (props: { public?: boolean; uploadsPath: string; alt?: string; style?: StyleValue }) => {
         const loading = ref(false);
         const dataUrl = ref(null as null | string);
-        const svg = ref(false);
         const loadImage = async () => {
             if (loading.value) {
                 return;
@@ -18,12 +18,13 @@ const ApiImage = dc(
                 const result = await api.get(url, {
                     responseType: "blob",
                 });
-                const contentType = result.headers["Content-Type"];
-                console.log("Content Type", result.headers);
-                if (contentType === "image/svg+xml") {
-                    svg.value = true;
+                // Only raster images are rendered (never SVG, never an embedded object): trust the blob type, not a header.
+                const blob = result.data as Blob;
+                const mime = safeRasterImageMime(blob.type);
+                if (!mime) {
+                    return;
                 }
-                dataUrl.value = URL.createObjectURL(result.data);
+                dataUrl.value = URL.createObjectURL(blob.slice(0, blob.size, mime));
             } catch (error) {
                 console.error(error);
             } finally {
@@ -43,9 +44,6 @@ const ApiImage = dc(
 
         return () => {
             if (dataUrl.value) {
-                if (svg.value) {
-                    return <object data={dataUrl.value} style={props.style}></object>;
-                }
                 return <img style={props.style} src={dataUrl.value}></img>;
             }
         };

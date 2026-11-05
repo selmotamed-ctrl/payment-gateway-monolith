@@ -1,3 +1,4 @@
+import { devLog } from "@/utils/devLog";
 import "./styles/globals/app.scss";
 import { RouterView } from "vue-router";
 import { dc } from "kt-dc";
@@ -32,7 +33,7 @@ const App = dc(() => {
                 <DetailsFieldsDialog
                     ref={(r) => {
                         if (r) {
-                            console.log("Setting details dialog ref", r);
+                            devLog("Setting details dialog ref", r);
                             detailsDialogRef.value = r as any;
                         }
                     }}

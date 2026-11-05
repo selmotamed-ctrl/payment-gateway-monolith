@@ -622,4 +622,6 @@ export const appCatalogue: Record<string, [string, string]> = {
     "Complete KYB, payout, and storefront details for activation.": ["Complete KYB, payout, and storefront details for activation.", "أكمل بيانات KYB والدفع وواجهة المتجر للتفعيل."],
     "Store operations, fees, disputes, and API guidance.": ["Store operations, fees, disputes, and API guidance.", "عمليات المتجر والرسوم والنزاعات وإرشادات API."],
     "Secure integration patterns, API reference, and code examples.": ["Secure integration patterns, API reference, and code examples.", "أنماط تكامل آمنة ومرجع API وأمثلة شيفرة."],
+    "Enter a valid amount greater than zero (up to 4 decimals).": ["Enter a valid amount greater than zero (up to 4 decimals).", "أدخل مبلغًا صالحًا أكبر من صفر (حتى 4 خانات عشرية)."],
+    "Confirm Cash-Out": ["Confirm Cash-Out", "تأكيد طلب السحب"],
 };

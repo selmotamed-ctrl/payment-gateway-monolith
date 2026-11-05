@@ -1,4 +1,4 @@
-import { getBaseUrl, resolveUploadPath } from "@/constants/baseUrl";
+import { getBaseUrl } from "@/constants/baseUrl";
 import axios from "axios";
 import { logout, user } from "../user";
 import { extractApiError, isAppSuspendedError } from "@/utils/errors/extractor";
@@ -37,7 +37,3 @@ api.interceptors.response.use(undefined, (error) => {
     }
     throw error;
 });
-
-export const resolveUploadPathWithMat = (path: string) => {
-    return `${resolveUploadPath(path)}?mat=${encodeURIComponent(user.value?.token || "")}`;
-};

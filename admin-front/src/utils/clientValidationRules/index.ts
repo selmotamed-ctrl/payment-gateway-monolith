@@ -1,3 +1,4 @@
+import { devLog } from "@/utils/devLog";
 // eslint-disable no-useless-escape
 // eslint-disable no-control-regex
 import { adaptedLocale } from "@/plugins/localization";
@@ -668,7 +669,7 @@ export const rules = {
             }
 
             value = String(value);
-            console.log("Validating phone number", value);
+            devLog("Validating phone number", value);
 
             try {
                 return !!value.trim().match(/^(?:00218|\+218|0)?(9(?:1|2|3|4|5)[0-9]{7})$/iu) || `${t(field)} ${t("is not valid phone")}`;
@@ -787,7 +788,7 @@ export const createValidator = <
             const fieldRules = rules[key];
             for (const rule of fieldRules || []) {
                 if (!rule || typeof rule != "function") {
-                    console.log("rule is not function", rule);
+                    devLog("rule is not function", rule);
                     continue;
                 }
                 const validationResult = rule?.(values[key]);

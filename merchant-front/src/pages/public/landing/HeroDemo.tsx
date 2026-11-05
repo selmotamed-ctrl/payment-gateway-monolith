@@ -50,9 +50,9 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const ACCOUNT_LABELS: Record<string, string> = {
-    GATEWAY_CLEARING: "Gateway clearing",
-    MERCHANT_WALLET: "Your wallet",
-    PLATFORM_INCOME: "Platform commission",
+    CUSTOMER_PAYMENT: "Customer payment",
+    YOUR_WALLET: "Your wallet",
+    PLATFORM_FEE: "Platform commission",
 };
 
 export const HeroDemo = defineComponent({
@@ -72,7 +72,7 @@ export const HeroDemo = defineComponent({
         const walletShown = ref(new Decimal(0));
 
         const journal = landingDemoJournal();
-        const walletCredit = journal.find((line) => line.account === "MERCHANT_WALLET")!.amount;
+        const walletCredit = journal.find((line) => line.account === "YOUR_WALLET")!.amount;
         const balanced = journalImbalance(journal).isZero();
 
         const playing = computed(() => !userPaused.value && inView.value && pageVisible.value);
@@ -316,7 +316,7 @@ export const HeroDemo = defineComponent({
                         <div class="pgl-demo__ledger-head">
                             <span>{t("Journal entry")}</span>
                             <span class="pgl-mono" dir="ltr">
-                                PLATFORM_CLEARING
+                                {t("Illustrative")}
                             </span>
                         </div>
                         <ul class="pgl-demo__lines">

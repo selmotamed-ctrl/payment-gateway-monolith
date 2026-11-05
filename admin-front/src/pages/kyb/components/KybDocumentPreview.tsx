@@ -1,3 +1,4 @@
+import { safePreviewMime } from "@/utils/safeBlob";
 import { dc } from "kt-dc";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useLocale } from "vuetify";
@@ -54,7 +55,12 @@ const KybDocumentPreview = dc(
             loading.value = true;
             try {
                 const response = await api.get(urlsMap.kybDocumentContent(document.id), { responseType: "blob" });
-                objectUrl.value = URL.createObjectURL(new Blob([response.data], { type: document.mime }));
+                const mime = safePreviewMime(document.mime);
+                if (!mime) {
+                    error.value = t("This file type cannot be previewed.");
+                    return;
+                }
+                objectUrl.value = URL.createObjectURL(new Blob([response.data], { type: mime }));
             } catch (cause) {
                 error.value = extractApiErrorMessage(cause);
             } finally {

@@ -72,17 +72,17 @@ export const computeLandingFees = (input: {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The five client actions the checkout renders (core-back RENDER step:
- * SHOW_OTP_FORM, SHOW_QR_OR_CODE, HTTP_REDIRECT, SHOW_PUSH_OR_TRANSFER, RENDER_EMBEDDED).
+ * The five payer experiences the hosted checkout can show. The ids are deliberately generic
+ * (not the internal step action names).
  */
 export type LandingRailMode = "OTP" | "QR" | "REDIRECT" | "PUSH" | "CARD";
 
-export const LANDING_RAIL_MODES: { mode: LandingRailMode; label: string; icon: string; action: string }[] = [
-    { mode: "OTP", label: "One-time code", icon: "mdi-cellphone-message", action: "SHOW_OTP_FORM" },
-    { mode: "QR", label: "Scan QR", icon: "mdi-qrcode-scan", action: "SHOW_QR_OR_CODE" },
-    { mode: "PUSH", label: "Approve in app", icon: "mdi-gesture-tap-button", action: "SHOW_PUSH_OR_TRANSFER" },
-    { mode: "REDIRECT", label: "Bank redirect", icon: "mdi-open-in-new", action: "HTTP_REDIRECT" },
-    { mode: "CARD", label: "Card form", icon: "mdi-credit-card-outline", action: "RENDER_EMBEDDED" },
+export const LANDING_RAIL_MODES: { mode: LandingRailMode; label: string; icon: string; experience: string }[] = [
+    { mode: "OTP", label: "One-time code", icon: "mdi-cellphone-message", experience: "code-entry" },
+    { mode: "QR", label: "Scan QR", icon: "mdi-qrcode-scan", experience: "qr-code" },
+    { mode: "PUSH", label: "Approve in app", icon: "mdi-gesture-tap-button", experience: "app-approval" },
+    { mode: "REDIRECT", label: "Bank redirect", icon: "mdi-open-in-new", experience: "bank-redirect" },
+    { mode: "CARD", label: "Card form", icon: "mdi-credit-card-outline", experience: "card-form" },
 ];
 
 /** Attempt statuses used by the simulator, in order. They are real core-back statuses. */
@@ -109,13 +109,13 @@ export const LANDING_DEMO_AMOUNT = "250.000";
 export const LANDING_DEMO_COMMISSION_PERCENT = "2.5";
 
 export type LandingJournalLine = {
-    account: "GATEWAY_CLEARING" | "MERCHANT_WALLET" | "PLATFORM_INCOME";
+    account: "CUSTOMER_PAYMENT" | "YOUR_WALLET" | "PLATFORM_FEE";
     side: "DR" | "CR";
     amount: Decimal;
 };
 
 /**
- * Illustrative PLATFORM_CLEARING confirmation journal (merchant absorbs the fee).
+ * Illustrative confirmation journal (merchant absorbs the fee).
  * Gateway/provider fee lines are omitted for clarity; the demo labels it as illustrative.
  */
 export const landingDemoJournal = (): LandingJournalLine[] => {
@@ -125,9 +125,9 @@ export const landingDemoJournal = (): LandingJournalLine[] => {
         feeBearer: "MERCHANT_ABSORBS",
     });
     return [
-        { account: "GATEWAY_CLEARING", side: "DR", amount: fees.customerTotal },
-        { account: "MERCHANT_WALLET", side: "CR", amount: fees.netToWallet },
-        { account: "PLATFORM_INCOME", side: "CR", amount: fees.commission },
+        { account: "CUSTOMER_PAYMENT", side: "DR", amount: fees.customerTotal },
+        { account: "YOUR_WALLET", side: "CR", amount: fees.netToWallet },
+        { account: "PLATFORM_FEE", side: "CR", amount: fees.commission },
     ];
 };
 

@@ -1,3 +1,4 @@
+import { devLog } from "@/utils/devLog";
 import { api } from "@/state/api";
 import { extractApiError, type ApiError } from "@/utils/errors/extractor";
 import type { Merge } from "kt-common";
@@ -34,7 +35,7 @@ const ApiAutocomplete = dc(
             loading.value = true;
             try {
                 data.value = props.apiDataExtractor((await api.get(props.url)).data);
-                console.log("Api autocomplete", props.url, data.value);
+                devLog("Api autocomplete", props.url, data.value);
             } catch (error) {
                 console.error(error);
                 const e = extractApiError(error);

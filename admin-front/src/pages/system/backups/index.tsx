@@ -23,6 +23,13 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { showConfirm } from "@/utils/confirm";
+import {
+    canRunBackupActions,
+    clipServerText,
+    needsExtraConfirm,
+    newIdempotencyKey,
+    validatePolicyForm,
+} from "@/utils/backupsGuard";
 
 type WalState = {
     archiveLagSeconds?: number | null;
@@ -210,6 +217,9 @@ const SystemBackupsPage = dc(() => {
     });
 
     const canWrite = computed(() => hasOneOfAuthorities(["security:write"]));
+    // Actions are only usable when the backup subsystem is configured and its daemon is reachable.
+    const actionsReady = computed(() => canRunBackupActions(overview.value));
+    let triggerKey = newIdempotencyKey();
 
     const load = async () => {
         loading.value = true;
@@ -218,7 +228,7 @@ const SystemBackupsPage = dc(() => {
             const response = await api.get(urlsMap.systemBackupsOverview);
             overview.value = (response.data?.data ?? response.data ?? null) as BackupOverview | null;
         } catch (e) {
-            error.value = extractApiErrorMessage(e);
+            error.value = clipServerText(extractApiErrorMessage(e));
         } finally {
             loading.value = false;
         }
@@ -390,22 +400,37 @@ const SystemBackupsPage = dc(() => {
         { key: "completedAt", label: "Completed", value: (row) => formatDateTime(row.completedAt) },
         { key: "durationMs", label: "Duration", value: (row) => formatDuration(row.durationMs, t) },
         { key: "sizeBytes", label: "Size", value: (row) => formatBytes(row.sizeBytes, t) },
-        { key: "errorMessage", label: "Error", value: (row) => row.errorMessage ?? "" },
+        { key: "errorMessage", label: "Error", value: (row) => clipServerText(row.errorMessage) },
     ];
 
     const openTrigger = () => {
         triggerForm.value = { target: "all", kind: "full" };
+        triggerKey = newIdempotencyKey();
         triggerOpen.value = true;
     };
 
     const submitTrigger = async () => {
-        if (triggering.value) return;
+        if (triggering.value || !actionsReady.value) return;
+        if (needsExtraConfirm(triggerForm.value)) {
+            const confirmed = await showConfirm({
+                title: t("Run backup now"),
+                message: t("This starts a full backup of every target and can load production databases. Continue?"),
+                submitButtonLabel: t("Run backup now"),
+                type: "warning",
+                onConfirm: async () => undefined,
+            });
+            if (!confirmed) return;
+        }
         triggering.value = true;
         try {
-            const response = await api.post(urlsMap.systemBackupsTrigger, {
-                target: triggerForm.value.target,
-                kind: triggerForm.value.kind,
-            });
+            const response = await api.post(
+                urlsMap.systemBackupsTrigger,
+                {
+                    target: triggerForm.value.target,
+                    kind: triggerForm.value.kind,
+                },
+                { headers: { "Idempotency-Key": triggerKey } },
+            );
             const payload = (response.data?.data ?? response.data ?? {}) as { backupJobId?: string };
             triggerOpen.value = false;
             showSnackBar({
@@ -414,16 +439,18 @@ const SystemBackupsPage = dc(() => {
                     ? `${t("Triggered")} · ${payload.backupJobId}`
                     : t("Triggered"),
             });
+            triggerKey = newIdempotencyKey();
             void load();
         } catch (e) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+            showSnackBar({ type: "error", message: clipServerText(extractApiErrorMessage(e)) });
         } finally {
             triggering.value = false;
         }
     };
 
     const runDrill = async () => {
-        if (!canWrite.value) return;
+        if (!canWrite.value || !actionsReady.value) return;
+        const drillKey = newIdempotencyKey();
         await showConfirm({
             title: t("Run restore drill"),
             message: t(
@@ -432,7 +459,7 @@ const SystemBackupsPage = dc(() => {
             submitButtonLabel: t("Run restore drill"),
             type: "warning",
             onConfirm: async () => {
-                const response = await api.post(urlsMap.systemBackupsDrill, {});
+                const response = await api.post(urlsMap.systemBackupsDrill, {}, { headers: { "Idempotency-Key": drillKey } });
                 const payload = (response.data?.data ?? response.data ?? {}) as { drillId?: string };
                 showSnackBar({
                     type: "success",
@@ -446,6 +473,7 @@ const SystemBackupsPage = dc(() => {
     };
 
     const openPolicy = () => {
+        if (!actionsReady.value) return;
         policyError.value = null;
         policyForm.value = {
             fullCron: schedule.value.fullCron ?? "",
@@ -470,31 +498,15 @@ const SystemBackupsPage = dc(() => {
     const submitPolicy = async () => {
         if (savingPolicy.value) return;
         const form = policyForm.value;
-        const fullRetentionDays = Number(form.fullRetentionDays);
-        const walRetentionDays = Number(form.walRetentionDays);
-        const alertLag = Number(form.alertLagSeconds);
-        if (
-            !form.fullCron.trim() ||
-            !form.deltaCron.trim() ||
-            !form.drillCron.trim() ||
-            !Number.isInteger(fullRetentionDays) ||
-            !Number.isInteger(walRetentionDays) ||
-            !Number.isInteger(alertLag)
-        ) {
+        const validated = validatePolicyForm(form);
+        if (!validated.ok) {
             policyError.value = t("Complete every policy field with a valid value.");
             return;
         }
         policyError.value = null;
         savingPolicy.value = true;
         try {
-            const response = await api.put(urlsMap.systemBackupsPolicy, {
-                fullCron: form.fullCron.trim(),
-                deltaCron: form.deltaCron.trim(),
-                drillCron: form.drillCron.trim(),
-                fullRetentionDays,
-                walRetentionDays,
-                alertLagSeconds: alertLag,
-            });
+            const response = await api.put(urlsMap.systemBackupsPolicy, validated.value);
             const payload = (response.data?.data ?? response.data ?? {}) as {
                 status?: string;
                 approvalRequestId?: string;
@@ -512,7 +524,7 @@ const SystemBackupsPage = dc(() => {
             }
             void load();
         } catch (e) {
-            policyError.value = extractApiErrorMessage(e);
+            policyError.value = clipServerText(extractApiErrorMessage(e));
         } finally {
             savingPolicy.value = false;
         }
@@ -538,6 +550,7 @@ const SystemBackupsPage = dc(() => {
                             </VBtn>
                             {canWrite.value && (
                                 <VBtn
+                                    disabled={!actionsReady.value}
                                     variant="tonal"
                                     prependIcon="mdi-database-plus-outline"
                                     onClick={openTrigger}
@@ -547,6 +560,7 @@ const SystemBackupsPage = dc(() => {
                             )}
                             {canWrite.value && (
                                 <VBtn
+                                    disabled={!actionsReady.value}
                                     variant="tonal"
                                     prependIcon="mdi-restore"
                                     onClick={() => void runDrill()}
@@ -556,6 +570,7 @@ const SystemBackupsPage = dc(() => {
                             )}
                             {canWrite.value && (
                                 <VBtn
+                                    disabled={!actionsReady.value}
                                     color="primary"
                                     variant="flat"
                                     prependIcon="mdi-tune-variant"
