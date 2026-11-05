@@ -3,7 +3,8 @@ import type { NextFunction, Request, Response } from "express";
 import * as ipaddr from "ipaddr.js";
 import { client } from "../../prisma/client";
 import { ApiError } from "../../lib/error";
-import { hashAccessToken, verifySessionToken } from "../../lib/auth";
+import { hashAccessToken, verifySessionToken, type SessionChannel } from "../../lib/auth";
+import { isSessionRevoked, revokeSession } from "../../lib/auth/revocation";
 
 export type PrincipalKind = "session" | "apiToken";
 
@@ -17,6 +18,11 @@ export interface Principal {
   scopes: string[];
   tokenId: string | null;
   sessionId: string | null;
+  /** Session id (`jti`) and expiry, the handle for server-side revocation. */
+  sessionJti?: string | null;
+  sessionExp?: number | null;
+  /** Channel the session token was minted for (JWT audience). */
+  sessionChannel?: SessionChannel | null;
 }
 
 declare global {
@@ -130,6 +136,9 @@ const resolveSessionPrincipal = async (token: string): Promise<Principal> => {
   } catch {
     throw new ApiError(401, "SESSION_INVALID", "The session token is invalid or expired");
   }
+  if (await isSessionRevoked(claims.jti)) {
+    throw new ApiError(401, "SESSION_REVOKED", "The session has been revoked");
+  }
   const user = await client.user.findUnique({ where: { id: claims.sub } });
   if (!user) {
     throw new ApiError(401, "SESSION_USER_MISSING", "The session principal no longer exists");
@@ -151,6 +160,9 @@ const resolveSessionPrincipal = async (token: string): Promise<Principal> => {
     scopes: authorities,
     tokenId: null,
     sessionId: claims.sub,
+    sessionJti: claims.jti,
+    sessionExp: claims.exp,
+    sessionChannel: claims.channel,
   };
 };
 
@@ -202,8 +214,12 @@ export const isMerchantPrincipal = (principal: Principal): boolean =>
 /** Admin channel guard: refuses merchant users and API tokens even when their authority strings overlap. */
 export const requireStaffPrincipal = (request: Request, _response: Response, next: NextFunction): void => {
   try {
-    if (!isStaffPrincipal(principalOf(request))) {
+    const principal = principalOf(request);
+    if (!isStaffPrincipal(principal)) {
       throw new ApiError(403, "STAFF_PRINCIPAL_REQUIRED", "This channel is reserved for platform staff");
+    }
+    if (principal.kind === "session" && principal.sessionChannel !== "admin") {
+      throw new ApiError(401, "SESSION_AUDIENCE_INVALID", "The session token was not issued for the admin channel");
     }
     next();
   } catch (error) {
@@ -214,8 +230,12 @@ export const requireStaffPrincipal = (request: Request, _response: Response, nex
 /** Merchant channel guard: refuses staff principals. */
 export const requireMerchantPrincipal = (request: Request, _response: Response, next: NextFunction): void => {
   try {
-    if (!isMerchantPrincipal(principalOf(request))) {
+    const principal = principalOf(request);
+    if (!isMerchantPrincipal(principal)) {
       throw new ApiError(403, "MERCHANT_PRINCIPAL_REQUIRED", "This channel is reserved for merchant principals");
+    }
+    if (principal.kind === "session" && principal.sessionChannel !== "merchant") {
+      throw new ApiError(401, "SESSION_AUDIENCE_INVALID", "The session token was not issued for the merchant channel");
     }
     next();
   } catch (error) {
@@ -257,3 +277,12 @@ export const requireMerchantScope = (request: Request, merchantId: string | null
 
 export const fingerprint = (parts: readonly (string | null | undefined)[]): string =>
   createHash("sha256").update(parts.filter((part): part is string => Boolean(part)).join("|"), "utf8").digest("hex");
+
+/** Revokes the session that authenticated this request (logout). API tokens are not sessions. */
+export const revokePrincipalSession = async (request: Request): Promise<void> => {
+  const principal = principalOf(request);
+  if (principal.kind !== "session" || !principal.sessionJti) {
+    throw new ApiError(400, "NOT_A_SESSION", "Only an interactive session can be logged out");
+  }
+  await revokeSession(principal.sessionJti, principal.sessionExp ?? Math.floor(Date.now() / 1000) + 12 * 60 * 60);
+};

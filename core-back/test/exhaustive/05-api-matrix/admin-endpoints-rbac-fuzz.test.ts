@@ -182,7 +182,7 @@ const tokenFor = (role: string, authorities: readonly string[]): string => {
     sub: `user-${role}`,
     typ: "session",
     iss: "payment-gateway-core",
-    aud: "payment-gateway-edge",
+    aud: "payment-gateway-admin",
     role,
     authorities,
   };
@@ -257,7 +257,7 @@ describe("Suite 05 · authority hint extraction", () => {
     const payload = {
       typ: "session",
       iss: "payment-gateway-core",
-      aud: "payment-gateway-edge",
+      aud: "payment-gateway-admin",
       roles: ["OPERATOR", "SUPPORT"],
       authorities_map: {
         "merchant:read": true,
@@ -275,7 +275,7 @@ describe("Suite 05 · authority hint extraction", () => {
     const payload = {
       typ: "mfa",
       iss: "payment-gateway-core",
-      aud: "payment-gateway-edge",
+      aud: "payment-gateway-admin",
       role: "MLRO",
       authorities: ["aml:read"],
     };
@@ -287,7 +287,7 @@ describe("Suite 05 · authority hint extraction", () => {
     const payload = {
       typ: "session",
       iss: "someone-else",
-      aud: "payment-gateway-edge",
+      aud: "payment-gateway-admin",
       role: "MLRO",
     };
     const token = `x.${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}.y`;

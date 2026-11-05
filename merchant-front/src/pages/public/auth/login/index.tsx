@@ -6,6 +6,7 @@ import { ref } from "vue";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { setUserState, type UserState } from "@/state/user";
+import { tokenFromLoginPayload } from "@/utils/security/sessionToken";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { setLocale } from "@/plugins/localization";
 import router from "@/router";
@@ -25,7 +26,7 @@ const LoginPage = dc(() => {
     const showPassword = ref(false);
 
     const buildSession = (payload: any): UserState => ({
-        token: payload?.token,
+        token: tokenFromLoginPayload(payload) as string,
         refreshToken: payload?.refreshToken ?? null,
         userInfo: {
             id: String(payload?.userInfo?.id ?? payload?.user?.id ?? ""),

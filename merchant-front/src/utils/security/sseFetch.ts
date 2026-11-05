@@ -53,7 +53,7 @@ export const openSseStream = (opts: SseStreamOptions) => {
             const response = await doFetch(opts.url, {
                 headers: { Accept: "text/event-stream", ...(opts.headers ?? {}) },
                 signal: controller.signal,
-                credentials: "omit",
+                credentials: "same-origin",
                 cache: "no-store",
             });
             if (!response.ok || !response.body) {

@@ -45,6 +45,10 @@ export class InboundInboxWorker extends BaseWorker {
   private readonly handler: InboundEventHandler | undefined;
   private readonly maxAttempts: number;
 
+  protected override get singleton(): boolean {
+    return true;
+  }
+
   constructor(deps: InboundInboxWorkerDeps) {
     super(deps);
     this.handler = deps.handler;
@@ -69,7 +73,10 @@ export class InboundInboxWorker extends BaseWorker {
       " ORDER BY received_at ASC" +
       " LIMIT $1" +
       " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(sql, this.batchSize);
+    // Claimed inside a transaction; cluster exclusivity for the processing that
+    // follows comes from the advisory-lock leader election (singleton): the
+    // table has no lease column and a webhook must never be handled twice.
+    const result = await this.inTransaction((tx) => tx.$queryRawUnsafe(sql, this.batchSize));
     return toCamelRows<InboundEventRow>(result);
   }
 

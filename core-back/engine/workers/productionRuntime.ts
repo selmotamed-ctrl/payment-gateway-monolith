@@ -266,6 +266,8 @@ export const createProductionWorkerRuntime = (
     repositories,
     intervalMs: options.intervalMs,
     batchSize: options.batchSize,
+    // Singleton workers only tick on the advisory-lock leader (GAP-012).
+    leaderElection: options.storage?.leaderElection,
   };
 
   const workers = [

@@ -29,9 +29,10 @@ const principal = (authorities: string[], over: Partial<Principal> = {}): Princi
   scopes: authorities,
   tokenId: null,
   sessionId: "u",
+  sessionChannel: "merchant",
   ...over,
 });
-const staff = (authorities: string[], role = "FINANCE") => principal(authorities, { role, merchantId: null });
+const staff = (authorities: string[], role = "FINANCE") => principal(authorities, { role, merchantId: null, sessionChannel: "admin" });
 const token = (scopes: string[]) =>
   principal(scopes, { kind: "apiToken", userId: null, role: "MERCHANT_API", tokenId: "t1", sessionId: null });
 const req = (p: Principal) => ({ principal: p }) as never;

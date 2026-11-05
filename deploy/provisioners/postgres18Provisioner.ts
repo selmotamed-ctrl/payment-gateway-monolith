@@ -104,7 +104,7 @@ export const postgresMainConfigSnippet = (
 ): string => `data_directory = '${cluster.dataDir}'
 hba_file = '${cluster.hbaPath}'
 port = ${cluster.port}
-${postgresConfigSnippet(config, privateIp ? `127.0.0.1,${privateIp}` : "*")}`;
+${postgresConfigSnippet(config, privateIp ? `127.0.0.1,${privateIp}` : "*")}${postgresTlsSnippet(cluster)}`;
 
 const nodeEndpoint = (node: PgNodeRef | string): string =>
   typeof node === "string" ? node : node.privateIp ?? node.sshHost ?? "127.0.0.1";
@@ -165,7 +165,37 @@ checkpoint_completion_target = 0.9
 random_page_cost = 1.1
 shared_preload_libraries = 'pg_stat_statements'
 track_io_timing = on
+timezone = 'UTC'
+log_timezone = 'UTC'
 `;
+};
+
+/** Per-cluster TLS directory, next to the cluster's pg_hba.conf. */
+export const pgTlsDir = (cluster: PgCluster): string => `${cluster.hbaPath.slice(0, cluster.hbaPath.lastIndexOf("/"))}/tls`;
+
+/** PostgreSQL server TLS settings (GAP-022). Material is provisioned by pgTlsCommands. */
+export const postgresTlsSnippet = (cluster: PgCluster): string => {
+  const dir = pgTlsDir(cluster);
+  return `ssl = on
+ssl_cert_file = '${dir}/server.crt'
+ssl_key_file = '${dir}/server.key'
+ssl_min_protocol_version = 'TLSv1.2'
+password_encryption = 'scram-sha-256'
+`;
+};
+
+/**
+ * Idempotently creates the server key/certificate (self-signed, 0600 key owned
+ * by postgres) unless an operator already installed one.
+ */
+export const pgTlsCommands = (cluster: PgCluster, hostName: string): string[] => {
+  const dir = pgTlsDir(cluster);
+  const subject = `/CN=${hostName.replace(/[^A-Za-z0-9.-]/g, "")}`;
+  const key = shellQuote(`${dir}/server.key`);
+  const crt = shellQuote(`${dir}/server.crt`);
+  return [
+    `install -d -m 0750 -o postgres -g postgres ${shellQuote(dir)} && if [ ! -s ${key} ] || [ ! -s ${crt} ]; then (umask 077 && openssl req -x509 -newkey rsa:4096 -nodes -sha256 -days 825 -subj ${shellQuote(subject)} -keyout ${key} -out ${crt}); fi && chown postgres:postgres ${key} ${crt} && chmod 0600 ${key} && chmod 0644 ${crt}`,
+  ];
 };
 
 /** Install PostgreSQL 18, contrib extensions and PgBouncer. */
@@ -232,17 +262,12 @@ export const pgHbaSnippet = (config: DeployConfig, allowedSources: string[]): st
   const sources = [...new Set(allowedSources.filter((entry) => entry.length > 0))];
   return [
     "local   all             all                                     peer",
-    "host    all             all             127.0.0.1/32            scram-sha-256",
-    "host    all             all             ::1/128                 scram-sha-256",
+    "hostssl all            all             127.0.0.1/32            scram-sha-256",
+    "hostssl all            all             ::1/128                 scram-sha-256",
     ...sources.flatMap((source) => [
-      // PostgreSQL TLS material is not provisioned by this deploy, so a
-      // non-TLS SCRAM rule is kept alongside hostssl. The core still uses the
-      // private LAN and UFW allowlists; the hostssl rules apply when an
-      // operator supplies certificates.
+      // TLS is provisioned by pgTlsCommands; there are no plain `host` rules (GAP-022).
       `hostssl all             all             ${source}/32            scram-sha-256`,
-      `host    all             all             ${source}/32            scram-sha-256`,
       `hostssl replication     all             ${source}/32            scram-sha-256`,
-      `host    replication     all             ${source}/32            scram-sha-256`,
     ]),
   ].join("\n") + "\n";
 };
@@ -277,6 +302,13 @@ export const primaryBootstrapSql = (config: DeployConfig, replicas: Array<PgNode
   ].join("\n") + "\n";
 };
 
+/** Content of the replica's ~postgres/.pgpass (written over stdin, mode 0600). */
+export const replicaPgpassContent = (
+  primary: PgNodeRef | string,
+  config: Pick<DeployConfig, "PG_REPLICATION_USER" | "PG_REPLICATION_PASSWORD">,
+): string =>
+  `${pgpassField(nodeEndpoint(primary))}:${nodePort(primary)}:*:${pgpassField(config.PG_REPLICATION_USER ?? "pg_replicator")}:${pgpassField(config.PG_REPLICATION_PASSWORD ?? "")}\n`;
+
 /** Slot creation + `pg_basebackup -R` for each replica (idempotent). */
 export const replicaCommands = (
   primary: PgNodeRef | string,
@@ -289,12 +321,12 @@ export const replicaCommands = (
   const targetCluster = cluster ?? pgClusterFor(config ?? { PG_VERSION: "18" }, "replica", replica);
   const dataDir = targetCluster.dataDir;
   const user = config?.PG_REPLICATION_USER ?? "pg_replicator";
-  const password = config?.PG_REPLICATION_PASSWORD ?? "";
   const slot = slotName(replica);
-  const pgpassEntry = `${pgpassField(primaryIp)}:${primaryPort}:*:${pgpassField(user)}:${pgpassField(password)}`;
   const autoConf = `${dataDir}/postgresql.auto.conf`;
   return [
-    `install -d -m 0700 -o postgres -g postgres /var/lib/postgresql && (umask 077 && printf '%s\n' ${shellQuote(pgpassEntry)} > /var/lib/postgresql/.pgpass) && chown postgres:postgres /var/lib/postgresql/.pgpass && chmod 0600 /var/lib/postgresql/.pgpass`,
+    // The .pgpass (replication password) is streamed over stdin by
+    // provisionPostgres18 (writeRemoteFile); it never appears in argv (GAP-028).
+    `install -d -m 0700 -o postgres -g postgres /var/lib/postgresql && test -s /var/lib/postgresql/.pgpass && chown postgres:postgres /var/lib/postgresql/.pgpass && chmod 0600 /var/lib/postgresql/.pgpass`,
     // The cluster was created so Debian owns its config and systemd unit; the
     // base backup then replaces the empty data directory with the primary's.
     // Destructive rebuild guard: a replica that already holds a cluster (PG_VERSION)
@@ -302,7 +334,7 @@ export const replicaCommands = (
     `if [ -s ${shellQuote(`${dataDir}/PG_VERSION`)} ] && [ -f ${shellQuote(`${dataDir}/standby.signal`)} ] && [ ${config?.PG_REPLICA_REBUILD ? "0" : "1"} -eq 1 ]; then echo "replica ${slot} already initialised; skipping rebuild (set PG_REPLICA_REBUILD=true to re-clone)"; systemctl start ${targetCluster.service} || true; exit 0; fi
 systemctl stop ${targetCluster.service} || true
 rm -rf ${shellQuote(dataDir)}/*
-runuser -u postgres -- env PGPASSFILE=/var/lib/postgresql/.pgpass pg_basebackup -h ${shellQuote(primaryIp)} -p ${primaryPort} -U ${shellQuote(user)} -D ${shellQuote(dataDir)} -Fp -Xs -P -R -S ${shellQuote(slot)}`,
+runuser -u postgres -- env PGPASSFILE=/var/lib/postgresql/.pgpass PGSSLMODE=require pg_basebackup -h ${shellQuote(primaryIp)} -p ${primaryPort} -U ${shellQuote(user)} -D ${shellQuote(dataDir)} -Fp -Xs -P -R -S ${shellQuote(slot)}`,
     `rm -f ${dataDir}/postgresql.conf ${dataDir}/pg_hba.conf && ln -sfn /etc/postgresql/${config?.PG_VERSION ?? "18"}/${targetCluster.name}/postgresql.conf ${dataDir}/postgresql.conf && ln -sfn /etc/postgresql/${config?.PG_VERSION ?? "18"}/${targetCluster.name}/pg_hba.conf ${dataDir}/pg_hba.conf`,
     `touch ${autoConf} && if grep -q '^primary_slot_name' ${autoConf}; then sed -i "s|^primary_slot_name = .*|primary_slot_name = '${slot}'|" ${autoConf}; else printf "primary_slot_name = '%s'\n" ${shellQuote(slot)} >> ${autoConf}; fi && chown -R postgres:postgres ${dataDir}`,
     `systemctl start ${targetCluster.service}`,
@@ -322,7 +354,7 @@ ${assertSingleLine(config.PG_DB_NAME, "PG_DB_NAME")} = host=127.0.0.1 port=${ser
 listen_addr = 0.0.0.0
 listen_port = ${config.PGBOUNCER_PORT}
 pool_mode = transaction
-server_tls_sslmode = prefer
+server_tls_sslmode = require
 max_client_conn = ${config.PGBOUNCER_MAX_CLIENT_CONN}
 default_pool_size = ${config.PGBOUNCER_DEFAULT_POOL_SIZE}
 reserve_pool_size = 10
@@ -362,7 +394,10 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
     commands.push(command);
     runner.run(primarySsh, command, { sudo: true });
   }
-  const snippet = postgresConfigSnippet(config);
+  for (const command of pgTlsCommands(primaryCluster, primaryIp)) {
+    commands.push(command);
+    runner.run(primarySsh, command, { sudo: true });
+  }
   write(runner, primarySsh, postgresMainConfigPath(config, primaryCluster), postgresMainConfigSnippet(config, primaryCluster, primaryIp), 0o644);
   const replicaRefs = replicas;
   const primaryAllowed = [
@@ -415,6 +450,10 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
       commands.push(command);
       runner.run(replicaSsh, command, { sudo: true });
     }
+    for (const command of pgTlsCommands(replicaCluster, replicaIp)) {
+      commands.push(command);
+      runner.run(replicaSsh, command, { sudo: true });
+    }
     write(runner, replicaSsh, postgresMainConfigPath(config, replicaCluster), postgresMainConfigSnippet(config, replicaCluster, replicaIp), 0o644);
     write(
       runner,
@@ -427,6 +466,8 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
       0o640,
     );
     runner.run(replicaSsh, `chown postgres:postgres ${replicaCluster.hbaPath} && chmod 0640 ${replicaCluster.hbaPath}`, { sudo: true });
+    runner.run(replicaSsh, "install -d -m 0700 -o postgres -g postgres /var/lib/postgresql", { sudo: true });
+    write(runner, replicaSsh, "/var/lib/postgresql/.pgpass", replicaPgpassContent(primary, config), 0o600);
     for (const command of replicaCommands(primary, replica, config, replicaCluster)) {
       commands.push(command);
       runner.run(replicaSsh, command, { sudo: true });

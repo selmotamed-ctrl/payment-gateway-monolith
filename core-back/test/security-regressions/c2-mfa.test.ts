@@ -20,6 +20,7 @@ import {
   recordMfaFailure,
   resetAuthThrottles,
 } from "../../lib/auth/throttle";
+import { MemoryAuthStateStore, setAuthStateStore } from "../../lib/auth/sharedState";
 import { createFakePrisma, fakeTable, resetFakeDatabase } from "../helpers/fakePrisma";
 
 /** The fake assigns sequential ids; challenge ids are UUIDs, as in the database. */
@@ -58,7 +59,7 @@ describe("C2 MFA challenge is server-side, single-use and bounded", () => {
   let store: MfaStore;
   beforeEach(() => {
     resetFakeDatabase();
-    resetAuthThrottles();
+    setAuthStateStore(new MemoryAuthStateStore());
     store = buildStore();
   });
 
@@ -153,27 +154,39 @@ describe("C2 MFA challenge is server-side, single-use and bounded", () => {
 });
 
 describe("C2 login and MFA throttling", () => {
-  beforeEach(() => resetAuthThrottles());
+  beforeEach(async () => {
+    setAuthStateStore(new MemoryAuthStateStore());
+    await resetAuthThrottles();
+  });
 
-  test("repeated failures lock the identifier, a success clears the counter", () => {
-    for (let i = 0; i < 4; i += 1) recordLoginFailure("Alice@Example.com", "10.0.0.9");
-    expect(() => assertLoginAllowed("alice@example.com", "10.0.0.9")).not.toThrow();
-    recordLoginSuccess("alice@example.com");
-    for (let i = 0; i < 5; i += 1) recordLoginFailure("alice@example.com", "10.0.0.9");
-    expect(() => assertLoginAllowed("ALICE@example.com", "10.0.0.50")).toThrow();
+  test("repeated failures lock the identifier, a success clears the counter", async () => {
+    for (let i = 0; i < 4; i += 1) await recordLoginFailure("Alice@Example.com", "10.0.0.9");
+    await expect(assertLoginAllowed("alice@example.com", "10.0.0.9")).resolves.toBeUndefined();
+    await recordLoginSuccess("alice@example.com");
+    for (let i = 0; i < 5; i += 1) await recordLoginFailure("alice@example.com", "10.0.0.9");
+    await expect(assertLoginAllowed("ALICE@example.com", "10.0.0.50")).rejects.toThrow();
     // Another identifier from another address is not affected.
-    expect(() => assertLoginAllowed("bob@example.com", "10.0.0.50")).not.toThrow();
+    await expect(assertLoginAllowed("bob@example.com", "10.0.0.50")).resolves.toBeUndefined();
   });
 
-  test("one address spraying many identifiers is throttled", () => {
-    for (let i = 0; i < 30; i += 1) recordLoginFailure(`user-${i}@example.com`, "203.0.113.7");
-    expect(() => assertLoginAllowed("fresh@example.com", "203.0.113.7")).toThrow();
+  test("one address spraying many identifiers is throttled", async () => {
+    for (let i = 0; i < 30; i += 1) await recordLoginFailure(`user-${i}@example.com`, "203.0.113.7");
+    await expect(assertLoginAllowed("fresh@example.com", "203.0.113.7")).rejects.toThrow();
   });
 
-  test("MFA failures per address are throttled", () => {
-    for (let i = 0; i < 20; i += 1) recordMfaFailure("198.51.100.4");
-    expect(() => assertMfaAllowed("198.51.100.4")).toThrow();
-    expect(() => assertMfaAllowed("198.51.100.5")).not.toThrow();
+  test("MFA failures per address are throttled", async () => {
+    for (let i = 0; i < 20; i += 1) await recordMfaFailure("198.51.100.4");
+    await expect(assertMfaAllowed("198.51.100.4")).rejects.toThrow();
+    await expect(assertMfaAllowed("198.51.100.5")).resolves.toBeUndefined();
+  });
+
+  test("counters are shared through the store (a second instance sees the same lock)", async () => {
+    // GAP-027: another core instance backed by the same shared store honours the lock.
+    const shared = new MemoryAuthStateStore();
+    setAuthStateStore(shared);
+    for (let i = 0; i < 5; i += 1) await recordLoginFailure("carol@example.com", null);
+    setAuthStateStore(shared);
+    await expect(assertLoginAllowed("carol@example.com", null)).rejects.toThrow();
   });
 
   test("an unknown user is compared against a dummy hash and never verifies", async () => {

@@ -112,11 +112,10 @@ describe("D1 postgres18Provisioner quoting", () => {
     const cmds = replicaCommands("10.10.10.10:5432", "10.10.10.11:5432", cfg);
     const syntax = spawnSync("bash", ["-n"], { input: cmds.join("\n"), encoding: "utf8", cwd: dir });
     expect(syntax.status).toBe(0);
-    const m = cmds[0]!.match(/\(umask 077 && (printf '%s[\s\S]*? > )\/var\/lib\/postgresql\/\.pgpass\)/);
-    expect(m).not.toBeNull();
-    sh(`${m![1]}./pgpass_out`, dir);
+    // GAP-028: the password never appears in any command (argv); it travels over stdin as a file.
+    expect(cmds.join("\n")).not.toContain(payload);
+    expect(cmds.join("\n")).not.toContain("printf '%s");
     expect(existsSync(path.join(dir, "MARKER_D1"))).toBe(false);
-    expect(readFileSync(path.join(dir, "pgpass_out"), "utf8")).toContain(payload);
     // The password is read from the 0600 .pgpass, not exposed through PGPASSWORD.
     expect(cmds.join("\n")).not.toContain("PGPASSWORD");
   });

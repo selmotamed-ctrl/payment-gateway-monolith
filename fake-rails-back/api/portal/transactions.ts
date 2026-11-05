@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { issueSseTicket, SSE_TICKET_TTL_SECONDS } from "../../lib/tickets";
 import { z } from "zod";
 import {
   findTransactionAnyReference,
@@ -40,6 +41,11 @@ export const createTransactionsRouter = (): Router => {
       offset: query.offset ? Number(query.offset) : 0,
     });
     response.json({ total: result.total, rows: result.rows });
+  });
+
+  /** Issues the single-use ticket EventSource presents in the query string. */
+  router.post("/stream-ticket", (request, response) => {
+    response.json({ ticket: issueSseTicket(String(request.tester?.sub ?? "tester")), expiresInSeconds: SSE_TICKET_TTL_SECONDS });
   });
 
   router.get("/stream", (request, response) => {

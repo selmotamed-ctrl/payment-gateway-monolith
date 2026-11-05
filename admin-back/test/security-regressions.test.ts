@@ -19,7 +19,7 @@ const forge = (
   header: Record<string, unknown> = { alg: "none", typ: "JWT" },
   signature = "",
 ) => `${b64(header)}.${b64(payload)}.${signature}`;
-const basePayload = { typ: "session", iss: "payment-gateway-core", aud: "payment-gateway-edge", sub: "attacker" };
+const basePayload = { typ: "session", iss: "payment-gateway-core", aud: "payment-gateway-admin", sub: "attacker" };
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 const runGuard = (guard: ReturnType<typeof requireAuthorities>, authorization?: string) => {

@@ -50,6 +50,11 @@ const OPEN_CASE_STATUSES = ["OPEN", "IN_REVIEW", "PENDING_CHECKER", "FROZEN", "E
 const DEFAULT_RESCREEN_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export class PeriodicScreeningWorker extends BaseWorker {
+  /** Cluster singleton: only the advisory-lock leader ticks (GAP-012). */
+  protected override get singleton(): boolean {
+    return true;
+  }
+
   private readonly screening: ScreeningProvider;
   private readonly rescreenIntervalMs: number;
   private readonly screenBatchSize: number;

@@ -10,7 +10,7 @@ import { createHmac } from "node:crypto";
  * so the test key is irrelevant: what matters is the claim shape.
  */
 const SESSION_ISSUER = "payment-gateway-core";
-const SESSION_AUDIENCE = "payment-gateway-edge";
+const SESSION_AUDIENCE = "payment-gateway-admin";
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
 const SESSION_SIGNING_KEY = "admin-back-test-session-key";
 

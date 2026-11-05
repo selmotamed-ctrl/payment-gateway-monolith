@@ -317,7 +317,7 @@ export class StatementIngestor {
         return this.resultFromExistingRun(run.id, fileHash);
       }
     } else {
-      const existing = await this.repositories.reconciliation.findRunByFileHash(this.db as Tx, fileHash);
+      const existing = await this.repositories.reconciliation.findRunByFileHash(this.db as Tx, fileHash, source.id);
       if (existing) {
         return this.resultFromExistingRun(existing.id, fileHash);
       }
@@ -373,7 +373,7 @@ export class StatementIngestor {
 
     let run = request.runId
       ? await this.repositories.reconciliation.findRunById(tx, request.runId)
-      : await this.repositories.reconciliation.findRunByFileHash(tx, fileHash);
+      : await this.repositories.reconciliation.findRunByFileHash(tx, fileHash, source.id);
     if (request.runId) {
       if (!run) {
         throw new ApiError(404, "RECONCILIATION_RUN_NOT_FOUND", "The reconciliation run does not exist");
@@ -551,7 +551,7 @@ export class StatementIngestor {
   }
 
   private async resultFromExistingRun(runId: string, fileHash: string): Promise<IngestResult> {
-    const run = await this.repositories.reconciliation.findRunByFileHash(this.db as Tx, fileHash);
+    const run = await this.repositories.reconciliation.findRunById(this.db as Tx, runId);
     const items = await this.repositories.reconciliation.listItemsByRun(this.db as Tx, runId);
     const stats = asRecord(run?.statsJson);
     return {

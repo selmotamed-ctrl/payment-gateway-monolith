@@ -159,7 +159,7 @@ describe("PostgreSQL 18 provisioner", () => {
     expect(ini).toContain("listen_addr = 0.0.0.0");
     expect(ini).toContain("listen_port = 6432");
     expect(ini).toContain("pool_mode = transaction");
-    expect(ini).toContain("server_tls_sslmode = prefer");
+    expect(ini).toContain("server_tls_sslmode = require");
     expect(ini).toContain("max_client_conn = 2000");
     expect(ini).toContain("default_pool_size = 50");
     expect(ini).toContain("reserve_pool_size = 10");
@@ -295,7 +295,8 @@ describe("Backup engine provisioner", () => {
     expect(unit).toContain("WorkingDirectory=/opt/pg-backup-daemon");
     expect(unit).toContain("ExecStart=/usr/local/bin/bun run src/index.ts");
     expect(unit).toContain("EnvironmentFile=/etc/pg-backup/backup.env");
-    expect(unit).toContain("User=postgres");
+    expect(unit).toContain("User=pgbackup");
+    expect(unit).not.toContain("User=postgres");
     expect(unit).toContain("ReadWritePaths=/var/lib/pg-backup /var/log/pg-backup");
     expect(backupCronEntries(cfg)).toEqual([]);
     expect(backupCronFile(cfg)).toContain("scheduler");

@@ -1,6 +1,5 @@
 import { Prisma, type PrismaClient } from "../../generated/prisma/client";
 import { Pool } from "pg";
-import { createClientForUrl } from "../../prisma/client/base";
 import { env } from "../env";
 import { parsePostgresUrlList } from "../db/connectionConfig";
 import {
@@ -17,7 +16,14 @@ import type {
   CachePort,
 } from "./ports";
 import { PostgresReplicaReadStore, type ReplicaNodeHandle } from "./readStoreAdapter";
-import { MemoryCacheAdapter, RedisCacheAdapter } from "./redisCacheAndVelocityAdapter";
+import {
+  MemoryCacheAdapter,
+  RedisCacheAdapter,
+  parseVelocityFailurePolicy,
+  type VelocityFailurePolicy,
+} from "./redisCacheAndVelocityAdapter";
+import { PgAdvisoryLeaderElection, type LeaderElectionPort } from "./leaderElection";
+import { createUtcPinnedClient, pinUtcInConnectionUrl } from "./utcSession";
 import { PostgresUnitOfWorkAdapter } from "./uowAdapter";
 import { recordReadSource } from "./telemetry";
 
@@ -32,6 +38,13 @@ export interface StorageEngineOptions {
   logFlushIntervalMs?: number;
   cache?: CachePort;
   onAfterCommit?: () => void;
+  /**
+   * Redis velocity failure policy (GAP-031): "local-fallback" (default),
+   * "fail-open" or "fail-closed". Defaults to REDIS_VELOCITY_FAILURE_POLICY.
+   */
+  velocityFailurePolicy?: VelocityFailurePolicy;
+  /** Replaces the advisory-lock leader election (tests). false disables it. */
+  leaderElection?: LeaderElectionPort | false;
 }
 
 const withTimeout = async <T>(work: Promise<T>, timeoutMs: number): Promise<T> => {
@@ -70,10 +83,11 @@ export const createStorageEngine = (options: StorageEngineOptions = {}): Storage
       ? env.REDIS_URL ?? (firstRedisNode ? `redis://${firstRedisNode}` : null)
       : options.redisUrl;
 
-  const primary = createClientForUrl(primaryUrl);
+  // Every connection is pinned to timezone=UTC (GAP-030).
+  const primary = createUtcPinnedClient(primaryUrl);
   const replicas: ReplicaNodeHandle[] = replicaUrls.map((url, index) => ({
     id: `replica-${index + 1}`,
-    client: createClientForUrl(url),
+    client: createUtcPinnedClient(url),
     healthy: true,
     lastReplayLsn: "0/0",
     lagMs: 0,
@@ -95,24 +109,34 @@ export const createStorageEngine = (options: StorageEngineOptions = {}): Storage
   const cache: CachePort =
     options.cache ??
     (redisUrl
-      ? new RedisCacheAdapter({ url: redisUrl })
+      ? new RedisCacheAdapter({
+          url: redisUrl,
+          velocityFailurePolicy: parseVelocityFailurePolicy(
+            options.velocityFailurePolicy ?? process.env.REDIS_VELOCITY_FAILURE_POLICY,
+          ),
+        })
       : new MemoryCacheAdapter());
 
   const auditPool = auditDatabaseUrl
-    ? new Pool({ connectionString: auditDatabaseUrl, max: 5 })
+    ? new Pool({ connectionString: pinUtcInConnectionUrl(auditDatabaseUrl), max: 5 })
     : null;
   const auditStore: AuditStorePort | null = auditPool
     ? new DedicatedAuditDatabaseDriver(auditPool)
     : null;
 
   const logPool = logDatabaseUrl
-    ? new Pool({ connectionString: logDatabaseUrl, max: 5 })
+    ? new Pool({ connectionString: pinUtcInConnectionUrl(logDatabaseUrl), max: 5 })
     : null;
   const logSink: LogSinkPort = new DedicatedPostgresLogSink(
     logPool,
     options.logBufferMax ?? env.STORAGE_LOG_BUFFER_MAX,
     options.logFlushIntervalMs ?? env.STORAGE_LOG_FLUSH_INTERVAL_MS,
   );
+
+  const leaderElection: LeaderElectionPort | undefined =
+    options.leaderElection === false
+      ? undefined
+      : options.leaderElection ?? new PgAdvisoryLeaderElection({ connectionString: primaryUrl });
 
   const engine: StorageEngine = {
     uow,
@@ -121,6 +145,7 @@ export const createStorageEngine = (options: StorageEngineOptions = {}): Storage
     auditStore,
     logSink,
     primary,
+    leaderElection,
     async health(): Promise<StorageHealth> {
       const started = performance.now();
       let primaryOk = false;
@@ -200,6 +225,7 @@ export const createStorageEngine = (options: StorageEngineOptions = {}): Storage
       readStore.stopLsnMonitor?.();
       await logSink.close?.();
       await cache.close?.();
+      await leaderElection?.close().catch(() => undefined);
       await Promise.allSettled([
         primary.$disconnect(),
         ...replicas.map((replica) => replica.client.$disconnect()),
@@ -305,7 +331,15 @@ export * from "./shardBalances";
 export * from "./uuid";
 export { PostgresUnitOfWorkAdapter } from "./uowAdapter";
 export { PostgresReplicaReadStore } from "./readStoreAdapter";
-export { MemoryCacheAdapter, RedisCacheAdapter } from "./redisCacheAndVelocityAdapter";
+export {
+  MemoryCacheAdapter,
+  RedisCacheAdapter,
+  VelocityUnavailableError,
+  parseVelocityFailurePolicy,
+  type VelocityFailurePolicy,
+} from "./redisCacheAndVelocityAdapter";
+export { PgAdvisoryLeaderElection, type LeaderElectionPort } from "./leaderElection";
+export { createUtcPinnedClient, pinUtcInConnectionUrl, readSessionTimeZone } from "./utcSession";
 export {
   DedicatedAuditDatabaseDriver,
   DedicatedPostgresLogSink,

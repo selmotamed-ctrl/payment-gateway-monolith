@@ -162,6 +162,11 @@ export interface RetentionWorkerDeps extends WorkerOptions {
  * what it would purge and deletes nothing.
  */
 export class RetentionWorker extends BaseWorker {
+  /** Cluster singleton: only the advisory-lock leader ticks (GAP-012). */
+  protected override get singleton(): boolean {
+    return true;
+  }
+
   private readonly retentionDaysOverride: number | undefined;
   private readonly dryRun: boolean;
 
@@ -298,6 +303,12 @@ export class RetentionWorker extends BaseWorker {
         const ids = await this.selectIds(tx, selectSql, [...table.params, this.batchSize]);
         if (ids.length === 0) {
           return { purged: 0, drained: true };
+        }
+        if (table.table === "audit_log") {
+          // audit_log is append-only (GAP-013). The retention purge is the one
+          // sanctioned DELETE: the trigger accepts it only inside a
+          // transaction that declares it (transaction-local, never session).
+          await tx.$queryRawUnsafe("SELECT set_config('pgw.audit_retention', 'on', true)");
         }
         const affected = Number(
           await tx.$executeRawUnsafe(

@@ -14,6 +14,11 @@ export interface LedgerInvariantWorkerDeps extends WorkerOptions {
  * the system wide drift becomes non zero.
  */
 export class LedgerInvariantWorker extends BaseWorker {
+  /** Cluster singleton: only the advisory-lock leader ticks (GAP-012). */
+  protected override get singleton(): boolean {
+    return true;
+  }
+
   private readonly onDrift: ((drift: string) => void) | undefined;
 
   constructor(deps: LedgerInvariantWorkerDeps) {

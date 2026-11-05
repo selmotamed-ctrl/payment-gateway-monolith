@@ -1,6 +1,7 @@
 import { Decimal } from "decimal.js";
 import { ApiError } from "../../lib/error";
 import { lockWalletLedgerBalance } from "../../lib/cashoutBalance";
+import { payoutAccountHash } from "../../lib/joinRequestOnboarding";
 import { nextKybReviewAt, parseKybRefreshPolicy } from "../../lib/kybReview";
 import {
   MERCHANT_CLOSE_REASON_CODES,
@@ -937,6 +938,21 @@ export async function executeMerchantPatch(
       idempotent: true,
     };
   }
+  if (touched.has("payoutBankDetailsJson")) {
+    // GAP-017: a payout-account change reaches this point only through the
+    // maker-checker merchant edit. The KYB hash that binds cash-out destinations
+    // is re-derived from the approved account, and an account that yields no
+    // hash (removed or incomplete) is refused instead of silently unbinding.
+    const hash = payoutAccountHash(data.payoutBankDetailsJson);
+    if (!hash) {
+      throw new ApiError(
+        422,
+        "PAYOUT_ACCOUNT_HASH_REQUIRED",
+        "The payout account must include a bank and an account number or IBAN",
+      );
+    }
+    data.payoutAccountHash = hash;
+  }
   data.version = merchantVersion(merchant) + 1;
   await merchants.update({ where: { id: input.merchantId }, data });
 
@@ -1324,9 +1340,18 @@ const resolveAmlHoldAmounts = async (
   tx: Tx,
   amlCase: any,
   attempt: any,
-): Promise<{ amount: Decimal; commission: Decimal; merchantAmount: Decimal }> => {
+  options: { requireEscrow?: boolean } = {},
+): Promise<{ amount: Decimal; commission: Decimal; merchantAmount: Decimal; escrowed: boolean }> => {
   let held = new Decimal(0);
-  const holdEntryId = amlCase.holdJournalEntryId ? String(amlCase.holdJournalEntryId) : null;
+  // GAP-015: the escrow is booked when the gateway capture is verified, so it
+  // is looked up by the attempt when the case does not point at it.
+  let holdEntryId = amlCase.holdJournalEntryId ? String(amlCase.holdJournalEntryId) : null;
+  if (!holdEntryId && attempt?.id) {
+    const entry = await modelOf(tx, "journalEntry").findFirst({
+      where: { refType: "PAYMENT_ATTEMPT", refId: String(attempt.id) },
+    });
+    holdEntryId = entry?.id ? String(entry.id) : null;
+  }
   if (holdEntryId) {
     const glAccounts = modelOf(tx, "glAccount");
     const journalLines = modelOf(tx, "journalLine");
@@ -1339,6 +1364,13 @@ const resolveAmlHoldAmounts = async (
       }
     }
   }
+  if (options.requireEscrow && !held.gt(0)) {
+    throw new ApiError(
+      409,
+      "AML_HOLD_CAPTURE_NOT_VERIFIED",
+      "The held payment has no verified gateway capture (no AML_HOLD escrow), so it cannot be released",
+    );
+  }
   const amount = held.gt(0) ? held : toDecimal(attempt?.totalChargedAmount);
   if (!amount.gt(0)) {
     throw new ApiError(409, "AML_HOLD_AMOUNT_UNRESOLVED", "The held amount of the AML case could not be resolved");
@@ -1348,7 +1380,7 @@ const resolveAmlHoldAmounts = async (
   if (merchantAmount.lt(0)) {
     throw new ApiError(409, "AML_HOLD_AMOUNT_INCONSISTENT", "The platform commission exceeds the held amount");
   }
-  return { amount, commission, merchantAmount };
+  return { amount, commission, merchantAmount, escrowed: held.gt(0) };
 };
 
 const linkCountOf = (row: any, camel: string, snake: string, fallback = 0): number => {
@@ -1546,7 +1578,7 @@ export async function executeAmlCaseResolution(
   } else if (merchantDirect) {
     postingReason = "CASE_ONLY_NO_POSTING";
   } else {
-    const amounts = await resolveAmlHoldAmounts(tx, amlCase, attempt);
+    const amounts = await resolveAmlHoldAmounts(tx, amlCase, attempt, { requireEscrow: action === "RELEASE" });
     const merchantId = attempt?.merchantId ? String(attempt.merchantId) : null;
     if (!merchantId) {
       throw new ApiError(
@@ -1555,27 +1587,32 @@ export async function executeAmlCaseResolution(
         "The merchant of the held payment could not be resolved, so the hold cannot be released",
       );
     }
-    const refId = attempt ? String(attempt.id) : String(amlCase.id);
-    const journal: JournalTemplate = action === "RELEASE"
-      ? buildLedgerTemplate("AML_HOLD_AND_RELEASE", {
-        amount: amounts.amount,
-        commissionAmount: amounts.commission,
-        merchantAmount: amounts.merchantAmount,
-        stage: "RELEASE",
-      })
-      : buildLedgerTemplate("AML_VOID", {
-        amount: amounts.amount,
-        commissionAmount: amounts.commission,
-        merchantAmount: amounts.merchantAmount,
-      });
-    journal.refId = refId;
-    const posted = await ctx.ledgerPoster.post(
-      journal,
-      await walletLedgerContext(tx, merchantId),
-      tx as never,
-    );
-    journalEntryId = posted.entry.id;
-    template = action === "RELEASE" ? "AML_HOLD_AND_RELEASE" : "AML_VOID";
+    if (action === "REJECT" && !amounts.escrowed) {
+      // Nothing was captured at the gateway, so there is no escrow to void.
+      postingReason = "NO_CAPTURE_NOTHING_TO_VOID";
+    } else {
+      const refId = attempt ? String(attempt.id) : String(amlCase.id);
+      const journal: JournalTemplate = action === "RELEASE"
+        ? buildLedgerTemplate("AML_HOLD_AND_RELEASE", {
+          amount: amounts.amount,
+          commissionAmount: amounts.commission,
+          merchantAmount: amounts.merchantAmount,
+          stage: "RELEASE",
+        })
+        : buildLedgerTemplate("AML_VOID", {
+          amount: amounts.amount,
+          commissionAmount: amounts.commission,
+          merchantAmount: amounts.merchantAmount,
+        });
+      journal.refId = refId;
+      const posted = await ctx.ledgerPoster.post(
+        journal,
+        await walletLedgerContext(tx, merchantId),
+        tx as never,
+      );
+      journalEntryId = posted.entry.id;
+      template = action === "RELEASE" ? "AML_HOLD_AND_RELEASE" : "AML_VOID";
+    }
   }
 
   await amlCases.update({

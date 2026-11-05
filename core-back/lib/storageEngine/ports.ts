@@ -1,3 +1,4 @@
+import type { LeaderElectionPort } from "./leaderElection";
 import type { Prisma, PrismaClient } from "../../generated/prisma/client";
 
 export type ReadConsistency =
@@ -101,6 +102,8 @@ export interface VelocityEvaluationResult {
   violatedRuleIds: string[];
   flaggedRuleIds: string[];
   windowStats: Record<string, { count: number; amountMinor: bigint }>;
+  /** True when the Redis counter failed and the result is degraded (see VelocityFailurePolicy). */
+  degraded?: boolean;
 }
 
 export interface CachePort {
@@ -219,6 +222,8 @@ export interface StorageEngine {
   auditStore: AuditStorePort | null;
   logSink: LogSinkPort;
   primary: PrismaClient;
+  /** Advisory-lock leader election for singleton workers (absent on test doubles). */
+  leaderElection?: LeaderElectionPort;
   health(): Promise<StorageHealth>;
   shutdown(): Promise<void>;
 }

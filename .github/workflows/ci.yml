@@ -1,0 +1,71 @@
+name: CI
+
+# GAP-014: the AGENTS.md verification gate, run on every push and PR.
+# Suites that need PostgreSQL 18 + Redis skip themselves when those services
+# are absent; bun reports the skips.
+on:
+  push:
+    branches: [main, ayoub]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  design:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun scripts/project-design/build.ts --check
+
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace:
+          - core-back
+          - deploy
+          - deploy/backup-daemon
+          - admin-back
+          - merchant-back
+          - checkout-back
+          - fake-rails-back
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install (frozen lockfile)
+        working-directory: ${{ matrix.workspace }}
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        working-directory: ${{ matrix.workspace }}
+        run: bun run typecheck
+      - name: Test
+        working-directory: ${{ matrix.workspace }}
+        run: bun test
+
+  frontend:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace:
+          - admin-front
+          - merchant-front
+          - checkout-front
+          - fake-rails-front
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install (frozen lockfile)
+        working-directory: ${{ matrix.workspace }}
+        run: bun install --frozen-lockfile
+      - name: Build
+        working-directory: ${{ matrix.workspace }}
+        run: bun run build

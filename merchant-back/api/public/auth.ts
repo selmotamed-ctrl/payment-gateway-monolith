@@ -13,6 +13,7 @@ import {
   coreRegisterSchema,
   coreVerifyIdentitySchema,
 } from "../contract";
+import { captureSessionToken, logoutHandler } from "../../lib/security/sessionCookie";
 import { coreForward } from "../forward";
 
 const router = express.Router();
@@ -147,8 +148,11 @@ router.post(
   }),
 );
 
+router.post("/logout", logoutHandler);
+
 router.post(
   "/login",
+  captureSessionToken,
   coreForward({
     method: "POST",
     path: () => "/internal/merchant/auth/login",
@@ -180,6 +184,7 @@ router.get(
 
 router.post(
   "/mfa/verify",
+  captureSessionToken,
   coreForward({
     method: "POST",
     path: () => "/internal/merchant/auth/mfa/verify",

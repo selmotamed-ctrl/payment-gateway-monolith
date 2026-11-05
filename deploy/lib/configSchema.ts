@@ -1022,9 +1022,48 @@ export interface ConfigLoadResult {
   problems: string[];
 }
 
+/** Luhn mod-10 check for a digit string. */
+const luhnValid = (digits: string): boolean => {
+  let sum = 0;
+  let double = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = digits.charCodeAt(i) - 48;
+    if (double) { d *= 2; if (d > 9) d -= 9; }
+    sum += d;
+    double = !double;
+  }
+  return sum % 10 === 0;
+};
+
+/** True when the text contains a standalone Luhn-valid 13-19 digit run (card PAN shape). */
+export const looksLikeCardPan = (text: string): boolean => {
+  for (const match of text.matchAll(/(?<![\w-])\d(?:[ -]?\d){12,18}(?![\w-])/g)) {
+    const digits = match[0].replace(/[ -]/g, "");
+    if (digits.length >= 13 && digits.length <= 19 && luhnValid(digits)) return true;
+  }
+  return false;
+};
+
+const PAN_KEY = /(^|_)(PAN|CVV|CVV2|CVC|CVC2|CARD_NUMBER|CARD_NO|PAN_RAIL|PAN_RAILS|CARD_RAIL|CARD_RAILS)(_|$)/;
+
+/**
+ * GAP-026 PAN-rail guard: the gateway is out of PCI cardholder-data scope
+ * (docs/pci-scope.md). Deploy config must not carry PAN rails or card data.
+ */
+export const panRailGuardProblems = (env: Record<string, string>): string[] => {
+  const problems: string[] = [];
+  for (const [key, value] of Object.entries(env)) {
+    if (PAN_KEY.test(key)) problems.push(`PAN_RAIL_GUARD: ${key} is refused: card PAN/CVV rails are out of PCI scope (docs/pci-scope.md)`);
+    else if (looksLikeCardPan(value)) problems.push(`PAN_RAIL_GUARD: ${key} holds card-PAN-shaped data (Luhn-valid 13-19 digits); refused`);
+  }
+  return problems;
+};
+
 /** Parses and validates a `deploy.env` source. */
 export const loadDeployConfig = (source: string): ConfigLoadResult => {
   const env = parseDeployEnv(source);
+  const panProblems = panRailGuardProblems(env);
+  if (panProblems.length > 0) return { ok: false, problems: panProblems };
   const parsed = base.safeParse(env);
   if (!parsed.success) {
     return {

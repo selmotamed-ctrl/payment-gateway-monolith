@@ -39,6 +39,42 @@ if maxAmount >= 0 and sum > maxAmount then amountViolation = 1 end
 return {count, sum, countViolation, amountViolation}
 `;
 
+/**
+ * What the Redis velocity counter does when Redis is unreachable, errors or
+ * exceeds the command timeout (GAP-031).
+ *
+ *  - "local-fallback" (DEFAULT): fail open, degraded. The window is counted in
+ *    this node's memory, so limits are still enforced but per node (a cluster
+ *    of N nodes tolerates up to N times the limit) and are lost on restart.
+ *    Velocity is a risk signal, not a ledger invariant, so an outage must not
+ *    stop payments.
+ *  - "fail-open": allow without counting (windowStats empty).
+ *  - "fail-closed": throw VelocityUnavailableError so the caller refuses the
+ *    attempt. Use only when a missed limit is worse than an outage.
+ */
+export type VelocityFailurePolicy = "local-fallback" | "fail-open" | "fail-closed";
+
+export const VELOCITY_FAILURE_POLICIES: readonly VelocityFailurePolicy[] = [
+  "local-fallback",
+  "fail-open",
+  "fail-closed",
+];
+
+export const parseVelocityFailurePolicy = (raw: string | undefined | null): VelocityFailurePolicy => {
+  const value = (raw ?? "").trim().toLowerCase();
+  return (VELOCITY_FAILURE_POLICIES as readonly string[]).includes(value)
+    ? (value as VelocityFailurePolicy)
+    : "local-fallback";
+};
+
+export class VelocityUnavailableError extends Error {
+  readonly code = "VELOCITY_STORE_UNAVAILABLE";
+  constructor(cause?: unknown) {
+    super(`Velocity store unavailable (fail-closed policy): ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = "VelocityUnavailableError";
+  }
+}
+
 export class MemoryCacheAdapter implements CachePort {
   private readonly entries = new Map<string, CacheEntry>();
   private readonly windows = new Map<string, WindowEntry[]>();
@@ -162,6 +198,12 @@ type RedisClientLike = {
 export interface RedisCacheOptions {
   url: string;
   keyPrefix?: string;
+  /** Behaviour when Redis fails for a velocity check. Default "local-fallback". */
+  velocityFailurePolicy?: VelocityFailurePolicy;
+  /** Per-command budget for the velocity script, so a hung Redis cannot stall payments. Default 250 ms. */
+  velocityCommandTimeoutMs?: number;
+  /** Called on every degraded velocity evaluation (metrics / logging hook). */
+  onVelocityDegraded?: (info: { policy: VelocityFailurePolicy; error: unknown }) => void;
   clientFactory?: (url: string) => RedisClientLike;
 }
 
@@ -169,14 +211,48 @@ export class RedisCacheAdapter implements CachePort {
   private readonly l1 = new MemoryCacheAdapter();
   private readonly inFlight = new Map<string, Promise<unknown>>();
   private readonly keyPrefix: string;
-  private readonly scriptShaPromise: Promise<string>;
+  private scriptShaPromise: Promise<string> | null = null;
+  private readonly velocityPolicy: VelocityFailurePolicy;
+  private readonly velocityTimeoutMs: number;
+  private degradedVelocityCount = 0;
   private sequence = 0;
   private clientPromise: Promise<RedisClientLike> | null = null;
 
   constructor(private readonly options: RedisCacheOptions) {
     this.keyPrefix = options.keyPrefix ?? "pgcache:";
-    const client = this.client();
-    this.scriptShaPromise = client.then((instance) => instance.scriptLoad(VELOCITY_LUA_SCRIPT));
+    this.velocityPolicy = options.velocityFailurePolicy ?? "local-fallback";
+    this.velocityTimeoutMs = options.velocityCommandTimeoutMs ?? 250;
+    // Connect eagerly, but a failure must not become an unhandled rejection:
+    // every operation re-awaits the client and handles its own failure.
+    this.client().catch(() => undefined);
+  }
+
+  /** How many velocity evaluations ran degraded since start (observability). */
+  get degradedVelocityEvaluations(): number {
+    return this.degradedVelocityCount;
+  }
+
+  private withVelocityTimeout<T>(work: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`VELOCITY_TIMEOUT after ${this.velocityTimeoutMs}ms`)), this.velocityTimeoutMs);
+        (timer as { unref?: () => void }).unref?.();
+      }),
+    ]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
+  }
+
+  private velocitySha(client: RedisClientLike): Promise<string> {
+    if (!this.scriptShaPromise) {
+      this.scriptShaPromise = client.scriptLoad(VELOCITY_LUA_SCRIPT).catch((error) => {
+        this.scriptShaPromise = null; // retry on the next call
+        throw error;
+      });
+    }
+    return this.scriptShaPromise;
   }
 
   private client(): Promise<RedisClientLike> {
@@ -287,10 +363,13 @@ export class RedisCacheAdapter implements CachePort {
     const violatedRuleIds: string[] = [];
     const flaggedRuleIds: string[] = [];
     const windowStats: Record<string, { count: number; amountMinor: bigint }> = {};
+    // Descriptors already applied in Redis; a failure at index N must only
+    // degrade descriptors N.. or the earlier ones would be counted twice.
+    let applied = 0;
 
     try {
-      const client = await this.client();
-      const sha = await this.scriptShaPromise;
+      const client = await this.withVelocityTimeout(this.client());
+      const sha = await this.withVelocityTimeout(this.velocitySha(client)).catch(() => null);
       for (const descriptor of descriptors) {
         const key = this.fullKey(
           `vel:${descriptor.ruleId}:${descriptor.scopeKey}:${descriptor.windowSeconds}`,
@@ -306,9 +385,10 @@ export class RedisCacheAdapter implements CachePort {
         ];
         let result: unknown;
         try {
-          result = await client.evalSha(sha, { keys: [key], arguments: args });
+          if (sha === null) throw new Error("NOSCRIPT");
+          result = await this.withVelocityTimeout(client.evalSha(sha, { keys: [key], arguments: args }));
         } catch {
-          result = await client.eval(VELOCITY_LUA_SCRIPT, { keys: [key], arguments: args });
+          result = await this.withVelocityTimeout(client.eval(VELOCITY_LUA_SCRIPT, { keys: [key], arguments: args }));
         }
         const [countRaw, amountRaw, countViolation, amountViolation] = result as Array<
           number | string
@@ -322,9 +402,28 @@ export class RedisCacheAdapter implements CachePort {
         if (Number(amountViolation) === 1) {
           flaggedRuleIds.push(descriptor.ruleId);
         }
+        applied += 1;
       }
-    } catch {
-      return this.l1.incrWindowCounter(descriptors, incrementAmountMinor, nowEpochMs);
+    } catch (error) {
+      this.degradedVelocityCount += 1;
+      this.options.onVelocityDegraded?.({ policy: this.velocityPolicy, error });
+      if (this.velocityPolicy === "fail-closed") {
+        throw new VelocityUnavailableError(error);
+      }
+      const remaining = descriptors.slice(applied);
+      if (this.velocityPolicy === "local-fallback" && remaining.length > 0) {
+        const local = await this.l1.incrWindowCounter(remaining, incrementAmountMinor, nowEpochMs);
+        violatedRuleIds.push(...local.violatedRuleIds);
+        flaggedRuleIds.push(...local.flaggedRuleIds);
+        Object.assign(windowStats, local.windowStats);
+      }
+      return {
+        allowed: violatedRuleIds.length === 0 && flaggedRuleIds.length === 0,
+        violatedRuleIds,
+        flaggedRuleIds,
+        windowStats,
+        degraded: true,
+      };
     }
 
     return {

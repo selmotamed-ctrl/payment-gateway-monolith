@@ -71,7 +71,8 @@ export interface SlotReservation {
  * counters were NOT advanced.
  */
 export interface SlotCommitResult {
-  outcome: "COMMITTED" | "SUSPENSE";
+  /** `HELD`: a verified capture of an AML-held attempt; escrowed, not settled. */
+  outcome: "COMMITTED" | "SUSPENSE" | "HELD";
   journalEntryId?: string;
   adjustmentId?: string;
   operatorCaseId?: string;
@@ -253,6 +254,23 @@ const TERMINAL_RELEASING_STATES = new Set<AdapterAttemptStatus>([
   "CANCELLED",
   "BLOCKED",
 ]);
+
+const AML_HOLD_SUBSTATUS = "AML_HOLD";
+
+/**
+ * GAP-016. IDEMPOTENT: the attempt already settled once, a duplicate success
+ * signal is a no-op. REFUSE: the attempt ended without a payment and cannot be
+ * resurrected. FAILED/EXPIRED stay ALLOWed: a late success is recovered there.
+ */
+const finalizeGuardFor = (status: AdapterAttemptStatus): "ALLOW" | "IDEMPOTENT" | "REFUSE" => {
+  if (status === "SUCCEEDED" || status === "PARTIALLY_REFUNDED" || status === "REFUNDED" || status === "DISPUTED") {
+    return "IDEMPOTENT";
+  }
+  if (status === "CANCELLED" || status === "BLOCKED") {
+    return "REFUSE";
+  }
+  return "ALLOW";
+};
 
 const ALLOWED_TRANSITIONS: Record<AdapterAttemptStatus, readonly AdapterAttemptStatus[]> = {
   CREATED: ["INITIATING", "AWAITING_CUSTOMER", "VERIFYING", "BLOCKED", "CANCELLED", "EXPIRED", "FAILED"],
@@ -512,6 +530,25 @@ export class DynamicRailEngine {
           outputs: { state: {}, public: current.publicOutputs ?? {} },
         });
       }
+    }
+    // GAP-016: a callback for an attempt that already settled is a duplicate
+    // (idempotent no-op); one for a cancelled/blocked attempt is refused. Neither
+    // may run the trusted-facts check, which could demote a SUCCEEDED attempt.
+    const finalizeGuard = finalizeGuardFor(current.status);
+    if (finalizeGuard === "IDEMPOTENT" && !verification.mustInquire) {
+      // Only a duplicate of the trusted success is a no-op; a contradicting
+      // (failure/untrusted) signal can never touch a settled attempt.
+      if (this.verifyTrustedSuccessFacts(verification.evidence ?? {}, current).trusted) {
+        return this.toResult(current, {
+          status: current.status,
+          substatus: current.substatus,
+          outputs: { state: {}, public: current.publicOutputs ?? {} },
+        });
+      }
+      throw engineError("ATTEMPT_TERMINAL", `The attempt is ${current.status}; a contradicting callback cannot change it`, 409);
+    }
+    if (finalizeGuard === "REFUSE") {
+      throw engineError("ATTEMPT_TERMINAL", `The attempt is ${current.status} and can no longer be finalized`, 409);
     }
     const evidence = verification.evidence ?? {};
     const environment = nestedEvidence(evidence).environment ?? nestedEvidence(evidence).env;
@@ -1048,6 +1085,22 @@ export class DynamicRailEngine {
     attempt: DynamicAttempt,
     _evidence: AdapterEvidence,
   ): Promise<SlotCommitResult> {
+    // GAP-016: re-finalize guard. The status is re-read so a stale in-memory
+    // attempt cannot settle twice. FAILED/EXPIRED stay finalizable (late success).
+    const fresh = (await this.options.attempts.getAttempt(attempt.id)) ?? attempt;
+    const guard = finalizeGuardFor(fresh.status);
+    if (guard === "IDEMPOTENT") {
+      attempt.status = fresh.status;
+      return fresh.substatus === "SUSPENSE_SETTLEMENT"
+        ? { outcome: "SUSPENSE", ...(fresh.ledgerEntryId ? { journalEntryId: fresh.ledgerEntryId } : {}) }
+        : { outcome: "COMMITTED", ...(fresh.ledgerEntryId ? { journalEntryId: fresh.ledgerEntryId } : {}) };
+    }
+    if (guard === "REFUSE") {
+      throw engineError("ATTEMPT_TERMINAL", `The attempt is ${fresh.status} and can no longer be finalized`, 409);
+    }
+    if ((fresh.substatus ?? attempt.substatus) === AML_HOLD_SUBSTATUS) {
+      return this.escrowHeldCapture(attempt);
+    }
     const previousStatus = attempt.status;
     const post = async (transaction?: unknown): Promise<string> => {
       if (!this.options.ledgerPoster) {
@@ -1150,6 +1203,35 @@ export class DynamicRailEngine {
     return result;
   }
 
+  /**
+   * GAP-015: the gateway capture of an AML-held attempt is verified, so the
+   * money exists now and is escrowed (`Dr GATEWAY_CLEARING` / `Cr AML_HOLD`).
+   * The attempt is NOT settled and the slot is NOT committed: the checker's
+   * release (which requires this escrow) does that. The ledger posting is
+   * idempotent per (refType, refId), so a duplicate verified signal is harmless.
+   * A merchant-direct settlement holds no cash, so nothing is booked.
+   */
+  private async escrowHeldCapture(attempt: DynamicAttempt): Promise<SlotCommitResult> {
+    const poster = this.options.ledgerPoster;
+    if (poster && (attempt.ownershipMode ?? "PLATFORM_CLEARING") !== "MERCHANT_DIRECT") {
+      if (!poster.postScenario) {
+        throw engineError("AML_HOLD_ESCROW_UNSUPPORTED", "The ledger poster cannot book the AML hold escrow", 500);
+      }
+      const amount = decimal(attempt.totalChargedAmount ?? attempt.requestedAmount);
+      const post = (transaction?: unknown) => poster.postScenario!(
+        "AML_HOLD_AND_RELEASE",
+        attempt.id,
+        { amount: amount.toFixed(4), commissionAmount: 0, merchantAmount: 0 },
+        this.ledgerContext(attempt),
+        transaction,
+      );
+      const runner = this.options.transactionRunner;
+      const posted = runner ? await runner(post, { attemptId: attempt.id }) : await post();
+      return { outcome: "HELD", journalEntryId: posted.entry.id, reason: "AML_HOLD_ESCROWED" };
+    }
+    return { outcome: "HELD", reason: "AML_HOLD_NO_ESCROW" };
+  }
+
   private async evaluateReporting(attempt: DynamicAttempt): Promise<void> {
     if (!this.options.reportingEvaluator) {
       return;
@@ -1190,6 +1272,14 @@ export class DynamicRailEngine {
     outputs: Record<string, unknown>,
     finalized: SlotCommitResult,
   ): DynamicRailResult {
+    if (finalized.outcome === "HELD") {
+      return {
+        attempt,
+        status: attempt.status,
+        substatus: AML_HOLD_SUBSTATUS,
+        outputs,
+      };
+    }
     if (finalized.outcome === "SUSPENSE") {
       return {
         attempt,

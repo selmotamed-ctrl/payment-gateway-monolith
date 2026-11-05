@@ -54,12 +54,38 @@ describe("fake-rails-back hardening", () => {
     expect((await call(process.env.FAKE_RAILS_SEEDER_TOKEN!)).status).toBe(200);
   });
 
-  test("the ?token= query JWT is accepted only for the SSE stream path", async () => {
+  test("the session token is never accepted from the query string; the SSE stream takes a single-use ticket (GAP-024)", async () => {
     const { token } = (await (await login("tester_admin", "Strong-Tester-Pass-2026!")).json()) as { token: string };
     const viaQuery = await fetch(`${baseUrl}/portal-api/auth/me?token=${encodeURIComponent(token)}`);
     expect(viaQuery.status).toBe(401);
     const viaHeader = await fetch(`${baseUrl}/portal-api/auth/me`, { headers: { authorization: `Bearer ${token}` } });
     expect(viaHeader.status).toBe(200);
+    // The session JWT in ?token= no longer opens the stream either.
+    const streamViaToken = await fetch(`${baseUrl}/portal-api/transactions/stream?token=${encodeURIComponent(token)}`);
+    expect(streamViaToken.status).toBe(401);
+    // A ticket requires a session, opens the stream exactly once and cannot act as a session.
+    expect((await fetch(`${baseUrl}/portal-api/transactions/stream-ticket`, { method: "POST" })).status).toBe(401);
+    const issued = await fetch(`${baseUrl}/portal-api/transactions/stream-ticket`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(issued.status).toBe(200);
+    const { ticket } = (await issued.json()) as { ticket: string };
+    expect((await fetch(`${baseUrl}/portal-api/auth/me`, { headers: { authorization: `Bearer ${ticket}` } })).status).toBe(401);
+    const abort = new AbortController();
+    const opened = await fetch(`${baseUrl}/portal-api/transactions/stream?ticket=${encodeURIComponent(ticket)}`, { signal: abort.signal });
+    expect(opened.status).toBe(200);
+    abort.abort();
+    const reused = await fetch(`${baseUrl}/portal-api/transactions/stream?ticket=${encodeURIComponent(ticket)}`);
+    expect(reused.status).toBe(401);
+  });
+
+  test("a hosted action token is bound to its own transaction", async () => {
+    const { issueHostedActionToken, verifyHostedActionToken } = await import("../lib/tickets");
+    const tokenForA = issueHostedActionToken("txn-a");
+    expect(verifyHostedActionToken(tokenForA, "txn-a")).toBe(true);
+    expect(verifyHostedActionToken(tokenForA, "txn-b")).toBe(false);
+    expect(verifyHostedActionToken(undefined, "txn-a")).toBe(false);
   });
 
   test("per-account lockout applies regardless of the source address", async () => {

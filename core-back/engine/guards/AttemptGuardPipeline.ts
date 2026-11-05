@@ -801,24 +801,12 @@ export class AttemptGuardPipeline {
             ? "FLAG"
             : "ALLOW";
 
-      let holdJournalEntryId: string | null = null;
       if (outcome === "HOLD") {
-        // The money of a held payment is escrowed (design §11.3 entry 7:
-        // `Dr GATEWAY_CLEARING` / `Cr AML_HOLD`) and the attempt waits for the
-        // resolution of the case. It is never settled from here.
-        holdJournalEntryId = await this.postAmlHoldEscrow(tx, {
-          attemptId: attempt.id,
-          amount: amounts.totalCharged,
-          currency,
-          gatewayId: request.pinnedRoute?.gatewayId ?? null,
-          credentialSetId: route.credentialSetId,
-          env: request.env,
-        });
-        if (amlCaseId) {
-          await this.repositories.risk.updateAmlCase(tx, amlCaseId, {
-            holdJournalEntryId,
-          });
-        }
+        // GAP-015: nothing is escrowed here. No money has been captured at the
+        // gateway yet, so booking `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` now
+        // would fabricate a balance. The engine books the escrow once the
+        // gateway capture is verified (DynamicRailEngine.finalizeSuccess) and
+        // the checker's release is refused until that escrow exists.
         await this.repositories.payments.updateAttempt(tx, attempt.id, {
           substatus: "AML_HOLD",
           nextCheckAt: null,
@@ -837,7 +825,6 @@ export class AttemptGuardPipeline {
             aml_hits: amlResult.hits.map((hit) => hit.ruleCode),
             velocity_rules: flaggedVelocityRuleIds,
             settlement_target: settlementTarget,
-            ...(holdJournalEntryId ? { hold_journal_entry_id: holdJournalEntryId } : {}),
           },
         });
       }
@@ -855,7 +842,7 @@ export class AttemptGuardPipeline {
         reasons: [
           ...amlResult.hits.map((hit) => `AML:${hit.ruleCode}:${hit.action}`),
           ...flaggedVelocityRuleIds.map((id) => `VELOCITY_FLAG:${id}`),
-          ...(outcome === "HOLD" ? ["AML_HOLD_ESCROWED"] : []),
+          ...(outcome === "HOLD" ? ["AML_HOLD_PENDING_CAPTURE"] : []),
         ],
         customerMessageCode: outcome === "ALLOW" || outcome === "FLAG"
           ? "OK"
@@ -1463,97 +1450,6 @@ export class AttemptGuardPipeline {
     // A published list invalidates the results that were screened against
     // the previous revision.
     await this.screening.refreshListVersions?.();
-  }
-
-  /**
-   * Escrows the money of a held payment (design §11.3 entry 7).
-   *
-   * The posting is `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` and it is written in
-   * the same transaction as the attempt and the case, so the money can never
-   * be settled while the case is open.
-   */
-  private async postAmlHoldEscrow(
-    tx: Tx,
-    input: {
-      attemptId: string;
-      amount: Money;
-      currency: string;
-      gatewayId: string | null;
-      credentialSetId: string;
-      env: Environment;
-    },
-  ): Promise<string> {
-    const accounts = await this.resolveHoldAccounts(tx, input);
-    const journal = buildLedgerTemplate("AML_HOLD_AND_RELEASE", {
-      // The amount is exact money: it is scaled by 10^4 and never a float.
-      amount: moneyToString(input.amount),
-      commissionAmount: 0,
-      merchantAmount: 0,
-    });
-    journal.refId = input.attemptId;
-    const poster = createLedgerPoster(this.db as never);
-    const posted = await poster.post(
-      journal,
-      { accounts, currency: input.currency },
-      tx as never,
-    );
-    return posted.entry.id;
-  }
-
-  /**
-   * The GL accounts of the escrow.
-   *
-   * The clearing account is the one of the pinned gateway, credential set and
-   * environment. When the platform has no such account, the currency scoped
-   * system account of the platform is used, so the escrow is never booked
-   * against a wrong account.
-   */
-  private async resolveHoldAccounts(
-    tx: Tx,
-    input: {
-      currency: string;
-      gatewayId: string | null;
-      credentialSetId: string;
-      env: Environment;
-    },
-  ): Promise<{ GATEWAY_CLEARING: string; AML_HOLD: string }> {
-    const client = tx as Record<string, any>;
-    const accounts = client.glAccount;
-    const clearing = await this.findGlAccount(accounts, [
-      ...(input.gatewayId
-        ? [{ accountType: "GATEWAY_CLEARING", gatewayId: input.gatewayId, credentialSetId: input.credentialSetId, env: input.env }]
-        : []),
-      { accountType: "GATEWAY_CLEARING", credentialSetId: input.credentialSetId, env: input.env },
-      { accountType: "GATEWAY_CLEARING", currency: input.currency },
-    ]);
-    const hold = await this.findGlAccount(accounts, [
-      { accountType: "AML_HOLD", currency: input.currency },
-      { accountType: "AML_HOLD" },
-    ]);
-    if (!clearing || !hold) {
-      throw new ApiError(
-        409,
-        "AML_HOLD_ACCOUNT_NOT_FOUND",
-        "The AML hold escrow cannot be booked: the clearing or the hold account is missing",
-      );
-    }
-    return { GATEWAY_CLEARING: clearing, AML_HOLD: hold };
-  }
-
-  private async findGlAccount(
-    accounts: Record<string, any> | undefined,
-    candidates: Array<Record<string, unknown>>,
-  ): Promise<string | null> {
-    if (!accounts?.findFirst) {
-      return null;
-    }
-    for (const where of candidates) {
-      const found = await accounts.findFirst({ where, select: { id: true } });
-      if (found?.id) {
-        return String(found.id);
-      }
-    }
-    return null;
   }
 
   private async createAmlCase(

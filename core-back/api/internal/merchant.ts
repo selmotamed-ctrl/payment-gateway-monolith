@@ -48,6 +48,7 @@ import {
   clientIp,
   principalOf,
   requireAuthentication,
+  revokePrincipalSession,
   requireMerchantPrincipal,
   requireMerchantScope,
 } from "../middleware/authDoubleCheck";
@@ -665,7 +666,7 @@ const buildSession = (
     authorities,
     appScopeIds,
     mfa: mfaCompleted,
-  });
+  }, "merchant");
   return {
     token,
     expiresInSeconds: 12 * 60 * 60,
@@ -841,7 +842,7 @@ router.post("/auth/login", async (request: Request, response: Response) => {
     ? normalizeEmail(body.identifier)
     : normalizePhone(body.identifier);
   const ip = clientIp(request);
-  assertLoginAllowed(identifier, ip);
+  await assertLoginAllowed(identifier, ip);
   const found = identifier.includes("@")
     ? await client.user.findFirst({
         where: {
@@ -859,13 +860,13 @@ router.post("/auth/login", async (request: Request, response: Response) => {
   const user = found && found.merchantId !== null && String(found.role).startsWith("MERCHANT_") ? found : null;
   const valid = await verifyPasswordOrDummy(body.password, user?.passwordHash);
   if (!user || !valid) {
-    recordLoginFailure(identifier, ip);
+    await recordLoginFailure(identifier, ip);
     throw new ApiError(401, "INVALID_CREDENTIALS", "The supplied credentials are not valid");
   }
   if (user.status !== "ACTIVE") {
     throw new ApiError(403, "ACCOUNT_NOT_ACTIVE", "The account is not active");
   }
-  recordLoginSuccess(identifier);
+  await recordLoginSuccess(identifier);
   if (user.mfaRequired) {
     const { challengeId } = await client.$transaction((tx) =>
       issueMfaChallenge(tx as never, {
@@ -896,7 +897,7 @@ router.post("/auth/mfa/verify", async (request: Request, response: Response) => 
     throw new ApiError(400, "MFA_CHALLENGE_REQUIRED", "An MFA challenge identifier is required");
   }
   const ip = clientIp(request);
-  assertMfaAllowed(ip);
+  await assertMfaAllowed(ip);
   // Not wrapped in a transaction: a wrong guess must persist its attempt counter.
   let verified;
   try {
@@ -906,7 +907,7 @@ router.post("/auth/mfa/verify", async (request: Request, response: Response) => 
       channel: "MERCHANT",
     });
   } catch (error) {
-    recordMfaFailure(ip);
+    await recordMfaFailure(ip);
     throw error;
   }
   const user = await client.user.findUnique({ where: { id: verified.userId } });
@@ -928,6 +929,12 @@ router.use(requireAuthentication);
 // Principal-type separation: staff never reach a merchant route, and an API token only
 // reaches the external API (it can never manage users, tokens or its own IP allowlist).
 router.use(requireMerchantPrincipal);
+
+/** Server-side logout (GAP-019): puts the presented session on the revoke list. */
+router.post("/auth/logout", async (request: Request, response: Response) => {
+  await revokePrincipalSession(request);
+  response.json({ revoked: true });
+});
 router.use((request, _response, next) => {
   const principal = principalOf(request);
   if (principal.kind === "apiToken" && !request.path.startsWith("/external/")) {
@@ -1979,19 +1986,26 @@ router.post("/cashouts", async (request: Request, response: Response) => {
   if (wallet.status !== "ACTIVE") {
     throw new ApiError(409, "WALLET_NOT_ACTIVE", "Cash-outs are only available from an active wallet");
   }
-  // The payout destination is bound to the KYB-verified payout account when one is on
-  // record: a cash-out can never be redirected to a different account by a session alone.
-  const destinationHash = payoutAccountHash(body.destinationBank);
-  if (merchant.payoutAccountHash) {
-    if (!destinationHash || destinationHash !== merchant.payoutAccountHash) {
-      throw new ApiError(
-        403,
-        "CASHOUT_DESTINATION_NOT_VERIFIED",
-        "The destination account does not match the payout account verified during onboarding",
-      );
-    }
+  // GAP-017: the payout destination is ALWAYS bound to the KYB-verified payout account.
+  // A merchant without a KYB payoutAccountHash cannot cash out at all (it is no longer
+  // flagged payoutVerified:false), and a session alone can never redirect a cash-out:
+  // the account only changes through the maker-checker merchant edit approval.
+  if (!merchant.payoutAccountHash) {
+    throw new ApiError(
+      403,
+      "CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED",
+      "No KYB-verified payout account is on record for this merchant, so a cash-out cannot be requested",
+    );
   }
-  const destination = { ...body.destinationBank, payoutVerified: Boolean(merchant.payoutAccountHash) };
+  const destinationHash = payoutAccountHash(body.destinationBank);
+  if (!destinationHash || destinationHash !== merchant.payoutAccountHash) {
+    throw new ApiError(
+      403,
+      "CASHOUT_DESTINATION_NOT_VERIFIED",
+      "The destination account does not match the payout account verified during onboarding",
+    );
+  }
+  const destination = { ...body.destinationBank, payoutVerified: true };
   const existing = await client.cashoutRequest.findFirst({ where: { merchantId, idempotencyKey } });
   const replay = (row: { id: string; state: string; walletId: string; amount: unknown }) => {
     if (row.walletId !== wallet.id || !decimal(row.amount as never).eq(decimal(body.amount))) {

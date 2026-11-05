@@ -10,7 +10,7 @@ export interface AuthorityHints {
 /** Core mints the administrative session token (`core-back/lib/auth/index.ts`). */
 const SESSION_TOKEN_TYPE = "session";
 const SESSION_TOKEN_ISSUER = "payment-gateway-core";
-const SESSION_TOKEN_AUDIENCE = "payment-gateway-edge";
+const SESSION_TOKEN_AUDIENCE = "payment-gateway-admin";
 
 /**
  * Authorities that grant the same access as a confidential role.

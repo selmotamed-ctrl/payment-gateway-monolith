@@ -45,14 +45,21 @@ export class OutboxNotificationWorker extends BaseWorker {
   }
 
   private async lockQueuedNotifications(now: Date): Promise<NotificationRow[]> {
+    // One statement in one transaction: lock with SKIP LOCKED and lease the
+    // rows by pushing next_attempt_at forward. Delivery then runs outside the
+    // transaction and every outcome rewrites next_attempt_at / status.
     const sql =
-      "SELECT * FROM notifications" +
+      "WITH claimed AS (" +
+      "SELECT id FROM notifications" +
       " WHERE status = 'QUEUED'" +
       " AND (next_attempt_at IS NULL OR next_attempt_at <= $1)" +
       " ORDER BY next_attempt_at ASC" +
       " LIMIT $2" +
-      " FOR UPDATE SKIP LOCKED";
-    const result = await this.db.$queryRawUnsafe(sql, now, this.batchSize);
+      " FOR UPDATE SKIP LOCKED)" +
+      " UPDATE notifications n SET next_attempt_at = $3, updated_at = now()" +
+      " FROM claimed WHERE n.id = claimed.id RETURNING n.*";
+    const leaseUntil = new Date(now.getTime() + this.claimLeaseSeconds * 1000);
+    const result = await this.inTransaction((tx) => tx.$queryRawUnsafe(sql, now, this.batchSize, leaseUntil));
     return toCamelRows<NotificationRow>(result);
   }
 

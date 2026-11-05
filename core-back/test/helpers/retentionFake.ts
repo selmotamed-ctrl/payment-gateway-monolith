@@ -1,3 +1,4 @@
+import { Decimal } from "decimal.js";
 import type { PrismaLike } from "../../engine/db/ports";
 
 /**
@@ -433,6 +434,8 @@ export interface RetentionFake {
   seed(table: string, rows: FakeRow[]): void;
   /** Empties every table. */
   reset(): void;
+  /** The `SELECT set_config(...)` statements the worker issued (append-only bypass). */
+  setConfigCalls: unknown[][];
 }
 
 const toGlAccount = (row: FakeRow | undefined): Record<string, unknown> | null => {
@@ -534,11 +537,44 @@ export const createRetentionFake = (): RetentionFake => {
     },
   };
 
+  const setConfigCalls: unknown[][] = [];
+
+  const aggregateGlBalances =(): FakeRow[] =>
+    table("gl_accounts").map((raw) => {
+      const account = toGlAccount(raw) as Record<string, unknown>;
+      const checkpointAt = (account.checkpointAt as Date | null) ?? null;
+      let delta = new Decimal(0);
+      for (const line of table("journal_lines").map(toJournalLine)) {
+        if (line.glAccountId !== account.id) continue;
+        const createdAt = line.createdAt as Date | undefined;
+        if (checkpointAt && createdAt && createdAt.getTime() <= checkpointAt.getTime()) continue;
+        const amount = new Decimal(String(line.amount ?? 0));
+        delta = line.direction === "DEBIT" ? delta.plus(amount) : delta.minus(amount);
+      }
+      return {
+        id: account.id,
+        accountType: account.accountType,
+        checkpointBalance: new Decimal(String(account.checkpointBalance ?? 0)).toString(),
+        checkpointAt,
+        delta: delta.toString(),
+      };
+    });
+
   const db = {
     platformSetting,
     glAccount,
     journalLine,
     $queryRawUnsafe: async (sql: string, ...params: unknown[]) => {
+      // The InvariantVerifier sums every account in one aggregate statement
+      // (SELECT ... AS ... LEFT JOIN ... GROUP BY). It is outside the small
+      // grammar below, so it is answered from the in-memory tables directly.
+      if (/^\s*SELECT\s+set_config\(/i.test(sql)) {
+        setConfigCalls.push([sql, ...params]);
+        return [{}];
+      }
+      if (/FROM\s+gl_accounts\s+g\s+LEFT\s+JOIN\s+journal_lines/i.test(sql)) {
+        return aggregateGlBalances();
+      }
       const statement = new StatementParser(tokenize(sql)).parse();
       if (statement.kind !== "select") {
         throw new Error("A query has to be a SELECT");
@@ -574,6 +610,7 @@ export const createRetentionFake = (): RetentionFake => {
 
   return {
     db: db as PrismaLike,
+    setConfigCalls,
     rows: (name: string) => table(name),
     seed: (name: string, rows: FakeRow[]) => {
       table(name).push(...rows);

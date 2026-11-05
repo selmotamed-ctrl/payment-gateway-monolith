@@ -47,7 +47,7 @@ afterAll(() => {
 
 const request = async (
   path: string,
-  options: { method?: string; body?: unknown; token?: string; seeder?: boolean; raw?: string } = {},
+  options: { method?: string; body?: unknown; token?: string; seeder?: boolean; raw?: string; headers?: Record<string, string> } = {},
 ): Promise<Response> =>
   fetch(`${baseUrl}${path}`, {
     method: options.method ?? "GET",
@@ -55,6 +55,7 @@ const request = async (
       "content-type": "application/json",
       ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
       ...(options.seeder ? { "x-fake-rails-seeder-token": process.env.FAKE_RAILS_SEEDER_TOKEN! } : {}),
+      ...(options.headers ?? {}),
     },
     ...(options.raw !== undefined
       ? { body: options.raw }
@@ -270,9 +271,18 @@ describe("fake-rails-back API", () => {
     const created = (await verify.json()) as { transaction_id: string };
     const session = await request(`/portal-api/hosted/session/${encodeURIComponent(created.transaction_id)}`);
     expect(session.status).toBe(200);
-    const action = await request(`/portal-api/hosted/session/${encodeURIComponent(created.transaction_id)}/action`, {
+    const { action_token: actionToken } = (await session.json()) as { action_token: string };
+    expect(typeof actionToken).toBe("string");
+    const path = `/portal-api/hosted/session/${encodeURIComponent(created.transaction_id)}/action`;
+    // GAP-024: the action POST is no longer anonymous.
+    expect((await request(path, { method: "POST", body: { action: "APPROVE" } })).status).toBe(401);
+    expect(
+      (await request(path, { method: "POST", body: { action: "APPROVE" }, headers: { "x-hosted-action-token": "not-a-token" } })).status,
+    ).toBe(401);
+    const action = await request(path, {
       method: "POST",
       body: { action: "APPROVE" },
+      headers: { "x-hosted-action-token": actionToken },
     });
     expect(action.status).toBe(200);
     const body = (await action.json()) as { transaction: { status: string } };

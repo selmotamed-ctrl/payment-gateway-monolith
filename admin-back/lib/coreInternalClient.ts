@@ -12,6 +12,8 @@ import { isValidIp } from "./net";
 export const CORE_SERVICE_NAME = "admin-back";
 export const CORE_CHANNEL_PREFIX = "/internal/admin";
 export const CORE_FAILURE_COOLDOWN_MS = 5000;
+/** Consecutive node failures required before a node leaves rotation (GAP-021). */
+export const CORE_FAILURE_THRESHOLD = 3;
 
 const DEFAULT_MAX_ATTEMPTS = 2;
 const MAX_STREAM_SOCKETS = 128;
@@ -399,9 +401,10 @@ const hasSelectableNode = (excluded: Set<string>): boolean => eligiblePool(exclu
 
 const markNodeFailure = (node: CoreNodeState): void => {
   const now = clock();
-  node.healthy = false;
   node.failures += 1;
   node.lastFailureAt = now;
+  if (node.failures < CORE_FAILURE_THRESHOLD) return;
+  node.healthy = false;
   node.cooldownUntil = now + CORE_FAILURE_COOLDOWN_MS;
 };
 

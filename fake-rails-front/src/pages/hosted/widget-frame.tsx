@@ -3,7 +3,7 @@ import { computed } from "vue";
 import { VAlert } from "vuetify/components";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { api } from "@/utils/api";
+import { postHostedAction } from "@/utils/api";
 import { resolveCheckoutOrigin } from "@/utils/security";
 
 const WidgetFramePage = dc(() => {
@@ -34,10 +34,7 @@ const WidgetFramePage = dc(() => {
   const complete = async (serverPayment: boolean) => {
     if (serverPayment && reference) {
       try {
-        await api(`/portal-api/hosted/session/${encodeURIComponent(reference)}/action`, {
-          method: "POST",
-          body: { action: "APPROVE" },
-        });
+        await postHostedAction(reference, "APPROVE");
       } catch {
         // The widget still reports completion so the T-06 spoof test is possible.
       }
@@ -48,10 +45,7 @@ const WidgetFramePage = dc(() => {
   const decline = async () => {
     if (reference) {
       try {
-        await api(`/portal-api/hosted/session/${encodeURIComponent(reference)}/action`, {
-          method: "POST",
-          body: { action: "DECLINE" },
-        });
+        await postHostedAction(reference, "DECLINE");
       } catch {
         // ignore
       }

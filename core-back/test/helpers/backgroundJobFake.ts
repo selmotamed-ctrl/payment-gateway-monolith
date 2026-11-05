@@ -82,6 +82,18 @@ const matchesWhere = (row: FakeRow, where: Record<string, unknown>): boolean => 
       }
       continue;
     }
+    if (
+      isPlainObject(expected)
+      && key.includes("_")
+      && !("in" in expected)
+      && !("not" in expected)
+    ) {
+      // A compound unique selector such as `statementSourceId_fileHash`.
+      if (!matchesWhere(row, expected)) {
+        return false;
+      }
+      continue;
+    }
     if (!matchesValue(row, key, expected)) {
       return false;
     }

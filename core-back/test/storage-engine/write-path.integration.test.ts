@@ -3,6 +3,7 @@ import { createLedgerPoster } from "../../lib/storageEngine/ledgerPosterFactory"
 import { loadShardBalanceRows, naturalShardBalance } from "../../lib/storageEngine/shardBalances";
 import { writeAudit } from "../../lib/audit/writeAudit";
 import { enqueueOutboxEvent } from "../../lib/storageEngine/outbox";
+import { withLedgerMaintenance } from "../helpers/ledgerMaintenance";
 import {
   DATABASE_URL,
   cleanupLedger,
@@ -56,7 +57,7 @@ describeDatabase("transactional write-path helpers (live PostgreSQL)", () => {
       expect(outbox?.createdAt).toEqual(audit?.createdAt);
     } finally {
       await client.auditOutbox.deleteMany({ where: { id: created.id } });
-      await client.auditLog.deleteMany({ where: { id: created.id } });
+      await withLedgerMaintenance(client, (tx) => tx.auditLog.deleteMany({ where: { id: created.id } }));
     }
   });
 

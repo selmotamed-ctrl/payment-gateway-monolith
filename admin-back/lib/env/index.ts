@@ -49,6 +49,9 @@ export const envSchema = z.object({
   BACKUP_JOB_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(6),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(900000),
+  // GAP-019: "true" moves the session token into an HttpOnly cookie (never exposed to JS).
+  SESSION_COOKIE_MODE: z.enum(["true", "false"]).default("false"),
+  SESSION_COOKIE_SECURE: z.enum(["true", "false"]).default("true"),
   RECONCILIATION_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600000).default(120000),
 });
 

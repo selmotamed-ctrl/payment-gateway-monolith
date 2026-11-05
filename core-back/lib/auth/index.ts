@@ -1,10 +1,21 @@
-import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, hkdfSync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { compare, hash } from "bcryptjs";
 import { sign, verify, type JwtPayload, type SignOptions } from "jsonwebtoken";
 import { env } from "../env";
 
 const SESSION_ISSUER = "payment-gateway-core";
-const SESSION_AUDIENCE = "payment-gateway-edge";
+/**
+ * Distinct JWT audience per channel (GAP-020): a token minted for one edge is refused by
+ * the others, and core only accepts the channel audiences (the old shared
+ * `payment-gateway-edge` audience is no longer valid).
+ */
+export type SessionChannel = "admin" | "merchant" | "checkout";
+export const SESSION_AUDIENCES: Record<SessionChannel, string> = {
+  admin: "payment-gateway-admin",
+  merchant: "payment-gateway-merchant",
+  checkout: "payment-gateway-checkout",
+};
+const ALL_SESSION_AUDIENCES = Object.values(SESSION_AUDIENCES);
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
 
 const deriveKey = (purpose: string): Buffer =>
@@ -29,6 +40,12 @@ export interface SessionClaims {
   authorities: string[];
   appScopeIds: string[];
   mfa: boolean;
+  /** Unique session id, the handle of the server-side revoke list. */
+  jti: string | null;
+  /** Expiry as epoch seconds. */
+  exp: number | null;
+  /** Channel the token was minted for (derived from the audience). */
+  channel: SessionChannel | null;
 }
 
 export const hashPassword = async (plaintext: string): Promise<string> => hash(plaintext, 12);
@@ -73,24 +90,33 @@ export const generateMfaCode = (): string => {
   return value.toString().padStart(6, "0");
 };
 
-export const signSession = (claims: Omit<SessionClaims, "typ">): string =>
+export const signSession = (
+  claims: Omit<SessionClaims, "typ" | "jti" | "exp" | "channel">,
+  channel: SessionChannel,
+): string =>
   sign(
     { ...claims, typ: "session" },
     sessionKey,
     {
       algorithm: "HS256",
       issuer: SESSION_ISSUER,
-      audience: SESSION_AUDIENCE,
+      audience: SESSION_AUDIENCES[channel],
       expiresIn: SESSION_TTL_SECONDS,
+      jwtid: randomUUID(),
     } satisfies SignOptions,
   );
 
-export const verifySessionToken = (token: string): SessionClaims => {
+/** Verifies a session token; with `channel` the audience must be exactly that channel's. */
+export const verifySessionToken = (token: string, channel?: SessionChannel): SessionClaims => {
   const payload = verify(token, sessionKey, {
     algorithms: ["HS256"],
     issuer: SESSION_ISSUER,
-    audience: SESSION_AUDIENCE,
+    audience: channel ? SESSION_AUDIENCES[channel] : (ALL_SESSION_AUDIENCES as [string, ...string[]]),
   }) as JwtPayload;
+  const audience = Array.isArray(payload.aud) ? payload.aud[0] : payload.aud;
+  const tokenChannel = (Object.keys(SESSION_AUDIENCES) as SessionChannel[]).find(
+    (name) => SESSION_AUDIENCES[name] === audience,
+  ) ?? null;
   if (payload.typ !== "session" || typeof payload.sub !== "string") {
     throw new Error("Session token payload is invalid");
   }
@@ -102,6 +128,9 @@ export const verifySessionToken = (token: string): SessionClaims => {
     authorities: Array.isArray(payload.authorities) ? payload.authorities.map(String) : [],
     appScopeIds: Array.isArray(payload.appScopeIds) ? payload.appScopeIds.map(String) : [],
     mfa: payload.mfa === true,
+    jti: typeof payload.jti === "string" ? payload.jti : null,
+    exp: typeof payload.exp === "number" ? payload.exp : null,
+    channel: tokenChannel,
   };
 };
 

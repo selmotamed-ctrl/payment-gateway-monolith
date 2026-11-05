@@ -4,6 +4,7 @@ import { z } from "zod";
 import { digestKeyPart, lazyLimiter, rateLimitKey } from "../../lib/clientIp";
 import { env } from "../../lib/env";
 import { zMfaCode, zPassword } from "../../lib/zReady";
+import { captureSessionToken, logoutHandler } from "../../lib/security/sessionCookie";
 import { coreForward } from "../forward";
 
 const router = express.Router();
@@ -63,8 +64,11 @@ const mfaSchema = z
   })
   .strict();
 
+router.post("/logout", logoutHandler);
+
 router.post(
   "/login",
+  captureSessionToken,
   coreForward({
     method: "POST",
     path: () => "/internal/admin/auth/login",
@@ -82,6 +86,7 @@ router.get(
 
 router.post(
   "/mfa",
+  captureSessionToken,
   coreForward({
     method: "POST",
     path: () => "/internal/admin/auth/mfa",

@@ -91,10 +91,11 @@ export const createReconciliationUploadHandler = (
     if (!source) {
       throw new ApiError(404, "STATEMENT_SOURCE_NOT_FOUND", "Statement source not found");
     }
-    // The file hash is unique: the same statement never produces two runs.
-    const existingRun = await deps.repositories.reconciliation.findRunByFileHash(tx, fileHash);
-    // The unique index is global today, so a hash that belongs to another
-    // statement source must never be answered with that source's run.
+    // (source, file_hash) is unique: the same statement never produces two runs
+    // for one source (GAP-018); another source may legitimately hold the same bytes.
+    const existingRun = await deps.repositories.reconciliation.findRunByFileHash(tx, fileHash, sourceId);
+    // Defence in depth: the lookup is source-scoped, but a run of another
+    // statement source must never be answered as this source's run.
     if (existingRun && String(existingRun.statementSourceId) !== sourceId) {
       throw new ApiError(
         409,

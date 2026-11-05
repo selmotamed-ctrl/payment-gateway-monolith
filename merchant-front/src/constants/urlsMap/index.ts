@@ -3,6 +3,7 @@ import { getBaseUrl } from "../baseUrl";
 export const urlsMap = {
     options: (kind: string) => `v1/merchant/options/${kind}`,
     authLogin: "v1/merchant/auth/login",
+    authLogout: "v1/merchant/auth/logout",
     authRegister: "v1/merchant/auth/register",
     authVerifyIdentity: "v1/merchant/auth/verify-identity",
     authGoogle: "v1/merchant/auth/google",

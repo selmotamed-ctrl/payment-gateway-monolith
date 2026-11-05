@@ -87,7 +87,7 @@ const signSession = (kmsMasterKey: string, userId: string, role: string): string
   const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const payload = b64url(JSON.stringify({
     sub: userId, typ: "session", role, merchantId: null, authorities: role === "GATEWAY_ADMIN" ? ["*"] : ["merchant:read", "gateway:read"],
-    appScopeIds: [], mfa: true, iss: "payment-gateway-core", aud: "payment-gateway-edge", iat: now, exp: now + 3600,
+    appScopeIds: [], mfa: true, iss: "payment-gateway-core", aud: "payment-gateway-admin", iat: now, exp: now + 3600,
   }));
   const signature = createHmac("sha256", sessionKey(kmsMasterKey)).update(`${header}.${payload}`).digest("base64url");
   return `${header}.${payload}.${signature}`;

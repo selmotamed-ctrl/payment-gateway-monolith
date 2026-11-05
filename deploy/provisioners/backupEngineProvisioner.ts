@@ -263,8 +263,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=postgres
-Group=postgres
+User=pgbackup
+Group=pgbackup
+SupplementaryGroups=postgres
 WorkingDirectory=/opt/pg-backup-daemon
 EnvironmentFile=/etc/pg-backup/backup.env
 Environment=BACKUP_DAEMON_PORT=${config.BACKUP_DAEMON_PORT}
@@ -439,8 +440,9 @@ elif command -v pacman >/dev/null 2>&1; then
 fi`,
     ...(config.BACKUP_ENGINE_MODE === "wal-g" ? [walGInstallCommand(config)] : []),
     "id -u pgbackup >/dev/null 2>&1 || useradd --system --home /var/lib/pg-backup --shell /usr/sbin/nologin pgbackup",
+    "usermod -aG pgbackup postgres 2>/dev/null || true",
     "id -u barman >/dev/null 2>&1 || useradd --system --home /var/lib/barman --shell /usr/sbin/nologin barman",
-    `install -d -m 0750 -o postgres -g postgres /var/lib/pg-backup ${shellQuote(config.BACKUP_DAEMON_CERT_DIR)} /var/log/pg-backup && chown -R postgres:postgres ${shellQuote(config.BACKUP_DAEMON_CERT_DIR)}`,
+    `install -d -m 0750 -o pgbackup -g pgbackup /var/lib/pg-backup ${shellQuote(config.BACKUP_DAEMON_CERT_DIR)} /var/log/pg-backup && chown -R pgbackup:pgbackup ${shellQuote(config.BACKUP_DAEMON_CERT_DIR)}`,
     "install -d -m 0755 /etc/pg-backup",
     "systemctl daemon-reload",
   ]) {
@@ -463,7 +465,7 @@ fi`,
     sudo: true,
   });
   // restore_command (run by the scratch postgres as user postgres) sources this file.
-  runner.run(ssh, "chown root:postgres /etc/pg-backup/wal-g.env && chmod 0640 /etc/pg-backup/wal-g.env", { sudo: true });
+  runner.run(ssh, "chown root:pgbackup /etc/pg-backup/wal-g.env && chmod 0640 /etc/pg-backup/wal-g.env", { sudo: true });
   runner.writeRemoteFile({
     target: ssh,
     path: "/etc/systemd/system/pg-backup-daemon.service",
@@ -499,7 +501,7 @@ fi`,
       `${pgpassField(primary?.privateIp ?? "127.0.0.1")}:${primary?.servicePort ?? 5432}:*:${pgpassField(config.PG_REPLICATION_USER)}:${pgpassField(config.PG_REPLICATION_PASSWORD)}`,
       ...(audit ? [`${pgpassField(audit.privateIp)}:${audit.servicePort}:*:${pgpassField(config.PG_REPLICATION_USER)}:${pgpassField(config.PG_REPLICATION_PASSWORD)}`] : []),
     ].join("\n");
-    runner.run(ssh, `install -d -m 0700 -o postgres -g postgres /var/lib/pg-backup /var/lib/pg-backup/barman ${shellQuote(dirname(config.BACKUP_PGPASSFILE))}`, { sudo: true });
+    runner.run(ssh, `install -d -m 0700 -o pgbackup -g pgbackup /var/lib/pg-backup /var/lib/pg-backup/barman ${shellQuote(dirname(config.BACKUP_PGPASSFILE))}`, { sudo: true });
     runner.writeRemoteFile({
       target: ssh,
       path: config.BACKUP_PGPASSFILE,
@@ -507,7 +509,7 @@ fi`,
       mode: 0o600,
       sudo: true,
     });
-    runner.run(ssh, `chown postgres:postgres ${shellQuote(config.BACKUP_PGPASSFILE)} && chmod 0600 ${shellQuote(config.BACKUP_PGPASSFILE)}`, { sudo: true });
+    runner.run(ssh, `chown pgbackup:pgbackup ${shellQuote(config.BACKUP_PGPASSFILE)} && chmod 0600 ${shellQuote(config.BACKUP_PGPASSFILE)}`, { sudo: true });
     runner.writeRemoteFile({ target: ssh, path: "/etc/barman.conf", content: barmanConfig(config), mode: 0o644, sudo: true });
   }
 

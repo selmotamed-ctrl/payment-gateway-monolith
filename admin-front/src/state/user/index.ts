@@ -1,6 +1,9 @@
 import type { UserAuthorityType, UserAuthoritiesMapType } from "@/utils/authorities";
 import router from "@/router";
 import { nextTick, ref } from "vue";
+import { getBaseUrl } from "@/constants/baseUrl";
+import { urlsMap } from "@/constants/urlsMap";
+import { revokeServerSession } from "@/utils/security/sessionToken";
 import { mapHasAllAuthorities, mapHasAuthority, type AdminRole } from "@/utils/authorities";
 
 export type AdminUserInfo = {
@@ -35,10 +38,10 @@ export const setUserState = (userData: UserState | null) => {
 
 export const loggingOut = ref(false);
 
-// TODO(backend): admin-back exposes no logout/revoke endpoint yet, so this only clears the client session;
-// the bearer token stays valid server-side until it expires. Call a revoke endpoint here once one exists.
 export const logout = async (options?: { redirect?: string }) => {
     loggingOut.value = true;
+    // Server-side revoke (GAP-019): best effort, the local session is cleared regardless.
+    await revokeServerSession(fetch, `${getBaseUrl()}/${urlsMap.authLogout}`, user.value?.token);
     setUserState(null);
     await nextTick();
     const redirect = options?.redirect && options.redirect !== "/login" ? options.redirect : undefined;

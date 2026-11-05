@@ -6,6 +6,7 @@ import { VBtn } from "vuetify/components";
 import { StateView } from "@/components/StateView";
 import { user } from "@/state/user";
 import { openSseStream } from "@/utils/security/sseFetch";
+import { sessionHeaders } from "@/utils/security/sessionToken";
 import { urlsMap } from "@/constants/urlsMap";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -62,7 +63,7 @@ const PosScreenPage = dc(() => {
         const token = user.value?.token;
         source = openSseStream({
             url: urlsMap.posScreenStream(code()),
-            headers: token ? { Authorization: `Bearer ${token}`, "X-Client-Channel": "merchant" } : {},
+            headers: token ? { ...sessionHeaders(token), "X-Client-Channel": "merchant" } : {},
             onOpen: () => {
                 connected.value = true;
                 loading.value = false;

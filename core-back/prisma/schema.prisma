@@ -2168,7 +2168,7 @@ model ReconciliationRun {
   statementSourceId String    @map("statement_source_id") @db.Uuid
   windowStart       DateTime  @map("window_start")
   windowEnd         DateTime  @map("window_end")
-  fileHash          String    @unique @map("file_hash") @db.Char(64)
+  fileHash          String    @map("file_hash") @db.Char(64)
   statsJson         Json      @map("stats_json")
   /// The name of the uploaded statement file.
   fileName          String?   @map("file_name") @db.Text
@@ -2183,6 +2183,9 @@ model ReconciliationRun {
   statementSource StatementSource      @relation(fields: [statementSourceId], references: [id], onDelete: Restrict)
   items           ReconciliationItem[]
 
+  /// GAP-018: the same bytes may be uploaded once per statement source.
+  @@unique([statementSourceId, fileHash])
+  @@index([fileHash])
   @@index([statementSourceId])
   @@index([ingestedAt])
   @@index([createdAt])

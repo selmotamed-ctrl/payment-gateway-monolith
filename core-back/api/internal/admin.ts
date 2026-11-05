@@ -79,6 +79,7 @@ import {
 import { scanKybBytes } from "../../lib/kybScan";
 import { postgresPlaceholders } from "../../engine/db/rawRows";
 import { hashPassword, signSession, verifyPasswordOrDummy } from "../../lib/auth";
+import { revokePrincipalSession } from "../middleware/authDoubleCheck";
 import { issueMfaChallenge, verifyMfaChallenge } from "../../lib/auth/mfaChallenges";
 import {
   assertLoginAllowed,
@@ -578,7 +579,7 @@ router.post("/auth/login", async (request: Request, response: Response) => {
   );
   const identifier = body.identifier.includes("@") ? body.identifier.trim().toLowerCase() : body.identifier.trim();
   const ip = clientIp(request);
-  assertLoginAllowed(identifier, ip);
+  await assertLoginAllowed(identifier, ip);
   const user = await client.user.findFirst({
     where: {
       OR: [
@@ -593,13 +594,13 @@ router.post("/auth/login", async (request: Request, response: Response) => {
   const staffUser = user && user.merchantId === null && !String(user.role).startsWith("MERCHANT_") ? user : null;
   const passwordOk = await verifyPasswordOrDummy(body.password, staffUser?.passwordHash);
   if (!staffUser || !passwordOk) {
-    recordLoginFailure(identifier, ip);
+    await recordLoginFailure(identifier, ip);
     throw new ApiError(401, "INVALID_CREDENTIALS", "The supplied credentials are not valid");
   }
   if (staffUser.status !== "ACTIVE") {
     throw new ApiError(403, "ACCOUNT_NOT_ACTIVE", "The account is not active");
   }
-  recordLoginSuccess(identifier);
+  await recordLoginSuccess(identifier);
   if (staffUser.mfaRequired) {
     const { challengeId } = await client.$transaction((tx) =>
       issueMfaChallenge(tx as never, {
@@ -625,7 +626,7 @@ router.post("/auth/login", async (request: Request, response: Response) => {
       authorities,
       appScopeIds: Array.isArray(staffUser.appScopeIds) ? staffUser.appScopeIds.map(String) : [],
       mfa: false,
-    }),
+    }, "admin"),
     expiresInSeconds: 12 * 60 * 60,
     userInfo: buildAdminUserInfo(staffUser, authorities),
   });
@@ -637,7 +638,7 @@ router.post("/auth/mfa", async (request: Request, response: Response) => {
     request.body,
   );
   const ip = clientIp(request);
-  assertMfaAllowed(ip);
+  await assertMfaAllowed(ip);
   // Not wrapped in a transaction: a wrong guess must persist its attempt counter.
   let verified;
   try {
@@ -647,7 +648,7 @@ router.post("/auth/mfa", async (request: Request, response: Response) => {
       channel: "ADMIN",
     });
   } catch (error) {
-    recordMfaFailure(ip);
+    await recordMfaFailure(ip);
     throw error;
   }
   const user = await client.user.findUnique({ where: { id: verified.userId } });
@@ -667,7 +668,7 @@ router.post("/auth/mfa", async (request: Request, response: Response) => {
       authorities,
       appScopeIds: Array.isArray(user.appScopeIds) ? user.appScopeIds.map(String) : [],
       mfa: true,
-    }),
+    }, "admin"),
     expiresInSeconds: 12 * 60 * 60,
     userInfo: buildAdminUserInfo(user, authorities),
   });
@@ -686,6 +687,12 @@ router.use(requireAuthentication);
 // Principal-type separation: merchant users and API tokens never reach an admin route,
 // even when their authority strings (for example merchant:read) overlap.
 router.use(requireStaffPrincipal);
+
+/** Server-side logout (GAP-019): puts the presented session on the revoke list. */
+router.post("/auth/logout", async (request: Request, response: Response) => {
+  await revokePrincipalSession(request);
+  response.json({ revoked: true });
+});
 router.use("/system/backups", backupInternalRouter);
 
 /** Any staff read authority: the floor for the cross-cutting dashboard, lookup and search routes. */
@@ -2796,6 +2803,14 @@ router.post("/join-requests/:id/submit", async (request: Request, response: Resp
   }
   if (!joinRequest.merchant.payoutBankDetailsJson) {
     throw new ApiError(409, "JOIN_REQUEST_PAYOUT_BANK_REQUIRED", "Payout bank details are required");
+  }
+  // GAP-017: the KYB payout hash is mandatory; it binds every cash-out destination.
+  if (!joinRequest.merchant.payoutAccountHash && !payoutAccountHash(joinRequest.merchant.payoutBankDetailsJson)) {
+    throw new ApiError(
+      409,
+      "JOIN_REQUEST_PAYOUT_HASH_REQUIRED",
+      "The payout bank details must include a bank and an account number or IBAN",
+    );
   }
   if (owners.length === 0) {
     throw new ApiError(409, "JOIN_REQUEST_OWNER_REQUIRED", "At least one beneficial owner is required");
@@ -5534,6 +5549,16 @@ router.post("/merchants/:id/propose-edit", async (request: Request, response: Re
   assertMerchantVersion(merchant, baseVersion);
   const operations = merchantPatchOperations(body.patch);
   assertMerchantPatchFields(operations, MERCHANT_SENSITIVE_FIELD_SET);
+  // GAP-017: a payout-account change is only ever a maker-checker approval, and a
+  // whole-account replacement must carry the data the KYB payout hash is derived from.
+  for (const operation of operations) {
+    if (operation.path === "/payoutBankDetailsJson" && operation.op !== "remove" && !payoutAccountHash(operation.value)) {
+      throw new ApiError(422, "PAYOUT_ACCOUNT_HASH_REQUIRED", "The payout account must include a bank and an account number or IBAN");
+    }
+    if (operation.path === "/payoutBankDetailsJson" && operation.op === "remove") {
+      throw new ApiError(422, "PAYOUT_ACCOUNT_HASH_REQUIRED", "The payout account cannot be removed");
+    }
+  }
   const approval = await client.approvalRequest.create({
     data: {
       subjectType: "MERCHANT",

@@ -1,6 +1,7 @@
 import { getBaseUrl } from "@/constants/baseUrl";
 import axios from "axios";
 import { logout, user } from "../user";
+import { sessionHeaders } from "@/utils/security/sessionToken";
 import { extractApiError, isAppSuspendedError } from "@/utils/errors/extractor";
 
 export const api = axios.create({
@@ -10,8 +11,8 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-    if (user.value?.token) {
-        config.headers["Authorization"] = `Bearer ${user.value.token}`;
+    for (const [name, value] of Object.entries(sessionHeaders(user.value?.token))) {
+        config.headers[name] = value;
     }
     config.headers["X-Client-Channel"] = "merchant";
     return config;

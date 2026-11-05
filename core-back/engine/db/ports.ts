@@ -752,7 +752,8 @@ export interface NotificationRepository {
 export interface ReconciliationRepository {
   findStatementSourceById(tx: Tx, id: string): Promise<StatementSourceRow | null>;
   listStatementSources(tx: Tx): Promise<StatementSourceRow[]>;
-  findRunByFileHash(tx: Tx, fileHash: string): Promise<ReconciliationRunRow | null>;
+  /** With `statementSourceId` the lookup is the (source, file_hash) unique key (GAP-018). */
+  findRunByFileHash(tx: Tx, fileHash: string, statementSourceId?: string): Promise<ReconciliationRunRow | null>;
   findRunById(tx: Tx, id: string): Promise<ReconciliationRunRow | null>;
   createRun(tx: Tx, data: {
     statementSourceId: string;

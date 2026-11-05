@@ -6,10 +6,11 @@ import HostedLayout from "@/layouts/hosted";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MonoRef } from "@/components/ui/MonoRef";
-import { api } from "@/utils/api";
+import { api, HOSTED_ACTION_HEADER } from "@/utils/api";
 import { isSafeRedirectUrl } from "@/utils/security";
 
 interface HostedSession {
+  action_token?: string;
   transaction: {
     id: string;
     rail_code: string;
@@ -44,7 +45,11 @@ const HostedRedirectPage = dc(() => {
     try {
       const result = await api<{ redirect_url: string }>(
         `/portal-api/hosted/session/${encodeURIComponent(String(route.params.sessionId))}/action`,
-        { method: "POST", body: { action } },
+        {
+          method: "POST",
+          body: { action },
+          headers: session.value?.action_token ? { [HOSTED_ACTION_HEADER]: session.value.action_token } : {},
+        },
       );
       if (result.redirect_url && isSafeRedirectUrl(result.redirect_url)) {
         window.location.assign(result.redirect_url);

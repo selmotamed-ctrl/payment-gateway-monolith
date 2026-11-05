@@ -47,6 +47,9 @@ export const envSchema = z.object({
   PG_LIVE_TOKEN_PREFIX: z.string().min(4).max(32).default("pg_live_"),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
   AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(900000),
+  // GAP-019: "true" moves the session token into an HttpOnly cookie (never exposed to JS).
+  SESSION_COOKIE_MODE: z.enum(["true", "false"]).default("false"),
+  SESSION_COOKIE_SECURE: z.enum(["true", "false"]).default("true"),
   API_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(300),
   API_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60000),
   EXTERNAL_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(120),
