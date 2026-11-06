@@ -197,8 +197,13 @@ describe("D4 env files", () => {
     const text = renderEnvFile(backupDaemonEnv(load()));
     for (const line of text.trim().split("\n")) expect(line).toMatch(/^[A-Za-z_][A-Za-z0-9_]*='[^'\n]*'$/);
   });
-  test("the restore drill script starts the scratch cluster with archive_mode=off", () => {
-    expect(scratchRestoreVerifierScript(load())).toContain("archive_mode=off");
+  test("the restore drill script delegates to the daemon, which forces archive_mode=off in every scratch cluster", () => {
+    const script = scratchRestoreVerifierScript(load());
+    expect(script).toContain("/v1/drills/run");
+    // it must not start a PostgreSQL of its own (the daemon's drill owns that, with archiving disabled)
+    expect(script).not.toContain("pg_ctl");
+    const daemonSource = readFileSync(path.join(import.meta.dir, "..", "backup-daemon", "src", "restoreDrillRunner.ts"), "utf8");
+    expect(daemonSource).toContain("archive_mode = off");
   });
 });
 

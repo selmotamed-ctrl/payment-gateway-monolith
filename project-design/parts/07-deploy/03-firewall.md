@@ -46,7 +46,7 @@ Every host gets a default-deny inbound policy. Only role-specific ports are open
 - admin only from the LAN;
 - merchant/checkout public ports open, backends loopback-only;
 - storage services only from core, backup and peer storage nodes;
-- backup daemon only from core.
+- backup daemon only from core and, for WAL ingest (`PUT /v1/wal`), the PostgreSQL primary and dedicated audit hosts.
 
 If several roles share a host, the rules are the union of the role rules. The SSH rule is always emitted first and `ufw --force enable` is last, so a failed rule cannot lock the operator out.
 

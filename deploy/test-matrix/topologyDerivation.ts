@@ -33,7 +33,7 @@ export interface DerivedTopology {
   description: string;
   aliases: string[];
   shardCount: 16 | 32;
-  backupMode: "wal-g" | "barman";
+  backupMode: "pg-native" | "wal-g" | "barman";
   deployMode: "fresh" | "rolling_update";
   nodes: Record<ComputeTier, NodeRef[]>;
   fakeRails: NodeRef;

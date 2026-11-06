@@ -3,6 +3,7 @@ import type { BackupEngine, BackupKind } from "./backupEngine";
 import type { BackupPolicy, CatalogStore } from "./catalogStore";
 import { collectSecretValues, redactText, type BackupDaemonConfig } from "./config";
 import { nextCronRun } from "./cron";
+import type { JobQueue } from "./jobQueue";
 import { signDrillReport, type DrillReport, type DrillRunOptions } from "./restoreDrillRunner";
 
 export const SCHEDULED_JOBS = ["full", "delta", "drill"] as const;
@@ -24,6 +25,8 @@ export interface BackupSchedulerOptions {
   catalog: CatalogStore;
   engine: BackupEngine;
   drillRunner: DrillRunnerLike;
+  /** Shared with the HTTP API: a scheduled slot never overlaps a manual run. */
+  jobs?: JobQueue;
   clock?: () => Date;
   idFactory?: () => string;
   logger?: Pick<Console, "info" | "warn" | "error">;
@@ -40,6 +43,7 @@ export class BackupScheduler {
   private readonly catalog: CatalogStore;
   private readonly engine: BackupEngine;
   private readonly drillRunner: DrillRunnerLike;
+  private readonly jobs?: JobQueue;
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
   private readonly logger: Pick<Console, "info" | "warn" | "error">;
@@ -69,6 +73,7 @@ export class BackupScheduler {
     this.catalog = options.catalog;
     this.engine = options.engine;
     this.drillRunner = options.drillRunner;
+    this.jobs = options.jobs;
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? (() => randomUUID());
     this.logger = options.logger ?? console;
@@ -135,7 +140,7 @@ export class BackupScheduler {
     for (const { job, slotAt } of due) {
       const slotKey = slotAt.toISOString();
       if (this.lastSlot[job] === slotKey) continue;
-      if (this.running.size > 0) {
+      if (this.running.size > 0 || this.jobs?.isBusy()) {
         this.logger.warn(
           `[pg-backup-daemon] skipping ${job} run scheduled for ${slotKey}: another job is still running`,
         );
@@ -145,7 +150,7 @@ export class BackupScheduler {
       this.running.add(job);
       let task: Promise<void>;
       task = this
-        .runJob(job, slotAt)
+        .runQueued(job, slotAt)
         .catch((error) => {
           this.logger.error(`[pg-backup-daemon] ${job} job failed: ${this.safeMessage(error)}`);
         })
@@ -190,6 +195,17 @@ export class BackupScheduler {
       error instanceof Error ? error.message : String(error),
       collectSecretValues(this.config),
     ).slice(0, 2000);
+  }
+
+  /** Runs through the shared queue (when there is one) so HTTP triggers and slots serialize. */
+  private async runQueued(job: ScheduledJob, slotAt: Date): Promise<void> {
+    if (!this.jobs) return this.runJob(job, slotAt);
+    const ticket = this.jobs.enqueue({
+      id: `scheduler-${job}-${slotAt.getTime()}`,
+      kind: job === "drill" ? "drill" : "backup",
+      run: () => this.runJob(job, slotAt),
+    });
+    await ticket.done;
   }
 
   private async runJob(job: ScheduledJob, slotAt: Date): Promise<void> {

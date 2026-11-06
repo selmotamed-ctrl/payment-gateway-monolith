@@ -822,13 +822,13 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ## Admin Guide and Academy
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-06
 
 ## 1. Purpose and scope
 
 This part owns two employee learning products in `admin-front`:
 
-- The Admin Interactive Guide at `/guide/**`: 14 books, 125 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
+- The Admin Interactive Guide at `/guide/**`: 14 books, 128 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
 - The Employee Academy under `/academy/**`: eight tracks, lessons with practice checks, simulated labs, server-graded certification exams, 12-month badges, certificates and a `SECURITY_ADMIN` team view.
 
 It does not own the merchant guide or the checkout help center. The future-guide design is now implemented; its detailed implementation notes live in `06-guide-v2.md`.
@@ -842,14 +842,14 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | Artifact | Count / notes |
 | :--- | :--- |
 | `books.json` | 14 books |
-| `articles.en.json` | 125 articles with headings, plain text, roles, UI status and related ids |
+| `articles.en.json` | 128 articles with headings, plain text, roles, UI status and related ids |
 | `glossary.en.json` | 151 terms with aliases, Arabic term and related slugs |
-| `cards.en.json` | 22 cards and 99 required checklist items |
-| `playbook.en.json` | 29 situations with screens, cases and articles |
+| `cards.en.json` | 25 cards and 112 required checklist items |
+| `playbook.en.json` | 32 situations with screens, cases and articles |
 | `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
 | `faq.en.json` | 58 quick answers |
 | `data.json` | `ledger-events`, `visible-rails`, `attempt-transitions` |
-| `context-map.json` | 23 screens plus the `General` fallback |
+| `context-map.json` | 24 screens (including `SystemBackups`) plus the `General` fallback |
 | `error-codes.en.json` | 19 codes parsed from `b13-01` |
 | `edge-cases.en.json` | 140 rows parsed from the v4.1 design |
 | `meta.json` | `contentVersion`, deterministic `generatedAt`, counts and source SHA-256 |
@@ -922,11 +922,11 @@ Specification: `design/07-guides-and-academy/academy_system_design_and_content.m
 
 | Output | Content | Audience |
 | :--- | :--- | :--- |
-| `admin-front/src/content/academy/generated/` | `meta`, `tracks`, `modules`, `lessons.en` (markdown `body`, rendered `html`, `plainText`), `checks.en` (98 practice questions WITH keys), `labs.en` (WITH keys), `drills.en`, `pages.en`, `lab-vectors`, `exam-blueprints.public` (no question ids) | browser |
-| `core-back/content/academy/exam-bank.json` | 218 exam-pool questions WITH keys + 8 blueprints | server only, never served |
+| `admin-front/src/content/academy/generated/` | `meta`, `tracks`, `modules`, `lessons.en` (markdown `body`, rendered `html`, `plainText`), `checks.en` (100 practice questions WITH keys), `labs.en` (WITH keys), `drills.en`, `pages.en`, `lab-vectors`, `exam-blueprints.public` (no question ids) | browser |
+| `core-back/content/academy/exam-bank.json` | 223 exam-pool questions WITH keys + 8 blueprints | server only, never served |
 | `core-back/content/academy/catalog.json` | tracks → lesson/lab/exam ids, lesson/lab titles, badge ids; no questions | server (eligibility, team view) |
 
-Counts (asserted by `academy-content.test.ts`): 8 tracks, 11 modules, 49 lessons (20 Foundation + 29 role), 98 checks, 218 exam-pool questions (203 single, 13 number, 2 order; 40 critical), 15 labs / 86 tasks, 8 exams, 10 drills, 7 pages (+ `lab-vectors`). Generated output is ~75 KB gzipped (budget 600 KB). Exam-pool question ids never appear under `admin-front/src/content/academy/generated/`.
+Counts (asserted by `academy-content.test.ts`): 8 tracks, 11 modules, 50 lessons (20 Foundation + 30 role), 100 checks, 223 exam-pool questions (208 single, 13 number, 2 order; 43 critical), 16 labs / 92 tasks, 8 exams, 11 drills, 7 pages (+ `lab-vectors`). Generated output is ~75 KB gzipped (budget 600 KB). Exam-pool question ids never appear under `admin-front/src/content/academy/generated/`.
 
 ### 7.2 Tracks, badges, routes
 
@@ -998,6 +998,16 @@ The first rebuild (7.1-7.5) was functionally complete but visually foreign: it i
 
 The guide was checked against the built admin screens and the current core behaviour. Stale "no screen" claims were removed: staff user management (Admin Users), audit search (Audit Log), commission/velocity changes (Pricing & Limits) and versioned platform settings (Platform Settings) all have screens. The menu table now lists Audit Log, Admin Users, Inquiry Schedule, Backups, Platform Settings and Pricing & Limits, and the Admin Users, Inquiry Schedule and Platform Settings articles describe those screens. MFA is described as an SMS code to the registered phone (not an authenticator app), sign-out is documented as server-side revocation, the authority catalogue is described as closed with no self-escalation, reconciliation fingerprints are per statement source, and the Backups screen/drill/policy flow is described. Academy `l-m1-5` uses the same SMS wording. The exact corrections are logged in `guide_content_fixes.md` and `academy_content_fixes.md`.
 
+### 7.8 Offline companion (2026-11-06)
+
+`companion-app/` is a separate offline-first Android app that mirrors the complete Guide and
+the learner-facing Academy. It runs the same canonical extractors with redirected output and
+commits the resulting snapshot in `companion-app/public/content/`. It deliberately excludes
+the Academy exam bank, team view and server-graded certification. The app is documented in
+`project-design/parts/10-companion/00-offline-companion.md` and
+`design/06-ui/pg_companion_offline_android_app.md`. No runtime code in `admin-front` is
+imported by the companion; this part remains the authority for the web Guide/Academy.
+
 ## 8. Contracts and invariants
 
 1. The design file content is the single source of truth; article prose is never retyped into TSX.
@@ -1023,6 +1033,12 @@ cd ../core-back && bun run typecheck && bun test test/academy-
 cd ../admin-back && bun run typecheck && bun test test/academy-progress.test.ts test/admin-surface.test.ts
 cd ../tests && bunx playwright test --project=admin e2e/admin/guide-*.spec.ts e2e/admin/academy-*.spec.ts   # needs a deployed stack
 ```
+
+## Backup and disaster-recovery content (2026-11-06)
+
+Added from `design/02-storage-and-performance/backup_engine_reliability_architecture_and_test_plan.md` section 5, corrected against the real product: Guide articles `b12-09` (full/delta/WAL/PITR, topologies, encryption and the three storage tiers), `b12-10` (the Backups screen: real tile, badge and column labels) and `b12-11` (manual triggers, maker-checker policy changes, queueing and idempotency); safeguard cards `sg-trigger-backup`, `sg-run-restore-drill`, `sg-update-backup-policy`; situations `s-backup-daemon-unreachable`, `s-wal-archive-lag-high`, `s-restore-drill-failed`; a `SystemBackups` context-map screen. Academy: lesson `l-m10-4` (GATEWAY_ADMIN and SECURITY_ADMIN tracks only, to avoid adding certification time for every learner), lab `lab-backup-dr-desk`, drill `drill-pitr-recovery` and exam questions `q-m10-113..117`.
+
+Corrections to the draft: the exam question ids `q-m10-004..008` collided with existing questions and were renumbered; the extractor requires exactly two checks per lesson, so the third moved into the exam pool; `@@map` takes a JSON block, not the draft's one-liner; the real route is `SystemBackups` (not `AdminSystemBackups`); the menu path is Operations -> Backups; the drill has three invariant checks, not five gates; unverified claims (cron gap minimums, hard-coded retention defaults, a 30-second tick) were removed. Content stays English-only like the rest of the Guide/Academy bodies. The three new cards are content only: they are not wired into `pages/system/backups/index.tsx` with `useSafeguard`.
 
 ## Contextual Help
 

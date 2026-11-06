@@ -143,7 +143,7 @@ CREATE TRIGGER trg_audit_immutable
   BEFORE UPDATE OR DELETE OR TRUNCATE ON audit_records
   FOR EACH STATEMENT EXECUTE FUNCTION forbid_audit_mutation();
 
--- Least-privilege runtime privileges for pg_audit_writer
+-- Least-privilege runtime privileges for gw_audit_writer
 REVOKE UPDATE, DELETE, TRUNCATE ON audit_records FROM PUBLIC;
 `;
 
@@ -216,8 +216,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${
 };
 
 /** The default-role DDL, kept as a stable export for operators and tests. */
-export const AUDIT_DB_DDL = `${AUDIT_DB_BASE}\n${auditRuntimeGrants("pg_audit_writer")}`;
-export const LOG_DB_DDL = `${LOG_DB_BASE}\n${logRuntimeGrants("pg_log_writer")}`;
+export const AUDIT_DB_DDL = `${AUDIT_DB_BASE}\n${auditRuntimeGrants("gw_audit_writer")}`;
+export const LOG_DB_DDL = `${LOG_DB_BASE}\n${logRuntimeGrants("gw_log_writer")}`;
 
 export const auditDatabaseDdl = (config?: Pick<DeployConfig, "AUDIT_DB_USER">): string =>
   config ? `${AUDIT_DB_BASE}\n${auditRuntimeGrants(config.AUDIT_DB_USER)}` : AUDIT_DB_DDL;

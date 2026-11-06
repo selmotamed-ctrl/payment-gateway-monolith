@@ -376,9 +376,9 @@ All routes are prefixed with `/api/v1/admin`. The auth routes are inside the LAN
 | Options | `GET /options/:kind` |
 | Stats | `GET /stats/overview`, `GET /stats/recent-activity`, `GET /stats/export`, `POST /stats/export-audit`, plus export variants |
 | Audit logs | `GET /audit-logs`, `GET /audit-logs/:id`, `GET /audit-logs/export`, `GET /audit-logs/summary`, `GET /audit-logs/summary/export` |
-| System backups | `GET /system/backups/overview`, `POST /system/backups/trigger`, `POST /system/backups/drill`, `PUT /system/backups/policy` |
+| System backups | `GET /system/backups/overview`, `GET /system/backups/catalog`, `POST /system/backups/trigger`, `POST /system/backups/drill`, `PUT /system/backups/policy` |
 
-The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` to every AML route. The backup router applies `security:read`/`gateway:read` to the overview and `security:write` to trigger, drill and policy. The remaining routes rely on `requireSession` plus core-side authority enforcement.
+The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` to every AML route. The backup router applies `security:read`/`gateway:read` to the overview and catalog and `security:write` to trigger, drill and policy. The remaining routes rely on `requireSession` plus core-side authority enforcement.
 
 ## 4. Contracts and invariants
 

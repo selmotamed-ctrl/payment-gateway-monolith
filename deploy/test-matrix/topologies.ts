@@ -55,6 +55,7 @@ export const renderTopologyEnv = ({ config, topology, secrets, intensity, sudoPa
   const allHosts = [...new Set(config.machines.flatMap((machine) => [machine.address, machinePrivateIp(machine)]))];
   const vaultMachine = topology.vault ? machineById(config, topology.vault.machineId) : undefined;
   const auditOffBackupHost = topology.auditDb.machineId !== topology.backup.machineId;
+  const backupMode: DerivedTopology["backupMode"] = process.env.LAB_BACKUP_MODE === "pg-native" ? "pg-native" : topology.backupMode;
 
   return {
     DEPLOY_MODE: topology.deployMode,
@@ -112,17 +113,19 @@ export const renderTopologyEnv = ({ config, topology, secrets, intensity, sudoPa
     LOG_DB_USER: "log_writer",
     LOG_DB_PASSWORD: secrets.logDbPassword,
     LOG_DB_NODE: nodeSpec(config, topology.logDb),
-    ...(topology.backupMode === "wal-g" && auditOffBackupHost ? { PG_AUDIT_DATA_DIR: "/var/lib/postgresql/18/audit" } : {}),
+    ...(backupMode === "wal-g" && auditOffBackupHost ? { PG_AUDIT_DATA_DIR: "/var/lib/postgresql/18/audit" } : {}),
     BACKUP_ENABLED: "true",
     BACKUP_NODE: nodeSpec(config, topology.backup),
-    BACKUP_ENGINE_MODE: topology.backupMode,
+    // LAB_BACKUP_MODE=pg-native switches any topology to the daemon's PostgreSQL-native engine
+    // (it works for co-located and remote backup nodes); otherwise the derived mode is used.
+    BACKUP_ENGINE_MODE: backupMode,
     BACKUP_COMPRESSION: "zstd",
     BACKUP_ENCRYPTION_KEY_HEX: secrets.backupEncryptionKeyHex,
     // The lab provisions its own object store; the engine must not install one.
     BACKUP_S3_MODE: "external",
     // WAL-G is installed from a pinned release and verified by SHA-256 (fails closed). Set LAB_WALG_SHA256 to the
-    // real checksum of the release asset; the all-zero fallback can never verify and makes the install abort.
-    BACKUP_WALG_SHA256: process.env.LAB_WALG_SHA256 ?? "0".repeat(64),
+    // real checksum of the release asset; without it the key is omitted (an existing wal-g binary is reused).
+    ...(process.env.LAB_WALG_SHA256 ? { BACKUP_WALG_SHA256: process.env.LAB_WALG_SHA256 } : {}),
     BACKUP_PRIMARY_S3_ENDPOINT: objectStore && objectStoreMachine ? `http://${machinePrivateIp(objectStoreMachine)}:${objectStore.port}` : "",
     BACKUP_PRIMARY_S3_BUCKET: objectStore ? `s3://${objectStore.bucket}` : "",
     BACKUP_PRIMARY_S3_ACCESS_KEY: secrets.objectStoreAccessKey,

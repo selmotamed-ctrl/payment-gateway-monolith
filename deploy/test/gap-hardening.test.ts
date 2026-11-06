@@ -49,8 +49,9 @@ describe("GAP-022 TLS + hostssl + backup user", () => {
   test("backup daemon account follows the engine: barman keeps pgbackup, wal-g runs as postgres", () => {
     // wal-g backup-push reads PGDATA (0700 postgres) and connects over the socket as postgres (peer auth);
     // a dedicated account cannot do either, so the earlier pgbackup-for-wal-g change broke base backups.
-    expect(backupDaemonUser({ BACKUP_ENGINE_MODE: "barman" })).toBe("pgbackup");
-    expect(backupDaemonUser({ BACKUP_ENGINE_MODE: "wal-g" })).toBe("postgres");
+    const colocated = { BACKUP_NODE: "b@10.0.0.5:22:10.0.0.5:4090", PG_PRIMARY_NODE: "p@10.0.0.5:22:10.0.0.5:5432" };
+    expect(backupDaemonUser({ ...colocated, DB_SSH_HOST: undefined, BACKUP_ENGINE_MODE: "barman" })).toBe("pgbackup");
+    expect(backupDaemonUser({ ...colocated, DB_SSH_HOST: undefined, BACKUP_ENGINE_MODE: "wal-g" })).toBe("postgres");
     const cfg = loaded();
     if (!cfg) return;
     const unit = backupDaemonSystemdUnit(cfg);
@@ -68,11 +69,11 @@ describe("GAP-022 TLS + hostssl + backup user", () => {
 
 describe("GAP-028 replica pgpass", () => {
   test("password not in any replica command; pgpass content is a stdin file", () => {
-    const cfg = { PG_VERSION: "18", PG_REPLICATION_USER: "pg_replicator", PG_REPLICATION_PASSWORD: SECRET } as never;
+    const cfg = { PG_VERSION: "18", PG_REPLICATION_USER: "gw_replicator", PG_REPLICATION_PASSWORD: SECRET } as never;
     const cmds = replicaCommands("10.0.0.5", "10.0.0.6", cfg).join("\n");
     expect(cmds).not.toContain(SECRET);
     expect(cmds).not.toContain("printf '%s\n'");
-    expect(replicaPgpassContent("10.0.0.5", cfg)).toBe(`10.0.0.5:5432:*:pg_replicator:${SECRET}\n`);
+    expect(replicaPgpassContent("10.0.0.5", cfg)).toBe(`10.0.0.5:5432:*:gw_replicator:${SECRET}\n`);
   });
   test("provisioning writes .pgpass via writeRemoteFile and keeps secret out of runs", () => {
     const cfg = loaded();

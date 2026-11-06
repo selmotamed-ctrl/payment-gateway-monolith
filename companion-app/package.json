@@ -1,0 +1,53 @@
+{
+    "name": "pg-companion",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Offline Android companion for the Payment Gateway Guide and Academy",
+    "scripts": {
+        "dev": "vite",
+        "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+        "preview": "vite preview",
+        "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "content:extract": "bun scripts/sync-content.ts",
+        "content:bundle": "bun scripts/build-bundle.ts",
+        "content:sync": "bun scripts/sync-content.ts && bun scripts/build-bundle.ts",
+        "content:check": "bun scripts/check-content.ts",
+        "android:sync": "node ./node_modules/@capacitor/cli/bin/capacitor sync android",
+        "android:add": "node ./node_modules/@capacitor/cli/bin/capacitor add android",
+        "android:open": "node ./node_modules/@capacitor/cli/bin/capacitor open android",
+        "apk": "bash build-apk.sh",
+        "content:key": "bun scripts/generate-content-key.ts",
+        "release:content": "bun scripts/release-content.ts"
+    },
+    "dependencies": {
+        "@capacitor/android": "8.6.0",
+        "@capacitor/app": "8.1.2",
+        "@capacitor/core": "8.6.0",
+        "@capacitor/filesystem": "8.1.5",
+        "@capacitor/haptics": "8.0.2",
+        "@capacitor/local-notifications": "8.3.1",
+        "@capacitor/preferences": "8.0.1",
+        "@capacitor/share": "8.0.3",
+        "@noble/ed25519": "3.2.0",
+        "@noble/hashes": "2.4.0",
+        "decimal.js": "10.6.0",
+        "markdown-it": "15.0.3",
+        "minisearch": "7.2.0",
+        "vue": "3.5.45",
+        "vue-router": "4.6.3"
+    },
+    "devDependencies": {
+        "@capacitor/cli": "8.6.0",
+        "@types/markdown-it": "14.1.2",
+        "@types/node": "24.10.1",
+        "@vitejs/plugin-vue": "6.0.10",
+        "jsdom": "31.0.0",
+        "typescript": "5.9.3",
+        "vite": "8.3.6",
+        "vitest": "5.1.0",
+        "vue-tsc": "3.1.4"
+    }
+}

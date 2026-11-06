@@ -287,6 +287,18 @@ systemctl daemon-reload
 # Started (with the final configuration) by applyPostgresCluster, not here.
 systemctl enable ${cluster.service} >/dev/null 2>&1 || true`;
 
+/**
+ * PostgreSQL server + client packages (pg_ctl, initdb, pg_basebackup, pg_dump, psql ...).
+ * Shared by the cluster bootstrap and by the backup host, which needs the same
+ * binaries even when it is a dedicated backup-only machine.
+ */
+export const postgresServerPackages = (
+  config: Pick<DeployConfig, "PG_VERSION">,
+): { debian: string[]; arch: string[] } => ({
+  debian: [`postgresql-${version(config)}`, `postgresql-client-${version(config)}`, `postgresql-contrib-${version(config)}`],
+  arch: ["postgresql"],
+});
+
 export const bootstrapCommands = (
   config: DeployConfig,
   role: "primary" | "replica" | "pgbouncer" = "primary",
@@ -294,8 +306,8 @@ export const bootstrapCommands = (
 ): string[] => [
   `if ! command -v apt-get >/dev/null 2>&1 && ! command -v pacman >/dev/null 2>&1; then echo "unsupported package manager" >&2; exit 1; fi
 ${ensurePackagesScript({
-    debian: [`postgresql-${version(config)}`, `postgresql-contrib-${version(config)}`, "pgbouncer"],
-    arch: ["postgresql", "pgbouncer"],
+    debian: [...postgresServerPackages(config).debian, "pgbouncer"],
+    arch: [...postgresServerPackages(config).arch, "pgbouncer"],
   })}`,
   ensureClusterScript(config, cluster),
   // Enabled for boot, started by applyPgbouncer with its final configuration.
@@ -317,6 +329,19 @@ export const pgHbaSnippet = (config: DeployConfig, allowedSources: string[]): st
   ].join("\n") + "\n";
 };
 
+/**
+ * Idempotent creation of the streaming-replication role (used by replicas,
+ * Barman and the pg-native daemon).
+ */
+export const replicationRoleSql = (config: Pick<DeployConfig, "PG_REPLICATION_USER" | "PG_REPLICATION_PASSWORD">): string => {
+  const replUser = sqlIdent(config.PG_REPLICATION_USER, "PG_REPLICATION_USER");
+  const replUserLit = sqlLiteral(config.PG_REPLICATION_USER, "PG_REPLICATION_USER");
+  const replPw = sqlLiteral(config.PG_REPLICATION_PASSWORD, "PG_REPLICATION_PASSWORD");
+  const body = `IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${replUserLit}) THEN CREATE ROLE ${replUser} WITH REPLICATION LOGIN PASSWORD ${replPw}; ELSE ALTER ROLE ${replUser} WITH REPLICATION LOGIN PASSWORD ${replPw}; END IF;`;
+  const tag = dollarTag(body);
+  return `DO ${tag} BEGIN ${body} END ${tag};`;
+};
+
 /** Primary SQL: application role/database, replication role and TLS host rules. */
 export const primaryBootstrapSql = (config: DeployConfig, replicas: Array<PgNodeRef | string>): string => {
   const replicaSources = replicas.map((node) => nodeEndpoint(node));
@@ -324,9 +349,6 @@ export const primaryBootstrapSql = (config: DeployConfig, replicas: Array<PgNode
   const appUser = sqlIdent(config.PG_DB_USER, "PG_DB_USER");
   const appUserLit = sqlLiteral(config.PG_DB_USER, "PG_DB_USER");
   const appPw = sqlLiteral(config.PG_DB_PASSWORD, "PG_DB_PASSWORD");
-  const replUser = sqlIdent(config.PG_REPLICATION_USER, "PG_REPLICATION_USER");
-  const replUserLit = sqlLiteral(config.PG_REPLICATION_USER, "PG_REPLICATION_USER");
-  const replPw = sqlLiteral(config.PG_REPLICATION_PASSWORD, "PG_REPLICATION_PASSWORD");
   const dbName = sqlIdent(config.PG_DB_NAME, "PG_DB_NAME");
   const dbNameLit = sqlLiteral(config.PG_DB_NAME, "PG_DB_NAME");
   // Dollar-quote tag is chosen so it cannot occur in the (already SQL-escaped) body.
@@ -338,7 +360,7 @@ export const primaryBootstrapSql = (config: DeployConfig, replicas: Array<PgNode
   return [
     doBlock(`IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${appUserLit}) THEN CREATE ROLE ${appUser} LOGIN PASSWORD ${appPw}; ELSE ALTER ROLE ${appUser} PASSWORD ${appPw}; END IF;`),
     `SELECT ${createDb} WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = ${dbNameLit})\\gexec`,
-    doBlock(`IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${replUserLit}) THEN CREATE ROLE ${replUser} WITH REPLICATION LOGIN PASSWORD ${replPw}; ELSE ALTER ROLE ${replUser} WITH REPLICATION LOGIN PASSWORD ${replPw}; END IF;`),
+    replicationRoleSql(config),
     ...replicas.map((node, index) => {
       const slot = sqlLiteral(slotName(node, index), "replication slot");
       return doBlock(`IF NOT EXISTS (SELECT FROM pg_replication_slots WHERE slot_name = ${slot}) THEN PERFORM pg_create_physical_replication_slot(${slot}); END IF;`);
@@ -387,7 +409,7 @@ export const replicaCommands = (
   const primaryPort = nodePort(primary);
   const targetCluster = cluster ?? pgClusterFor(config ?? { PG_VERSION: "18" }, "replica", replica);
   const dataDir = targetCluster.dataDir;
-  const user = config?.PG_REPLICATION_USER ?? "pg_replicator";
+  const user = config?.PG_REPLICATION_USER ?? "gw_replicator";
   const slot = slotName(replica);
   const autoConf = `${dataDir}/postgresql.auto.conf`;
   return [

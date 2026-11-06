@@ -18,10 +18,10 @@ const booleanish = z
 
 const port = z.coerce.number().int().min(1).max(65535);
 const nonEmpty = z.string().trim().min(1);
-const optionalNonEmpty = z.preprocess(
-  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
-  nonEmpty.optional(),
-);
+const emptyToUndefined = (value: unknown): unknown =>
+  typeof value === "string" && value.trim() === "" ? undefined : value;
+const optionalNonEmpty = z.preprocess(emptyToUndefined, nonEmpty.optional());
+const optionalUrl = z.preprocess(emptyToUndefined, z.url().optional());
 
 const hexKey = z
   .string()
@@ -35,7 +35,7 @@ export const isValidCron = (value: string): boolean => isValidCronExpression(val
 
 const cron = z.string().trim().refine(isValidCron, "must be a five-field cron expression");
 
-export const BACKUP_ENGINE_MODES = ["wal-g", "barman"] as const;
+export const BACKUP_ENGINE_MODES = ["pg-native", "wal-g", "barman"] as const;
 export type BackupEngineMode = (typeof BACKUP_ENGINE_MODES)[number];
 
 export const BACKUP_COMPRESSION_METHODS = ["zstd", "lz4", "lzma", "brotli", "none"] as const;
@@ -46,13 +46,26 @@ export const backupDaemonEnvSchema = z
     BACKUP_ENGINE_MODE: z.enum(BACKUP_ENGINE_MODES),
     BACKUP_COMPRESSION: z.enum(BACKUP_COMPRESSION_METHODS).default("zstd"),
     BACKUP_ENCRYPTION_KEY_HEX: hexKey,
-    BACKUP_PRIMARY_S3_ENDPOINT: z.url(),
-    BACKUP_PRIMARY_S3_BUCKET: nonEmpty,
+    // Optional in pg-native mode (a local repository alone is a valid air-gapped setup); required for wal-g/barman.
+    BACKUP_PRIMARY_S3_ENDPOINT: optionalUrl,
+    BACKUP_PRIMARY_S3_BUCKET: optionalNonEmpty,
     BACKUP_PRIMARY_S3_ACCESS_KEY: z.string().default(""),
     BACKUP_PRIMARY_S3_SECRET_KEY: z.string().default(""),
     BACKUP_CORE_S3_PREFIX: optionalNonEmpty,
     BACKUP_AUDIT_S3_PREFIX: optionalNonEmpty,
     BACKUP_SECONDARY_SSH_TARGET: optionalNonEmpty,
+    // Local content repository (tier 1). Defaults to /var/lib/pg-backup/repo in pg-native mode, disabled otherwise.
+    BACKUP_LOCAL_REPO_DIR: optionalNonEmpty,
+    // Plain WAL streamed by pg_receivewal waits here (0700) until it is encrypted into the repository.
+    BACKUP_WAL_SPOOL_DIR: nonEmpty.default("/var/lib/pg-backup/wal_spool"),
+    // pg_basebackup / pg_combinebackup / pg_dump working area.
+    BACKUP_STAGING_DIR: nonEmpty.default("/var/lib/pg-backup/staging"),
+    // Comma separated client CNs allowed to PUT /v1/wal/... (and nothing else).
+    BACKUP_WAL_CLIENT_CNS: nonEmpty.default("wal-archive-client"),
+    BACKUP_WAL_PUSH_MAX_BYTES: z.coerce.number().int().positive().default(64 * 1024 * 1024),
+    BACKUP_WAL_STREAMING_ENABLED: booleanish.default(true),
+    // The continuous WAL stream is "unhealthy" once it is this many bytes behind the primary (default 256 MiB = 16 segments).
+    BACKUP_STREAM_ALERT_BYTES: z.coerce.number().int().positive().default(256 * 1024 * 1024),
     // Off-site copy never deletes by default; set true to mirror deletions (rclone sync / rsync --delete).
     BACKUP_SECONDARY_MIRROR_DELETE: booleanish.default(false),
     BACKUP_FULL_CRON: cron.default("0 2 * * 0"),
@@ -78,7 +91,18 @@ export const backupDaemonEnvSchema = z
     PG_PRIMARY_PASSWORD: z.string().default(""),
     PG_PRIMARY_DB_NAME: nonEmpty.default("payment_gateway_prod"),
     PG_AUDIT_DB_NAME: nonEmpty.default("pg_audit_db"),
+    // Set only when the audit database lives on a different host than the primary (dedicated cluster).
+    PG_AUDIT_HOST: optionalNonEmpty,
+    PG_AUDIT_USER: optionalNonEmpty,
+    PG_AUDIT_PASSWORD: z.string().default(""),
     PG_AUDIT_PORT: port.default(5434),
+    PG_LOG_DB_NAME: optionalNonEmpty,
+    // Replication role used by pg_basebackup / pg_receivewal (falls back to the primary user).
+    PG_REPLICATION_USER: optionalNonEmpty,
+    PG_REPLICATION_PASSWORD: z.string().default(""),
+    PG_REPLICATION_SLOT: nonEmpty.default("pg_backup_core"),
+    PG_AUDIT_REPLICATION_SLOT: nonEmpty.default("pg_backup_audit"),
+    PG_SSLMODE: z.enum(["disable", "allow", "prefer", "require", "verify-ca", "verify-full"]).default("prefer"),
     PG_REPLICA_NODES: z.string().default(""),
     PG_DATA_DIR: nonEmpty.default("/var/lib/postgresql/18/main"),
     PG_AUDIT_DATA_DIR: optionalNonEmpty,
@@ -95,6 +119,8 @@ export const backupDaemonEnvSchema = z
     BACKUP_SCRATCH_AUDIT_PORT: port.default(55433),
     BACKUP_ALLOW_INSECURE_HTTP: booleanish.default(false),
     BACKUP_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(30 * 60 * 1000),
+    // How long a restore drill waits for WAL replay to reach the target time and promote.
+    BACKUP_RECOVERY_TIMEOUT_MS: z.coerce.number().int().positive().default(10 * 60 * 1000),
     SCHEDULER_ENABLED: booleanish.default(true),
     SCHEDULER_TICK_MS: z.coerce.number().int().positive().default(30_000),
     REDIS_URL: optionalNonEmpty,
@@ -115,6 +141,24 @@ export const backupDaemonEnvSchema = z
         path: ["BACKUP_DAEMON_CA_CERT_PATH"],
       });
     }
+    if (config.BACKUP_ENGINE_MODE !== "pg-native") {
+      for (const key of ["BACKUP_PRIMARY_S3_ENDPOINT", "BACKUP_PRIMARY_S3_BUCKET"] as const) {
+        if (!config[key]) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${key} is required when BACKUP_ENGINE_MODE=${config.BACKUP_ENGINE_MODE}`,
+            path: [key],
+          });
+        }
+      }
+    }
+    if (Boolean(config.BACKUP_PRIMARY_S3_ENDPOINT) !== Boolean(config.BACKUP_PRIMARY_S3_BUCKET)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "BACKUP_PRIMARY_S3_ENDPOINT and BACKUP_PRIMARY_S3_BUCKET must be provided together",
+        path: ["BACKUP_PRIMARY_S3_ENDPOINT"],
+      });
+    }
     if (Boolean(config.BACKUP_PRIMARY_S3_ACCESS_KEY) !== Boolean(config.BACKUP_PRIMARY_S3_SECRET_KEY)) {
       ctx.addIssue({
         code: "custom",
@@ -126,12 +170,18 @@ export const backupDaemonEnvSchema = z
   .transform((config) => {
     const joinPrefix = (base: string, suffix: string): string =>
       `${base.replace(/\/+$/, "")}/${suffix}`;
+    const bucket = config.BACKUP_PRIMARY_S3_BUCKET ?? "";
     return {
       ...config,
+      BACKUP_PRIMARY_S3_ENDPOINT: config.BACKUP_PRIMARY_S3_ENDPOINT ?? "",
+      BACKUP_PRIMARY_S3_BUCKET: bucket,
+      BACKUP_LOCAL_REPO_DIR:
+        config.BACKUP_LOCAL_REPO_DIR ??
+        (config.BACKUP_ENGINE_MODE === "pg-native" ? "/var/lib/pg-backup/repo" : ""),
       BACKUP_CORE_S3_PREFIX:
-        config.BACKUP_CORE_S3_PREFIX ?? joinPrefix(config.BACKUP_PRIMARY_S3_BUCKET, "postgres_core"),
+        config.BACKUP_CORE_S3_PREFIX ?? (bucket ? joinPrefix(bucket, "postgres_core") : ""),
       BACKUP_AUDIT_S3_PREFIX:
-        config.BACKUP_AUDIT_S3_PREFIX ?? joinPrefix(config.BACKUP_PRIMARY_S3_BUCKET, "audit_db"),
+        config.BACKUP_AUDIT_S3_PREFIX ?? (bucket ? joinPrefix(bucket, "audit_db") : ""),
       BARMAN_AUDIT_SERVER: config.BARMAN_AUDIT_SERVER ?? config.PG_AUDIT_DB_NAME,
       BACKUP_SCRATCH_AUDIT_DIR:
         config.BACKUP_SCRATCH_AUDIT_DIR ?? joinPrefix(config.BACKUP_SCRATCH_DIR, "audit"),
@@ -194,4 +244,63 @@ export const collectSecretValues = (config: BackupDaemonConfig): string[] =>
     config.BACKUP_PRIMARY_S3_ACCESS_KEY,
     config.BACKUP_PRIMARY_S3_SECRET_KEY,
     config.PG_PRIMARY_PASSWORD,
+    config.PG_AUDIT_PASSWORD,
+    config.PG_REPLICATION_PASSWORD,
   ].filter((value) => value.length > 0);
+
+/**
+ * Topology helpers. The audit database either lives inside the primary cluster
+ * (shared: it is captured by the core physical backup) or in its own cluster
+ * (dedicated: it needs its own physical backup and drill cluster).
+ *
+ * `PG_AUDIT_PORT` is deliberately NOT part of the decision: it defaults to
+ * 5434 and would make every shared deployment look dedicated.
+ */
+export const isAuditDedicatedCluster = (
+  config: Pick<BackupDaemonConfig, "PG_AUDIT_DATA_DIR" | "PG_AUDIT_HOST" | "PG_PRIMARY_HOST">,
+): boolean =>
+  Boolean(config.PG_AUDIT_DATA_DIR) ||
+  Boolean(config.PG_AUDIT_HOST && config.PG_AUDIT_HOST !== config.PG_PRIMARY_HOST);
+
+export const isAuditConfigured = (config: Pick<BackupDaemonConfig, "PG_AUDIT_DB_NAME">): boolean =>
+  config.PG_AUDIT_DB_NAME.trim().length > 0;
+
+export const isLogDbConfigured = (config: Pick<BackupDaemonConfig, "PG_LOG_DB_NAME">): boolean =>
+  Boolean(config.PG_LOG_DB_NAME && config.PG_LOG_DB_NAME.trim().length > 0);
+
+export type ClusterTopology = "shared-audit" | "dedicated-audit";
+
+export const clusterTopology = (config: Parameters<typeof isAuditDedicatedCluster>[0]): ClusterTopology =>
+  isAuditDedicatedCluster(config) ? "dedicated-audit" : "shared-audit";
+
+/** Host/port/user/password of the cluster that holds the audit database. */
+export const auditEndpoint = (
+  config: BackupDaemonConfig,
+): { host: string; port: number; user: string; password: string } =>
+  isAuditDedicatedCluster(config)
+    ? {
+        host: config.PG_AUDIT_HOST ?? config.PG_PRIMARY_HOST,
+        port: config.PG_AUDIT_PORT,
+        user: config.PG_AUDIT_USER ?? config.PG_PRIMARY_USER,
+        password: config.PG_AUDIT_PASSWORD || config.PG_PRIMARY_PASSWORD,
+      }
+    : {
+        host: config.PG_PRIMARY_HOST,
+        port: config.PG_PRIMARY_PORT,
+        user: config.PG_AUDIT_USER ?? config.PG_PRIMARY_USER,
+        password: config.PG_AUDIT_PASSWORD || config.PG_PRIMARY_PASSWORD,
+      };
+
+/** Replication credentials, falling back to the primary role. */
+export const replicationCredentials = (
+  config: BackupDaemonConfig,
+): { user: string; password: string } => ({
+  user: config.PG_REPLICATION_USER ?? config.PG_PRIMARY_USER,
+  password: config.PG_REPLICATION_PASSWORD || config.PG_PRIMARY_PASSWORD,
+});
+
+export const parseCsv = (value: string | undefined): string[] =>
+  (value ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);

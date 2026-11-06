@@ -201,14 +201,14 @@ Why: The explanation of the right answer (mandatory), in plain words.
 | :--- | :--- | :--- |
 | Tracks | 8 | `@@track` lines |
 | Modules | 11 | `@@module` lines |
-| Lessons | 49 | `@@lesson` blocks (20 Foundation, 29 role) |
-| Lesson checks (practice questions) | 98 | `@@q` with `lesson=` (exactly 2 per lesson) |
-| Exam-pool questions | 218 | `@@q` with `exam=true` (203 single, 13 number, 2 order) |
-| Critical exam-pool questions | 40 | `critical=true` among exam-pool questions |
-| Labs | 15 | `@@lab` blocks |
-| Lab tasks | 86 | sum of tasks in all labs |
+| Lessons | 50 | `@@lesson` blocks (20 Foundation, 30 role) |
+| Lesson checks (practice questions) | 100 | `@@q` with `lesson=` (exactly 2 per lesson) |
+| Exam-pool questions | 223 | `@@q` with `exam=true` (208 single, 13 number, 2 order) |
+| Critical exam-pool questions | 43 | `critical=true` among exam-pool questions |
+| Labs | 16 | `@@lab` blocks |
+| Lab tasks | 92 | sum of tasks in all labs |
 | Exams | 8 | `@@exam` blocks (one per track) |
-| Live drills | 10 | `@@drill` blocks |
+| Live drills | 11 | `@@drill` blocks |
 | Pages | 7 | `@@page` blocks (including `lab-vectors`) |
 
 `meta.json.counts` must equal this table exactly. A content change that changes a count is allowed only together with an update of this table in the same commit.
@@ -415,7 +415,7 @@ interface NumericTask extends TaskBase { kind:"numeric"; answer:string; toleranc
 @@module id=m7 title="AML and confidentiality" minutes=125 :: You can explain AML, decide screening matches, handle cases and never tip off.
 @@module id=m8 title="Gateways, rails and the engine" minutes=165 :: You can configure and review a gateway safely.
 @@module id=m9 title="When things go wrong" minutes=75 :: You can follow the runbooks, hand over and report mistakes.
-@@module id=m10 title="Security and deployment" minutes=70 :: You can resist social engineering, handle data and understand the deployment model.
+@@module id=m10 title="Security and deployment" minutes=95 :: You can resist social engineering, handle data and understand the deployment model.
 
 @@lesson id=l-m0-1 module=m0 order=1 title="Welcome: how the Academy works and what is expected of you" minutes=12 tracks=FOUNDATION reading=b00-01,b00-02,b00-04
 ### You will be able to
@@ -1813,6 +1813,38 @@ A compromised checkout server cannot reach the database or impersonate the admin
 
 ### Check yourself
 Questions: c-l-m10-3-1, c-l-m10-3-2
+@@end
+
+
+@@lesson id=l-m10-4 module=m10 order=4 title="Backups, point-in-time recovery and restore drills" minutes=25 tracks=GATEWAY_ADMIN,SECURITY_ADMIN reading=b12-07,b12-09,b12-10,b12-11
+### You will be able to
+- Explain the difference between a full backup, a delta backup and continuous WAL archiving.
+- Read the five summary tiles and the three restore-drill checks on the **Backups** screen.
+- Explain why a backup policy change needs a second Security Admin and why the off-site vault never deletes by default.
+
+### Key ideas
+- A **full backup** copies the whole database; a **delta backup** copies only what changed since the previous backup; **WAL archiving** copies every change continuously, so we can recover to a chosen second. That is **point-in-time recovery (PITR)**.
+- Default timing, always in UTC: full weekly (Sunday 02:00), delta daily (02:00), restore drill weekly (Sunday 04:00).
+- The **backup daemon** runs on the same host as the primary database or on a dedicated backup host. It keeps compressed, AES-256-GCM encrypted copies in a local repository, an S3 or MinIO bucket and an optional off-site vault.
+- A backup nobody has restored is only a hope. The **restore drill** restores into an isolated scratch cluster, replays WAL to a target time and runs exactly three checks: **Double-entry zero drift**, **Sharded balance parity** and **Audit hash chain**. Any failed check is a priority-1 incident.
+- **Edit policy** needs two Security Admins (`BACKUP_POLICY` approval), so one stolen account cannot shorten retention and erase history.
+
+### A worked example
+The weekly full backup ran on Sunday at 02:00 UTC and deltas ran on Monday and Tuesday at 02:00. On Tuesday at 14:35 UTC the primary disk fails. WAL archive lag was 2 seconds, so the archive holds everything except the last few seconds. The people who run the servers restore the full backup, the two deltas and then replay WAL up to the moment before the fault. Every settled payment and audit record is recovered, and the weekly drill had already shown that the same steps pass all three checks.
+
+### Common mistakes
+- Ignoring a rising **WAL archive lag** until unarchived WAL fills the database disk.
+- Believing a policy change took effect after **Save Changes**, when it is still waiting for a second Security Admin.
+- Treating **Drill failed** as a minor warning instead of finding which check failed.
+
+### Read now
+- [[a:b12-07]]
+- [[a:b12-09]]
+- [[a:b12-10]]
+- [[a:b12-11]]
+
+### Check yourself
+Questions: c-l-m10-4-1, c-l-m10-4-2
 @@end
 
 
@@ -4275,6 +4307,46 @@ Stem: The ledger integrity target is
 Why: Service objectives are in b12-07.
 @@end
 
+@@q id=q-m10-113 module=m10 type=single difficulty=2 critical=true exam=true tracks=GATEWAY_ADMIN,SECURITY_ADMIN refs=b12-09,b12-10
+Stem: On the Backups screen **Last backup** is Passed (from 02:00 UTC), but **WAL archive lag** is 4,200 s (Critical, threshold 300 s) and one storage target is Failed. What is the real risk?
+- [ ] There is no risk, because the 02:00 backup passed.
+- [x] Recent changes are not safely archived, and unarchived WAL piles up on the database disk until archiving resumes.
+- [ ] Every older backup in the bucket has been deleted.
+Why: A passed nightly backup says nothing about the last hours. High archive lag means a disaster now would lose more than a few seconds, and the database keeps what it could not deliver.
+@@end
+
+@@q id=q-m10-114 module=m10 type=single difficulty=2 critical=true exam=true tracks=GATEWAY_ADMIN,SECURITY_ADMIN refs=b12-10
+Stem: A restore drill ends Drill failed. Double-entry zero drift and Sharded balance parity show Passed, but Audit hash chain shows Failed. What do you do?
+- [ ] Ignore it, because the money checks passed.
+- [ ] Delete the audit database so the next drill passes.
+- [x] Treat it as a priority-1 incident: escalate to the Security Admin, keep every backup and do not alter audit records.
+Why: A failed audit chain means an audit row may be changed, damaged or missing. Backups are the evidence, so they must be kept.
+@@end
+
+@@q id=q-m10-115 module=m10 type=single difficulty=2 critical=true exam=true tracks=GATEWAY_ADMIN,SECURITY_ADMIN refs=b12-11
+Stem: Why does lowering **Full retention days** need a second Security Admin?
+- [x] So one compromised or mistaken account cannot shorten the history that recovery and investigations depend on.
+- [ ] Because cron expressions must be typed by two people at the same time.
+- [ ] Because the backup daemon cannot store retention settings.
+Why: Policy changes use maker-checker (`BACKUP_POLICY`), and the checker must be a different Security Admin.
+@@end
+
+@@q id=q-m10-116 module=m10 type=single difficulty=2 critical=false exam=true tracks=GATEWAY_ADMIN,SECURITY_ADMIN refs=b12-10
+Stem: What does a restore drill do to the production database?
+- [ ] It restores the latest backup over production to prove it works.
+- [ ] It pauses production for a few minutes so the checks are exact.
+- [x] Nothing: it restores into an isolated scratch cluster with archiving switched off, then destroys that cluster.
+Why: The scratch cluster listens on the loopback address only and cannot write into the real archive, so production is never touched.
+@@end
+
+@@q id=q-m10-117 module=m10 type=single difficulty=2 critical=false exam=true tracks=GATEWAY_ADMIN,SECURITY_ADMIN refs=b12-11
+Stem: You click **Run backup now** while a restore drill is already running. What happens?
+- [ ] The drill is cancelled and the backup starts at once.
+- [ ] Both run at the same time to save time.
+- [x] The backup is queued and runs after the drill, in order.
+Why: Only one backup or drill job runs at a time; extra requests wait in order, and a repeated request with the same Idempotency-Key is not run twice.
+@@end
+
 @@q id=c-l-m10-1-1 module=m10 type=single difficulty=1 critical=false exam=false lesson=l-m10-1 tracks=FOUNDATION refs=b11-02
 Stem: Someone phones asking for your one-time code. You
 - [x] refuse and report it.
@@ -4321,6 +4393,22 @@ Stem: Fake Rails must
 - [ ] run in production.
 - [ ] hold live secrets.
 Why: It imitates payment companies for drills.
+@@end
+
+@@q id=c-l-m10-4-1 module=m10 type=single difficulty=1 critical=false exam=false lesson=l-m10-4 tracks=GATEWAY_ADMIN,SECURITY_ADMIN refs=b12-09
+Stem: Which mechanism lets the platform recover changes made hours after the last scheduled backup?
+- [x] Continuously archived WAL replayed on top of the full and delta backups (point-in-time recovery).
+- [ ] Asking merchants to re-enter the day's payments.
+- [ ] Clearing the browser cache in reverse.
+Why: Archived WAL records every change between backups, so recovery can be replayed to a chosen moment.
+@@end
+
+@@q id=c-l-m10-4-2 module=m10 type=single difficulty=2 critical=false exam=false lesson=l-m10-4 tracks=GATEWAY_ADMIN,SECURITY_ADMIN refs=b12-10
+Stem: Which three checks must pass in the scratch cluster for a restore drill to pass?
+- [x] Double-entry zero drift, Sharded balance parity and Audit hash chain.
+- [ ] CPU under 50 percent, disk under 50 percent and ten active merchants.
+- [ ] Checkout logo loaded, Arabic translation present and an email sent.
+Why: The drill runs exactly these three invariant checks, signs the report and destroys the scratch cluster.
 @@end
 
 
@@ -9527,6 +9615,327 @@ Why: It imitates payment companies for drills.
 @@end
 
 
+@@lab id=lab-backup-dr-desk module=m10 title="Backup and Recovery Desk: read the screen, judge the drill" minutes=25 tracks=GATEWAY_ADMIN,SECURITY_ADMIN refs=b12-09,b12-10,b12-11,b10-05
+```json
+{
+ "id": "lab-backup-dr-desk",
+ "module": "m10",
+ "title": "Backup and Recovery Desk: read the screen, judge the drill",
+ "minutes": 25,
+ "tracks": [
+  "GATEWAY_ADMIN",
+  "SECURITY_ADMIN"
+ ],
+ "refs": [
+  "b12-09",
+  "b12-10",
+  "b12-11",
+  "b10-05"
+ ],
+ "briefing": "You are on duty at the Backups screen. Read the tiles, know what a restore drill checks, react to a failed drill and review a policy change.",
+ "passPercent": 80,
+ "tasks": [
+  {
+   "id": "b1",
+   "kind": "choice",
+   "title": "Read the tiles",
+   "panels": [
+    {
+     "title": "Backups screen, summary tiles",
+     "rows": [
+      [
+       "WAL archive lag",
+       "4,200 s (alert threshold 300 s): Critical"
+      ],
+      [
+       "Daemon status",
+       "Reachable: Healthy"
+      ],
+      [
+       "Storage targets",
+       "2/3: Attention"
+      ],
+      [
+       "Last backup",
+       "Passed, 02:00 UTC today"
+      ],
+      [
+       "Latest restore drill",
+       "Drill passed, Sunday 04:00 UTC"
+      ]
+     ]
+    }
+   ],
+   "prompt": "What is the most urgent problem?",
+   "points": 10,
+   "options": [
+    {
+     "id": "a",
+     "label": "Archiving is far behind and one storage target has failed, so recent changes are not safely stored",
+     "correct": true,
+     "feedback": "Correct. A passed nightly backup does not cover the last hours; WAL piles up on the database disk."
+    },
+    {
+     "id": "b",
+     "label": "Nothing: the last backup passed and the last drill passed",
+     "correct": false,
+     "feedback": "Both are old news. The lag tile is Critical and a target is down.",
+     "critical": true
+    },
+    {
+     "id": "c",
+     "label": "The daemon is unreachable",
+     "correct": false,
+     "feedback": "Daemon status says Reachable."
+    }
+   ]
+  },
+  {
+   "id": "b2",
+   "kind": "multi",
+   "title": "What a drill checks",
+   "panels": [
+    {
+     "title": "Restore drill",
+     "text": "The daemon restores the latest backup chain into a scratch cluster, replays WAL to the target time and then checks the restored data."
+    }
+   ],
+   "prompt": "Which checks are part of every restore drill?",
+   "points": 12,
+   "options": [
+    {
+     "id": "a",
+     "label": "Double-entry zero drift",
+     "correct": true,
+     "feedback": "Yes. Debits equal credits in the restored ledger."
+    },
+    {
+     "id": "b",
+     "label": "Sharded balance parity",
+     "correct": true,
+     "feedback": "Yes. Shard totals match the journal lines."
+    },
+    {
+     "id": "c",
+     "label": "Audit hash chain, including a gap-free sequence",
+     "correct": true,
+     "feedback": "Yes. Every audit record is present, in order and untampered."
+    },
+    {
+     "id": "d",
+     "label": "Checkout page loads in Arabic",
+     "correct": false,
+     "feedback": "Not a drill check."
+    },
+    {
+     "id": "e",
+     "label": "Production CPU stays under 50 percent",
+     "correct": false,
+     "feedback": "The drill does not run on production."
+    }
+   ]
+  },
+  {
+   "id": "b3",
+   "kind": "order",
+   "title": "Order the drill",
+   "panels": [
+    {
+     "title": "What the daemon does during a drill"
+    }
+   ],
+   "prompt": "Put the steps in order.",
+   "points": 12,
+   "items": [
+    {
+     "id": "a",
+     "label": "Restore the latest backup chain into an isolated scratch cluster (loopback, port 55432, archiving off)"
+    },
+    {
+     "id": "b",
+     "label": "Replay archived WAL to the target time (default: now minus 5 minutes)"
+    },
+    {
+     "id": "c",
+     "label": "Wait until recovery has finished"
+    },
+    {
+     "id": "d",
+     "label": "Run the three invariant checks"
+    },
+    {
+     "id": "e",
+     "label": "Sign the report with HMAC-SHA256"
+    },
+    {
+     "id": "f",
+     "label": "Destroy the scratch cluster"
+    }
+   ],
+   "correctOrder": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f"
+   ],
+   "feedback": "Restore, replay, wait for recovery, check, sign, destroy. Checks run only after recovery has finished, and no customer data is left behind."
+  },
+  {
+   "id": "b4",
+   "kind": "choice",
+   "title": "A failed drill",
+   "panels": [
+    {
+     "title": "Latest restore drill: Drill failed",
+     "rows": [
+      [
+       "Double-entry zero drift",
+       "Passed"
+      ],
+      [
+       "Sharded balance parity",
+       "Passed"
+      ],
+      [
+       "Audit hash chain",
+       "Failed"
+      ]
+     ]
+    }
+   ],
+   "prompt": "What is the right reaction?",
+   "points": 12,
+   "options": [
+    {
+     "id": "a",
+     "label": "Priority-1 incident: escalate to the Security Admin, keep every backup and do not alter audit records",
+     "correct": true,
+     "feedback": "Correct. An audit chain failure may mean tampering or damage."
+    },
+    {
+     "id": "b",
+     "label": "Ignore it: the money checks passed",
+     "correct": false,
+     "feedback": "Any failed check is priority 1.",
+     "critical": true
+    },
+    {
+     "id": "c",
+     "label": "Delete the audit database and run another drill",
+     "correct": false,
+     "feedback": "Never destroy evidence.",
+     "critical": true
+    },
+    {
+     "id": "d",
+     "label": "Run drills until one passes and file only that one",
+     "correct": false,
+     "feedback": "Hiding a failure is as bad as the failure."
+    }
+   ]
+  },
+  {
+   "id": "b5",
+   "kind": "checklist",
+   "title": "Review a policy change",
+   "panels": [
+    {
+     "title": "You are the second Security Admin. Request BACKUP_POLICY, PENDING_REVIEW.",
+     "rows": [
+      [
+       "Maker",
+       "Omar (a different person)"
+      ],
+      [
+       "Changed field",
+       "Full retention days: 56 to 1"
+      ],
+      [
+       "Other fields",
+       "unchanged"
+      ],
+      [
+       "Maker's reason",
+       "Free up disk space"
+      ]
+     ]
+    }
+   ],
+   "prompt": "Tick only the statements the record supports.",
+   "points": 10,
+   "items": [
+    {
+     "id": "c1",
+     "label": "I am a different person from the maker",
+     "shouldTick": true,
+     "why": "Stated in the request; the checker must differ from the maker."
+    },
+    {
+     "id": "c2",
+     "label": "The change cuts the history we can recover from to about one day",
+     "shouldTick": true,
+     "why": "Retention goes from 56 days to 1."
+    },
+    {
+     "id": "c3",
+     "label": "The maker has confirmed with the Security team that one day is enough",
+     "shouldTick": false,
+     "why": "Nothing in the record says so; do not tick what you did not verify."
+    },
+    {
+     "id": "c4",
+     "label": "Approving will apply the change to the daemon and write BACKUP_POLICY_UPDATED to the audit log",
+     "shouldTick": true,
+     "why": "That is what approval does."
+    },
+    {
+     "id": "c5",
+     "label": "The Alert lag threshold is also changing",
+     "shouldTick": false,
+     "why": "Only Full retention days differs."
+    }
+   ],
+   "criticalWrong": [
+    "c3"
+   ]
+  },
+  {
+   "id": "b6",
+   "kind": "numeric",
+   "title": "The restore chain",
+   "panels": [
+    {
+     "title": "Defaults",
+     "rows": [
+      [
+       "Full backup",
+       "Sunday 02:00 UTC"
+      ],
+      [
+       "Delta backup",
+       "Monday to Saturday 02:00 UTC"
+      ],
+      [
+       "Disk failure",
+       "Wednesday 14:35 UTC"
+      ]
+     ]
+    }
+   ],
+   "prompt": "How many backups (the full plus the deltas) form the restore chain before WAL is replayed?",
+   "points": 10,
+   "answer": "4",
+   "tolerance": "0",
+   "feedback": "One full (Sunday) plus deltas on Monday, Tuesday and Wednesday 02:00. Each delta builds on the previous one. WAL then covers the time after Wednesday 02:00."
+  }
+ ]
+}
+```
+@@end
+
+
 ## III-F. Optional live drills (Fake Rails, staging only)
 
 @@drill id=drill-wrong-otp title="Wrong code, then the right code" rail=edfali minutes=15 refs=b07-07,b06-08
@@ -9643,6 +10052,26 @@ A dispute opens, the payment becomes `DISPUTED`, and a chargeback adjustment is 
 Who may approve the drafted chargeback? What happens if the wallet is too small?
 @@end
 
+
+@@drill id=drill-pitr-recovery title="Point-in-time recovery rehearsal and a silent daemon" rail=none minutes=30 refs=b12-09,b12-10,b12-11
+### Setup
+Staging environment only, with the backup daemon running, **Daemon status** **Reachable** and at least one full backup already **Passed** on **Operations**, **Backups**. A Security Admin (`security:write`) sits with the learner, and the people who run the staging servers are available. Fake Rails is running so payments can be created. This drill does not use a payment rail; no rail is involved. Never run it in production.
+### Do
+1. Open **Operations**, **Backups**. Note **WAL archive lag**, **Last backup** and **Latest restore drill**.
+2. Make several test payments with Fake Rails so the ledger has fresh data.
+3. Click **Run backup now**, choose **Backup target** **PostgreSQL core** and **Backup kind** **Delta**, and wait until the row in **Scheduled backups** reads **Passed**.
+4. Make a few more payments, then wait at least six minutes. The drill replays WAL to now minus 5 minutes by default.
+5. Click **Run restore drill**, confirm, and press **Refresh** until **Latest restore drill** shows a result. Read **Target time**, **Replayed LSN**, **Duration**, **Journal lines** and the three badges.
+6. Ask the server team to stop the backup daemon service on staging for two minutes. Press **Refresh**.
+7. Ask them to start it again and press **Refresh** until **Daemon status** is **Reachable**.
+### Expect
+* After step 3 the delta backup moves from **Queued** to **Running** to **Passed**, with **Size** and **Duration** filled and **Error** empty.
+* After step 5 the result is **Drill passed** and **Double-entry zero drift**, **Sharded balance parity** and **Audit hash chain** each read **Passed**. **Journal lines** is not empty.
+* After step 6 **Daemon status** reads **Unreachable**, the red banner about the unreachable daemon appears, and **Run backup now**, **Run restore drill** and **Edit policy** are disabled.
+* After step 7 the buttons return and **WAL archive lag** falls back below the **Alert threshold**.
+### Debrief questions
+Why is one drill pass worth more than a green **Last backup** tile? Why did the drill not touch the staging database? Which payments were inside the restore point and which were not, and why? What does PostgreSQL do with WAL it could not deliver while the daemon was silent, and what would a long outage risk?
+@@end
 
 ## III-G. Trainer and manager guide, III-H. Learner texts
 

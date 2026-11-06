@@ -405,3 +405,26 @@ Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not cov
 - **Unit (`tests/unit`, vitest, 483 passing in 29 files):** pure logic of the new UI: governance action tables per state (immediate vs approval), owner/revalidation forms, journal/route-cap/lifecycle/health/jobs models, the JSON diff model, audit summaries (`formatAuditValue`, `describeAuditChange`), commission tiers, dispute evidence mapping, and the builders' round trips (cost model, scope, maintenance windows, parser config, AML params, settings schemas, template variables) including unknown-key preservation. `commerce-i18n` and `builders-api-error-i18n` assert that every message key the logic can produce has an Arabic entry. `frontend-security-admin` (default-deny route authorities, alias map) and `guide-content` (every router name has a context-map screen) caught the six new routes until they were registered properly.
 - **E2E (Playwright, needs Chrome: set `PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome-stable` when the bundled browser is not installed):** `e2e/admin/commerce-governance.spec.ts` drives the wallets page against realistic mocked responses (restricted balances render "Restricted" and never 0; a freeze needs a >=10-character reason and sends exactly `{status: "FROZEN", reason}`; restoring returns HTTP 202 and is reported as submitted for approval; a read-only role gets no freeze action). `exhaustive-admin-surface.spec.ts` now covers 31 routes (the six new ones included) across 3 viewports x 2 locales x 2 themes (372 combinations: no horizontal overflow, correct direction and theme, app bar never overlapping). `e2e/admin/backups.spec.ts` was updated for the second confirmation the page has asked for since the frontend hardening commit (its spec was stale).
 - **Component compliance (`admin-front` `bun run test:unit`):** helper components must live in `components/` subfolders so every route page keeps `PageHeader` (the test stops at the first offender).
+
+## Backup daemon suites (2026-11-06)
+
+`deploy/backup-daemon/test/` (220 tests): `cryptoEnvelope` (HKDF, round trip, every tamper class, signed manifests), `storage` (local/S3/vault tiers, repository fan-out and verified fallback), `wal` (WAL names and lag arithmetic, idempotent ingest and 409 conflicts, mirroring, `pg_receivewal` supervision), `jobQueue`, `catalogMirror`, `pgNativeEngine` (chain resolution, live-policy retention, delta preconditions), `mtlsRoles` (real TLS 1.3 role separation, 50 sequential + 50 concurrent keep-alive requests), plus the updated `backupEngine`, `config`, `server` and `restoreDrillRunner` suites.
+
+`test/lab/two-host.lab.test.ts` is the TWO-HOST LAB (primary on host A, daemon alone on host B over a real LAN, as a systemd service running as `pgbackup`); it skips unless `LAB_B_HOST`, `LAB_B_USER` and `LAB_B_PASSWORD` are set and is not part of CI. `live-pg18-pitr.test.ts` is a LIVE integration test: a private throwaway PostgreSQL under `/tmp` with a Debian-style external config, the real daemon over mTLS, `curl` as `archive_command` and real `pg_receivewal`. It runs full and incremental backups, PITR to a point before an injected operator error, a full+delta chain through `pg_combinebackup`, fault injection (double-entry drift, shard drift, tampered and deleted audit rows, one-byte backup corruption with tier fallback) and asserts the production archive stays free of timeline-2 files. It skips with a message when the PostgreSQL 17+ binaries, `zstd`, `curl`, `tar` or `openssl` are missing.
+
+## Offline companion suites (2026-11-06)
+
+`companion-app/tests/` (Vitest, 16 tests / 4 files) covers the generated content bundle
+(counts, cross-document links, lesson reading/check references, external-URL and exam-bank
+leak guards), markdown rendering for every article and lesson (unresolved links, callouts,
+glossary terms, widget placeholders, stable heading ids, structural lesson trimming), the
+offline MiniSearch index (`LIMIT_EXCEEDED`, maker-checker, glossary terms), and all 18
+published Academy lab-scoring vectors.
+
+`companion-app/scripts/check-content.ts` is the build gate: it re-runs the canonical Guide
+and Academy extractors, compares their output with `admin-front/src/content/**/generated`,
+rebuilds the bundle and fails on any drift. `build-apk.sh` runs it before typecheck, tests,
+web build, Capacitor sync and Gradle. Web Playwright sweeps 24 routes at 360/390/768 px in
+light/dark/sepia and English/Arabic chrome; the signed APK is verified with `apksigner`.
+No Android device was connected, so on-device install, airplane-mode, notification reboot
+and real-device performance tests remain open.

@@ -36,7 +36,7 @@ tests:
 gaps:
   - Edge authority gating checks the JWT shape/claims but cannot verify the HS256 signature because the key lives in core; it remains advisory and core is the enforcement point.
   - "Cookie session mode is opt-in (`SESSION_COOKIE_MODE`, default off); with it off the token still lives in browser storage (GAP-019 residual)."
-  - Backup trigger/drill are not idempotent: the Idempotency-Key is relayed but core has no replay store.
+  - Backup trigger/drill do not REQUIRE an Idempotency-Key; a well-formed key is relayed to core and the daemon, which deduplicates a retry (in memory, 24 h).
   - `ADMIN_AUTHORITY_HINTS` is a restriction list; an upgrade that copies an old hint value can deny routes until it is cleared.
 ---
 
@@ -141,9 +141,9 @@ All routes are prefixed with `/api/v1/admin`. The auth routes are inside the LAN
 | Options | `GET /options/:kind` |
 | Stats | `GET /stats/overview`, `GET /stats/recent-activity`, `GET /stats/export`, `POST /stats/export-audit`, plus export variants |
 | Audit logs | `GET /audit-logs`, `GET /audit-logs/:id`, `GET /audit-logs/export`, `GET /audit-logs/summary`, `GET /audit-logs/summary/export` |
-| System backups | `GET /system/backups/overview`, `POST /system/backups/trigger`, `POST /system/backups/drill`, `PUT /system/backups/policy` |
+| System backups | `GET /system/backups/overview`, `GET /system/backups/catalog`, `POST /system/backups/trigger`, `POST /system/backups/drill`, `PUT /system/backups/policy` |
 
-The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` to every AML route. The backup router applies `security:read`/`gateway:read` to the overview and `security:write` to trigger, drill and policy. The remaining routes rely on `requireSession` plus core-side authority enforcement.
+The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` to every AML route. The backup router applies `security:read`/`gateway:read` to the overview and catalog and `security:write` to trigger, drill and policy. The remaining routes rely on `requireSession` plus core-side authority enforcement.
 
 ## 4. Contracts and invariants
 

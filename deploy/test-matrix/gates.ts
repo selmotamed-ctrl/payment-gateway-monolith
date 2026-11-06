@@ -559,12 +559,38 @@ const gateBackup = async (ctx: GateContext): Promise<GateCheck[]> => {
     if (["PASSED", "SUCCEEDED", "COMPLETED", "FAILED"].includes(finalStatus)) break;
   }
   const drill = await adminFetch(ctx, token, "/system/backups/drill", { method: "POST", body: JSON.stringify({}) });
+  const drillBody = await drill.json().catch(() => ({})) as { drillId?: string };
+  // The drill is asynchronous: poll the overview until THIS drill reaches a
+  // terminal status, then assert the restored copy is internally consistent.
+  interface LatestDrill {
+    id?: string;
+    status?: string;
+    doubleEntryDrift?: number | string | null;
+    balanceMismatches?: number | null;
+    auditBrokenLinks?: number | null;
+  }
+  let latestDrill: LatestDrill | undefined;
+  const drillStarted = Date.now();
+  while (drill.ok && drillBody.drillId && Date.now() - drillStarted < ctx.intensity.slo.backupTimeoutSec * 1000) {
+    await sleep(2_000);
+    const response = await adminFetch(ctx, token, "/system/backups/overview");
+    const body = await response.json().catch(() => ({})) as { latestDrill?: LatestDrill | null };
+    if (body.latestDrill?.id === drillBody.drillId) {
+      latestDrill = body.latestDrill;
+      if (latestDrill.status === "PASSED" || latestDrill.status === "FAILED") break;
+    }
+  }
+  const drillDone = latestDrill?.status === "PASSED" || latestDrill?.status === "FAILED";
+  const drillSummary = `drill=${drillBody.drillId ?? "none"} status=${latestDrill?.status ?? "UNKNOWN"} after ${Math.round((Date.now() - drillStarted) / 1000)}s`;
   return [
     check("backup overview is reachable", overview.ok, `status=${overview.status}`),
     check("backup overview reports WAL archiving healthy", overviewBody.walArchiveHealthy === true, JSON.stringify(overviewBody).slice(0, 200)),
     check(`full backup completes within ${ctx.intensity.slo.backupTimeoutSec}s`, ["PASSED", "SUCCEEDED", "COMPLETED"].includes(finalStatus), `trigger=${trigger.status} job=${triggerBody.backupJobId ?? "none"} status=${finalStatus} after ${Math.round((Date.now() - started) / 1000)}s`),
-    check("restore drill is accepted", drill.ok, `status=${drill.status}`),
-    skip("restore drill completes", "drill completion is not polled yet (daemon /v1/runs not wired)"),
+    check("restore drill is accepted", drill.ok && Boolean(drillBody.drillId), `status=${drill.status} drill=${drillBody.drillId ?? "none"}`),
+    check("restore drill completes and passes", drillDone && latestDrill?.status === "PASSED", drillSummary, latestDrill ? { drillStatus: latestDrill.status ?? "UNKNOWN", doubleEntryDrift: String(latestDrill.doubleEntryDrift), balanceMismatches: String(latestDrill.balanceMismatches), auditBrokenLinks: String(latestDrill.auditBrokenLinks) } : undefined),
+    check("restored copy has zero double-entry drift", drillDone && Number(latestDrill?.doubleEntryDrift) === 0, `doubleEntryDrift=${String(latestDrill?.doubleEntryDrift)}`),
+    check("restored copy has no balance mismatches", drillDone && latestDrill?.balanceMismatches === 0, `balanceMismatches=${String(latestDrill?.balanceMismatches)}`),
+    check("restored audit chain has no broken links", drillDone && latestDrill?.auditBrokenLinks === 0, `auditBrokenLinks=${String(latestDrill?.auditBrokenLinks)}`),
   ];
 };
 

@@ -110,9 +110,9 @@ export const backupPolicySchema = z
 // proposal impossible (the core only creates the approval when the maker calls
 // without an approvalRequestId).
 
-// NOTE: trigger/drill stay non-idempotent. The header is relayed to core but
-// core has no replay store yet, so requiring it here would only be cosmetic;
-// this remains a documented gap until the daemon accepts an idempotency key.
+// NOTE: trigger/drill do not REQUIRE an Idempotency-Key (existing clients send none), but a valid one is
+// relayed to core and on to the daemon, which deduplicates a retried request (202 with the original job id)
+// and serializes all jobs in one FIFO queue, so a double click can never start two overlapping backups.
 
 /** Tight per client limiter for the job starting routes. */
 const jobLimiter = lazyLimiter(() =>
@@ -137,6 +137,16 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/system/backups/overview",
+  }),
+);
+
+// Local run/drill history kept by core; stays available while the daemon is in maintenance.
+router.get(
+  "/catalog",
+  readBackups,
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/system/backups/catalog",
   }),
 );
 

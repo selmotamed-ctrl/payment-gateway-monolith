@@ -2,9 +2,9 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { effectiveDatabase, loadDeployConfig, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
+import { backupS3Configured, effectiveDatabase, loadDeployConfig, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
-import { buildPki, certFilesForHost, readMaterial, verifyPki } from "./lib/pkiManager";
+import { buildPki, certFilesForHost, readMaterial, verifyPki, WAL_ARCHIVE_CLIENT } from "./lib/pkiManager";
 import { collectSecretValues, effectiveTargetHome, effectiveTargetUser, SshRunner, shellQuote } from "./lib/sshRunner";
 import { dollarTag, pgpassField, sqlIdent, sqlLiteral } from "./lib/quoting";
 import { applyFirewall, readFirewallStatus } from "./lib/firewallConfigurator";
@@ -15,7 +15,7 @@ import { startFrontendBuilds, type FrontendBuildHandle } from "./lib/frontendBui
 import { provisionPostgres18 } from "./provisioners/postgres18Provisioner";
 import { provisionRedis } from "./provisioners/redisProvisioner";
 import { provisionAuditAndLogDb } from "./provisioners/auditAndLogDbProvisioner";
-import { provisionBackupEngine } from "./provisioners/backupEngineProvisioner";
+import { backupDaemonUser, provisionBackupEngine, STORAGE_CERT_DIR } from "./provisioners/backupEngineProvisioner";
 
 /**
  * The multi-host deployment orchestrator.
@@ -140,7 +140,6 @@ const warn = (message: string): void => console.warn(`  ! ${message}`);
 
 const timestamp = (): string => new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
 
-const STORAGE_CERT_DIR = "/etc/pg-deploy/certs";
 
 const isStorageRole = (role: string): boolean =>
   ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup"].includes(role);
@@ -156,16 +155,48 @@ const uploadStorageCertificates = (
     const directory = host.roles.includes("backup")
       ? config.BACKUP_DAEMON_CERT_DIR
       : STORAGE_CERT_DIR;
-    for (const material of certFilesForHost(pki, host.roles)) {
+    const materials = certFilesForHost(pki, host.roles);
+    // The WAL ingest client (and the CA that verifies the daemon) always live in
+    // STORAGE_CERT_DIR on the PostgreSQL host, where archive_command reads them,
+    // even when that host is also the backup node (whose daemon uses its own dir).
+    const walClient = materials.find((material) => material.name === WAL_ARCHIVE_CLIENT);
+    const directoryFor = (material: { name: string }): string =>
+      material.name === WAL_ARCHIVE_CLIENT ? STORAGE_CERT_DIR : directory;
+    for (const material of materials) {
+      const target = directoryFor(material);
       if (dryRun) {
-        runner.writeRemoteFile({ target: host.ssh, path: `${directory}/${material.name}.crt`, content: "", mode: 0o644, sudo: true });
+        runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.crt`, content: "", mode: 0o644, sudo: true });
         continue;
       }
       const content = readMaterial(material);
-      runner.writeRemoteFile({ target: host.ssh, path: `${directory}/${material.name}.crt`, content: content.cert, mode: 0o644, sudo: true });
+      runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.crt`, content: content.cert, mode: 0o644, sudo: true });
       if (content.key) {
-        runner.writeRemoteFile({ target: host.ssh, path: `${directory}/${material.name}.key`, content: content.key, mode: 0o600, sudo: true });
+        runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.key`, content: content.key, mode: 0o600, sudo: true });
       }
+    }
+    if (walClient && !dryRun) {
+      if (directory !== STORAGE_CERT_DIR) {
+        const ca = materials.find((material) => material.kind === "ca");
+        if (ca) runner.writeRemoteFile({ target: host.ssh, path: `${STORAGE_CERT_DIR}/${ca.name}.crt`, content: readMaterial(ca).cert, mode: 0o644, sudo: true });
+      }
+      // archive_command runs as the postgres OS user: it must read the WAL
+      // client key, and nothing else in this directory is made group-readable.
+      const dir = shellQuote(STORAGE_CERT_DIR);
+      runner.run(
+        host.ssh,
+        `getent group postgres >/dev/null 2>&1 && { chgrp postgres ${dir} ${shellQuote(`${STORAGE_CERT_DIR}/${WAL_ARCHIVE_CLIENT}.key`)} && chmod 0750 ${dir} && chmod 0640 ${shellQuote(`${STORAGE_CERT_DIR}/${WAL_ARCHIVE_CLIENT}.key`)}; } || true`,
+        { sudo: true },
+      );
+    }
+    if (host.roles.includes("backup") && !dryRun) {
+      // The daemon (pgbackup, or postgres when co-located in wal-g mode) must own its mTLS material.
+      const owner = shellQuote(`${backupDaemonUser(config)}:${backupDaemonUser(config)}`);
+      const dir = shellQuote(directory);
+      runner.run(
+        host.ssh,
+        `chown ${owner} ${dir} && chmod 0750 ${dir} && { chown ${owner} ${dir}/*.crt ${dir}/*.key 2>/dev/null; chmod 0640 ${dir}/*.crt 2>/dev/null; chmod 0600 ${dir}/*.key 2>/dev/null; true; } || true`,
+        { sudo: true },
+      );
     }
   }
 };
@@ -535,6 +566,15 @@ const deployService = (input: {
 };
 
 /**
+ * Waits (up to ~10 s) for the daemon unit to be active and to stay active for a
+ * moment (Restart=always would otherwise hide a crash loop behind a brief
+ * "active"); on failure prints the unit's journal to stderr and exits 1.
+ */
+export const daemonReadinessWait = (unit = "pg-backup-daemon"): string =>
+  `ok=0; for i in $(seq 1 10); do if systemctl is-active --quiet ${unit}; then sleep 1; if systemctl is-active --quiet ${unit}; then ok=1; break; fi; fi; sleep 1; done
+if [ "$ok" != 1 ]; then echo "${unit} did not become active within 10s" >&2; journalctl -u ${unit} -n 40 --no-pager >&2; exit 1; fi`;
+
+/**
  * Copies the daemon source to BACKUP_NODE and brings its systemd unit up.
  * The daemon is restarted only when something it runs on changed (its source,
  * environment or unit) or it is down: a blind restart can interrupt a backup
@@ -552,7 +592,11 @@ const deployBackupDaemon = (input: {
   const installDir = "/opt/pg-backup-daemon";
   const sourceDir = join(REPO_ROOT, "deploy", "backup-daemon");
   const targetUser = effectiveTargetUser(host.ssh);
-  // Hand the source tree (never node_modules, which postgres owns and which can
+  // The daemon account: pgbackup, or postgres only for a co-located wal-g backup.
+  const daemonUser = backupDaemonUser(config);
+  const daemonOwner = `${daemonUser}:${daemonUser}`;
+  const bunCacheDir = "/var/lib/pg-backup/.bun-cache";
+  // Hand the source tree (never node_modules, which the daemon user owns and which can
   // hold thousands of files) to the deploy user for rsync, and back afterwards.
   const chownSource = (owner: string): string =>
     `find ${shellQuote(installDir)} -path ${shellQuote(`${installDir}/node_modules`)} -prune -o -exec chown ${shellQuote(owner)} {} +`;
@@ -573,7 +617,7 @@ const deployBackupDaemon = (input: {
   runner.run(host.ssh, bunInstallCommand(config), { sudo: true });
   runner.run(
     host.ssh,
-    `${chownSource("postgres:postgres")}; if [ ${synced.changed ? 1 : 0} = 1 ] || [ ! -d ${shellQuote(`${installDir}/node_modules`)} ]; then install -d -o postgres -g postgres ${shellQuote(`${installDir}/node_modules`)} && cd ${shellQuote(installDir)} && runuser -u postgres -- /usr/local/bin/bun install --frozen-lockfile; fi`,
+    `${chownSource(daemonOwner)}; install -d -m 0755 -o ${shellQuote(daemonUser)} -g ${shellQuote(daemonUser)} ${shellQuote(bunCacheDir)}; if [ ${synced.changed ? 1 : 0} = 1 ] || [ ! -d ${shellQuote(`${installDir}/node_modules`)} ]; then install -d -o ${shellQuote(daemonUser)} -g ${shellQuote(daemonUser)} ${shellQuote(`${installDir}/node_modules`)} && cd ${shellQuote(installDir)} && runuser -u ${shellQuote(daemonUser)} -- env HOME=/var/lib/pg-backup BUN_INSTALL_CACHE_DIR=${shellQuote(bunCacheDir)} /usr/local/bin/bun install --frozen-lockfile; fi`,
     { sudo: true },
   );
   const restart = input.forceRestart === true || synced.changed || input.configChanged !== false;
@@ -582,7 +626,8 @@ const deployBackupDaemon = (input: {
     `systemctl daemon-reload && systemctl enable pg-backup-daemon >/dev/null 2>&1
 if ! systemctl is-active --quiet pg-backup-daemon; then systemctl start pg-backup-daemon; echo __PG_APPLY__=started
 elif [ ${restart ? 1 : 0} = 1 ]; then systemctl restart pg-backup-daemon; echo __PG_APPLY__=restarted
-else echo __PG_APPLY__=unchanged; fi`,
+else echo __PG_APPLY__=unchanged; fi
+${daemonReadinessWait()}`,
     { sudo: true },
   ));
   log(`  backup daemon ${outcome === "unknown" ? "applied" : outcome} -> ${host.ssh.host}:${installDir} (BACKUP_DAEMON_PORT=${config.BACKUP_DAEMON_PORT})`);
@@ -600,7 +645,12 @@ export const bunInstallCommand = (config: Pick<DeployConfig, "BUN_VERSION" | "BU
   const download = sha
     ? `d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && curl -fsSL ${shellQuote(`https://github.com/oven-sh/bun/releases/download/bun-v${config.BUN_VERSION}/bun-linux-x64.zip`)} -o "$d/bun.zip" && echo ${shellQuote(`${sha}  `)}"$d/bun.zip" | sha256sum -c - && unzip -q -o "$d/bun.zip" -d "$d" && install -m 0755 "$d/bun-linux-x64/bun" /usr/local/bin/bun`
     : missing;
-  return `if [ ! -x /usr/local/bin/bun ]; then if command -v bun >/dev/null 2>&1; then ln -sfn "$(command -v bun)" /usr/local/bin/bun; elif [ -x "$HOME/.bun/bin/bun" ]; then ln -sfn "$HOME/.bun/bin/bun" /usr/local/bin/bun; else ${download}; fi; fi; ${link}`;
+  // The daemon runs as an unprivileged service user, which cannot traverse the deploy user's home directory (0750),
+  // so /usr/local/bin/bun must be a REAL file, never a symlink into a home directory. An existing symlink (from an
+  // earlier deploy or a per-user install) is converted. Copies go through a temp file + mv so a running daemon's
+  // binary is replaced atomically instead of failing with "text file busy".
+  const realCopy = (source: string): string => `install -m 0755 ${source} /usr/local/bin/bun.new && mv -f /usr/local/bin/bun.new /usr/local/bin/bun`;
+  return `if [ -L /usr/local/bin/bun ]; then t=$(readlink -f /usr/local/bin/bun); if [ -x "$t" ]; then ${realCopy('"$t"')}; else rm -f /usr/local/bin/bun; fi; fi; if [ ! -x /usr/local/bin/bun ]; then if command -v bun >/dev/null 2>&1; then ${realCopy('"$(readlink -f "$(command -v bun)")"')}; elif [ -x "$HOME/.bun/bin/bun" ]; then ${realCopy('"$HOME/.bun/bin/bun"')}; else ${download}; fi; fi; ${link}`;
 };
 
 const provisionDatabase = (input: {
@@ -991,7 +1041,7 @@ const main = async (): Promise<void> => {
   }
   if (config.BACKUP_ENABLED && shouldRunStorage(options, ["backup"])) {
     const report = provisionBackupEngine({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });
-    log(`  Backup engine (${config.BACKUP_ENGINE_MODE}) on: ${report.nodes.join(", ") || "none"}; object store: ${resolveBackupS3Mode(config)}`);
+    log(`  Backup engine (${config.BACKUP_ENGINE_MODE}) on: ${report.nodes.join(", ") || "none"}; object store: ${backupS3Configured(config) ? resolveBackupS3Mode(config) : "none (local repo)"}`);
     logOutcomes(report.outcomes);
     const backupHost = plan.hosts.find((host) => host.roles.includes("backup"));
     if (backupHost) {

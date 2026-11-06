@@ -95,8 +95,8 @@
 | `core-back/test/academy-team.test.ts` | 270 | 31 |
 | `core-back/test/aml-resolution-finalization.test.ts` | 300 | 7 |
 | `core-back/test/background-jobs.test.ts` | 631 | 11 |
-| `core-back/test/backup-admin/backup-admin-routes.test.ts` | 475 | 9 |
-| `core-back/test/backup-admin/backup-control-client.test.ts` | 344 | 6 |
+| `core-back/test/backup-admin/backup-admin-routes.test.ts` | 557 | 12 |
+| `core-back/test/backup-admin/backup-control-client.test.ts` | 369 | 7 |
 | `core-back/test/blueprint-seed.test.ts` | 720 | 30 |
 | `core-back/test/checkout-cancel.test.ts` | 183 | 5 |
 | `core-back/test/checkout-confirm-concurrency.test.ts` | 287 | 4 |
@@ -159,7 +159,7 @@
 | `admin-back/test/core-contract.test.ts` | 1646 | 58 |
 | `admin-back/test/academy-progress.test.ts` | 240 | 13 |
 | `admin-back/test/admin-surface.test.ts` | 1329 | 53 |
-| `admin-back/test/backups.test.ts` | 423 | 18 |
+| `admin-back/test/backups.test.ts` | 457 | 21 |
 | `admin-back/test/core-internal-client.test.ts` | 493 | 16 |
 | `admin-back/test/search.test.ts` | 83 | 2 |
 | `admin-back/test/security-regressions.test.ts` | 502 | 31 |
@@ -190,35 +190,49 @@
 | `fake-rails-back/test/api.test.ts` | 292 | 11 |
 | `fake-rails-back/test/security.test.ts` | 139 | 7 |
 | `deploy/test/ci-workflows.test.ts` | 37 | 2 |
-| `deploy/test/configScale.test.ts` | 185 | 13 |
 | `deploy/test/exhaustive-deploy-matrix.test.ts` | 311 | 20 |
 | `deploy/test/fakeRails.test.ts` | 109 | 7 |
-| `deploy/test/gap-hardening.test.ts` | 113 | 10 |
+| `deploy/test/gap-hardening.test.ts` | 114 | 10 |
 | `deploy/test/healthVerifierScale.test.ts` | 140 | 4 |
 | `deploy/test/hostPlanner.test.ts` | 311 | 23 |
-| `deploy/test/hostPlannerScale.test.ts` | 157 | 6 |
+| `deploy/test/hostPlannerScale.test.ts` | 158 | 6 |
 | `deploy/test/ipv6Loopback.test.ts` | 37 | 2 |
-| `deploy/test/pipeline.test.ts` | 95 | 4 |
 | `deploy/test/pkiScale.test.ts` | 112 | 5 |
 | `deploy/test/provisioners.test.ts` | 507 | 27 |
 | `deploy/test/redactSecrets.test.ts` | 63 | 5 |
 | `deploy/test/rollingDeploy.test.ts` | 52 | 5 |
-| `deploy/test/security-regressions.test.ts` | 395 | 35 |
+| `deploy/test/security-regressions.test.ts` | 400 | 35 |
 | `deploy/test/templates.test.ts` | 244 | 17 |
-| `deploy/test/testMatrix.test.ts` | 414 | 33 |
+| `deploy/test/testMatrix.test.ts` | 455 | 35 |
 | `deploy/test/converge.test.ts` | 530 | 48 |
 | `deploy/test/frontendBuild.test.ts` | 171 | 12 |
 | `deploy/test/stress-harness.test.ts` | 162 | 15 |
-| `deploy/backup-daemon/test/backupEngine.test.ts` | 352 | 18 |
+| `deploy/test/configScale.test.ts` | 185 | 13 |
+| `deploy/test/pipeline.test.ts` | 95 | 4 |
+| `deploy/test/backupReliability.test.ts` | 494 | 31 |
+| `deploy/backup-daemon/test/backupEngine.test.ts` | 504 | 28 |
 | `deploy/backup-daemon/test/catalogStore.test.ts` | 133 | 6 |
 | `deploy/backup-daemon/test/commandRunner.test.ts` | 61 | 3 |
-| `deploy/backup-daemon/test/config.test.ts` | 117 | 7 |
+| `deploy/backup-daemon/test/config.test.ts` | 202 | 18 |
 | `deploy/backup-daemon/test/cron.test.ts` | 82 | 8 |
-| `deploy/backup-daemon/test/helpers.ts` | 202 | 0 |
+| `deploy/backup-daemon/test/helpers.ts` | 240 | 0 |
 | `deploy/backup-daemon/test/mtlsAuthorization.test.ts` | 94 | 1 |
-| `deploy/backup-daemon/test/restoreDrillRunner.test.ts` | 382 | 10 |
 | `deploy/backup-daemon/test/scheduler.test.ts` | 154 | 3 |
-| `deploy/backup-daemon/test/server.test.ts` | 352 | 16 |
+| `deploy/backup-daemon/test/server.test.ts` | 568 | 28 |
+| `deploy/backup-daemon/test/cryptoEnvelope.test.ts` | 300 | 25 |
+| `deploy/backup-daemon/test/storage.test.ts` | 311 | 20 |
+| `deploy/backup-daemon/test/wal.test.ts` | 315 | 20 |
+| `deploy/backup-daemon/test/jobQueue.test.ts` | 154 | 8 |
+| `deploy/backup-daemon/test/catalogMirror.test.ts` | 132 | 7 |
+| `deploy/backup-daemon/test/mtlsRoles.test.ts` | 196 | 4 |
+| `deploy/backup-daemon/test/pgNativeEngine.test.ts` | 300 | 20 |
+| `deploy/backup-daemon/test/restoreDrillRunner.test.ts` | 632 | 24 |
+| `deploy/backup-daemon/test/instanceLock.test.ts` | 103 | 8 |
+| `deploy/backup-daemon/test/startup.test.ts` | 68 | 2 |
+| `deploy/backup-daemon/test/live-pg18-pitr.test.ts` | 580 | 18 |
+| `deploy/backup-daemon/test/lab/labConfig.ts` | 58 | 0 |
+| `deploy/backup-daemon/test/lab/ledgerFixtures.ts` | 40 | 0 |
+| `deploy/backup-daemon/test/lab/two-host.lab.test.ts` | 573 | 9 |
 | `tests/e2e/admin/finance.spec.ts` | 47 | 1 |
 | `tests/e2e/admin/a11y.spec.ts` | 37 | 2 |
 | `tests/e2e/admin/auth.spec.ts` | 50 | 2 |
@@ -256,7 +270,6 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/authorities.test.ts` | 27 | 4 |
 | `tests/unit/global-search.test.ts` | 208 | 10 |
-| `tests/unit/academy-content.test.ts` | 306 | 17 |
 | `tests/unit/academy-lab-scoring.test.ts` | 162 | 13 |
 | `tests/unit/academy-lesson-body.test.ts` | 24 | 3 |
 | `tests/unit/academy-next-step.test.ts` | 128 | 11 |
@@ -265,7 +278,7 @@
 | `tests/unit/frontend-security-admin.test.ts` | 179 | 19 |
 | `tests/unit/frontend-security-checkout.test.ts` | 335 | 42 |
 | `tests/unit/frontend-security-merchant.test.ts` | 167 | 17 |
-| `tests/unit/guide-content.test.ts` | 174 | 9 |
+| `tests/unit/guide-content.test.ts` | 177 | 9 |
 | `tests/unit/guide-search.test.ts` | 80 | 9 |
 | `tests/unit/guide-widgets.test.ts` | 221 | 25 |
 | `tests/unit/json-diff-model.test.ts` | 182 | 20 |
@@ -282,6 +295,7 @@
 | `tests/unit/commerce-i18n.test.ts` | 127 | 7 |
 | `tests/unit/builders-api-error-i18n.test.ts` | 79 | 6 |
 | `tests/unit/audit-summary.test.ts` | 109 | 13 |
+| `tests/unit/academy-content.test.ts` | 306 | 17 |
 
-- Total files: **278**
-- Total literal test declarations: **2925**
+- Total files: **292**
+- Total literal test declarations: **3153**

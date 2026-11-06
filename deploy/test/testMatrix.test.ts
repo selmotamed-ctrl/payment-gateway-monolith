@@ -279,6 +279,47 @@ describe("topology derivation", () => {
   });
 });
 
+describe("lab backup settings", () => {
+  const topology = () => deriveTopologies(parseLabConfig(minimal())).topologies[0]!;
+  const withEnv = (patch: Record<string, string | undefined>, run: () => void) => {
+    const saved = Object.fromEntries(Object.keys(patch).map((key) => [key, process.env[key]]));
+    try {
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      run();
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  };
+
+  test("BACKUP_WALG_SHA256 is only set when LAB_WALG_SHA256 is (no all-zero checksum that aborts the install)", () => {
+    withEnv({ LAB_WALG_SHA256: undefined }, () => {
+      const { env } = renderAndLoad(parseLabConfig(minimal()), topology());
+      expect(env.BACKUP_WALG_SHA256).toBeUndefined();
+    });
+    const sha = "ab".repeat(32);
+    withEnv({ LAB_WALG_SHA256: sha }, () => {
+      expect(renderAndLoad(parseLabConfig(minimal()), topology()).env.BACKUP_WALG_SHA256).toBe(sha);
+    });
+  });
+
+  test("LAB_BACKUP_MODE=pg-native selects the pg-native engine", () => {
+    withEnv({ LAB_BACKUP_MODE: undefined }, () => {
+      expect(renderAndLoad(parseLabConfig(minimal()), topology()).env.BACKUP_ENGINE_MODE).toBe("wal-g");
+    });
+    withEnv({ LAB_BACKUP_MODE: "pg-native" }, () => {
+      const { env, config } = renderAndLoad(parseLabConfig(minimal()), topology());
+      expect(env.BACKUP_ENGINE_MODE).toBe("pg-native");
+      expect(config.BACKUP_ENGINE_MODE).toBe("pg-native");
+    });
+  });
+});
+
 describe("gate verdicts", () => {
   test("SKIP never counts as a pass", () => {
     expect(gateStatusOf([])).toBe("SKIPPED");
@@ -404,7 +445,7 @@ describe("multi-cluster PostgreSQL", () => {
   });
 
   test("audit DDL installs the serialized trigger and pgcrypto", () => {
-    const ddl = auditDatabaseDdl({ AUDIT_DB_USER: "pg_audit_writer" });
+    const ddl = auditDatabaseDdl({ AUDIT_DB_USER: "gw_audit_writer" });
     expect(ddl).toContain("CREATE EXTENSION IF NOT EXISTS pgcrypto");
     expect(ddl).toContain("compute_audit_chain_hash_trg");
     expect(ddl).toContain("pg_advisory_xact_lock(994001)");

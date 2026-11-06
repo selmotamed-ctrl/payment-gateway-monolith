@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
+  auditEndpoint,
+  clusterTopology,
   collectSecretValues,
+  isAuditConfigured,
+  isAuditDedicatedCluster,
+  isLogDbConfigured,
   isValidCron,
+  replicationCredentials,
   loadBackupDaemonConfig,
   redactSecrets,
   redactSensitiveData,
@@ -112,5 +118,84 @@ describe("backup daemon configuration", () => {
     expect(redactSensitiveData({ nested: { secret: "abc", keep: "yes" } })).toEqual({
       nested: { secret: "[REDACTED]", keep: "yes" },
     });
+  });
+});
+
+describe("pg-native mode and optional S3", () => {
+  const native = { BACKUP_ENGINE_MODE: "pg-native" };
+  const noS3 = { BACKUP_PRIMARY_S3_ENDPOINT: "", BACKUP_PRIMARY_S3_BUCKET: "", BACKUP_PRIMARY_S3_ACCESS_KEY: "", BACKUP_PRIMARY_S3_SECRET_KEY: "" };
+
+  test("pg-native boots with a local repository only (air-gapped LAN) and defaults the repository directory", () => {
+    const config = makeConfig({ ...native, ...noS3 });
+    expect(config.BACKUP_ENGINE_MODE).toBe("pg-native");
+    expect(config.BACKUP_LOCAL_REPO_DIR).toBe("/var/lib/pg-backup/repo");
+    expect(config.BACKUP_PRIMARY_S3_ENDPOINT).toBe("");
+    expect(config.BACKUP_CORE_S3_PREFIX).toBe("");
+  });
+
+  test("wal-g and barman still REQUIRE an S3 endpoint and bucket", () => {
+    for (const mode of ["wal-g", "barman"]) {
+      expect(() => makeConfig({ BACKUP_ENGINE_MODE: mode, ...noS3 })).toThrow(/BACKUP_PRIMARY_S3_(ENDPOINT|BUCKET)/);
+    }
+    expect(makeConfig({ BACKUP_ENGINE_MODE: "wal-g" }).BACKUP_LOCAL_REPO_DIR).toBe("");
+  });
+
+  test("an endpoint without a bucket (or the reverse) is rejected", () => {
+    expect(() => makeConfig({ ...native, BACKUP_PRIMARY_S3_BUCKET: "" })).toThrow("provided together");
+    expect(() => makeConfig({ ...native, BACKUP_PRIMARY_S3_ENDPOINT: "" })).toThrow("provided together");
+  });
+
+  test("the WAL stream alert threshold defaults to 256 MiB and is configurable", () => {
+    expect(makeConfig(native).BACKUP_STREAM_ALERT_BYTES).toBe(256 * 1024 * 1024);
+    expect(makeConfig({ ...native, BACKUP_STREAM_ALERT_BYTES: "1048576" }).BACKUP_STREAM_ALERT_BYTES).toBe(1048576);
+    expect(() => makeConfig({ ...native, BACKUP_STREAM_ALERT_BYTES: "0" })).toThrow();
+  });
+
+  test("the WAL client allow-list defaults to the dedicated wal-archive-client and is separate from the control allow-list", () => {
+    const config = makeConfig(native);
+    expect(config.BACKUP_WAL_CLIENT_CNS).toBe("wal-archive-client");
+    expect(config.BACKUP_ALLOWED_CLIENT_CNS).toBe("backup-client");
+    expect(config.BACKUP_WAL_PUSH_MAX_BYTES).toBe(64 * 1024 * 1024);
+  });
+
+  test("replication and audit passwords are treated as secrets", () => {
+    const config = makeConfig({ ...native, PG_REPLICATION_PASSWORD: "repl-secret-pw", PG_AUDIT_PASSWORD: "audit-secret-pw" });
+    expect(collectSecretValues(config)).toEqual(expect.arrayContaining(["repl-secret-pw", "audit-secret-pw"]));
+  });
+});
+
+describe("cluster topology helpers", () => {
+  test("shared by default: the default audit PORT (5434) must not make a shared deployment look dedicated", () => {
+    const config = makeConfig();
+    expect(config.PG_AUDIT_PORT).toBe(5434);
+    expect(config.PG_PRIMARY_PORT).toBe(5432);
+    expect(isAuditDedicatedCluster(config)).toBe(false);
+    expect(clusterTopology(config)).toBe("shared-audit");
+  });
+
+  test("dedicated when PG_AUDIT_DATA_DIR is set, or the audit host differs from the primary host", () => {
+    expect(isAuditDedicatedCluster(makeConfig({ PG_AUDIT_DATA_DIR: "/var/lib/postgresql/18/audit" }))).toBe(true);
+    expect(isAuditDedicatedCluster(makeConfig({ PG_PRIMARY_HOST: "10.0.0.5", PG_AUDIT_HOST: "10.0.0.6" }))).toBe(true);
+    expect(isAuditDedicatedCluster(makeConfig({ PG_PRIMARY_HOST: "10.0.0.5", PG_AUDIT_HOST: "10.0.0.5" }))).toBe(false);
+    expect(clusterTopology(makeConfig({ PG_AUDIT_DATA_DIR: "/x" }))).toBe("dedicated-audit");
+  });
+
+  test("audit and log database configuration flags", () => {
+    expect(isAuditConfigured(makeConfig())).toBe(true);
+    expect(isLogDbConfigured(makeConfig())).toBe(false);
+    expect(isLogDbConfigured(makeConfig({ PG_LOG_DB_NAME: "pg_log_db" }))).toBe(true);
+  });
+
+  test("auditEndpoint: shared uses the primary host/port, dedicated uses the audit host/port, credentials fall back sensibly", () => {
+    const shared = auditEndpoint(makeConfig({ PG_PRIMARY_HOST: "10.0.0.5" }));
+    expect(shared).toMatchObject({ host: "10.0.0.5", port: 5432, user: "postgres" });
+    const dedicated = auditEndpoint(makeConfig({ PG_PRIMARY_HOST: "10.0.0.5", PG_AUDIT_HOST: "10.0.0.6", PG_AUDIT_PORT: "5434", PG_AUDIT_USER: "audit_app", PG_AUDIT_PASSWORD: "ap" }));
+    expect(dedicated).toEqual({ host: "10.0.0.6", port: 5434, user: "audit_app", password: "ap" });
+    expect(auditEndpoint(makeConfig({ PG_PRIMARY_HOST: "10.0.0.5", PG_AUDIT_HOST: "10.0.0.6" })).password).toBe(PG_PASSWORD);
+  });
+
+  test("replication credentials fall back to the primary role", () => {
+    expect(replicationCredentials(makeConfig())).toEqual({ user: "postgres", password: PG_PASSWORD });
+    expect(replicationCredentials(makeConfig({ PG_REPLICATION_USER: "repl", PG_REPLICATION_PASSWORD: "rp" }))).toEqual({ user: "repl", password: "rp" });
   });
 });

@@ -1,4 +1,4 @@
-import type { BackupEngine, BackupExecutionResult, BackupKind, BackupSummary, BackupTarget, EngineHealth, RecoverRequest, RecoverResult } from "../src/backupEngine";
+import type { BackupEngine, BackupExecutionResult, BackupKind, BackupSummary, BackupTarget, EngineHealth, RecoverLogicalRequest, RecoverRequest, RecoverResult } from "../src/backupEngine";
 import type { CatalogFileSystem } from "../src/catalogStore";
 import type { CommandResult, CommandRunner, RunOptions } from "../src/commandRunner";
 import { loadBackupDaemonConfig, type BackupDaemonConfig } from "../src/config";
@@ -41,6 +41,8 @@ export class RecordingRunner implements CommandRunner {
 
 export class FakeEngine implements BackupEngine {
   public readonly recovered: RecoverRequest[] = [];
+  public readonly logicalRestores: RecoverLogicalRequest[] = [];
+  public logicalRestoreResult: { restored: boolean; detail: string } = { restored: true, detail: "restored logical dump" };
   public health: EngineHealth = {
     healthy: true,
     wal: {
@@ -88,6 +90,11 @@ export class FakeEngine implements BackupEngine {
 
   public async prune(target: BackupTarget, kind?: BackupKind): Promise<void> {
     this.pruneCalls.push({ target, kind });
+  }
+
+  public async restoreLogical(request: RecoverLogicalRequest): Promise<{ restored: boolean; detail: string }> {
+    this.logicalRestores.push(request);
+    return this.logicalRestoreResult;
   }
 }
 
@@ -199,3 +206,34 @@ export const makeDrillReport = (id: string, overrides: Partial<DrillReport> = {}
   },
   ...overrides,
 });
+
+/**
+ * A runner that behaves like the PostgreSQL client tools for the logical-dump path:
+ * `psql` reports the audit database as present, `pg_dump --file X` really writes X,
+ * and `pg_restore --list` prints a table of contents. Everything else succeeds silently.
+ */
+export const dumpAwareRunner = (options: { auditDatabasePresent?: boolean } = {}): RecordingRunner =>
+  new RecordingRunner(async (command, args) => {
+    const binary = command.split("/").at(-1);
+    if (binary === "psql") {
+      const query = args.at(-1) ?? "";
+      if (query.includes("FROM pg_database")) return { code: 0, stdout: options.auditDatabasePresent === false ? "\n" : "1\n", stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    if (binary === "pg_dump") {
+      const file = args[args.indexOf("--file") + 1]!;
+      await (await import("node:fs/promises")).writeFile(file, Buffer.from("PGDMP-fake-custom-format-archive"));
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    if (binary === "pg_restore" && args.includes("--list")) {
+      return { code: 0, stdout: "; Archive created at 2026-11-06\n; dbname: pg_audit_db\n", stderr: "" };
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  });
+
+export const tempDir = async (prefix = "bd-test-"): Promise<string> => {
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  return mkdtemp(join(tmpdir(), prefix));
+};

@@ -2938,5 +2938,65 @@
       }
     ],
     "why": "It imitates payment companies for drills."
+  },
+  {
+    "id": "c-l-m10-4-1",
+    "module": "m10",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m10-4",
+    "refs": [
+      "b12-09"
+    ],
+    "stem": "Which mechanism lets the platform recover changes made hours after the last scheduled backup?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Continuously archived WAL replayed on top of the full and delta backups (point-in-time recovery).",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Asking merchants to re-enter the day's payments.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Clearing the browser cache in reverse.",
+        "correct": false
+      }
+    ],
+    "why": "Archived WAL records every change between backups, so recovery can be replayed to a chosen moment."
+  },
+  {
+    "id": "c-l-m10-4-2",
+    "module": "m10",
+    "type": "single",
+    "difficulty": 2,
+    "critical": false,
+    "lesson": "l-m10-4",
+    "refs": [
+      "b12-10"
+    ],
+    "stem": "Which three checks must pass in the scratch cluster for a restore drill to pass?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Double-entry zero drift, Sharded balance parity and Audit hash chain.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "CPU under 50 percent, disk under 50 percent and ten active merchants.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Checkout logo loaded, Arabic translation present and an email sent.",
+        "correct": false
+      }
+    ],
+    "why": "The drill runs exactly these three invariant checks, signs the report and destroys the scratch cluster."
   }
 ]

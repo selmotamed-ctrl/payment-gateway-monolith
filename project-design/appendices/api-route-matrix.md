@@ -319,11 +319,11 @@
 | `core-back/api/internal/checkout.ts` | 1578 | `GET` | `/return/:attemptToken` |
 | `core-back/api/internal/checkout.ts` | 1597 | `POST` | `/return/:attemptToken` |
 | `core-back/api/internal/checkout.ts` | 1640 | `POST` | `/inbound/:gateway/:env/:pathToken` |
-| `core-back/api/internal/backups.ts` | 221 | `GET` | `/overview` |
-| `core-back/api/internal/backups.ts` | 251 | `POST` | `/trigger` |
-| `core-back/api/internal/backups.ts` | 291 | `POST` | `/drill` |
-| `core-back/api/internal/backups.ts` | 321 | `PUT` | `/policy` |
-| `core-back/api/internal/backups.ts` | 411 | `GET` | `/catalog` |
+| `core-back/api/internal/backups.ts` | 227 | `GET` | `/overview` |
+| `core-back/api/internal/backups.ts` | 263 | `POST` | `/trigger` |
+| `core-back/api/internal/backups.ts` | 315 | `POST` | `/drill` |
+| `core-back/api/internal/backups.ts` | 349 | `PUT` | `/policy` |
+| `core-back/api/internal/backups.ts` | 439 | `GET` | `/catalog` |
 | `core-back/api/index.ts` | 11 | `USE` | `/public` |
 | `core-back/api/index.ts` | 14 | `USE` | `/admin` |
 | `core-back/api/index.ts` | 15 | `USE` | `/merchant` |

@@ -3943,7 +3943,7 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 
 ## Backup Control
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-06
 
 ## 1. Purpose and scope
 
@@ -4044,7 +4044,7 @@ There is no maker-checker on `POST /trigger` or `POST /drill`; both are direct `
 
 ### 3.3 Catalog synchronization
 
-`GET /overview` reads local runs and drills first, then checks whether the daemon is configured. If configured, it calls `GET /v1/overview`; on success it calls `syncDaemonCatalog`:
+`GET /overview` adds `walArchiveHealthy` (the daemon is healthy AND `wal.archiveLagSeconds` is within the policy `alertLagSeconds`; false when the daemon is unconfigured or unreachable), which certification gate 10 reads. It reads local runs and drills first, then checks whether the daemon is configured. If configured, it calls `GET /v1/overview`; on success it calls `syncDaemonCatalog`:
 
 - every daemon backup run is upserted into `backup_catalog_runs` by id;
 - every daemon drill is upserted into `backup_restore_drills` by id;
@@ -4169,7 +4169,7 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 
 ### 3.10 Admin BFF and UI
 
-`admin-back/api/protected/backups.ts` proxies overview/trigger/drill/policy under `/api/v1/admin/system/backups` with the same authority split as core. It does not expose `/catalog`.
+`admin-back/api/protected/backups.ts` proxies overview/catalog/trigger/drill/policy under `/api/v1/admin/system/backups` with the same authority split as core (`GET /catalog` needs `security:read` or `gateway:read` and stays available while the daemon is in maintenance). A well-formed `Idempotency-Key` on trigger/drill is relayed to core.
 
 `admin-front/src/pages/system/backups/index.tsx`:
 
@@ -4202,7 +4202,7 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 - `BackupRestoreDrill` — id, status, timestamps, target time, replayed LSN, double-entry drift, balance mismatches, audit broken links, journal line count, checks JSON, signature, error.
 - `ApprovalRequest` — backs the policy maker-checker workflow with `subjectType = "BACKUP_POLICY"`.
 - Core routes: `GET /internal/admin/system/backups/overview`, `POST /trigger`, `POST /drill`, `PUT /policy`, `GET /catalog`.
-- Admin BFF routes: `GET /api/v1/admin/system/backups/overview`, `POST /trigger`, `POST /drill`, `PUT /policy`.
+- Admin BFF routes: `GET /api/v1/admin/system/backups/overview`, `GET /catalog`, `POST /trigger`, `POST /drill`, `PUT /policy`.
 
 ### Daemon environment (selected)
 
@@ -4225,14 +4225,14 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 
 `deploy/provisioners/backupEngineProvisioner.ts` writes `/etc/pg-backup/backup.env`, `/etc/pg-backup/wal-g.env`, the `pgbackup` systemd unit, `/etc/cron.d/pg-backup`, the trigger and restore-drill scripts, Barman configuration/PGPASSFILE in Barman mode, archive_command/restore_command settings and the journal partition cron.
 
-`deploy/deploy.ts` syncs the daemon source to `/opt/pg-backup-daemon`, chowns the install directory to `pgbackup`, uploads storage certificates to `BACKUP_DAEMON_CERT_DIR`, and enables the unit. `deploy/lib/hostPlanner.ts` injects `BACKUP_DAEMON_URL` and the client cert paths into core.
+`deploy/deploy.ts` syncs the daemon source to `/opt/pg-backup-daemon`, chowns the install directory and the certificate directory to the daemon user (`pgbackup`, or `postgres` for wal-g co-located with the primary), uploads storage certificates to `BACKUP_DAEMON_CERT_DIR`, enables the unit and waits for it to stay active. `deploy/lib/hostPlanner.ts` (`backupCoreEnv`) injects `BACKUP_DAEMON_URL`, the client cert paths and `BACKUP_DAEMON_TIMEOUT_MS` into core whenever `BACKUP_ENABLED`, independent of `pgStorageConfigured`.
 
 ## 6. Operational usage
 
 - Set `BACKUP_DAEMON_URL` and client CA/cert/key paths in core. Use HTTPS in production; plain HTTP is local only.
 - Ensure the daemon has a primary S3 bucket and an encryption key. A typo fails at boot, not during a restore.
 - For a manual backup, call the admin page or `POST /trigger`; poll `/overview` or `/runs` for completion.
-- For `target=all`, confirm `PG_AUDIT_DATA_DIR` is set and the audit database is reachable.
+- For `target=all`, the audit database is backed up logically when it shares the primary cluster, or physically when `PG_AUDIT_DATA_DIR`/`PG_AUDIT_HOST` mark a dedicated cluster; confirm it is reachable.
 - For a policy change, submit without an approval id, then have a different `security:write` user submit with the returned id.
 - Watch `archiveLagSeconds` against `BACKUP_ALERT_LAG_SECONDS`. A non-zero lag with a healthy bucket usually means archive_command, credentials or the archive process is failing.
 - Inspect `backup_catalog_runs` and `backup_restore_drills` for the local copy and the daemon catalog for the in-process view. A failed drill's three checks identify double-entry, parity or audit-chain failure.
@@ -4267,106 +4267,37 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 
 ### Missing / deferred
 
-- Certificate ownership fix: files under `BACKUP_DAEMON_CERT_DIR` are uploaded as root with mode 0600 and no `chown pgbackup`, so the daemon cannot read them.
-- Audit drill role mapping: the restored audit cluster is queried with `PG_PRIMARY_USER`, while the audit database uses `AUDIT_DB_USER`.
-- Barman audit slot: `barmanConfig` declares `slot_name = barman_audit`, but `barmanStreamingSql()` only creates the `barman` slot.
-- WAL archive lag correctness: `WAL_ARCHIVE_STATUS_QUERY` passes `COALESCE(last_archived_wal, '')` to `pg_wal_lsn_diff`, and an empty string is not a valid `pg_lsn`.
-- WAL replay lag semantics: `WAL_LAG_QUERY` uses replay/receive LSN on the first replica (or primary) and is labeled `lastArchivedLsn`; it is not the archive lag.
-- Retention enforcement: WAL-G prune uses the environment full count; catalog policy days are not applied. Barman uses a static server policy.
-- Secondary mirroring for Barman/Redis: Barman returns only `primary-s3`; Redis writes only to the core prefix.
+- Secondary mirroring for Barman/Redis (WAL-G/Barman engines only): Barman returns only `primary-s3`; Redis writes only to the core prefix. The pg-native engine mirrors everything.
 - Redis schedule: no `redis` cron; scheduled full/delta jobs use `target=all`, and a `delta` Redis run still performs a full BGSAVE/RDB copy.
 - UTC cron: the in-process scheduler has no timezone field and evaluates UTC; the system-cron fallback uses host local time, so the historical Tripoli schedule is not honored consistently.
-- Barman health: `BarmanEngine.overviewHealth` still calls WAL-G bucket/WAL commands.
-- Catalog exposure and destructive-action controls: admin-back does not proxy `/catalog`; trigger/drill are not maker-checker protected.
-- Restore drill target selection: the drill always uses now minus 5 minutes.
+- Destructive-action controls: trigger/drill are not maker-checker protected.
+
+### Resolved 2026-11-06
+
+- Daemon certificate ownership: the deploy chowns `BACKUP_DAEMON_CERT_DIR` to the daemon user and the unit waits for readiness (see `deploy.backup`).
+- Barman audit slot: `barmanStreamingSql()` creates `barman_audit` for a dedicated audit cluster (or on the core cluster when audit shares it).
+- WAL archive lag: the status query no longer passes a file name to `pg_wal_lsn_diff`; lag bytes come from segment numbers.
+- Retention: WAL-G prune uses `ceil(fullRetentionDays/7)` from the live policy; pg-native prunes by the live policy.
+- Barman health no longer calls WAL-G.
+- Catalog exposure: `admin-back` proxies `GET /catalog`.
+- Audit drill role mapping: the daemon's drill now queries the audit database as `PG_AUDIT_USER` (primary role when unset), in shared and dedicated topologies.
+- Archive lag no longer grows on an idle database (counted only while a completed segment waits or the archiver fails).
+- Drill target: the daemon accepts an explicit `targetTime` (the default is still now minus 5 minutes).
 
 ### Known bugs / risks
 
-- The certificate ownership gap blocks the intended mTLS daemon path; code/deploy gap.
-- The audit role mismatch can produce a false `FAILED` drill on a correctly restored audit database; code gap.
-- The `barman_audit` slot mismatch can break audit streaming while core works; code gap.
-- An empty `last_archived_wal` can make health report zero lag instead of "no archive yet"; code gap.
-- The scheduler advances `next` before skip-on-overlap, so a long-running job can silently miss a slot; code risk.
-- A failed prune is only logged, while the backup remains `PASSED`; operational risk.
-- The daemon catalog cap diverges from the unbounded PostgreSQL history; design gap.
-- The first policy submission returns `PENDING_REVIEW`; an operator who skips the checker step may believe the schedule changed; UX risk.
-- Scratch port collisions fail the drill; operational risk.
-- `target=all` fails when audit is not configured; select `postgres_core` explicitly for core-only backups.
-
-## 8. Verification and tests
-
-Relevant test files:
-
-- `core-back/test/backup-admin/backup-control-client.test.ts` — client requests, TLS options, typed errors, timeouts and singleton reset.
-- `core-back/test/backup-admin/backup-admin-routes.test.ts` — overview/trigger/drill/policy/catalog behavior against a fake daemon and live PostgreSQL.
-- `deploy/backup-daemon/test/config.test.ts` — environment validation, redaction and defaults.
-- `deploy/backup-daemon/test/cron.test.ts` — five-field parser, UTC evaluation and next-run calculation.
-- `deploy/backup-daemon/test/backupEngine.test.ts` — command builders, WAL-G/Barman selection, Redis snapshot commands, WAL queries and pruning.
-- `deploy/backup-daemon/test/catalogStore.test.ts` — atomic writes, corrupt-file fallback, caps and policy.
-- `deploy/backup-daemon/test/scheduler.test.ts` — due-job selection, overlap skipping, policy reload, prune and drill.
-- `deploy/backup-daemon/test/server.test.ts` — routes, validation, redaction, background tasks and mTLS-related options.
-- `deploy/backup-daemon/test/restoreDrillRunner.test.ts` — scratch restore orchestration, checks, signature and failure reports.
-- `tests/e2e/admin/backups.spec.ts` — admin backup page behavior with mocked APIs.
-
-Commands:
-
-```bash
-cd core-back && bun test test/backup-admin
-cd deploy/backup-daemon && bun test
-cd deploy && bun test
-cd tests && bunx playwright test -c playwright.config.ts -g "backup"
-```
-
-Core backup-admin route tests that touch PostgreSQL skip when the database is unreachable. The daemon tests are unit-level and use fake command runners/file systems; they do **not** run a real WAL-G/Barman backup or a real PostgreSQL restore. The Playwright backup test mocks the API and needs no live stack. No test or benchmark was run for this documentation change.
-
-## 9. Source references
-
-### Old design sections
-
-- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front`
-- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-1-architecture-wrapping-wal-g--barman-with-an-admin-accessible-control-plane`
-- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-2-core-back--admin-front-backup-management-api-contract`
-- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts`
-- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md`
-- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
-
-### Code paths
-
-- `core-back/api/internal/backups.ts`
-- `core-back/lib/storageEngine/backupControlClient.ts`
-- `core-back/lib/storageEngine/auditAndLogAdapters.ts`
-- `core-back/lib/audit/writeAudit.ts`
-- `core-back/prisma/schema.prisma` (`BackupCatalogRun`, `BackupRestoreDrill`, `ApprovalRequest`)
-- `deploy/backup-daemon/src/index.ts`
-- `deploy/backup-daemon/src/config.ts`
-- `deploy/backup-daemon/src/server.ts`
-- `deploy/backup-daemon/src/backupEngine.ts`
-- `deploy/backup-daemon/src/scheduler.ts`
-- `deploy/backup-daemon/src/cron.ts`
-- `deploy/backup-daemon/src/catalogStore.ts`
-- `deploy/backup-daemon/src/restoreDrillRunner.ts`
-- `deploy/backup-daemon/src/commandRunner.ts`
-- `deploy/provisioners/backupEngineProvisioner.ts`
-- `deploy/lib/hostPlanner.ts`
-- `deploy/deploy.ts`
-- `admin-back/api/protected/backups.ts`
-- `admin-front/src/pages/system/backups/index.tsx`
-
-### Generated appendices
-
-- `project-design/appendices/api-route-matrix.md` — core, BFF and portal backup routes
-- `project-design/appendices/env-and-config-matrix.md` — daemon and core backup environment keys
-- `project-design/appendices/schema-catalog.md` — backup catalog/drill models
-- `project-design/appendices/migration-catalog.md` — migration that introduced the backup models
+- None specific to the backup control plane beyond the open gaps above.
 
 ## 10. Change history
+
+- 2026-11-06 — Backup engine reliability implementation: `walArchiveHealthy` on the overview, `Idempotency-Key` forwarding with `deduplicated` handling, `/catalog` edge route; gaps resolved as listed above. See `deploy.backup`.
 
 - 2026-11-03 — Initial canonical extraction. Records the core API, daemon API, WAL-G/Barman engines, UTC scheduler, JSON catalog, policy maker-checker, restore drill, catalog sync and target-aware behavior, plus the certificate ownership, audit role, Barman slot, WAL lag, retention, secondary mirroring, Redis schedule, UTC cron and Barman health gaps. See `project-design/TRACKER.md`.
 
 ## 11. Security hardening (2026-11-05)
 
 - Off-site mirroring no longer deletes by default; set `BACKUP_SECONDARY_MIRROR_DELETE=true` to opt in.
-- Admin edge backup trigger/drill calls require an `Idempotency-Key` header that is relayed to core; policy cron and retention floors are validated at the edge (see the admin edge part).
+- Admin edge backup trigger/drill calls relay a well-formed `Idempotency-Key` header to core and on to the daemon, which deduplicates retries (the edge does not require the header); policy cron is validated at the edge (see the admin edge part).
 - The backup daemon authorizes its mTLS clients by certificate CN/SAN; see the backup daemon part.
 
 ## Synthetic Seeder

@@ -295,7 +295,8 @@
       ],
       "cards": [],
       "situations": [
-        "s-ledger-drift"
+        "s-ledger-drift",
+        "s-restore-drill-failed"
       ]
     },
     {
@@ -456,6 +457,30 @@
       "situations": []
     },
     {
+      "screenId": "SystemBackups",
+      "routeNames": [
+        "SystemBackups"
+      ],
+      "pageDir": "pages/system/backups",
+      "summary": "Backup and disaster-recovery control: WAL archive lag, daemon and storage-target health, the backup schedule, scheduled backups and the latest restore drill with its three invariant checks. Viewing needs security:read or gateway:read; running a backup or a drill and proposing a policy change need security:write, and a policy change needs a second Security Admin.",
+      "articles": [
+        "b12-07",
+        "b12-09",
+        "b12-10",
+        "b12-11"
+      ],
+      "cards": [
+        "sg-trigger-backup",
+        "sg-run-restore-drill",
+        "sg-update-backup-policy"
+      ],
+      "situations": [
+        "s-backup-daemon-unreachable",
+        "s-wal-archive-lag-high",
+        "s-restore-drill-failed"
+      ]
+    },
+    {
       "screenId": "General",
       "routeNames": [
         "Users",
@@ -465,7 +490,6 @@
         "AdminUserDetail",
         "AuditLog",
         "AdminPlatformSettings",
-        "SystemBackups",
         "JobsOutbox"
       ],
       "pageDir": "(any other page)",

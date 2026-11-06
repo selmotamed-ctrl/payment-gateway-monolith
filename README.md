@@ -30,6 +30,7 @@ Read the canonical design before changing behavior:
 | `fake-rails-back/`, `fake-rails-front/` | Optional Fake Payment Rails emulator and tester portal. |
 | `deploy/` | Multi-host deploy engine, PKI, firewall, storage provisioners, templates and `pg-backup-daemon`. |
 | `tests/` | Playwright and Vitest suites, including mocked UI, exhaustive surface and live-stack journeys. |
+| `companion-app/` | Offline Android Guide + Academy companion (Capacitor/Vue), generated content bundle and signed APK build. |
 | `project-design/` | Canonical design, generated status, tracker and appendices. |
 | `scripts/` | Local deployment, exhaustive-suite and storage-benchmark runners. |
 
@@ -78,6 +79,7 @@ Default ports are schema defaults; every deployment can override them. `core-bac
 - OpenSSL (the local mTLS certificate generator invokes it).
 - PM2 for the all-in-one local stack.
 - Playwright Chromium for the UI suites (`bunx playwright install chromium`).
+- JDK 21 and Android SDK 36 + build-tools 36 for `companion-app` APK builds.
 - Linux or macOS. `scripts/deploy-localhost.sh` is written for an Arch Linux workstation; the multi-host deploy engine supports Debian-style `apt` and Arch-style `pacman` hosts.
 
 The repository has no root package manifest. Install dependencies per workspace with `bun install`.
@@ -158,6 +160,7 @@ The deploy engine injects the admin UI flags (`ADMIN_SHOW_CHECKLISTS`, `ADMIN_SH
 | `merchant-front` | `bun install` | `bun run dev`, `bun run preview` | `bun run test:unit` | `bun run build`, `bun run type-check` |
 | `checkout-front` | `bun install` | `bun run dev`, `bun run preview` | n/a | `bun run build`, `bun run type-check` |
 | `fake-rails-front` | `bun install` | `bun run dev`, `bun run preview` | n/a | `bun run build`, `bun run type-check` |
+| `companion-app` | `bun install` | `bun run dev` | `bun test` | `bun run typecheck`, `bun run build`, `bun run apk` |
 | `tests` | `bun install` | n/a | `bun run test`, `bun run test:unit`, `bun run test:live` | n/a |
 | `deploy` | `bun install` | `bun run deploy` | `bun test` | `bun run typecheck` |
 | `deploy/backup-daemon` | `bun install` | `bun run start` | `bun test` | `bun run typecheck` |

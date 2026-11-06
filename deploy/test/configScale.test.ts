@@ -130,14 +130,14 @@ PG_REPLICA_NODES="pg-rep-1@10.0.1.11:22:10.1.1.11:5432"
 PG_MANAGE_VIA_SSH="true"
 PG_PRIMARY_NODE="pg-pri@10.0.1.10:22:10.1.1.10:5432"
 PG_DB_NAME="pg_authoritative"
-PG_DB_USER="pg_authoritative_user"
+PG_DB_USER="gw_authoritative_user"
 PG_DB_PASSWORD="strong-pg-Xk7Qm2Zr"
 PG_SSH_KEY_PATH="~/.ssh/pg"
 `));
     const database = effectiveDatabase(config);
     expect(database.engine).toBe("postgresql");
     expect(database.name).toBe("pg_authoritative");
-    expect(database.user).toBe("pg_authoritative_user");
+    expect(database.user).toBe("gw_authoritative_user");
     expect(database.password).toBe("strong-pg-Xk7Qm2Zr");
     expect(database.host).toBe("10.1.1.10");
     expect(database.port).toBe(5432);
@@ -175,7 +175,7 @@ BACKUP_SSH_KEY_PATH="~/.ssh/backup"
     expect(loadDeployConfig(text).ok).toBe(false);
     // ...but is otherwise structurally valid once every placeholder secret is replaced with a real-looking value.
     const filled = text.replace(/^([A-Z_]+)="[^"\n]*(?:change-me|changeme)[^"\n]*"/gim, (m, key: string) => (key === "DATABASE_URL" ? m : `${key}="Xk7Qm2Zr-${key.length}-9Lp4Vn8Bc3Wd6Th-Hy5Jp0Sa2Fg7"`))
-      .replace("postgresql://pg_core_user:change-me-strong-db-password@", "postgresql://pg_core_user:Xk7Qm2Zr-db_password-9Lp4Vn8Bc3Wd6Th@");
+      .replace("postgresql://gw_core_user:change-me-strong-db-password@", "postgresql://gw_core_user:Xk7Qm2Zr-db_password-9Lp4Vn8Bc3Wd6Th@");
     const example = requireConfig(filled);
     expect(example.PG_VERSION).toBe("18");
     expect(example.PGBOUNCER_PORT).toBe(6432);

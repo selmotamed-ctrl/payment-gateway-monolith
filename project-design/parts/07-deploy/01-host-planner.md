@@ -112,6 +112,8 @@ Nginx plans are filtered per role and attached to the matching compute host(s). 
 - audit: `audit-db-client`;
 - log: `log-db-client`.
 
+`coreEnv()` spreads `backupCoreEnv(config)` right after `storageEnv(config)`: whenever `BACKUP_ENABLED` core receives `BACKUP_DAEMON_URL` (https unless `BACKUP_ALLOW_INSECURE_HTTP`), the CA/client cert/key paths and `BACKUP_DAEMON_TIMEOUT_MS`, independent of `pgStorageConfigured()` (before this, a `DB_*` deployment got `503 BACKUP_DAEMON_NOT_CONFIGURED` because `storageEnv` returned early). The backup host's firewall rule for `BACKUP_DAEMON_PORT` also admits the PostgreSQL primary and dedicated audit IPs so their `archive_command` can reach the WAL ingest route.
+
 Display bundles are not the same as actual distribution. `certFilesForHost()` in `deploy/lib/pkiManager.ts` filters the generated storage clients by what actually exists and adds `backup-client` for the backup role. The cert bundle display can therefore list a storage client name that was not generated when that storage feature is disabled; the actual upload loop is driven by `certFilesForHost`.
 
 A host that runs several roles receives the union of their bundles. A co-located edge host receives the client certificates for every edge role on that host, in each service's `shared/certs` directory, because `deployService()` calls `certFilesForHost(pki, host.roles)`.

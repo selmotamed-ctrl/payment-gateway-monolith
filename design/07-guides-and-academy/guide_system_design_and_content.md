@@ -205,15 +205,15 @@ export const loadArticles: (lang:"en"|"ar") => Promise<Article[]>; // dynamic im
 | Item | Count | Source |
 | :--- | :--- | :--- |
 | Books | 14 | `@@book` blocks |
-| Articles | 125 | `@@article` blocks |
+| Articles | 128 | `@@article` blocks |
 | Glossary terms | 151 | `@@term` lines |
-| Safeguard cards | 22 | `@@card` blocks (exactly the 22 ids in §II-7) |
-| Safeguard checklist items | 99 | lines `- [ ] ` inside cards |
-| Situations | 29 | `@@situation` blocks |
+| Safeguard cards | 25 | `@@card` blocks (the 22 ids in §II-7 plus `sg-trigger-backup`, `sg-run-restore-drill`, `sg-update-backup-policy`) |
+| Safeguard checklist items | 112 | lines `- [ ] ` inside cards |
+| Situations | 32 | `@@situation` blocks |
 | Reading paths | 8 | `@@path` lines (`ALL` plus the 7 staff roles) |
 | Quick answers (FAQ) | 58 | `@@faq` blocks |
 | Data blocks | 3 | `ledger-events` (16 events), `visible-rails` (7 vectors), `attempt-transitions` |
-| Context map screens | 23 | `screens` array of `context-map` |
+| Context map screens | 24 | `screens` array of `context-map` |
 | Error codes (from b13-01) | 19 | first-column backticked tokens |
 | Edge cases | 140 | parsed from the repository's v4 design file |
 
@@ -278,6 +278,9 @@ A **card** is a short checklist for a risky action. Body of every card has exact
 | `sg-edit-route` | `pages/routes` | **Save** / **Create** |
 | `sg-ai-import-draft` | `pages/gateways/ai-import` | creating the draft |
 | `sg-run-reconciliation` | `pages/reconciliation` | **Run File** |
+| `sg-trigger-backup` | `pages/system/backups` | **Run backup now** (card content only; the confirmation guard is not wired into the page yet) |
+| `sg-run-restore-drill` | `pages/system/backups` | **Run restore drill** (card content only; not wired yet) |
+| `sg-update-backup-policy` | `pages/system/backups` | **Save Changes** in **Edit backup policy** (card content only; not wired yet) |
 
 If the existing code uses a different mechanism (`AwaitedConfirmationDialog`), call `confirm()` first and keep the existing dialog afterwards. Never remove an existing confirmation.
 
@@ -882,7 +885,7 @@ Your menu only shows screens you may open. Buttons you cannot use are hidden or 
 | Operations | **Adjustments** | refunds, chargebacks, corrections | FINANCE | [[a:b08-08]] |
 | Operations | **Cash-Outs** | merchant payouts | FINANCE | [[a:b08-07]] |
 | Operations | **Reconciliation** | match partner statements to our books | FINANCE | [[a:b08-06]] |
-| Operations | **Backups** | backup engine, schedule, last backup and restore drill | SECURITY_ADMIN | [[a:b12-07]] |
+| Operations | **Backups** | backup engine, WAL archive lag, storage targets, schedule, last backup and restore drill | SECURITY_ADMIN | [[a:b12-10]] |
 | Operations | **Platform Settings** | versioned platform settings, export and restore | SECURITY_ADMIN, GATEWAY_ADMIN | [[a:b12-07]] |
 | Operations | **Checkout Help** | the help payers see at checkout | admins | [[a:b07-10]] |
 | Finance | **Pricing & Limits** | commission profiles and velocity rules | FINANCE | [[a:b08-03]] |
@@ -3397,7 +3400,7 @@ Every gateway has a sandbox environment on the partner's side ([[a:b06-10]]). It
 * Always check the **SANDBOX/LIVE** badge before acting.
 @@end
 
-@@article id=b12-07 book=12 order=7 title="Releases, rollback, backups and health checks" roles=SECURITY_ADMIN,GATEWAY_ADMIN minutes=1 ui=AVAILABLE related=b12-05,b12-08
+@@article id=b12-07 book=12 order=7 title="Releases, rollback, backups and health checks" roles=SECURITY_ADMIN,GATEWAY_ADMIN minutes=1 ui=AVAILABLE related=b12-05,b12-08,b12-09,b12-10,b12-11
 ### Releases
 Each deployment creates a dated release folder. A `current` link points to the release in use. Switching is one atomic step. Services are restarted through a process manager.
 
@@ -3405,7 +3408,7 @@ Each deployment creates a dated release folder. A `current` link points to the r
 Because old releases remain, going back is switching the link and restarting. If the end-to-end check fails during deployment, this happens automatically.
 
 ### Backups
-Before database changes, a compressed backup is saved. The **Backups** screen shows the engine, the schedule, the latest full and delta backups and the latest restore drill. `SECURITY_ADMIN` can start a backup or a drill and propose a policy change; a second person must approve the policy. A drill restores into an isolated scratch database and checks the ledger invariants without touching production. Keep backups protected like production data.
+Before database changes, a compressed backup is saved. The **Backups** screen shows the engine, the schedule, the latest full and delta backups and the latest restore drill. `SECURITY_ADMIN` can start a backup or a drill and propose a policy change; a second person must approve the policy. A drill restores into an isolated scratch database and checks the ledger invariants without touching production. Keep backups protected like production data. Backups from zero: [[a:b12-09]]; reading the screen: [[a:b12-10]]; operating it safely: [[a:b12-11]].
 
 ### Platform settings
 **Platform Settings** lists every setting key with its versions and effective date. `SECURITY_ADMIN` can create or edit a setting, export a settings backup and preview a restore; sensitive changes go through approval. Payer-facing checkout copy stays on **Checkout Help** ([[a:b07-10]]).
@@ -3431,6 +3434,130 @@ The tool checks: the core over mutual TLS, each edge service's health address, e
 * A terminal change is applied **at most once**, even if two servers pick the same item.
 * Configuration changes are announced to all servers so none keeps an old copy.
 * The weakest guarantee of this design is time: servers must keep correct clocks. Timestamps are stored in UTC.
+@@end
+
+
+@@article id=b12-09 book=12 order=9 title="Backups from zero: full backups, delta backups, WAL archiving and point-in-time recovery" roles=SECURITY_ADMIN,GATEWAY_ADMIN,FINANCE minutes=4 ui=AVAILABLE related=b12-07,b12-08,b12-10,b12-11
+### Why one copy per night is not enough
+Imagine a shop that photographs its cash register once a night at 02:00. If a fire destroys the register at 18:00, every sale made since 02:00 is gone. For a payment platform the same loss would be far worse: customers have already paid at partner companies, and our books would no longer match reality. So the platform combines **three layers** that work together all the time.
+
+| Layer | Plain meaning | Shop analogy | How often |
+| :--- | :--- | :--- | :--- |
+| **Full backup** | A complete, checked copy of the database. | Photographing every page of the ledger. | Weekly (default Sunday 02:00 UTC) and on demand. |
+| **Delta backup** | A smaller copy holding only the parts that changed since the previous backup. | Photographing only the pages written today. | Daily (default Monday to Saturday 02:00 UTC). |
+| **WAL archiving** | Before PostgreSQL changes any number on disk it first writes the change into a numbered, never-rewritten log called the **WAL** (write-ahead log). Each position in that log has an address called an **LSN** (log sequence number). Every finished WAL segment is copied to the backup daemon continuously. | A flight recorder that records every pen stroke. | Continuously. The alert threshold defaults to 300 seconds. |
+
+**Point-in-time recovery (PITR)** means: restore the latest full backup and its deltas, then replay the archived WAL forward to an exact moment, for example one second before a mistake or a hardware fault. The platform proves that this works by doing it every week in a **restore drill** ([[a:b12-10]]).
+
+All schedules are written as five-field cron expressions and always run in **UTC**. A backup is checked with `pg_verifybackup` before it is encrypted and stored.
+
+### How little can be lost
+WAL reaches the daemon in two independent ways:
+* The database pushes each completed WAL segment to the backup daemon over mutual TLS, using a dedicated **WAL-archive certificate** that can do nothing else.
+* The daemon also streams WAL continuously with `pg_receivewal`.
+
+Because of this, a disaster loses at most a few seconds of changes, not the time since the last nightly copy. This is only true while the **WAL archive lag** tile is healthy ([[a:b12-10]]).
+
+### What is backed up
+* The **core database** (all money, ledger, approvals and configuration).
+* The **audit database**. It may live inside the same PostgreSQL cluster as the core database; then it is protected by the core physical backup plus a separate logical dump. Or it may run in its own dedicated cluster, which is then backed up on its own.
+* **Redis** can also be chosen as a backup target on the **Backups** screen.
+
+### Where the daemon runs
+The **backup daemon** is a separate service. Its engine is chosen at deployment:
+| Engine | What it is | Where it runs |
+| :--- | :--- | :--- |
+| `pg-native` | The new built-in engine. It needs no external backup tool and is the default-capable choice. | On the same host as the primary database, or on a dedicated backup host that talks to the primary over the PostgreSQL replication protocol. |
+| `wal-g` | An external backup tool. | On the same host as the primary. |
+| `barman` | An external backup tool. | On a separate host. |
+
+A dedicated backup host has one more benefit: restore drills use that host's own processor and disk, so production payments are not slowed down.
+
+### How the copies are protected
+* Every artifact is compressed (`zstd`) and encrypted with **AES-256-GCM** before it is stored. Without the backup encryption key the copies cannot be read, so the key must be kept safe by the Security Admin and must also be recoverable separately from the servers it protects.
+* Copies are stored in up to **three tiers**: a **local repository** on the daemon host, an **S3 or MinIO bucket**, and an optional **off-site vault** reached over SSH or rclone.
+* The off-site vault **never deletes by default**, so an attacker who controls the daemon cannot erase the off-site history.
+
+:::warning A copy nobody has restored is only a hope
+A backup that has never been restored might be empty, corrupt or missing the newest data. That is why the weekly restore drill exists. Never assume backups work because the **Last backup** tile is green.
+:::
+@@end
+
+@@article id=b12-10 book=12 order=10 title="The Backups screen: every tile, target, LSN and restore drill check" roles=SECURITY_ADMIN,GATEWAY_ADMIN minutes=4 ui=AVAILABLE related=b12-09,b12-11,b08-11,b10-05
+### Opening the screen
+Open **Operations**, then **Backups** (the page title is **Backup management**, with the badge **Disaster recovery**). The menu entry appears for staff with `security:read` or `gateway:read`. The action buttons **Run backup now**, **Run restore drill** and **Edit policy** appear only for staff with `security:write` (the Security Admin). **Refresh** reloads the screen for everyone.
+
+Two banners can appear above the tiles:
+* **Backup management is not configured for this environment.** The platform has no backup daemon set up here.
+* **The backup daemon is unreachable. Backup and drill actions are disabled until connectivity returns.** The three action buttons are greyed out. See [[s:s-backup-daemon-unreachable]].
+
+### The five summary tiles
+| Tile | What it shows | How to read it |
+| :--- | :--- | :--- |
+| **WAL archive lag** | Seconds since the newest change was safely archived, and the **Alert threshold**. | **Healthy** up to the threshold (default 300 s). **Attention** above it. **Critical** above twice the threshold. See [[s:s-wal-archive-lag-high]]. |
+| **Daemon status** | **Reachable** or **Unreachable**: whether the core can talk to the backup daemon over mutual TLS. | **Healthy** or **Failed** badge. |
+| **Storage targets** | Healthy targets over total targets, for example `3/3`. | **Healthy** only when every target is healthy, otherwise **Attention**. |
+| **Last backup** | Time of the newest backup and its status. | **Passed**, **Running**, **Queued** or **Failed**; **No backups yet** on a new system. |
+| **Latest restore drill** | Time of the newest drill and its result. | **Drill passed**, **Drill failed**, **Pending**; **No restore drill yet** before the first one. |
+
+### The cards below the tiles
+* **WAL archive lag:** **Archive lag**, **Current LSN** (where the database is writing now), **Last archived LSN** (the newest position safely archived), **Lag bytes** (how much is waiting) and **Alert threshold**. When archiving keeps up, the two LSNs are close together and **Lag bytes** is small.
+* **Daemon status:** **Reachable** or **Unreachable**, **Generated at**, **Engine mode** (`pg-native`, `wal-g` or `barman`), **Configured** and **Overall health**.
+* **Storage targets:** one row per target with a **Healthy** or **Failed** badge, its kind and a detail line.
+* **Backup schedule:** **Full cron**, **Delta cron**, **Drill cron**, **Full retention days**, **WAL retention days** and **Alert lag threshold**. Changing these needs two people ([[a:b12-11]]).
+* **Latest restore drill:** the result, the drill id, **Started**, **Target time**, **Replayed LSN**, **Duration**, **Journal lines** and three check badges.
+* **Scheduled backups:** a table with **Backup ID**, **Target**, **Kind**, **Engine**, **Status**, **Started**, **Completed**, **Duration**, **Size** and **Error**.
+
+### What a restore drill does
+A backup that has never been restored is only a wish. A drill proves recovery works, without touching production:
+1. The daemon restores the latest backup chain into an **isolated scratch cluster** on the loopback address (port 55432). Archiving is switched off in that cluster, so it can never write into the real archive.
+2. It replays the archived WAL up to a **target time** (default: now minus 5 minutes) and waits until recovery has finished.
+3. It runs exactly **three invariant checks** (below).
+4. It signs the report with HMAC-SHA256 and **destroys the scratch cluster**, so no customer data is left behind.
+
+Drills run every week by default (Sunday 04:00 UTC) and on demand.
+
+### The three invariant checks
+| Badge | Plain meaning | If it fails |
+| :--- | :--- | :--- |
+| **Double-entry zero drift** | In the restored database, total debits equal total credits (drift `0.0000`). | The restored ledger does not balance. Priority 1. |
+| **Sharded balance parity** | The busy account balances that are split into shards add up to what the permanent journal lines say. | Some account balance disagrees with the journal. Priority 1. |
+| **Audit hash chain** | Every audit record is present, in an unbroken sequence with no gaps, and each record's fingerprint still matches the one before it. | An audit row was changed, damaged or removed. Priority 1. |
+
+Each badge reads `<check>: Passed`, `<check>: Failed` or `<check>: Pending`. **Any failed check is a priority-1 incident** ([[s:s-restore-drill-failed]]). A drill can also end as **Drill failed** with a red error text and no failed check, for example when the backup could not be fetched or the scratch cluster could not start. That means we currently have no proof that recovery works.
+
+The double-entry check is also run on live data on the **Ledger Audit & Invariant** screen under **Finance** ([[a:b08-11]], [[a:b10-05]]); the drill adds the same proof for the restored copy, plus parity and the audit chain.
+
+:::note Reading a drill result
+The drill checks a restored copy. A failure can mean the copy is damaged or that production already has the problem. Always compare with the live invariant screen before deciding which.
+:::
+@@end
+
+@@article id=b12-11 book=12 order=11 title="Operating backups safely: manual runs, restore drills and two-person policy changes" roles=SECURITY_ADMIN,GATEWAY_ADMIN minutes=3 ui=AVAILABLE related=b12-09,b12-10,b04-03,b12-07
+### Who may do what
+* View the screen: `security:read` or `gateway:read`.
+* **Run backup now**, **Run restore drill**, **Edit policy**: `security:write` (Security Admin). Authorities are checked by the core; the screen only hides the buttons.
+* The actions are disabled while the **Daemon status** is **Unreachable** or the system is not configured.
+
+### One job at a time
+The daemon runs only **one backup or drill job at a time**. If you request another while one is running, it is **queued** and runs in order. Every request carries an **Idempotency-Key**, so a repeated click or a retry of the same request is not run twice.
+
+### Run backup now
+Use it before risky work: a major configuration or routing change, server maintenance, a firewall or operating-system change, or a certificate rotation. The form asks for a **Backup target** (**All targets**, **PostgreSQL core**, **Audit database** or **Redis**) and a **Backup kind** (**Full** or **Delta**). **All targets** with **Full** asks for an extra confirmation because it reads every database and can load production. The backup runs in the background: watch the **Scheduled backups** table go from **Queued** to **Running** to **Passed**. Checklist: [[c:sg-trigger-backup]].
+
+### Run restore drill
+The button asks you to confirm, then queues a drill ([[a:b12-10]]). It can take several minutes. Run one after any change to the backup setup, and whenever you need fresh proof. Checklist: [[c:sg-run-restore-drill]].
+
+### Changing the policy needs two people
+An attacker who takes over one administrator account may try to **weaken the backups**, for example by cutting retention so old copies disappear before anyone notices. So **Edit policy** never changes anything on its own:
+1. **Maker (Security Admin #1)** edits the form. All six fields are required: three five-field UTC cron expressions (**Full cron**, **Delta cron**, **Drill cron**), **Full retention days** (1 to 3650), **WAL retention days** (1 to 3650) and **Alert lag threshold** in seconds (1 to 86400). **Save Changes** creates a `BACKUP_POLICY` approval request in `PENDING_REVIEW` and shows its id.
+2. **Checker (a different Security Admin, `security:write`)** reviews it on the **Approvals** screen ([[a:b04-03]]). Approving applies the new policy to the daemon and writes a `BACKUP_POLICY_UPDATED` audit record. The maker can never approve their own request. Unapproved requests expire after 7 days.
+
+Checklist: [[c:sg-update-backup-policy]].
+
+:::note What this screen does not do
+There is no **restore production** button. The screen takes backups and rehearses recovery in a scratch cluster. A real recovery is a deliberate, planned procedure carried out by the people who run the servers, using the same backup chain and WAL that the drill has proved. Rehearse it; do not improvise it.
+:::
 @@end
 
 
@@ -4111,6 +4238,61 @@ You are matching a partner's statement against our books. Problem lines open cas
 Tell Finance. A wrong run is corrected through cases and adjustments, never by editing.
 @@end
 
+@@card id=sg-trigger-backup title="Run a backup now" screen=SystemBackups risk=MEDIUM irreversible=false
+**What this does**
+You ask the backup daemon to take a **Full** or **Delta** backup of one store or of all stores right now. It runs in the background and is queued behind any job already running.
+
+**Check first**
+- [ ] **Daemon status** says **Reachable** and the banner about an unreachable daemon is not shown.
+- [ ] **Storage targets** shows every target **Healthy**.
+- [ ] I know why I need it now (for example before maintenance, a configuration change or a certificate rotation).
+- [ ] I chose the right **Backup target** and **Backup kind**. **All targets** with **Full** loads production, so I will do it when the platform is calm.
+
+**Never**
+- Never click **Run backup now** repeatedly to "make it go faster"; extra requests are queued behind the first.
+- Never treat a started backup as finished. Wait for **Passed**.
+
+**If you made a mistake**
+A backup cannot harm data, only load the system. If you started the wrong one, let it finish and tell the Security Admin. If it ends **Failed**, read the **Error** column and see [[a:b12-10]].
+@@end
+
+@@card id=sg-run-restore-drill title="Run a restore drill" screen=SystemBackups risk=MEDIUM irreversible=false
+**What this does**
+You ask the daemon to restore the latest backup chain into an isolated scratch cluster, replay the archived WAL to a target time and run the three invariant checks. Production is not touched and the scratch cluster is destroyed afterwards.
+
+**Check first**
+- [ ] **Daemon status** says **Reachable**.
+- [ ] I understand it can take several minutes and runs after any job already running.
+- [ ] I will read the result in **Latest restore drill** and will not assume success.
+- [ ] I know that a failed check is a priority-1 incident ([[s:s-restore-drill-failed]]).
+
+**Never**
+- Never ignore a **Drill failed** result because the money checks passed.
+- Never delete or prune backups to make a drill pass.
+
+**If you made a mistake**
+An extra drill is harmless. If a result is red, follow [[s:s-restore-drill-failed]] at once.
+@@end
+
+@@card id=sg-update-backup-policy title="Change the backup schedule or retention" screen=SystemBackups risk=HIGH irreversible=false
+**What this does**
+You propose new cron schedules (Full, Delta, Drill), retention (**Full retention days**, **WAL retention days**) or the **Alert lag threshold**. A second Security Admin must approve before anything changes.
+
+**Check first**
+- [ ] I have a written reason, for example a change of agreed recovery targets.
+- [ ] Every cron expression has five fields and is in UTC.
+- [ ] Retention is not lowered: shorter retention can destroy the history we need for recovery or an investigation.
+- [ ] The **Alert lag threshold** is not raised just to hide a warning.
+- [ ] I will ask a different Security Admin to review the `BACKUP_POLICY` request on **Approvals** ([[a:b12-11]]).
+
+**Never**
+- Never ask someone to approve a policy change without telling them what it does.
+- Never use a second account of your own as the checker.
+
+**If you made a mistake**
+Before it is approved, ask for the request to be rejected and submit a corrected one. After approval, submit and approve a new change that restores the old values; the audit log keeps both.
+@@end
+
 ## III-D. Situation Playbook
 
 @@situation id=s-unknown-attempt title="A payment is stuck in UNKNOWN" screens=OperatorCases,Dashboard cases=5,8,20,77 articles=b07-03,b07-09,b10-04
@@ -4280,6 +4462,40 @@ Pause the route, then roll back to the named rollback version through the normal
 Tell the Gateway Admin; the reference format contract test (gate 4) is the place to fix it.
 @@end
 
+@@situation id=s-backup-daemon-unreachable title="The Backups screen says the backup daemon is unreachable" screens=SystemBackups,Dashboard articles=b12-09,b12-10,b12-11
+### What it means
+The core cannot talk to the backup daemon over mutual TLS. **Run backup now**, **Run restore drill** and **Edit policy** are disabled. Scheduled backups and WAL archiving may not be happening.
+
+### What to do
+1. Do not guess and do not try to fix servers yourself. Tell the Security Admin and the people who run the servers.
+2. Ask them to check that the backup daemon service is running on its host, that its certificate and the core's backup client certificate are valid, and that the network path from the core to the daemon is open.
+3. Remember that the database keeps WAL segments it has not yet delivered. A long outage can fill the database disk, so do not leave this overnight.
+4. When **Daemon status** returns to **Reachable**, press **Refresh**, confirm **WAL archive lag** drains and check **Last backup**. If a scheduled backup was missed, a Security Admin can run a **Delta** ([[c:sg-trigger-backup]]).
+@@end
+
+@@situation id=s-wal-archive-lag-high title="WAL archive lag is Attention or Critical" screens=SystemBackups articles=b12-09,b12-10
+### What it means
+**Attention** means the lag is above the **Alert threshold** (default 300 s). **Critical** means above twice the threshold. Recent changes are not yet safely archived, so a disaster now would lose more than a few seconds.
+
+### What to do
+1. Read **Archive lag**, **Lag bytes**, **Current LSN** and **Last archived LSN**. Press **Refresh** twice a minute apart: is the lag falling or growing?
+2. Open **Storage targets** and **Daemon status**. A **Failed** target (for example the S3 or MinIO bucket) or an **Unreachable** daemon is the usual cause. See [[s:s-backup-daemon-unreachable]].
+3. Tell the Security Admin and the people who run the servers. Until archiving catches up, WAL piles up on the database disk.
+4. Do not raise the **Alert lag threshold** to silence the warning.
+5. Confirm recovery: **Archive lag** back under the threshold and the tile **Healthy**.
+@@end
+
+@@situation id=s-restore-drill-failed title="A restore drill failed" screens=SystemBackups,Finance articles=b12-10,b10-05,b08-11
+### What it means
+Any failed check is a **priority-1 incident**. Read the three badges in **Latest restore drill**.
+
+### What to do
+1. **Double-entry zero drift** or **Sharded balance parity** failed: tell Finance and the Security Admin. Open **Ledger Audit & Invariant** under **Finance** to see whether production also drifts, then follow RB-04 ([[a:b10-05]], [[a:b08-05]]).
+2. **Audit hash chain** failed: escalate immediately to the Security Admin. Do not delete, prune or alter any backup, and do not touch audit records.
+3. **Drill failed** with a red error text and no failed check (the backup could not be fetched or the scratch cluster did not start): we have no proof that recovery works. Ask the people who run the servers to fix the cause, then run another drill ([[c:sg-run-restore-drill]]) and confirm all three badges read **Passed**.
+4. Write down the drill id, the time and what you saw, in the incident record.
+@@end
+
 ## III-E. Reading Paths by Role
 
 @@path role=ALL title="New employee: day one to day five" :: b00-01,b00-02,b00-03,b00-04,b01-01,b01-02,b01-03,b01-04,b01-05,b01-06,b01-07,b01-08,b01-09,b01-10,b02-01,b02-02,b02-03,b02-06,b03-01,b03-02,b04-01,b04-03,b04-06,b11-02,b10-01
@@ -4288,8 +4504,8 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
 @@path role=FINANCE title="Finance" :: b04-05,b08-01,b08-02,b08-03,b08-04,b08-05,b08-06,b08-07,b08-08,b08-09,b08-10,b08-11,b08-13,b10-05,b07-03
 @@path role=COMPLIANCE title="Compliance" :: b05-03,b05-04,b05-05,b09-01,b09-02,b09-03,b09-04,b09-05,b09-06,b09-07,b09-08,b09-09,b09-10,b04-04
 @@path role=MLRO title="MLRO" :: b09-01,b09-05,b09-06,b09-07,b09-08,b04-04,b04-05,b09-04
-@@path role=GATEWAY_ADMIN title="Gateway Admin" :: b06-01,b06-02,b06-03,b06-04,b06-05,b06-06,b06-07,b06-08,b06-09,b06-10,b06-11,b06-12,b06-13,b06-14,b06-16,b10-02,b10-03,b10-06
-@@path role=SECURITY_ADMIN title="Security Admin" :: b04-05,b06-16,b06-17,b11-01,b11-03,b12-01,b12-02,b12-03,b12-04,b12-05,b12-07,b10-03,b10-07
+@@path role=GATEWAY_ADMIN title="Gateway Admin" :: b06-01,b06-02,b06-03,b06-04,b06-05,b06-06,b06-07,b06-08,b06-09,b06-10,b06-11,b06-12,b06-13,b06-14,b06-16,b12-09,b12-10,b10-02,b10-03,b10-06
+@@path role=SECURITY_ADMIN title="Security Admin" :: b04-05,b06-16,b06-17,b11-01,b11-03,b12-01,b12-02,b12-03,b12-04,b12-05,b12-07,b12-09,b12-10,b12-11,b10-03,b10-07
 
 ## III-F. Data blocks
 
@@ -4795,7 +5011,8 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
    ],
    "cards": [],
    "situations": [
-    "s-ledger-drift"
+    "s-ledger-drift",
+    "s-restore-drill-failed"
    ]
   },
   {
@@ -4956,6 +5173,30 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
    "situations": []
   },
   {
+   "screenId": "SystemBackups",
+   "routeNames": [
+    "SystemBackups"
+   ],
+   "pageDir": "pages/system/backups",
+   "summary": "Backup and disaster-recovery control: WAL archive lag, daemon and storage-target health, the backup schedule, scheduled backups and the latest restore drill with its three invariant checks. Viewing needs security:read or gateway:read; running a backup or a drill and proposing a policy change need security:write, and a policy change needs a second Security Admin.",
+   "articles": [
+    "b12-07",
+    "b12-09",
+    "b12-10",
+    "b12-11"
+   ],
+   "cards": [
+    "sg-trigger-backup",
+    "sg-run-restore-drill",
+    "sg-update-backup-policy"
+   ],
+   "situations": [
+    "s-backup-daemon-unreachable",
+    "s-wal-archive-lag-high",
+    "s-restore-drill-failed"
+   ]
+  },
+  {
    "screenId": "General",
    "routeNames": [
     "Users",
@@ -4965,7 +5206,6 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
     "AdminUserDetail",
     "AuditLog",
     "AdminPlatformSettings",
-    "SystemBackups",
     "JobsOutbox"
    ],
    "pageDir": "(any other page)",

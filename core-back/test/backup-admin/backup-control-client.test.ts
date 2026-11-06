@@ -237,6 +237,31 @@ describe("BackupControlClient over HTTP", () => {
     }
   });
 
+  test("sends the Idempotency-Key header on trigger and drill only when one is supplied", async () => {
+    const seen: Array<{ url?: string; key: string | string[] | undefined }> = [];
+    const server = await startServer((request, response) => {
+      seen.push({ url: request.url, key: request.headers["idempotency-key"] });
+      sendJson(response, 202, { backupJobId: "j", drillId: "d", acceptedAt: "2026-01-01T00:00:00.000Z", deduplicated: true });
+    });
+    try {
+      const client = new BackupControlClient({ baseUrl: server.url });
+      await client.triggerBackup("all", "full", "user-1", "key-abcdefgh");
+      await client.runDrill("user-1", "drill-key-abcd");
+      await client.triggerBackup("all", "full");
+      await client.runDrill();
+      expect(seen).toEqual([
+        { url: "/v1/backups/trigger", key: "key-abcdefgh" },
+        { url: "/v1/drills/run", key: "drill-key-abcd" },
+        { url: "/v1/backups/trigger", key: undefined },
+        { url: "/v1/drills/run", key: undefined },
+      ]);
+      // the daemon's `deduplicated` flag is surfaced to the caller
+      expect(await client.triggerBackup("all", "full", undefined, "k-12345678")).toMatchObject({ deduplicated: true });
+    } finally {
+      await server.close();
+    }
+  });
+
   test("maps a daemon timeout to BACKUP_DAEMON_TIMEOUT", async () => {
     const server = await startServer(() => {
       // Deliberately never respond.

@@ -97,6 +97,10 @@ This is the canonical entrypoint for the payment-gateway project design.
 - [Smart AI Spec Importer and Voucher Half (Future)](parts/09-future-and-unimplemented/02-smart-ai-voucher-half.md) — `future.smart-ai-voucher` · `missing`
 - [Deferred and Partial Features](parts/09-future-and-unimplemented/03-deferred-features.md) — `future.deferred` · `deferred`
 
+### 10-companion
+
+- [Offline Android Companion](parts/10-companion/00-offline-companion.md) — `companion.offline` · `partial`
+
 ## Generated artifacts
 
 - [PROJECT_DESIGN.md](PROJECT_DESIGN.md)

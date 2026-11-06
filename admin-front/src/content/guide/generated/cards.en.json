@@ -317,5 +317,48 @@
       "This file has not been loaded before.",
       "I know what to do with mismatches ([[a:b08-06]])."
     ]
+  },
+  {
+    "id": "sg-trigger-backup",
+    "title": "Run a backup now",
+    "screen": "SystemBackups",
+    "risk": "MEDIUM",
+    "irreversible": false,
+    "body": "**What this does**\nYou ask the backup daemon to take a **Full** or **Delta** backup of one store or of all stores right now. It runs in the background and is queued behind any job already running.\n\n**Check first**\n- [ ] **Daemon status** says **Reachable** and the banner about an unreachable daemon is not shown.\n- [ ] **Storage targets** shows every target **Healthy**.\n- [ ] I know why I need it now (for example before maintenance, a configuration change or a certificate rotation).\n- [ ] I chose the right **Backup target** and **Backup kind**. **All targets** with **Full** loads production, so I will do it when the platform is calm.\n\n**Never**\n- Never click **Run backup now** repeatedly to \"make it go faster\"; extra requests are queued behind the first.\n- Never treat a started backup as finished. Wait for **Passed**.\n\n**If you made a mistake**\nA backup cannot harm data, only load the system. If you started the wrong one, let it finish and tell the Security Admin. If it ends **Failed**, read the **Error** column and see [[a:b12-10]].",
+    "checklist": [
+      "**Daemon status** says **Reachable** and the banner about an unreachable daemon is not shown.",
+      "**Storage targets** shows every target **Healthy**.",
+      "I know why I need it now (for example before maintenance, a configuration change or a certificate rotation).",
+      "I chose the right **Backup target** and **Backup kind**. **All targets** with **Full** loads production, so I will do it when the platform is calm."
+    ]
+  },
+  {
+    "id": "sg-run-restore-drill",
+    "title": "Run a restore drill",
+    "screen": "SystemBackups",
+    "risk": "MEDIUM",
+    "irreversible": false,
+    "body": "**What this does**\nYou ask the daemon to restore the latest backup chain into an isolated scratch cluster, replay the archived WAL to a target time and run the three invariant checks. Production is not touched and the scratch cluster is destroyed afterwards.\n\n**Check first**\n- [ ] **Daemon status** says **Reachable**.\n- [ ] I understand it can take several minutes and runs after any job already running.\n- [ ] I will read the result in **Latest restore drill** and will not assume success.\n- [ ] I know that a failed check is a priority-1 incident ([[s:s-restore-drill-failed]]).\n\n**Never**\n- Never ignore a **Drill failed** result because the money checks passed.\n- Never delete or prune backups to make a drill pass.\n\n**If you made a mistake**\nAn extra drill is harmless. If a result is red, follow [[s:s-restore-drill-failed]] at once.",
+    "checklist": [
+      "**Daemon status** says **Reachable**.",
+      "I understand it can take several minutes and runs after any job already running.",
+      "I will read the result in **Latest restore drill** and will not assume success.",
+      "I know that a failed check is a priority-1 incident ([[s:s-restore-drill-failed]])."
+    ]
+  },
+  {
+    "id": "sg-update-backup-policy",
+    "title": "Change the backup schedule or retention",
+    "screen": "SystemBackups",
+    "risk": "HIGH",
+    "irreversible": false,
+    "body": "**What this does**\nYou propose new cron schedules (Full, Delta, Drill), retention (**Full retention days**, **WAL retention days**) or the **Alert lag threshold**. A second Security Admin must approve before anything changes.\n\n**Check first**\n- [ ] I have a written reason, for example a change of agreed recovery targets.\n- [ ] Every cron expression has five fields and is in UTC.\n- [ ] Retention is not lowered: shorter retention can destroy the history we need for recovery or an investigation.\n- [ ] The **Alert lag threshold** is not raised just to hide a warning.\n- [ ] I will ask a different Security Admin to review the `BACKUP_POLICY` request on **Approvals** ([[a:b12-11]]).\n\n**Never**\n- Never ask someone to approve a policy change without telling them what it does.\n- Never use a second account of your own as the checker.\n\n**If you made a mistake**\nBefore it is approved, ask for the request to be rejected and submit a corrected one. After approval, submit and approve a new change that restores the old values; the audit log keeps both.",
+    "checklist": [
+      "I have a written reason, for example a change of agreed recovery targets.",
+      "Every cron expression has five fields and is in UTC.",
+      "Retention is not lowered: shorter retention can destroy the history we need for recovery or an investigation.",
+      "The **Alert lag threshold** is not raised just to hide a warning.",
+      "I will ask a different Security Admin to review the `BACKUP_POLICY` request on **Approvals** ([[a:b12-11]])."
+    ]
   }
 ]

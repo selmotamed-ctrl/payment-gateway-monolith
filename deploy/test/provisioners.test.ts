@@ -159,7 +159,7 @@ describe("PostgreSQL 18 provisioner", () => {
     expect(commands).toContain("PGPASSFILE=/var/lib/postgresql/.pgpass");
     expect(commands).not.toContain("PGPASSWORD=");
     expect(commands).toContain("/var/lib/postgresql/.pgpass");
-    expect(commands).toContain("pg_basebackup -h '10.10.10.10' -p 5432 -U 'pg_replicator'");
+    expect(commands).toContain("pg_basebackup -h '10.10.10.10' -p 5432 -U 'gw_replicator'");
     expect(commands).toContain("-Fp -Xs -P -R -S");
     expect(commands).toContain("primary_slot_name");
   });
@@ -256,7 +256,7 @@ describe("Audit and log database provisioner", () => {
     expect(AUDIT_DB_DDL).toContain("BEFORE UPDATE OR DELETE OR TRUNCATE");
     expect(AUDIT_DB_DDL).toContain("REVOKE UPDATE, DELETE, TRUNCATE ON audit_records FROM PUBLIC");
     const ddl = auditDatabaseDdl(config());
-    expect(ddl).toContain('GRANT SELECT, INSERT ON audit_records TO "pg_audit_writer"');
+    expect(ddl).toContain('GRANT SELECT, INSERT ON audit_records TO "gw_audit_writer"');
     expect(ddl).toContain("GRANT USAGE, SELECT ON ALL SEQUENCES");
     expect(ddl).toContain("ALTER DEFAULT PRIVILEGES");
     expect(ddl).not.toContain("GRANT UPDATE");
@@ -267,7 +267,7 @@ describe("Audit and log database provisioner", () => {
     expect(LOG_DB_DDL).toContain("attempt_step_logs");
     expect(LOG_DB_DDL).toContain("http_access_logs");
     const ddl = logDatabaseDdl(config());
-    expect(ddl).toContain('GRANT SELECT, INSERT ON attempt_step_logs, http_access_logs TO "pg_log_writer"');
+    expect(ddl).toContain('GRANT SELECT, INSERT ON attempt_step_logs, http_access_logs TO "gw_log_writer"');
     expect(ddl).toContain("GRANT USAGE, SELECT ON ALL SEQUENCES");
     expect(ddl).not.toContain("GRANT UPDATE");
   });

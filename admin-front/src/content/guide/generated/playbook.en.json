@@ -490,5 +490,48 @@
       "b06-03"
     ],
     "body": "### What to do\nTell the Gateway Admin; the reference format contract test (gate 4) is the place to fix it."
+  },
+  {
+    "id": "s-backup-daemon-unreachable",
+    "title": "The Backups screen says the backup daemon is unreachable",
+    "screens": [
+      "SystemBackups",
+      "Dashboard"
+    ],
+    "cases": [],
+    "articles": [
+      "b12-09",
+      "b12-10",
+      "b12-11"
+    ],
+    "body": "### What it means\nThe core cannot talk to the backup daemon over mutual TLS. **Run backup now**, **Run restore drill** and **Edit policy** are disabled. Scheduled backups and WAL archiving may not be happening.\n\n### What to do\n1. Do not guess and do not try to fix servers yourself. Tell the Security Admin and the people who run the servers.\n2. Ask them to check that the backup daemon service is running on its host, that its certificate and the core's backup client certificate are valid, and that the network path from the core to the daemon is open.\n3. Remember that the database keeps WAL segments it has not yet delivered. A long outage can fill the database disk, so do not leave this overnight.\n4. When **Daemon status** returns to **Reachable**, press **Refresh**, confirm **WAL archive lag** drains and check **Last backup**. If a scheduled backup was missed, a Security Admin can run a **Delta** ([[c:sg-trigger-backup]])."
+  },
+  {
+    "id": "s-wal-archive-lag-high",
+    "title": "WAL archive lag is Attention or Critical",
+    "screens": [
+      "SystemBackups"
+    ],
+    "cases": [],
+    "articles": [
+      "b12-09",
+      "b12-10"
+    ],
+    "body": "### What it means\n**Attention** means the lag is above the **Alert threshold** (default 300 s). **Critical** means above twice the threshold. Recent changes are not yet safely archived, so a disaster now would lose more than a few seconds.\n\n### What to do\n1. Read **Archive lag**, **Lag bytes**, **Current LSN** and **Last archived LSN**. Press **Refresh** twice a minute apart: is the lag falling or growing?\n2. Open **Storage targets** and **Daemon status**. A **Failed** target (for example the S3 or MinIO bucket) or an **Unreachable** daemon is the usual cause. See [[s:s-backup-daemon-unreachable]].\n3. Tell the Security Admin and the people who run the servers. Until archiving catches up, WAL piles up on the database disk.\n4. Do not raise the **Alert lag threshold** to silence the warning.\n5. Confirm recovery: **Archive lag** back under the threshold and the tile **Healthy**."
+  },
+  {
+    "id": "s-restore-drill-failed",
+    "title": "A restore drill failed",
+    "screens": [
+      "SystemBackups",
+      "Finance"
+    ],
+    "cases": [],
+    "articles": [
+      "b12-10",
+      "b10-05",
+      "b08-11"
+    ],
+    "body": "### What it means\nAny failed check is a **priority-1 incident**. Read the three badges in **Latest restore drill**.\n\n### What to do\n1. **Double-entry zero drift** or **Sharded balance parity** failed: tell Finance and the Security Admin. Open **Ledger Audit & Invariant** under **Finance** to see whether production also drifts, then follow RB-04 ([[a:b10-05]], [[a:b08-05]]).\n2. **Audit hash chain** failed: escalate immediately to the Security Admin. Do not delete, prune or alter any backup, and do not touch audit records.\n3. **Drill failed** with a red error text and no failed check (the backup could not be fetched or the scratch cluster did not start): we have no proof that recovery works. Ask the people who run the servers to fix the cause, then run another drill ([[c:sg-run-restore-drill]]) and confirm all three badges read **Passed**.\n4. Write down the drill id, the time and what you saw, in the incident record."
   }
 ]

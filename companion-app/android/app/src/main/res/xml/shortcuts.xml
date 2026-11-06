@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="continue"
+        android:enabled="true"
+        android:icon="@drawable/ic_stat_companion"
+        android:shortcutShortLabel="@string/shortcut_continue"
+        android:shortcutLongLabel="@string/shortcut_continue_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="pgcompanion://open/today"
+            android:targetClass="ly.paymentgateway.companion.MainActivity"
+            android:targetPackage="ly.paymentgateway.companion" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="search"
+        android:enabled="true"
+        android:icon="@drawable/ic_stat_companion"
+        android:shortcutShortLabel="@string/shortcut_search"
+        android:shortcutLongLabel="@string/shortcut_search_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="pgcompanion://open/search"
+            android:targetClass="ly.paymentgateway.companion.MainActivity"
+            android:targetPackage="ly.paymentgateway.companion" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="saved"
+        android:enabled="true"
+        android:icon="@drawable/ic_stat_companion"
+        android:shortcutShortLabel="@string/shortcut_saved"
+        android:shortcutLongLabel="@string/shortcut_saved_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="pgcompanion://open/saved"
+            android:targetClass="ly.paymentgateway.companion.MainActivity"
+            android:targetPackage="ly.paymentgateway.companion" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="guide"
+        android:enabled="true"
+        android:icon="@drawable/ic_stat_companion"
+        android:shortcutShortLabel="@string/shortcut_guide"
+        android:shortcutLongLabel="@string/shortcut_guide_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="pgcompanion://open/guide"
+            android:targetClass="ly.paymentgateway.companion.MainActivity"
+            android:targetPackage="ly.paymentgateway.companion" />
+    </shortcut>
+</shortcuts>

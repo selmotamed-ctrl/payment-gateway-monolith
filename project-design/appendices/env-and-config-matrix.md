@@ -144,8 +144,11 @@
 | `deploy/deploy.env.example` | `BACKUP_WALG_VERSION` |
 | `deploy/deploy.env.example` | `BACKUP_BARMAN_VERSION` |
 | `deploy/deploy.env.example` | `BACKUP_ALLOWED_CLIENT_CNS` |
+| `deploy/deploy.env.example` | `BACKUP_WAL_CLIENT_CNS` |
+| `deploy/deploy.env.example` | `BACKUP_DAEMON_TIMEOUT_MS` |
 | `deploy/deploy.env.example` | `BUN_VERSION` |
 | `deploy/deploy.env.example` | `BUN_SHA256` |
+| `deploy/deploy.env.example` | `BACKUP_LOCAL_REPO_DIR` |
 | `deploy/deploy.env.example` | `BACKUP_S3_MODE` |
 | `deploy/deploy.env.example` | `BACKUP_MINIO_DATA_DIR` |
 | `deploy/deploy.env.example` | `BACKUP_MINIO_CONSOLE_PORT` |

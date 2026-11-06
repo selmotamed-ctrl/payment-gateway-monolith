@@ -7,8 +7,15 @@ import { randomUUID } from "node:crypto";
 import { promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BackupDaemonConfig } from "./config";
+import type { Readable } from "node:stream";
+import type { ArtifactRepository } from "./artifactStore";
 import type { CommandResult, CommandRunner } from "./commandRunner";
+import { isAuditConfigured, isAuditDedicatedCluster, type BackupDaemonConfig } from "./config";
+import { LogicalDumper } from "./logicalDump";
+import { masterKeyFromHex } from "./cryptoEnvelope";
+import { PgNativeEngine } from "./pgNativeEngine";
+import { buildRepository } from "./repository";
+import { parseWalArchiveStatus, pgRecoveryTimestamp } from "./walNames";
 
 export const BACKUP_TARGETS = ["all", "postgres_core", "audit_db", "redis"] as const;
 export type BackupTarget = (typeof BACKUP_TARGETS)[number];
@@ -58,7 +65,13 @@ export interface BackupSummary {
 
 export interface RecoverRequest {
   target: RecoveryTarget;
+  /** Recovery target. Ignored when `latest` is set. */
   targetTime: Date;
+  /**
+   * Disaster recovery: replay everything that is available (every archived segment, and the streamed `.partial`
+   * one) instead of stopping at a time. The cluster promotes when the WAL runs out.
+   */
+  latest?: boolean;
   targetDir: string;
   port: number;
 }
@@ -72,8 +85,35 @@ export interface RecoverResult {
   initializedEmptyDataDir?: boolean;
 }
 
+export interface RecoverLogicalRequest {
+  database: string;
+  host: string;
+  port: number;
+  user: string;
+}
+
+export interface WalIngestOutcome {
+  status: "stored" | "duplicate";
+  key: string;
+  bytes: number;
+}
+
+export interface BackupPolicyView {
+  fullRetentionDays: number;
+  walRetentionDays: number;
+}
+
 export interface BackupEngine {
   overviewHealth(): Promise<EngineHealth>;
+  /** Restores the newest verified logical dump into a running scratch cluster (shared-cluster audit database). */
+  restoreLogical?(request: RecoverLogicalRequest): Promise<{ restored: boolean; detail: string }>;
+  /** Accepts a WAL file pushed by the database's archive_command (pg-native only). */
+  ingestWal?(target: string, file: string, body: Readable, declaredLength: number | null): Promise<WalIngestOutcome>;
+  /** Starts background workers (continuous WAL streaming, WAL mirroring). */
+  start?(): Promise<void>;
+  stop?(): Promise<void>;
+  /** Live WAL ingest / streaming / mirror status for the overview. */
+  walStatus?(): unknown;
   triggerBackup(target: BackupTarget, kind: BackupKind): Promise<BackupExecutionResult>;
   listBackups(limit: number, target?: BackupTarget): Promise<BackupSummary[]>;
   latestDrill?(): Promise<unknown | null>;
@@ -114,6 +154,33 @@ export const backupDataDir = (config: BackupDaemonConfig, target: BackupTarget):
   }
   return config.PG_DATA_DIR;
 };
+
+/**
+ * What `target = "all"` means for this deployment. The audit database is a
+ * target whenever one is configured: with a dedicated cluster it gets its own
+ * physical backup, otherwise a logical dump (it is already inside the core
+ * physical backup, but a standalone dump keeps it independently restorable).
+ */
+export const expandTargets = (config: BackupDaemonConfig, target: BackupTarget): BackupTarget[] => {
+  if (target !== "all") return [target];
+  return [
+    "postgres_core",
+    ...(isAuditConfigured(config) ? (["audit_db"] as const) : []),
+    ...(config.REDIS_URL ? (["redis"] as const) : []),
+  ];
+};
+
+export interface EngineDeps {
+  repository?: ArtifactRepository;
+  /** Live retention policy (maker-checker governed) so pruning follows what the Admin Portal approved. */
+  getPolicy?: () => BackupPolicyView;
+  clock?: () => Date;
+  logger?: Pick<Console, "info" | "warn" | "error">;
+}
+
+/** WAL-G keeps whole base backups; the policy is expressed in days, so convert at one backup per week. */
+export const retentionCount = (config: BackupDaemonConfig, policy?: BackupPolicyView): number =>
+  policy ? Math.max(1, Math.ceil(policy.fullRetentionDays / 7)) : config.BACKUP_RETENTION_FULL_COUNT;
 
 export const walGS3Prefix = (
   config: BackupDaemonConfig,
@@ -232,9 +299,10 @@ export const buildWalGVerifyBucketCommand = (
 export const buildWalGPruneCommand = (
   config: BackupDaemonConfig,
   target: BackupTarget = "postgres_core",
+  policy?: BackupPolicyView,
 ): BuiltCommand => ({
   command: config.WALG_BIN,
-  args: ["delete", "retain", "FULL", String(config.BACKUP_RETENTION_FULL_COUNT), "--confirm"],
+  args: ["delete", "retain", "FULL", String(retentionCount(config, policy)), "--confirm"],
   env: walGEnvironment(config, target),
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
 });
@@ -242,10 +310,21 @@ export const buildWalGPruneCommand = (
 export const WAL_LAG_QUERY =
   "SELECT COALESCE(pg_last_wal_replay_lsn(), pg_last_wal_receive_lsn())::text AS last_replayed_lsn, pg_current_wal_lsn()::text AS current_lsn;";
 
+/**
+ * `last_archived_wal` is a segment FILE NAME, so it is returned as text and the
+ * byte lag is computed from segment numbers in code (walNames.archiveLagBytes);
+ * it is never fed to pg_wal_lsn_diff(). Row format (psql -A -t, `|` separated):
+ * last_archived_wal | lag_seconds | archived_count | failed_count | current_lsn | current_wal_file | failing
+ */
 export const WAL_ARCHIVE_STATUS_QUERY =
-  "SELECT COALESCE(last_archived_wal, '') AS last_archived_lsn, " +
-  "COALESCE(EXTRACT(EPOCH FROM (now() - last_archived_time)), 0)::text AS lag_seconds, " +
-  "COALESCE(pg_wal_lsn_diff(pg_current_wal_lsn(), last_archived_wal), 0)::text AS lag_bytes " +
+  "SELECT COALESCE(last_archived_wal, '') AS last_archived_wal, " +
+  "CASE WHEN last_archived_time IS NULL THEN 0 " +
+  "ELSE GREATEST(0, ROUND(EXTRACT(EPOCH FROM (now() - last_archived_time))))::bigint END::text AS lag_seconds, " +
+  "COALESCE(archived_count, 0)::text AS archived_count, " +
+  "COALESCE(failed_count, 0)::text AS failed_count, " +
+  "pg_current_wal_lsn()::text AS current_lsn, " +
+  "pg_walfile_name(pg_current_wal_lsn()) AS current_wal_file, " +
+  "(last_failed_time IS NOT NULL AND (last_archived_time IS NULL OR last_failed_time > last_archived_time))::text AS failing " +
   "FROM pg_stat_archiver;";
 
 export interface ReplicaEndpoint {
@@ -291,6 +370,8 @@ export const buildPsqlCommand = (
   query: string,
   database: string,
   endpoint: ReplicaEndpoint = { id: "primary", host: config.PG_PRIMARY_HOST, port: config.PG_PRIMARY_PORT },
+  /** Role to connect as; defaults to the primary role. A dedicated audit cluster has its own roles. */
+  user: string = config.PG_PRIMARY_USER,
 ): BuiltCommand => ({
   command: `${trimTrailingSlash(config.PG_BIN_DIR)}/psql`,
   args: [
@@ -299,7 +380,7 @@ export const buildPsqlCommand = (
     "-p",
     String(endpoint.port),
     "-U",
-    config.PG_PRIMARY_USER,
+    user,
     "-d",
     database,
     "-X",
@@ -374,6 +455,7 @@ export const buildBarmanRecoverCommand = (
   targetDir: string,
   targetTime: Date,
   target: BackupTarget = "postgres_core",
+  latest = false,
 ): BuiltCommand => ({
   command: config.BARMAN_BIN,
   args: [
@@ -381,8 +463,7 @@ export const buildBarmanRecoverCommand = (
     barmanServerName(config, target),
     backupId,
     targetDir,
-    "--target-time",
-    targetTime.toISOString(),
+    ...(latest ? [] : ["--target-time", targetTime.toISOString()]),
   ],
   env: barmanEnvironment(),
   timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
@@ -539,22 +620,18 @@ export const parseBarmanBackupList = (stdout: string): BackupSummary[] => {
   return summaries;
 };
 
-const parseFieldRow = (stdout: string): string[] =>
+export const parseFieldRow = (stdout: string): string[] =>
   stdout
     .trim()
     .split(/\r?\n/)[0]
     ?.split("|")
     .map((value) => value.trim()) ?? [];
 
-const toNumber = (value: string | undefined): number => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
 
-const errorText = (result: CommandResult): string =>
+export const errorText = (result: CommandResult): string =>
   (result.stderr || result.stdout || `exit code ${result.code}`).trim().slice(0, 500);
 
-const runChecked = async (
+export const runChecked = async (
   runner: CommandRunner,
   command: BuiltCommand,
   target: BackupTarget,
@@ -579,14 +656,14 @@ const runChecked = async (
   return result;
 };
 
-const emptyWalHealth = (): WalHealth => ({
+export const emptyWalHealth = (): WalHealth => ({
   archiveLagSeconds: 0,
   currentLsn: "",
   lastArchivedLsn: "",
   lagBytes: 0,
 });
 
-const walHealthFor = async (config: BackupDaemonConfig, runner: CommandRunner): Promise<WalHealth> => {
+export const walHealthFor = async (config: BackupDaemonConfig, runner: CommandRunner): Promise<WalHealth> => {
   const health = emptyWalHealth();
   try {
     const lagResult = await runner.run(buildWalGLagQueryCommand(config).command, buildWalGLagQueryCommand(config).args, {
@@ -608,10 +685,11 @@ const walHealthFor = async (config: BackupDaemonConfig, runner: CommandRunner): 
       timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS,
     });
     if (archiveResult.code === 0) {
-      const [lastArchived = "", lagSeconds = "0", lagBytes = "0"] = parseFieldRow(archiveResult.stdout);
-      health.lastArchivedLsn = lastArchived || health.lastArchivedLsn;
-      health.archiveLagSeconds = Math.max(0, Math.round(toNumber(lagSeconds)));
-      health.lagBytes = Math.max(0, Math.round(toNumber(lagBytes)));
+      const status = parseWalArchiveStatus(archiveResult.stdout);
+      health.lastArchivedLsn = status.lastArchivedWal || health.lastArchivedLsn;
+      if (status.currentLsn) health.currentLsn = status.currentLsn;
+      health.archiveLagSeconds = status.lagSeconds;
+      health.lagBytes = status.lagBytes;
     }
   } catch {
     // Keep the LSN values from the replica query, with a zeroed lag.
@@ -619,7 +697,7 @@ const walHealthFor = async (config: BackupDaemonConfig, runner: CommandRunner): 
   return health;
 };
 
-const checkTarget = async (
+export const checkTarget = async (
   runner: CommandRunner,
   id: string,
   name: string,
@@ -649,7 +727,7 @@ const checkTarget = async (
   }
 };
 
-const optionalTargetChecks = (config: BackupDaemonConfig, runner: CommandRunner): Array<Promise<BackupStorageTarget>> => {
+export const optionalTargetChecks = (config: BackupDaemonConfig, runner: CommandRunner): Array<Promise<BackupStorageTarget>> => {
   const checks: Array<Promise<BackupStorageTarget>> = [];
   const secondary = buildSecondaryTargetCheckCommand(config);
   if (secondary) {
@@ -737,11 +815,35 @@ const triggerWalGTarget = async (
   return startLsn ? [...storageTargets, `start-lsn:${startLsn}`] : storageTargets;
 };
 
+/** Lazily builds the logical-dump service (and its storage tiers) the first time a shared audit target needs it. */
+const lazyDumper = (config: BackupDaemonConfig, runner: CommandRunner, deps: EngineDeps): (() => LogicalDumper) => {
+  let dumper: LogicalDumper | undefined;
+  return () => {
+    dumper ??= new LogicalDumper({
+      config,
+      runner,
+      repository: deps.repository ?? buildRepository(config, runner),
+      master: masterKeyFromHex(config.BACKUP_ENCRYPTION_KEY_HEX),
+      clock: deps.clock,
+    });
+    return dumper;
+  };
+};
+
 export class WalGEngine implements BackupEngine {
+  private readonly dumper: () => LogicalDumper;
+
   constructor(
     private readonly config: BackupDaemonConfig,
     private readonly runner: CommandRunner,
-  ) {}
+    private readonly deps: EngineDeps = {},
+  ) {
+    this.dumper = lazyDumper(config, runner, deps);
+  }
+
+  public restoreLogical(request: RecoverLogicalRequest): Promise<{ restored: boolean; detail: string }> {
+    return this.dumper().restoreLatest(request);
+  }
 
   public async overviewHealth(): Promise<EngineHealth> {
     const targets = await Promise.all([
@@ -769,21 +871,16 @@ export class WalGEngine implements BackupEngine {
   }
 
   public async triggerBackup(target: BackupTarget, kind: BackupKind): Promise<BackupExecutionResult> {
-    const requested: BackupTarget[] =
-      target === "all" ? (this.config.REDIS_URL ? ["postgres_core", "audit_db", "redis"] : ["postgres_core", "audit_db"]) : [target];
+    const requested = expandTargets(this.config, target);
     const storageTargets = new Set<string>();
 
     for (const requestedTarget of requested) {
-      if (requestedTarget === "audit_db" && !this.config.PG_AUDIT_DATA_DIR) {
-        throw new BackupEngineError(
-          "PG_AUDIT_DATA_DIR is required for the audit_db WAL-G target; refusing to back up the core data directory",
-          requestedTarget,
-          kind,
-        );
+      if (requestedTarget === "audit_db" && !isAuditDedicatedCluster(this.config)) {
+        // Shared cluster: the audit database is inside the core physical backup; take a standalone logical dump.
+        const audit = await this.dumper().backupSharedAudit({ engine: "wal-g", skipIfMissing: target === "all" });
+        for (const id of audit.storageTargets) storageTargets.add(id);
+        continue;
       }
-    }
-
-    for (const requestedTarget of requested) {
       for (const storageTarget of await triggerWalGTarget(this.config, this.runner, requestedTarget, kind)) {
         if (!storageTarget.startsWith("start-lsn:")) storageTargets.add(storageTarget);
       }
@@ -814,7 +911,7 @@ export class WalGEngine implements BackupEngine {
     if (fetch.code !== 0) {
       throw new BackupEngineError(`backup-fetch failed: ${errorText(fetch)}`, request.target, "full");
     }
-    const escapedTargetTime = request.targetTime.toISOString().replace(/'/g, "''");
+    const escapedTargetTime = pgRecoveryTimestamp(request.targetTime);
     // restore_command is a postgresql.conf single-quoted literal: every inner
     // single quote MUST be doubled. With WALG_ENV_FILE configured the secrets
     // stay in that 0640 file and only the (non-secret) prefix is on the line.
@@ -831,17 +928,25 @@ export class WalGEngine implements BackupEngine {
     return {
       recoveryConf:
         `restore_command = '${restoreCommand}'\n` +
-        `recovery_target_time = '${escapedTargetTime}'\n` +
-        "recovery_target_action = 'promote'\n",
+        (request.latest
+          ? ""
+          : `recovery_target_time = '${escapedTargetTime}'\n` + "recovery_target_action = 'promote'\n"),
     };
   }
 
   public async prune(target: BackupTarget, kind: BackupKind = "full"): Promise<void> {
     if (kind !== "full") return;
+    const policy = this.deps.getPolicy?.();
+    // The shared audit database has no WAL-G backup set of its own to prune.
+    const wantsAudit = isAuditDedicatedCluster(this.config);
     const targets: BackupTarget[] =
-      target === "all" ? ["postgres_core", "audit_db"] : target === "redis" ? [] : [target];
+      target === "all"
+        ? ["postgres_core", ...(wantsAudit ? (["audit_db"] as const) : [])]
+        : target === "redis" || (target === "audit_db" && !wantsAudit)
+          ? []
+          : [target];
     for (const pruneTarget of targets) {
-      const command = buildWalGPruneCommand(this.config, pruneTarget);
+      const command = buildWalGPruneCommand(this.config, pruneTarget, policy);
       await runChecked(this.runner, command, pruneTarget, kind);
     }
   }
@@ -863,24 +968,45 @@ const triggerBarmanTarget = async (
 };
 
 export class BarmanEngine implements BackupEngine {
+  private readonly dumper: () => LogicalDumper;
+
   constructor(
     private readonly config: BackupDaemonConfig,
     private readonly runner: CommandRunner,
-  ) {}
+    private readonly deps: EngineDeps = {},
+  ) {
+    this.dumper = lazyDumper(config, runner, deps);
+  }
+
+  public restoreLogical(request: RecoverLogicalRequest): Promise<{ restored: boolean; detail: string }> {
+    return this.dumper().restoreLatest(request);
+  }
+
+  /**
+   * S3 reachability for Barman is proven with the daemon's own S3 client (write,
+   * read back, delete). It must never call WAL-G: a Barman-only host has no
+   * wal-g binary and used to report its object store unhealthy forever.
+   */
+  private async s3Target(): Promise<BackupStorageTarget> {
+    try {
+      const repository = this.deps.repository ?? buildRepository(this.config, this.runner);
+      const store = repository.stores.find((candidate) => candidate.kind === "s3");
+      if (!store) return { id: "primary-s3", name: "Primary S3 Bucket", kind: "s3", healthy: false, detail: "no S3 target is configured" };
+      const health = await store.health();
+      return { id: "primary-s3", name: "Primary S3 Bucket", kind: "s3", healthy: health.healthy, detail: health.detail };
+    } catch (error) {
+      return { id: "primary-s3", name: "Primary S3 Bucket", kind: "s3", healthy: false, detail: error instanceof Error ? error.message : String(error) };
+    }
+  }
 
   public async overviewHealth(): Promise<EngineHealth> {
     const check = buildBarmanCheckCommand(this.config);
-    const auditCheck = buildBarmanCheckCommand(this.config, "audit_db");
     const targets = await Promise.all([
       checkTarget(this.runner, "barman", "Barman Backup Server", "ssh", check),
-      checkTarget(this.runner, "barman-audit", "Barman Audit Server", "ssh", auditCheck),
-      checkTarget(
-        this.runner,
-        "primary-s3",
-        "Primary S3 Bucket",
-        "s3",
-        buildWalGVerifyBucketCommand(this.config),
-      ),
+      ...(isAuditDedicatedCluster(this.config)
+        ? [checkTarget(this.runner, "barman-audit", "Barman Audit Server", "ssh", buildBarmanCheckCommand(this.config, "audit_db"))]
+        : []),
+      this.s3Target(),
       checkTarget(
         this.runner,
         "postgres-primary",
@@ -898,10 +1024,14 @@ export class BarmanEngine implements BackupEngine {
   }
 
   public async triggerBackup(target: BackupTarget, kind: BackupKind): Promise<BackupExecutionResult> {
-    const requested: BackupTarget[] =
-      target === "all" ? (this.config.REDIS_URL ? ["postgres_core", "audit_db", "redis"] : ["postgres_core", "audit_db"]) : [target];
+    const requested = expandTargets(this.config, target);
     const storageTargets = new Set<string>();
     for (const requestedTarget of requested) {
+      if (requestedTarget === "audit_db" && !isAuditDedicatedCluster(this.config)) {
+        const audit = await this.dumper().backupSharedAudit({ engine: "barman", skipIfMissing: target === "all" });
+        for (const id of audit.storageTargets) storageTargets.add(id);
+        continue;
+      }
       for (const storageTarget of await triggerBarmanTarget(this.config, this.runner, requestedTarget, kind)) {
         storageTargets.add(storageTarget);
       }
@@ -931,6 +1061,7 @@ export class BarmanEngine implements BackupEngine {
       request.targetDir,
       request.targetTime,
       request.target,
+      request.latest === true,
     );
     const result = await this.runner.run(command.command, command.args, {
       env: command.env,
@@ -948,5 +1079,17 @@ export class BarmanEngine implements BackupEngine {
   }
 }
 
-export const createBackupEngine = (config: BackupDaemonConfig, runner: CommandRunner): BackupEngine =>
-  config.BACKUP_ENGINE_MODE === "wal-g" ? new WalGEngine(config, runner) : new BarmanEngine(config, runner);
+export const createBackupEngine = (
+  config: BackupDaemonConfig,
+  runner: CommandRunner,
+  deps: EngineDeps = {},
+): BackupEngine => {
+  switch (config.BACKUP_ENGINE_MODE) {
+    case "pg-native":
+      return new PgNativeEngine(config, runner, deps);
+    case "wal-g":
+      return new WalGEngine(config, runner, deps);
+    default:
+      return new BarmanEngine(config, runner, deps);
+  }
+};

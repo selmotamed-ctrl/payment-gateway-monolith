@@ -125,7 +125,10 @@ After `provisionBackupEngine()`, `deployBackupDaemon()`:
 - hands the source tree back to `postgres:postgres` (the daemon's service user);
 - ensures Bun exists and installs a real copy at `/usr/local/bin/bun` (not a symlink through the SSH user's home, which may not be traversable by `postgres`);
 - runs `bun install --frozen-lockfile` as `postgres` only when the rsync changed something or `node_modules` is missing;
+- chowns the source tree and `/var/lib/pg-backup/.bun-cache` to the daemon account (`backupDaemonUser()`: `postgres` only for WAL-G co-located with the primary, else `pgbackup`) and runs `bun install` as that account with `HOME` and `BUN_INSTALL_CACHE_DIR` set;
 - runs `systemctl daemon-reload && systemctl enable pg-backup-daemon`, then **starts the unit if it is down and restarts it only if the source, env, unit or archive environment changed** (or `--force-restart`), logging `backup daemon started|restarted|unchanged`.
+
+After the start/restart decision the same remote script runs `daemonReadinessWait()`: it polls up to 10 s for the unit to be active and to stay active for one more second (so `Restart=always` cannot hide a crash loop), and on failure prints `journalctl -u pg-backup-daemon -n 40 --no-pager` to stderr and exits 1, so a startup failure surfaces in step 5 instead of at the first health probe.
 
 The systemd unit and `/etc/pg-backup/backup.env` are written by the provisioner, not by `deployBackupDaemon()`. If `BACKUP_ENABLED` is true but the plan has no backup host, the deploy warns and skips the daemon; validation normally prevents that.
 

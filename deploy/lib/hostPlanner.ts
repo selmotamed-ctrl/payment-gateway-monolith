@@ -20,7 +20,7 @@ import {
 
 export type ServiceName = string;
 export type NginxSiteName = "admin-lan" | "merchant-public" | "checkout-public" | "merchant-lan" | "checkout-lan" | "fake-rails";
-export type CertBundle = "core-server" | "admin-client" | "merchant-client" | "checkout-client" | "fake-rails-server" | "backup-server" | "pg-client" | "redis-client" | "audit-db-client" | "log-db-client";
+export type CertBundle = "core-server" | "admin-client" | "merchant-client" | "checkout-client" | "fake-rails-server" | "backup-server" | "backup-client" | "wal-archive-client" | "pg-client" | "redis-client" | "audit-db-client" | "log-db-client";
 
 export interface SshTarget {
   host: string;
@@ -241,6 +241,23 @@ const allEdgePrivateIps = (config: DeployConfig): string[] => {
 const backupPrivateIp = (config: DeployConfig): string | null =>
   parseNodeList(config.BACKUP_NODE)[0]?.privateIp ?? null;
 
+/**
+ * core-back's backup-daemon client settings. Independent of the PostgreSQL
+ * storage env: a core host that talks to an externally managed database
+ * (`DB_*`) still needs to reach the backup daemon whenever backups are on.
+ */
+export const backupCoreEnv = (config: DeployConfig): Record<string, string> => {
+  if (!config.BACKUP_ENABLED) return {};
+  const scheme = config.BACKUP_ALLOW_INSECURE_HTTP ? "http" : "https";
+  return {
+    BACKUP_DAEMON_URL: `${scheme}://${backupPrivateIp(config) ?? "127.0.0.1"}:${config.BACKUP_DAEMON_PORT}`,
+    BACKUP_DAEMON_CA_CERT_PATH: "shared/certs/internal-ca.crt",
+    BACKUP_DAEMON_CLIENT_CERT_PATH: "shared/certs/backup-client.crt",
+    BACKUP_DAEMON_CLIENT_KEY_PATH: "shared/certs/backup-client.key",
+    BACKUP_DAEMON_TIMEOUT_MS: String(config.BACKUP_DAEMON_TIMEOUT_MS),
+  };
+};
+
 const storageEnv = (config: DeployConfig): Record<string, string> => {
   if (!pgStorageConfigured(config)) return {};
   const primary = parseNodeList(config.PG_PRIMARY_NODE)[0];
@@ -273,12 +290,6 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
     ...(replicaUrls.length > 0 ? { DATABASE_REPLICA_URLS: replicaUrls.join(",") } : {}),
     ...(config.AUDIT_DB_NODE ? { AUDIT_DATABASE_URL: `postgresql://${encodeURIComponent(config.AUDIT_DB_USER)}:${encodeURIComponent(config.AUDIT_DB_PASSWORD)}@${parseNodeList(config.AUDIT_DB_NODE)[0]?.privateIp}:${parseNodeList(config.AUDIT_DB_NODE)[0]?.servicePort}/${config.AUDIT_DB_NAME}${directTlsQuery(config.AUDIT_DB_MANAGE_VIA_SSH)}` } : {}),
     ...(config.LOG_DB_NODE ? { LOG_DATABASE_URL: `postgresql://${encodeURIComponent(config.LOG_DB_USER)}:${encodeURIComponent(config.LOG_DB_PASSWORD)}@${parseNodeList(config.LOG_DB_NODE)[0]?.privateIp}:${parseNodeList(config.LOG_DB_NODE)[0]?.servicePort}/${config.LOG_DB_NAME}${directTlsQuery(config.LOG_DB_MANAGE_VIA_SSH)}` } : {}),
-    ...(config.BACKUP_ENABLED ? {
-      BACKUP_DAEMON_URL: `https://${backupPrivateIp(config) ?? "127.0.0.1"}:${config.BACKUP_DAEMON_PORT}`,
-      BACKUP_DAEMON_CA_CERT_PATH: "shared/certs/internal-ca.crt",
-      BACKUP_DAEMON_CLIENT_CERT_PATH: "shared/certs/backup-client.crt",
-      BACKUP_DAEMON_CLIENT_KEY_PATH: "shared/certs/backup-client.key",
-    } : {}),
   };
 };
 
@@ -316,6 +327,7 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
     WORKER_ENABLED: "true",
     ...(redisUrl ? { REDIS_URL: redisUrl } : {}),
     ...storageEnv(config),
+    ...backupCoreEnv(config),
     FAKE_RAILS_ENABLED: config.FAKE_RAILS_ENABLED ? "true" : "false",
     FAKE_RAILS_ALLOW_IN_PRODUCTION: config.FAKE_RAILS_ALLOW_IN_PRODUCTION ? "true" : "false",
     IS_TEST_SERVER: config.IS_TEST_SERVER ? "true" : "false",
@@ -637,6 +649,11 @@ const buildNginx = (config: DeployConfig, privateIp?: string, nodes: ComputeNode
 };
 const buildCertBundles = (role: HostRole, config?: DeployConfig): CertBundle[] => {
   const storageCerts: CertBundle[] = config && storageEnabled(config) ? ["pg-client", "redis-client", "audit-db-client", "log-db-client"] : [];
+  // backup-client (core-back -> backup daemon) must reach core whenever backups
+  // are on, also when the database itself is externally managed (DB_*).
+  if (config?.BACKUP_ENABLED) storageCerts.push("backup-client");
+  // Least privilege: only the hosts whose PostgreSQL archives WAL get the WAL ingest client.
+  const walCerts: CertBundle[] = config?.BACKUP_ENABLED ? ["wal-archive-client"] : [];
   switch (role) {
     case "core":
       return ["core-server", ...storageCerts];
@@ -649,14 +666,15 @@ const buildCertBundles = (role: HostRole, config?: DeployConfig): CertBundle[] =
     case "fake-rails":
       return ["fake-rails-server"];
     case "backup":
-      return ["backup-server", "pg-client"];
+      return ["backup-server", "backup-client", "pg-client"];
     case "pg-primary":
+      return ["pg-client", ...walCerts];
     case "pg-replica":
       return ["pg-client"];
     case "redis":
       return ["redis-client"];
     case "audit-db":
-      return ["audit-db-client"];
+      return ["audit-db-client", ...walCerts];
     case "log-db":
       return ["log-db-client"];
     default:
@@ -867,7 +885,13 @@ const buildStorageFirewall = (config: DeployConfig, node: StorageNodePlan, allSt
     case "backup":
       return [
         sshRule,
-        { port: config.BACKUP_DAEMON_PORT, proto: "tcp", fromCidrs: coreIps, comment: "backup-daemon mTLS from core nodes" },
+        // Core nodes drive the control plane; the PostgreSQL primary and the
+        // dedicated audit DB push WAL (archive_command -> PUT /v1/wal/...).
+        { port: config.BACKUP_DAEMON_PORT, proto: "tcp", fromCidrs: [...new Set([
+          ...coreIps,
+          ...(allStorage.postgres.primary ? [allStorage.postgres.primary.privateIp] : []),
+          ...(allStorage.auditDb ? [allStorage.auditDb.privateIp] : []),
+        ])], comment: "backup-daemon mTLS from core nodes + WAL archive push from PostgreSQL hosts" },
       ];
     default:
       return [sshRule];

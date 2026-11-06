@@ -1,6 +1,6 @@
 {
   "contentVersion": "1.0.0",
-  "contentHash": "135601360323bb9f82f5c2873a179b5e9f2a16bbc3f04978e5f84edbf3e0f558",
+  "contentHash": "55a4980f48d3d8e0431665c55cf93b160a92250cde9936452e2e24cc52d483dc",
   "blueprints": [
     {
       "id": "exam-foundation",
@@ -7192,6 +7192,172 @@
         }
       ],
       "why": "Service objectives are in b12-07."
+    },
+    {
+      "id": "q-m10-113",
+      "module": "m10",
+      "type": "single",
+      "difficulty": 2,
+      "critical": true,
+      "tracks": [
+        "GATEWAY_ADMIN",
+        "SECURITY_ADMIN"
+      ],
+      "refs": [
+        "b12-09",
+        "b12-10"
+      ],
+      "stem": "On the Backups screen **Last backup** is Passed (from 02:00 UTC), but **WAL archive lag** is 4,200 s (Critical, threshold 300 s) and one storage target is Failed. What is the real risk?",
+      "options": [
+        {
+          "id": "o1",
+          "text": "There is no risk, because the 02:00 backup passed.",
+          "correct": false
+        },
+        {
+          "id": "o2",
+          "text": "Recent changes are not safely archived, and unarchived WAL piles up on the database disk until archiving resumes.",
+          "correct": true
+        },
+        {
+          "id": "o3",
+          "text": "Every older backup in the bucket has been deleted.",
+          "correct": false
+        }
+      ],
+      "why": "A passed nightly backup says nothing about the last hours. High archive lag means a disaster now would lose more than a few seconds, and the database keeps what it could not deliver."
+    },
+    {
+      "id": "q-m10-114",
+      "module": "m10",
+      "type": "single",
+      "difficulty": 2,
+      "critical": true,
+      "tracks": [
+        "GATEWAY_ADMIN",
+        "SECURITY_ADMIN"
+      ],
+      "refs": [
+        "b12-10"
+      ],
+      "stem": "A restore drill ends Drill failed. Double-entry zero drift and Sharded balance parity show Passed, but Audit hash chain shows Failed. What do you do?",
+      "options": [
+        {
+          "id": "o1",
+          "text": "Ignore it, because the money checks passed.",
+          "correct": false
+        },
+        {
+          "id": "o2",
+          "text": "Delete the audit database so the next drill passes.",
+          "correct": false
+        },
+        {
+          "id": "o3",
+          "text": "Treat it as a priority-1 incident: escalate to the Security Admin, keep every backup and do not alter audit records.",
+          "correct": true
+        }
+      ],
+      "why": "A failed audit chain means an audit row may be changed, damaged or missing. Backups are the evidence, so they must be kept."
+    },
+    {
+      "id": "q-m10-115",
+      "module": "m10",
+      "type": "single",
+      "difficulty": 2,
+      "critical": true,
+      "tracks": [
+        "GATEWAY_ADMIN",
+        "SECURITY_ADMIN"
+      ],
+      "refs": [
+        "b12-11"
+      ],
+      "stem": "Why does lowering **Full retention days** need a second Security Admin?",
+      "options": [
+        {
+          "id": "o1",
+          "text": "So one compromised or mistaken account cannot shorten the history that recovery and investigations depend on.",
+          "correct": true
+        },
+        {
+          "id": "o2",
+          "text": "Because cron expressions must be typed by two people at the same time.",
+          "correct": false
+        },
+        {
+          "id": "o3",
+          "text": "Because the backup daemon cannot store retention settings.",
+          "correct": false
+        }
+      ],
+      "why": "Policy changes use maker-checker (`BACKUP_POLICY`), and the checker must be a different Security Admin."
+    },
+    {
+      "id": "q-m10-116",
+      "module": "m10",
+      "type": "single",
+      "difficulty": 2,
+      "critical": false,
+      "tracks": [
+        "GATEWAY_ADMIN",
+        "SECURITY_ADMIN"
+      ],
+      "refs": [
+        "b12-10"
+      ],
+      "stem": "What does a restore drill do to the production database?",
+      "options": [
+        {
+          "id": "o1",
+          "text": "It restores the latest backup over production to prove it works.",
+          "correct": false
+        },
+        {
+          "id": "o2",
+          "text": "It pauses production for a few minutes so the checks are exact.",
+          "correct": false
+        },
+        {
+          "id": "o3",
+          "text": "Nothing: it restores into an isolated scratch cluster with archiving switched off, then destroys that cluster.",
+          "correct": true
+        }
+      ],
+      "why": "The scratch cluster listens on the loopback address only and cannot write into the real archive, so production is never touched."
+    },
+    {
+      "id": "q-m10-117",
+      "module": "m10",
+      "type": "single",
+      "difficulty": 2,
+      "critical": false,
+      "tracks": [
+        "GATEWAY_ADMIN",
+        "SECURITY_ADMIN"
+      ],
+      "refs": [
+        "b12-11"
+      ],
+      "stem": "You click **Run backup now** while a restore drill is already running. What happens?",
+      "options": [
+        {
+          "id": "o1",
+          "text": "The drill is cancelled and the backup starts at once.",
+          "correct": false
+        },
+        {
+          "id": "o2",
+          "text": "Both run at the same time to save time.",
+          "correct": false
+        },
+        {
+          "id": "o3",
+          "text": "The backup is queued and runs after the drill, in order.",
+          "correct": true
+        }
+      ],
+      "why": "Only one backup or drill job runs at a time; extra requests wait in order, and a repeated request with the same Idempotency-Key is not run twice."
     }
   ]
 }
