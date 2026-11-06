@@ -21,8 +21,9 @@ catalog, the HTTP API, the job queue and the restore drill.
 | `wal-g` | Same host as the primary only (reads `PGDATA`, peer auth as `postgres`) | `wal-g`, S3/MinIO | Daemon runs as `postgres`. |
 | `barman` | Dedicated backup host | `barman`, `barman-cloud-backup`, S3/MinIO | Retention is applied by Barman. |
 
-The deploy keeps `BACKUP_ENGINE_MODE=auto` resolving to `wal-g` (co-located) or
-`barman` (separate host). `pg-native` is selected explicitly.
+`pg-native` is the default: the deploy resolves `BACKUP_ENGINE_MODE=auto` (and an omitted
+value) to `pg-native`; `wal-g` and `barman` are explicit choices that have not been
+exercised live.
 
 ### 1.1 pg-native
 

@@ -34,6 +34,7 @@ tests:
   - deploy/backup-daemon/test/instanceLock.test.ts
   - deploy/backup-daemon/test/jobQueue.test.ts
   - deploy/backup-daemon/test/lab/two-host.lab.test.ts
+  - deploy/backup-daemon/test/lab/single-host-deploy.lab.test.ts
   - deploy/backup-daemon/test/live-pg18-pitr.test.ts
   - deploy/backup-daemon/test/mtlsAuthorization.test.ts
   - deploy/backup-daemon/test/mtlsRoles.test.ts
@@ -50,11 +51,11 @@ tests:
   - core-back/test/backup-admin/backup-control-client.test.ts
   - admin-back/test/backups.test.ts
 gaps:
-  - The two-host lab (primary on one host, daemon alone on a second host over a real LAN) passed for the pg-native engine on ONE pair of machines (a Wi-Fi LAN, Ubuntu 26.04 backup host). WAL-G and Barman have not run on two hosts, the lab is a manual run (`LAB_B_HOST=... bun test test/lab/two-host.lab.test.ts`) and is not in CI, and a multi-node, replica or PgBouncer topology was not exercised.
-  - BACKUP_ENGINE_MODE=auto still resolves to wal-g (co-located) or barman (separate host); switching it to pg-native is a deliberate one-line decision that has not been taken (the lab now supports it).
+  - The two-host lab passed for the pg-native engine on ONE pair of machines (Wi-Fi LAN, Ubuntu 26.04 backup host). WAL-G and Barman have never run live (they are retained as explicit, unexercised options), a multi-node/replica/PgBouncer topology was not exercised, and the labs are manual (not in CI).
+  - The deploy engine's own execution of the pg-native provisioning (provisionPostgres18 + provisionAuditAndLogDb + provisionBackupEngine + deployBackupDaemon over ssh, then idempotency on a second pass) is covered by `test/lab/single-host-deploy.lab.test.ts`, which was written and type-checked but NOT run to completion: the target host became unreachable (the controlling machine changed network). Only string-level tests and the two-host lab (which uses the real generators) cover it until it is run.
   - The single-instance lock protects one state directory on one host; two daemons on different hosts sharing one S3 bucket are not detected and remain unsupported.
   - The native restore supports the default tablespace layout only; a cluster with extra tablespaces is refused at backup time (no unrestorable backup is ever produced) rather than restored.
-  - Log-database backups are not a daemon target (core, audit and optional Redis only); adding one needs target-enum, core API and admin UI changes.
+  - Log-database backups are not a daemon target (ADR-0005); adding one needs target-enum, core API and admin UI changes.
 ---
 
 # Backup Daemon
@@ -187,6 +188,10 @@ cd deploy/backup-daemon && bun install && bun run typecheck && bun test
 
 On a deployed host use `systemctl status pg-backup-daemon`, `journalctl -u pg-backup-daemon` and a `curl` with `internal-ca.crt`, `backup-client.crt` and `backup-client.key`. Admin triggers and policy changes go through core; policy changes require a second user. A manual drill accepts `targetTime` directly on the daemon.
 
+## 6a. Engine default (ADR-0004)
+
+`BACKUP_ENGINE_MODE` defaults to `pg-native` and `auto` means `pg-native`; `wal-g` and `barman` must be chosen explicitly and keep their rules (wal-g only on the primary's host). S3 is optional for pg-native and required for the others. See `DECISIONS.md` ADR-0004 for the evidence and the consequences.
+
 ## 7. Status and deviations
 
 ### Implemented
@@ -197,7 +202,7 @@ On a deployed host use `systemctl status pg-backup-daemon`, `journalctl -u pg-ba
 
 ### Partial
 
-- Two-host topologies and host-loss are not run on the lab. `auto` does not select pg-native yet.
+- The deploy engine's SSH execution of the pg-native provisioning has not been run end to end against a host (see the gaps).
 
 ### Missing / deferred
 
@@ -243,7 +248,7 @@ Not covered: the dedicated-backup-host and host-loss topologies on real machines
 | (not in the design) default PostgreSQL role names | `PG_DB_USER` (`pg_core_user`) and `PG_REPLICATION_USER` (`pg_replicator`) defaulted to reserved `pg_*` names too, found when the lab rendered the real provisioner SQL. Defaults are now `gw_core_user`/`gw_replicator`, every role setting rejects `pg_*`, and test fixtures that used `pg_owner`/`pg_authoritative_user` were renamed. |
 | (not in the design) `bunInstallCommand` symlinked bun into a home directory | The lab's first real run failed with `status=203/EXEC`: `/usr/local/bin/bun` was a symlink into `/home/<user>/.bun` (home is 0750), unreadable by the service user. The command now installs a real copy atomically and converts an existing symlink. |
 | (not in the design) default audit/log role names | `AUDIT_DB_USER`/`LOG_DB_USER` defaulted to `pg_audit_writer`/`pg_log_writer`; PostgreSQL reserves `pg_*` so `CREATE ROLE` always failed. Defaults are now `gw_audit_writer`/`gw_log_writer` and `pg_*` is rejected at config load. |
-| `BACKUP_ENGINE_MODE` default becomes `pg-native` | Not changed: `auto` keeps wal-g/barman until the two-host lab has run pg-native. |
+| `BACKUP_ENGINE_MODE` default becomes `pg-native` | Adopted on 2026-11-06 (ADR-0004), after the single-host live test and the two-host lab. It was first left unchanged: `auto` keeps wal-g/barman until the two-host lab has run pg-native. |
 | RC-03 root cause | Narrower than claimed: a full run re-chowned the certificate directory later in the storage step; it affected partial and rotate-only runs. |
 | RC-07 `go install @latest` | Already a pinned version; only the lab's all-zero `BACKUP_WALG_SHA256` fallback was a defect. |
 | Design 5.1/5.2 "5-gate" drill | The drill has three invariant checks; guide and academy content say so. |

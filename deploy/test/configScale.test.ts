@@ -156,14 +156,21 @@ BACKUP_ENCRYPTION_KEY_HEX="9f3a7c1e5b2d84f06a1c3e7b9d2f4a8c5e0b6d1a3f7c9e2b4d8a0
     expect(result.problems.join(" ")).toContain("BACKUP_PRIMARY_S3_ENDPOINT must be an absolute http(s) URL");
   });
 
-  test("backup without S3 bucket or encryption key is rejected", () => {
-    const result = loadDeployConfig(withOverrides(`
+  test("backup without an encryption key is always rejected; S3 is required only by the engines that need it", () => {
+    const base = `
 BACKUP_ENABLED="true"
 BACKUP_NODE="backup-1@10.0.3.10:22:10.1.3.10:4090"
 BACKUP_SSH_KEY_PATH="~/.ssh/backup"
-`));
-    expect(result.ok).toBe(false);
-    const problems = result.problems.join(" ");
+`;
+    // default engine (pg-native): the key is required, S3 is optional (local repository only)
+    const native = loadDeployConfig(withOverrides(base));
+    expect(native.ok).toBe(false);
+    expect(native.problems.join(" ")).toContain("BACKUP_ENCRYPTION_KEY_HEX");
+    expect(native.problems.join(" ")).not.toContain("BACKUP_PRIMARY_S3_BUCKET");
+    // barman (explicit): S3 is required as well
+    const barman = loadDeployConfig(withOverrides(`${base}BACKUP_ENGINE_MODE="barman"\n`));
+    expect(barman.ok).toBe(false);
+    const problems = barman.problems.join(" ");
     expect(problems).toContain("BACKUP_PRIMARY_S3_BUCKET");
     expect(problems).toContain("BACKUP_ENCRYPTION_KEY_HEX");
     expect(problems).toContain("BACKUP_PRIMARY_S3_ENDPOINT");

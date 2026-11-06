@@ -198,7 +198,7 @@
 | `deploy/test/hostPlannerScale.test.ts` | 158 | 6 |
 | `deploy/test/ipv6Loopback.test.ts` | 37 | 2 |
 | `deploy/test/pkiScale.test.ts` | 112 | 5 |
-| `deploy/test/provisioners.test.ts` | 507 | 27 |
+| `deploy/test/provisioners.test.ts` | 514 | 27 |
 | `deploy/test/redactSecrets.test.ts` | 63 | 5 |
 | `deploy/test/rollingDeploy.test.ts` | 52 | 5 |
 | `deploy/test/security-regressions.test.ts` | 400 | 35 |
@@ -207,7 +207,7 @@
 | `deploy/test/converge.test.ts` | 530 | 48 |
 | `deploy/test/frontendBuild.test.ts` | 171 | 12 |
 | `deploy/test/stress-harness.test.ts` | 162 | 15 |
-| `deploy/test/configScale.test.ts` | 185 | 13 |
+| `deploy/test/configScale.test.ts` | 192 | 13 |
 | `deploy/test/pipeline.test.ts` | 95 | 4 |
 | `deploy/test/backupReliability.test.ts` | 494 | 31 |
 | `deploy/backup-daemon/test/backupEngine.test.ts` | 504 | 28 |
@@ -215,7 +215,7 @@
 | `deploy/backup-daemon/test/commandRunner.test.ts` | 61 | 3 |
 | `deploy/backup-daemon/test/config.test.ts` | 202 | 18 |
 | `deploy/backup-daemon/test/cron.test.ts` | 82 | 8 |
-| `deploy/backup-daemon/test/helpers.ts` | 240 | 0 |
+| `deploy/backup-daemon/test/helpers.ts` | 253 | 0 |
 | `deploy/backup-daemon/test/mtlsAuthorization.test.ts` | 94 | 1 |
 | `deploy/backup-daemon/test/scheduler.test.ts` | 154 | 3 |
 | `deploy/backup-daemon/test/server.test.ts` | 568 | 28 |
@@ -224,15 +224,16 @@
 | `deploy/backup-daemon/test/wal.test.ts` | 315 | 20 |
 | `deploy/backup-daemon/test/jobQueue.test.ts` | 154 | 8 |
 | `deploy/backup-daemon/test/catalogMirror.test.ts` | 132 | 7 |
-| `deploy/backup-daemon/test/mtlsRoles.test.ts` | 196 | 4 |
 | `deploy/backup-daemon/test/pgNativeEngine.test.ts` | 300 | 20 |
 | `deploy/backup-daemon/test/restoreDrillRunner.test.ts` | 632 | 24 |
 | `deploy/backup-daemon/test/instanceLock.test.ts` | 103 | 8 |
 | `deploy/backup-daemon/test/startup.test.ts` | 68 | 2 |
 | `deploy/backup-daemon/test/live-pg18-pitr.test.ts` | 580 | 18 |
-| `deploy/backup-daemon/test/lab/labConfig.ts` | 58 | 0 |
+| `deploy/backup-daemon/test/lab/labConfig.ts` | 117 | 0 |
 | `deploy/backup-daemon/test/lab/ledgerFixtures.ts` | 40 | 0 |
 | `deploy/backup-daemon/test/lab/two-host.lab.test.ts` | 573 | 9 |
+| `deploy/backup-daemon/test/lab/single-host-deploy.lab.test.ts` | 337 | 8 |
+| `deploy/backup-daemon/test/mtlsRoles.test.ts` | 194 | 4 |
 | `tests/e2e/admin/finance.spec.ts` | 47 | 1 |
 | `tests/e2e/admin/a11y.spec.ts` | 37 | 2 |
 | `tests/e2e/admin/auth.spec.ts` | 50 | 2 |
@@ -297,5 +298,5 @@
 | `tests/unit/audit-summary.test.ts` | 109 | 13 |
 | `tests/unit/academy-content.test.ts` | 306 | 17 |
 
-- Total files: **292**
-- Total literal test declarations: **3153**
+- Total files: **293**
+- Total literal test declarations: **3161**

@@ -136,6 +136,10 @@ cd deploy/backup-daemon && bun install && bun run typecheck && bun test
 
 On a deployed host use `systemctl status pg-backup-daemon`, `journalctl -u pg-backup-daemon` and a `curl` with `internal-ca.crt`, `backup-client.crt` and `backup-client.key`. Admin triggers and policy changes go through core; policy changes require a second user. A manual drill accepts `targetTime` directly on the daemon.
 
+## 6a. Engine default (ADR-0004)
+
+`BACKUP_ENGINE_MODE` defaults to `pg-native` and `auto` means `pg-native`; `wal-g` and `barman` must be chosen explicitly and keep their rules (wal-g only on the primary's host). S3 is optional for pg-native and required for the others. See `DECISIONS.md` ADR-0004 for the evidence and the consequences.
+
 ## 7. Status and deviations
 
 ### Implemented
@@ -146,7 +150,7 @@ On a deployed host use `systemctl status pg-backup-daemon`, `journalctl -u pg-ba
 
 ### Partial
 
-- Two-host topologies and host-loss are not run on the lab. `auto` does not select pg-native yet.
+- The deploy engine's SSH execution of the pg-native provisioning has not been run end to end against a host (see the gaps).
 
 ### Missing / deferred
 
@@ -192,7 +196,7 @@ Not covered: the dedicated-backup-host and host-loss topologies on real machines
 | (not in the design) default PostgreSQL role names | `PG_DB_USER` (`pg_core_user`) and `PG_REPLICATION_USER` (`pg_replicator`) defaulted to reserved `pg_*` names too, found when the lab rendered the real provisioner SQL. Defaults are now `gw_core_user`/`gw_replicator`, every role setting rejects `pg_*`, and test fixtures that used `pg_owner`/`pg_authoritative_user` were renamed. |
 | (not in the design) `bunInstallCommand` symlinked bun into a home directory | The lab's first real run failed with `status=203/EXEC`: `/usr/local/bin/bun` was a symlink into `/home/<user>/.bun` (home is 0750), unreadable by the service user. The command now installs a real copy atomically and converts an existing symlink. |
 | (not in the design) default audit/log role names | `AUDIT_DB_USER`/`LOG_DB_USER` defaulted to `pg_audit_writer`/`pg_log_writer`; PostgreSQL reserves `pg_*` so `CREATE ROLE` always failed. Defaults are now `gw_audit_writer`/`gw_log_writer` and `pg_*` is rejected at config load. |
-| `BACKUP_ENGINE_MODE` default becomes `pg-native` | Not changed: `auto` keeps wal-g/barman until the two-host lab has run pg-native. |
+| `BACKUP_ENGINE_MODE` default becomes `pg-native` | Adopted on 2026-11-06 (ADR-0004), after the single-host live test and the two-host lab. It was first left unchanged: `auto` keeps wal-g/barman until the two-host lab has run pg-native. |
 | RC-03 root cause | Narrower than claimed: a full run re-chowned the certificate directory later in the storage step; it affected partial and rotate-only runs. |
 | RC-07 `go install @latest` | Already a pinned version; only the lab's all-zero `BACKUP_WALG_SHA256` fallback was a defect. |
 | Design 5.1/5.2 "5-gate" drill | The drill has three invariant checks; guide and academy content say so. |

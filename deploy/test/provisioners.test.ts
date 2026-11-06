@@ -494,13 +494,20 @@ ${extra}`.replace(/BACKUP_NODE="[^"]*"/, 'BACKUP_NODE="backup-1@10.10.10.10:22:1
     expect(bad.problems.join(" ")).toContain("at least 8 characters");
   });
 
-  test("BACKUP_ENGINE_MODE=auto picks wal-g when co-located and barman otherwise", () => {
+  test("BACKUP_ENGINE_MODE=auto and the default are pg-native, co-located or not; explicit wal-g/barman are kept and still validated", () => {
     const pg = SOURCE.match(/PG_PRIMARY_NODE="[^@"]*@[^:"]*:\d+:([^:"]*):/)?.[1] ?? "";
     const same = loadDeployConfig(`${SOURCE}
 BACKUP_WALG_SHA256="${"a".repeat(64)}"`.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="auto"').replace(/BACKUP_NODE="[^"]*"/, `BACKUP_NODE="backup-1@${pg}:22:${pg}:4090"`));
     expect(same.problems).toEqual([]);
-    expect(same.config?.BACKUP_ENGINE_MODE).toBe("wal-g");
+    expect(same.config?.BACKUP_ENGINE_MODE).toBe("pg-native");
     const diff = loadDeployConfig(SOURCE.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="auto"'));
-    expect(diff.config?.BACKUP_ENGINE_MODE).toBe("barman");
+    expect(diff.config?.BACKUP_ENGINE_MODE).toBe("pg-native");
+    // omitted entirely: the same default
+    const omitted = loadDeployConfig(SOURCE.replace(/^BACKUP_ENGINE_MODE=.*$/m, ""));
+    expect(omitted.config?.BACKUP_ENGINE_MODE).toBe("pg-native");
+    // explicit choices are untouched
+    expect(loadDeployConfig(SOURCE).config?.BACKUP_ENGINE_MODE).toBe("barman");
+    const walgRemote = loadDeployConfig(SOURCE.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="wal-g"'));
+    expect(walgRemote.problems.join(" ")).toContain("must equal PG_PRIMARY_NODE");
   });
 });

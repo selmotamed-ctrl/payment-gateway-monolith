@@ -237,3 +237,16 @@ export const tempDir = async (prefix = "bd-test-"): Promise<string> => {
   const { join } = await import("node:path");
   return mkdtemp(join(tmpdir(), prefix));
 };
+
+/** A port the OS just proved is free. Random ports from a fixed range collide between test files. */
+export const freePort = async (): Promise<number> => {
+  const { createServer } = await import("node:net");
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as { port: number };
+      server.close(() => resolve(port));
+    });
+  });
+};

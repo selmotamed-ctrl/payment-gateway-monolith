@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { CatalogStore, createDefaultPolicy } from "../src/catalogStore";
 import { startBackupDaemonServer, type RunningBackupDaemonServer } from "../src/server";
-import { FakeEngine, MemoryCatalogFileSystem, makeConfig, makeDrillReport } from "./helpers";
+import { FakeEngine, MemoryCatalogFileSystem, freePort, makeConfig, makeDrillReport } from "./helpers";
 
 const hasOpenssl = (() => {
   try {
@@ -46,11 +46,9 @@ interface Started {
   uploads: Array<{ target: string; file: string; bytes: number }>;
 }
 
-let nextPort = 47400 + Math.floor(Math.random() * 400);
-
 const start = async (): Promise<Started> => {
   const dir = makePki(["backup-client", "wal-archive-client", "admin-back"]);
-  const port = nextPort++;
+  const port = await freePort();
   const uploads: Started["uploads"] = [];
   const engine = new FakeEngine();
   (engine as unknown as { ingestWal: unknown }).ingestWal = async (target: string, file: string, body: Readable) => {

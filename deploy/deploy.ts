@@ -144,7 +144,7 @@ const timestamp = (): string => new Date().toISOString().replace(/[-:T]/g, "").s
 const isStorageRole = (role: string): boolean =>
   ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup"].includes(role);
 
-const uploadStorageCertificates = (
+export const uploadStorageCertificates = (
   runner: SshRunner,
   plan: DeployPlan,
   pki: ReturnType<typeof buildPki>,
@@ -580,7 +580,7 @@ if [ "$ok" != 1 ]; then echo "${unit} did not become active within 10s" >&2; jou
  * environment or unit) or it is down: a blind restart can interrupt a backup
  * or restore drill in progress.
  */
-const deployBackupDaemon = (input: {
+export const deployBackupDaemon = (input: {
   runner: SshRunner;
   config: DeployConfig;
   host: HostPlan;

@@ -450,7 +450,7 @@ const base = z.strictObject({
   BACKUP_SUDO_PASSWORD: z.string().max(256).default(""),
   // "pg-native" = the daemon's own PostgreSQL-native engine (pg_basebackup /
   // pg_receivewal / WAL-over-mTLS ingest) with a local repo; S3 is optional.
-  BACKUP_ENGINE_MODE: z.enum(["pg-native", "wal-g", "barman"]).default("wal-g"),
+  BACKUP_ENGINE_MODE: z.enum(["pg-native", "wal-g", "barman"]).default("pg-native"),
   // Local repository directory of the pg-native engine (base backups + WAL).
   BACKUP_LOCAL_REPO_DIR: safeDir(300).default("/var/lib/pg-backup/repo"),
   // Timeout core-back applies to every backup-daemon control call.
@@ -557,16 +557,15 @@ const safeParseNodes = (value: string): NodeSpec[] => {
 };
 
 /**
- * `BACKUP_ENGINE_MODE=auto` picks WAL-G when the backup node shares the PG
- * primary's private IP (WAL-G reads the local data dir) and Barman when the
- * backup node is a different host. Explicit values are untouched.
+ * `BACKUP_ENGINE_MODE=auto` (and the default) is `pg-native`: it works the same
+ * on the primary's host and on a dedicated backup host, needs no external
+ * backup tool, and is the only engine verified end to end (single host live
+ * test and a real two-host lab). `wal-g` (co-located only) and `barman`
+ * (dedicated host) stay available as explicit choices and keep their rules.
  */
 export const resolveBackupEngineMode = (env: Record<string, string>): "pg-native" | "wal-g" | "barman" | undefined => {
   const raw = (env.BACKUP_ENGINE_MODE ?? "").trim();
-  if (raw !== "auto") return undefined;
-  const backupIp = safeParseNodes(env.BACKUP_NODE ?? "")[0]?.privateIp;
-  const primaryIp = safeParseNodes(env.PG_PRIMARY_NODE ?? "")[0]?.privateIp;
-  return backupIp && primaryIp && backupIp !== primaryIp ? "barman" : "wal-g";
+  return raw === "auto" ? "pg-native" : undefined;
 };
 
 /** Effective S3 mode after resolving "auto" against the endpoint host. */
