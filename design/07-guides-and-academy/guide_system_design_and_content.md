@@ -731,29 +731,91 @@ If an action is refused with a message like "forbidden", the core made that deci
 :::
 @@end
 
-@@article id=b02-03 book=2 order=3 title="The life of a payment, step by step" roles=ALL minutes=3 ui=AVAILABLE related=b07-01,b06-04,b08-04
-Follow one payment from start to finish. Each step names what the system **records**, because that is what you will later inspect.
+@@article id=b02-03 book=2 order=3 title="The life of a payment, step by step" roles=ALL minutes=5 ui=AVAILABLE related=b07-01,b07-02,b06-04,b08-04
+A payment is not one event. It is a chain of **13 steps**, and most steps leave a record. Knowing the chain lets you answer two questions when someone asks about a payment: **where is it now?** and **where can I see the proof?** (How to read the records themselves is in [[a:b07-01]].)
 
-1. **The merchant creates a payment link** with an amount and currency. *Recorded:* a payment link with a unique key. The amount lives here and nowhere else.
-2. **The customer opens the link** on the checkout website. The checkout asks the core for the link. The core decides which payment methods (rails) to show using the *visible rails formula* (Book 7).
-3. **The customer picks a method and fills a form** (for example mobile number). The browser sends only the link key, the method and the form values. **It never sends an amount.**
-4. **The core runs guards** in one safe step: is the merchant active, is the customer sending too many requests, do cheap anti-money-laundering rules allow it, and is there still a free slot on this link? *Recorded:* a **payment attempt**, with the exact configuration versions it started with *pinned* to it, so later edits cannot change a payment in progress. A slot on the link is reserved.
-5. **The engine starts the payment with the partner** (for example asks it to text an OTP). *Recorded:* each outgoing request and its cleaned (secrets removed) answer in the step log.
-6. **The customer is told what to do next** (type the OTP, scan the QR, approve in the app).
-7. **The customer completes it.** For an OTP rail, the engine sends the **confirm step**. This is the **money step**: it is never retried automatically.
-8. **The partner answers** — success, a clear failure, or uncertainty (silence, an error, an unreadable answer). Rules map the partner's wording into our standard statuses. Uncertainty always becomes `UNKNOWN`.
-9. **Trusted confirmation.** We only believe success when the server has verified five facts: the status is success; our reference matches; the amount matches (within a tolerance); the currency matches; the environment matches. Browser messages and return links are *hints* that make us ask the partner, nothing more.
-10. **Posting.** In **one** database transaction the attempt becomes `SUCCEEDED` and the journal entry is written. Either both happen or neither.
-11. **Everyone is told.** The customer's page updates live; a POS screen updates; the merchant is notified through a safe outbox so a message is never sent twice.
-12. **Later, the partner settles to us.** Partners usually pay us in a batch days later (T+N). A **statement** arrives; we **reconcile** it against our records.
-13. **The merchant requests a cash-out** of its wallet; Finance processes it under two-person control.
+We follow one example. **Layla** buys a phone case for **25.500 LYD** from an online shop and pays with **Sadad**, a mobile wallet (you met her in [[a:b01-01]]). Sadad is our **partner**: the payment company that really moves the money. Our **core** ([[a:b02-01]]) makes every decision and writes every record.
+
+Read the picture from top to bottom. The numbers match the steps below it, where each new word is explained.
 
 ```diagram
-Link → Visible rails → Guards → Attempt(pinned) → INITIATE → Customer acts → SUBMIT(money step)
-   → verified? ── yes ─► SUCCEEDED + journal entry (one transaction) ─► notify
-        │
-        └─ unsure ─► UNKNOWN ─► inquiry / webhook / statement / operator decides
+CUSTOMER & SHOP               OUR CORE                       PARTNER (SADAD)
+───────────────               ────────                       ───────────────
+ 1 Shop makes a link     ──►     stores the link
+ 2 Customer opens it     ──►     shows the right methods
+ 3 Picks Sadad, types    ──►   4 runs the guards, makes
+   her phone number              the attempt, holds a slot
+                               5 asks Sadad to start     ──► sends an SMS code
+ 6 Gets the SMS code     ◄──     shows "type your code"
+ 7 Types the code        ──►     asks Sadad to confirm   ──► takes the money
+                               8 reads the answer        ◄── replies
+                               9 checks five facts
+                              10 writes SUCCEEDED + books
+11 Sees "Paid"           ◄──     tells page, shop and POS
+                              12 reads the statement     ◄── pays us days later
+13 Shop cashes out       ──►     Finance pays the shop
 ```
+
+### Part 1: The request (steps 1 to 3)
+Someone asks to pay. No money moves yet.
+
+1. **The merchant creates a payment link** with an amount and a currency, in the Merchant Portal or through the API. The platform stores it with a unique secret key.
+   * *Recorded:* the payment link. **The amount lives here and nowhere else.**
+2. **The customer opens the link** on the checkout website. The core decides **which payment methods to show** (called *rails*, see [[a:b02-06]]). A method appears only if the merchant allows it, a fee is agreed for it, and a healthy *route* (a working connection to a partner) can carry this amount ([[a:b06-12]]).
+3. **The customer picks a method and fills in a short form**, for Sadad her mobile number. The checkout sends the core only the **link key**, the **method** and **what she typed**. **It never sends an amount.** The core reads the amount from the link, so nobody can change the price by editing the page or the web address.
+
+### Part 2: Safety checks and the start (steps 4 to 6)
+Now the core decides whether this payment may go ahead, and starts it with the partner.
+
+4. **The core runs its safety checks ("guards") and creates the attempt.** The guards run together, in one protected step:
+   * Is the merchant active, not suspended?
+   * Is this customer sending too many requests too fast?
+   * Do the quick anti-money-laundering (AML) rules allow it?
+   * Is a **slot** free on the link? A slot is a reservation that stops a single-use link from being paid twice at once.
+
+   If all pass, the core creates the **payment attempt** (one try to pay this link; a link can have several) and reserves the slot. If a safety check fails, nothing goes to the partner and the attempt ends as `BLOCKED`. If only the slot is taken, the customer sees "Payment in progress".
+   * *Recorded:* the attempt, with its **pinned configuration**: the exact versions of the settings it started with (gateway, route, credentials, commission). A setting edited a minute later does not change this payment.
+5. **The core starts the payment with the partner.** For Sadad, it asks Sadad to text a one-time code (an **OTP**) to Layla's phone.
+   * *Recorded:* every request we send and the partner's answer, with secrets removed, in the **step log**.
+6. **The customer is told what to do next**: "type the code we sent you". Other methods ask her to scan a QR code, approve in her wallet app or pay on the partner's own page. Waiting is normal, and nobody should tell her to pay again. If she walks away, the attempt ends as `EXPIRED` when its time limit passes ([[a:b07-06]]).
+
+### Part 3: The money and the proof (steps 7 to 11)
+The customer finishes, the partner answers, and we check the answer before we believe it.
+
+7. **The customer completes the payment.** Layla types the code, and the core sends the partner the **confirm** request. This is the **money step**: the one request that makes money move.
+   * **The core never repeats the money step automatically**, not after a timeout and not after a dropped connection. If the reply is lost, "it never arrived" and "it arrived and the money moved" look the same to us, and a repeat could charge her twice ([[a:b06-03]]).
+   * Other methods end differently: the customer pays inside the partner's own app or page, and the partner tells us. From step 8 on, the story is the same ([[a:b06-02]]).
+8. **The partner answers.** There are only three kinds of answer. Every partner uses its own words, so the core uses rules to translate them into our standard **states**, the one-word labels that say where an attempt is. There are 14 ([[a:b07-02]]), and the rules are in [[a:b06-08]].
+
+| The partner's answer | What the core does | The attempt's state |
+| :--- | :--- | :--- |
+| **Clear success** | Goes on to step 9 and checks it before believing it. | `SUCCEEDED`, after steps 9 and 10 |
+| **Clear failure** | Ends the attempt and frees the slot. | `FAILED` |
+| **Unclear**: no reply, an error, or a reply we cannot read | **Does not guess.** Keeps the slot, posts no money and keeps checking ([[a:b07-03]]). | `UNKNOWN` |
+
+9. **The core checks the success itself.** It believes a success only after it has verified **five facts**:
+   * the status really says success;
+   * our reference number matches;
+   * the amount matches (within a small tolerance);
+   * the currency matches;
+   * the environment matches (test or real).
+
+   A message from the customer's browser, such as "I paid" or a return link, is only a **hint**. It makes the core ask the partner. It is never proof ([[a:b06-07]]).
+10. **The core writes it into the books.** In **one** database transaction, the attempt becomes `SUCCEEDED` **and** the **journal entry** is written. The journal entry is the accounting record in our books (the *ledger*): it credits the shop's wallet, records our commission and keeps everything balanced. Both happen together or neither happens.
+    * *Recorded:* the new state and the journal entry. The shop's balance is calculated from the ledger, so it now includes this payment ([[a:b08-04]]).
+11. **Everyone is told.** Layla's page changes to "Paid", the shop's POS screen updates if it has one, and the merchant is notified through the **outbox**, a safe queue that makes sure each message is sent once.
+
+### Part 4: After the customer has paid (steps 12 and 13)
+The customer is finished. The money still has to travel, and our books must agree with the partner's.
+
+12. **Later, the partner pays us.** A partner usually pays in one batch some days after the customers paid ("T+N" means the payment day plus N days) and sends a **statement**, its own list of what it settled. We **reconcile**: we compare the statement with our records line by line, and any difference becomes a case for Finance ([[a:b08-06]]). Some partners pay the merchant directly instead ([[a:b08-10]]).
+13. **The merchant cashes out.** The shop's wallet is only a number on our books: what we owe the shop. To get that money into its real bank account, the shop requests a **cash-out**, and Finance processes it under two-person control ([[a:b08-07]]).
+
+:::tip If you remember only three things
+1. **The server decides, not the browser.** The amount comes from the link, and a success is believed only after the server's own five checks.
+2. **Unsure is never "failed".** If we do not know whether money moved, the state is `UNKNOWN`, and nobody guesses.
+3. **Success and the books move together.** There is no success without its journal entry.
+:::
 @@end
 
 @@article id=b02-04 book=2 order=4 title="The life of a merchant" roles=ALL minutes=1 ui=AVAILABLE related=b05-01,b05-02
