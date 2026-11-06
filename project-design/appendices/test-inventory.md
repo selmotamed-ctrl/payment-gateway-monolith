@@ -164,13 +164,13 @@
 | `admin-back/test/search.test.ts` | 83 | 2 |
 | `admin-back/test/security-regressions.test.ts` | 502 | 31 |
 | `admin-back/test/session-cookie-and-logout.test.ts` | 133 | 6 |
-| `admin-back/test/admin-ui-completion.test.ts` | 390 | 25 |
+| `admin-back/test/admin-ui-completion.test.ts` | 399 | 26 |
 | `merchant-back/test/helpers/core.ts` | 215 | 1 |
 | `merchant-back/test/helpers/upstream.ts` | 106 | 0 |
 | `merchant-back/test/mtls-client.test.ts` | 85 | 8 |
 | `merchant-back/test/env-isolation.test.ts` | 24 | 1 |
 | `merchant-back/test/core-contract.test.ts` | 569 | 29 |
-| `merchant-back/test/core-forwarding.test.ts` | 309 | 14 |
+| `merchant-back/test/core-forwarding.test.ts` | 331 | 15 |
 | `merchant-back/test/core-internal-client.test.ts` | 492 | 16 |
 | `merchant-back/test/merchant-kyb-and-external.test.ts` | 211 | 15 |
 | `merchant-back/test/security-regressions.test.ts` | 388 | 25 |
@@ -284,4 +284,4 @@
 | `tests/unit/audit-summary.test.ts` | 109 | 13 |
 
 - Total files: **278**
-- Total literal test declarations: **2923**
+- Total literal test declarations: **2925**

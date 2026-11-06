@@ -306,3 +306,25 @@ describe("merchant write routes are translated into the canonical core payload",
     expect(Buffer.from(evidence.contentBase64 as string, "base64").equals(pngBytes)).toBe(true);
   });
 });
+
+describe("deep pagination is forwarded on every merchant list", () => {
+  const routes = [
+    "/api/v1/merchant/wallets",
+    "/api/v1/merchant/payments",
+    "/api/v1/merchant/links",
+    "/api/v1/merchant/cashouts",
+    "/api/v1/merchant/disputes",
+    "/api/v1/merchant/wallets/wal_1/statements?month=2026-11",
+  ];
+
+  for (const route of routes) {
+    test(`GET ${route} forwards page 23397`, async () => {
+      const separator = route.includes("?") ? "&" : "?";
+      const response = await fetch(`${edgeUrl}${route}${separator}page=23397&pageSize=25`, { headers: auth });
+      expect(response.status).toBe(200);
+      const url = forwarded()?.url ?? "";
+      expect(url).toContain("page=23397");
+      expect(url).toContain("pageSize=25");
+    });
+  }
+});

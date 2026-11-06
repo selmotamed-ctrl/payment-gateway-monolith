@@ -22,7 +22,7 @@ export const cashoutCreateSchema = z
 const cashoutQuerySchema = z
   .object({
     status: z.enum(["PENDING_REVIEW", "APPROVED", "REJECTED", "PROCESSING", "COMPLETED", "FAILED"]).optional(),
-    page: z.coerce.number().int().min(1).max(10000).optional(),
+    page: z.coerce.number().int().min(1).optional(),
     pageSize: z.coerce.number().int().min(1).max(200).optional(),
   })
   .passthrough();

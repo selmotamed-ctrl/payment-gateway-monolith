@@ -19,7 +19,7 @@ const disputeParamsSchema = z.object({ id: zIdentifier });
 const disputeQuerySchema = z
   .object({
     status: z.enum(["PENDING_REVIEW", "ACCEPTED", "REJECTED", "WITHDRAWN", "RESOLVED"]).optional(),
-    page: z.coerce.number().int().min(1).max(10000).optional(),
+    page: z.coerce.number().int().min(1).optional(),
     pageSize: z.coerce.number().int().min(1).max(200).optional(),
   })
   .passthrough();

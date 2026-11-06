@@ -514,6 +514,7 @@ The tests use a local HTTPS/HTTP stub and do not require PostgreSQL or Redis. A 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+- 2026-11-06: removed the arbitrary `page <= 10000` cap from `zListQuery`; the admin journal-entries last-page jump (page 23397 on the stress dataset) was rejected with `400 VALIDATION_FAILED` before reaching core. `pageSize` stays capped at 200. Regression test added to `admin-back/test/admin-ui-completion.test.ts`.
 
 ## Security hardening (2026-11-05)
 
@@ -541,4 +542,4 @@ New `coreForward` routes (new files `wallets.ts`, `applications.ts` (application
 | `/merchants/:id/beneficial-owners`, `/merchants/:id/revalidations` | `merchant:read` or `kyb:read` | `kyb:write` or `merchant:write` (the rest of `/merchants` stays `merchant:write`; `kyb:write` does not unlock suspend) |
 | `/aml/reporting-rules/:id/promote`, `/finance/route-caps` | already in core; now forwarded | |
 
-Contracts enforced at the edge: bodies are `.strict()` zod; `reason` is `z.string().trim().min(10).max(500)` (shared `mutationSchemas.ts`; also required on job requeue, notification retry and GL checkpoint); mutation enums are the safe subsets (wallet `FROZEN|ACTIVE`, application `SUSPENDED|ACTIVE`, POS `INACTIVE|BLOCKED|ACTIVE`, link `CANCELLED`); path ids must be UUIDs; list queries pass through every scalar filter. `relayStatus` passes core's 200/201/202 to the client unchanged (202 = submitted for approval). There is no outbox retry route (core has none).
+Contracts enforced at the edge: bodies are `.strict()` zod; `reason` is `z.string().trim().min(10).max(500)` (shared `mutationSchemas.ts`; also required on job requeue, notification retry and GL checkpoint); mutation enums are the safe subsets (wallet `FROZEN|ACTIVE`, application `SUSPENDED|ACTIVE`, POS `INACTIVE|BLOCKED|ACTIVE`, link `CANCELLED`); path ids must be UUIDs; list queries pass through every scalar filter. `zListQuery` requires `page >= 1` and caps `pageSize` at 200 but has no upper page bound, so a "last page" jump on a multi-million-row ledger is forwarded instead of failing validation; deep offset pages remain an offset-pagination cost (GAP-006). `relayStatus` passes core's 200/201/202 to the client unchanged (202 = submitted for approval). There is no outbox retry route (core has none).

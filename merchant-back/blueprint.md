@@ -275,7 +275,7 @@ Applies to all three copies of the client:
 
 ## Merchant Edge BFF
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-06
 
 ## 1. Purpose and scope
 
@@ -420,6 +420,7 @@ The merchant portal session is a core-issued token. The edge never verifies its 
 - Uploaded KYB and dispute files are validated for MIME, magic bytes and size before the core call.
 - Team/user and credential-set operations are forwarded with the caller's bearer token; the core enforces merchant roles and maker-checker where applicable.
 - The POS SSE route requires a bearer header, then proxies the core stream.
+- List queries accept any positive `page` (no arbitrary upper bound) and cap `pageSize` at 200, so deep pages on large merchant datasets are forwarded rather than rejected with `400 VALIDATION_FAILED`; deep offset pages remain an offset-pagination cost (GAP-006).
 
 ## 5. Data / API / config / deployment surface
 
@@ -543,6 +544,7 @@ These suites do not require PostgreSQL or Redis. The Google route is expected to
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+- 2026-11-06: removed the arbitrary `page <= 10000` cap from `zListQuery` and the five list query schemas that duplicated it (`payments`, `links`, `cashouts`, `disputes`, wallet statements); `pageSize` stays capped at 200. Regression tests forward page 23397 on all six merchant list routes.
 
 ## 11. Cross-node POS updates (2026-11-03)
 

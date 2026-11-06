@@ -135,6 +135,15 @@ describe("new admin read routes", () => {
     }
   });
 
+  test("a deep page beyond the old 10k cap is forwarded", async () => {
+    const response = await call("GET", "/finance/journal-entries?page=23397&pageSize=25", staff);
+    expect(response.status).toBe(200);
+    const url = lastCore().url ?? "";
+    expect(url.startsWith("/internal/admin/finance/journal-entries?")).toBe(true);
+    expect(url).toContain("page=23397");
+    expect(url).toContain("pageSize=25");
+  });
+
   test("an out of range page is refused before core", async () => {
     const before = core.requests.length;
     const response = await call("GET", "/wallets?pageSize=5000", staff);
