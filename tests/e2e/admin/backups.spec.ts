@@ -117,6 +117,9 @@ test("triggers a backup with the selected target and kind", async ({ page }) => 
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: /run backup/i }).click();
+  // "every target, full" is the heaviest combination: the page asks for a second confirmation before it sends anything.
+  await expect(page.getByText(/can load production databases/i)).toBeVisible();
+  await page.getByRole("dialog").last().getByRole("button", { name: /run backup now/i }).click();
   await expect.poll(() => triggers.length).toBeGreaterThan(0);
   expect(triggers[0]).toMatchObject({ target: "all", kind: "full" });
 });

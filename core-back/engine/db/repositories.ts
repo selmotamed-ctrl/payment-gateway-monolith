@@ -419,6 +419,16 @@ export class PrismaRepositories implements Repositories {
     findLinkById: async (tx, id) => {
       return (await model(tx, "paymentLink").findUnique({ where: { id } })) as PaymentLinkRow | null;
     },
+    findLinkCommerceStatus: async (tx, input) => {
+      const [application, wallet] = await Promise.all([
+        model(tx, "application").findUnique({ where: { id: input.applicationId }, select: { status: true } }),
+        model(tx, "wallet").findUnique({ where: { id: input.walletId }, select: { status: true } }),
+      ]);
+      return {
+        applicationStatus: application ? String(application.status) : null,
+        walletStatus: wallet ? String(wallet.status) : null,
+      };
+    },
     updateLinkSlotCount: async (tx, linkId, delta) => {
       await tx.$executeRaw`
         UPDATE payment_links

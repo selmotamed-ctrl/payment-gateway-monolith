@@ -598,6 +598,7 @@ const cases: ContractCase[] = [
       baseVersion: 3,
     },
     allowedKeys: [
+      "logoAssetId",
       "nameAr",
       "nameEn",
       "blocked",
@@ -675,6 +676,8 @@ const cases: ContractCase[] = [
       baseVersion: 2,
     },
     allowedKeys: [
+      "mismatchPolicy",
+      "maintenanceWindows",
       "priority",
       "weight",
       "minAmount",
@@ -1459,7 +1462,56 @@ describe("core contract field mapping", () => {
     expect(mapped.calcType).toBe("HYBRID");
     expect(mapped.flatFee).toBe("1.0000");
     expect(mapped.percentageRate).toBe("3.0000");
-    expect(mapped.tiersJson).toEqual({ "0": { upTo: "100.0000" } });
+    // core's fee calculator reads an ORDERED ARRAY; the old index-keyed object was silently ignored
+    expect(mapped.tiersJson).toEqual([{ upTo: "100.0000" }]);
+  });
+
+  test("commission profile forwards fee bounds, bearer, rounding and scope when given", () => {
+    const mapped = toCoreCommissionProfileCreate({
+      code: "STD",
+      name: "standard",
+      model: "TIERED",
+      railCode: "cib",
+      tiers: [{ upTo: "100.0000", flat: "1.0000" }, { flat: "2.0000" }],
+      minFee: "0.5000",
+      maxFee: "25.0000",
+      feeBearerDefault: "SPLIT",
+      roundingMode: "HALF_EVEN",
+      merchantId: "0198a000-0000-7000-8000-000000000001",
+      applicationId: "0198a000-0000-7000-8000-000000000002",
+    });
+    expect(mapped.tiersJson).toEqual([{ upTo: "100.0000", flat: "1.0000" }, { flat: "2.0000" }]);
+    expect(mapped).toMatchObject({
+      minFee: "0.5000",
+      maxFee: "25.0000",
+      feeBearerDefault: "SPLIT",
+      roundingMode: "HALF_EVEN",
+      merchantId: "0198a000-0000-7000-8000-000000000001",
+      applicationId: "0198a000-0000-7000-8000-000000000002",
+    });
+    const bare = toCoreCommissionProfileCreate({ code: "S", name: "n", model: "FLAT", railCode: "cib", flatAmount: "1.0000" });
+    for (const key of ["minFee", "maxFee", "feeBearerDefault", "roundingMode", "merchantId", "applicationId", "tiersJson"]) {
+      expect(key in bare).toBe(false);
+    }
+  });
+
+  test("route update forwards the mismatch policy and maintenance windows, including empty ones", () => {
+    const windows = [{ start: "2026-11-10T01:00:00.000Z", end: "2026-11-10T03:00:00.000Z" }];
+    expect(toCoreRouteUpdate({ mismatchPolicy: { tolerance_amount: "0.5000" }, maintenanceWindows: windows })).toEqual({
+      mismatchPolicy: { tolerance_amount: "0.5000" },
+      maintenanceWindows: windows,
+    });
+    // an empty list / empty policy are meaningful (clear), absence is not
+    expect(toCoreRouteUpdate({ mismatchPolicy: {}, maintenanceWindows: [] })).toEqual({ mismatchPolicy: {}, maintenanceWindows: [] });
+    expect(toCoreRouteUpdate({ priority: 3 })).toEqual({ priority: 3 });
+    expect(toCoreRouteUpdate({ maintenanceWindows: [1, "x", windows[0]] }).maintenanceWindows).toEqual(windows);
+  });
+
+  test("rail update forwards a logo asset id, and null clears it", () => {
+    const id = "0198a000-0000-7000-8000-0000000000aa";
+    expect(toCoreRailUpdate({ logoAssetId: id }).logoAssetId).toBe(id);
+    expect(toCoreRailUpdate({ logoAssetId: null }).logoAssetId).toBeNull();
+    expect("logoAssetId" in toCoreRailUpdate({ name: "x" })).toBe(false);
   });
 
   test("velocity rule maps the public scope and action onto the core vocabulary", () => {

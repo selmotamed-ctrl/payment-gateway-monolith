@@ -6,6 +6,7 @@ import { requireAuthoritiesByMethod, requireSession } from "../middleware/author
 import { academyRouter } from "./academy";
 import { amlRouter } from "./aml";
 import { approvalsRouter } from "./approvals";
+import { applicationsRouter, paymentLinksRouter, posTerminalsRouter } from "./applications";
 import { assetsRouter } from "./assets";
 import { backupsRouter } from "./backups";
 import { credentialSetsRouter } from "./credentialSets";
@@ -23,6 +24,9 @@ import { statsRouter } from "./stats";
 import { auditLogsRouter } from "./auditLogs";
 import { usersRouter } from "./users";
 import { searchRouter } from "./search";
+import { systemRouter } from "./system";
+import { inboundEventsRouter, transactionsRouter } from "./transactions";
+import { walletsRouter } from "./wallets";
 
 const router = express.Router();
 
@@ -64,7 +68,36 @@ router.use(
   usersRouter,
 );
 router.use("/join-requests", kybGuard, joinRequestsRouter);
-router.use("/merchants", guard({ read: ["merchant:read"], write: ["merchant:write"] }), merchantsRouter);
+const merchantGuard = guard({ read: ["merchant:read"], write: ["merchant:write"] });
+// Beneficial owners and KYB revalidations are compliance data: core accepts `kyb:write` or `merchant:write`.
+const merchantKybGuard = guard({ read: ["merchant:read", "kyb:read"], write: ["kyb:write", "merchant:write"] });
+router.use(
+  "/merchants",
+  (req, res, next) =>
+    (/^\/[^/]+\/(beneficial-owners|revalidations)(\/|$)/.test(req.path) ? merchantKybGuard : merchantGuard)(
+      req,
+      res,
+      next,
+    ),
+  merchantsRouter,
+);
+// Wallet, application, payment link and POS containment: read `merchant:read`, mutate `merchant:write`.
+const merchantOpsGuard = guard({ read: ["merchant:read"], write: ["merchant:write"] });
+router.use("/wallets", merchantOpsGuard, walletsRouter);
+router.use("/applications", merchantOpsGuard, applicationsRouter);
+router.use("/payment-links", merchantOpsGuard, paymentLinksRouter);
+router.use("/pos-terminals", merchantOpsGuard, posTerminalsRouter);
+// Read-only monitors. They have no mutating routes, so the write list denies every non-read method.
+router.use(
+  "/transactions",
+  guard({ read: ["attempt:read", "merchant:read", "finance:read"], write: ["attempt:inquire"] }),
+  transactionsRouter,
+);
+router.use(
+  "/inbound-events",
+  guard({ read: ["attempt:read", "case:read"], write: ["attempt:inquire"] }),
+  inboundEventsRouter,
+);
 router.use(
   "/approvals",
   guard({ read: ["approval:read"], write: ["approval:check", "approval:write"] }),
@@ -96,6 +129,7 @@ router.use("/stats", statsRouter);
 router.use("/audit-logs", guard({ read: ["security:read"], write: ["security:read"] }), auditLogsRouter);
 router.use("/kyb-documents", kybGuard, kybReviewRouter);
 router.use("/system/backups", backupsRouter);
+router.use("/system", guard({ read: ["security:read"], write: ["security:write"] }), systemRouter);
 router.use(
   ["/operator-cases", "/gateway-inquiries"],
   guard({

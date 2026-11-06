@@ -34,6 +34,20 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { SectionFields } from "@/components/SectionFields";
+import { JsonValueList } from "@/components/ui/JsonValueList";
+import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
+import {
+    EVIDENCE_FIELD_LIMIT,
+    EVIDENCE_LABELS,
+    EVIDENCE_ORDER,
+    buildEvidenceSubmission,
+    emptyEvidenceForm,
+    evidenceDocumentLinks,
+    evidenceHiddenKeys,
+    validateEvidenceForm,
+    type EvidenceError,
+    type EvidenceForm,
+} from "./evidenceModel";
 type Dispute = {
     id: string;
     externalDisputeRef: string;
@@ -143,9 +157,8 @@ const DisputesPage = dc(() => {
     const selected = ref<DisputeDetail | null>(null);
     const detailLoading = ref(false);
     const actionLoading = ref(false);
-    const evidenceReference = ref("");
-    const evidenceDocumentUrl = ref("");
-    const evidenceNotes = ref("");
+    const evidenceForm = ref<EvidenceForm>(emptyEvidenceForm());
+    const journalEntryId = ref<string | null>(null);
     const evidenceChecklist = ref<Record<string, boolean>>({});
     const exportLoading = ref(false);
     const summaryExportLoading = ref(false);
@@ -254,9 +267,7 @@ const DisputesPage = dc(() => {
     };
 
     const resetEvidenceState = () => {
-        evidenceReference.value = "";
-        evidenceDocumentUrl.value = "";
-        evidenceNotes.value = "";
+        evidenceForm.value = emptyEvidenceForm();
         evidenceChecklist.value = {};
         evidenceOpen.value = false;
         actionError.value = "";
@@ -313,15 +324,25 @@ const DisputesPage = dc(() => {
 
     const evidenceChecklistComplete = computed(() => !showChecklists || EVIDENCE_CHECKS.every((check) => evidenceChecklist.value[check.key] === true));
 
+    const evidenceProblemMessage = (problem: EvidenceError): string => {
+        switch (problem.code) {
+            case "EMPTY":
+                return t("Add at least one evidence field");
+            case "TOO_LONG":
+                return t("An evidence field is too long.");
+            case "TOO_MANY_URLS":
+                return t("Add at most 10 supporting document links.");
+            case "INVALID_URL":
+                return `${t("Supporting document links must be valid http or https URLs.")} ${problem.value ?? ""}`.trim();
+        }
+    };
+
     const submitEvidence = async () => {
         if (!selected.value) return;
         actionError.value = "";
-        const evidence: Record<string, unknown> = {};
-        if (evidenceReference.value.trim()) evidence.reference = evidenceReference.value.trim();
-        if (evidenceDocumentUrl.value.trim()) evidence.documentUrl = evidenceDocumentUrl.value.trim();
-        if (evidenceNotes.value.trim()) evidence.summary = evidenceNotes.value.trim();
-        if (Object.keys(evidence).length === 0) {
-            showSnackBar({ type: "warning", message: t("Add at least one evidence field") });
+        const problems = validateEvidenceForm(evidenceForm.value);
+        if (problems.length > 0) {
+            showSnackBar({ type: "warning", message: evidenceProblemMessage(problems[0]!) });
             return;
         }
         if (!evidenceChecklistComplete.value) {
@@ -331,8 +352,7 @@ const DisputesPage = dc(() => {
         actionLoading.value = true;
         try {
             await api.post(urlsMap.disputeEvidence(selected.value.id), {
-                evidence,
-                notes: evidenceNotes.value.trim() || undefined,
+                ...buildEvidenceSubmission(evidenceForm.value),
                 checklist: EVIDENCE_CHECKS.filter((check) => evidenceChecklist.value[check.key]).map((check) => check.key),
             });
             showSnackBar({ type: "success", message: t("Evidence submitted") });
@@ -683,14 +703,38 @@ const DisputesPage = dc(() => {
                                 <DescriptionList items={[
                                     { label: t("Adjustment state"), value: selected.value.adjustmentState || "—" },
                                     { label: t("Adjustment reason"), value: selected.value.adjustmentReason || "—" },
-                                    { label: t("Journal entry"), value: <MonoRef value={selected.value.adjustmentJournalEntryId ?? ""} /> },
+                                    {
+                                        label: t("Journal entry"),
+                                        value: selected.value.adjustmentJournalEntryId ? (
+                                            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                                <MonoRef value={selected.value.adjustmentJournalEntryId} truncate={18} />
+                                                <VBtn size="x-small" variant="tonal" onClick={() => (journalEntryId.value = selected.value?.adjustmentJournalEntryId ?? null)}>{t("View entry")}</VBtn>
+                                            </span>
+                                        ) : "—",
+                                    },
                                     { label: t("Evidence submitted"), value: formatDateTime(selected.value.evidenceSubmittedAt) },
                                 ]} />
-                                {selected.value.evidenceJson && (
-                                    <pre style={{ margin: 0, padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", background: "var(--pg-bg-surface-subtle)", border: "1px solid var(--pg-border-subtle)", fontSize: "10px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "180px", overflow: "auto" }}>
-                                        {JSON.stringify(selected.value.evidenceJson, null, 2)}
-                                    </pre>
-                                )}
+                                {selected.value.evidenceJson ? (
+                                    <>
+                                        <JsonValueList
+                                            value={selected.value.evidenceJson}
+                                            labels={EVIDENCE_LABELS}
+                                            order={EVIDENCE_ORDER}
+                                            hidden={evidenceHiddenKeys(selected.value.evidenceJson)}
+                                            ariaLabel={t("Submitted evidence")}
+                                        />
+                                        {evidenceDocumentLinks(selected.value.evidenceJson).length > 0 && (
+                                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                                <ThemedText style={{ fontSize: "12.5px", color: "var(--pg-ink-muted)" }}>{t("Supporting documents")}</ThemedText>
+                                                {evidenceDocumentLinks(selected.value.evidenceJson).map((url) => (
+                                                    <a key={url} href={url} target="_blank" rel="noopener noreferrer" dir="ltr" style={{ fontSize: "13px", overflowWrap: "anywhere", color: "var(--pg-accent, inherit)" }}>
+                                                        {url}
+                                                    </a>
+                                                ))}
+                                            </ThemedView>
+                                        )}
+                                    </>
+                                ) : null}
                             </ThemedView>
                         </ThemedView>
                     </>
@@ -709,26 +753,48 @@ const DisputesPage = dc(() => {
                 onSubmit={() => void submitEvidence()}
             >
                 <SectionFields title={t("Evidence details")}>
-                    <FormField label={t("Evidence reference")} hint={t("Gateway portal reference or case number")} sensitiveMakerChecker>
+                    <FormField label={t("Receipt / RRN reference")} hint={t("Gateway portal reference or case number")} sensitiveMakerChecker>
                         <VTextField
-                            modelValue={evidenceReference.value}
-                            onUpdate:modelValue={(value: string) => (evidenceReference.value = value)}
+                            modelValue={evidenceForm.value.receiptRef}
+                            onUpdate:modelValue={(value: string) => (evidenceForm.value = { ...evidenceForm.value, receiptRef: value ?? "" })}
+                            style={{ direction: "ltr" }}
                             hideDetails
                         />
                     </FormField>
-                    <FormField label={t("Document URL")} sensitiveMakerChecker>
-                        <VTextField
-                            modelValue={evidenceDocumentUrl.value}
-                            onUpdate:modelValue={(value: string) => (evidenceDocumentUrl.value = value)}
+                    <FormField label={t("Customer proof summary")} hint={t("What the payer provided or what the transaction trail proves")} sensitiveMakerChecker>
+                        <VTextarea
+                            modelValue={evidenceForm.value.customerProofSummary}
+                            onUpdate:modelValue={(value: string) => (evidenceForm.value = { ...evidenceForm.value, customerProofSummary: value ?? "" })}
+                            rows={3}
+                            counter={EVIDENCE_FIELD_LIMIT}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Merchant explanation")} hint={t("The merchant's account of the sale and delivery")} sensitiveMakerChecker>
+                        <VTextarea
+                            modelValue={evidenceForm.value.merchantResponse}
+                            onUpdate:modelValue={(value: string) => (evidenceForm.value = { ...evidenceForm.value, merchantResponse: value ?? "" })}
+                            rows={3}
+                            counter={EVIDENCE_FIELD_LIMIT}
+                            hideDetails
+                        />
+                    </FormField>
+                    <FormField label={t("Supporting document links")} hint={t("One http or https link per line, up to 10")} sensitiveMakerChecker>
+                        <VTextarea
+                            modelValue={evidenceForm.value.documentUrls}
+                            onUpdate:modelValue={(value: string) => (evidenceForm.value = { ...evidenceForm.value, documentUrls: value ?? "" })}
                             placeholder="https://"
+                            rows={2}
+                            style={{ direction: "ltr" }}
                             hideDetails
                         />
                     </FormField>
                     <FormField label={t("Evidence notes")} sensitiveMakerChecker>
                         <VTextarea
-                            modelValue={evidenceNotes.value}
-                            onUpdate:modelValue={(value: string) => (evidenceNotes.value = value)}
-                            rows={3}
+                            modelValue={evidenceForm.value.notes}
+                            onUpdate:modelValue={(value: string) => (evidenceForm.value = { ...evidenceForm.value, notes: value ?? "" })}
+                            rows={2}
+                            counter={EVIDENCE_FIELD_LIMIT}
                             hideDetails
                         />
                     </FormField>
@@ -743,6 +809,7 @@ const DisputesPage = dc(() => {
                     incompleteMessage={t("Complete all evidence checklist items before submitting")}
                 />
             </FormModal>
+            <JournalEntryDrawer entryId={journalEntryId.value} onClose={() => (journalEntryId.value = null)} />
         </ScreenContainer>
     );
 });

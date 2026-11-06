@@ -4552,7 +4552,9 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
    "screenId": "Merchants",
    "routeNames": [
     "Merchants",
-    "MerchantDetail"
+    "MerchantDetail",
+    "Wallets",
+    "Applications"
    ],
    "pageDir": "pages/merchants",
    "summary": "Look up a merchant, see its state and history, edit descriptive fields, submit sensitive changes for approval, suspend or reinstate it.",
@@ -4671,7 +4673,8 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
    "routeNames": [
     "OperatorCases",
     "OperatorCaseDetail",
-    "GatewayInquirySchedules"
+    "GatewayInquirySchedules",
+    "Transactions"
    ],
    "pageDir": "pages/operator-cases",
    "summary": "Tasks for payments and statement lines that need a human: unknown, conflict, mismatch, late success. Inquire first; resolve by hand only with evidence and a second person.",
@@ -4780,7 +4783,8 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
     "FinanceProfitability",
     "FinanceLiquidity",
     "FinanceInvariant",
-    "PricingControls"
+    "PricingControls",
+    "JournalEntries"
    ],
    "pageDir": "pages/finance",
    "summary": "Profit, cash cover and ledger integrity, all computed from the ledger. Any drift in the invariant is a priority-1 incident.",
@@ -4797,7 +4801,8 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
   {
    "screenId": "Gateways",
    "routeNames": [
-    "Gateways"
+    "Gateways",
+    "CredentialSets"
    ],
    "pageDir": "pages/gateways",
    "summary": "The list of payment-company integrations. Create a gateway, open its wizard, or start the AI-assisted import. Gateways are versioned; the live version is never edited in place.",
@@ -4960,7 +4965,8 @@ Tell the Gateway Admin; the reference format contract test (gate 4) is the place
     "AdminUserDetail",
     "AuditLog",
     "AdminPlatformSettings",
-    "SystemBackups"
+    "SystemBackups",
+    "JobsOutbox"
    ],
    "pageDir": "(any other page)",
    "summary": "This screen is not described individually yet. Check your role and the environment badge, read before you click, and ask if unsure.",

@@ -23,6 +23,21 @@ import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetaPill } from "@/components/ui/MetaPill";
+import { SectionFields } from "@/components/SectionFields";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
+import { PlatformSettingTypedEditor } from "@/components/builders/PlatformSettingTypedEditor";
+import { SettingValueView } from "@/components/builders/SettingValueView";
+import {
+    buildSettingValue,
+    isSettingUnchanged,
+    knownSettingKeys,
+    parseSettingForm,
+    resolveSettingNamespace,
+    validateSettingForm,
+    type SettingForm,
+} from "@/components/builders/model";
+import { NotificationTemplatesTab } from "./components/NotificationTemplatesTab";
 type PlatformSetting = {
     id: string;
     key: string;
@@ -53,33 +68,6 @@ const formatDateTime = (value: string | null | undefined): string => {
         hour: "2-digit",
         minute: "2-digit",
     }).format(date);
-};
-
-type DiffRow = { path: string; before: string; after: string; kind: "ADDED" | "REMOVED" | "CHANGED" };
-
-const flattenJson = (value: unknown, prefix = "", out: Record<string, string> = {}): Record<string, string> => {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-        out[prefix || "(root)"] = typeof value === "string" ? value : JSON.stringify(value);
-        return out;
-    }
-    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-        const path = prefix ? `${prefix}.${key}` : key;
-        if (entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
-            flattenJson(entry, path, out);
-        } else {
-            out[path] = typeof entry === "string" ? entry : JSON.stringify(entry);
-        }
-    }
-    return out;
-};
-
-const jsonPreview = (value: unknown): string => {
-    try {
-        const text = JSON.stringify(value);
-        return text.length > 180 ? `${text.slice(0, 177)}…` : text;
-    } catch {
-        return String(value);
-    }
 };
 
 const restoreTone = (status: string): "success" | "warning" | "danger" | "neutral" => {
@@ -120,8 +108,9 @@ const PlatformSettingsPage = dc(() => {
     const search = ref("");
 
     const dialogOpen = ref(false);
+    const tab = ref<"settings" | "templates">("settings");
     const editKey = ref("");
-    const editValue = ref("{}");
+    const editForm = ref<SettingForm>(parseSettingForm(null, {}));
     const editError = ref<string | null>(null);
     const editChecklist = ref<Record<string, boolean>>({});
     const saving = ref(false);
@@ -355,9 +344,11 @@ const PlatformSettingsPage = dc(() => {
         }
     };
 
+    const editDef = computed(() => resolveSettingNamespace(editKey.value.trim()));
+
     const openNew = () => {
         editKey.value = "";
-        editValue.value = "{\n  \n}";
+        editForm.value = parseSettingForm(null, {});
         editError.value = null;
         editChecklist.value = {};
         history.value = [];
@@ -367,7 +358,7 @@ const PlatformSettingsPage = dc(() => {
 
     const openEdit = (entry: { key: string; versions: PlatformSetting[] }) => {
         editKey.value = entry.key;
-        editValue.value = JSON.stringify(entry.versions[0]?.valueJson ?? {}, null, 2);
+        editForm.value = parseSettingForm(resolveSettingNamespace(entry.key), entry.versions[0]?.valueJson ?? {});
         editError.value = null;
         editChecklist.value = {};
         history.value = entry.versions;
@@ -375,30 +366,16 @@ const PlatformSettingsPage = dc(() => {
         dialogOpen.value = true;
     };
 
-    const diffRows = computed<DiffRow[]>(() => {
-        const oldRow = compareRow.value;
-        const current = history.value[0];
-        if (!oldRow || !current) return [];
-        const before = flattenJson(oldRow.valueJson ?? {});
-        const after = flattenJson(current.valueJson ?? {});
-        const paths = Array.from(new Set([...Object.keys(before), ...Object.keys(after)])).sort();
-        const rows: DiffRow[] = [];
-        for (const path of paths) {
-            const oldValue = before[path];
-            const newValue = after[path];
-            if (oldValue === newValue) continue;
-            rows.push({
-                path,
-                before: oldValue ?? "—",
-                after: newValue ?? "—",
-                kind: oldValue === undefined ? "ADDED" : newValue === undefined ? "REMOVED" : "CHANGED",
-            });
-        }
-        return rows;
-    });
+    /** Typing a known key switches the form to its typed editor, keeping what was already entered. */
+    const changeKey = (value: string) => {
+        const before = resolveSettingNamespace(editKey.value.trim());
+        const carried = buildSettingValue(before, editForm.value);
+        editKey.value = value;
+        editForm.value = parseSettingForm(resolveSettingNamespace(value.trim()), carried);
+    };
 
     const restoreVersion = (row: PlatformSetting) => {
-        editValue.value = JSON.stringify(row.valueJson ?? {}, null, 2);
+        editForm.value = parseSettingForm(editDef.value, row.valueJson ?? {});
         editError.value = null;
     };
 
@@ -411,15 +388,17 @@ const PlatformSettingsPage = dc(() => {
             editError.value = t("Use 2-120 letters, digits, dots, colons, underscores or hyphens.");
             return;
         }
-        let parsed: unknown;
-        try {
-            parsed = JSON.parse(editValue.value || "{}");
-        } catch {
-            editError.value = t("The value must be valid JSON.");
+        if (validateSettingForm(editDef.value, editForm.value).length > 0) {
+            editError.value = t("Fix the highlighted fields before saving.");
             return;
         }
-        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-            editError.value = t("The value must be a JSON object.");
+        const parsed = buildSettingValue(editDef.value, editForm.value);
+        if (history.value.length > 0 && isSettingUnchanged(editDef.value, editForm.value, history.value[0]?.valueJson)) {
+            editError.value = t("Nothing changed: the value is identical to the current version.");
+            return;
+        }
+        if (history.value.length === 0 && Object.keys(parsed).length === 0) {
+            editError.value = t("Enter at least one value.");
             return;
         }
         if (!editChecklistComplete.value) {
@@ -449,7 +428,7 @@ const PlatformSettingsPage = dc(() => {
                 <PageHeader
                     title={t("Platform Settings")}
                     subtitle={t("Governed platform configuration with versioned changes.")}
-                    end={() => (
+                    end={() => tab.value !== "settings" ? null : (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
                                 {t("Refresh")}
@@ -467,6 +446,19 @@ const PlatformSettingsPage = dc(() => {
                     )}
                 />
 
+                <SegmentedTabs
+                    modelValue={tab.value}
+                    onUpdate:modelValue={(value: string) => (tab.value = value === "templates" ? "templates" : "settings")}
+                    tabs={[
+                        { value: "settings", label: t("Platform settings") },
+                        { value: "templates", label: t("Notification templates") },
+                    ]}
+                    ariaLabel={t("Platform settings sections")}
+                />
+                {tab.value === "templates" ? (
+                    <NotificationTemplatesTab />
+                ) : (
+                    <>
                 <VAlert type="info" variant="tonal">
                     {t("Every save creates a new immutable version. The effective version is the highest version whose effective date has passed.")}
                 </VAlert>
@@ -526,6 +518,9 @@ const PlatformSettingsPage = dc(() => {
                                         <ThemedText type="defaultSemiBold" style={{ fontSize: "14px", direction: "ltr" }}>{entry.key}</ThemedText>
                                         <MetaPill size="x-small" variant="tonal" color="primary">v{entry.latest.version}</MetaPill>
                                         <MetaPill size="x-small" variant="tonal">{entry.latest.scope}</MetaPill>
+                                        {resolveSettingNamespace(entry.key) && (
+                                            <MetaPill size="x-small" variant="text">{t(resolveSettingNamespace(entry.key)!.title)}</MetaPill>
+                                        )}
                                         {entry.versions.length > 1 && (
                                             <MetaPill size="x-small" variant="text">{entry.versions.length} {t("versions")}</MetaPill>
                                         )}
@@ -534,15 +529,15 @@ const PlatformSettingsPage = dc(() => {
                                             {t("Effective")}: {formatDateTime(entry.latest.effectiveFrom)}
                                         </ThemedText>
                                     </ThemedView>
-                                    <ThemedText style={{ fontSize: "12px", opacity: 0.7, direction: "ltr", fontFamily: "ui-monospace, monospace", wordBreak: "break-all" }}>
-                                        {jsonPreview(entry.latest.valueJson)}
-                                    </ThemedText>
+                                    <SettingValueView settingKey={entry.key} value={entry.latest.valueJson} maxRows={8} />
                                     <ThemedView style={{ flexDirection: "row", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap" }}>
                                         <VBtn size="small" variant="tonal" onClick={() => openEdit(entry)}>{t("History & edit")}</VBtn>
                                     </ThemedView>
                                 </SurfaceCardText>
                             </SurfaceCard>
                         ))}
+                    </>
+                )}
                     </>
                 )}
             </ThemedView>
@@ -676,19 +671,23 @@ const PlatformSettingsPage = dc(() => {
                 >
                     <VTextField
                         modelValue={editKey.value}
-                        onUpdate:modelValue={(value: string) => (editKey.value = value)}
+                        onUpdate:modelValue={(value: string) => changeKey(value)}
                         readonly={history.value.length > 0}
                     />
                 </FormField>
-                <FormField label={t("JSON value")} required sensitiveMakerChecker>
-                    <VTextarea
-                        modelValue={editValue.value}
-                        onUpdate:modelValue={(value: string) => (editValue.value = value)}
-                        rows={12}
-                        autoGrow
-                        style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }}
-                    />
-                </FormField>
+                {history.value.length === 0 && (
+                    <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                        <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{t("Common settings")}:</ThemedText>
+                        {knownSettingKeys().map((key) => (
+                            <VBtn key={key} size="x-small" variant="tonal" onClick={() => changeKey(key)}>{key}</VBtn>
+                        ))}
+                    </ThemedView>
+                )}
+                <SectionFields title={editDef.value ? t(editDef.value.title) : t("Setting value")}>
+                    <div style={{ gridColumn: "1 / -1" }}>
+                        <PlatformSettingTypedEditor def={editDef.value} modelValue={editForm.value} onUpdate:modelValue={(value: SettingForm) => (editForm.value = value)} />
+                    </div>
+                </SectionFields>
                 <FormChecklist
                     checks={[...SETTING_EDIT_CHECKS]}
                     modelValue={editChecklist.value}
@@ -737,18 +736,7 @@ const PlatformSettingsPage = dc(() => {
                                 </ThemedText>
                                 <VBtn size="x-small" variant="text" onClick={() => (compareRow.value = null)}>{t("Clear comparison")}</VBtn>
                             </ThemedView>
-                            {diffRows.value.length === 0 && (
-                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{t("No differences in this version pair.")}</ThemedText>
-                            )}
-                            {diffRows.value.map((row) => (
-                                <ThemedView key={row.path} style={{ display: "flex", flexDirection: "column", gap: "3px", padding: "6px 8px", borderRadius: "var(--pg-radius-sm)", background: "var(--pg-bg-surface-subtle)" }}>
-                                    <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center" }}>
-                                        <ThemedText style={{ fontSize: "11px", fontWeight: 600, direction: "ltr" }}>{row.path}</ThemedText>
-                                        <StatusBadge status={row.kind} toneOverride={restoreTone(row.kind)} showDot={false} />
-                                    </ThemedView>
-                                    <ThemedText style={{ fontSize: "11px", direction: "ltr", opacity: 0.75 }}>{row.before} → {row.after}</ThemedText>
-                                </ThemedView>
-                            ))}
+                            <JsonDiffViewer diff={{ before: compareRow.value.valueJson ?? {}, after: history.value[0]?.valueJson ?? {} }} />
                         </SurfaceCardText>
                     </SurfaceCard>
                 )}

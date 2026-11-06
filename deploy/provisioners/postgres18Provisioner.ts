@@ -121,6 +121,19 @@ export const postgresMainConfigPath = (
   cluster: PgCluster,
 ): string => `/etc/postgresql/${version(config)}/${cluster.name}/postgresql.conf`;
 
+/**
+ * Loopback + the node's private IP, de-duplicated: on a single-host install the
+ * private IP IS 127.0.0.1, and PostgreSQL fails to start when it is told to
+ * bind the same address twice ("could not bind IPv4 address ... Address already
+ * in use").
+ */
+export const postgresListenAddresses = (privateIp?: string): string => {
+  const addresses = ["127.0.0.1", ...(privateIp ?? "").split(",")]
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return [...new Set(addresses)].join(",");
+};
+
 export const postgresMainConfigSnippet = (
   config: Pick<DeployConfig, "PG_VERSION"> & Partial<Pick<DeployConfig, "PG_RAM_GB" | "PG_IO_METHOD">>,
   cluster: PgCluster,
@@ -129,7 +142,7 @@ export const postgresMainConfigSnippet = (
 ): string => `data_directory = '${cluster.dataDir}'
 hba_file = '${cluster.hbaPath}'
 port = ${cluster.port}
-${postgresConfigSnippet(config, privateIp ? `127.0.0.1,${privateIp}` : "*")}${postgresTlsSnippet(cluster)}`;
+${postgresConfigSnippet(config, privateIp ? postgresListenAddresses(privateIp) : "*")}${postgresTlsSnippet(cluster)}`;
 
 const nodeEndpoint = (node: PgNodeRef | string): string =>
   typeof node === "string" ? node : node.privateIp ?? node.sshHost ?? "127.0.0.1";
@@ -254,6 +267,11 @@ After=network.target
 Type=simple
 User=postgres
 Group=postgres
+# /run is a tmpfs, so the socket directory is gone after every reboot. Without
+# this the postmaster dies with "could not create lock file
+# /run/postgresql/.s.PGSQL.<port>.lock" and never comes back up.
+RuntimeDirectory=postgresql
+RuntimeDirectoryMode=2775
 ExecStart=/usr/bin/postgres -D ${cluster.dataDir} -p ${cluster.port}
 ExecReload=/bin/kill -HUP \\$MAINPID
 # SIGINT = fast shutdown. The default SIGTERM is a smart shutdown that waits for every session to end.

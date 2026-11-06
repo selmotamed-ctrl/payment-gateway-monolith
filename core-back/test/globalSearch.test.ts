@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  credentialSetProvider,
   defaultSearchRegistry,
   executeGlobalSearch,
   SearchProviderRegistry,
@@ -180,9 +181,9 @@ describe("global search plugin engine", () => {
 describe("global search authority matrix", () => {
   test("registers all built-in providers with unique types and order", () => {
     const providers = defaultSearchRegistry.getAllOrdered();
-    expect(providers).toHaveLength(20);
-    expect(new Set(providers.map((provider) => provider.type)).size).toBe(20);
-    expect(new Set(providers.map((provider) => provider.order)).size).toBe(20);
+    expect(providers).toHaveLength(21);
+    expect(new Set(providers.map((provider) => provider.type)).size).toBe(21);
+    expect(new Set(providers.map((provider) => provider.order)).size).toBe(21);
   });
 
   const can = (type: string, role: string, authorities: string[]): boolean =>
@@ -218,5 +219,47 @@ describe("global search authority matrix", () => {
   test("wildcard authority grants access", () => {
     expect(hasAuthority(actor("GATEWAY_ADMIN", ["*"]), "merchant:read")).toBe(true);
     expect(hasAuthority(actor("GATEWAY_ADMIN", []), "merchant:read")).toBe(false);
+  });
+});
+
+describe("credential set search provider", () => {
+  test("is registered, gated by credential/gateway read, and never selects secret columns", async () => {
+    expect(defaultSearchRegistry.get("credential_set")).toBeDefined();
+    expect(credentialSetProvider.canAccess(actor("SUPPORT", []))).toBe(false);
+    expect(credentialSetProvider.canAccess(actor("GATEWAY_ADMIN", ["credential:read"]))).toBe(true);
+    expect(credentialSetProvider.canAccess(actor("GATEWAY_ADMIN", ["gateway:read"]))).toBe(true);
+
+    let captured: { select?: Record<string, unknown> } = {};
+    const prisma = {
+      credentialSet: {
+        findMany: async (args: { select: Record<string, unknown> }) => {
+          captured = args;
+          return [];
+        },
+      },
+    };
+    await credentialSetProvider.fetchCandidates({
+      prisma: prisma as never,
+      actor: actor("GATEWAY_ADMIN", ["credential:read"]),
+      parsed: parseSearchQuery("sadad"),
+      take: 5,
+    } as never);
+    const selected = Object.keys(captured.select ?? {});
+    expect(selected).toContain("gateway");
+    expect(selected).not.toContain("entriesCiphertext");
+    expect(selected).not.toContain("mtlsCertCiphertext");
+  });
+
+  test("renders a safe result item", () => {
+    const item = credentialSetProvider.toResultItem({
+      id: "cs-1",
+      env: "LIVE",
+      ownerType: "PLATFORM",
+      externalMerchantId: "MID-77",
+      status: "VERIFIED",
+      updatedAt: new Date(),
+      gateway: { code: "sadad", name: "Sadad" },
+    } as never, actor("GATEWAY_ADMIN", ["credential:read"]) as never);
+    expect(item).toMatchObject({ id: "cs-1", title: "Sadad (sadad) · LIVE", reference: "MID-77", status: "VERIFIED" });
   });
 });

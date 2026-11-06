@@ -269,6 +269,16 @@ export const clientSearchRegistry = new ClientSearchTargetRegistry();
         resolveTarget: openDrawerTarget("GatewayRoutes", "open"),
     }),
     defineSearchTargetPlugin({
+        type: "credential_set",
+        order: 185,
+        icon: "mdi-key-chain-variant",
+        groupLabel: { en: "Credential Sets", ar: "مجموعات بيانات الاعتماد" },
+        kindLabel: { en: "Credential Set", ar: "مجموعة اعتماد" },
+        primaryRouteName: "CredentialSets",
+        // The vault page opens the matching set highlighted (and its drawer); secrets are never searched.
+        resolveTarget: openDrawerTarget("CredentialSets", "highlight"),
+    }),
+    defineSearchTargetPlugin({
         type: "user",
         order: 190,
         icon: "mdi-account-badge-outline",

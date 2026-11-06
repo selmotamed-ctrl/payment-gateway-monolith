@@ -2243,7 +2243,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 <a id="coreapi"></a>
 
-> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Core API Surface
 
@@ -2830,6 +2830,38 @@ A closed catalogue in `lib/auth/merchantAuthorities.ts` is enforced route by rou
 - Admin join-request `submit` returns `409 JOIN_REQUEST_PAYOUT_HASH_REQUIRED` and merchant `propose-edit` returns `422 PAYOUT_ACCOUNT_HASH_REQUIRED` for a payout account that yields no hash (GAP-017).
 - AML case release returns `409 AML_HOLD_CAPTURE_NOT_VERIFIED` when no escrow exists; verified callbacks/finalisation on terminal attempts return `409 ATTEMPT_TERMINAL` (GAP-015/GAP-016).
 - The reconciliation upload looks the duplicate run up per `(source, file_hash)` (GAP-018).
+
+## Admin UI completion endpoints (2026-11-06)
+
+Four new router modules are mounted from `admin.ts` (next to `/system/backups`): `adminCommerce.ts`, `adminLedger.ts`, `adminOperations.ts`, `adminSystem.ts` (shared helpers in `adminSliceHelpers.ts`). All are under `/internal/admin`, use `requireAuthorities` (any-of), `buildListQuery`/`listResponse`, 4-decimal money strings, stable `ApiError` codes, and write audit rows (`writeAudit`; `audit_log` has no merchant column, so the merchant id is recorded in `afterJson`). Secrets never leave: no `tokenHash`, `authTokenHash`, `nationalIdCiphertext`, `rawBodyBytes`, `addressCiphertext`, `entriesCiphertext`.
+
+**Commerce (`merchant:read` reads, `merchant:write` mutations)**
+
+| Endpoint | Notes |
+| :--- | :--- |
+| `GET /wallets`, `/wallets/summary`, `/wallets/:id` | Live balance = shard sum, checkpoint balance; both `null` + `redactedFields` for SUPPORT/plain `merchant:read`. Detail adds GL account, shards, applications, last 10 cash-outs, last 25 statement lines, pending approvals. |
+| `POST /wallets/:id/status` | FROZEN immediate (`WALLET_FROZEN`); ACTIVE = approval (`202`, subject `WALLET`). `409 WALLET_INVALID_TRANSITION`, `WALLET_APPROVAL_PENDING`. |
+| `GET /applications`, `/applications/summary`, `/applications/:id` | Real `railWhitelist` (`string[]\|null`) + mode/count, redirect domains (empty + `redactedFields` for non-sensitive principals), tokens (status ACTIVE/REVOKED/EXPIRED, CIDRs), payment links, POS terminals. |
+| `PATCH /applications/:id` | SUSPENDED alone immediate (`APPLICATION_SUSPENDED`); reactivation and any policy edit (rails, redirect domains, assigned wallet) = one approval (`202`, subject `APPLICATION`). Validates rails exist, https hostnames, same-merchant/currency ACTIVE wallet. |
+| `POST /applications/:id/tokens/:tokenId/revoke` | Irreversible, audited; `409 TOKEN_ALREADY_REVOKED`. Core has no token cache (`authDoubleCheck` reads the row each request). |
+| `GET /payment-links`, `POST /payment-links/:id/state` | Only PENDING->CANCELLED (`PAYMENT_LINK_CANCELLED`). |
+| `GET /pos-terminals`, `POST /pos-terminals/:id/status` | ACTIVE->INACTIVE/BLOCKED immediate; to ACTIVE = approval (subject `POS_TERMINAL`). |
+| `GET\|POST /merchants/:id/beneficial-owners`, `PATCH\|DELETE .../:ownerId` | Body = join-request owner schema; national id encrypted (`kyb-national-id`) + hash; identity/PEP edits reset screening; DELETE deactivates. `409 OWNERSHIP_PERCENT_EXCEEDED`. Reads `merchant:read`/`kyb:read`/`kyb:write`; writes `kyb:write`/`merchant:write`. |
+| `POST /merchants/:id/revalidations` | `KybRevalidationRequest`, merchant `kybStatus=PENDING`, `KYB_REVALIDATION_DUE` notification; `409 KYB_REVALIDATION_ALREADY_OPEN`. |
+
+`GET /merchants/:id/applications` now also returns `railWhitelist`.
+
+**Ledger (`finance:read`; checkpoint `finance:write`)**: `GET /finance/journal-entries` (+`/summary`, `/:id`; balanced/unbalanced, `currency: "MIXED"`, reference route hint; `JournalEntry` has `refType/refId/description`, `postedAt` = `createdAt`; lines queried by `entryId` only because `journal_lines` is partitioned), `GET /finance/gl-accounts/:id` (live + natural balance, shards, last 30 lines), `POST /finance/gl-accounts/:id/checkpoint` (`{reason}` required; existing `CheckpointService`; `409 LEDGER_SHARD_PARITY_MISMATCH` with `{shardTotal, journalTotal, drift}` changes nothing).
+
+**Operations**: `GET /transactions` (+`/summary`; `attempt:read`/`merchant:read`/`finance:read`; SUPPORT gets amounts, references and ledger entry `null` + `redactedFields`), `GET /inbound-events` and `/:id` (`attempt:read`/`case:read`; `verified`, `unmatchedOnly`; detail returns redacted headers, a 2 KB redacted body preview, size and sha256, never raw bytes), `GET /attempts/:id` (moved from `admin.ts`; keeps the `attempt` key, adds merchant/application/rail/gateway, ordered re-redacted `stepLogs`, `inboundEvents`, `attemptGroup`, cases, disputes, adjustments; `contextCiphertext` stripped), `GET /gateways/:id/health` (`gateway:read`; per ROUTE: last 100 `GatewayHealthSample` windows with success rate, 30 days of `RmRouteDailyVolume`, 24h summary).
+
+**System (`security:read` reads, `security:write` actions; templates `settings:read`/`settings:write`)**: `GET /system/jobs-outbox/summary`, `GET /system/jobs` + `POST /system/jobs/:id/requeue` (FAILED only, resets attempts; `{reason}`), `GET /system/outbox` (monitor only: no failure column exists so there is deliberately no retry; BigInt ids as strings, offset paging), `GET /system/audit-outbox`, `GET /system/notifications` (default FAILED) + `POST /system/notifications/:id/retry` (`{reason}`), `GET /settings/notification-templates` (active versions; `?history=true`) and `PUT /settings/notification-templates/:id` (new version in one transaction under a row lock, audit `NOTIFICATION_TEMPLATE_VERSIONED`; `422 TEMPLATE_UNKNOWN_PLACEHOLDERS`, `409 TEMPLATE_UNCHANGED`/`VERSION_CONFLICT`/`VERSION_NOT_ACTIVE`).
+
+### Rail logo, route policy and commission tiers (2026-11-06)
+
+- `PATCH /rails/:id` accepts `logoAssetId` (uuid, or `null` to clear). A uuid must reference a registered `Asset` (`404 ASSET_NOT_FOUND`); the audit row records the before/after logo. The edge schema and `toCoreRailUpdate` forward it. `POST /assets` still registers metadata only (name, type, size, SHA-256, storage key): it does not store image bytes, which remains a gap.
+- `PATCH /routes/:id` accepts `mismatchPolicy` (object; only `tolerance_amount`/`toleranceAmount` is read by the settlement engine, other keys are kept as stored; a malformed tolerance is `400 MISMATCH_TOLERANCE_INVALID`) and `maintenanceWindows` (`[{ start, end }]`, max 50, absolute instants; `end <= start` or an unparsable instant is `400 MAINTENANCE_WINDOW_INVALID`; `[]` clears). Omitted fields are left untouched; the edge forwards empty values so an operator can clear them.
+- **Commission tiers were broken end to end and are fixed.** The admin edge persisted UI tiers as an index-keyed object (`{"0": {...}}`) and core's create schema (`z.record`) could not take an array, while the fee calculator (`commissionForProfile`, `checkout.ts`) only reads `tiersJson` when it is an array: a TIERED profile created through the UI silently priced at its minimum fee. Now `POST /commission-profiles` accepts an ordered array (or the legacy object), the edge forwards the array, and `commissionTiers()` normalises both shapes (object keys ordered numerically), which also reprices already-stored legacy rows correctly. Tier keys are `upTo`, `flat`, `percent` (a fraction). **Behaviour change for existing data:** a legacy TIERED profile now prices by its tiers instead of the minimum fee. The edge also forwards `minFee`, `maxFee`, `feeBearerDefault`, `roundingMode`, `merchantId`, `applicationId` (core already accepted them; the strict edge schema dropped them). Note `percentageRate` is a **fraction** (`0.0300` = 3%), as the seed data stores it; the form now says so.
 
 ---
 
@@ -3848,7 +3880,7 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 
 <a id="coregovernance"></a>
 
-> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Governance and Compliance
 
@@ -4204,6 +4236,24 @@ Some governance tests use fake clients; database-backed suites require PostgreSQ
 - **Payout account maker-checker and mandatory hash (GAP-017, RESOLVED).** A cash-out requires a KYB `payoutAccountHash` on the merchant (`403 CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED` otherwise) and the destination must hash to it (`403 CASHOUT_DESTINATION_NOT_VERIFIED`); destinations are always stored `payoutVerified: true`, so the unverified-destination path no longer exists. Join-request submit is refused with `409 JOIN_REQUEST_PAYOUT_HASH_REQUIRED` unless the payout details yield a hash. A payout-account change only happens through the maker-checker merchant edit (`propose-edit`): a replacement of `/payoutBankDetailsJson` must carry a bank and an account number or IBAN and a `remove` is refused (`422 PAYOUT_ACCOUNT_HASH_REQUIRED`); `executeMerchantPatch` recomputes `payoutAccountHash` from the approved account on execution and refuses an account that yields no hash.
 - **Per-source statement file hash (GAP-018, RESOLVED with a residual).** Migration `20261105130000_statement_unique_source_file_hash` drops the global `reconciliation_runs_file_hash_key` index and creates the unique index `reconciliation_runs_statement_source_id_file_hash_key` on `(statement_source_id, file_hash)` plus a non-unique `reconciliation_runs_file_hash_idx`. The same bytes may now be uploaded for two sources; one source never gets two runs. `findRunByFileHash(tx, fileHash, sourceId)` is source-scoped and the upload handler keeps a defence-in-depth check that a run of another source is never answered as this source's. Residual: the concurrent duplicate-upload race described in the frontmatter gaps.
 - **Still open.** GAP-025: KYB scanning is content sniffing plus EICAR only; a real malware scanner is not integrated.
+
+## Governed commerce state changes and intake enforcement (2026-11-06)
+
+**Rule (project invariant: sensitive actions use maker-checker).** Moving an entity to a *more restrictive* state is immediate: it requires a trimmed `reason` of 10-500 characters and writes an audit row. Moving it to a *less restrictive* state, or changing what it may accept, is a maker-checker approval:
+
+| Entity | Immediate (audited) | Approval subject |
+| :--- | :--- | :--- |
+| Wallet | ACTIVE -> FROZEN (`WALLET_FROZEN`) | `WALLET`: FROZEN -> ACTIVE (`WALLET_UNFROZEN`) |
+| Application | ACTIVE -> SUSPENDED, alone (`APPLICATION_SUSPENDED`) | `APPLICATION`: reactivation (`APPLICATION_REACTIVATED`) and any edit of rail whitelist, redirect domains or assigned wallet (`APPLICATION_UPDATED`) |
+| POS terminal | ACTIVE -> INACTIVE/BLOCKED, INACTIVE -> BLOCKED (`POS_TERMINAL_STATUS_CHANGED`) | `POS_TERMINAL`: to ACTIVE |
+| Payment link | PENDING -> CANCELLED (`PAYMENT_LINK_CANCELLED`, no reactivation) | none |
+| Access token | revoke (`ACCESS_TOKEN_REVOKED`, irreversible) | none |
+
+`executeWalletStatusChange`, `executeApplicationChange` and `executePosTerminalStatusChange` (`GovernanceExecution.ts`) are dispatched from `executeApprovalSubject`; each re-validates the entity's current state (the application executor also checks `fromStatus` and `baseUpdatedAt`, wallet ownership/currency/ACTIVE and rail codes), audits in the same transaction and is idempotent. maker != checker is enforced by the existing approval machinery. The three subject types map to the MERCHANT approval domain (`approvalQueue.ts`). Side effect: the pre-existing merchant-side `PATCH /applications/:id` approvals (subject `APPLICATION`) previously had no executor and now execute.
+
+**Enforcement (a freeze that does not freeze would be a defect).** Before this change the checkout intake checked link state and merchant status but not application or wallet status; wallet status was only enforced for cash-outs. `lib/commerceStatus.ts` now raises `409 APPLICATION_NOT_ACTIVE` / `WALLET_NOT_ACTIVE` / `POS_TERMINAL_NOT_ACTIVE` in: `AttemptGuardPipeline.guard` (the choke point for every attempt, via optional `payments.findLinkCommerceStatus`), checkout `ensureLinkUsable` (initiate) and the confirm SUBMIT step, merchant `createLink` (`POST /links` and `/external/links`), POS screen stream connect (an open stream ends at the next minute heartbeat) and POS screen creation. A merchant can no longer lift a BLOCKED terminal through its own `PATCH /pos/terminals/:id` (`409 POS_TERMINAL_BLOCKED`). LIVE traffic requires ACTIVE; SANDBOX additionally tolerates application PENDING/DRAFT and wallet PENDING (the OD-10 sandbox-before-approval flow); SUSPENDED/CLOSED applications and FROZEN/CLOSED wallets are blocked in both. Not gated by design: display-only `GET /pay/:linkKey`, resend/client-event routes, and inbound provider webhooks (already-captured money must still be processed).
+
+**Known limits.** A merchant can still move its own INACTIVE terminal back to ACTIVE (INACTIVE cannot be told apart from a staff-set INACTIVE; only BLOCKED is staff-only). `approvalSubjectContext` (admin.ts) has no case for the three new subjects, so the approvals detail shows the generic payload diff.
 
 ---
 
@@ -5425,7 +5475,7 @@ The change-history line below records the original extraction numbers (75 models
 
 <a id="coresearch"></a>
 
-> **Part ID:** `core.search` · **Status:** `partial` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.search` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Global Search
 
@@ -5819,6 +5869,10 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical extraction. Records the 20 providers, registry, parser, ranking weights, authority predicates, BFF limiter, palette/targets/`useOpenQuery`, and the actual gaps: dormant `supportsTokenKind`, missing fields, no full-text search, per-process limiter and no deep-search scale benchmark. See `project-design/TRACKER.md`.
+
+## Credential set provider (2026-11-06)
+
+`credentialSetProvider` (`type: "credential_set"`, aliases `credential_sets`/`credentials`/`credential`, order 165) is the 21st built-in provider. Access: `credential:read` or `gateway:read` (the same any-of as `GET /credential-sets`). It matches id, `externalMerchantId`, gateway code and gateway name, supports the scoped status filter (`CredentialStatus`), and selects only metadata (gateway, environment, owner type, external merchant id, status): never `entriesCiphertext` or the mTLS certificate (a test asserts the `select`). The admin palette routes these hits to `CredentialSets` with `?highlight=<id>`. Before this change the palette plugin existed in the plan but no backend provider did.
 
 ---
 
@@ -6658,7 +6712,7 @@ The unit tests do not require a live database or Fake Rails. The actual `seed-sy
 
 <a id="coretests"></a>
 
-> **Part ID:** `core.tests` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.tests` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Tests and Benchmarks
 
@@ -7039,6 +7093,12 @@ New suites in `core-back/test/security-regressions/`: `c1-forged-success`, `c2-m
 
 Known gaps: true concurrency needs PostgreSQL 18 and is not exercised; the RetentionWorker fake parser (`test/helpers/retentionFake.ts`) cannot parse the new InvariantVerifier query (test drift, not a product bug).
 
+## Admin UI completion suites (2026-11-06)
+
+New core suites: `test/admin-commerce.test.ts` (22, DB-backed: redaction, immediate-vs-approval transitions, executors, owner PII, revalidation, intake enforcement over real routers), `test/security-regressions/commerce-status-enforcement.test.ts` (10, no DB: LIVE/SANDBOX gate matrix, guard pipeline creates no attempt for a suspended application or frozen wallet, source tripwires on every intake path), `test/admin-slice/admin-ledger|operations|system.test.ts` (7 + 7 + 13, DB-backed, harness in `test/admin-slice/harness.ts`), `test/admin-slice/admin-rails-routes.test.ts` (3, DB-backed through the REAL admin router with real signed admin sessions), `test/commission-tiers.test.ts` (7, no DB) and the credential-set provider cases in `test/globalSearch.test.ts`. DB-backed files skip themselves when `POSTGRES_TEST_DATABASE_URL`/`DATABASE_URL` does not point at a migrated database whose name contains "test".
+
+To run them against a private, throwaway cluster (never the live databases): `initdb -D $DIR/data -U lead --auth=trust`, `pg_ctl -D $DIR/data -o "-p 56434 -k $DIR -c listen_addresses=127.0.0.1 -c fsync=off" start`, `createdb -h 127.0.0.1 -p 56434 -U lead lead_test`, `DATABASE_URL=postgresql://lead@127.0.0.1:56434/lead_test bunx prisma migrate deploy`, then `POSTGRES_TEST_DATABASE_URL=$DATABASE_URL bun test <file>`; a throwaway `valkey-server --port 56379 --save ""` covers the Redis-backed suites. Stop and delete both when done.
+
 ---
 
 <a id="edgeshared"></a>
@@ -7316,7 +7376,7 @@ Applies to all three copies of the client:
 
 <a id="edgeadmin"></a>
 
-> **Part ID:** `edge.admin` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `edge.admin` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Admin Edge BFF
 
@@ -7567,6 +7627,24 @@ The tests use a local HTTPS/HTTP stub and do not require PostgreSQL or Redis. A 
 - **Limiters** key on the resolved client IP plus a per-account limiter on login/MFA. Admin `x-pg-min-lsn` is validated (400).
 - **Logout and session cookie (GAP-019, RESOLVED 2026-11-05).** `POST /api/v1/admin/auth/logout` (public router, `logoutHandler`) forwards to core `POST /internal/admin/auth/logout`, which revokes the session `jti`, and clears the session cookie. With `SESSION_COOKIE_MODE=true` (default `false`) login and MFA responses move the token into the `pg_admin_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/admin`, 12 h, `Secure` unless `SESSION_COOKIE_SECURE=false`, default `true`) and return `sessionCookie: true` instead of `token` (`captureSessionToken`); the `cookieSession` middleware, mounted first on the admin router, converts the cookie into the `Authorization: Bearer` header only when the mode is on and the caller sent none, and requires `x-pg-csrf: 1` on unsafe methods (`403 CSRF_HEADER_REQUIRED`). Login/MFA are exempt from the cookie conversion so a stale cookie cannot block a new sign-in; logout is outside the auth limiter. Both settings are validated by `admin-back/lib/env`.
 - **Session audience and breaker (GAP-020, GAP-021).** The advisory authority guard now requires `aud=payment-gateway-admin`. The core upstream client removes a node from rotation only after `CORE_FAILURE_THRESHOLD = 3` consecutive failures. Sessions minted before the audience change are rejected and administrators must sign in again.
+
+## Admin UI completion forwards (2026-11-06)
+
+New `coreForward` routes (new files `wallets.ts`, `applications.ts` (applications + `paymentLinksRouter` + `posTerminalsRouter`), `transactions.ts` (transactions + `inboundEventsRouter`), `system.ts`, plus additions to `merchants.ts`, `gateways.ts`, `settings.ts`, `finance.ts`, `aml.ts`) registered in `protected/index.ts` with the same any-of authorities core enforces:
+
+| Mount | Read | Write |
+| :--- | :--- | :--- |
+| `/wallets`, `/applications`, `/payment-links`, `/pos-terminals` | `merchant:read` | `merchant:write` |
+| `/transactions` | `attempt:read`, `merchant:read`, `finance:read` | n/a |
+| `/inbound-events` | `attempt:read`, `case:read` | n/a |
+| `/system/*` (jobs-outbox, jobs, outbox, audit-outbox, notifications), mounted after `/system/backups` | `security:read` | `security:write` |
+| `/finance/journal-entries`, `/finance/gl-accounts/:id` | `finance:read` | checkpoint `finance:write` |
+| `/gateways/:id/health` | `gateway:read` | n/a |
+| `/settings/notification-templates` | `settings:read` | `settings:write` |
+| `/merchants/:id/beneficial-owners`, `/merchants/:id/revalidations` | `merchant:read` or `kyb:read` | `kyb:write` or `merchant:write` (the rest of `/merchants` stays `merchant:write`; `kyb:write` does not unlock suspend) |
+| `/aml/reporting-rules/:id/promote`, `/finance/route-caps` | already in core; now forwarded | |
+
+Contracts enforced at the edge: bodies are `.strict()` zod; `reason` is `z.string().trim().min(10).max(500)` (shared `mutationSchemas.ts`; also required on job requeue, notification retry and GL checkpoint); mutation enums are the safe subsets (wallet `FROZEN|ACTIVE`, application `SUSPENDED|ACTIVE`, POS `INACTIVE|BLOCKED|ACTIVE`, link `CANCELLED`); path ids must be UUIDs; list queries pass through every scalar filter. `relayStatus` passes core's 200/201/202 to the client unchanged (202 = submitted for approval). There is no outbox retry route (core has none).
 
 ---
 
@@ -8114,7 +8192,7 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 
 <a id="admin-uisystem"></a>
 
-> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Admin UI System
 
@@ -8389,11 +8467,23 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 - **Logout and cookie sessions (GAP-019, RESOLVED).** The user store logout calls `POST v1/admin/auth/logout` (`urlsMap.authLogout`) through `revokeServerSession` (best effort, never throws) and always clears the local session. `utils/security/sessionToken.ts` handles the cookie mode: a login payload with `sessionCookie: true` is kept as the non-secret `cookie-session` sentinel and requests send `X-Pg-Csrf: 1` instead of a bearer token.
 - **XLSX 0.20.3 (GAP-029).** `xlsx` is pinned to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` (the maintained SheetJS build; the npm registry copy 0.18.5 is vulnerable) and `@types/xlsx` was dropped. The shared XLSX pipeline is unchanged. `@prisma/client` is still listed in `admin-front/package.json` although nothing imports it (residual).
 
+## No raw operational JSON; structured builders (2026-11-06)
+
+**Rule:** operational data is never shown as `JSON.stringify`/`<pre>`, and never edited in a JSON textarea. Allowed exceptions: raw HTTP wire traces (`gateways/ai-import`, the step/webhook trace blocks of `operator-cases/[id]`), data exports (`audit-logs` CSV/XLSX columns, the platform-settings backup file), and plain-text message bodies (rail instructions, notification template body, restore reason).
+
+- **`JsonDiffViewer`** (rewritten) takes `diff: unknown`: an RFC-6902 array, `{operations}`, `{before, after}` or a plain payload (`DRAFT_AML_RULE`, `CREATE_ADJUSTMENT`...). The pure model `components/ui/jsonDiffModel.ts` humanises paths (`/payoutBankDetailsJson/iban` -> "Payout Bank Details · IBAN"), flattens nested objects to sub-rows, classifies money keys (`*Amount|*Ceiling|*Fee|*Balance|*Volume` -> `MoneyDisplay`), status strings (`StatusBadge`), lists (chips) and dates. `JsonValueCell`/`JsonValueList` render the same values as key/value rows. `components/JsonPatchDiff` is now a thin wrapper.
+- **`summarizeAuditChange(before, after)`** (`utils/auditSummary.ts`) returns the humanised labels of the changed top-level keys (ignoring identical values and timestamps); `components/AuditChangeChips.tsx` shows up to 3 chips plus "+N more" in the audit-log table, Merchant 360 and the case timeline.
+- **Builders** (`components/builders/**`, each with a pure model under `builders/model/` and unit tests): `CostModelBuilder` (+`formatCostModel`: `1.25% + 0.500 LYD (min…, max…)`), `RouteScopeBuilder` + `MismatchPolicyBuilder` (`tolerance_amount`, the only key the settlement engine reads), `MaintenanceWindowsBuilder` (absolute UTC `start`/`end`; a route is hidden while `start <= now < end`), `ParserConfigBuilder`/`ColumnMappingBadges` (statement sources), `AmlParamsBuilder`/summaries (7 rule types; `scope` is edited as a structured tree and the UI states that the engine does not evaluate it), `PlatformSettingTypedEditor` + `SettingValueView` (typed editors for the decision register OD-1..OD-11 and the policy keys; unknown keys fall back to a structured tree editor that preserves them), `LogoAssetPicker`, `ChipListInput`, `OptionChips`, `RepeatableRows`, `KeyValueSummary`, `StructuredValueEditor`. Every builder round-trips unknown keys losslessly.
+- **Commission tiers:** `CommissionTiersEditor` (`pages/finance/pricing/components`) edits `{ upTo, flat, percent }` (percent is a fraction) and is shown for TIERED only (the calculator ignores tiers for FLAT/PERCENTAGE/HYBRID). The create form also carries min/max fee, fee bearer, rounding mode and optional merchant/application scope.
+- **Shared drawers** (`components/ledger/JournalEntryDrawer`, `GlAccountDrawer`; `pages/merchants/components/WalletDetailDrawer`, `ApplicationDetailDrawer`) are opened by an id prop (`null` = closed) and emit `close`/`changed`. Governed actions share `ReasonModal` (>=10 characters) and a 202 handler that explains "submitted for approval" and links to `/approvals`.
+- **i18n slices:** `constants/i18n/{commerce,ledgerOps,forms,builders}.ts` are merged by `plugins/i18n.ts` after the main catalogue; each new string has an `[English, Arabic]` pair and unit tests assert EN/AR sync. Table filter configs live in `components/Table/registry/{commerce,ledgerOps,forms}.ts` and are spread into `tableRegistry`.
+- Compliance gate (`components/ui/__tests__/ui-abstraction-compliance.test.ts`): every standard route page uses `PageHeader` (helper components belong in `components/` subfolders), no raw `VCard`/`VDialog`/`VChip`.
+
 ---
 
 <a id="admin-uiroutes"></a>
 
-> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Admin Route and Page Catalog
 
@@ -8634,11 +8724,28 @@ These suites require a running stack and are skipped without the live/edge servi
 
 The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard. `PUBLIC_FOR_AUTHENTICATED` covers Dashboard, every Guide reader route and every Academy route (the Team page keeps its own `SECURITY_ADMIN` check); `AUTHORITY_ALIASES` normalizes dotted and colon forms. AdminUsers/Detail accept `user:read`/`user:write`/`security:*`, AdminPlatformSettings accepts `settings:read`/`settings:write` (plus the security fallback), and PricingControls includes `liquidity.read`. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
 
+## Admin UI completion: six new routes (2026-11-06)
+
+Six protected children were added to `admin-front/src/router/index.ts` (and the sidebar in `layouts/sections.tsx`, authorities in `utils/routeAuthorities.ts`, guide context-map screens). The numbered table in 3.2 and the "37" counts in this part predate the Guide/Academy routes; the router now has **60** protected children (the six below included), so treat the table as a historical catalog and this section as current for these routes.
+
+| Path | Name | Sidebar section | UI authority | Backend authority | Purpose |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `/wallets` | `Wallets` | Onboarding | `merchants.read` or `support.read_merchant` | `merchant:read` (freeze `merchant:write`) | Cross-merchant wallets: KPI strip, live/checkpoint balance ("Restricted" for non-financial roles), shard breakdown, statement lines, freeze (immediate) / unfreeze (approval). |
+| `/applications` | `Applications` ("Applications & Channels") | Onboarding | same | `merchant:read` / `merchant:write` | Tabs Applications, Payment Links, POS Terminals; drawer with rail whitelist, redirect domains, API tokens (revoke), link cancel, terminal status; suspend immediate, reactivation and policy edits go to approval. `?tab=links\|pos`, `?open=<id>`. |
+| `/transactions` | `Transactions` ("Transactions & Webhooks") | Operations | `merchants.read`, `support.read_merchant` or `attempt:read` | `attempt:read` (+`merchant:read`/`finance:read`) | Tabs Payment Attempts and Inbound Webhooks (verified / unmatched filters); the attempt drawer shows summary, step logs, inbound events and the checkout retry group as structured rows. |
+| `/credential-sets` | `CredentialSets` | Gateways | `credentials.manage` or `gateways.edit` | `credential:read`/`gateway:read`, `credential:write` | Vault entries: create, rotate, verify, revoke (reason); secrets are write-only. `?highlight=<id>` (from search hits and Merchant 360). |
+| `/finance/journal-entries` | `JournalEntries` | Finance | `profit.read` or `liquidity.read` | `finance:read` | Double-entry explorer: balanced badge, T-account drawer, GL account drawer; `?glAccountId=`, `?open=`. |
+| `/system/jobs-outbox` | `JobsOutbox` ("Jobs & Outbox") | Operations | `security:read` | `security:read` / `security:write` | Outbox and audit-outbox monitors (no retry exists), background-job requeue, failed-notification retry. |
+
+Existing routes that changed: `Invariant` is now "Ledger Audit & Invariant" with per-account actions (shards and lines, journal entries, checkpoint rollup); `MerchantDetail` shows the Wallets tab to every `merchant:read` role and gained interactive wallets/applications, structured beneficial owners, KYB revalidation, access rows and pending-change diffs; `Gateways` gained a route-health drawer; `Liquidity` shows route daily-cap utilisation; `GatewayRoutes`, `AdminPlatformSettings`, `Reconciliation`, `AmlRules`, `Rails`, `Approvals`, `AuditLog`, `Disputes`, `PricingControls` lost their raw-JSON views/inputs (see `admin-ui.system`). Shared drawers are opened by id prop and clear themselves on `close`: `JournalEntryDrawer`, `GlAccountDrawer`, `WalletDetailDrawer`, `ApplicationDetailDrawer`. `attempt:read` was added to `AUTHORITY_ALIASES` (no portal equivalent).
+
+Gaps: the dashboards/global search still route `payment_attempt` hits to Merchant 360's transactions tab (a test pins it; `Transactions?open=` would be a one-line change); approvals' "Open subject" has no target for `WALLET`/`APPLICATION`/`POS_TERMINAL`; merchant users open the `AdminUserDetail` route (works: `GET /users/:id` serves any user id).
+
 ---
 
 <a id="admin-uitables"></a>
 
-> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Tables Filters and Exports
 
@@ -8904,6 +9011,10 @@ No database is required for the unit/static compliance checks; the Playwright ge
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical table/export part. Records the 19 registry configurations, hybrid 200-row server mode, current-page-only XLSX export, summary export surfaces, and runtime checklist flags.
+
+## Registry slices (2026-11-06)
+
+`components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`.
 
 ---
 
@@ -13574,7 +13685,7 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 
 <a id="deploystorage"></a>
 
-> **Part ID:** `deploy.storage` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `deploy.storage` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `a8bafd1+working-tree`
 
 # Storage Provisioners
 
@@ -13944,7 +14055,7 @@ Not covered:
 **Design (`deploy/lib/converge.ts`, pure script builders; applied by the provisioners):**
 
 - `SshRunner.writeRemoteFile()` returns whether the bytes changed (remote `cmp -s`, then `install`/atomic `mv`; the mode is re-asserted when unchanged). A runner that returns nothing (test fakes) counts as "changed".
-- PostgreSQL (`applyPostgresCluster`): inactive -> `enable --now`; `--force-restart` -> restart; config/hba/auto.conf changed -> `systemctl reload`, wait for `pg_conf_load_time()` to move, then restart **only if** `count(*) FROM pg_settings WHERE pending_restart` is non-zero; else nothing. Always waits for `pg_isready`. The cluster is now applied before the bootstrap SQL runs (the SQL needs a running server and uses `-p <cluster port>`).
+- PostgreSQL (`applyPostgresCluster`): inactive -> `systemctl reset-failed` then `enable --now` (a failed boot leaves the unit in `start-limit-hit`, where a plain start is refused with "start request repeated too quickly"); `--force-restart` -> restart; config/hba/auto.conf changed -> `systemctl reload`, wait for `pg_conf_load_time()` to move, then restart **only if** `count(*) FROM pg_settings WHERE pending_restart` is non-zero; else nothing. Always waits for `pg_isready`. The cluster is now applied before the bootstrap SQL runs (the SQL needs a running server and uses `-p <cluster port>`).
 - PgBouncer (`applyPgbouncer`): writes `pgbouncer.ini`, `userlist.txt`, the drop-in and a restart signature. The drop-in `/etc/systemd/system/pgbouncer.service.d/zz-pg-switch.conf` sets `KillSignal=SIGINT` (safe shutdown, exits in ~0.1 s with idle clients attached; verified against SIGTERM, which never exits) and `TimeoutStopSec=15s`. Down -> start; PostgreSQL restarted in this run, the restart signature (`listen_addr`, `listen_port`, `unix_socket_*`, `so_reuseport`, `pidfile`, `logfile`) changed, or `--force-restart` -> restart; any other ini/userlist change -> `reload`; else nothing.
 - Redis/Valkey: the installed unit is detected from real unit files (`redis-server`, `redis`, `valkey`; a drop-in-only stub does not count). Only that flavour's config files and drop-in decide the restart, which still runs `CONFIG SET save ""` first.
 - Backup daemon (`deployBackupDaemon`): rsync reports changes (`--itemize-changes`); the unit is started if down and restarted only if the source, `backup.env`, the unit or the archive environment changed. Ownership of the source tree is handed to the deploy user and back without touching `node_modules`.
@@ -13971,7 +14082,7 @@ Not covered:
 - **Credentials.** `pg_basebackup` uses `PGPASSFILE`, never `PGPASSWORD`. Bootstrap/audit/log/archive SQL lives in a private 0700 postgres-owned directory, mode 0600, removed by trap/finally.
 - **WAL-G.** `restore_command` is a valid `postgresql.conf` literal (inner quotes doubled). The daemon settings `WALG_ENV_FILE`/`WALG_ENV_FILE_AUDIT` keep S3/encryption secrets out of that line; the provisioner writes `/etc/pg-backup/wal-g-core.env` and `/etc/pg-backup/wal-g-audit.env` (0640 root:postgres), so the audit restore uses the audit prefix instead of the core prefix. WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed when it must be downloaded; barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`).
 - **Mirror and restore.** The off-site mirror uses `rclone copy`/`rsync` without `--delete` unless `BACKUP_SECONDARY_MIRROR_DELETE=true`. The scratch restore cluster starts with `-c archive_mode=off`.
-- **PostgreSQL.** `listen_addresses = 127.0.0.1,<private IP>`; memory settings derive from optional `PG_RAM_GB` (unset keeps 8GB/24GB/1GB); `PG_IO_METHOD` defaults to `worker` (io_uring is opt-in); an existing standby (PG_VERSION and `standby.signal` present) is not rebuilt unless `PG_REPLICA_REBUILD=true`.
+- **PostgreSQL.** `listen_addresses = 127.0.0.1,<private IP>`, de-duplicated (`postgresListenAddresses`) so a single-host install where the private IP is `127.0.0.1` emits one entry; memory settings derive from optional `PG_RAM_GB` (unset keeps 8GB/24GB/1GB); `PG_IO_METHOD` defaults to `worker` (io_uring is opt-in); an existing standby (PG_VERSION and `standby.signal` present) is not rebuilt unless `PG_REPLICA_REBUILD=true`.
 - **Still open.** Real SHA256 values for WAL-G/bun/barman must be supplied by the operator (GAP-023). GAP-022 and GAP-028 are resolved (see the gap resolutions below).
 
 ## Gap resolutions (2026-11-05)
@@ -13981,6 +14092,19 @@ Not covered:
 - **Replica pgpass over stdin (GAP-028, RESOLVED).** `replicaPgpassContent` renders the replication `.pgpass` line and `provisionPostgres18` streams it to `/var/lib/postgresql/.pgpass` (0600) with the remote-file writer; the replication password no longer appears in any command argv. `replicaCommands` only checks and `chown`/`chmod`s the file.
 - **UTC (GAP-030).** The cluster configuration also sets `timezone = 'UTC'` and `log_timezone = 'UTC'` (the engine pins its own sessions, see `core.storage`).
 - **Still open.** GAP-023: real SHA256 values for WAL-G, bun and barman (`BACKUP_WALG_SHA256`, `BUN_SHA256`) must be supplied by the operator for each release.
+
+## 18. PostgreSQL did not survive a reboot on a single Arch/Garuda host (2026-11-06)
+
+**Symptom:** every database-backed command failed with `Transaction API error: Unable to start a transaction in the given time` (Prisma `$transaction` maxWait) while PgBouncer logged `client_login_timeout (server down)`. `systemctl status postgresql@18-*` showed `start-limit-hit`.
+
+**Root cause (two generated-config defects, both only on the Arch/custom-cluster path):**
+
+1. On a single-host deploy `DB_PRIVATE_IP` is `127.0.0.1`, and `postgresMainConfigSnippet` rendered `listen_addresses = '127.0.0.1,127.0.0.1'`. PostgreSQL binds the first entry, then fails the duplicate with `could not bind IPv4 address "127.0.0.1": Address already in use` and exits.
+2. The generated `postgresql@18-<cluster>.service` had no `RuntimeDirectory`, and `/run` is a tmpfs, so after every reboot `/run/postgresql` did not exist and the postmaster died with `could not create lock file "/run/postgresql/.s.PGSQL.<port>.lock"`. `ensureClusterScript` only created the directory during bootstrap. The start limit then left the unit refusing further starts.
+
+**Fix:** `postgresListenAddresses()` de-duplicates loopback + private IP (`127.0.0.1` stays a single entry); the generated unit sets `RuntimeDirectory=postgresql` and `RuntimeDirectoryMode=2775`, so systemd recreates the socket directory before every start; and `postgresApplyScript` runs `systemctl reset-failed "$unit"` before starting an inactive cluster so a start-limit from an earlier boot cannot block recovery.
+
+**Verified live:** `./deploy/deploy.sh --update --skip-build --only=storage` brought the primary cluster, Redis and PgBouncer back (`Verification OK`); `/etc/postgresql/18/main/postgresql.conf` then had `listen_addresses = '127.0.0.1'`, the unit had `RuntimeDirectory=postgresql`, and `create-dev-users` completed against the pooler.
 
 ---
 
@@ -14825,7 +14949,7 @@ Security regression suites exist for core-back (`test/security-regressions/`), t
 
 <a id="testingsuites"></a>
 
-> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Test Suite Catalog
 
@@ -15153,6 +15277,12 @@ This catalog is derived by counting literal declarations and inspecting the suit
 | `tests/unit/frontend-security-{admin,checkout,merchant}.test.ts` | frontend allow-lists, guards, validation |
 
 Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not covered.
+
+## Admin UI completion suites (2026-11-06)
+
+- **Unit (`tests/unit`, vitest, 483 passing in 29 files):** pure logic of the new UI: governance action tables per state (immediate vs approval), owner/revalidation forms, journal/route-cap/lifecycle/health/jobs models, the JSON diff model, audit summaries (`formatAuditValue`, `describeAuditChange`), commission tiers, dispute evidence mapping, and the builders' round trips (cost model, scope, maintenance windows, parser config, AML params, settings schemas, template variables) including unknown-key preservation. `commerce-i18n` and `builders-api-error-i18n` assert that every message key the logic can produce has an Arabic entry. `frontend-security-admin` (default-deny route authorities, alias map) and `guide-content` (every router name has a context-map screen) caught the six new routes until they were registered properly.
+- **E2E (Playwright, needs Chrome: set `PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome-stable` when the bundled browser is not installed):** `e2e/admin/commerce-governance.spec.ts` drives the wallets page against realistic mocked responses (restricted balances render "Restricted" and never 0; a freeze needs a >=10-character reason and sends exactly `{status: "FROZEN", reason}`; restoring returns HTTP 202 and is reported as submitted for approval; a read-only role gets no freeze action). `exhaustive-admin-surface.spec.ts` now covers 31 routes (the six new ones included) across 3 viewports x 2 locales x 2 themes (372 combinations: no horizontal overflow, correct direction and theme, app bar never overlapping). `e2e/admin/backups.spec.ts` was updated for the second confirmation the page has asked for since the frontend hardening commit (its spec was stale).
+- **Component compliance (`admin-front` `bun run test:unit`):** helper components must live in `components/` subfolders so every route page keeps `PageHeader` (the test stops at the first offender).
 
 ---
 

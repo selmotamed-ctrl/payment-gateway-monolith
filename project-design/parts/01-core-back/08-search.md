@@ -3,7 +3,7 @@ id: core.search
 title: Global Search
 status: partial
 confidence: high
-last_verified: 2026-11-03
+last_verified: 2026-11-06
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/lib/globalSearch.ts
@@ -13,6 +13,7 @@ code:
   - admin-back/api/protected/index.ts
   - admin-front/src/components/search/**
   - admin-front/src/composables/useOpenQuery.ts
+  - core-back/lib/search/types.ts
 tests:
   - core-back/test/globalSearch.test.ts
   - tests/unit/global-search.test.ts
@@ -418,3 +419,7 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical extraction. Records the 20 providers, registry, parser, ranking weights, authority predicates, BFF limiter, palette/targets/`useOpenQuery`, and the actual gaps: dormant `supportsTokenKind`, missing fields, no full-text search, per-process limiter and no deep-search scale benchmark. See `project-design/TRACKER.md`.
+
+## Credential set provider (2026-11-06)
+
+`credentialSetProvider` (`type: "credential_set"`, aliases `credential_sets`/`credentials`/`credential`, order 165) is the 21st built-in provider. Access: `credential:read` or `gateway:read` (the same any-of as `GET /credential-sets`). It matches id, `externalMerchantId`, gateway code and gateway name, supports the scoped status filter (`CredentialStatus`), and selects only metadata (gateway, environment, owner type, external merchant id, status): never `entriesCiphertext` or the mTLS certificate (a test asserts the `select`). The admin palette routes these hits to `CredentialSets` with `?highlight=<id>`. Before this change the palette plugin existed in the plan but no backend provider did.

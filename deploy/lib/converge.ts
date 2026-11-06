@@ -88,6 +88,9 @@ export const postgresApplyScript = (input: { unit: string; port: number; changed
   return `set -u
 unit=${unit}
 if ! systemctl is-active --quiet "$unit"; then
+  # A failed boot leaves the unit in start-limit-hit, where a plain start is
+  # refused ("start request repeated too quickly"). Clear it before retrying.
+  systemctl reset-failed "$unit" >/dev/null 2>&1 || true
   systemctl enable --now "$unit" 2>/dev/null || systemctl start "$unit"
   echo ${APPLY_MARKER}started
 elif [ ${input.force ? 1 : 0} = 1 ]; then

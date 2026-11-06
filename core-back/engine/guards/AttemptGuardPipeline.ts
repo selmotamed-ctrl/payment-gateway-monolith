@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ApiError } from "../../lib/error";
+import { assertCommerceActive } from "../../lib/commerceStatus";
 import { moneyFromDecimal, moneyToString, type Money } from "../db/money";
 import type {
   AmlAction,
@@ -417,6 +418,15 @@ export class AttemptGuardPipeline {
       }
       if (link.expiresAt && link.expiresAt.getTime() <= now.getTime()) {
         throw new ApiError(409, "PAYMENT_LINK_EXPIRED", "Payment link has expired");
+      }
+      // A suspended application or a frozen wallet takes in no payment, whatever
+      // the state of the link (the central choke point of every attempt).
+      const commerce = await this.repositories.payments.findLinkCommerceStatus?.(tx, {
+        applicationId: request.applicationId ?? link.applicationId,
+        walletId: link.walletId,
+      });
+      if (commerce) {
+        assertCommerceActive({ ...commerce, env: request.env });
       }
 
       const applicationId = request.applicationId ?? link.applicationId;

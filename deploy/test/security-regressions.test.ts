@@ -361,6 +361,16 @@ describe("PostgreSQL / backup / nginx hardening", () => {
     expect(snippet).toContain("effective_cache_size = 48GB");
     expect(snippet).toContain("io_method = 'worker'");
   });
+  test("a single-host primary does not bind loopback twice (PostgreSQL would fail to start)", async () => {
+    const { postgresMainConfigSnippet, postgresListenAddresses, pgClusterFor } = await import("../provisioners/postgres18Provisioner");
+    const cfg = load();
+    const cluster = pgClusterFor(cfg, "primary", { privateIp: "127.0.0.1", servicePort: 5432 });
+    const snippet = postgresMainConfigSnippet(cfg, cluster, "127.0.0.1");
+    expect(snippet).toContain("listen_addresses = '127.0.0.1'");
+    expect(snippet).not.toContain("127.0.0.1,127.0.0.1");
+    expect(postgresListenAddresses("127.0.0.1,127.0.0.1")).toBe("127.0.0.1");
+    expect(postgresListenAddresses(" 10.0.0.5,127.0.0.1 ")).toBe("127.0.0.1,10.0.0.5");
+  });
   test("nginx templates rate limit, hide the version and the fake-rails vhost has an allowlist and tight CSP", () => {
     const dir = path.join(import.meta.dir, "..", "templates");
     for (const name of ["admin.lan", "checkout.lan", "checkout.ssl", "fakerails", "merchant.lan", "merchant.ssl"]) {

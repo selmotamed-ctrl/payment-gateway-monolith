@@ -8,7 +8,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { statusTone } from "@/components/Table/statusTone";
-import { JsonDiffViewer, type JsonPatchOperation } from "@/components/ui/JsonDiffViewer";
+import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
+import { humanizeKey } from "@/components/ui/jsonDiffModel";
 import { ApiTable } from "@/components/Table/ApiTable";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
@@ -69,12 +70,8 @@ const APPROVAL_CHECKS = [
 const PENDING_STATES = ["PENDING_REVIEW"];
 const HISTORY_STATES = ["APPROVED", "EXECUTED", "REJECTED"];
 
-const subjectTypeLabel = (value: string): string =>
-    value
-        .toLowerCase()
-        .split("_")
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" ");
+/** `POS_TERMINAL` -> `POS Terminal`, `AML_CASE` -> `AML Case` (translated at the call site). */
+const subjectTypeLabel = (value: string): string => humanizeKey(value);
 
 const kindLabel = (value: string): string => value.replaceAll("_", " ");
 
@@ -89,16 +86,6 @@ const formatDateTime = (value: string | null | undefined): string => {
         hour: "2-digit",
         minute: "2-digit",
     }).format(date);
-};
-
-const jsonText = (value: unknown): string => {
-    if (value === undefined) return "";
-    if (typeof value === "string") return value;
-    try {
-        return JSON.stringify(value, null, 2);
-    } catch {
-        return String(value);
-    }
 };
 
 const ApprovalsPage = dc(() => {
@@ -573,7 +560,7 @@ const ApprovalsPage = dc(() => {
             if (value === null || value === undefined || value === "") return;
             rows.push({ label, value: String(value) });
         };
-        push(t("Type"), subjectTypeLabel(String(context.contextType ?? selected.value?.subjectType ?? "")));
+        push(t("Type"), t(subjectTypeLabel(String(context.contextType ?? selected.value?.subjectType ?? ""))));
         push(t("Reference"), context.id ?? selected.value?.subjectId);
         push(t("Merchant"), context.merchant?.tradeName ?? context.merchant?.legalName ?? context.tradeName ?? context.legalName ?? context.displayName);
         push(t("Status"), context.status);
@@ -650,7 +637,7 @@ const ApprovalsPage = dc(() => {
             value: (row) => `${row.subjectType} ${row.subjectId}`,
             Value: ({ row }: { row: ApprovalRow }) => (
                 <ThemedView style={{ gap: "3px" }}>
-                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{subjectTypeLabel(row.subjectType)}</ThemedText>
+                    <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t(subjectTypeLabel(row.subjectType))}</ThemedText>
                     <MonoRef value={row.subjectId} truncate={18} />
                     <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{kindLabel(row.kind)}</ThemedText>
                 </ThemedView>
@@ -941,7 +928,7 @@ const ApprovalsPage = dc(() => {
                     detailsOpen.value = value;
                     if (!value) void clearOpenQueryParam();
                 }}
-                title={selected.value ? subjectTypeLabel(selected.value.subjectType) : t("Approval")}
+                title={selected.value ? t(subjectTypeLabel(selected.value.subjectType)) : t("Approval")}
                 subtitle={selected.value ? `${selected.value.domain} · ${kindLabel(selected.value.kind)}` : ""}
                 width={680}
             >
@@ -1017,13 +1004,7 @@ const ApprovalsPage = dc(() => {
 
                                 <ThemedView style={{ gap: "8px" }}>
                                     <ThemedText type="defaultSemiBold">{t("Proposed change")}</ThemedText>
-                                    {Array.isArray(selected.value.payloadDiff) ? (
-                                        <JsonDiffViewer operations={selected.value.payloadDiff as JsonPatchOperation[]} />
-                                    ) : (
-                                        <pre style={{ margin: 0, padding: "10px 12px", borderRadius: "var(--pg-radius-md)", background: "var(--pg-bg-surface-subtle)", fontSize: "11px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", unicodeBidi: "isolate", maxHeight: "320px", overflow: "auto" }}>
-                                            {jsonText(selected.value.payloadDiff)}
-                                        </pre>
-                                    )}
+                                    <JsonDiffViewer diff={selected.value.payloadDiff} />
                                 </ThemedView>
 
                                 {selected.value.riskAcceptanceNote && (

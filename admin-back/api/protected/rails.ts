@@ -68,6 +68,7 @@ export const railPatchSchema = z
     capabilities: z.union([z.array(z.string().max(40)).max(50), z.record(z.string().max(40), z.boolean())]).optional(),
     instructionsAr: z.string().max(2000).optional(),
     instructionsEn: z.string().max(2000).optional(),
+    logoAssetId: z.string().uuid().nullable().optional(),
     baseVersion: zBaseVersion.optional(),
     checklist: z
       .array(
@@ -153,6 +154,11 @@ export const routePatchSchema = z
     maxAmount: zAmount.optional(),
     dailyCapAmount: zAmount.optional(),
     limitCurrency: zCurrency.optional(),
+    mismatchPolicy: zJsonObject.optional(),
+    maintenanceWindows: z
+      .array(z.object({ start: z.string().min(10).max(64), end: z.string().min(10).max(64) }).catchall(z.unknown()))
+      .max(50)
+      .optional(),
     baseVersion: zBaseVersion.optional(),
     checklist: z
       .array(

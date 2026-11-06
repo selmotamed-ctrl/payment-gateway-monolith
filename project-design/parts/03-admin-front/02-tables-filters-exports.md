@@ -3,7 +3,7 @@ id: admin-ui.tables
 title: Tables Filters and Exports
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-06
 verified_against: 5a24f6f+working-tree
 code:
   - admin-front/src/components/Table/**
@@ -12,6 +12,7 @@ code:
   - admin-front/src/components/ui/FormChecklist.tsx
   - admin-front/src/constants/env/index.ts
   - admin-front/src/pages/**
+  - admin-front/src/components/Table/registry/**
 design_sources:
   - design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md
   - design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md
@@ -291,3 +292,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical table/export part. Records the 19 registry configurations, hybrid 200-row server mode, current-page-only XLSX export, summary export surfaces, and runtime checklist flags.
+
+## Registry slices (2026-11-06)
+
+`components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`.

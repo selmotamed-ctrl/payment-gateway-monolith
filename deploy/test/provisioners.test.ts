@@ -143,6 +143,12 @@ describe("PostgreSQL 18 provisioner", () => {
     expect(commands.join("\n")).toContain("pgbouncer");
   });
 
+  test("the generated cluster unit recreates /run/postgresql after a reboot", () => {
+    const commands = bootstrapCommands(config()).join("\n");
+    expect(commands).toContain("RuntimeDirectory=postgresql");
+    expect(commands).toContain("RuntimeDirectoryMode=2775");
+  });
+
   test("replica commands use streaming basebackup with -R, a password and the created slot", () => {
     const commands = replicaCommands(
       { nodeId: "pg-pri", privateIp: "10.10.10.10", servicePort: 5432 },

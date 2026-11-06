@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
-import { VAlert, VBtn, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -14,6 +14,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { MonoRef } from "@/components/ui/MonoRef";
+import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
+import CommissionTiersEditor from "./components/CommissionTiersEditor";
+import { emptyTier, tiersToApi, validateTiers, withoutBlankTiers, type TierError, type TierRow } from "./commissionTiers";
 import { statusTone } from "@/components/Table/statusTone";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -119,8 +122,15 @@ const PricingControlsPage = dc(() => {
         model: "PERCENTAGE",
         percentage: "0.0000",
         flatAmount: "0.0000",
-        tiers: "[]",
+        minFee: "",
+        maxFee: "",
+        feeBearerDefault: "MERCHANT_ABSORBS",
+        roundingMode: "HALF_UP",
+        merchantId: "",
+        applicationId: "",
     });
+    const commissionTiers = ref<TierRow[]>([emptyTier()]);
+    const commissionTierErrors = ref<TierError[]>([]);
 
     const lifecycleOpen = ref(false);
     const lifecycleKind = ref<"COMMISSION" | "VELOCITY">("COMMISSION");
@@ -203,8 +213,15 @@ const PricingControlsPage = dc(() => {
             model: "PERCENTAGE",
             percentage: "0.0000",
             flatAmount: "0.0000",
-            tiers: "[]",
+            minFee: "",
+            maxFee: "",
+            feeBearerDefault: "MERCHANT_ABSORBS",
+            roundingMode: "HALF_UP",
+            merchantId: "",
+            applicationId: "",
         };
+        commissionTiers.value = [emptyTier()];
+        commissionTierErrors.value = [];
         commissionOpen.value = true;
     };
 
@@ -219,18 +236,31 @@ const PricingControlsPage = dc(() => {
             commissionError.value = t("Name and rail code are required.");
             return;
         }
-        let tiers: unknown = [];
-        if (form.model === "TIERED" || form.model === "MIXED") {
-            try {
-                tiers = JSON.parse(form.tiers || "[]");
-            } catch {
-                commissionError.value = t("Tiers must be a valid JSON array.");
+        const money = /^\d{1,14}(\.\d{1,4})?$/;
+        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if ((form.minFee.trim() && !money.test(form.minFee.trim())) || (form.maxFee.trim() && !money.test(form.maxFee.trim()))) {
+            commissionError.value = t("Fee bounds must be amounts with up to 4 decimals.");
+            return;
+        }
+        if (form.minFee.trim() && form.maxFee.trim() && Number(form.minFee) > Number(form.maxFee)) {
+            commissionError.value = t("The minimum fee cannot exceed the maximum fee.");
+            return;
+        }
+        if ((form.merchantId.trim() && !uuid.test(form.merchantId.trim())) || (form.applicationId.trim() && !uuid.test(form.applicationId.trim()))) {
+            commissionError.value = t("Merchant and application ids must be valid UUIDs.");
+            return;
+        }
+        // The fee calculator only reads tiers for the TIERED model (HYBRID/FLAT/PERCENTAGE ignore them).
+        let tiers: Array<Record<string, string>> = [];
+        if (form.model === "TIERED") {
+            const rows = withoutBlankTiers(commissionTiers.value);
+            const problems = validateTiers(rows);
+            commissionTierErrors.value = problems;
+            if (problems.length > 0) {
+                commissionError.value = t("Fix the highlighted tiers before saving.");
                 return;
             }
-            if (!Array.isArray(tiers)) {
-                commissionError.value = t("Tiers must be a valid JSON array.");
-                return;
-            }
+            tiers = tiersToApi(rows);
         }
         commissionSaving.value = true;
         commissionError.value = null;
@@ -242,7 +272,13 @@ const PricingControlsPage = dc(() => {
                 model: form.model,
                 ...(form.model === "PERCENTAGE" || form.model === "MIXED" ? { percentage: form.percentage.trim() } : {}),
                 ...(form.model === "FLAT" || form.model === "MIXED" ? { flatAmount: form.flatAmount.trim() } : {}),
-                ...((form.model === "TIERED" || form.model === "MIXED") && (tiers as unknown[]).length > 0 ? { tiers } : {}),
+                ...(form.model === "TIERED" && tiers.length > 0 ? { tiers } : {}),
+                ...(form.minFee.trim() ? { minFee: form.minFee.trim() } : {}),
+                ...(form.maxFee.trim() ? { maxFee: form.maxFee.trim() } : {}),
+                feeBearerDefault: form.feeBearerDefault,
+                roundingMode: form.roundingMode,
+                ...(form.merchantId.trim() ? { merchantId: form.merchantId.trim() } : {}),
+                ...(form.applicationId.trim() ? { applicationId: form.applicationId.trim() } : {}),
             });
             showSnackBar({ type: "success", message: t("Commission profile created") });
             commissionOpen.value = false;
@@ -512,9 +548,7 @@ const PricingControlsPage = dc(() => {
                                 { label: t("Approval request"), value: entry.approvalRequestId ? <MonoRef value={entry.approvalRequestId} truncate={18} /> : "—" },
                             ]}
                         />
-                        <ThemedText style={{ fontSize: "11px", opacity: 0.7, direction: "ltr", wordBreak: "break-word" }}>
-                            {JSON.stringify(entry.afterJson ?? {}).slice(0, 240)}
-                        </ThemedText>
+                        <JsonDiffViewer diff={{ before: entry.beforeJson, after: entry.afterJson }} />
                     </ThemedView>
                 ))}
             </FormModal>
@@ -550,7 +584,7 @@ const PricingControlsPage = dc(() => {
                 </ThemedView>
                 <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
                     {(commissionForm.value.model === "PERCENTAGE" || commissionForm.value.model === "MIXED") && (
-                        <FormField label={t("Percentage rate")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                        <FormField label={t("Percentage rate")} hint={t("A fraction of the amount, e.g. 0.0300 charges 3%.")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
                             <VTextField modelValue={commissionForm.value.percentage} onUpdate:modelValue={(value: string) => (commissionForm.value.percentage = value)} />
                         </FormField>
                     )}
@@ -560,9 +594,40 @@ const PricingControlsPage = dc(() => {
                         </FormField>
                     )}
                 </ThemedView>
-                {(commissionForm.value.model === "TIERED" || commissionForm.value.model === "MIXED") && (
-                    <FormField label={t("Tiers JSON")} sensitiveMakerChecker>
-                        <VTextarea modelValue={commissionForm.value.tiers} onUpdate:modelValue={(value: string) => (commissionForm.value.tiers = value)} rows={5} style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }} />
+                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                    <FormField label={t("Minimum fee")} style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={commissionForm.value.minFee} onUpdate:modelValue={(value: string) => (commissionForm.value.minFee = value)} />
+                    </FormField>
+                    <FormField label={t("Maximum fee")} style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={commissionForm.value.maxFee} onUpdate:modelValue={(value: string) => (commissionForm.value.maxFee = value)} />
+                    </FormField>
+                </ThemedView>
+                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                    <FormField label={t("Fee bearer")} sensitiveMakerChecker style={{ flex: "1 1 220px" }}>
+                        <VSelect items={["MERCHANT_ABSORBS", "PAYER_SURCHARGE", "SPLIT"]} modelValue={commissionForm.value.feeBearerDefault} onUpdate:modelValue={(value: string | null) => (commissionForm.value.feeBearerDefault = value ?? "MERCHANT_ABSORBS")} />
+                    </FormField>
+                    <FormField label={t("Rounding mode")} style={{ flex: "1 1 220px" }}>
+                        <VSelect items={["HALF_UP", "HALF_EVEN", "FLOOR", "CEIL"]} modelValue={commissionForm.value.roundingMode} onUpdate:modelValue={(value: string | null) => (commissionForm.value.roundingMode = value ?? "HALF_UP")} />
+                    </FormField>
+                </ThemedView>
+                <ThemedView style={{ flexDirection: "row", gap: "12px", flexWrap: "wrap" }}>
+                    <FormField label={t("Merchant ID (optional)")} hint={t("Scope this profile to one merchant or application. Leave both empty for the rail default.")} style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={commissionForm.value.merchantId} onUpdate:modelValue={(value: string) => (commissionForm.value.merchantId = value)} />
+                    </FormField>
+                    <FormField label={t("Application ID (optional)")} style={{ flex: "1 1 220px" }}>
+                        <VTextField modelValue={commissionForm.value.applicationId} onUpdate:modelValue={(value: string) => (commissionForm.value.applicationId = value)} />
+                    </FormField>
+                </ThemedView>
+                {commissionForm.value.model === "TIERED" && (
+                    <FormField label={t("Commission tiers")} sensitiveMakerChecker>
+                        <CommissionTiersEditor
+                            modelValue={commissionTiers.value}
+                            errors={commissionTierErrors.value}
+                            onUpdate:modelValue={(rows: TierRow[]) => {
+                                commissionTiers.value = rows;
+                                if (commissionTierErrors.value.length > 0) commissionTierErrors.value = [];
+                            }}
+                        />
                     </FormField>
                 )}
             </FormModal>

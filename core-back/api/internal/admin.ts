@@ -6,7 +6,11 @@ import { client } from "../../prisma/client";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { createReconciliationUploadHandler } from "./reconciliationUpload";
 import { backupInternalRouter } from "./backups";
+import { adminCommerceRouter } from "./adminCommerce";
 import { academyInternalRouter } from "./academy";
+import { adminLedgerRouter } from "./adminLedger";
+import { adminOperationsRouter } from "./adminOperations";
+import { adminSystemRouter } from "./adminSystem";
 import { publicProgress } from "../../engine/academy/progress";
 import { loadCatalog } from "../../engine/academy/catalog";
 import { getPlatformRuntime } from "../../engine/runtime";
@@ -698,6 +702,10 @@ router.post("/auth/logout", async (request: Request, response: Response) => {
   response.json({ revoked: true });
 });
 router.use("/system/backups", backupInternalRouter);
+router.use("/", adminCommerceRouter);
+router.use(adminLedgerRouter);
+router.use(adminOperationsRouter);
+router.use(adminSystemRouter);
 router.use("/academy", academyInternalRouter);
 
 /** Any staff read authority: the floor for the cross-cutting dashboard, lookup and search routes. */
@@ -5061,6 +5069,7 @@ router.get("/merchants/:id/applications", async (request: Request, response: Res
         posTerminalCount: application._count.posTerminals,
         railWhitelistMode: railWhitelist === null ? "ALL" : railWhitelist.length === 0 ? "NONE" : "LIST",
         railWhitelistCount: railWhitelist?.length ?? 0,
+        railWhitelist,
         redirectDomainCount: redirectDomains.length,
         redirectDomains: flags.canSensitive ? redirectDomains : [],
         createdAt: application.createdAt,
@@ -9386,15 +9395,7 @@ router.post("/operator-cases/:id/resolve", async (request: Request, response: Re
   });
 });
 
-router.get("/attempts/:id", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["attempt:read"]);
-  const { id } = parseOrThrow(idSchema, request.params);
-  const attempt = await client.paymentAttempt.findUnique({ where: { id } });
-  if (!attempt) {
-    throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "The payment attempt does not exist");
-  }
-  response.json({ attempt });
-});
+// GET /attempts/:id (attempt detail) is served by adminOperations.ts, mounted next to /system/backups.
 
 router.post("/attempts/:id/inquire", async (request: Request, response: Response) => {
   requireAuthorities(request, ["attempt:inquire"]);
@@ -12560,6 +12561,8 @@ router.patch("/rails/:id", async (request: Request, response: Response) => {
         capabilities: z.record(z.string().max(40), z.boolean()).optional(),
         instructionsAr: z.string().max(2000).optional(),
         instructionsEn: z.string().max(2000).optional(),
+        // null clears the logo; a uuid must reference a registered asset.
+        logoAssetId: z.string().uuid().nullable().optional(),
         checklist: z.array(z.enum([
           "NAMES_VERIFIED",
           "LIMITS_VERIFIED",
@@ -12574,9 +12577,14 @@ router.patch("/rails/:id", async (request: Request, response: Response) => {
   if (!rail) {
     throw new ApiError(404, "RAIL_NOT_FOUND", "The rail does not exist");
   }
+  if (body.logoAssetId) {
+    const asset = await client.asset.findUnique({ where: { id: body.logoAssetId }, select: { id: true } });
+    if (!asset) throw new ApiError(404, "ASSET_NOT_FOUND", "The logo asset does not exist");
+  }
   const updated = await client.rail.update({
     where: { id },
     data: {
+      logoAssetId: body.logoAssetId,
       nameAr: body.nameAr,
       nameEn: body.nameEn,
       blocked: body.blocked,
@@ -12595,11 +12603,11 @@ router.patch("/rails/:id", async (request: Request, response: Response) => {
       action: "RAIL_UPDATED",
       entityType: "RAIL",
       entityId: updated.id,
-      beforeJson: { nameAr: rail.nameAr, nameEn: rail.nameEn, blocked: rail.blocked, minAmount: String(rail.minAmount), maxAmount: String(rail.maxAmount) },
-      afterJson: { nameAr: updated.nameAr, nameEn: updated.nameEn, blocked: updated.blocked, minAmount: String(updated.minAmount), maxAmount: String(updated.maxAmount), checklist: body.checklist ?? [] },
+      beforeJson: { nameAr: rail.nameAr, nameEn: rail.nameEn, blocked: rail.blocked, minAmount: String(rail.minAmount), maxAmount: String(rail.maxAmount), logoAssetId: rail.logoAssetId },
+      afterJson: { nameAr: updated.nameAr, nameEn: updated.nameEn, blocked: updated.blocked, minAmount: String(updated.minAmount), maxAmount: String(updated.maxAmount), logoAssetId: updated.logoAssetId, checklist: body.checklist ?? [] },
     },
   });
-  response.json({ id: updated.id, blocked: updated.blocked });
+  response.json({ id: updated.id, blocked: updated.blocked, logoAssetId: updated.logoAssetId });
 });
 
 router.put("/rails/:id/fields", async (request: Request, response: Response) => {
@@ -12901,6 +12909,13 @@ router.patch("/routes/:id", async (request: Request, response: Response) => {
         dailyCapAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
         scope: z.record(z.string().max(64), z.unknown()).optional(),
         costModel: z.record(z.string().max(64), z.unknown()).optional(),
+        // `tolerance_amount` is the only key the settlement engine reads; other keys are kept as stored.
+        mismatchPolicy: z.record(z.string().max(64), z.unknown()).optional(),
+        // Absolute UTC windows: the route is hidden while start <= now < end (VisibleRailsResolver). [] clears them.
+        maintenanceWindows: z
+          .array(z.object({ start: z.string().min(10).max(64), end: z.string().min(10).max(64) }).catchall(z.unknown()))
+          .max(50)
+          .optional(),
         checklist: z.array(z.enum([
           "PRIORITY_WEIGHT_REVIEWED",
           "LIMITS_CAP_VERIFIED",
@@ -12915,9 +12930,25 @@ router.patch("/routes/:id", async (request: Request, response: Response) => {
   if (!route) {
     throw new ApiError(404, "ROUTE_NOT_FOUND", "The route does not exist");
   }
+  const windows = body.maintenanceWindows;
+  if (windows) {
+    const parsed = windows.map((window) => ({ start: Date.parse(window.start), end: Date.parse(window.end) }));
+    if (parsed.some((window) => Number.isNaN(window.start) || Number.isNaN(window.end))) {
+      throw new ApiError(400, "MAINTENANCE_WINDOW_INVALID", "Every maintenance window needs a valid start and end instant");
+    }
+    if (parsed.some((window) => window.end <= window.start)) {
+      throw new ApiError(400, "MAINTENANCE_WINDOW_INVALID", "A maintenance window must end after it starts");
+    }
+  }
+  const tolerance = body.mismatchPolicy?.tolerance_amount ?? body.mismatchPolicy?.toleranceAmount;
+  if (tolerance !== undefined && tolerance !== null && !/^\d{1,14}(\.\d{1,4})?$/.test(String(tolerance))) {
+    throw new ApiError(400, "MISMATCH_TOLERANCE_INVALID", "The mismatch tolerance must be a non-negative amount with up to 4 decimals");
+  }
   const updated = await client.railRoute.update({
     where: { id },
     data: {
+      mismatchPolicy: body.mismatchPolicy === undefined ? undefined : json(body.mismatchPolicy),
+      maintenanceWindows: windows === undefined ? undefined : json(windows),
       priority: body.priority,
       weight: body.weight,
       minAmount: body.minAmount ? new Prisma.Decimal(body.minAmount) : undefined,
@@ -14519,7 +14550,10 @@ router.post("/commission-profiles", async (request: Request, response: Response)
         calcType: z.enum(["FLAT", "PERCENTAGE", "TIERED", "HYBRID"]),
         flatFee: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).default("0.0000"),
         percentageRate: z.string().regex(/^\d{1,6}(\.\d{1,6})?$/).default("0.000000"),
-        tiersJson: z.record(z.string().max(64), z.unknown()).optional(),
+        // An ordered tier list (what the fee calculator reads). The legacy index-keyed object is still accepted.
+        tiersJson: z
+          .union([z.array(z.record(z.string().max(64), z.unknown())).max(20), z.record(z.string().max(64), z.unknown())])
+          .optional(),
         minFee: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).default("0.0000"),
         maxFee: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
         feeBearerDefault: z.enum(["MERCHANT_ABSORBS", "PAYER_SURCHARGE", "SPLIT"]).default("MERCHANT_ABSORBS"),

@@ -29,6 +29,8 @@ const link = {
   merchantTradeName: "Acme Store",
   merchantLegalName: "Acme LLC",
   merchantStatus: "ACTIVE",
+  applicationStatus: "ACTIVE",
+  walletStatus: "ACTIVE",
   merchantRiskTier: "LOW",
   merchantContactPhone: "+218910000001",
   merchantContactEmail: "store@acme.ly",

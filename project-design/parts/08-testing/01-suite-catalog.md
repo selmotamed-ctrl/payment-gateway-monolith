@@ -3,7 +3,7 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-06
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/test/exhaustive/**
@@ -49,6 +49,21 @@ tests:
   - tests/unit/frontend-security-admin.test.ts
   - tests/unit/frontend-security-checkout.test.ts
   - tests/unit/frontend-security-merchant.test.ts
+  - tests/e2e/admin/commerce-governance.spec.ts
+  - tests/unit/commerce-governance.test.ts
+  - tests/unit/commerce-actions.test.ts
+  - tests/unit/commerce-owners-revalidation.test.ts
+  - tests/unit/commerce-i18n.test.ts
+  - tests/unit/ledger-ops-ledger.test.ts
+  - tests/unit/ledger-ops-operations.test.ts
+  - tests/unit/json-diff-model.test.ts
+  - tests/unit/audit-summary.test.ts
+  - tests/unit/commission-tiers.test.ts
+  - tests/unit/dispute-evidence.test.ts
+  - tests/unit/builders-route-models.test.ts
+  - tests/unit/builders-settings-parser.test.ts
+  - tests/unit/builders-aml-templates.test.ts
+  - tests/unit/builders-api-error-i18n.test.ts
 gaps:
   - No core-back/test/exhaustive/09-storage-backup directory exists.
   - No tests/e2e/exhaustive/11-e2e-seeder-deploy directory exists.
@@ -384,3 +399,9 @@ This catalog is derived by counting literal declarations and inspecting the suit
 | `tests/unit/frontend-security-{admin,checkout,merchant}.test.ts` | frontend allow-lists, guards, validation |
 
 Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not covered.
+
+## Admin UI completion suites (2026-11-06)
+
+- **Unit (`tests/unit`, vitest, 483 passing in 29 files):** pure logic of the new UI: governance action tables per state (immediate vs approval), owner/revalidation forms, journal/route-cap/lifecycle/health/jobs models, the JSON diff model, audit summaries (`formatAuditValue`, `describeAuditChange`), commission tiers, dispute evidence mapping, and the builders' round trips (cost model, scope, maintenance windows, parser config, AML params, settings schemas, template variables) including unknown-key preservation. `commerce-i18n` and `builders-api-error-i18n` assert that every message key the logic can produce has an Arabic entry. `frontend-security-admin` (default-deny route authorities, alias map) and `guide-content` (every router name has a context-map screen) caught the six new routes until they were registered properly.
+- **E2E (Playwright, needs Chrome: set `PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome-stable` when the bundled browser is not installed):** `e2e/admin/commerce-governance.spec.ts` drives the wallets page against realistic mocked responses (restricted balances render "Restricted" and never 0; a freeze needs a >=10-character reason and sends exactly `{status: "FROZEN", reason}`; restoring returns HTTP 202 and is reported as submitted for approval; a read-only role gets no freeze action). `exhaustive-admin-surface.spec.ts` now covers 31 routes (the six new ones included) across 3 viewports x 2 locales x 2 themes (372 combinations: no horizontal overflow, correct direction and theme, app bar never overlapping). `e2e/admin/backups.spec.ts` was updated for the second confirmation the page has asked for since the frontend hardening commit (its spec was stale).
+- **Component compliance (`admin-front` `bun run test:unit`):** helper components must live in `components/` subfolders so every route page keeps `PageHeader` (the test stops at the first offender).

@@ -2,11 +2,15 @@ import { createI18n } from "vue-i18n";
 import { en as vuetifyEn, ar as vuetifyAr } from "vuetify/locale";
 import { appCatalogue } from "@/constants/i18nCatalogue";
 import { academyCatalogue } from "@/constants/i18nAcademy";
+import { commerceCatalogue } from "@/constants/i18n/commerce";
+import { ledgerOpsCatalogue } from "@/constants/i18n/ledgerOps";
+import { formsCatalogue } from "@/constants/i18n/forms";
+import { buildersCatalogue } from "@/constants/i18n/builders";
 
 const buildAppMessages = () => {
     const en: Record<string, string> = {};
     const ar: Record<string, string> = {};
-    for (const [key, pair] of Object.entries({ ...appCatalogue, ...academyCatalogue })) {
+    for (const [key, pair] of Object.entries({ ...appCatalogue, ...academyCatalogue, ...commerceCatalogue, ...ledgerOpsCatalogue, ...formsCatalogue, ...buildersCatalogue })) {
         en[key] = pair[0];
         ar[key] = pair[1];
     }

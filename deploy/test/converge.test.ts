@@ -185,6 +185,12 @@ describe("PostgreSQL apply script", () => {
     expect(script).toContain("pg_isready -h 127.0.0.1 -p 5432");
   });
 
+  test("a failed boot (start-limit-hit) is cleared before retrying the start", () => {
+    const script = postgresApplyScript({ unit: "postgresql@18-main", port: 5432, changed: false });
+    expect(script).toContain('systemctl reset-failed "$unit"');
+    expect(script.indexOf("reset-failed")).toBeLessThan(script.indexOf("systemctl enable --now"));
+  });
+
   test("an unchanged cluster is neither reloaded nor restarted", () => {
     const script = postgresApplyScript({ unit: "postgresql@18-main", port: 5432, changed: false });
     expect(script).toContain("elif [ 0 = 1 ]; then\n  t0=");

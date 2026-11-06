@@ -17,6 +17,7 @@ export const V1_SEARCH_TYPES = [
   "cashout",
   "reconciliation_run",
   "gateway",
+  "credential_set",
   "rail",
   "route",
 ] as const;

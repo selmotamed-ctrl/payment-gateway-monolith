@@ -19,6 +19,7 @@ import {
   toCoreGatewayVersionStatusRules,
 } from "../contract";
 import { coreForward } from "../forward";
+import { encode } from "./mutationSchemas";
 
 const router = express.Router();
 
@@ -410,6 +411,15 @@ router.post(
     paramsSchema: gatewayParamsSchema,
     schema: rollbackSchema,
     bodyFrom: (_req, body) => toCoreGatewayRollback(body),
+  }),
+);
+
+router.get(
+  "/:id/health",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/gateways/${encode(context.params.id)}/health`,
+    paramsSchema: gatewayParamsSchema,
   }),
 );
 

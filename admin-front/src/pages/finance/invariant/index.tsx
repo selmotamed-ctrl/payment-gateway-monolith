@@ -1,7 +1,8 @@
 import { dc } from "kt-dc";
-import { ref } from "vue";
+import { computed, ref } from "vue";
+import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn } from "vuetify/components";
+import { VAlert, VBtn, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -20,6 +21,14 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { DescriptionList } from "@/components/ui/DescriptionList";
+import { FormModal } from "@/components/ui/FormModal";
+import { FormField } from "@/components/ui/FormField";
+import { TableRowActions } from "@/components/Table/TableRowActions";
+import { GlAccountDrawer } from "@/components/ledger/GlAccountDrawer";
+import { LedgerRefLink } from "@/components/ledger/LedgerRefLink";
+import { isValidReason, normalizeReason } from "@/components/ledger/mutationReason";
+import { errorCodeOf, errorDetailsOf } from "@/components/ledger/format";
+import { hasOneOfAuthorities } from "@/state/user";
 type InvariantResult = {
     ok?: boolean;
     drift?: string;
@@ -45,10 +54,49 @@ type InvariantResult = {
 
 const InvariantPage = dc(() => {
     const { t } = useLocale();
+    const router = useRouter();
     const data = ref<InvariantResult | null>(null);
     const loading = ref(true);
     const error = ref<string | null>(null);
     const exportLoading = ref(false);
+    const inspectAccountId = ref<string | null>(null);
+    const canRollup = computed(() => hasOneOfAuthorities(["finance:write"]));
+    const rollupAccountId = ref<string | null>(null);
+    const rollupReason = ref("");
+    const rollupLoading = ref(false);
+    const rollupError = ref("");
+
+    const openRollup = (accountId: string) => {
+        rollupAccountId.value = accountId;
+        rollupReason.value = "";
+        rollupError.value = "";
+    };
+
+    const runRollup = async () => {
+        const accountId = rollupAccountId.value;
+        if (!accountId) return;
+        if (!isValidReason(rollupReason.value)) {
+            rollupError.value = t("Reason is required (at least 10 characters)");
+            return;
+        }
+        rollupLoading.value = true;
+        rollupError.value = "";
+        try {
+            await api.post(urlsMap.financeGlAccountCheckpoint(accountId), { reason: normalizeReason(rollupReason.value) });
+            rollupAccountId.value = null;
+            showSnackBar({ type: "success", message: t("Checkpoint rollup completed") });
+            void load();
+        } catch (e) {
+            if (errorCodeOf(e) === "LEDGER_SHARD_PARITY_MISMATCH") {
+                const details = errorDetailsOf(e);
+                rollupError.value = `${t("The shard total differs from the journal total; the checkpoint was refused.")} ${t("Shard total")}: ${String(details.shardTotal ?? "—")} · ${t("Journal total")}: ${String(details.journalTotal ?? "—")} · ${t("Drift")}: ${String(details.drift ?? "—")}`;
+            } else {
+                rollupError.value = extractApiErrorMessage(e);
+            }
+        } finally {
+            rollupLoading.value = false;
+        }
+    };
 
     const load = async () => {
         loading.value = true;
@@ -108,7 +156,7 @@ const InvariantPage = dc(() => {
         <ScreenContainer>
             <ThemedView style={{ gap: "18px" }}>
                 <PageHeader
-                    title={t("Invariant Status")}
+                    title={t("Ledger Audit & Invariant")}
                     subtitle={t("Verify the double-entry ledger invariant and inspect account-level balances.")}
                     badge={t("Ledger control")}
                     badgeTone="info"
@@ -194,15 +242,36 @@ const InvariantPage = dc(() => {
                                                 <th style={{ textAlign: "start" }}>{t("Type")}</th>
                                                 <th style={{ textAlign: "end" }}>{t("Live balance")}</th>
                                                 <th style={{ textAlign: "end" }}>{t("Natural balance")}</th>
+                                                <th style={{ textAlign: "end" }}>{t("Actions")}</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {(data.value?.accounts ?? []).map((row) => (
                                                 <tr key={row.accountId}>
-                                                    <td><MonoRef value={row.accountId} /></td>
+                                                    <td><LedgerRefLink value={row.accountId} truncate={18} label={t("Open GL account")} onOpen={() => (inspectAccountId.value = row.accountId)} /></td>
                                                     <td><StatusBadge status={row.accountType} label={row.accountType} showDot={false} /></td>
                                                     <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.liveBalance} currency={currency()} size="sm" showCurrency={false} /></td>
                                                     <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.naturalBalance} currency={currency()} size="sm" showCurrency={false} colorSign /></td>
+                                                    <td style={{ textAlign: "end" }}>
+                                                        <TableRowActions
+                                                            primaryAction={{ label: t("Inspect shards & lines"), icon: "mdi-text-search", onClick: () => void (inspectAccountId.value = row.accountId) }}
+                                                            items={[
+                                                                {
+                                                                    key: "journal",
+                                                                    label: t("View journal entries"),
+                                                                    icon: "mdi-book-open-variant",
+                                                                    onClick: () => void router.push({ name: "JournalEntries", query: { glAccountId: row.accountId } }),
+                                                                },
+                                                                {
+                                                                    key: "rollup",
+                                                                    label: t("Run checkpoint rollup"),
+                                                                    icon: "mdi-database-sync-outline",
+                                                                    hidden: !canRollup.value,
+                                                                    onClick: () => openRollup(row.accountId),
+                                                                },
+                                                            ]}
+                                                        />
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -213,6 +282,27 @@ const InvariantPage = dc(() => {
                     </>
                 )}
             </ThemedView>
+            <GlAccountDrawer accountId={inspectAccountId.value} onClose={() => (inspectAccountId.value = null)} onChanged={() => void load()} />
+            <FormModal
+                modelValue={rollupAccountId.value !== null}
+                onUpdate:modelValue={(value: boolean) => {
+                    if (!value) rollupAccountId.value = null;
+                }}
+                title={t("Run checkpoint rollup")}
+                subtitle={t("Folds the shard deltas into the stored checkpoint balance")}
+                submitLabel={t("Run rollup")}
+                loading={rollupLoading.value}
+                errorMessage={rollupError.value}
+                onSubmit={() => void runRollup()}
+            >
+                {rollupAccountId.value && <MonoRef value={rollupAccountId.value} />}
+                <VAlert type="info" variant="tonal" density="compact">
+                    {t("The rollup is refused if the shard total differs from the journal total. The action is audited.")}
+                </VAlert>
+                <FormField label={t("Reason")} required hint={t("At least 10 characters; written to the audit log")}>
+                    <VTextarea modelValue={rollupReason.value} onUpdate:modelValue={(value: string) => void (rollupReason.value = value)} rows={3} autoGrow {...{ maxlength: 500 }} />
+                </FormField>
+            </FormModal>
         </ScreenContainer>
     );
 });

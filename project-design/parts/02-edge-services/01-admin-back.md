@@ -3,7 +3,7 @@ id: edge.admin
 title: Admin Edge BFF
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-06
 verified_against: 5a24f6f+working-tree
 code:
   - admin-back/index.ts
@@ -13,6 +13,11 @@ code:
   - admin-back/lib/net/index.ts
   - admin-back/lib/error/index.ts
   - admin-back/lib/requestLogger/index.ts
+  - admin-back/api/protected/wallets.ts
+  - admin-back/api/protected/applications.ts
+  - admin-back/api/protected/transactions.ts
+  - admin-back/api/protected/system.ts
+  - admin-back/api/protected/mutationSchemas.ts
 design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#163-admin-back-lan-only-api-apiv1admin---forwards-to-core-back-internaladmin
@@ -27,6 +32,7 @@ tests:
   - admin-back/test/academy-progress.test.ts
   - admin-back/test/env-isolation.test.ts
   - admin-back/test/security-regressions.test.ts
+  - admin-back/test/admin-ui-completion.test.ts
 gaps:
   - Edge authority gating checks the JWT shape/claims but cannot verify the HS256 signature because the key lives in core; it remains advisory and core is the enforcement point.
   - "Cookie session mode is opt-in (`SESSION_COOKIE_MODE`, default off); with it off the token still lives in browser storage (GAP-019 residual)."
@@ -283,3 +289,21 @@ The tests use a local HTTPS/HTTP stub and do not require PostgreSQL or Redis. A 
 - **Limiters** key on the resolved client IP plus a per-account limiter on login/MFA. Admin `x-pg-min-lsn` is validated (400).
 - **Logout and session cookie (GAP-019, RESOLVED 2026-11-05).** `POST /api/v1/admin/auth/logout` (public router, `logoutHandler`) forwards to core `POST /internal/admin/auth/logout`, which revokes the session `jti`, and clears the session cookie. With `SESSION_COOKIE_MODE=true` (default `false`) login and MFA responses move the token into the `pg_admin_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/admin`, 12 h, `Secure` unless `SESSION_COOKIE_SECURE=false`, default `true`) and return `sessionCookie: true` instead of `token` (`captureSessionToken`); the `cookieSession` middleware, mounted first on the admin router, converts the cookie into the `Authorization: Bearer` header only when the mode is on and the caller sent none, and requires `x-pg-csrf: 1` on unsafe methods (`403 CSRF_HEADER_REQUIRED`). Login/MFA are exempt from the cookie conversion so a stale cookie cannot block a new sign-in; logout is outside the auth limiter. Both settings are validated by `admin-back/lib/env`.
 - **Session audience and breaker (GAP-020, GAP-021).** The advisory authority guard now requires `aud=payment-gateway-admin`. The core upstream client removes a node from rotation only after `CORE_FAILURE_THRESHOLD = 3` consecutive failures. Sessions minted before the audience change are rejected and administrators must sign in again.
+
+## Admin UI completion forwards (2026-11-06)
+
+New `coreForward` routes (new files `wallets.ts`, `applications.ts` (applications + `paymentLinksRouter` + `posTerminalsRouter`), `transactions.ts` (transactions + `inboundEventsRouter`), `system.ts`, plus additions to `merchants.ts`, `gateways.ts`, `settings.ts`, `finance.ts`, `aml.ts`) registered in `protected/index.ts` with the same any-of authorities core enforces:
+
+| Mount | Read | Write |
+| :--- | :--- | :--- |
+| `/wallets`, `/applications`, `/payment-links`, `/pos-terminals` | `merchant:read` | `merchant:write` |
+| `/transactions` | `attempt:read`, `merchant:read`, `finance:read` | n/a |
+| `/inbound-events` | `attempt:read`, `case:read` | n/a |
+| `/system/*` (jobs-outbox, jobs, outbox, audit-outbox, notifications), mounted after `/system/backups` | `security:read` | `security:write` |
+| `/finance/journal-entries`, `/finance/gl-accounts/:id` | `finance:read` | checkpoint `finance:write` |
+| `/gateways/:id/health` | `gateway:read` | n/a |
+| `/settings/notification-templates` | `settings:read` | `settings:write` |
+| `/merchants/:id/beneficial-owners`, `/merchants/:id/revalidations` | `merchant:read` or `kyb:read` | `kyb:write` or `merchant:write` (the rest of `/merchants` stays `merchant:write`; `kyb:write` does not unlock suspend) |
+| `/aml/reporting-rules/:id/promote`, `/finance/route-caps` | already in core; now forwarded | |
+
+Contracts enforced at the edge: bodies are `.strict()` zod; `reason` is `z.string().trim().min(10).max(500)` (shared `mutationSchemas.ts`; also required on job requeue, notification retry and GL checkpoint); mutation enums are the safe subsets (wallet `FROZEN|ACTIVE`, application `SUSPENDED|ACTIVE`, POS `INACTIVE|BLOCKED|ACTIVE`, link `CANCELLED`); path ids must be UUIDs; list queries pass through every scalar filter. `relayStatus` passes core's 200/201/202 to the client unchanged (202 = submitted for approval). There is no outbox retry route (core has none).

@@ -272,6 +272,8 @@ export type MerchantApplicationRow = {
     posTerminalCount: number;
     railWhitelistMode: string;
     railWhitelistCount: number;
+    /** Real rail codes, `null` = every active rail. */
+    railWhitelist?: string[] | null;
     redirectDomainCount: number;
     redirectDomains: string[];
     createdAt: string;

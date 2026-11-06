@@ -340,7 +340,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 ## Core API Surface
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-06
 
 ## 1. Purpose and scope
 
@@ -925,6 +925,38 @@ A closed catalogue in `lib/auth/merchantAuthorities.ts` is enforced route by rou
 - Admin join-request `submit` returns `409 JOIN_REQUEST_PAYOUT_HASH_REQUIRED` and merchant `propose-edit` returns `422 PAYOUT_ACCOUNT_HASH_REQUIRED` for a payout account that yields no hash (GAP-017).
 - AML case release returns `409 AML_HOLD_CAPTURE_NOT_VERIFIED` when no escrow exists; verified callbacks/finalisation on terminal attempts return `409 ATTEMPT_TERMINAL` (GAP-015/GAP-016).
 - The reconciliation upload looks the duplicate run up per `(source, file_hash)` (GAP-018).
+
+## Admin UI completion endpoints (2026-11-06)
+
+Four new router modules are mounted from `admin.ts` (next to `/system/backups`): `adminCommerce.ts`, `adminLedger.ts`, `adminOperations.ts`, `adminSystem.ts` (shared helpers in `adminSliceHelpers.ts`). All are under `/internal/admin`, use `requireAuthorities` (any-of), `buildListQuery`/`listResponse`, 4-decimal money strings, stable `ApiError` codes, and write audit rows (`writeAudit`; `audit_log` has no merchant column, so the merchant id is recorded in `afterJson`). Secrets never leave: no `tokenHash`, `authTokenHash`, `nationalIdCiphertext`, `rawBodyBytes`, `addressCiphertext`, `entriesCiphertext`.
+
+**Commerce (`merchant:read` reads, `merchant:write` mutations)**
+
+| Endpoint | Notes |
+| :--- | :--- |
+| `GET /wallets`, `/wallets/summary`, `/wallets/:id` | Live balance = shard sum, checkpoint balance; both `null` + `redactedFields` for SUPPORT/plain `merchant:read`. Detail adds GL account, shards, applications, last 10 cash-outs, last 25 statement lines, pending approvals. |
+| `POST /wallets/:id/status` | FROZEN immediate (`WALLET_FROZEN`); ACTIVE = approval (`202`, subject `WALLET`). `409 WALLET_INVALID_TRANSITION`, `WALLET_APPROVAL_PENDING`. |
+| `GET /applications`, `/applications/summary`, `/applications/:id` | Real `railWhitelist` (`string[]\|null`) + mode/count, redirect domains (empty + `redactedFields` for non-sensitive principals), tokens (status ACTIVE/REVOKED/EXPIRED, CIDRs), payment links, POS terminals. |
+| `PATCH /applications/:id` | SUSPENDED alone immediate (`APPLICATION_SUSPENDED`); reactivation and any policy edit (rails, redirect domains, assigned wallet) = one approval (`202`, subject `APPLICATION`). Validates rails exist, https hostnames, same-merchant/currency ACTIVE wallet. |
+| `POST /applications/:id/tokens/:tokenId/revoke` | Irreversible, audited; `409 TOKEN_ALREADY_REVOKED`. Core has no token cache (`authDoubleCheck` reads the row each request). |
+| `GET /payment-links`, `POST /payment-links/:id/state` | Only PENDING->CANCELLED (`PAYMENT_LINK_CANCELLED`). |
+| `GET /pos-terminals`, `POST /pos-terminals/:id/status` | ACTIVE->INACTIVE/BLOCKED immediate; to ACTIVE = approval (subject `POS_TERMINAL`). |
+| `GET\|POST /merchants/:id/beneficial-owners`, `PATCH\|DELETE .../:ownerId` | Body = join-request owner schema; national id encrypted (`kyb-national-id`) + hash; identity/PEP edits reset screening; DELETE deactivates. `409 OWNERSHIP_PERCENT_EXCEEDED`. Reads `merchant:read`/`kyb:read`/`kyb:write`; writes `kyb:write`/`merchant:write`. |
+| `POST /merchants/:id/revalidations` | `KybRevalidationRequest`, merchant `kybStatus=PENDING`, `KYB_REVALIDATION_DUE` notification; `409 KYB_REVALIDATION_ALREADY_OPEN`. |
+
+`GET /merchants/:id/applications` now also returns `railWhitelist`.
+
+**Ledger (`finance:read`; checkpoint `finance:write`)**: `GET /finance/journal-entries` (+`/summary`, `/:id`; balanced/unbalanced, `currency: "MIXED"`, reference route hint; `JournalEntry` has `refType/refId/description`, `postedAt` = `createdAt`; lines queried by `entryId` only because `journal_lines` is partitioned), `GET /finance/gl-accounts/:id` (live + natural balance, shards, last 30 lines), `POST /finance/gl-accounts/:id/checkpoint` (`{reason}` required; existing `CheckpointService`; `409 LEDGER_SHARD_PARITY_MISMATCH` with `{shardTotal, journalTotal, drift}` changes nothing).
+
+**Operations**: `GET /transactions` (+`/summary`; `attempt:read`/`merchant:read`/`finance:read`; SUPPORT gets amounts, references and ledger entry `null` + `redactedFields`), `GET /inbound-events` and `/:id` (`attempt:read`/`case:read`; `verified`, `unmatchedOnly`; detail returns redacted headers, a 2 KB redacted body preview, size and sha256, never raw bytes), `GET /attempts/:id` (moved from `admin.ts`; keeps the `attempt` key, adds merchant/application/rail/gateway, ordered re-redacted `stepLogs`, `inboundEvents`, `attemptGroup`, cases, disputes, adjustments; `contextCiphertext` stripped), `GET /gateways/:id/health` (`gateway:read`; per ROUTE: last 100 `GatewayHealthSample` windows with success rate, 30 days of `RmRouteDailyVolume`, 24h summary).
+
+**System (`security:read` reads, `security:write` actions; templates `settings:read`/`settings:write`)**: `GET /system/jobs-outbox/summary`, `GET /system/jobs` + `POST /system/jobs/:id/requeue` (FAILED only, resets attempts; `{reason}`), `GET /system/outbox` (monitor only: no failure column exists so there is deliberately no retry; BigInt ids as strings, offset paging), `GET /system/audit-outbox`, `GET /system/notifications` (default FAILED) + `POST /system/notifications/:id/retry` (`{reason}`), `GET /settings/notification-templates` (active versions; `?history=true`) and `PUT /settings/notification-templates/:id` (new version in one transaction under a row lock, audit `NOTIFICATION_TEMPLATE_VERSIONED`; `422 TEMPLATE_UNKNOWN_PLACEHOLDERS`, `409 TEMPLATE_UNCHANGED`/`VERSION_CONFLICT`/`VERSION_NOT_ACTIVE`).
+
+### Rail logo, route policy and commission tiers (2026-11-06)
+
+- `PATCH /rails/:id` accepts `logoAssetId` (uuid, or `null` to clear). A uuid must reference a registered `Asset` (`404 ASSET_NOT_FOUND`); the audit row records the before/after logo. The edge schema and `toCoreRailUpdate` forward it. `POST /assets` still registers metadata only (name, type, size, SHA-256, storage key): it does not store image bytes, which remains a gap.
+- `PATCH /routes/:id` accepts `mismatchPolicy` (object; only `tolerance_amount`/`toleranceAmount` is read by the settlement engine, other keys are kept as stored; a malformed tolerance is `400 MISMATCH_TOLERANCE_INVALID`) and `maintenanceWindows` (`[{ start, end }]`, max 50, absolute instants; `end <= start` or an unparsable instant is `400 MAINTENANCE_WINDOW_INVALID`; `[]` clears). Omitted fields are left untouched; the edge forwards empty values so an operator can clear them.
+- **Commission tiers were broken end to end and are fixed.** The admin edge persisted UI tiers as an index-keyed object (`{"0": {...}}`) and core's create schema (`z.record`) could not take an array, while the fee calculator (`commissionForProfile`, `checkout.ts`) only reads `tiersJson` when it is an array: a TIERED profile created through the UI silently priced at its minimum fee. Now `POST /commission-profiles` accepts an ordered array (or the legacy object), the edge forwards the array, and `commissionTiers()` normalises both shapes (object keys ordered numerically), which also reprices already-stored legacy rows correctly. Tier keys are `upTo`, `flat`, `percent` (a fraction). **Behaviour change for existing data:** a legacy TIERED profile now prices by its tiers instead of the minimum fee. The edge also forwards `minFee`, `maxFee`, `feeBearerDefault`, `roundingMode`, `merchantId`, `applicationId` (core already accepted them; the strict edge schema dropped them). Note `percentageRate` is a **fraction** (`0.0300` = 3%), as the seed data stores it; the form now says so.
 
 ## Core Engine
 
@@ -1933,7 +1965,7 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 
 ## Governance and Compliance
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-06
 
 ## 1. Purpose and scope
 
@@ -2287,6 +2319,24 @@ Some governance tests use fake clients; database-backed suites require PostgreSQ
 - **Payout account maker-checker and mandatory hash (GAP-017, RESOLVED).** A cash-out requires a KYB `payoutAccountHash` on the merchant (`403 CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED` otherwise) and the destination must hash to it (`403 CASHOUT_DESTINATION_NOT_VERIFIED`); destinations are always stored `payoutVerified: true`, so the unverified-destination path no longer exists. Join-request submit is refused with `409 JOIN_REQUEST_PAYOUT_HASH_REQUIRED` unless the payout details yield a hash. A payout-account change only happens through the maker-checker merchant edit (`propose-edit`): a replacement of `/payoutBankDetailsJson` must carry a bank and an account number or IBAN and a `remove` is refused (`422 PAYOUT_ACCOUNT_HASH_REQUIRED`); `executeMerchantPatch` recomputes `payoutAccountHash` from the approved account on execution and refuses an account that yields no hash.
 - **Per-source statement file hash (GAP-018, RESOLVED with a residual).** Migration `20261105130000_statement_unique_source_file_hash` drops the global `reconciliation_runs_file_hash_key` index and creates the unique index `reconciliation_runs_statement_source_id_file_hash_key` on `(statement_source_id, file_hash)` plus a non-unique `reconciliation_runs_file_hash_idx`. The same bytes may now be uploaded for two sources; one source never gets two runs. `findRunByFileHash(tx, fileHash, sourceId)` is source-scoped and the upload handler keeps a defence-in-depth check that a run of another source is never answered as this source's. Residual: the concurrent duplicate-upload race described in the frontmatter gaps.
 - **Still open.** GAP-025: KYB scanning is content sniffing plus EICAR only; a real malware scanner is not integrated.
+
+## Governed commerce state changes and intake enforcement (2026-11-06)
+
+**Rule (project invariant: sensitive actions use maker-checker).** Moving an entity to a *more restrictive* state is immediate: it requires a trimmed `reason` of 10-500 characters and writes an audit row. Moving it to a *less restrictive* state, or changing what it may accept, is a maker-checker approval:
+
+| Entity | Immediate (audited) | Approval subject |
+| :--- | :--- | :--- |
+| Wallet | ACTIVE -> FROZEN (`WALLET_FROZEN`) | `WALLET`: FROZEN -> ACTIVE (`WALLET_UNFROZEN`) |
+| Application | ACTIVE -> SUSPENDED, alone (`APPLICATION_SUSPENDED`) | `APPLICATION`: reactivation (`APPLICATION_REACTIVATED`) and any edit of rail whitelist, redirect domains or assigned wallet (`APPLICATION_UPDATED`) |
+| POS terminal | ACTIVE -> INACTIVE/BLOCKED, INACTIVE -> BLOCKED (`POS_TERMINAL_STATUS_CHANGED`) | `POS_TERMINAL`: to ACTIVE |
+| Payment link | PENDING -> CANCELLED (`PAYMENT_LINK_CANCELLED`, no reactivation) | none |
+| Access token | revoke (`ACCESS_TOKEN_REVOKED`, irreversible) | none |
+
+`executeWalletStatusChange`, `executeApplicationChange` and `executePosTerminalStatusChange` (`GovernanceExecution.ts`) are dispatched from `executeApprovalSubject`; each re-validates the entity's current state (the application executor also checks `fromStatus` and `baseUpdatedAt`, wallet ownership/currency/ACTIVE and rail codes), audits in the same transaction and is idempotent. maker != checker is enforced by the existing approval machinery. The three subject types map to the MERCHANT approval domain (`approvalQueue.ts`). Side effect: the pre-existing merchant-side `PATCH /applications/:id` approvals (subject `APPLICATION`) previously had no executor and now execute.
+
+**Enforcement (a freeze that does not freeze would be a defect).** Before this change the checkout intake checked link state and merchant status but not application or wallet status; wallet status was only enforced for cash-outs. `lib/commerceStatus.ts` now raises `409 APPLICATION_NOT_ACTIVE` / `WALLET_NOT_ACTIVE` / `POS_TERMINAL_NOT_ACTIVE` in: `AttemptGuardPipeline.guard` (the choke point for every attempt, via optional `payments.findLinkCommerceStatus`), checkout `ensureLinkUsable` (initiate) and the confirm SUBMIT step, merchant `createLink` (`POST /links` and `/external/links`), POS screen stream connect (an open stream ends at the next minute heartbeat) and POS screen creation. A merchant can no longer lift a BLOCKED terminal through its own `PATCH /pos/terminals/:id` (`409 POS_TERMINAL_BLOCKED`). LIVE traffic requires ACTIVE; SANDBOX additionally tolerates application PENDING/DRAFT and wallet PENDING (the OD-10 sandbox-before-approval flow); SUSPENDED/CLOSED applications and FROZEN/CLOSED wallets are blocked in both. Not gated by design: display-only `GET /pay/:linkKey`, resend/client-event routes, and inbound provider webhooks (already-captured money must still be processed).
+
+**Known limits.** A merchant can still move its own INACTIVE terminal back to ACTIVE (INACTIVE cannot be told apart from a staff-set INACTIVE; only BLOCKED is staff-only). `approvalSubjectContext` (admin.ts) has no case for the three new subjects, so the approvals detail shows the generic payload diff.
 
 ## Background Workers and Outboxes
 
@@ -3494,7 +3544,7 @@ The change-history line below records the original extraction numbers (75 models
 
 ## Global Search
 
-> Status: `partial` · Last verified: 2026-11-03
+> Status: `partial` · Last verified: 2026-11-06
 
 ## 1. Purpose and scope
 
@@ -3886,6 +3936,10 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical extraction. Records the 20 providers, registry, parser, ranking weights, authority predicates, BFF limiter, palette/targets/`useOpenQuery`, and the actual gaps: dormant `supportsTokenKind`, missing fields, no full-text search, per-process limiter and no deep-search scale benchmark. See `project-design/TRACKER.md`.
+
+## Credential set provider (2026-11-06)
+
+`credentialSetProvider` (`type: "credential_set"`, aliases `credential_sets`/`credentials`/`credential`, order 165) is the 21st built-in provider. Access: `credential:read` or `gateway:read` (the same any-of as `GET /credential-sets`). It matches id, `externalMerchantId`, gateway code and gateway name, supports the scoped status filter (`CredentialStatus`), and selects only metadata (gateway, environment, owner type, external merchant id, status): never `entriesCiphertext` or the mTLS certificate (a test asserts the `select`). The admin palette routes these hits to `CredentialSets` with `?highlight=<id>`. Before this change the palette plugin existed in the plan but no backend provider did.
 
 ## Backup Control
 
@@ -4715,7 +4769,7 @@ The unit tests do not require a live database or Fake Rails. The actual `seed-sy
 
 ## Tests and Benchmarks
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-06
 
 ## 1. Purpose and scope
 
@@ -5093,3 +5147,9 @@ Database-backed suites require PostgreSQL 18; Redis-backed suites require Redis.
 New suites in `core-back/test/security-regressions/`: `c1-forged-success`, `c2-mfa`, `h1h2-authz`, `h3-admin-users-and-approvals`, `h4-cashout`, `h7-rounding`, `h8-webhook`, `m4-idempotency`, `m9-m12-upload-kyb`, `m10-ssrf`. Existing tests that asserted insecure behaviour were updated (for example the RBAC fuzz now mints well-formed tokens).
 
 Known gaps: true concurrency needs PostgreSQL 18 and is not exercised; the RetentionWorker fake parser (`test/helpers/retentionFake.ts`) cannot parse the new InvariantVerifier query (test drift, not a product bug).
+
+## Admin UI completion suites (2026-11-06)
+
+New core suites: `test/admin-commerce.test.ts` (22, DB-backed: redaction, immediate-vs-approval transitions, executors, owner PII, revalidation, intake enforcement over real routers), `test/security-regressions/commerce-status-enforcement.test.ts` (10, no DB: LIVE/SANDBOX gate matrix, guard pipeline creates no attempt for a suspended application or frozen wallet, source tripwires on every intake path), `test/admin-slice/admin-ledger|operations|system.test.ts` (7 + 7 + 13, DB-backed, harness in `test/admin-slice/harness.ts`), `test/admin-slice/admin-rails-routes.test.ts` (3, DB-backed through the REAL admin router with real signed admin sessions), `test/commission-tiers.test.ts` (7, no DB) and the credential-set provider cases in `test/globalSearch.test.ts`. DB-backed files skip themselves when `POSTGRES_TEST_DATABASE_URL`/`DATABASE_URL` does not point at a migrated database whose name contains "test".
+
+To run them against a private, throwaway cluster (never the live databases): `initdb -D $DIR/data -U lead --auth=trust`, `pg_ctl -D $DIR/data -o "-p 56434 -k $DIR -c listen_addresses=127.0.0.1 -c fsync=off" start`, `createdb -h 127.0.0.1 -p 56434 -U lead lead_test`, `DATABASE_URL=postgresql://lead@127.0.0.1:56434/lead_test bunx prisma migrate deploy`, then `POSTGRES_TEST_DATABASE_URL=$DATABASE_URL bun test <file>`; a throwaway `valkey-server --port 56379 --save ""` covers the Redis-backed suites. Stop and delete both when done.

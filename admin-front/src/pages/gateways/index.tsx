@@ -30,6 +30,7 @@ import { FormChecklist } from "@/components/ui/FormChecklist";
 import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { SectionFields } from "@/components/SectionFields";
+import GatewayHealthDrawer from "./components/GatewayHealthDrawer";
 const ROLLBACK_CHECKS = [
     { key: "TARGET_VERSION_VERIFIED", label: "Target version verified" },
     { key: "GATES_VERIFIED", label: "Rollback target gates verified" },
@@ -112,6 +113,7 @@ const GatewaysPage = dc(() => {
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
     const createOpen = ref(false);
+    const healthGateway = ref<{ id: string; name: string } | null>(null);
     const rollbackOpen = ref(false);
     const rollbackGateway = ref<Gateway | null>(null);
     const rollbackTarget = ref("");
@@ -437,6 +439,12 @@ const GatewaysPage = dc(() => {
                     }}
                     items={[
                         {
+                            key: "health",
+                            label: t("Health & telemetry"),
+                            icon: "mdi-heart-pulse",
+                            onClick: () => void (healthGateway.value = { id: row.id, name: `${row.name} (${row.code})` }),
+                        },
+                        {
                             key: "rollback",
                             label: t("Rollback"),
                             icon: "mdi-history",
@@ -550,6 +558,12 @@ const GatewaysPage = dc(() => {
                     )}
                 />
             </ThemedView>
+
+            <GatewayHealthDrawer
+                gatewayId={healthGateway.value?.id ?? null}
+                gatewayName={healthGateway.value?.name ?? ""}
+                onClose={() => (healthGateway.value = null)}
+            />
 
             <FormModal
                 modelValue={rollbackOpen.value}

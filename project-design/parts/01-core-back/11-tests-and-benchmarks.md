@@ -3,7 +3,7 @@ id: core.tests
 title: Tests and Benchmarks
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-06
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/test/**
@@ -27,6 +27,10 @@ tests:
   - core-back/test/security-regressions/m4-idempotency.test.ts
   - core-back/test/security-regressions/m9-m12-upload-kyb.test.ts
   - core-back/test/security-regressions/m10-ssrf.test.ts
+  - core-back/test/admin-commerce.test.ts
+  - core-back/test/admin-slice/**
+  - core-back/test/security-regressions/commerce-status-enforcement.test.ts
+  - core-back/test/commission-tiers.test.ts
 gaps:
   - The historical 38,500+ assertion target is not met; the working tree has about 1,964 literal test declarations.
   - `core-back/test/exhaustive/09-storage-backup/` does not exist; the runner substitutes storage-engine and backup-admin suites.
@@ -415,3 +419,9 @@ Database-backed suites require PostgreSQL 18; Redis-backed suites require Redis.
 New suites in `core-back/test/security-regressions/`: `c1-forged-success`, `c2-mfa`, `h1h2-authz`, `h3-admin-users-and-approvals`, `h4-cashout`, `h7-rounding`, `h8-webhook`, `m4-idempotency`, `m9-m12-upload-kyb`, `m10-ssrf`. Existing tests that asserted insecure behaviour were updated (for example the RBAC fuzz now mints well-formed tokens).
 
 Known gaps: true concurrency needs PostgreSQL 18 and is not exercised; the RetentionWorker fake parser (`test/helpers/retentionFake.ts`) cannot parse the new InvariantVerifier query (test drift, not a product bug).
+
+## Admin UI completion suites (2026-11-06)
+
+New core suites: `test/admin-commerce.test.ts` (22, DB-backed: redaction, immediate-vs-approval transitions, executors, owner PII, revalidation, intake enforcement over real routers), `test/security-regressions/commerce-status-enforcement.test.ts` (10, no DB: LIVE/SANDBOX gate matrix, guard pipeline creates no attempt for a suspended application or frozen wallet, source tripwires on every intake path), `test/admin-slice/admin-ledger|operations|system.test.ts` (7 + 7 + 13, DB-backed, harness in `test/admin-slice/harness.ts`), `test/admin-slice/admin-rails-routes.test.ts` (3, DB-backed through the REAL admin router with real signed admin sessions), `test/commission-tiers.test.ts` (7, no DB) and the credential-set provider cases in `test/globalSearch.test.ts`. DB-backed files skip themselves when `POSTGRES_TEST_DATABASE_URL`/`DATABASE_URL` does not point at a migrated database whose name contains "test".
+
+To run them against a private, throwaway cluster (never the live databases): `initdb -D $DIR/data -U lead --auth=trust`, `pg_ctl -D $DIR/data -o "-p 56434 -k $DIR -c listen_addresses=127.0.0.1 -c fsync=off" start`, `createdb -h 127.0.0.1 -p 56434 -U lead lead_test`, `DATABASE_URL=postgresql://lead@127.0.0.1:56434/lead_test bunx prisma migrate deploy`, then `POSTGRES_TEST_DATABASE_URL=$DATABASE_URL bun test <file>`; a throwaway `valkey-server --port 56379 --save ""` covers the Redis-backed suites. Stop and delete both when done.

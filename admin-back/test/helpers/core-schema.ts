@@ -601,6 +601,7 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       capabilities: z.record(z.string().max(40), z.boolean()).optional(),
       instructionsAr: z.string().max(2000).optional(),
       instructionsEn: z.string().max(2000).optional(),
+      logoAssetId: z.string().uuid().nullable().optional(),
       checklist: z
         .array(
           z.enum([
@@ -687,6 +688,11 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       dailyCapAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
       scope: z.record(z.string().max(64), z.unknown()).optional(),
       costModel: z.record(z.string().max(64), z.unknown()).optional(),
+      mismatchPolicy: z.record(z.string().max(64), z.unknown()).optional(),
+      maintenanceWindows: z
+        .array(z.object({ start: z.string().min(10).max(64), end: z.string().min(10).max(64) }).catchall(z.unknown()))
+        .max(50)
+        .optional(),
     })
     .strict(),
   "POST /routes/:id/state": z
@@ -834,7 +840,9 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       calcType: z.enum(["FLAT", "PERCENTAGE", "TIERED", "HYBRID"]),
       flatFee: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).default("0.0000"),
       percentageRate: z.string().regex(/^\d{1,6}(\.\d{1,6})?$/).default("0.000000"),
-      tiersJson: z.record(z.string().max(64), z.unknown()).optional(),
+      tiersJson: z
+        .union([z.array(z.record(z.string().max(64), z.unknown())).max(20), z.record(z.string().max(64), z.unknown())])
+        .optional(),
       minFee: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).default("0.0000"),
       maxFee: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
       feeBearerDefault: z

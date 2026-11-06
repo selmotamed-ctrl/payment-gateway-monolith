@@ -35,6 +35,8 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { SectionFields } from "@/components/SectionFields";
+import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
+import { LedgerRefLink } from "@/components/ledger/LedgerRefLink";
 type Cashout = {
     id: string;
     merchantId: string;
@@ -126,6 +128,7 @@ const CashoutsPage = dc(() => {
     const { t } = useLocale();
     const showChecklists = areChecklistsVisible();
     const router = useRouter();
+    const journalEntryId = ref<string | null>(null);
     const rows = ref<Cashout[]>([]);
     const total = ref(0);
     const summary = ref<CashoutSummary | null>(null);
@@ -647,7 +650,7 @@ const CashoutsPage = dc(() => {
                                     { label: t("Adjustment state"), value: selected.value.adjustmentState || "—" },
                                     { label: t("Adjustment amount"), value: <MoneyDisplay amount={selected.value.adjustmentAmount} currency={selected.value.currency} size="sm" colorSign /> },
                                     { label: t("Adjustment reason"), value: selected.value.adjustmentReason || "—" },
-                                    { label: t("Journal entry"), value: <MonoRef value={selected.value.adjustmentJournalEntryId ?? ""} /> },
+                                    { label: t("Journal entry"), value: <LedgerRefLink value={selected.value.adjustmentJournalEntryId ?? ""} truncate={22} label={t("Open journal entry")} onOpen={(id: string) => (journalEntryId.value = id)} /> },
                                 ]} />
                             </ThemedView>
                         </ThemedView>
@@ -702,6 +705,7 @@ const CashoutsPage = dc(() => {
                     </FormField>
                 </SectionFields>
             </FormModal>
+            {journalEntryId.value && <JournalEntryDrawer entryId={journalEntryId.value} onClose={() => (journalEntryId.value = null)} />}
         </ScreenContainer>
     );
 });

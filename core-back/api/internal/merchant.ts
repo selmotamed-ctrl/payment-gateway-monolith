@@ -4,6 +4,7 @@ import * as ipaddr from "ipaddr.js";
 import { z } from "zod";
 import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
+import { assertCommerceActive, assertPosTerminalActive } from "../../lib/commerceStatus";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { detectDuplicateFlags, nationalIdHash, payoutAccountHash } from "../../lib/joinRequestOnboarding";
@@ -1681,6 +1682,12 @@ const createLink = async (merchantId: string, body: z.infer<typeof linkCreateSch
   if (!merchant) {
     throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
   }
+  // A suspended application or a frozen wallet can not take in new payment links.
+  assertCommerceActive({
+    applicationStatus: application.status,
+    walletStatus: wallet.status,
+    env: merchant.status === "ACTIVE" ? "LIVE" : "SANDBOX",
+  });
   const key = `pl_${randomBytes(12).toString("base64url")}`;
   const link = await client.paymentLink.create({
     data: {
@@ -2676,6 +2683,11 @@ router.patch("/pos/terminals/:id", async (request: Request, response: Response) 
   if (!terminal) {
     throw new ApiError(404, "POS_TERMINAL_NOT_FOUND", "The POS terminal does not exist");
   }
+  // A BLOCKED terminal is a staff decision: only an approved admin
+  // reactivation lifts it, never the merchant's own PATCH.
+  if (terminal.status === "BLOCKED" && body.status !== undefined && body.status !== "BLOCKED") {
+    throw new ApiError(409, "POS_TERMINAL_BLOCKED", "A blocked terminal can only be reactivated by the platform");
+  }
   const updated = await client.posTerminal.update({
     where: { id: terminal.id },
     data: { name: body.name, location: body.location, status: body.status },
@@ -2691,6 +2703,7 @@ router.post("/pos/terminals/:id/screens", async (request: Request, response: Res
   if (!terminal) {
     throw new ApiError(404, "POS_TERMINAL_NOT_FOUND", "The POS terminal does not exist");
   }
+  assertPosTerminalActive(terminal.status);
   const screenCode = `scr_${randomBytes(9).toString("base64url")}`;
   const authToken = randomBytes(24).toString("base64url");
   const screen = await client.posScreen.create({
@@ -2715,11 +2728,13 @@ router.get("/pos/screens/:screenCode/stream", async (request: Request, response:
   const screenCode = String(request.params.screenCode ?? "");
   const screen = await client.posScreen.findFirst({
     where: { screenCode, pos: { application: { merchantId } } },
-    select: { id: true },
+    select: { id: true, posId: true, pos: { select: { status: true } } },
   });
   if (!screen) {
     throw new ApiError(404, "POS_SCREEN_NOT_FOUND", "The POS screen does not exist");
   }
+  // A screen of an inactive or blocked terminal does not authenticate.
+  assertPosTerminalActive(screen.pos.status);
   let lastHeartbeatAt = 0;
   response.setHeader("content-type", "text/event-stream");
   response.setHeader("cache-control", "no-cache, no-transform");
@@ -2756,6 +2771,12 @@ router.get("/pos/screens/:screenCode/stream", async (request: Request, response:
     // open screen (nothing reads last_active_at at finer resolution).
     if (Date.now() - lastHeartbeatAt >= 60_000) {
       lastHeartbeatAt = Date.now();
+      // A terminal deactivated or blocked while the stream is open ends it.
+      const terminal = await client.posTerminal.findUnique({ where: { id: screen.posId }, select: { status: true } });
+      if (terminal?.status !== "ACTIVE") {
+        response.end();
+        return;
+      }
       await client.posScreen.update({ where: { id: screen.id }, data: { lastActiveAt: new Date() }, select: { id: true } });
     }
     // Filter on the merchant_id column ([merchant_id, created_at] index)

@@ -19,6 +19,7 @@ export const V1_SEARCH_TYPES = [
     "gateway",
     "rail",
     "route",
+    "credential_set",
 ] as const;
 
 export type BuiltinSearchType = (typeof V1_SEARCH_TYPES)[number];

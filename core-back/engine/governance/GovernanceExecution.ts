@@ -1,4 +1,5 @@
 import { Decimal } from "decimal.js";
+import { Prisma } from "../../generated/prisma/client";
 import { ApiError } from "../../lib/error";
 import { lockWalletLedgerBalance } from "../../lib/cashoutBalance";
 import { payoutAccountHash } from "../../lib/joinRequestOnboarding";
@@ -1072,6 +1073,239 @@ export async function executeVelocityRuleDeactivation(
     entityId: updated.id,
     beforeJson: { active: rule.active, effectiveTo: rule.effectiveTo?.toISOString() ?? null },
     afterJson: { active: false, effectiveTo: effectiveTo.toISOString() },
+    approvalRequestId: input.approvalId,
+  });
+  return { status: "EXECUTED", entityId: updated.id, idempotent: false };
+}
+
+/**
+ * Unfreezes a wallet (FROZEN -> ACTIVE) after a checker approves it.
+ *
+ * Freezing is immediate and audited; only the loosening direction is a
+ * maker-checker change. The current state is re-validated here, never trusted
+ * from the moment the approval was requested.
+ */
+export async function executeWalletStatusChange(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    approvalId: string;
+    walletId: string;
+    payload: unknown;
+    checkerUserId: string;
+    checkerRole: string;
+  },
+): Promise<GovernanceExecutionResult> {
+  const wallets = modelOf(tx, "wallet");
+  const wallet = await wallets.findUnique({ where: { id: input.walletId } });
+  if (!wallet) {
+    throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
+  }
+  const payload = asRecord(input.payload);
+  const target = String(payload.toStatus ?? payload.status ?? "ACTIVE").toUpperCase();
+  if (target !== "ACTIVE") {
+    throw new ApiError(400, "WALLET_APPROVAL_PAYLOAD_INVALID", "Only a reactivation is executed through an approval");
+  }
+  if (wallet.status === "ACTIVE") {
+    return { status: "EXECUTED", entityId: wallet.id, idempotent: true };
+  }
+  if (wallet.status !== "FROZEN") {
+    throw new ApiError(409, "WALLET_STATE_CHANGED", "The wallet is no longer frozen", {
+      currentStatus: wallet.status,
+    });
+  }
+  const updated = await wallets.update({ where: { id: wallet.id }, data: { status: "ACTIVE" } });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "WALLET_UNFROZEN",
+    entityType: "WALLET",
+    entityId: updated.id,
+    beforeJson: { status: wallet.status },
+    afterJson: { status: "ACTIVE", reason: payload.reason ?? null },
+    approvalRequestId: input.approvalId,
+  });
+  return { status: "EXECUTED", entityId: updated.id, idempotent: false };
+}
+
+/**
+ * Reactivates a POS terminal (INACTIVE/BLOCKED -> ACTIVE) after approval.
+ */
+export async function executePosTerminalStatusChange(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    approvalId: string;
+    terminalId: string;
+    payload: unknown;
+    checkerUserId: string;
+    checkerRole: string;
+  },
+): Promise<GovernanceExecutionResult> {
+  const terminals = modelOf(tx, "posTerminal");
+  const terminal = await terminals.findUnique({ where: { id: input.terminalId } });
+  if (!terminal) {
+    throw new ApiError(404, "POS_TERMINAL_NOT_FOUND", "The POS terminal does not exist");
+  }
+  const payload = asRecord(input.payload);
+  const target = String(payload.toStatus ?? payload.status ?? "ACTIVE").toUpperCase();
+  if (target !== "ACTIVE") {
+    throw new ApiError(400, "POS_TERMINAL_APPROVAL_PAYLOAD_INVALID", "Only a reactivation is executed through an approval");
+  }
+  if (terminal.status === "ACTIVE") {
+    return { status: "EXECUTED", entityId: terminal.id, idempotent: true };
+  }
+  if (payload.fromStatus !== undefined && payload.fromStatus !== null && payload.fromStatus !== terminal.status) {
+    throw new ApiError(409, "POS_TERMINAL_STATE_CHANGED", "The POS terminal changed after the approval was requested", {
+      expected: payload.fromStatus,
+      currentStatus: terminal.status,
+    });
+  }
+  const updated = await terminals.update({ where: { id: terminal.id }, data: { status: "ACTIVE" } });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "POS_TERMINAL_STATUS_CHANGED",
+    entityType: "POS_TERMINAL",
+    entityId: updated.id,
+    beforeJson: { status: terminal.status },
+    afterJson: { status: "ACTIVE", reason: payload.reason ?? null },
+    approvalRequestId: input.approvalId,
+  });
+  return { status: "EXECUTED", entityId: updated.id, idempotent: false };
+}
+
+const stringListOrNull = (value: unknown): string[] | null => {
+  if (value === null) return null;
+  if (!Array.isArray(value)) {
+    throw new ApiError(400, "APPLICATION_APPROVAL_PAYLOAD_INVALID", "A list of strings was expected");
+  }
+  return [...new Set(value.map((entry) => String(entry)))];
+};
+
+/**
+ * Applies an application change that loosens what the application may accept:
+ * SUSPENDED -> ACTIVE, a new rail whitelist, a new redirect allowlist or a new
+ * settlement wallet. Everything is re-validated against the current rows.
+ */
+export async function executeApplicationChange(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    approvalId: string;
+    applicationId: string;
+    payload: unknown;
+    checkerUserId: string;
+    checkerRole: string;
+  },
+): Promise<GovernanceExecutionResult> {
+  const applications = modelOf(tx, "application");
+  const application = await applications.findUnique({ where: { id: input.applicationId } });
+  if (!application) {
+    throw new ApiError(404, "APPLICATION_NOT_FOUND", "The application does not exist");
+  }
+  const payload = asRecord(input.payload);
+  const data: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  const before: Record<string, unknown> = {};
+
+  if (payload.baseUpdatedAt !== undefined && payload.baseUpdatedAt !== null) {
+    const current = application.updatedAt instanceof Date ? application.updatedAt.toISOString() : null;
+    if (current !== null && current !== payload.baseUpdatedAt) {
+      throw new ApiError(409, "APPLICATION_STATE_CHANGED", "The application changed after the approval was requested", {
+        expected: payload.baseUpdatedAt,
+        current,
+      });
+    }
+  }
+  if (payload.fromStatus !== undefined && payload.fromStatus !== null && payload.fromStatus !== application.status) {
+    throw new ApiError(409, "APPLICATION_STATE_CHANGED", "The application status changed after the approval was requested", {
+      expected: payload.fromStatus,
+      currentStatus: application.status,
+    });
+  }
+
+  if (payload.status !== undefined && payload.status !== null) {
+    const target = String(payload.status).toUpperCase();
+    if (target !== "ACTIVE") {
+      throw new ApiError(400, "APPLICATION_APPROVAL_PAYLOAD_INVALID", "Only a reactivation is executed through an approval");
+    }
+    if (application.status !== "ACTIVE") {
+      if (application.status !== "SUSPENDED") {
+        throw new ApiError(409, "APPLICATION_STATE_CHANGED", "Only a suspended application can be reactivated", {
+          currentStatus: application.status,
+        });
+      }
+      data.status = "ACTIVE";
+      before.status = application.status;
+      after.status = "ACTIVE";
+    }
+  }
+  if (payload.assignedWalletId !== undefined && payload.assignedWalletId !== null) {
+    const wallet = await modelOf(tx, "wallet").findUnique({ where: { id: String(payload.assignedWalletId) } });
+    if (!wallet || wallet.merchantId !== application.merchantId) {
+      throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist for this merchant");
+    }
+    const currentWallet = await modelOf(tx, "wallet").findUnique({ where: { id: application.assignedWalletId } });
+    if (currentWallet && currentWallet.currency !== wallet.currency) {
+      throw new ApiError(409, "WALLET_CURRENCY_MISMATCH", "The new wallet must use the same currency as the current one");
+    }
+    if (wallet.status !== "ACTIVE") {
+      throw new ApiError(409, "WALLET_NOT_ACTIVE", "The application can only be assigned to an active wallet");
+    }
+    if (wallet.id !== application.assignedWalletId) {
+      data.assignedWalletId = wallet.id;
+      before.assignedWalletId = application.assignedWalletId;
+      after.assignedWalletId = wallet.id;
+    }
+  }
+  if (Object.hasOwn(payload, "railWhitelist")) {
+    const rails = stringListOrNull(payload.railWhitelist);
+    if (rails !== null && rails.length > 0) {
+      const known = await modelOf(tx, "rail").findMany({ where: { code: { in: rails } }, select: { code: true } });
+      const knownCodes = new Set(known.map((rail: { code: string }) => rail.code));
+      const unknown = rails.filter((code) => !knownCodes.has(code));
+      if (unknown.length > 0) {
+        throw new ApiError(409, "RAIL_NOT_FOUND", "The rail whitelist contains an unknown rail", { unknown });
+      }
+    }
+    data.railWhitelist = rails === null ? Prisma.DbNull : rails;
+    before.railWhitelist = application.railWhitelist ?? null;
+    after.railWhitelist = rails;
+  }
+  if (Object.hasOwn(payload, "redirectDomainAllowlist")) {
+    const domains = stringListOrNull(payload.redirectDomainAllowlist) ?? [];
+    data.redirectDomainAllowlist = domains;
+    before.redirectDomainAllowlist = application.redirectDomainAllowlist ?? null;
+    after.redirectDomainAllowlist = domains;
+  }
+  for (const field of ["name", "businessUseDescription"] as const) {
+    if (typeof payload[field] === "string" && payload[field] !== application[field]) {
+      data[field] = payload[field];
+      before[field] = application[field] ?? null;
+      after[field] = payload[field];
+    }
+  }
+  if (typeof payload.expectedMonthlyVolume === "string") {
+    data.expectedMonthlyVolume = new Decimal(payload.expectedMonthlyVolume).toFixed(4);
+    before.expectedMonthlyVolume = application.expectedMonthlyVolume === undefined
+      ? null
+      : new Decimal(String(application.expectedMonthlyVolume)).toFixed(4);
+    after.expectedMonthlyVolume = data.expectedMonthlyVolume;
+  }
+
+  if (Object.keys(data).length === 0) {
+    return { status: "EXECUTED", entityId: application.id, idempotent: true };
+  }
+  const updated = await applications.update({ where: { id: application.id }, data });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: data.status === "ACTIVE" ? "APPLICATION_REACTIVATED" : "APPLICATION_UPDATED",
+    entityType: "APPLICATION",
+    entityId: updated.id,
+    beforeJson: before,
+    afterJson: { ...after, reason: payload.reason ?? null },
     approvalRequestId: input.approvalId,
   });
   return { status: "EXECUTED", entityId: updated.id, idempotent: false };
@@ -3401,6 +3635,33 @@ export async function executeApprovalSubject(
     return executeVelocityRuleDeactivation(ctx, tx, {
       approvalId: input.approval.id,
       ruleId: input.approval.subjectId,
+      payload: input.approval.payloadDiffJson,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "WALLET") {
+    return executeWalletStatusChange(ctx, tx, {
+      approvalId: input.approval.id,
+      walletId: input.approval.subjectId,
+      payload: input.approval.payloadDiffJson,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "APPLICATION") {
+    return executeApplicationChange(ctx, tx, {
+      approvalId: input.approval.id,
+      applicationId: input.approval.subjectId,
+      payload: input.approval.payloadDiffJson,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "POS_TERMINAL") {
+    return executePosTerminalStatusChange(ctx, tx, {
+      approvalId: input.approval.id,
+      terminalId: input.approval.subjectId,
       payload: input.approval.payloadDiffJson,
       checkerUserId: input.checkerUserId,
       checkerRole: input.checkerRole,

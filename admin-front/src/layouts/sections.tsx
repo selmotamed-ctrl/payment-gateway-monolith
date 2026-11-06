@@ -75,6 +75,18 @@ export const useSections = () => {
                     icon: "mdi-storefront-outline",
                     if: () => hasOneOfAuthorities(["merchants.read", "support.read_merchant"]),
                 },
+                {
+                    label: t("Wallets"),
+                    name: "Wallets",
+                    icon: "mdi-wallet-outline",
+                    if: () => canOpenRoute("Wallets"),
+                },
+                {
+                    label: t("Applications & Channels"),
+                    name: "Applications",
+                    icon: "mdi-application-cog-outline",
+                    if: () => canOpenRoute("Applications"),
+                },
             ],
         },
         {
@@ -130,6 +142,12 @@ export const useSections = () => {
             icon: "mdi-cog-outline",
             routes: [
                 {
+                    label: t("Transactions & Webhooks"),
+                    name: "Transactions",
+                    icon: "mdi-swap-horizontal-circle-outline",
+                    if: () => canOpenRoute("Transactions"),
+                },
+                {
                     label: t("Operator Cases"),
                     name: "OperatorCases",
                     icon: "mdi-lifebuoy",
@@ -172,6 +190,12 @@ export const useSections = () => {
                     if: () => hasOneOfAuthorities(["security:read", "gateway:read"]),
                 },
                 {
+                    label: t("Jobs & Outbox"),
+                    name: "JobsOutbox",
+                    icon: "mdi-tray-full",
+                    if: () => canOpenRoute("JobsOutbox"),
+                },
+                {
                     label: t("Platform Settings"),
                     name: "AdminPlatformSettings",
                     icon: "mdi-cog-transfer-outline",
@@ -208,7 +232,13 @@ export const useSections = () => {
                     if: () => hasOneOfAuthorities(["liquidity.read"]),
                 },
                 {
-                    label: t("Invariant"),
+                    label: t("Journal Entries"),
+                    name: "JournalEntries",
+                    icon: "mdi-book-open-page-variant-outline",
+                    if: () => canOpenRoute("JournalEntries"),
+                },
+                {
+                    label: t("Ledger Audit & Invariant"),
                     name: "Invariant",
                     icon: "mdi-scale-balance",
                     if: () => hasOneOfAuthorities(["profit.read", "liquidity.read"]),
@@ -224,6 +254,12 @@ export const useSections = () => {
                     name: "Gateways",
                     icon: "mdi-router",
                     if: () => hasOneOfAuthorities(["gateways.edit"]),
+                },
+                {
+                    label: t("Credential Sets"),
+                    name: "CredentialSets",
+                    icon: "mdi-key-chain-variant",
+                    if: () => canOpenRoute("CredentialSets"),
                 },
                 {
                     label: t("Rails"),
