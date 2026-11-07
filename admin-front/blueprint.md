@@ -822,7 +822,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ## Admin Guide and Academy
 
-> Status: `partial` · Last verified: 2026-11-06
+> Status: `partial` · Last verified: 2026-11-07
 
 ## 1. Purpose and scope
 
@@ -856,6 +856,8 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 
 The extractor output is deterministic and byte-stable. The content test re-runs it into a temporary directory and fails on drift, count changes, unresolved links, empty bodies, external URLs, missing context-map routes, missing widgets or a gzip total above 400 KB.
 
+`scripts/overhaul-guide-and-academy-clarity.ts` is the content clarity gate. It labels every bare inline `[[a:…]]` / `[[c:…]]` / `[[s:…]]` / `[[g:…]]` token outside tables with a short natural title, skips code fences, table rows and already-labelled links, and supports `--check` (used by `guide-content.test.ts`). Table cells stay unlabelled because a `|` inside a link label would split the markdown cell; the readers shorten bare table links at render time instead. Parenthetical reference dumps are removed at render time (see §3), so the canonical prose preserves the links. The clarity overhaul (2026-11-07) rewrote 101 Guide articles (Books 2 and 4–12; Books 0, 1, 3 and 13 untouched) so each opens with a `:::summary` "In plain words" callout and a plain-language opening, and rewrote 40 Academy lessons as self-contained 350–600 word tutorials (all 50 lessons are now in that form); it also added short labels on bare references. Counts, ids, headings, check ids, quiz structure and table rows are unchanged. Each rewrite was validated mechanically and then reviewed independently against the old text and the code; the factual corrections that review found are listed in `design/07-guides-and-academy/guide_content_fixes.md` and `academy_content_fixes.md`. The authoring standard is §10.
+
 ## 3. Guide reader and navigation
 
 Eight routes are registered with no authority gate:
@@ -872,6 +874,13 @@ Eight routes are registered with no authority gate:
 | `AdminGuideEdgeCases` | `/guide/edge-cases` | Filterable 140-case catalog |
 
 `MarkdownView` uses `markdown-it` (`html:false`, `linkify:false`) and adds callouts, diagram fences, table scrolling, stable heading ids, article/card/situation/glossary links, glossary auto-linking (first occurrence per article, never in headings, links, code or table headers) and widget placeholders. The glossary popover is keyboard reachable and focus-trapped.
+
+The clarity renderer adds:
+
+- **Automatic parenthetical extraction.** Parenthetical pointers such as `([[a:b06-12]])`, `(see [[a:b07-03]])` or `(see [[a:b06-05]], [[a:b06-07]])` are removed from the sentence, deduplicated and rendered in a per-`##`-section **Related** tray of typed pills (`Guide`, `Screen`, `Playbook`, `Term`). Meaningful parenthetical prose is preserved: `(called rails, see [[a:b02-06]])` becomes `(called rails)`. Links extracted this way carry `data-ref-kind` and `data-ref-id`.
+- **Short inline labels.** A bare `[[a:id]]` renders the target's short title (the clause before a colon, or at most 12 words) instead of dumping the full 10-to-15-word title into the sentence. The full title is still the anchor's `title` attribute.
+- **Summary and reference callouts.** `:::summary` renders a warm "In plain words" banner for a two-sentence orientation at the top of an article; `:::refs` renders a "Where to go next" callout whose links explain why the reader would follow them. Explicit `:::refs` links are excluded from the automatic section tray to avoid duplicates.
+- **Reference preview popover.** In the full reader (not compact embedded views), clicking a guide, screen or playbook pill opens a keyboard-accessible popover with the type badge, title, reading time or risk, a short plain-text body and two actions: **Stay here** and **Read full page →**. Compact views (`ContextHelpDrawer`, `SafeguardDialog`, Academy help drills) keep direct navigation so the hosting dialog is not covered.
 
 ## 4. Search and contextual help
 
@@ -1028,11 +1037,30 @@ imported by the companion; this part remains the authority for the web Guide/Aca
 
 ```bash
 cd admin-front && bun run content:guide && bun run content:academy && bun run type-check && bun run test:unit && bun run build
+bun scripts/overhaul-guide-and-academy-clarity.ts --check
 cd ../tests && bunx vitest run unit/guide- unit/academy-
 cd ../core-back && bun run typecheck && bun test test/academy-
 cd ../admin-back && bun run typecheck && bun test test/academy-progress.test.ts test/admin-surface.test.ts
 cd ../tests && bunx playwright test --project=admin e2e/admin/guide-*.spec.ts e2e/admin/academy-*.spec.ts   # needs a deployed stack
 ```
+
+## 10. Authoring standard (readability)
+
+Every new or edited Guide article and Academy lesson follows this standard. Readers range from an intern to the CEO and most read English as a second language, so articles are **layered**: the summary and tables serve the expert, the story and example serve the newcomer.
+
+**Article anatomy.** (1) `:::summary Big picture in 20 seconds`: at most two sentences, 45 words. (2) An opening in everyday terms (a situation the reader knows, or their real question), with at most one analogy, noting where it stops being true. (3) Short `###` sections whose headings say what they answer (never `##`). (4) A worked example with the shared cast wherever numbers or a sequence matter. (5) Reference tables only for lookup, each introduced by one sentence, at most five columns, no explanations hidden in cells. (6) Operator articles end with what you do and never do. (7) At most three callouts and an optional `:::refs` of at most three links, each with a reason to click.
+
+**Sentences.** Average at most 18 words, none over 28; one idea per sentence, four sentences per paragraph at most; active voice. Introduce a term in its own short sentence before using it; at most one parenthesis per paragraph. One name per concept; spell out abbreviations at first use; no idioms, no "simply/just/obviously". Code identifiers stay exact in backticks, but say what they mean in words first. LYD amounts use three decimals (25.500 LYD) and every example sum must be recomputed.
+
+**Links.** Inline links use a natural two-to-six word anchor that reads as part of the sentence; never a parenthetical link, never an article id in prose. Inside a table use a bare `[[a:id]]`. Every existing link target is kept.
+
+**Shared cast.** Layla (payer), Noon Mart (merchant), Sadad / MobiCash / Edfali (partner wallets), Ali (operator), Huda (finance), Omar (compliance). Default example: Layla pays 25.500 LYD for a phone case at Noon Mart with Sadad. Example roles must follow the approval matrix (`b04-05`). Invented numbers are labelled as examples.
+
+**Facts are sacred.** Rewriting changes readability only. Never add, drop, soften or strengthen a claim, state name, number, limit, role, screen name or safeguard. A claim the code contradicts is corrected only with evidence recorded in the `*_content_fixes.md` files; a disagreement between text and code that needs a product decision goes to `*_content_questions.md`.
+
+**Lessons.** Six headings in order (`You will be able to`, `Key ideas`, `A worked example`, `Common mistakes`, `Read now`, `Check yourself`); 350–600 words that a learner can pass without opening the Guide; every correct answer and the reason each wrong option is wrong is taught in the lesson; check ids and Read-now links unchanged.
+
+**Review before merging.** A mechanical diff (header, link targets, widgets, dropped numbers and code terms) is not enough: the rewrite of 101 articles and 50 lessons found 21 high-severity and about 67 medium problems (invented behaviour, wrong example roles, misleading analogies) only when a second reader compared old text, new text and the code.
 
 ## Backup and disaster-recovery content (2026-11-06)
 

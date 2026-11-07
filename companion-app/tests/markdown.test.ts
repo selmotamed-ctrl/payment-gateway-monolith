@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { lessonProse, renderMarkdown } from "@/lib/markdown";
+import {
+    extractParentheticalRefs,
+    firstProseParagraph,
+    lessonProse,
+    renderMarkdown,
+    shortTitle,
+} from "@/lib/markdown";
 import { loadBundle } from "./helpers";
 
 const bundle = loadBundle();
@@ -52,5 +58,78 @@ describe("markdown renderer", () => {
             .join("\n");
         const ids = [...html.matchAll(/<h[1-4] id="([^"]+)"/g)].map((match) => match[1]!);
         expect(new Set(ids).size).toBe(ids.length);
+    });
+});
+
+describe("reference clarity helpers", () => {
+    test("extracts pure parenthetical reference pointers", () => {
+        expect(extractParentheticalRefs("The core shows methods ([[a:b02-06]]).")).toEqual({
+            cleaned: "The core shows methods.",
+            refs: [{ kind: "a", id: "b02-06", label: undefined }],
+        });
+        expect(extractParentheticalRefs("Ask the partner (see [[a:b07-03]]).").refs).toEqual([
+            { kind: "a", id: "b07-03", label: undefined },
+        ]);
+        expect(
+            extractParentheticalRefs("Check both (see [[a:b06-05]], [[a:b06-07]]).").refs,
+        ).toHaveLength(2);
+    });
+
+    test("keeps meaningful parenthetical prose and removes only the pointer", () => {
+        expect(
+            extractParentheticalRefs(
+                "The core decides which methods to show (called *rails*, see [[a:b02-06]]).",
+            ),
+        ).toEqual({
+            cleaned:
+                "The core decides which methods to show (called *rails*).",
+            refs: [{ kind: "a", id: "b02-06", label: undefined }],
+        });
+    });
+
+    test("short labels never dump a long article title", () => {
+        expect(shortTitle("The visible-rails formula: why a customer sees a method")).toBe(
+            "The visible-rails formula",
+        );
+        expect(shortTitle("The engine: ten phases, steps, side effects and the retry boundary")).toBe(
+            "The engine",
+        );
+    });
+
+    test("renders summary and refs callouts and a section reference tray", () => {
+        const source = [
+            ":::summary Big picture",
+            "The whole point in one sentence.",
+            ":::",
+            "",
+            "## A section",
+            "Text with a pointer ([[a:b02-06]]).",
+            ":::refs",
+            "- [[a:b07-03|Runbook for UNKNOWN]]",
+            ":::",
+        ].join("\n");
+        const html = renderMarkdown(source, {
+            articles: [
+                { id: "b02-06", title: "The four layers: Gateway, Credential Set, Rail, Route" },
+                { id: "b07-03", title: "UNKNOWN: what it means and exactly what to do" },
+            ],
+        })
+            .map((segment) => segment.html ?? "")
+            .join("\n");
+        expect(html).toContain("callout-summary");
+        expect(html).toContain("In plain words");
+        expect(html).toContain("callout-refs");
+        expect(html).toContain("Runbook for UNKNOWN");
+        expect(html).toContain("section-refs");
+        expect(html).toContain('data-ref-kind="a"');
+        expect(html).toContain("The four layers");
+        expect(html).not.toContain("[[");
+    });
+
+    test("firstProseParagraph strips headings, links and callout markers", () => {
+        const paragraph = firstProseParagraph(
+            ":::summary Big picture\n## Heading\n\nThe amount comes from ([[a:b07-03|the link]]), not the customer.\n\nSecond paragraph.",
+        );
+        expect(paragraph).toBe("The amount comes from (the link), not the customer.");
     });
 });

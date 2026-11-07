@@ -10,17 +10,40 @@ import {
 import { useRouter } from "vue-router";
 import {
     loadArticles,
+    loadBooks,
     loadCards,
     loadGlossary,
     loadPlaybook,
+    type Article,
+    type Book,
     type Card,
     type Situation,
     type Term,
 } from "@/content/guide";
 import { createHeadingIdFactory } from "@/content/guide/slug";
 import { GlossaryPopover } from "./GlossaryPopover";
+import {
+    ReferencePreviewPopover,
+    type RefPreview,
+} from "./ReferencePreviewPopover";
+import {
+    extractParentheticalRefs,
+    firstProseParagraph,
+    shortTitle,
+    type CollectedRef,
+} from "./markdownRefs";
 
-const CALLOUT_TYPES = new Set(["note", "tip", "warning", "danger", "example", "do", "dont"]);
+const CALLOUT_TYPES = new Set([
+    "note",
+    "tip",
+    "warning",
+    "danger",
+    "example",
+    "do",
+    "dont",
+    "summary",
+    "refs",
+]);
 const CALLOUT_LABELS: Record<string, string> = {
     note: "Note",
     tip: "Tip",
@@ -29,6 +52,8 @@ const CALLOUT_LABELS: Record<string, string> = {
     example: "Example",
     do: "Do",
     dont: "Don't",
+    summary: "In plain words",
+    refs: "Where to go next",
 };
 const CALLOUT_ICONS: Record<string, string> = {
     note: "ℹ",
@@ -38,6 +63,14 @@ const CALLOUT_ICONS: Record<string, string> = {
     example: "▸",
     do: "✓",
     dont: "✕",
+    summary: "◆",
+    refs: "→",
+};
+const KIND_BADGES: Record<string, string> = {
+    a: "Guide",
+    c: "Screen",
+    s: "Playbook",
+    g: "Term",
 };
 
 const WIDGET_IDS = new Set([
@@ -79,6 +112,7 @@ interface RenderEnvironment {
     resolveLink: GuideLinkResolver;
     disableGlossaryLinks: boolean;
     glossaryPageSlug?: string;
+    articleId?: string;
 }
 
 const normalizeKey = (value: string): string => value.trim().toLocaleLowerCase();
@@ -103,8 +137,43 @@ const makeGlossaryRegex = (terms: Term[]): RegExp | null => {
     }
 };
 
-const createMarkdown = (): MarkdownItType => {
-    const md = new MarkdownIt({
+const renderRefTrayHtml = (
+    refs: CollectedRef[],
+    env: RenderEnvironment,
+    explicitRefs: Set<string>,
+): string => {
+    const unique = new Map<string, CollectedRef>();
+    for (const ref of refs) {
+        if (ref.kind === "a" && ref.id === env.articleId) continue;
+        const key = `${ref.kind}:${ref.id}`;
+        if (explicitRefs.has(key)) continue;
+        if (!unique.has(key)) unique.set(key, ref);
+    }
+    if (unique.size === 0) return "";
+
+    const pills = [...unique.values()]
+        .map((ref) => {
+            const link = env.resolveLink(ref.kind, ref.id, ref.label);
+            const label = ref.label || shortTitle(link.title || link.label);
+            const badge = KIND_BADGES[ref.kind] ?? "Link";
+            return `<a href="${escapeAttribute(link.href)}" class="guide-ref-pill guide-ref-pill--${escapeAttribute(
+                ref.kind,
+            )}" data-guide-link="true" data-ref-kind="${escapeAttribute(
+                ref.kind,
+            )}" data-ref-id="${escapeAttribute(ref.id)}" title="${escapeAttribute(
+                link.title,
+            )}"${
+                link.external ? ' target="_blank" rel="noreferrer"' : ""
+            }><span class="guide-ref-pill__badge">${escapeHtml(
+                badge,
+            )}</span><span class="guide-ref-pill__label">${escapeHtml(label)}</span></a>`;
+        })
+        .join("");
+
+    return `<aside class="guide-section-refs" aria-label="Related guides and screens"><span class="guide-section-refs__title">Related</span><div class="guide-section-refs__list">${pills}</div></aside>`;
+};
+
+const createMarkdown = (): MarkdownItType => {    const md = new MarkdownIt({
         html: false,
         linkify: false,
         typographer: false,
@@ -138,9 +207,14 @@ const createMarkdown = (): MarkdownItType => {
         const meta = (token.meta ?? {}) as { kind: string; id: string; label?: string };
         const resolver = (env as unknown as RenderEnvironment).resolveLink;
         const link = resolver(meta.kind, meta.id, meta.label || undefined);
-        return `<a href="${escapeAttribute(link.href)}" data-guide-link="true" title="${escapeAttribute(link.title)}"${
-            link.external ? ' target="_blank" rel="noreferrer"' : ""
-        }>${escapeHtml(link.label)}</a>`;
+        const label = meta.label || shortTitle(link.title || link.label);
+        return `<a href="${escapeAttribute(link.href)}" class="guide-inline-ref" data-guide-link="true" data-ref-kind="${escapeAttribute(
+            meta.kind,
+        )}" data-ref-id="${escapeAttribute(meta.id)}" title="${escapeAttribute(
+            link.title,
+        )}"${link.external ? ' target="_blank" rel="noreferrer"' : ""}>${escapeHtml(
+            label,
+        )}</a>`;
     };
 
     md.core.ruler.push("guide_heading_ids", (state: any) => {
@@ -276,25 +350,65 @@ const renderSegments = (
     const normalized = source.replace(/\r\n/g, "\n");
     const lines = normalized.split("\n");
     let buffer: string[] = [];
+    let sectionRefs: CollectedRef[] = [];
+    let explicitRefs = new Set<string>();
 
-    const flush = () => {
-        if (buffer.length === 0) return;
-        segments.push({ type: "html", html: md.render(buffer.join("\n"), env as any) });
-        buffer = [];
+    const flush = (includeRefTray = false) => {
+        if (buffer.length > 0) {
+            segments.push({ type: "html", html: md.render(buffer.join("\n"), env as any) });
+            buffer = [];
+        }
+        if (includeRefTray) {
+            const tray = renderRefTrayHtml(sectionRefs, env, explicitRefs);
+            if (tray) segments.push({ type: "html", html: tray });
+            sectionRefs = [];
+            explicitRefs = new Set<string>();
+        }
     };
 
     for (let index = 0; index < lines.length; index += 1) {
         const line = lines[index] ?? "";
-        const callout = /^:::([a-z]+)(?:\s+(.*))?$/.exec(line.trim());
+        const trimmed = line.trim();
+
+        if (trimmed.startsWith("```")) {
+            buffer.push(line);
+            index += 1;
+            while (index < lines.length) {
+                const codeLine = lines[index] ?? "";
+                buffer.push(codeLine);
+                index += 1;
+                if (codeLine.trim().startsWith("```")) break;
+            }
+            index -= 1;
+            continue;
+        }
+
+        if (/^##\s+/.test(trimmed)) {
+            flush(true);
+            buffer.push(line);
+            continue;
+        }
+
+        const callout = /^:::([a-z]+)(?:\s+(.*))?$/.exec(trimmed);
         const calloutType = callout?.[1];
         if (calloutType && CALLOUT_TYPES.has(calloutType)) {
-            flush();
+            flush(false);
             const type = calloutType;
             const title = callout[2]?.trim() ?? "";
             const inner: string[] = [];
             index += 1;
             while (index < lines.length && (lines[index] ?? "").trim() !== ":::") {
-                inner.push(lines[index] ?? "");
+                const innerLine = lines[index] ?? "";
+                if (type === "refs") {
+                    inner.push(innerLine);
+                    for (const match of innerLine.matchAll(/(\[\[([acgs]):([a-z0-9-]+)(?:\|[^\]]+)?\]\])/g)) {
+                        explicitRefs.add(`${match[2]}:${match[3]}`);
+                    }
+                } else {
+                    const extracted = extractParentheticalRefs(innerLine);
+                    inner.push(extracted.cleaned);
+                    sectionRefs.push(...extracted.refs);
+                }
                 index += 1;
             }
             const innerHtml = md.render(inner.join("\n"), env as any);
@@ -308,15 +422,20 @@ const renderSegments = (
             });
             continue;
         }
-        const widget = /^\{\{widget:([a-z0-9-]+)\}\}$/.exec(line.trim());
+
+        const widget = /^\{\{widget:([a-z0-9-]+)\}\}$/.exec(trimmed);
         if (widget && WIDGET_IDS.has(widget[1] ?? "")) {
-            flush();
+            flush(false);
             segments.push({ type: "widget", widgetId: widget[1] });
             continue;
         }
-        buffer.push(line);
+
+        const extracted = extractParentheticalRefs(line);
+        buffer.push(extracted.cleaned);
+        sectionRefs.push(...extracted.refs);
     }
-    flush();
+
+    flush(true);
     return segments;
 };
 
@@ -336,11 +455,14 @@ export const MarkdownView = defineComponent({
     setup(props) {
         const router = useRouter();
         const terms = ref<Term[]>([]);
-        const articles = ref<{ id: string; title: string }[]>([]);
+        const articles = ref<Article[]>([]);
+        const books = ref<Book[]>([]);
         const cards = ref<Card[]>([]);
         const situations = ref<Situation[]>([]);
         const selectedTerm = ref<Term | null>(null);
         const anchor = ref<DOMRect | null>(null);
+        const selectedPreview = ref<RefPreview | null>(null);
+        const previewAnchor = ref<DOMRect | null>(null);
 
         const md = createMarkdown();
 
@@ -390,15 +512,17 @@ export const MarkdownView = defineComponent({
         });
 
         onMounted(async () => {
-            const [loadedTerms, loadedArticles, loadedCards, loadedSituations] =
+            const [loadedTerms, loadedArticles, loadedBooks, loadedCards, loadedSituations] =
                 await Promise.all([
                     loadGlossary().catch(() => []),
                     loadArticles("en").catch(() => []),
+                    loadBooks().catch(() => []),
                     loadCards().catch(() => []),
                     loadPlaybook().catch(() => []),
                 ]);
             terms.value = loadedTerms;
-            articles.value = loadedArticles.map(({ id, title }) => ({ id, title }));
+            articles.value = loadedArticles;
+            books.value = loadedBooks;
             cards.value = loadedCards;
             situations.value = loadedSituations;
         });
@@ -418,9 +542,58 @@ export const MarkdownView = defineComponent({
                 resolveLink: resolver.value,
                 disableGlossaryLinks: props.disableGlossaryLinks,
                 glossaryPageSlug: props.glossaryPageSlug || undefined,
+                articleId: props.articleId || undefined,
             };
             return renderSegments(md, props.source, env);
         });
+
+        const openReferencePreview = (kind: string, id: string, href: string): boolean => {
+            if (kind === "a") {
+                const article = articles.value.find((entry) => entry.id === id);
+                if (!article) return false;
+                const book = books.value.find((entry) => entry.id === String(article.book));
+                selectedTerm.value = null;
+                selectedPreview.value = {
+                    kindLabel: book
+                        ? `Book ${book.id} · ${book.title}`
+                        : `Book ${article.book}`,
+                    title: article.title,
+                    subtitle: `${article.minutes} min read`,
+                    body: firstProseParagraph(article.plainText || article.body),
+                    href,
+                };
+                return true;
+            }
+            if (kind === "c") {
+                const card = cards.value.find((entry) => entry.id === id);
+                if (!card) return false;
+                selectedTerm.value = null;
+                selectedPreview.value = {
+                    kindLabel: `Screen card · ${card.screen}`,
+                    title: card.title,
+                    subtitle: `${card.risk} risk${card.irreversible ? " · irreversible" : ""}`,
+                    body: firstProseParagraph(card.body),
+                    href,
+                };
+                return true;
+            }
+            if (kind === "s") {
+                const situation = situations.value.find((entry) => entry.id === id);
+                if (!situation) return false;
+                selectedTerm.value = null;
+                selectedPreview.value = {
+                    kindLabel: "Incident playbook",
+                    title: situation.title,
+                    subtitle: `${situation.cases.length} linked case${
+                        situation.cases.length === 1 ? "" : "s"
+                    }`,
+                    body: firstProseParagraph(situation.body),
+                    href,
+                };
+                return true;
+            }
+            return false;
+        };
 
         const handleClick = (event: MouseEvent) => {
             const target = event.target as HTMLElement | null;
@@ -430,6 +603,8 @@ export const MarkdownView = defineComponent({
                 const slug = glossary.dataset.slug ?? "";
                 const term = termsBySlug.value.get(slug);
                 if (term) {
+                    selectedPreview.value = null;
+                    previewAnchor.value = null;
                     selectedTerm.value = term;
                     anchor.value = glossary.getBoundingClientRect();
                 }
@@ -438,6 +613,24 @@ export const MarkdownView = defineComponent({
             const link = target?.closest<HTMLAnchorElement>("a[data-guide-link]");
             if (link) {
                 const href = link.getAttribute("href") ?? "";
+                const refKind = link.dataset.refKind ?? "";
+                const refId = link.dataset.refId ?? "";
+                if (!props.compact && refKind === "g" && refId) {
+                    const term = termsBySlug.value.get(refId);
+                    if (term) {
+                        event.preventDefault();
+                        selectedPreview.value = null;
+                        previewAnchor.value = null;
+                        selectedTerm.value = term;
+                        anchor.value = link.getBoundingClientRect();
+                        return;
+                    }
+                }
+                if (!props.compact && refKind && refId && openReferencePreview(refKind, refId, href)) {
+                    event.preventDefault();
+                    previewAnchor.value = link.getBoundingClientRect();
+                    return;
+                }
                 if (href.startsWith("/guide/")) {
                     event.preventDefault();
                     void router.push(href);
@@ -469,6 +662,19 @@ export const MarkdownView = defineComponent({
                     onClose={() => {
                         selectedTerm.value = null;
                         anchor.value = null;
+                    }}
+                />
+                <ReferencePreviewPopover
+                    preview={selectedPreview.value}
+                    anchor={previewAnchor.value}
+                    onClose={() => {
+                        selectedPreview.value = null;
+                        previewAnchor.value = null;
+                    }}
+                    onOpen={(href) => {
+                        selectedPreview.value = null;
+                        previewAnchor.value = null;
+                        if (href.startsWith("/")) void router.push(href);
                     }}
                 />
             </div>
