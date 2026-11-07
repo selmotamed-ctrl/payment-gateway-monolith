@@ -204,15 +204,13 @@ describeDb("Suite 01 · boundary round-trips", () => {
             expect(true).toBe(true);
             return;
           }
-          if (
-            (table === "journal_lines")
-            || (table === "gl_accounts" && columnName === "checkpoint_balance")
-          ) {
-            // These two columns feed the continuous double-entry invariant.
+          if (table === "journal_lines") {
+            // A journal line feeds the continuous double-entry invariant.
             // A single boundary write is intentionally not made here because
             // the exhaustive files run in parallel against one database and a
             // transient one-legged line / checkpoint would be observed by a
             // peer suite. The CHECK constraints and the ledger suite cover them.
+            // (A shard checkpoint does not feed the invariant: it is round-tripped below and removed again.)
             expect(true).toBe(true);
             return;
           }
@@ -228,16 +226,21 @@ describeDb("Suite 01 · boundary round-trips", () => {
             expect(rejected).toBe(true);
             return;
           }
+          // gl_shard_checkpoints has a composite key (gl_account_id, shard_id) and no id column; the factory creates the
+          // account, the shard row (FK) and then the checkpoint row on top of it.
+          const composite = table === "gl_shard_checkpoints";
           const row = await createRow(table, { [columnName]: value });
+          const where = composite ? '"gl_account_id" = $1 AND "shard_id" = $2' : '"id" = $1';
+          const keys = composite ? [row.gl_account_id, row.shard_id] : [row.id];
           const rows = (await db.$queryRawUnsafe(
-            `SELECT CAST("${columnName}" AS TEXT) AS value FROM "${table}" WHERE "id" = $1`,
-            row.id,
+            `SELECT CAST("${columnName}" AS TEXT) AS value FROM "${table}" WHERE ${where}`,
+            ...keys,
           )) as Array<{ value: string }>;
           expect(rows[0]?.value).toBe(value);
-          // The boundary rows are removed immediately: a checkpoint balance or
-          // a one-legged journal line would (correctly) break the continuous
-          // double-entry invariant of the shared test database.
-          await db.$executeRawUnsafe(`DELETE FROM "${table}" WHERE "id" = $1`, row.id).catch(() => undefined);
+          // The boundary rows are removed immediately: a one-legged journal line
+          // would (correctly) break the continuous double-entry invariant of the
+          // shared test database.
+          await db.$executeRawUnsafe(`DELETE FROM "${table}" WHERE ${where}`, ...keys).catch(() => undefined);
         });
       }
     }

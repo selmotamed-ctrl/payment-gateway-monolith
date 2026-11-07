@@ -101,23 +101,16 @@ export interface LiveAccountBalanceRow {
   accountType: string;
   /** Natural-sign balance (credit-normal accounts positive when in credit). */
   balance: string;
-  /** "shards" when gl_account_shards rows exist, otherwise "journal". */
-  source: "shards" | "journal";
+  /** Always "shards": every account has its shard rows (the `gl_accounts_create_shards` trigger). */
+  source: "shards";
 }
 
 /**
- * Live natural-sign balance of GL accounts in ONE statement.
+ * Live natural-sign balance of GL accounts in ONE statement: the sum of the account's shard rows.
  *
- * Precedence is the same as before: the `gl_account_shards` total when shard
- * rows exist; otherwise the checkpoint plus the journal lines posted AFTER the
- * checkpoint. Checkpoints are stored debit-positive (CheckpointService), so
- * the fallback is computed debit-positive and converted with the same rule as
- * the shard total. This replaces three divergent fallbacks: the merchant
- * balance route and `merchantWalletBalance` summed EVERY line on top of the
- * checkpoint (double counting the checkpointed window) and treated the
- * debit-positive checkpoint as credit-positive; the admin finance view looped
- * one journal query per account and mixed debit-positive fallbacks with
- * natural-sign shard totals.
+ * Every account has at least shard 0 (created with the account by a trigger), so there is no journal
+ * fallback any more and nothing to double count. An account that somehow has no shard rows reads 0.
+ * Shards are stored debit-positive; the sum is converted to the natural sign of the account type.
  */
 export const loadLiveAccountBalances = async (
   db: { $queryRawUnsafe?: (query: string, ...values: unknown[]) => Promise<unknown> },
@@ -133,8 +126,7 @@ export const loadLiveAccountBalances = async (
   const rows = await db.$queryRawUnsafe(
     `SELECT g.id::text AS id,
             g.account_type::text AS "accountType",
-            COALESCE(s.total, g.checkpoint_balance + COALESCE(l.delta, 0))::text AS raw,
-            (s.total IS NOT NULL) AS "fromShards"
+            COALESCE(s.total, 0)::text AS raw
      FROM gl_accounts g
      LEFT JOIN (
        SELECT gl_account_id, SUM(current_balance) AS total
@@ -142,23 +134,69 @@ export const loadLiveAccountBalances = async (
        ${filtered ? "WHERE gl_account_id = ANY($1::uuid[])" : ""}
        GROUP BY gl_account_id
      ) s ON s.gl_account_id = g.id
-     LEFT JOIN LATERAL (
-       SELECT SUM(CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END) AS delta
-       FROM journal_lines jl
-       WHERE s.total IS NULL
-         AND jl.gl_account_id = g.id
-         AND (g.checkpoint_at IS NULL OR jl.created_at > g.checkpoint_at)
-     ) l ON true
      ${filtered ? "WHERE g.id = ANY($1::uuid[])" : ""}`,
     ...(filtered ? [accountIds] : []),
   );
   return (Array.isArray(rows) ? rows : []).map((row) => {
-    const record = row as { id: string; accountType: string; raw: string | null; fromShards: boolean };
+    const record = row as { id: string; accountType: string; raw: string | null };
     return {
       id: record.id,
       accountType: record.accountType,
       balance: naturalShardBalance(record.accountType, record.raw ?? "0"),
-      source: record.fromShards ? "shards" : "journal",
+      source: "shards" as const,
     };
   });
+};
+
+export interface AccountCheckpointSummary {
+  id: string;
+  accountType: string;
+  /** Routing width and the number of shard rows (rows can exceed the width after a scale-down). */
+  shardCount: number;
+  shardRows: number;
+  /** Sum of the shard checkpoints, debit-positive (the sign shards are stored in). */
+  checkpointBalance: string;
+  /** Oldest checkpoint among the shards that have one; null when no shard was ever checkpointed. */
+  checkpointAt: Date | null;
+  /** Lines posted since the shard checkpoints (all shards), and how many shards have any. */
+  pendingLines: string;
+  shardsBehind: number;
+  /** Worst checkpoint status among the shards: OK, GAP or PARITY. */
+  status: "OK" | "GAP" | "PARITY";
+}
+
+/**
+ * The checkpoint state of accounts, derived from their shards (the account itself stores none).
+ * `checkpointBalance` + the lines posted since = the live balance, both debit-positive.
+ */
+export const loadAccountCheckpointSummary = async (
+  db: { $queryRawUnsafe?: (query: string, ...values: unknown[]) => Promise<unknown> },
+  accountIds?: readonly string[],
+): Promise<AccountCheckpointSummary[]> => {
+  if (typeof db.$queryRawUnsafe !== "function") {
+    return [];
+  }
+  const filtered = accountIds !== undefined;
+  if (filtered && accountIds.length === 0) {
+    return [];
+  }
+  const rows = await db.$queryRawUnsafe(
+    `SELECT s.gl_account_id::text AS id,
+            g.account_type::text AS "accountType",
+            g.shard_count AS "shardCount",
+            COUNT(*)::int AS "shardRows",
+            COALESCE(SUM(c.checkpoint_balance), 0)::text AS "checkpointBalance",
+            MIN(c.checkpoint_at) AS "checkpointAt",
+            COALESCE(SUM(s.line_seq - COALESCE(c.checkpoint_seq, 0)), 0)::text AS "pendingLines",
+            COUNT(*) FILTER (WHERE s.line_seq > COALESCE(c.checkpoint_seq, 0))::int AS "shardsBehind",
+            CASE WHEN bool_or(c.status = 'PARITY') THEN 'PARITY'
+                 WHEN bool_or(c.status = 'GAP') THEN 'GAP' ELSE 'OK' END AS status
+     FROM gl_account_shards s
+     INNER JOIN gl_accounts g ON g.id = s.gl_account_id
+     LEFT JOIN gl_shard_checkpoints c ON c.gl_account_id = s.gl_account_id AND c.shard_id = s.shard_id
+     ${filtered ? "WHERE s.gl_account_id = ANY($1::uuid[])" : ""}
+     GROUP BY s.gl_account_id, g.account_type, g.shard_count`,
+    ...(filtered ? [accountIds] : []),
+  );
+  return (Array.isArray(rows) ? rows : []) as AccountCheckpointSummary[];
 };

@@ -274,7 +274,9 @@ topology example.
    used, falling back to `PG_DB_*`.
 3. A derived `DATABASE_URL` uses the PostgreSQL credentials, primary private IP
    and PgBouncer port when enabled; otherwise the explicit `DATABASE_URL` is
-   used.
+   used. `LEADER_ELECTION_DATABASE_URL` is derived separately (the
+   `pgw_session` alias, or a direct URL when PgBouncer is disabled); an explicit
+   value in the deploy env overrides the derived one.
 4. `CORE_BACK_URLS` wins over derived `https://<core-private-ip>:<port>` URLs.
 5. A node's `servicePort` overrides the tier backend port for that node.
 6. CLI flags override the corresponding environment value for one run.
@@ -406,10 +408,14 @@ the distribution defaults.
 
 ### PgBouncer
 
-PgBouncer runs in transaction mode on the primary and replicas. The generated
-`pgbouncer.ini` has **no `[databases]` mapping**, so a core connection to `:6432`
-has no configured route to the application database. Enabling the pooler
-without adding that mapping can make the deployed core unable to connect.
+PgBouncer runs in transaction mode for the application database on the primary
+and replicas. The generated `pgbouncer.ini` maps `PG_DB_NAME` to the local
+PostgreSQL port, and adds `pgw_session`, a second alias to the same database
+with `pool_mode=session`. The session alias exists for the singleton-worker
+leader election (`LEADER_ELECTION_DATABASE_URL`); PostgreSQL advisory locks do
+not survive transaction pooling. The provisioner proves a login through both
+aliases before core starts. An explicit `LEADER_ELECTION_DATABASE_URL` in the
+deploy env overrides the derived URL for an external database or pooler.
 
 ### Redis
 

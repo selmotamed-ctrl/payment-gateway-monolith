@@ -26,12 +26,14 @@ import { actorFromRequest } from "../middleware/makerCheckerGuard";
 import { writeAudit } from "../../lib/audit/writeAudit";
 import { APPROVAL_PENDING_STATES, approvalSubjectTypeVariants } from "../../lib/approvalQueue";
 import { hasMerchantFinancialAccess, hasSensitiveMerchantAccess } from "../../lib/merchantOps";
-import { loadLiveAccountBalances } from "../../lib/storageEngine/shardBalances";
+import { loadAccountCheckpointSummary, loadLiveAccountBalances } from "../../lib/storageEngine/shardBalances";
 import { decimal } from "../../engine/ledger/LedgerPoster";
+import { naturalBalance } from "../../engine/ledger/InvariantVerifier";
 import { Vault } from "../../engine/crypto/Vault";
 import { nationalIdHash } from "../../lib/joinRequestOnboarding";
 import { queueKybNotification } from "../../lib/kybNotifications";
 import { readKybRefreshPolicy } from "../../lib/kybReview";
+import { listAccountLines } from "./ledgerLines";
 
 const router = express.Router();
 export const adminCommerceRouter = router;
@@ -213,9 +215,19 @@ const walletListSelect = {
   glAccountId: true,
   createdAt: true,
   merchant: { select: merchantSelect },
-  glAccount: { select: { checkpointBalance: true } },
   _count: { select: { applications: true, paymentLinks: true } },
 } as const;
+
+/**
+ * A wallet is a liability: its GL account is credit-natural and the checkpoint is STORED
+ * debit-positive (a merchant owed 25.000 has a stored checkpoint of -25.0000). The wallet
+ * views show every balance in the natural sign, like `liveBalance`, so live minus checkpoint
+ * is the amount posted since the last rollup. Never "-0.0000".
+ */
+const walletNaturalBalance = (storedDebitPositive: unknown): string => {
+  const natural = naturalBalance("MERCHANT_WALLET", decimal(storedDebitPositive as never));
+  return natural.isZero() ? "0.0000" : natural.toFixed(4);
+};
 
 const serializeWalletRow = (
   wallet: {
@@ -226,12 +238,13 @@ const serializeWalletRow = (
     glAccountId: string;
     createdAt: Date;
     merchant: { id: string; legalName: string; tradeName: string };
-    glAccount: { checkpointBalance: unknown };
     _count: { applications: number; paymentLinks: number };
   },
   flags: Flags,
   liveBalance: string | undefined,
   pendingCashouts: number,
+  /** Sum of the wallet's shard checkpoints as STORED (debit-positive). */
+  storedCheckpointBalance?: string,
 ) => ({
   id: wallet.id,
   merchantId: wallet.merchantId,
@@ -240,7 +253,7 @@ const serializeWalletRow = (
   status: wallet.status,
   glAccountId: wallet.glAccountId,
   liveBalance: flags.canFinancial ? liveBalance ?? "0.0000" : null,
-  checkpointBalance: flags.canFinancial ? money(wallet.glAccount.checkpointBalance) : null,
+  checkpointBalance: flags.canFinancial ? walletNaturalBalance(storedCheckpointBalance ?? 0) : null,
   applicationCount: wallet._count.applications,
   paymentLinkCount: wallet._count.paymentLinks,
   pendingCashoutCount: pendingCashouts,
@@ -285,15 +298,17 @@ router.get("/wallets", async (request: Request, response: Response) => {
     client.wallet.count({ where: built.where as never }),
   ]);
   const accountIds = wallets.map((wallet) => wallet.glAccountId);
-  const [pending, live] = await Promise.all([
+  const [pending, live, checkpoints] = await Promise.all([
     pendingCashoutCounts(wallets.map((wallet) => wallet.id)),
     flags.canFinancial ? loadLiveAccountBalances(client as never, accountIds) : Promise.resolve([]),
+    flags.canFinancial ? loadAccountCheckpointSummary(client as never, accountIds) : Promise.resolve([]),
   ]);
   const liveById = new Map(live.map((row) => [row.id, decimal(row.balance).toFixed(4)]));
+  const checkpointById = new Map(checkpoints.map((row) => [row.id, row.checkpointBalance]));
   response.json({
     ...listResponse(
       "wallets",
-      wallets.map((wallet) => serializeWalletRow(wallet, flags, liveById.get(wallet.glAccountId), pending.get(wallet.id) ?? 0)),
+      wallets.map((wallet) => serializeWalletRow(wallet, flags, liveById.get(wallet.glAccountId), pending.get(wallet.id) ?? 0, checkpointById.get(wallet.glAccountId))),
       total,
       built,
       wallets,
@@ -356,17 +371,22 @@ router.get("/wallets/:id", async (request: Request, response: Response) => {
     select: {
       ...walletListSelect,
       glAccount: {
-        select: { id: true, accountType: true, currency: true, checkpointBalance: true, checkpointAt: true },
+        select: { id: true, accountType: true, currency: true, shardCount: true, shardScaledAt: true },
       },
       applications: { select: { id: true, name: true, status: true }, orderBy: { createdAt: "desc" }, take: 50 },
     },
   });
   if (!wallet) throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
-  const [pending, live, shards, cashouts, lines, pendingApprovals] = await Promise.all([
+  const [pending, live, checkpoints, shards, cashouts, pendingApprovals] = await Promise.all([
     pendingCashoutCounts([wallet.id]),
     flags.canFinancial ? loadLiveAccountBalances(client as never, [wallet.glAccountId]) : Promise.resolve([]),
+    flags.canFinancial ? loadAccountCheckpointSummary(client as never, [wallet.glAccountId]) : Promise.resolve([]),
     flags.canFinancial
-      ? client.glAccountShard.findMany({ where: { glAccountId: wallet.glAccountId }, orderBy: { shardId: "asc" } })
+      ? client.glAccountShard.findMany({
+          where: { glAccountId: wallet.glAccountId },
+          orderBy: { shardId: "asc" },
+          include: { checkpoint: true },
+        })
       : Promise.resolve([]),
     flags.canFinancial
       ? client.cashoutRequest.findMany({
@@ -376,17 +396,16 @@ router.get("/wallets/:id", async (request: Request, response: Response) => {
           select: { id: true, state: true, amount: true, createdAt: true },
         })
       : Promise.resolve([]),
-    flags.canFinancial
-      ? client.journalLine.findMany({
-          where: { glAccountId: wallet.glAccountId },
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          take: 25,
-          include: { entry: { select: { id: true, refType: true, refId: true, description: true } } },
-        })
-      : Promise.resolve([]),
     pendingApprovalsFor("WALLET", wallet.id),
   ]);
-  const base = serializeWalletRow(wallet, flags, live[0] ? decimal(live[0].balance).toFixed(4) : undefined, pending.get(wallet.id) ?? 0);
+  const checkpoint = checkpoints[0];
+  const base = serializeWalletRow(
+    wallet,
+    flags,
+    live[0] ? decimal(live[0].balance).toFixed(4) : undefined,
+    pending.get(wallet.id) ?? 0,
+    checkpoint?.checkpointBalance,
+  );
   response.json({
     wallet: {
       ...base,
@@ -394,12 +413,20 @@ router.get("/wallets/:id", async (request: Request, response: Response) => {
         id: wallet.glAccount.id,
         accountType: wallet.glAccount.accountType,
         currency: wallet.glAccount.currency,
-        checkpointBalance: flags.canFinancial ? money(wallet.glAccount.checkpointBalance) : null,
-        checkpointAt: wallet.glAccount.checkpointAt,
+        /** Derived from the shard checkpoints (the account stores none), natural sign like liveBalance. */
+        checkpointBalance: flags.canFinancial ? walletNaturalBalance(checkpoint?.checkpointBalance ?? 0) : null,
+        checkpointAt: flags.canFinancial ? checkpoint?.checkpointAt ?? null : null,
+        shardCount: wallet.glAccount.shardCount,
+        shardScaledAt: wallet.glAccount.shardScaledAt,
+        pendingLines: flags.canFinancial ? checkpoint?.pendingLines ?? "0" : null,
       },
       shards: shards.map((shard) => ({
         shardId: shard.shardId,
         currentBalance: money(shard.currentBalance),
+        lineSeq: shard.lineSeq.toString(),
+        checkpointSeq: (shard.checkpoint?.checkpointSeq ?? 0n).toString(),
+        checkpointAt: shard.checkpoint?.checkpointAt ?? null,
+        pendingLines: (shard.lineSeq - (shard.checkpoint?.checkpointSeq ?? 0n)).toString(),
         updatedAt: shard.updatedAt,
       })),
       applications: wallet.applications,
@@ -410,22 +437,97 @@ router.get("/wallets/:id", async (request: Request, response: Response) => {
         currency: wallet.currency,
         createdAt: cashout.createdAt,
       })),
-      statementLines: lines.map((line) => ({
-        lineId: line.id,
-        entryId: line.entryId,
-        direction: line.direction,
-        amount: money(line.amount),
-        createdAt: line.createdAt,
-        refType: line.entry.refType,
-        refId: line.entry.refId,
-        description: line.entry.description,
-      })),
       pendingApprovals,
       redactedFields: flags.canFinancial
         ? []
         : ["liveBalance", "checkpointBalance", "shards", "cashouts", "statementLines"],
     },
   });
+});
+
+/**
+ * The wallet statement: the posting lines of the wallet's GL account, paginated. The detail
+ * response no longer embeds a fixed page of lines. Roles without financial visibility get an
+ * empty page flagged as redacted, exactly like the other financial fields of the wallet.
+ */
+router.get("/wallets/:id/statement", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const flags = flagsOf(request);
+  const wallet = await client.wallet.findUnique({ where: { id }, select: { id: true, glAccountId: true, currency: true } });
+  if (!wallet) throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
+  if (!flags.canFinancial) {
+    response.json({
+      lines: [],
+      total: 0,
+      page: 1,
+      pageSize: 25,
+      totals: { lineCount: 0, totalDebit: null, totalCredit: null, netDebit: null },
+      currency: wallet.currency,
+      redactedFields: ["statementLines"],
+    });
+    return;
+  }
+  response.json({
+    ...(await listAccountLines(wallet.glAccountId, request.query as Record<string, unknown>)),
+    currency: wallet.currency,
+    redactedFields: [],
+  });
+});
+
+/** Status history of one wallet (freeze / unfreeze), newest first, from the audit trail. */
+router.get("/wallets/:id/audit-events", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["merchant:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const wallet = await client.wallet.findUnique({ where: { id }, select: { id: true } });
+  if (!wallet) throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
+  const flags = flagsOf(request);
+  const built = buildListQuery(request.query, {
+    in: { action: "action", role: "role" },
+    dates: { createdAt: { path: "createdAt" } },
+    sortable: { action: "action", role: "role", createdAt: "createdAt" },
+    defaultSort: { createdAt: "desc" },
+    defaultPageSize: 10,
+  });
+  const conditions = Array.isArray(built.where.AND) ? built.where.AND : [];
+  const where = { AND: [{ entityType: "WALLET", entityId: id }, ...conditions] };
+  const [events, total] = await Promise.all([
+    client.auditLog.findMany({
+      where: where as never,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: {
+        id: true,
+        action: true,
+        role: true,
+        beforeJson: true,
+        afterJson: true,
+        approvalRequestId: true,
+        createdAt: true,
+        actor: { select: { email: true } },
+      },
+    }),
+    client.auditLog.count({ where: where as never }),
+  ]);
+  response.json(
+    listResponse(
+      "auditEvents",
+      events.map((event) => ({
+        id: event.id,
+        action: event.action,
+        role: event.role,
+        actorEmail: event.actor.email,
+        approvalRequestId: event.approvalRequestId,
+        before: flags.canSensitive ? event.beforeJson : null,
+        after: flags.canSensitive ? event.afterJson : null,
+        createdAt: event.createdAt,
+        redacted: !flags.canSensitive,
+      })),
+      total,
+      built,
+    ),
+  );
 });
 
 router.post("/wallets/:id/status", async (request: Request, response: Response) => {

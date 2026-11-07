@@ -1,11 +1,9 @@
 import { LedgerPoster, type LedgerPrismaClient, type LedgerTransactionRunner } from "../../engine/ledger/LedgerPoster";
-import { env } from "../env";
 import { createLedgerShardWriter } from "./ledgerShardWriter";
 import { enqueueOutboxEvent } from "./outbox";
 
 export interface LedgerPosterOptions {
   transactionRunner?: LedgerTransactionRunner;
-  shardCount?: number;
   /**
    * Emit `ledger.entry_posted` in the posting transaction. Off by default since
    * 2026-11-04: the topic has no consumer (its relay handler is a no-op), so
@@ -25,11 +23,10 @@ export const createLedgerPoster = (
   client: LedgerPrismaClient,
   options: LedgerPosterOptions = {},
 ): LedgerPoster => {
-  const shardCount = options.shardCount ?? env.STORAGE_SHARD_COUNT;
   return new LedgerPoster(
     client,
     options.transactionRunner,
-    createLedgerShardWriter(shardCount),
+    createLedgerShardWriter(),
     options.emitOutbox !== true
       ? undefined
       : async (transaction, entry) => {

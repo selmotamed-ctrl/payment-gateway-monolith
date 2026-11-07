@@ -297,11 +297,11 @@ New `coreForward` routes (new files `wallets.ts`, `applications.ts` (application
 
 | Mount | Read | Write |
 | :--- | :--- | :--- |
-| `/wallets`, `/applications`, `/payment-links`, `/pos-terminals` | `merchant:read` | `merchant:write` |
+| `/wallets` (+ `/:id/statement`, `/:id/audit-events`), `/applications`, `/payment-links`, `/pos-terminals` | `merchant:read` | `merchant:write` |
 | `/transactions` | `attempt:read`, `merchant:read`, `finance:read` | n/a |
 | `/inbound-events` | `attempt:read`, `case:read` | n/a |
 | `/system/*` (jobs-outbox, jobs, outbox, audit-outbox, notifications), mounted after `/system/backups` | `security:read` | `security:write` |
-| `/finance/journal-entries`, `/finance/gl-accounts/:id` | `finance:read` | checkpoint `finance:write` |
+| `/finance/journal-entries`, `/finance/gl-accounts/:id` (+ `/lines`) | `finance:read` | checkpoint, `/shards/scale`, `/shards/:shardId/repair` and `/repair/request` `finance:write` (`/repair-plan` `finance:read`) |
 | `/gateways/:id/health` | `gateway:read` | n/a |
 | `/settings/notification-templates` | `settings:read` | `settings:write` |
 | `/merchants/:id/beneficial-owners`, `/merchants/:id/revalidations` | `merchant:read` or `kyb:read` | `kyb:write` or `merchant:write` (the rest of `/merchants` stays `merchant:write`; `kyb:write` does not unlock suspend) |

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import { ApiError } from "../../lib/error";
 import { toCamelRows } from "../db/rawRows";
 import type { Tx } from "../db/ports";
@@ -19,6 +20,8 @@ export interface InboundEventRow {
   receivedAt: Date;
   processedAt: Date | null;
   processingResult: string | null;
+  claimedAt?: Date | null;
+  claimedBy?: string | null;
 }
 
 export interface InboundEventHandler {
@@ -28,6 +31,11 @@ export interface InboundEventHandler {
 export interface InboundInboxWorkerDeps extends WorkerOptions {
   handler?: InboundEventHandler;
   maxAttempts?: number;
+  /**
+   * Stable identifier written on the claim. Defaults to `NODE_ID`, then the
+   * hostname; it only has to identify the claimant in the lease/finalize SQL.
+   */
+  workerId?: string;
 }
 
 export class RetryableInboundError extends Error {
@@ -44,6 +52,7 @@ const ATTEMPT_PATTERN = /RETRY\((\d+)\)/;
 export class InboundInboxWorker extends BaseWorker {
   private readonly handler: InboundEventHandler | undefined;
   private readonly maxAttempts: number;
+  private readonly workerId: string;
 
   protected override get singleton(): boolean {
     return true;
@@ -53,6 +62,7 @@ export class InboundInboxWorker extends BaseWorker {
     super(deps);
     this.handler = deps.handler;
     this.maxAttempts = deps.maxAttempts ?? 5;
+    this.workerId = deps.workerId ?? process.env.NODE_ID ?? hostname() ?? "core-back";
   }
 
   protected async tick(): Promise<void> {
@@ -60,23 +70,41 @@ export class InboundInboxWorker extends BaseWorker {
       this.logger.warn("InboundInboxWorker: no handler registered, nothing to drain");
       return;
     }
-    const events = await this.lockUnprocessedEvents();
+    const events = await this.claimEvents();
     for (const event of events) {
       await this.processEvent(event);
     }
   }
 
-  private async lockUnprocessedEvents(): Promise<InboundEventRow[]> {
+  /**
+   * Claims a batch with a durable lease.
+   *
+   * `FOR UPDATE SKIP LOCKED` alone is not enough here: the row locks end when
+   * the claim transaction commits, while the handler runs outside it. The
+   * `claimed_at`/`claimed_by` write persists the claim, so two nodes (even if
+   * leadership briefly overlaps) cannot process the same webhook. A crashed
+   * claimant's rows are reclaimed after `claimLeaseSeconds`.
+   */
+  private async claimEvents(): Promise<InboundEventRow[]> {
+    const now = this.clock();
+    const staleBefore = new Date(now.getTime() - this.claimLeaseSeconds * 1000);
     const sql =
-      "SELECT * FROM inbound_events" +
+      "WITH candidate AS (" +
+      " SELECT id FROM inbound_events" +
       " WHERE processed_at IS NULL" +
+      "   AND (claimed_at IS NULL OR claimed_at < $2)" +
       " ORDER BY received_at ASC" +
       " LIMIT $1" +
-      " FOR UPDATE SKIP LOCKED";
-    // Claimed inside a transaction; cluster exclusivity for the processing that
-    // follows comes from the advisory-lock leader election (singleton): the
-    // table has no lease column and a webhook must never be handled twice.
-    const result = await this.inTransaction((tx) => tx.$queryRawUnsafe(sql, this.batchSize));
+      " FOR UPDATE SKIP LOCKED" +
+      ")" +
+      " UPDATE inbound_events e" +
+      " SET claimed_at = $3, claimed_by = $4, updated_at = $3" +
+      " FROM candidate" +
+      " WHERE e.id = candidate.id" +
+      " RETURNING e.*";
+    const result = await this.inTransaction((tx) =>
+      tx.$queryRawUnsafe(sql, this.batchSize, staleBefore, now, this.workerId),
+    );
     return toCamelRows<InboundEventRow>(result);
   }
 
@@ -92,8 +120,10 @@ export class InboundInboxWorker extends BaseWorker {
         await this.markRetry(event, attempt + 1, message);
         return;
       }
-      await this.markFailed(event, attempt + 1, message);
-      await this.openOperatorCase(event, message);
+      const failed = await this.markFailed(event, attempt + 1, message);
+      if (failed) {
+        await this.openOperatorCase(event, message);
+      }
     }
   }
 
@@ -105,30 +135,61 @@ export class InboundInboxWorker extends BaseWorker {
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  private async markProcessed(event: InboundEventRow, result: string): Promise<void> {
-    await this.db.$executeRawUnsafe(
-      "UPDATE inbound_events SET processed_at = $1, processing_result = $2 WHERE id = $3::uuid",
-      this.clock(),
+  /** Records the result only while this node still owns the claim. */
+  private async markProcessed(event: InboundEventRow, result: string): Promise<boolean> {
+    const now = this.clock();
+    const updated = await this.db.$executeRawUnsafe(
+      "UPDATE inbound_events SET processed_at = $1, processing_result = $2, claimed_at = NULL, claimed_by = NULL, updated_at = $1" +
+        " WHERE id = $3::uuid AND claimed_by = $4 AND processed_at IS NULL",
+      now,
       result.slice(0, 500),
       event.id,
+      this.workerId,
     );
+    if (Number(updated ?? 0) === 0) {
+      this.logger.warn("InboundInboxWorker: claim was lost before the result was recorded", {
+        eventId: event.id,
+      });
+      return false;
+    }
+    return true;
   }
 
-  private async markRetry(event: InboundEventRow, attempt: number, message: string): Promise<void> {
-    await this.db.$executeRawUnsafe(
-      "UPDATE inbound_events SET processing_result = $1 WHERE id = $2::uuid",
+  private async markRetry(event: InboundEventRow, attempt: number, message: string): Promise<boolean> {
+    const updated = await this.db.$executeRawUnsafe(
+      "UPDATE inbound_events SET processing_result = $1, claimed_at = NULL, claimed_by = NULL, updated_at = $2" +
+        " WHERE id = $3::uuid AND claimed_by = $4 AND processed_at IS NULL",
       `RETRY(${attempt}):${message}`.slice(0, 500),
+      this.clock(),
       event.id,
+      this.workerId,
     );
+    if (Number(updated ?? 0) === 0) {
+      this.logger.warn("InboundInboxWorker: claim was lost before the retry was recorded", {
+        eventId: event.id,
+      });
+      return false;
+    }
+    return true;
   }
 
-  private async markFailed(event: InboundEventRow, attempt: number, message: string): Promise<void> {
-    await this.db.$executeRawUnsafe(
-      "UPDATE inbound_events SET processed_at = $1, processing_result = $2 WHERE id = $3::uuid",
-      this.clock(),
+  private async markFailed(event: InboundEventRow, attempt: number, message: string): Promise<boolean> {
+    const now = this.clock();
+    const updated = await this.db.$executeRawUnsafe(
+      "UPDATE inbound_events SET processed_at = $1, processing_result = $2, claimed_at = NULL, claimed_by = NULL, updated_at = $1" +
+        " WHERE id = $3::uuid AND claimed_by = $4 AND processed_at IS NULL",
+      now,
       `FAILED(${attempt}):${message}`.slice(0, 500),
       event.id,
+      this.workerId,
     );
+    if (Number(updated ?? 0) === 0) {
+      this.logger.warn("InboundInboxWorker: claim was lost before the failure was recorded", {
+        eventId: event.id,
+      });
+      return false;
+    }
+    return true;
   }
 
   private async openOperatorCase(event: InboundEventRow, message: string): Promise<void> {

@@ -21,7 +21,6 @@ import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { GlAccountDrawer } from "@/components/ledger/GlAccountDrawer";
-import { WalletDetailDrawer } from "@/pages/merchants/components/WalletDetailDrawer";
 import ReasonModal from "@/pages/merchants/components/ReasonModal";
 import {
     ApprovalSubmittedNotice,
@@ -74,7 +73,6 @@ const WalletsPage = dc(() => {
     } | null>(null);
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const openWalletId = ref<string | null>(null);
     const glAccountId = ref<string | null>(null);
     const notice = ref<{ approvalRequestId: string | null } | null>(null);
     const target = ref<{ wallet: WalletRow; action: WalletAction } | null>(null);
@@ -93,10 +91,13 @@ const WalletsPage = dc(() => {
     };
     void loadSummary();
 
-    const { clearOpenQueryParam } = useOpenQuery<{ id: string }>({
+    const openWallet = (id: string) => void router.push({ name: "WalletDetail", params: { id } });
+
+    // Older links (`/wallets?open=<id>`: search hits, the application drawer, guide articles) land on the wallet page.
+    useOpenQuery<{ id: string }>({
         alwaysFetchDetail: true,
         fetchById: async (id) => ({ id }),
-        onOpenRecord: (record) => (openWalletId.value = record.id),
+        onOpenRecord: (record) => void router.replace({ name: "WalletDetail", params: { id: record.id } }),
     });
 
     const refreshAll = () => {
@@ -168,7 +169,11 @@ const WalletsPage = dc(() => {
             key: "id",
             label: "Wallet",
             value: (row) => row.id,
-            Value: ({ row }: { row: WalletRow }) => <MonoRef value={row.id} truncate={12} />,
+            Value: ({ row }: { row: WalletRow }) => (
+                <VBtn size="small" variant="text" style={{ paddingInline: "2px", textTransform: "none" }} aria-label={`${t("Open wallet")} ${row.id}`} onClick={() => openWallet(row.id)}>
+                    <MonoRef value={row.id} truncate={12} />
+                </VBtn>
+            ),
         },
         {
             key: "merchant",
@@ -227,7 +232,7 @@ const WalletsPage = dc(() => {
             sortable: false,
             Value: ({ row }: { row: WalletRow }) => (
                 <TableRowActions
-                    primaryAction={{ label: t("Inspect"), icon: "mdi-wallet-outline", onClick: () => { openWalletId.value = row.id; } }}
+                    primaryAction={{ label: t("Inspect"), icon: "mdi-wallet-outline", onClick: () => openWallet(row.id) }}
                     items={[
                         { key: "gl", label: t("Inspect GL account"), icon: "mdi-book-open-variant", onClick: () => { glAccountId.value = row.glAccountId; } },
                         { key: "merchant", label: t("Open merchant"), icon: "mdi-storefront-outline", onClick: () => void router.push({ name: "MerchantDetail", params: { id: row.merchantId } }) },
@@ -315,14 +320,6 @@ const WalletsPage = dc(() => {
                 />
             </ThemedView>
 
-            <WalletDetailDrawer
-                walletId={openWalletId.value}
-                onClose={() => {
-                    openWalletId.value = null;
-                    void clearOpenQueryParam();
-                }}
-                onChanged={refreshAll}
-            />
             <GlAccountDrawer accountId={glAccountId.value} onClose={() => (glAccountId.value = null)} onChanged={refreshAll} />
 
             <ReasonModal

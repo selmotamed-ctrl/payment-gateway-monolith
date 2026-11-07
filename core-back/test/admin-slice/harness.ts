@@ -11,6 +11,8 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import express, { type NextFunction, type Request, type Response, type Router } from "express";
 import { client } from "../../prisma/client";
+import { LedgerPoster, decimal } from "../../engine/ledger/LedgerPoster";
+import { createLedgerShardWriter } from "../../lib/storageEngine/ledgerShardWriter";
 import { isApiError, toErrorEnvelope } from "../../lib/error";
 import type { Principal } from "../../api/middleware/authDoubleCheck";
 
@@ -103,14 +105,89 @@ export const dbAvailable: boolean = await client
   .catch(() => false);
 
 /**
+ * Posts one journal entry the way production does, so the rows stay shard-consistent (every line carries its shard and
+ * a real per-shard sequence, and the shard balances / `line_seq` move with it).
+ *
+ *  - A BALANCED entry goes through `LedgerPoster.post` (it validates the template and projects the shards).
+ *  - A deliberately UNBALANCED entry (the "unbalanced entry" detection tests) cannot pass the poster's template
+ *    validation, so it reserves the shard sequences with the same shard writer and inserts the lines itself.
+ */
+export interface EntryLine {
+  glAccountId: string;
+  direction: "DEBIT" | "CREDIT";
+  amount: string;
+}
+
+export const postEntry = async (
+  lines: EntryLine[],
+  refType = "ADJUSTMENT",
+  description = "test entry",
+  refId: string = uid("ref"),
+): Promise<{ id: string; refId: string }> => {
+  const accounts = await client.glAccount.findMany({
+    where: { id: { in: [...new Set(lines.map((line) => line.glAccountId))] } },
+    select: { id: true, accountType: true },
+  });
+  const typeOf = new Map(accounts.map((account) => [account.id, account.accountType]));
+  const total = (direction: "DEBIT" | "CREDIT") =>
+    lines.filter((line) => line.direction === direction).reduce((sum, line) => sum.plus(line.amount), decimal(0));
+  if (total("DEBIT").equals(total("CREDIT"))) {
+    const result = await new LedgerPoster(client as never).post({
+      refType: refType as never,
+      refId,
+      description,
+      lines: lines.map((line) => ({
+        direction: line.direction,
+        amount: line.amount,
+        account: { accountType: typeOf.get(line.glAccountId) as never, accountId: line.glAccountId },
+      })),
+    });
+    return { id: result.entry.id, refId };
+  }
+  return client.$transaction(async (tx) => {
+    const assignments = await createLedgerShardWriter()(
+      tx as never,
+      lines.map((line) => ({
+        entryId: "pending",
+        refType,
+        refId,
+        glAccountId: line.glAccountId,
+        accountType: typeOf.get(line.glAccountId) as never,
+        direction: line.direction,
+        amount: line.amount,
+      })),
+    );
+    const entry = await tx.journalEntry.create({
+      data: {
+        refType: refType as never,
+        refId,
+        description,
+        journalLines: {
+          create: lines.map((line, index) => ({
+            glAccountId: line.glAccountId,
+            direction: line.direction,
+            amount: line.amount,
+            shardId: assignments[index]!.shardId,
+            shardSeq: assignments[index]!.shardSeq,
+          })),
+        },
+      },
+    });
+    return { id: entry.id, refId };
+  });
+};
+
+/**
  * Hygiene for suites that share one database with the global-invariant suites
  * (test/exhaustive/*, the relay/shipper/queue workers).
  *
  * `purgeSince` deletes the rows a suite created in tables that allow it
  * (outbox, jobs, notifications...). The ledger is append-only by design, so
  * `neutraliseLedgerSince` cannot delete: for every GL account created since
- * `since` it posts one offsetting entry (net zero per account) and resets the
- * account's shards and checkpoint, so system-wide debits still equal credits.
+ * `since` it posts one offsetting entry (net zero per account) through the same
+ * write path as production, so system-wide debits still equal credits and the
+ * rows stay shard-consistent. If the suite itself forged a shard balance, the
+ * shards of those accounts are finally re-derived from their journal lines.
  */
 export const purgeSince = async (since: Date, tables: string[]): Promise<void> => {
   for (const table of tables) {
@@ -128,23 +205,26 @@ export const neutraliseLedgerSince = async (since: Date): Promise<void> => {
     where: { glAccountId: { in: ids } },
     _sum: { amount: true },
   });
-  const net = new Map<string, number>();
+  const net = new Map<string, ReturnType<typeof decimal>>();
   for (const row of sums) {
-    const amount = Number(row._sum.amount ?? 0);
-    net.set(row.glAccountId, (net.get(row.glAccountId) ?? 0) + (row.direction === "DEBIT" ? amount : -amount));
+    const amount = decimal(row._sum.amount?.toString() ?? "0");
+    net.set(row.glAccountId, (net.get(row.glAccountId) ?? decimal(0)).plus(row.direction === "DEBIT" ? amount : amount.negated()));
   }
-  const lines = [...net.entries()]
-    .filter(([, value]) => Math.abs(value) > 0.00005)
+  const lines: EntryLine[] = [...net.entries()]
+    .filter(([, value]) => !value.isZero())
     .map(([glAccountId, value]) => ({
       glAccountId,
-      direction: value > 0 ? ("CREDIT" as const) : ("DEBIT" as const),
-      amount: Math.abs(value).toFixed(4),
+      direction: value.greaterThan(0) ? ("CREDIT" as const) : ("DEBIT" as const),
+      amount: value.abs().toFixed(4),
     }));
   if (lines.length > 0) {
-    await client.journalEntry.create({
-      data: { refType: "ADJUSTMENT", refId: uid("neutralise"), description: "test hygiene: offsets the suite's own lines", journalLines: { create: lines } },
-    });
+    await postEntry(lines, "ADJUSTMENT", "test hygiene: offsets the suite's own lines", uid("neutralise"));
   }
-  await client.glAccountShard.updateMany({ where: { glAccountId: { in: ids } }, data: { currentBalance: 0 } });
-  await client.glAccount.updateMany({ where: { id: { in: ids } }, data: { checkpointBalance: 0 } });
+  await client.$executeRawUnsafe(
+    `UPDATE gl_account_shards s SET current_balance = COALESCE((
+       SELECT SUM(CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END)
+       FROM journal_lines jl WHERE jl.gl_account_id = s.gl_account_id AND jl.shard_id = s.shard_id), 0)
+     WHERE s.gl_account_id = ANY($1::uuid[])`,
+    ids,
+  );
 };

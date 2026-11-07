@@ -1,3 +1,4 @@
+import { initialShardWidth } from "../lib/storageEngine/shardRouting";
 import { GlAccountType, Prisma } from "../generated/prisma/client";
 
 /**
@@ -67,7 +68,7 @@ export interface GlAccountSeedClient {
       create: {
         accountType: GlAccountType;
         currency: string;
-        checkpointBalance: Prisma.Decimal;
+        shardCount: number;
         seedKey: string;
       };
     }): Promise<unknown>;
@@ -89,9 +90,10 @@ export const GL_ACCOUNT_SHARD_COUNT = 16;
 /**
  * Seeds the system GL accounts of every supported currency.
  *
- * The balances stay at zero: the balance of an account is derived from the
- * journal lines, the checkpoint balance is only the anchor of the periodic
- * invariant check.
+ * The balances stay at zero: the balance of an account is the sum of its
+ * shards. System accounts start 16 shards wide and merchant wallets one shard
+ * wide (the `gl_accounts_create_shards` trigger creates the shard rows); the
+ * shard scaler widens an account that gets hot.
  */
 export const seedSystemGlAccounts = async (
   client: GlAccountSeedClient,
@@ -106,7 +108,7 @@ export const seedSystemGlAccounts = async (
         create: {
           accountType,
           currency,
-          checkpointBalance: new Prisma.Decimal(0),
+          shardCount: initialShardWidth(accountType, GL_ACCOUNT_SHARD_COUNT),
           seedKey,
         },
       });

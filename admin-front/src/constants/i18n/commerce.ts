@@ -44,7 +44,7 @@ export const commerceCatalogue: Record<string, [string, string]> = {
         "لا يمكن الخصم من محفظة مجمّدة عبر السحوبات إلى حين إعادة تفعيلها.",
     ],
 
-    /* ---------------------------- Wallet drawer --------------------------- */
+    /* ---------------------------- Wallet details (shared labels) ---------- */
     "Wallet sections": ["Wallet sections", "أقسام المحفظة"],
     "Overview and shards": ["Overview and shards", "نظرة عامة والشظايا"],
     "Links and cash-outs": ["Links and cash-outs", "الروابط والسحوبات"],
@@ -500,4 +500,41 @@ export const commerceCatalogue: Record<string, [string, string]> = {
     "fee": ["fee", "الرسوم"],
     "pending changes": ["pending changes", "تغييرات معلّقة"],
     "suspended": ["suspended", "موقوف"],
+
+    /* ---------------------------- Wallet details page --------------------- */
+    "Back to wallets": ["Back to wallets", "العودة إلى المحافظ"],
+    "wallet": ["wallet", "محفظة"],
+    "Status history": ["Status history", "سجل الحالة"],
+    "Owed to the merchant": ["Owed to the merchant", "المستحق للتاجر"],
+    "No checkpoint yet": ["No checkpoint yet", "لا توجد نقطة ترحيل بعد"],
+    "Taken": ["Taken", "أُخذت في"],
+    "Posted since checkpoint": ["Posted since checkpoint", "المرحَّل منذ نقطة الترحيل"],
+    "This wallet is frozen. Cash-outs cannot debit it until it is restored.": [
+        "This wallet is frozen. Cash-outs cannot debit it until it is restored.",
+        "هذه المحفظة مجمّدة. لا يمكن للسحوبات الخصم منها إلى حين إعادة تفعيلها.",
+    ],
+    "A request to restore it is waiting for approval.": [
+        "A request to restore it is waiting for approval.",
+        "يوجد طلب لإعادة تفعيلها بانتظار الاعتماد.",
+    ],
+    "Restoring it needs an independent checker.": [
+        "Restoring it needs an independent checker.",
+        "إعادة تفعيلها تتطلب مراجعاً مستقلاً.",
+    ],
+    "A busy account is split into parts so many payments can post at once; the parts add up to the live balance.": [
+        "A busy account is split into parts so many payments can post at once; the parts add up to the live balance.",
+        "يُقسَّم الحساب المزدحم إلى أجزاء ليتم ترحيل مدفوعات كثيرة في وقت واحد؛ ومجموع الأجزاء يساوي الرصيد الحيّ.",
+    ],
+    "This wallet has no shard rows; its balance derives from the journal since the last checkpoint.": [
+        "This wallet has no shard rows; its balance derives from the journal since the last checkpoint.",
+        "لا توجد شظايا لهذه المحفظة؛ يُحتسب رصيدها من دفتر اليومية منذ آخر نقطة ترحيل.",
+    ],
+    "Shards agree with the live balance": ["Shards agree with the live balance", "الشظايا تطابق الرصيد الحيّ"],
+    "Shards differ from the live balance": ["Shards differ from the live balance", "الشظايا تختلف عن الرصيد الحيّ"],
+    "Every posting to this wallet's ledger account, newest first.": [
+        "Every posting to this wallet's ledger account, newest first.",
+        "كل ترحيل على حساب دفتر الأستاذ لهذه المحفظة، من الأحدث إلى الأقدم.",
+    ],
+    "By": ["By", "بواسطة"],
+    "Repair ledger shard": ["Repair ledger shard", "إصلاح شظية دفتر الأستاذ"],
 };

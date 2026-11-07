@@ -758,7 +758,7 @@ Notice that only the core decides and records. The checkout only passes Layla's 
 Questions: c-l-m2-1-1, c-l-m2-1-2
 @@end
 
-@@lesson id=l-m2-2 module=m2 order=2 title="Merchants, applications, wallets and links" minutes=20 tracks=FOUNDATION reading=b01-04,b05-06,b05-07
+@@lesson id=l-m2-2 module=m2 order=2 title="Merchants, applications, wallets and links" minutes=20 tracks=FOUNDATION reading=b01-04,b05-06,b05-07,b03-09
 ### You will be able to
 - Explain the relationships between a merchant, an application, a wallet and a payment link.
 - State why an application has exactly one wallet.
@@ -769,6 +769,7 @@ Questions: c-l-m2-1-1, c-l-m2-1-2
 - **A merchant is a checked business.** It has users, wallets and applications.
 - **An application is one place the merchant takes payments.** It might be a website, an app or a branch. Every application is assigned to **exactly one wallet**, so a payment can never be ambiguous about where the money goes. Many applications may share one wallet.
 - **A wallet is a balance on our books.** It is a number we owe the merchant, not a bank account. It is **calculated** from ledger lines and is not a stored number that someone can edit.
+- **Each wallet has its own page.** On **Wallets**, open a wallet to read its balance, its paged statement of ledger lines, the shards behind the balance and the history of its status. You can only read the numbers. The one change you may make is to freeze the wallet, and a second person must approve restoring it.
 - **A payment link requests one fixed amount.** The merchant sets the amount and currency when the link is created. They are never taken from the customer. The link may narrow the application's list of payment methods, but it can never widen it.
 - **A slot stops double payment.** A single-use link can be paid once. A multi-use link can be paid a set number of times, or without limit. An attempt reserves a slot before it starts. `confirmed_count` and `active_locked_count` together may never exceed the use limit.
 - **API tokens start with `pg_live_` and are shown once.** The merchant sees the token only when it is created. We store only a fingerprint, so staff never see a token and must never ask for one. If a token leaks, the merchant revokes it in the portal and creates a new one.
@@ -783,11 +784,13 @@ Noon Mart has two applications, a website and a mobile app. Both are assigned to
 - **Thinking an application can pay into any wallet.** Each application has exactly one wallet, and that link is fixed.
 - **Asking a merchant to read a token to you.** Staff cannot see a token, not even a masked one. Tell the merchant to revoke it and create a new one.
 - **Assuming a link can add a payment method the application does not allow.** It can only narrow the list.
+- **Trying to correct a wallet number that looks wrong.** The page only reads the ledger. If the shards differ from the live balance, tell Finance.
 
 ### Read now
 - [[a:b01-04|Merchants, applications, wallets, payment links and POS]]
 - [[a:b05-06|Applications and wallets]]
 - [[a:b05-07|Payment links, POS terminals and API tokens]]
+- [[a:b03-09|The Wallets screen and the wallet page]]
 
 ### Check yourself
 Questions: c-l-m2-2-1, c-l-m2-2-2

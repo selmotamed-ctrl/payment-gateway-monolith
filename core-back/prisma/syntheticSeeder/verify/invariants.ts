@@ -143,24 +143,55 @@ export const checkInvariants = (ctx: SeederContext): InvariantReport => {
   if (drift !== 0n) fail("ledger.drift", drift.toString());
   metrics.ledgerDrift = drift.toString();
 
-  // ---- 3. checkpoints and shards reproduce the plain line sums
-  const lineSums = new Map<string, bigint>();
-  const afterCheckpoint = new Map<string, bigint>();
+  // ---- 3. shards: sequence, balance and checkpoints reproduce the plain line sums
+  interface ShardLines { count: number; sum: bigint; seqs: Set<number>; seqSum: Array<[number, bigint]> }
+  const shardKeyOf = (glAccountId: unknown, shardId: unknown): string => `${String(glAccountId)}:${Number(shardId)}`;
+  const linesByShard = new Map<string, ShardLines>();
   for (const line of ds.journalLines!) {
-    const id = String(line.glAccountId);
+    const key = shardKeyOf(line.glAccountId, line.shardId);
     const signed = line.direction === "DEBIT" ? money(line.amount) : -money(line.amount);
-    lineSums.set(id, (lineSums.get(id) ?? 0n) + signed);
-    const checkpoint = ctx.checkpoints.get(id);
-    if (checkpoint && ts(line.createdAt) > checkpoint.at.getTime()) afterCheckpoint.set(id, (afterCheckpoint.get(id) ?? 0n) + signed);
+    const state = linesByShard.get(key) ?? { count: 0, sum: 0n, seqs: new Set<number>(), seqSum: [] };
+    const seq = Number(line.shardSeq);
+    if (!Number.isInteger(seq) || seq < 1 || state.seqs.has(seq)) fail("shard.seq-gapless", `${key}#${String(line.shardSeq)}`);
+    state.seqs.add(seq);
+    state.count += 1;
+    state.sum += signed;
+    state.seqSum.push([seq, signed]);
+    // the lines at or before the checkpoint cut are exactly the checkpointed prefix of the sequence
+    const checkpoint = ctx.checkpoints.get(key);
+    if (checkpoint && (seq <= checkpoint.seq) !== (ts(line.createdAt) <= checkpoint.at.getTime())) fail("shard.checkpoint-live", `${key}#${seq} is not in checkpoint order`);
+    linesByShard.set(key, state);
   }
-  for (const [id, checkpoint] of ctx.checkpoints) {
-    if (money(checkpoint.balance) + (afterCheckpoint.get(id) ?? 0n) !== (lineSums.get(id) ?? 0n)) fail("checkpoint.live-balance", id);
-    if (checkpoint.at.getTime() > endMs) fail("checkpoint.future", id);
+  const shardRows = new Map<string, Row>();
+  for (const shard of ds.glAccountShards!) shardRows.set(shardKeyOf(shard.glAccountId, shard.shardId), shard);
+  // Every line must sit on a shard row that exists.
+  for (const key of linesByShard.keys()) if (!shardRows.has(key)) fail("shard.sum", `${key} has lines but no shard row`);
+  for (const [key, shard] of shardRows) {
+    const lines = linesByShard.get(key);
+    const lineSeq = Number(shard.lineSeq);
+    // sequence 1..line_seq present exactly once per shard, line_seq == count
+    if (!Number.isInteger(lineSeq) || lineSeq !== (lines?.count ?? 0)) fail("shard.seq-gapless", `${key} line_seq ${String(shard.lineSeq)} != ${lines?.count ?? 0} lines`);
+    else if (lines) for (let seq = 1; seq <= lineSeq; seq += 1) if (!lines.seqs.has(seq)) { fail("shard.seq-gapless", `${key} misses #${seq}`); break; }
+    // the shard balance is the signed sum of ALL its lines
+    if (money(shard.currentBalance) !== (lines?.sum ?? 0n)) fail("shard.sum", key);
   }
-  if (ds.glAccountShards!.length > 0) {
-    const shardSums = new Map<string, bigint>();
-    for (const shard of ds.glAccountShards!) shardSums.set(String(shard.glAccountId), (shardSums.get(String(shard.glAccountId)) ?? 0n) + money(shard.currentBalance));
-    for (const [id, sum] of lineSums) if ((shardSums.get(id) ?? 0n) !== sum) fail("shard.sum", id);
+  // the checkpoint proof: balance == checkpoint + SUM(lines after the checkpoint sequence), the lines in
+  // (checkpoint_seq, line_seq] are gapless, and (deep) the checkpoint equals the sum of the lines up to it
+  for (const checkpoint of ctx.checkpoints.values()) {
+    const key = shardKeyOf(checkpoint.glAccountId, checkpoint.shardId);
+    const shard = shardRows.get(key);
+    if (!shard) { fail("shard.checkpoint-live", `${key} has a checkpoint but no shard row`); continue; }
+    if (checkpoint.at.getTime() > endMs) fail("shard.checkpoint-live", `${key} is dated in the future`);
+    const lines = linesByShard.get(key);
+    let after = 0n;
+    let afterCount = 0;
+    let upTo = 0n;
+    for (const [seq, signed] of lines?.seqSum ?? []) {
+      if (seq > checkpoint.seq) { after += signed; afterCount += 1; } else upTo += signed;
+    }
+    if (money(shard.currentBalance) !== money(checkpoint.balance) + after) fail("shard.checkpoint-live", key);
+    if (afterCount !== Number(shard.lineSeq) - checkpoint.seq) fail("shard.seq-gapless", `${key} (checkpoint_seq, line_seq] has ${afterCount} lines`);
+    if (upTo !== money(checkpoint.balance)) fail("shard.checkpoint-live", `${key} checkpoint_balance != lines up to checkpoint_seq`);
   }
 
   // ---- 4. attempts: lifecycle, timestamps, money, ledger linkage

@@ -33,7 +33,7 @@ import { createPlatformRuntime } from "../../engine/runtime/platform";
 import { InvariantVerifier } from "../../engine/ledger/InvariantVerifier";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { seedSystemGlAccounts } from "../../prisma/seedGlAccounts";
-import { withLedgerMaintenance } from "../helpers/ledgerMaintenance";
+import { deleteJournalLinesAndUndoShards, withLedgerMaintenance } from "../helpers/ledgerMaintenance";
 import type { DynamicAttempt } from "../../engine/flow/DynamicRailEngine";
 
 /**
@@ -202,7 +202,6 @@ const buildCatalog = async (): Promise<Catalog> => {
         credentialSetId: credentialSet.id,
         env: ENVIRONMENT,
         currency: CURRENCY,
-        checkpointBalance: new Prisma.Decimal(0),
       },
     });
     return account.id;
@@ -757,9 +756,12 @@ const cleanup = async (): Promise<void> => {
   // The journal is append-only (GAP-013): cleanup needs the maintenance flag.
   const cleanupCatalog = catalog;
   await withLedgerMaintenance(client, async (tx) => {
-    await tx.journalLine.deleteMany({
-      where: { entry: { refType: "PAYMENT_ATTEMPT", refId: { in: [cleanupCatalog.attemptId, cleanupCatalog.secondAttemptId] } } },
-    });
+    // The lines also moved the shards of the shared system accounts: give them back (keeps balance == journal).
+    await deleteJournalLinesAndUndoShards(
+      tx,
+      `SELECT id FROM journal_entries WHERE ref_type = 'PAYMENT_ATTEMPT' AND ref_id = ANY($1::text[])`,
+      [[cleanupCatalog.attemptId, cleanupCatalog.secondAttemptId]],
+    );
     await tx.journalEntry.deleteMany({
       where: { refType: "PAYMENT_ATTEMPT", refId: { in: [cleanupCatalog.attemptId, cleanupCatalog.secondAttemptId] } },
     });
@@ -903,9 +905,15 @@ describe("postgres payment (live PostgreSQL 18)", () => {
   });
 
   test.skipIf(!reachable)("reports a zero system-wide ledger drift", async () => {
-    const result = await new InvariantVerifier(client as never).verify();
+    // The production path: the ledger equation over the SHARD balances, in one statement.
+    const result = await new InvariantVerifier(client as never, { sql: true }).verify();
     expect(result.ok).toBe(true);
     expect(result.drift.toFixed(4)).toBe("0.0000");
+    // ... and the journal itself balances (total debits = total credits over every line).
+    const journal = (await client.$queryRawUnsafe(
+      `SELECT COALESCE(SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE -amount END), 0)::text AS drift FROM journal_lines`,
+    )) as Array<{ drift: string }>;
+    expect(Number(journal[0]?.drift)).toBe(0);
   });
 
   test.skipIf(!reachable)("refuses a second attempt on the exhausted link", async () => {

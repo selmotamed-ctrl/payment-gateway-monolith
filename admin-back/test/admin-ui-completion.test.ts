@@ -96,6 +96,8 @@ const READ_ROUTES: ReadRoute[] = [
   { path: "/finance/journal-entries/summary", core: "/internal/admin/finance/journal-entries/summary", authority: "finance:read" },
   { path: `/finance/journal-entries/${ID}`, core: `/internal/admin/finance/journal-entries/${ID}`, authority: "finance:read" },
   { path: `/finance/gl-accounts/${ID}`, core: `/internal/admin/finance/gl-accounts/${ID}`, authority: "finance:read" },
+  { path: `/finance/gl-accounts/${ID}/lines`, core: `/internal/admin/finance/gl-accounts/${ID}/lines`, authority: "finance:read" },
+  { path: `/finance/gl-accounts/${ID}/shards/0/repair-plan`, core: `/internal/admin/finance/gl-accounts/${ID}/shards/0/repair-plan`, authority: "finance:read" },
   { path: "/finance/route-caps", core: "/internal/admin/finance/route-caps", authority: "finance:read" },
   { path: `/gateways/${ID}/health`, core: `/internal/admin/gateways/${ID}/health`, authority: "gateway:read" },
   { path: "/system/jobs-outbox/summary", core: "/internal/admin/system/jobs-outbox/summary", authority: "security:read" },
@@ -191,6 +193,9 @@ const WRITE_ROUTES: WriteRoute[] = [
   { name: "payment link cancel", method: "POST", path: `/payment-links/${ID}/state`, core: `/internal/admin/payment-links/${ID}/state`, body: { state: "CANCELLED", reason: REASON }, authority: "merchant:write", readOnly: "merchant:read" },
   { name: "pos block", method: "POST", path: `/pos-terminals/${ID}/status`, core: `/internal/admin/pos-terminals/${ID}/status`, body: { status: "BLOCKED", reason: REASON }, authority: "merchant:write", readOnly: "merchant:read" },
   { name: "gl checkpoint", method: "POST", path: `/finance/gl-accounts/${ID}/checkpoint`, core: `/internal/admin/finance/gl-accounts/${ID}/checkpoint`, body: { reason: REASON }, authority: "finance:write", readOnly: "finance:read" },
+  { name: "gl shard scale", method: "POST", path: `/finance/gl-accounts/${ID}/shards/scale`, core: `/internal/admin/finance/gl-accounts/${ID}/shards/scale`, body: { width: 4, reason: REASON }, authority: "finance:write", readOnly: "finance:read" },
+  { name: "gl shard repair", method: "POST", path: `/finance/gl-accounts/${ID}/shards/0/repair`, core: `/internal/admin/finance/gl-accounts/${ID}/shards/0/repair`, body: { reason: REASON, planHash: "a".repeat(64) }, authority: "finance:write", readOnly: "finance:read" },
+  { name: "gl shard repair request", method: "POST", path: `/finance/gl-accounts/${ID}/shards/0/repair/request`, core: `/internal/admin/finance/gl-accounts/${ID}/shards/0/repair/request`, body: { reason: REASON, planHash: "a".repeat(64) }, authority: "finance:write", readOnly: "finance:read" },
   { name: "job requeue", method: "POST", path: `/system/jobs/${ID}/requeue`, core: `/internal/admin/system/jobs/${ID}/requeue`, body: { reason: REASON }, authority: "security:write", readOnly: "security:read" },
   { name: "notification retry", method: "POST", path: `/system/notifications/${ID}/retry`, core: `/internal/admin/system/notifications/${ID}/retry`, body: { reason: REASON }, authority: "security:write", readOnly: "security:read" },
   { name: "template edit", method: "PUT", path: `/settings/notification-templates/${ID}`, core: `/internal/admin/settings/notification-templates/${ID}`, body: { subjectTemplate: "Hello {{name}}", bodyTemplate: "Hi {{name}}" }, authority: "settings:write", readOnly: "settings:read" },
@@ -388,6 +393,7 @@ describe("authority any-of lists mirror core", () => {
     expect((await call("POST", `/system/jobs/${ID}/requeue`, read, { reason: REASON })).status).toBe(403);
     expect((await call("POST", `/system/notifications/${ID}/retry`, read, { reason: REASON })).status).toBe(403);
     expect((await call("POST", `/finance/gl-accounts/${ID}/checkpoint`, read, { reason: REASON })).status).toBe(403);
+    expect((await call("POST", `/finance/gl-accounts/${ID}/shards/scale`, read, { width: 4, reason: REASON })).status).toBe(403);
     expect(core.requests.length).toBe(before);
   });
 

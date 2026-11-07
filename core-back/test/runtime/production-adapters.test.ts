@@ -460,17 +460,15 @@ describe("production ledger invariant", () => {
    * fee accrual. `GATEWAY_FEE_ACCRUAL` is a CREDIT-normal account, so a
    * debit-positive reading of it would report a false drift.
    */
-  const buildInvariantClient = (options: { checkpointBalance?: string; checkpointAt?: Date } = {}) => {
+  const buildInvariantClient = () => {
     const accounts = [
-      { id: "clearing", accountType: "GATEWAY_CLEARING", checkpointBalance: options.checkpointBalance ?? "0", checkpointAt: options.checkpointAt ?? null },
-      { id: "fee-expense", accountType: "GATEWAY_FEE_EXPENSE", checkpointBalance: "0", checkpointAt: null },
-      { id: "fee-accrual", accountType: "GATEWAY_FEE_ACCRUAL", checkpointBalance: "0", checkpointAt: null },
-      { id: "wallet", accountType: "MERCHANT_WALLET", checkpointBalance: "0", checkpointAt: null },
-      { id: "income", accountType: "PLATFORM_INCOME", checkpointBalance: "0", checkpointAt: null },
+      { id: "clearing", accountType: "GATEWAY_CLEARING" },
+      { id: "fee-expense", accountType: "GATEWAY_FEE_EXPENSE" },
+      { id: "fee-accrual", accountType: "GATEWAY_FEE_ACCRUAL" },
+      { id: "wallet", accountType: "MERCHANT_WALLET" },
+      { id: "income", accountType: "PLATFORM_INCOME" },
     ];
-    const postedAt = options.checkpointAt
-      ? new Date(options.checkpointAt.getTime() + 1000)
-      : new Date("2026-03-01T00:00:00.000Z");
+    const postedAt = new Date("2026-03-01T00:00:00.000Z");
     const lines = [
       { id: "l1", glAccountId: "clearing", direction: "DEBIT", amount: "100.0000", createdAt: postedAt },
       { id: "l2", glAccountId: "fee-expense", direction: "DEBIT", amount: "0.8000", createdAt: postedAt },
@@ -510,44 +508,54 @@ describe("production ledger invariant", () => {
   });
 
   test("the checkpoint is not double counted", async () => {
-    // The checkpoint already covers the window that was closed, so a line that
-    // was posted BEFORE the checkpoint must not be added to it again.
+    // SQL path: the live balance is the SHARD sum, the checkpoint is the sum of the shard checkpoints, and the delta is
+    // what was posted since. A checkpoint that already covers the closed window must not be added on top of the live
+    // balance again.
     const checkpointAt = new Date("2026-03-01T00:00:00.000Z");
-    const before = new Date("2026-02-28T00:00:00.000Z");
-    const accounts = [
-      { id: "clearing", accountType: "GATEWAY_CLEARING", checkpointBalance: "100.0000", checkpointAt },
-      // A credit-normal account keeps a NEGATIVE debit-positive balance.
-      { id: "wallet", accountType: "MERCHANT_WALLET", checkpointBalance: "-100.0000", checkpointAt },
-    ];
-    const lines = [
-      { id: "l1", glAccountId: "clearing", direction: "DEBIT", amount: "100.0000", createdAt: before },
-      { id: "l2", glAccountId: "wallet", direction: "CREDIT", amount: "100.0000", createdAt: before },
-    ];
+    const statements: string[] = [];
     const client = {
-      glAccount: { findMany: async () => accounts },
-      journalLine: {
-        findMany: async (args?: {
-          where?: { glAccountId?: string; createdAt?: { gt?: Date } };
-        }) => {
-          const glAccountId = args?.where?.glAccountId;
-          const after = args?.where?.createdAt?.gt;
-          return lines.filter((line) => {
-            if (glAccountId && line.glAccountId !== glAccountId) {
-              return false;
-            }
-            if (after && line.createdAt.getTime() <= after.getTime()) {
-              return false;
-            }
-            return true;
-          });
-        },
+      glAccount: { findMany: async () => [] },
+      journalLine: { findMany: async () => [] },
+      $queryRawUnsafe: async (sql: string) => {
+        statements.push(sql);
+        return [
+          { id: "clearing", accountType: "GATEWAY_CLEARING", checkpointBalance: "100.0000", checkpointAt, live: "100.0000" },
+          // A credit-normal account keeps a NEGATIVE debit-positive balance.
+          { id: "wallet", accountType: "MERCHANT_WALLET", checkpointBalance: "-100.0000", checkpointAt, live: "-100.0000" },
+        ];
       },
     } as never;
-    const verifier = new InvariantVerifier(client);
-    const result = await verifier.verify();
+    const result = await new InvariantVerifier(client, { sql: true }).verify();
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toContain("gl_shard_checkpoints");
+    expect(statements[0]).toContain("gl_account_shards");
     const clearing = result.accountBalances.find((balance) => balance.accountType === "GATEWAY_CLEARING");
     expect(clearing?.checkpointBalance.toFixed(4)).toBe("100.0000");
     expect(clearing?.delta.toFixed(4)).toBe("0.0000");
+    expect(clearing?.liveBalance.toFixed(4)).toBe("100.0000");
+    expect(clearing?.checkpointAt).toEqual(checkpointAt);
+    expect(result.ok).toBe(true);
+  });
+
+  test("without raw SQL every journal line counts exactly once and no checkpoint is added", async () => {
+    const client = {
+      glAccount: {
+        findMany: async () => [
+          { id: "clearing", accountType: "GATEWAY_CLEARING" },
+          { id: "wallet", accountType: "MERCHANT_WALLET" },
+        ],
+      },
+      journalLine: {
+        findMany: async (args?: { where?: { glAccountId?: string } }) =>
+          [
+            { id: "l1", glAccountId: "clearing", direction: "DEBIT", amount: "100.0000" },
+            { id: "l2", glAccountId: "wallet", direction: "CREDIT", amount: "100.0000" },
+          ].filter((line) => !args?.where?.glAccountId || line.glAccountId === args.where.glAccountId),
+      },
+    } as never;
+    const result = await new InvariantVerifier(client).verify();
+    const clearing = result.accountBalances.find((balance) => balance.accountType === "GATEWAY_CLEARING");
+    expect(clearing?.checkpointBalance.toFixed(4)).toBe("0.0000");
     expect(clearing?.liveBalance.toFixed(4)).toBe("100.0000");
     expect(result.ok).toBe(true);
   });

@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { computed, defineComponent, ref, watch, type PropType, type VNodeChild } from "vue";
-import { VAlert, VBtn, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VTextarea, VTextField } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { StatusBadge, formatHumanStatus } from "@/components/ui/StatusBadge";
@@ -17,7 +17,8 @@ import { urlsMap } from "@/constants/urlsMap";
 import { hasOneOfAuthorities } from "@/state/user";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
-import { LedgerRefLink } from "./LedgerRefLink";
+import { AccountLinesTable } from "./AccountLinesTable";
+import { ShardRepairModal } from "./ShardRepairModal";
 import { JournalEntryDrawer } from "./JournalEntryDrawer";
 import { checkpointLag } from "./journalModel";
 import { errorCodeOf, errorDetailsOf, formatDateTime } from "./format";
@@ -30,25 +31,35 @@ export interface GlAccountSnapshot {
         ownerId: string | null;
         currency: string;
         gatewayId: string | null;
+        /** Derived: the sum of the shard checkpoints (debit-positive) and the oldest checkpoint time. */
         checkpointBalance: string;
         checkpointAt: string | null;
+        /** Routing width: new lines are spread over this many shards. */
+        shardCount: number;
+        shardScaledAt: string | null;
     };
+    checkpoint?: { status: "OK" | "GAP" | "PARITY" | string; pendingLines: string; shardsBehind: number };
     /** Debit-positive (the sign shards and checkpoints are stored in). */
     liveBalance: string;
     /** Natural sign of the account type: liabilities, income and reserves read positive. */
     naturalBalance: string;
     balanceSource: "shards" | "journal" | string;
-    shards: { shardId: number; currentBalance: string; updatedAt: string }[];
-    recentLines: {
-        lineId: string;
-        entryId: string;
-        direction: "DEBIT" | "CREDIT";
-        amount: string;
-        createdAt: string;
-        refType: string;
-        refId: string;
-        description: string;
-    }[];
+    shards: GlShardSnapshot[];
+}
+
+/** Sequence numbers are 64-bit, so they travel as strings. */
+export interface GlShardSnapshot {
+    shardId: number;
+    currentBalance: string;
+    lineSeq: string;
+    checkpointBalance: string;
+    checkpointSeq: string;
+    checkpointAt: string | null;
+    pendingLines: string;
+    status: "OK" | "GAP" | "PARITY" | string;
+    failureKind: string | null;
+    consecutiveFailures: number;
+    updatedAt: string;
 }
 
 /**
@@ -67,6 +78,13 @@ export const GlAccountDrawer = defineComponent({
         const loading = ref(false);
         const error = ref<string | null>(null);
         const entryId = ref<string | null>(null);
+        const linesTable = ref<{ refresh: () => void } | null>(null);
+        const repairShard = ref<number | null>(null);
+        const scaleOpen = ref(false);
+        const scaleWidth = ref(1);
+        const scaleReason = ref("");
+        const scaleLoading = ref(false);
+        const scaleError = ref("");
         const rollupOpen = ref(false);
         const rollupReason = ref("");
         const rollupLoading = ref(false);
@@ -114,6 +132,40 @@ export const GlAccountDrawer = defineComponent({
         const lag = computed(() => (snapshot.value ? checkpointLag(snapshot.value.liveBalance, snapshot.value.account.checkpointBalance) : null));
         const shardTotal = computed(() => (snapshot.value ? snapshot.value.shards.reduce((sum, shard) => sum.plus(new Decimal(shard.currentBalance || "0")), new Decimal(0)).toFixed(4) : "0.0000"));
 
+        const openScale = () => {
+            scaleWidth.value = snapshot.value?.account.shardCount ?? 1;
+            scaleReason.value = "";
+            scaleError.value = "";
+            scaleOpen.value = true;
+        };
+
+        const runScale = async () => {
+            const id = props.accountId;
+            if (!id) return;
+            if (!isValidReason(scaleReason.value)) {
+                scaleError.value = t("Reason is required (at least 10 characters)");
+                return;
+            }
+            const width = Math.trunc(Number(scaleWidth.value));
+            if (!Number.isFinite(width) || width < 1 || width > 256) {
+                scaleError.value = t("The shard count must be between 1 and 256");
+                return;
+            }
+            scaleLoading.value = true;
+            scaleError.value = "";
+            try {
+                const response = await api.post(urlsMap.financeGlAccountShardsScale(id), { width, reason: normalizeReason(scaleReason.value) });
+                snapshot.value = (response.data?.data ?? response.data) as GlAccountSnapshot;
+                scaleOpen.value = false;
+                showSnackBar({ type: "success", message: t("Shard count updated") });
+                emit("changed");
+            } catch (cause) {
+                scaleError.value = errorCodeOf(cause) === "SHARD_WIDTH_UNCHANGED" ? t("The account already routes over that many shards") : extractApiErrorMessage(cause);
+            } finally {
+                scaleLoading.value = false;
+            }
+        };
+
         const openRollup = () => {
             rollupReason.value = "";
             rollupError.value = "";
@@ -138,7 +190,10 @@ export const GlAccountDrawer = defineComponent({
             } catch (cause) {
                 if (errorCodeOf(cause) === "LEDGER_SHARD_PARITY_MISMATCH") {
                     const details = errorDetailsOf(cause);
-                    rollupError.value = `${t("The shard total differs from the journal total; the checkpoint was refused.")} ${t("Shard total")}: ${String(details.shardTotal ?? "—")} · ${t("Journal total")}: ${String(details.journalTotal ?? "—")} · ${t("Drift")}: ${String(details.drift ?? "—")}`;
+                    const shard = details.shardId === undefined ? "" : ` ${t("Shard")} #${String(details.shardId)}.`;
+                    rollupError.value = details.kind === "GAP"
+                        ? `${t("A shard's journal lines are not gapless; its checkpoint was refused.")}${shard} ${t("Lines found")}: ${String(details.linesFound ?? "—")} / ${String(details.linesExpected ?? "—")}`
+                        : `${t("The shard total differs from the journal total; the checkpoint was refused.")}${shard} ${t("Shard total")}: ${String(details.shardTotal ?? "—")} · ${t("Journal total")}: ${String(details.journalTotal ?? "—")} · ${t("Drift")}: ${String(details.drift ?? "—")}`;
                 } else {
                     rollupError.value = extractApiErrorMessage(cause);
                 }
@@ -159,7 +214,21 @@ export const GlAccountDrawer = defineComponent({
                 <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                         <StatusBadge status={data.account.accountType} label={data.account.accountType} showDot={false} />
-                        <StatusBadge status={data.balanceSource === "shards" ? "SHARDS" : "JOURNAL"} label={data.balanceSource === "shards" ? t("Balance from shards") : t("Balance from journal")} toneOverride="info" showDot={false} />
+                        <StatusBadge status="SHARDS" label={`${t("Balance from shards")} · ${data.account.shardCount ?? 1} ${(data.account.shardCount ?? 1) === 1 ? t("shard wide") : t("shards wide")}`} toneOverride="info" showDot={false} />
+                        {data.checkpoint && (
+                            <StatusBadge
+                                status={data.checkpoint.status === "OK" ? (Number(data.checkpoint.shardsBehind) > 0 ? "PENDING" : "SUCCESS") : "DRIFT"}
+                                label={
+                                    data.checkpoint.status !== "OK"
+                                        ? t("Checkpoint proof failed")
+                                        : Number(data.checkpoint.shardsBehind) > 0
+                                          ? `${t("Checkpoint behind")} · ${data.checkpoint.pendingLines} ${t("lines")}`
+                                          : t("Checkpoints up to date")
+                                }
+                                toneOverride={data.checkpoint.status !== "OK" ? "danger" : Number(data.checkpoint.shardsBehind) > 0 ? "warning" : "success"}
+                                showDot={false}
+                            />
+                        )}
                     </div>
 
                     <div
@@ -180,7 +249,7 @@ export const GlAccountDrawer = defineComponent({
                         <div style={{ padding: "14px 16px", backgroundColor: "var(--pg-bg-surface)", display: "flex", flexDirection: "column", gap: "4px" }}>
                             <span style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--pg-ink-muted)" }}>{t("Checkpoint balance")}</span>
                             <MoneyDisplay amount={data.account.checkpointBalance} currency={currency} size="lg" />
-                            <span style={{ fontSize: "11.5px", color: "var(--pg-ink-muted)" }}>{t("Debit-positive, as stored")}</span>
+                            <span style={{ fontSize: "11.5px", color: "var(--pg-ink-muted)" }}>{t("Sum of the shard checkpoints, debit-positive")}</span>
                         </div>
                     </div>
 
@@ -196,9 +265,9 @@ export const GlAccountDrawer = defineComponent({
                         ]}
                     />
 
-                    <SurfaceCard title={t("Shards")} subtitle={t("Balance of each hot-account shard (debit-positive)")} noPadding>
+                    <SurfaceCard title={t("Shards")} subtitle={t("Each shard keeps its own balance, line sequence and checkpoint (debit-positive)")} noPadding>
                         {data.shards.length === 0 ? (
-                            <EmptyState title={t("No shard rows")} description={t("This account has no shards; its balance derives from the journal since the last checkpoint.")} />
+                            <EmptyState title={t("No shard rows")} description={t("This account has no shard rows yet; they are created with the account.")} />
                         ) : (
                             <div class="pg-unified-table" style={{ overflowX: "auto" }}>
                                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -206,23 +275,51 @@ export const GlAccountDrawer = defineComponent({
                                         <tr>
                                             {th(t("Shard"))}
                                             {th(t("Balance"), "end")}
-                                            {th(t("Updated"))}
+                                            {th(t("Lines"), "end")}
+                                            {th(t("Pending"), "end")}
+                                            {th(t("Checkpoint"), "end")}
+                                            {th(t("Checkpoint age"))}
+                                            {th(t("Status"))}
+                                            {canRollup.value && th("")}
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {data.shards.map((shard) => (
                                             <tr key={shard.shardId}>
-                                                <td class="pg-tabular">#{shard.shardId}</td>
+                                                <td class="pg-tabular">#{shard.shardId}{shard.shardId >= (data.account.shardCount ?? 1) ? ` (${t("not routed")})` : ""}</td>
                                                 <td style={{ textAlign: "end" }}><MoneyDisplay amount={shard.currentBalance} currency={currency} size="sm" showCurrency={false} /></td>
-                                                <td>{formatDateTime(shard.updatedAt)}</td>
+                                                <td class="pg-tabular" style={{ textAlign: "end" }}>{shard.lineSeq}</td>
+                                                <td class="pg-tabular" style={{ textAlign: "end" }}>{shard.pendingLines}</td>
+                                                <td style={{ textAlign: "end" }}><MoneyDisplay amount={shard.checkpointBalance} currency={currency} size="sm" showCurrency={false} /></td>
+                                                <td>{shard.checkpointAt ? formatDateTime(shard.checkpointAt) : "—"}</td>
+                                                <td>
+                                                    <StatusBadge
+                                                        status={shard.status}
+                                                        label={shard.status === "OK" ? t("OK") : `${shard.status} · ${shard.consecutiveFailures}`}
+                                                        toneOverride={shard.status === "OK" ? "success" : "danger"}
+                                                        showDot={false}
+                                                    />
+                                                </td>
+                                                {canRollup.value && (
+                                                    <td style={{ textAlign: "end" }}>
+                                                        {shard.status !== "OK" && (
+                                                            <VBtn size="x-small" variant="tonal" color="error" prependIcon="mdi-wrench-outline" onClick={() => (repairShard.value = shard.shardId)}>
+                                                                {t("Repair")}
+                                                            </VBtn>
+                                                        )}
+                                                    </td>
+                                                )}
                                             </tr>
                                         ))}
                                     </tbody>
                                     <tfoot>
-                                        <tr style={{ fontWeight: 600 }}>
+                                        <tr>
                                             <td>{t("Total")}</td>
                                             <td style={{ textAlign: "end" }}><MoneyDisplay amount={shardTotal.value} currency={currency} size="sm" showCurrency={false} /></td>
-                                            <td />
+                                            <td class="pg-tabular" style={{ textAlign: "end" }}>{data.shards.reduce((sum, shard) => sum + BigInt(shard.lineSeq || "0"), 0n).toString()}</td>
+                                            <td class="pg-tabular" style={{ textAlign: "end" }}>{data.shards.reduce((sum, shard) => sum + BigInt(shard.pendingLines || "0"), 0n).toString()}</td>
+                                            <td style={{ textAlign: "end" }}><MoneyDisplay amount={data.account.checkpointBalance} currency={currency} size="sm" showCurrency={false} /></td>
+                                            <td colspan={canRollup.value ? 3 : 2} />
                                         </tr>
                                     </tfoot>
                                 </table>
@@ -230,35 +327,17 @@ export const GlAccountDrawer = defineComponent({
                         )}
                     </SurfaceCard>
 
-                    <SurfaceCard title={t("Recent lines")} subtitle={t("Latest postings to this account")} noPadding>
-                        {data.recentLines.length === 0 ? (
-                            <EmptyState title={t("No journal lines")} description={t("Nothing has been posted to this account yet.")} />
-                        ) : (
-                            <div class="pg-unified-table" style={{ overflowX: "auto" }}>
-                                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                                    <thead>
-                                        <tr>
-                                            {th(t("Entry"))}
-                                            {th(t("Reference type"))}
-                                            {th(t("Side"))}
-                                            {th(t("Amount"), "end")}
-                                            {th(t("Posted at"))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {data.recentLines.map((line) => (
-                                            <tr key={line.lineId}>
-                                                <td><LedgerRefLink value={line.entryId} label={t("Open journal entry")} onOpen={(id: string) => (entryId.value = id)} /></td>
-                                                <td title={line.description}>{formatHumanStatus(line.refType)}</td>
-                                                <td><StatusBadge status={line.direction} label={line.direction === "DEBIT" ? t("Debit") : t("Credit")} toneOverride={line.direction === "DEBIT" ? "info" : "neutral"} showDot={false} /></td>
-                                                <td style={{ textAlign: "end" }}><MoneyDisplay amount={line.amount} currency={currency} size="sm" showCurrency={false} /></td>
-                                                <td>{formatDateTime(line.createdAt)}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
+                    <SurfaceCard title={t("Lines")} subtitle={t("Every posting to this account, newest first")} noPadding>
+                        <AccountLinesTable
+                            ref={linesTable}
+                            key={props.accountId ?? ""}
+                            url={urlsMap.financeGlAccountLines(data.account.id)}
+                            currency={currency}
+                            accountType={data.account.accountType}
+                            compact
+                            noElevation
+                            onOpenEntry={(id: string) => (entryId.value = id)}
+                        />
                     </SurfaceCard>
                 </div>
             );
@@ -278,7 +357,13 @@ export const GlAccountDrawer = defineComponent({
                         default: body,
                         footer: () => (
                             <>
-                                <VBtn variant="text" prependIcon="mdi-refresh" onClick={() => props.accountId && void load(props.accountId, true)}>{t("Refresh")}</VBtn>
+                                <VBtn variant="text" prependIcon="mdi-refresh" onClick={() => {
+                                    if (props.accountId) void load(props.accountId, true);
+                                    linesTable.value?.refresh();
+                                }}>{t("Refresh")}</VBtn>
+                                {canRollup.value && snapshot.value && (
+                                    <VBtn variant="text" prependIcon="mdi-table-split-cell" onClick={openScale}>{t("Set shard count")}</VBtn>
+                                )}
                                 {canRollup.value && snapshot.value && (
                                     <VBtn variant="tonal" color="primary" prependIcon="mdi-database-sync-outline" onClick={openRollup}>{t("Run checkpoint rollup")}</VBtn>
                                 )}
@@ -288,23 +373,65 @@ export const GlAccountDrawer = defineComponent({
                     }}
                 />
                 {entryId.value && <JournalEntryDrawer entryId={entryId.value} onClose={() => (entryId.value = null)} />}
+                <ShardRepairModal
+                    accountId={repairShard.value === null ? null : props.accountId}
+                    shardId={repairShard.value}
+                    currency={snapshot.value?.account.currency ?? "LYD"}
+                    onClose={() => (repairShard.value = null)}
+                    onChanged={() => {
+                        if (props.accountId) void load(props.accountId, true);
+                        linesTable.value?.refresh();
+                        emit("changed");
+                    }}
+                />
                 <FormModal
                     modelValue={rollupOpen.value}
                     onUpdate:modelValue={(value: boolean) => (rollupOpen.value = value)}
                     title={t("Run checkpoint rollup")}
-                    subtitle={t("Folds the shard deltas into the stored checkpoint balance")}
+                    subtitle={t("Verifies every shard against the journal and moves its checkpoint forward")}
                     submitLabel={t("Run rollup")}
                     loading={rollupLoading.value}
                     errorMessage={rollupError.value}
                     onSubmit={() => void runRollup()}
                 >
                     <VAlert type="info" variant="tonal" density="compact">
-                        {t("The rollup is refused if the shard total differs from the journal total. The action is audited.")}
+                        {t("A shard whose lines do not add up to its balance is not advanced and the action names that shard. Payments are not blocked. The action is audited.")}
                     </VAlert>
                     <FormField label={t("Reason")} required hint={t("At least 10 characters; written to the audit log")}>
                         <VTextarea
                             modelValue={rollupReason.value}
                             onUpdate:modelValue={(value: string) => void (rollupReason.value = value)}
+                            rows={3}
+                            autoGrow
+                            {...{ maxlength: 500 }}
+                        />
+                    </FormField>
+                </FormModal>
+                <FormModal
+                    modelValue={scaleOpen.value}
+                    onUpdate:modelValue={(value: boolean) => (scaleOpen.value = value)}
+                    title={t("Set shard count")}
+                    subtitle={t("How many shards new postings are spread over")}
+                    submitLabel={t("Apply")}
+                    loading={scaleLoading.value}
+                    errorMessage={scaleError.value}
+                    onSubmit={() => void runScale()}
+                >
+                    <VAlert type="info" variant="tonal" density="compact">
+                        {t("Widening adds shards for new postings. Narrowing only changes where new postings go; existing shards keep their balances and checkpoints. Nothing is moved. The action is audited.")}
+                    </VAlert>
+                    <FormField label={t("Shard count")} required hint={t("1 to 256")}>
+                        <VTextField
+                            modelValue={scaleWidth.value}
+                            onUpdate:modelValue={(value: string) => void (scaleWidth.value = Number(value))}
+                            type="number"
+                            {...{ min: 1, max: 256 }}
+                        />
+                    </FormField>
+                    <FormField label={t("Reason")} required hint={t("At least 10 characters; written to the audit log")}>
+                        <VTextarea
+                            modelValue={scaleReason.value}
+                            onUpdate:modelValue={(value: string) => void (scaleReason.value = value)}
                             rows={3}
                             autoGrow
                             {...{ maxlength: 500 }}

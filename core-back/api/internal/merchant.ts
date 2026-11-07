@@ -33,7 +33,7 @@ import {
 import { lockWalletLedgerBalance, openCashoutTotal } from "../../lib/cashoutBalance";
 import { Vault } from "../../engine/crypto/Vault";
 import { decimal } from "../../engine/ledger/LedgerPoster";
-import { loadLiveAccountBalances } from "../../lib/storageEngine/shardBalances";
+import { loadAccountCheckpointSummary, loadLiveAccountBalances, naturalShardBalance } from "../../lib/storageEngine/shardBalances";
 import { moneyFromDecimal } from "../../engine/db/money";
 import { getPlatformRuntime } from "../../engine/runtime";
 import { readThroughReplicaOrPrimary } from "../../lib/storageEngine";
@@ -746,7 +746,6 @@ router.post("/auth/register", async (request: Request, response: Response) => {
         accountType: "MERCHANT_WALLET",
         ownerId: merchant.id,
         currency: "LYD",
-        checkpointBalance: new Prisma.Decimal(0),
       },
     });
     const wallet = await tx.wallet.create({
@@ -1408,7 +1407,6 @@ router.post("/wallets", async (request: Request, response: Response) => {
         accountType: "MERCHANT_WALLET",
         ownerId: merchantId,
         currency: body.currency.toUpperCase(),
-        checkpointBalance: new Prisma.Decimal(0),
       },
     });
     return tx.wallet.create({
@@ -1433,19 +1431,21 @@ router.get("/wallets/:id/balance", async (request: Request, response: Response) 
   const { id } = parseOrThrow(idSchema, request.params);
   const wallet = await client.wallet.findFirst({
     where: { id, merchantId },
-    select: { id: true, currency: true, glAccountId: true, glAccount: { select: { checkpointBalance: true } } },
+    select: { id: true, currency: true, glAccountId: true },
   });
   if (!wallet) {
     throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
   }
-  // One statement: shard total, or checkpoint + post-checkpoint lines.
+  // The balance is the shard total; the checkpoint is derived from the shard checkpoints.
   const [live] = await loadLiveAccountBalances(client as never, [wallet.glAccountId]);
+  const [checkpoint] = await loadAccountCheckpointSummary(client as never, [wallet.glAccountId]);
   const balance = decimal(live?.balance ?? 0);
   response.json({
     walletId: wallet.id,
     currency: wallet.currency,
     balance: balance.toFixed(4),
-    checkpointBalance: decimal(wallet.glAccount.checkpointBalance).toFixed(4),
+    // Natural sign like `balance` (a merchant in credit reads positive); the stored checkpoint is debit-positive.
+    checkpointBalance: decimal(naturalShardBalance("MERCHANT_WALLET", checkpoint?.checkpointBalance ?? "0")).toFixed(4),
   });
 });
 

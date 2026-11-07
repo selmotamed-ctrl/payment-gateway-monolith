@@ -32,7 +32,7 @@ export interface DerivedTopology {
   name: string;
   description: string;
   aliases: string[];
-  shardCount: 16 | 32;
+  shardCount: number;
   backupMode: "pg-native" | "wal-g" | "barman";
   deployMode: "fresh" | "rolling_update";
   nodes: Record<ComputeTier, NodeRef[]>;
@@ -103,7 +103,7 @@ class PortBook {
 
 export const slugify = (id: string): string => id.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-const defaultShards = (family: TopologyFamily): 16 | 32 =>
+const defaultShards = (family: TopologyFamily): number =>
   family === "single-host" || family === "split" || family === "dmz" ? 16 : 32;
 
 const cap = (config: LabConfig, machineId: string): number =>

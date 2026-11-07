@@ -12,3 +12,6 @@
 | `20261104120000_mfa_challenges` | 51 | ============================================================================ |
 | `20261105090000_append_only_ledger_guards` | 158 | ============================================================================ |
 | `20261105130000_statement_unique_source_file_hash` | 33 | GAP-018: statement file hashes are unique per statement source, not globally. |
+| `20261107090000_shard_sequenced_checkpoints` | 174 | ============================================================================ |
+| `20261107120000_inbound_event_claims` | 22 | Lease-based claim for the inbound webhook inbox. |
+| `20261107150000_shard_repairs` | 53 | ============================================================================ |

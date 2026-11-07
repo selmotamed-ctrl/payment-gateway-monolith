@@ -6,7 +6,7 @@ Generated from: `merchant-ui.portal`, `merchant-ui.guide`.
 
 ## Merchant Portal
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-07
 
 ## 1. Purpose and scope
 
@@ -168,6 +168,7 @@ The link amount is stored server-side; the checkout page never accepts a client 
 - Creates a terminal with name and location.
 - Creates/pairs a screen with a screen name and type.
 - Shows screen role/status and actions.
+- The shared table subsystem mirrors the admin copy: the action column is sticky to the inline end and `TableRowActions` opens the same actions from a row right-click or `Shift+F10` (primary action first, then the overflow items). The visible overflow button remains the touch path.
 
 `PosScreen` (`/portal/pos/screen/:code`):
 

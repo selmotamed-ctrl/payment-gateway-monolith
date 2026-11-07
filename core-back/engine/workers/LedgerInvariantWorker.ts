@@ -1,4 +1,5 @@
 import { InvariantVerifier } from "../ledger/InvariantVerifier";
+import { LEDGER_SUBJECT_KEYS, raiseLedgerCase } from "../ledger/ledgerAlerts";
 import type { PrismaLike } from "../db/ports";
 import { BaseWorker, type WorkerOptions } from "./workerRuntime";
 
@@ -43,21 +44,11 @@ export class LedgerInvariantWorker extends BaseWorker {
   }
 
   private async raiseOperatorCase(drift: string): Promise<void> {
-    const open = await this.db.operatorCase.findFirst({
-      where: { kind: "MISMATCH", priority: "P1", state: "OPEN" },
-      select: { id: true },
-    });
-    if (open) {
-      return;
-    }
-    await this.db.operatorCase.create({
-      data: {
-        kind: "MISMATCH",
-        priority: "P1",
-        state: "OPEN",
-        resolutionNotes: `The system wide double-entry invariant drifted by ${drift} LYD`,
-        slaDueAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
-      },
+    // Keyed, so it does not suppress (or get suppressed by) a per-shard checkpoint alert.
+    await raiseLedgerCase(this.db as never, {
+      subjectKey: LEDGER_SUBJECT_KEYS.invariant,
+      notes: `The system wide double-entry invariant drifted by ${drift} LYD`,
+      now: this.clock(),
     });
   }
 }

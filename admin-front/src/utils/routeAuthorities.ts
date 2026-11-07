@@ -19,6 +19,7 @@ export const routesAuthorities: Record<string, string[]> = {
     Merchants: ["merchants.read", "support.read_merchant"],
     MerchantDetail: ["merchants.read", "support.read_merchant"],
     Wallets: ["merchants.read", "support.read_merchant"],
+    WalletDetail: ["merchants.read", "support.read_merchant"],
     Applications: ["merchants.read", "support.read_merchant"],
     Transactions: ["merchants.read", "support.read_merchant", "attempt:read"],
     Approvals: ["approvals.approve", "approvals.reject"],

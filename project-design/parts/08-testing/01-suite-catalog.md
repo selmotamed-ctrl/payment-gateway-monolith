@@ -3,8 +3,8 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-06
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-07
+verified_against: d695518+working-tree
 code:
   - core-back/test/exhaustive/**
   - core-back/test/storage-engine/**
@@ -50,8 +50,10 @@ tests:
   - tests/unit/frontend-security-checkout.test.ts
   - tests/unit/frontend-security-merchant.test.ts
   - tests/e2e/admin/commerce-governance.spec.ts
+  - tests/e2e/admin/wallet-details.spec.ts
   - tests/unit/commerce-governance.test.ts
   - tests/unit/commerce-actions.test.ts
+  - tests/unit/wallet-details.test.ts
   - tests/unit/commerce-owners-revalidation.test.ts
   - tests/unit/commerce-i18n.test.ts
   - tests/unit/ledger-ops-ledger.test.ts
@@ -212,7 +214,8 @@ The 140-case catalog lives in `core-back/test/edge-cases/catalog-140.test.ts`, n
 
 There is **no** `core-back/test/exhaustive/09-storage-backup` directory. The runner's `T-EX-09` executes:
 
-- `core-back/test/storage-engine` — unit and live PostgreSQL storage tests, including `uow`, `read-store`, `ledger-shards`, `audit-chain`, `cache-velocity`, `outbox-workers`, `log-sink`, `engine-factory`, `write-path.integration` and `performance`.
+- `core-back/test/storage-engine` — unit and live PostgreSQL storage tests, including `uow`, `read-store`, `ledger-shards`, `audit-chain`, `cache-velocity`, `outbox-workers`, `log-sink`, `engine-factory`, `write-path.integration` and `performance`. `leader-election-pgbouncer.test.ts` starts a throwaway PgBouncer (skipped when PostgreSQL or the `pgbouncer` binary is unavailable) and proves that transaction pooling lets two clients hold one advisory lock, that the `pgw_session` alias enforces one leader and fails over after `pg_terminate_backend`, and that the boot probe accepts only the session alias.
+- `core-back/test/hardening-gap-regressions.test.ts` covers the leader-election environment guard, backend-PID/`pg_locks` ownership checks, refused unlocks, the session-safety probe and the durable `inbound_events` claim lease.
 - `core-back/test/backup-admin` — backup routes and control client.
 - `deploy/backup-daemon/test` — 71 declarations across 8 files.
 
@@ -403,7 +406,7 @@ Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not cov
 ## Admin UI completion suites (2026-11-06)
 
 - **Unit (`tests/unit`, vitest, 490 passing in 30 files):** pure logic of the new UI: governance action tables per state (immediate vs approval), owner/revalidation forms, journal/route-cap/lifecycle/health/jobs models, the JSON diff model, audit summaries (`formatAuditValue`, `describeAuditChange`), commission tiers, dispute evidence mapping, and the builders' round trips (cost model, scope, maintenance windows, parser config, AML params, settings schemas, template variables) including unknown-key preservation. `commerce-i18n` and `builders-api-error-i18n` assert that every message key the logic can produce has an Arabic entry. `frontend-security-admin` (default-deny route authorities, alias map) and `guide-content` (every router name has a context-map screen) caught the six new routes until they were registered properly. `guide-markdown-refs` covers the clarity renderer helpers (parenthetical reference extraction, meaningful-prose preservation, short labels, preview snippets); `guide-content` also runs the clarity `--check` gate.
-- **E2E (Playwright, needs Chrome: set `PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome-stable` when the bundled browser is not installed):** `e2e/admin/commerce-governance.spec.ts` drives the wallets page against realistic mocked responses (restricted balances render "Restricted" and never 0; a freeze needs a >=10-character reason and sends exactly `{status: "FROZEN", reason}`; restoring returns HTTP 202 and is reported as submitted for approval; a read-only role gets no freeze action). `exhaustive-admin-surface.spec.ts` now covers 31 routes (the six new ones included) across 3 viewports x 2 locales x 2 themes (372 combinations: no horizontal overflow, correct direction and theme, app bar never overlapping). `e2e/admin/backups.spec.ts` was updated for the second confirmation the page has asked for since the frontend hardening commit (its spec was stale). `e2e/admin/guide-reader.spec.ts` also holds the phone-width regression for guides: a wide article table and the edge-case catalogue must scroll inside their wrapper, keep `overflow-wrap: normal` on cells and never make the page itself overflow horizontally.
+- **E2E (Playwright, needs Chrome: set `PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome-stable` when the bundled browser is not installed):** `e2e/admin/wallet-details.spec.ts` drives the wallet details page against mocked responses (Inspect and old `?open=` links land on `/wallets/:id`; the shard **Total** row has cell padding; the statement is paged by the server with totals of the whole result and a side filter sent as `direction=`; the tab survives a reload; a journal entry opens above the page and above the GL account drawer, checked with `elementFromPoint`; the GL drawer paginates its lines; a frozen wallet shows the banner and the status history). `e2e/admin/commerce-governance.spec.ts` drives the wallets page against realistic mocked responses (restricted balances render "Restricted" and never 0; a freeze needs a >=10-character reason and sends exactly `{status: "FROZEN", reason}`; restoring returns HTTP 202 and is reported as submitted for approval; a read-only role gets no freeze action). `exhaustive-admin-surface.spec.ts` now covers 31 routes (the six new ones included) across 3 viewports x 2 locales x 2 themes (372 combinations: no horizontal overflow, correct direction and theme, app bar never overlapping). `e2e/admin/backups.spec.ts` was updated for the second confirmation the page has asked for since the frontend hardening commit (its spec was stale). `e2e/admin/guide-reader.spec.ts` also holds the phone-width regression for guides: a wide article table and the edge-case catalogue must scroll inside their wrapper, keep `overflow-wrap: normal` on cells and never make the page itself overflow horizontally.
 - **Component compliance (`admin-front` `bun run test:unit`):** helper components must live in `components/` subfolders so every route page keeps `PageHeader` (the test stops at the first offender).
 
 ## Backup daemon suites (2026-11-06)

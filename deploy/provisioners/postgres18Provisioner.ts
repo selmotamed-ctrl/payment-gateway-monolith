@@ -1,5 +1,6 @@
 import {
   parseNodeList,
+  PGBOUNCER_SESSION_ALIAS,
   type DeployConfig,
   type NodeSpec,
 } from "../lib/configSchema";
@@ -435,9 +436,20 @@ runuser -u postgres -- env PGPASSFILE=/var/lib/postgresql/.pgpass PGSSLMODE=requ
 const connValue = (value: string): string =>
   `'${assertSingleLine(value, "pgbouncer value").replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 
-/** The exact PgBouncer transaction-pooling configuration. */
-export const pgbouncerIni = (config: DeployConfig, serverPort = 5432): string => `[databases]
+/**
+ * The exact PgBouncer configuration.
+ *
+ * The application database stays in transaction mode (the pooler's reason to
+ * exist). A second alias, `pgw_session`, maps to the SAME real database with
+ * `pool_mode=session`, because PostgreSQL advisory locks live on a backend
+ * session. Singleton workers connect only through the session alias.
+ */
+export const pgbouncerIni = (config: DeployConfig, serverPort = 5432): string => {
+  const coreNodes = parseNodeList(config.CORE_NODES).length || 1;
+  const sessionPoolSize = Math.max(8, coreNodes * 2 + 4);
+  return `[databases]
 ${assertSingleLine(config.PG_DB_NAME, "PG_DB_NAME")} = host=127.0.0.1 port=${serverPort} dbname=${connValue(config.PG_DB_NAME)} user=${connValue(config.PG_DB_USER)} password=${connValue(config.PG_DB_PASSWORD)}
+${PGBOUNCER_SESSION_ALIAS} = host=127.0.0.1 port=${serverPort} dbname=${connValue(config.PG_DB_NAME)} user=${connValue(config.PG_DB_USER)} password=${connValue(config.PG_DB_PASSWORD)} pool_mode=session pool_size=${sessionPoolSize}
 
 [pgbouncer]
 listen_addr = 0.0.0.0
@@ -453,6 +465,7 @@ ignore_startup_parameters = extra_float_digits,search_path
 auth_type = scram-sha-256
 auth_file = /etc/pgbouncer/userlist.txt
 `;
+};
 
 export const pgbouncerUserlist = (config: DeployConfig): string =>
   `${pgbouncerQuoted(config.PG_DB_USER)} ${pgbouncerQuoted(config.PG_DB_PASSWORD)}\n${pgbouncerQuoted(config.PG_REPLICATION_USER)} ${pgbouncerQuoted(config.PG_REPLICATION_PASSWORD)}\n`;
@@ -629,6 +642,23 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
     });
     commands.push(login);
     runner.run(primarySsh, login, { sudo: false, timeoutMs: 2 * 60_000 });
+
+    // The singleton workers use the session alias for their advisory locks.
+    // Prove it is served before core starts: a reload normally publishes a new
+    // [databases] entry, but a restart is the safe fallback if it did not.
+    const leaderLogin = poolerLoginScript({
+      port: config.PGBOUNCER_PORT,
+      database: PGBOUNCER_SESSION_ALIAS,
+      user: config.PG_DB_USER,
+      pgpassLine: `${pgpassField("127.0.0.1")}:${config.PGBOUNCER_PORT}:${pgpassField(PGBOUNCER_SESSION_ALIAS)}:${pgpassField(config.PG_DB_USER)}:${pgpassField(config.PG_DB_PASSWORD)}`,
+    });
+    commands.push(leaderLogin);
+    try {
+      runner.run(primarySsh, leaderLogin, { sudo: false, timeoutMs: 2 * 60_000 });
+    } catch {
+      runner.run(primarySsh, "systemctl restart pgbouncer", { sudo: true, timeoutMs: 2 * 60_000 });
+      runner.run(primarySsh, leaderLogin, { sudo: false, timeoutMs: 2 * 60_000 });
+    }
   }
 
   const pgbouncerHosts = new Set<string>([primarySsh.host]);

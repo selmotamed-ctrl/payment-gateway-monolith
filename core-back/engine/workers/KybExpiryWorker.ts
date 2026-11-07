@@ -121,8 +121,11 @@ export class KybExpiryWorker extends BaseWorker {
           },
           eventKey: `expiring:${document.id}:${range.days}`,
         });
-        await db.kybDocument.update({
-          where: { id: document.id },
+        // Conditional marker: a duplicate leader (or a retried tick after a
+        // lost connection) must not overwrite the notice time. The
+        // notification itself is already de-duplicated by its unique eventKey.
+        await db.kybDocument.updateMany({
+          where: { id: document.id, [range.field]: null },
           data: { [range.field]: now },
         });
       }

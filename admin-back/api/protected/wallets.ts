@@ -41,6 +41,26 @@ router.get(
   }),
 );
 
+router.get(
+  "/:id/statement",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/wallets/${encode(context.params.id)}/statement`,
+    paramsSchema: uuidParamsSchema,
+    querySchema: zListQuery,
+  }),
+);
+
+router.get(
+  "/:id/audit-events",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/wallets/${encode(context.params.id)}/audit-events`,
+    paramsSchema: uuidParamsSchema,
+    querySchema: zListQuery,
+  }),
+);
+
 router.post(
   "/:id/status",
   coreForward({

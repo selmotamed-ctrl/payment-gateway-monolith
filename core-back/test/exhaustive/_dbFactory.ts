@@ -201,14 +201,28 @@ export interface BuildRowOptions {
   token?: string;
 }
 
+/**
+ * Column values a generic factory row needs on tables whose invariants a zero/default value would violate.
+ *  - `gl_account_shards`: shard 0 of every account is created by the `gl_accounts_create_shards` trigger, so a factory
+ *    shard row (and the parent shard of a `gl_shard_checkpoints` row) uses shard 1 to avoid colliding with it.
+ *  - `journal_lines`: a new line must carry a real per-shard sequence (`journal_lines_shard_seq_positive`).
+ */
+const FACTORY_DEFAULTS: Record<string, Record<string, unknown>> = {
+  gl_account_shards: { shard_id: 1 },
+  journal_lines: { shard_id: 0, shard_seq: 1 },
+  // The CHECK constraints of the append-only repair history accept only these values.
+  gl_shard_repairs: { kind: "RECOMPUTE", mode: "AUTO" },
+};
+
 export const buildRow = async (
   table: string,
-  overrides: Record<string, unknown> = {},
+  rawOverrides: Record<string, unknown> = {},
   options: BuildRowOptions = {},
   client: PrismaClient = exhaustiveClient(),
   stack: string[] = [],
 ): Promise<Record<string, unknown>> => {
   const meta = await loadMeta(client, table);
+  const overrides = { ...(FACTORY_DEFAULTS[table] ?? {}), ...rawOverrides };
   const token = options.token ?? randomUUID();
   const row: Record<string, unknown> = {};
   const required = requiredColumns(meta);

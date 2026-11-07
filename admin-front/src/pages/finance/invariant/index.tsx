@@ -89,7 +89,10 @@ const InvariantPage = dc(() => {
         } catch (e) {
             if (errorCodeOf(e) === "LEDGER_SHARD_PARITY_MISMATCH") {
                 const details = errorDetailsOf(e);
-                rollupError.value = `${t("The shard total differs from the journal total; the checkpoint was refused.")} ${t("Shard total")}: ${String(details.shardTotal ?? "—")} · ${t("Journal total")}: ${String(details.journalTotal ?? "—")} · ${t("Drift")}: ${String(details.drift ?? "—")}`;
+                const shard = details.shardId === undefined ? "" : ` ${t("Shard")} #${String(details.shardId)}.`;
+                rollupError.value = details.kind === "GAP"
+                    ? `${t("A shard's journal lines are not gapless; its checkpoint was refused.")}${shard} ${t("Lines found")}: ${String(details.linesFound ?? "—")} / ${String(details.linesExpected ?? "—")}`
+                    : `${t("The shard total differs from the journal total; the checkpoint was refused.")}${shard} ${t("Shard total")}: ${String(details.shardTotal ?? "—")} · ${t("Journal total")}: ${String(details.journalTotal ?? "—")} · ${t("Drift")}: ${String(details.drift ?? "—")}`;
             } else {
                 rollupError.value = extractApiErrorMessage(e);
             }
@@ -289,7 +292,7 @@ const InvariantPage = dc(() => {
                     if (!value) rollupAccountId.value = null;
                 }}
                 title={t("Run checkpoint rollup")}
-                subtitle={t("Folds the shard deltas into the stored checkpoint balance")}
+                subtitle={t("Verifies every shard against the journal and moves its checkpoint forward")}
                 submitLabel={t("Run rollup")}
                 loading={rollupLoading.value}
                 errorMessage={rollupError.value}
@@ -297,7 +300,7 @@ const InvariantPage = dc(() => {
             >
                 {rollupAccountId.value && <MonoRef value={rollupAccountId.value} />}
                 <VAlert type="info" variant="tonal" density="compact">
-                    {t("The rollup is refused if the shard total differs from the journal total. The action is audited.")}
+                    {t("A shard whose lines do not add up to its balance is not advanced and the action names that shard. Payments are not blocked. The action is audited.")}
                 </VAlert>
                 <FormField label={t("Reason")} required hint={t("At least 10 characters; written to the audit log")}>
                     <VTextarea modelValue={rollupReason.value} onUpdate:modelValue={(value: string) => void (rollupReason.value = value)} rows={3} autoGrow {...{ maxlength: 500 }} />

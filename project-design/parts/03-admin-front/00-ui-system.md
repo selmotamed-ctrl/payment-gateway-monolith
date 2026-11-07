@@ -3,8 +3,8 @@ id: admin-ui.system
 title: Admin UI System
 status: partial
 confidence: high
-last_verified: 2026-11-06
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-07
+verified_against: d695518+working-tree
 code:
   - admin-front/src/plugins/vuetify.ts
   - admin-front/src/styles/**
@@ -37,6 +37,7 @@ tests:
   - admin-front/src/components/ui/__tests__/ui-abstraction-compliance.test.ts
   - tests/e2e/admin/shell.spec.ts
   - tests/e2e/admin/table-and-padding-geometry.spec.ts
+  - tests/e2e/admin/table-row-context-menu.spec.ts
   - tests/e2e/admin/a11y.spec.ts
   - tests/e2e/merchant/shell.spec.ts
   - tests/e2e/checkout/pay.spec.ts
@@ -83,7 +84,7 @@ The key intent from `design/90-archive/superseded-ui/portal_ui_abstraction_and_m
 4. **A precision shell.** A 248 px permanent drawer on desktop, a 56 px flat app bar, keycap-style active navigation, collapsible section groups, breadcrumbs, a global search entry point, help entry point, theme/locale controls, and an operator identity card.
 5. **A split-screen auth surface.** Institutional brand and security posture on one side; the login panel on the other.
 6. **A primitive layer instead of page-level Vuetify soup.** Pages compose `PageHeader`, `StatusBadge`, `MoneyDisplay`, `MonoRef`, `MetricStrip`, `SurfaceCard`, `FormModal`, `FormField`, `SlideOverDrawer`, `DescriptionList`, `SegmentedTabs`, `EmptyState`, and `JsonDiffViewer`. The unified table surface is the fourteenth deliverable even though the design prose sometimes calls it a fourteenth primitive.
-7. **Disciplined tables.** 40 px single-line rows, no rainbow row tints, one primary row action plus an overflow menu, collapsible filters, and XLSX export through the shared pipeline.
+7. **Disciplined tables.** 40 px single-line rows, no rainbow row tints, one primary row action plus an overflow menu, a sticky action column, a row-level right-click/`Shift+F10` context menu that reuses the same action model, collapsible filters, and XLSX export through the shared pipeline.
 8. **No global scaling transform.** A previous whole-app `transform: scale(0.9)` caused fixed-position and RTL problems and was removed. The old `SCALING_FEATURE.md` files were deleted; do not reintroduce them.
 
 The implementation plan records one correction to the design prose: the blueprint says "14 primitives" but names 13 components. The 13 named exports plus the unified table surface are the actual contract checked by the compliance test.
@@ -145,7 +146,8 @@ No external font request is required. `tests/e2e/admin/a11y.spec.ts` and the she
 | `SurfaceCard` | Flat hairline card with padding/title slots; `SurfaceCardText` is its body extra. |
 | `FormModal` | Standard modal shell with title, body, footer, submit/loading/error behavior. |
 | `FormField` | Static label, hint, error, required marker, and maker-checker hint wrapper. |
-| `SlideOverDrawer` | Right/end slide-over shell used for details and contextual help. |
+| `SlideOverDrawer` | Right/end slide-over shell used for details and contextual help. Open drawers keep a module-level stack and take a z-index from their position in it (base 1100, step 4, below Vuetify dialogs/menus), so the drawer opened last is always on top even when it is an always-mounted sibling of its parent (Vuetify otherwise gives earlier-registered items the higher z-index). |
+| `AccountLinesTable` (`components/ledger`) | Server-paginated posting lines of one GL account with side/reference-type/date filters, search and totals of the filtered set; used by the wallet statement and the GL account drawer (`financeGlAccountLines`, `walletStatement`). |
 | `DescriptionList` | Label/value lists with money, mono, and column options. |
 | `SegmentedTabs` | Compact tab switch used for periods, roles, languages, and modes. |
 | `EmptyState` | Empty/error-adjacent illustration-free state block. |
@@ -239,6 +241,7 @@ However, the stale files are still physically present:
 - Adding a status: use `StatusBadge` and keep the tone mapping centralized.
 - Rendering money: use `MoneyDisplay`/`MoneyText` or decimal-backed utilities; never format money with floating point.
 - Adding a drawer/modal: use `SlideOverDrawer`/`FormModal` so focus, padding, and footer behavior stay consistent.
+- Totals rows go in a `<tfoot>` of a `.pg-unified-table`/`.pg-table-card` table: the shared stylesheet gives them the body-row padding, edge insets and a top rule (before 2026-11-07 a `tfoot` had no padding and its label touched the table border).
 - Changing the theme: edit `plugins/vuetify.ts` and the `--pg-*` tokens together; do not add page-local hard-coded palettes.
 - Learning surfaces: the Guide (`styles/guide.css`) and the Academy (`styles/academy/*.css`, see `03-guide-and-academy.md` §7.6) are built from these primitives and tokens. A feature area may add its own stylesheet under `src/styles/` imported from `main.ts`, but must not inject runtime `<style>` blocks, introduce a second palette, or cap the page width below the `ScreenContainer`; only reading text takes a measure (75 ch).
 - Deploy-time visibility: set `ADMIN_SHOW_CHECKLISTS` and `ADMIN_SHOW_HELP_PANELS` in `deploy.env`; the deploy engine writes `runtime-config.js`. Rebuilding the SPA is not required for the runtime flags to change.

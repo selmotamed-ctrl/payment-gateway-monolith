@@ -96,6 +96,7 @@ This is the canonical entrypoint for the payment-gateway project design.
 - [Voucher Provider Management System (Future)](parts/09-future-and-unimplemented/00-voucher-provider-system.md) — `future.voucher` · `missing`
 - [Smart AI Spec Importer and Voucher Half (Future)](parts/09-future-and-unimplemented/02-smart-ai-voucher-half.md) — `future.smart-ai-voucher` · `missing`
 - [Deferred and Partial Features](parts/09-future-and-unimplemented/03-deferred-features.md) — `future.deferred` · `deferred`
+- [Ledger Archive and Shard Repair Anchors (Future)](parts/09-future-and-unimplemented/04-ledger-archive-and-shard-repair.md) — `future.ledger-archive` · `missing`
 
 ### 10-companion
 

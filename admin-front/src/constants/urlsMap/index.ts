@@ -82,6 +82,8 @@ export const urlsMap = {
     walletsSummary: "v1/admin/wallets/summary",
     walletDetail: (id: string) => `v1/admin/wallets/${id}`,
     walletStatus: (id: string) => `v1/admin/wallets/${id}/status`,
+    walletStatement: (id: string) => `v1/admin/wallets/${id}/statement`,
+    walletAuditEvents: (id: string) => `v1/admin/wallets/${id}/audit-events`,
 
     applicationsList: "v1/admin/applications",
     applicationsSummary: "v1/admin/applications/summary",
@@ -199,6 +201,11 @@ export const urlsMap = {
     financeJournalEntriesSummary: "v1/admin/finance/journal-entries/summary",
     financeJournalEntryDetail: (id: string) => `v1/admin/finance/journal-entries/${id}`,
     financeGlAccountDetail: (id: string) => `v1/admin/finance/gl-accounts/${id}`,
+    financeGlAccountLines: (id: string) => `v1/admin/finance/gl-accounts/${id}/lines`,
+    financeGlAccountShardsScale: (id: string) => `v1/admin/finance/gl-accounts/${id}/shards/scale`,
+    financeGlShardRepairPlan: (id: string, shardId: number) => `v1/admin/finance/gl-accounts/${id}/shards/${shardId}/repair-plan`,
+    financeGlShardRepair: (id: string, shardId: number) => `v1/admin/finance/gl-accounts/${id}/shards/${shardId}/repair`,
+    financeGlShardRepairRequest: (id: string, shardId: number) => `v1/admin/finance/gl-accounts/${id}/shards/${shardId}/repair/request`,
     financeGlAccountCheckpoint: (id: string) => `v1/admin/finance/gl-accounts/${id}/checkpoint`,
 
     settings: "v1/admin/settings",

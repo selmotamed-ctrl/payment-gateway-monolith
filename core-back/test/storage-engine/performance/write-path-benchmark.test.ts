@@ -68,7 +68,7 @@ describeDatabase("write-path benchmark (live PostgreSQL)", () => {
     const refId = uniqueId("bench-shard");
     const treasury = await seedGlAccount(client, { accountType: "TREASURY", shardCount: 16 });
     const wallet = await seedGlAccount(client, { accountType: "MERCHANT_WALLET", shardCount: 1 });
-    const poster = createLedgerPoster(client, { emitOutbox: false, shardCount: 16 });
+    const poster = createLedgerPoster(client, { emitOutbox: false });
     try {
       for (let index = 0; index < 120; index += 1) {
         await poster.post({

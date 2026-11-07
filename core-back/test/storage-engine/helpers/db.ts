@@ -390,22 +390,15 @@ export const seedGlAccount = async (
 ): Promise<{ id: string; shardCount: number }> => {
   const id = uniqueUuid();
   const shardCount = options.shardCount ?? 16;
+  // The `gl_accounts_create_shards` trigger creates shard rows 0..shardCount-1 with the account.
   await client.glAccount.create({
     data: {
       id,
       accountType: options.accountType ?? "TREASURY",
       currency: options.currency ?? "LYD",
+      shardCount,
     },
   });
-  if (shardCount > 0) {
-    await client.glAccountShard.createMany({
-      data: Array.from({ length: shardCount }, (_, shardId) => ({
-        glAccountId: id,
-        shardId,
-        currentBalance: 0,
-      })),
-    });
-  }
   return { id, shardCount };
 };
 
@@ -426,6 +419,8 @@ export const cleanupLedger = async (
     });
   });
   if (accountIds.length > 0) {
+    await client.glShardRepair.deleteMany({ where: { glAccountId: { in: accountIds } } });
+    await client.glShardCheckpoint.deleteMany({ where: { glAccountId: { in: accountIds } } });
     await client.glAccountShard.deleteMany({
       where: { glAccountId: { in: accountIds } },
     });

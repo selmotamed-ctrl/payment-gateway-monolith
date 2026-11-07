@@ -116,7 +116,6 @@ const main = async (): Promise<void> => {
           accountType: "MERCHANT_WALLET",
           ownerId: merchant.id,
           currency: "LYD",
-          checkpointBalance: new Prisma.Decimal(0),
         },
       });
     }

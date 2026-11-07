@@ -3,8 +3,8 @@ id: platform.runtime
 title: Runtime and Configuration
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-07
+verified_against: d695518+working-tree
 code:
   - core-back/index.ts
   - core-back/lib/env/index.ts
@@ -87,7 +87,7 @@ The historical design requires:
 
 The exported `env` is a Proxy that parses lazily and caches outside tests. In `NODE_ENV=test` the cache is bypassed so multiple test files can boot different configurations in one process. If the test environment is missing configuration, the loader prints one warning and returns a full fallback object with a local test database, test master key and worker defaults; non-test invalid configuration prints the invalid key names and exits with code 1.
 
-`envSummary()` redacts only `DATABASE_URL`, `KMS_MASTER_KEY` and `MTLS_SERVER_KEY_PATH`. Replica/audit/log URLs and other certificate paths are not redacted by that helper. It is not an HTTP route.
+`envSummary()` redacts `DATABASE_URL`, `LEADER_ELECTION_DATABASE_URL`, `KMS_MASTER_KEY` and `MTLS_SERVER_KEY_PATH`. Replica/audit/log URLs and other certificate paths are not redacted by that helper. It is not an HTTP route.
 
 Edge env loaders follow the same pattern: strict-ish Zod object, cached outside tests, explicit `process.exit(1)` on invalid production config. `admin-back` additionally parses `CORE_BACK_URLS` into a de-duplicated HTTPS list.
 
@@ -108,6 +108,8 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | Key | Default | Consumer |
 | :--- | :--- | :--- |
 | `DATABASE_URL` | required | Prisma primary |
+| `LEADER_ELECTION_DATABASE_URL` | unset | session-scoped leader election; required when `PGBOUNCER_ENABLED=true` |
+| `PGBOUNCER_ENABLED` | `false` | deploy sets it when the pooler fronts PostgreSQL; enforces the session endpoint |
 | `DATABASE_REPLICA_URLS` | empty | read replicas |
 | `AUDIT_DATABASE_URL` | unset | dedicated audit store |
 | `LOG_DATABASE_URL` | unset | dedicated log sink |
@@ -117,7 +119,7 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `STORAGE_QUERY_TIMEOUT_MS` | `5000` | storage/transaction timeout |
 | `STORAGE_LOG_BUFFER_MAX` | `5000` (max 100000) | log buffer |
 | `STORAGE_LOG_FLUSH_INTERVAL_MS` | `250` (max 60000) | log flush |
-| `STORAGE_SHARD_COUNT` | `16` (max 16) | ledger poster shard count |
+| `STORAGE_SHARD_COUNT` | `16` (max 256) | initial routing width of system GL accounts (wallets start at 1) |
 
 #### mTLS and backup control plane
 
@@ -149,6 +151,20 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `WORKER_RETENTION_ENABLED` | `false` | retention worker |
 | `WORKER_RETENTION_INTERVAL_MS` | `3600000` | retention cadence |
 | `WORKER_RETENTION_BATCH_SIZE` | `500` (max 10000) | retention batch |
+| `WORKER_LEDGER_CHECKPOINT_ENABLED` | `true` | per-shard ledger checkpoint worker |
+| `WORKER_LEDGER_CHECKPOINT_INTERVAL_MS` | `30000` | checkpoint cadence |
+| `WORKER_LEDGER_CHECKPOINT_BATCH_SIZE` | `50` (max 10000) | shards captured per pass |
+| `LEDGER_CHECKPOINT_MIN_LINES` | `5000` | pending lines that trigger a checkpoint |
+| `LEDGER_CHECKPOINT_MAX_AGE_MS` | `900000` | age after which any pending shard is checkpointed |
+| `LEDGER_SHARD_AUTO_REPAIR_ENABLED` | `true` | automatic repair of a persistently failing PARITY shard with an intact sequence |
+| `LEDGER_SHARD_AUTO_REPAIR_MIN_FAILURES` | `3` | consecutive failed proofs before an automatic repair |
+| `LEDGER_SHARD_AUTO_REPAIR_MAX_ABS_DRIFT` | `100` | largest correction an automatic repair may apply |
+| `WORKER_LEDGER_SHARD_SCALER_ENABLED` | `true` | hot-account shard scaler |
+| `WORKER_LEDGER_SHARD_SCALER_INTERVAL_MS` | `30000` | scaler sampling cadence |
+| `LEDGER_SHARD_SCALER_DRY_RUN` | `false` | `true` = audit proposals only (nothing is widened); the default lets the scaler widen hot accounts |
+| `LEDGER_SHARD_UP_LINES_PER_SEC` | `150` | hot threshold, lines per second per shard |
+| `LEDGER_SHARD_MAX_WIDTH` | `64` (max 256) | widest routing width the scaler assigns |
+| `LEDGER_SHARD_COOLDOWN_MS` | `600000` | minimum time between two scalings of one account |
 | `RETENTION_DRY_RUN` | `false` | retention dry run |
 | `WORKER_BACKGROUND_JOBS_ENABLED` | `true` | durable job queue; boot refuses false |
 | `WORKER_BACKGROUND_JOBS_INTERVAL_MS` | `2000` | queue drain cadence |
@@ -232,7 +248,7 @@ and throws if the version is not 8. The check is invoked by `prisma/seed.ts`, `p
 - `OutboxRelayWorker` and `AuditShipperWorker` only when a storage engine is supplied; the audit shipper additionally requires a `DedicatedAuditDatabaseDriver`, which exists only when `AUDIT_DATABASE_URL` is set.
 - `BackgroundJobWorker` when background jobs are enabled, with `RECONCILIATION_RUN` and `ADJUSTMENT_EXECUTION` handlers.
 
-Workers are in-process; horizontal nodes rely on database claim semantics (`FOR UPDATE SKIP LOCKED`, conditional terminal updates and leases) rather than a leader election.
+Workers are in-process. Non-singleton workers rely on database claim semantics (`FOR UPDATE SKIP LOCKED`, conditional terminal updates and leases). Singleton workers (`ExpirySweeper`, `InboundInbox`, `JoinRequestExpiry`, `KybExpiry`, `LedgerInvariant`, `PeriodicScreening`, `Retention`, `LedgerCheckpoint`, `LedgerShardScaler`) additionally hold a PostgreSQL session advisory lock through `LEADER_ELECTION_DATABASE_URL`. That endpoint is a PgBouncer `pgw_session` alias with `pool_mode=session` when `PGBOUNCER_ENABLED=true` (or a direct PostgreSQL URL); core refuses the transaction-pooled `DATABASE_URL`, probes the session at boot and re-proves backend/lock ownership on every tick (fail closed).
 
 ### 3.7 Health and degradation
 
@@ -370,7 +386,7 @@ bun run start
 - Set `DATABASE_REPLICA_URLS` to a comma-separated list to enable replica reads.
 - Set `AUDIT_DATABASE_URL` and `LOG_DATABASE_URL` to enable the dedicated adapters; otherwise audit shipping is skipped and log records stay in memory.
 - Set `REDIS_URL` or `REDIS_NODES` for cross-node cache/velocity and invalidation.
-- Keep `STORAGE_SHARD_COUNT` at 16; the ledger shard constraint and the migration assume `shard_id` in `[0,16)`.
+- `STORAGE_SHARD_COUNT` is only the INITIAL width of system GL accounts (default 16, range 1..256, the same range in core env, the DB check and the deploy schema). The shard scaler widens hot accounts afterwards; the scaler is ON by default (`LEDGER_SHARD_SCALER_DRY_RUN=false`) with conservative thresholds; calibrate `LEDGER_SHARD_UP_LINES_PER_SEC` on the target hardware, and set the flag to `true` to watch proposals without widening anything.
 
 ### 6.3 Diagnose degradation
 
@@ -409,7 +425,7 @@ bun run start
 - **Logging.** `LOG_LEVEL` is unused; console ids differ from request ids; no structured JSON log contract; database query counts are always zero.
 - **Worker controls.** `WORKER_CONCURRENCY` and `WORKER_REQUEST_TIMEOUT_MS` are parsed but not wired to the production worker runtime.
 - **Health.** Only the background-job queue is checked; storage, replicas, Redis, audit/log and backup are not.
-- **Env secrecy.** `envSummary` redacts only three keys; replica/audit/log URLs and many certificate paths are not redacted by that helper.
+- **Env secrecy.** `envSummary` redacts `DATABASE_URL`, `LEADER_ELECTION_DATABASE_URL`, `KMS_MASTER_KEY` and `MTLS_SERVER_KEY_PATH`; replica/audit/log URLs and many certificate paths are not redacted by that helper.
 - **Fake Rails CIDR.** `FAKE_RAILS_ALLOWED_CIDRS` is accepted but not consumed by the engine guard.
 
 ### Missing / deferred

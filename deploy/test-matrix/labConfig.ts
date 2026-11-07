@@ -105,7 +105,7 @@ const topologySelectionSchema = z.object({
   include: z.array(z.string().min(1)).default([]).describe("Restrict to these topology ids or legacy aliases (e.g. T1). Empty = every derived topology."),
   exclude: z.array(z.string().min(1)).default([]).describe("Topology ids or aliases to drop."),
   maxPerFamily: z.number().int().min(1).max(64).optional().describe("Cap the number of variants generated per family (variants are ordered by machine declaration order)."),
-  shardCount: z.union([z.literal(16), z.literal(32)]).optional().describe("Force STORAGE_SHARD_COUNT for every topology; default 16 for single-host/split/dmz and 32 otherwise."),
+  shardCount: z.number().int().min(1).max(256).optional().describe("Force STORAGE_SHARD_COUNT for every topology; default 16 for single-host/split/dmz and 32 otherwise."),
 }).strict();
 
 export const labConfigSchema = z.object({

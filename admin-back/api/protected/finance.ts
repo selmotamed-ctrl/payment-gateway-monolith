@@ -9,7 +9,7 @@ import {
   toCoreVelocityRuleCreate,
 } from "../contract";
 import { coreForward } from "../forward";
-import { encode, reasonOnlySchema, uuidParamsSchema } from "./mutationSchemas";
+import { encode, reasonOnlySchema, uuidParamsSchema, zMutationReason } from "./mutationSchemas";
 
 const router = express.Router();
 
@@ -539,11 +539,67 @@ router.get(
 );
 
 router.get(
+  "/finance/gl-accounts/:id/lines",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}/lines`,
+    paramsSchema: uuidParamsSchema,
+    querySchema: zListQuery,
+  }),
+);
+
+router.get(
   "/finance/gl-accounts/:id",
   coreForward({
     method: "GET",
     path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}`,
     paramsSchema: uuidParamsSchema,
+  }),
+);
+
+const shardParamsSchema = z.object({ id: z.string().uuid(), shardId: z.coerce.number().int().min(0).max(255) }).strict();
+const shardRepairSchema = z.object({ reason: zMutationReason, planHash: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
+
+router.get(
+  "/finance/gl-accounts/:id/shards/:shardId/repair-plan",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}/shards/${encode(String(context.params.shardId))}/repair-plan`,
+    paramsSchema: shardParamsSchema,
+  }),
+);
+
+router.post(
+  "/finance/gl-accounts/:id/shards/:shardId/repair",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}/shards/${encode(String(context.params.shardId))}/repair`,
+    paramsSchema: shardParamsSchema,
+    schema: shardRepairSchema,
+  }),
+);
+
+router.post(
+  "/finance/gl-accounts/:id/shards/:shardId/repair/request",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}/shards/${encode(String(context.params.shardId))}/repair/request`,
+    paramsSchema: shardParamsSchema,
+    schema: shardRepairSchema,
+    // 202: the repair was submitted for a checker
+    relayStatus: true,
+  }),
+);
+
+const shardScaleSchema = z.object({ width: z.number().int().min(1).max(256), reason: zMutationReason }).strict();
+
+router.post(
+  "/finance/gl-accounts/:id/shards/scale",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}/shards/scale`,
+    paramsSchema: uuidParamsSchema,
+    schema: shardScaleSchema,
   }),
 );
 

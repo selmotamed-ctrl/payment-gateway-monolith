@@ -9,6 +9,7 @@ import {
   shardKey,
   signedShardDelta,
 } from "../../lib/storageEngine/shardBalances";
+import { routeLine } from "../../lib/storageEngine/shardRouting";
 import { stableJson } from "../../lib/storageEngine/auditAndLogAdapters";
 
 describe("LSN comparison", () => {
@@ -136,6 +137,19 @@ describe("FNV-1a shard hashing", () => {
     expect(shardCountForAccountType("MERCHANT_WALLET", 32)).toBe(1);
     expect(shardCountForAccountType("UNKNOWN", 0)).toBe(1);
     expect(shardKey("account", 7)).toBe("account:7");
+  });
+
+  test("the legacy shardIdForAttempt helper agrees with the live routing for system accounts at the same width", () => {
+    // `shardIdForAttempt` is kept in shardBalances.ts as a legacy helper; the poster routes with `routeLine`, which uses
+    // the same hash, so for non-wallet accounts (either direction) the two always pick the same shard.
+    for (let index = 0; index < 500; index += 1) {
+      const ref = `attempt-${index}-${(index * 104729) % 10_000}`;
+      for (const width of [1, 4, 16, 64]) {
+        const legacy = shardIdForAttempt(ref, "TREASURY", width);
+        expect(routeLine("TREASURY", "DEBIT", ref, width)).toBe(legacy);
+        expect(routeLine("TREASURY", "CREDIT", ref, width)).toBe(legacy);
+      }
+    }
   });
 
   test("signed shard deltas follow the debit-positive convention", () => {

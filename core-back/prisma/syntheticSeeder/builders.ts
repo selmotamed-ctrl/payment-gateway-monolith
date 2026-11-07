@@ -7,6 +7,7 @@ import {
   type LedgerAccountSelector,
   type LedgerPostContext,
 } from "../../engine/ledger/LedgerPoster";
+import { initialShardWidth } from "../../lib/storageEngine/shardRouting";
 import { metaOf, type SeederContext } from "./context";
 import { CITIES, FIRST_NAMES_AR, FIRST_NAMES_EN, LAST_NAMES_AR, LAST_NAMES_EN, BUSINESS_CATEGORIES, BUSINESS_SUFFIXES, BANKS, STREETS, ADDRESSES_EN, pickPhone, pickTaxId, type BusinessCategory } from "./libyanDataCatalog";
 
@@ -261,9 +262,8 @@ const newGlAccount = (
     credentialSetId: input.credentialSetId ?? null,
     env: input.env ?? null,
     currency: "LYD",
-    lastCheckpointId: null,
-    checkpointBalance: "0.0000",
-    checkpointAt: null,
+    // Routing width; the DB trigger creates shard rows 0..shardCount-1 on insert.
+    shardCount: initialShardWidth(input.type),
     seedKey: input.seedKey,
   });
   ctx.refs.glAccounts.push({
@@ -274,6 +274,7 @@ const newGlAccount = (
     ownerId: input.ownerId ?? null,
     credentialSetId: input.credentialSetId ?? null,
     currency: "LYD",
+    shardCount: initialShardWidth(input.type),
   });
   metaOf(ctx).accountCache.clear();
   return id;

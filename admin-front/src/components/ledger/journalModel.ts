@@ -140,6 +140,26 @@ export const journalReferenceTarget = (reference: { route?: string | null; id?: 
     }
 };
 
+/**
+ * Which "open by id" page shows the record a journal entry of this `refType` was posted for.
+ * Mirrors `REFERENCE_ROUTES` in core-back (`adminLedger.ts`); types without a page are plain text.
+ */
+export const referenceRouteOfRefType = (refType: string | null | undefined): string | null => {
+    switch (refType) {
+        case "PAYMENT_ATTEMPT":
+            return "attempt";
+        case "ADJUSTMENT":
+            return "adjustment";
+        case "AML_RELEASE":
+        case "AML_VOID":
+            return "aml-case";
+        case "DISPUTE_OUTCOME":
+            return "dispute";
+        default:
+            return null;
+    }
+};
+
 export const REF_TYPES = [
     "PAYMENT_ATTEMPT",
     "ADJUSTMENT",

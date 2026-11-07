@@ -2,7 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadDeployConfig, type DeployConfig } from "../lib/configSchema";
+import {
+  leaderElectionDatabaseUrl,
+  loadDeployConfig,
+  PGBOUNCER_SESSION_ALIAS,
+  type DeployConfig,
+} from "../lib/configSchema";
 import {
   ensurePackagesScript,
   outcomeBounced,
@@ -160,6 +165,35 @@ describe("PgBouncer convergence primitives", () => {
     expect(pgbouncerRestartSignature(moved)).not.toBe(pgbouncerRestartSignature(base));
     expect(pgbouncerRestartSignature(base)).toContain("listen_port=6432");
     expect(pgbouncerRestartSignature(base)).not.toContain("password");
+  });
+
+  test("the session alias is generated for the singleton-worker leader election", () => {
+    const ini = pgbouncerIni(config(), 5432);
+    expect(ini).toContain(`${PGBOUNCER_SESSION_ALIAS} = `);
+    expect(ini).toContain("pool_mode=session");
+    expect(ini).toMatch(new RegExp(`${PGBOUNCER_SESSION_ALIAS} = .*pool_size=\\d+`));
+    // The ordinary application pool stays transaction-pooled.
+    expect(ini).toContain("pool_mode = transaction");
+  });
+
+  test("the leader-election URL points at the session alias, never the pooled database", () => {
+    const pooled = config();
+    const url = leaderElectionDatabaseUrl(pooled);
+    expect(url).not.toBeNull();
+    expect(url!).toContain(":6432/");
+    expect(url!.endsWith(`/${PGBOUNCER_SESSION_ALIAS}`)).toBe(true);
+    expect(url).not.toBe(`postgresql://${encodeURIComponent(pooled.PG_DB_USER)}:${encodeURIComponent(pooled.PG_DB_PASSWORD)}@127.0.0.1:6432/${pooled.PG_DB_NAME}`);
+
+    const direct = leaderElectionDatabaseUrl({ ...pooled, PGBOUNCER_ENABLED: false } as DeployConfig);
+    expect(direct).not.toBeNull();
+    expect(direct!).toContain(":5432/");
+    expect(direct!).toContain("sslmode=no-verify");
+  });
+
+  test("the provisioner proves a login through the session alias", () => {
+    const runner = new ScriptedRunner(() => false, () => "__PG_APPLY__=unchanged");
+    provisionPostgres18({ runner, config: config() });
+    expect(runner.runs.some((command) => command.includes(PGBOUNCER_SESSION_ALIAS))).toBe(true);
   });
 
   test("the apply script starts, restarts, reloads or does nothing based on the flags", () => {
@@ -481,6 +515,20 @@ describe("direct PostgreSQL connections must match the hostssl-only pg_hba (audi
     expect(env.LOG_DATABASE_URL).toContain("?sslmode=no-verify");
     // PgBouncer's client side is plain, and Prisma's engine does not understand no-verify
     expect(env.DATABASE_URL).not.toContain("sslmode");
+  });
+
+  test("core receives the PgBouncer session alias for the leader election", () => {
+    const env = coreEnv(plannable());
+    expect(env.PGBOUNCER_ENABLED).toBe("true");
+    expect(env.LEADER_ELECTION_DATABASE_URL).toContain(":6432/pgw_session");
+    expect(env.LEADER_ELECTION_DATABASE_URL).not.toBe(env.DATABASE_URL);
+  });
+
+  test("an explicit leader-election URL overrides the derived alias", () => {
+    const env = coreEnv(
+      plannable({ LEADER_ELECTION_DATABASE_URL: "postgresql://gw:secret@10.9.9.9:5432/gateway" }),
+    );
+    expect(env.LEADER_ELECTION_DATABASE_URL).toBe("postgresql://gw:secret@10.9.9.9:5432/gateway");
   });
 
   test("replica URLs (direct to PostgreSQL) negotiate TLS too", () => {

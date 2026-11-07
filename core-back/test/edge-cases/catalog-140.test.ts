@@ -66,6 +66,7 @@ import {
   type LedgerPrismaClient,
 } from "../../engine/ledger/LedgerPoster";
 import { CheckpointService } from "../../engine/ledger/CheckpointService";
+import { createFakeCheckpointDb } from "../helpers/fakeCheckpointDb";
 import { InvariantVerifier } from "../../engine/ledger/InvariantVerifier";
 import { ApprovalService, SYSTEM_AUTOMATION } from "../../engine/governance/ApprovalService";
 import {
@@ -2513,41 +2514,39 @@ const checks: Record<string, Check> = {
     expect(attempt?.credentialSetId).toBe("cred-pinned");
   },
 
-  async checkpoint_row_lock() {
-    const statements: Array<{ sql: string; args: unknown[] }> = [];
-    let lockHeld = false;
-    let lineReadAfterLock = false;
-    const checkpoint = new CheckpointService({
-      $queryRawUnsafe: async (sql: string, ...args: unknown[]) => {
-        statements.push({ sql, args });
-        lockHeld = true;
-        return [{ id: "acc-1", accountType: "GATEWAY_CLEARING", checkpointBalance: "0", checkpointAt: null }];
-      },
-      glAccount: {
-        findUnique: async () => ({ id: "acc-1", accountType: "GATEWAY_CLEARING", checkpointBalance: "0", checkpointAt: null }),
-        findMany: async () => [],
-        update: async (args: { where: { id: string }; data: Record<string, unknown> }) => ({ id: args.where.id, accountType: "GATEWAY_CLEARING", ...args.data }),
-      },
-      journalLine: {
-        findMany: async () => {
-          statements.push({ sql: "journalLine.findMany", args: ["acc-1"] });
-          lineReadAfterLock = lockHeld;
-          return [{ id: "line-1", entryId: "e1", glAccountId: "acc-1", direction: "DEBIT", amount: "10" }];
-        },
-      },
-      journalEntry: { findFirst: async () => ({ id: "entry-1" }) },
-    });
-    const record = await checkpoint.captureCheckpoint("acc-1");
-    expect(decimal(record.balance).toFixed(4)).toBe("10.0000");
+  async checkpoint_shard_sequence() {
+    // The redesign removed the account row lock: a capture reads one snapshot of (balance, line_seq) and proves the
+    // lines in (checkpoint_seq, line_seq]. A late payment posts under the SHARD row lock and takes the next sequence
+    // number, so it can never be half-counted: it is either inside the snapshot's range or entirely after it.
+    const fake = createFakeCheckpointDb();
+    fake.post("acc-1", 0, "DEBIT", "10.0000");
+    fake.post("acc-1", 0, "DEBIT", "5.0000");
+    const checkpoint = new CheckpointService(fake.db);
+    const sweep = await checkpoint.captureShard("acc-1", 0);
+    expect(sweep.status).toBe("ADVANCED");
+    expect(sweep.checkpointSeq).toBe(2n);
+    expect(sweep.checkpointBalance.toFixed(4)).toBe("15.0000");
 
-    const lockIndex = statements.findIndex((entry) => entry.sql.includes("FOR UPDATE"));
-    const linesIndex = statements.findIndex((entry) => entry.sql === "journalLine.findMany");
-    expect(lockIndex).toBeGreaterThanOrEqual(0);
-    expect(linesIndex).toBeGreaterThan(lockIndex);
-    expect(lineReadAfterLock).toBe(true);
-    const lock = statements[lockIndex];
-    expect(lock?.sql).toContain("SELECT * FROM gl_accounts WHERE id = $1::uuid FOR UPDATE");
-    expect(lock?.args).toEqual(["acc-1"]);
+    // the late payment confirms right after the sweep: next sequence number, picked up by the next capture only
+    fake.post("acc-1", 0, "DEBIT", "7.0000");
+    const late = await checkpoint.captureShard("acc-1", 0);
+    expect(late.status).toBe("ADVANCED");
+    expect(late.linesCovered).toBe(1n);
+    expect(late.checkpointBalance.toFixed(4)).toBe("22.0000");
+    expect((await checkpoint.captureShard("acc-1", 0)).status).toBe("NOOP");
+
+    // no lock on the shard or the account anywhere in the capture path (payments are never delayed)
+    expect(fake.statements.length).toBeGreaterThan(0);
+    for (const entry of fake.statements) {
+      expect(entry.sql).not.toContain("FOR UPDATE");
+      expect(entry.sql).not.toContain("gl_accounts");
+    }
+    const source = readSource("engine/ledger/CheckpointService.ts");
+    expect(source).not.toContain("FOR UPDATE");
+    // the serialisation is the poster's per-shard sequence reservation under the shard row lock
+    const writer = readSource("lib/storageEngine/ledgerShardWriter.ts");
+    expect(writer).toContain("line_seq = s.line_seq + EXCLUDED.line_seq");
+    expect(writer).toContain("ON CONFLICT (gl_account_id, shard_id) DO UPDATE");
   },
 
   async cashout_destination_snapshot() {

@@ -53,7 +53,6 @@
       "routeNames": [
         "Merchants",
         "MerchantDetail",
-        "Wallets",
         "Applications"
       ],
       "pageDir": "pages/merchants",
@@ -64,7 +63,6 @@
         "b05-09",
         "b04-02",
         "b04-04",
-        "b03-09",
         "b03-10"
       ],
       "cards": [
@@ -77,6 +75,23 @@
         "s-emergency-suspension",
         "s-token-leak"
       ]
+    },
+    {
+      "screenId": "Wallets",
+      "routeNames": [
+        "Wallets",
+        "WalletDetail"
+      ],
+      "pageDir": "pages/wallets",
+      "summary": "Every merchant's wallet: live and checkpoint balance, the paginated statement of ledger postings, the shards behind the balance, assigned applications, cash-outs and status history. Freezing is immediate; restoring a frozen wallet needs a second person.",
+      "articles": [
+        "b03-09",
+        "b05-06",
+        "b04-04",
+        "b08-07"
+      ],
+      "cards": [],
+      "situations": []
     },
     {
       "screenId": "Approvals",

@@ -74,8 +74,38 @@ router.get("/system/jobs-outbox/summary", async (request: Request, response: Res
       failed: jobCount("FAILED"),
     },
     failedNotifications,
+    ledger: await ledgerAutomationStats(),
   });
 });
+
+/**
+ * Health of the ledger automation: how far the shard checkpoints lag, shards that failed their proof, and the
+ * latest shard-width change. Cheap: it only reads the (small) shard and checkpoint tables.
+ */
+const ledgerAutomationStats = async () => {
+  const [row] = (await client.$queryRawUnsafe(
+    `SELECT COUNT(*) FILTER (WHERE s.line_seq > COALESCE(c.checkpoint_seq, 0))::int AS "shardsBehind",
+            COALESCE(MAX(s.line_seq - COALESCE(c.checkpoint_seq, 0)), 0)::text AS "maxPendingLines",
+            MIN(c.checkpoint_at) FILTER (WHERE s.line_seq > COALESCE(c.checkpoint_seq, 0)) AS "oldestPendingCheckpointAt",
+            COUNT(*) FILTER (WHERE c.status <> 'OK')::int AS "failedShards",
+            COUNT(*)::int AS shards
+     FROM gl_account_shards s
+     LEFT JOIN gl_shard_checkpoints c ON c.gl_account_id = s.gl_account_id AND c.shard_id = s.shard_id`,
+  )) as Array<{ shardsBehind: number; maxPendingLines: string; oldestPendingCheckpointAt: Date | null; failedShards: number; shards: number }>;
+  const lastScaled = await client.glAccount.findFirst({
+    where: { shardScaledAt: { not: null } },
+    orderBy: { shardScaledAt: "desc" },
+    select: { id: true, shardCount: true, shardScaledAt: true },
+  });
+  return {
+    shards: row?.shards ?? 0,
+    shardsBehind: row?.shardsBehind ?? 0,
+    maxPendingLines: row?.maxPendingLines ?? "0",
+    oldestPendingCheckpointAt: row?.oldestPendingCheckpointAt ?? null,
+    failedShards: row?.failedShards ?? 0,
+    lastScaling: lastScaled ? { glAccountId: lastScaled.id, shardCount: lastScaled.shardCount, at: lastScaled.shardScaledAt } : null,
+  };
+};
 
 // ---------------------------------------------------------------- background jobs
 

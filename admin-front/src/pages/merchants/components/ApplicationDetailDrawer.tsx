@@ -296,7 +296,7 @@ export const ApplicationDetailDrawer = defineComponent({
                                             variant="text"
                                             icon="mdi-open-in-new"
                                             aria-label={t("Open wallet")}
-                                            onClick={() => void router.push({ name: "Wallets", query: { open: current.assignedWallet.id } })}
+                                            onClick={() => void router.push({ name: "WalletDetail", params: { id: current.assignedWallet.id } })}
                                         />
                                     </span>
                                 ),

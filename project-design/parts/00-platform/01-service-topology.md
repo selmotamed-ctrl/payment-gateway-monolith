@@ -3,8 +3,8 @@ id: platform.topology
 title: Service Topology
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-07
+verified_against: d695518+working-tree
 code:
   - core-back/index.ts
   - core-back/api/index.ts
@@ -302,7 +302,7 @@ admin-front -> admin-back -> /internal/admin/system/backups/*
 - **Multi-host verification.** The topology code and unit tests exist, but no production-shaped deployment, replica failover, rolling batch or backup restore is recorded in this repository state.
 - **Storage mTLS.** Deploy generates storage certificates; PostgreSQL and Redis configuration do not consume them, so the storage-plane certificate chain is not an enforced channel today.
 - **Backup daemon mTLS.** Core reads `BACKUP_DAEMON_CA_CERT_PATH`, `BACKUP_DAEMON_CLIENT_CERT_PATH` and `BACKUP_DAEMON_CLIENT_KEY_PATH`; the daemon reads `BACKUP_DAEMON_CERT_PATH`, `BACKUP_DAEMON_KEY_PATH` and `BACKUP_DAEMON_CA_CERT_PATH`. The provisioner mapping is not aligned in the current tree, so a staging verification is required.
-- **Core node identity.** All core nodes share the same server certificate role; there is no node-specific identity or leader election inside core. Workers rely on database `SKIP LOCKED` claims and conditional updates.
+- **Core node identity.** All core nodes share the same server certificate role. Claim-based workers rely on database `SKIP LOCKED` claims and conditional updates; singleton workers elect one leader with a PostgreSQL session advisory lock over `LEADER_ELECTION_DATABASE_URL` (PgBouncer `pgw_session`, `pool_mode=session`, or direct PostgreSQL). The lock is backend-specific, so `DATABASE_URL` (transaction-pooled) is never used for it; core verifies the session at boot and fails closed if the backend changes or the lock row is missing.
 
 ### Missing / deferred
 

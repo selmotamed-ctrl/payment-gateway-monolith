@@ -19,7 +19,7 @@ const EXPECTED_COUNTS = {
     readingPaths: 8,
     quickAnswers: 58,
     dataBlocks: 3,
-    contextMapScreens: 24,
+    contextMapScreens: 25,
     errorCodes: 19,
     edgeCases: 140,
 };

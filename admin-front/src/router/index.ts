@@ -66,6 +66,12 @@ const router = createRouter({
                     component: () => import("@/pages/wallets/index"),
                 },
                 {
+                    path: "wallets/:id",
+                    name: "WalletDetail",
+                    component: () => import("@/pages/wallets/[id]"),
+                    meta: { parentName: "Wallets" },
+                },
+                {
                     path: "applications",
                     name: "Applications",
                     component: () => import("@/pages/applications/index"),

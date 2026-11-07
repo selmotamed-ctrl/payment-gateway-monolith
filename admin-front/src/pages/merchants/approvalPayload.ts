@@ -17,6 +17,7 @@ export const APPROVAL_ACTION_LABELS: Record<string, string> = {
     APPLICATION_REACTIVATE: "Reactivate application",
     APPLICATION_UPDATE: "Update application policy",
     POS_TERMINAL_REACTIVATE: "Reactivate POS terminal",
+    GL_SHARD_REPAIR: "Repair ledger shard",
 };
 
 const humanize = (raw: string): string =>

@@ -43,6 +43,12 @@ export interface StorageEngineOptions {
    * "fail-open" or "fail-closed". Defaults to REDIS_VELOCITY_FAILURE_POLICY.
    */
   velocityFailurePolicy?: VelocityFailurePolicy;
+  /**
+   * Session-scoped URL for the singleton-worker leader election. Defaults to
+   * LEADER_ELECTION_DATABASE_URL, then DATABASE_URL (direct PostgreSQL or a
+   * session-pooled endpoint; never a transaction-pooled one).
+   */
+  leaderElectionConnectionString?: string;
   /** Replaces the advisory-lock leader election (tests). false disables it. */
   leaderElection?: LeaderElectionPort | false;
 }
@@ -133,10 +139,14 @@ export const createStorageEngine = (options: StorageEngineOptions = {}): Storage
     options.logFlushIntervalMs ?? env.STORAGE_LOG_FLUSH_INTERVAL_MS,
   );
 
+  const leaderElectionUrl =
+    options.leaderElectionConnectionString ??
+    env.LEADER_ELECTION_DATABASE_URL ??
+    primaryUrl;
   const leaderElection: LeaderElectionPort | undefined =
     options.leaderElection === false
       ? undefined
-      : options.leaderElection ?? new PgAdvisoryLeaderElection({ connectionString: primaryUrl });
+      : options.leaderElection ?? new PgAdvisoryLeaderElection({ connectionString: leaderElectionUrl });
 
   const engine: StorageEngine = {
     uow,
@@ -246,6 +256,9 @@ export const getStorageEngine = (): StorageEngine => {
   }
   return engineSingleton;
 };
+
+/** The already-created engine, if any (health probes must not create one). */
+export const getStorageEngineIfConfigured = (): StorageEngine | undefined => engineSingleton;
 
 export const setStorageEngine = (engine: StorageEngine | undefined): void => {
   engineSingleton = engine;

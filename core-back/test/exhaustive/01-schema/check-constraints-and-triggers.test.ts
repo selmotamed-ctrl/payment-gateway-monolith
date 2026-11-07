@@ -33,13 +33,14 @@ let checkerId = "";
 const makeJournalLine = async (direction: "DEBIT" | "CREDIT", amount: string): Promise<boolean> => {
   // The tested line is inserted atomically together with its opposite leg, so
   // a peer suite that verifies the continuous invariant never observes a
-  // one-legged journal entry.
+  // one-legged journal entry. Every new line must carry its shard and a real per-shard sequence (>= 1,
+  // `journal_lines_shard_seq_positive`); the two legs sit on different accounts, so both are seq 1 of shard 0.
   const opposite = direction === "DEBIT" ? "CREDIT" : "DEBIT";
   try {
     await db.$executeRawUnsafe(
-      `INSERT INTO "journal_lines" ("id", "created_at", "updated_at", "entry_id", "gl_account_id", "direction", "amount") VALUES
-        ($1, $2, $3, $4, $5, $6, $7),
-        ($8, $9, $10, $11, $12, $13, $14)`,
+      `INSERT INTO "journal_lines" ("id", "created_at", "updated_at", "entry_id", "gl_account_id", "direction", "amount", "shard_id", "shard_seq") VALUES
+        ($1, $2, $3, $4, $5, $6, $7, 0, 1),
+        ($8, $9, $10, $11, $12, $13, $14, 0, 1)`,
       crypto.randomUUID(),
       new Date(),
       new Date(),
@@ -135,6 +136,11 @@ afterAll(async () => {
 describeDb("Suite 01 · CHECK constraint metadata", () => {
   const expected = [
     "journal_lines_amount_positive",
+    "journal_lines_shard_seq_positive",
+    "journal_lines_shard_id_range",
+    "gl_account_shards_shard_id_range",
+    "gl_accounts_shard_count_range",
+    "gl_shard_checkpoints_status_check",
     "attempt_groups_single_success",
     "payment_links_slot_reservation_invariant",
     "approval_requests_checker_not_maker_insert",
@@ -184,6 +190,139 @@ describeDb("Suite 01 · journal_lines_amount_positive", () => {
       });
     }
   }
+});
+
+describeDb("Suite 01 · sequenced shard ledger constraints", () => {
+  /** Inserts a balanced pair of lines (the two legs sit on different accounts) with explicit shard columns. */
+  const insertPair = async (shardId: number | null, shardSeq: number | string | null): Promise<boolean> => {
+    try {
+      await db.$executeRawUnsafe(
+        `INSERT INTO "journal_lines" ("id", "created_at", "updated_at", "entry_id", "gl_account_id", "direction", "amount", "shard_id", "shard_seq") VALUES
+          ($1, now(), now(), $2, $3, 'DEBIT', 1, $4, $5),
+          ($6, now(), now(), $2, $7, 'CREDIT', 1, $4, $5)`,
+        crypto.randomUUID(),
+        journalEntryId,
+        glDebitId,
+        shardId,
+        shardSeq,
+        crypto.randomUUID(),
+        glCreditId,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  for (const seq of [0, -1, -9_000_000_000]) {
+    test(`a new journal line with shard_seq ${seq} is rejected (pre-genesis rows are exempt, new rows are not)`, async () => {
+      await removeJournalLines();
+      expect(await insertPair(0, seq)).toBe(false);
+    });
+  }
+  for (const seq of [1, 2, "9223372036854775807"]) {
+    test(`a new journal line with shard_seq ${seq} is accepted`, async () => {
+      await removeJournalLines();
+      expect(await insertPair(0, seq)).toBe(true);
+      await removeJournalLines();
+    });
+  }
+  for (const shardId of [-1, 256, 1000]) {
+    test(`a journal line on shard ${shardId} is rejected`, async () => {
+      await removeJournalLines();
+      expect(await insertPair(shardId, 1)).toBe(false);
+    });
+  }
+  for (const shardId of [0, 1, 255]) {
+    test(`a journal line on shard ${shardId} is accepted`, async () => {
+      await removeJournalLines();
+      expect(await insertPair(shardId, 1)).toBe(true);
+      await removeJournalLines();
+    });
+  }
+  test("shard_id and shard_seq have no defaults: a line without them is rejected", async () => {
+    await removeJournalLines();
+    expect(await insertPair(null, 1)).toBe(false);
+    expect(await insertPair(0, null)).toBe(false);
+    let omitted = true;
+    try {
+      await db.$executeRawUnsafe(
+        `INSERT INTO "journal_lines" ("id", "created_at", "updated_at", "entry_id", "gl_account_id", "direction", "amount") VALUES
+          ($1, now(), now(), $2, $3, 'DEBIT', 1), ($4, now(), now(), $2, $5, 'CREDIT', 1)`,
+        crypto.randomUUID(),
+        journalEntryId,
+        glDebitId,
+        crypto.randomUUID(),
+        glCreditId,
+      );
+    } catch {
+      omitted = false;
+    }
+    expect(omitted).toBe(false);
+  });
+
+  for (const width of [0, -1, 257]) {
+    test(`gl_accounts.shard_count ${width} is rejected`, async () => {
+      let rejected = false;
+      try {
+        await createRow("gl_accounts", { account_type: "TREASURY", currency: "LYD", shard_count: width });
+      } catch {
+        rejected = true;
+      }
+      expect(rejected).toBe(true);
+    });
+  }
+  for (const width of [1, 16, 256]) {
+    test(`gl_accounts.shard_count ${width} is accepted and the trigger creates shard rows 0..${width - 1}`, async () => {
+      const account = await createRow("gl_accounts", { account_type: "TREASURY", currency: "LYD", shard_count: width });
+      const shards = (await db.$queryRawUnsafe(
+        `SELECT shard_id, current_balance::text AS balance, line_seq::text AS seq FROM gl_account_shards WHERE gl_account_id = $1::uuid ORDER BY shard_id`,
+        account.id,
+      )) as Array<{ shard_id: number; balance: string; seq: string }>;
+      expect(shards.map((shard) => Number(shard.shard_id))).toEqual(Array.from({ length: width }, (_, index) => index));
+      expect(shards.every((shard) => Number(shard.balance) === 0 && shard.seq === "0")).toBe(true);
+    });
+  }
+
+  test("gl_account_shards refuses shard ids outside 0..255", async () => {
+    for (const shardId of [-1, 256]) {
+      let rejected = false;
+      try {
+        await createRow("gl_account_shards", { shard_id: shardId });
+      } catch {
+        rejected = true;
+      }
+      expect(rejected).toBe(true);
+    }
+  });
+
+  test("gl_shard_checkpoints: status must be OK, GAP or PARITY and the shard row must exist", async () => {
+    const account = await createRow("gl_accounts", { account_type: "TREASURY", currency: "LYD", shard_count: 2 });
+    const insert = async (shardId: number, status: string): Promise<boolean> => {
+      try {
+        await db.$executeRawUnsafe(
+          `INSERT INTO "gl_shard_checkpoints" ("gl_account_id", "shard_id", "status") VALUES ($1::uuid, $2, $3)`,
+          account.id,
+          shardId,
+          status,
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    expect(await insert(0, "BROKEN")).toBe(false);
+    expect(await insert(5, "OK")).toBe(false); // composite FK: shard 5 does not exist
+    expect(await insert(1, "PARITY")).toBe(true);
+    expect(await insert(1, "OK")).toBe(false); // primary key (gl_account_id, shard_id)
+    const rows = (await db.$queryRawUnsafe(
+      `SELECT checkpoint_balance::text AS balance, checkpoint_seq::text AS seq, consecutive_failures FROM gl_shard_checkpoints WHERE gl_account_id = $1::uuid AND shard_id = 1`,
+      account.id,
+    )) as Array<{ balance: string; seq: string; consecutive_failures: number }>;
+    // a shard without checkpoint data is at (0, seq 0)
+    expect([rows[0]?.balance, rows[0]?.seq, Number(rows[0]?.consecutive_failures)]).toEqual(["0.0000", "0", 0]);
+    await db.$executeRawUnsafe(`DELETE FROM "gl_shard_checkpoints" WHERE gl_account_id = $1::uuid`, account.id);
+  });
 });
 
 describeDb("Suite 01 · attempt_groups_single_success", () => {

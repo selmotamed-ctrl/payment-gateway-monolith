@@ -176,6 +176,9 @@ describe("PostgreSQL 18 provisioner", () => {
     expect(ini).toContain("max_prepared_statements = 256");
     expect(ini).toContain("server_reset_query_always = 0");
     expect(ini).toContain("ignore_startup_parameters = extra_float_digits,search_path");
+    // The leader election gets a session-scoped alias on the same port.
+    expect(ini).toContain("pgw_session = ");
+    expect(ini).toContain("pool_mode=session");
   });
 
   test("provisioning writes config, pg_hba, roles, slots and replica basebackup", () => {

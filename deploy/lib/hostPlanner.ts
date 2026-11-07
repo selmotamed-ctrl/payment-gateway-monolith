@@ -1,6 +1,7 @@
 import {
   edgeCoreUrls,
   effectiveDatabase,
+  leaderElectionDatabaseUrl,
   parseNodeList,
   pgStorageConfigured,
   withIpv6Loopback,
@@ -272,6 +273,7 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
   const replicaUrls = replicas.map((node) =>
     `postgresql://${encodeURIComponent(database.user)}:${encodeURIComponent(database.password)}@${node.privateIp}:${node.servicePort}/${database.name}${directTlsQuery(pgManaged)}`,
   );
+  const leaderUrl = leaderElectionDatabaseUrl(config);
   return {
     ...(primary ? {
       PG_PRIMARY_HOST: primary.privateIp,
@@ -287,6 +289,10 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
     PGBOUNCER_DEFAULT_POOL_SIZE: String(config.PGBOUNCER_DEFAULT_POOL_SIZE),
     PGBOUNCER_MAX_CLIENT_CONN: String(config.PGBOUNCER_MAX_CLIENT_CONN),
     PGBOUNCER_MAX_PREPARED_STATEMENTS: String(config.PGBOUNCER_MAX_PREPARED_STATEMENTS),
+    // Session-scoped endpoint for the singleton-worker advisory locks. With
+    // PgBouncer this is the pgw_session alias (pool_mode=session); without it,
+    // a direct PostgreSQL URL. Never the transaction-pooled DATABASE_URL.
+    ...(leaderUrl ? { LEADER_ELECTION_DATABASE_URL: leaderUrl } : {}),
     ...(replicaUrls.length > 0 ? { DATABASE_REPLICA_URLS: replicaUrls.join(",") } : {}),
     ...(config.AUDIT_DB_NODE ? { AUDIT_DATABASE_URL: `postgresql://${encodeURIComponent(config.AUDIT_DB_USER)}:${encodeURIComponent(config.AUDIT_DB_PASSWORD)}@${parseNodeList(config.AUDIT_DB_NODE)[0]?.privateIp}:${parseNodeList(config.AUDIT_DB_NODE)[0]?.servicePort}/${config.AUDIT_DB_NAME}${directTlsQuery(config.AUDIT_DB_MANAGE_VIA_SSH)}` } : {}),
     ...(config.LOG_DB_NODE ? { LOG_DATABASE_URL: `postgresql://${encodeURIComponent(config.LOG_DB_USER)}:${encodeURIComponent(config.LOG_DB_PASSWORD)}@${parseNodeList(config.LOG_DB_NODE)[0]?.privateIp}:${parseNodeList(config.LOG_DB_NODE)[0]?.servicePort}/${config.LOG_DB_NAME}${directTlsQuery(config.LOG_DB_MANAGE_VIA_SSH)}` } : {}),
@@ -327,6 +333,11 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
     WORKER_ENABLED: "true",
     ...(redisUrl ? { REDIS_URL: redisUrl } : {}),
     ...storageEnv(config),
+    // An explicit session endpoint for an external database / custom pooler
+    // wins over the derived PgBouncer alias.
+    ...(config.LEADER_ELECTION_DATABASE_URL
+      ? { LEADER_ELECTION_DATABASE_URL: config.LEADER_ELECTION_DATABASE_URL }
+      : {}),
     ...backupCoreEnv(config),
     FAKE_RAILS_ENABLED: config.FAKE_RAILS_ENABLED ? "true" : "false",
     FAKE_RAILS_ALLOW_IN_PRODUCTION: config.FAKE_RAILS_ALLOW_IN_PRODUCTION ? "true" : "false",

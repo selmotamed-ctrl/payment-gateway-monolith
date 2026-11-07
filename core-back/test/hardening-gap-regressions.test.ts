@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { CheckpointService, ShardParityError, checkShardParity } from "../engine/ledger/CheckpointService";
+import { CheckpointService, ShardParityError } from "../engine/ledger/CheckpointService";
+import { createFakeCheckpointDb } from "./helpers/fakeCheckpointDb";
+import { LedgerCheckpointWorker } from "../engine/workers/LedgerCheckpointWorker";
+import { LedgerShardScalerWorker } from "../engine/workers/LedgerShardScalerWorker";
 import { ExpirySweeperWorker } from "../engine/workers/ExpirySweeperWorker";
 import { InboundInboxWorker } from "../engine/workers/InboundInboxWorker";
 import { OutboxNotificationWorker } from "../engine/workers/OutboxNotificationWorker";
@@ -13,132 +16,125 @@ import type { PrismaLike } from "../engine/db/ports";
 import { emptyRepositories } from "./helpers/fakeRepositories";
 import { createRetentionFake } from "./helpers/retentionFake";
 import { PgAdvisoryLeaderElection, type PgClientLike } from "../lib/storageEngine/leaderElection";
+import { crossFieldIssues, envSchema } from "../lib/env";
 import { pinUtcInConnectionUrl } from "../lib/storageEngine/utcSession";
 
 /* -------------------------------------------------------------------------- */
 /* GAP-011 checkpoint                                                          */
 /* -------------------------------------------------------------------------- */
 
-interface Trace {
-  events: string[];
-  updates: Array<Record<string, unknown>>;
-}
+describe("GAP-011 CheckpointService (per-shard, lock-free, verified)", () => {
+  test("a capture is one snapshot read plus one monotonic upsert, with no lock and no transaction", async () => {
+    const fake = createFakeCheckpointDb();
+    fake.post("acc-1", 0, "DEBIT", "10.0000");
+    const result = await new CheckpointService(fake.db).captureShard("acc-1", 0);
+    expect(result.status).toBe("ADVANCED");
+    expect(fake.statements).toHaveLength(2);
+    expect(fake.statements[0]!.sql).toContain("WITH s AS");
+    expect(fake.statements[1]!.sql).toContain("WHERE c.checkpoint_seq < EXCLUDED.checkpoint_seq");
+    for (const statement of fake.statements) {
+      expect(statement.sql).not.toContain("FOR UPDATE");
+      expect(statement.sql).not.toMatch(/\bgl_accounts\b/);
+    }
+  });
 
-const checkpointClient = (options: {
-  shardTotal?: string;
-  journalTotal?: string;
-  dbNow?: Date;
-  inTransaction?: { value: boolean };
-}) => {
-  const trace: Trace = { events: [], updates: [] };
-  const state = { inTx: false };
-  const make = (): Record<string, unknown> => ({
-    glAccount: {
-      findUnique: async () => ({ id: "acc-1", accountType: "TREASURY", checkpointBalance: 0, checkpointAt: null }),
-      findMany: async () => [],
-      update: async (args: { data: Record<string, unknown> }) => {
-        trace.events.push(`update:${state.inTx ? "tx" : "outside"}`);
-        trace.updates.push(args.data);
-        return {};
+  test("the checkpoint time is the database clock, never a value computed by the application", async () => {
+    const fake = createFakeCheckpointDb();
+    fake.post("acc-1", 0, "DEBIT", "10.0000");
+    await new CheckpointService(fake.db).captureShard("acc-1", 0);
+    const advance = fake.statements.find((statement) => statement.sql.includes("INSERT INTO gl_shard_checkpoints"))!;
+    expect(advance.sql).toContain("checkpoint_at = now()");
+    expect(advance.args.some((arg) => arg instanceof Date)).toBe(false);
+    expect(advance.args).toEqual(["acc-1", 0, "10.0000", "1"]);
+  });
+
+  test("a shard-vs-journal mismatch is refused: PARITY, nothing moves, the first failure is flagged", async () => {
+    const fake = createFakeCheckpointDb();
+    fake.post("acc-1", 0, "DEBIT", "100.0000");
+    fake.shard("acc-1").balance = fake.shard("acc-1").balance.minus("10.0000"); // the shard disagrees with the journal
+    const service = new CheckpointService(fake.db);
+    const first = await service.captureShard("acc-1", 0);
+    expect(first.status).toBe("PARITY");
+    expect(first.drift.toFixed(4)).toBe("-10.0000");
+    expect(first.firstFailure).toBe(true);
+    expect(fake.shard("acc-1").checkpoint?.seq).toBe(0n);
+    expect(fake.shard("acc-1").checkpoint?.status).toBe("PARITY");
+    const second = await service.captureShard("acc-1", 0);
+    expect(second.firstFailure).toBe(false);
+    expect(fake.shard("acc-1").checkpoint?.consecutiveFailures).toBe(2);
+    const error = new ShardParityError(first);
+    expect(error.code).toBe("LEDGER_SHARD_PARITY_MISMATCH");
+    expect(error.result.drift.toFixed(4)).toBe("-10.0000");
+    expect(error.message).toContain("shard 0");
+  });
+
+  test("a missing line is a GAP, found after a retry without the partition-pruning hint", async () => {
+    const fake = createFakeCheckpointDb();
+    fake.post("acc-1", 0, "DEBIT", "10.0000");
+    fake.post("acc-1", 0, "DEBIT", "5.0000");
+    fake.shard("acc-1").lines.pop(); // line_seq says 2, only 1 line exists
+    const result = await new CheckpointService(fake.db).captureShard("acc-1", 0);
+    expect(result.status).toBe("GAP");
+    expect(result.linesFound).toBe(1n);
+    const snapshots = fake.statements.filter((statement) => statement.sql.includes("WITH s AS"));
+    expect(snapshots).toHaveLength(2); // hinted read, then the full read before alarming
+    expect(snapshots[0]!.sql).toContain("make_interval");
+    expect(snapshots[1]!.sql).not.toContain("make_interval");
+    expect(new ShardParityError(result).message).toContain("1 line(s) found");
+  });
+
+  test("a capture that lost the race to a further checkpoint reports NOOP and never moves it back", async () => {
+    const fake = createFakeCheckpointDb();
+    fake.post("acc-1", 0, "DEBIT", "10.0000");
+    const base = fake.db.$queryRawUnsafe;
+    let raced = false;
+    const racing = {
+      $queryRawUnsafe: async <T = unknown>(sql: string, ...args: unknown[]): Promise<T> => {
+        const rows = await base<T>(sql, ...args);
+        if (!raced && sql.includes("WITH s AS")) {
+          raced = true;
+          fake.shard("acc-1").checkpoint = {
+            balance: fake.shard("acc-1").balance, seq: 1n, status: "OK", failureKind: null, consecutiveFailures: 0, verifiedAt: new Date(),
+          };
+        }
+        return rows;
       },
-    },
-    journalLine: { findMany: async () => [] },
-    $queryRawUnsafe: async (sql: string) => {
-      trace.events.push(`sql:${state.inTx ? "tx" : "outside"}:${sql.slice(0, 40)}`);
-      if (sql.includes("FOR UPDATE")) return [{ id: "acc-1", accountType: "TREASURY" }];
-      if (sql.includes("clock_timestamp")) return [{ now: options.dbNow ?? new Date("2030-01-01T00:00:00.000Z") }];
-      if (sql.includes("gl_account_shards")) {
-        if (options.shardTotal === undefined) return [];
-        return [{ id: "acc-1", shardTotal: options.shardTotal, journalTotal: options.journalTotal ?? "0" }];
-      }
-      return [];
-    },
-  });
-  const client = {
-    ...make(),
-    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
-      state.inTx = true;
-      trace.events.push("begin");
-      try {
-        const result = await fn(make());
-        trace.events.push("commit");
-        return result;
-      } catch (error) {
-        trace.events.push("rollback");
-        throw error;
-      } finally {
-        state.inTx = false;
-      }
-    },
-  };
-  return { client: client as never, trace };
-};
-
-describe("GAP-011 CheckpointService", () => {
-  test("lock, parity read and write run inside one transaction", async () => {
-    const { client, trace } = checkpointClient({});
-    await new CheckpointService(client).captureCheckpoint("acc-1");
-    expect(trace.events[0]).toBe("begin");
-    expect(trace.events.at(-1)).toBe("commit");
-    expect(trace.events.filter((event) => event.endsWith(":outside") || event.startsWith("update:outside"))).toEqual([]);
-    expect(trace.events.some((event) => event.startsWith("update:tx"))).toBe(true);
+    };
+    const result = await new CheckpointService(racing).captureShard("acc-1", 0);
+    expect(result.status).toBe("NOOP");
+    expect(result.checkpointSeq).toBe(0n);
+    expect(fake.shard("acc-1").checkpoint?.seq).toBe(1n);
   });
 
-  test("the default asOf is the database clock, not the application clock", async () => {
-    const dbNow = new Date("2031-05-05T05:05:05.000Z");
-    const { client, trace } = checkpointClient({ dbNow });
-    const before = Date.now();
-    const record = await new CheckpointService(client).captureCheckpoint("acc-1");
-    expect(record.asOf.toISOString()).toBe(dbNow.toISOString());
-    expect(record.asOf.getTime()).toBeGreaterThan(before + 1000 * 60 * 60 * 24 * 365);
-    expect(trace.updates[0]?.checkpointAt).toEqual(dbNow);
+  test("an unchanged, healthy shard only refreshes verified_at and an unknown shard is an error", async () => {
+    const fake = createFakeCheckpointDb();
+    fake.post("acc-1", 0, "DEBIT", "10.0000");
+    const service = new CheckpointService(fake.db);
+    await service.captureShard("acc-1", 0);
+    expect((await service.captureShard("acc-1", 0)).status).toBe("NOOP");
+    expect(fake.statements.at(-1)!.sql).toContain("UPDATE gl_shard_checkpoints SET verified_at");
+    await expect(service.captureShard("missing", 3)).rejects.toThrow("has no shard 3");
   });
 
-  test("an explicit asOf is honoured", async () => {
-    const { client } = checkpointClient({});
-    const asOf = new Date("2025-01-01T00:00:00.000Z");
-    const record = await new CheckpointService(client).captureCheckpoint("acc-1", asOf);
-    expect(record.asOf).toEqual(asOf);
-  });
+  test("captureAccount walks every shard row and findCandidates is bounded and respects the failure back-off", async () => {
+    const fake = createFakeCheckpointDb();
+    fake.post("acc-1", 0, "DEBIT", "1.0000");
+    fake.post("acc-1", 1, "DEBIT", "2.0000");
+    fake.post("acc-1", 2, "DEBIT", "3.0000");
+    const service = new CheckpointService(fake.db);
+    const results = await service.captureAccount("acc-1");
+    expect(results.map((entry) => [entry.shardId, entry.status])).toEqual([[0, "ADVANCED"], [1, "ADVANCED"], [2, "ADVANCED"]]);
 
-  test("a shard-vs-journal mismatch refuses the checkpoint and rolls back", async () => {
-    const { client, trace } = checkpointClient({ shardTotal: "100.0000", journalTotal: "90.0000" });
-    const error = await new CheckpointService(client).captureCheckpoint("acc-1").catch((e) => e);
-    expect(error).toBeInstanceOf(ShardParityError);
-    expect((error as ShardParityError).mismatch.drift.toFixed(4)).toBe("10.0000");
-    expect(trace.updates).toEqual([]);
-    expect(trace.events.at(-1)).toBe("rollback");
-  });
-
-  test("warn mode captures but reports the mismatch", async () => {
-    const { client, trace } = checkpointClient({ shardTotal: "5", journalTotal: "4" });
-    const seen: string[] = [];
-    await new CheckpointService(client, {
-      parity: "warn",
-      onParityMismatch: (mismatch) => seen.push(mismatch.accountId),
-    }).captureCheckpoint("acc-1");
-    expect(seen).toEqual(["acc-1"]);
-    expect(trace.updates).toHaveLength(1);
-  });
-
-  test("matching totals and accounts without shards pass", async () => {
-    const equal = checkpointClient({ shardTotal: "10.0000", journalTotal: "10" });
-    await new CheckpointService(equal.client).captureCheckpoint("acc-1");
-    expect(equal.trace.updates).toHaveLength(1);
-    const none = checkpointClient({});
-    expect((await new CheckpointService(none.client).verifyShardParity()).checked).toBe(0);
-  });
-
-  test("checkShardParity reports every drifting account", async () => {
-    const result = await checkShardParity({
-      $queryRawUnsafe: async () => [
-        { id: "a", shardTotal: "1", journalTotal: "1" },
-        { id: "b", shardTotal: "2", journalTotal: "3" },
-      ],
-    });
-    expect(result.ok).toBe(false);
-    expect(result.checked).toBe(2);
-    expect(result.mismatches.map((m) => m.accountId)).toEqual(["b"]);
+    const seen: unknown[][] = [];
+    const candidates = await new CheckpointService({
+      $queryRawUnsafe: async <T = unknown>(sql: string, ...args: unknown[]): Promise<T> => {
+        seen.push([sql, ...args]);
+        return [{ id: "acc-1", shard_id: 2, pending: "7" }] as T;
+      },
+    }).findCandidates({ minLines: 100, maxAgeSeconds: 60, limit: 5 });
+    expect(candidates).toEqual([{ glAccountId: "acc-1", shardId: 2, pendingLines: 7n }]);
+    expect(seen[0]!.slice(1)).toEqual([100, 60, 600, 5]);
+    expect(String(seen[0]![0])).toContain("last_failure_at");
   });
 });
 
@@ -194,6 +190,23 @@ describe("GAP-012 SKIP LOCKED claims run inside a transaction", () => {
       expect(claim?.inTx).toBe(true);
     });
   }
+
+  test("the inbound inbox claim is a durable lease, not only a transaction-scoped lock", async () => {
+    const { db, calls } = claimDb();
+    await new InboundInboxWorker({
+      db,
+      repositories: emptyRepositories(),
+      handler: { handle: async () => ({ processed: true }) },
+      workerId: "node-a",
+    }).runOnce();
+    const claim = calls.find(
+      (call) => call.sql.includes("FROM inbound_events") && call.sql.includes("FOR UPDATE SKIP LOCKED"),
+    );
+    expect(claim?.sql).toContain("claimed_at = $3");
+    expect(claim?.sql).toContain("claimed_by = $4");
+    expect(claim?.args[3]).toBe("node-a");
+    expect(claim?.inTx).toBe(true);
+  });
 
   test("PollWorker and OutboxNotificationWorker lease the claimed rows before the lock is released", async () => {
     const poll = claimDb();
@@ -272,21 +285,35 @@ describe("GAP-012 singleton workers need the advisory-lock leader", () => {
     const keys = [
       new ExpirySweeperWorker({ db, repositories, leaderElection: election }),
       new LedgerInvariantWorker({ db, repositories, leaderElection: election } as never),
+      new LedgerCheckpointWorker({ db, repositories, leaderElection: election } as never),
+      new LedgerShardScalerWorker({ db, repositories, leaderElection: election } as never),
       new RetentionWorker({ db, repositories, leaderElection: election } as never),
     ];
     return Promise.all(keys.map((worker) => worker.runOnce().catch(() => undefined))).then(() => {
       expect(election.keys.sort()).toEqual([
         "worker:ExpirySweeperWorker",
+        "worker:LedgerCheckpointWorker",
         "worker:LedgerInvariantWorker",
+        "worker:LedgerShardScalerWorker",
         "worker:RetentionWorker",
       ]);
     });
   });
 });
 
-const fakePgClient = (script: { lockResult?: boolean; failOn?: string }) => {
+const fakePgClient = (script: {
+  lockResult?: boolean;
+  failOn?: string;
+  pid?: number;
+  sameSession?: boolean;
+  holdsLock?: boolean;
+  unlocked?: boolean;
+  pidSequence?: number[];
+}) => {
   const queries: string[] = [];
   const handlers: Record<string, ((error?: Error) => void)[]> = {};
+  let backendPid = script.pid ?? 4242;
+  let pidChecks = 0;
   const client: PgClientLike & { queries: string[]; emit(event: string): void; ended: boolean } = {
     queries,
     ended: false,
@@ -294,7 +321,30 @@ const fakePgClient = (script: { lockResult?: boolean; failOn?: string }) => {
     query: async (sql: string) => {
       queries.push(sql);
       if (script.failOn && sql.includes(script.failOn)) throw new Error("connection terminated");
-      if (sql.includes("pg_try_advisory_lock")) return { rows: [{ locked: script.lockResult ?? true }] };
+      if (sql.includes("holds_lock")) {
+        return {
+          rows: [
+            {
+              pid: backendPid,
+              same_session: script.sameSession ?? true,
+              holds_lock: script.holdsLock ?? true,
+            },
+          ],
+        };
+      }
+      if (sql.includes("pg_advisory_unlock")) {
+        return { rows: [{ released: script.unlocked ?? true }] };
+      }
+      if (sql.includes("pg_try_advisory_lock")) {
+        return { rows: [{ pid: backendPid, locked: script.lockResult ?? true }] };
+      }
+      if (sql.includes("SELECT pg_backend_pid() AS pid")) {
+        if (script.pidSequence && pidChecks < script.pidSequence.length) {
+          backendPid = script.pidSequence[pidChecks]!;
+        }
+        pidChecks += 1;
+        return { rows: [{ pid: backendPid }] };
+      }
       return { rows: [] };
     },
     end: async () => {
@@ -346,10 +396,38 @@ describe("GAP-012 PgAdvisoryLeaderElection", () => {
     const client = fakePgClient({});
     const election = new PgAdvisoryLeaderElection({ clientFactory: () => client });
     await election.tryAcquire("w");
-    const failing = fakePgClient({ failOn: "SELECT 1" });
+    const failing = fakePgClient({ failOn: "holds_lock" });
     (election as unknown as { client: unknown }).client = failing;
     await expect(election.tryAcquire("w")).rejects.toThrow("connection terminated");
     expect(election.held()).toEqual([]);
+  });
+
+  test("a changed backend PID drops leadership instead of trusting the client connection", async () => {
+    const client = fakePgClient({});
+    const election = new PgAdvisoryLeaderElection({ clientFactory: () => client });
+    await election.tryAcquire("w");
+    (election as unknown as { client: unknown }).client = fakePgClient({ sameSession: false });
+    expect(await election.tryAcquire("w")).toBe(false);
+    expect(election.held()).toEqual([]);
+    expect(election.status().lostCount).toBeGreaterThan(0);
+  });
+
+  test("a missing advisory lock row drops leadership", async () => {
+    const client = fakePgClient({});
+    const election = new PgAdvisoryLeaderElection({ clientFactory: () => client });
+    await election.tryAcquire("w");
+    (election as unknown as { client: unknown }).client = fakePgClient({ holdsLock: false });
+    expect(await election.tryAcquire("w")).toBe(false);
+    expect(election.held()).toEqual([]);
+  });
+
+  test("a refused unlock drops the session instead of pretending the release succeeded", async () => {
+    const client = fakePgClient({ unlocked: false });
+    const election = new PgAdvisoryLeaderElection({ clientFactory: () => client });
+    await election.tryAcquire("w");
+    await election.release("w");
+    expect(election.held()).toEqual([]);
+    expect(client.ended).toBe(true);
   });
 
   test("release unlocks and close ends the session", async () => {
@@ -360,6 +438,80 @@ describe("GAP-012 PgAdvisoryLeaderElection", () => {
     expect(client.queries.some((q) => q.includes("pg_advisory_unlock"))).toBe(true);
     await election.close();
     expect(client.ended).toBe(true);
+  });
+
+  test("the session-safety probe rejects an endpoint where two clients share one backend", async () => {
+    const clients = [fakePgClient({}), fakePgClient({ lockResult: true })];
+    let index = 0;
+    const election = new PgAdvisoryLeaderElection({
+      clientFactory: () => clients[Math.min(index++, clients.length - 1)]!,
+    });
+    await expect(election.verifySessionSafety()).rejects.toThrow(
+      "Two leader-election clients acquired the same advisory lock",
+    );
+    expect(election.status().probeOk).toBe(false);
+  });
+
+  test("the session-safety probe accepts a genuinely session-scoped endpoint", async () => {
+    const clients = [fakePgClient({}), fakePgClient({ lockResult: false })];
+    let index = 0;
+    const election = new PgAdvisoryLeaderElection({
+      clientFactory: () => clients[Math.min(index++, clients.length - 1)]!,
+    });
+    const status = await election.verifySessionSafety();
+    expect(status.probeOk).toBe(true);
+    expect(status.backendPid).toBe(4242);
+  });
+
+  test("the session-safety probe rejects an endpoint that changes backend between statements", async () => {
+    const main = fakePgClient({ pidSequence: [4242, 4242, 4242, 9999, 9999, 9999, 9999, 9999] });
+    const second = fakePgClient({ lockResult: false });
+    const clients = [main, second];
+    let index = 0;
+    const election = new PgAdvisoryLeaderElection({
+      clientFactory: () => clients[Math.min(index++, clients.length - 1)]!,
+    });
+    await expect(election.verifySessionSafety()).rejects.toThrow(
+      "The leader-election backend changed between statements",
+    );
+    expect(election.status().probeOk).toBe(false);
+  });
+});
+
+describe("leader-election environment guard", () => {
+  const parsed = () =>
+    envSchema.parse({
+      DATABASE_URL: "postgresql://gw:secret@10.0.0.5:6432/payment_gateway",
+      PGBOUNCER_ENABLED: "true",
+      MTLS_CA_CERT_PATH: "/certs/ca.crt",
+      MTLS_SERVER_CERT_PATH: "/certs/core.crt",
+      MTLS_SERVER_KEY_PATH: "/certs/core.key",
+      KMS_MASTER_KEY: "test-only-master-key-value",
+    });
+
+  test("PgBouncer without a dedicated session URL refuses to boot the workers", () => {
+    expect(crossFieldIssues(parsed())).toContain(
+      "LEADER_ELECTION_DATABASE_URL is required when WORKER_ENABLED and PGBOUNCER_ENABLED are true " +
+        "(point it at the PgBouncer session alias, never the transaction-pooled DATABASE_URL)",
+    );
+  });
+
+  test("the transactional DATABASE_URL is refused as the leader endpoint", () => {
+    const value = { ...parsed(), LEADER_ELECTION_DATABASE_URL: "postgresql://gw:secret@10.0.0.5:6432/payment_gateway" };
+    expect(crossFieldIssues(value)).toContain(
+      "LEADER_ELECTION_DATABASE_URL must not be the transaction-pooled DATABASE_URL " +
+        "(use the session-pooled alias or a direct PostgreSQL URL)",
+    );
+  });
+
+  test("a distinct session alias is accepted", () => {
+    const value = { ...parsed(), LEADER_ELECTION_DATABASE_URL: "postgresql://gw:secret@10.0.0.5:6432/pgw_session" };
+    expect(crossFieldIssues(value)).toEqual([]);
+  });
+
+  test("a direct endpoint without PgBouncer needs no extra URL", () => {
+    const value = { ...parsed(), PGBOUNCER_ENABLED: false };
+    expect(crossFieldIssues(value)).toEqual([]);
   });
 });
 

@@ -3,8 +3,8 @@ id: merchant-ui.portal
 title: Merchant Portal
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-07
+verified_against: d695518+working-tree
 code:
   - merchant-front/src/router/index.ts
   - merchant-front/src/layouts/**
@@ -22,6 +22,7 @@ design_sources:
   - design/06-ui/merchant_landing_page_redesign.md
 tests:
   - tests/e2e/merchant/shell.spec.ts
+  - tests/e2e/merchant/table-row-context-menu.spec.ts
   - tests/e2e/merchant/auth.spec.ts
   - tests/e2e/merchant/a11y.spec.ts
   - tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts
@@ -203,6 +204,7 @@ The link amount is stored server-side; the checkout page never accepts a client 
 - Creates a terminal with name and location.
 - Creates/pairs a screen with a screen name and type.
 - Shows screen role/status and actions.
+- The shared table subsystem mirrors the admin copy: the action column is sticky to the inline end and `TableRowActions` opens the same actions from a row right-click or `Shift+F10` (primary action first, then the overflow items). The visible overflow button remains the touch path.
 
 `PosScreen` (`/portal/pos/screen/:code`):
 

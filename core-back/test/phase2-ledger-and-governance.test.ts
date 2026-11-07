@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { Vault } from "../engine/crypto/Vault";
 import { buildLedgerTemplate, buildPaymentConfirmationTemplate, decimal, LedgerPoster } from "../engine/ledger/LedgerPoster";
 import { CheckpointService } from "../engine/ledger/CheckpointService";
+import { createFakeCheckpointDb } from "./helpers/fakeCheckpointDb";
 import { InvariantVerifier } from "../engine/ledger/InvariantVerifier";
 import { ApprovalService, SYSTEM_AUTOMATION } from "../engine/governance/ApprovalService";
 import { DetailChangeService } from "../engine/governance/DetailChangeService";
@@ -178,33 +179,20 @@ describe("phase 2 ledger", () => {
     ).toThrow();
   });
 
-  test("resolves the live balance from the checkpoint plus the journal lines", async () => {
-    const account = {
-      id: "wallet",
-      accountType: "MERCHANT_WALLET",
-      ownerId: "merchant-1",
-      gatewayId: null,
-      credentialSetId: null,
-      env: null,
-      currency: "LYD",
-      checkpointBalance: decimal("10.0000"),
-      checkpointAt: new Date("2026-01-01T00:00:00.000Z"),
-      lastCheckpointId: "cp-1",
-    };
-    const client = {
-      glAccount: { findUnique: async () => account },
-      journalLine: {
-        findMany: async () => [
-          { direction: "CREDIT", amount: decimal("5.0000") },
-          { direction: "DEBIT", amount: decimal("2.0000") },
-        ],
-      },
-    };
-    const service = new CheckpointService(client as never);
-    const balance = await service.getLiveBalance("wallet");
-    expect(balance.liveBalance.toFixed(4)).toBe("7.0000");
-    expect(balance.checkpointBalance.toFixed(4)).toBe("10.0000");
-    expect(balance.accountType).toBe("MERCHANT_WALLET");
+  test("resolves the live balance from the shard checkpoint plus the lines posted since", async () => {
+    const fake = createFakeCheckpointDb();
+    fake.post("wallet", 0, "CREDIT", "10.0000");
+    const service = new CheckpointService(fake.db);
+    expect((await service.captureShard("wallet", 0)).checkpointBalance.toFixed(4)).toBe("-10.0000");
+    fake.post("wallet", 0, "CREDIT", "5.0000");
+    fake.post("wallet", 0, "DEBIT", "2.0000");
+    const verdict = await service.inspectShard("wallet", 0);
+    // debit-positive: the checkpoint (-10) plus the two lines since (-5, +2) is the shard balance (-13)
+    expect(verdict.balance.toFixed(4)).toBe("-13.0000");
+    expect(verdict.previousSeq).toBe(1n);
+    expect(verdict.linesFound).toBe(2n);
+    expect(verdict.drift.toFixed(4)).toBe("0.0000");
+    expect(verdict.status).toBe("ADVANCED");
   });
 
   test("reports zero drift when the system wide invariant holds", async () => {

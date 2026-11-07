@@ -213,7 +213,7 @@ export const loadArticles: (lang:"en"|"ar") => Promise<Article[]>; // dynamic im
 | Reading paths | 8 | `@@path` lines (`ALL` plus the 7 staff roles) |
 | Quick answers (FAQ) | 58 | `@@faq` blocks |
 | Data blocks | 3 | `ledger-events` (16 events), `visible-rails` (7 vectors), `attempt-transitions` |
-| Context map screens | 24 | `screens` array of `context-map` |
+| Context map screens | 25 | `screens` array of `context-map` |
 | Error codes (from b13-01) | 19 | first-column backticked tokens |
 | Edge cases | 140 | parsed from the repository's v4 design file |
 
@@ -1199,9 +1199,9 @@ The dashboard is a smoke alarm, not a diagnosis. When a tile worries you, open t
 :::
 @@end
 
-@@article id=b03-09 book=3 order=6 title="The Wallets screen: balances, shards, statements and freezing" roles=OPERATOR,COMPLIANCE,SUPPORT minutes=3 ui=AVAILABLE related=b05-06,b08-02,b08-07,b04-04
+@@article id=b03-09 book=3 order=6 title="The Wallets screen and the wallet page: balances, statements, shards and freezing" roles=OPERATOR,COMPLIANCE,SUPPORT minutes=4 ui=AVAILABLE related=b05-06,b08-02,b08-07,b04-04
 :::summary Big picture in 20 seconds
-**Wallets** lists every merchant's wallet in one place. You can read the balance, see how it is built from the ledger and look at the statement. The one thing you can change is the wallet's status: freezing is immediate, and unfreezing needs a second person.
+**Wallets** lists every merchant's wallet. Each wallet has its own page with the balance, the full paged statement, the shards behind the balance and the history of its status. The one thing you can change is the status: freezing is immediate, and unfreezing needs a second person.
 :::
 
 ### What a wallet is, in one minute
@@ -1225,17 +1225,25 @@ If your role may not see money, the balance tile shows **Restricted**. If the ti
 Each row is one wallet. The columns are **Wallet**, **Merchant**, **Currency**, **Status**, **Live balance**, **Checkpoint**, **GL account**, **Applications**, **Pending cash-outs**, **Created** and **Action**.
 
 * A wallet's **Status** is `PENDING`, `ACTIVE`, `FROZEN` or `CLOSED`.
-* **Live balance** is the sum of the wallet's ledger shards right now.
-* **Checkpoint** is the balance saved at the last checkpoint. The live balance can differ from it, because the live balance includes everything posted since then.
-* **GL account** is the ledger account behind the wallet. Click **Inspect GL account** to read it ([[a:b03-13|Journal Entries]]).
+* **Live balance** is the sum of the wallet's ledger shards right now. A positive number is money we owe the merchant.
+* **Checkpoint** is the balance saved at the last checkpoint, written with the same sign as the live balance. The platform saves checkpoints by itself, so the live balance is normally only a little ahead of it, by whatever was posted since then.
+* **GL account** is the ledger account behind the wallet.
 * You can filter by **Status**, **Currency**, **Merchant** and **Created**, and search by text.
+* **Inspect** (or the wallet ID) opens the wallet page. **Inspect GL account** in the row menu opens the ledger account in a side panel ([[a:b03-13|Journal Entries]]).
 
-### The wallet drawer
-Click **Inspect** to open a panel on the right. It has three tabs.
+### The wallet page
+Each wallet has its own page, so you can bookmark it, share the link and use the browser's Back button. Old links of the form `Wallets?open=…` land on the same page. The header shows the merchant, the status, **Freeze wallet** or **Request unfreeze**, **Back to wallets** and **Refresh**.
 
-1. **Overview and shards.** The wallet's identity and its balances. A busy account is split into several parts, called **shards**, so that many payments can post at the same moment. The **Shard distribution** table lists each shard's balance. They add up to the live balance. If a request about this wallet is waiting for approval, a **Pending approvals** card appears with a link to **Approvals**.
-2. **Statement.** Each ledger line posted to the wallet: **Posted**, **Reference**, **Debit**, **Credit** and a link to the **Journal entry**.
+* If the wallet is `FROZEN`, a banner says so and says whether a request to restore it is already waiting.
+* If a request about the wallet is waiting for approval, a **Pending approvals** list appears with a link to **Approvals**.
+* Four tiles show **Live balance**, **Checkpoint balance** (with the time it was taken), **Posted since checkpoint** and **Pending cash-outs**.
+
+Below the tiles are four tabs. The tab you choose is kept in the address, so a reload opens the same tab.
+
+1. **Overview and shards.** The wallet's details and its **Shards**. A busy account is split into several parts, called **shards**, so that many payments can post at the same moment. A wallet normally has one shard; a wallet that is paid very often can be spread over more (the **Shard width** in the details tells you how many). Each shard's balance is shown with the same sign as the live balance, and the **Total** row adds them up. A green note says "Shards agree with the live balance". If it says "Shards differ from the live balance" and shows a **Drift**, tell Finance. Do not try to fix it. See [[a:b08-05|The ledger equation]].
+2. **Statement.** Every ledger posting to the wallet, newest first, in pages of 10, 25, 50 or 100 lines. Above the table, **Lines**, **Total debits**, **Total credits** and **Net change** describe the **whole** result of your filters, not only the visible page. A **Net change** of +135.000 means the wallet grew by 135.000 over those lines. You can filter by **Side** (debit or credit), **Reference type** and **Posted** (a date range), and search the memo or the reference. Each row shows **Posted**, **Reference type**, **Memo**, **Debit**, **Credit** and **Journal entry**. When the line came from a payment, an adjustment, an AML case or a dispute, the **Reference type** is a link to that record. The **Journal entry** link opens the whole entry in a side panel, on top of the page.
 3. **Links and cash-outs.** The applications that pay into this wallet, and its recent cash-outs, with a button to **Open cash-outs**.
+4. **Status history.** Every freeze and restore of this wallet: **When**, **Action**, **Change** (for example `ACTIVE → FROZEN`), **Reason**, **By** (who, and in which role) and a link to the approval when there was one. You can filter by **Action** and **When**.
 
 ### Freezing and unfreezing
 | Action | When it appears | What happens |
@@ -1243,15 +1251,15 @@ Click **Inspect** to open a panel on the right. It has three tabs.
 | **Freeze wallet** | the wallet is `ACTIVE` | applied **at once**. A frozen wallet cannot be debited by cash-outs until it is restored |
 | **Request unfreeze** | the wallet is `FROZEN` | creates an **approval request**. A different checker must approve it before anything changes |
 
-Both ask for a **Reason** of 10 to 500 characters, which goes into the audit trail. Freezing is fast on purpose and unfreezing is slow on purpose. It is easy to stop money and hard to release it. This is the asymmetry principle in [[a:b04-04|Emergency actions]]. A wallet that is `PENDING` or `CLOSED` has no action.
+Both ask for a **Reason** of 10 to 500 characters, which goes into the audit trail and then into **Status history**. Freezing is fast on purpose and unfreezing is slow on purpose. It is easy to stop money and hard to release it. This is the asymmetry principle in [[a:b04-04|Emergency actions]]. A wallet that is `PENDING` or `CLOSED` has no action.
 
 If a change to the wallet is already waiting for approval, a second request is refused with "A change to this wallet is already awaiting approval."
 
 ### What `SUPPORT` and similar roles see
-Accounts without financial visibility see **Restricted** instead of the live balance, the checkpoint, the shards and the recent cash-outs. The **Statement** tab shows a lock and the text "The ledger statement is hidden for your role." This is intended. Do not try to get the numbers another way.
+Accounts without financial visibility see **Restricted** instead of the live balance, the checkpoint, the shards and the recent cash-outs. The **Statement** tab shows a lock and the text "The ledger statement is hidden for your role." In **Status history**, the change and the reason show **Restricted** for accounts without sensitive access. This is intended. Do not try to get the numbers another way.
 
 :::tip A safe habit
-Before you freeze, read the merchant name and the currency on the row, then write the reason as a sentence: "Freezing Noon Mart LYD wallet because AML case 1042 is open." A reason you cannot write is a sign to stop.
+Before you freeze, read the merchant name and the currency on the page, then write the reason as a sentence: "Freezing Noon Mart LYD wallet because AML case 1042 is open." A reason you cannot write is a sign to stop.
 :::
 @@end
 
@@ -1451,7 +1459,7 @@ Type secrets only into this form. Never paste them into chat, a ticket or an e-m
 
 @@article id=b03-13 book=3 order=10 title="The Journal Entries screen: reading the ledger line by line" roles=FINANCE minutes=4 ui=AVAILABLE related=b08-01,b08-02,b08-05,b08-12
 :::summary Big picture in 20 seconds
-**Journal Entries** is the ledger opened for reading. Each row is one posting that moved money between accounts, and each shows whether its debits equal its credits. Nothing here can be edited. The one action, **Run checkpoint rollup**, is on an account, not on an entry.
+**Journal Entries** is the ledger opened for reading. Each row is one posting that moved money between accounts, and each shows whether its debits equal its credits. Nothing here can be edited. The two actions, **Run checkpoint rollup** and **Set shard count**, belong to an account, not to an entry.
 :::
 
 ### Before you start
@@ -1488,14 +1496,29 @@ The **Reference** is a link when the entry came from a payment, an adjustment, a
 ### The GL account drawer
 Click a **GL account** on any line to open that account. The account types are in [[a:b08-02|The eleven accounts]].
 * **Natural balance** is the balance read the way that account type is normally read, so a credit-natural account is not shown as a confusing negative.
-* **Checkpoint balance** is the saved balance at the last checkpoint. **Posted since last checkpoint** is what was added afterwards.
-* **Shards** lists the parts of a busy account and their balances. **Recent lines** shows the latest postings, each linking back to its entry.
-* Drawers open from drawers: an entry opens an account, and an account's lines open entries.
+* **Checkpoint balance** is the total of the saved balances of all the account's shards. **Posted since last checkpoint** is what was added afterwards. The platform saves checkpoints **by itself** every few minutes, so you never have to do it for the numbers to be right.
+* The badges at the top say how many shards the account is spread over ("16 shards wide") and whether its checkpoints are **up to date**, **behind** or **failed their proof**.
+* **Shards** lists every part of the account. For each shard you see its **Balance**, its **Lines** (how many postings it has taken, counted without gaps), **Pending** (postings since its last checkpoint), its **Checkpoint** balance and **Checkpoint age**, and its **Status**. The **Total** row adds them up. A shard marked **not routed** no longer receives new postings but still counts.
+* **Lines** lists every posting to the account, newest first, in pages. It has the same filters, search, totals and paging as the wallet **Statement** in [[a:b03-09|The Wallets screen and the wallet page]], and each line links back to its entry.
+* Drawers open from drawers: an entry opens an account, and an account's lines open entries. The drawer you opened last is always the one on top.
 
-### The one action: Run checkpoint rollup
-In the GL account drawer, accounts with finance write access (`finance:write`) see **Run checkpoint rollup**. It folds the shard changes into the stored checkpoint balance. It is applied **immediately**, needs a **Reason** of at least 10 characters, and is audited.
+### How checkpoints and shards work, in plain words
+A busy account receives many postings at the same moment, and each shard can only take one posting at a time. So the platform splits a busy account into several **shards** and shares the postings between them. The account's balance is the total of its shards.
 
-The rollup is **refused** if the shard total differs from the journal total. The box then shows the **Shard total**, the **Journal total** and the **Drift**. A refusal is a finding, not an obstacle: do not retry. Report it as in [[a:b08-05|The ledger equation]].
+Each shard numbers its postings 1, 2, 3, … without skipping any number. A **checkpoint** records "this shard's balance was X after posting number N". Before the platform moves a checkpoint forward it **proves** two things: that every posting between the old and the new number really exists, and that the old checkpoint plus those postings equals the shard's balance. If the proof fails, the checkpoint stays where it was, a priority-1 case opens and the shard shows **GAP** or **PARITY** in its status.
+
+When an account becomes very busy, a background process can give it **more shards**. This changes only where new postings go. Old postings and old balances stay where they are, so nothing is moved and nothing can be lost. Wallets start with one shard; the main platform accounts start with sixteen.
+
+### The actions
+Accounts with finance write access (`finance:write`) see two actions in the GL account drawer. Both are applied **immediately**, need a **Reason** of at least 10 characters, and are audited.
+* **Run checkpoint rollup** checks every shard of the account right now and moves its checkpoint forward. Payments are not slowed down. A shard whose postings do not add up is **not** moved: the box names that shard and shows the **Shard total**, the **Journal total** and the **Drift**, or the number of postings it found against the number it expected. A refusal is a finding, not an obstacle. Do not retry it blindly: use **Repair** on that shard (see below) and report it as in [[a:b08-05|The ledger equation]].
+* **Set shard count** tells the platform how many shards new postings are shared between (1 to 256). Making the number larger adds shards. Making it smaller only stops new postings going to the extra shards. Use it only when Engineering asks you to.
+
+### Repairing a shard that failed its proof
+A failed shard shows **GAP** or **PARITY** and a **Repair** button (for accounts with `finance:write`). The shard's balance is only a running total of the permanent journal lines, so the journal is always right. **Repair** works out the shard's balance again **from the journal** and shows you the correction **before** anything changes: the balance the shard holds, the balance the journal says, and the difference. It never creates a ledger entry, because a new entry would change the journal and leave the shard just as wrong.
+* **Postings complete and in order** (usually **PARITY**: only the stored balance or checkpoint is off). **Recompute from journal** fixes it at once. It needs a **Reason**, is audited, and is refused if the shard changed since you looked. The platform also does this **by itself** when a shard has failed the check three times in a row, as long as the correction is small (up to 100.0000 by default). It never does it for a **GAP**.
+* **A posting is missing or a number is used twice** (**GAP**). Recomputing could remove money the shard really holds, so the button becomes **Request approval**. A different user must approve it in **Approvals**. After approval the shard continues from its highest number and the damaged history is kept as a documented exception.
+* If the journal itself is wrong, for example a payment was never booked, that is not a shard problem: correct it as an adjustment ([[a:b08-08|Adjustments]]), never by editing a shard.
 
 :::tip Using the screen for a question
 "Where did Noon Mart's 25.500 LYD go?" Open **Transactions & Webhooks**, find the payment, click its **Ledger entry**, and read the lines. Every payment you can name has an entry you can read.
@@ -2157,7 +2180,7 @@ For rule 4, this is what is direct and what needs two people:
 For example, Noon Mart's application allows Sadad and Edfali. A payment link made from it may allow only Sadad. It may not add MobiCash, because a link can never widen the application's list.
 
 ### Wallets
-A **wallet** is the merchant's balance on our books. It belongs to one merchant and one currency (`LYD`). The currency can never be changed. Only the wallet's **status** can be changed, and that needs two people. The balance is **calculated** from ledger lines every time it is displayed. It is not a stored number that someone could edit.
+A **wallet** is the merchant's balance on our books. It belongs to one merchant and one currency (`LYD`). The currency can never be changed. Only the wallet's **status** can be changed, and that needs two people. The balance is **calculated** from ledger lines every time it is displayed. It is not a stored number that someone could edit. Each wallet has its own page with its statement; see [[a:b03-09|The Wallets screen and the wallet page]].
 @@end
 
 @@article id=b05-07 book=5 order=7 title="Payment links, POS terminals and API tokens" roles=ALL minutes=3 ui=AVAILABLE related=b05-06,b07-06,b07-11
@@ -5689,7 +5712,7 @@ An invariant is something that must always be true. Read the table by row. Each 
 | Badge | Plain meaning | If it fails |
 | :--- | :--- | :--- |
 | **Double-entry zero drift** | In the restored database, total debits equal total credits (drift `0.0000`). | The restored ledger does not balance. Priority 1. |
-| **Sharded balance parity** | The busy account balances that are split into shards add up to what the permanent journal lines say. | Some account balance disagrees with the journal. Priority 1. |
+| **Sharded balance parity** | Every shard of every account adds up to its own journal lines, its checkpoint agrees with those lines, and the numbering of its postings has no gaps. | Some account balance disagrees with the journal. Priority 1. |
 | **Audit hash chain** | Every audit record is present, in an unbroken sequence with no gaps, and each record's fingerprint still matches the one before it. | An audit row was changed, damaged or removed. Priority 1. |
 
 ### What the drill result means for you
@@ -6956,7 +6979,6 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
    "routeNames": [
     "Merchants",
     "MerchantDetail",
-    "Wallets",
     "Applications"
    ],
    "pageDir": "pages/merchants",
@@ -6967,7 +6989,6 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
     "b05-09",
     "b04-02",
     "b04-04",
-    "b03-09",
     "b03-10"
    ],
    "cards": [
@@ -6980,6 +7001,23 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
     "s-emergency-suspension",
     "s-token-leak"
    ]
+  },
+  {
+   "screenId": "Wallets",
+   "routeNames": [
+    "Wallets",
+    "WalletDetail"
+   ],
+   "pageDir": "pages/wallets",
+   "summary": "Every merchant's wallet: live and checkpoint balance, the paginated statement of ledger postings, the shards behind the balance, assigned applications, cash-outs and status history. Freezing is immediate; restoring a frozen wallet needs a second person.",
+   "articles": [
+    "b03-09",
+    "b05-06",
+    "b04-04",
+    "b08-07"
+   ],
+   "cards": [],
+   "situations": []
   },
   {
    "screenId": "Approvals",

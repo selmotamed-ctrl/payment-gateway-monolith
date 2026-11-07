@@ -151,11 +151,23 @@ const invariantChecks = (ctx: GateContext): GateCheck[] => {
     SELECT gl_account_id, SUM(current_balance) AS shard_total FROM gl_account_shards GROUP BY gl_account_id
   ) sh USING (gl_account_id)
   WHERE COALESCE(jl.journal_total, 0) <> COALESCE(sh.shard_total, 0)`);
+  // Per shard: balance = sum of its lines, checkpoint = sum of its lines up to the checkpoint sequence, and the
+  // sequenced line count equals line_seq (gapless). See BALANCE_PARITY_QUERY in the restore drill.
+  const shardProof = scalar(ctx, `SELECT COUNT(*)::text FROM gl_account_shards s
+    LEFT JOIN gl_shard_checkpoints c ON c.gl_account_id = s.gl_account_id AND c.shard_id = s.shard_id
+    CROSS JOIN LATERAL (
+      SELECT COALESCE(SUM(x.signed), 0) AS total,
+             COALESCE(SUM(x.signed) FILTER (WHERE x.shard_seq <= COALESCE(c.checkpoint_seq, 0)), 0) AS upto_checkpoint,
+             COUNT(*) FILTER (WHERE x.shard_seq > COALESCE(c.baseline_seq, 0)) AS sequenced
+      FROM (SELECT CASE WHEN l.direction = 'DEBIT' THEN l.amount ELSE -l.amount END AS signed, l.shard_seq
+            FROM journal_lines l WHERE l.gl_account_id = s.gl_account_id AND l.shard_id = s.shard_id) x) j
+    WHERE s.current_balance <> j.total OR COALESCE(c.checkpoint_balance, 0) <> j.upto_checkpoint OR j.sequenced <> s.line_seq - COALESCE(c.baseline_seq, 0)`);
   // Compare the decimal string exactly; never parse money into a float.
   const zero = /^-?0(\.0+)?$/.test(drift);
   return [
     check("double-entry drift is exactly zero", zero, `drift=${drift} LYD`, { drift }),
     check("gl_account_shards equals journal_lines", shardMismatch === 0, `mismatched accounts=${shardMismatch}`, { shardMismatch }),
+    check("every shard proves its checkpoint and sequence", shardProof === 0, `failing shards=${shardProof}`, { shardProof }),
   ];
 };
 

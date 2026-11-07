@@ -11,6 +11,7 @@ import {
   type LedgerScenario,
 } from "../../engine/ledger/LedgerPoster";
 import { CheckpointService } from "../../engine/ledger/CheckpointService";
+import { createFakeCheckpointDb } from "../helpers/fakeCheckpointDb";
 import { InvariantVerifier } from "../../engine/ledger/InvariantVerifier";
 
 interface FakeState {
@@ -24,9 +25,6 @@ interface FakeState {
     credentialSetId?: string | null;
     env?: string | null;
     currency?: string | null;
-    checkpointBalance?: unknown;
-    checkpointAt?: Date | null;
-    lastCheckpointId?: string | null;
   }>;
 }
 
@@ -419,63 +417,65 @@ describe("LedgerPoster posting behaviour", () => {
 });
 
 describe("checkpoint service and live balances", () => {
-  const buildClient = () => {
-    const accounts = [
-      { id: "acc-treasury", accountType: "TREASURY" as const, checkpointBalance: 0, checkpointAt: null },
-    ];
-    const lines: JournalLineRecord[] = [
-      {
-        id: "l1",
-        entryId: "e1",
-        glAccountId: "acc-treasury",
-        direction: "DEBIT" as const,
-        amount: "100",
-        createdAt: new Date("2026-01-01T00:00:00Z"),
-      } as unknown as JournalLineRecord,
-      {
-        id: "l2",
-        entryId: "e2",
-        glAccountId: "acc-treasury",
-        direction: "CREDIT" as const,
-        amount: "30",
-        createdAt: new Date("2026-02-01T00:00:00Z"),
-      } as unknown as JournalLineRecord,
-    ];
-    return {
-      accounts,
-      lines,
-      client: {
-        glAccount: {
-          findUnique: async ({ where }: { where: { id: string } }) =>
-            accounts.find((account) => account.id === where.id) ?? null,
-          findMany: async () => accounts,
-          update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-            const account = accounts.find((entry) => entry.id === where.id);
-            if (!account) {
-              throw new Error("account not found");
-            }
-            Object.assign(account, data);
-            return account;
-          },
-        },
-        journalLine: {
-          findMany: async ({ where }: { where: { glAccountId: string } }) =>
-            lines.filter((line) => line.glAccountId === where.glAccountId),
-        },
-      },
-    };
-  };
+  test("captures a per-shard checkpoint over the sequence range and resolves the live balance as checkpoint plus delta", async () => {
+    const fake = createFakeCheckpointDb();
+    fake.post("acc-treasury", 0, "DEBIT", "100.0000");
+    fake.post("acc-treasury", 0, "CREDIT", "30.0000");
+    const service = new CheckpointService(fake.db);
 
-  test("captures a checkpoint and resolves the live balance", async () => {
-    const { client, accounts } = buildClient();
-    const service = new CheckpointService(client);
-    const checkpoint = await service.captureCheckpoint("acc-treasury", new Date("2026-01-15T00:00:00Z"));
-    expect(decimal(checkpoint.balance).toFixed(4)).toBe("100.0000");
-    expect(accounts[0]?.checkpointBalance).toBeDefined();
-    const live = await service.getLiveBalance("acc-treasury");
-    expect(live.liveBalance.toFixed(4)).toBe("70.0000");
+    const first = await service.captureShard("acc-treasury", 0);
+    expect(first.status).toBe("ADVANCED");
+    expect(first.linesCovered).toBe(2n);
+    expect(first.checkpointSeq).toBe(2n);
+    expect(first.checkpointBalance.toFixed(4)).toBe("70.0000");
+    expect(fake.shard("acc-treasury").checkpoint?.balance.toFixed(4)).toBe("70.0000");
+
+    // a later line is the delta on top of the checkpoint; the live balance is the shard balance
+    fake.post("acc-treasury", 0, "DEBIT", "5.0000");
+    const inspected = await service.inspectShard("acc-treasury", 0);
+    expect(inspected.status).toBe("ADVANCED"); // would advance, but inspect does not move it
+    expect(inspected.balance.toFixed(4)).toBe("75.0000");
+    expect(inspected.previousSeq).toBe(2n);
+    expect(inspected.linesCovered).toBe(1n);
+    expect(fake.shard("acc-treasury").checkpoint?.seq).toBe(2n);
+  });
+
+  test("a checkpoint does not double count: the second capture of an unchanged shard is a no-op", async () => {
+    const fake = createFakeCheckpointDb();
+    fake.post("acc-treasury", 0, "DEBIT", "100.0000");
+    const service = new CheckpointService(fake.db);
+    expect((await service.captureShard("acc-treasury", 0)).status).toBe("ADVANCED");
+    const again = await service.captureShard("acc-treasury", 0);
+    expect(again.status).toBe("NOOP");
+    expect(again.checkpointBalance.toFixed(4)).toBe("100.0000");
+    expect(again.linesCovered).toBe(0n);
+  });
+
+  test("a verifier without raw SQL sums the whole journal and ignores any checkpoint", async () => {
+    const { client } = buildInvariantClient();
+    const verifier = new InvariantVerifier(client as never);
+    const result = await verifier.verify();
+    const treasury = result.accountBalances.find((entry) => entry.accountId === "acc-treasury");
+    expect(treasury?.checkpointBalance.toFixed(4)).toBe("0.0000");
+    expect(treasury?.liveBalance.toFixed(4)).toBe("70.0000");
   });
 });
+
+const buildInvariantClient = () => {
+  const accounts = [{ id: "acc-treasury", accountType: "TREASURY" as const }];
+  const lines = [
+    { id: "l1", entryId: "e1", glAccountId: "acc-treasury", direction: "DEBIT" as const, amount: "100" },
+    { id: "l2", entryId: "e2", glAccountId: "acc-treasury", direction: "CREDIT" as const, amount: "30" },
+  ];
+  return {
+    client: {
+      glAccount: { findMany: async () => accounts },
+      journalLine: {
+        findMany: async ({ where }: { where: { glAccountId: string } }) => lines.filter((line) => line.glAccountId === where.glAccountId),
+      },
+    },
+  };
+};
 
 describe("system wide ledger invariant", () => {
   test("reports zero drift for a consistent posting", async () => {

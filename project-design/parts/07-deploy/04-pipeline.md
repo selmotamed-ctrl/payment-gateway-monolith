@@ -3,8 +3,8 @@ id: deploy.pipeline
 title: Deployment Pipeline
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-07
+verified_against: d695518+working-tree
 code:
   - deploy/deploy.ts
   - deploy/deploy.sh
@@ -190,7 +190,7 @@ The synthetic seed requires `IS_TEST_SERVER=true` and Fake Rails enabled at conf
 - public merchant/checkout vhosts from the host itself (admin LAN vhost skipped);
 - Fake Rails backend and vhost when enabled;
 - PostgreSQL primary/replicas with `pg_isready` and `psql SELECT 1`;
-- PgBouncer `SELECT 1` when enabled;
+- PgBouncer `SELECT 1` when enabled, through both the application database and the `pgw_session` leader-election alias;
 - Redis `PING` with `REDISCLI_AUTH`;
 - audit/log `SELECT 1`;
 - backup-daemon `/health` over mTLS when configured.

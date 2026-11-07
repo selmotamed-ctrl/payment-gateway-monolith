@@ -44,7 +44,7 @@ Delivered:
 - Eight guide routes: home, book, article, glossary, tools, playbook, cards and edge cases.
 - Markdown reader with callouts, diagram fences, tables, stable heading ids, safe article/card/situation/glossary links and first-occurrence glossary popovers.
 - MiniSearch command palette with Arabic-aware normalisation, grouping, recents and keyboard navigation.
-- Contextual help button/drawer driven by the 23-screen context map, mounted automatically by `PageHeader`.
+- Contextual help button/drawer driven by the 25-screen context map, mounted automatically by `PageHeader`.
 - 22 safeguard integrations at risky action points; Continue is disabled until all required checks are ticked.
 - Five client-only simulators with published test vectors.
 - Guide read tracking stored in the shared Academy progress JSON with a `localStorage` fallback.

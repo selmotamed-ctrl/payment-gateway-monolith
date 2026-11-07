@@ -72,7 +72,6 @@ import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
 import { walletActionsFor, type WalletAction } from "@/pages/wallets/walletActions";
-import { WalletDetailDrawer } from "./components/WalletDetailDrawer";
 import { ApplicationDetailDrawer } from "./components/ApplicationDetailDrawer";
 import ReasonModal from "./components/ReasonModal";
 import BeneficialOwnersCard from "./components/BeneficialOwnersCard";
@@ -160,7 +159,7 @@ const MerchantDetailPage = dc(() => {
     const sectionCommandSeq = ref(0);
     const activeTab = ref<MerchantDetailTab>(readQueryString(route.query.tab) === "transactions" ? "transactions" : "all");
     const reference = computed(() => readQueryString(route.query.reference));
-    const openWalletId = ref<string | null>(null);
+    const openWallet = (id: string) => void router.push({ name: "WalletDetail", params: { id } });
     const openApplicationId = ref<string | null>(null);
     const openEntryId = ref<string | null>(null);
     const revalidationOpen = ref(false);
@@ -699,7 +698,7 @@ const MerchantDetailPage = dc(() => {
                                 label: t("Open wallet"),
                                 icon: "mdi-wallet-outline",
                                 onClick: () => {
-                                    openWalletId.value = row.assignedWallet.id;
+                                    openWallet(row.assignedWallet.id);
                                 },
                             },
                             {
@@ -740,7 +739,7 @@ const MerchantDetailPage = dc(() => {
                     variant="text"
                     style={{ paddingInline: "2px", textTransform: "none", justifyContent: "flex-start" }}
                     onClick={() => {
-                        openWalletId.value = row.id;
+                        openWallet(row.id);
                     }}
                 >
                     <MonoRef value={row.id} truncate={14} />
@@ -777,18 +776,10 @@ const MerchantDetailPage = dc(() => {
                         label: t("Inspect"),
                         icon: "mdi-wallet-outline",
                         onClick: () => {
-                            openWalletId.value = row.id;
+                            openWallet(row.id);
                         },
                     }}
                     items={[
-                        {
-                            key: "page",
-                            label: t("Open in Wallets"),
-                            icon: "mdi-open-in-new",
-                            onClick: () => {
-                                void router.push({ name: "Wallets", query: { open: row.id } });
-                            },
-                        },
                         ...walletActionsFor(row.status, { canWrite: canWriteCommerce.value }).map((action) => ({
                             key: action.key,
                             label: t(action.label),
@@ -1400,14 +1391,6 @@ const MerchantDetailPage = dc(() => {
                     onOpenCase={(caseId) => {
                         transactionOpen.value = false;
                         void router.push({ name: "OperatorCaseDetail", params: { id: caseId } });
-                    }}
-                />
-                <WalletDetailDrawer
-                    walletId={openWalletId.value}
-                    onClose={() => (openWalletId.value = null)}
-                    onChanged={() => {
-                        walletRefresh.value?.();
-                        reloadSilently();
                     }}
                 />
                 <ApplicationDetailDrawer

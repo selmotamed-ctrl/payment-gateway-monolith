@@ -218,6 +218,12 @@ const base = z.strictObject({
     .optional(),
   DB_PASSWORD: secretValue(8, 256).optional(),
   DATABASE_URL: z.string().trim().min(1).max(1000).optional(),
+  /**
+   * Optional override for the session-scoped leader-election endpoint. Deploy
+   * derives a PgBouncer session alias (or a direct URL) automatically; set
+   * this only for an externally managed database or a custom pooler.
+   */
+  LEADER_ELECTION_DATABASE_URL: z.string().trim().min(1).max(1000).optional(),
 
   // 1b. Horizontal compute node arrays (override the single-host fields above)
   CORE_NODES: nodeList,
@@ -296,7 +302,7 @@ const base = z.strictObject({
   KMS_MASTER_KEY: secretValue(32),
   KMS_MASTER_KEY_ID: z.string().trim().max(64).default("v1"),
   KMS_MASTER_KEY_HEX: z.string().trim().regex(/^[0-9a-fA-F]{64}$/).or(z.literal("")).default(""),
-  STORAGE_SHARD_COUNT: z.coerce.number().int().min(1).max(32).default(16),
+  STORAGE_SHARD_COUNT: z.coerce.number().int().min(1).max(256).default(16),
   READ_REPLICA_MAX_LAG_MS: z.coerce.number().int().min(0).max(600_000).default(2_000),
   /**
    * KYB document scanner mode. `eicar` is the built-in content gate (EICAR +
@@ -537,6 +543,15 @@ export const pgStorageConfigured = (config: DeployConfig): boolean =>
   || config.PG_REPLICA_NODES.trim().length > 0
   || config.PG_DB_PASSWORD.length > 0;
 
+/**
+ * PgBouncer database alias used ONLY by the singleton-worker leader election.
+ *
+ * It maps to the same real database as the application pool but is served with
+ * `pool_mode=session`, because PostgreSQL advisory locks live on a backend
+ * session and transaction pooling would let two core nodes lead at once.
+ */
+export const PGBOUNCER_SESSION_ALIAS = "pgw_session";
+
 export const redisStorageConfigured = (config: DeployConfig): boolean =>
   config.REDIS_MANAGE_VIA_SSH || parseNodeList(config.REDIS_NODES).length > 0;
 
@@ -647,6 +662,32 @@ export const effectiveDatabase = (config: DeployConfig): {
     privateIp: pg ? (primary?.privateIp ?? config.DB_PRIVATE_IP ?? null) : (config.DB_PRIVATE_IP ?? primary?.privateIp ?? null),
     managedViaSsh: config.DB_MANAGE_VIA_SSH || config.PG_MANAGE_VIA_SSH,
   };
+};
+
+/**
+ * The session-safe URL the core uses for singleton-worker leader election.
+ *
+ * With PgBouncer enabled it is the `pgw_session` alias (same pooler port,
+ * `pool_mode=session`). Without PgBouncer it is the direct PostgreSQL port,
+ * encrypted with `sslmode=no-verify` for the deploy-managed self-signed
+ * certificate. Null means core falls back to `DATABASE_URL` (external or
+ * development database).
+ */
+export const leaderElectionDatabaseUrl = (config: DeployConfig): string | null => {
+  if (!pgStorageConfigured(config)) {
+    return null;
+  }
+  const primary = parseNodeList(config.PG_PRIMARY_NODE)[0] ?? null;
+  if (!primary) {
+    return null;
+  }
+  const database = effectiveDatabase(config);
+  const credentials = `${encodeURIComponent(database.user)}:${encodeURIComponent(database.password)}`;
+  if (config.PGBOUNCER_ENABLED) {
+    return `postgresql://${credentials}@${primary.privateIp}:${config.PGBOUNCER_PORT}/${PGBOUNCER_SESSION_ALIAS}`;
+  }
+  const tls = config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : "";
+  return `postgresql://${credentials}@${primary.privateIp}:${primary.servicePort}/${database.name}${tls}`;
 };
 
 const PLACEHOLDER_MARKERS = ["change-me", "changeme", "change_me", "replace-me", "replaceme", "replace_me", "your-", "your_", "example", "placeholder", "password", "passwd", "admin", "default", "secret123", "xxxx"];
@@ -789,6 +830,9 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     if (config.DB_PRIVATE_IP && !config.DATABASE_URL.includes(config.DB_PRIVATE_IP)) {
       problems.push("DATABASE_URL should point at DB_PRIVATE_IP");
     }
+  }
+  if (config.LEADER_ELECTION_DATABASE_URL && !/^postgres(ql)?:\/\//.test(config.LEADER_ELECTION_DATABASE_URL)) {
+    problems.push("LEADER_ELECTION_DATABASE_URL must be a PostgreSQL URL");
   }
   // A single-box installation legitimately co-locates the database with the
   // core (the database binds to 127.0.0.1 and is never exposed); on separate

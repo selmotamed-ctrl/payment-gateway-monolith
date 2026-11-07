@@ -18,6 +18,8 @@ import { adminCommerceRouter } from "../api/internal/adminCommerce";
 import { checkoutInternalRouter } from "../api/internal/checkout";
 import { merchantInternalRouter } from "../api/internal/merchant";
 import type { Principal } from "../api/middleware/authDoubleCheck";
+import { LedgerPoster } from "../engine/ledger/LedgerPoster";
+import { CheckpointService } from "../engine/ledger/CheckpointService";
 import { executeApprovalSubject } from "../engine/governance/GovernanceExecution";
 import { PrismaRepositories } from "../engine/db/repositories";
 import { generateAccessToken, hashAccessToken, signSession } from "../lib/auth";
@@ -146,9 +148,29 @@ const makeCommerce = async (label: string): Promise<Commerce> => {
     },
   });
   const glAccount = await client.glAccount.create({
-    data: { accountType: "MERCHANT_WALLET", ownerId: merchant.id, currency: "LYD", checkpointBalance: new Prisma.Decimal(0) },
+    data: { accountType: "MERCHANT_WALLET", ownerId: merchant.id, currency: "LYD" },
   });
-  await client.glAccountShard.create({ data: { glAccountId: glAccount.id, shardId: 0, currentBalance: new Prisma.Decimal("-25.0000") } });
+  // The wallet is funded with REAL postings (a balanced entry through the poster, so the ledger stays balanced and the
+  // shard is consistent): 10.0000, then a shard checkpoint over it, then another 15.0000. Live balance 25.0000, derived
+  // checkpoint 10.0000 with one line pending. The stored (debit-positive) shard values are -25 and -10.
+  const funding = await client.glAccount.create({ data: { accountType: "TREASURY", currency: "LYD" } });
+  const poster = new LedgerPoster(client as never);
+  const fund = (amount: string, ref: string) =>
+    poster.post(
+      {
+        refType: "ADJUSTMENT",
+        refId: `commerce-fund-${label}-${RUN}-${ref}`,
+        description: "commerce test funding",
+        lines: [
+          { direction: "DEBIT", amount, account: { accountType: "TREASURY", accountId: funding.id } },
+          { direction: "CREDIT", amount, account: { accountType: "MERCHANT_WALLET", accountId: glAccount.id } },
+        ],
+      },
+      { currency: "LYD" },
+    );
+  await fund("10.0000", "1");
+  await new CheckpointService(client as never).captureAccount(glAccount.id);
+  await fund("15.0000", "2");
   const wallet = await client.wallet.create({
     data: { merchantId: merchant.id, glAccountId: glAccount.id, currency: "LYD", status: "ACTIVE" },
   });
@@ -305,13 +327,23 @@ describe.skipIf(!reachable)("wallets: visibility, authority and the freeze / unf
     expect(supportDetail.status).toBe(200);
     expect(supportDetail.body.wallet.liveBalance).toBeNull();
     expect(supportDetail.body.wallet.shards).toEqual([]);
-    expect(supportDetail.body.wallet.statementLines).toEqual([]);
+    expect(supportDetail.body.wallet.statementLines).toBeUndefined();
     expect(supportDetail.body.wallet.redactedFields).toContain("shards");
 
     const financeDetail = await admin(`/wallets/${commerce.walletId}`, "finance");
     expect(financeDetail.body.wallet.liveBalance).toBe("25.0000");
     expect(financeDetail.body.wallet.shards[0].currentBalance).toBe("-25.0000");
+    expect(financeDetail.body.wallet.shards[0]).toMatchObject({ lineSeq: "2", checkpointSeq: "1", pendingLines: "1" });
     expect(financeDetail.body.wallet.glAccount.accountType).toBe("MERCHANT_WALLET");
+    // The account stores no checkpoint: it is derived from the shard checkpoints, and shown in the natural sign like the
+    // live balance (stored -10.0000 for a wallet in credit is 10.0000 here).
+    expect(financeDetail.body.wallet.checkpointBalance).toBe("10.0000");
+    expect(financeDetail.body.wallet.glAccount.checkpointBalance).toBe("10.0000");
+    expect(financeDetail.body.wallet.glAccount.checkpointAt).not.toBeNull();
+    expect(financeDetail.body.wallet.glAccount.pendingLines).toBe("1");
+    expect(financeDetail.body.wallet.glAccount.shardCount).toBe(1);
+    expect(supportDetail.body.wallet.checkpointBalance).toBeNull();
+    expect(supportDetail.body.wallet.glAccount.checkpointBalance).toBeNull();
     expect(financeDetail.body.wallet.applications[0].id).toBe(commerce.applicationId);
 
     const supportSummary = await admin("/wallets/summary", "support");
@@ -322,6 +354,32 @@ describe.skipIf(!reachable)("wallets: visibility, authority and the freeze / unf
     const lyd = financeSummary.body.totalBalanceByCurrency.find((entry: { currency: string }) => entry.currency === "LYD");
     expect(typeof lyd.total).toBe("string");
     expect(lyd.total).toMatch(/^-?\d+\.\d{4}$/);
+  });
+
+  test("the statement is paginated, totalled and redacted for roles without financial visibility", async () => {
+    const support = await admin(`/wallets/${commerce.walletId}/statement`, "support");
+    expect(support.status).toBe(200);
+    expect(support.body.lines).toEqual([]);
+    expect(support.body.redactedFields).toEqual(["statementLines"]);
+    expect(support.body.totals.totalDebit).toBeNull();
+
+    const finance = await admin(`/wallets/${commerce.walletId}/statement?pageSize=5`, "finance");
+    expect(finance.status).toBe(200);
+    expect(finance.body.redactedFields).toEqual([]);
+    expect(finance.body.currency).toBe("LYD");
+    expect(Array.isArray(finance.body.lines)).toBe(true);
+    expect(finance.body.pageSize).toBe(5);
+    expect(finance.body.totals.lineCount).toBe(finance.body.total);
+    expect(finance.body.totals.totalDebit).toMatch(/^\d+\.\d{4}$/);
+    // The two funding postings are the wallet's whole statement: credits of 10.0000 and 15.0000.
+    expect(finance.body.total).toBe(2);
+    expect(finance.body.totals.totalCredit).toBe("25.0000");
+    expect(finance.body.totals.totalDebit).toBe("0.0000");
+
+    expect((await admin(`/wallets/${commerce.walletId}/statement?direction=SIDEWAYS`, "finance")).status).toBe(400);
+    expect((await admin("/wallets/not-a-uuid/statement", "finance")).status).toBe(400);
+    expect((await admin(`/wallets/${randomUUID()}/statement`, "finance")).status).toBe(404);
+    expect((await admin(`/wallets/${commerce.walletId}/statement`, "nobody")).status).toBe(403);
   });
 
   test("authority and filter checks", async () => {
@@ -345,6 +403,12 @@ describe.skipIf(!reachable)("wallets: visibility, authority and the freeze / unf
     expect(frozen.status).toBe(200);
     expect(frozen.body.wallet.status).toBe("FROZEN");
     expect(await auditActions(commerce.walletId)).toContain("WALLET_FROZEN");
+    const history = await admin(`/wallets/${commerce.walletId}/audit-events`, "finance");
+    expect(history.status).toBe(200);
+    expect(history.body.auditEvents.map((event: { action: string }) => event.action)).toContain("WALLET_FROZEN");
+    expect(history.body.total).toBeGreaterThanOrEqual(1);
+    expect((await admin(`/wallets/${randomUUID()}/audit-events`, "finance")).status).toBe(404);
+    expect((await admin(`/wallets/${commerce.walletId}/audit-events`, "nobody")).status).toBe(403);
 
     const again = await admin(`/wallets/${commerce.walletId}/status`, "maker", "POST", { status: "FROZEN", reason: REASON });
     expect(again.status).toBe(409);

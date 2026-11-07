@@ -505,7 +505,7 @@ suite("live PostgreSQL PITR: backup -> WAL -> restore drill -> fault injection",
   }, 300_000);
 
   test("FAULT: a shard that drifted by +1.0000 fails ONLY the sharded-balance parity check", async () => {
-    env.psql("UPDATE gl_account_shards SET current_balance = current_balance + 1.0000 WHERE shard = 3 AND gl_account_id = (SELECT id FROM gl_accounts WHERE code = 'A');");
+    env.psql("UPDATE gl_account_shards SET current_balance = current_balance + 1.0000 WHERE shard_id = 3 AND gl_account_id = (SELECT id FROM gl_accounts WHERE code = 'A');");
     const mark2 = await mark();
     await tail();
     const report = await runDrill(mark2);
@@ -514,7 +514,7 @@ suite("live PostgreSQL PITR: backup -> WAL -> restore drill -> fault injection",
     expect(report.balanceMismatches).toBe(1);
     expect(report.checks.doubleEntry.ok).toBe(true);
     expect(report.checks.auditChain.ok).toBe(true);
-    env.psql("UPDATE gl_account_shards SET current_balance = current_balance - 1.0000 WHERE shard = 3 AND gl_account_id = (SELECT id FROM gl_accounts WHERE code = 'A');");
+    env.psql("UPDATE gl_account_shards SET current_balance = current_balance - 1.0000 WHERE shard_id = 3 AND gl_account_id = (SELECT id FROM gl_accounts WHERE code = 'A');");
   }, 300_000);
 
   test("FAULT: ONE-BYTE CORRUPTION of the local copy is survived (verified S3 copy used); corrupting BOTH copies fails at the integrity gate", async () => {

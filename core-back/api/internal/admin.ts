@@ -101,7 +101,7 @@ import { executeGlobalSearch } from "../../lib/globalSearch";
 import { getConfiguredAuditStore, readThroughReplicaOrPrimary } from "../../lib/storageEngine";
 import { getBackupControlClient, isBackupDaemonConfigured } from "../../lib/storageEngine/backupControlClient";
 import { backupPolicySchema } from "./backups";
-import { loadLiveAccountBalances } from "../../lib/storageEngine/shardBalances";
+import { loadAccountCheckpointSummary, loadLiveAccountBalances, naturalShardBalance } from "../../lib/storageEngine/shardBalances";
 import type { Decimal } from "decimal.js";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { LedgerPoster } from "../../engine/ledger/LedgerPoster";
@@ -2376,7 +2376,6 @@ router.post("/join-requests/admin-assisted", async (request: Request, response: 
         accountType: "MERCHANT_WALLET",
         ownerId: merchant.id,
         currency: "LYD",
-        checkpointBalance: new Prisma.Decimal(0),
       },
     });
     await tx.wallet.create({
@@ -5109,12 +5108,15 @@ router.get("/merchants/:id/wallets", async (request: Request, response: Response
         glAccountId: true,
         createdAt: true,
         _count: { select: { applications: true, paymentLinks: true, cashoutRequests: true } },
-        glAccount: { select: { checkpointBalance: true } },
       },
     }),
     client.wallet.count({ where: where as never }),
     flags.canFinancial ? merchantWalletBalance(client, id) : Promise.resolve(null),
   ]);
+  const checkpointSummaries = flags.canFinancial && wallets.length > 0
+    ? await loadAccountCheckpointSummary(client as never, wallets.map((wallet) => wallet.glAccountId))
+    : [];
+  const checkpointByAccount = new Map(checkpointSummaries.map((row) => [row.id, row.checkpointBalance]));
   const balanceMap = new Map((balances?.wallets ?? []).map((wallet) => [wallet.id, wallet.balance]));
   const pendingByWallet = new Map<string, number>();
   if (flags.canFinancial && wallets.length > 0) {
@@ -5133,7 +5135,8 @@ router.get("/merchants/:id/wallets", async (request: Request, response: Response
       status: wallet.status,
       glAccountId: wallet.glAccountId,
       balance: flags.canFinancial ? balanceMap.get(wallet.id) ?? "0.0000" : null,
-      checkpointBalance: flags.canFinancial ? merchantMoney(wallet.glAccount.checkpointBalance) : null,
+      // Natural sign like `balance`; the stored (debit-positive) shard checkpoints are summed per wallet account.
+      checkpointBalance: flags.canFinancial ? merchantMoney(naturalShardBalance("MERCHANT_WALLET", checkpointByAccount.get(wallet.glAccountId) ?? "0")) : null,
       applicationCount: wallet._count.applications,
       paymentLinkCount: wallet._count.paymentLinks,
       cashoutCount: wallet._count.cashoutRequests,
@@ -15163,38 +15166,54 @@ const buildLiquiditySnapshot = async () => {
   );
   const clearingAccounts = await client.glAccount.findMany({
     where: { accountType: "GATEWAY_CLEARING" },
-    select: { id: true, gatewayId: true, checkpointAt: true, checkpointBalance: true, gateway: { select: { code: true, name: true } } },
+    select: { id: true, gatewayId: true },
   });
   const clearingAccountIds = clearingAccounts.map((account) => account.id);
-  const clearingLines = clearingAccountIds.length === 0
+  // Balance = the shard totals of each gateway's clearing accounts. The age buckets are the NET signed
+  // movement (debit positive) of the lines of the last three days, bounded by `created_at` so the cost does not
+  // grow with history and does not depend on any checkpoint; "older" is whatever is left of the balance.
+  const clearingLive = await loadLiveAccountBalances(client as never, clearingAccountIds);
+  const clearingMovement = clearingAccountIds.length === 0
     ? []
-    : await client.journalLine.findMany({
-        where: { glAccountId: { in: clearingAccountIds } },
-        select: { glAccountId: true, direction: true, amount: true, createdAt: true },
-      });
+    : ((await client.$queryRawUnsafe(
+        `SELECT a.gateway_id::text AS "gatewayId",
+                COALESCE(SUM(x.signed) FILTER (WHERE x.age <= 0), 0)::text AS t0,
+                COALESCE(SUM(x.signed) FILTER (WHERE x.age = 1), 0)::text AS t1,
+                COALESCE(SUM(x.signed) FILTER (WHERE x.age = 2), 0)::text AS t2
+         FROM (
+           SELECT jl.gl_account_id,
+                  FLOOR(EXTRACT(EPOCH FROM ((now() AT TIME ZONE 'UTC') - jl.created_at)) / 86400)::int AS age,
+                  CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END AS signed
+           FROM journal_lines jl
+           WHERE jl.gl_account_id = ANY($1::uuid[])
+             AND jl.created_at >= (now() AT TIME ZONE 'UTC') - interval '3 days'
+         ) x
+         INNER JOIN gl_accounts a ON a.id = x.gl_account_id
+         GROUP BY a.gateway_id`,
+        clearingAccountIds,
+      )) as Array<{ gatewayId: string | null; t0: string; t1: string; t2: string }>);
   const clearingBalanceByGateway = new Map<string, Decimal>();
   const clearingBucketsByGateway = new Map<string, { t0: Decimal; t1: Decimal; t2: Decimal; older: Decimal }>();
+  const liveByAccount = new Map(clearingLive.map((row) => [row.id, decimal(row.balance)]));
   for (const account of clearingAccounts) {
     if (!account.gatewayId) continue;
-    let balance = decimal(account.checkpointBalance ?? 0);
-    const buckets = { t0: decimal(0), t1: decimal(0), t2: decimal(0), older: decimal(0) };
-    for (const line of clearingLines) {
-      if (line.glAccountId !== account.id) continue;
-      if (account.checkpointAt && line.createdAt <= account.checkpointAt) continue;
-      const value = decimal(line.amount);
-      if (line.direction === "DEBIT") balance = balance.plus(value);
-      else balance = balance.minus(value);
-      const ageDays = Math.floor((Date.now() - line.createdAt.getTime()) / (24 * 60 * 60 * 1000));
-      const key = ageDays <= 0 ? "t0" : ageDays <= 1 ? "t1" : ageDays <= 2 ? "t2" : "older";
-      buckets[key] = buckets[key].plus(value);
+    clearingBalanceByGateway.set(
+      account.gatewayId,
+      (clearingBalanceByGateway.get(account.gatewayId) ?? decimal(0)).plus(liveByAccount.get(account.id) ?? decimal(0)),
+    );
+  }
+  for (const row of clearingMovement) {
+    if (!row.gatewayId) continue;
+    const balance = clearingBalanceByGateway.get(row.gatewayId) ?? decimal(0);
+    const t0 = decimal(row.t0);
+    const t1 = decimal(row.t1);
+    const t2 = decimal(row.t2);
+    clearingBucketsByGateway.set(row.gatewayId, { t0, t1, t2, older: balance.minus(t0).minus(t1).minus(t2) });
+  }
+  for (const [gatewayId, balance] of clearingBalanceByGateway) {
+    if (!clearingBucketsByGateway.has(gatewayId)) {
+      clearingBucketsByGateway.set(gatewayId, { t0: decimal(0), t1: decimal(0), t2: decimal(0), older: balance });
     }
-    clearingBalanceByGateway.set(account.gatewayId, (clearingBalanceByGateway.get(account.gatewayId) ?? decimal(0)).plus(balance));
-    const current = clearingBucketsByGateway.get(account.gatewayId) ?? { t0: decimal(0), t1: decimal(0), t2: decimal(0), older: decimal(0) };
-    current.t0 = current.t0.plus(buckets.t0);
-    current.t1 = current.t1.plus(buckets.t1);
-    current.t2 = current.t2.plus(buckets.t2);
-    current.older = current.older.plus(buckets.older);
-    clearingBucketsByGateway.set(account.gatewayId, current);
   }
   const gatewayCodes = new Map(
     (await client.gateway.findMany({ select: { id: true, code: true, name: true } })).map((gateway) => [gateway.id, gateway]),

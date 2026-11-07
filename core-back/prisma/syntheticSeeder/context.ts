@@ -55,6 +55,8 @@ export interface GlRef {
   env: string | null;
   ownerId: string | null;
   credentialSetId?: string | null;
+  /** Routing width of the account (baseline accounts are read from the DB; absent in tests). */
+  shardCount?: number;
   currency?: string | null;
 }
 export interface UserRef {
@@ -209,9 +211,21 @@ export interface SeederContext {
   refs: SeedReferences;
   /** Monotonic id factory, namespaced so two seeds never collide. */
   nextId: (entity: string) => string;
-  /** Monthly GL checkpoint snapshots applied after the bulk insert. */
-  checkpoints: Map<string, { balance: string; at: Date; lastCheckpointId: string }>;
+  /**
+   * Per-shard checkpoints (month-end cut), keyed `${glAccountId}:${shardId}`, written after the shard rows.
+   * `seq` is the number of the shard's lines with createdAt <= `at` (a prefix of its sequence).
+   */
+  checkpoints: Map<string, ShardCheckpointSnapshot>;
   meta?: SeederMeta;
+}
+
+export interface ShardCheckpointSnapshot {
+  glAccountId: string;
+  shardId: number;
+  /** Signed (debit-positive) balance of the shard's lines with shard_seq <= seq, as a 4-decimal string. */
+  balance: string;
+  seq: number;
+  at: Date;
 }
 
 export const emptyMeta = (): SeederMeta => ({
@@ -263,7 +277,7 @@ export const loadReferences = async (prisma: PrismaClient): Promise<SeedReferenc
     include: { gateway: { select: { code: true } } },
   });
   const glAccounts = await prisma.glAccount.findMany({
-    select: { id: true, accountType: true, gatewayId: true, env: true, ownerId: true, credentialSetId: true, currency: true },
+    select: { id: true, accountType: true, gatewayId: true, env: true, ownerId: true, credentialSetId: true, currency: true, shardCount: true },
   });
   const adminUsers = await prisma.user.findMany({
     where: {

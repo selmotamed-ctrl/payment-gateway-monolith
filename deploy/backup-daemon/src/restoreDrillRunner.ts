@@ -63,16 +63,26 @@ export const DOUBLE_ENTRY_QUERY =
   "SELECT COALESCE(SUM(CASE WHEN direction='DEBIT' THEN amount ELSE -amount END), 0)::text FROM journal_lines;";
 
 /**
- * Design lines 1168-1169, adapted for PostgreSQL's uuid/text columns:
- * `last_checkpoint_id` is TEXT while `journal_lines.id` is UUID, so the uuid is
- * cast to text for the comparison instead of forcing an unsafe text->uuid cast.
+ * Per-shard ledger proof on the RESTORED database, counting the shards that fail it (0 = healthy). For every shard:
+ *   * its balance equals the sum of ALL its journal lines (pre-genesis lines are shard 0, sequence 0),
+ *   * its checkpoint balance equals the sum of the lines up to the checkpoint sequence, and
+ *   * the number of sequenced lines above the shard's `baseline_seq` (0 unless an approved re-baseline repaired a damaged
+ *     sequence) equals `line_seq - baseline_seq` (gapless, no duplicates, nothing lost).
+ * This replaces the old account-level comparison against `last_checkpoint_id`, which compared a line UUID with a text
+ * marker and no longer exists: the boundary of a checkpoint is the shard's own gapless sequence.
  */
 export const BALANCE_PARITY_QUERY =
-  "SELECT COUNT(*)::text FROM gl_accounts g " +
-  "WHERE (SELECT SUM(s.current_balance) FROM gl_account_shards s WHERE s.gl_account_id = g.id) <> " +
-  "(g.checkpoint_balance + COALESCE((SELECT SUM(CASE WHEN l.direction='DEBIT' THEN l.amount ELSE -l.amount END) " +
-  "FROM journal_lines l WHERE l.gl_account_id = g.id AND " +
-  "(g.last_checkpoint_id IS NULL OR l.id::text > g.last_checkpoint_id)), 0));";
+  "SELECT COUNT(*)::text FROM gl_account_shards s " +
+  "LEFT JOIN gl_shard_checkpoints c ON c.gl_account_id = s.gl_account_id AND c.shard_id = s.shard_id " +
+  "CROSS JOIN LATERAL (" +
+  "SELECT COALESCE(SUM(x.signed), 0) AS total, " +
+  "COALESCE(SUM(x.signed) FILTER (WHERE x.shard_seq <= COALESCE(c.checkpoint_seq, 0)), 0) AS upto_checkpoint, " +
+  "COUNT(*) FILTER (WHERE x.shard_seq > COALESCE(c.baseline_seq, 0)) AS sequenced " +
+  "FROM (SELECT CASE WHEN l.direction = 'DEBIT' THEN l.amount ELSE -l.amount END AS signed, l.shard_seq " +
+  "FROM journal_lines l WHERE l.gl_account_id = s.gl_account_id AND l.shard_id = s.shard_id) x) j " +
+  "WHERE s.current_balance <> j.total " +
+  "OR COALESCE(c.checkpoint_balance, 0) <> j.upto_checkpoint " +
+  "OR j.sequenced <> s.line_seq - COALESCE(c.baseline_seq, 0);";
 
 export const JOURNAL_LINE_COUNT_QUERY = "SELECT COUNT(*)::text FROM journal_lines;";
 

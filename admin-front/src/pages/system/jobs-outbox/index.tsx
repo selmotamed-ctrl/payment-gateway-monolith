@@ -189,6 +189,31 @@ const JobsOutboxPage = dc(() => {
                 badge: data.failedNotifications > 0 ? t("Review") : t("Clear"),
                 badgeTone: data.failedNotifications > 0 ? "danger" : "success",
             },
+            ...(data.ledger
+                ? [
+                      {
+                          key: "ledger-checkpoints",
+                          label: t("Shards behind checkpoint"),
+                          value: String(data.ledger.shardsBehind),
+                          subLabel: data.ledger.shardsBehind > 0 ? `${t("Most pending lines")}: ${data.ledger.maxPendingLines}` : t("All shards are checkpointed"),
+                          badge: data.ledger.failedShards > 0 ? t("Proof failed") : data.ledger.shardsBehind > 0 ? t("Catching up") : t("Healthy"),
+                          badgeTone: (data.ledger.failedShards > 0 ? "danger" : data.ledger.shardsBehind > 0 ? "warning" : "success") as MetricItem["badgeTone"],
+                      },
+                      {
+                          key: "ledger-failed-shards",
+                          label: t("Shards failing the checkpoint proof"),
+                          value: String(data.ledger.failedShards),
+                          badge: data.ledger.failedShards > 0 ? t("Review") : t("Clear"),
+                          badgeTone: (data.ledger.failedShards > 0 ? "danger" : "success") as MetricItem["badgeTone"],
+                      },
+                      {
+                          key: "ledger-scaling",
+                          label: t("Last shard scaling"),
+                          value: data.ledger.lastScaling ? `${data.ledger.lastScaling.shardCount} ${t("shards")}` : t("None"),
+                          subLabel: data.ledger.lastScaling ? formatDateTime(data.ledger.lastScaling.at) : t("No account was widened yet"),
+                      },
+                  ]
+                : []),
         ];
     });
 

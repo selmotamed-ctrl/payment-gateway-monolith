@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { TLSSocket } from "node:tls";
+import { REQUIRED_SCHEMA_VERSION } from "../prisma/schemaVersion";
 
 const repositoryRoot = path.join(import.meta.dirname, "..");
 const schemaPath = path.join(repositoryRoot, "prisma", "schema.prisma");
@@ -92,6 +93,10 @@ const designModelNames = [
   "GatewayVersionEvidence",
   // The PostgreSQL storage engine additions.
   "GlAccountShard",
+  // Per-shard (balance, sequence) checkpoints of the sequenced ledger.
+  "GlShardCheckpoint",
+  // Append-only history of every ledger shard repair.
+  "GlShardRepair",
   "OutboxEvent",
   "AuditOutbox",
   "BackupCatalogRun",
@@ -151,6 +156,16 @@ describe("prisma schema", () => {
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
     expect(postgresMigrations).toContain("20261103000000_postgres18_init");
+    expect(postgresMigrations).toContain("20261107090000_shard_sequenced_checkpoints");
+    const ordered = [...postgresMigrations].sort();
+    // The newest migration adds the durable inbound-event claim lease; the
+    // shard-sequenced checkpoint redesign raised the version to 12.
+    expect(ordered).toContain("20261107090000_shard_sequenced_checkpoints");
+    expect(ordered).toContain("20261107120000_inbound_event_claims");
+    expect(ordered.at(-1)).toBe("20261107150000_shard_repairs");
+    const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
+    expect(newest).toMatch(/UPDATE "schema_versions"\s+SET "version" = 14\b/);
+    expect(REQUIRED_SCHEMA_VERSION).toBe(14);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),
@@ -158,7 +173,9 @@ describe("prisma schema", () => {
       );
       expect(sql).toContain("CREATE");
       expect(sql.toLowerCase()).not.toContain("engine=innodb");
-      expect(sql).not.toContain("`");
+      // MySQL identifier quoting is forbidden in executable SQL; a backtick inside a `--` comment is just prose.
+      const executable = sql.split("\n").filter((line) => !line.trimStart().startsWith("--")).join("\n");
+      expect(executable).not.toContain("`");
     }
   });
 

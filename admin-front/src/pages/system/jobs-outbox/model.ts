@@ -10,6 +10,15 @@ export interface JobsOutboxSummary {
     oldestAuditOutboxAt: string | null;
     jobs24h: { queued: number; running: number; succeeded: number; failed: number };
     failedNotifications: number;
+    /** Health of the ledger automation (shard checkpoints and shard scaling). */
+    ledger?: {
+        shards: number;
+        shardsBehind: number;
+        maxPendingLines: string;
+        oldestPendingCheckpointAt: string | null;
+        failedShards: number;
+        lastScaling: { glAccountId: string; shardCount: number; at: string } | null;
+    };
 }
 
 export type Tone = "success" | "warning" | "danger" | "info" | "neutral";

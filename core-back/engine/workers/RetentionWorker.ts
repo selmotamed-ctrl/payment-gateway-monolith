@@ -147,12 +147,12 @@ export interface RetentionWorkerDeps extends WorkerOptions {
  *                          retained (or when it never had one).
  *
  * The ledger (`journal_entries` / `journal_lines`) is deliberately OUT of the
- * retention scope. The GL account balances are derived from the journal lines
- * (`checkpoint_balance + SUM(lines since the checkpoint)`) and a merchant holds
- * no mutable balance of its own (design §7.1). Deleting a journal line without
- * first folding its amount into `gl_accounts.checkpoint_balance` would make a
- * merchant balance silently drop to zero while the system-wide invariant still
- * looks balanced (design §11.2). The ledger is the immutable audit evidence of
+ * retention scope. A GL account balance is the sum of its shards, and every
+ * shard checkpoint is proven against the journal lines of its gapless sequence
+ * (`checkpoint + lines in the range = shard balance`); a merchant holds no
+ * mutable balance of its own (design §7.1). Deleting a journal line would break
+ * that proof and could make a merchant balance silently diverge from the
+ * journal while the system-wide invariant still looks balanced (design §11.2). The ledger is the immutable audit evidence of
  * money that really moved, so the purger never removes it. The non-ledger
  * evidence of an attempt (step logs, inbound events, disputes, operator cases)
  * is still purged, and the attempt row may go once its ledger entry is

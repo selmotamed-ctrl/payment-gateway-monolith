@@ -220,11 +220,22 @@ export interface InvariantSnapshot {
   rightSide: string;
 }
 
+/**
+ * The continuous invariant is checked twice, on the two ledgers the redesign keeps in step:
+ *  1. the production SQL path (`InvariantVerifier` with `{ sql: true }`): the ledger equation over the SHARD balances;
+ *  2. the journal itself: total DEBIT equals total CREDIT over every journal line (a one-legged or unbalanced
+ *     entry, even one written without going through the poster, shows up here).
+ * Either drifting fails the hook.
+ */
 export const verifyInvariant = async (client: PrismaClient = exhaustiveClient()): Promise<InvariantSnapshot> => {
-  const result = await new InvariantVerifier(client as never).verify();
+  const result = await new InvariantVerifier(client as never, { sql: true }).verify();
+  const journal = (await client.$queryRawUnsafe(
+    `SELECT COALESCE(SUM(CASE WHEN direction = 'DEBIT' THEN amount ELSE -amount END), 0)::text AS drift FROM journal_lines`,
+  )) as Array<{ drift: string }>;
+  const journalDrift = dec(journal[0]?.drift ?? "0");
   return {
-    ok: result.ok,
-    drift: result.drift.toFixed(4),
+    ok: result.ok && journalDrift.isZero(),
+    drift: (result.drift.isZero() ? journalDrift : result.drift).toFixed(4),
     leftSide: result.leftSide.toFixed(4),
     rightSide: result.rightSide.toFixed(4),
   };

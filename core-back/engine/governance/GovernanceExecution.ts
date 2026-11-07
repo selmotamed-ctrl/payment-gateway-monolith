@@ -2,6 +2,7 @@ import { Decimal } from "decimal.js";
 import { Prisma } from "../../generated/prisma/client";
 import { ApiError } from "../../lib/error";
 import { lockWalletLedgerBalance } from "../../lib/cashoutBalance";
+import { applyShardRepair } from "../ledger/ShardRepair";
 import { payoutAccountHash } from "../../lib/joinRequestOnboarding";
 import { nextKybReviewAt, parseKybRefreshPolicy } from "../../lib/kybReview";
 import {
@@ -510,21 +511,21 @@ export const evaluateCommissionReceivableCeiling = async (
 };
 
 /**
- * The merchant wallet balance, computed from the posted journal lines.
+ * The merchant's wallet balance (credit positive), summed over its wallets from their shards.
+ *
+ * Each wallet is read through `lockWalletLedgerBalance`, so the caller holds the wallets' debit locks until
+ * its transaction ends: a check-then-debit (the chargeback ceiling) can no longer race another debit of the
+ * same wallet, and no journal line is loaded into memory.
  */
 const resolveMerchantWalletBalance = async (tx: Tx, merchantId: string): Promise<Decimal> => {
   const glAccounts = modelOf(tx, "glAccount");
-  const journalLines = modelOf(tx, "journalLine");
-  const accounts = await glAccounts.findMany({ where: { accountType: "MERCHANT_WALLET", ownerId: merchantId } });
-  if (!accounts.length) {
-    return new Decimal(0);
-  }
-  const ids = accounts.map((account: any) => String(account.id));
-  const lines = await journalLines.findMany({ where: { glAccountId: { in: ids } } });
+  const accounts = await glAccounts.findMany({
+    where: { accountType: "MERCHANT_WALLET", ownerId: merchantId },
+    orderBy: { id: "asc" },
+  });
   let balance = new Decimal(0);
-  for (const line of lines) {
-    const amount = toDecimal(line.amount);
-    balance = line.direction === "CREDIT" ? balance.plus(amount) : balance.minus(amount);
+  for (const account of accounts) {
+    balance = balance.plus(await lockWalletLedgerBalance(tx, String(account.id)));
   }
   return balance;
 };
@@ -630,7 +631,6 @@ export async function activateApprovedJoinRequest(
         accountType: "MERCHANT_WALLET",
         ownerId: merchantId,
         currency: "LYD",
-        checkpointBalance: 0,
       },
     });
     await wallets.create({
@@ -2854,8 +2854,19 @@ export async function executeCashout(
     throw conflict();
   }
 
-  // Available-balance check under the wallet shard lock.
-  const balance = await lockWalletLedgerBalance(tx, String(wallet.glAccountId));
+  // The journal this cash-out will post. Its shard rows are locked in the global order BEFORE the balance is read
+  // (see `lockWalletLedgerBalance`): locking the wallet first and the treasury shard later, while a payment
+  // confirmation locks them the other way round, is a deadlock.
+  const journal = buildLedgerTemplate("CASHOUT", { amount });
+  // The journal reference is the cash-out id: a stable idempotency key, so the ledger itself
+  // refuses a second payout of the same request.
+  journal.refId = String(cashout.id);
+  const journalContext = { accounts: { MERCHANT_WALLET: String(wallet.glAccountId) } };
+
+  // Available-balance check under the wallet debit lock and the posting's shard locks.
+  const balance = await lockWalletLedgerBalance(tx, String(wallet.glAccountId), {
+    lockShards: () => ctx.ledgerPoster.lockShardsFor(journal, journalContext, tx as never),
+  });
   if (balance.lt(amount)) {
     throw new ApiError(409, "CASHOUT_INSUFFICIENT_BALANCE", "The wallet balance does not cover this cash-out", {
       cashoutId: String(cashout.id),
@@ -2875,15 +2886,7 @@ export async function executeCashout(
     },
   });
 
-  const journal = buildLedgerTemplate("CASHOUT", { amount });
-  // The journal reference is the cash-out id: a stable idempotency key, so the ledger itself
-  // refuses a second payout of the same request.
-  journal.refId = String(cashout.id);
-  const posted = await ctx.ledgerPoster.post(
-    journal,
-    { accounts: { MERCHANT_WALLET: String(wallet.glAccountId) } },
-    tx as never,
-  );
+  const posted = await ctx.ledgerPoster.post(journal, journalContext, tx as never);
 
   await modelOf(tx, "adjustment").update({
     where: { id: String(adjustment.id) },
@@ -3639,6 +3642,21 @@ export async function executeApprovalSubject(
       checkerUserId: input.checkerUserId,
       checkerRole: input.checkerRole,
     });
+  }
+  if (subjectType === "GL_SHARD_REPAIR") {
+    const payload = (input.approval.payloadDiffJson ?? {}) as Record<string, unknown>;
+    const result = await applyShardRepair(tx as never, {
+      glAccountId: String(payload.glAccountId ?? ""),
+      shardId: Number(payload.shardId),
+      mode: "APPROVED",
+      allowedKinds: ["RECOMPUTE", "REBASELINE"],
+      // The approval is bound to the plan the maker previewed: a shard that moved since is refused, never repaired blindly.
+      expectedPlanHash: String(payload.planHash ?? ""),
+      reason: String(payload.reason ?? "approved shard repair").slice(0, 1000),
+      actor: { actorId: input.checkerUserId, role: input.checkerRole },
+      approvalRequestId: input.approval.id,
+    });
+    return { status: "EXECUTED", entityId: input.approval.subjectId, idempotent: !result.repaired };
   }
   if (subjectType === "WALLET") {
     return executeWalletStatusChange(ctx, tx, {
