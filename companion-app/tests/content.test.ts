@@ -16,7 +16,7 @@ describe("companion content bundle", () => {
         expect(bundle.schema).toBe(1);
         expect(bundle.meta.contentHash).toMatch(/^[0-9a-f]{64}$/);
         expect(bundle.guide.books).toHaveLength(14);
-        expect(bundle.guide.articles).toHaveLength(128);
+        expect(bundle.guide.articles).toHaveLength(134);
         expect(bundle.guide.glossary).toHaveLength(151);
         expect(bundle.guide.cards).toHaveLength(25);
         expect(bundle.guide.playbook).toHaveLength(32);

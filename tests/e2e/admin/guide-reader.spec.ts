@@ -52,6 +52,56 @@ test.describe("admin guide reader", () => {
     }
   });
 
+  test("wide tables scroll inside the reader instead of breaking words", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 900 });
+    await page.goto("/guide/a/b07-02");
+    const wrapper = page.locator(".guide-table-wrap").first();
+    await expect(wrapper).toBeVisible();
+
+    const metrics = await wrapper.evaluate((element) => {
+      const cell = element.querySelector("th,td")!;
+      const cellStyle = getComputedStyle(cell);
+      return {
+        overflowX: getComputedStyle(element).overflowX,
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+        overflowWrap: cellStyle.overflowWrap,
+        wordBreak: cellStyle.wordBreak,
+        tabIndex: element.getAttribute("tabindex"),
+      };
+    });
+
+    expect(metrics.overflowX).toBe("auto");
+    expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
+    expect(metrics.overflowWrap).toBe("normal");
+    expect(metrics.wordBreak).toBe("normal");
+    expect(metrics.tabIndex).toBe("0");
+    expect(await noHorizontalOverflow(page)).toBe(true);
+  });
+
+  test("edge-case catalogue keeps readable columns on a phone", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 900 });
+    await page.goto("/guide/edge-cases");
+    const wrapper = page.locator(".guide-edge-table-wrap").first();
+    await expect(wrapper).toBeVisible();
+
+    const metrics = await wrapper.evaluate((element) => {
+      const cell = element.querySelector("th,td")!;
+      const cellStyle = getComputedStyle(cell);
+      return {
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+        overflowWrap: cellStyle.overflowWrap,
+        wordBreak: cellStyle.wordBreak,
+      };
+    });
+
+    expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
+    expect(metrics.overflowWrap).toBe("normal");
+    expect(metrics.wordBreak).toBe("normal");
+    expect(await noHorizontalOverflow(page)).toBe(true);
+  });
+
   test("Arabic RTL renders without horizontal overlap", async ({ page }) => {
     await page.addInitScript(() => window.localStorage.setItem("locale-name", "ar"));
     await page.setViewportSize({ width: 390, height: 844 });

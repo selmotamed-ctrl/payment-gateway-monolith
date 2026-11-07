@@ -250,11 +250,11 @@
 | `tests/e2e/admin/global-search.spec.ts` | 124 | 5 |
 | `tests/e2e/admin/guide-context.spec.ts` | 128 | 2 |
 | `tests/e2e/admin/guide-palette.spec.ts` | 32 | 1 |
-| `tests/e2e/admin/guide-reader.spec.ts` | 66 | 3 |
 | `tests/e2e/admin/guide-safeguard.spec.ts` | 104 | 1 |
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/operator-cases.spec.ts` | 187 | 2 |
 | `tests/e2e/admin/commerce-governance.spec.ts` | 132 | 4 |
+| `tests/e2e/admin/guide-reader.spec.ts` | 116 | 5 |
 | `tests/e2e/merchant/a11y.spec.ts` | 28 | 1 |
 | `tests/e2e/merchant/auth.spec.ts` | 47 | 2 |
 | `tests/e2e/merchant/shell.spec.ts` | 121 | 9 |
@@ -296,8 +296,8 @@
 | `tests/unit/builders-api-error-i18n.test.ts` | 79 | 6 |
 | `tests/unit/audit-summary.test.ts` | 109 | 13 |
 | `tests/unit/academy-content.test.ts` | 306 | 17 |
-| `tests/unit/guide-content.test.ts` | 185 | 10 |
 | `tests/unit/guide-markdown-refs.test.ts` | 70 | 6 |
+| `tests/unit/guide-content.test.ts` | 185 | 10 |
 
 - Total files: **294**
-- Total literal test declarations: **3168**
+- Total literal test declarations: **3170**

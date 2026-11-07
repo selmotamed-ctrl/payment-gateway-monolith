@@ -11,7 +11,7 @@ const ROUTER_FILE = join(REPO_ROOT, "admin-front/src/router/index.ts");
 
 const EXPECTED_COUNTS = {
     books: 14,
-    articles: 128,
+    articles: 134,
     glossaryTerms: 151,
     safeguardCards: 25,
     safeguardChecklistItems: 112,

@@ -3,7 +3,7 @@
   "generatedAt": "1970-01-01T00:00:00.000Z",
   "counts": {
     "books": 14,
-    "articles": 128,
+    "articles": 134,
     "glossaryTerms": 151,
     "safeguardCards": 25,
     "safeguardChecklistItems": 112,
@@ -15,5 +15,5 @@
     "errorCodes": 19,
     "edgeCases": 140
   },
-  "sourceSha256": "d2f85e4a13bc069a123a9a72b52ae2ce558b645bd298b7baa8247dfe4fa65648"
+  "sourceSha256": "059b1dc4f3cb92ebcfbca6934930e129ff70e96de9d20a8b8fdfe88cb09eefd6"
 }

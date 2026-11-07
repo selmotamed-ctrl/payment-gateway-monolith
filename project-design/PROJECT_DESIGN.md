@@ -8963,7 +8963,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 This part owns two employee learning products in `admin-front`:
 
-- The Admin Interactive Guide at `/guide/**`: 14 books, 128 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
+- The Admin Interactive Guide at `/guide/**`: 14 books, 134 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
 - The Employee Academy under `/academy/**`: eight tracks, lessons with practice checks, simulated labs, server-graded certification exams, 12-month badges, certificates and a `SECURITY_ADMIN` team view.
 
 It does not own the merchant guide or the checkout help center. The future-guide design is now implemented; its detailed implementation notes live in `06-guide-v2.md`.
@@ -8977,7 +8977,7 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | Artifact | Count / notes |
 | :--- | :--- |
 | `books.json` | 14 books |
-| `articles.en.json` | 128 articles with headings, plain text, roles, UI status and related ids |
+| `articles.en.json` | 134 articles with headings, plain text, roles, UI status and related ids |
 | `glossary.en.json` | 151 terms with aliases, Arabic term and related slugs |
 | `cards.en.json` | 25 cards and 112 required checklist items |
 | `playbook.en.json` | 32 situations with screens, cases and articles |
@@ -9008,7 +9008,7 @@ Eight routes are registered with no authority gate:
 | `AdminGuideCards` | `/guide/cards/:id?` | Safeguard card catalog |
 | `AdminGuideEdgeCases` | `/guide/edge-cases` | Filterable 140-case catalog |
 
-`MarkdownView` uses `markdown-it` (`html:false`, `linkify:false`) and adds callouts, diagram fences, table scrolling, stable heading ids, article/card/situation/glossary links, glossary auto-linking (first occurrence per article, never in headings, links, code or table headers) and widget placeholders. The glossary popover is keyboard reachable and focus-trapped.
+`MarkdownView` uses `markdown-it` (`html:false`, `linkify:false`) and adds callouts, diagram fences, table scrolling, stable heading ids, article/card/situation/glossary links, glossary auto-linking (first occurrence per article, never in headings, links, code or table headers) and widget placeholders. The glossary popover is keyboard reachable and focus-trapped. Markdown and edge-case tables keep a `9.5em` minimum column width, so a table narrower than that budget scrolls horizontally inside its focusable wrapper (with themed thin scrollbars and contained overscroll) instead of compressing; cells use `overflow-wrap: normal` and never break a word letter by letter. The edge-case filter controls also cap at the row width so the page itself never overflows on a phone.
 
 The clarity renderer adds:
 
@@ -15277,7 +15277,7 @@ Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not cov
 ## Admin UI completion suites (2026-11-06)
 
 - **Unit (`tests/unit`, vitest, 490 passing in 30 files):** pure logic of the new UI: governance action tables per state (immediate vs approval), owner/revalidation forms, journal/route-cap/lifecycle/health/jobs models, the JSON diff model, audit summaries (`formatAuditValue`, `describeAuditChange`), commission tiers, dispute evidence mapping, and the builders' round trips (cost model, scope, maintenance windows, parser config, AML params, settings schemas, template variables) including unknown-key preservation. `commerce-i18n` and `builders-api-error-i18n` assert that every message key the logic can produce has an Arabic entry. `frontend-security-admin` (default-deny route authorities, alias map) and `guide-content` (every router name has a context-map screen) caught the six new routes until they were registered properly. `guide-markdown-refs` covers the clarity renderer helpers (parenthetical reference extraction, meaningful-prose preservation, short labels, preview snippets); `guide-content` also runs the clarity `--check` gate.
-- **E2E (Playwright, needs Chrome: set `PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome-stable` when the bundled browser is not installed):** `e2e/admin/commerce-governance.spec.ts` drives the wallets page against realistic mocked responses (restricted balances render "Restricted" and never 0; a freeze needs a >=10-character reason and sends exactly `{status: "FROZEN", reason}`; restoring returns HTTP 202 and is reported as submitted for approval; a read-only role gets no freeze action). `exhaustive-admin-surface.spec.ts` now covers 31 routes (the six new ones included) across 3 viewports x 2 locales x 2 themes (372 combinations: no horizontal overflow, correct direction and theme, app bar never overlapping). `e2e/admin/backups.spec.ts` was updated for the second confirmation the page has asked for since the frontend hardening commit (its spec was stale).
+- **E2E (Playwright, needs Chrome: set `PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome-stable` when the bundled browser is not installed):** `e2e/admin/commerce-governance.spec.ts` drives the wallets page against realistic mocked responses (restricted balances render "Restricted" and never 0; a freeze needs a >=10-character reason and sends exactly `{status: "FROZEN", reason}`; restoring returns HTTP 202 and is reported as submitted for approval; a read-only role gets no freeze action). `exhaustive-admin-surface.spec.ts` now covers 31 routes (the six new ones included) across 3 viewports x 2 locales x 2 themes (372 combinations: no horizontal overflow, correct direction and theme, app bar never overlapping). `e2e/admin/backups.spec.ts` was updated for the second confirmation the page has asked for since the frontend hardening commit (its spec was stale). `e2e/admin/guide-reader.spec.ts` also holds the phone-width regression for guides: a wide article table and the edge-case catalogue must scroll inside their wrapper, keep `overflow-wrap: normal` on cells and never make the page itself overflow horizontally.
 - **Component compliance (`admin-front` `bun run test:unit`):** helper components must live in `components/` subfolders so every route page keeps `PageHeader` (the test stops at the first offender).
 
 ## Backup daemon suites (2026-11-06)
@@ -15288,13 +15288,14 @@ Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not cov
 
 ## Offline companion suites (2026-11-06)
 
-`companion-app/tests/` (Vitest, 22 tests / 4 files) covers the generated content bundle
+`companion-app/tests/` (Vitest, 23 tests / 4 files) covers the generated content bundle
 (counts, cross-document links, lesson reading/check references, external-URL and exam-bank
 leak guards), markdown rendering for every article and lesson (unresolved links, callouts,
 glossary terms, widget placeholders, stable heading ids, structural lesson trimming,
-parenthetical reference extraction, summary/refs callouts, section trays, short labels and
-preview snippets), the offline MiniSearch index (`LIMIT_EXCEEDED`, maker-checker, glossary
-terms), and all 18 published Academy lab-scoring vectors.
+parenthetical reference extraction, summary/refs callouts, section trays, short labels,
+preview snippets and the focusable scrollable table wrapper), the offline MiniSearch index
+(`LIMIT_EXCEEDED`, maker-checker, glossary terms), and all 18 published Academy lab-scoring
+vectors.
 
 `companion-app/scripts/check-content.ts` is the build gate: it re-runs the canonical Guide
 and Academy extractors, compares their output with `admin-front/src/content/**/generated`,
@@ -17021,7 +17022,7 @@ The app mirrors the true content during build:
 4. `scripts/check-content.ts` re-runs the extractors and fails if the committed snapshot is
    stale, or if `admin-front` generated content has drifted.
 
-The current snapshot contains 14 guide books, 128 articles, 151 glossary terms, 25 safeguard
+The current snapshot contains 14 guide books, 134 articles, 151 glossary terms, 25 safeguard
 cards, 32 situations, 58 quick answers, 19 error codes, 140 edge cases; and 8 Academy tracks,
 11 modules, 50 lessons, 100 practice checks, 16 labs / 92 tasks, 11 drills and 6 learner pages.
 The exam bank has 223 questions with keys but is not in the bundle.
@@ -17031,6 +17032,10 @@ The exam bank has 223 questions with keys but is not in the bundle.
 The client is Vue 3 + TypeScript + Vite + Capacitor 8. It uses hash routing, no Vuetify, no
 remote UI assets, and a self-contained markdown renderer with callouts, guide links,
 glossary auto-linking, heading ids, table/diagram handling and simulator placeholders.
+Article and lesson tables keep a `9.5em` minimum column width and scroll horizontally
+inside a focusable wrapper (themed thin scrollbars, contained overscroll) on narrow
+screens; cells use `overflow-wrap: normal`, so a long identifier or word is never broken
+letter by letter.
 
 The clarity renderer matches the Admin Guide: parenthetical reference dumps are removed from
 sentences and collected into a per-section **Related** tray of typed pills; bare inline links
@@ -17108,9 +17113,9 @@ The 2026-11-06 build produced a 3.8 MiB signed APK with SHA-256
 
 - `bun run content:check` passes against the canonical extractors.
 - `bun run typecheck` passes.
-- `bun test` passes 22 tests: content integrity, markdown rendering (including parenthetical
-  extraction, summary/refs callouts, section trays and preview-snippet helpers), offline
-  search and all 18 published lab-scoring vectors.
+- `bun test` passes 23 tests: content integrity, markdown rendering (including parenthetical
+  extraction, summary/refs callouts, section trays, preview-snippet helpers and the
+  scrollable table wrapper), offline search and all 18 published lab-scoring vectors.
 - Web Playwright smoke covers 24 routes at 360/390/768 px, light/dark/sepia, English/Arabic
   chrome, with no horizontal overflow or console errors.
 - The release APK passes `apksigner verify`; the content manifest signature and bundle

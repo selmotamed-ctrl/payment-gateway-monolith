@@ -268,7 +268,8 @@ const createMarkdown = (): MarkdownItType => {    const md = new MarkdownIt({
         )}">${escapeHtml(token.content)}</button>`;
     };
 
-    md.renderer.rules.table_open = () => '<div class="guide-table-wrap"><table>';
+    md.renderer.rules.table_open = () =>
+        '<div class="guide-table-wrap" tabindex="0"><table>';
     md.renderer.rules.table_close = () => "</table></div>";
 
     const defaultFence = md.renderer.rules.fence;

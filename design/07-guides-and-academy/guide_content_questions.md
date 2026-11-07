@@ -36,3 +36,4 @@ The rewrites kept the original wording in every case below. Change either the co
 6. `b06-11`: WEIGHTED is described as a share of traffic; `VisibleRailsResolver.ts` only sorts by weight.
 7. `b09-*`: the article says a screening suppression "may" carry an expiry date; the exam says it "must".
 8. `b08-13`: rule 2 offers suspending the merchant, while rule 4 says suspension is blocked.
+9. `b06-09` / `b03-12` Credential Sets: `b06-09` says credential changes need two people (`GATEWAY_ADMIN` proposes, `SECURITY_ADMIN` approves), and `project-design/parts/01-core-back/04-governance-compliance.md` lists a `CREDENTIAL_SET` approval subject with no execution branch. The Credential Sets screen and `core-back/api/internal/admin.ts` create, rotate, verify and revoke immediately, with no approval. `b03-12` describes the screen's real behaviour and carries a note about the mismatch. Decide whether to add the approval flow or reword `b06-09`.

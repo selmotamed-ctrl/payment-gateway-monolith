@@ -205,7 +205,7 @@ export const loadArticles: (lang:"en"|"ar") => Promise<Article[]>; // dynamic im
 | Item | Count | Source |
 | :--- | :--- | :--- |
 | Books | 14 | `@@book` blocks |
-| Articles | 128 | `@@article` blocks |
+| Articles | 134 | `@@article` blocks |
 | Glossary terms | 151 | `@@term` lines |
 | Safeguard cards | 25 | `@@card` blocks (the 22 ids in §II-7 plus `sg-trigger-backup`, `sg-run-restore-drill`, `sg-update-backup-policy`) |
 | Safeguard checklist items | 112 | lines `- [ ] ` inside cards |
@@ -1060,32 +1060,107 @@ Your menu only shows screens you may open. Buttons you cannot use are hidden or 
 `SECURITY_ADMIN` can list, invite, edit and disable staff accounts on **Admin Users**. Changing a role, an authority, a maker/checker flag or activating an account creates an approval for a different `SECURITY_ADMIN`; nobody can change their own account. The detail page shows the account's current authorities and its recent changes.
 @@end
 
-@@article id=b03-03 book=3 order=3 title="The menu, screen by screen" roles=ALL minutes=2 ui=AVAILABLE related=b03-05,b13-02
-| Section | Screen | What it is for | Typically used by | Read more |
-| :--- | :--- | :--- | :--- | :--- |
-| Overview | **Dashboard** | health at a glance | everyone | [[a:b03-05]] |
-| Onboarding | **Join Requests** | review businesses applying to join | OPERATOR, COMPLIANCE | [[a:b05-03]] |
-| Onboarding | **KYB Review** | check uploaded documents | COMPLIANCE, OPERATOR | [[a:b05-04]] |
-| Onboarding | **Merchants** | look up, edit, suspend, reinstate | OPERATOR, COMPLIANCE, SUPPORT (read) | [[a:b05-08]] |
-| Governance | **Approvals** | decide requests made by others | checkers | [[a:b04-03]] |
-| Governance | **Audit Log** | search and export the audit trail | SECURITY_ADMIN | [[a:b04-07]] |
-| Governance | **Admin Users** | staff accounts, roles, authorities, maker/checker flags | SECURITY_ADMIN | [[a:b03-02]] |
-| Governance | **AML Cases / Screenings / Rules / Reports** | the compliance program | COMPLIANCE, MLRO | Book 9 |
-| Operations | **Operator Cases** | stuck, conflicting or odd payments | OPERATOR | [[a:b07-04]] |
-| Operations | **Inquiry Schedule** | when the platform asks a partner for a payment's status | OPERATOR | [[a:b07-09]] |
-| Operations | **Disputes** | chargebacks and disputes | FINANCE | [[a:b08-09]] |
-| Operations | **Adjustments** | refunds, chargebacks, corrections | FINANCE | [[a:b08-08]] |
-| Operations | **Cash-Outs** | merchant payouts | FINANCE | [[a:b08-07]] |
-| Operations | **Reconciliation** | match partner statements to our books | FINANCE | [[a:b08-06]] |
-| Operations | **Backups** | backup engine, WAL archive lag, storage targets, schedule, last backup and restore drill | SECURITY_ADMIN | [[a:b12-10]] |
-| Operations | **Platform Settings** | versioned platform settings, export and restore | SECURITY_ADMIN, GATEWAY_ADMIN | [[a:b12-07]] |
-| Operations | **Checkout Help** | the help payers see at checkout | admins | [[a:b07-10]] |
-| Finance | **Pricing & Limits** | commission profiles and velocity rules | FINANCE | [[a:b08-03]] |
-| Finance | **Profitability / Liquidity / Invariant** | profit, cash cover, ledger integrity | FINANCE | [[a:b08-11]] |
-| Gateways | **Gateways / Rails / Routes** | partner connections | GATEWAY_ADMIN | Book 6 |
-| Learning | **Interactive Guide / Employee Academy** | this guide and training | everyone | — |
+@@article id=b03-03 book=3 order=3 title="The menu, screen by screen" roles=ALL minutes=5 ui=AVAILABLE related=b03-05,b03-02,b03-07,b13-02
+:::summary Big picture in 20 seconds
+The menu on the left groups every Back Office screen into seven sections: Overview, Onboarding, Governance, Operations, Finance, Gateways and Learning. You only see the screens your authorities allow, so your menu is shorter than this article. Use the tables below to find out what a screen is for, who normally uses it, and which article explains it in full.
+:::
 
-You only see the screens your authorities allow. A screen that is missing from *your* menu is not an error.
+### How the menu works
+* **The menu is personal.** A screen appears only if your account holds the authority to open it. A missing screen is not an error. If you need one, see [[a:b03-07|When a button is missing or an action is refused]].
+* **A section with no visible screens disappears.** For example, a `SUPPORT` account has no Finance section at all.
+* **The menu is only a door.** Even if a screen opens, every button on it is checked again by the core. Opening a screen never means you may change things on it.
+* **Every screen has a "?" button** in its header. It opens a short explanation of the screen and links to the right articles.
+* **Press Ctrl+K (Cmd+K on a Mac)** to search for a screen, an article or a glossary term.
+
+The "Typically used by" column describes the usual job, not a rule. What you can really do is decided by your authorities ([[a:b03-02|Your account]]).
+
+### Overview
+| Screen | What it is for | Typically used by | Read more |
+| :--- | :--- | :--- | :--- |
+| **Dashboard** | health of the platform at a glance | everyone | [[a:b03-05]] |
+
+### Onboarding
+This section is about merchants: who they are, where their money lands and where they take payments.
+
+| Screen | What it is for | Typically used by | Read more |
+| :--- | :--- | :--- | :--- |
+| **Join Requests** | review businesses applying to join | OPERATOR, COMPLIANCE | [[a:b05-03]] |
+| **KYB Review** | check uploaded documents and beneficial owners | COMPLIANCE, OPERATOR | [[a:b05-04]] |
+| **Merchants** | look up, edit, suspend, reinstate | OPERATOR, COMPLIANCE, SUPPORT (read) | [[a:b05-08]] |
+| **Wallets** | every merchant's balance, shards and statement; freeze a wallet | OPERATOR, COMPLIANCE, SUPPORT (read) | [[a:b03-09]] |
+| **Applications & Channels** | applications, payment links and POS terminals; allow-lists and tokens | OPERATOR, COMPLIANCE, SUPPORT (read) | [[a:b03-10]] |
+
+### Governance
+This section is about control: who decides, who is on the team and what is recorded.
+
+| Screen | What it is for | Typically used by | Read more |
+| :--- | :--- | :--- | :--- |
+| **Approvals** | decide requests made by others | checkers | [[a:b04-03]] |
+| **Audit Log** | search and export the audit trail | SECURITY_ADMIN | [[a:b04-07]] |
+| **Admin Users** | staff accounts, roles, authorities, maker/checker flags | SECURITY_ADMIN | [[a:b03-02]] |
+| **AML Cases** | investigate suspicious activity | COMPLIANCE, MLRO | [[a:b09-05]] |
+| **AML Screenings** | decide matches against sanctions and watch lists | COMPLIANCE, MLRO | [[a:b09-03]] |
+| **AML Rules** | the rules that raise alerts | COMPLIANCE, MLRO | [[a:b09-04]] |
+| **AML Reports** | regulatory reports | COMPLIANCE, MLRO | [[a:b09-07]] |
+
+### Operations
+This section is about the day-to-day running of payments and of the platform itself.
+
+| Screen | What it is for | Typically used by | Read more |
+| :--- | :--- | :--- | :--- |
+| **Transactions & Webhooks** | every payment attempt and every message a partner sent us | OPERATOR, SUPPORT (limited view) | [[a:b03-11]] |
+| **Operator Cases** | stuck, conflicting or odd payments | OPERATOR | [[a:b07-04]] |
+| **Inquiry Schedule** | when the platform asks a partner for a payment's status | OPERATOR | [[a:b07-09]] |
+| **Disputes** | chargebacks and disputes | FINANCE | [[a:b08-09]] |
+| **Adjustments** | refunds, chargebacks, corrections | FINANCE | [[a:b08-08]] |
+| **Cash-Outs** | merchant payouts | FINANCE | [[a:b08-07]] |
+| **Reconciliation** | match partner statements to our books | FINANCE | [[a:b08-06]] |
+| **Backups** | backup engine, WAL archive lag, storage targets, schedule, last backup and restore drill | SECURITY_ADMIN | [[a:b12-10]] |
+| **Jobs & Outbox** | delivery health of background work: outbox, audit outbox, jobs, notifications | SECURITY_ADMIN | [[a:b03-14]] |
+| **Platform Settings** | versioned platform settings, export and restore | SECURITY_ADMIN, GATEWAY_ADMIN | [[a:b12-07]] |
+| **Checkout Help** | the help payers see at checkout | admins | [[a:b07-10]] |
+
+### Finance
+This section is about the money itself and whether the books are right.
+
+| Screen | What it is for | Typically used by | Read more |
+| :--- | :--- | :--- | :--- |
+| **Pricing & Limits** | commission profiles and velocity rules | FINANCE | [[a:b08-03]] |
+| **Profitability** | what the platform earns | FINANCE | [[a:b08-11]] |
+| **Liquidity** | whether there is enough cash to cover payouts | FINANCE | [[a:b08-11]] |
+| **Journal Entries** | read every double-entry posting and its balance check | FINANCE | [[a:b03-13]] |
+| **Ledger Audit & Invariant** | ledger integrity checks, per-account shards and checkpoints | FINANCE | [[a:b08-11]] |
+
+### Gateways
+This section is about the connections to payment partners.
+
+| Screen | What it is for | Typically used by | Read more |
+| :--- | :--- | :--- | :--- |
+| **Gateways** | partner connections, versions and go-live | GATEWAY_ADMIN | [[a:b06-01]] |
+| **Credential Sets** | the vault of login details we hold for each partner | GATEWAY_ADMIN | [[a:b03-12]] |
+| **Rails** | the payment methods a customer can pick | GATEWAY_ADMIN | [[a:b06-11]] |
+| **Routes** | which gateway serves which rail, in what order | GATEWAY_ADMIN | [[a:b06-11]] |
+
+### Learning
+| Screen | What it is for | Typically used by | Read more |
+| :--- | :--- | :--- | :--- |
+| **Interactive Guide** | this guide | everyone | [[a:b00-02]] |
+| **Employee Academy** | training, labs and exams | everyone | [[a:b13-04]] |
+
+Inside the Academy, `SECURITY_ADMIN` also sees a **Team** tab that shows everyone's training progress. It has no menu entry of its own and is read-only.
+
+### Screens you reach from another screen
+Some screens have no menu entry. You open them from a row or a button:
+* **Merchant detail**, from **Merchants** ([[a:b05-08|The Merchants screen]]).
+* **Join request detail** and **new join request**, from **Join Requests** ([[a:b05-03|Working the Join Requests queue, step by step]]).
+* **KYB document review**, from **KYB Review** ([[a:b05-04|KYB documents and beneficial owners]]).
+* **Operator case detail**, from **Operator Cases** ([[a:b07-04|The Operator Cases screen]]).
+* **Admin user detail**, from **Admin Users** ([[a:b03-02|Your account]]).
+* **The Add-a-Gateway wizard** and **Smart AI Integration**, from **Gateways** ([[a:b06-13|The Add-a-Gateway wizard]], [[a:b06-14|Smart AI Integration]]).
+
+:::note A screen that is missing is not a fault
+If a screen is missing from *your* menu, your account does not hold its authority. Do not ask a colleague to do it "from their account". Ask your manager, and the Security Admin will change permissions under two-person control.
+:::
 @@end
 
 @@article id=b03-04 book=3 order=4 title="Reading tables, filters, search and statuses safely" roles=ALL minutes=1 ui=AVAILABLE related=b13-01
@@ -1124,7 +1199,360 @@ The dashboard is a smoke alarm, not a diagnosis. When a tile worries you, open t
 :::
 @@end
 
-@@article id=b03-06 book=3 order=6 title="Safe-working habits that prevent most mistakes" roles=ALL minutes=1 ui=AVAILABLE related=b00-03,b04-06
+@@article id=b03-09 book=3 order=6 title="The Wallets screen: balances, shards, statements and freezing" roles=OPERATOR,COMPLIANCE,SUPPORT minutes=3 ui=AVAILABLE related=b05-06,b08-02,b08-07,b04-04
+:::summary Big picture in 20 seconds
+**Wallets** lists every merchant's wallet in one place. You can read the balance, see how it is built from the ledger and look at the statement. The one thing you can change is the wallet's status: freezing is immediate, and unfreezing needs a second person.
+:::
+
+### What a wallet is, in one minute
+A **wallet** is a merchant's balance on our books. It belongs to one merchant and one currency, for example Noon Mart in `LYD`. The balance is not a number someone typed. It is **calculated from the ledger** every time you look. For the full idea, see [[a:b05-06|Applications and wallets]].
+
+### Opening the screen
+**Wallets** is in the **Onboarding** section. It opens for accounts that may read merchants (`merchants.read` or `support.read_merchant`). Buttons that change something need the extra authority to write merchants (`merchant:write`). Without it you can look, but you will not see "Freeze wallet".
+
+### The tiles at the top
+| Tile | Meaning | What to do if it looks bad |
+| :--- | :--- | :--- |
+| **Total wallets** | all wallets on the platform | none; context |
+| **Active wallets** | wallets that can be used normally | none; context |
+| **Frozen wallets** | wallets held back. The badge says **Contained** when there is at least one, **Clear** when there are none | check each one is frozen on purpose |
+| **Wallets with pending cash-outs** | wallets with a payout waiting. The badge says **Pending** or **Clear** | see [[a:b08-07]] (Cash-outs) |
+| **Total balance · LYD** | the sum of live balances, one tile per currency | none; context |
+
+If your role may not see money, the balance tile shows **Restricted**. If the tiles fail to load, the strip is hidden and the table still works.
+
+### The table
+Each row is one wallet. The columns are **Wallet**, **Merchant**, **Currency**, **Status**, **Live balance**, **Checkpoint**, **GL account**, **Applications**, **Pending cash-outs**, **Created** and **Action**.
+
+* A wallet's **Status** is `PENDING`, `ACTIVE`, `FROZEN` or `CLOSED`.
+* **Live balance** is the sum of the wallet's ledger shards right now.
+* **Checkpoint** is the balance saved at the last checkpoint. The live balance can differ from it, because the live balance includes everything posted since then.
+* **GL account** is the ledger account behind the wallet. Click **Inspect GL account** to read it ([[a:b03-13|Journal Entries]]).
+* You can filter by **Status**, **Currency**, **Merchant** and **Created**, and search by text.
+
+### The wallet drawer
+Click **Inspect** to open a panel on the right. It has three tabs.
+
+1. **Overview and shards.** The wallet's identity and its balances. A busy account is split into several parts, called **shards**, so that many payments can post at the same moment. The **Shard distribution** table lists each shard's balance. They add up to the live balance. If a request about this wallet is waiting for approval, a **Pending approvals** card appears with a link to **Approvals**.
+2. **Statement.** Each ledger line posted to the wallet: **Posted**, **Reference**, **Debit**, **Credit** and a link to the **Journal entry**.
+3. **Links and cash-outs.** The applications that pay into this wallet, and its recent cash-outs, with a button to **Open cash-outs**.
+
+### Freezing and unfreezing
+| Action | When it appears | What happens |
+| :--- | :--- | :--- |
+| **Freeze wallet** | the wallet is `ACTIVE` | applied **at once**. A frozen wallet cannot be debited by cash-outs until it is restored |
+| **Request unfreeze** | the wallet is `FROZEN` | creates an **approval request**. A different checker must approve it before anything changes |
+
+Both ask for a **Reason** of 10 to 500 characters, which goes into the audit trail. Freezing is fast on purpose and unfreezing is slow on purpose. It is easy to stop money and hard to release it. This is the asymmetry principle in [[a:b04-04|Emergency actions]]. A wallet that is `PENDING` or `CLOSED` has no action.
+
+If a change to the wallet is already waiting for approval, a second request is refused with "A change to this wallet is already awaiting approval."
+
+### What `SUPPORT` and similar roles see
+Accounts without financial visibility see **Restricted** instead of the live balance, the checkpoint, the shards and the recent cash-outs. The **Statement** tab shows a lock and the text "The ledger statement is hidden for your role." This is intended. Do not try to get the numbers another way.
+
+:::tip A safe habit
+Before you freeze, read the merchant name and the currency on the row, then write the reason as a sentence: "Freezing Noon Mart LYD wallet because AML case 1042 is open." A reason you cannot write is a sign to stop.
+:::
+@@end
+
+@@article id=b03-10 book=3 order=7 title="The Applications & Channels screen: applications, payment links and POS terminals" roles=OPERATOR,COMPLIANCE,SUPPORT minutes=4 ui=AVAILABLE related=b05-06,b05-07,b04-02,b04-03
+:::summary Big picture in 20 seconds
+**Applications & Channels** shows every place where merchants take payments: their applications, payment links and POS terminals. Stopping something is immediate. Anything that could widen who can pay, or where money lands, goes to a second person.
+:::
+
+### Opening the screen
+It is in the **Onboarding** section, after **Wallets**. It uses the same access rule as **Merchants**: you need to be allowed to read merchants. The screen title is **Applications**. Change buttons need the authority to write merchants (`merchant:write`).
+
+The concepts are explained in [[a:b05-06|Applications and wallets]] and [[a:b05-07|Payment links, POS terminals and API tokens]]. This article is about the screen.
+
+### The tiles
+| Tile | Meaning | What to do |
+| :--- | :--- | :--- |
+| **Applications** | all applications | none; context |
+| **Active** | applications that can take payments | none; context |
+| **Suspended** | stopped applications. The badge says **Contained** when there is at least one | check each one is suspended on purpose |
+| **Pending activation** | applications waiting to go live. The badge says **Pending** | see [[a:b05-02]] (the onboarding journey) |
+| **Without rail whitelist** | applications that accept every active rail. The badge says **Review** when there are any | confirm that "all rails" is really intended |
+
+### Three tabs
+The tabs are **Applications**, **Payment links** and **POS terminals**. Each tab has its own search, filters and paging. You can open a tab directly with `?tab=links` or `?tab=pos` in the address.
+
+**Applications tab.** Columns: **Application**, **Merchant**, **Status**, **Settlement wallet**, **Monthly volume**, **Rail whitelist**, **Redirect domains**, **API tokens**, **Links / POS**, **Created**, **Action**. The **Rail whitelist** cell says **All rails** when no list is set, **No rails** when the list is empty (payments are blocked), or shows the allowed rails. Application status is `DRAFT`, `PENDING`, `ACTIVE`, `SUSPENDED` or `CLOSED`.
+
+**Payment links tab.** Columns: **Link**, **Application**, **Merchant**, **Amount**, **Fee bearer**, **Uses**, **State**, **Expires**, **Created**, **Action**. A link's **State** is `PENDING`, `COMPLETED`, `EXPIRED` or `CANCELLED`. **Uses** reads "n / ∞" for a link that can be paid many times.
+
+**POS terminals tab.** Columns: **Terminal**, **Application**, **Merchant**, **Status**, **Screens**, **Last active**, **Created**, **Action**. A terminal is `ACTIVE`, `INACTIVE` or `BLOCKED`.
+
+### What you can do
+Every action opens a box that asks for a **Reason** (10 to 500 characters). The box tells you whether the change is **immediate** or **submitted for four-eyes approval**.
+
+| Where | Action | When | Immediate or approval |
+| :--- | :--- | :--- | :--- |
+| Application | **Suspend application** | `ACTIVE` | immediate |
+| Application | **Request reactivation** | `SUSPENDED` | approval |
+| Application | **Edit policy** | any status except `CLOSED` | approval |
+| Application drawer | **Revoke token** | token not already revoked | immediate, cannot be undone |
+| Payment link | **Cancel link** | `PENDING` | immediate, cannot be undone |
+| POS terminal | **Deactivate terminal** | `ACTIVE` | immediate |
+| POS terminal | **Block terminal** | `ACTIVE` or `INACTIVE` | immediate |
+| POS terminal | **Request reactivation** | `INACTIVE` or `BLOCKED` | approval |
+
+The pattern is the one from [[a:b04-02|Descriptive versus sensitive fields]]: a change that makes things **more restricted** is applied at once and audited. A change that **loosens** things or changes what an application may accept needs a different person to approve it. After you submit an approval, a banner says "Submitted for approval. The change is not applied until an independent checker approves it." with a button to **Open Approvals**. See [[a:b04-03|The life of an approval request]].
+
+Two more rules to know:
+* A `BLOCKED` terminal can only leave that state through an approved reactivation.
+* You cannot suspend an application and change its configuration in the same request. Suspending is immediate; the configuration change is not.
+
+### Edit application policy
+**Edit policy** opens a form with three parts, and its button is **Submit for approval**.
+* **Settlement wallet:** only active wallets of the same merchant and the same currency are offered.
+* **Rail whitelist:** **All active rails**, **Selected rails only** or **No rails (payments blocked)**. Choosing **No rails** warns you that the application cannot accept any payment.
+* **Redirect domains:** a hostname or an `https` origin without a path, separated by commas or new lines. The limit is 100 domains.
+
+If you change nothing, the form says "Nothing changed: the request matches the current configuration."
+
+### The application drawer
+Click **Inspect** to open a panel with four tabs: **Configuration and allowlists**, **API tokens**, **Payment links** and **POS terminals**.
+* **Configuration** shows the settlement wallet (with a link to open it on **Wallets**), the rail whitelist and the redirect domains. A **Pending approvals** card appears if something is waiting. While a change is waiting, **Request reactivation** and **Edit policy** are disabled with the message "A change to this entity is already awaiting approval."
+* **API tokens** lists each token by name and its last four characters only (for example `****a91f`), its scopes, whether an IP allow-list is on, when it was last used, when it expires and its status. The full token is never shown.
+
+### What is hidden
+Roles without sensitive access (for example `SUPPORT`) see **Restricted** for **Redirect domains**, and for **Monthly volume** and **Expected monthly volume**.
+
+:::warning Revoke and Cancel cannot be undone
+A revoked token stops working at once and the merchant must create a new one. A cancelled payment link can never be paid again. Check the name, the merchant and the environment before you confirm.
+:::
+@@end
+
+@@article id=b03-11 book=3 order=8 title="The Transactions & Webhooks screen: attempts, step logs and partner messages" roles=OPERATOR,SUPPORT minutes=4 ui=AVAILABLE related=b07-01,b07-02,b07-05,b07-09
+:::summary Big picture in 20 seconds
+**Transactions & Webhooks** is the place to look up any payment attempt and any message a partner sent us. It is mostly for reading. The only action that touches a payment is **Schedule inquiry**, and it is for payments stuck in `UNKNOWN` or `VERIFYING`.
+:::
+
+### Opening the screen
+It is in the **Operations** section. You need one of: permission to read merchants, support access to merchants, or `attempt:read`. The screen's subtitle says: "Every payment attempt and provider callback across all merchants."
+
+What you actually see depends on your role. `OPERATOR` and `SUPPORT` can read attempts. `SUPPORT` sees a **redacted** view: amounts, partner references and the ledger entry show **Restricted**, and the search box does not match partner references.
+
+### Two tabs
+* **Payment attempts** (the default).
+* **Inbound webhooks**. Open it directly with `?tab=inbound`.
+
+You can also open one attempt directly with `?open=<attempt id>`. Several other screens link here that way.
+
+### Payment attempts: the tiles
+The tiles cover the last 24 hours.
+
+| Tile | Counts these states | What to do if it looks bad |
+| :--- | :--- | :--- |
+| **Attempts (24h)** | all attempts | none; context |
+| **Settled** | `SUCCEEDED` | none |
+| **In flight / verifying** | `CREATED`, `INITIATING`, `AWAITING_CUSTOMER`, `AUTHORIZING`, `VERIFYING`, `UNKNOWN` | a growing number: [[a:b07-03]] (UNKNOWN) |
+| **Failed** | `FAILED`, `EXPIRED`, `CANCELLED`, `BLOCKED` | look for one rail or gateway behind most of them |
+| **Escalated to case** | attempts whose operator case is not yet resolved | work the queue in **Operator Cases** |
+
+### Payment attempts: the table
+Columns: **Reference**, **Status**, **Amount**, **Merchant**, **Rail**, **Provider reference**, **Ledger entry** and **Actions**.
+* Click the **Reference** to open the drawer. The reference is what you quote to a partner, never the customer's name.
+* A **Case** badge next to the status means an operator case is open on this attempt.
+* **Ledger entry** opens the journal entry ([[a:b03-13|Journal Entries]]).
+* Filters: **Status**, **Rail**, **Gateway**, **Merchant**, **Application**, **Currency**, **Amount** (a range) and **Created** (a date range). The status list shows all fourteen states from [[a:b07-02|The fourteen payment states]].
+* The newest attempts come first. There is no Excel export on this screen.
+
+Each row has **Inspect**, and a menu with **Schedule inquiry** and **Open merchant**.
+
+### The attempt drawer
+The drawer is titled **Transaction detail** and shows the reference, the status, the environment (`SANDBOX` or `LIVE`) and the mode. It has four tabs.
+
+1. **Summary.** The facts in blocks: **Payment** (who, which rail and gateway, when it expires, fee bearer, settlement target), **Amounts and references** (requested, surcharge, total charged, settled, gateway fee, platform commission, net to merchant, and the partner's references), **Customer fields (masked)**, and links to any **Operator cases**, **Disputes** and **Adjustments** on this attempt. How to read these fields is in [[a:b07-01|Reading a payment]].
+2. **Step logs.** One card per call the engine made to the partner, with the phase, the HTTP code, the outcome and how long it took. Open a card to read the request and the response as labelled rows. **Payloads are redacted**: secrets show a **Redacted** chip. Long payloads are cut off after 120 rows.
+3. **Inbound webhooks.** The messages the partner sent about this attempt. Click one to open it.
+4. **Checkout retry group.** All attempts of the same payer on the same payment link, oldest first. It explains the common story: the customer failed on one rail, then paid on another. Your attempt is marked **This attempt**. If none of the payer's attempts succeeded, the tab says so.
+
+### Inbound webhooks: the table
+Columns: **Received**, **Gateway**, **Signature**, **Source IP**, **Attempt**, **Processing result** and **Actions**.
+* **Signature** is **Verified** or **Unverified**, with the reason under it. Unverified rows have a red background. A spike of these is the signal for runbook [[a:b10-03|RB-02]].
+* **Attempt** is a link, or **Unmatched** when the message does not belong to any payment we know.
+* **Processing result** reads **Not processed** until the background worker has handled it.
+* Filters: **Gateway**, **Signature** (**Verified** or **Unverified**), **Unmatched only** and **Received**.
+
+The webhook drawer shows the verdict (**Signature verified** or **Signature not verified**, **Matched to attempt** or **Unmatched**), the details, the **Headers** (secrets are removed before they leave the server) and a **Body preview** with the size and the first characters of its hash. The full story of what happens to a message is in [[a:b07-05|Webhooks and the inbox]].
+
+### What you can do from the drawer
+| Button | Who and when | What it does |
+| :--- | :--- | :--- |
+| **Schedule inquiry** | `attempt:inquire`; status `UNKNOWN` or `VERIFYING` | immediate. Asks the partner about this payment within about a second and moves any open case to in progress. Refused if the attempt cannot be asked |
+| **Create refund / adjustment** | `finance:write`; status `SUCCEEDED`, `PARTIALLY_REFUNDED` or `DISPUTED` | only opens **Adjustments** with this payment filled in. Nothing is created here |
+| **Record dispute** | `dispute:write`; same states | only opens **Disputes** with this payment filled in |
+
+**Schedule inquiry** is audited. Read [[a:b07-09|Inquiry]] first, because some rails cannot be asked at all.
+
+:::warning Look, do not fix
+Nothing on this screen changes a payment's status by hand. If a payment looks wrong, open a case or follow [[a:b07-12|the customer-says-money-was-deducted procedure]]. Never guess a status from the partner's words alone.
+:::
+@@end
+
+@@article id=b03-12 book=3 order=9 title="The Credential Sets screen: the vault of partner logins" roles=GATEWAY_ADMIN,SECURITY_ADMIN minutes=4 ui=AVAILABLE related=b06-09,b06-01,b10-06,b11-04
+:::summary Big picture in 20 seconds
+**Credential Sets** is the vault where we keep the logins and secrets that partners gave us. You can create, replace, test and withdraw a set. You can never read a secret back, not even your own.
+:::
+
+### Opening the screen
+It is in the **Gateways** section, between **Gateways** and **Rails**. It opens for accounts with `credentials.manage` or `gateways.edit`. The page says: "Provider credentials held in the vault. Secrets are write-only and are never displayed."
+
+To create, replace, test or withdraw a set you need the authority to write credentials or gateways. Without it you see the list but no buttons. What a credential set is, and why secrets are write-only, is in [[a:b06-09|Credentials and Credential Sets]]. This article is about the screen.
+
+### The table
+Columns: **Gateway**, **Environment**, **Owner**, **External merchant ID**, **Settlement target**, **Status**, **Last verified**, **Expires** and **Actions**.
+* **Environment:** `LIVE` is shown in a warning colour, because it is real money.
+* **Owner:** **Platform** (our own account with the partner) or **Merchant** (the merchant's own account, shown with the merchant).
+* **Status:** `UNTESTED`, `VERIFIED`, `FAILING` or `REVOKED`.
+* **Expires** shows **Expires soon** within 14 days and **Expired** after the date. Plan the replacement before it expires. See [[a:b10-06|RB-05]].
+* Filters: **Gateway code**, **Environment**, **Owner**, **Status** and **Created**.
+* Open one set directly with `?highlight=<id>`. Search results and the merchant page link here that way.
+
+### The drawer
+Click **View** to open the set. It shows its identity, status, settlement target, **Last verified** and **Expires**. A blue note repeats the rule: stored secrets are write-only.
+
+The **Stored entries** table lists only the **Key** and **Type** of each entry. The **Value** column shows **Secret, hidden** or **Write-only**. The values themselves are never sent to your browser.
+
+### What you can do
+Every action here is applied **immediately**. This screen does not create an approval request.
+
+| Action | What it does |
+| :--- | :--- |
+| **New credential set** | stores a new set. It starts as `UNTESTED`. You choose the gateway, the environment, the owner, the settlement target and the entries |
+| **Verify** | runs the live credential check at once. A pass makes the set `VERIFIED`. A failure leaves it `FAILING` and shows "Verification failed" with the partner's reason |
+| **Rotate secrets** | replaces **every** entry. The set goes back to `UNTESTED`, so verify it again |
+| **Revoke** | withdraws the set for good. It needs a reason of 10 to 500 characters, which is recorded in the audit trail |
+
+A `REVOKED` set has no actions. To replace it, create a new set.
+
+### Creating a set
+1. Choose the **Gateway** and the **Environment** (default `SANDBOX`).
+2. Choose the **Owner**. Choosing **Platform** suggests `PLATFORM_CLEARING` as the settlement target. Choosing **Merchant** suggests `MERCHANT_DIRECT` and asks for the **Owning merchant**.
+3. Optionally fill the **External merchant ID**: the merchant identifier at the partner.
+4. Fill the **Credential entries**. Each row has a **Key**, a **Type** (`HEADER`, `QUERY`, `BODY` or `CERTIFICATE`), a value and a **Secret** switch that is on by default. You can have up to 40 entries. A key cannot be repeated with the same type.
+5. Click **Create credential set**, then **Verify**.
+
+The screen says "Verify it before it is trusted". An `UNTESTED` set does not make its route visible to customers. See [[a:b06-12|the visible-rails formula]].
+
+### Rotating
+**Rotate secrets** keeps your keys, types and secret switches, but every value is blank, because the old values cannot be shown. You must **type every value again**, not only the one that changed. If you leave one out, the form refuses.
+
+:::danger Never type a secret anywhere else
+Type secrets only into this form. Never paste them into chat, a ticket or an e-mail, and never take a screenshot of the form while it is filled. If you think a secret leaked, follow [[a:b10-07|A secret may have leaked]].
+:::
+
+:::note The two-person rule
+[[a:b06-09|Credentials and Credential Sets]] says credential changes need two people. On this screen the buttons act immediately and are audited. Until that is settled, treat every action here as serious and check the gateway, the environment and the owner twice before you confirm.
+:::
+@@end
+
+@@article id=b03-13 book=3 order=10 title="The Journal Entries screen: reading the ledger line by line" roles=FINANCE minutes=4 ui=AVAILABLE related=b08-01,b08-02,b08-05,b08-12
+:::summary Big picture in 20 seconds
+**Journal Entries** is the ledger opened for reading. Each row is one posting that moved money between accounts, and each shows whether its debits equal its credits. Nothing here can be edited. The one action, **Run checkpoint rollup**, is on an account, not on an entry.
+:::
+
+### Before you start
+If double-entry is new to you, read [[a:b08-01|Double-entry bookkeeping from zero]] first. In short: every posting has lines, and the total of the **debit** lines must equal the total of the **credit** lines. The ledger is **append-only**. A mistake is corrected by a new entry, never by changing an old one.
+
+### Opening the screen
+It is in the **Finance** section. You need `profit.read` or `liquidity.read`. The screen is titled "Journal Entries" with the subtitle "Append-only double-entry postings of the ledger, with their balance check."
+
+### The tiles
+| Tile | Meaning | What to do if it looks bad |
+| :--- | :--- | :--- |
+| **Journal entries** | all entries ever posted | none; context |
+| **Entries (24h)** | entries posted in the last day | none; context |
+| **Volume posted (24h)** | the total of debit lines in the last day, per currency. With several currencies it says "N currencies" | none; context |
+| **Unbalanced entries** | entries from the last 7 days whose debits and credits differ. The badge says **Passed** at zero and **Failed** otherwise | **Failed** is serious. Go to [[a:b08-05]] (the ledger equation) and runbook [[a:b10-05]] (RB-04) |
+
+The tiles do not follow the filters.
+
+### The table
+Columns: **Entry ID**, **Reference type**, **Reference**, **Memo**, **Lines**, **Total debit**, **Total credit**, **Balance**, **Posted at** and **Actions**.
+* **Reference type** says what caused the entry: `PAYMENT_ATTEMPT`, `ADJUSTMENT`, `AML_RELEASE`, `AML_VOID`, `SETTLEMENT_SWEEP`, `FEE_VARIANCE`, `COMMISSION_NETTING` or `DISPUTE_OUTCOME`. The postings are explained in [[a:b08-04|How each kind of payment is posted]].
+* **Balance** says **Balanced** or **Unbalanced**. An entry with no lines at all counts as **Unbalanced**, because it is broken.
+* Filters: **Reference type**, **GL account ID** and **Posted** (a date range).
+* The newest entries come first. There is no Excel export.
+* `?glAccountId=<id>` opens the screen already filtered to one account. **Ledger Audit & Invariant** links here that way. `?open=<id>` opens one entry.
+
+### The entry drawer
+Click a row to open **Journal entry**. It shows the entry's identity, **Reference type**, **Reference**, **Posted at**, **Memo** and **Currency**.
+
+The **Double-entry lines** table is a T-account: **GL account**, **Currency**, **Debit** and **Credit**, with a **Totals** row. Each line has an amount on one side only, and credit lines are indented. Next to the badge you see **Σ Debits = Σ Credits**, or **Σ Debits ≠ Σ Credits** with the **Difference**.
+
+The **Reference** is a link when the entry came from a payment, an adjustment, an AML case or a dispute. **Open record** takes you there. Other references stay as text.
+
+### The GL account drawer
+Click a **GL account** on any line to open that account. The account types are in [[a:b08-02|The eleven accounts]].
+* **Natural balance** is the balance read the way that account type is normally read, so a credit-natural account is not shown as a confusing negative.
+* **Checkpoint balance** is the saved balance at the last checkpoint. **Posted since last checkpoint** is what was added afterwards.
+* **Shards** lists the parts of a busy account and their balances. **Recent lines** shows the latest postings, each linking back to its entry.
+* Drawers open from drawers: an entry opens an account, and an account's lines open entries.
+
+### The one action: Run checkpoint rollup
+In the GL account drawer, accounts with finance write access (`finance:write`) see **Run checkpoint rollup**. It folds the shard changes into the stored checkpoint balance. It is applied **immediately**, needs a **Reason** of at least 10 characters, and is audited.
+
+The rollup is **refused** if the shard total differs from the journal total. The box then shows the **Shard total**, the **Journal total** and the **Drift**. A refusal is a finding, not an obstacle: do not retry. Report it as in [[a:b08-05|The ledger equation]].
+
+:::tip Using the screen for a question
+"Where did Noon Mart's 25.500 LYD go?" Open **Transactions & Webhooks**, find the payment, click its **Ledger entry**, and read the lines. Every payment you can name has an entry you can read.
+:::
+@@end
+
+@@article id=b03-14 book=3 order=11 title="The Jobs & Outbox screen: is background work keeping up?" roles=SECURITY_ADMIN minutes=4 ui=AVAILABLE related=b12-08,b07-05,b10-01,b03-05
+:::summary Big picture in 20 seconds
+**Jobs & Outbox** shows whether the platform's background work is keeping up: events waiting to be published, audit records waiting to be shipped, background jobs and failed notifications. Two of its tabs are monitors only. On the other two you can put a failed item back in the queue.
+:::
+
+### Why this screen exists
+Much of the platform's work happens after you click: a payment's events are published, audit records are shipped to the audit store, reconciliations and adjustments run in the background, and messages go out to people. If a worker falls behind, nothing breaks loudly. Items just wait. This screen makes the waiting visible. Background workers are explained in [[a:b12-08|The database, timers and workers]].
+
+### Opening the screen
+It is in the **Operations** section. You need the authority `security:read`. To **Re-queue** or **Retry** you also need `security:write`. Without it you see **—** in the **Actions** column. The page is titled **System Jobs & Outbox**.
+
+### The tiles
+| Tile | Meaning | What to do if it looks bad |
+| :--- | :--- | :--- |
+| **Unpublished outbox events** | events saved but not yet published. It shows the age of the oldest | see the badge colours below |
+| **Audit outbox queued** | audit records waiting to be shipped, with the age of the oldest | the same |
+| **Background jobs (24h)** | jobs created in the last day, with how many are queued, running and succeeded | none; context |
+| **Failed jobs (24h)** | jobs that failed in the last day. **Review** when above zero, **Clear** at zero | open the **Background jobs** tab |
+| **Failed notifications** | all-time count of notifications that failed. **Review** or **Clear** | open the **Notifications** tab |
+
+The two backlog tiles carry a badge: **Healthy** when nothing waits, **Draining** while something waits but the oldest item is under 15 minutes old, and **Backlog** (red) when the oldest item is older than 15 minutes. A **Backlog** that does not go away means a worker is stuck. Tell Engineering and follow [[a:b10-01|Incident principles]].
+
+### Four tabs
+Open one directly with `?tab=outbox`, `?tab=audit`, `?tab=jobs` or `?tab=notifications`.
+
+**Transactional outbox** (monitor only). When the platform saves a business change, it also saves an *event* in the same step, so the two cannot disagree. A worker then reads these events and updates the dashboards. Columns: **Event**, **Topic**, **Aggregate**, **Aggregate ID**, **Merchant**, **Status**, **Age**, **Created** and **Published at**. Status is **Published** or **Unpublished**.
+
+**Audit outbox** (monitor only). Audit records waiting to be copied to the audit store and added to its tamper-evident chain. Columns: **Record**, **Action**, **Entity type**, **Entity ID**, **Actor role**, **Status**, **Lease until**, **Created** and **Shipped at**. Status is **Shipped** or **Queued**. Before-and-after data and the actor's e-mail are never shown. See [[a:b04-07|Audit trails]].
+
+**Background jobs.** Columns: **Job**, **Type**, **Reference**, **State**, **Attempts**, **Available at**, **Last error** and **Actions**. The types are `RECONCILIATION_RUN` and `ADJUSTMENT_EXECUTION`. The states are `QUEUED`, `RUNNING`, `SUCCEEDED` and `FAILED`. **FAILED means the job used all its attempts and will not run again by itself.**
+
+**Notifications.** The table is titled **Failed notifications** and shows only failed ones until you change **Status** to see all. Columns: **Notification**, **Template**, **Channel**, **Language**, **Recipient** (masked), **Status**, **Attempts**, **Next attempt** and **Actions**. Channels are `SMS`, `EMAIL` and `IN_APP`. Statuses are `QUEUED`, `SENT`, `DELIVERED`, `FAILED` and `SUPPRESSED`.
+
+Every tab has its own filters and the newest rows first.
+
+### What you can do
+| Action | On | What happens |
+| :--- | :--- | :--- |
+| **Re-queue** | a `FAILED` background job | puts the job back in the queue with its attempts reset to zero. Refused if the job is not `FAILED` |
+| **Retry** | a `FAILED` notification | queues the notification again for delivery. Refused if it is not `FAILED` |
+
+Both are **immediate**, need no second person, ask for a **Reason** of at least 10 characters and are audited.
+
+There is **no retry** on the two outbox tabs. The screen says: "This is a monitor: the worker republishes events itself, there is nothing to retry by hand." If the numbers do not fall, the fix is in the worker, not in this screen.
+
+:::warning Find out why before you re-queue
+A job that failed may fail again for the same reason. Read the **Last error** first. If you do not understand it, ask Engineering before you click **Re-queue**.
+:::
+@@end
+
+@@article id=b03-06 book=3 order=12 title="Safe-working habits that prevent most mistakes" roles=ALL minutes=1 ui=AVAILABLE related=b00-03,b04-06
 1. **One task at a time.** Finish or deliberately park the current item before opening another. Most wrong-merchant, wrong-amount mistakes happen when two tabs are open.
 2. **Read the whole line before you click.** Merchant name, amount, currency, environment badge, status.
 3. **Say it out loud (or in your head) in one sentence** before approving: "I am approving a 250.000 LYD refund to merchant X because the original payment was duplicated."
@@ -1137,7 +1565,7 @@ The dashboard is a smoke alarm, not a diagnosis. When a tile worries you, open t
 10. **Take breaks.** Fatigue is the largest cause of clicking the wrong row.
 @@end
 
-@@article id=b03-07 book=3 order=7 title="When a button is missing or an action is refused" roles=ALL minutes=2 ui=AVAILABLE related=b02-02,b03-02
+@@article id=b03-07 book=3 order=13 title="When a button is missing or an action is refused" roles=ALL minutes=2 ui=AVAILABLE related=b02-02,b03-02
 | What you see | Likely reason | What to do |
 | :--- | :--- | :--- |
 | A menu item is missing | You do not have the authority. | Ask your manager. Do not ask a colleague to share their account. |
@@ -1153,7 +1581,7 @@ Never try to "work around" a refusal by using another person's session, changing
 :::
 @@end
 
-@@article id=b03-08 book=3 order=8 title="Features that are only partially available" roles=ALL minutes=1 ui=PARTIAL related=b04-05
+@@article id=b03-08 book=3 order=14 title="Features that are only partially available" roles=ALL minutes=1 ui=PARTIAL related=b04-05
 Almost every Back Office control now has a screen. One area is still partial:
 
 | Capability | Status | What to do today |
@@ -6538,7 +6966,9 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
     "b05-08",
     "b05-09",
     "b04-02",
-    "b04-04"
+    "b04-04",
+    "b03-09",
+    "b03-10"
    ],
    "cards": [
     "sg-suspend-merchant",
@@ -6657,7 +7087,8 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
     "b07-03",
     "b07-04",
     "b07-08",
-    "b07-09"
+    "b07-09",
+    "b03-11"
    ],
    "cards": [
     "sg-resolve-unknown",
@@ -6766,7 +7197,8 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
    "articles": [
     "b08-05",
     "b08-11",
-    "b10-05"
+    "b10-05",
+    "b03-13"
    ],
    "cards": [],
    "situations": [
@@ -6786,7 +7218,8 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
     "b06-01",
     "b06-13",
     "b06-14",
-    "b06-16"
+    "b06-16",
+    "b03-12"
    ],
    "cards": [],
    "situations": [
@@ -6974,7 +7407,8 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
     "b03-03",
     "b03-06",
     "b03-07",
-    "b03-08"
+    "b03-08",
+    "b03-14"
    ],
    "cards": [],
    "situations": [

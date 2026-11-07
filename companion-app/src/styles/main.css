@@ -1319,11 +1319,34 @@ code,
 
 .table-wrap {
     width: 100%;
+    max-width: 100%;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
     margin: 0.8em 0;
     border: 1px solid var(--border);
     border-radius: 11px;
     background: var(--bg-elevated);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) var(--bg-soft);
+}
+
+.table-wrap:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.table-wrap::-webkit-scrollbar {
+    height: 8px;
+}
+
+.table-wrap::-webkit-scrollbar-track {
+    background: var(--bg-soft);
+    border-radius: 4px;
+}
+
+.table-wrap::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 4px;
 }
 
 .data-table,
@@ -1332,6 +1355,16 @@ code,
     border-collapse: collapse;
     font-size: 0.8rem;
     line-height: 1.5;
+}
+
+/* Guide and Academy article tables scroll inside their wrapper instead of
+   squeezing columns. Without the min width a five-column table in a phone
+   reader would break identifiers into single letters. */
+.prose .table-wrap--md th,
+.prose .table-wrap--md td {
+    min-inline-size: 9.5em;
+    overflow-wrap: normal;
+    word-break: normal;
 }
 
 .data-table th,

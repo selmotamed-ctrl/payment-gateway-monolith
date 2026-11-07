@@ -58,7 +58,7 @@ The app mirrors the true content during build:
 4. `scripts/check-content.ts` re-runs the extractors and fails if the committed snapshot is
    stale, or if `admin-front` generated content has drifted.
 
-The current snapshot contains 14 guide books, 128 articles, 151 glossary terms, 25 safeguard
+The current snapshot contains 14 guide books, 134 articles, 151 glossary terms, 25 safeguard
 cards, 32 situations, 58 quick answers, 19 error codes, 140 edge cases; and 8 Academy tracks,
 11 modules, 50 lessons, 100 practice checks, 16 labs / 92 tasks, 11 drills and 6 learner pages.
 The exam bank has 223 questions with keys but is not in the bundle.
@@ -68,6 +68,10 @@ The exam bank has 223 questions with keys but is not in the bundle.
 The client is Vue 3 + TypeScript + Vite + Capacitor 8. It uses hash routing, no Vuetify, no
 remote UI assets, and a self-contained markdown renderer with callouts, guide links,
 glossary auto-linking, heading ids, table/diagram handling and simulator placeholders.
+Article and lesson tables keep a `9.5em` minimum column width and scroll horizontally
+inside a focusable wrapper (themed thin scrollbars, contained overscroll) on narrow
+screens; cells use `overflow-wrap: normal`, so a long identifier or word is never broken
+letter by letter.
 
 The clarity renderer matches the Admin Guide: parenthetical reference dumps are removed from
 sentences and collected into a per-section **Related** tray of typed pills; bare inline links
@@ -145,9 +149,9 @@ The 2026-11-06 build produced a 3.8 MiB signed APK with SHA-256
 
 - `bun run content:check` passes against the canonical extractors.
 - `bun run typecheck` passes.
-- `bun test` passes 22 tests: content integrity, markdown rendering (including parenthetical
-  extraction, summary/refs callouts, section trays and preview-snippet helpers), offline
-  search and all 18 published lab-scoring vectors.
+- `bun test` passes 23 tests: content integrity, markdown rendering (including parenthetical
+  extraction, summary/refs callouts, section trays, preview-snippet helpers and the
+  scrollable table wrapper), offline search and all 18 published lab-scoring vectors.
 - Web Playwright smoke covers 24 routes at 360/390/768 px, light/dark/sepia, English/Arabic
   chrome, with no horizontal overflow or console errors.
 - The release APK passes `apksigner verify`; the content manifest signature and bundle

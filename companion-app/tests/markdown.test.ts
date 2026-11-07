@@ -51,6 +51,20 @@ describe("markdown renderer", () => {
         expect(prose).not.toMatch(/### Check yourself/i);
     });
 
+    test("wraps tables in a keyboard-scrollable container", () => {
+        const source = [
+            "| Field | Meaning |",
+            "| --- | --- |",
+            "| `SECURITY_ADMIN/FINANCE` | The longest role name in the guide. |",
+        ].join("\n");
+        const html = renderMarkdown(source, context)
+            .map((segment) => segment.html ?? "")
+            .join("\n");
+        expect(html).toContain('<div class="table-wrap table-wrap--md" tabindex="0">');
+        expect(html).toContain("</table></div>");
+        expect(html).not.toMatch(/<table[^>]*(?:style=|width=)/);
+    });
+
     test("heading ids are stable and unique within a rendered article", () => {
         const article = bundle.guide.articles.find((entry) => entry.headings.length > 3) ?? bundle.guide.articles[0]!;
         const html = renderMarkdown(article.body, context)
