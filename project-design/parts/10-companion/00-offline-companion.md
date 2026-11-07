@@ -3,7 +3,7 @@ id: companion.offline
 title: Offline Android Companion
 status: partial
 confidence: high
-last_verified: 2026-11-06
+last_verified: 2026-11-07
 verified_against: working-tree
 code:
   - companion-app/**
@@ -68,6 +68,14 @@ The exam bank has 223 questions with keys but is not in the bundle.
 The client is Vue 3 + TypeScript + Vite + Capacitor 8. It uses hash routing, no Vuetify, no
 remote UI assets, and a self-contained markdown renderer with callouts, guide links,
 glossary auto-linking, heading ids, table/diagram handling and simulator placeholders.
+
+The clarity renderer matches the Admin Guide: parenthetical reference dumps are removed from
+sentences and collected into a per-section **Related** tray of typed pills; bare inline links
+use a short natural title rather than the full article title; `:::summary` renders an
+"In plain words" banner and `:::refs` renders a "Where to go next" footer; and tapping a
+guide, screen or playbook pill opens a **reference preview sheet** with a short body,
+**Keep reading here** and **Open full page →**. The sheet is dismissible by backdrop,
+Escape or its close button.
 
 Screens:
 
@@ -137,8 +145,9 @@ The 2026-11-06 build produced a 3.8 MiB signed APK with SHA-256
 
 - `bun run content:check` passes against the canonical extractors.
 - `bun run typecheck` passes.
-- `bun test` passes 16 tests: content integrity, markdown rendering, offline search and all
-  18 published lab-scoring vectors.
+- `bun test` passes 22 tests: content integrity, markdown rendering (including parenthetical
+  extraction, summary/refs callouts, section trays and preview-snippet helpers), offline
+  search and all 18 published lab-scoring vectors.
 - Web Playwright smoke covers 24 routes at 360/390/768 px, light/dark/sepia, English/Arabic
   chrome, with no horizontal overflow or console errors.
 - The release APK passes `apksigner verify`; the content manifest signature and bundle

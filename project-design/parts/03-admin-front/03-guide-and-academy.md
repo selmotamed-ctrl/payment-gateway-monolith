@@ -3,11 +3,12 @@ id: admin-ui.guide
 title: Admin Guide and Academy
 status: partial
 confidence: high
-last_verified: 2026-11-06
+last_verified: 2026-11-07
 verified_against: working-tree
 code:
   - admin-front/scripts/extract-guide-content.ts
   - admin-front/scripts/extract-academy-content.ts
+  - scripts/overhaul-guide-and-academy-clarity.ts
   - admin-front/src/content/guide/**
   - admin-front/src/components/guide/**
   - admin-front/src/pages/guide/**
@@ -31,6 +32,7 @@ tests:
   - tests/unit/guide-content.test.ts
   - tests/unit/guide-search.test.ts
   - tests/unit/guide-widgets.test.ts
+  - tests/unit/guide-markdown-refs.test.ts
   - tests/unit/academy-content.test.ts
   - tests/unit/academy-lab-scoring.test.ts
   - tests/unit/academy-progress-merge.test.ts
@@ -92,6 +94,8 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 
 The extractor output is deterministic and byte-stable. The content test re-runs it into a temporary directory and fails on drift, count changes, unresolved links, empty bodies, external URLs, missing context-map routes, missing widgets or a gzip total above 400 KB.
 
+`scripts/overhaul-guide-and-academy-clarity.ts` is the content clarity gate. It labels every bare inline `[[a:…]]` / `[[c:…]]` / `[[s:…]]` / `[[g:…]]` token outside tables with a short natural title, skips code fences, table rows and already-labelled links, and supports `--check` (used by `guide-content.test.ts`). Table cells stay unlabelled because a `|` inside a link label would split the markdown cell; the readers shorten bare table links at render time instead. Parenthetical reference dumps are removed at render time (see §3), so the canonical prose preserves the links. The clarity pass added 22 `:::summary` "In plain words" callouts (Book 2 plus the highest-friction Book 4–11 articles), one curated `:::refs` footer, short labels on 295 references, and richer story-driven prose for 10 foundational Academy lessons; counts, ids, check questions and facts are unchanged.
+
 ## 3. Guide reader and navigation
 
 Eight routes are registered with no authority gate:
@@ -108,6 +112,13 @@ Eight routes are registered with no authority gate:
 | `AdminGuideEdgeCases` | `/guide/edge-cases` | Filterable 140-case catalog |
 
 `MarkdownView` uses `markdown-it` (`html:false`, `linkify:false`) and adds callouts, diagram fences, table scrolling, stable heading ids, article/card/situation/glossary links, glossary auto-linking (first occurrence per article, never in headings, links, code or table headers) and widget placeholders. The glossary popover is keyboard reachable and focus-trapped.
+
+The clarity renderer adds:
+
+- **Automatic parenthetical extraction.** Parenthetical pointers such as `([[a:b06-12]])`, `(see [[a:b07-03]])` or `(see [[a:b06-05]], [[a:b06-07]])` are removed from the sentence, deduplicated and rendered in a per-`##`-section **Related** tray of typed pills (`Guide`, `Screen`, `Playbook`, `Term`). Meaningful parenthetical prose is preserved: `(called rails, see [[a:b02-06]])` becomes `(called rails)`. Links extracted this way carry `data-ref-kind` and `data-ref-id`.
+- **Short inline labels.** A bare `[[a:id]]` renders the target's short title (the clause before a colon, or at most 12 words) instead of dumping the full 10-to-15-word title into the sentence. The full title is still the anchor's `title` attribute.
+- **Summary and reference callouts.** `:::summary` renders a warm "In plain words" banner for a two-sentence orientation at the top of an article; `:::refs` renders a "Where to go next" callout whose links explain why the reader would follow them. Explicit `:::refs` links are excluded from the automatic section tray to avoid duplicates.
+- **Reference preview popover.** In the full reader (not compact embedded views), clicking a guide, screen or playbook pill opens a keyboard-accessible popover with the type badge, title, reading time or risk, a short plain-text body and two actions: **Stay here** and **Read full page →**. Compact views (`ContextHelpDrawer`, `SafeguardDialog`, Academy help drills) keep direct navigation so the hosting dialog is not covered.
 
 ## 4. Search and contextual help
 
@@ -264,6 +275,7 @@ imported by the companion; this part remains the authority for the web Guide/Aca
 
 ```bash
 cd admin-front && bun run content:guide && bun run content:academy && bun run type-check && bun run test:unit && bun run build
+bun scripts/overhaul-guide-and-academy-clarity.ts --check
 cd ../tests && bunx vitest run unit/guide- unit/academy-
 cd ../core-back && bun run typecheck && bun test test/academy-
 cd ../admin-back && bun run typecheck && bun test test/academy-progress.test.ts test/admin-surface.test.ts

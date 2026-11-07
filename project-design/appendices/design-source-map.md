@@ -22,6 +22,7 @@ Every historical design file must map to a canonical part or be explicitly marke
 | `design/07-guides-and-academy/guide_content_questions.md` | Open behaviour questions found during implementation | `parts/03-admin-front/06-guide-v2.md` |
 | `design/07-guides-and-academy/academy_content_fixes.md` | Implementation log of Academy label/route-map/spec corrections | `parts/03-admin-front/03-guide-and-academy.md` |
 | `design/07-guides-and-academy/academy_content_questions.md` | Open Academy behaviour questions found during implementation | `parts/03-admin-front/03-guide-and-academy.md` |
+| `design/07-guides-and-academy/guide_academy_and_companion_clarity_overhaul_plan.md` | Implemented 2026-11-07 against the current 128-article/50-lesson tree; the plan's verbatim replacements target an older snapshot and were adapted, not copied | `parts/03-admin-front/03-guide-and-academy.md`, `parts/10-companion/00-offline-companion.md`, `parts/08-testing/01-suite-catalog.md` |
 | `design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md` | SUPERSEDED by v2 (`design/06-ui/..._2.md`); UI design source; correct route counts and actual primitives | `parts/03-admin-front/00-ui-system.md` |
 | `design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md` | UI v2 design source | `parts/03-admin-front/00-ui-system.md`, `02-tables-filters-exports.md` |
 | `design/06-ui/pg_companion_offline_android_app.md` | Active design for the offline PG Companion Android app | `parts/10-companion/00-offline-companion.md` |

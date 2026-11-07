@@ -8955,7 +8955,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 <a id="admin-uiguide"></a>
 
-> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `working-tree`
+> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `working-tree`
 
 # Admin Guide and Academy
 
@@ -8991,6 +8991,8 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 
 The extractor output is deterministic and byte-stable. The content test re-runs it into a temporary directory and fails on drift, count changes, unresolved links, empty bodies, external URLs, missing context-map routes, missing widgets or a gzip total above 400 KB.
 
+`scripts/overhaul-guide-and-academy-clarity.ts` is the content clarity gate. It labels every bare inline `[[a:…]]` / `[[c:…]]` / `[[s:…]]` / `[[g:…]]` token outside tables with a short natural title, skips code fences, table rows and already-labelled links, and supports `--check` (used by `guide-content.test.ts`). Table cells stay unlabelled because a `|` inside a link label would split the markdown cell; the readers shorten bare table links at render time instead. Parenthetical reference dumps are removed at render time (see §3), so the canonical prose preserves the links. The clarity pass added 22 `:::summary` "In plain words" callouts (Book 2 plus the highest-friction Book 4–11 articles), one curated `:::refs` footer, short labels on 295 references, and richer story-driven prose for 10 foundational Academy lessons; counts, ids, check questions and facts are unchanged.
+
 ## 3. Guide reader and navigation
 
 Eight routes are registered with no authority gate:
@@ -9007,6 +9009,13 @@ Eight routes are registered with no authority gate:
 | `AdminGuideEdgeCases` | `/guide/edge-cases` | Filterable 140-case catalog |
 
 `MarkdownView` uses `markdown-it` (`html:false`, `linkify:false`) and adds callouts, diagram fences, table scrolling, stable heading ids, article/card/situation/glossary links, glossary auto-linking (first occurrence per article, never in headings, links, code or table headers) and widget placeholders. The glossary popover is keyboard reachable and focus-trapped.
+
+The clarity renderer adds:
+
+- **Automatic parenthetical extraction.** Parenthetical pointers such as `([[a:b06-12]])`, `(see [[a:b07-03]])` or `(see [[a:b06-05]], [[a:b06-07]])` are removed from the sentence, deduplicated and rendered in a per-`##`-section **Related** tray of typed pills (`Guide`, `Screen`, `Playbook`, `Term`). Meaningful parenthetical prose is preserved: `(called rails, see [[a:b02-06]])` becomes `(called rails)`. Links extracted this way carry `data-ref-kind` and `data-ref-id`.
+- **Short inline labels.** A bare `[[a:id]]` renders the target's short title (the clause before a colon, or at most 12 words) instead of dumping the full 10-to-15-word title into the sentence. The full title is still the anchor's `title` attribute.
+- **Summary and reference callouts.** `:::summary` renders a warm "In plain words" banner for a two-sentence orientation at the top of an article; `:::refs` renders a "Where to go next" callout whose links explain why the reader would follow them. Explicit `:::refs` links are excluded from the automatic section tray to avoid duplicates.
+- **Reference preview popover.** In the full reader (not compact embedded views), clicking a guide, screen or playbook pill opens a keyboard-accessible popover with the type badge, title, reading time or risk, a short plain-text body and two actions: **Stay here** and **Read full page →**. Compact views (`ContextHelpDrawer`, `SafeguardDialog`, Academy help drills) keep direct navigation so the hosting dialog is not covered.
 
 ## 4. Search and contextual help
 
@@ -9163,6 +9172,7 @@ imported by the companion; this part remains the authority for the web Guide/Aca
 
 ```bash
 cd admin-front && bun run content:guide && bun run content:academy && bun run type-check && bun run test:unit && bun run build
+bun scripts/overhaul-guide-and-academy-clarity.ts --check
 cd ../tests && bunx vitest run unit/guide- unit/academy-
 cd ../core-back && bun run typecheck && bun test test/academy-
 cd ../admin-back && bun run typecheck && bun test test/academy-progress.test.ts test/admin-surface.test.ts
@@ -15248,7 +15258,7 @@ Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not cov
 
 ## Admin UI completion suites (2026-11-06)
 
-- **Unit (`tests/unit`, vitest, 483 passing in 29 files):** pure logic of the new UI: governance action tables per state (immediate vs approval), owner/revalidation forms, journal/route-cap/lifecycle/health/jobs models, the JSON diff model, audit summaries (`formatAuditValue`, `describeAuditChange`), commission tiers, dispute evidence mapping, and the builders' round trips (cost model, scope, maintenance windows, parser config, AML params, settings schemas, template variables) including unknown-key preservation. `commerce-i18n` and `builders-api-error-i18n` assert that every message key the logic can produce has an Arabic entry. `frontend-security-admin` (default-deny route authorities, alias map) and `guide-content` (every router name has a context-map screen) caught the six new routes until they were registered properly.
+- **Unit (`tests/unit`, vitest, 490 passing in 30 files):** pure logic of the new UI: governance action tables per state (immediate vs approval), owner/revalidation forms, journal/route-cap/lifecycle/health/jobs models, the JSON diff model, audit summaries (`formatAuditValue`, `describeAuditChange`), commission tiers, dispute evidence mapping, and the builders' round trips (cost model, scope, maintenance windows, parser config, AML params, settings schemas, template variables) including unknown-key preservation. `commerce-i18n` and `builders-api-error-i18n` assert that every message key the logic can produce has an Arabic entry. `frontend-security-admin` (default-deny route authorities, alias map) and `guide-content` (every router name has a context-map screen) caught the six new routes until they were registered properly. `guide-markdown-refs` covers the clarity renderer helpers (parenthetical reference extraction, meaningful-prose preservation, short labels, preview snippets); `guide-content` also runs the clarity `--check` gate.
 - **E2E (Playwright, needs Chrome: set `PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome-stable` when the bundled browser is not installed):** `e2e/admin/commerce-governance.spec.ts` drives the wallets page against realistic mocked responses (restricted balances render "Restricted" and never 0; a freeze needs a >=10-character reason and sends exactly `{status: "FROZEN", reason}`; restoring returns HTTP 202 and is reported as submitted for approval; a read-only role gets no freeze action). `exhaustive-admin-surface.spec.ts` now covers 31 routes (the six new ones included) across 3 viewports x 2 locales x 2 themes (372 combinations: no horizontal overflow, correct direction and theme, app bar never overlapping). `e2e/admin/backups.spec.ts` was updated for the second confirmation the page has asked for since the frontend hardening commit (its spec was stale).
 - **Component compliance (`admin-front` `bun run test:unit`):** helper components must live in `components/` subfolders so every route page keeps `PageHeader` (the test stops at the first offender).
 
@@ -15260,12 +15270,13 @@ Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not cov
 
 ## Offline companion suites (2026-11-06)
 
-`companion-app/tests/` (Vitest, 16 tests / 4 files) covers the generated content bundle
+`companion-app/tests/` (Vitest, 22 tests / 4 files) covers the generated content bundle
 (counts, cross-document links, lesson reading/check references, external-URL and exam-bank
 leak guards), markdown rendering for every article and lesson (unresolved links, callouts,
-glossary terms, widget placeholders, stable heading ids, structural lesson trimming), the
-offline MiniSearch index (`LIMIT_EXCEEDED`, maker-checker, glossary terms), and all 18
-published Academy lab-scoring vectors.
+glossary terms, widget placeholders, stable heading ids, structural lesson trimming,
+parenthetical reference extraction, summary/refs callouts, section trays, short labels and
+preview snippets), the offline MiniSearch index (`LIMIT_EXCEEDED`, maker-checker, glossary
+terms), and all 18 published Academy lab-scoring vectors.
 
 `companion-app/scripts/check-content.ts` is the build gate: it re-runs the canonical Guide
 and Academy extractors, compares their output with `admin-front/src/content/**/generated`,
@@ -16958,7 +16969,7 @@ No test currently verifies D-04 success, D-06 projection, D-08 encrypted storage
 
 <a id="companionoffline"></a>
 
-> **Part ID:** `companion.offline` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `working-tree`
+> **Part ID:** `companion.offline` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `working-tree`
 
 # Offline Android Companion
 
@@ -17002,6 +17013,14 @@ The exam bank has 223 questions with keys but is not in the bundle.
 The client is Vue 3 + TypeScript + Vite + Capacitor 8. It uses hash routing, no Vuetify, no
 remote UI assets, and a self-contained markdown renderer with callouts, guide links,
 glossary auto-linking, heading ids, table/diagram handling and simulator placeholders.
+
+The clarity renderer matches the Admin Guide: parenthetical reference dumps are removed from
+sentences and collected into a per-section **Related** tray of typed pills; bare inline links
+use a short natural title rather than the full article title; `:::summary` renders an
+"In plain words" banner and `:::refs` renders a "Where to go next" footer; and tapping a
+guide, screen or playbook pill opens a **reference preview sheet** with a short body,
+**Keep reading here** and **Open full page →**. The sheet is dismissible by backdrop,
+Escape or its close button.
 
 Screens:
 
@@ -17071,8 +17090,9 @@ The 2026-11-06 build produced a 3.8 MiB signed APK with SHA-256
 
 - `bun run content:check` passes against the canonical extractors.
 - `bun run typecheck` passes.
-- `bun test` passes 16 tests: content integrity, markdown rendering, offline search and all
-  18 published lab-scoring vectors.
+- `bun test` passes 22 tests: content integrity, markdown rendering (including parenthetical
+  extraction, summary/refs callouts, section trays and preview-snippet helpers), offline
+  search and all 18 published lab-scoring vectors.
 - Web Playwright smoke covers 24 routes at 360/390/768 px, light/dark/sepia, English/Arabic
   chrome, with no horizontal overflow or console errors.
 - The release APK passes `apksigner verify`; the content manifest signature and bundle

@@ -402,7 +402,7 @@ Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not cov
 
 ## Admin UI completion suites (2026-11-06)
 
-- **Unit (`tests/unit`, vitest, 483 passing in 29 files):** pure logic of the new UI: governance action tables per state (immediate vs approval), owner/revalidation forms, journal/route-cap/lifecycle/health/jobs models, the JSON diff model, audit summaries (`formatAuditValue`, `describeAuditChange`), commission tiers, dispute evidence mapping, and the builders' round trips (cost model, scope, maintenance windows, parser config, AML params, settings schemas, template variables) including unknown-key preservation. `commerce-i18n` and `builders-api-error-i18n` assert that every message key the logic can produce has an Arabic entry. `frontend-security-admin` (default-deny route authorities, alias map) and `guide-content` (every router name has a context-map screen) caught the six new routes until they were registered properly.
+- **Unit (`tests/unit`, vitest, 490 passing in 30 files):** pure logic of the new UI: governance action tables per state (immediate vs approval), owner/revalidation forms, journal/route-cap/lifecycle/health/jobs models, the JSON diff model, audit summaries (`formatAuditValue`, `describeAuditChange`), commission tiers, dispute evidence mapping, and the builders' round trips (cost model, scope, maintenance windows, parser config, AML params, settings schemas, template variables) including unknown-key preservation. `commerce-i18n` and `builders-api-error-i18n` assert that every message key the logic can produce has an Arabic entry. `frontend-security-admin` (default-deny route authorities, alias map) and `guide-content` (every router name has a context-map screen) caught the six new routes until they were registered properly. `guide-markdown-refs` covers the clarity renderer helpers (parenthetical reference extraction, meaningful-prose preservation, short labels, preview snippets); `guide-content` also runs the clarity `--check` gate.
 - **E2E (Playwright, needs Chrome: set `PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome-stable` when the bundled browser is not installed):** `e2e/admin/commerce-governance.spec.ts` drives the wallets page against realistic mocked responses (restricted balances render "Restricted" and never 0; a freeze needs a >=10-character reason and sends exactly `{status: "FROZEN", reason}`; restoring returns HTTP 202 and is reported as submitted for approval; a read-only role gets no freeze action). `exhaustive-admin-surface.spec.ts` now covers 31 routes (the six new ones included) across 3 viewports x 2 locales x 2 themes (372 combinations: no horizontal overflow, correct direction and theme, app bar never overlapping). `e2e/admin/backups.spec.ts` was updated for the second confirmation the page has asked for since the frontend hardening commit (its spec was stale).
 - **Component compliance (`admin-front` `bun run test:unit`):** helper components must live in `components/` subfolders so every route page keeps `PageHeader` (the test stops at the first offender).
 
@@ -414,12 +414,13 @@ Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not cov
 
 ## Offline companion suites (2026-11-06)
 
-`companion-app/tests/` (Vitest, 16 tests / 4 files) covers the generated content bundle
+`companion-app/tests/` (Vitest, 22 tests / 4 files) covers the generated content bundle
 (counts, cross-document links, lesson reading/check references, external-URL and exam-bank
 leak guards), markdown rendering for every article and lesson (unresolved links, callouts,
-glossary terms, widget placeholders, stable heading ids, structural lesson trimming), the
-offline MiniSearch index (`LIMIT_EXCEEDED`, maker-checker, glossary terms), and all 18
-published Academy lab-scoring vectors.
+glossary terms, widget placeholders, stable heading ids, structural lesson trimming,
+parenthetical reference extraction, summary/refs callouts, section trays, short labels and
+preview snippets), the offline MiniSearch index (`LIMIT_EXCEEDED`, maker-checker, glossary
+terms), and all 18 published Academy lab-scoring vectors.
 
 `companion-app/scripts/check-content.ts` is the build gate: it re-runs the canonical Guide
 and Academy extractors, compares their output with `admin-front/src/content/**/generated`,

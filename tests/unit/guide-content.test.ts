@@ -173,4 +173,12 @@ describe("guide content extractor", () => {
         ];
         expect(candidates.some((candidate) => existsSync(candidate))).toBe(true);
     });
+
+    test("inline guide references keep short labels", () => {
+        execFileSync(
+            "bun",
+            [join(REPO_ROOT, "scripts/overhaul-guide-and-academy-clarity.ts"), "--check"],
+            { cwd: REPO_ROOT, stdio: "pipe" },
+        );
+    });
 });

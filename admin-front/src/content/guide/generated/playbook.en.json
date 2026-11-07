@@ -17,7 +17,7 @@
       "b07-09",
       "b10-04"
     ],
-    "body": "### What you are seeing\nAn attempt shows `UNKNOWN`, or the **Unknown Backlog** tile is rising.\n### What it means\nWe did not get a clear answer from the partner. Money may or may not have moved.\n### What to do\n1. Check the environment badge.\n2. Open the case and read the step log.\n3. Press **Inquire** once.\n4. If the partner cannot be asked, wait for the statement or ask the partner's support with our reference and the provider reference.\n5. Resolve by hand only with evidence and a second person ([[c:sg-resolve-unknown]]).\n### What not to do\nDo not mark it failed because it is old. Do not ask the customer to pay again. Do not re-send an OTP."
+    "body": "### What you are seeing\nAn attempt shows `UNKNOWN`, or the **Unknown Backlog** tile is rising.\n### What it means\nWe did not get a clear answer from the partner. Money may or may not have moved.\n### What to do\n1. Check the environment badge.\n2. Open the case and read the step log.\n3. Press **Inquire** once.\n4. If the partner cannot be asked, wait for the statement or ask the partner's support with our reference and the provider reference.\n5. Resolve by hand only with evidence and a second person ([[c:sg-resolve-unknown|Resolve an UNKNOWN payment by hand]]).\n### What not to do\nDo not mark it failed because it is old. Do not ask the customer to pay again. Do not re-send an OTP."
   },
   {
     "id": "s-customer-deducted",
@@ -36,7 +36,7 @@
       "b07-03",
       "b07-08"
     ],
-    "body": "### What it means\nThe customer's bank or wallet shows a deduction. Our status may be anything.\n### What to do\nAsk for the reference, look it up and follow the table in [[a:b07-12]]. If our status is not `SUCCEEDED`, create or update a case with the reference and time.\n### What not to do\nDo not promise a refund. Do not say \"confirmed\" from a screenshot."
+    "body": "### What it means\nThe customer's bank or wallet shows a deduction. Our status may be anything.\n### What to do\nAsk for the reference, look it up and follow the table in [[a:b07-12|Procedure]]. If our status is not `SUCCEEDED`, create or update a case with the reference and time.\n### What not to do\nDo not promise a refund. Do not say \"confirmed\" from a screenshot."
   },
   {
     "id": "s-method-missing",
@@ -56,7 +56,7 @@
       "b06-11",
       "b10-02"
     ],
-    "body": "### What it means\nOne of the nine conditions of the visible-rails formula is failing.\n### What to do\nWalk down the table in [[a:b06-12]]: application list, link list, commission profile, route active, route healthy, limits and daily cap, maintenance and scope, credential verified, currency and blocked flag.\n### What not to do\nDo not widen limits or resume a route to \"make it appear\"."
+    "body": "### What it means\nOne of the nine conditions of the visible-rails formula is failing.\n### What to do\nWalk down the table in [[a:b06-12|The visible-rails formula]]: application list, link list, commission profile, route active, route healthy, limits and daily cap, maintenance and scope, credential verified, currency and blocked flag.\n### What not to do\nDo not widen limits or resume a route to \"make it appear\"."
   },
   {
     "id": "s-breaker-open",
@@ -110,7 +110,7 @@
       "b06-06",
       "b07-05"
     ],
-    "body": "### What to do\nFollow [[a:b10-03]]. Never accept unsigned messages to get things moving."
+    "body": "### What to do\nFollow [[a:b10-03|RB-02 Partner changed its signature or sender address]]. Never accept unsigned messages to get things moving."
   },
   {
     "id": "s-late-success",
@@ -196,7 +196,7 @@
       "b08-05",
       "b10-05"
     ],
-    "body": "### What to do\nTreat as P1. Payouts stop automatically. Follow [[a:b10-05]]. Never edit numbers."
+    "body": "### What to do\nTreat as P1. Payouts stop automatically. Follow [[a:b10-05|RB-04 Reconciliation or ledger drift]]. Never edit numbers."
   },
   {
     "id": "s-cashout-request",
@@ -344,7 +344,7 @@
       "b10-06",
       "b06-09"
     ],
-    "body": "### What to do\nFollow [[a:b10-06]]: replace the secret through two-person approval and run the credential check."
+    "body": "### What to do\nFollow [[a:b10-06|RB-05 Credentials or tokens expired or failing]]: replace the secret through two-person approval and run the credential check."
   },
   {
     "id": "s-approval-refused",
@@ -359,7 +359,7 @@
       "b03-07",
       "b03-02"
     ],
-    "body": "### What to do\nRead [[a:b03-07]]. Do not work around it."
+    "body": "### What to do\nRead [[a:b03-07|When a button is missing or an action is refused]]. Do not work around it."
   },
   {
     "id": "s-approval-expired",
@@ -504,7 +504,7 @@
       "b12-10",
       "b12-11"
     ],
-    "body": "### What it means\nThe core cannot talk to the backup daemon over mutual TLS. **Run backup now**, **Run restore drill** and **Edit policy** are disabled. Scheduled backups and WAL archiving may not be happening.\n\n### What to do\n1. Do not guess and do not try to fix servers yourself. Tell the Security Admin and the people who run the servers.\n2. Ask them to check that the backup daemon service is running on its host, that its certificate and the core's backup client certificate are valid, and that the network path from the core to the daemon is open.\n3. Remember that the database keeps WAL segments it has not yet delivered. A long outage can fill the database disk, so do not leave this overnight.\n4. When **Daemon status** returns to **Reachable**, press **Refresh**, confirm **WAL archive lag** drains and check **Last backup**. If a scheduled backup was missed, a Security Admin can run a **Delta** ([[c:sg-trigger-backup]])."
+    "body": "### What it means\nThe core cannot talk to the backup daemon over mutual TLS. **Run backup now**, **Run restore drill** and **Edit policy** are disabled. Scheduled backups and WAL archiving may not be happening.\n\n### What to do\n1. Do not guess and do not try to fix servers yourself. Tell the Security Admin and the people who run the servers.\n2. Ask them to check that the backup daemon service is running on its host, that its certificate and the core's backup client certificate are valid, and that the network path from the core to the daemon is open.\n3. Remember that the database keeps WAL segments it has not yet delivered. A long outage can fill the database disk, so do not leave this overnight.\n4. When **Daemon status** returns to **Reachable**, press **Refresh**, confirm **WAL archive lag** drains and check **Last backup**. If a scheduled backup was missed, a Security Admin can run a **Delta** ([[c:sg-trigger-backup|Run a backup now]])."
   },
   {
     "id": "s-wal-archive-lag-high",
@@ -517,7 +517,7 @@
       "b12-09",
       "b12-10"
     ],
-    "body": "### What it means\n**Attention** means the lag is above the **Alert threshold** (default 300 s). **Critical** means above twice the threshold. Recent changes are not yet safely archived, so a disaster now would lose more than a few seconds.\n\n### What to do\n1. Read **Archive lag**, **Lag bytes**, **Current LSN** and **Last archived LSN**. Press **Refresh** twice a minute apart: is the lag falling or growing?\n2. Open **Storage targets** and **Daemon status**. A **Failed** target (for example the S3 or MinIO bucket) or an **Unreachable** daemon is the usual cause. See [[s:s-backup-daemon-unreachable]].\n3. Tell the Security Admin and the people who run the servers. Until archiving catches up, WAL piles up on the database disk.\n4. Do not raise the **Alert lag threshold** to silence the warning.\n5. Confirm recovery: **Archive lag** back under the threshold and the tile **Healthy**."
+    "body": "### What it means\n**Attention** means the lag is above the **Alert threshold** (default 300 s). **Critical** means above twice the threshold. Recent changes are not yet safely archived, so a disaster now would lose more than a few seconds.\n\n### What to do\n1. Read **Archive lag**, **Lag bytes**, **Current LSN** and **Last archived LSN**. Press **Refresh** twice a minute apart: is the lag falling or growing?\n2. Open **Storage targets** and **Daemon status**. A **Failed** target (for example the S3 or MinIO bucket) or an **Unreachable** daemon is the usual cause. See [[s:s-backup-daemon-unreachable|The Backups screen says the backup daemon is unreachable]].\n3. Tell the Security Admin and the people who run the servers. Until archiving catches up, WAL piles up on the database disk.\n4. Do not raise the **Alert lag threshold** to silence the warning.\n5. Confirm recovery: **Archive lag** back under the threshold and the tile **Healthy**."
   },
   {
     "id": "s-restore-drill-failed",
@@ -532,6 +532,6 @@
       "b10-05",
       "b08-11"
     ],
-    "body": "### What it means\nAny failed check is a **priority-1 incident**. Read the three badges in **Latest restore drill**.\n\n### What to do\n1. **Double-entry zero drift** or **Sharded balance parity** failed: tell Finance and the Security Admin. Open **Ledger Audit & Invariant** under **Finance** to see whether production also drifts, then follow RB-04 ([[a:b10-05]], [[a:b08-05]]).\n2. **Audit hash chain** failed: escalate immediately to the Security Admin. Do not delete, prune or alter any backup, and do not touch audit records.\n3. **Drill failed** with a red error text and no failed check (the backup could not be fetched or the scratch cluster did not start): we have no proof that recovery works. Ask the people who run the servers to fix the cause, then run another drill ([[c:sg-run-restore-drill]]) and confirm all three badges read **Passed**.\n4. Write down the drill id, the time and what you saw, in the incident record."
+    "body": "### What it means\nAny failed check is a **priority-1 incident**. Read the three badges in **Latest restore drill**.\n\n### What to do\n1. **Double-entry zero drift** or **Sharded balance parity** failed: tell Finance and the Security Admin. Open **Ledger Audit & Invariant** under **Finance** to see whether production also drifts, then follow RB-04 ([[a:b10-05|RB-04 Reconciliation or ledger drift]], [[a:b08-05|The ledger equation and what to do when it does not hold]]).\n2. **Audit hash chain** failed: escalate immediately to the Security Admin. Do not delete, prune or alter any backup, and do not touch audit records.\n3. **Drill failed** with a red error text and no failed check (the backup could not be fetched or the scratch cluster did not start): we have no proof that recovery works. Ask the people who run the servers to fix the cause, then run another drill ([[c:sg-run-restore-drill|Run a restore drill]]) and confirm all three badges read **Passed**.\n4. Write down the drill id, the time and what you saw, in the incident record."
   }
 ]

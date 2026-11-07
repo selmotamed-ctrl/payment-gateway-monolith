@@ -1,7 +1,17 @@
 import MarkdownIt, { type MarkdownIt as MarkdownItType } from "markdown-it";
 import type { Card, Situation, Term } from "@/content/types";
 
-const CALLOUT_TYPES = new Set(["note", "tip", "warning", "danger", "example", "do", "dont"]);
+const CALLOUT_TYPES = new Set([
+    "note",
+    "tip",
+    "warning",
+    "danger",
+    "example",
+    "do",
+    "dont",
+    "summary",
+    "refs",
+]);
 const CALLOUT_LABELS: Record<string, string> = {
     note: "Note",
     tip: "Tip",
@@ -10,6 +20,8 @@ const CALLOUT_LABELS: Record<string, string> = {
     example: "Example",
     do: "Do",
     dont: "Don't",
+    summary: "In plain words",
+    refs: "Where to go next",
 };
 const CALLOUT_ICONS: Record<string, string> = {
     note: "i",
@@ -19,6 +31,8 @@ const CALLOUT_ICONS: Record<string, string> = {
     example: ">",
     do: "+",
     dont: "x",
+    summary: "◆",
+    refs: "→",
 };
 const WIDGET_IDS = new Set([
     "transform-sandbox",
@@ -27,6 +41,16 @@ const WIDGET_IDS = new Set([
     "visible-rails",
     "attempt-states",
 ]);
+
+const KIND_BADGES: Record<string, string> = {
+    a: "Guide",
+    c: "Screen",
+    s: "Playbook",
+    g: "Term",
+};
+
+const REF_TOKEN_SOURCE = "\\[\\[([acgs]):([a-z0-9-]+)(?:\\|([^\\]]+))?\\]\\]";
+const createRefTokenRegex = (): RegExp => new RegExp(REF_TOKEN_SOURCE, "g");
 
 export const escapeHtml = (value: string): string =>
     value
@@ -37,6 +61,12 @@ export const escapeHtml = (value: string): string =>
         .replace(/'/g, "&#39;");
 
 const escapeAttribute = (value: string): string => escapeHtml(value);
+
+export interface CollectedRef {
+    kind: string;
+    id: string;
+    label?: string;
+}
 
 interface GuideLink {
     href: string;
@@ -54,14 +84,34 @@ interface RenderEnvironment {
     resolveLink: (kind: string, id: string, customLabel?: string) => GuideLink;
     disableGlossaryLinks: boolean;
     glossaryPageSlug?: string;
+    articleId?: string;
 }
 
 export interface MarkdownContext {
     articleId?: string;
     glossary?: Term[];
-    articles?: { id: string; title: string }[];
-    cards?: { id: string; title: string }[];
-    situations?: { id: string; title: string }[];
+    articles?: {
+        id: string;
+        title: string;
+        plainText?: string;
+        minutes?: number;
+        book?: number;
+    }[];
+    cards?: {
+        id: string;
+        title: string;
+        body?: string;
+        screen?: string;
+        risk?: string;
+        irreversible?: boolean;
+    }[];
+    situations?: {
+        id: string;
+        title: string;
+        body?: string;
+        screens?: string[];
+        cases?: number[];
+    }[];
     disableGlossaryLinks?: boolean;
     glossaryPageSlug?: string;
 }
@@ -92,36 +142,309 @@ const makeGlossaryRegex = (terms: Term[]): RegExp | null => {
     }
 };
 
-const stripInline = (value: string): string =>
+/** A short, natural label for an inline reference or a tray pill. */
+export const shortTitle = (value: string): string => {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    const colon = trimmed.indexOf(":");
+    if (colon > 0) return trimmed.slice(0, colon).trim();
+    const words = trimmed.split(/\s+/);
+    return words.length > 12 ? words.slice(0, 12).join(" ") : trimmed;
+};
+
+const POINTER_PATTERNS = [
+    /^(?:see|also|e\.g\.?|for example|details?|more|further|below|above|here|there)$/i,
+    /^(?:and|or|but|in|on|at|from|with|to|of|for|by|as)$/i,
+    /\b(?:is|are|was|were)\s+(?:in|found in|described in|explained in|covered in|introduced in|mentioned in|shown in)\s*$/i,
+    /^(?:you met|as (?:described|explained|shown)|the (?:rules?|details?|story|meaning|definition|explanation|full (?:explanation|details?)|guide|article|screen|playbook|section|chapter))\b/i,
+    /^how to .*\b(?:is|are) in$/i,
+    /^where .*\b(?:is|are) in$/i,
+    /^(?:for|about|because|since|why|as)\b(?:\s+\w+){0,3}$/i,
+];
+const POINTER_WORDS = new Set([
+    "a",
+    "above",
+    "also",
+    "an",
+    "and",
+    "are",
+    "article",
+    "as",
+    "at",
+    "be",
+    "because",
+    "below",
+    "but",
+    "by",
+    "chapter",
+    "could",
+    "covered",
+    "definition",
+    "described",
+    "detail",
+    "details",
+    "e.g",
+    "eg",
+    "example",
+    "explained",
+    "explanation",
+    "for",
+    "from",
+    "further",
+    "guide",
+    "her",
+    "here",
+    "him",
+    "how",
+    "in",
+    "introduced",
+    "is",
+    "it",
+    "its",
+    "meaning",
+    "mentioned",
+    "more",
+    "of",
+    "on",
+    "or",
+    "our",
+    "playbook",
+    "read",
+    "records",
+    "rule",
+    "rules",
+    "same",
+    "screen",
+    "section",
+    "see",
+    "shown",
+    "since",
+    "story",
+    "that",
+    "the",
+    "their",
+    "themselves",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "to",
+    "us",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "why",
+    "with",
+    "you",
+]);
+
+const cleanupResidue = (value: string): string =>
     value
-        .replace(/\[\[(?:a|c|s|g):([a-z0-9-]+)\|([^\]]+)\]\]/g, "$2")
-        .replace(/\[\[(?:a|c|s|g):([a-z0-9-]+)\]\]/g, "$1")
-        .replace(/`{1,3}([^`]*)`{1,3}/g, "$1")
-        .replace(/\*\*([^*]+)\*\*/g, "$1")
-        .replace(/__([^_]+)__/g, "$1")
-        .replace(/(^|\s)\*([^*]+)\*(?=\s|$)/g, "$1$2")
-        .replace(/(^|\s)_([^_]+)_(?=\s|$)/g, "$1$2")
-        .replace(/\\([\\`*_{}[\]()#+\-.!|>])/g, "$1")
-        .replace(/<br\s*\/?>/gi, " ")
-        .replace(/[ \t]+/g, " ")
+        .replace(/^[\s,;:.\-–—]+/, "")
+        .replace(/[\s,;:.\-–—]+$/, "")
+        .replace(/^(?:see|also|e\.g\.?|for example|details?|more)\b[,:]?\s*/i, "")
+        .replace(/\s*,?\s*(?:see|also)$/i, "")
+        .replace(/[\s,;:.\-–—]+$/, "")
         .trim();
 
-const slugify = (value: string): string =>
-    stripInline(value)
+const isPointerResidue = (value: string): boolean => {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (!normalized) return true;
+    if (POINTER_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
+    const words = normalized
         .toLocaleLowerCase()
-        .normalize("NFKD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^\p{L}\p{N}]+/gu, "-")
-        .replace(/^-+|-+$/g, "") || "section";
+        .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+        .split(/\s+/)
+        .filter(Boolean);
+    if (words.length === 0) return true;
+    return words.every((word) => POINTER_WORDS.has(word));
+};
 
-export const createHeadingIdFactory = (): ((text: string) => string) => {
-    const seen = new Map<string, number>();
-    return (text: string) => {
-        const base = slugify(text);
-        const count = seen.get(base) ?? 0;
-        seen.set(base, count + 1);
-        return count === 0 ? base : `${base}-${count + 1}`;
-    };
+/**
+ * Strips clunky mid-sentence parenthetical reference dumps such as
+ *   ([[a:b06-12]])
+ *   (see [[a:b02-06]])
+ *   (see [[a:b06-05]], [[a:b06-07]])
+ *   (called rails, see [[a:b02-06]])
+ * and returns the cleaned prose plus the extracted references. Parenthetical
+ * prose that carries meaning ("called rails") is preserved; pure pointers are
+ * moved to the section reference tray by the renderer.
+ */
+export const extractParentheticalRefs = (
+    line: string,
+): { cleaned: string; refs: CollectedRef[] } => {
+    if (!line.includes("[[") || !line.includes("(")) return { cleaned: line, refs: [] };
+
+    const refs: CollectedRef[] = [];
+    let output = "";
+    let cursor = 0;
+    let index = 0;
+
+    while (index < line.length) {
+        const open = line.indexOf("(", index);
+        if (open < 0) break;
+        const before = line.slice(0, open);
+        if ((before.match(/`/g) ?? []).length % 2 === 1) {
+            index = open + 1;
+            continue;
+        }
+        const close = line.indexOf(")", open + 1);
+        if (close < 0) break;
+        const inner = line.slice(open + 1, close);
+        if (!inner.includes("[[")) {
+            index = close + 1;
+            continue;
+        }
+
+        const tokenRegex = createRefTokenRegex();
+        const matches = [...inner.matchAll(tokenRegex)];
+        if (matches.length === 0) {
+            index = close + 1;
+            continue;
+        }
+        for (const match of matches) {
+            refs.push({
+                kind: match[1]!,
+                id: match[2]!,
+                label: match[3] || undefined,
+            });
+        }
+
+        tokenRegex.lastIndex = 0;
+        const residue = inner.replace(tokenRegex, " ").replace(/\s+/g, " ").trim();
+        const cleanedResidue = cleanupResidue(residue);
+        if (cleanedResidue && !isPointerResidue(cleanedResidue)) {
+            output += `${line.slice(cursor, open)}(${cleanedResidue})`;
+        } else {
+            output += line.slice(cursor, open);
+        }
+        cursor = close + 1;
+        index = close + 1;
+    }
+
+    output += line.slice(cursor);
+    const cleaned = output
+        .replace(/[ \t]+([.,;:!?])/g, "$1")
+        .replace(/\(\s*\)/g, "")
+        .replace(/[ \t]{2,}/g, " ")
+        .trimEnd();
+    return { cleaned, refs };
+};
+
+/** First readable paragraph of a markdown document, for reference previews. */
+export const firstProseParagraph = (source: string, maxLength = 240): string => {
+    const stripped = source
+        .replace(/```[a-zA-Z0-9_-]*\n[\s\S]*?```/g, "\n\n")
+        .replace(/^:::[a-z]+\s*.*$/gm, "")
+        .replace(/^:::$/gm, "")
+        .replace(/^\s{0,3}#{1,6}\s+.*$/gm, "")
+        .replace(/^\s*\*\*[^*]+\*\*\s*$/gm, "")
+        .replace(/^\s*[-*+]\s+\[[ x]\]\s+.*$/gm, "")
+        .replace(/^\s*[-*+]\s+/gm, "")
+        .replace(/^\s*\d+\.\s+/gm, "")
+        .replace(/^\s*\|\s*/gm, "")
+        .replace(/\{\{widget:[a-z0-9-]+\}\}/g, "")
+        .replace(/\[\[[acgs]:([a-z0-9-]+)\|([^\]]+)\]\]/g, "$2")
+        .replace(/\[\[[acgs]:([a-z0-9-]+)\]\]/g, "$1")
+        .replace(/\|/g, " ")
+        .replace(/\*\*([^*]+)\*\*/g, "$1")
+        .replace(/`([^`]+)`/g, "$1");
+    const paragraphs = stripped
+        .split(/\n\s*\n/)
+        .map((paragraph) =>
+            paragraph
+                .replace(/\s+/g, " ")
+                .replace(/\s+([.,;:!?])/g, "$1")
+                .trim(),
+        )
+        .filter((paragraph) => paragraph.length >= 20);
+    const paragraph = paragraphs[0] ?? stripped.replace(/\s+/g, " ").trim();
+    if (paragraph.length <= maxLength) return paragraph;
+    return `${paragraph.slice(0, maxLength - 1).trimEnd()}…`;
+};
+
+const renderRefTrayHtml = (
+    refs: CollectedRef[],
+    env: RenderEnvironment,
+    explicitRefs: Set<string>,
+): string => {
+    const unique = new Map<string, CollectedRef>();
+    for (const ref of refs) {
+        if (ref.kind === "a" && ref.id === env.articleId) continue;
+        const key = `${ref.kind}:${ref.id}`;
+        if (explicitRefs.has(key)) continue;
+        if (!unique.has(key)) unique.set(key, ref);
+    }
+    if (unique.size === 0) return "";
+
+    const pills = [...unique.values()]
+        .map((ref) => {
+            const link = env.resolveLink(ref.kind, ref.id, ref.label);
+            const label = ref.label || shortTitle(link.title || link.label);
+            const badge = KIND_BADGES[ref.kind] ?? "Link";
+            return `<a href="${escapeAttribute(link.href)}" class="ref-pill ref-pill--${escapeAttribute(
+                ref.kind,
+            )}" data-guide-link="true" data-ref-kind="${escapeAttribute(
+                ref.kind,
+            )}" data-ref-id="${escapeAttribute(ref.id)}" title="${escapeAttribute(
+                link.title,
+            )}"${
+                link.external ? ' target="_blank" rel="noreferrer"' : ""
+            }><span class="ref-pill__badge">${escapeHtml(
+                badge,
+            )}</span><span class="ref-pill__label">${escapeHtml(label)}</span></a>`;
+        })
+        .join("");
+
+    return `<aside class="section-refs" aria-label="Related guides and screens"><span class="section-refs__title">Related</span><div class="section-refs__list">${pills}</div></aside>`;
+};
+
+const linkTermsInText = (text: string, env: RenderEnvironment): any[] | null => {
+    const regex = env.glossaryRegex;
+    if (!regex) return null;
+    regex.lastIndex = 0;
+    const tokens: any[] = [];
+    let cursor = 0;
+    let changed = false;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(text)) !== null) {
+        const matched = match[0];
+        const term = env.termsByKey.get(normalizeKey(matched));
+        if (!term || env.usedTerms.has(term.slug) || term.slug === env.glossaryPageSlug) {
+            if (match.index + matched.length <= cursor) regex.lastIndex += 1;
+            continue;
+        }
+        if (match.index > cursor) {
+            tokens.push({
+                type: "text",
+                content: text.slice(cursor, match.index),
+                level: 0,
+                children: null,
+            });
+        }
+        tokens.push({
+            type: "guide_gloss",
+            tag: "",
+            nesting: 0,
+            content: matched,
+            meta: { slug: term.slug },
+            level: 0,
+            children: null,
+        });
+        env.usedTerms.add(term.slug);
+        cursor = match.index + matched.length;
+        changed = true;
+    }
+    if (!changed) return null;
+    if (cursor < text.length) {
+        tokens.push({ type: "text", content: text.slice(cursor), level: 0, children: null });
+    }
+    return tokens;
 };
 
 const createMarkdown = (): MarkdownItType => {
@@ -149,9 +472,14 @@ const createMarkdown = (): MarkdownItType => {
             meta.id,
             meta.label || undefined,
         );
-        return `<a href="${escapeAttribute(link.href)}" data-guide-link="true" title="${escapeAttribute(link.title)}"${
-            link.external ? ' target="_blank" rel="noreferrer"' : ""
-        }>${escapeHtml(link.label)}</a>`;
+        const label = meta.label || shortTitle(link.title || link.label);
+        return `<a href="${escapeAttribute(link.href)}" class="inline-guide-ref" data-guide-link="true" data-ref-kind="${escapeAttribute(
+            meta.kind,
+        )}" data-ref-id="${escapeAttribute(meta.id)}" title="${escapeAttribute(
+            link.title,
+        )}"${link.external ? ' target="_blank" rel="noreferrer"' : ""}>${escapeHtml(
+            label,
+        )}</a>`;
     };
 
     md.core.ruler.push("guide_heading_ids", (state: any) => {
@@ -172,7 +500,8 @@ const createMarkdown = (): MarkdownItType => {
         let previousBlock = "";
         for (const token of state.tokens) {
             if (token.type === "inline") {
-                const skipBlock = previousBlock === "heading_open" || previousBlock === "th_open";
+                const skipBlock =
+                    previousBlock === "heading_open" || previousBlock === "th_open";
                 insideLink = false;
                 const children = token.children ?? [];
                 for (let index = 0; index < children.length; index += 1) {
@@ -222,44 +551,6 @@ const createMarkdown = (): MarkdownItType => {
     return md;
 };
 
-const linkTermsInText = (text: string, env: RenderEnvironment): any[] | null => {
-    const regex = env.glossaryRegex;
-    if (!regex) return null;
-    regex.lastIndex = 0;
-    const tokens: any[] = [];
-    let cursor = 0;
-    let changed = false;
-    let match: RegExpExecArray | null;
-    while ((match = regex.exec(text)) !== null) {
-        const matched = match[0];
-        const term = env.termsByKey.get(normalizeKey(matched));
-        if (!term || env.usedTerms.has(term.slug) || term.slug === env.glossaryPageSlug) {
-            if (match.index + matched.length <= cursor) regex.lastIndex += 1;
-            continue;
-        }
-        if (match.index > cursor) {
-            tokens.push({ type: "text", content: text.slice(cursor, match.index), level: 0, children: null });
-        }
-        tokens.push({
-            type: "guide_gloss",
-            tag: "",
-            nesting: 0,
-            content: matched,
-            meta: { slug: term.slug },
-            level: 0,
-            children: null,
-        });
-        env.usedTerms.add(term.slug);
-        cursor = match.index + matched.length;
-        changed = true;
-    }
-    if (!changed) return null;
-    if (cursor < text.length) {
-        tokens.push({ type: "text", content: text.slice(cursor), level: 0, children: null });
-    }
-    return tokens;
-};
-
 const renderSegments = (
     md: MarkdownItType,
     source: string,
@@ -269,24 +560,64 @@ const renderSegments = (
     const normalized = source.replace(/\r\n/g, "\n");
     const lines = normalized.split("\n");
     let buffer: string[] = [];
+    let sectionRefs: CollectedRef[] = [];
+    let explicitRefs = new Set<string>();
 
-    const flush = () => {
-        if (buffer.length === 0) return;
-        segments.push({ type: "html", html: md.render(buffer.join("\n"), env as any) });
-        buffer = [];
+    const flush = (includeRefTray = false) => {
+        if (buffer.length > 0) {
+            segments.push({ type: "html", html: md.render(buffer.join("\n"), env as any) });
+            buffer = [];
+        }
+        if (includeRefTray) {
+            const tray = renderRefTrayHtml(sectionRefs, env, explicitRefs);
+            if (tray) segments.push({ type: "html", html: tray });
+            sectionRefs = [];
+            explicitRefs = new Set<string>();
+        }
     };
 
     for (let index = 0; index < lines.length; index += 1) {
         const line = lines[index] ?? "";
-        const callout = /^:::([a-z]+)(?:\s+(.*))?$/.exec(line.trim());
+        const trimmed = line.trim();
+
+        if (trimmed.startsWith("```")) {
+            buffer.push(line);
+            index += 1;
+            while (index < lines.length) {
+                const codeLine = lines[index] ?? "";
+                buffer.push(codeLine);
+                index += 1;
+                if (codeLine.trim().startsWith("```")) break;
+            }
+            index -= 1;
+            continue;
+        }
+
+        if (/^##\s+/.test(trimmed)) {
+            flush(true);
+            buffer.push(line);
+            continue;
+        }
+
+        const callout = /^:::([a-z]+)(?:\s+(.*))?$/.exec(trimmed);
         const calloutType = callout?.[1];
         if (calloutType && CALLOUT_TYPES.has(calloutType)) {
-            flush();
+            flush(false);
             const title = callout[2]?.trim() ?? "";
             const inner: string[] = [];
             index += 1;
             while (index < lines.length && (lines[index] ?? "").trim() !== ":::") {
-                inner.push(lines[index] ?? "");
+                const innerLine = lines[index] ?? "";
+                if (calloutType === "refs") {
+                    inner.push(innerLine);
+                    for (const match of innerLine.matchAll(createRefTokenRegex())) {
+                        explicitRefs.add(`${match[1]}:${match[2]}`);
+                    }
+                } else {
+                    const extracted = extractParentheticalRefs(innerLine);
+                    inner.push(extracted.cleaned);
+                    sectionRefs.push(...extracted.refs);
+                }
                 index += 1;
             }
             const innerHtml = md.render(inner.join("\n"), env as any);
@@ -300,15 +631,20 @@ const renderSegments = (
             });
             continue;
         }
-        const widget = /^\{\{widget:([a-z0-9-]+)\}\}$/.exec(line.trim());
+
+        const widget = /^\{\{widget:([a-z0-9-]+)\}\}$/.exec(trimmed);
         if (widget && WIDGET_IDS.has(widget[1] ?? "")) {
-            flush();
+            flush(false);
             segments.push({ type: "widget", widgetId: widget[1] });
             continue;
         }
-        buffer.push(line);
+
+        const extracted = extractParentheticalRefs(line);
+        buffer.push(extracted.cleaned);
+        sectionRefs.push(...extracted.refs);
     }
-    flush();
+
+    flush(true);
     return segments;
 };
 
@@ -368,8 +704,41 @@ export const renderMarkdown = (source: string, context: MarkdownContext = {}): M
         resolveLink,
         disableGlossaryLinks: Boolean(context.disableGlossaryLinks),
         glossaryPageSlug: context.glossaryPageSlug,
+        articleId: context.articleId,
     };
     return renderSegments(createMarkdown(), source, env);
+};
+
+const stripInline = (value: string): string =>
+    value
+        .replace(/\[\[(?:a|c|s|g):([a-z0-9-]+)\|([^\]]+)\]\]/g, "$2")
+        .replace(/\[\[(?:a|c|s|g):([a-z0-9-]+)\]\]/g, "$1")
+        .replace(/`{1,3}([^`]*)`{1,3}/g, "$1")
+        .replace(/\*\*([^*]+)\*\*/g, "$1")
+        .replace(/__([^_]+)__/g, "$1")
+        .replace(/(^|\s)\*([^*]+)\*(?=\s|$)/g, "$1$2")
+        .replace(/(^|\s)_([^_]+)_(?=\s|$)/g, "$1$2")
+        .replace(/\\([\\`*_{}[\]()#+\-.!|>])/g, "$1")
+        .replace(/<br\s*\/?>/gi, " ")
+        .replace(/[ \t]+/g, " ")
+        .trim();
+
+const slugify = (value: string): string =>
+    stripInline(value)
+        .toLocaleLowerCase()
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^\p{L}\p{N}]+/gu, "-")
+        .replace(/^-+|-+$/g, "") || "section";
+
+export const createHeadingIdFactory = (): ((text: string) => string) => {
+    const seen = new Map<string, number>();
+    return (text: string) => {
+        const base = slugify(text);
+        const count = seen.get(base) ?? 0;
+        seen.set(base, count + 1);
+        return count === 0 ? base : `${base}-${count + 1}`;
+    };
 };
 
 /** Academy lesson bodies end with structural sections rendered as dedicated UI. */

@@ -36,3 +36,14 @@ drill-breaker | **Open Circuit Breakers** (Dashboard tile) | **Open breaker** (R
 | Item | Old claim | Corrected claim | Evidence |
 | :--- | :--- | :--- | :--- |
 | `l-m1-5` | MFA is "usually a code from your phone" | six-digit code sent by SMS to the phone number on the account | `core-back/lib/auth/mfaChallenges.ts` |
+
+## Readability overhaul (2026-11-07)
+
+Ten foundational lessons were rewritten as self-contained mini-tutorials: `l-m1-1`, `l-m1-2`,
+`l-m1-3`, `l-m2-1`, `l-m2-2`, `l-m2-3`, `l-m4-1`, `l-m4-2`, `l-m5-1` and `l-m6-1`. Each keeps
+the six required `###` headings in order, the same two check ids and the same facts; the worked
+examples now use named merchants/customers and real numbers, and the common mistakes explain
+the consequence. Counts are unchanged: 8 tracks, 11 modules, 50 lessons, 100 checks, 16 labs,
+92 lab tasks, 8 exams and 223 exam-pool questions. The plan's replacement lessons used a
+different module map (for example its `l-m2-4` does not exist here; `l-m4-1` is merchant states),
+so they were adapted to the current lesson ids instead of copied verbatim.
