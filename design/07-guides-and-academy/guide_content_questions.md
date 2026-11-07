@@ -23,3 +23,16 @@ Admin Interactive Guide. These do not block the build.
    **Create**/**Save** and "creating the draft". The current labels are
    **Create**/**Save** for routes and **Create Draft** for the AI importer;
    both paths are guarded.
+
+## Text and code disagree: owner decisions (2026-11-07 readability overhaul)
+
+The rewrites kept the original wording in every case below. Change either the code or the article once you decide which is intended.
+
+1. `b08-07` Cash-outs: the article describes a second Finance user approving the subtraction (`PENDING`, `PROCESSING`, `COMPLETE`, `SUBTRACTED`). The code lets one actor process a request straight to `COMPLETE` (`executeCashout` in `core-back/engine/governance/GovernanceExecution.ts`; `PROCESSING` and `SUBTRACTED` are unused). This also touches the maker-checker invariant.
+2. `b08-05`, `b08-06`, `b08-07` (and `l-m9-2`): "drift stops automatic payouts". `core-back/engine/workers/LedgerInvariantWorker.ts` only opens a P1 case; nothing was found that halts payouts (`project-design/parts/01-core-back/05-workers.md`).
+3. `b08-03`: commission-profile changes "go through approval". The governance part documents creation as a direct route.
+4. Circuit breaker: `b06-08` (gateway faults and ambiguous results count), `b06-11` (partner faults only) and the lesson check (gateway faults only) disagree. The code uses a per-error flag `counts_toward_breaker` (`core-back/engine/specImporter/specSchema.ts`).
+5. `b06-15` says "twenty integrations" but lists 21 gateways. `b12-05` is titled "twelve-step" while `deploy/deploy.ts` runs 14 steps. `b12-03` says four certificates but the tool also creates backup-daemon, Fake Rails and optional storage certificates.
+6. `b06-11`: WEIGHTED is described as a share of traffic; `VisibleRailsResolver.ts` only sorts by weight.
+7. `b09-*`: the article says a screening suppression "may" carry an expiry date; the exam says it "must".
+8. `b08-13`: rule 2 offers suspending the merchant, while rule 4 says suspension is blocked.

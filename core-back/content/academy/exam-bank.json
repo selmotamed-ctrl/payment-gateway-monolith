@@ -1,6 +1,6 @@
 {
   "contentVersion": "1.0.0",
-  "contentHash": "97a625e2ccbb5f839d68451901ed6b43a2ad21609b5b31f35991b5825efe54b4",
+  "contentHash": "ad4d5d5b2aafc69d2b2c164267a4e1fffaaceea17fed5c3113c76e1c94301fba",
   "blueprints": [
     {
       "id": "exam-foundation",
@@ -7012,21 +7012,21 @@
       "options": [
         {
           "id": "o1",
-          "text": "returns to the previous release automatically.",
+          "text": "stops with an error, leaves the new release current and keeps the previous release on disk for a manual rollback.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "continues.",
+          "text": "returns to the previous release automatically.",
           "correct": false
         },
         {
           "id": "o3",
-          "text": "deletes the backup.",
+          "text": "deletes the previous release.",
           "correct": false
         }
       ],
-      "why": "Old releases remain."
+      "why": "There is no automatic rollback. Going back is a manual action by an operator."
     },
     {
       "id": "q-m10-108",
@@ -7111,12 +7111,12 @@
       "options": [
         {
           "id": "o1",
-          "text": "switching the current link to the previous release and restarting.",
+          "text": "pointing the current link at the previous release and restarting the backend services from that release's folder.",
           "correct": true
         },
         {
           "id": "o2",
-          "text": "rebuilding.",
+          "text": "rebuilding the release.",
           "correct": false
         },
         {
@@ -7125,7 +7125,7 @@
           "correct": false
         }
       ],
-      "why": "One atomic step."
+      "why": "Releases are immutable. A plain restart would reuse the new release's path, and database changes only go forward."
     },
     {
       "id": "q-m10-111",

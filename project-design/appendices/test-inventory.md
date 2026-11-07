@@ -279,7 +279,6 @@
 | `tests/unit/frontend-security-admin.test.ts` | 179 | 19 |
 | `tests/unit/frontend-security-checkout.test.ts` | 335 | 42 |
 | `tests/unit/frontend-security-merchant.test.ts` | 167 | 17 |
-| `tests/unit/guide-content.test.ts` | 185 | 10 |
 | `tests/unit/guide-search.test.ts` | 80 | 9 |
 | `tests/unit/guide-widgets.test.ts` | 221 | 25 |
 | `tests/unit/json-diff-model.test.ts` | 182 | 20 |
@@ -297,6 +296,7 @@
 | `tests/unit/builders-api-error-i18n.test.ts` | 79 | 6 |
 | `tests/unit/audit-summary.test.ts` | 109 | 13 |
 | `tests/unit/academy-content.test.ts` | 306 | 17 |
+| `tests/unit/guide-content.test.ts` | 185 | 10 |
 | `tests/unit/guide-markdown-refs.test.ts` | 70 | 6 |
 
 - Total files: **294**

@@ -47,3 +47,14 @@ the consequence. Counts are unchanged: 8 tracks, 11 modules, 50 lessons, 100 che
 92 lab tasks, 8 exams and 223 exam-pool questions. The plan's replacement lessons used a
 different module map (for example its `l-m2-4` does not exist here; `l-m4-1` is merchant states),
 so they were adapted to the current lesson ids instead of copied verbatim.
+
+## Readability overhaul, second pass (2026-11-07)
+
+The remaining 40 lessons (every lesson except the ten rewritten earlier today) were rewritten as self-contained 350 to 600 word tutorials. All 50 lessons now have the same shape, with the six required `###` headings in order, the same check ids and the same Read-now links. Counts are unchanged: 8 tracks, 11 modules, 50 lessons, 100 checks, 16 labs, 92 lab tasks, 8 exams and 223 exam-pool questions.
+
+| Item | Old claim | Corrected claim | Evidence |
+| :--- | :--- | :--- | :--- |
+| `l-m10-3`, quiz `q-m10-107` | The deployment returns to the previous release automatically after a failed end-to-end check | No automatic rollback; the new release stays current and an operator rolls back by hand | `deploy/README.md` sections 7 and 12 |
+| quiz `q-m10-110` | Rollback is switching the current link and restarting | Rollback points the current link at the previous release and restarts the backend services from that release's folder | `deploy/README.md` section 12 |
+| `l-m1-1` example | A Pending-to-Available balance flow and a 2 LYD "gateway fee" | Only what the Guide states: the partner confirms the charge, the platform verifies and books it, and settlement and reconciliation follow; the cast is now Layla, Noon Mart and Sadad | `b01-01`, Book 8 |
+| `l-m3-4`, `l-m1-5` and others | Examples gave an unsupported role or an unsupported sentence | Roles follow the approval matrix in `b04-05`; unsupported sentences were removed | review notes |
