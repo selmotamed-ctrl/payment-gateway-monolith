@@ -9,6 +9,8 @@ import {
   type FakeTransactionRow,
 } from "../../engine/db";
 import { env } from "../../lib/env";
+import { ApiError } from "../../lib/error";
+import { webhookTargetAllowed } from "../../lib/webhookTarget";
 import { rawBodyText } from "../../lib/rawBody";
 import { zMaskCard, zMaskPhone, zMaskWallet } from "../../lib/zReady";
 import {
@@ -191,6 +193,11 @@ export const resolveOrCreateTransaction = (input: {
   const fate = assignFate(input.scenario, scenarioSeed);
 
   const otp = deriveOtp(env.FAKE_RAILS_SEEDER_TOKEN, descriptor.railCode, reference, descriptor.otpLength);
+  // The webhook target comes from the caller: refuse anything but an allowed host (SSRF).
+  const requestedWebhookUrl = deepFind(body, ["webhook_url", "webhookUrl", "notification_url"]) ?? null;
+  if (requestedWebhookUrl !== null && !webhookTargetAllowed(requestedWebhookUrl)) {
+    throw new ApiError(400, "WEBHOOK_URL_NOT_ALLOWED", "The webhook URL host is not on the allowed list");
+  }
   const transaction: FakeTransactionRow = {
     id: uuidv7(),
     gateway_code: descriptor.gatewayCode,
@@ -216,7 +223,7 @@ export const resolveOrCreateTransaction = (input: {
     inquiry_override_status: null,
     return_url: deepFind(body, ["return_url", "returnUrl", "redirect_url", "callback_url"]) ?? null,
     cancel_url: deepFind(body, ["cancel_url", "cancelUrl"]) ?? null,
-    webhook_url: deepFind(body, ["webhook_url", "webhookUrl", "notification_url"]) ?? null,
+    webhook_url: requestedWebhookUrl,
     is_seeded_historical: 0,
     created_at: nowIso(),
     updated_at: nowIso(),

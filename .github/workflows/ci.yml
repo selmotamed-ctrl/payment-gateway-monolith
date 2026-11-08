@@ -1,11 +1,16 @@
 name: CI
 
 # GAP-014: the AGENTS.md verification gate, run on every push and PR.
-# Suites that need PostgreSQL 18 + Redis skip themselves when those services
-# are absent; bun reports the skips.
+#
+# `core-back` runs in its own job against real PostgreSQL 18 and Redis service containers on the
+# ports the test harness defaults to (55432 / 56379). Its database suites skip themselves when a
+# service is unreachable, and a skipped suite still reports green, so that job FAILS when bun
+# reports any skipped test: a ledger or governance regression must never pass because the
+# database was silently missing.
 on:
   push:
-    branches: [main, ayoub]
+    # `master` is the repository's default branch; `main` and `ayoub` are kept for compatibility.
+    branches: [master, main, ayoub]
   pull_request:
   workflow_dispatch:
 
@@ -24,13 +29,80 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun scripts/project-design/build.ts --check
 
+  core-back:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: postgres
+          POSTGRES_DB: payment_gateway_monolith_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7
+        ports:
+          - 56379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test
+      POSTGRES_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test
+      STORAGE_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test
+      EXHAUSTIVE_DATABASE_URL: postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test
+      STORAGE_TEST_REDIS_URL: redis://127.0.0.1:56379
+      REDIS_URL: redis://127.0.0.1:56379
+    defaults:
+      run:
+        working-directory: core-back
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install (frozen lockfile)
+        run: bun install --frozen-lockfile
+      - name: Generate the Prisma client
+        run: bun run migrate-generate
+      - name: Generate the internal mTLS test certificates
+        run: bun run generate-mtls-certs
+      - name: Verify PostgreSQL 18
+        run: |
+          version_num="$(psql "$DATABASE_URL" -tAc 'SHOW server_version_num')"
+          echo "server_version_num=$version_num"
+          test "$version_num" -ge 180000
+      - name: Apply migrations to the test database
+        run: bun run migrate-deploy
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Test
+        shell: bash
+        run: |
+          set -o pipefail
+          bun test 2>&1 | tee "$RUNNER_TEMP/core-back-test.log"
+      - name: Fail when any suite was skipped
+        shell: bash
+        run: |
+          if grep -Eq '^[[:space:]]*[0-9]+ skip' "$RUNNER_TEMP/core-back-test.log"; then
+            echo "::error::bun reported skipped tests: a database or Redis suite did not run."
+            grep -E '^[[:space:]]*[0-9]+ (pass|skip|fail)' "$RUNNER_TEMP/core-back-test.log"
+            exit 1
+          fi
+
   backend:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         workspace:
-          - core-back
           - deploy
           - deploy/backup-daemon
           - admin-back

@@ -191,9 +191,7 @@ const UsersPage = dc(() => {
     const createForm = ref({
         email: "",
         fullName: "",
-        phone: "",
         role: "OPERATOR",
-        temporaryPassword: "",
         authorities: "",
     });
 
@@ -432,6 +430,21 @@ const UsersPage = dc(() => {
 
     const detailChecklistComplete = computed(() => !showChecklists || USER_EDIT_CHECKS.every((check) => detailChecklist.value[check.key] === true));
 
+    const resendingInvitation = ref(false);
+    const resendInvitation = async () => {
+        if (!detail.value || resendingInvitation.value) return;
+        resendingInvitation.value = true;
+        try {
+            await api.post(urlsMap.userInvite(detail.value.id));
+            showSnackBar({ type: "success", message: t("Invitation sent") });
+            refreshAll();
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        } finally {
+            resendingInvitation.value = false;
+        }
+    };
+
     const saveDetail = async () => {
         const user = detail.value;
         if (!user || saving.value) return;
@@ -488,9 +501,7 @@ const UsersPage = dc(() => {
         createForm.value = {
             email: "",
             fullName: "",
-            phone: "",
             role: "OPERATOR",
-            temporaryPassword: "",
             authorities: "",
         };
         inviteChecklist.value = {};
@@ -513,8 +524,6 @@ const UsersPage = dc(() => {
                 email: createForm.value.email.trim().toLowerCase(),
                 fullName: createForm.value.fullName.trim() || createForm.value.email.split("@")[0],
                 role: createForm.value.role,
-                ...(createForm.value.phone.trim() ? { phone: createForm.value.phone.trim() } : {}),
-                ...(createForm.value.temporaryPassword ? { temporaryPassword: createForm.value.temporaryPassword } : {}),
                 ...(authorities.length > 0 ? { authorities: authorityRecord(authorities) } : {}),
                 checklist: INVITE_CHECKS.filter((check) => inviteChecklist.value[check.key]).map((check) => check.key),
             });
@@ -869,6 +878,17 @@ const UsersPage = dc(() => {
                             ]}
                         />
 
+                        {detail.value.status === "INVITED" && (
+                            <VAlert type="warning" variant="tonal" density="compact">
+                                {t("Invitation pending: the invitee has not set a password yet")}
+                                <div style={{ marginTop: "8px" }}>
+                                    <VBtn size="small" variant="outlined" loading={resendingInvitation.value} onClick={() => void resendInvitation()}>
+                                        {t("Resend invitation")}
+                                    </VBtn>
+                                </div>
+                            </VAlert>
+                        )}
+
                         <SectionFields title={t("Role and access")}>
                             <FormField label={t("Role")} sensitiveMakerChecker>
                                 <VSelect
@@ -942,7 +962,7 @@ const UsersPage = dc(() => {
                 }}
             >
                 <VAlert type="info" variant="tonal" density="compact">
-                    {t("The user starts in INVITED state. Set a temporary password only when hand-delivering credentials.")}
+                    {t("The user starts in INVITED state.")} {t("The invitee receives an email with a single-use invitation code and chooses their own password and phone.")}
                 </VAlert>
                 <SectionFields title={t("User details")}>
                     <FormField label={t("Email")} required>
@@ -951,16 +971,10 @@ const UsersPage = dc(() => {
                     <FormField label={t("Display name")}>
                         <VTextField modelValue={createForm.value.fullName} onUpdate:modelValue={(value: string) => (createForm.value.fullName = value)} />
                     </FormField>
-                    <FormField label={t("Phone")}>
-                        <VTextField modelValue={createForm.value.phone} onUpdate:modelValue={(value: string) => (createForm.value.phone = value)} />
-                    </FormField>
                 </SectionFields>
                 <SectionFields title={t("Access")}>
                     <FormField label={t("Role")} sensitiveMakerChecker>
                         <VSelect items={[...ADMIN_ROLES] as string[]} modelValue={createForm.value.role} onUpdate:modelValue={(value: string | null) => (createForm.value.role = value ?? "OPERATOR")} />
-                    </FormField>
-                    <FormField label={t("Temporary password")} sensitiveMakerChecker>
-                        <VTextField type="password" modelValue={createForm.value.temporaryPassword} onUpdate:modelValue={(value: string) => (createForm.value.temporaryPassword = value)} />
                     </FormField>
                     <FormField
                         label={t("Authority keys")}

@@ -315,7 +315,8 @@ describe("multi-upstream selection and failover", () => {
     let available = false;
     const upstream = await startUpstream(pki, (_request, response) => {
       if (available) respondJson(response, 200, { ok: true });
-      else respondJson(response, 503, { code: "UNAVAILABLE" });
+      // A transport failure (the connection drops after the handshake) is what trips the breaker.
+      else response.socket?.destroy();
     });
     let now = 1000;
     configure([upstream.url]);
@@ -323,8 +324,9 @@ describe("multi-upstream selection and failover", () => {
     try {
       // GAP-021: the node only leaves rotation after CORE_FAILURE_THRESHOLD consecutive failures.
       for (let i = 0; i < CORE_FAILURE_THRESHOLD; i += 1) {
-        const failed = await request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/half-open`, maxAttempts: 1 });
-        expect(failed.statusCode).toBe(503);
+        await expect(
+          request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/half-open`, maxAttempts: 1 }),
+        ).rejects.toBeInstanceOf(ApiError);
       }
       const tripped = upstream.requests.length;
       expect(tripped).toBe(CORE_FAILURE_THRESHOLD);
@@ -372,6 +374,174 @@ describe("multi-upstream selection and failover", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect(error?.code).toBe("CORE_UNAVAILABLE");
     expect(error?.statusCode).toBe(503);
+  });
+});
+
+describe("breaker counts transport failures only and replays only read-only calls", () => {
+  test("core's own 502/503/504 answers never take a node out of rotation", async () => {
+    let status = 503;
+    const upstream = await startUpstream(pki, (_request, response) => {
+      if (status === 200) respondJson(response, 200, { ok: true });
+      else respondJson(response, status, { code: "SCREENING_UNAVAILABLE" });
+    });
+    // The clock never advances: a tripped node would stay out of rotation for the whole test.
+    setCoreClock(() => 1000);
+    configure([upstream.url]);
+    try {
+      for (const code of [503, 502, 504, 503, 503, 503, 503]) {
+        status = code;
+        const answered = await request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/screen`, maxAttempts: 1 });
+        expect(answered.statusCode).toBe(code);
+      }
+      expect(upstream.requests.length).toBe(7);
+      expect(upstream.requests.length).toBeGreaterThan(CORE_FAILURE_THRESHOLD);
+      status = 200;
+      const recovered = await request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/screen` });
+      expect(recovered.statusCode).toBe(200);
+    } finally {
+      await closeUpstreams(upstream);
+    }
+  });
+
+  test("a read-only call still fails over to another node on a 503 answer", async () => {
+    const first = await startUpstream(pki, (_request, response) => {
+      respondJson(response, 503, { code: "DRAINING" });
+    });
+    const second = await startUpstream(pki);
+    try {
+      configure([first.url, second.url]);
+      const response = await request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/read` });
+      expect(response.statusCode).toBe(200);
+      expect(first.requests.length).toBe(1);
+      expect(second.requests.length).toBe(1);
+    } finally {
+      await closeUpstreams(first, second);
+    }
+  });
+
+  test("PUT and DELETE are not replayed on another node after the request reached core", async () => {
+    const first = await startUpstream(pki, (_request, response) => {
+      respondJson(response, 503, { code: "UNAVAILABLE" });
+    });
+    const second = await startUpstream(pki);
+    try {
+      for (const method of ["PUT", "DELETE"] as const) {
+        configure([first.url, second.url]);
+        const answered = await request({
+          method,
+          path: `${CORE_CHANNEL_PREFIX}/versioned`,
+          body: method === "PUT" ? JSON.stringify({ value: 1 }) : undefined,
+          headers: { "content-type": "application/json" },
+        });
+        expect(answered.statusCode).toBe(503);
+      }
+      expect(first.requests.length).toBe(2);
+      expect(second.requests.length).toBe(0);
+
+      // A connection that dies after the request was sent is not replayed either.
+      first.setHandler((_request, response) => {
+        response.socket?.destroy();
+      });
+      configure([first.url, second.url]);
+      await expect(
+        request({ method: "PUT", path: `${CORE_CHANNEL_PREFIX}/versioned`, body: "{}" }),
+      ).rejects.toBeInstanceOf(ApiError);
+      expect(second.requests.length).toBe(0);
+
+      // The same transport failure on a GET is replayed on the other node.
+      configure([first.url, second.url]);
+      const read = await request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/versioned` });
+      expect(read.statusCode).toBe(200);
+      expect(second.requests.length).toBe(1);
+    } finally {
+      await closeUpstreams(first, second);
+    }
+  });
+
+  test("PUT is still retried on the next node when the connection never established", async () => {
+    const dead = await startUpstream(pki);
+    const alive = await startUpstream(pki);
+    const urls = [dead.url, alive.url];
+    await dead.close();
+    try {
+      configure(urls);
+      const response = await request({ method: "PUT", path: `${CORE_CHANNEL_PREFIX}/versioned`, body: "{}" });
+      expect(response.statusCode).toBe(200);
+      expect(alive.requests.length).toBe(1);
+    } finally {
+      await closeUpstreams(alive);
+    }
+  });
+
+  test("a request that carries an idempotency key may still be replayed after it was sent", async () => {
+    const first = await startUpstream(pki, (_request, response) => {
+      respondJson(response, 503, { code: "UNAVAILABLE" });
+    });
+    const second = await startUpstream(pki);
+    try {
+      configure([first.url, second.url]);
+      const response = await request({
+        method: "PUT",
+        path: `${CORE_CHANNEL_PREFIX}/versioned`,
+        body: "{}",
+        headers: { "idempotency-key": "idem-key-0001" },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(second.requests.length).toBe(1);
+    } finally {
+      await closeUpstreams(first, second);
+    }
+  });
+});
+
+describe("message framing headers are never taken from the caller", () => {
+  test("a stale content-length, transfer-encoding and content-encoding are dropped; the length comes from the real body", async () => {
+    const upstream = await startUpstream(pki);
+    try {
+      configure([upstream.url]);
+      const body = Buffer.from(JSON.stringify({ decompressed: "x".repeat(300) }));
+      const response = await request({
+        method: "POST",
+        path: `${CORE_CHANNEL_PREFIX}/inbound`,
+        body,
+        // The inbound request was gzipped: 20 bytes on the wire, 300+ after inflation.
+        headers: {
+          "Content-Length": "20",
+          "Transfer-Encoding": "chunked",
+          "Content-Encoding": "gzip",
+          Connection: "upgrade",
+          "content-type": "application/json",
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      const seen = upstream.requests.at(-1)!;
+      expect(seen.headers["content-length"]).toBe(String(body.length));
+      expect(seen.headers["transfer-encoding"]).toBeUndefined();
+      expect(seen.headers["content-encoding"]).toBeUndefined();
+      expect(seen.headers.upgrade).toBeUndefined();
+      expect(seen.body.length).toBe(body.length);
+      // The shared keep-alive connection is still in sync: the next request is a clean one.
+      const next = await request({ method: "GET", path: `${CORE_CHANNEL_PREFIX}/after` });
+      expect(next.statusCode).toBe(200);
+      expect(upstream.requests.at(-1)!.url).toBe(`${CORE_CHANNEL_PREFIX}/after`);
+      expect(upstream.requests).toHaveLength(2);
+    } finally {
+      await closeUpstreams(upstream);
+    }
+  });
+
+  test("buildCoreHeaders strips framing headers a caller tries to inject", () => {
+    const headers = buildCoreHeaders({
+      method: "POST",
+      path: `${CORE_CHANNEL_PREFIX}/x`,
+      requestId: "r",
+      clientIp: "10.0.0.1",
+      body: {},
+      headers: { "Content-Length": "5", "Transfer-Encoding": "chunked", Host: "evil", Connection: "close" },
+    });
+    for (const name of ["content-length", "transfer-encoding", "host", "connection"]) {
+      expect(headers[name]).toBeUndefined();
+    }
   });
 });
 

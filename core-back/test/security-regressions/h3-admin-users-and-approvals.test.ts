@@ -55,7 +55,11 @@ describe("H3 approval execution of a user change", () => {
     client = createFakePrisma();
     ctx = { repositories: new PrismaRepositories(client as never) } as never;
     client.user.create({
-      data: { id: "u-new", email: "n@x.co", role: "SUPPORT", authoritiesMap: [], isMaker: false, isChecker: false, status: "INVITED" },
+      // An invitee who already accepted the invitation: their own password and MFA phone are set.
+      data: {
+        id: "u-new", email: "n@x.co", role: "SUPPORT", authoritiesMap: [], isMaker: false, isChecker: false,
+        status: "INVITED", passwordHash: "scrypt:invitee", phone: "+218910000009", mfaRequired: true,
+      },
     });
   });
   const exec = (payload: unknown, checkerUserId = "checker") =>
@@ -77,6 +81,19 @@ describe("H3 approval execution of a user change", () => {
     expect(user().status).toBe("INVITED");
   });
 
+  test("activation is refused until the invitee has set their own password and MFA phone", async () => {
+    user().passwordHash = null;
+    await expect(exec({ status: "ACTIVE" })).rejects.toMatchObject({ code: "USER_INVITATION_PENDING" });
+    expect(user().status).toBe("INVITED");
+    user().passwordHash = "scrypt:invitee";
+    user().phone = null;
+    await expect(exec({ status: "ACTIVE" })).rejects.toMatchObject({ code: "USER_INVITATION_PENDING" });
+    expect(user().status).toBe("INVITED");
+    user().phone = "+218910000009";
+    await exec({ status: "ACTIVE" });
+    expect(user().status).toBe("ACTIVE");
+  });
+
   test("a user cannot approve a change to their own account", async () => {
     await expect(exec({ status: "ACTIVE" }, "u-new")).rejects.toMatchObject({ code: "APPROVAL_SELF_CHANGE" });
     expect(user().status).toBe("INVITED");
@@ -90,7 +107,16 @@ describe("M3 approval decisions are claimed atomically", () => {
       'state: { in: ["PENDING_REVIEW", "DRAFT"] }',
     );
     const approve = slice(admin, 'router.post("/approvals/:id/approve"', 'router.post("/approvals/:id/reject"');
-    expect((approve.match(/claimPendingApproval\(tx as never/g) ?? []).length).toBe(3);
+    // BACKUP_POLICY delegates to `executeBackupPolicyApproval`, which claims the request with a
+    // conditional update BEFORE it calls the backup daemon (and is shared with PUT /policy).
+    expect((approve.match(/claimPendingApproval\(tx as never/g) ?? []).length).toBe(2);
+    expect(approve).toContain("executeBackupPolicyApproval({");
+    const backups = readFileSync("api/internal/backups.ts", "utf8");
+    const helper = slice(backups, "export const executeBackupPolicyApproval", 'router.put("/policy"');
+    expect(helper).toContain("assertCheckerAuthority(actor)");
+    expect(helper).toContain("assertCheckerIsNotMaker(approval.makerUserId, actor.userId)");
+    expect(helper).toContain('state: { in: ["PENDING_REVIEW", "DRAFT"] }');
+    expect(helper.indexOf("approvalRequest.updateMany")).toBeLessThan(helper.indexOf("getBackupControlClient().updatePolicy"));
     const reject = slice(admin, 'router.post("/approvals/:id/reject"', "\n});");
     expect(reject).toContain("claimPendingApproval(tx as never");
     expect(reject).toContain("APPROVAL_NOT_PENDING");

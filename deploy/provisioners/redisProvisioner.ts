@@ -21,7 +21,20 @@ const nodeSsh = (config: DeployConfig, spec: { sshHost: string; sshPort: number 
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
 
-/** Bind strictly to the private LAN address and require a password. */
+/**
+ * Bind strictly to the private LAN address and require a password.
+ *
+ * Eviction and persistence matter for correctness here, not just speed: this Redis holds the session revoke list
+ * and the login throttles next to the (short-lived) cache and velocity keys.
+ *
+ * - `volatile-ttl` evicts the keys closest to expiry first and never a key without an expiry. Cache entries live
+ *   seconds to minutes, velocity windows minutes to hours and revoke flags up to the 12 hour session lifetime, so
+ *   under memory pressure the cheap keys go first (every writer sets a TTL, and the auth store now writes value and
+ *   expiry atomically). `allkeys-lru` evicted purely by recency and so could drop a revoked session.
+ * - `appendonly yes` with `everysec` bounds the loss on a restart to about a second; before, only an hourly
+ *   snapshot protected the list, so a restart could bring revoked sessions back. The core also keeps a durable copy
+ *   of every revocation in PostgreSQL (`session_revocations`) and consults it on a Redis miss.
+ */
 export const redisConfigSnippet = (config: DeployConfig, privateIp: string, port = 6379): string => {
   // A loopback-only node (single-machine deploy) would otherwise render the
   // same address twice and Redis would fail its second bind with EADDRINUSE.
@@ -32,8 +45,9 @@ port ${port}
 requirepass ${config.REDIS_PASSWORD}
 save 3600 1
 maxmemory ${config.REDIS_MAXMEMORY}
-maxmemory-policy allkeys-lru
-appendonly no
+maxmemory-policy volatile-ttl
+appendonly yes
+appendfsync everysec
 daemonize no
 supervised systemd
 dir /var/lib/pg-redis

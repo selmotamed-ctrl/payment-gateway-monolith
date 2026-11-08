@@ -14,7 +14,7 @@ import type { FlowStep, StepExecutionContext, StepExecutionResult } from "../../
 import type { PrismaLike, Repositories, Tx } from "../../engine/db/ports";
 import { createFakeRepositories } from "../helpers/fakeRepositories";
 import { PrismaRepositories } from "../../engine/db/repositories";
-import { LedgerPoster } from "../../engine/ledger/LedgerPoster";
+import { LedgerPoster, type LedgerScenarioInput } from "../../engine/ledger/LedgerPoster";
 import { CryptoEngine } from "../../engine/crypto/CryptoEngine";
 import { Vault } from "../../engine/crypto/Vault";
 import type { GovernanceExecutionContext } from "../../engine/governance/GovernanceExecution";
@@ -65,6 +65,8 @@ export interface EngineHarnessOptions {
   steps?: Partial<Record<FlowPhase, FlowStep[]>>;
   executor?: Executor;
   ledger?: { entry: { id: string } };
+  /** Receives every `postScenario` call so a test can assert the template that was chosen. */
+  ledgerScenarioCalls?: Array<{ scenario: string; refId: string; input: LedgerScenarioInput }>;
   ledgerThrows?: Error;
   commit?: SlotCommitResult;
   transactionRunner?: DynamicRailEngineOptions["transactionRunner"];
@@ -143,10 +145,11 @@ export const createEngineHarness = (options: EngineHarnessOptions = {}): EngineH
       }
       return options.ledger ?? { entry: { id: "entry-1" } };
     },
-    postScenario: async () => {
+    postScenario: async (scenario: string, refId: string, input: LedgerScenarioInput) => {
       if (options.ledgerThrows) {
         throw options.ledgerThrows;
       }
+      options.ledgerScenarioCalls?.push({ scenario, refId, input });
       return options.ledger ?? { entry: { id: "entry-1" } };
     },
   };

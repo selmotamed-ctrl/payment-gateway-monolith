@@ -4,7 +4,13 @@ import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { requireAuthorities } from "../middleware/authDoubleCheck";
-import { actorFromRequest } from "../middleware/makerCheckerGuard";
+import {
+  actorFromRequest,
+  assertCheckerAuthority,
+  assertCheckerIsNotMaker,
+  type ApprovalActor,
+} from "../middleware/makerCheckerGuard";
+import { approvalIsExpired, normalizeApprovalSubjectType } from "../../lib/approvalQueue";
 import {
   BACKUP_KINDS,
   BACKUP_TARGETS,
@@ -304,6 +310,17 @@ router.post("/trigger", async (request: Request, response: Response) => {
     })
     .catch(() => undefined);
 
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "BACKUP_TRIGGERED",
+      entityType: "BACKUP_JOB",
+      entityId: accepted.backupJobId,
+      beforeJson: {},
+      afterJson: { target: body.target, kind: body.kind },
+    },
+  }).catch(() => undefined);
   response.status(202).json({
     backupJobId: accepted.backupJobId,
     acceptedAt: accepted.acceptedAt,
@@ -340,11 +357,135 @@ router.post("/drill", async (request: Request, response: Response) => {
     })
     .catch(() => undefined);
 
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "BACKUP_DRILL_TRIGGERED",
+      entityType: "BACKUP_DRILL",
+      entityId: accepted.drillId,
+      beforeJson: {},
+      afterJson: {},
+    },
+  }).catch(() => undefined);
   response.status(202).json({
     drillId: accepted.drillId,
     acceptedAt: accepted.acceptedAt,
   });
 });
+
+export interface BackupPolicyApprovalExecution {
+  approvalId: string;
+  state: string;
+  checkerUserId: string;
+  policy: BackupPolicy;
+}
+
+/**
+ * Executes an approved `BACKUP_POLICY` request. It is the single implementation behind both
+ * `POST /approvals/:id/approve` and `PUT /system/backups/policy` (with an `approvalRequestId`), so
+ * the two entry points can never differ in what they enforce:
+ *
+ * - the caller must hold checker authority (`approval:check`), not merely `security:write`;
+ * - the request must be pending, unexpired, and checked by someone other than its maker;
+ * - the request is claimed with a conditional update BEFORE the daemon is called, so two
+ *   concurrent checkers cannot both apply it; a failed daemon call releases the claim;
+ * - only then is the policy sent to the daemon, and the approval is marked `EXECUTED` together
+ *   with its audit row.
+ */
+export const executeBackupPolicyApproval = async (input: {
+  approvalId: string;
+  actor: ApprovalActor;
+  riskAcceptanceNote?: string;
+}): Promise<BackupPolicyApprovalExecution> => {
+  const { actor } = input;
+  assertCheckerAuthority(actor);
+  const approval = await client.approvalRequest.findUnique({ where: { id: input.approvalId } });
+  if (!approval || normalizeApprovalSubjectType(approval.subjectType) !== "BACKUP_POLICY") {
+    throw new ApiError(404, "APPROVAL_NOT_FOUND", "The backup policy approval does not exist");
+  }
+  assertCheckerIsNotMaker(approval.makerUserId, actor.userId);
+  if (approval.state !== "PENDING_REVIEW" && approval.state !== "DRAFT") {
+    throw new ApiError(409, "APPROVAL_NOT_PENDING", "The approval request is not pending review");
+  }
+  if (approvalIsExpired(approval.expiresAt)) {
+    throw new ApiError(409, "APPROVAL_EXPIRED", "The approval request has expired");
+  }
+  if (!isBackupDaemonConfigured()) {
+    throw new ApiError(
+      503,
+      "BACKUP_DAEMON_NOT_CONFIGURED",
+      "The backup daemon is not configured for this deployment",
+    );
+  }
+  const payload = backupPolicySchema.omit({ approvalRequestId: true }).parse(approval.payloadDiffJson ?? {});
+  const policy: BackupPolicy = {
+    fullCron: payload.fullCron,
+    deltaCron: payload.deltaCron,
+    drillCron: payload.drillCron,
+    fullRetentionDays: payload.fullRetentionDays,
+    walRetentionDays: payload.walRetentionDays,
+    alertLagSeconds: payload.alertLagSeconds,
+  };
+
+  // Claim first: only one caller can move the request out of its pending state.
+  const claimed = await client.approvalRequest.updateMany({
+    where: { id: approval.id, state: { in: ["PENDING_REVIEW", "DRAFT"] } },
+    data: { state: "APPROVED", checkerUserId: actor.userId },
+  });
+  if (claimed.count !== 1) {
+    throw new ApiError(409, "APPROVAL_NOT_PENDING", "The approval request is not pending review");
+  }
+
+  let updated: { policy: BackupPolicy };
+  try {
+    updated = await getBackupControlClient().updatePolicy({ ...policy, updatedBy: actor.userId });
+  } catch (error) {
+    // The daemon did not take the policy: give the request back so it can be retried.
+    await client.approvalRequest
+      .updateMany({
+        where: { id: approval.id, state: "APPROVED", checkerUserId: actor.userId },
+        data: { state: "PENDING_REVIEW", checkerUserId: null },
+      })
+      .catch(() => undefined);
+    throw error;
+  }
+
+  const executed = await client.$transaction(async (tx) => {
+    const row = await tx.approvalRequest.update({
+      where: { id: approval.id },
+      data: {
+        state: "EXECUTED",
+        checkerUserId: actor.userId,
+        riskAcceptanceNote: input.riskAcceptanceNote,
+        baseVersion: (approval.baseVersion ?? 0) + 1,
+      },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "UNKNOWN",
+        action: "BACKUP_POLICY_UPDATED",
+        entityType: "BACKUP_POLICY",
+        entityId: approval.id,
+        approvalRequestId: approval.id,
+        beforeJson: (approval.payloadDiffJson ?? {}) as Record<string, unknown>,
+        afterJson: {
+          policy: updated.policy,
+          approvalRequestId: approval.id,
+          checksum: stableJson(updated.policy).slice(0, 64),
+        },
+      },
+    });
+    return row;
+  });
+  return {
+    approvalId: executed.id,
+    state: executed.state,
+    checkerUserId: actor.userId,
+    policy: updated.policy,
+  };
+};
 
 router.put("/policy", async (request: Request, response: Response) => {
   requireAuthorities(request, ["security:write"]);
@@ -380,59 +521,14 @@ router.put("/policy", async (request: Request, response: Response) => {
     return;
   }
 
-  const approval = await client.approvalRequest.findUnique({
-    where: { id: body.approvalRequestId },
-  });
-  if (!approval || approval.subjectType !== "BACKUP_POLICY") {
-    throw new ApiError(404, "APPROVAL_NOT_FOUND", "The backup policy approval does not exist");
-  }
-  if (approval.state !== "PENDING_REVIEW" && approval.state !== "APPROVED") {
-    throw new ApiError(409, "APPROVAL_NOT_EXECUTABLE", `Approval is ${approval.state}`);
-  }
-  if (approval.makerUserId === actor.userId) {
-    throw new ApiError(
-      403,
-      "MAKER_CHECKER_VIOLATION",
-      "The checker must differ from the maker",
-    );
-  }
-  if (!isBackupDaemonConfigured()) {
-    throw new ApiError(
-      503,
-      "BACKUP_DAEMON_NOT_CONFIGURED",
-      "The backup daemon is not configured for this deployment",
-    );
-  }
-  const approvedPayload = approval.payloadDiffJson as unknown as BackupPolicy;
-  const updated = await getBackupControlClient().updatePolicy(approvedPayload);
-  await client.approvalRequest.update({
-    where: { id: approval.id },
-    data: {
-      state: "EXECUTED",
-      checkerUserId: actor.userId,
-      baseVersion: (approval.baseVersion ?? 0) + 1,
-    },
-  });
-  await writeAudit(client, {
-    data: {
-      actorId: actor.userId,
-      role: actor.role ?? "UNKNOWN",
-      action: "BACKUP_POLICY_UPDATED",
-      entityType: "BACKUP_POLICY",
-      entityId: "backup-policy",
-      approvalRequestId: approval.id,
-      beforeJson: (approval.payloadDiffJson ?? {}) as Record<string, unknown>,
-      afterJson: {
-        policy: updated.policy,
-        approvalRequestId: approval.id,
-        checksum: stableJson(updated.policy).slice(0, 64),
-      },
-    },
+  const executed = await executeBackupPolicyApproval({
+    approvalId: body.approvalRequestId,
+    actor,
   });
   response.json({
     executed: true,
-    approvalRequestId: approval.id,
-    policy: updated.policy,
+    approvalRequestId: executed.approvalId,
+    policy: executed.policy,
   });
 });
 

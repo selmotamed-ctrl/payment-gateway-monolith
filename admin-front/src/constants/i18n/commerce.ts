@@ -66,7 +66,6 @@ export const commerceCatalogue: Record<string, [string, string]> = {
         "لا يوجد تطبيق مرتبط بهذه المحفظة",
     ],
     "Recent cash-outs": ["Recent cash-outs", "أحدث السحوبات"],
-    "Open cash-outs": ["Open cash-outs", "فتح السحوبات"],
     "No cash-outs yet": ["No cash-outs yet", "لا توجد سحوبات بعد"],
 
     /* ------------------- Applications page and drawer --------------------- */
@@ -148,7 +147,6 @@ export const commerceCatalogue: Record<string, [string, string]> = {
         "Rail whitelist, redirect domains and the settlement wallet define what this application may accept. Any change is reviewed by an independent checker before it applies.",
         "تحدد قائمة المسارات المسموحة ونطاقات إعادة التوجيه ومحفظة التسوية ما يمكن للتطبيق قبوله. تخضع أي تعديلات لمراجعة مراجع مستقل قبل سريانها.",
     ],
-    "Submit for approval": ["Submit for approval", "إرسال للاعتماد"],
     "Only active wallets of this merchant in the same currency.": [
         "Only active wallets of this merchant in the same currency.",
         "المحافظ النشطة لهذا التاجر وبالعملة نفسها فقط.",
@@ -425,7 +423,6 @@ export const commerceCatalogue: Record<string, [string, string]> = {
     "Commercial and risk profile": ["Commercial and risk profile", "الملف التجاري وملف المخاطر"],
     "Registration number": ["Registration number", "رقم التسجيل"],
     "Commission receivable ceiling": ["Commission receivable ceiling", "حد العمولات المستحقة"],
-    "Negative balance ceiling": ["Negative balance ceiling", "حد الرصيد السالب"],
     "Negative ceiling": ["Negative ceiling", "الحد السالب"],
     "Payout bank": ["Payout bank", "مصرف الصرف"],
     "Payout account": ["Payout account", "حساب الصرف"],

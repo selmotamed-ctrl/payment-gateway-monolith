@@ -4,7 +4,7 @@ import multer from "multer";
 import rateLimiter from "express-rate-limit";
 import { lazyLimiter, rateLimitKey } from "../lib/clientIp";
 import { env } from "../lib/env";
-import { requireBearer } from "./forward";
+import { assertMerchantSessionShape } from "../lib/security/sessionCookie";
 import { ApiError } from "../lib/error";
 import { callCore } from "../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../lib/net";
@@ -38,13 +38,15 @@ const uploadLimiter = lazyLimiter(() =>
 );
 
 /**
- * Runs BEFORE the multipart parser: strict per ip budget, mandatory bearer, and a declared
+ * Runs BEFORE the multipart parser: strict per ip budget, a plausible live session, and a declared
  * length above the upload limit is refused without buffering a single byte.
  */
 export const uploadGuards: Array<(req: Request, res: Response, next: NextFunction) => void> = [
   uploadLimiter,
   (req, _res, next) => {
-    requireBearer(req);
+    // Presence is not enough: the credential must at least look like a live merchant session before a file
+    // is buffered for it (see `assertMerchantSessionShape`).
+    assertMerchantSessionShape(req.headers.authorization);
     const declared = Number(req.headers["content-length"]);
     // Chunked clients have no Content-Length; multer still enforces the byte
     // limit while streaming. Only an explicitly oversized body is refused here.

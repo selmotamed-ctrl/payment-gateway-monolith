@@ -208,6 +208,12 @@ const LoginPage = dc(() => {
                         </>
                     )}
 
+                    {!mfaChallengeId.value && (
+                        <VBtn variant="text" size="small" onClick={() => void router.push({ name: "AcceptInvitation" })}>
+                            {t("I have an invitation code")}
+                        </VBtn>
+                    )}
+
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <VBtn variant="text" size="small" onClick={() => setLocale("ar")}>
                             العربية

@@ -9,7 +9,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StateView } from "@/components/StateView";
-import EChart from "@/components/EChart";
+import { LazyEChart as EChart } from "@/components/EChart/lazy";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";

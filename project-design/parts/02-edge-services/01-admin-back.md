@@ -308,3 +308,7 @@ New `coreForward` routes (new files `wallets.ts`, `applications.ts` (application
 | `/aml/reporting-rules/:id/promote`, `/finance/route-caps` | already in core; now forwarded | |
 
 Contracts enforced at the edge: bodies are `.strict()` zod; `reason` is `z.string().trim().min(10).max(500)` (shared `mutationSchemas.ts`; also required on job requeue, notification retry and GL checkpoint); mutation enums are the safe subsets (wallet `FROZEN|ACTIVE`, application `SUSPENDED|ACTIVE`, POS `INACTIVE|BLOCKED|ACTIVE`, link `CANCELLED`); path ids must be UUIDs; list queries pass through every scalar filter. `zListQuery` requires `page >= 1` and caps `pageSize` at 200 but has no upper page bound, so a "last page" jump on a multi-million-row ledger is forwarded instead of failing validation; deep offset pages remain an offset-pagination cost (GAP-006). `relayStatus` passes core's 200/201/202 to the client unchanged (202 = submitted for approval). There is no outbox retry route (core has none).
+
+## Remediation round 2 (2026-11-08): limiters, uploads, invitation routes
+
+`api/public/auth.ts` wires `createAccountLimiters` (per `identifier|ip` and an identifier ceiling, failures only) and the public `POST /auth/accept-invitation` route; `api/upload.ts` exports `uploadGuards` (limiter, `Content-Length` pre-check, session-shape check before multer) and is used by the reconciliation and join-request uploads; `api/protected/users.ts` and `api/contract.ts` carry the invitation-based create and re-invite contracts (no password or phone in the create body).

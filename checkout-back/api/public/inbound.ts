@@ -9,10 +9,11 @@ import { resolveRequestId } from "../../lib/requestLogger";
 
 const router = express.Router();
 
+// `content-length` is deliberately absent: the body is forwarded after body-parser inflated it, so the
+// inbound length would no longer describe it (request smuggling on the shared core connection).
 const FORWARDABLE_HEADER_ALLOWLIST = new Set([
   "content-type",
   "user-agent",
-  "content-length",
   "x-signature",
   "x-gateway-signature",
   "x-hub-signature-256",

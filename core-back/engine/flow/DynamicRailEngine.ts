@@ -1,6 +1,6 @@
 import { Decimal } from "decimal.js";
 import { invalidationBus, type InvalidationBus } from "../../lib/invalidationBus";
-import { decimal, type DecimalInput, type LedgerPostContext, type LedgerScenario, type LedgerScenarioInput, type PaymentConfirmationInput } from "../ledger/LedgerPoster";
+import { decimal, refundScenarioFor, type DecimalInput, type LedgerPostContext, type LedgerScenario, type LedgerScenarioInput, type PaymentConfirmationInput } from "../ledger/LedgerPoster";
 import { StepExecutor, type FlowStep, type StepExecutionContext, type StepExecutionResult } from "./StepExecutor";
 import type { LogSinkPort } from "../../lib/storageEngine/ports";
 import type {
@@ -681,17 +681,23 @@ export class DynamicRailEngine {
     }
     if (this.options.ledgerPoster?.postScenario) {
       const split = this.refundSplit(current, refundAmount);
-      const scenario: LedgerScenario = current.ownershipMode === "INTERNAL" ? "INTERNAL_REFUND" : "FULL_REFUND";
-      await this.options.ledgerPoster.postScenario(
-        scenario,
-        adjustmentId,
-        {
-          amount: refundAmount,
-          commissionAmount: split.commission,
-          merchantAmount: split.merchant,
-        },
-        this.ledgerContext(current),
-      );
+      const refundScenario = refundScenarioFor(current.ownershipMode);
+      // A merchant-direct refund only reverses the commission recognition; with no commission to
+      // reverse the merchant refunds the payer from their own gateway account and nothing posts.
+      const nothingToPost = refundScenario.stage === "REFUND" && split.commission.isZero();
+      if (!nothingToPost) {
+        await this.options.ledgerPoster.postScenario(
+          refundScenario.scenario,
+          adjustmentId,
+          {
+            amount: refundAmount,
+            commissionAmount: split.commission,
+            merchantAmount: split.merchant,
+            stage: refundScenario.stage,
+          },
+          this.ledgerContext(current),
+        );
+      }
     }
     const fullyRefunded = refundAmount.eq(decimal(current.totalChargedAmount));
     await this.transition(current, fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED", {

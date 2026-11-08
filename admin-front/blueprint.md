@@ -293,6 +293,11 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 - **i18n slices:** `constants/i18n/{commerce,ledgerOps,forms,builders}.ts` are merged by `plugins/i18n.ts` after the main catalogue; each new string has an `[English, Arabic]` pair and unit tests assert EN/AR sync. Table filter configs live in `components/Table/registry/{commerce,ledgerOps,forms}.ts` and are spread into `tableRegistry`.
 - Compliance gate (`components/ui/__tests__/ui-abstraction-compliance.test.ts`): every standard route page uses `PageHeader` (helper components belong in `components/` subfolders), no raw `VCard`/`VDialog`/`VChip`.
 
+## Remediation round 2 (2026-11-08): bundle size and translation gate
+
+- **Lazy heavy chunks (GAP-060).** `utils/xlsx` is a lazy facade (the exceljs/xlsx chunk loads on the first export click) and charts load through `components/EChart/lazy.tsx` (`defineAsyncComponent`); `tests/unit/admin-bundle-lazy.test.ts` fails if the dashboard, profitability page, gateway health drawer or table header import the heavy libraries statically.
+- **Translation gate (GAP-061).** `tests/unit/i18n-catalogue.test.ts` (scanner `tests/unit/helpers/i18nScan.ts`) fails on a literal `t()` key with no catalogue entry that is not in the shrink-only baselines `tests/unit/fixtures/i18n-missing-*.json`, and on a key whose Arabic value conflicts across catalogue files (the last spread silently won). The 18 conflicts were resolved; the existing missing keys stay in the baselines and are filled over time (`UPDATE_I18N_BASELINE=1` rewrites a baseline after a fix).
+
 ## Admin Route and Page Catalog
 
 > Status: `partial` · Last verified: 2026-11-06
@@ -551,6 +556,10 @@ Six protected children were added to `admin-front/src/router/index.ts` (and the 
 Existing routes that changed: `Invariant` is now "Ledger Audit & Invariant" with per-account actions (shards and lines, journal entries, checkpoint rollup); `MerchantDetail` shows the Wallets tab to every `merchant:read` role and gained interactive wallets/applications, structured beneficial owners, KYB revalidation, access rows and pending-change diffs; `Gateways` gained a route-health drawer; `Liquidity` shows route daily-cap utilisation; `GatewayRoutes`, `AdminPlatformSettings`, `Reconciliation`, `AmlRules`, `Rails`, `Approvals`, `AuditLog`, `Disputes`, `PricingControls` lost their raw-JSON views/inputs (see `admin-ui.system`). The GL account drawer (`GlAccountDrawer`) shows the routing width, a derived checkpoint status badge, a per-shard table (balance, lines, pending, checkpoint, checkpoint age, status, padded Total row), the paginated Lines table, "Run checkpoint rollup" (verifies every shard, names a failing one) and "Set shard count" (`finance:write`, reason, audited) and, per failed shard, **Repair** (`ShardRepairModal`: preview from the journal; an intact shard is recomputed at once with a reason, a damaged one is submitted to Approvals as `GL_SHARD_REPAIR`). Shared drawers are opened by id prop and clear themselves on `close`: `JournalEntryDrawer`, `GlAccountDrawer`, `WalletDetailDrawer`, `ApplicationDetailDrawer`. `attempt:read` was added to `AUTHORITY_ALIASES` (no portal equivalent).
 
 Gaps: the dashboards/global search still route `payment_attempt` hits to Merchant 360's transactions tab (a test pins it; `Transactions?open=` would be a one-line change); approvals' "Open subject" has no target for `WALLET`/`APPLICATION`/`POS_TERMINAL`; merchant users open the `AdminUserDetail` route (works: `GET /users/:id` serves any user id).
+
+## Remediation round 2 (2026-11-08): invitation route
+
+`/accept-invitation` (`pages/public/auth/accept-invitation`) is a public route reached from the invitation message; the Users page creates users without a password and shows invitation state with a re-invite action; the login page links to nothing new.
 
 ## Tables Filters and Exports
 
@@ -933,7 +942,7 @@ AcademyProgress { schema:1; rev; startedAt; updatedAt; contentVersion; activeTra
 - **Concurrency:** a stale `baseRev` returns `409 ACADEMY_REV_CONFLICT` with `details:{progress,rev}`; the client refetches, merges and retries once. `rev` also bumps on exam start/submit. The store compare-and-swaps on `User.updatedAt` (retry up to 4, then `ACADEMY_BUSY`).
 - **Server-only state** lives in the same JSON under the reserved key `_server` (open exam sessions with question ids and opaque option ids, previous attempt's question ids, attempt counters, last submitted session ids). `publicProgress()` is the only exit and strips it, including from `GET /users/:id`. Stored size limit 64 KB (`413 ACADEMY_PROGRESS_TOO_LARGE`).
 - **Legacy rows** (no `schema:1`, the pre-rebuild academy shape) are replaced by a fresh record that carries over only `guideRead`.
-- **Client:** `useAcademyProgress` keeps the last record and a queue of unsent patches in `localStorage["pg.academy.progress"]`; a failed save never blocks learning and shows a "not saved yet" indicator. `useGuideProgress` (the Guide's hook) is a thin layer over it and one-time migrates `pg.guide.read`.
+- **Client:** `useAcademyProgress` keeps the last record and a queue of unsent patches in `localStorage["pg.academy.progress"]`, stamped with the owner's user id (a record with no owner or another user's is dropped, never adopted; `setUserState` fires `pg:user-changed` on every login/logout/switch and `resetAcademyProgress` drops the in-memory singletons, with a generation counter so a request in flight for the previous user cannot write into the next user's state; before 2026-11-08 user A's queued patches could be sent under user B's token); a failed save never blocks learning and shows a "not saved yet" indicator. `useGuideProgress` (the Guide's hook) is a thin layer over it and one-time migrates `pg.guide.read`.
 
 ## 7. Academy (rebuilt 2026-11-04)
 

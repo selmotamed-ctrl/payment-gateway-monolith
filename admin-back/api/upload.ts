@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
+import rateLimiter from "express-rate-limit";
+import { lazyLimiter, rateLimitKey } from "../lib/clientIp";
 import { env } from "../lib/env";
 import { ApiError } from "../lib/error";
 import { callCore } from "../lib/mtlsClient";
@@ -17,6 +19,41 @@ export const getUploader = (): multer.Multer => {
   });
   return uploader;
 };
+
+/** multipart framing overhead tolerated on top of the file size limit */
+const MULTIPART_OVERHEAD_BYTES = 256 * 1024;
+
+const uploadLimiter = lazyLimiter(() =>
+  rateLimiter({
+    windowMs: env.ADMIN_RATE_LIMIT_WINDOW_MS,
+    max: () => env.UPLOAD_RATE_LIMIT_MAX,
+    keyGenerator: (req) => rateLimitKey(req, "upload"),
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).json({ code: "RATE_LIMITED", message: "Too many uploads, please retry later" });
+    },
+  }),
+);
+
+/**
+ * Runs BEFORE the multipart parser. multer buffers the whole file in memory before core can look at the
+ * credential, so an upload gets its own per-address budget (on top of the general admin limiter), and a
+ * declared length above the limit is refused without buffering a single byte. The session was already
+ * required to be shaped like a live core session by `requireSession`.
+ */
+export const uploadGuards: Array<(req: Request, res: Response, next: NextFunction) => void> = [
+  uploadLimiter,
+  (req, _res, next) => {
+    const declared = Number(req.headers["content-length"]);
+    // Chunked clients have no Content-Length; multer still enforces the byte limit while streaming.
+    if (Number.isFinite(declared) && declared > 0 && declared > env.MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES) {
+      next(new ApiError(413, "UPLOAD_TOO_LARGE", "The uploaded file exceeds the size limit"));
+      return;
+    }
+    next();
+  },
+];
 
 export const uploadSingle = (field: string) => (req: Request, res: Response, next: NextFunction) => {
   getUploader()

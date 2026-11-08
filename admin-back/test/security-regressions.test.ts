@@ -462,13 +462,20 @@ describe("core client retry and size policy", () => {
   };
   const common = { path: "/internal/admin/x", requestId: "r", clientIp: "10.0.0.1" };
 
-  test("an idempotent PUT that reached core fails over on another node", async () => {
+  test("a PUT that reached core is never replayed on another node (core PUTs version on every call)", async () => {
     const failing = await startUpstream(pki, (_request, response) => respondJson(response, 503, { code: "DOWN" }));
     const healthy = await startUpstream(pki, (_request, response) => respondJson(response, 200, { ok: true }));
     configure([failing.url, healthy.url]);
     const first = await callCoreRaw({ ...common, method: "PUT", body: {} });
-    expect(first.statusCode).toBe(200);
-    expect(healthy.requests.length).toBe(1);
+    expect(first.statusCode).toBe(503);
+    expect(failing.requests.length).toBe(1);
+    expect(healthy.requests.length).toBe(0);
+    // Rebuild the pool so the round-robin cursor starts at the failing node again.
+    configure([failing.url, healthy.url]);
+    const deleted = await callCoreRaw({ ...common, method: "DELETE" });
+    expect(deleted.statusCode).toBe(503);
+    expect(failing.requests.length).toBe(2);
+    expect(healthy.requests.length).toBe(0);
     await failing.close();
     await healthy.close();
     setEnv();

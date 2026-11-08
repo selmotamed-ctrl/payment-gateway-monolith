@@ -3,7 +3,7 @@ id: core.data
 title: Data Schema and Migrations
 status: partial
 confidence: high
-last_verified: 2026-11-07
+last_verified: 2026-11-08
 verified_against: d695518+working-tree
 code:
   - core-back/prisma/schema.prisma
@@ -20,6 +20,7 @@ code:
   - core-back/prisma/migrations/20261104120000_mfa_challenges/migration.sql
   - core-back/prisma/migrations/20261107090000_shard_sequenced_checkpoints/migration.sql
   - core-back/prisma/migrations/20261107150000_shard_repairs/migration.sql
+  - core-back/prisma/migrations/20261108090000_partition_truncate_guard/migration.sql
 tests:
   - core-back/test/exhaustive/01-schema/**
   - core-back/test/phase1-mtls-and-schema.test.ts
@@ -416,6 +417,33 @@ The current schema version is 14 (`REQUIRED_SCHEMA_VERSION = 14`; model count 78
 - `20261105130000_statement_unique_source_file_hash`: replaces the global `reconciliation_runs.file_hash` unique index with `(statement_source_id, file_hash)`, sets `timestamp_tolerance_sec = 0` for legacy keyed channels with no signed timestamp source (the verifier now fails closed on a missing signed timestamp), and bumps `schema_versions` to 11.
 - `20261107090000_shard_sequenced_checkpoints` (version 12): per-shard sequenced ledger checkpoints, `journal_lines.shard_id/shard_seq`, the `gl_shard_checkpoints` table, per-account shard width and `operator_cases.subject_key` (see `core.ledger`).
 - `20261107150000_shard_repairs` (version 14): `gl_shard_checkpoints.baseline_seq` (the exemption marker of a re-baselined shard) and the append-only history table `gl_shard_repairs` (see `core.ledger` 3.10).
+- `20261108090000_partition_truncate_guard` (functions and triggers only; `schema_versions` stays at 14): `pgw_guard_journal_line_partition(regclass)` installs the `pgw_journal_lines_no_truncate` statement trigger only when it is missing; `ensure_journal_line_partitions` (run daily by the deploy cron) calls it for every partition it covers, and the migration backfills every existing partition. Statement-level TRUNCATE triggers are not cloned from the partitioned parent, so partitions created after `20261105090000_append_only_ledger_guards` could be truncated by their owner without meeting the guard.
 - `20261107120000_inbound_event_claims` (version 13): adds nullable `inbound_events.claimed_at` and `claimed_by` plus `(processed_at, claimed_at)`, the durable lease the inbound webhook worker uses to prevent duplicate processing across a brief leadership overlap.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
+
+## 12. Runbook: applying `20261107090000_shard_sequenced_checkpoints` to a populated database (2026-11-08)
+
+Fresh databases and test databases need nothing special. A database that already holds `journal_lines` history does, because the migration is one transaction that:
+
+- adds `journal_lines.shard_id/shard_seq` (metadata-only, but each `ALTER TABLE` takes `ACCESS EXCLUSIVE` on the partitioned parent and every partition for its duration);
+- adds `journal_lines_shard_id_range` as a **validated** `CHECK`, which scans every partition under that lock (the `shard_seq > 0` check is `NOT VALID` and costs nothing);
+- builds `journal_lines_shard_seq_idx` with a plain `CREATE INDEX`, which blocks writes to `journal_lines` until it finishes;
+- computes the genesis totals with one aggregate over all of `journal_lines`, then rewrites `gl_account_shards` and `gl_shard_checkpoints` for every account.
+
+The application is not available for the duration, and an old binary posting while it runs would either block or write lines without shard attribution. The applied migration file must not be edited (Prisma checksums it); the safe handling is operational.
+
+1. **Rehearse first.** Restore the latest backup into a scratch PostgreSQL 18 instance and run `bunx prisma migrate deploy` there. Record the elapsed time; it grows with `journal_lines` row count (the scan, the index build and the genesis aggregate are all full passes). Plan the window at about three times the rehearsal.
+2. **Announce a maintenance window** and stop traffic: stop the three edge services (admin/merchant/checkout) and then core's workers, so nothing posts. Confirm no open transactions touch `journal_lines`: `SELECT pid, state, query FROM pg_stat_activity WHERE query ILIKE '%journal_lines%' AND pid <> pg_backend_pid();`.
+3. **Take the pre-migration dump** (the deploy engine does this automatically before `migrate deploy`; keep it until the checkpoint worker has verified at least one full sweep afterwards).
+4. **Deploy the new core binary and run the migration together** (`bun deploy/deploy.ts`, update mode). Do not run the migration alone and leave the old binary serving: the old poster does not write `shard_id/shard_seq`, so every new line would violate `journal_lines_shard_seq_positive` (the migration is not skippable for the new binary either: `REQUIRED_SCHEMA_VERSION` is checked by the seeders).
+5. **Verify before reopening traffic**: `SELECT version FROM schema_versions;` is at least 12; `SELECT count(*) FROM gl_accounts a WHERE NOT EXISTS (SELECT 1 FROM gl_account_shards s WHERE s.gl_account_id = a.id);` is 0; the global ledger invariant check in the admin ledger-health page reports no drift; then start the edges.
+6. **If the window is too long for the lock scan**, the lower-impact variant is a hand-applied pre-step on the production database, run before the deploy and reviewed by two people (maker-checker for operations): `ALTER TABLE journal_lines ADD CONSTRAINT journal_lines_shard_id_range CHECK (shard_id >= 0 AND shard_id < 256) NOT VALID;` then `ALTER TABLE journal_lines VALIDATE CONSTRAINT journal_lines_shard_id_range;` (the validate step takes only `SHARE UPDATE EXCLUSIVE`) and `CREATE INDEX CONCURRENTLY` for each partition's index. The migration's own `ADD CONSTRAINT`/`CREATE INDEX` statements would then fail on the existing names, so this variant requires a reviewed copy of the migration with those statements guarded by `IF NOT EXISTS`/skipped, applied via `prisma migrate resolve`. Do this only with a rehearsal; the default recommendation is the window.
+
+Open: a deploy-time guard that refuses to run this migration on a database with a large `journal_lines` unless the operator passes an explicit acknowledgement is not implemented. The pipeline already takes a pre-migration dump and probes pending migrations (`deploy/deploy.ts` `probeMigrationState`), so the guard would extend that probe.
+
+## Remediation round 2 (2026-11-08): session revocations
+
+## 13. Session revocations (schema version 15)
+
+`20261108100000_session_revocations` adds the `session_revocations` model (`jti`, `expires_at`) and bumps `REQUIRED_SCHEMA_VERSION` to 15. `revokeSession` writes Redis (atomic `SET ... PX`) and the table; `isSessionRevoked` reads Redis first and the table when Redis misses or is down. Expired rows are deleted opportunistically on later revocations. `20261108090000_partition_truncate_guard` was amended (it is unreleased) so `pgw_guard_journal_line_partition` also grants the app role its DML on each partition and revokes UPDATE/DELETE/TRUNCATE, because partitions created by the cron run as `postgres` and do not inherit the owner's default privileges.

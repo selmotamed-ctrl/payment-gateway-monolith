@@ -179,15 +179,29 @@ export class PrismaRepositories implements Repositories {
       // COMMISSION_RECEIVABLE is a global ledger account, so the merchant's
       // share is resolved through the attempt referenced by each posting.
       if (typeof (tx as Any).$queryRaw === "function") {
+        // Recognition and netting entries are keyed by the attempt; a refund's commission
+        // reversal is keyed by the adjustment, which points back at the attempt.
         const result = await tx.$queryRaw`
-          SELECT COALESCE(SUM(CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END), 0) AS receivable
-          FROM journal_lines jl
-          INNER JOIN gl_accounts a ON a.id = jl.gl_account_id
-          INNER JOIN journal_entries je ON je.id = jl.entry_id
-          INNER JOIN payment_attempts pa ON je.ref_id = pa.id::text
-          WHERE a.account_type = 'COMMISSION_RECEIVABLE'
-            AND pa.merchant_id = ${merchantId}::uuid
-            AND je.ref_type IN ('PAYMENT_ATTEMPT', 'COMMISSION_NETTING')
+          SELECT COALESCE(SUM(movement.delta), 0) AS receivable
+          FROM (
+            SELECT CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END AS delta
+            FROM journal_lines jl
+            INNER JOIN gl_accounts a ON a.id = jl.gl_account_id
+            INNER JOIN journal_entries je ON je.id = jl.entry_id
+            INNER JOIN payment_attempts pa ON je.ref_id = pa.id::text
+            WHERE a.account_type = 'COMMISSION_RECEIVABLE'
+              AND pa.merchant_id = ${merchantId}::uuid
+              AND je.ref_type IN ('PAYMENT_ATTEMPT', 'COMMISSION_NETTING')
+            UNION ALL
+            SELECT CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END AS delta
+            FROM journal_lines jl
+            INNER JOIN gl_accounts a ON a.id = jl.gl_account_id
+            INNER JOIN journal_entries je ON je.id = jl.entry_id AND je.ref_type = 'ADJUSTMENT'
+            INNER JOIN adjustments adj ON je.ref_id = adj.id::text
+            INNER JOIN payment_attempts pa ON pa.id = adj.source_attempt_id
+            WHERE a.account_type = 'COMMISSION_RECEIVABLE'
+              AND pa.merchant_id = ${merchantId}::uuid
+          ) movement
         `;
         const first = rows<Any>(result)[0];
         return moneyFromDecimal(first?.receivable ?? 0);
@@ -208,9 +222,14 @@ export class PrismaRepositories implements Repositories {
       if (attemptIds.size === 0) {
         return 0n;
       }
+      const adjustmentIds = new Set(
+        rows<Any>(await model(tx, "adjustment").findMany({}))
+          .filter((adjustment) => adjustment.sourceAttemptId && attemptIds.has(String(adjustment.sourceAttemptId)))
+          .map((adjustment) => String(adjustment.id)),
+      );
       const entries = rows<Any>(await model(tx, "journalEntry").findMany({
-        where: { refType: { in: ["PAYMENT_ATTEMPT", "COMMISSION_NETTING"] } },
-      })).filter((entry) => attemptIds.has(String(entry.refId)));
+        where: { refType: { in: ["PAYMENT_ATTEMPT", "COMMISSION_NETTING", "ADJUSTMENT"] } },
+      })).filter((entry) => (entry.refType === "ADJUSTMENT" ? adjustmentIds : attemptIds).has(String(entry.refId)));
       const entryIds = entries.map((entry) => String(entry.id));
       if (entryIds.length === 0) {
         return 0n;

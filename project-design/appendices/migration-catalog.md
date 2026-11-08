@@ -15,3 +15,5 @@
 | `20261107090000_shard_sequenced_checkpoints` | 174 | ============================================================================ |
 | `20261107120000_inbound_event_claims` | 22 | Lease-based claim for the inbound webhook inbox. |
 | `20261107150000_shard_repairs` | 53 | ============================================================================ |
+| `20261108090000_partition_truncate_guard` | 81 | Partitions created after 20261105090000_append_only_ledger_guards had no TRUNCATE guard. |
+| `20261108100000_session_revocations` | 25 | Durable copy of the session revoke list. |

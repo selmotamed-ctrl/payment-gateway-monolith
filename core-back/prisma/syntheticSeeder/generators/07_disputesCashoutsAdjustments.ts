@@ -1,5 +1,5 @@
 import { Decimal } from "decimal.js";
-import { buildLedgerTemplate, decimal, type JournalTemplate, type LedgerPostContext } from "../../../engine/ledger/LedgerPoster";
+import { buildLedgerTemplate, decimal, refundScenarioFor, type JournalTemplate, type LedgerPostContext } from "../../../engine/ledger/LedgerPoster";
 import { metaOf, type SeederContext } from "../context";
 import { addDays, addMinutes, between, ensureSystemAccounts, postTemplate, sha256Like } from "../builders";
 
@@ -65,9 +65,13 @@ export const generateDisputesCashoutsAdjustments = (ctx: SeederContext): void =>
     const amount = full ? total : r4(total.mul(ctx.rng.int(30, 70)).div(100).toDecimalPlaces(2));
     if (!amount.gt(0)) return false;
     const { commission, merchant } = splitCommission(attempt, amount);
-    const template = buildLedgerTemplate(info.ownershipMode === "INTERNAL" ? "INTERNAL_REFUND" : "FULL_REFUND", {
-      amount, commissionAmount: commission, merchantAmount: merchant,
+    const refundScenario = refundScenarioFor(info.ownershipMode);
+    const template = buildLedgerTemplate(refundScenario.scenario, {
+      amount, commissionAmount: commission, merchantAmount: merchant, stage: refundScenario.stage,
     });
+    // A merchant-direct refund only reverses commission. With none to reverse nothing would be
+    // booked, and the seeded dataset requires every executed adjustment to carry a journal entry.
+    if (template.lines.length === 0) return false;
     const adjustmentId = ctx.nextId("adjustment");
     const journalId = execJournal(template, adjustmentId, "ADJUSTMENT", accountsOf(attempt), at);
     ctx.dataset.adjustments.push({

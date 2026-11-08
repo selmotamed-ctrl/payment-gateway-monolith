@@ -97,6 +97,7 @@ const designModelNames = [
   "GlShardCheckpoint",
   // Append-only history of every ledger shard repair.
   "GlShardRepair",
+  "SessionRevocation",
   "OutboxEvent",
   "AuditOutbox",
   "BackupCatalogRun",
@@ -162,10 +163,16 @@ describe("prisma schema", () => {
     // shard-sequenced checkpoint redesign raised the version to 12.
     expect(ordered).toContain("20261107090000_shard_sequenced_checkpoints");
     expect(ordered).toContain("20261107120000_inbound_event_claims");
-    expect(ordered.at(-1)).toBe("20261107150000_shard_repairs");
+    // The newest migration adds the durable session revoke list (schema version 15). The one before it only
+    // installs the TRUNCATE guard on every journal_lines partition (functions and triggers, no table change).
+    expect(ordered.at(-1)).toBe("20261108100000_session_revocations");
+    expect(ordered).toContain("20261108090000_partition_truncate_guard");
+    const guard = fs.readFileSync(path.join(migrationsDirectory, "20261108090000_partition_truncate_guard", "migration.sql"), "utf8");
+    expect(guard).toContain("pgw_guard_journal_line_partition");
+    expect(guard).not.toContain("schema_versions");
     const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
-    expect(newest).toMatch(/UPDATE "schema_versions"\s+SET "version" = 14\b/);
-    expect(REQUIRED_SCHEMA_VERSION).toBe(14);
+    expect(newest).toMatch(/UPDATE "schema_versions"\s+SET "version" = 15\b/);
+    expect(REQUIRED_SCHEMA_VERSION).toBe(15);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),

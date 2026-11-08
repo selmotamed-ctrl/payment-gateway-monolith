@@ -158,7 +158,10 @@ describe("D2 SQL / pgbouncer escaping", () => {
   test("pgbouncer.ini and userlist.txt escape quotes and reject newlines", () => {
     const cfg: DeployConfig = { ...load(), PG_DB_PASSWORD: 'p"w\'x' };
     expect(pgbouncerUserlist(cfg)).toContain('"p""w\'x"');
-    expect(pgbouncerIni(cfg)).toContain("password='p\"w\\'x'");
+    // The ini carries NO credentials at all: every client connects as itself and PgBouncer uses the auth file.
+    expect(pgbouncerIni(cfg)).not.toContain("password");
+    expect(pgbouncerIni(cfg)).not.toContain("user=");
+    expect(pgbouncerIni(cfg)).not.toContain("w\\'x");
     expect(() => pgbouncerUserlist({ ...cfg, PG_DB_PASSWORD: "a\nb" })).toThrow();
   });
 });
@@ -306,6 +309,15 @@ describe("D6/B-H3 migration planning", () => {
     expect(refused.refuse).toContain("--force-fresh");
     expect(refused.runMigrate).toBe(false);
     expect(planMigrations({ ...base, fresh: true, forceFresh: true })).toEqual({ runMigrate: true, dumpBeforeMigrate: true });
+  });
+  test("--fresh is refused when the emptiness probe failed (unknown is not empty), unless forced or a dry run", () => {
+    const unknown = { ...base, fresh: true, databaseNonEmpty: undefined };
+    const refused = planMigrations(unknown);
+    expect(refused.refuse).toContain("probe");
+    expect(refused.refuse).toContain("--force-fresh");
+    expect(refused.runMigrate).toBe(false);
+    expect(planMigrations({ ...unknown, forceFresh: true })).toEqual({ runMigrate: true, dumpBeforeMigrate: true });
+    expect(planMigrations({ ...unknown, dryRun: true })).toEqual({ runMigrate: true, dumpBeforeMigrate: true });
   });
   test("--fresh on an empty database migrates without a dump", () => {
     expect(planMigrations({ ...base, fresh: true, databaseNonEmpty: false })).toEqual({ runMigrate: true, dumpBeforeMigrate: false });

@@ -29,8 +29,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      COMPANION_CONTENT_SIGNING_KEY: ${{ secrets.COMPANION_CONTENT_SIGNING_KEY }}
+      # The release keystore and the content-signing key are only handed to builds of the default
+      # branch. Every `if: env.X != ''` below then skips signing and publishing on any other ref, so a
+      # push of a feature branch that touches companion-app/** can no longer produce a production-signed
+      # APK, a signed content update or a release.
+      ANDROID_KEYSTORE_BASE64: ${{ github.ref_name == github.event.repository.default_branch && secrets.ANDROID_KEYSTORE_BASE64 || '' }}
+      COMPANION_CONTENT_SIGNING_KEY: ${{ github.ref_name == github.event.repository.default_branch && secrets.COMPANION_CONTENT_SIGNING_KEY || '' }}
     steps:
       - uses: actions/checkout@v4
         with:

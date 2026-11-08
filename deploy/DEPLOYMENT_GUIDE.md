@@ -293,7 +293,7 @@ what you meant.
 
 | Variable | Default | Meaning |
 | :--- | :--- | :--- |
-| `DEPLOY_MODE` | `auto` | `auto` (fresh when the remote dir is absent), `fresh`, `update`. |
+| `DEPLOY_MODE` | `auto` | `auto` probes each host read-only (rsync, curl, nginx on edge hosts, Bun, PM2) and bootstraps only the hosts with gaps, so a bare host is prepared instead of failing late; `fresh` bootstraps every host; `update` assumes every host is ready. |
 | `KEEP_RELEASES` | `5` | Releases kept per host; older ones are pruned in step 11. |
 | `ROTATE_MTLS_CERTS` | `false` | Force a CA + leaf regeneration. |
 | `MTLS_VALIDITY_DAYS` | `825` | Leaf certificate validity. |
@@ -471,12 +471,12 @@ can never lock itself out.
 8. Deploy `admin-back` + `admin-front` on the LAN vhost.
 9. Deploy `merchant-back` + `merchant-front` (unbuffered POS SSE).
 10. Deploy `checkout-back` + `checkout-front` (unbuffered payer SSE, strict CSP).
-11. Seed Fake Rails blueprints and optional synthetic operational history.
-12. Verify: every core node `/health` over mTLS, each edge backend `/health`,
+11. Verify (before the seed, so a release that fails its checks is not followed by a long seed): every core node `/health` over mTLS, each edge backend `/health`,
     each edge host completing an mTLS handshake to a healthy core node, the
     public vhosts, PostgreSQL primary/replicas with `pg_isready` + `SELECT 1`,
     PgBouncer, Redis `PING`, audit/log `SELECT 1`, and the backup-daemon
     `/health` over mTLS when configured.
+12. Seed Fake Rails blueprints and optional synthetic operational history.
 13. Prune old releases.
 14. Print the audit summary (commit, release timestamp, hosts, certificate
     expiry).

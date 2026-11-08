@@ -3,7 +3,7 @@ id: core.api
 title: Core API Surface
 status: partial
 confidence: high
-last_verified: 2026-11-06
+last_verified: 2026-11-08
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/api/index.ts
@@ -46,6 +46,7 @@ tests:
   - core-back/test/checkout-confirm-concurrency.test.ts
   - core-back/test/checkout-cancel.test.ts
   - core-back/test/backup-admin/backup-admin-routes.test.ts
+  - core-back/test/merchant-read-scope.test.ts
   - core-back/test/exhaustive/05-api-matrix/admin-endpoints-rbac-fuzz.test.ts
   - core-back/test/exhaustive/05-api-matrix/list-query-filters-all-27-endpoints.test.ts
   - core-back/test/security-regressions/c2-mfa.test.ts
@@ -181,7 +182,7 @@ Sensitive merchant changes create `MERCHANT` approvals. Suspension has an emerge
 | `GET /approvals`, `GET /approvals/export`, `GET /approvals/summary`, `GET /approvals/summary/export`, `GET /approvals/:id` | `approval:read` |
 | `POST /approvals/:id/approve`, `POST /approvals/:id/reject` | `approval:check` or `approval:write` + checker authority |
 
-The approve/reject routes call `actorFromRequest`, `assertCheckerAuthority` and `assertCheckerIsNotMaker`. The approve route also handles `BACKUP_POLICY` out of band and dispatches every other subject to `executeApprovalSubject`.
+The approve/reject routes call `actorFromRequest`, `assertCheckerAuthority` and `assertCheckerIsNotMaker`. The approve route also handles `BACKUP_POLICY` out of band (through `executeBackupPolicyApproval`, which claims the request before it calls the backup daemon) and dispatches every other subject to `executeApprovalSubject`.
 
 #### AML and compliance
 
@@ -291,7 +292,7 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `GET /overview` | `security:read` or `gateway:read` |
 | `POST /trigger` | `security:write` |
 | `POST /drill` | `security:write` |
-| `PUT /policy` | `security:write`; creates or executes a `BACKUP_POLICY` approval |
+| `PUT /policy` | `security:write`; creates a `BACKUP_POLICY` approval, or (with `approvalRequestId`) executes one and then additionally requires checker authority (`approval:check`), maker ≠ checker, a pending unexpired request and an atomic claim |
 | `GET /catalog` | `security:read` or `gateway:read` |
 
 ### 3.3 Merchant namespace
@@ -321,7 +322,10 @@ Authentication behavior:
 - The principal must have a `merchantId`; `merchantIdOf` rejects otherwise with `403 MERCHANT_CONTEXT_REQUIRED`.
 - Queries are scoped by `merchantId`; a merchant cannot read another merchant's wallet/application/link.
 - API tokens are bound to a merchant and optionally an application; the token hash, revocation and CIDR checks happen in core.
-- There is no per-route `requireAuthorities` call. API-token scopes and session authorities do not gate individual merchant endpoints.
+- Merchant authorities are enforced per route in core with `assertMerchantAuthority` (the closed catalogue in `lib/auth/merchantAuthorities.ts`); the portal and the edges only project them. Reads: wallets, `/wallets/:id`, `/balance`, `/statements` and `GET /applications*` need `merchant:read` or `merchant:write`; the statement export needs `merchant:write` (the portal's `statements.export`); `GET /links*` needs `link:read`; `GET /payments` and `GET /stats/overview` need `payment:read`; `GET /disputes*` needs `payment:read` or `dispute:respond`. `merchant:read`/`merchant:write` imply `payment:read` and `link:read`, so a payment-only user can read payments but never balances or statements. Before 2026-11-08 these read routes only checked the merchant, so any merchant user could read balances and the 50,000-row export. Writes keep their fine-grained authorities. API tokens only reach `/external/*`.
+- **Application scope (`users.app_scope_ids`).** A session principal carries `appScopeIds`, read from the user row on every request (a change takes effect without a new login). Empty means unscoped. For a scoped user the application, link, payment, dispute and statement lists are narrowed to those applications, by-id reads/cancels/evidence of another application answer `403 APP_SCOPE_VIOLATION`, `POST /links` refuses another application and defaults to the oldest application inside the scope, and the merchant-wide `GET /stats/overview` (it mixes merchant-wide wallet and cash-out figures) answers `403 APP_SCOPE_RESTRICTED`. Not scoped yet: POS terminals, wallets themselves, cash-outs and tokens.
+- Audit rows added 2026-11-08 (before this, these state changes left no trail): merchant `PUT /tokens/:id/ips` (`ACCESS_TOKEN_IP_ALLOWLIST_CHANGED`, with before/after CIDRs, in the same transaction as the change) and `DELETE /tokens/:id` (`ACCESS_TOKEN_REVOKED`); merchant and admin credential sets `POST` (`CREDENTIAL_SET_CREATED`), `PUT` rotate (`CREDENTIAL_SET_ROTATED`) and `POST .../verify` (`CREDENTIAL_SET_VERIFIED`), recording entry KEY names and versions only, never a secret value or ciphertext; admin `POST /assets` (`ASSET_REGISTERED`); backup `POST /trigger` (`BACKUP_TRIGGERED`) and `POST /drill` (`BACKUP_DRILL_TRIGGERED`, written best effort after the daemon accepted the job: a failed audit write never turns an already-started job into an error).
+- `POST /onboarding/kyb-documents` reports `duplicateDocuments` for the uploader's OWN earlier copies only; matches in other merchants are kept in the staff-only audit row (`KYB_DOCUMENT_UPLOADED.afterJson.duplicateDocuments`) and in the join-request duplicate flags, never returned to the merchant (tipping-off).
 - Sensitive application changes (`assignedWalletId`, `railWhitelist`, `redirectDomainAllowlist`) create an `APPLICATION` approval instead of applying directly.
 
 ### 3.4 Checkout namespace
@@ -691,3 +695,8 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 - `PATCH /rails/:id` accepts `logoAssetId` (uuid, or `null` to clear). A uuid must reference a registered `Asset` (`404 ASSET_NOT_FOUND`); the audit row records the before/after logo. The edge schema and `toCoreRailUpdate` forward it. `POST /assets` still registers metadata only (name, type, size, SHA-256, storage key): it does not store image bytes, which remains a gap.
 - `PATCH /routes/:id` accepts `mismatchPolicy` (object; only `tolerance_amount`/`toleranceAmount` is read by the settlement engine, other keys are kept as stored; a malformed tolerance is `400 MISMATCH_TOLERANCE_INVALID`) and `maintenanceWindows` (`[{ start, end }]`, max 50, absolute instants; `end <= start` or an unparsable instant is `400 MAINTENANCE_WINDOW_INVALID`; `[]` clears). Omitted fields are left untouched; the edge forwards empty values so an operator can clear them.
 - **Commission tiers were broken end to end and are fixed.** The admin edge persisted UI tiers as an index-keyed object (`{"0": {...}}`) and core's create schema (`z.record`) could not take an array, while the fee calculator (`commissionForProfile`, `checkout.ts`) only reads `tiersJson` when it is an array: a TIERED profile created through the UI silently priced at its minimum fee. Now `POST /commission-profiles` accepts an ordered array (or the legacy object), the edge forwards the array, and `commissionTiers()` normalises both shapes (object keys ordered numerically), which also reprices already-stored legacy rows correctly. Tier keys are `upTo`, `flat`, `percent` (a fraction). **Behaviour change for existing data:** a legacy TIERED profile now prices by its tiers instead of the minimum fee. The edge also forwards `minFee`, `maxFee`, `feeBearerDefault`, `roundingMode`, `merchantId`, `applicationId` (core already accepted them; the strict edge schema dropped them). Note `percentageRate` is a **fraction** (`0.0300` = 3%), as the seed data stores it; the form now says so.
+
+## Remediation round 2 (2026-11-08): routes
+
+- `POST /internal/admin/users` accepts no password or phone and creates an `INVITED` user; `POST /internal/admin/users/:id/invite` re-issues an invitation; `POST /internal/admin/auth/accept-invitation` (public, token-bound) sets the password and phone and marks the invitation complete. The maker-checker activation of a staff user requires a completed invitation.
+- `GET|POST /internal/checkout/return/:attemptToken` accepts only the attempt `reference`, and runs the gateway inquiry at most once per `RETURN_INQUIRY_COOLDOWN_MS` (10 s) per attempt across core instances (a shared flag in the auth-state store); calls inside the window answer with the current status (GAP-055).

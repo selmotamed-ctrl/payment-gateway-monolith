@@ -16,6 +16,7 @@ import { fingerprint, principalOf } from "../middleware/authDoubleCheck";
 import { subscribeRealtimeAttempt } from "../../lib/realtimeBus";
 import { json } from "./json";
 import { postgresPlaceholders } from "../../engine/db/rawRows";
+import { getAuthStateStore } from "../../lib/auth/sharedState";
 
 const PLATFORM_TTL_CEILINGS: Record<string, number> = {
   OTP_PULL: 1200,
@@ -1575,43 +1576,44 @@ route.post("/pay/:linkKey/logs/:attemptId/client-event", async (request: Request
   });
 });
 
-route.get("/return/:attemptToken", async (request: Request, response: Response) => {
-  const attemptToken = String(request.params.attemptToken ?? "");
-  const attempt = await client.paymentAttempt.findFirst({
-    where: { OR: [{ reference: attemptToken }, { gatewayReference: attemptToken }] },
-  });
-  if (!attempt) {
-    throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "The attempt token is not recognised");
-  }
-  const platform = getPlatformRuntime(client as never);
-  const result = await platform.engine.inquire(attempt as unknown as DynamicAttempt);
-  const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id }, select: { status: true } });
-  response.json({
-    attemptId: attempt.id,
-    reference: attempt.reference,
-    status: updated?.status ?? result.status,
-    redirect: `/pay/${attempt.reference}/status`,
-  });
-});
+/**
+ * The browser returns from a gateway page here. It is unauthenticated by nature, so it is deliberately cheap
+ * and bounded:
+ *
+ * - the token is OUR attempt `reference` only. A provider-controlled `gatewayReference` is not accepted: it may be
+ *   sequential or guessable, and it would let anyone trigger inquiries for it;
+ * - it triggers a gateway inquiry (an outbound call that can move the attempt to `VERIFYING`), at most once per
+ *   `RETURN_INQUIRY_COOLDOWN_MS` per attempt across all core instances; hits inside the window answer with the
+ *   current status instead of calling the gateway again.
+ */
+export const RETURN_INQUIRY_COOLDOWN_MS = 10_000;
 
-route.post("/return/:attemptToken", async (request: Request, response: Response) => {
+const handleReturn = async (request: Request, response: Response): Promise<void> => {
   const attemptToken = String(request.params.attemptToken ?? "");
-  const attempt = await client.paymentAttempt.findFirst({
-    where: { OR: [{ reference: attemptToken }, { gatewayReference: attemptToken }] },
-  });
+  const attempt = await client.paymentAttempt.findFirst({ where: { reference: attemptToken } });
   if (!attempt) {
     throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "The attempt token is not recognised");
   }
-  const platform = getPlatformRuntime(client as never);
-  const result = await platform.engine.inquire(attempt as unknown as DynamicAttempt);
+  const store = getAuthStateStore();
+  const cooldownKey = `return-inquiry:${attempt.id}`;
+  let status: string | undefined;
+  if ((await store.flagRemainingMs(cooldownKey)) <= 0) {
+    await store.setFlag(cooldownKey, RETURN_INQUIRY_COOLDOWN_MS);
+    const platform = getPlatformRuntime(client as never);
+    const result = await platform.engine.inquire(attempt as unknown as DynamicAttempt);
+    status = result.status;
+  }
   const updated = await client.paymentAttempt.findUnique({ where: { id: attempt.id }, select: { status: true } });
   response.json({
     attemptId: attempt.id,
     reference: attempt.reference,
-    status: updated?.status ?? result.status,
+    status: updated?.status ?? status ?? attempt.status,
     redirect: `/pay/${attempt.reference}/status`,
   });
-});
+};
+
+route.get("/return/:attemptToken", handleReturn);
+route.post("/return/:attemptToken", handleReturn);
 
 const UNVERIFIED_BODY_STORAGE_CAP = 64 * 1024;
 const INBOUND_VERIFIER_HEADERS = [

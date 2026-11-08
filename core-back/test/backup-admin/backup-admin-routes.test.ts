@@ -54,6 +54,9 @@ const principal: Principal = {
   sessionId: null,
 };
 
+/** When set, a request may pick its principal's user id with `x-test-user` (for race tests). */
+let principalByHeader = false;
+
 interface RunningApp {
   url: string;
   close: () => Promise<void>;
@@ -63,7 +66,8 @@ const startApp = async (): Promise<RunningApp> => {
   const app = express();
   app.use(express.json());
   app.use((request: Request, _response: Response, next: NextFunction) => {
-    request.principal = principal;
+    const asUser = principalByHeader ? request.header("x-test-user") : undefined;
+    request.principal = asUser ? { ...principal, userId: asUser } : principal;
     next();
   });
   app.use("/system/backups", backupInternalRouter);
@@ -115,6 +119,10 @@ interface DaemonOptions {
   healthy?: boolean;
   /** Answer trigger/drill as an Idempotency-Key retry of this already accepted job. */
   deduplicatedJobId?: string;
+  /** Answer `PUT /v1/policy` with a 500 while this returns true (it is read on every call). */
+  failPolicy?: () => boolean;
+  /** Delay `PUT /v1/policy`, so concurrent callers overlap inside the daemon call. */
+  policyDelayMs?: number;
 }
 
 const startDaemon = async (options: DaemonOptions = {}): Promise<RunningDaemon> => {
@@ -177,6 +185,18 @@ const startDaemon = async (options: DaemonOptions = {}): Promise<RunningDaemon> 
           acceptedAt: new Date().toISOString(),
           ...(options.deduplicatedJobId ? { deduplicated: true } : {}),
         });
+        return;
+      }
+      if (request.method === "PUT" && request.url === "/v1/policy") {
+        const respond = (): void => {
+          if (options.failPolicy?.()) {
+            send(500, { error: { code: "POLICY_REJECTED", message: "daemon failure" } });
+            return;
+          }
+          send(200, { policy: JSON.parse(body) });
+        };
+        if (options.policyDelayMs) setTimeout(respond, options.policyDelayMs);
+        else respond();
         return;
       }
       send(404, { error: { code: "NOT_FOUND", message: "not found" } });
@@ -538,6 +558,267 @@ describeDatabase("backup internal routes against a fake daemon (live PostgreSQL)
       await client.approvalRequest.deleteMany({ where: { makerUserId: userId } });
       await client.user.delete({ where: { id: userId } });
     }
+  });
+
+  test("a backup trigger and a drill leave audit rows naming the actor and the job", async () => {
+    const actor = await client.user.create({
+      data: {
+        id: uniqueUuid(),
+        email: `${uniqueId("bp-audit")}@example.test`,
+        role: "SECURITY_ADMIN",
+        authoritiesMap: { "security:write": true },
+        status: "ACTIVE",
+        mfaRequired: false,
+      },
+    });
+    const daemon = await startDaemon();
+    configureDaemon(daemon.url);
+    const app = await startApp();
+    const previous = principal.userId;
+    principal.userId = actor.id;
+    try {
+      const trigger = await postJson(app, "/system/backups/trigger", { target: "redis", kind: "delta" });
+      expect(trigger.status).toBe(202);
+      createdRuns.push(trigger.json.backupJobId as string);
+      const drill = await postJson(app, "/system/backups/drill", {});
+      expect(drill.status).toBe(202);
+      createdDrills.push(drill.json.drillId as string);
+
+      const triggerAudit = await client.auditLog.findFirst({ where: { entityId: trigger.json.backupJobId as string } });
+      expect(triggerAudit).toMatchObject({ action: "BACKUP_TRIGGERED", actorId: actor.id, entityType: "BACKUP_JOB" });
+      expect(triggerAudit?.afterJson).toEqual({ target: "redis", kind: "delta" });
+      const drillAudit = await client.auditLog.findFirst({ where: { entityId: drill.json.drillId as string } });
+      expect(drillAudit).toMatchObject({ action: "BACKUP_DRILL_TRIGGERED", actorId: actor.id });
+    } finally {
+      principal.userId = previous;
+      configureDaemon(undefined);
+      await app.close();
+      await daemon.close();
+    }
+  });
+
+  describe("applying an approved policy (PUT /policy with approvalRequestId)", () => {
+    const policy = {
+      fullCron: "0 3 * * 0",
+      deltaCron: "0 3 * * 1-6",
+      drillCron: "0 5 * * 0",
+      fullRetentionDays: 30,
+      walRetentionDays: 7,
+      alertLagSeconds: 90,
+    };
+    const originalAuthorities = [...principal.authorities];
+    const originalUserId = principal.userId;
+
+    const createUser = async (label: string): Promise<string> => {
+      const id = uniqueUuid();
+      await client.user.create({
+        data: {
+          id,
+          email: `${uniqueId(label)}@example.test`,
+          role: "SECURITY_ADMIN",
+          authoritiesMap: { "security:write": true },
+          status: "ACTIVE",
+          mfaRequired: false,
+        },
+      });
+      return id;
+    };
+
+    const createApproval = async (
+      makerUserId: string,
+      overrides: { state?: "PENDING_REVIEW" | "EXECUTED" | "APPROVED"; expiresAt?: Date } = {},
+    ): Promise<string> => {
+      const approval = await client.approvalRequest.create({
+        data: {
+          subjectType: "BACKUP_POLICY",
+          subjectId: "backup-policy",
+          payloadDiffJson: policy,
+          mode: "STANDARD",
+          makerUserId,
+          state: overrides.state ?? "PENDING_REVIEW",
+          expiresAt: overrides.expiresAt ?? new Date(Date.now() + 60 * 60 * 1000),
+        },
+      });
+      return approval.id;
+    };
+
+    const actAs = (userId: string, authorities: string[]): void => {
+      principal.userId = userId;
+      principal.authorities = authorities;
+    };
+
+    const stateOf = async (id: string) =>
+      client.approvalRequest.findUnique({ where: { id }, select: { state: true, checkerUserId: true } });
+
+    const policyPuts = (daemon: RunningDaemon) =>
+      daemon.requests.filter((request) => request.method === "PUT" && request.url === "/v1/policy");
+
+    const restore = (): void => {
+      principal.userId = originalUserId;
+      principal.authorities = [...originalAuthorities];
+      configureDaemon(undefined);
+    };
+
+    test("a checker with approval:check applies it: claimed, sent to the daemon once, executed and audited", async () => {
+      const [maker, checker] = [await createUser("bp-maker"), await createUser("bp-checker")];
+      const approvalId = await createApproval(maker);
+      const daemon = await startDaemon();
+      configureDaemon(daemon.url);
+      const app = await startApp();
+      try {
+        actAs(checker, ["security:write", "approval:check"]);
+        const response = await postJson(app, "/system/backups/policy", { ...policy, approvalRequestId: approvalId }, "PUT");
+        expect(response.status).toBe(200);
+        expect(response.json).toMatchObject({ executed: true, approvalRequestId: approvalId });
+        expect(policyPuts(daemon)).toHaveLength(1);
+        expect(JSON.parse(policyPuts(daemon)[0]!.body)).toMatchObject({ ...policy, updatedBy: checker });
+        expect(await stateOf(approvalId)).toEqual({ state: "EXECUTED", checkerUserId: checker });
+        const audit = await client.auditLog.findMany({ where: { approvalRequestId: approvalId } });
+        expect(audit.map((row) => row.action)).toEqual(["BACKUP_POLICY_UPDATED"]);
+
+        // Executed requests can never be applied again.
+        const again = await postJson(app, "/system/backups/policy", { ...policy, approvalRequestId: approvalId }, "PUT");
+        expect(again.status).toBe(409);
+        expect(again.json.code).toBe("APPROVAL_NOT_PENDING");
+        expect(policyPuts(daemon)).toHaveLength(1);
+      } finally {
+        restore();
+        await app.close();
+        await daemon.close();
+      }
+    });
+
+    test("security:write alone is not checker authority: the pending approval stays pending", async () => {
+      const [maker, writer] = [await createUser("bp-maker"), await createUser("bp-writer")];
+      const approvalId = await createApproval(maker);
+      const daemon = await startDaemon();
+      configureDaemon(daemon.url);
+      const app = await startApp();
+      try {
+        actAs(writer, ["security:write"]);
+        const response = await postJson(app, "/system/backups/policy", { ...policy, approvalRequestId: approvalId }, "PUT");
+        expect(response.status).toBe(403);
+        expect(response.json.code).toBe("APPROVAL_CHECKER_AUTHORITY_REQUIRED");
+        expect(policyPuts(daemon)).toHaveLength(0);
+        expect(await stateOf(approvalId)).toEqual({ state: "PENDING_REVIEW", checkerUserId: null });
+      } finally {
+        restore();
+        await app.close();
+        await daemon.close();
+      }
+    });
+
+    test("the maker cannot check their own request", async () => {
+      const maker = await createUser("bp-maker");
+      const approvalId = await createApproval(maker);
+      const daemon = await startDaemon();
+      configureDaemon(daemon.url);
+      const app = await startApp();
+      try {
+        actAs(maker, ["security:write", "approval:check"]);
+        const response = await postJson(app, "/system/backups/policy", { ...policy, approvalRequestId: approvalId }, "PUT");
+        expect(response.status).toBe(409);
+        expect(response.json.code).toBe("APPROVAL_MAKER_EQUALS_CHECKER");
+        expect(policyPuts(daemon)).toHaveLength(0);
+        expect(await stateOf(approvalId)).toEqual({ state: "PENDING_REVIEW", checkerUserId: null });
+      } finally {
+        restore();
+        await app.close();
+        await daemon.close();
+      }
+    });
+
+    test("an expired request, and one that is not pending, are refused before the daemon is called", async () => {
+      const [maker, checker] = [await createUser("bp-maker"), await createUser("bp-checker")];
+      const expired = await createApproval(maker, { expiresAt: new Date(Date.now() - 1000) });
+      const approvedButUnexecuted = await createApproval(maker, { state: "APPROVED" });
+      const daemon = await startDaemon();
+      configureDaemon(daemon.url);
+      const app = await startApp();
+      try {
+        actAs(checker, ["security:write", "approval:check"]);
+        const late = await postJson(app, "/system/backups/policy", { ...policy, approvalRequestId: expired }, "PUT");
+        expect(late.status).toBe(409);
+        expect(late.json.code).toBe("APPROVAL_EXPIRED");
+        const stale = await postJson(app, "/system/backups/policy", { ...policy, approvalRequestId: approvedButUnexecuted }, "PUT");
+        expect(stale.status).toBe(409);
+        expect(stale.json.code).toBe("APPROVAL_NOT_PENDING");
+        expect(policyPuts(daemon)).toHaveLength(0);
+        expect((await stateOf(expired))?.state).toBe("PENDING_REVIEW");
+        expect((await stateOf(approvedButUnexecuted))?.state).toBe("APPROVED");
+      } finally {
+        restore();
+        await app.close();
+        await daemon.close();
+      }
+    });
+
+    test("two checkers racing apply it exactly once", async () => {
+      const [maker, checkerA, checkerB] = [
+        await createUser("bp-maker"),
+        await createUser("bp-checker-a"),
+        await createUser("bp-checker-b"),
+      ];
+      const approvalId = await createApproval(maker);
+      // The daemon call is slow, so both requests are inside it unless the claim comes first.
+      const daemon = await startDaemon({ policyDelayMs: 150 });
+      configureDaemon(daemon.url);
+      const app = await startApp();
+      try {
+        const attempt = async (userId: string) => {
+          // The route reads the principal per request, so give each racer its own app.
+          const racer = await startApp();
+          try {
+            const response = await fetch(`${racer.url}/system/backups/policy`, {
+              method: "PUT",
+              headers: { "content-type": "application/json", "x-test-user": userId },
+              body: JSON.stringify({ ...policy, approvalRequestId: approvalId }),
+            });
+            return { status: response.status, json: (await response.json()) as Record<string, unknown> };
+          } finally {
+            await racer.close();
+          }
+        };
+        principalByHeader = true;
+        const results = await Promise.all([attempt(checkerA), attempt(checkerB)]);
+        const statuses = results.map((result) => result.status).sort();
+        expect(statuses).toEqual([200, 409]);
+        expect(results.find((result) => result.status === 409)?.json.code).toBe("APPROVAL_NOT_PENDING");
+        expect(policyPuts(daemon)).toHaveLength(1);
+        expect((await stateOf(approvalId))?.state).toBe("EXECUTED");
+      } finally {
+        principalByHeader = false;
+        restore();
+        await app.close();
+        await daemon.close();
+      }
+    });
+
+    test("a daemon failure releases the claim so the request can be retried and then succeeds", async () => {
+      const [maker, checker] = [await createUser("bp-maker"), await createUser("bp-checker")];
+      const approvalId = await createApproval(maker);
+      let failing = true;
+      const daemon = await startDaemon({ failPolicy: () => failing });
+      configureDaemon(daemon.url);
+      const app = await startApp();
+      try {
+        actAs(checker, ["security:write", "approval:check"]);
+        const failed = await postJson(app, "/system/backups/policy", { ...policy, approvalRequestId: approvalId }, "PUT");
+        expect(failed.status).toBeGreaterThanOrEqual(400);
+        expect(await stateOf(approvalId)).toEqual({ state: "PENDING_REVIEW", checkerUserId: null });
+        expect(await client.auditLog.count({ where: { approvalRequestId: approvalId } })).toBe(0);
+
+        failing = false;
+        const retried = await postJson(app, "/system/backups/policy", { ...policy, approvalRequestId: approvalId }, "PUT");
+        expect(retried.status).toBe(200);
+        expect(await stateOf(approvalId)).toEqual({ state: "EXECUTED", checkerUserId: checker });
+        expect(policyPuts(daemon)).toHaveLength(2);
+      } finally {
+        restore();
+        await app.close();
+        await daemon.close();
+      }
+    });
   });
 
   test("the local catalog endpoint returns only local rows", async () => {

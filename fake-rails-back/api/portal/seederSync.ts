@@ -1,3 +1,4 @@
+import { webhookTargetAllowed } from "../../lib/webhookTarget";
 import { Router } from "express";
 import { z } from "zod";
 import { getDb, nowIso, type FakeStepEventRow, type FakeTransactionRow } from "../../engine/db";
@@ -28,7 +29,7 @@ const transactionSchema = z.object({
   inquiry_override_status: z.string().nullable().optional(),
   return_url: z.string().nullable().optional(),
   cancel_url: z.string().nullable().optional(),
-  webhook_url: z.string().nullable().optional(),
+  webhook_url: z.string().nullable().optional().refine((value) => value == null || webhookTargetAllowed(value), "webhook_url host is not allowed"),
   is_seeded_historical: z.number().int().min(0).max(1).default(1),
   created_at: z.string(),
   updated_at: z.string(),

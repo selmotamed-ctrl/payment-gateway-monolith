@@ -1,3 +1,4 @@
+import { SESSION_BEARER } from "./helpers/session";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { resetEnvCache } from "../lib/env";
 import { resetCoreAgent } from "../lib/mtlsClient";
@@ -49,7 +50,7 @@ const uploadKyb = (filename: string, mime: string, bytes: Buffer) => {
   form.set("document", new Blob([new Uint8Array(bytes)], { type: mime }), filename);
   return fetch(`${edgeUrl}/api/v1/merchant/onboarding/kyb-documents`, {
     method: "POST",
-    headers: { authorization: "Bearer merchant-session-token" },
+    headers: { authorization: SESSION_BEARER },
     body: form,
   });
 };
@@ -107,7 +108,7 @@ describe("merchant kyb upload validation", () => {
     form.set("documentType", "COMMERCIAL_REGISTRY");
     const response = await fetch(`${edgeUrl}/api/v1/merchant/onboarding/kyb-documents`, {
       method: "POST",
-      headers: { authorization: "Bearer merchant-session-token" },
+      headers: { authorization: SESSION_BEARER },
       body: form,
     });
     expect(response.status).toBe(400);
@@ -126,12 +127,12 @@ describe("merchant authorization forwarding", () => {
 
   test("forwards the merchant bearer token to core", async () => {
     const response = await fetch(`${edgeUrl}/api/v1/merchant/wallets`, {
-      headers: { authorization: "Bearer merchant-session-token" },
+      headers: { authorization: SESSION_BEARER },
     });
     expect(response.status).toBe(200);
     const forwarded = core.requests.at(-1);
     expect(forwarded?.url).toBe("/internal/merchant/wallets");
-    expect(forwarded?.headers.authorization).toBe("Bearer merchant-session-token");
+    expect(forwarded?.headers.authorization).toBe(SESSION_BEARER);
     expect(forwarded?.headers["x-edge-service"]).toBe("merchant-back");
   });
 });
@@ -139,7 +140,7 @@ describe("merchant authorization forwarding", () => {
 describe("merchant external pg_live_ api", () => {
   test("rejects a request without a pg_live_ token", async () => {
     const response = await fetch(`${edgeUrl}/api/v1/external/links/LINKKEY123`, {
-      headers: { authorization: "Bearer merchant-session-token" },
+      headers: { authorization: SESSION_BEARER },
     });
     expect(response.status).toBe(401);
     const payload = (await response.json()) as { code: string };
@@ -201,7 +202,7 @@ describe("merchant external pg_live_ api", () => {
 describe("merchant realtime rooms", () => {
   test("proxies the pos screen stream", async () => {
     const response = await fetch(`${edgeUrl}/api/v1/merchant/pos/screens/SCREEN1/stream`, {
-      headers: { authorization: "Bearer merchant-session-token" },
+      headers: { authorization: SESSION_BEARER },
     });
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/event-stream");

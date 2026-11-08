@@ -223,15 +223,28 @@ const barmanServerName = (config: DeployConfig, target: BackupTarget | string): 
     ? (config.BARMAN_AUDIT_SERVER.trim() || config.AUDIT_DB_NAME)
     : config.PG_DB_NAME;
 
-/** `https://<backup>:<port>/v1/wal/<target>` of the daemon's WAL ingest (pg-native). */
-const walIngestUrl = (config: DeployConfig, target: BackupTarget | string): string =>
-  `https://${backupPrivateIp(config)}:${config.BACKUP_DAEMON_PORT}/v1/wal/${isAuditTarget(target) ? "audit_db" : "postgres_core"}`;
+/**
+ * `<scheme>://<backup>:<port>/v1/wal/<target>` of the daemon's WAL ingest (pg-native). The scheme
+ * follows `BACKUP_ALLOW_INSECURE_HTTP`, exactly like the daemon listener, the health probe and
+ * `BACKUP_DAEMON_URL`: with the flag on the daemon serves plain HTTP, and an `https://` archive
+ * command would fail every WAL segment (the disk then fills with unarchived WAL) while the health
+ * check still passes.
+ */
+const walIngestScheme = (config: DeployConfig): "http" | "https" =>
+  config.BACKUP_ALLOW_INSECURE_HTTP ? "http" : "https";
 
-const walClientTlsArgs = `--cacert ${STORAGE_CERT_DIR}/internal-ca.crt --cert ${STORAGE_CERT_DIR}/wal-archive-client.crt --key ${STORAGE_CERT_DIR}/wal-archive-client.key`;
+const walIngestUrl = (config: DeployConfig, target: BackupTarget | string): string =>
+  `${walIngestScheme(config)}://${backupPrivateIp(config)}:${config.BACKUP_DAEMON_PORT}/v1/wal/${isAuditTarget(target) ? "audit_db" : "postgres_core"}`;
+
+const walClientTlsOptions = `--cacert ${STORAGE_CERT_DIR}/internal-ca.crt --cert ${STORAGE_CERT_DIR}/wal-archive-client.crt --key ${STORAGE_CERT_DIR}/wal-archive-client.key`;
+
+/** Client-certificate arguments, only meaningful (and only valid) for an https ingest. */
+const walClientTlsArgs = (config: DeployConfig): string =>
+  walIngestScheme(config) === "https" ? `${walClientTlsOptions} ` : "";
 
 export const archiveCommand = (config: DeployConfig, target: BackupTarget | string = "postgres_core"): string => {
   if (config.BACKUP_ENGINE_MODE === "pg-native") {
-    return `curl --fail --silent --show-error --max-time 120 ${walClientTlsArgs} --upload-file %p ${walIngestUrl(config, target)}/%f`;
+    return `curl --fail --silent --show-error --max-time 120 ${walClientTlsArgs(config)}--upload-file %p ${walIngestUrl(config, target)}/%f`;
   }
   if (config.BACKUP_ENGINE_MODE === "barman") {
     const backupIp = backupSpec(config)?.privateIp ?? "backup-1";
@@ -243,7 +256,7 @@ export const archiveCommand = (config: DeployConfig, target: BackupTarget | stri
 
 export const restoreCommand = (config: DeployConfig, target: BackupTarget | string = "postgres_core"): string => {
   if (config.BACKUP_ENGINE_MODE === "pg-native") {
-    return `curl --fail --silent --show-error --max-time 120 ${walClientTlsArgs} --output %p ${walIngestUrl(config, target)}/%f`;
+    return `curl --fail --silent --show-error --max-time 120 ${walClientTlsArgs(config)}--output %p ${walIngestUrl(config, target)}/%f`;
   }
   if (config.BACKUP_ENGINE_MODE === "barman") {
     const backupIp = backupSpec(config)?.privateIp ?? "backup-1";

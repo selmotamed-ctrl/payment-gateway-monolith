@@ -2,10 +2,10 @@
 
 <!-- GENERATED FILE. Edit core-back/prisma/schema.prisma instead. Do not hand-edit this file. -->
 
-- Models: **78**
+- Models: **79**
 - Enums: **105**
-- Schema version: **14**
-- Migrations: **11**
+- Schema version: **15**
+- Migrations: **13**
 
 ## Models
 
@@ -77,6 +77,7 @@
 - `Dispute`
 - `NotificationTemplate`
 - `Notification`
+- `SessionRevocation`
 - `PlatformSetting`
 - `GlAccountShard`
 - `GlShardRepair`
@@ -209,3 +210,5 @@
 - `20261107090000_shard_sequenced_checkpoints`
 - `20261107120000_inbound_event_claims`
 - `20261107150000_shard_repairs`
+- `20261108090000_partition_truncate_guard`
+- `20261108100000_session_revocations`

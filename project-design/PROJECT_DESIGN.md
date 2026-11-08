@@ -1005,7 +1005,7 @@ No test run was performed for this documentation change. Integration suites that
 - Authorities remain enforced by core. The edge guard is advisory but now deny-by-default. `*` is honoured at the edge only because core re-verifies; the edge cannot verify signatures because the key lives in core.
 
 ### Edge client IP and headers
-- `TRUSTED_PROXY_CIDRS` defaults to loopback only (`127.0.0.0/8,::1/128`; deploy sets `127.0.0.1/32,::1/128` explicitly). `resolveClientIp` honours forwarded headers only from trusted peers and requires a single valid IP (`x-real-ip` preferred, `x-real-client-ip` fallback). The edge always overwrites `x-real-client-ip` towards core.
+- `TRUSTED_PROXY_CIDRS` defaults to loopback only (`127.0.0.0/8,::1/128`; deploy sets `127.0.0.1/32,::1/128` plus the node's own private address, `<NODE_PRIVATE_IP>/32`, because nginx proxies to the address the backend binds to; with loopback only, `x-real-ip` was ignored on a multi-host deploy and every client looked like the nginx host). `resolveClientIp` honours forwarded headers only from trusted peers and requires a single valid IP (`x-real-ip` preferred, `x-real-client-ip` fallback). The edge always overwrites `x-real-client-ip` towards core.
 - Hand-written security headers on all edges: `nosniff`, `no-referrer`, `X-Frame-Options`, `frame-ancestors 'none'`, CORP, default `no-store`.
 - Redaction now covers PII keys (email, phone, msisdn, iban, account number, names, identity, national id, passport, dob, address). `redactUrl` masks sensitive query values and path tokens (inbound path tokens, link keys, attempt tokens, `/logs/` ids, `/external/links/` keys).
 - Limiters key on the resolved client IP, with an extra per-account limiter on admin login/MFA and merchant auth POSTs. Window envs: `AUTH_RATE_LIMIT_WINDOW_MS`, `ADMIN_RATE_LIMIT_WINDOW_MS`, `API_RATE_LIMIT_WINDOW_MS`, `EXTERNAL_RATE_LIMIT_WINDOW_MS`, `PAY_RATE_LIMIT_WINDOW_MS`, `INBOUND_RATE_LIMIT_WINDOW_MS`.
@@ -1024,6 +1024,13 @@ Fake Rails tester tokens stay in localStorage (GAP-019 residual); httpOnly cooki
 - **Shared throttle state (GAP-027).** `core-back/lib/auth/sharedState.ts` exposes an `AuthStateStore` (`incrWindow`, `setFlag`, `flagRemainingMs`, `del`, `clear`) backed by Redis when `REDIS_URL` is configured and by a bounded in-memory store (20,000 entries, oldest half dropped under a key flood) otherwise or when a Redis call fails. Login, MFA and the revoke list use it; keys are hashed, never a clear identifier. The policy is availability over strictness: login keeps working during a Redis outage.
 - **PCI scope (GAP-026, partially resolved).** `deploy/docs/pci-scope.md` is the normative scope statement: the gateway is out of PCI DSS cardholder-data scope by design (no PAN, CVV/CVC, PIN or track data is received, processed, stored or logged; only opaque processor tokens, statuses and at most last four digits plus brand). `deploy/lib/configSchema.ts` `panRailGuardProblems` makes `loadDeployConfig` reject any `deploy.env` key naming a PAN/CVV/card-number rail and any value holding a Luhn-valid 13-19 digit token. **Still open:** the core-back guard (rejecting PAN-capable rails at registration and PAN-shaped request fields, and redacting PAN-shaped log strings) is not implemented.
 - **Still open.** GAP-023 (operator-supplied SHA256 values) and GAP-025 (real malware scanner).
+
+## Remediation round 2 (2026-11-08): account lockout, staff invitation, uploads, revocation durability
+
+- **Login throttle (GAP-053).** The lock is keyed on `identifier|ip` (`LOGIN_PAIR_POLICY`: 5 failures / 15 min, 15 min lock) with a much larger identifier-only ceiling (`LOGIN_IDENTIFIER_POLICY`: 50 failures). An anonymous caller can no longer lock a known account for its real user from another address; a successful login clears the pair bucket (`recordLoginSuccess(identifier, ip)`). The admin and merchant edges mirror this with `createAccountLimiters(accountOf)` (`{ perAddress, ceiling }`, failures-only counting via `skipSuccessfulRequests`) in `lib/authLimiters.ts`.
+- **Staff creation (GAP-052).** A maker no longer chooses a staff member's password or phone. `POST /internal/admin/users` creates an `INVITED` user; the invitee sets their own password and phone through a single-use, vault-sealed invitation token (`POST /internal/admin/auth/accept-invitation`, public and rate-limited). The `status: ACTIVE` approval is refused until the invitation is completed, and the checker context shows the masked phone and the invitation state.
+- **Uploads (GAP-054).** Both edges verify the session shape and expiry and apply a per-address limiter and a `Content-Length` pre-check before multer buffers a byte (`uploadGuards`; admin limit `UPLOAD_RATE_LIMIT_MAX`, default 20 per window).
+- **Revocation durability (GAP-058).** A revoked session is written atomically to Redis (`SET ... PX`) and to the `session_revocations` table, so a Redis eviction or restart cannot resurrect it; the lookup falls back to the table. See `core.data` section 13.
 
 ---
 
@@ -1478,6 +1485,15 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 - Edges: `TRUSTED_PROXY_CIDRS` default loopback only; `MAX_INBOUND_BODY_BYTES` default 1 MiB; `CORS_ALLOWED_ORIGINS` (no CORS headers on admin/merchant when unset); newly wired rate-limit window envs `AUTH_/ADMIN_/API_/EXTERNAL_/PAY_/INBOUND_RATE_LIMIT_WINDOW_MS`; `CORE_MAX_RESPONSE_BYTES` (64 MiB), `CORE_TOTAL_DEADLINE_MS` (300000), `MAX_STREAMS_PER_IP` (5), `ADMIN_AUTHORITY_HINTS` (default empty, restrict-only), merchant `TOKEN_MAX_SCOPES`, `TOKEN_MAX_TTL_DAYS`, `TOKEN_DEFAULT_TTL_DAYS`, `UPLOAD_RATE_LIMIT_MAX`, admin `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
 - Frontends: `VITE_CHECKOUT_BASE_URL`, `VITE_IDENTITY_HOSTS` (merchant), `VITE_CHECKOUT_ORIGIN` (fake-rails). Real `.env` files in the frontends are no longer tracked; copy `.env.example` to `.env` on a fresh clone.
 - Deploy and daemon keys are listed in the deploy parts.
+
+## Remediation round 2 (2026-11-08): new configuration keys
+
+| Key | Where | Meaning |
+| :--- | :--- | :--- |
+| `UPLOAD_RATE_LIMIT_MAX` | admin-back | Uploads per address per rate-limit window (default 20). |
+| `LEDGER_RAW_SQL` | core-back | `false` turns the raw-SQL ledger posting path off (default on). |
+| `FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS` | fake-rails-back | Extra hosts (`host` or `host:port`) a webhook may target; the host of `CORE_INBOUND_BASE_URL` is always allowed. |
+| `PG_APP_USER`, `PG_APP_PASSWORD` | deploy | The non-owner role the deployed application connects as; setting the password enables the split (see `deploy.storage`). |
 
 ---
 
@@ -2261,7 +2277,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 <a id="coreapi"></a>
 
-> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-08 · **Verified against:** `5a24f6f+working-tree`
 
 # Core API Surface
 
@@ -2372,7 +2388,7 @@ Sensitive merchant changes create `MERCHANT` approvals. Suspension has an emerge
 | `GET /approvals`, `GET /approvals/export`, `GET /approvals/summary`, `GET /approvals/summary/export`, `GET /approvals/:id` | `approval:read` |
 | `POST /approvals/:id/approve`, `POST /approvals/:id/reject` | `approval:check` or `approval:write` + checker authority |
 
-The approve/reject routes call `actorFromRequest`, `assertCheckerAuthority` and `assertCheckerIsNotMaker`. The approve route also handles `BACKUP_POLICY` out of band and dispatches every other subject to `executeApprovalSubject`.
+The approve/reject routes call `actorFromRequest`, `assertCheckerAuthority` and `assertCheckerIsNotMaker`. The approve route also handles `BACKUP_POLICY` out of band (through `executeBackupPolicyApproval`, which claims the request before it calls the backup daemon) and dispatches every other subject to `executeApprovalSubject`.
 
 #### AML and compliance
 
@@ -2482,7 +2498,7 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `GET /overview` | `security:read` or `gateway:read` |
 | `POST /trigger` | `security:write` |
 | `POST /drill` | `security:write` |
-| `PUT /policy` | `security:write`; creates or executes a `BACKUP_POLICY` approval |
+| `PUT /policy` | `security:write`; creates a `BACKUP_POLICY` approval, or (with `approvalRequestId`) executes one and then additionally requires checker authority (`approval:check`), maker ≠ checker, a pending unexpired request and an atomic claim |
 | `GET /catalog` | `security:read` or `gateway:read` |
 
 ### 3.3 Merchant namespace
@@ -2512,7 +2528,10 @@ Authentication behavior:
 - The principal must have a `merchantId`; `merchantIdOf` rejects otherwise with `403 MERCHANT_CONTEXT_REQUIRED`.
 - Queries are scoped by `merchantId`; a merchant cannot read another merchant's wallet/application/link.
 - API tokens are bound to a merchant and optionally an application; the token hash, revocation and CIDR checks happen in core.
-- There is no per-route `requireAuthorities` call. API-token scopes and session authorities do not gate individual merchant endpoints.
+- Merchant authorities are enforced per route in core with `assertMerchantAuthority` (the closed catalogue in `lib/auth/merchantAuthorities.ts`); the portal and the edges only project them. Reads: wallets, `/wallets/:id`, `/balance`, `/statements` and `GET /applications*` need `merchant:read` or `merchant:write`; the statement export needs `merchant:write` (the portal's `statements.export`); `GET /links*` needs `link:read`; `GET /payments` and `GET /stats/overview` need `payment:read`; `GET /disputes*` needs `payment:read` or `dispute:respond`. `merchant:read`/`merchant:write` imply `payment:read` and `link:read`, so a payment-only user can read payments but never balances or statements. Before 2026-11-08 these read routes only checked the merchant, so any merchant user could read balances and the 50,000-row export. Writes keep their fine-grained authorities. API tokens only reach `/external/*`.
+- **Application scope (`users.app_scope_ids`).** A session principal carries `appScopeIds`, read from the user row on every request (a change takes effect without a new login). Empty means unscoped. For a scoped user the application, link, payment, dispute and statement lists are narrowed to those applications, by-id reads/cancels/evidence of another application answer `403 APP_SCOPE_VIOLATION`, `POST /links` refuses another application and defaults to the oldest application inside the scope, and the merchant-wide `GET /stats/overview` (it mixes merchant-wide wallet and cash-out figures) answers `403 APP_SCOPE_RESTRICTED`. Not scoped yet: POS terminals, wallets themselves, cash-outs and tokens.
+- Audit rows added 2026-11-08 (before this, these state changes left no trail): merchant `PUT /tokens/:id/ips` (`ACCESS_TOKEN_IP_ALLOWLIST_CHANGED`, with before/after CIDRs, in the same transaction as the change) and `DELETE /tokens/:id` (`ACCESS_TOKEN_REVOKED`); merchant and admin credential sets `POST` (`CREDENTIAL_SET_CREATED`), `PUT` rotate (`CREDENTIAL_SET_ROTATED`) and `POST .../verify` (`CREDENTIAL_SET_VERIFIED`), recording entry KEY names and versions only, never a secret value or ciphertext; admin `POST /assets` (`ASSET_REGISTERED`); backup `POST /trigger` (`BACKUP_TRIGGERED`) and `POST /drill` (`BACKUP_DRILL_TRIGGERED`, written best effort after the daemon accepted the job: a failed audit write never turns an already-started job into an error).
+- `POST /onboarding/kyb-documents` reports `duplicateDocuments` for the uploader's OWN earlier copies only; matches in other merchants are kept in the staff-only audit row (`KYB_DOCUMENT_UPLOADED.afterJson.duplicateDocuments`) and in the join-request duplicate flags, never returned to the merchant (tipping-off).
 - Sensitive application changes (`assignedWalletId`, `railWhitelist`, `redirectDomainAllowlist`) create an `APPLICATION` approval instead of applying directly.
 
 ### 3.4 Checkout namespace
@@ -2882,6 +2901,11 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 - `PATCH /rails/:id` accepts `logoAssetId` (uuid, or `null` to clear). A uuid must reference a registered `Asset` (`404 ASSET_NOT_FOUND`); the audit row records the before/after logo. The edge schema and `toCoreRailUpdate` forward it. `POST /assets` still registers metadata only (name, type, size, SHA-256, storage key): it does not store image bytes, which remains a gap.
 - `PATCH /routes/:id` accepts `mismatchPolicy` (object; only `tolerance_amount`/`toleranceAmount` is read by the settlement engine, other keys are kept as stored; a malformed tolerance is `400 MISMATCH_TOLERANCE_INVALID`) and `maintenanceWindows` (`[{ start, end }]`, max 50, absolute instants; `end <= start` or an unparsable instant is `400 MAINTENANCE_WINDOW_INVALID`; `[]` clears). Omitted fields are left untouched; the edge forwards empty values so an operator can clear them.
 - **Commission tiers were broken end to end and are fixed.** The admin edge persisted UI tiers as an index-keyed object (`{"0": {...}}`) and core's create schema (`z.record`) could not take an array, while the fee calculator (`commissionForProfile`, `checkout.ts`) only reads `tiersJson` when it is an array: a TIERED profile created through the UI silently priced at its minimum fee. Now `POST /commission-profiles` accepts an ordered array (or the legacy object), the edge forwards the array, and `commissionTiers()` normalises both shapes (object keys ordered numerically), which also reprices already-stored legacy rows correctly. Tier keys are `upTo`, `flat`, `percent` (a fraction). **Behaviour change for existing data:** a legacy TIERED profile now prices by its tiers instead of the minimum fee. The edge also forwards `minFee`, `maxFee`, `feeBearerDefault`, `roundingMode`, `merchantId`, `applicationId` (core already accepted them; the strict edge schema dropped them). Note `percentageRate` is a **fraction** (`0.0300` = 3%), as the seed data stores it; the form now says so.
+
+## Remediation round 2 (2026-11-08): routes
+
+- `POST /internal/admin/users` accepts no password or phone and creates an `INVITED` user; `POST /internal/admin/users/:id/invite` re-issues an invitation; `POST /internal/admin/auth/accept-invitation` (public, token-bound) sets the password and phone and marks the invitation complete. The maker-checker activation of a staff user requires a completed invitation.
+- `GET|POST /internal/checkout/return/:attemptToken` accepts only the attempt `reference`, and runs the gateway inquiry at most once per `RETURN_INQUIRY_COOLDOWN_MS` (10 s) per attempt across core instances (a shared flag in the auth-state store); calls inside the window answer with the current status (GAP-055).
 
 ---
 
@@ -3524,7 +3548,7 @@ No build or test was run for this documentation change. Tests that require Postg
 
 <a id="coreledger"></a>
 
-> **Part ID:** `core.ledger` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `working-tree`
+> **Part ID:** `core.ledger` · **Status:** `partial` · **Last verified:** 2026-11-08 · **Verified against:** `working-tree`
 
 # Double-Entry Ledger
 
@@ -3562,7 +3586,7 @@ The design requires an append-only, double-entry ledger with a fixed chart of ac
 | :--- | :--- | :--- |
 | `PLATFORM_CLEARING` | the gateway owes the platform until settlement | debit `GATEWAY_CLEARING`, book provider or gateway fees, credit wallet and income |
 | `INTERNAL` | first-party rail (NeomPay); no external clearing account | `INTERNAL_CONFIRMATION`: debit `TREASURY`, credit wallet and income |
-| `MERCHANT_DIRECT` | merchant owns the gateway account and receives the money directly | commission only: debit `COMMISSION_RECEIVABLE`, credit `PLATFORM_INCOME`; netting later moves wallet against receivable |
+| `MERCHANT_DIRECT` | merchant owns the gateway account and receives the money directly | commission only: debit `COMMISSION_RECEIVABLE`, credit `PLATFORM_INCOME`; netting later moves wallet against receivable. A refund reverses only that commission (`MERCHANT_DIRECT_CONFIRMATION`, stage `REFUND`); it never touches the wallet or treasury |
 
 `PROVIDER_HELD` is a valid `settlementTarget` in the schema but is treated as `PLATFORM_CLEARING` by the ownership-mode projection (`core-back/engine/runtime/attemptRepository.ts:56`).
 
@@ -3582,7 +3606,9 @@ The implemented verifier applies this equation to natural balances, where debit-
 
 ### The 17 scenarios (design said 15 worked entries)
 
-The historical design listed 15 worked entries. The code now defines 17 `LedgerScenario` values: the original 15 plus `SPLIT_SURCHARGE_CONFIRMATION` and `SUSPENSE_SETTLEMENT`. Three scenarios have multiple stages (merchant-direct netting, AML release, chargeback lost), so the exhaustive matrix contains 20 labels rather than 17.
+The historical design listed 15 worked entries. The code now defines 17 `LedgerScenario` values: the original 15 plus `SPLIT_SURCHARGE_CONFIRMATION` and `SUSPENSE_SETTLEMENT`. Three scenarios have multiple stages (merchant-direct netting and refund, AML release, chargeback lost), so the exhaustive matrix contains 21 labels rather than 17.
+
+**Refund template selection (2026-11-08).** Every refund path (the governance executor `finalizeRefundAdjustment`, `DynamicRailEngine.refund` and the synthetic seeder) picks its template through `refundScenarioFor(ownershipMode)` in `LedgerPoster.ts`, so they cannot diverge: `INTERNAL` -> `INTERNAL_REFUND`; `MERCHANT_DIRECT` -> `MERCHANT_DIRECT_CONFIRMATION` stage `REFUND` (label `MERCHANT_DIRECT_REFUND`); everything else -> `FULL_REFUND`. Before this fix a merchant-direct refund reused `FULL_REFUND`, which debits the merchant wallet for the net amount and credits treasury for the full amount although the platform never held the cash and never credited the wallet; the entry balanced, so the invariant verifier could not see it. A merchant-direct refund with nothing to reverse (`reverseCommission = false`, or a zero commission) posts no journal: the adjustment still becomes `EXECUTED` with a null `journalEntryId` (the chargeback path already behaves this way), the seeder skips such a refund because its verifier requires a journal on every executed adjustment, and the rail engine skips the posting.
 
 ## 3. As-built architecture
 
@@ -3646,6 +3672,7 @@ All examples use `amount = 100.0000`, `commission = 3.0000`, `providerFee = 1.00
 | 6 | `SPLIT_SURCHARGE_CONFIRMATION` | confirm, `PAYMENT_ATTEMPT` | `Dr GATEWAY_CLEARING 101.5000`; `Dr GATEWAY_FEE_EXPENSE 0.8000`; `Cr MERCHANT_WALLET 98.5000`; `Cr PLATFORM_INCOME 3.0000`; `Cr GATEWAY_FEE_ACCRUAL 0.8000` |
 | 7 | `MERCHANT_DIRECT_CONFIRMATION` | confirm, `PAYMENT_ATTEMPT` | `Dr COMMISSION_RECEIVABLE 3.0000`; `Cr PLATFORM_INCOME 3.0000` |
 | 7b | `MERCHANT_DIRECT_CONFIRMATION` | netting, `COMMISSION_NETTING` | `Dr MERCHANT_WALLET 3.0000`; `Cr COMMISSION_RECEIVABLE 3.0000` |
+| 7c | `MERCHANT_DIRECT_CONFIRMATION` | refund, `ADJUSTMENT` (keyed by the adjustment id) | `Dr PLATFORM_INCOME 3.0000`; `Cr COMMISSION_RECEIVABLE 3.0000` |
 | 8 | `AML_HOLD_AND_RELEASE` | hold, `PAYMENT_ATTEMPT` | `Dr GATEWAY_CLEARING 100.0000`; `Cr AML_HOLD 100.0000` |
 | 8b | `AML_HOLD_AND_RELEASE` | release, `AML_RELEASE` | `Dr AML_HOLD 100.0000`; `Cr MERCHANT_WALLET 97.0000`; `Cr PLATFORM_INCOME 3.0000` |
 | 9 | `CASHOUT` | execution, `ADJUSTMENT` | `Dr MERCHANT_WALLET 100.0000`; `Cr TREASURY 100.0000` |
@@ -3847,7 +3874,7 @@ Use `postScenario` for settlement sweeps, fee variance, suspense, AML, and adjus
 
 - **Code gap:** idempotent replay of the same `(refType, refId)` with a different template silently returns the first entry; it does not compare the line set or amounts. A caller that reuses a reference for a different economic event loses the second posting.
 - **Risk:** the single-hot-shard write path is about 25-30% slower than before the sequence was added (benchmark 2026-11-07: p50 1.4 ms to 1.8 ms single-threaded; about 1,000 to 750 postings/s on one shard) because the sequence is reserved under the shard lock before the lines are inserted and a fifth index exists on `journal_lines`. That is the case the shard scaler relieves.
-- **Documentation gap:** `core-back/test/engine/ledger.test.ts` describes “all 16 journal entry templates”; the exhaustive matrix header says “15” and asserts 20 labels. The canonical count is 17 scenarios / 20 staged variants.
+- **Documentation gap:** `core-back/test/engine/ledger.test.ts` describes “all 16 journal entry templates”; the exhaustive matrix header says “15” and asserts 20 labels. The canonical count is 17 scenarios / 21 staged variants.
 - **Risk:** the raw scenario builder defaults commission/provider/gateway fee. A production caller that forgets a fee will silently book the default rather than fail. Use `postPaymentConfirmation` or pass every amount explicitly.
 
 ## 8. Verification and tests
@@ -3864,7 +3891,8 @@ cd core-back && bun test test/storage-engine/ledger-shards.test.ts
 Coverage:
 
 - `test/engine/ledger.test.ts` — template balance, scenario semantics, strict fee resolution, idempotency, unbalanced rejection, checkpoint service, invariant provider.
-- `test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` — 20 labels × 3 currencies × 5 amount tiers × 4 fee configurations = 1,200 template constructions.
+- `test/refund-merchant-direct.test.ts` — a merchant-direct refund reverses only commission (no wallet debit, no treasury credit), posts nothing without a commission, keeps `FULL_REFUND` for platform-cleared payments, `refundScenarioFor`, the rail-engine refund path, and the per-merchant commission-receivable balance after a reversal.
+- `test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` — 21 labels × 3 currencies × 5 amount tiers × 4 fee configurations = 1,260 template constructions.
 - `test/exhaustive/02-ledger/checkpoints-and-invariant.test.ts` — checkpoint snapshot, no double count, 500-entry fuzz drift, deliberate drift detection; requires PostgreSQL and skips otherwise.
 - `test/exhaustive/02-ledger/commission-hierarchy-and-bearers.test.ts` / `property-fuzzer-10k.test.ts` — commission precedence, fee-bearer matrices, 10,000 deterministic monetary iterations.
 - `test/storage-engine/ledger-shards.test.ts` / `uow.test.ts` / `write-path.integration.test.ts` — 16-shard distribution, merchant one-shard rule, parity after concurrent postings, `ensureAccountShards`, atomic ledger/outbox/shard write path; live PostgreSQL required.
@@ -3913,11 +3941,23 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 - **Append-only ledger and audit trail (GAP-013, RESOLVED 2026-11-05).** Migration `20261105090000_append_only_ledger_guards` installs `BEFORE UPDATE OR DELETE` row triggers and `BEFORE TRUNCATE` statement triggers on `journal_entries`, `journal_lines` (the parent and every partition; row triggers are cloned to future partitions, TRUNCATE triggers are installed on each existing partition) and `audit_log`. They raise `55000` for any caller, including the table owner. Two narrow bypasses exist: (1) maintenance, a transaction that sets `pgw.ledger_maintenance = 'on'` AND whose session user is a superuser or a member of the role `pgw_ledger_maintenance` (the application role is not a member); (2) retention, `DELETE` on `audit_log` only, in a transaction that sets `pgw.audit_retention = 'on'` (the `RetentionWorker` purge; the journal is never purged by retention). The migration also creates, best effort (a managed PostgreSQL may forbid `CREATE ROLE`; it then emits a notice and the roles must be provisioned manually), the NOLOGIN roles `pgw_ledger_maintenance` and the non-owner application role `pgw_app`, grants `pgw_app` the DML it needs and revokes `UPDATE`/`DELETE`/`TRUNCATE` on the journal tables and `UPDATE`/`TRUNCATE` on `audit_log` from it (`audit_log` keeps `DELETE` for the retention purge, still gated by the trigger). REVOKE alone does nothing against the table owner, which is why the triggers exist. **Production must connect as `pgw_app` (or another non-owner member of it), never as the owner that ran the migrations**; migrations still run as the owner. Test fixtures open the maintenance bypass through `core-back/test/helpers/ledgerMaintenance.ts`.
 - **Tests.** `core-back/test/security-regressions/{h7-rounding,h4-cashout}` and `core-back/test/hardening-gap-regressions.test.ts` (checkpoint, parity, append-only guards). True concurrency needs PostgreSQL 18 and is not covered.
 
+## Remediation round 2 (2026-11-08): raw-SQL posting path and throughput measurements
+
+`LedgerPoster` has an opt-in raw-SQL write path (`LedgerPosterOptions.rawSql`), on in production through `createLedgerPoster` (`LEDGER_RAW_SQL=false` is the kill switch). It produces the same rows as the ORM path:
+
+- the entry is inserted with `INSERT ... ON CONFLICT (ref_type, ref_id) DO NOTHING RETURNING` (an idempotent replay reads the existing entry back and moves nothing);
+- accounts are resolved with one typed `SELECT`, and the lines are inserted with application-generated UUIDv7 ids by one `INSERT ... SELECT ... FROM unnest(...)`, together with the per-shard `shard_seq` bookkeeping from the shard writer, all inside the one transaction;
+- a most-specific (scoped) account resolution is cached per poster for 60 s (max 20,000 entries): a more specific account can never appear later and ties resolve to the lowest id. A platform-wide fallback resolution is never cached, so a wallet created afterwards takes over at once; `clearAccountCache()` and `accountCacheTtlMs: 0` disable it.
+
+Measured on the test host (single Bun process, local PostgreSQL 18, 16 shards): sequential posting 255 -> 628 posts/s (p50 3.83 -> 1.50 ms, about 4.2 statements per posting); eight concurrent workers 582-641 -> about 2,085 posts/s. Widening shards did not help: the limit is client-side ORM/CPU work in one process. **15,000 TPS is therefore not reachable on one core process; it needs horizontal scale (several core instances over the same database) and further hot-row work (treasury/income shard locks held through commit, a faster shard scaler), which remain open (GAP-063).**
+
+Tests: `core-back/test/ledger-raw-sql-parity.test.ts` (same entries, lines, balances and gapless shard sequences as the ORM path for five templates; returned records match storage; idempotent replay in both modes; whole-posting rollback when the shard writer fails; cache semantics).
+
 ---
 
 <a id="coregovernance"></a>
 
-> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-08 · **Verified against:** `5a24f6f+working-tree`
 
 # Governance and Compliance
 
@@ -3979,7 +4019,7 @@ The actual admin approve route (`core-back/api/internal/admin.ts:6014`) is more 
 - rejects expired requests;
 - enforces maker ≠ checker;
 - adds a join-request admin-assisted maker check and a merchant payload checker-domain check;
-- special-cases `BACKUP_POLICY` through the backup daemon;
+- special-cases `BACKUP_POLICY` through `executeBackupPolicyApproval` (claim first, then the backup daemon; shared with `PUT /system/backups/policy`);
 - queues `ADJUSTMENT` execution as a background job and executes everything else through `executeApprovalSubject` in one transaction;
 - records a decision checklist audit row.
 
@@ -4070,7 +4110,7 @@ Dispute intake is exposed as `POST /admin/disputes`; the route queues an `ADJUST
 
 There is no webhook or statement dispute-intake wiring in `DynamicRailEngine` or reconciliation; the admin manual route is the implemented intake path.
 
-Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` holds the adjustment and opens an operator case. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id.
+Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` holds the adjustment and opens an operator case. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id. The refund template follows the ownership mode of the payment (`refundScenarioFor`, see `core.ledger`): a `MERCHANT_DIRECT` refund only reverses the commission recognition (`Dr PLATFORM_INCOME` / `Cr COMMISSION_RECEIVABLE`) and never debits the wallet or credits treasury; with nothing to reverse the adjustment is `EXECUTED` with no journal entry.
 
 ### 3.8 Cash-outs
 
@@ -5135,7 +5175,7 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 
 <a id="coredata"></a>
 
-> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-08 · **Verified against:** `d695518+working-tree`
 
 # Data Schema and Migrations
 
@@ -5518,9 +5558,36 @@ The current schema version is 14 (`REQUIRED_SCHEMA_VERSION = 14`; model count 78
 - `20261105130000_statement_unique_source_file_hash`: replaces the global `reconciliation_runs.file_hash` unique index with `(statement_source_id, file_hash)`, sets `timestamp_tolerance_sec = 0` for legacy keyed channels with no signed timestamp source (the verifier now fails closed on a missing signed timestamp), and bumps `schema_versions` to 11.
 - `20261107090000_shard_sequenced_checkpoints` (version 12): per-shard sequenced ledger checkpoints, `journal_lines.shard_id/shard_seq`, the `gl_shard_checkpoints` table, per-account shard width and `operator_cases.subject_key` (see `core.ledger`).
 - `20261107150000_shard_repairs` (version 14): `gl_shard_checkpoints.baseline_seq` (the exemption marker of a re-baselined shard) and the append-only history table `gl_shard_repairs` (see `core.ledger` 3.10).
+- `20261108090000_partition_truncate_guard` (functions and triggers only; `schema_versions` stays at 14): `pgw_guard_journal_line_partition(regclass)` installs the `pgw_journal_lines_no_truncate` statement trigger only when it is missing; `ensure_journal_line_partitions` (run daily by the deploy cron) calls it for every partition it covers, and the migration backfills every existing partition. Statement-level TRUNCATE triggers are not cloned from the partitioned parent, so partitions created after `20261105090000_append_only_ledger_guards` could be truncated by their owner without meeting the guard.
 - `20261107120000_inbound_event_claims` (version 13): adds nullable `inbound_events.claimed_at` and `claimed_by` plus `(processed_at, claimed_at)`, the durable lease the inbound webhook worker uses to prevent duplicate processing across a brief leadership overlap.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
+
+## 12. Runbook: applying `20261107090000_shard_sequenced_checkpoints` to a populated database (2026-11-08)
+
+Fresh databases and test databases need nothing special. A database that already holds `journal_lines` history does, because the migration is one transaction that:
+
+- adds `journal_lines.shard_id/shard_seq` (metadata-only, but each `ALTER TABLE` takes `ACCESS EXCLUSIVE` on the partitioned parent and every partition for its duration);
+- adds `journal_lines_shard_id_range` as a **validated** `CHECK`, which scans every partition under that lock (the `shard_seq > 0` check is `NOT VALID` and costs nothing);
+- builds `journal_lines_shard_seq_idx` with a plain `CREATE INDEX`, which blocks writes to `journal_lines` until it finishes;
+- computes the genesis totals with one aggregate over all of `journal_lines`, then rewrites `gl_account_shards` and `gl_shard_checkpoints` for every account.
+
+The application is not available for the duration, and an old binary posting while it runs would either block or write lines without shard attribution. The applied migration file must not be edited (Prisma checksums it); the safe handling is operational.
+
+1. **Rehearse first.** Restore the latest backup into a scratch PostgreSQL 18 instance and run `bunx prisma migrate deploy` there. Record the elapsed time; it grows with `journal_lines` row count (the scan, the index build and the genesis aggregate are all full passes). Plan the window at about three times the rehearsal.
+2. **Announce a maintenance window** and stop traffic: stop the three edge services (admin/merchant/checkout) and then core's workers, so nothing posts. Confirm no open transactions touch `journal_lines`: `SELECT pid, state, query FROM pg_stat_activity WHERE query ILIKE '%journal_lines%' AND pid <> pg_backend_pid();`.
+3. **Take the pre-migration dump** (the deploy engine does this automatically before `migrate deploy`; keep it until the checkpoint worker has verified at least one full sweep afterwards).
+4. **Deploy the new core binary and run the migration together** (`bun deploy/deploy.ts`, update mode). Do not run the migration alone and leave the old binary serving: the old poster does not write `shard_id/shard_seq`, so every new line would violate `journal_lines_shard_seq_positive` (the migration is not skippable for the new binary either: `REQUIRED_SCHEMA_VERSION` is checked by the seeders).
+5. **Verify before reopening traffic**: `SELECT version FROM schema_versions;` is at least 12; `SELECT count(*) FROM gl_accounts a WHERE NOT EXISTS (SELECT 1 FROM gl_account_shards s WHERE s.gl_account_id = a.id);` is 0; the global ledger invariant check in the admin ledger-health page reports no drift; then start the edges.
+6. **If the window is too long for the lock scan**, the lower-impact variant is a hand-applied pre-step on the production database, run before the deploy and reviewed by two people (maker-checker for operations): `ALTER TABLE journal_lines ADD CONSTRAINT journal_lines_shard_id_range CHECK (shard_id >= 0 AND shard_id < 256) NOT VALID;` then `ALTER TABLE journal_lines VALIDATE CONSTRAINT journal_lines_shard_id_range;` (the validate step takes only `SHARE UPDATE EXCLUSIVE`) and `CREATE INDEX CONCURRENTLY` for each partition's index. The migration's own `ADD CONSTRAINT`/`CREATE INDEX` statements would then fail on the existing names, so this variant requires a reviewed copy of the migration with those statements guarded by `IF NOT EXISTS`/skipped, applied via `prisma migrate resolve`. Do this only with a rehearsal; the default recommendation is the window.
+
+Open: a deploy-time guard that refuses to run this migration on a database with a large `journal_lines` unless the operator passes an explicit acknowledgement is not implemented. The pipeline already takes a pre-migration dump and probes pending migrations (`deploy/deploy.ts` `probeMigrationState`), so the guard would extend that probe.
+
+## Remediation round 2 (2026-11-08): session revocations
+
+## 13. Session revocations (schema version 15)
+
+`20261108100000_session_revocations` adds the `session_revocations` model (`jti`, `expires_at`) and bumps `REQUIRED_SCHEMA_VERSION` to 15. `revokeSession` writes Redis (atomic `SET ... PX`) and the table; `isSessionRevoked` reads Redis first and the table when Redis misses or is down. Expired rows are deleted opportunistically on later revocations. `20261108090000_partition_truncate_guard` was amended (it is unreleased) so `pgw_guard_journal_line_partition` also grants the app role its DML on each partition and revokes UPDATE/DELETE/TRUNCATE, because partitions created by the cron run as `postgres` and do not inherit the owner's default privileges.
 
 ---
 
@@ -5929,7 +5996,7 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 
 <a id="corebackup"></a>
 
-> **Part ID:** `core.backup` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `747d9bc+working-tree`
+> **Part ID:** `core.backup` · **Status:** `partial` · **Last verified:** 2026-11-08 · **Verified against:** `747d9bc+working-tree`
 
 # Backup Control
 
@@ -6018,15 +6085,18 @@ The trigger schema defaults `target` to `all` and `kind` to `full`.
 
 It returns HTTP 202 with `checkerRequired: true` and the approval id.
 
-With `approvalRequestId`, core:
+With `approvalRequestId`, core calls `executeBackupPolicyApproval` (`core-back/api/internal/backups.ts`). The same function backs `POST /approvals/:id/approve` for a `BACKUP_POLICY` approval, so the two entry points cannot differ:
 
-1. loads the approval and requires `subjectType = "BACKUP_POLICY"`;
-2. requires state `PENDING_REVIEW` or `APPROVED`;
-3. rejects when `approval.makerUserId === actor.userId` with `MAKER_CHECKER_VIOLATION`;
-4. requires the daemon to be configured;
-5. applies `approval.payloadDiffJson` to the daemon (not the current request body);
-6. marks the approval `EXECUTED`, records `checkerUserId` and increments `baseVersion`;
-7. writes a `BACKUP_POLICY_UPDATED` audit row with before/after JSON and a stable-JSON checksum prefix.
+1. the caller must hold checker authority (`approval:check`); `security:write` alone is refused with `403 APPROVAL_CHECKER_AUTHORITY_REQUIRED`;
+2. it loads the approval and requires `subjectType = "BACKUP_POLICY"` (`404 APPROVAL_NOT_FOUND` otherwise);
+3. it rejects `approval.makerUserId === actor.userId` with `409 APPROVAL_MAKER_EQUALS_CHECKER`;
+4. it requires state `PENDING_REVIEW` or `DRAFT` (`409 APPROVAL_NOT_PENDING`; an `APPROVED`, `EXECUTED` or `REJECTED` request can never be applied again) and an unexpired request (`409 APPROVAL_EXPIRED`);
+5. it requires the daemon to be configured (`503`);
+6. it CLAIMS the approval with a conditional `updateMany` (pending -> `APPROVED`, `checkerUserId` set) BEFORE calling the daemon, so two checkers racing apply the policy exactly once (the loser gets `409 APPROVAL_NOT_PENDING`);
+7. it applies `approval.payloadDiffJson` to the daemon (not the current request body) with `updatedBy` set to the checker; if the daemon call fails the claim is released (back to `PENDING_REVIEW`, `checkerUserId` cleared) so the request can be retried;
+8. in one transaction it marks the approval `EXECUTED`, records `checkerUserId`, increments `baseVersion` and writes a `BACKUP_POLICY_UPDATED` audit row (`entityId` = the approval id) with before/after JSON and a stable-JSON checksum prefix.
+
+Residual: if the process dies after the daemon accepted the policy but before step 8, the approval stays `APPROVED` with the checker recorded and the policy is already live; the daemon call is idempotent, but there is no automatic resume of that state.
 
 There is no maker-checker on `POST /trigger` or `POST /drill`; both are direct `security:write` actions.
 
@@ -6552,7 +6622,7 @@ The seeder writes 49 Prisma models through `createMany`, including merchant/user
 | `FAKE_RAILS_ALLOW_IN_PRODUCTION` | Required when `NODE_ENV=production` |
 | `FAKE_RAILS_ALLOWED_HOSTS` | Comma-separated allowed emulator hosts |
 | `FAKE_RAILS_SEEDER_TOKEN` | Shared handshake/bulk-seed token |
-| `SYNTHETIC_SEED_PROFILE` | `COMPACT`, `STANDARD`, `STRESS` (default `STANDARD` in the seeder; deploy default `COMPACT`) |
+| `SYNTHETIC_SEED_PROFILE` | `COMPACT`, `STANDARD`, `STRESS` (default `STANDARD` in the seeder when unset or empty; deploy default `COMPACT`). Any other value now throws (`Unknown synthetic seed profile`) instead of silently becoming `STANDARD`. A refund of a `MERCHANT_DIRECT` attempt with no commission to reverse is skipped by the generator (see `core.ledger`). |
 | `SYNTHETIC_SEED_KEY` | Completed-run key and PRNG seed |
 | `SYNTHETIC_DATA_NAMESPACE` | Namespace used in emails/references (default `synthv1`) |
 | `SYNTHETIC_YEARS_SPAN` | Timeline span in years |
@@ -7093,7 +7163,7 @@ To run them against a private, throwaway cluster (never the live databases): `in
 
 <a id="edgeshared"></a>
 
-> **Part ID:** `edge.shared` · **Status:** `implemented` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `edge.shared` · **Status:** `implemented` · **Last verified:** 2026-11-08 · **Verified against:** `5a24f6f+working-tree`
 
 # Shared Core Upstream Client
 
@@ -7168,12 +7238,12 @@ Each node state tracks `url`, `agent`, `healthy`, `inFlight`, `failures`, `lastF
 
 Retry eligibility is controlled by `retryAttemptsFor()`:
 
-- idempotent methods default to retrying: `GET`, `HEAD`, `PUT`, `DELETE`, `OPTIONS`;
+- idempotent methods default to retrying: `GET`, `HEAD`, `PUT`, `DELETE`, `OPTIONS`. A retry after the request reached the wire is a separate question (below): `PUT` and `DELETE` are only retried when the connection failed before anything was sent;
 - `POST` and `PATCH` do not retry by default;
 - `retryIdempotent: true` forces retries; `retryIfUnavailable: true` allows a non-idempotent call to retry;
 - `maxAttempts` defaults to 2 and is floored to at least 1; there is no upper cap.
 
-`request()` marks a node failed and retries when the node returns HTTP `502` or `503`, or when the request throws a connection/TLS error. Any other status, including other `5xx` responses, marks the node healthy and is returned to the caller. If every attempt ends in a `502`/`503`, the last response body is returned rather than converted to a local error. If every node has already been attempted and no eligible node remains, the call fails with `CORE_UNAVAILABLE`.
+`request()` marks a node failed only when the request throws a connection/TLS/timeout error (`isNodeFailure`). Every complete HTTP response, whatever its status, marks the node healthy. A `502`/`503`/`504` response is retried on another node only when the request may be replayed after it was sent: `GET`, `HEAD` and `OPTIONS`, a request carrying an `Idempotency-Key`, or an explicit `retryIdempotent`/`retryIfUnavailable` opt-in. `PUT` and `DELETE` are deliberately NOT replay-safe after send, because core's `PUT` routes create a new version per call (`PUT /settings` writes a new `platform_settings` version and an audit row on every call), so a replay could double-apply; they are still retried on a connect-phase failure, when nothing was sent. If every attempt ends in a `502`/`503`/`504`, the last response body is returned rather than converted to a local error. If every node has already been attempted and no eligible node remains, the call fails with `CORE_UNAVAILABLE`.
 
 `mapCoreTransportError()` maps transport failures to stable edge errors:
 
@@ -7228,7 +7298,7 @@ The prefixes are:
 - sets `accept: text/event-stream` and `cache-control: no-cache`;
 - uses the same node selection, retry count, cooldown and attempted-node set;
 - increments `inFlight` until the stream ends, closes or errors;
-- if a node answers `502`/`503` and another attempt is possible, drains that response into a buffer, records it as `lastStream`, and tries the next node;
+- if a node answers `502`/`503`/`504` and another attempt is possible, drains that response into a buffer, records it as `lastStream`, and tries the next node (the answer does not count against the node's health);
 - if retries are exhausted, returns `lastStream` or maps the transport error.
 
 `proxyCoreStream()` converts a non-2xx upstream into the normal core HTTP error, then copies the stream to the express response with `cache-control: no-cache, no-transform`, `connection: keep-alive` and `x-accel-buffering: no`. On client disconnect it aborts the upstream request.
@@ -7242,7 +7312,7 @@ There is no true fallback to polling at the edge. Checkout and POS SSE are imple
 - The client cert CN must match the channel; the client path guard prevents accidental cross-channel calls, and `core-back` prevents forged ones.
 - A call never retries against the same URL twice.
 - A default retry only applies to idempotent methods.
-- A `502`/`503` from any node is interpreted as node unavailability even if generated by application code.
+- A `502`/`503`/`504` answer can trigger a failover for a replay-safe request, but it is never interpreted as node failure, even when a proxy generated it; only transport errors are.
 - Request identity headers and `authorization` are forwarded verbatim; the edge does not mint or re-sign tokens.
 - The pool does not load-balance SSE streams after establishment; selection happens once per stream open.
 - LSN hints are propagated, not validated. A malformed value is passed to core, where the storage layer decides how to handle it.
@@ -7306,7 +7376,7 @@ The deploy engine installs only the CA and the edge's own client certificate on 
 
 ### Known bugs / risks
 
-- Treating every upstream `502`/`503` as a node failure can evict a healthy core node that legitimately returned a gateway-style `502`/`503`.
+- A proxy in front of core that answers `502` for a dead backend is no longer detected as a node failure (only transport errors are); with a single core behind such a proxy every request still reaches it. Distinguishing a proxy-generated 5xx from core's own envelope (a JSON body with `code`) would restore that detection if it is ever needed.
 - A half-open node is preferred over healthy nodes while any half-open candidate exists. With several recovering nodes this can concentrate probe traffic rather than spread it.
 - `maxAttempts` can exceed the number of nodes; the attempted set then stops the loop early.
 - A pool with an empty URL list throws `CORE_UNAVAILABLE`; there is no startup-time rejection of an empty `CORE_BACK_URLS` beyond the fallback to `CORE_BACK_URL`.
@@ -7353,9 +7423,10 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 ## Security hardening (2026-11-05)
 
 Applies to all three copies of the client:
-- Only transport/TLS errors and 502/503/504 mark a node unhealthy.
+- Only transport/TLS errors mark a node unhealthy (HTTP 502/503/504 answers do not, since 2026-11-08).
+- Framing and hop-by-hop headers are never taken from a caller (`content-length`, `transfer-encoding`, `content-encoding`, `connection`, `keep-alive`, `upgrade`, `te`, `trailer`, `host`, `expect`; since 2026-11-08): `buildCoreHeaders` and `request()` strip them and `request()` sets `content-length` from the body it actually writes. A forwarded length that described a different (for example decompressed) body would otherwise desync the pooled keep-alive connection to core (request smuggling; confirmed for the checkout inbound route, latent in the other two edges).
 - Header names and values are validated as printable ASCII (`400 CORE_HEADER_INVALID`); edge-owned headers are applied last, and `x-real-client-ip` is always overwritten with the resolved IP.
-- PUT/DELETE are HTTP-idempotent and are replayed after send like GET/HEAD/OPTIONS; POST/PATCH still need an `Idempotency-Key`/opt-in, and a connect-phase failure is always retryable.
+- Only GET/HEAD/OPTIONS (and requests with an `Idempotency-Key` or an explicit opt-in) are replayed after send. PUT/DELETE are retried only on a connect-phase failure (nothing was sent); POST/PATCH likewise need an `Idempotency-Key`/opt-in. This reverses the 2026-11-05 rule that replayed PUT/DELETE.
 - SSE streams use their own agent pool (128 sockets) with `MAX_STREAMS_PER_IP` (default 5) and abort upstream on early client disconnect.
 - Buffered responses are capped (`CORE_MAX_RESPONSE_BYTES` default 64 MiB, `CORE_TOTAL_DEADLINE_MS` default 300000).
 - Admin `x-pg-min-lsn` is validated against `^hex/hex$` (400 otherwise).
@@ -7636,6 +7707,10 @@ New `coreForward` routes (new files `wallets.ts`, `applications.ts` (application
 | `/aml/reporting-rules/:id/promote`, `/finance/route-caps` | already in core; now forwarded | |
 
 Contracts enforced at the edge: bodies are `.strict()` zod; `reason` is `z.string().trim().min(10).max(500)` (shared `mutationSchemas.ts`; also required on job requeue, notification retry and GL checkpoint); mutation enums are the safe subsets (wallet `FROZEN|ACTIVE`, application `SUSPENDED|ACTIVE`, POS `INACTIVE|BLOCKED|ACTIVE`, link `CANCELLED`); path ids must be UUIDs; list queries pass through every scalar filter. `zListQuery` requires `page >= 1` and caps `pageSize` at 200 but has no upper page bound, so a "last page" jump on a multi-million-row ledger is forwarded instead of failing validation; deep offset pages remain an offset-pagination cost (GAP-006). `relayStatus` passes core's 200/201/202 to the client unchanged (202 = submitted for approval). There is no outbox retry route (core has none).
+
+## Remediation round 2 (2026-11-08): limiters, uploads, invitation routes
+
+`api/public/auth.ts` wires `createAccountLimiters` (per `identifier|ip` and an identifier ceiling, failures only) and the public `POST /auth/accept-invitation` route; `api/upload.ts` exports `uploadGuards` (limiter, `Content-Length` pre-check, session-shape check before multer) and is used by the reconciliation and join-request uploads; `api/protected/users.ts` and `api/contract.ts` carry the invitation-based create and re-invite contracts (no password or phone in the create body).
 
 ---
 
@@ -7932,6 +8007,10 @@ The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` an
 - **Logout and session cookie (GAP-019, RESOLVED).** `POST /api/v1/merchant/auth/logout` forwards to core `POST /internal/merchant/auth/logout` (session `jti` revocation) and clears the cookie. `SESSION_COOKIE_MODE` (default `false`) and `SESSION_COOKIE_SECURE` (default `true`) are validated in `merchant-back/lib/env`; in cookie mode the token is set as the `pg_merchant_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/merchant`, 12 h), the body carries `sessionCookie: true`, and cookie-authenticated writes require `x-pg-csrf: 1`. The cookie is ignored when the mode is off; login/MFA are exempt from the CSRF conversion so a stale cookie cannot block sign-in. The mode is off by default.
 - **Audience and breaker (GAP-020, GAP-021).** Merchant sessions carry `aud=payment-gateway-merchant`; a session minted for another channel is refused by core (`401 SESSION_AUDIENCE_INVALID`). The upstream client uses `CORE_FAILURE_THRESHOLD = 3`.
 
+## Remediation round 2 (2026-11-08): limiters and session shape
+
+`lib/authLimiters.ts` mirrors the admin account limiters; `lib/security/sessionCookie.ts` exports `assertMerchantSessionShape`, which `api/upload.ts` applies (with the existing limiter and size cap) before any body is buffered.
+
 ---
 
 <a id="edgecheckout"></a>
@@ -7987,7 +8066,7 @@ The listener binds to `BIND_HOST` (default `0.0.0.0`). The deploy engine writes 
 | Raw parser | `express.raw({ type: () => true, limit: MAX_INBOUND_BODY_BYTES })`, applied after the inbound limiter; only GET/HEAD/POST are accepted; parser errors return 413/400. |
 | `assertNoMonetaryFields` | Recursively rejects forbidden monetary keys (amount, currency, total, fee, commission, price, net/gross/debit/credit amounts, and close variants) with `400 AMOUNT_NOT_ACCEPTED`. Applied to initiate, confirm, resend, cancel and client-event. |
 | Schema validation | Zod schemas for link keys, attempt ids, rail codes, sub-modes, form data, OTPs, evidence, idempotency keys and client events. |
-| Header allowlist | Inbound forwards only `content-type`, `user-agent`, `content-length`, `x-signature`, `x-gateway-signature`, `x-hub-signature-256`, `x-moomalat-signature`, `x-timestamp` and `x-nonce`. |
+| Header allowlist | Inbound forwards only `content-type`, `user-agent`, `x-signature`, `x-gateway-signature`, `x-hub-signature-256`, `x-moomalat-signature`, `x-timestamp` and `x-nonce`. `content-length` is deliberately NOT forwarded (2026-11-08): `express.raw` inflates gzip/deflate/br/zstd bodies, so the inbound length no longer describes the bytes the edge writes to core; forwarding it let the surplus be parsed as the next request on the pooled keep-alive connection (request smuggling). The shared client now also drops caller-supplied framing/hop-by-hop headers and computes `content-length` from the real body. |
 | Environment translation | `sandbox`, `test`, `uat` map to core `SANDBOX`; `live`, `production` map to `LIVE`; anything else is rejected. |
 
 There is no edge authentication. Anonymous payers and external gateways are the intended callers. The link key, attempt id/token, OTP and idempotency key are the edge-visible capabilities; core validates each against database state.
@@ -8474,6 +8553,11 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 - **i18n slices:** `constants/i18n/{commerce,ledgerOps,forms,builders}.ts` are merged by `plugins/i18n.ts` after the main catalogue; each new string has an `[English, Arabic]` pair and unit tests assert EN/AR sync. Table filter configs live in `components/Table/registry/{commerce,ledgerOps,forms}.ts` and are spread into `tableRegistry`.
 - Compliance gate (`components/ui/__tests__/ui-abstraction-compliance.test.ts`): every standard route page uses `PageHeader` (helper components belong in `components/` subfolders), no raw `VCard`/`VDialog`/`VChip`.
 
+## Remediation round 2 (2026-11-08): bundle size and translation gate
+
+- **Lazy heavy chunks (GAP-060).** `utils/xlsx` is a lazy facade (the exceljs/xlsx chunk loads on the first export click) and charts load through `components/EChart/lazy.tsx` (`defineAsyncComponent`); `tests/unit/admin-bundle-lazy.test.ts` fails if the dashboard, profitability page, gateway health drawer or table header import the heavy libraries statically.
+- **Translation gate (GAP-061).** `tests/unit/i18n-catalogue.test.ts` (scanner `tests/unit/helpers/i18nScan.ts`) fails on a literal `t()` key with no catalogue entry that is not in the shrink-only baselines `tests/unit/fixtures/i18n-missing-*.json`, and on a key whose Arabic value conflicts across catalogue files (the last spread silently won). The 18 conflicts were resolved; the existing missing keys stay in the baselines and are filled over time (`UPDATE_I18N_BASELINE=1` rewrites a baseline after a fix).
+
 ---
 
 <a id="admin-uiroutes"></a>
@@ -8736,6 +8820,10 @@ Six protected children were added to `admin-front/src/router/index.ts` (and the 
 Existing routes that changed: `Invariant` is now "Ledger Audit & Invariant" with per-account actions (shards and lines, journal entries, checkpoint rollup); `MerchantDetail` shows the Wallets tab to every `merchant:read` role and gained interactive wallets/applications, structured beneficial owners, KYB revalidation, access rows and pending-change diffs; `Gateways` gained a route-health drawer; `Liquidity` shows route daily-cap utilisation; `GatewayRoutes`, `AdminPlatformSettings`, `Reconciliation`, `AmlRules`, `Rails`, `Approvals`, `AuditLog`, `Disputes`, `PricingControls` lost their raw-JSON views/inputs (see `admin-ui.system`). The GL account drawer (`GlAccountDrawer`) shows the routing width, a derived checkpoint status badge, a per-shard table (balance, lines, pending, checkpoint, checkpoint age, status, padded Total row), the paginated Lines table, "Run checkpoint rollup" (verifies every shard, names a failing one) and "Set shard count" (`finance:write`, reason, audited) and, per failed shard, **Repair** (`ShardRepairModal`: preview from the journal; an intact shard is recomputed at once with a reason, a damaged one is submitted to Approvals as `GL_SHARD_REPAIR`). Shared drawers are opened by id prop and clear themselves on `close`: `JournalEntryDrawer`, `GlAccountDrawer`, `WalletDetailDrawer`, `ApplicationDetailDrawer`. `attempt:read` was added to `AUTHORITY_ALIASES` (no portal equivalent).
 
 Gaps: the dashboards/global search still route `payment_attempt` hits to Merchant 360's transactions tab (a test pins it; `Transactions?open=` would be a one-line change); approvals' "Open subject" has no target for `WALLET`/`APPLICATION`/`POS_TERMINAL`; merchant users open the `AdminUserDetail` route (works: `GET /users/:id` serves any user id).
+
+## Remediation round 2 (2026-11-08): invitation route
+
+`/accept-invitation` (`pages/public/auth/accept-invitation`) is a public route reached from the invitation message; the Users page creates users without a password and shows invitation state with a re-invite action; the login page links to nothing new.
 
 ---
 
@@ -9126,7 +9214,7 @@ AcademyProgress { schema:1; rev; startedAt; updatedAt; contentVersion; activeTra
 - **Concurrency:** a stale `baseRev` returns `409 ACADEMY_REV_CONFLICT` with `details:{progress,rev}`; the client refetches, merges and retries once. `rev` also bumps on exam start/submit. The store compare-and-swaps on `User.updatedAt` (retry up to 4, then `ACADEMY_BUSY`).
 - **Server-only state** lives in the same JSON under the reserved key `_server` (open exam sessions with question ids and opaque option ids, previous attempt's question ids, attempt counters, last submitted session ids). `publicProgress()` is the only exit and strips it, including from `GET /users/:id`. Stored size limit 64 KB (`413 ACADEMY_PROGRESS_TOO_LARGE`).
 - **Legacy rows** (no `schema:1`, the pre-rebuild academy shape) are replaced by a fresh record that carries over only `guideRead`.
-- **Client:** `useAcademyProgress` keeps the last record and a queue of unsent patches in `localStorage["pg.academy.progress"]`; a failed save never blocks learning and shows a "not saved yet" indicator. `useGuideProgress` (the Guide's hook) is a thin layer over it and one-time migrates `pg.guide.read`.
+- **Client:** `useAcademyProgress` keeps the last record and a queue of unsent patches in `localStorage["pg.academy.progress"]`, stamped with the owner's user id (a record with no owner or another user's is dropped, never adopted; `setUserState` fires `pg:user-changed` on every login/logout/switch and `resetAcademyProgress` drops the in-memory singletons, with a generation counter so a request in flight for the previous user cannot write into the next user's state; before 2026-11-08 user A's queued patches could be sent under user B's token); a failed save never blocks learning and shows a "not saved yet" indicator. `useGuideProgress` (the Guide's hook) is a thin layer over it and one-time migrates `pg.guide.read`.
 
 ## 7. Academy (rebuilt 2026-11-04)
 
@@ -11246,7 +11334,7 @@ bun run start
 
 - The JWT secret and seeder token must be at least 32 characters and pass the same weak-secret checks as deploy. The seeder token compare is constant-time. The session token is never accepted from the query string; `/transactions/stream` takes a single-use `?ticket=` instead (GAP-024).
 - `FAKE_RAILS_ALLOWED_CIDRS` is enforced against `socket.remoteAddress` (not `X-Forwarded-For`); behind nginx the real allowlist is the nginx `allow`/`deny` block. `FAKE_RAILS_TRUST_PROXY` defaults to loopback. `FAKE_RAILS_PORTAL_ACCOUNT_LOCKOUT` (default 5 per username) locks repeated failed portal logins.
-- **Hosted action token and stream ticket (GAP-024, RESOLVED 2026-11-05).** `GET /hosted/session/:reference` now returns `action_token`, a JWT bound to that transaction id with the purpose role `FAKE_RAILS_HOSTED_ACTION` (15 minutes); the approve/decline action POST must send it in `X-Hosted-Action-Token` or gets `401 HOSTED_ACTION_TOKEN_REQUIRED`. `POST /portal-api/transactions/stream-ticket` (tester session required) issues a `FAKE_RAILS_SSE_TICKET` JWT (30 seconds, unique `jti`); `portalAuthGuard` accepts it only on `/transactions/stream` and consumes it once (`consumeSseTicket`; replay is `401`). Both tokens are signed with the portal JWT secret but carry their own `role` (helpers in `fake-rails-back/lib/tickets.ts`), so neither works as a tester session and a tester session works as neither. The used-ticket map is in-process and pruned on use. `/hosted/*` session reads remain public.
+- **Hosted action token and stream ticket (GAP-024, RESOLVED 2026-11-05).** `GET /hosted/session/:reference` now returns `action_token`, a JWT bound to that transaction id with the purpose role `FAKE_RAILS_HOSTED_ACTION` (15 minutes); the approve/decline action POST must send it in `X-Hosted-Action-Token` or gets `401 HOSTED_ACTION_TOKEN_REQUIRED`. `POST /portal-api/transactions/stream-ticket` (tester session required) issues a `FAKE_RAILS_SSE_TICKET` JWT (30 seconds, unique `jti`); `portalAuthGuard` accepts it only on `/transactions/stream` and consumes it once (`consumeSseTicket`; replay is `401`). Both tokens are signed with the portal JWT secret but carry their own `role` (helpers in `fake-rails-back/lib/tickets.ts`), so neither works as a tester session and a tester session works as neither. The used-ticket map is in-process and pruned on use. `/hosted/*` session reads remain public. Since 2026-11-08 they no longer include `expected_otp` or `webhook_url` (`publicHostedTransaction`, applied to both the session read and the action response); the token itself is still issued by the public session read, so it proves knowledge of the reference, not authority. Testers read the OTP on the authenticated portal routes. The rails initiate response still returns the OTP by design (automated sandbox runner).
 - **Residual.** `fake-rails-front` still keeps the tester token in localStorage (GAP-019 does not cover this portal).
 
 ---
@@ -12225,6 +12313,10 @@ bun run deploy.ts --only=fake-rails
 
 Core's outbound URL compile now fails closed on an empty `allowed_hosts` (`HOST_ALLOWLIST_EMPTY`) unless `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST=true`, and blocks private/loopback/link-local literals unless `allowPrivateHosts`; the Fake Rails exception (three-part allowlist) is unchanged. Seed blueprints for generic `input.code`, `mpgs` and `mypay` set `timestampToleranceSec = 0` because they carry no timestamp field. In production deploys `FAKE_RAILS_ENABLED`, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION=true` and the synthetic seeder are refused.
 
+## Remediation round 2 (2026-11-08): webhook target allowlist
+
+`webhook_url` is validated at accept time and again at send time against `lib/webhookTarget.ts` (`allowedWebhookHosts`: the host of `CORE_INBOUND_BASE_URL` plus `FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS`; no credentials in the URL, http/https only) and the dispatcher no longer follows redirects (GAP-059). Test: `fake-rails-back/test/webhook-target.test.ts`.
+
 ---
 
 <a id="deploytopology"></a>
@@ -12527,6 +12619,10 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 - **PAN-rail guard (GAP-026, partially resolved).** `loadDeployConfig` runs `panRailGuardProblems` over the environment: a key naming a PAN/CVV/card-number rail (`PAN`, `CVV`, `CVV2`, `CVC`, `CVC2`, `CARD_NUMBER`, `CARD_NO`, `PAN_RAIL(S)`, `CARD_RAIL(S)` as an underscore-delimited token) or a value containing a Luhn-valid 13-19 digit run is refused with a `PAN_RAIL_GUARD` problem. The scope statement is `deploy/docs/pci-scope.md` (see `platform.security`); the core-back guard is still open.
 - **GAP-023 remains open:** real WAL-G, bun and barman SHA256 values are operator-supplied.
+
+## Remediation round 2 (2026-11-08): app role and host probe configuration
+
+`PG_APP_USER` (default `pgw_app_login`) and `PG_APP_PASSWORD` (at least 12 characters, different from the owner's) enable the role split: the owner (`PG_DB_USER`) runs migrations and seeders through `ownerUrl`, while the running services connect as `PG_APP_USER`, a plain LOGIN member of `pgw_app`. `PG_APP_USER` must not be `postgres`, `pgw_app` or `pgw_ledger_maintenance`, nor equal the owner or replication user. Without `PG_APP_PASSWORD` the legacy single-role behaviour is kept and the deploy warns.
 
 ---
 
@@ -13731,15 +13827,19 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 
 - **Quoting.** `deploy/lib/quoting.ts` is the single helper set (`shellQuote`, `sqlLiteral`, `sqlIdent`, `dollarTag`, `pgbouncerQuoted`, `pgpassField`, `assertSingleLine`, `envAssign`). Paths are shell-quoted in rm/chown/mkdir/ln/xargs/pm2 commands.
 - **Pre-migrate dump.** `pg_dump` uses `PGPASSFILE` (never `PGPASSWORD`), runs under `umask 077` into a 0700 backups directory, and only the newest `KEEP_RELEASES` dumps are kept. The earlier statements in this part that the dump embeds `PGPASSWORD` are superseded.
-- **Migrations.** `planMigrations()` is exported; only the first core node migrates. `--fresh` against a non-empty database is refused unless `--force-fresh` or `DEPLOY_FORCE_FRESH=1`. Update deploys run `migrate deploy` when migrations are pending or unknown. The dump is taken before migrating in both modes when the database is non-empty or unknown.
+- **Migrations.** `planMigrations()` is exported; only the first core node migrates. `--fresh` against a non-empty database is refused unless `--force-fresh` or `DEPLOY_FORCE_FRESH=1`; since 2026-11-08 it is refused as well when the emptiness probe FAILED (no PostgreSQL client on the core host, refused connection: `databaseNonEmpty` unknown is no longer treated as empty), except in `--dry-run`. The frontend builds started in step 2 are all awaited (`builds.waitAll()`) before the first service is deployed, so a failed SPA build aborts before the database is migrated and core is switched. Update deploys run `migrate deploy` when migrations are pending or unknown. The dump is taken before migrating in both modes when the database is non-empty or unknown.
 - **sshRunner** local-sudo writes use an `mkdtemp` 0700 directory removed in `finally`.
 - **Bun** is installed from a pinned download verified against `BUN_SHA256` (no `curl | bash`); the fresh-host bootstrap installs `unzip`, and an existing `/usr/local/bin/bun` or `~/.bun/bin/bun` is reused.
 - **Frontend build env**: the deploy injects `VITE_CHECKOUT_BASE_URL` into merchant-front and `VITE_CHECKOUT_ORIGIN` into fake-rails-front from `CHECKOUT_DOMAIN`/ports, so checkout links and hosted-widget postMessage targets do not fall back to the wrong origin.
 - **nginx templates**: `server_tokens off` and `limit_req` (with `limit_req_status 429`) in all six; the fakerails vhost gets `allow`/`deny` from `FAKE_RAILS_ALLOWED_CIDRS`, `script-src 'self'`, `object-src 'none'`, and a computed `frame-ancestors` list (self + merchant/checkout origins + loopback) so the hosted widget can still be embedded; the checkout CSP is unchanged.
 - **scripts/deploy-localhost.sh** refuses `NODE_ENV=production` unless `LOCAL_TARGET=1`, no longer falls back to default secrets (random secrets via `openssl rand` go to a 0600 `.local/secrets.env` or `LOCAL_SECRETS_FILE`), and requires `DB_PASSWORD`.
-- **CI and legacy deploy workflows (GAP-014, RESOLVED 2026-11-05).** `.github/workflows/ci.yml` (jobs `design`, `backend`, `frontend`; triggers push to `main`/`ayoub`, pull requests and manual dispatch; `contents: read`; concurrency-cancelled per ref) runs the AGENTS.md gate: `bun scripts/project-design/build.ts --check`, then for `core-back`, `deploy`, `deploy/backup-daemon`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` a frozen-lockfile install, typecheck and `bun test`, and for `admin-front`, `merchant-front`, `checkout-front` and `fake-rails-front` a frozen-lockfile install and `bun run build`. Suites that need PostgreSQL 18 and Redis skip themselves when the services are absent. The per-service `*/.github/workflows/deploy.yml` workflows are now legacy and manual only (`workflow_dispatch` with a typed `deploy` confirmation): they run the service typecheck/tests first, run the deploy job in the `legacy-deploy` environment, use `StrictHostKeyChecking=yes` with a pinned `known_hosts` taken from the **`SSH_KNOWN_HOSTS` secret (which operators must now create, with the server's verified host key lines)**, sync additively (no `rsync --delete`) and never scan the host key on first use. The supported deploy path remains the multi-host engine in `deploy/`. Tests: `deploy/test/ci-workflows.test.ts`.
+- **CI and legacy deploy workflows (GAP-014, RESOLVED 2026-11-05).** `.github/workflows/ci.yml` (jobs `design`, `core-back`, `backend`, `frontend`; triggers push to `master` (the default branch; `main` and `ayoub` are kept), pull requests and manual dispatch; `contents: read`; concurrency-cancelled per ref) runs the AGENTS.md gate: `bun scripts/project-design/build.ts --check`, then for `deploy`, `deploy/backup-daemon`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` a frozen-lockfile install, typecheck and `bun test`, and for `admin-front`, `merchant-front`, `checkout-front` and `fake-rails-front` a frozen-lockfile install and `bun run build`. **Update 2026-11-08:** the workflow used to list `main`/`ayoub` only, so a push to `master` never ran CI, and it had no database, so every PostgreSQL/Redis suite skipped itself and a ledger regression could pass green. `core-back` now has its own job with `postgres:18` and `redis:7` service containers on the harness ports (`55432`, `56379`), generates the Prisma client and the mTLS test certificates, checks `server_version_num >= 180000`, applies the migrations to the test database, typechecks, runs `bun test` and then FAILS the job when bun reports any skipped test (the full suite reports 0 skips with the services present). The `backend` matrix no longer contains `core-back`. The companion workflow (`companion.yml`) only receives `ANDROID_KEYSTORE_BASE64` and `COMPANION_CONTENT_SIGNING_KEY` on the default branch (job-level `env` is empty elsewhere, so every `if: env.X != ''` step skips): a feature-branch push touching `companion-app/**` can no longer produce a production-signed APK, a signed content update or a release. The per-service `*/.github/workflows/deploy.yml` workflows are now legacy and manual only (`workflow_dispatch` with a typed `deploy` confirmation): they run the service typecheck/tests first, run the deploy job in the `legacy-deploy` environment, use `StrictHostKeyChecking=yes` with a pinned `known_hosts` taken from the **`SSH_KNOWN_HOSTS` secret (which operators must now create, with the server's verified host key lines)**, sync additively (no `rsync --delete`) and never scan the host key on first use. The supported deploy path remains the multi-host engine in `deploy/`. Tests: `deploy/test/ci-workflows.test.ts` (matrix, `master` trigger, the `core-back` job with services and the skip guard, companion secret gating, legacy deploy workflows).
 - **Replica pgpass (GAP-028, RESOLVED).** The replica `.pgpass` is streamed over stdin; see `deploy.storage`.
 - **Still open.** GAP-023: real WAL-G/bun/barman SHA256 values must be supplied by the operator.
+
+## Remediation round 2 (2026-11-08): auto probe, preflight and step order
+
+`DEPLOY_MODE=auto` now probes every host read-only in step 4 (`lib/hostProbe.ts`, a pure `bootstrapGaps()` over the probe output) and resolves each host to fresh, update or refuse (an edge host whose core has not been migrated is refused before anything changes). A resource preflight warns when PostgreSQL sizing (`PG_RAM_GB`) exceeds the host's memory. Verification (formerly step 12) now runs before the long seed (formerly step 11). `runAsDatabaseOwner` runs migrations and seeders with the owner URL. Tests: `deploy/test/hostProbe.test.ts`, `pipeline.test.ts`.
 
 ---
 
@@ -14188,6 +14288,12 @@ Not covered:
 - After `applyPgbouncer()`, the provisioner logs in through `pgw_session`; a reload normally publishes the new alias, otherwise it restarts PgBouncer once and retries. Core refuses to boot if the session endpoint is missing or transaction-pooled.
 - No firewall change: the alias uses the existing `PGBOUNCER_PORT` rule from core nodes; PostgreSQL's own port remains closed to core when PgBouncer is enabled.
 
+## Remediation round 2 (2026-11-08): role split, PgBouncer TLS, Redis
+
+- PgBouncer authenticates each client as its own user (per-client userlist entry for `PG_APP_USER`) instead of forcing the owner, and terminates TLS on the client leg (`client_tls_sslmode`, self-signed certificate); `DATABASE_URL` carries `sslmode=no-verify` whenever the deploy manages the cluster (encrypted, not identity-verified; certificate verification remains open).
+- The bootstrap SQL creates the app login role as a member of `pgw_app` with no UPDATE/DELETE/TRUNCATE on the ledger and audit tables and no DDL. Validated end to end on a TLS PostgreSQL 18 with a real PgBouncer (owner migrations, app-role privilege probes, core's Prisma client). It has not run on a multi-host lab (GAP-057 stays partial).
+- Redis (`redisProvisioner.ts`): `maxmemory-policy volatile-ttl` plus AOF, so only keys with a TTL are evictable and a restart does not lose revoke flags; every durable key must carry a TTL.
+
 ---
 
 <a id="deploybackup"></a>
@@ -14512,7 +14618,7 @@ Fake Rails gets backend and vhost `/health` probes, with `-k` when SSL is enable
 | Redis | `REDISCLI_AUTH=<password> redis-cli -h 127.0.0.1 -p <port> PING`, expecting `PONG`. |
 | Audit DB | `psql SELECT 1` with the audit user/password. |
 | Log DB | `psql SELECT 1` with the log user/password. |
-| Backup daemon | HTTPS `/health` with the CA and the `backup-client` certificate/key when `BACKUP_ALLOW_INSECURE_HTTP=false`; plain HTTP when it is `true`. Expects `"status":"ok"` or `ok`. |
+| Backup daemon | HTTPS `/health` with the CA and the `backup-client` certificate/key when `BACKUP_ALLOW_INSECURE_HTTP=false`; plain HTTP when it is `true`. With the flag on, the pg-native `archive_command`/`restore_command` also use plain `http://` without a client certificate (the daemon, its health probe and `BACKUP_DAEMON_URL` already followed the flag; the WAL commands hard-coded `https://`, so every archive call failed while the health check passed and `pg_wal` filled the disk). Expects `"status":"ok"` or `ok`. |
 
 The mTLS backup probe presents the `backup-client` certificate/key, matching the daemon's CN allow-list; the daemon's own server certificate is not a client identity and is rejected. When `BACKUP_ALLOW_INSECURE_HTTP=true` the daemon serves plain HTTP and the verifier uses an unauthenticated HTTP probe on the same host/port, so development deployments do not fail on TLS.
 
@@ -15028,7 +15134,7 @@ Security regression suites exist for core-back (`test/security-regressions/`), t
 
 <a id="testingsuites"></a>
 
-> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-08 · **Verified against:** `d695518+working-tree`
 
 # Test Suite Catalog
 
@@ -15094,7 +15200,7 @@ Most tests are wrapped in `describeDb`, so they skip when PostgreSQL is unreacha
 
 Files:
 
-- `all-15-templates-matrix.test.ts` — despite the file name, it defines **20 template variants** (T1-T15 plus T5b, T6b, T7b, T10b, T15b) and asserts 1,200 combinations.
+- `all-15-templates-matrix.test.ts` — despite the file name, it defines **21 template variants** (T1-T15 plus T5b, T6b, T6c, T7b, T10b, T15b) and asserts 1,260 combinations.
 - `commission-hierarchy-and-bearers.test.ts` — hierarchy precedence, rail isolation, effective dating.
 - `property-fuzzer-10k.test.ts` — exactly 10,000 deterministic iterations with Decimal-only money and balanced entries.
 - `checkpoints-and-invariant.test.ts` — live checkpoint snapshots and a 500-entry invariant batch.
@@ -15258,6 +15364,12 @@ cd tests && bunx playwright test -c playwright.exhaustive.config.ts e2e/exhausti
 
 ## 7. Status and deviations
 
+### Added 2026-11-08 (review-report remediation)
+
+Core, against a real PostgreSQL 18 test database (skipped without one): `core-back/test/refund-merchant-direct.test.ts` (merchant-direct refund ledger lines, rail-engine refund template, receivable balance), `test/merchant-read-scope.test.ts` (merchant read authorities, `app_scope_ids`, KYB duplicate-id scoping, token/IP audit rows), `test/partition-truncate-guard.test.ts` (every `journal_lines` partition is guarded), and the added cases in `test/backup-admin/backup-admin-routes.test.ts` (checker authority, maker != checker, expiry, atomic claim under a race, claim release on daemon failure, backup audit rows). Edges: the failover/replay/framing-header cases in `*/test/core-internal-client.test.ts` (all three copies) and `admin-back/test/security-regressions.test.ts`. Deploy: `ci-workflows.test.ts` (master trigger, `core-back` job with services and the skip guard, companion secret gating), the `--fresh` probe-failure, WAL-URL-scheme and trusted-proxy cases. Companion: `tests/updates.test.ts`. Root unit: `academy-progress-user-scope.test.ts`. Fake rails: hosted-session OTP/webhook redaction in `test/api.test.ts`.
+
+**Known order-dependent failure (pre-existing, 2026-11-08).** `admin-back/test/backups.test.ts` passes on its own but 20 of its tests return `429 RATE_LIMITED` when the whole `admin-back` suite runs in one process (a limiter shared across files; identical on the pre-change tree). Run that file alone until the limiter state is isolated per test file.
+
 ### Implemented
 
 - Suites 01-08 and 10 core directories.
@@ -15388,6 +15500,10 @@ web build, Capacitor sync and Gradle. Web Playwright sweeps 24 routes at 360/390
 light/dark/sepia and English/Arabic chrome; the signed APK is verified with `apksigner`.
 No Android device was connected, so on-device install, airplane-mode, notification reboot
 and real-device performance tests remain open.
+
+## Remediation round 2 (2026-11-08): new suites
+
+core-back: `ledger-raw-sql-parity`, `staff-invitation`, `checkout-return-route`, `session-revocation-durability`, `partition-truncate-guard`; admin-back and merchant-back: `auth-account-limiters`; fake-rails-back: `webhook-target`; deploy: `hostProbe`, `pgAppRole`; root `tests/unit`: `admin-bundle-lazy`, `i18n-catalogue`.
 
 ---
 
@@ -17208,6 +17324,7 @@ Content-only updates are signed manifests plus a bundle:
 - The client verifies the pinned signature, bundle SHA-256 and bundle schema before writing a
   versioned file and switching the active pointer atomically. A bad update falls back to the
   APK bundle. Content updates are data-only and cannot execute code.
+- Rollback protection (2026-11-08): the signature covers only the bundle SHA-256, so the manifest dates (`publishedAt`, `generatedAt`) are NOT authenticated and cannot be trusted to refuse an old bundle (an old genuine bundle plus its old signature, under a manifest with an edited future date, used to install). `installUpdate` therefore also compares the bundle's own `meta.generatedAt`, which sits inside the checksummed bytes, against the installed content (`assertBundleNotOlderThanInstalled`) and refuses an older one. The manifest check in `checkForUpdate` remains a courtesy pre-filter. A signature over a canonical `appId|contentVersion|contentHash|generatedAt|bundleSha256` string would also authenticate `contentVersion`/`minAppVersion`; it needs a versioned signature so installed apps keep accepting old manifests (open).
 
 APK releases use a separate long-lived release keystore generated on first local build at
 `.keys/companion-release.jks` (password in `.keys/keystore.env`, mode 0600, gitignored).
@@ -17216,7 +17333,7 @@ and verified with `apksigner`; `allowBackup` and cleartext traffic are disabled,
 exact-alarm permission is removed because reminders are intentionally inexact.
 
 `.github/workflows/companion.yml` builds and tests on content changes, publishes a private
-release when the signing secrets are present, and can be run manually. Content OTA needs a
+release when the signing secrets are present, and can be run manually. The signing secrets (release keystore and content-signing key) are only exposed to builds of the default branch; any other ref builds and tests without signing or publishing. Content OTA needs a
 private HTTPS endpoint; if one is not available, APK releases carry the latest content.
 
 ## 6. Build

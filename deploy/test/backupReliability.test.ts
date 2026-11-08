@@ -248,6 +248,17 @@ describe("pg-native engine", () => {
     expect(restoreCommand(config)).toContain("/v1/wal/postgres_core/%f");
   });
 
+  test("with BACKUP_ALLOW_INSECURE_HTTP the WAL commands use plain http and no client certificate, like the daemon listener", () => {
+    const config = load(`${PG_MODE}\nBACKUP_ENGINE_MODE="pg-native"\nBACKUP_ALLOW_INSECURE_HTTP="true"`);
+    const archive = archiveCommand(config);
+    expect(archive).toContain("--upload-file %p http://10.10.13.10:4090/v1/wal/postgres_core/%f");
+    expect(archive).not.toContain("https://");
+    expect(archive).not.toContain("--cert");
+    const restore = restoreCommand(config);
+    expect(restore).toContain("--output %p http://10.10.13.10:4090/v1/wal/postgres_core/%f");
+    expect(restore).not.toContain("--cacert");
+  });
+
   test("cluster SQL sets the pg-native settings, never lowers sender/slot limits, creates the replication role", () => {
     const sql = archiveCommandSql(pgNative());
     for (const expected of [

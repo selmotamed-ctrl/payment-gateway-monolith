@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StateView } from "@/components/StateView";
-import { EChart } from "@/components/EChart";
+import { LazyEChart as EChart } from "@/components/EChart/lazy";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";

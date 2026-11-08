@@ -1,3 +1,4 @@
+import { SESSION_BEARER } from "./helpers/session";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { resetEnvCache } from "../lib/env";
 import { resetCoreAgent } from "../lib/mtlsClient";
@@ -14,7 +15,7 @@ const { createApp } = await import("../index");
 let edgeUrl: string;
 let edgeServer: ReturnType<ReturnType<typeof createApp>["listen"]>;
 
-const auth = { authorization: "Bearer merchant-session-token" };
+const auth = { authorization: SESSION_BEARER };
 
 const forwarded = (): CoreRequestRecord | undefined => core.requests.at(-1);
 const forwardedBody = (): Record<string, unknown> =>

@@ -319,8 +319,8 @@ even when `DEPLOY_ENV` is `development` or `staging`.
 | 8 | Deploy admin. |
 | 9 | Deploy merchant. |
 | 10 | Deploy checkout. |
-| 11 | Seed Fake Rails blueprints and optional synthetic history. |
-| 12 | Run end-to-end verification. |
+| 11 | Run end-to-end verification (before the seed: a release that fails its checks must not be followed by a long seed). |
+| 12 | Seed Fake Rails blueprints and optional synthetic history. |
 | 13 | Log the retained release count. Actual pruning already happened per service. |
 | 14 | Print commit, release timestamp, topology, hosts and certificate expiry. |
 

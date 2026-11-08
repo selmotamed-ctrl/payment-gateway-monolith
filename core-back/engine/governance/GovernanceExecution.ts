@@ -25,6 +25,7 @@ import {
   buildPaymentConfirmationTemplate,
   decimal,
   LedgerPoster,
+  refundScenarioFor,
   type JournalTemplate,
   type LedgerPostContext,
   type LedgerOwnershipMode,
@@ -1348,6 +1349,15 @@ export async function executeUserAuthorityChange(
     data.isChecker = payload.isChecker;
   }
   if (payload.status === "ACTIVE") {
+    // The invitee must have set their own password and MFA phone first (see `lib/staffInvitation.ts`);
+    // checked again here because the proposal may predate the invitation being completed.
+    if (!user.passwordHash || (user.mfaRequired !== false && !user.phone)) {
+      throw new ApiError(
+        409,
+        "USER_INVITATION_PENDING",
+        "The invitee has not accepted the invitation yet (no password or MFA phone set by the user)",
+      );
+    }
     data.status = "ACTIVE";
   }
   if (Object.keys(data).length === 0) {
@@ -2359,11 +2369,13 @@ const finalizeRefundAdjustment = async (
           ? "MERCHANT_DIRECT"
           : "PLATFORM_CLEARING";
     }
-    const templateName = ownershipMode === "INTERNAL" ? "INTERNAL_REFUND" : "FULL_REFUND";
-    const journal = buildLedgerTemplate(templateName, {
+    const refundScenario = refundScenarioFor(ownershipMode as LedgerOwnershipMode);
+    const templateName = refundScenario.label;
+    const journal = buildLedgerTemplate(refundScenario.scenario, {
       amount,
       commissionAmount: commission,
       merchantAmount,
+      stage: refundScenario.stage,
     });
     // Keyed by the adjustment, so even a race between two finalisers can only
     // ever create one journal entry.
@@ -2371,14 +2383,18 @@ const finalizeRefundAdjustment = async (
     if (journal.refType === "PAYMENT_ATTEMPT") {
       journal.refType = "ADJUSTMENT";
     }
-    const posted = await ctx.ledgerPoster.post(
-      journal,
-      await walletLedgerContext(tx, merchantId, accounts),
-      tx as never,
-    );
+    // A merchant-direct refund with no commission to reverse moves nothing on the ledger: the
+    // merchant refunds the payer from their own gateway account.
+    const posted = journal.lines.length === 0
+      ? null
+      : await ctx.ledgerPoster.post(
+        journal,
+        await walletLedgerContext(tx, merchantId, accounts),
+        tx as never,
+      );
     await adjustments.update({
       where: { id: String(adjustment.id) },
-      data: { state: "EXECUTED", journalEntryId: posted.entry.id },
+      data: { state: "EXECUTED", journalEntryId: posted?.entry.id ?? null },
     });
     await writeAudit(ctx, tx, {
       actorId: input.checkerUserId,
@@ -2391,7 +2407,7 @@ const finalizeRefundAdjustment = async (
         state: "EXECUTED",
         type: "REFUND",
         template: templateName,
-        journalEntryId: posted.entry.id,
+        journalEntryId: posted?.entry.id ?? null,
         amount: amount.toFixed(4),
         outcome: null,
       },
@@ -2401,8 +2417,8 @@ const finalizeRefundAdjustment = async (
       status: "EXECUTED" as const,
       entityId: String(adjustment.id),
       template: templateName,
-      journalEntryId: posted.entry.id,
-      idempotent: posted.idempotent,
+      journalEntryId: posted?.entry.id,
+      idempotent: posted?.idempotent ?? false,
     };
   });
 };

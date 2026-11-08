@@ -2701,6 +2701,17 @@ model Notification {
   @@map("notifications")
 }
 
+/// Durable copy of the session revoke list (the Redis flag is the fast path and may be evicted or lost).
+/// Rows are pruned once the revoked token would have expired anyway.
+model SessionRevocation {
+  jti       String   @id
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@map("session_revocations")
+}
+
 model PlatformSetting {
   id                String   @id @default(uuid(7)) @db.Uuid
   createdAt         DateTime @default(now()) @map("created_at")

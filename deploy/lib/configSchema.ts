@@ -365,6 +365,22 @@ const base = z.strictObject({
     .refine(notReservedRole, RESERVED_ROLE_MESSAGE)
     .default("gw_core_user"),
   PG_DB_PASSWORD: optionalSecret,
+  /**
+   * The role the running application connects as. `PG_DB_USER` is the database OWNER (it runs the migrations) and
+   * the append-only ledger triggers cannot stop an owner from dropping them, so production must not run as it. The
+   * app role is a plain LOGIN role that is only a member of `pgw_app` (DML on the tables, no UPDATE/DELETE/TRUNCATE
+   * on the ledger and audit tables, no DDL). It is enabled by setting `PG_APP_PASSWORD`; without it the deploy keeps
+   * the legacy single-role behaviour and warns.
+   */
+  PG_APP_USER: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9_]+$/, "must be an identifier")
+    .refine(notReservedRole, RESERVED_ROLE_MESSAGE)
+    .default("pgw_app_login"),
+  PG_APP_PASSWORD: optionalSecret,
   PG_REPLICATION_USER: z
     .string()
     .trim()
@@ -626,6 +642,16 @@ export const edgeCoreUrls = (config: DeployConfig): string[] => {
 };
 
 /** The effective relational database (legacy DB_* or the PG 18 settings). */
+/** True when the running application gets its own, non-owner database role (`PG_APP_PASSWORD` is set). */
+export const pgAppRoleEnabled = (config: DeployConfig): boolean =>
+  pgStorageConfigured(config) && config.PG_APP_PASSWORD.length > 0;
+
+/** Credentials the RUNNING application uses: the `pgw_app` member when enabled, otherwise the owner (legacy). */
+export const applicationCredentials = (config: DeployConfig): { user: string; password: string } =>
+  pgAppRoleEnabled(config)
+    ? { user: config.PG_APP_USER, password: config.PG_APP_PASSWORD }
+    : { user: config.PG_DB_USER, password: config.PG_DB_PASSWORD };
+
 export const effectiveDatabase = (config: DeployConfig): {
   engine: DeployConfig["DB_ENGINE"];
   host: string | null;
@@ -634,6 +660,8 @@ export const effectiveDatabase = (config: DeployConfig): {
   user: string;
   password: string;
   url: string | null;
+  /** The owner's URL (migrations, seeders). Equal to `url` in the legacy single-role mode. */
+  ownerUrl: string | null;
   privateIp: string | null;
   managedViaSsh: boolean;
 } => {
@@ -648,8 +676,16 @@ export const effectiveDatabase = (config: DeployConfig): {
   const host = primary?.privateIp ?? config.DB_PRIVATE_IP ?? null;
   const port = primary?.servicePort ?? config.DB_PORT;
   const derivedPort = config.PGBOUNCER_ENABLED ? config.PGBOUNCER_PORT : port;
+  // The URL the application connects with: the app role when enabled (the owner only in the legacy mode), and TLS
+  // whenever the deploy manages the cluster: its pg_hba.conf is hostssl-only and PgBouncer now requires TLS on its
+  // client side too (the self-signed certificate is encrypted-but-unverified, hence `no-verify`).
+  const app = applicationCredentials(config);
   const url = pg && host
-    ? `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${derivedPort}/${name}`
+    ? `postgresql://${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}@${host}:${derivedPort}/${name}${config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : ""}`
+    : (config.DATABASE_URL ?? null);
+  // The owner's URL, for migrations and the test-server seeders only. It is never written to the runtime `.env`.
+  const ownerUrl = pg && host
+    ? `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${derivedPort}/${name}${config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : ""}`
     : (config.DATABASE_URL ?? null);
   return {
     engine: config.DB_ENGINE,
@@ -659,6 +695,7 @@ export const effectiveDatabase = (config: DeployConfig): {
     user,
     password,
     url,
+    ownerUrl,
     privateIp: pg ? (primary?.privateIp ?? config.DB_PRIVATE_IP ?? null) : (config.DB_PRIVATE_IP ?? primary?.privateIp ?? null),
     managedViaSsh: config.DB_MANAGE_VIA_SSH || config.PG_MANAGE_VIA_SSH,
   };
@@ -682,9 +719,10 @@ export const leaderElectionDatabaseUrl = (config: DeployConfig): string | null =
     return null;
   }
   const database = effectiveDatabase(config);
-  const credentials = `${encodeURIComponent(database.user)}:${encodeURIComponent(database.password)}`;
+  const app = applicationCredentials(config);
+  const credentials = `${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}`;
   if (config.PGBOUNCER_ENABLED) {
-    return `postgresql://${credentials}@${primary.privateIp}:${config.PGBOUNCER_PORT}/${PGBOUNCER_SESSION_ALIAS}`;
+    return `postgresql://${credentials}@${primary.privateIp}:${config.PGBOUNCER_PORT}/${PGBOUNCER_SESSION_ALIAS}${config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : ""}`;
   }
   const tls = config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : "";
   return `postgresql://${credentials}@${primary.privateIp}:${primary.servicePort}/${database.name}${tls}`;
@@ -723,6 +761,7 @@ export const weakSecretProblems = (config: DeployConfig): string[] => {
   const secrets: Array<[string, string | undefined]> = [
     ["KMS_MASTER_KEY", config.KMS_MASTER_KEY],
     ["PG_DB_PASSWORD", config.PG_DB_PASSWORD],
+    ["PG_APP_PASSWORD", config.PG_APP_PASSWORD],
     ["PG_REPLICATION_PASSWORD", config.PG_REPLICATION_PASSWORD],
     ["REDIS_PASSWORD", config.REDIS_PASSWORD],
     ["AUDIT_DB_PASSWORD", config.AUDIT_DB_PASSWORD],
@@ -805,6 +844,24 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   }
   if (pgConfigured && config.PG_DB_PASSWORD.length > 0 && config.PG_DB_PASSWORD.length < 8) {
     problems.push("PG_DB_PASSWORD must be at least 8 characters");
+  }
+  if (config.PG_APP_PASSWORD.length > 0) {
+    if (!pgConfigured) problems.push("PG_APP_PASSWORD requires the PostgreSQL 18 storage fields");
+    if (config.PG_APP_PASSWORD.length < 12) problems.push("PG_APP_PASSWORD must be at least 12 characters");
+    // These names already mean something: `postgres` is the superuser (the bootstrap would strip its powers),
+    // `pgw_app` is the group role the app role joins, `pgw_ledger_maintenance` is the ledger bypass role.
+    if (["postgres", "pgw_app", "pgw_ledger_maintenance"].includes(config.PG_APP_USER.toLowerCase())) {
+      problems.push(`PG_APP_USER must not be '${config.PG_APP_USER}': that name is already a privileged or group role`);
+    }
+    if (config.PG_APP_USER === config.PG_DB_USER) {
+      problems.push("PG_APP_USER must differ from PG_DB_USER: the application must not run as the database owner");
+    }
+    if (config.PG_APP_USER === (config.PG_REPLICATION_USER ?? "pg_replicator")) {
+      problems.push("PG_APP_USER must differ from PG_REPLICATION_USER");
+    }
+    if (config.PG_APP_PASSWORD === config.PG_DB_PASSWORD) {
+      problems.push("PG_APP_PASSWORD must differ from PG_DB_PASSWORD");
+    }
   }
   if (config.PGBOUNCER_ENABLED && !pgConfigured) {
     problems.push("PGBOUNCER_ENABLED requires the PostgreSQL 18 storage fields");

@@ -288,8 +288,6 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
   "POST /users": z
     .object({
       email: z.email(),
-      phone: z.string().min(6).max(20).optional(),
-      password: z.string().min(10).max(128).optional(),
       role: z.enum([
         "GATEWAY_ADMIN",
         "SECURITY_ADMIN",
@@ -313,6 +311,13 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
         )
         .max(10)
         .optional(),
+    })
+    .strict(),
+  "POST /auth/accept-invitation": z
+    .object({
+      token: z.string().min(16).max(256),
+      password: z.string().min(12).max(128),
+      phone: z.string().trim().regex(/^\+?[0-9 ()-]{6,20}$/),
     })
     .strict(),
   "PATCH /users": z

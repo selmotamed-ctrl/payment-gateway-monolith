@@ -3,7 +3,7 @@ id: core.governance
 title: Governance and Compliance
 status: partial
 confidence: high
-last_verified: 2026-11-06
+last_verified: 2026-11-08
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/engine/governance/ApprovalService.ts
@@ -138,7 +138,7 @@ The actual admin approve route (`core-back/api/internal/admin.ts:6014`) is more 
 - rejects expired requests;
 - enforces maker ≠ checker;
 - adds a join-request admin-assisted maker check and a merchant payload checker-domain check;
-- special-cases `BACKUP_POLICY` through the backup daemon;
+- special-cases `BACKUP_POLICY` through `executeBackupPolicyApproval` (claim first, then the backup daemon; shared with `PUT /system/backups/policy`);
 - queues `ADJUSTMENT` execution as a background job and executes everything else through `executeApprovalSubject` in one transaction;
 - records a decision checklist audit row.
 
@@ -229,7 +229,7 @@ Dispute intake is exposed as `POST /admin/disputes`; the route queues an `ADJUST
 
 There is no webhook or statement dispute-intake wiring in `DynamicRailEngine` or reconciliation; the admin manual route is the implemented intake path.
 
-Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` holds the adjustment and opens an operator case. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id.
+Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` holds the adjustment and opens an operator case. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id. The refund template follows the ownership mode of the payment (`refundScenarioFor`, see `core.ledger`): a `MERCHANT_DIRECT` refund only reverses the commission recognition (`Dr PLATFORM_INCOME` / `Cr COMMISSION_RECEIVABLE`) and never debits the wallet or credits treasury; with nothing to reverse the adjustment is `EXECUTED` with no journal entry.
 
 ### 3.8 Cash-outs
 

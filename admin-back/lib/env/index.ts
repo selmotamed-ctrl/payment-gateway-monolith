@@ -44,6 +44,8 @@ export const envSchema = z.object({
   MAX_UPLOAD_BYTES: z.coerce.number().int().min(1024).max(52428800).default(20971520),
   UPLOAD_ALLOWED_MIME: z.string().default("text/csv,application/vnd.ms-excel,application/json"),
   ADMIN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(600),
+  /** Uploads per client address per `ADMIN_RATE_LIMIT_WINDOW_MS`; each one is buffered in memory by multer. */
+  UPLOAD_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
   ADMIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60000),
   // Backup trigger / drill requests one client may start per 10 minutes.
   BACKUP_JOB_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(6),

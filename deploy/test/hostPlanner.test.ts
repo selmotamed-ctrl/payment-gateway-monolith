@@ -225,6 +225,20 @@ CHECKOUT_PRIVATE_IP="127.0.0.1"
     expect(core?.services[0]?.env.MTLS_SERVER_CERT_PATH).toBe("shared/certs/core-back.crt");
   });
 
+  test("each edge trusts its own nginx: loopback plus the node's private address", () => {
+    const plan = planHosts(requireConfig(base));
+    const edgeServices = plan.hosts.flatMap((host) => host.services).filter((service) => service.role !== "core");
+    expect(edgeServices.length).toBeGreaterThan(0);
+    for (const service of edgeServices) {
+      const cidrs = service.env.TRUSTED_PROXY_CIDRS!.split(",");
+      expect(cidrs).toContain("127.0.0.1/32");
+      expect(cidrs).toContain("::1/128");
+      // nginx connects to the private address the backend binds to; anything broader is not trusted.
+      if (service.env.NODE_PRIVATE_IP) expect(cidrs).toContain(`${service.env.NODE_PRIVATE_IP}/32`);
+      expect(cidrs.every((cidr) => cidr.endsWith("/32") || cidr === "::1/128")).toBe(true);
+    }
+  });
+
   test("two roles on one host with different keys is rejected", () => {
     const config = requireConfig(`
 ${base}

@@ -3,7 +3,7 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-07
+last_verified: 2026-11-08
 verified_against: d695518+working-tree
 code:
   - core-back/test/exhaustive/**
@@ -139,7 +139,7 @@ Most tests are wrapped in `describeDb`, so they skip when PostgreSQL is unreacha
 
 Files:
 
-- `all-15-templates-matrix.test.ts` — despite the file name, it defines **20 template variants** (T1-T15 plus T5b, T6b, T7b, T10b, T15b) and asserts 1,200 combinations.
+- `all-15-templates-matrix.test.ts` — despite the file name, it defines **21 template variants** (T1-T15 plus T5b, T6b, T6c, T7b, T10b, T15b) and asserts 1,260 combinations.
 - `commission-hierarchy-and-bearers.test.ts` — hierarchy precedence, rail isolation, effective dating.
 - `property-fuzzer-10k.test.ts` — exactly 10,000 deterministic iterations with Decimal-only money and balanced entries.
 - `checkpoints-and-invariant.test.ts` — live checkpoint snapshots and a 500-entry invariant batch.
@@ -303,6 +303,12 @@ cd tests && bunx playwright test -c playwright.exhaustive.config.ts e2e/exhausti
 
 ## 7. Status and deviations
 
+### Added 2026-11-08 (review-report remediation)
+
+Core, against a real PostgreSQL 18 test database (skipped without one): `core-back/test/refund-merchant-direct.test.ts` (merchant-direct refund ledger lines, rail-engine refund template, receivable balance), `test/merchant-read-scope.test.ts` (merchant read authorities, `app_scope_ids`, KYB duplicate-id scoping, token/IP audit rows), `test/partition-truncate-guard.test.ts` (every `journal_lines` partition is guarded), and the added cases in `test/backup-admin/backup-admin-routes.test.ts` (checker authority, maker != checker, expiry, atomic claim under a race, claim release on daemon failure, backup audit rows). Edges: the failover/replay/framing-header cases in `*/test/core-internal-client.test.ts` (all three copies) and `admin-back/test/security-regressions.test.ts`. Deploy: `ci-workflows.test.ts` (master trigger, `core-back` job with services and the skip guard, companion secret gating), the `--fresh` probe-failure, WAL-URL-scheme and trusted-proxy cases. Companion: `tests/updates.test.ts`. Root unit: `academy-progress-user-scope.test.ts`. Fake rails: hosted-session OTP/webhook redaction in `test/api.test.ts`.
+
+**Known order-dependent failure (pre-existing, 2026-11-08).** `admin-back/test/backups.test.ts` passes on its own but 20 of its tests return `429 RATE_LIMITED` when the whole `admin-back` suite runs in one process (a limiter shared across files; identical on the pre-change tree). Run that file alone until the limiter state is isolated per test file.
+
 ### Implemented
 
 - Suites 01-08 and 10 core directories.
@@ -433,3 +439,7 @@ web build, Capacitor sync and Gradle. Web Playwright sweeps 24 routes at 360/390
 light/dark/sepia and English/Arabic chrome; the signed APK is verified with `apksigner`.
 No Android device was connected, so on-device install, airplane-mode, notification reboot
 and real-device performance tests remain open.
+
+## Remediation round 2 (2026-11-08): new suites
+
+core-back: `ledger-raw-sql-parity`, `staff-invitation`, `checkout-return-route`, `session-revocation-durability`, `partition-truncate-guard`; admin-back and merchant-back: `auth-account-limiters`; fake-rails-back: `webhook-target`; deploy: `hostProbe`, `pgAppRole`; root `tests/unit`: `admin-bundle-lazy`, `i18n-catalogue`.

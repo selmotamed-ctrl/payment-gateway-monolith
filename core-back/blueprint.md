@@ -340,7 +340,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 ## Core API Surface
 
-> Status: `partial` · Last verified: 2026-11-06
+> Status: `partial` · Last verified: 2026-11-08
 
 ## 1. Purpose and scope
 
@@ -449,7 +449,7 @@ Sensitive merchant changes create `MERCHANT` approvals. Suspension has an emerge
 | `GET /approvals`, `GET /approvals/export`, `GET /approvals/summary`, `GET /approvals/summary/export`, `GET /approvals/:id` | `approval:read` |
 | `POST /approvals/:id/approve`, `POST /approvals/:id/reject` | `approval:check` or `approval:write` + checker authority |
 
-The approve/reject routes call `actorFromRequest`, `assertCheckerAuthority` and `assertCheckerIsNotMaker`. The approve route also handles `BACKUP_POLICY` out of band and dispatches every other subject to `executeApprovalSubject`.
+The approve/reject routes call `actorFromRequest`, `assertCheckerAuthority` and `assertCheckerIsNotMaker`. The approve route also handles `BACKUP_POLICY` out of band (through `executeBackupPolicyApproval`, which claims the request before it calls the backup daemon) and dispatches every other subject to `executeApprovalSubject`.
 
 #### AML and compliance
 
@@ -559,7 +559,7 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `GET /overview` | `security:read` or `gateway:read` |
 | `POST /trigger` | `security:write` |
 | `POST /drill` | `security:write` |
-| `PUT /policy` | `security:write`; creates or executes a `BACKUP_POLICY` approval |
+| `PUT /policy` | `security:write`; creates a `BACKUP_POLICY` approval, or (with `approvalRequestId`) executes one and then additionally requires checker authority (`approval:check`), maker ≠ checker, a pending unexpired request and an atomic claim |
 | `GET /catalog` | `security:read` or `gateway:read` |
 
 ### 3.3 Merchant namespace
@@ -589,7 +589,10 @@ Authentication behavior:
 - The principal must have a `merchantId`; `merchantIdOf` rejects otherwise with `403 MERCHANT_CONTEXT_REQUIRED`.
 - Queries are scoped by `merchantId`; a merchant cannot read another merchant's wallet/application/link.
 - API tokens are bound to a merchant and optionally an application; the token hash, revocation and CIDR checks happen in core.
-- There is no per-route `requireAuthorities` call. API-token scopes and session authorities do not gate individual merchant endpoints.
+- Merchant authorities are enforced per route in core with `assertMerchantAuthority` (the closed catalogue in `lib/auth/merchantAuthorities.ts`); the portal and the edges only project them. Reads: wallets, `/wallets/:id`, `/balance`, `/statements` and `GET /applications*` need `merchant:read` or `merchant:write`; the statement export needs `merchant:write` (the portal's `statements.export`); `GET /links*` needs `link:read`; `GET /payments` and `GET /stats/overview` need `payment:read`; `GET /disputes*` needs `payment:read` or `dispute:respond`. `merchant:read`/`merchant:write` imply `payment:read` and `link:read`, so a payment-only user can read payments but never balances or statements. Before 2026-11-08 these read routes only checked the merchant, so any merchant user could read balances and the 50,000-row export. Writes keep their fine-grained authorities. API tokens only reach `/external/*`.
+- **Application scope (`users.app_scope_ids`).** A session principal carries `appScopeIds`, read from the user row on every request (a change takes effect without a new login). Empty means unscoped. For a scoped user the application, link, payment, dispute and statement lists are narrowed to those applications, by-id reads/cancels/evidence of another application answer `403 APP_SCOPE_VIOLATION`, `POST /links` refuses another application and defaults to the oldest application inside the scope, and the merchant-wide `GET /stats/overview` (it mixes merchant-wide wallet and cash-out figures) answers `403 APP_SCOPE_RESTRICTED`. Not scoped yet: POS terminals, wallets themselves, cash-outs and tokens.
+- Audit rows added 2026-11-08 (before this, these state changes left no trail): merchant `PUT /tokens/:id/ips` (`ACCESS_TOKEN_IP_ALLOWLIST_CHANGED`, with before/after CIDRs, in the same transaction as the change) and `DELETE /tokens/:id` (`ACCESS_TOKEN_REVOKED`); merchant and admin credential sets `POST` (`CREDENTIAL_SET_CREATED`), `PUT` rotate (`CREDENTIAL_SET_ROTATED`) and `POST .../verify` (`CREDENTIAL_SET_VERIFIED`), recording entry KEY names and versions only, never a secret value or ciphertext; admin `POST /assets` (`ASSET_REGISTERED`); backup `POST /trigger` (`BACKUP_TRIGGERED`) and `POST /drill` (`BACKUP_DRILL_TRIGGERED`, written best effort after the daemon accepted the job: a failed audit write never turns an already-started job into an error).
+- `POST /onboarding/kyb-documents` reports `duplicateDocuments` for the uploader's OWN earlier copies only; matches in other merchants are kept in the staff-only audit row (`KYB_DOCUMENT_UPLOADED.afterJson.duplicateDocuments`) and in the join-request duplicate flags, never returned to the merchant (tipping-off).
 - Sensitive application changes (`assignedWalletId`, `railWhitelist`, `redirectDomainAllowlist`) create an `APPLICATION` approval instead of applying directly.
 
 ### 3.4 Checkout namespace
@@ -959,6 +962,11 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 - `PATCH /rails/:id` accepts `logoAssetId` (uuid, or `null` to clear). A uuid must reference a registered `Asset` (`404 ASSET_NOT_FOUND`); the audit row records the before/after logo. The edge schema and `toCoreRailUpdate` forward it. `POST /assets` still registers metadata only (name, type, size, SHA-256, storage key): it does not store image bytes, which remains a gap.
 - `PATCH /routes/:id` accepts `mismatchPolicy` (object; only `tolerance_amount`/`toleranceAmount` is read by the settlement engine, other keys are kept as stored; a malformed tolerance is `400 MISMATCH_TOLERANCE_INVALID`) and `maintenanceWindows` (`[{ start, end }]`, max 50, absolute instants; `end <= start` or an unparsable instant is `400 MAINTENANCE_WINDOW_INVALID`; `[]` clears). Omitted fields are left untouched; the edge forwards empty values so an operator can clear them.
 - **Commission tiers were broken end to end and are fixed.** The admin edge persisted UI tiers as an index-keyed object (`{"0": {...}}`) and core's create schema (`z.record`) could not take an array, while the fee calculator (`commissionForProfile`, `checkout.ts`) only reads `tiersJson` when it is an array: a TIERED profile created through the UI silently priced at its minimum fee. Now `POST /commission-profiles` accepts an ordered array (or the legacy object), the edge forwards the array, and `commissionTiers()` normalises both shapes (object keys ordered numerically), which also reprices already-stored legacy rows correctly. Tier keys are `upTo`, `flat`, `percent` (a fraction). **Behaviour change for existing data:** a legacy TIERED profile now prices by its tiers instead of the minimum fee. The edge also forwards `minFee`, `maxFee`, `feeBearerDefault`, `roundingMode`, `merchantId`, `applicationId` (core already accepted them; the strict edge schema dropped them). Note `percentageRate` is a **fraction** (`0.0300` = 3%), as the seed data stores it; the form now says so.
+
+## Remediation round 2 (2026-11-08): routes
+
+- `POST /internal/admin/users` accepts no password or phone and creates an `INVITED` user; `POST /internal/admin/users/:id/invite` re-issues an invitation; `POST /internal/admin/auth/accept-invitation` (public, token-bound) sets the password and phone and marks the invitation complete. The maker-checker activation of a staff user requires a completed invitation.
+- `GET|POST /internal/checkout/return/:attemptToken` accepts only the attempt `reference`, and runs the gateway inquiry at most once per `RETURN_INQUIRY_COOLDOWN_MS` (10 s) per attempt across core instances (a shared flag in the auth-state store); calls inside the window answer with the current status (GAP-055).
 
 ## Core Engine
 
@@ -1595,7 +1603,7 @@ No build or test was run for this documentation change. Tests that require Postg
 
 ## Double-Entry Ledger
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-08
 
 ## 1. Purpose and scope
 
@@ -1631,7 +1639,7 @@ The design requires an append-only, double-entry ledger with a fixed chart of ac
 | :--- | :--- | :--- |
 | `PLATFORM_CLEARING` | the gateway owes the platform until settlement | debit `GATEWAY_CLEARING`, book provider or gateway fees, credit wallet and income |
 | `INTERNAL` | first-party rail (NeomPay); no external clearing account | `INTERNAL_CONFIRMATION`: debit `TREASURY`, credit wallet and income |
-| `MERCHANT_DIRECT` | merchant owns the gateway account and receives the money directly | commission only: debit `COMMISSION_RECEIVABLE`, credit `PLATFORM_INCOME`; netting later moves wallet against receivable |
+| `MERCHANT_DIRECT` | merchant owns the gateway account and receives the money directly | commission only: debit `COMMISSION_RECEIVABLE`, credit `PLATFORM_INCOME`; netting later moves wallet against receivable. A refund reverses only that commission (`MERCHANT_DIRECT_CONFIRMATION`, stage `REFUND`); it never touches the wallet or treasury |
 
 `PROVIDER_HELD` is a valid `settlementTarget` in the schema but is treated as `PLATFORM_CLEARING` by the ownership-mode projection (`core-back/engine/runtime/attemptRepository.ts:56`).
 
@@ -1651,7 +1659,9 @@ The implemented verifier applies this equation to natural balances, where debit-
 
 ### The 17 scenarios (design said 15 worked entries)
 
-The historical design listed 15 worked entries. The code now defines 17 `LedgerScenario` values: the original 15 plus `SPLIT_SURCHARGE_CONFIRMATION` and `SUSPENSE_SETTLEMENT`. Three scenarios have multiple stages (merchant-direct netting, AML release, chargeback lost), so the exhaustive matrix contains 20 labels rather than 17.
+The historical design listed 15 worked entries. The code now defines 17 `LedgerScenario` values: the original 15 plus `SPLIT_SURCHARGE_CONFIRMATION` and `SUSPENSE_SETTLEMENT`. Three scenarios have multiple stages (merchant-direct netting and refund, AML release, chargeback lost), so the exhaustive matrix contains 21 labels rather than 17.
+
+**Refund template selection (2026-11-08).** Every refund path (the governance executor `finalizeRefundAdjustment`, `DynamicRailEngine.refund` and the synthetic seeder) picks its template through `refundScenarioFor(ownershipMode)` in `LedgerPoster.ts`, so they cannot diverge: `INTERNAL` -> `INTERNAL_REFUND`; `MERCHANT_DIRECT` -> `MERCHANT_DIRECT_CONFIRMATION` stage `REFUND` (label `MERCHANT_DIRECT_REFUND`); everything else -> `FULL_REFUND`. Before this fix a merchant-direct refund reused `FULL_REFUND`, which debits the merchant wallet for the net amount and credits treasury for the full amount although the platform never held the cash and never credited the wallet; the entry balanced, so the invariant verifier could not see it. A merchant-direct refund with nothing to reverse (`reverseCommission = false`, or a zero commission) posts no journal: the adjustment still becomes `EXECUTED` with a null `journalEntryId` (the chargeback path already behaves this way), the seeder skips such a refund because its verifier requires a journal on every executed adjustment, and the rail engine skips the posting.
 
 ## 3. As-built architecture
 
@@ -1715,6 +1725,7 @@ All examples use `amount = 100.0000`, `commission = 3.0000`, `providerFee = 1.00
 | 6 | `SPLIT_SURCHARGE_CONFIRMATION` | confirm, `PAYMENT_ATTEMPT` | `Dr GATEWAY_CLEARING 101.5000`; `Dr GATEWAY_FEE_EXPENSE 0.8000`; `Cr MERCHANT_WALLET 98.5000`; `Cr PLATFORM_INCOME 3.0000`; `Cr GATEWAY_FEE_ACCRUAL 0.8000` |
 | 7 | `MERCHANT_DIRECT_CONFIRMATION` | confirm, `PAYMENT_ATTEMPT` | `Dr COMMISSION_RECEIVABLE 3.0000`; `Cr PLATFORM_INCOME 3.0000` |
 | 7b | `MERCHANT_DIRECT_CONFIRMATION` | netting, `COMMISSION_NETTING` | `Dr MERCHANT_WALLET 3.0000`; `Cr COMMISSION_RECEIVABLE 3.0000` |
+| 7c | `MERCHANT_DIRECT_CONFIRMATION` | refund, `ADJUSTMENT` (keyed by the adjustment id) | `Dr PLATFORM_INCOME 3.0000`; `Cr COMMISSION_RECEIVABLE 3.0000` |
 | 8 | `AML_HOLD_AND_RELEASE` | hold, `PAYMENT_ATTEMPT` | `Dr GATEWAY_CLEARING 100.0000`; `Cr AML_HOLD 100.0000` |
 | 8b | `AML_HOLD_AND_RELEASE` | release, `AML_RELEASE` | `Dr AML_HOLD 100.0000`; `Cr MERCHANT_WALLET 97.0000`; `Cr PLATFORM_INCOME 3.0000` |
 | 9 | `CASHOUT` | execution, `ADJUSTMENT` | `Dr MERCHANT_WALLET 100.0000`; `Cr TREASURY 100.0000` |
@@ -1916,7 +1927,7 @@ Use `postScenario` for settlement sweeps, fee variance, suspense, AML, and adjus
 
 - **Code gap:** idempotent replay of the same `(refType, refId)` with a different template silently returns the first entry; it does not compare the line set or amounts. A caller that reuses a reference for a different economic event loses the second posting.
 - **Risk:** the single-hot-shard write path is about 25-30% slower than before the sequence was added (benchmark 2026-11-07: p50 1.4 ms to 1.8 ms single-threaded; about 1,000 to 750 postings/s on one shard) because the sequence is reserved under the shard lock before the lines are inserted and a fifth index exists on `journal_lines`. That is the case the shard scaler relieves.
-- **Documentation gap:** `core-back/test/engine/ledger.test.ts` describes “all 16 journal entry templates”; the exhaustive matrix header says “15” and asserts 20 labels. The canonical count is 17 scenarios / 20 staged variants.
+- **Documentation gap:** `core-back/test/engine/ledger.test.ts` describes “all 16 journal entry templates”; the exhaustive matrix header says “15” and asserts 20 labels. The canonical count is 17 scenarios / 21 staged variants.
 - **Risk:** the raw scenario builder defaults commission/provider/gateway fee. A production caller that forgets a fee will silently book the default rather than fail. Use `postPaymentConfirmation` or pass every amount explicitly.
 
 ## 8. Verification and tests
@@ -1933,7 +1944,8 @@ cd core-back && bun test test/storage-engine/ledger-shards.test.ts
 Coverage:
 
 - `test/engine/ledger.test.ts` — template balance, scenario semantics, strict fee resolution, idempotency, unbalanced rejection, checkpoint service, invariant provider.
-- `test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` — 20 labels × 3 currencies × 5 amount tiers × 4 fee configurations = 1,200 template constructions.
+- `test/refund-merchant-direct.test.ts` — a merchant-direct refund reverses only commission (no wallet debit, no treasury credit), posts nothing without a commission, keeps `FULL_REFUND` for platform-cleared payments, `refundScenarioFor`, the rail-engine refund path, and the per-merchant commission-receivable balance after a reversal.
+- `test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` — 21 labels × 3 currencies × 5 amount tiers × 4 fee configurations = 1,260 template constructions.
 - `test/exhaustive/02-ledger/checkpoints-and-invariant.test.ts` — checkpoint snapshot, no double count, 500-entry fuzz drift, deliberate drift detection; requires PostgreSQL and skips otherwise.
 - `test/exhaustive/02-ledger/commission-hierarchy-and-bearers.test.ts` / `property-fuzzer-10k.test.ts` — commission precedence, fee-bearer matrices, 10,000 deterministic monetary iterations.
 - `test/storage-engine/ledger-shards.test.ts` / `uow.test.ts` / `write-path.integration.test.ts` — 16-shard distribution, merchant one-shard rule, parity after concurrent postings, `ensureAccountShards`, atomic ledger/outbox/shard write path; live PostgreSQL required.
@@ -1982,9 +1994,21 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 - **Append-only ledger and audit trail (GAP-013, RESOLVED 2026-11-05).** Migration `20261105090000_append_only_ledger_guards` installs `BEFORE UPDATE OR DELETE` row triggers and `BEFORE TRUNCATE` statement triggers on `journal_entries`, `journal_lines` (the parent and every partition; row triggers are cloned to future partitions, TRUNCATE triggers are installed on each existing partition) and `audit_log`. They raise `55000` for any caller, including the table owner. Two narrow bypasses exist: (1) maintenance, a transaction that sets `pgw.ledger_maintenance = 'on'` AND whose session user is a superuser or a member of the role `pgw_ledger_maintenance` (the application role is not a member); (2) retention, `DELETE` on `audit_log` only, in a transaction that sets `pgw.audit_retention = 'on'` (the `RetentionWorker` purge; the journal is never purged by retention). The migration also creates, best effort (a managed PostgreSQL may forbid `CREATE ROLE`; it then emits a notice and the roles must be provisioned manually), the NOLOGIN roles `pgw_ledger_maintenance` and the non-owner application role `pgw_app`, grants `pgw_app` the DML it needs and revokes `UPDATE`/`DELETE`/`TRUNCATE` on the journal tables and `UPDATE`/`TRUNCATE` on `audit_log` from it (`audit_log` keeps `DELETE` for the retention purge, still gated by the trigger). REVOKE alone does nothing against the table owner, which is why the triggers exist. **Production must connect as `pgw_app` (or another non-owner member of it), never as the owner that ran the migrations**; migrations still run as the owner. Test fixtures open the maintenance bypass through `core-back/test/helpers/ledgerMaintenance.ts`.
 - **Tests.** `core-back/test/security-regressions/{h7-rounding,h4-cashout}` and `core-back/test/hardening-gap-regressions.test.ts` (checkpoint, parity, append-only guards). True concurrency needs PostgreSQL 18 and is not covered.
 
+## Remediation round 2 (2026-11-08): raw-SQL posting path and throughput measurements
+
+`LedgerPoster` has an opt-in raw-SQL write path (`LedgerPosterOptions.rawSql`), on in production through `createLedgerPoster` (`LEDGER_RAW_SQL=false` is the kill switch). It produces the same rows as the ORM path:
+
+- the entry is inserted with `INSERT ... ON CONFLICT (ref_type, ref_id) DO NOTHING RETURNING` (an idempotent replay reads the existing entry back and moves nothing);
+- accounts are resolved with one typed `SELECT`, and the lines are inserted with application-generated UUIDv7 ids by one `INSERT ... SELECT ... FROM unnest(...)`, together with the per-shard `shard_seq` bookkeeping from the shard writer, all inside the one transaction;
+- a most-specific (scoped) account resolution is cached per poster for 60 s (max 20,000 entries): a more specific account can never appear later and ties resolve to the lowest id. A platform-wide fallback resolution is never cached, so a wallet created afterwards takes over at once; `clearAccountCache()` and `accountCacheTtlMs: 0` disable it.
+
+Measured on the test host (single Bun process, local PostgreSQL 18, 16 shards): sequential posting 255 -> 628 posts/s (p50 3.83 -> 1.50 ms, about 4.2 statements per posting); eight concurrent workers 582-641 -> about 2,085 posts/s. Widening shards did not help: the limit is client-side ORM/CPU work in one process. **15,000 TPS is therefore not reachable on one core process; it needs horizontal scale (several core instances over the same database) and further hot-row work (treasury/income shard locks held through commit, a faster shard scaler), which remain open (GAP-063).**
+
+Tests: `core-back/test/ledger-raw-sql-parity.test.ts` (same entries, lines, balances and gapless shard sequences as the ORM path for five templates; returned records match storage; idempotent replay in both modes; whole-posting rollback when the shard writer fails; cache semantics).
+
 ## Governance and Compliance
 
-> Status: `partial` · Last verified: 2026-11-06
+> Status: `partial` · Last verified: 2026-11-08
 
 ## 1. Purpose and scope
 
@@ -2044,7 +2068,7 @@ The actual admin approve route (`core-back/api/internal/admin.ts:6014`) is more 
 - rejects expired requests;
 - enforces maker ≠ checker;
 - adds a join-request admin-assisted maker check and a merchant payload checker-domain check;
-- special-cases `BACKUP_POLICY` through the backup daemon;
+- special-cases `BACKUP_POLICY` through `executeBackupPolicyApproval` (claim first, then the backup daemon; shared with `PUT /system/backups/policy`);
 - queues `ADJUSTMENT` execution as a background job and executes everything else through `executeApprovalSubject` in one transaction;
 - records a decision checklist audit row.
 
@@ -2135,7 +2159,7 @@ Dispute intake is exposed as `POST /admin/disputes`; the route queues an `ADJUST
 
 There is no webhook or statement dispute-intake wiring in `DynamicRailEngine` or reconciliation; the admin manual route is the implemented intake path.
 
-Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` holds the adjustment and opens an operator case. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id.
+Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` holds the adjustment and opens an operator case. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id. The refund template follows the ownership mode of the payment (`refundScenarioFor`, see `core.ledger`): a `MERCHANT_DIRECT` refund only reverses the commission recognition (`Dr PLATFORM_INCOME` / `Cr COMMISSION_RECEIVABLE`) and never debits the wallet or credits treasury; with nothing to reverse the adjustment is `EXECUTED` with no journal entry.
 
 ### 3.8 Cash-outs
 
@@ -3190,7 +3214,7 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 
 ## Data Schema and Migrations
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-08
 
 ## 1. Purpose and scope
 
@@ -3571,9 +3595,36 @@ The current schema version is 14 (`REQUIRED_SCHEMA_VERSION = 14`; model count 78
 - `20261105130000_statement_unique_source_file_hash`: replaces the global `reconciliation_runs.file_hash` unique index with `(statement_source_id, file_hash)`, sets `timestamp_tolerance_sec = 0` for legacy keyed channels with no signed timestamp source (the verifier now fails closed on a missing signed timestamp), and bumps `schema_versions` to 11.
 - `20261107090000_shard_sequenced_checkpoints` (version 12): per-shard sequenced ledger checkpoints, `journal_lines.shard_id/shard_seq`, the `gl_shard_checkpoints` table, per-account shard width and `operator_cases.subject_key` (see `core.ledger`).
 - `20261107150000_shard_repairs` (version 14): `gl_shard_checkpoints.baseline_seq` (the exemption marker of a re-baselined shard) and the append-only history table `gl_shard_repairs` (see `core.ledger` 3.10).
+- `20261108090000_partition_truncate_guard` (functions and triggers only; `schema_versions` stays at 14): `pgw_guard_journal_line_partition(regclass)` installs the `pgw_journal_lines_no_truncate` statement trigger only when it is missing; `ensure_journal_line_partitions` (run daily by the deploy cron) calls it for every partition it covers, and the migration backfills every existing partition. Statement-level TRUNCATE triggers are not cloned from the partitioned parent, so partitions created after `20261105090000_append_only_ledger_guards` could be truncated by their owner without meeting the guard.
 - `20261107120000_inbound_event_claims` (version 13): adds nullable `inbound_events.claimed_at` and `claimed_by` plus `(processed_at, claimed_at)`, the durable lease the inbound webhook worker uses to prevent duplicate processing across a brief leadership overlap.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
+
+## 12. Runbook: applying `20261107090000_shard_sequenced_checkpoints` to a populated database (2026-11-08)
+
+Fresh databases and test databases need nothing special. A database that already holds `journal_lines` history does, because the migration is one transaction that:
+
+- adds `journal_lines.shard_id/shard_seq` (metadata-only, but each `ALTER TABLE` takes `ACCESS EXCLUSIVE` on the partitioned parent and every partition for its duration);
+- adds `journal_lines_shard_id_range` as a **validated** `CHECK`, which scans every partition under that lock (the `shard_seq > 0` check is `NOT VALID` and costs nothing);
+- builds `journal_lines_shard_seq_idx` with a plain `CREATE INDEX`, which blocks writes to `journal_lines` until it finishes;
+- computes the genesis totals with one aggregate over all of `journal_lines`, then rewrites `gl_account_shards` and `gl_shard_checkpoints` for every account.
+
+The application is not available for the duration, and an old binary posting while it runs would either block or write lines without shard attribution. The applied migration file must not be edited (Prisma checksums it); the safe handling is operational.
+
+1. **Rehearse first.** Restore the latest backup into a scratch PostgreSQL 18 instance and run `bunx prisma migrate deploy` there. Record the elapsed time; it grows with `journal_lines` row count (the scan, the index build and the genesis aggregate are all full passes). Plan the window at about three times the rehearsal.
+2. **Announce a maintenance window** and stop traffic: stop the three edge services (admin/merchant/checkout) and then core's workers, so nothing posts. Confirm no open transactions touch `journal_lines`: `SELECT pid, state, query FROM pg_stat_activity WHERE query ILIKE '%journal_lines%' AND pid <> pg_backend_pid();`.
+3. **Take the pre-migration dump** (the deploy engine does this automatically before `migrate deploy`; keep it until the checkpoint worker has verified at least one full sweep afterwards).
+4. **Deploy the new core binary and run the migration together** (`bun deploy/deploy.ts`, update mode). Do not run the migration alone and leave the old binary serving: the old poster does not write `shard_id/shard_seq`, so every new line would violate `journal_lines_shard_seq_positive` (the migration is not skippable for the new binary either: `REQUIRED_SCHEMA_VERSION` is checked by the seeders).
+5. **Verify before reopening traffic**: `SELECT version FROM schema_versions;` is at least 12; `SELECT count(*) FROM gl_accounts a WHERE NOT EXISTS (SELECT 1 FROM gl_account_shards s WHERE s.gl_account_id = a.id);` is 0; the global ledger invariant check in the admin ledger-health page reports no drift; then start the edges.
+6. **If the window is too long for the lock scan**, the lower-impact variant is a hand-applied pre-step on the production database, run before the deploy and reviewed by two people (maker-checker for operations): `ALTER TABLE journal_lines ADD CONSTRAINT journal_lines_shard_id_range CHECK (shard_id >= 0 AND shard_id < 256) NOT VALID;` then `ALTER TABLE journal_lines VALIDATE CONSTRAINT journal_lines_shard_id_range;` (the validate step takes only `SHARE UPDATE EXCLUSIVE`) and `CREATE INDEX CONCURRENTLY` for each partition's index. The migration's own `ADD CONSTRAINT`/`CREATE INDEX` statements would then fail on the existing names, so this variant requires a reviewed copy of the migration with those statements guarded by `IF NOT EXISTS`/skipped, applied via `prisma migrate resolve`. Do this only with a rehearsal; the default recommendation is the window.
+
+Open: a deploy-time guard that refuses to run this migration on a database with a large `journal_lines` unless the operator passes an explicit acknowledgement is not implemented. The pipeline already takes a pre-migration dump and probes pending migrations (`deploy/deploy.ts` `probeMigrationState`), so the guard would extend that probe.
+
+## Remediation round 2 (2026-11-08): session revocations
+
+## 13. Session revocations (schema version 15)
+
+`20261108100000_session_revocations` adds the `session_revocations` model (`jti`, `expires_at`) and bumps `REQUIRED_SCHEMA_VERSION` to 15. `revokeSession` writes Redis (atomic `SET ... PX`) and the table; `isSessionRevoked` reads Redis first and the table when Redis misses or is down. Expired rows are deleted opportunistically on later revocations. `20261108090000_partition_truncate_guard` was amended (it is unreleased) so `pgw_guard_journal_line_partition` also grants the app role its DML on each partition and revokes UPDATE/DELETE/TRUNCATE, because partitions created by the cron run as `postgres` and do not inherit the owner's default privileges.
 
 ## Global Search
 
@@ -3976,7 +4027,7 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 
 ## Backup Control
 
-> Status: `partial` · Last verified: 2026-11-06
+> Status: `partial` · Last verified: 2026-11-08
 
 ## 1. Purpose and scope
 
@@ -4063,15 +4114,18 @@ The trigger schema defaults `target` to `all` and `kind` to `full`.
 
 It returns HTTP 202 with `checkerRequired: true` and the approval id.
 
-With `approvalRequestId`, core:
+With `approvalRequestId`, core calls `executeBackupPolicyApproval` (`core-back/api/internal/backups.ts`). The same function backs `POST /approvals/:id/approve` for a `BACKUP_POLICY` approval, so the two entry points cannot differ:
 
-1. loads the approval and requires `subjectType = "BACKUP_POLICY"`;
-2. requires state `PENDING_REVIEW` or `APPROVED`;
-3. rejects when `approval.makerUserId === actor.userId` with `MAKER_CHECKER_VIOLATION`;
-4. requires the daemon to be configured;
-5. applies `approval.payloadDiffJson` to the daemon (not the current request body);
-6. marks the approval `EXECUTED`, records `checkerUserId` and increments `baseVersion`;
-7. writes a `BACKUP_POLICY_UPDATED` audit row with before/after JSON and a stable-JSON checksum prefix.
+1. the caller must hold checker authority (`approval:check`); `security:write` alone is refused with `403 APPROVAL_CHECKER_AUTHORITY_REQUIRED`;
+2. it loads the approval and requires `subjectType = "BACKUP_POLICY"` (`404 APPROVAL_NOT_FOUND` otherwise);
+3. it rejects `approval.makerUserId === actor.userId` with `409 APPROVAL_MAKER_EQUALS_CHECKER`;
+4. it requires state `PENDING_REVIEW` or `DRAFT` (`409 APPROVAL_NOT_PENDING`; an `APPROVED`, `EXECUTED` or `REJECTED` request can never be applied again) and an unexpired request (`409 APPROVAL_EXPIRED`);
+5. it requires the daemon to be configured (`503`);
+6. it CLAIMS the approval with a conditional `updateMany` (pending -> `APPROVED`, `checkerUserId` set) BEFORE calling the daemon, so two checkers racing apply the policy exactly once (the loser gets `409 APPROVAL_NOT_PENDING`);
+7. it applies `approval.payloadDiffJson` to the daemon (not the current request body) with `updatedBy` set to the checker; if the daemon call fails the claim is released (back to `PENDING_REVIEW`, `checkerUserId` cleared) so the request can be retried;
+8. in one transaction it marks the approval `EXECUTED`, records `checkerUserId`, increments `baseVersion` and writes a `BACKUP_POLICY_UPDATED` audit row (`entityId` = the approval id) with before/after JSON and a stable-JSON checksum prefix.
+
+Residual: if the process dies after the daemon accepted the policy but before step 8, the approval stays `APPROVED` with the checker recorded and the policy is already live; the daemon call is idempotent, but there is no automatic resume of that state.
 
 There is no maker-checker on `POST /trigger` or `POST /drill`; both are direct `security:write` actions.
 
@@ -4593,7 +4647,7 @@ The seeder writes 49 Prisma models through `createMany`, including merchant/user
 | `FAKE_RAILS_ALLOW_IN_PRODUCTION` | Required when `NODE_ENV=production` |
 | `FAKE_RAILS_ALLOWED_HOSTS` | Comma-separated allowed emulator hosts |
 | `FAKE_RAILS_SEEDER_TOKEN` | Shared handshake/bulk-seed token |
-| `SYNTHETIC_SEED_PROFILE` | `COMPACT`, `STANDARD`, `STRESS` (default `STANDARD` in the seeder; deploy default `COMPACT`) |
+| `SYNTHETIC_SEED_PROFILE` | `COMPACT`, `STANDARD`, `STRESS` (default `STANDARD` in the seeder when unset or empty; deploy default `COMPACT`). Any other value now throws (`Unknown synthetic seed profile`) instead of silently becoming `STANDARD`. A refund of a `MERCHANT_DIRECT` attempt with no commission to reverse is skipped by the generator (see `core.ledger`). |
 | `SYNTHETIC_SEED_KEY` | Completed-run key and PRNG seed |
 | `SYNTHETIC_DATA_NAMESPACE` | Namespace used in emails/references (default `synthv1`) |
 | `SYNTHETIC_YEARS_SPAN` | Timeline span in years |

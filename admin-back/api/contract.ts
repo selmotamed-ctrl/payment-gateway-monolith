@@ -744,10 +744,7 @@ export const toCoreUserCreate = (body: unknown): JsonRecord => {
     email: (asString(source.email) ?? "").trim().toLowerCase(),
     role: pickEnum(source.role, USER_ROLES) ?? asString(source.role) ?? "",
   };
-  const phone = asString(source.phone);
-  if (phone) result.phone = phone;
-  const password = asString(source.temporaryPassword) ?? asString(source.password);
-  if (password) result.password = password;
+  // Never `phone` or `password`, even from a legacy payload: the invitee sets both (see core `staffInvitation`).
   const authorities = flattenAuthorities(source.authorities).slice(0, 60);
   if (authorities.length > 0) result.authoritiesMap = authorities;
   if (Array.isArray(source.checklist)) {
