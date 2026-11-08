@@ -1,0 +1,5 @@
+[test]
+# One shared per-minute admin rate-limit budget is consumed by every test file of a full run
+# (the limiter keeps module-level state); lift it for tests. The limiter itself is exercised in
+# test/security-regressions.test.ts with an explicit small ADMIN_RATE_LIMIT_MAX.
+preload = ["./test/setup.ts"]
