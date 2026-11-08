@@ -109,6 +109,33 @@ test("right-click opens the row actions at the pointer and runs them", async ({ 
     await expect(page).toHaveURL(/\/merchants\/mch_1/);
 });
 
+test("the right-click menu opens at the pointer, not at the top-left of the page", async ({ page }) => {
+    await page.goto("/merchants");
+    for (const rowIndex of [0, 1]) {
+        const cell = page.locator("tbody tr").nth(rowIndex).locator("td").nth(2);
+        await expect(cell).toBeVisible();
+        await cell.scrollIntoViewIfNeeded(); // the click scrolls the row into view: measure where it will actually be
+        const box = (await cell.boundingBox())!;
+        const click = { x: box.x + 24, y: box.y + 8 };
+        await cell.click({ button: "right", position: { x: 24, y: 8 } });
+        const menu = page.locator('.v-menu.v-overlay--active [role="menu"][aria-label="Row actions"]').last();
+        await expect(menu).toBeVisible();
+        // Vuetify animates the overlay in and may flip it near an edge: wait for it to settle, then compare.
+        await page.waitForTimeout(350);
+        const rect = (await menu.boundingBox())!;
+        const viewport = page.viewportSize()!;
+        const rtl = (await page.evaluate(() => getComputedStyle(document.documentElement).direction)) === "rtl";
+        const nearX = rtl ? Math.abs(rect.x + rect.width - click.x) : Math.abs(rect.x - click.x);
+        const flippedUp = rect.y + rect.height <= click.y + 12;
+        const nearY = flippedUp ? Math.abs(rect.y + rect.height - click.y) : Math.abs(rect.y - click.y);
+        expect(nearX, `menu x (${rect.x}) is next to the pointer x (${click.x}) for row ${rowIndex}`).toBeLessThan(24);
+        expect(nearY, `menu y (${rect.y}) is next to the pointer y (${click.y}) for row ${rowIndex}`).toBeLessThan(24);
+        expect(rect.x + rect.width, "menu stays inside the viewport").toBeLessThanOrEqual(viewport.width + 1);
+        await page.keyboard.press("Escape");
+        await expect(page.locator('.v-menu.v-overlay--active [role="menu"][aria-label="Row actions"]')).toHaveCount(0);
+    }
+});
+
 test("only one row menu is open at a time", async ({ page }) => {
     await page.goto("/merchants");
     await openContextMenu(page, 0);

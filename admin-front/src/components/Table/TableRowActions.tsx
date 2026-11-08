@@ -54,6 +54,20 @@ const NATIVE_MENU_TARGETS = `${EDITABLE_TARGETS}, a, [data-no-row-context-menu]`
 const matchesTarget = (target: EventTarget | null, selector: string): boolean =>
     target instanceof Element && Boolean(target.closest(selector));
 
+/**
+ * Vuetify's `VMenu` finds its activator through `activatorProps.ref` (a function ref). A second `ref` on the same
+ * element, written before or after the spread of `activatorProps`, REPLACES that one and the menu then has no anchor
+ * (it opened at the top-left of the page). This sets both: the component's own ref and Vuetify's.
+ */
+const composeActivatorRef =
+    (own: { value: HTMLElement | null }, vuetifyRef: unknown) =>
+    (element: unknown): void => {
+        own.value = element instanceof HTMLElement ? element : null;
+        if (typeof vuetifyRef === "function") {
+            (vuetifyRef as (target: unknown) => void)(element);
+        }
+    };
+
 const MENU_PANEL_STYLE = {
     minWidth: "184px",
     maxHeight: "min(70vh, 420px)",
@@ -372,9 +386,9 @@ export const TableRowActions = defineComponent({
                             {{
                                 activator: ({ props: activatorProps }: { props: Record<string, unknown> }) => (
                                     <button
-                                        ref={actionsButton}
                                         type="button"
                                         {...activatorProps}
+                                        ref={composeActivatorRef(actionsButton, activatorProps.ref)}
                                         aria-label={t("Row actions")}
                                         aria-keyshortcuts="Shift+F10"
                                         style={{
@@ -421,7 +435,7 @@ export const TableRowActions = defineComponent({
                                 activator: ({ props: activatorProps }: { props: Record<string, unknown> }) => (
                                     <span
                                         {...activatorProps}
-                                        ref={contextActivator}
+                                        ref={composeActivatorRef(contextActivator, activatorProps.ref)}
                                         aria-hidden="true"
                                         tabindex={-1}
                                         style={{

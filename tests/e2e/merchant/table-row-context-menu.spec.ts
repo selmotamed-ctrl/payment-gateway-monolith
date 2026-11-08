@@ -96,6 +96,14 @@ test("right-click opens the payment link actions including the primary action", 
     await expect(menu.getByRole("menuitem", { name: "Copy" })).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: "Generate QR" })).toBeVisible();
 
+    // The menu is anchored to the pointer (320, 280), not to the top-left of the page.
+    await page.waitForTimeout(350); // let the overlay finish animating in
+    const rect = (await menu.boundingBox())!;
+    const rtl = (await page.evaluate(() => getComputedStyle(document.documentElement).direction)) === "rtl";
+    expect(Math.abs((rtl ? rect.x + rect.width : rect.x) - 320), `menu x (${rect.x}) is next to the pointer x (320)`).toBeLessThan(24);
+    const flippedUp = rect.y + rect.height <= 280 + 12;
+    expect(Math.abs((flippedUp ? rect.y + rect.height : rect.y) - 280), `menu y (${rect.y}) is next to the pointer y (280)`).toBeLessThan(24);
+
     await page.keyboard.press("Escape");
     await expect(page.locator('.v-menu.v-overlay--active [role="menu"][aria-label="Row actions"]')).toHaveCount(0);
 });

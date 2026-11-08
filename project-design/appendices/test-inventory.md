@@ -266,13 +266,13 @@
 | `tests/e2e/admin/commerce-governance.spec.ts` | 132 | 4 |
 | `tests/e2e/admin/guide-reader.spec.ts` | 116 | 5 |
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
-| `tests/e2e/admin/table-row-context-menu.spec.ts` | 190 | 7 |
+| `tests/e2e/admin/table-row-context-menu.spec.ts` | 217 | 8 |
 | `tests/e2e/admin/wallet-details.spec.ts` | 302 | 12 |
 | `tests/e2e/merchant/a11y.spec.ts` | 28 | 1 |
 | `tests/e2e/merchant/auth.spec.ts` | 47 | 2 |
 | `tests/e2e/merchant/shell.spec.ts` | 121 | 9 |
 | `tests/e2e/merchant/landing.spec.ts` | 104 | 5 |
-| `tests/e2e/merchant/table-row-context-menu.spec.ts` | 116 | 3 |
+| `tests/e2e/merchant/table-row-context-menu.spec.ts` | 124 | 3 |
 | `tests/e2e/checkout/a11y.spec.ts` | 13 | 1 |
 | `tests/e2e/checkout/pay.spec.ts` | 46 | 3 |
 | `tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts` | 93 | 1 |
@@ -315,4 +315,4 @@
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **309**
-- Total literal test declarations: **3344**
+- Total literal test declarations: **3345**
