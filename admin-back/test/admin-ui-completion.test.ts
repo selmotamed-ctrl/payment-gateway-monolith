@@ -42,7 +42,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  delete process.env.ADMIN_RATE_LIMIT_MAX;
+  process.env.ADMIN_RATE_LIMIT_MAX = "1000000"; // suite-wide test budget (test/setup.ts)
   resetEnvCache();
   await new Promise<void>((resolve) => edgeServer.close(() => resolve()));
   await core.close();

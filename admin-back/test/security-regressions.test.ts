@@ -423,7 +423,8 @@ describe("client ip based rate limiting", () => {
       });
       single.push(response.status);
     }
-    delete process.env.ADMIN_RATE_LIMIT_MAX;
+    // back to the suite-wide test budget set by test/setup.ts (not the 600/min default)
+    process.env.ADMIN_RATE_LIMIT_MAX = "1000000";
     resetEnvCache();
     expect(single.slice(0, 3).every((status) => status !== 429)).toBe(true);
     expect(single.at(-1)).toBe(429);
