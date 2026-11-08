@@ -4,9 +4,9 @@
 
 | File | Lines | Literal test declarations |
 | :--- | ---: | ---: |
-| `core-back/test/edge-cases/catalog.ts` | 191 | 0 |
 | `core-back/test/edge-cases/helpers.ts` | 772 | 0 |
 | `core-back/test/edge-cases/catalog-140.test.ts` | 3539 | 18 |
+| `core-back/test/edge-cases/catalog.ts` | 191 | 0 |
 | `core-back/test/engine/api-consumer-primitives.test.ts` | 92 | 12 |
 | `core-back/test/engine/transform-pipeline.test.ts` | 225 | 33 |
 | `core-back/test/engine/crypto.test.ts` | 253 | 27 |
@@ -33,10 +33,10 @@
 | `core-back/test/helpers/guardsFake.ts` | 794 | 0 |
 | `core-back/test/helpers/backgroundJobFake.ts` | 423 | 0 |
 | `core-back/test/helpers/fakePrisma.ts` | 281 | 0 |
+| `core-back/test/helpers/fakeCheckpointDb.ts` | 120 | 0 |
 | `core-back/test/helpers/ledgerMaintenance.ts` | 54 | 0 |
 | `core-back/test/helpers/retentionFake.ts` | 619 | 3 |
 | `core-back/test/helpers/seederFixture.ts` | 98 | 0 |
-| `core-back/test/helpers/fakeCheckpointDb.ts` | 120 | 0 |
 | `core-back/test/phase3-dynamic-engine-and-blueprints.test.ts` | 273 | 12 |
 | `core-back/test/runtime/rotating-refresh-token.test.ts` | 106 | 2 |
 | `core-back/test/runtime/raw-body.test.ts` | 88 | 4 |
@@ -54,10 +54,10 @@
 | `core-back/test/ui-authorities.test.ts` | 35 | 3 |
 | `core-back/test/dev-users-plan.test.ts` | 114 | 6 |
 | `core-back/test/fake-rails-allowlist.test.ts` | 33 | 3 |
-| `core-back/test/exhaustive/01-schema/check-constraints-and-triggers.test.ts` | 456 | 24 |
 | `core-back/test/exhaustive/01-schema/indexes-and-query-plans.test.ts` | 164 | 6 |
-| `core-back/test/exhaustive/01-schema/models-and-columns.test.ts` | 302 | 23 |
 | `core-back/test/exhaustive/01-schema/unique-and-fk-constraints.test.ts` | 321 | 15 |
+| `core-back/test/exhaustive/01-schema/check-constraints-and-triggers.test.ts` | 456 | 24 |
+| `core-back/test/exhaustive/01-schema/models-and-columns.test.ts` | 302 | 23 |
 | `core-back/test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` | 228 | 8 |
 | `core-back/test/exhaustive/02-ledger/commission-hierarchy-and-bearers.test.ts` | 214 | 4 |
 | `core-back/test/exhaustive/02-ledger/property-fuzzer-10k.test.ts` | 215 | 2 |
@@ -89,9 +89,7 @@
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/internal-routes.test.ts` | 127 | 9 |
 | `core-back/test/globalSearch.test.ts` | 266 | 12 |
-| `core-back/test/phase2-ledger-and-governance.test.ts` | 281 | 11 |
 | `core-back/test/remediation-high.test.ts` | 975 | 18 |
-| `core-back/test/retention-worker.test.ts` | 504 | 17 |
 | `core-back/test/academy-exam-engine.test.ts` | 839 | 54 |
 | `core-back/test/academy-progress.test.ts` | 476 | 32 |
 | `core-back/test/academy-team.test.ts` | 270 | 31 |
@@ -108,10 +106,8 @@
 | `core-back/test/expiry-sweeper-aml.test.ts` | 91 | 3 |
 | `core-back/test/gaps/gap-015-018-regressions.test.ts` | 185 | 11 |
 | `core-back/test/governance-execution.test.ts` | 1208 | 27 |
-| `core-back/test/hardening-gap-regressions.test.ts` | 615 | 40 |
 | `core-back/test/list-query-keyset.test.ts` | 89 | 7 |
 | `core-back/test/list-query.test.ts` | 89 | 6 |
-| `core-back/test/notifications-and-gl-accounts.test.ts` | 526 | 20 |
 | `core-back/test/security-regressions/c1-forged-success.test.ts` | 119 | 8 |
 | `core-back/test/security-regressions/c2-mfa.test.ts` | 252 | 18 |
 | `core-back/test/security-regressions/gap-019-020-027-session.test.ts` | 153 | 7 |
@@ -127,39 +123,44 @@
 | `core-back/test/setup.ts` | 8 | 0 |
 | `core-back/test/storage-engine/audit-chain.test.ts` | 237 | 6 |
 | `core-back/test/storage-engine/cache-velocity.test.ts` | 274 | 10 |
-| `core-back/test/storage-engine/db-optimisation.test.ts` | 342 | 17 |
 | `core-back/test/storage-engine/engine-factory.test.ts` | 107 | 3 |
 | `core-back/test/storage-engine/helpers/db.ts` | 530 | 0 |
-| `core-back/test/storage-engine/ledger-shards.test.ts` | 275 | 3 |
 | `core-back/test/storage-engine/log-sink.test.ts` | 233 | 8 |
 | `core-back/test/storage-engine/outbox-workers.test.ts` | 349 | 6 |
 | `core-back/test/storage-engine/performance/storage-performance.test.ts` | 363 | 11 |
 | `core-back/test/storage-engine/performance/write-path-benchmark.test.ts` | 111 | 2 |
-| `core-back/test/storage-engine/primitives.test.ts` | 195 | 16 |
 | `core-back/test/storage-engine/read-store.test.ts` | 281 | 14 |
 | `core-back/test/storage-engine/telemetry-and-realtime.test.ts` | 38 | 2 |
 | `core-back/test/storage-engine/uow.test.ts` | 366 | 10 |
 | `core-back/test/storage-engine/velocity-failure-policy.test.ts` | 139 | 8 |
-| `core-back/test/storage-engine/write-path.integration.test.ts` | 135 | 3 |
+| `core-back/test/storage-engine/db-optimisation.test.ts` | 342 | 17 |
 | `core-back/test/storage-engine/leader-election-pgbouncer.test.ts` | 220 | 3 |
-| `core-back/test/synthetic-seeder-realism.test.ts` | 464 | 43 |
+| `core-back/test/storage-engine/ledger-shards.test.ts` | 275 | 3 |
+| `core-back/test/storage-engine/primitives.test.ts` | 195 | 16 |
+| `core-back/test/storage-engine/write-path.integration.test.ts` | 135 | 3 |
 | `core-back/test/synthetic-seeder.test.ts` | 178 | 10 |
-| `core-back/test/admin-slice/harness.ts` | 231 | 1 |
-| `core-back/test/admin-slice/admin-ledger.test.ts` | 376 | 9 |
 | `core-back/test/admin-slice/admin-operations.test.ts` | 325 | 7 |
 | `core-back/test/admin-slice/admin-system.test.ts` | 314 | 13 |
 | `core-back/test/admin-slice/admin-rails-routes.test.ts` | 167 | 3 |
+| `core-back/test/admin-slice/admin-ledger.test.ts` | 376 | 9 |
+| `core-back/test/admin-slice/harness.ts` | 231 | 1 |
 | `core-back/test/guides-support.test.ts` | 171 | 8 |
-| `core-back/test/admin-commerce.test.ts` | 878 | 24 |
 | `core-back/test/commission-tiers.test.ts` | 60 | 7 |
-| `core-back/test/phase1-mtls-and-schema.test.ts` | 385 | 14 |
-| `core-back/test/ledger-shard-scaling.test.ts` | 232 | 6 |
-| `core-back/test/ledger-checkpoint-worker.test.ts` | 359 | 6 |
+| `core-back/test/admin-commerce.test.ts` | 878 | 24 |
 | `core-back/test/cashout-lock-order.test.ts` | 123 | 3 |
-| `core-back/test/ledger-shard-sequence.test.ts` | 336 | 10 |
-| `core-back/test/ledger-shard-repair.test.ts` | 227 | 6 |
+| `core-back/test/ledger-checkpoint-worker.test.ts` | 359 | 6 |
 | `core-back/test/ledger-shard-auto-repair.test.ts` | 142 | 3 |
 | `core-back/test/ledger-shard-repair-api.test.ts` | 146 | 3 |
+| `core-back/test/ledger-shard-repair.test.ts` | 227 | 6 |
+| `core-back/test/ledger-shard-scaling.test.ts` | 232 | 6 |
+| `core-back/test/ledger-shard-sequence.test.ts` | 336 | 10 |
+| `core-back/test/notifications-and-gl-accounts.test.ts` | 526 | 20 |
+| `core-back/test/phase1-mtls-and-schema.test.ts` | 385 | 14 |
+| `core-back/test/phase2-ledger-and-governance.test.ts` | 281 | 11 |
+| `core-back/test/retention-worker.test.ts` | 504 | 17 |
+| `core-back/test/synthetic-seeder-realism.test.ts` | 464 | 43 |
+| `core-back/test/inbound-inbox-claim-pg.test.ts` | 34 | 1 |
+| `core-back/test/hardening-gap-regressions.test.ts` | 616 | 40 |
 | `admin-back/test/helpers/core-schema.ts` | 899 | 0 |
 | `admin-back/test/helpers/session.ts` | 135 | 0 |
 | `admin-back/test/helpers/upstream.ts` | 106 | 0 |
@@ -208,18 +209,18 @@
 | `deploy/test/hostPlannerScale.test.ts` | 158 | 6 |
 | `deploy/test/ipv6Loopback.test.ts` | 37 | 2 |
 | `deploy/test/pkiScale.test.ts` | 112 | 5 |
-| `deploy/test/provisioners.test.ts` | 517 | 27 |
 | `deploy/test/redactSecrets.test.ts` | 63 | 5 |
 | `deploy/test/rollingDeploy.test.ts` | 52 | 5 |
 | `deploy/test/security-regressions.test.ts` | 400 | 35 |
 | `deploy/test/templates.test.ts` | 244 | 17 |
 | `deploy/test/testMatrix.test.ts` | 455 | 35 |
-| `deploy/test/converge.test.ts` | 578 | 53 |
 | `deploy/test/frontendBuild.test.ts` | 171 | 12 |
 | `deploy/test/stress-harness.test.ts` | 162 | 15 |
 | `deploy/test/configScale.test.ts` | 192 | 13 |
 | `deploy/test/pipeline.test.ts` | 95 | 4 |
 | `deploy/test/backupReliability.test.ts` | 494 | 31 |
+| `deploy/test/converge.test.ts` | 578 | 53 |
+| `deploy/test/provisioners.test.ts` | 517 | 27 |
 | `deploy/backup-daemon/test/backupEngine.test.ts` | 504 | 28 |
 | `deploy/backup-daemon/test/catalogStore.test.ts` | 133 | 6 |
 | `deploy/backup-daemon/test/commandRunner.test.ts` | 61 | 3 |
@@ -239,9 +240,9 @@
 | `deploy/backup-daemon/test/instanceLock.test.ts` | 103 | 8 |
 | `deploy/backup-daemon/test/startup.test.ts` | 68 | 2 |
 | `deploy/backup-daemon/test/lab/labConfig.ts` | 117 | 0 |
-| `deploy/backup-daemon/test/lab/ledgerFixtures.ts` | 51 | 0 |
 | `deploy/backup-daemon/test/lab/two-host.lab.test.ts` | 573 | 9 |
 | `deploy/backup-daemon/test/lab/single-host-deploy.lab.test.ts` | 337 | 8 |
+| `deploy/backup-daemon/test/lab/ledgerFixtures.ts` | 51 | 0 |
 | `deploy/backup-daemon/test/mtlsRoles.test.ts` | 194 | 4 |
 | `deploy/backup-daemon/test/live-pg18-pitr.test.ts` | 580 | 18 |
 | `tests/e2e/admin/finance.spec.ts` | 47 | 1 |
@@ -261,10 +262,10 @@
 | `tests/e2e/admin/guide-context.spec.ts` | 128 | 2 |
 | `tests/e2e/admin/guide-palette.spec.ts` | 32 | 1 |
 | `tests/e2e/admin/guide-safeguard.spec.ts` | 104 | 1 |
-| `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/operator-cases.spec.ts` | 187 | 2 |
 | `tests/e2e/admin/commerce-governance.spec.ts` | 132 | 4 |
 | `tests/e2e/admin/guide-reader.spec.ts` | 116 | 5 |
+| `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/table-row-context-menu.spec.ts` | 190 | 7 |
 | `tests/e2e/admin/wallet-details.spec.ts` | 302 | 12 |
 | `tests/e2e/merchant/a11y.spec.ts` | 28 | 1 |
@@ -310,8 +311,8 @@
 | `tests/unit/audit-summary.test.ts` | 109 | 13 |
 | `tests/unit/academy-content.test.ts` | 306 | 17 |
 | `tests/unit/guide-markdown-refs.test.ts` | 70 | 6 |
-| `tests/unit/wallet-details.test.ts` | 85 | 11 |
 | `tests/unit/guide-content.test.ts` | 185 | 10 |
+| `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **308**
-- Total literal test declarations: **3342**
+- Total files: **309**
+- Total literal test declarations: **3343**

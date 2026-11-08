@@ -412,7 +412,7 @@ describe("staff, secrets, configuration and the writer", () => {
       ["merchant", "user"], ["user", "approvalRequest"], ["approvalRequest", "joinRequest"], ["amlScreening", "joinRequest"],
       ["glAccount", "wallet"], ["wallet", "application"], ["journalEntry", "paymentAttempt"], ["paymentLink", "paymentAttempt"],
       ["paymentAttempt", "dispute"], ["dispute", "adjustment"], ["adjustment", "cashoutRequest"], ["amlRule", "amlCase"],
-      ["journalEntry", "amlCase"], ["amlCase", "regulatoryReport"], ["reconciliationItem", "operatorCase"], ["gatewayVersion", "confirmationChannel"],
+      ["journalEntry", "amlCase"], ["journalLine", "glAccountShard"], ["amlCase", "regulatoryReport"], ["reconciliationItem", "operatorCase"], ["gatewayVersion", "confirmationChannel"],
     ] as const) {
       expect(at(parent)).toBeGreaterThanOrEqual(0);
       expect(at(parent)).toBeLessThan(at(child));

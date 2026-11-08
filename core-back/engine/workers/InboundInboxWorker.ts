@@ -98,7 +98,7 @@ export class InboundInboxWorker extends BaseWorker {
       " FOR UPDATE SKIP LOCKED" +
       ")" +
       " UPDATE inbound_events e" +
-      " SET claimed_at = $3, claimed_by = $4, updated_at = $3" +
+      " SET claimed_at = $3::timestamptz, claimed_by = $4, updated_at = ($3::timestamptz AT TIME ZONE 'UTC')" +
       " FROM candidate" +
       " WHERE e.id = candidate.id" +
       " RETURNING e.*";

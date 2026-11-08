@@ -43,7 +43,6 @@ const STEPS: Step[] = [
   { model: "kybDocument", key: "kybDocuments" },
   { model: "beneficialOwner", key: "beneficialOwners" },
   { model: "glAccount", key: "glAccounts" },
-  { model: "glAccountShard", key: "glAccountShards" },
   { model: "wallet", key: "wallets" },
   { model: "application", key: "applications" },
   { model: "accessToken", key: "accessTokens" },
@@ -67,6 +66,9 @@ const STEPS: Step[] = [
   { model: "attemptStepLog", key: "attemptStepLogs" },
   { model: "inboundEvent", key: "inboundEvents" },
   { model: "journalLine", key: "journalLines" },
+  // Shard balances and `line_seq` come AFTER the lines they count. The checkpoint worker runs in the live core while the
+  // seeder writes, so a shard that was ahead of its lines would fail its proof ("0 of N lines found") and raise a P1 case.
+  { model: "glAccountShard", key: "glAccountShards" },
   { model: "reconciliationRun", key: "reconciliationRuns" },
   { model: "reconciliationItem", key: "reconciliationItems" },
   { model: "dispute", key: "disputes" },

@@ -202,7 +202,8 @@ describe("GAP-012 SKIP LOCKED claims run inside a transaction", () => {
     const claim = calls.find(
       (call) => call.sql.includes("FROM inbound_events") && call.sql.includes("FOR UPDATE SKIP LOCKED"),
     );
-    expect(claim?.sql).toContain("claimed_at = $3");
+    expect(claim?.sql).toContain("claimed_at = $3::timestamptz");
+    expect(claim?.sql).toContain("updated_at = ($3::timestamptz AT TIME ZONE 'UTC')");
     expect(claim?.sql).toContain("claimed_by = $4");
     expect(claim?.args[3]).toBe("node-a");
     expect(claim?.inTx).toBe(true);
