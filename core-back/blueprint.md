@@ -2671,6 +2671,7 @@ It degrades when workers are disabled, the queue cannot be read, or the oldest q
 
 ### Missing / deferred
 
+- Background automation plan (2026-11-09): `design/11-automation/background_automation_and_workers_plan.md` lists the missing and defective automations, their design and a phased roadmap (GAP-066).
 - Asynchronous webhook inbox processing on the request path.
 - Transition-bus-backed SSE/WebSocket fan-out.
 - Outbox and audit-outbox retention.

@@ -37,6 +37,7 @@ Every historical design file must map to a canonical part or be explicitly marke
 | `design/06-ui/merchant_landing_page_redesign.md` | Active design for the merchant public landing page | `parts/04-merchant-front/00-portal.md` |
 | `design/90-archive/legacy-deploy-configs/**` | SUPERSEDED hand-written nginx/systemd files; replaced by `deploy/templates/*.tpl` + PM2 | `parts/07-deploy/04-pipeline.md` |
 | `design/10-fixes/_0001_operator_cases.md` | Implemented operator-case feature spec | `parts/01-core-back/01-api-surface.md`, `04-governance-compliance.md`, `parts/03-admin-front/01-route-and-page-catalog.md` |
+| `design/11-automation/background_automation_and_workers_plan.md` | FUTURE: background automation plan (not implemented); verified against master 2026-11-09 | `parts/01-core-back/05-workers.md`, `TRACKER.md` GAP-066 |
 | `design/90-archive/delivery-logs/session-ses_e8c2.md` | Raw session transcript; not authoritative | `TRACKER.md` historical note only |
 
 ## Unmapped headings

@@ -36,6 +36,7 @@ design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#91-the-nine-governing-state-machine-rules
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#32
   - design/10-fixes/_0001_operator_cases.md
+  - design/11-automation/background_automation_and_workers_plan.md
 tests:
   - deploy/test/testMatrix.test.ts
   - core-back/test/engine/guards-and-workers.test.ts
@@ -356,6 +357,7 @@ It degrades when workers are disabled, the queue cannot be read, or the oldest q
 
 ### Missing / deferred
 
+- Background automation plan (2026-11-09): `design/11-automation/background_automation_and_workers_plan.md` lists the missing and defective automations, their design and a phased roadmap (GAP-066).
 - Asynchronous webhook inbox processing on the request path.
 - Transition-bus-backed SSE/WebSocket fan-out.
 - Outbox and audit-outbox retention.
