@@ -75,6 +75,15 @@ describe("F8 route authority coverage (default-deny)", () => {
       expect(r.authorities.length, n).toBeGreaterThan(0);
     }
   });
+  test("every Guide and Academy page (tracks, track, help, lessons, labs, exam, certificate) is open to any signed-in staff member", () => {
+    const learning = names.filter((n) => /^Admin(Guide|Academy)/.test(n));
+    expect(learning).toContain("AdminAcademyTrack");
+    expect(learning).toContain("AdminAcademyTracks");
+    expect(learning).toContain("AdminAcademyHelp");
+    for (const n of learning) {
+      expect(resolveRouteRequirement(n), n).toEqual({ allowed: true, authorities: [] });
+    }
+  });
   test("an unlisted route name is denied, listed login-only routes are allowed", () => {
     expect(resolveRouteRequirement("SomeNewRoute")).toEqual({ allowed: false, authorities: [] });
     expect(resolveRouteRequirement("Dashboard")).toEqual({ allowed: true, authorities: [] });
