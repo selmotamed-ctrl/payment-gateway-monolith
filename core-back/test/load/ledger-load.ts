@@ -69,7 +69,8 @@ const runWorker = async (): Promise<void> => {
   const workerId = process.env.LOAD_WORKER_ID ?? "0";
 
   const client = createPrisma({ max: concurrency + 2 });
-  const poster = createLedgerPoster(client, { emitOutbox: true, shardCount: pool.shards });
+  // emitOutbox is opt-in on master (the topic has no consumer); the harness keeps it ON so D4 can prove atomicity.
+  const poster = createLedgerPoster(client, { emitOutbox: true });
 
   const result: WorkerResult = {
     created: 0, createdAll: 0, duplicates: 0, duplicateMismatch: 0, errors: 0, errorSamples: [], latencies: [], distinctRefIds: 0, elapsedS: 0,
