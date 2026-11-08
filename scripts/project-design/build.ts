@@ -37,7 +37,13 @@ const fail = (message: string): never => {
 const walk = (directory: string, suffix = ".md"): string[] => {
   if (!existsSync(directory)) return [];
   const output: string[] = [];
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+  // readdirSync order depends on the file system (NTFS, ext4, overlayfs differ), which made the
+  // generated test inventory machine-dependent and `--check` fail on any other machine.
+  // Plain code-unit order (not localeCompare, which depends on the ICU locale) is identical everywhere.
+  const entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+  );
+  for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) output.push(...walk(path, suffix));
