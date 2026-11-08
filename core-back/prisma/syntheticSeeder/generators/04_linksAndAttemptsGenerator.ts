@@ -7,6 +7,30 @@ import { SETTLED_STATUSES } from "../lifecycle";
 import type { CommissionProfileRef, CredentialRef, RouteRef } from "../context";
 
 /**
+ * The attempt-state variables the gateway's flows read, as INITIATE would have stored them. Fake Rails resolves an
+ * inquiry by our, provider or network reference, so an id-like variable carries the provider reference; the reference
+ * and amount variables carry the real ones. Without them the inquiry URL cannot be built.
+ */
+const gatewayStateFor = (
+  ctx: SeederContext,
+  gatewayCode: string,
+  attemptId: string,
+  reference: string,
+  providerReference: string,
+  wireAmount: string,
+): Record<string, string> => {
+  const state: Record<string, string> = {};
+  for (const key of ctx.refs.gatewayStateKeys?.[gatewayCode] ?? []) {
+    if (/^merchantreference$/i.test(key)) state[key] = reference;
+    else if (/^amounttrxn$/i.test(key)) state[key] = wireAmount;
+    else if (/hash|signature/i.test(key)) state[key] = sha256Like(ctx, `hash:${attemptId}`);
+    else state[key] = providerReference; // order_id, payment_id, payment_uuid, transfer_uuid, request_id, session_id, ...
+  }
+  return state;
+};
+
+
+/**
  * Payment links, attempt groups, attempts, step logs and inbound events.
  *
  * Every attempt is built from a LIFECYCLE PATH that the engine can really
@@ -616,7 +640,15 @@ export const generateLinksAndAttempts = (ctx: SeederContext): void => {
     meta.pendingSecrets.push({
       row,
       field: "contextCiphertext",
-      plaintext: JSON.stringify(blocked ? {} : { process_id: sha256Like(ctx, `proc:${attemptId}`).slice(0, 16), phase: path[path.length - 1] }),
+      plaintext: JSON.stringify(
+        blocked
+          ? {}
+          : {
+              process_id: sha256Like(ctx, `proc:${attemptId}`).slice(0, 16),
+              phase: path[path.length - 1],
+              ...(reachedGateway ? gatewayStateFor(ctx, gateway.code, attemptId, reference, providerReference, wire.wire) : {}),
+            },
+      ),
       keyId: "attempt-context",
       mode: "context",
     });

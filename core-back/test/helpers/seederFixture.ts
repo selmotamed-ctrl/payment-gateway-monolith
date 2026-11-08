@@ -63,6 +63,8 @@ export const baselineRefs = (): SeedReferences => {
     notificationTemplates: ["PAYMENT_SUCCEEDED", "PAYMENT_FAILED", "DISPUTE_OPENED", "CASHOUT_REQUESTED", "APPROVAL_REQUIRED"].flatMap((code) =>
       (["AR", "EN"] as const).map((lang) => ({ code, channel: "EMAIL", lang }))),
     requiredDocumentsSetting: null,
+    // The state variables the gateways' inquiry steps read (from the baseline blueprints).
+    gatewayStateKeys: { moamalat: ["AmountTrxn", "MerchantReference", "SecureHash"], neompay: ["request_id"], plutu: ["order_id"] } as Record<string, string[]>,
     confirmationChannels: [] as Array<{ id: string; gatewayVersionId: string; type: string }>,
   };
   // The real baseline seed (Fake Rails blueprints) already owns webhook channels for some gateway

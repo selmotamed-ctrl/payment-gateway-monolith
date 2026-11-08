@@ -107,6 +107,13 @@ export interface SeedReferences {
   requiredDocumentsSetting?: unknown;
   /** Existing confirmation channels (the baseline webhook channels). */
   confirmationChannels?: Array<{ id: string; gatewayVersionId: string; type: string }>;
+  /**
+   * Per gateway code, the names of the attempt-state variables its flows READ (step parameters bound to the `STATE`
+   * source, e.g. `order_id`, `payment_id`). A real attempt that reached the gateway holds them after INITIATE; the
+   * inquiry (ExpirySweeper, PollWorker) builds its URL from them and fails with "URL parameter '<name>' is missing"
+   * when they are absent.
+   */
+  gatewayStateKeys?: Record<string, string[]>;
 }
 
 /**
@@ -297,6 +304,19 @@ export const loadReferences = async (prisma: PrismaClient): Promise<SeedReferenc
   const confirmationChannels = await prisma.confirmationChannel.findMany({
     select: { id: true, gatewayVersionId: true, type: true },
   });
+  const stateParameters = await prisma.stepParameter.findMany({
+    // REFUND / VOID read call-time inputs (`adjustmentId`), not variables the attempt stored after INITIATE.
+    where: { source: "STATE", step: { flow: { phase: { notIn: ["REFUND", "VOID"] } } } },
+    select: { key: true, selector: true, step: { select: { flow: { select: { gatewayVersion: { select: { gateway: { select: { code: true } } } } } } } } },
+  });
+  const stateKeySets = new Map<string, Set<string>>();
+  for (const parameter of stateParameters) {
+    const code = parameter.step.flow.gatewayVersion.gateway.code;
+    const keys = stateKeySets.get(code) ?? new Set<string>();
+    keys.add(parameter.selector ?? parameter.key);
+    stateKeySets.set(code, keys);
+  }
+  const gatewayStateKeys = Object.fromEntries([...stateKeySets].map(([code, keys]) => [code, [...keys].sort()]));
   const requiredDocuments = await prisma.platformSetting.findFirst({
     where: { key: "onboarding.required_documents" },
     orderBy: { version: "desc" },
@@ -362,6 +382,7 @@ export const loadReferences = async (prisma: PrismaClient): Promise<SeedReferenc
     notificationTemplates,
     requiredDocumentsSetting: requiredDocuments?.valueJson ?? null,
     confirmationChannels,
+    gatewayStateKeys,
   };
 };
 

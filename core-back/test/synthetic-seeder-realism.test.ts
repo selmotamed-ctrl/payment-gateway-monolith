@@ -382,6 +382,29 @@ describe("staff, secrets, configuration and the writer", () => {
     expect(ctx.dataset.users.find((u) => u.role === "FINANCE")!.isChecker).toBe(true);
     expect(ctx.dataset.users.find((u) => u.role === "OPERATOR" && u.status === "ACTIVE")!.isMaker).toBe(true);
   });
+  test("an attempt that reached the gateway carries the state variables its inquiry URL needs (no `URL parameter is missing`)", () => {
+    const ctx = run("inquiry-state", { paymentAttempts: 2500, paymentLinks: 1200 });
+    const keys = ctx.refs.gatewayStateKeys!;
+    let checked = 0;
+    for (const secret of ctx.meta!.pendingSecrets.filter((entry) => entry.field === "contextCiphertext")) {
+      const meta = ctx.meta!.attempts.get(String(secret.row.id))!;
+      const state = JSON.parse(secret.plaintext) as Record<string, string>;
+      const required = keys[meta.gatewayCode] ?? [];
+      if (!meta.reachedGateway || Object.keys(state).length === 0) {
+        for (const key of required) expect(state[key]).toBeUndefined(); // never reached the gateway / blocked: nothing to inquire about
+        continue;
+      }
+      for (const key of required) expect(typeof state[key]).toBe("string");
+      if (meta.gatewayCode === "moamalat") {
+        expect(state.MerchantReference).toBe(String(secret.row.reference));
+        expect(state.AmountTrxn).toBe(String(secret.row.gatewayAmountWire));
+        expect(state.SecureHash).toMatch(/^[0-9a-f]{16,}$/);
+      }
+      if (meta.gatewayCode === "neompay") expect(state.request_id).toBe(String(secret.row.providerReference)); // Fake Rails resolves it by provider reference
+      checked += required.length > 0 ? 1 : 0;
+    }
+    expect(checked).toBeGreaterThan(50);
+  });
   test("sensitive columns are encrypted through the Vault, never plain base64", async () => {
     const ctx = run();
     const pending = ctx.meta!.pendingSecrets.length;

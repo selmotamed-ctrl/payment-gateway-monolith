@@ -36,7 +36,7 @@
 | `core-back/test/helpers/fakeCheckpointDb.ts` | 120 | 0 |
 | `core-back/test/helpers/ledgerMaintenance.ts` | 54 | 0 |
 | `core-back/test/helpers/retentionFake.ts` | 619 | 3 |
-| `core-back/test/helpers/seederFixture.ts` | 98 | 0 |
+| `core-back/test/helpers/seederFixture.ts` | 100 | 0 |
 | `core-back/test/phase3-dynamic-engine-and-blueprints.test.ts` | 273 | 12 |
 | `core-back/test/runtime/rotating-refresh-token.test.ts` | 106 | 2 |
 | `core-back/test/runtime/raw-body.test.ts` | 88 | 4 |
@@ -158,7 +158,7 @@
 | `core-back/test/phase1-mtls-and-schema.test.ts` | 385 | 14 |
 | `core-back/test/phase2-ledger-and-governance.test.ts` | 281 | 11 |
 | `core-back/test/retention-worker.test.ts` | 504 | 17 |
-| `core-back/test/synthetic-seeder-realism.test.ts` | 464 | 43 |
+| `core-back/test/synthetic-seeder-realism.test.ts` | 487 | 44 |
 | `core-back/test/inbound-inbox-claim-pg.test.ts` | 34 | 1 |
 | `core-back/test/hardening-gap-regressions.test.ts` | 616 | 40 |
 | `admin-back/test/helpers/core-schema.ts` | 899 | 0 |
@@ -315,4 +315,4 @@
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **309**
-- Total literal test declarations: **3343**
+- Total literal test declarations: **3344**

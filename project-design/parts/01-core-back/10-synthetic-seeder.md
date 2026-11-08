@@ -109,6 +109,8 @@ Since 2026-11-04 every volume drives generation. `joinRequests`, `wallets`, `app
 
 `nextId` returns `<8 hex>-<4 hex>-7<3 hex>-8<3 hex>-<12 hex counter>` where the first 64 bits come from `sha256(namespace, seedKey)`. Two different seed keys or namespaces therefore never collide (the old factory ignored both and `skipDuplicates` silently dropped the second history), while a run stays deterministic. Rows keep unique keys that matter for re-runs (`seed_key` of GL accounts and commission profiles, e-mails, references) namespaced by seed key as well.
 
+`SeedReferences.gatewayStateKeys` (since 2026-11-08) maps each gateway code to the attempt-state variables its flows read (`step_parameters` bound to the `STATE` source in every phase except REFUND/VOID, whose `adjustmentId` is a call-time input), loaded from the live flows. Generator 04 writes them into the encrypted `context_ciphertext` of every attempt that reached the gateway (`order_id`, `payment_id`, `payment_uuid`, `transfer_uuid`, `request_id` carry the provider reference, which Fake Rails resolves by our, provider or network reference; `MerchantReference`, `AmountTrxn` and `SecureHash` carry the real reference, wire amount and a hash). Before this, a seeded in-flight attempt had only `{process_id, phase}` and the ExpirySweeper/PollWorker inquiry failed with `URL parameter 'order_id' is missing` (or `payment_id`).
+
 ### 3.4 Timeline
 
 `core-back/prisma/syntheticSeeder/timelineClock.ts`:
