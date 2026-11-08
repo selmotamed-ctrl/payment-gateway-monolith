@@ -9,6 +9,9 @@ const setEnv = () => {
   process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
   process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
   process.env.MTLS_CA_CERT_PATH = pki.caCert;
+  // This suite exercises the cookie transport, so the option is on unless a
+  // test flips it explicitly.
+  process.env.SESSION_COOKIE_MODE = "true";
 };
 setEnv();
 

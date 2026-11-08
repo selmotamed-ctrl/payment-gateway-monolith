@@ -30,6 +30,8 @@ import { FormChecklist } from "@/components/ui/FormChecklist";
 import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { SectionFields } from "@/components/SectionFields";
+import { LogoAssetPicker } from "@/components/builders/LogoAssetPicker";
+import { hasOneOfAuthorities } from "@/state/user";
 type RailField = {
     id?: string;
     key?: string;
@@ -82,6 +84,7 @@ type Rail = {
     minAmount: string;
     maxAmount: string;
     capabilities: unknown;
+    logoAssetId?: string | null;
     blocked?: boolean;
     displayOrder?: number;
     instructionsAr?: string;
@@ -207,6 +210,7 @@ const RailsPage = dc(() => {
         displayOrder: "",
         instructionsEn: "",
         instructionsAr: "",
+        logoAssetId: null as string | null,
     });
 
     // Customer catalog (rail fields)
@@ -350,6 +354,7 @@ const RailsPage = dc(() => {
             displayOrder: rail.displayOrder === undefined || rail.displayOrder === null ? "" : String(rail.displayOrder),
             instructionsEn: rail.instructionsEn ?? "",
             instructionsAr: rail.instructionsAr ?? "",
+            logoAssetId: rail.logoAssetId ?? null,
         };
         railEditChecklist.value = {};
         editOpen.value = true;
@@ -375,11 +380,27 @@ const RailsPage = dc(() => {
         if (form.instructionsEn.trim()) payload.instructionsEn = form.instructionsEn.trim();
         if (form.instructionsAr.trim()) payload.instructionsAr = form.instructionsAr.trim();
         payload.checklist = RAIL_EDIT_CHECKS.filter((check) => railEditChecklist.value[check.key]).map((check) => check.key);
+        const logoChanged = (form.logoAssetId ?? null) !== (editingRail.value.logoAssetId ?? null);
+        // A uuid sets the logo; null clears it (the rail update API accepts both).
+        if (logoChanged) payload.logoAssetId = form.logoAssetId ?? null;
         savingRail.value = true;
         try {
             await api.patch(urlsMap.railDetail(editingRail.value.id), payload);
             editOpen.value = false;
             showSnackBar({ type: "success", message: t("Update") });
+            if (logoChanged) {
+                // Read the rail back instead of assuming the logo was applied.
+                try {
+                    const check = await api.get(urlsMap.railDetail(editingRail.value.id));
+                    const saved = (check.data?.data ?? check.data ?? {}) as { rail?: { logoAssetId?: string | null }; logoAssetId?: string | null };
+                    const savedLogo = saved.rail?.logoAssetId ?? saved.logoAssetId ?? null;
+                    if (savedLogo !== (form.logoAssetId ?? null)) {
+                        showSnackBar({ type: "warning", message: t("The rail was updated, but the server did not apply the logo.") });
+                    }
+                } catch {
+                    // The read-back is advisory only.
+                }
+            }
             refreshAll();
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
@@ -919,6 +940,13 @@ const RailsPage = dc(() => {
                             label={t("Active")}
                             modelValue={railEditForm.value.active}
                             onUpdate:modelValue={(v: any) => (railEditForm.value.active = !!v)}
+                        />
+                    </div>
+                    <div style={{ gridColumn: "span 2" }}>
+                        <LogoAssetPicker
+                            modelValue={railEditForm.value.logoAssetId}
+                            onUpdate:modelValue={(value: string | null) => (railEditForm.value.logoAssetId = value)}
+                            canRegister={hasOneOfAuthorities(["gateway:write", "gateways.edit"])}
                         />
                     </div>
                     <FormField label={t("Instructions (English)")} style={{ gridColumn: "span 2" }}>

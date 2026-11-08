@@ -17,7 +17,7 @@ describe("create-admin bootstrap", () => {
 
   test("parses flags and environment variables", () => {
     const fromFlags = parseCreateAdminArgs(
-      ["--email", "Admin@Example.com", "--role", "finance", "--mfa"],
+      ["--email", "Admin@Example.com", "--role", "finance", "--mfa", "--phone", "+218 91 123 4567"],
       { ADMIN_PASSWORD: "Str0ngPassword!" },
     );
     expect(fromFlags.ok).toBe(true);
@@ -30,11 +30,13 @@ describe("create-admin bootstrap", () => {
     const fromEnv = parseCreateAdminArgs([], {
       ADMIN_EMAIL: "ops@example.com",
       ADMIN_PASSWORD: "Str0ngPassword!",
+      ADMIN_PHONE: "+218911234567",
     });
     expect(fromEnv.ok).toBe(true);
     if (!fromEnv.ok) return;
     expect(fromEnv.args.role).toBe("GATEWAY_ADMIN");
     expect(fromEnv.args.mfaRequired).toBe(true); // MFA is on by default
+    expect(fromEnv.args.phone).toBe("+218911234567");
     expect(fromEnv.args.roleProvided).toBe(false);
   });
 
@@ -52,13 +54,25 @@ describe("create-admin bootstrap", () => {
     expect(argvPassword.ok).toBe(false);
     const off = parseCreateAdminArgs(["--email", "a@b.co", "--no-mfa"], { ADMIN_PASSWORD: "Str0ngPassword!" });
     expect(off.ok && off.args.mfaRequired).toBe(false);
+    expect(off.ok && off.args.phone).toBeNull();
+  });
+
+  test("requires a phone number while MFA is enabled", () => {
+    const noPhone = parseCreateAdminArgs(["--email", "a@b.co"], { ADMIN_PASSWORD: "Str0ngPassword!" });
+    expect(noPhone.ok).toBe(false);
+    const withPhone = parseCreateAdminArgs(["--email", "a@b.co", "--phone", "+218911234567"], {
+      ADMIN_PASSWORD: "Str0ngPassword!",
+    });
+    expect(withPhone.ok).toBe(true);
+    if (withPhone.ok) expect(withPhone.args.phone).toBe("+218911234567");
   });
 
   test("builds an ACTIVE user with the role authorities and four-eyes flags", () => {
-    const parsed = parseCreateAdminArgs(["--email", "a@b.co"], { ADMIN_PASSWORD: "Str0ngPassword!" });
+    const parsed = parseCreateAdminArgs(["--email", "a@b.co", "--phone", "+218911234567"], { ADMIN_PASSWORD: "Str0ngPassword!" });
     if (!parsed.ok) throw new Error("expected valid args");
     const data = buildAdminUserData(parsed.args, "$2b$12$hash");
     expect(data.status).toBe("ACTIVE");
+    expect(data.phone).toBe("+218911234567");
     expect(data.role).toBe("GATEWAY_ADMIN");
     expect(data.isMaker).toBe(true);
     expect(data.isChecker).toBe(false);

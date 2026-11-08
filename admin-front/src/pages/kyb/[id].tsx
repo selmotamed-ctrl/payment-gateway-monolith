@@ -34,6 +34,7 @@ import { DescriptionList, type DescriptionItem } from "@/components/ui/Descripti
 import { MonoRef } from "@/components/ui/MonoRef";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { describeAuditChange } from "@/utils/auditSummary";
 const parse = (payload: unknown): KybDocumentDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
     return (source.kybDocument ?? source) as KybDocumentDetail;
@@ -49,28 +50,8 @@ const detailItem = (label: string, value: unknown, _hint?: string, _source?: str
               : String(value),
 });
 
-const auditValue = (value: unknown): string => {
-    if (value === null || value === undefined) return "—";
-    if (typeof value === "string") return value.length > 80 ? `${value.slice(0, 77)}…` : value;
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
-    try {
-        const text = JSON.stringify(value);
-        return text.length > 80 ? `${text.slice(0, 77)}…` : text;
-    } catch {
-        return String(value);
-    }
-};
-
-const auditRecord = (value: unknown): Record<string, unknown> =>
-    value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-
-const auditChangeSummary = (entry: KybAuditEntry): string => {
-    const before = auditRecord(entry.beforeJson);
-    const after = auditRecord(entry.afterJson);
-    const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)])).slice(0, 4);
-    if (keys.length === 0) return "";
-    return keys.map((key) => `${key}: ${auditValue(before[key])} → ${auditValue(after[key])}`).join(" · ");
-};
+const auditChangeSummary = (entry: { beforeJson?: unknown; afterJson?: unknown }): string =>
+    describeAuditChange(entry.beforeJson, entry.afterJson);
 
 const KybReviewDetailPage = dc(() => {
     const { t } = useLocale();

@@ -46,8 +46,7 @@ afterAll(async () => {
   if (!databaseIsReachable) {
     return;
   }
-  // journal tables are append-only (GAP-013): fixture cleanup runs under the maintenance flag.
-  await withLedgerMaintenance(db, async (tx) => {
+  await withLedgerMaintenance(db as never, async (tx) => {
     await tx.$executeRawUnsafe(
       'DELETE FROM "journal_lines" WHERE "entry_id" IN (SELECT "id" FROM "journal_entries" WHERE "ref_id" LIKE $1)',
       `${PREFIX}%`,

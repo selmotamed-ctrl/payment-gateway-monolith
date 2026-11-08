@@ -66,10 +66,10 @@ describe("merge rules", () => {
       d: { at: T(1), v: "1.0.0", checkScore: 2 }, // new id
     });
     expect(merged.a).toEqual({ at: T(20), v: "1.1.0", checkScore: 0 });
-    expect(merged.b.checkScore).toBe(1);
-    expect(merged.c.checkScore).toBe(2);
+    expect(merged.b!.checkScore).toBe(1);
+    expect(merged.c!.checkScore).toBe(2);
     expect(merged.d).toBeDefined();
-    expect(mergeLessons({ x: { at: T(10), v: "1", checkScore: 0 } }, { x: { at: T(10), v: "1", checkScore: 2 } }).x.checkScore).toBe(2);
+    expect(mergeLessons({ x: { at: T(10), v: "1", checkScore: 0 } }, { x: { at: T(10), v: "1", checkScore: 2 } }).x!.checkScore).toBe(2);
   });
 
   test("labs: bestScore max, attempts max, passedAt earliest, critical/v from the best entry", () => {
@@ -89,35 +89,35 @@ describe("merge rules", () => {
       { l: { bestScore: 85, attempts: 1, criticalErrors: 2, v: "1.0.0" } },
       { l: { bestScore: 85, attempts: 1, criticalErrors: 0, v: "1.1.0" } },
     ).l;
-    expect(merged.criticalErrors).toBe(0);
-    expect(merged.v).toBe("1.1.0");
+    expect(merged!.criticalErrors).toBe(0);
+    expect(merged!.v).toBe("1.1.0");
     const kept = mergeLabs(
       { l: { bestScore: 85, attempts: 1, criticalErrors: 0, v: "1.0.0" } },
       { l: { bestScore: 85, attempts: 1, criticalErrors: 3, v: "1.1.0" } },
     ).l;
-    expect(kept.criticalErrors).toBe(0);
-    expect(kept.v).toBe("1.0.0");
+    expect(kept!.criticalErrors).toBe(0);
+    expect(kept!.v).toBe("1.0.0");
   });
 
   test("labs: passedAt is kept when only one side has it; merging never deletes a lab", () => {
     const merged = mergeLabs({ a: { bestScore: 80, attempts: 1, criticalErrors: 0, v: "1", passedAt: T(3) } }, { a: { bestScore: 40, attempts: 1, criticalErrors: 0, v: "1" } });
-    expect(merged.a.passedAt).toBe(T(3));
-    expect(Object.keys(mergeLabs({ a: merged.a }, {}))).toEqual(["a"]);
+    expect(merged.a!.passedAt).toBe(T(3));
+    expect(Object.keys(mergeLabs({ a: merged.a! }, {}))).toEqual(["a"]);
   });
 
   test("guideRead: later `at` wins, an older entry cannot resurrect", () => {
     const merged = mergeGuideRead({ g: { v: "1.0.0", at: T(10) } }, { g: { v: "1.0.1", at: T(5) }, h: { v: "1.0.0", at: T(1) } });
     expect(merged.g).toEqual({ v: "1.0.0", at: T(10) });
     expect(merged.h).toBeDefined();
-    expect(mergeGuideRead({ g: { v: "1.0.0", at: T(10) } }, { g: { v: "1.0.2", at: T(11) } }).g.v).toBe("1.0.2");
+    expect(mergeGuideRead({ g: { v: "1.0.0", at: T(10) } }, { g: { v: "1.0.2", at: T(11) } }).g!.v).toBe("1.0.2");
   });
 
   test("guideRead tombstone (v:'') un-reads, and a later read overrides the tombstone", () => {
     const unread = mergeGuideRead({ g: { v: "1.0.0", at: T(10) } }, { g: { v: "", at: T(20) } });
     expect(unread.g).toEqual({ v: "", at: T(20) });
     expect(Object.keys(unread)).toEqual(["g"]); // tombstone, not a delete
-    expect(mergeGuideRead(unread, { g: { v: "1.0.0", at: T(30) } }).g.v).toBe("1.0.0");
-    expect(mergeGuideRead(unread, { g: { v: "1.0.0", at: T(15) } }).g.v).toBe(""); // older read loses to tombstone
+    expect(mergeGuideRead(unread, { g: { v: "1.0.0", at: T(30) } }).g!.v).toBe("1.0.0");
+    expect(mergeGuideRead(unread, { g: { v: "1.0.0", at: T(15) } }).g!.v).toBe(""); // older read loses to tombstone
   });
 
   test("merges are idempotent", () => {

@@ -71,14 +71,18 @@ deploy_value() {
 
 DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_PORT="${DB_PORT:-5432}"
-DB_USER="${DB_USER:-postgres}"
+DB_USER="${DB_USER:-$(deploy_value DB_USER postgres)}"
 if [[ -z "${DB_PASSWORD:-}" ]]; then
-  echo "DB_PASSWORD (the password of DB_USER on the local PostgreSQL) must be provided in the environment." >&2
+  DB_PASSWORD="$(read_deploy_value DB_PASSWORD || true)"
+fi
+if [[ -z "${DB_PASSWORD:-}" ]]; then
+  echo "DB_PASSWORD (the password of DB_USER on the local PostgreSQL) must be provided in the environment or deploy/deploy.env." >&2
   exit 1
 fi
-DB_NAME="${DB_NAME:-payment_gateway_monolith}"
+DB_NAME="${DB_NAME:-$(deploy_value DB_NAME payment_gateway_monolith)}"
 DB_ADMIN_DB="${DB_ADMIN_DB:-postgres}"
-DATABASE_URL="${DATABASE_URL:-postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}}"
+url_encode() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"; }
+DATABASE_URL="${DATABASE_URL:-postgresql://${DB_USER}:$(url_encode "$DB_PASSWORD")@${DB_HOST}:${DB_PORT}/${DB_NAME}}"
 
 ensure_secret KMS_MASTER_KEY
 ensure_secret DEV_PASSWORD

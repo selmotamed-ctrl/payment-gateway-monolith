@@ -3,8 +3,8 @@ id: admin-ui.system
 title: Admin UI System
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-07
+verified_against: d695518+working-tree
 code:
   - admin-front/src/plugins/vuetify.ts
   - admin-front/src/styles/**
@@ -20,6 +20,15 @@ code:
   - fake-rails-front/src/styles/**
   - fake-rails-front/src/components/ui/**
   - admin-front/src/utils/devLog.ts
+  - admin-front/src/components/ui/jsonDiffModel.ts
+  - admin-front/src/components/ui/JsonDiffViewer.tsx
+  - admin-front/src/components/ui/JsonValueCell.tsx
+  - admin-front/src/components/ui/JsonValueList.tsx
+  - admin-front/src/components/builders/**
+  - admin-front/src/components/ledger/**
+  - admin-front/src/components/AuditChangeChips.tsx
+  - admin-front/src/utils/auditSummary.ts
+  - admin-front/src/constants/i18n/**
 design_sources:
   - design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md
   - design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md
@@ -28,14 +37,22 @@ tests:
   - admin-front/src/components/ui/__tests__/ui-abstraction-compliance.test.ts
   - tests/e2e/admin/shell.spec.ts
   - tests/e2e/admin/table-and-padding-geometry.spec.ts
+  - tests/e2e/admin/table-row-context-menu.spec.ts
   - tests/e2e/admin/a11y.spec.ts
   - tests/e2e/merchant/shell.spec.ts
   - tests/e2e/checkout/pay.spec.ts
   - tests/unit/frontend-security-admin.test.ts
+  - tests/unit/json-diff-model.test.ts
+  - tests/unit/audit-summary.test.ts
+  - tests/unit/builders-route-models.test.ts
+  - tests/unit/builders-settings-parser.test.ts
+  - tests/unit/builders-aml-templates.test.ts
+  - tests/unit/builders-api-error-i18n.test.ts
+  - tests/unit/commerce-i18n.test.ts
 gaps:
   - Fake Rails receives only a partial shared-UI rollout; it has separate portal/hosted shells and is not covered by the admin compliance test.
   - Shared primitives are copied per workspace rather than published as one package, so drift is possible.
-  - "Residual (GAP-019/GAP-029): the admin session token lives in client storage unless the edge runs `SESSION_COOKIE_MODE=true`; `@prisma/client` is still listed (unused) in `admin-front/package.json`."
+  - "Residual (GAP-019): the admin session token lives in client storage unless the edge runs `SESSION_COOKIE_MODE=true`."
 ---
 
 # Admin UI System
@@ -67,7 +84,7 @@ The key intent from `design/90-archive/superseded-ui/portal_ui_abstraction_and_m
 4. **A precision shell.** A 248 px permanent drawer on desktop, a 56 px flat app bar, keycap-style active navigation, collapsible section groups, breadcrumbs, a global search entry point, help entry point, theme/locale controls, and an operator identity card.
 5. **A split-screen auth surface.** Institutional brand and security posture on one side; the login panel on the other.
 6. **A primitive layer instead of page-level Vuetify soup.** Pages compose `PageHeader`, `StatusBadge`, `MoneyDisplay`, `MonoRef`, `MetricStrip`, `SurfaceCard`, `FormModal`, `FormField`, `SlideOverDrawer`, `DescriptionList`, `SegmentedTabs`, `EmptyState`, and `JsonDiffViewer`. The unified table surface is the fourteenth deliverable even though the design prose sometimes calls it a fourteenth primitive.
-7. **Disciplined tables.** 40 px single-line rows, no rainbow row tints, one primary row action plus an overflow menu, collapsible filters, and XLSX export through the shared pipeline.
+7. **Disciplined tables.** 40 px single-line rows, no rainbow row tints, one primary row action plus an overflow menu, a sticky action column, a row-level right-click/`Shift+F10` context menu that reuses the same action model, collapsible filters, and XLSX export through the shared pipeline.
 8. **No global scaling transform.** A previous whole-app `transform: scale(0.9)` caused fixed-position and RTL problems and was removed. The old `SCALING_FEATURE.md` files were deleted; do not reintroduce them.
 
 The implementation plan records one correction to the design prose: the blueprint says "14 primitives" but names 13 components. The 13 named exports plus the unified table surface are the actual contract checked by the compliance test.
@@ -129,7 +146,8 @@ No external font request is required. `tests/e2e/admin/a11y.spec.ts` and the she
 | `SurfaceCard` | Flat hairline card with padding/title slots; `SurfaceCardText` is its body extra. |
 | `FormModal` | Standard modal shell with title, body, footer, submit/loading/error behavior. |
 | `FormField` | Static label, hint, error, required marker, and maker-checker hint wrapper. |
-| `SlideOverDrawer` | Right/end slide-over shell used for details and contextual help. |
+| `SlideOverDrawer` | Right/end slide-over shell used for details and contextual help. Open drawers keep a module-level stack and take a z-index from their position in it (base 1100, step 4, below Vuetify dialogs/menus), so the drawer opened last is always on top even when it is an always-mounted sibling of its parent (Vuetify otherwise gives earlier-registered items the higher z-index). |
+| `AccountLinesTable` (`components/ledger`) | Server-paginated posting lines of one GL account with side/reference-type/date filters, search and totals of the filtered set; used by the wallet statement and the GL account drawer (`financeGlAccountLines`, `walletStatement`). |
 | `DescriptionList` | Label/value lists with money, mono, and column options. |
 | `SegmentedTabs` | Compact tab switch used for periods, roles, languages, and modes. |
 | `EmptyState` | Empty/error-adjacent illustration-free state block. |
@@ -223,6 +241,7 @@ However, the stale files are still physically present:
 - Adding a status: use `StatusBadge` and keep the tone mapping centralized.
 - Rendering money: use `MoneyDisplay`/`MoneyText` or decimal-backed utilities; never format money with floating point.
 - Adding a drawer/modal: use `SlideOverDrawer`/`FormModal` so focus, padding, and footer behavior stay consistent.
+- Totals rows go in a `<tfoot>` of a `.pg-unified-table`/`.pg-table-card` table: the shared stylesheet gives them the body-row padding, edge insets and a top rule (before 2026-11-07 a `tfoot` had no padding and its label touched the table border).
 - Changing the theme: edit `plugins/vuetify.ts` and the `--pg-*` tokens together; do not add page-local hard-coded palettes.
 - Learning surfaces: the Guide (`styles/guide.css`) and the Academy (`styles/academy/*.css`, see `03-guide-and-academy.md` §7.6) are built from these primitives and tokens. A feature area may add its own stylesheet under `src/styles/` imported from `main.ts`, but must not inject runtime `<style>` blocks, introduce a second palette, or cap the page width below the `ScreenContainer`; only reading text takes a measure (75 ch).
 - Deploy-time visibility: set `ADMIN_SHOW_CHECKLISTS` and `ADMIN_SHOW_HELP_PANELS` in `deploy.env`; the deploy engine writes `runtime-config.js`. Rebuilding the SPA is not required for the runtime flags to change.
@@ -310,3 +329,15 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 - Catalogue keys added (EN and AR): "This file type cannot be previewed." and the full-backup confirmation text.
 - **Logout and cookie sessions (GAP-019, RESOLVED).** The user store logout calls `POST v1/admin/auth/logout` (`urlsMap.authLogout`) through `revokeServerSession` (best effort, never throws) and always clears the local session. `utils/security/sessionToken.ts` handles the cookie mode: a login payload with `sessionCookie: true` is kept as the non-secret `cookie-session` sentinel and requests send `X-Pg-Csrf: 1` instead of a bearer token.
 - **XLSX 0.20.3 (GAP-029).** `xlsx` is pinned to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` (the maintained SheetJS build; the npm registry copy 0.18.5 is vulnerable) and `@types/xlsx` was dropped. The shared XLSX pipeline is unchanged. `@prisma/client` is still listed in `admin-front/package.json` although nothing imports it (residual).
+
+## No raw operational JSON; structured builders (2026-11-06)
+
+**Rule:** operational data is never shown as `JSON.stringify`/`<pre>`, and never edited in a JSON textarea. Allowed exceptions: raw HTTP wire traces (`gateways/ai-import`, the step/webhook trace blocks of `operator-cases/[id]`), data exports (`audit-logs` CSV/XLSX columns, the platform-settings backup file), and plain-text message bodies (rail instructions, notification template body, restore reason).
+
+- **`JsonDiffViewer`** (rewritten) takes `diff: unknown`: an RFC-6902 array, `{operations}`, `{before, after}` or a plain payload (`DRAFT_AML_RULE`, `CREATE_ADJUSTMENT`...). The pure model `components/ui/jsonDiffModel.ts` humanises paths (`/payoutBankDetailsJson/iban` -> "Payout Bank Details · IBAN"), flattens nested objects to sub-rows, classifies money keys (`*Amount|*Ceiling|*Fee|*Balance|*Volume` -> `MoneyDisplay`), status strings (`StatusBadge`), lists (chips) and dates. `JsonValueCell`/`JsonValueList` render the same values as key/value rows. `components/JsonPatchDiff` is now a thin wrapper.
+- **`summarizeAuditChange(before, after)`** (`utils/auditSummary.ts`) returns the humanised labels of the changed top-level keys (ignoring identical values and timestamps); `components/AuditChangeChips.tsx` shows up to 3 chips plus "+N more" in the audit-log table, Merchant 360 and the case timeline.
+- **Builders** (`components/builders/**`, each with a pure model under `builders/model/` and unit tests): `CostModelBuilder` (+`formatCostModel`: `1.25% + 0.500 LYD (min…, max…)`), `RouteScopeBuilder` + `MismatchPolicyBuilder` (`tolerance_amount`, the only key the settlement engine reads), `MaintenanceWindowsBuilder` (absolute UTC `start`/`end`; a route is hidden while `start <= now < end`), `ParserConfigBuilder`/`ColumnMappingBadges` (statement sources), `AmlParamsBuilder`/summaries (7 rule types; `scope` is edited as a structured tree and the UI states that the engine does not evaluate it), `PlatformSettingTypedEditor` + `SettingValueView` (typed editors for the decision register OD-1..OD-11 and the policy keys; unknown keys fall back to a structured tree editor that preserves them), `LogoAssetPicker`, `ChipListInput`, `OptionChips`, `RepeatableRows`, `KeyValueSummary`, `StructuredValueEditor`. Every builder round-trips unknown keys losslessly.
+- **Commission tiers:** `CommissionTiersEditor` (`pages/finance/pricing/components`) edits `{ upTo, flat, percent }` (percent is a fraction) and is shown for TIERED only (the calculator ignores tiers for FLAT/PERCENTAGE/HYBRID). The create form also carries min/max fee, fee bearer, rounding mode and optional merchant/application scope.
+- **Shared drawers** (`components/ledger/JournalEntryDrawer`, `GlAccountDrawer`; `pages/merchants/components/WalletDetailDrawer`, `ApplicationDetailDrawer`) are opened by an id prop (`null` = closed) and emit `close`/`changed`. Governed actions share `ReasonModal` (>=10 characters) and a 202 handler that explains "submitted for approval" and links to `/approvals`.
+- **i18n slices:** `constants/i18n/{commerce,ledgerOps,forms,builders}.ts` are merged by `plugins/i18n.ts` after the main catalogue; each new string has an `[English, Arabic]` pair and unit tests assert EN/AR sync. Table filter configs live in `components/Table/registry/{commerce,ledgerOps,forms}.ts` and are spread into `tableRegistry`.
+- Compliance gate (`components/ui/__tests__/ui-abstraction-compliance.test.ts`): every standard route page uses `PageHeader` (helper components belong in `components/` subfolders), no raw `VCard`/`VDialog`/`VChip`.

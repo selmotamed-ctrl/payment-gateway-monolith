@@ -659,6 +659,15 @@ export interface PaymentRepository {
   lockLinkByKey(tx: Tx, key: string): Promise<PaymentLinkRow | null>;
   findLinkByKey(tx: Tx, key: string): Promise<PaymentLinkRow | null>;
   findLinkById(tx: Tx, id: string): Promise<PaymentLinkRow | null>;
+  /**
+   * Operating status of the application and the settlement wallet of a link.
+   * Optional so in-memory repositories without those tables keep working; the
+   * Prisma repository always implements it.
+   */
+  findLinkCommerceStatus?(
+    tx: Tx,
+    input: { applicationId: string; walletId: string },
+  ): Promise<{ applicationStatus: string | null; walletStatus: string | null }>;
   updateLinkSlotCount(tx: Tx, linkId: string, delta: number): Promise<void>;
   resolveSettlementTarget(tx: Tx, input: { railCode: string | null; merchantId: string | null; env: Environment }): Promise<SettlementTarget>;
   createAttempt(tx: Tx, data: Partial<PaymentAttemptRow> & { linkId: string; merchantId: string; applicationId: string }): Promise<PaymentAttemptRow>;

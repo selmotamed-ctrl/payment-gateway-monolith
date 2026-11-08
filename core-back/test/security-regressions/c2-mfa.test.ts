@@ -34,7 +34,14 @@ const buildStore = (): MfaStore => {
 
 const USER = "11111111-1111-4111-8111-111111111111";
 const issue = (store: MfaStore, over: Partial<Parameters<typeof issueMfaChallenge>[1]> = {}) =>
-  issueMfaChallenge(store, { userId: USER, channel: "ADMIN", phoneLast4: "1234", ip: "10.0.0.1", ...over });
+  issueMfaChallenge(store, {
+    userId: USER,
+    channel: "ADMIN",
+    phone: "+218911234567",
+    phoneLast4: "1234",
+    ip: "10.0.0.1",
+    ...over,
+  });
 
 /** Reads the delivered code back from the (encrypted) notification, like the SMS worker does. */
 const deliveredCode = async (): Promise<string> => {

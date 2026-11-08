@@ -95,7 +95,7 @@ A valid certificate on the wrong channel gets `403 FORBIDDEN_SERVICE_IDENTITY`; 
 }
 ```
 
-It returns HTTP 200 for both healthy and degraded states. Degradation occurs when workers are disabled, the queue cannot be read (`QUEUE_HEALTH_UNAVAILABLE`) or the oldest `QUEUED` background job exceeds `WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS`. It does not probe replicas, Redis, audit/log databases, the backup daemon or external gateways.
+It returns HTTP 200 for both healthy and degraded states. Degradation occurs when workers are disabled, the queue cannot be read (`QUEUE_HEALTH_UNAVAILABLE`) or the oldest `QUEUED` background job exceeds `WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS`. The payload also carries a `leader` object (held/expected singleton keys, backend PID, last probe, loss count and the sanitised endpoint); it is empty before the storage engine exists. It does not probe replicas, Redis, audit/log databases, the backup daemon or external gateways.
 
 Each internal channel also exposes `GET /internal/{admin,merchant,checkout}/health` after the channel guard. The storage engine has a richer `health()` snapshot for primary, replicas, cache, audit and logs, but it is not exposed over HTTP.
 
@@ -107,13 +107,13 @@ Request logging writes console lines with a separate short id and an `http_acces
 
 - Engine: PostgreSQL 18. The Prisma datasource is `provider = "postgresql"`.
 - Runtime driver: `@prisma/adapter-pg` (`PrismaPg`) over the `pg` driver.
-- `DATABASE_URL`, `AUDIT_DATABASE_URL` and `LOG_DATABASE_URL` must be `postgresql://` or `postgres://` URLs; the environment validator rejects any other protocol. `DATABASE_REPLICA_URLS` is a comma-separated list consumed by the storage engine, and every entry must use the PostgreSQL protocol.
+- `DATABASE_URL`, `LEADER_ELECTION_DATABASE_URL`, `AUDIT_DATABASE_URL` and `LOG_DATABASE_URL` must be `postgresql://` or `postgres://` URLs; the environment validator rejects any other protocol. `DATABASE_REPLICA_URLS` is a comma-separated list consumed by the storage engine, and every entry must use the PostgreSQL protocol.
 - IDs are native PostgreSQL `uuid` with UUIDv7 defaults. Money is `NUMERIC(18,4)` and application `Decimal`. JSON is `JSONB`; binary data is `BYTEA`.
 - The complete model, column and index inventory is generated in [`../project-design/appendices/schema-catalog.md`](../project-design/appendices/schema-catalog.md). Do not hand-maintain schema counts here.
 - The migration order and files are generated in [`../project-design/appendices/migration-catalog.md`](../project-design/appendices/migration-catalog.md).
 - The committed history is forward-only: baseline schema, storage-engine indexes, CQRS read models and storage hardening. There are no down migrations. Recovery is restore/PITR or a new forward migration.
 - `journal_lines` is monthly range-partitioned by `created_at`; the primary key includes `created_at`. The deploy engine installs a daily partition-maintenance cron. Elsewhere, run `SELECT ensure_journal_line_partitions(18)` on a schedule.
-- Schema version 10 is required (latest migration `20261104120000_mfa_challenges`). `ensureSchemaVersion()` is called by the baseline seeder, the Fake Rails seeder and the synthetic seeder, but not by the HTTP start path. A stale database can boot and fail later at query time.
+- Schema version 13 is required (latest migration `20261107120000_inbound_event_claims`; the preceding one is `20261107090000_shard_sequenced_checkpoints`). `ensureSchemaVersion()` is called by the baseline seeder, the Fake Rails seeder and the synthetic seeder, but not by the HTTP start path. A stale database can boot and fail later at query time.
 
 ### 3.2 Storage engine ports
 
@@ -147,18 +147,20 @@ Actual behavior to keep in mind:
 | :--- | :--- | :--- |
 | `ExpirySweeperWorker` | `WORKER_POLL_INTERVAL_MS` | Inquires inquiry-capable attempts before expiring; excludes `AML_HOLD`; releases link slots on terminal failure/expiry/cancel. |
 | `PollWorker` | `WORKER_POLL_INTERVAL_MS` | Reconciles inquiry schedules, applies route backoff and terminal transitions. |
-| `InboundInboxWorker` | `WORKER_POLL_INTERVAL_MS` | Drains unprocessed inbound events; the live webhook route currently verifies synchronously, so this worker is effectively idle. |
+| `InboundInboxWorker` | `WORKER_POLL_INTERVAL_MS` | Drains unprocessed inbound events with a durable `claimed_at`/`claimed_by` lease (at-most-once even across a brief leadership overlap); the live webhook route currently verifies synchronously, so this worker is effectively idle. |
 | `OutboxNotificationWorker` | `WORKER_POLL_INTERVAL_MS` | Drains `notifications`, applies the AML tipping-off guard, redacts, renders, sends and retries with backoff. |
 | `LedgerInvariantWorker` | Every 60 seconds | Verifies system-wide zero drift and opens one `MISMATCH`/`P1` operator case on drift. |
 | `JoinRequestExpiryWorker` | `WORKER_POLL_INTERVAL_MS` | Expires abandoned drafts and overdue reviews. |
 | `PeriodicScreeningWorker` | `WORKER_POLL_INTERVAL_MS` / `WORKER_RESCREEN_INTERVAL_MS` | Re-screens active merchants and owners; handles confirmed matches. |
 | `KybExpiryWorker` | `WORKER_KYB_EXPIRY_INTERVAL_MS` | Marks expired documents, queues notices, suspends after grace and starts revalidations. |
 | `RetentionWorker` | `WORKER_RETENTION_INTERVAL_MS` | Opt-in evidence purge; never removes journal entries or lines. |
+| `LedgerCheckpointWorker` | `WORKER_LEDGER_CHECKPOINT_INTERVAL_MS` | Keeps every shard checkpoint close to its head with a verified O(delta) proof; no locks. |
+| `LedgerShardScalerWorker` | `WORKER_LEDGER_SHARD_SCALER_INTERVAL_MS` | Widens hot GL accounts (live by default; `LEDGER_SHARD_SCALER_DRY_RUN=true` only audits proposals). |
 | `BackgroundJobWorker` | `WORKER_BACKGROUND_JOBS_INTERVAL_MS` | Drains `RECONCILIATION_RUN` and `ADJUSTMENT_EXECUTION` with leases, retries and crash recovery. |
 | `OutboxRelayWorker` | 250 ms | Projects `attempt.transitioned` into the two read models. |
 | `AuditShipperWorker` | 500 ms | Ships `audit_outbox` to a dedicated audit database; only runs when `AUDIT_DATABASE_URL` is set. |
 
-`WORKER_CONCURRENCY` and `WORKER_REQUEST_TIMEOUT_MS` are validated but not passed to the production runtime. `WORKER_ENABLED=false` and `WORKER_BACKGROUND_JOBS_ENABLED=false` are rejected at boot. Horizontal scaling relies on `FOR UPDATE SKIP LOCKED`, conditional updates and leases, not leader election.
+`WORKER_CONCURRENCY` and `WORKER_REQUEST_TIMEOUT_MS` are validated but not passed to the production runtime. `WORKER_ENABLED=false` and `WORKER_BACKGROUND_JOBS_ENABLED=false` are rejected at boot. Non-singleton workers claim rows with `FOR UPDATE SKIP LOCKED`, conditional updates and leases. The singleton workers (`ExpirySweeper`, `InboundInbox`, `LedgerInvariant`, `JoinRequestExpiry`, `PeriodicScreening`, `KybExpiry`, `Retention`, `LedgerCheckpoint`, `LedgerShardScaler`) additionally require the PostgreSQL advisory-lock leader. The election connects through `LEADER_ELECTION_DATABASE_URL` (a session-pooled PgBouncer alias or direct PostgreSQL), never the transaction-pooled `DATABASE_URL`; core verifies the endpoint at boot and fails closed otherwise.
 
 ## 4. Backup control
 
@@ -230,7 +232,7 @@ bun run start
 The baseline seed creates administrator accounts but deliberately leaves their passwords unset. Activate one before signing in:
 
 ```bash
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --phone +218911234567
 ```
 
 `bun run start` listens on `HOST:PORT` (`127.0.0.1:4000` by default) with TLS 1.3 and requires a client certificate. `bun run dev` uses Bun watch mode.
@@ -281,6 +283,8 @@ The authoritative whole-repository key inventory is [`../project-design/appendic
 | Key | Default | Purpose |
 | :--- | :--- | :--- |
 | `DATABASE_URL` | required | PostgreSQL primary URL. Must start with `postgresql://` or `postgres://`. |
+| `LEADER_ELECTION_DATABASE_URL` | unset | Session-scoped PostgreSQL URL for the singleton-worker advisory locks. Required when `PGBOUNCER_ENABLED=true`; deploy generates the `pgw_session` alias. Never point it at the transaction-pooled `DATABASE_URL`. |
+| `PGBOUNCER_ENABLED` | `false` | Set by deploy when traffic goes through PgBouncer; core then refuses to boot without a distinct session endpoint. |
 | `DATABASE_REPLICA_URLS` | empty | Comma-separated PostgreSQL replica URLs for `ReadStore`. |
 | `AUDIT_DATABASE_URL` | unset | Dedicated `pg_audit_db` URL for the append-only audit chain. |
 | `LOG_DATABASE_URL` | unset | Dedicated `pg_logs_db` URL for buffered step/access logs. |
@@ -290,7 +294,7 @@ The authoritative whole-repository key inventory is [`../project-design/appendic
 | `STORAGE_QUERY_TIMEOUT_MS` | `5000` | Storage query/transaction deadline. |
 | `STORAGE_LOG_BUFFER_MAX` | `5000` (max `100000`) | Maximum buffered log records. |
 | `STORAGE_LOG_FLUSH_INTERVAL_MS` | `250` (max `60000`) | Log flush interval. |
-| `STORAGE_SHARD_COUNT` | `16` (max `16`) | GL account shard count; the migration constrains `shard_id` to `0..15`. |
+| `STORAGE_SHARD_COUNT` | `16` (max `256`) | Initial routing width of system GL accounts (wallets start at 1); the shard scaler widens hot accounts later. |
 
 ### 6.3 mTLS, KMS and backup control
 
@@ -324,6 +328,20 @@ The Vault also recognizes `KMS_KEYS_JSON` for multiple key ids; it is read outsi
 | `WORKER_RETENTION_ENABLED` | `false` | Enables the evidence-retention worker. |
 | `WORKER_RETENTION_INTERVAL_MS` | `3600000` | Retention cadence. |
 | `WORKER_RETENTION_BATCH_SIZE` | `500` (max `10000`) | Retention batch. |
+| `WORKER_LEDGER_CHECKPOINT_ENABLED` | `true` | per-shard ledger checkpoint worker |
+| `WORKER_LEDGER_CHECKPOINT_INTERVAL_MS` | `30000` | checkpoint cadence |
+| `WORKER_LEDGER_CHECKPOINT_BATCH_SIZE` | `50` (max `10000`) | shards captured per pass |
+| `LEDGER_CHECKPOINT_MIN_LINES` | `5000` | pending lines that trigger a checkpoint |
+| `LEDGER_CHECKPOINT_MAX_AGE_MS` | `900000` | age after which any pending shard is checkpointed |
+| `WORKER_LEDGER_SHARD_SCALER_ENABLED` | `true` | hot-account shard scaler |
+| `WORKER_LEDGER_SHARD_SCALER_INTERVAL_MS` | `30000` | scaler sampling cadence |
+| `LEDGER_SHARD_AUTO_REPAIR_ENABLED` | `true` | Automatic repair of a persistently failing PARITY shard whose sequence is intact (recomputed from the journal). |
+| `LEDGER_SHARD_AUTO_REPAIR_MIN_FAILURES` | `3` | Consecutive failed proofs before an automatic repair. |
+| `LEDGER_SHARD_AUTO_REPAIR_MAX_ABS_DRIFT` | `100` | Largest correction an automatic repair may apply. |
+| `LEDGER_SHARD_SCALER_DRY_RUN` | `false` | `true` = audit proposals only (nothing is widened); the default lets the scaler widen hot accounts |
+| `LEDGER_SHARD_UP_LINES_PER_SEC` | `150` | hot threshold, lines per second per shard |
+| `LEDGER_SHARD_MAX_WIDTH` | `64` (max 256) | widest routing width the scaler assigns |
+| `LEDGER_SHARD_COOLDOWN_MS` | `600000` | minimum time between two scalings of one account |
 | `RETENTION_DRY_RUN` | `false` | Reports what retention would purge without deleting. |
 | `WORKER_BACKGROUND_JOBS_ENABLED` | `true` | Durable job-queue worker. Boot refuses `false`. |
 | `WORKER_BACKGROUND_JOBS_INTERVAL_MS` | `2000` | Queue drain cadence. |
@@ -381,12 +399,12 @@ Keys read outside the env proxy include `KMS_KEYS_JSON`, `KYB_SCANNER_MODE` (uns
 ### 7.1 Administrator bootstrap
 
 ```bash
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email compliance@example.com --role COMPLIANCE
-ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --no-mfa   # MFA is on by default
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --phone +218911234567
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email compliance@example.com --role COMPLIANCE --phone +218911234568
+ADMIN_PASSWORD='<strong password>' bun run create-admin --email admin@example.com --no-mfa   # MFA is on by default and needs a phone
 ```
 
-Environment equivalents: `ADMIN_EMAIL`, `ADMIN_PASSWORD` (the only way to supply the password: `--password` on the command line is rejected), `ADMIN_ROLE`, `ADMIN_MFA=false` (MFA is on by default; `--no-mfa` also disables it). The password policy is 12-128 characters with a lowercase letter, an uppercase letter and a digit. The command is idempotent; it sets `ACTIVE`, clears a stale MFA secret and rotates the password. Roles are `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `COMPLIANCE`, `MLRO`, `OPERATOR` and `SUPPORT`. The baseline seed creates the seeded accounts with no password and `INVITED` status on purpose.
+Environment equivalents: `ADMIN_EMAIL`, `ADMIN_PASSWORD` (the only way to supply the password: `--password` on the command line is rejected), `ADMIN_PHONE`, `ADMIN_ROLE`, `ADMIN_MFA=false` (MFA is on by default and requires a phone; `--no-mfa` also disables it). The password policy is 12-128 characters with a lowercase letter, an uppercase letter and a digit. The command is idempotent; it sets `ACTIVE`, clears a stale MFA secret and rotates the password. Roles are `GATEWAY_ADMIN`, `SECURITY_ADMIN`, `FINANCE`, `COMPLIANCE`, `MLRO`, `OPERATOR` and `SUPPORT`. The baseline seed creates the seeded accounts with no password and `INVITED` status on purpose.
 
 ### 7.2 Development superusers
 

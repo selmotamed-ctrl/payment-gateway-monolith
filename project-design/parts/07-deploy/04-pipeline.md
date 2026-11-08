@@ -3,11 +3,13 @@ id: deploy.pipeline
 title: Deployment Pipeline
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-07
+verified_against: d695518+working-tree
 code:
   - deploy/deploy.ts
   - deploy/deploy.sh
+  - deploy/lib/frontendBuild.ts
+  - deploy/lib/converge.ts
   - deploy/lib/sshRunner.ts
   - deploy/lib/healthVerifier.ts
   - deploy/templates/**
@@ -18,6 +20,10 @@ design_sources:
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#2-complete-deploy-directory-structure
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#61-upgraded-deploydeployenvexample-horizontal-node-arrays--individual-storage-solutions
 tests:
+  - deploy/test/frontendBuild.test.ts
+  - deploy/test/converge.test.ts
+  - deploy/test/redactSecrets.test.ts
+  - deploy/stress/**
   - deploy/test/ci-workflows.test.ts
   - deploy/test/pipeline.test.ts
   - deploy/test/rollingDeploy.test.ts
@@ -54,11 +60,15 @@ It also requires atomic releases, a symlinked `current`, least-privilege environ
 
 `main()` parses CLI options, checks that `deploy.env` exists, loads and validates it, runs `findSshConflicts()`, calls `planHosts()`, prints `renderTopology()` and creates an `SshRunner` with `verbose: true`.
 
+`--force-restart` and `--rebuild` are the two engine-level overrides of the convergence and build-cache behaviour. After loading the config, the runner registers every credential value (any key matching PASSWORD/SECRET/TOKEN/MASTER_KEY/ACCESS_KEY/ENCRYPTION_KEY/JWT/SEED_KEY with a value of at least 8 characters) and masks it **wherever it appears** in logs, the timing report, thrown error messages, the verification report and the final failure line. `redactSecrets` alone only recognised `NAME=value`; the health verifier's pgpass lines (`host:port:db:user:PASSWORD`) and connection URLs were printed in clear before this change.
+
 A missing file, schema error, cross-field error or SSH credential conflict aborts before any remote command. With `--dry-run`, every later command is logged instead of executed. Every logged command line passes through `redactSecrets` (`deploy/lib/sshRunner.ts`), which masks the value of any `NAME=value` whose name contains PASSWORD, PASSWD, SECRET, TOKEN, AUTH, API_KEY, ACCESS_KEY or MASTER_KEY (for example `PGPASSWORD=`, `REDISCLI_AUTH=`); before 2026-11-04 these were printed in the clear.
 
-### 3.2 Step 2: build SPAs locally
+### 3.2 Step 2: build SPAs locally (background, cached)
 
-`buildFrontends()` runs `bun run build` locally for `admin-front`, `merchant-front`, `checkout-front` and, when enabled, `fake-rails-front`. Admin builds receive `VITE_SHOW_CHECKLISTS`, `VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST` and `VITE_SHOW_HELP_PANELS` from the deploy config. The step is skipped with `--skip-build` or `--dry-run`; it builds all three SPAs regardless of `--only`.
+`startFrontendBuilds()` (`deploy/lib/frontendBuild.ts`) starts `bun run build` for the SPAs of the **selected roles** (`admin-front`, `merchant-front`, `checkout-front`, and `fake-rails-front` when enabled; an `--only=core` run builds none) and **returns immediately**: at most `ceil(cores/2)` (max 4) run at once, output goes to a log file (never a pipe, so a parent blocked in a synchronous ssh call cannot stall a build), and the main loop `await`s each SPA right before the tier that ships it, so the builds overlap with storage provisioning (step 5). A failing build rejects with its log tail where it is awaited; on a failed deploy the remaining builds are killed. Admin builds receive `VITE_SHOW_CHECKLISTS`, `VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST` and `VITE_SHOW_HELP_PANELS`; merchant and Fake Rails builds receive their checkout origin.
+
+**Build cache:** the fingerprint is the SHA-256 of the frontend's source tree (file paths and bytes; `node_modules`, `dist`, `.vite`, coverage and `*.log` excluded; `.env*` included) plus the sorted deploy-injected build environment. A build is skipped when `dist/index.html` exists and `dist/.pg-build-stamp` equals the fingerprint. The stamp records the **post-build** state, because some builds rewrite tracked sources (`unplugin-vue-components` regenerates `src/components.d.ts`), which made a pre-build stamp miss on every run. `--rebuild` ignores the cache; `--skip-build` and `--dry-run` skip the step. `.pg-build-stamp` is excluded from the rsync of `dist`.
 
 ### 3.3 Step 3: PKI
 
@@ -89,6 +99,8 @@ The firewall is only applied in fresh or enforce mode. An ordinary `--update` do
 
 The step requires a core host in the plan.
 
+Provisioning **converges** rather than restarts (see `deploy.storage` section 16): a second run with unchanged configuration leaves PostgreSQL, PgBouncer, Redis and the backup daemon running and the step takes seconds (it took 4m53s when every service was restarted and PgBouncer waited out three 90 s stop timeouts). Each provisioner reports `started` / `restarted` / `reloaded` / `unchanged` per service on a `services:` line; `--force-restart` restarts them regardless.
+
 Provisioning is gated by `--only` and by the management flags:
 
 - PostgreSQL 18 primary/replicas/PgBouncer when `PG_MANAGE_VIA_SSH` and the relevant `--only` selection;
@@ -108,12 +120,15 @@ No dump is taken on a fresh install. A failure aborts before migrations. `pg_dum
 
 After `provisionBackupEngine()`, `deployBackupDaemon()`:
 
-- creates `/opt/pg-backup-daemon` owned by the effective target user (the SSH user remotely, the orchestrator's OS user locally);
+- creates `/opt/pg-backup-daemon` owned by the effective target user (the SSH user remotely, the orchestrator's OS user locally) and hands the source tree (not `node_modules`) to that user for the rsync;
 - rsyncs `deploy/backup-daemon` with `--delete`, excluding `node_modules`, `.git`, `dist`, `test`, `*.log` and `.env`;
-- chowns the install directory to `postgres:postgres` (the daemon's service user);
+- hands the source tree back to `postgres:postgres` (the daemon's service user);
 - ensures Bun exists and installs a real copy at `/usr/local/bin/bun` (not a symlink through the SSH user's home, which may not be traversable by `postgres`);
-- runs `bun install --frozen-lockfile` as `postgres`;
-- runs `systemctl daemon-reload && systemctl enable pg-backup-daemon && systemctl restart pg-backup-daemon`.
+- runs `bun install --frozen-lockfile` as `postgres` only when the rsync changed something or `node_modules` is missing;
+- chowns the source tree and `/var/lib/pg-backup/.bun-cache` to the daemon account (`backupDaemonUser()`: `postgres` only for WAL-G co-located with the primary, else `pgbackup`) and runs `bun install` as that account with `HOME` and `BUN_INSTALL_CACHE_DIR` set;
+- runs `systemctl daemon-reload && systemctl enable pg-backup-daemon`, then **starts the unit if it is down and restarts it only if the source, env, unit or archive environment changed** (or `--force-restart`), logging `backup daemon started|restarted|unchanged`.
+
+After the start/restart decision the same remote script runs `daemonReadinessWait()`: it polls up to 10 s for the unit to be active and to stay active for one more second (so `Restart=always` cannot hide a crash loop), and on failure prints `journalctl -u pg-backup-daemon -n 40 --no-pager` to stderr and exits 1, so a startup failure surfaces in step 5 instead of at the first health probe.
 
 The systemd unit and `/etc/pg-backup/backup.env` are written by the provisioner, not by `deployBackupDaemon()`. If `BACKUP_ENABLED` is true but the plan has no backup host, the deploy warns and skips the daemon; validation normally prevents that.
 
@@ -175,7 +190,7 @@ The synthetic seed requires `IS_TEST_SERVER=true` and Fake Rails enabled at conf
 - public merchant/checkout vhosts from the host itself (admin LAN vhost skipped);
 - Fake Rails backend and vhost when enabled;
 - PostgreSQL primary/replicas with `pg_isready` and `psql SELECT 1`;
-- PgBouncer `SELECT 1` when enabled;
+- PgBouncer `SELECT 1` when enabled, through both the application database and the `pgw_session` leader-election alias;
 - Redis `PING` with `REDISCLI_AUTH`;
 - audit/log `SELECT 1`;
 - backup-daemon `/health` over mTLS when configured.
@@ -192,6 +207,12 @@ Prune old releases
 ```
 
 Actual pruning already happened inside each `deployService()` call. The guide's statements that pruning is step 13 or step 11 are historical/wrong. Because pruning is per service, a host with several services prunes each service's release tree separately.
+
+### 3.11a Runner behaviour and the timing report
+
+- **Timings:** every command and write is timed (secrets scrubbed). A command that takes 30 s or more is flagged as it finishes (`! slow command`). After step 14 the deploy prints wall-clock per step and the slowest commands over 1 s.
+- **Change detection:** `writeRemoteFile()` returns whether the content changed; `sync()` returns `{ changed, files }` from `rsync --itemize-changes` (directory mtime touches do not count).
+- **Multiplexing:** remote targets share one ssh connection per host (`ControlMaster=auto`, `ControlPersist=120`, sockets in a private 0700 `mkdtemp` directory, closed by `SshRunner.close()` at the end or on failure). `PG_DEPLOY_SSH_MUX=0` disables it. Local targets and dry runs never use it.
 
 ### 3.12 Step 14: audit summary
 
@@ -317,7 +338,7 @@ Relevant suites:
 - `deploy/test/provisioners.test.ts`: provisioner command builders.
 - `deploy/test/exhaustive-deploy-matrix.test.ts`: broad plan behavior.
 
-No test performs a real multi-host deployment, migration, PM2 restart or Nginx reload. A live staging run is required for those.
+The unit tests mock the runner. `deploy/stress` (see `testing.deploy-stress`) drives the real engine against real services on the dev box, including the real ssh transport (via `127.0.0.2`), PM2 restarts, Nginx reloads and multi-node rolling deploys; a genuinely separate-machine run is still the job of the multi-machine matrix.
 
 ## 9. Source references
 
@@ -372,8 +393,9 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 - **Pre-migrate dump.** `pg_dump` uses `PGPASSFILE` (never `PGPASSWORD`), runs under `umask 077` into a 0700 backups directory, and only the newest `KEEP_RELEASES` dumps are kept. The earlier statements in this part that the dump embeds `PGPASSWORD` are superseded.
 - **Migrations.** `planMigrations()` is exported; only the first core node migrates. `--fresh` against a non-empty database is refused unless `--force-fresh` or `DEPLOY_FORCE_FRESH=1`. Update deploys run `migrate deploy` when migrations are pending or unknown. The dump is taken before migrating in both modes when the database is non-empty or unknown.
 - **sshRunner** local-sudo writes use an `mkdtemp` 0700 directory removed in `finally`.
-- **Bun** is installed from a pinned download verified against `BUN_SHA256` (no `curl | bash`).
-- **nginx templates**: `server_tokens off` and `limit_req` (with `limit_req_status 429`) in all six; the fakerails vhost gets `allow`/`deny` from `FAKE_RAILS_ALLOWED_CIDRS`, `script-src 'self'`, `object-src 'none'`, `frame-ancestors 'self'` (previously `'self' *`); the checkout CSP is unchanged.
+- **Bun** is installed from a pinned download verified against `BUN_SHA256` (no `curl | bash`); the fresh-host bootstrap installs `unzip`, and an existing `/usr/local/bin/bun` or `~/.bun/bin/bun` is reused.
+- **Frontend build env**: the deploy injects `VITE_CHECKOUT_BASE_URL` into merchant-front and `VITE_CHECKOUT_ORIGIN` into fake-rails-front from `CHECKOUT_DOMAIN`/ports, so checkout links and hosted-widget postMessage targets do not fall back to the wrong origin.
+- **nginx templates**: `server_tokens off` and `limit_req` (with `limit_req_status 429`) in all six; the fakerails vhost gets `allow`/`deny` from `FAKE_RAILS_ALLOWED_CIDRS`, `script-src 'self'`, `object-src 'none'`, and a computed `frame-ancestors` list (self + merchant/checkout origins + loopback) so the hosted widget can still be embedded; the checkout CSP is unchanged.
 - **scripts/deploy-localhost.sh** refuses `NODE_ENV=production` unless `LOCAL_TARGET=1`, no longer falls back to default secrets (random secrets via `openssl rand` go to a 0600 `.local/secrets.env` or `LOCAL_SECRETS_FILE`), and requires `DB_PASSWORD`.
 - **CI and legacy deploy workflows (GAP-014, RESOLVED 2026-11-05).** `.github/workflows/ci.yml` (jobs `design`, `backend`, `frontend`; triggers push to `main`/`ayoub`, pull requests and manual dispatch; `contents: read`; concurrency-cancelled per ref) runs the AGENTS.md gate: `bun scripts/project-design/build.ts --check`, then for `core-back`, `deploy`, `deploy/backup-daemon`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` a frozen-lockfile install, typecheck and `bun test`, and for `admin-front`, `merchant-front`, `checkout-front` and `fake-rails-front` a frozen-lockfile install and `bun run build`. Suites that need PostgreSQL 18 and Redis skip themselves when the services are absent. The per-service `*/.github/workflows/deploy.yml` workflows are now legacy and manual only (`workflow_dispatch` with a typed `deploy` confirmation): they run the service typecheck/tests first, run the deploy job in the `legacy-deploy` environment, use `StrictHostKeyChecking=yes` with a pinned `known_hosts` taken from the **`SSH_KNOWN_HOSTS` secret (which operators must now create, with the server's verified host key lines)**, sync additively (no `rsync --delete`) and never scan the host key on first use. The supported deploy path remains the multi-host engine in `deploy/`. Tests: `deploy/test/ci-workflows.test.ts`.
 - **Replica pgpass (GAP-028, RESOLVED).** The replica `.pgpass` is streamed over stdin; see `deploy.storage`.

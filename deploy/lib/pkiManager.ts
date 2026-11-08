@@ -62,6 +62,9 @@ export interface PkiOptions {
   run?: (command: string, args: string[], cwd: string) => void;
 }
 
+/** CN and file stem of the WAL-archive-only client certificate. */
+export const WAL_ARCHIVE_CLIENT = "wal-archive-client";
+
 const DEFAULT_PKI_DIR = resolve(import.meta.dirname, "..", ".certs");
 
 const runOpenssl = (command: string, args: string[], cwd: string): void => {
@@ -183,6 +186,18 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     });
   }
 
+  // Least-privilege WAL ingest client: lets PostgreSQL's archive_command PUT WAL
+  // to the backup daemon and nothing else. Only pg-primary / audit-db hosts get it.
+  if (backupStorageConfigured(config)) {
+    storageClients.push({
+      name: WAL_ARCHIVE_CLIENT,
+      certPath: join(directory, `${WAL_ARCHIVE_CLIENT}.crt`),
+      keyPath: join(directory, `${WAL_ARCHIVE_CLIENT}.key`),
+      kind: "client",
+      cn: WAL_ARCHIVE_CLIENT,
+    });
+  }
+
   const fakeRails: CertMaterial = {
     name: "fake-rails",
     certPath: join(directory, "fake-rails.crt"),
@@ -223,7 +238,8 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
   ensureDirectory(directory);
 
   // ---- 1. Internal root CA (10 years) ------------------------------------
-  if (!existsSync(caCert) || !existsSync(caKey) || rotate) {
+  const regenerateCa = !existsSync(caCert) || !existsSync(caKey) || rotate;
+  if (regenerateCa) {
     run("openssl", [
       "req", "-x509", "-newkey", "rsa:4096", "-nodes",
       "-keyout", "internal-ca.key", "-out", "internal-ca.crt",
@@ -269,7 +285,10 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
   });
 
   // ---- 3. Optional storage/backup client certificates --------------------
+  // Existing client leaves are kept (unless the CA or a rotation says
+  // otherwise) so adding one new client certificate does not re-issue the rest.
   for (const client of storageClients) {
+    if (!regenerateCa && existsSync(client.certPath) && existsSync(client.keyPath)) continue;
     signLeaf({
       run,
       directory,
@@ -283,6 +302,7 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
 
   // ---- 4. The three edge client certificates ----------------------------
   for (const client of clients) {
+    if (!regenerateCa && existsSync(client.certPath) && existsSync(client.keyPath)) continue;
     const role = client.cn.split("-back")[0] ?? client.cn;
     signLeaf({
       run,
@@ -397,7 +417,8 @@ export const certFilesForHost = (
   const files: CertMaterial[] = [bundle.ca];
   for (const role of roles) {
     if (role === "core") {
-      files.push(bundle.server, ...bundle.storageClients);
+      // Everything except the WAL ingest client, which is for PostgreSQL hosts only.
+      files.push(bundle.server, ...bundle.storageClients.filter((client) => client.name !== WAL_ARCHIVE_CLIENT));
     }
     if (role === "admin") {
       files.push(...bundle.clients.filter((client) => client.cn === "admin-back"));
@@ -413,6 +434,9 @@ export const certFilesForHost = (
     }
     if (role === "pg-primary" || role === "pg-replica" || role === "pgbouncer") {
       files.push(...bundle.storageClients.filter((client) => client.name === "pg-client"));
+    }
+    if (role === "pg-primary" || role === "audit-db") {
+      files.push(...bundle.storageClients.filter((client) => client.name === WAL_ARCHIVE_CLIENT));
     }
     if (role === "redis") {
       files.push(...bundle.storageClients.filter((client) => client.name === "redis-client"));

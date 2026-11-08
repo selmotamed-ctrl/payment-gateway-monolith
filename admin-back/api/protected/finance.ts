@@ -1,6 +1,6 @@
 import express from "express";
 import { z } from "zod";
-import { zAmount, zCurrency, zIdentifier, zJsonObject, zPaginationQuery, zReason } from "../../lib/zReady";
+import { zAmount, zCurrency, zIdentifier, zJsonObject, zListQuery, zPaginationQuery, zReason } from "../../lib/zReady";
 import {
   toCoreAdjustmentCreate,
   toCoreCashoutProcess,
@@ -9,6 +9,7 @@ import {
   toCoreVelocityRuleCreate,
 } from "../contract";
 import { coreForward } from "../forward";
+import { encode, reasonOnlySchema, uuidParamsSchema, zMutationReason } from "./mutationSchemas";
 
 const router = express.Router();
 
@@ -124,6 +125,12 @@ export const commissionProfileSchema = z
     percentage: z.string().regex(/^\d{1,3}(\.\d{1,4})?$/).optional(),
     flatAmount: zAmount.optional(),
     tiers: z.array(z.record(z.string().max(64), z.unknown())).max(20).optional(),
+    minFee: zAmount.optional(),
+    maxFee: zAmount.optional(),
+    feeBearerDefault: z.enum(["MERCHANT_ABSORBS", "PAYER_SURCHARGE", "SPLIT"]).optional(),
+    roundingMode: z.enum(["HALF_UP", "HALF_EVEN", "FLOOR", "CEIL"]).optional(),
+    merchantId: z.string().uuid().optional(),
+    applicationId: z.string().uuid().optional(),
     currency: zCurrency.optional(),
     active: z.boolean().optional(),
     // core binds every commission profile to a rail code that the public API does not carry.
@@ -492,6 +499,118 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/finance/invariant-check",
+  }),
+);
+
+router.get(
+  "/finance/route-caps",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/finance/route-caps",
+  }),
+);
+
+// Journal entries are read-only (the ledger is append-only); `/summary` must precede `/:id`.
+router.get(
+  "/finance/journal-entries",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/finance/journal-entries",
+    querySchema: zListQuery,
+  }),
+);
+
+router.get(
+  "/finance/journal-entries/summary",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/finance/journal-entries/summary",
+    querySchema: zListQuery,
+  }),
+);
+
+router.get(
+  "/finance/journal-entries/:id",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/finance/journal-entries/${encode(context.params.id)}`,
+    paramsSchema: uuidParamsSchema,
+  }),
+);
+
+router.get(
+  "/finance/gl-accounts/:id/lines",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}/lines`,
+    paramsSchema: uuidParamsSchema,
+    querySchema: zListQuery,
+  }),
+);
+
+router.get(
+  "/finance/gl-accounts/:id",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}`,
+    paramsSchema: uuidParamsSchema,
+  }),
+);
+
+const shardParamsSchema = z.object({ id: z.string().uuid(), shardId: z.coerce.number().int().min(0).max(255) }).strict();
+const shardRepairSchema = z.object({ reason: zMutationReason, planHash: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
+
+router.get(
+  "/finance/gl-accounts/:id/shards/:shardId/repair-plan",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}/shards/${encode(String(context.params.shardId))}/repair-plan`,
+    paramsSchema: shardParamsSchema,
+  }),
+);
+
+router.post(
+  "/finance/gl-accounts/:id/shards/:shardId/repair",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}/shards/${encode(String(context.params.shardId))}/repair`,
+    paramsSchema: shardParamsSchema,
+    schema: shardRepairSchema,
+  }),
+);
+
+router.post(
+  "/finance/gl-accounts/:id/shards/:shardId/repair/request",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}/shards/${encode(String(context.params.shardId))}/repair/request`,
+    paramsSchema: shardParamsSchema,
+    schema: shardRepairSchema,
+    // 202: the repair was submitted for a checker
+    relayStatus: true,
+  }),
+);
+
+const shardScaleSchema = z.object({ width: z.number().int().min(1).max(256), reason: zMutationReason }).strict();
+
+router.post(
+  "/finance/gl-accounts/:id/shards/scale",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}/shards/scale`,
+    paramsSchema: uuidParamsSchema,
+    schema: shardScaleSchema,
+  }),
+);
+
+router.post(
+  "/finance/gl-accounts/:id/checkpoint",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}/checkpoint`,
+    paramsSchema: uuidParamsSchema,
+    schema: reasonOnlySchema,
+    relayStatus: true,
   }),
 );
 

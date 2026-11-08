@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VProgressCircular, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VProgressCircular, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -32,6 +32,19 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { SectionFields } from "@/components/SectionFields";
+import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { AmlParamsBuilder, AmlParamsSummary, AmlScopeSummary } from "@/components/builders/AmlParamsBuilder";
+import { StructuredValueEditor } from "@/components/builders/StructuredValueEditor";
+import {
+    AML_RULE_TYPES,
+    buildAmlParams,
+    defaultAmlParams,
+    summarizeAmlParams,
+    validateAmlParams,
+    type AmlParamsState,
+    type AmlRuleType,
+} from "@/components/builders/model";
+import { ReportingRulesTab } from "./components/ReportingRulesTab";
 type AmlRule = {
     id: string;
     code: string;
@@ -70,26 +83,9 @@ type RuleSummary = {
     byType: Record<string, number>;
     byAction: Record<string, number>;
 };
-const RULE_TYPES = [
-    "SINGLE_AMOUNT",
-    "CUMULATIVE_WINDOW",
-    "STRUCTURING",
-    "RISK_TIER",
-    "COUNTERPARTY_COUNTRY",
-    "RAIL",
-    "MERCHANT_DIRECT_AMOUNT",
-];
+const RULE_TYPES: readonly string[] = AML_RULE_TYPES;
 const RULE_ACTIONS = ["HOLD", "FLAG", "BLOCK", "CASE_ONLY"];
 const SEVERITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
-const PARAM_HELP: Record<string, string> = {
-    SINGLE_AMOUNT: 'Example: {"min_amount": "10000.0000", "currency": "LYD"}',
-    CUMULATIVE_WINDOW: 'Example: {"max_amount": "50000.0000", "max_count": 5, "window_seconds": 86400}',
-    STRUCTURING: 'Example: {"threshold": "10000.0000", "band_percent": 10, "min_count": 2, "window_seconds": 86400}',
-    RISK_TIER: 'Example: {"tier": "HIGH", "min_amount": "5000.0000"}',
-    COUNTERPARTY_COUNTRY: 'Example: {"mode": "DENY", "countries": ["KP", "IR"]}',
-    RAIL: 'Example: {"rail_codes": ["moamalat"], "min_amount": "20000.0000"}',
-    MERCHANT_DIRECT_AMOUNT: 'Example: {"min_amount": "100000.0000", "currency": "LYD"}',
-};
 const badgeTone = (value: string): BadgeTone => {
     const tone = statusTone(value);
     return tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
@@ -99,15 +95,6 @@ const formatDateTime = (value: string | null | undefined): string => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "—";
     return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
-};
-const parseJsonObject = (text: string): Record<string, unknown> | null => {
-    if (!text.trim()) return {};
-    try {
-        const parsed = JSON.parse(text) as unknown;
-        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
-    } catch {
-        return null;
-    }
 };
 const RULE_CHECKS = [
     { key: "RULE_LOGIC_REVIEWED", label: "Rule logic reviewed" },
@@ -138,10 +125,11 @@ const AmlRulesPage = dc(() => {
         ruleType: "SINGLE_AMOUNT",
         action: "HOLD",
         baseSeverity: "MEDIUM",
-        scopeText: "{}",
-        paramsText: '{"min_amount":"10000.0000","currency":"LYD"}',
         effectiveFrom: "",
     });
+    const tab = ref<"rules" | "reporting">("rules");
+    const paramsState = ref<AmlParamsState>(defaultAmlParams("SINGLE_AMOUNT"));
+    const scopeValue = ref<unknown>({});
     const actionLoading = ref(false);
     const createError = ref("");
     const ruleChecklist = ref<Record<string, boolean>>({});
@@ -236,17 +224,17 @@ const AmlRulesPage = dc(() => {
             ruleType: "SINGLE_AMOUNT",
             action: "HOLD",
             baseSeverity: "MEDIUM",
-            scopeText: "{}",
-            paramsText: PARAM_HELP.SINGLE_AMOUNT?.match(/\{.*\}/)?.[0] ?? "{}",
             effectiveFrom: "",
         };
+        paramsState.value = defaultAmlParams("SINGLE_AMOUNT");
+        scopeValue.value = {};
         ruleChecklist.value = {};
         createError.value = "";
         createOpen.value = true;
     };
     const onRuleTypeChanged = (type: string) => {
         form.value.ruleType = type;
-        form.value.paramsText = PARAM_HELP[type]?.match(/\{.*\}/)?.[0] ?? "{}";
+        paramsState.value = defaultAmlParams(type as AmlRuleType);
     };
     const presentRuleDetail = (detail: AmlRuleDetail) => {
         selected.value = detail;
@@ -291,12 +279,13 @@ const AmlRulesPage = dc(() => {
     const ruleSafeguard = useSafeguard("sg-aml-rule-change");
     const submit = async () => {
         createError.value = "";
-        const scope = parseJsonObject(form.value.scopeText);
-        const params = parseJsonObject(form.value.paramsText);
-        if (scope === null || params === null) {
-            showSnackBar({ type: "warning", message: t("Scope and params must be valid JSON objects") });
+        const ruleType = form.value.ruleType as AmlRuleType;
+        if (validateAmlParams(ruleType, paramsState.value.form).length > 0) {
+            showSnackBar({ type: "warning", message: t("Fix the highlighted rule parameters before drafting") });
             return;
         }
+        const params = buildAmlParams(ruleType, paramsState.value);
+        const scope = (scopeValue.value && typeof scopeValue.value === "object" && !Array.isArray(scopeValue.value) ? scopeValue.value : {}) as Record<string, unknown>;
         if (!ruleChecklistComplete.value) {
             showSnackBar({ type: "warning", message: t("Complete all rule checklist items before drafting") });
             return;
@@ -399,8 +388,8 @@ const AmlRulesPage = dc(() => {
         {
             key: "params",
             label: "Params",
-            value: (row) => JSON.stringify(row.params ?? {}),
-            Value: ({ row }: { row: AmlRule }) => <ThemedText style={{ fontSize: "10px", direction: "ltr", maxWidth: "300px", wordBreak: "break-word" }}>{JSON.stringify(row.params ?? {})}</ThemedText>,
+            value: (row) => summarizeAmlParams(row.ruleType, row.params).map((entry) => entry.label).join(", "),
+            Value: ({ row }: { row: AmlRule }) => <AmlParamsSummary ruleType={row.ruleType} params={row.params} compact maxRows={3} />,
         },
         {
             key: "active",
@@ -452,7 +441,7 @@ const AmlRulesPage = dc(() => {
                     subtitle={t("Manage AML rule versions and thresholds through maker-checker approval.")}
                     badge="AML-CONFIDENTIAL"
                     badgeTone="danger"
-                    end={() => (
+                    end={() => tab.value !== "rules" ? null : (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
@@ -460,6 +449,19 @@ const AmlRulesPage = dc(() => {
                         </ThemedView>
                     )}
                 />
+                <SegmentedTabs
+                    modelValue={tab.value}
+                    onUpdate:modelValue={(value: string) => (tab.value = value === "reporting" ? "reporting" : "rules")}
+                    tabs={[
+                        { value: "rules", label: t("Rules") },
+                        { value: "reporting", label: t("Reporting rules") },
+                    ]}
+                    ariaLabel={t("AML rule sections")}
+                />
+                {tab.value === "reporting" ? (
+                    <ReportingRulesTab />
+                ) : (
+                    <>
                 <VAlert type="info" variant="tonal">
                     {t("Every AML rule change is a maker-checker request. The rule stays inactive until a different MLRO or authorised checker approves it.")}
                 </VAlert>
@@ -531,6 +533,8 @@ const AmlRulesPage = dc(() => {
                         />
                     )}
                 />
+                    </>
+                )}
             </ThemedView>
             <SlideOverDrawer
                 modelValue={detailsOpen.value}
@@ -588,9 +592,9 @@ const AmlRulesPage = dc(() => {
                         </ThemedView>
                         <ThemedView style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                             <ThemedText type="defaultSemiBold">{t("Scope")}</ThemedText>
-                            <pre style={{ margin: 0, padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", background: "var(--pg-bg-surface-subtle)", border: "1px solid var(--pg-border-subtle)", fontSize: "10px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "160px", overflow: "auto" }}>{JSON.stringify(selected.value.scope ?? {}, null, 2)}</pre>
+                            <AmlScopeSummary scope={selected.value.scope} />
                             <ThemedText type="defaultSemiBold">{t("Params")}</ThemedText>
-                            <pre style={{ margin: 0, padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", background: "var(--pg-bg-surface-subtle)", border: "1px solid var(--pg-border-subtle)", fontSize: "10px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "220px", overflow: "auto" }}>{JSON.stringify(selected.value.params ?? {}, null, 2)}</pre>
+                            <AmlParamsSummary ruleType={selected.value.ruleType} params={selected.value.params} />
                         </ThemedView>
                     </>
                 )}
@@ -623,16 +627,20 @@ const AmlRulesPage = dc(() => {
                         <VSelect items={SEVERITIES.map((value) => ({ title: value, value }))} modelValue={form.value.baseSeverity} onUpdate:modelValue={(value: string) => (form.value.baseSeverity = value)} hideDetails />
                     </FormField>
                 </SectionFields>
-                <SectionFields title={t("Scope and parameters")}>
+                <SectionFields title={t("Effective date")}>
                     <FormField label={t("Effective from (optional)")} sensitiveMakerChecker>
                         <VTextField type="date" modelValue={form.value.effectiveFrom} onUpdate:modelValue={(value: string) => (form.value.effectiveFrom = value)} hideDetails />
                     </FormField>
-                    <FormField label={t("Scope JSON")} hint={t("Use {} for all merchants and rails.")} sensitiveMakerChecker>
-                        <VTextarea modelValue={form.value.scopeText} onUpdate:modelValue={(value: string) => (form.value.scopeText = value)} rows={3} hideDetails />
-                    </FormField>
-                    <FormField label={t("Params JSON")} hint={PARAM_HELP[form.value.ruleType] ?? ""} sensitiveMakerChecker>
-                        <VTextarea modelValue={form.value.paramsText} onUpdate:modelValue={(value: string) => (form.value.paramsText = value)} rows={4} hideDetails />
-                    </FormField>
+                </SectionFields>
+                <SectionFields title={t("Rule parameters")} subtitle={t("The fields below are the ones the selected rule type evaluates.")}>
+                    <div style={{ gridColumn: "1 / -1" }}>
+                        <AmlParamsBuilder ruleType={form.value.ruleType as AmlRuleType} modelValue={paramsState.value} onUpdate:modelValue={(value: AmlParamsState) => (paramsState.value = value)} />
+                    </div>
+                </SectionFields>
+                <SectionFields title={t("Scope")} subtitle={t("Leave empty to apply to all merchants and rails. The current engine stores the scope with the rule but evaluates every effective rule platform-wide.")}>
+                    <div style={{ gridColumn: "1 / -1" }}>
+                        <StructuredValueEditor modelValue={scopeValue.value} onUpdate:modelValue={(value: unknown) => (scopeValue.value = value)} ariaLabel={t("Scope")} />
+                    </div>
                 </SectionFields>
                 <FormChecklist
                     checks={[...RULE_CHECKS]}

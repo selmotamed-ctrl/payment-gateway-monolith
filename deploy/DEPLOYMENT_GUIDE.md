@@ -39,6 +39,8 @@ Flags:
 | `--update` | Never touch the OS or the firewall. |
 | `--enforce-firewall` | Re-apply the UFW rules without a full bootstrap. |
 | `--skip-build` | Reuse the existing `*/dist` builds. |
+| `--rebuild` | Ignore the frontend build cache (an unchanged SPA is otherwise not rebuilt). |
+| `--force-restart` | Restart PostgreSQL, PgBouncer, Redis and the backup daemon even if nothing changed. |
 | `--skip-verify` | Skip the end-to-end mTLS health verification. |
 | `--rotate-certs` | Regenerate the internal CA **and** every leaf certificate. |
 | `--keep=<n>` | Releases kept per host (default `KEEP_RELEASES`). |
@@ -69,6 +71,12 @@ them:
   in `self_signed` mode, or the admin vhost has no certificate, the deploy mints
   a certificate bound to the server name so `nginx -t` always passes.
 
+Storage services (PostgreSQL, PgBouncer, Redis, the backup daemon) are converged,
+not restarted: a config change is applied by reload, and a restart happens only
+when a setting genuinely needs one (see "Convergence" in `deploy/README.md`). A
+second deploy of an unchanged configuration therefore leaves every storage
+process running, keeps the Redis cache, and takes seconds instead of minutes.
+
 PM2 applications are restarted with `pm2 delete` + `pm2 start` on every deploy,
 not `startOrReload`: PM2 keeps the old `script`/`cwd` when an app is reloaded by
 name, which would leave the previous (eventually pruned) release running. The
@@ -85,7 +93,7 @@ DB_SSH_HOST="203.0.113.10"
 DB_PRIVATE_IP="127.0.0.1"
 DB_ENGINE="postgresql"
 DB_PORT="5432"
-DATABASE_URL="postgresql://pg_core_user:...@127.0.0.1:5432/payment_gateway_prod"
+DATABASE_URL="postgresql://gw_core_user:...@127.0.0.1:5432/payment_gateway_prod"
 CORE_PRIVATE_IP="203.0.113.10"     # edge -> core mTLS target
 MERCHANT_SSL_MODE="self_signed"    # no public DNS on a test box
 CHECKOUT_SSL_MODE="self_signed"

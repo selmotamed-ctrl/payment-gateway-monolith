@@ -19,6 +19,7 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetaPill } from "@/components/ui/MetaPill";
+import { describeAuditChange } from "@/utils/auditSummary";
 type UserDetail = {
     id: string;
     createdAt: string;
@@ -128,25 +129,8 @@ const authorityKeys = (map: unknown): string[] => {
     return keys;
 };
 
-const auditValue = (value: unknown): string => {
-    if (value === null || value === undefined) return "—";
-    if (typeof value === "string") return value.length > 80 ? `${value.slice(0, 77)}…` : value;
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
-    try {
-        const text = JSON.stringify(value);
-        return text.length > 80 ? `${text.slice(0, 77)}…` : text;
-    } catch {
-        return String(value);
-    }
-};
-
-const auditChangeSummary = (entry: AuditRow): string => {
-    const before = (entry.beforeJson ?? {}) as Record<string, unknown>;
-    const after = (entry.afterJson ?? {}) as Record<string, unknown>;
-    const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)])).slice(0, 4);
-    if (keys.length === 0) return "";
-    return keys.map((key) => `${key}: ${auditValue(before[key])} → ${auditValue(after[key])}`).join(" · ");
-};
+const auditChangeSummary = (entry: { beforeJson?: unknown; afterJson?: unknown }): string =>
+    describeAuditChange(entry.beforeJson, entry.afterJson);
 
 const UserDetailPage = dc(() => {
     const { t } = useLocale();

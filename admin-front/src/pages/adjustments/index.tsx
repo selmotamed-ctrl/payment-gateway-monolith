@@ -35,6 +35,8 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { SectionFields } from "@/components/SectionFields";
+import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
+import { LedgerRefLink } from "@/components/ledger/LedgerRefLink";
 type Adjustment = {
     id: string;
     type: string;
@@ -145,6 +147,7 @@ const AdjustmentsPage = dc(() => {
     const { t } = useLocale();
     const showChecklists = areChecklistsVisible();
     const router = useRouter();
+    const journalEntryId = ref<string | null>(null);
     const rows = ref<Adjustment[]>([]);
     const total = ref(0);
     const summary = ref<AdjustmentSummary | null>(null);
@@ -717,7 +720,7 @@ const AdjustmentsPage = dc(() => {
                                     { label: t("Approval state"), value: selected.value.approvalState || "—" },
                                     { label: t("Checker"), value: selected.value.approval?.checkerUserId || selected.value.checkerUserId || "—" },
                                     { label: t("Rejection reason"), value: selected.value.approval?.rejectionReason || "—" },
-                                    { label: t("Journal entry"), value: <MonoRef value={selected.value.journalEntryId ?? ""} /> },
+                                    { label: t("Journal entry"), value: <LedgerRefLink value={selected.value.journalEntryId ?? ""} truncate={22} label={t("Open journal entry")} onOpen={(id: string) => (journalEntryId.value = id)} /> },
                                     { label: t("Journal type"), value: selected.value.journalEntry?.refType || "—" },
                                     { label: t("Journal reference"), value: <MonoRef value={selected.value.journalEntry?.refId ?? ""} /> },
                                     { label: t("External dispute ref"), value: <MonoRef value={selected.value.externalDisputeRef ?? ""} /> },
@@ -836,6 +839,7 @@ const AdjustmentsPage = dc(() => {
                     />
                 </FormField>
             </FormModal>
+            {journalEntryId.value && <JournalEntryDrawer entryId={journalEntryId.value} onClose={() => (journalEntryId.value = null)} />}
         </ScreenContainer>
     );
 });

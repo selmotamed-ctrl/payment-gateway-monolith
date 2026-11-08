@@ -1,3 +1,4 @@
+import { initialShardWidth } from "../../lib/storageEngine/shardRouting";
 import type { SeederConfig, ProfileVolumes } from "../../prisma/syntheticSeeder/config";
 import { buildContext, type SeedReferences, type SeederContext } from "../../prisma/syntheticSeeder/context";
 import { generateAdminAndStaff } from "../../prisma/syntheticSeeder/generators/01_adminAndStaffGenerator";
@@ -18,7 +19,7 @@ export const smallVolumes = (overrides: Partial<ProfileVolumes> = {}): ProfileVo
   cashouts: 40, amlScreenings: 90, amlCases: 25, operatorCases: 80, approvalRequests: 40, yearsSpan: 1.5, ...overrides,
 });
 
-const gl = (id: number, accountType: string) => ({ id: `gl-${id}`, accountType, gatewayId: null, env: null, ownerId: null, credentialSetId: null, currency: "LYD" });
+const gl = (id: number, accountType: string) => ({ id: `gl-${id}`, accountType, gatewayId: null, env: null, ownerId: null, credentialSetId: null, currency: "LYD", shardCount: initialShardWidth(accountType) });
 const uuid = (n: number) => `ffffffff-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 
 /** A baseline-seed lookalike: 4 gateways, 4 rails, 5 routes, platform credentials, system GL accounts. */
@@ -62,6 +63,8 @@ export const baselineRefs = (): SeedReferences => {
     notificationTemplates: ["PAYMENT_SUCCEEDED", "PAYMENT_FAILED", "DISPUTE_OPENED", "CASHOUT_REQUESTED", "APPROVAL_REQUIRED"].flatMap((code) =>
       (["AR", "EN"] as const).map((lang) => ({ code, channel: "EMAIL", lang }))),
     requiredDocumentsSetting: null,
+    // The state variables the gateways' inquiry steps read (from the baseline blueprints).
+    gatewayStateKeys: { moamalat: ["AmountTrxn", "MerchantReference", "SecureHash"], neompay: ["request_id"], plutu: ["order_id"] } as Record<string, string[]>,
     confirmationChannels: [] as Array<{ id: string; gatewayVersionId: string; type: string }>,
   };
   // The real baseline seed (Fake Rails blueprints) already owns webhook channels for some gateway

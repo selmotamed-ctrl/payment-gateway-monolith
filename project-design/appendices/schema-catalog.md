@@ -2,10 +2,10 @@
 
 <!-- GENERATED FILE. Edit core-back/prisma/schema.prisma instead. Do not hand-edit this file. -->
 
-- Models: **76**
+- Models: **78**
 - Enums: **105**
-- Schema version: **10**
-- Migrations: **8**
+- Schema version: **14**
+- Migrations: **11**
 
 ## Models
 
@@ -79,6 +79,8 @@
 - `Notification`
 - `PlatformSetting`
 - `GlAccountShard`
+- `GlShardRepair`
+- `GlShardCheckpoint`
 - `OutboxEvent`
 - `AuditOutbox`
 - `BackupCatalogRun`
@@ -204,3 +206,6 @@
 - `20261104120000_mfa_challenges`
 - `20261105090000_append_only_ledger_guards`
 - `20261105130000_statement_unique_source_file_hash`
+- `20261107090000_shard_sequenced_checkpoints`
+- `20261107120000_inbound_event_claims`
+- `20261107150000_shard_repairs`

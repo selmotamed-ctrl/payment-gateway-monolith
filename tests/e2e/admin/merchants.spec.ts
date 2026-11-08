@@ -57,7 +57,7 @@ test("merchant editing uses a form instead of a raw JSON patch", async ({ page }
   await expect(page.locator("table")).toContainText("Acme Store");
   const merchantRow = page.locator("tbody tr").first();
   await merchantRow.getByRole("button", { name: "Row actions" }).click();
-  await page.locator(".v-overlay-container").getByRole("button", { name: "Open", exact: true }).click();
+  await page.locator(".v-overlay-container").getByRole("menuitem", { name: "Open", exact: true }).click();
   await expect(page).toHaveURL(/\/merchants\/mch_1/);
   await page.getByRole("button", { name: "Propose sensitive change", exact: true }).click();
 

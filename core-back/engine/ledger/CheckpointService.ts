@@ -1,313 +1,272 @@
 import { Decimal } from "decimal.js";
-import { decimal, type DecimalInput, type JournalLineRecord, type LedgerAccountRecord } from "./LedgerPoster";
+import { decimal } from "./LedgerPoster";
 
-export interface CheckpointRecord {
-  id: string;
+/**
+ * Per-shard ledger checkpoints.
+ *
+ * A checkpoint is a (balance, sequence) pair of ONE shard (`gl_shard_checkpoints`). The boundary is the
+ * shard's own gapless line sequence, never a timestamp: the poster reserves each line's sequence number
+ * under the shard row lock (see `ledgerShardWriter.ts`), so a snapshot that sees the shard at
+ * (balance B, line_seq S) also sees every line with `shard_seq <= S`.
+ *
+ * Capturing a shard is ONE statement (one snapshot) that reads the shard and the checkpoint and sums the
+ * lines in `(checkpoint_seq, line_seq]`. It proves two things before the checkpoint moves:
+ *   * GAPLESS   the number of lines found equals `line_seq - checkpoint_seq` (a missing, duplicate or
+ *               misattributed line is detected), and
+ *   * PARITY    `checkpoint_balance + SUM(lines) = shard balance` (the shard balance matches the journal).
+ * Only then is the checkpoint advanced, in a second tiny, monotonic upsert. It is O(lines since the last
+ * checkpoint), takes no lock on the shard or the account, and never blocks a posting.
+ */
+
+export type ShardCaptureStatus = "ADVANCED" | "NOOP" | "GAP" | "PARITY";
+
+export interface ShardCaptureResult {
   glAccountId: string;
-  asOf: Date;
-  balance: DecimalInput;
-  createdAt?: Date;
-}
-
-export interface CheckpointPrismaClient {
-  glAccount: {
-    findUnique(args: { where: { id: string } }): Promise<LedgerAccountRecord | null>;
-    findMany(args?: { select?: Record<string, boolean> }): Promise<LedgerAccountRecord[]>;
-    update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<LedgerAccountRecord>;
-  };
-  journalLine: {
-    findMany(args: { where: Record<string, unknown> }): Promise<JournalLineRecord[]>;
-  };
-  journalEntry?: {
-    findFirst(args: { where: Record<string, unknown>; orderBy?: Record<string, unknown> }): Promise<{ id: string } | null>;
-  };
-  /** Present on the Prisma client; absent on a narrow test double. */
-  $queryRawUnsafe?: (sql: string, ...params: unknown[]) => Promise<unknown>;
-  /** Present on the Prisma client; absent on a narrow test double. */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  $transaction?: (fn: (tx: any) => Promise<unknown>, options?: { timeout?: number }) => Promise<unknown>;
-}
-
-export interface AccountBalance {
-  accountId: string;
-  accountType: LedgerAccountRecord["accountType"];
+  shardId: number;
+  status: ShardCaptureStatus;
+  /** Shard balance and high-water at the snapshot (debit-positive). */
+  balance: Decimal;
+  lineSeq: bigint;
+  /** The checkpoint before and after this capture. */
+  previousSeq: bigint;
+  checkpointSeq: bigint;
   checkpointBalance: Decimal;
-  delta: Decimal;
-  liveBalance: Decimal;
-  checkpointAt?: Date;
-}
-
-export type ParityMode = "enforce" | "warn" | "off";
-
-export interface CheckpointServiceOptions {
-  /**
-   * What to do when the shard total of an account disagrees with its journal
-   * total at capture time. "enforce" (default) refuses the checkpoint,
-   * "warn" captures it and reports through `onParityMismatch`, "off" skips.
-   */
-  parity?: ParityMode;
-  onParityMismatch?: (mismatch: ShardParityMismatch) => void;
-}
-
-export interface ShardParityMismatch {
-  accountId: string;
-  /** Sum of gl_account_shards.current_balance (debit-positive). */
-  shardTotal: Decimal;
-  /** checkpoint_balance + journal lines after the checkpoint (debit-positive). */
-  journalTotal: Decimal;
+  /** Lines folded in by this capture (0 for NOOP and failures). */
+  linesCovered: bigint;
+  /** Lines actually found in (previousSeq, lineSeq]. */
+  linesFound: bigint;
+  /** shard balance minus (previous checkpoint + found lines); zero when they agree. */
   drift: Decimal;
-}
-
-export interface ShardParityResult {
-  ok: boolean;
-  /** Accounts that have shard rows and were compared. */
-  checked: number;
-  mismatches: ShardParityMismatch[];
+  /** True when this was the first failure of the shard (consecutive_failures became 1). */
+  firstFailure: boolean;
 }
 
 export class ShardParityError extends Error {
   readonly code = "LEDGER_SHARD_PARITY_MISMATCH";
-  readonly mismatch: ShardParityMismatch;
-  constructor(mismatch: ShardParityMismatch) {
+  readonly result: ShardCaptureResult;
+  constructor(result: ShardCaptureResult) {
     super(
-      `GL account '${mismatch.accountId}' shard total ${mismatch.shardTotal.toFixed(4)} ` +
-        `differs from journal total ${mismatch.journalTotal.toFixed(4)} (drift ${mismatch.drift.toFixed(4)})`,
+      result.status === "GAP"
+        ? `GL account '${result.glAccountId}' shard ${result.shardId}: ${result.linesFound} line(s) found for sequence range ` +
+            `(${result.previousSeq}, ${result.lineSeq}] which holds ${result.lineSeq - result.previousSeq}`
+        : `GL account '${result.glAccountId}' shard ${result.shardId}: shard balance ${result.balance.toFixed(4)} differs from ` +
+            `checkpoint + journal by ${result.drift.toFixed(4)}`,
     );
     this.name = "ShardParityError";
-    this.mismatch = mismatch;
+    this.result = result;
   }
 }
 
-/**
- * ONE statement, therefore ONE snapshot: the shard total and the journal total
- * are read together, so a posting that commits in between cannot produce a
- * false mismatch.
- */
-const PARITY_SQL =
-  "SELECT g.id::text AS id," +
-  ' s.total::text AS "shardTotal",' +
-  " (g.checkpoint_balance + COALESCE((" +
-  "SELECT SUM(CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END)" +
-  " FROM journal_lines jl WHERE jl.gl_account_id = g.id" +
-  ' AND (g.checkpoint_at IS NULL OR jl.created_at > g.checkpoint_at)), 0))::text AS "journalTotal"' +
-  " FROM gl_accounts g" +
-  " INNER JOIN (SELECT gl_account_id, SUM(current_balance) AS total FROM gl_account_shards GROUP BY gl_account_id) s" +
-  " ON s.gl_account_id = g.id";
+export interface CheckpointDb {
+  $queryRawUnsafe: <T = unknown>(query: string, ...values: unknown[]) => Promise<T>;
+}
+
+export interface CheckpointServiceOptions {
+  /**
+   * Partition-pruning hint: lines with sequence above the checkpoint cannot be much older than the
+   * checkpoint itself. `journal_lines.created_at` is stamped by the app process, so the margin is generous.
+   * When a capture finds a gap WITH the hint it is retried once without it before a failure is recorded.
+   */
+  createdAtMarginSeconds?: number;
+}
+
+const DEFAULT_MARGIN_SECONDS = 2 * 86_400;
+
+interface ShardSnapshotRow {
+  balance: string;
+  line_seq: string;
+  cp_balance: string;
+  cp_seq: string;
+  found: string;
+  delta: string;
+}
+
+const snapshotSql = (withHint: boolean): string => `
+  WITH s AS (
+    SELECT sh.current_balance AS balance, sh.line_seq AS line_seq,
+           COALESCE(c.checkpoint_balance, 0) AS cp_balance, COALESCE(c.checkpoint_seq, 0) AS cp_seq,
+           c.checkpoint_at AS cp_at
+    FROM gl_account_shards sh
+    LEFT JOIN gl_shard_checkpoints c ON c.gl_account_id = sh.gl_account_id AND c.shard_id = sh.shard_id
+    WHERE sh.gl_account_id = $1::uuid AND sh.shard_id = $2::smallint
+  ), d AS (
+    SELECT COUNT(jl.shard_seq)::bigint AS found,
+           COALESCE(SUM(CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END), 0) AS delta
+    FROM s
+    LEFT JOIN journal_lines jl
+      ON jl.gl_account_id = $1::uuid AND jl.shard_id = $2::smallint
+     AND jl.shard_seq > s.cp_seq AND jl.shard_seq <= s.line_seq
+     ${withHint ? "AND (s.cp_at IS NULL OR jl.created_at >= (s.cp_at AT TIME ZONE 'UTC') - make_interval(secs => $3::double precision))" : ""}
+  )
+  SELECT s.balance::text AS balance, s.line_seq::text AS line_seq, s.cp_balance::text AS cp_balance,
+         s.cp_seq::text AS cp_seq, (CASE WHEN s.line_seq > s.cp_seq THEN d.found ELSE 0 END)::text AS found, d.delta::text AS delta
+  FROM s, d`;
 
 export class CheckpointService {
-  private readonly client: CheckpointPrismaClient;
-  private readonly parity: ParityMode;
-  private readonly onParityMismatch?: (mismatch: ShardParityMismatch) => void;
+  private readonly margin: number;
 
-  constructor(client: CheckpointPrismaClient, options: CheckpointServiceOptions = {}) {
-    this.client = client;
-    this.parity = options.parity ?? "enforce";
-    this.onParityMismatch = options.onParityMismatch;
+  constructor(
+    private readonly db: CheckpointDb,
+    options: CheckpointServiceOptions = {},
+  ) {
+    this.margin = options.createdAtMarginSeconds ?? DEFAULT_MARGIN_SECONDS;
   }
 
-  /**
-   * Captures a checkpoint atomically: the account lock, the snapshot sum, the
-   * parity check and the write happen in ONE database transaction, and the
-   * default `asOf` is the DATABASE clock (`clock_timestamp()` after the lock
-   * is held), never the application clock. Journal lines carry database
-   * timestamps, so mixing in an app timestamp let a skewed node include or
-   * skip lines at the checkpoint boundary.
-   */
-  async captureCheckpoint(accountId: string, asOf?: Date, checkpointId?: string): Promise<CheckpointRecord> {
-    if (typeof this.client.$transaction === "function") {
-      return (await this.client.$transaction(
-        (tx) => this.captureWithin(tx as CheckpointPrismaClient, accountId, asOf, checkpointId),
-        { timeout: 30_000 },
-      )) as CheckpointRecord;
-    }
-    return this.captureWithin(this.client, accountId, asOf, checkpointId);
-  }
-
-  private async captureWithin(
-    client: CheckpointPrismaClient,
-    accountId: string,
-    asOfInput: Date | undefined,
-    checkpointId: string | undefined,
-  ): Promise<CheckpointRecord> {
-    // The checkpoint must serialise against a concurrent settlement sweep that
-    // is writing lines to the same account, otherwise the balance captured is
-    // a torn read. The row is locked for the duration of the transaction.
-    const account = await lockAccount(client, accountId);
-    if (!account) {
-      throw new Error(`GL account '${accountId}' does not exist`);
-    }
-    const asOf = asOfInput ?? (await databaseNow(client));
-    if (this.parity !== "off") {
-      const result = await checkShardParity(client, [accountId]);
-      for (const mismatch of result.mismatches) {
-        this.onParityMismatch?.(mismatch);
-        if (this.parity === "enforce") {
-          throw new ShardParityError(mismatch);
-        }
-      }
-    }
-    const lines = await client.journalLine.findMany({ where: { glAccountId: accountId } });
-    const balance = sumLines(lines, undefined, asOf);
-    let id = checkpointId;
-    if (!id && client.journalEntry) {
-      const entry = await client.journalEntry.findFirst({
-        where: {},
-        orderBy: { createdAt: "desc" },
-      });
-      id = entry?.id;
-    }
-    if (!id) {
-      id = `checkpoint:${accountId}:${asOf.toISOString()}`;
-    }
-    await client.glAccount.update({
-      where: { id: accountId },
-      data: {
-        checkpointBalance: balance,
-        checkpointAt: asOf,
-        lastCheckpointId: id,
-      },
-    });
-    return { id, glAccountId: accountId, asOf, balance };
-  }
-
-  /**
-   * Runtime shard-vs-journal parity check (read only). Compares, for every
-   * account that has shard rows, the shard total with checkpoint + journal
-   * lines after the checkpoint. Returns the mismatches instead of throwing.
-   */
-  async verifyShardParity(accountIds?: readonly string[]): Promise<ShardParityResult> {
-    return checkShardParity(this.client, accountIds);
-  }
-
-  async getLiveBalance(accountId: string): Promise<AccountBalance> {
-    const account = await this.client.glAccount.findUnique({ where: { id: accountId } });
-    if (!account) {
-      throw new Error(`GL account '${accountId}' does not exist`);
-    }
-    const lines = await this.client.journalLine.findMany({ where: { glAccountId: accountId } });
-    const checkpointBalance = decimal(account.checkpointBalance ?? 0);
-    const delta = sumLines(lines, account.checkpointAt ?? undefined, undefined, true);
-    return {
-      accountId,
-      accountType: account.accountType,
-      checkpointBalance,
-      delta,
-      liveBalance: checkpointBalance.plus(delta),
-      checkpointAt: account.checkpointAt ?? undefined,
+  /** Reads and verifies one shard against its checkpoint WITHOUT moving it. */
+  async inspectShard(glAccountId: string, shardId: number): Promise<ShardCaptureResult> {
+    const read = async (withHint: boolean): Promise<ShardSnapshotRow | undefined> => {
+      const rows = await this.db.$queryRawUnsafe<ShardSnapshotRow[]>(
+        snapshotSql(withHint),
+        glAccountId,
+        shardId,
+        ...(withHint ? [this.margin] : []),
+      );
+      return rows[0];
     };
-  }
-
-  async getLiveBalances(accountIds?: readonly string[]): Promise<AccountBalance[]> {
-    if (accountIds) {
-      return Promise.all(accountIds.map((accountId) => this.getLiveBalance(accountId)));
+    let row = await read(true);
+    if (!row) {
+      throw new Error(`GL account '${glAccountId}' has no shard ${shardId}`);
     }
-    const balances: AccountBalance[] = [];
-    for (const account of await this.client.glAccount.findMany({ select: { id: true } })) {
-      balances.push(await this.getLiveBalance(account.id));
-    }
-    return balances;
-  }
-}
-
-/**
- * Reads the account under a row lock when the client supports it, so a
- * checkpoint cannot interleave with a posting that targets the same account.
- */
-async function lockAccount(client: CheckpointPrismaClient, accountId: string): Promise<LedgerAccountRecord | null> {
-  if (client.$queryRawUnsafe) {
-    const rows = (await client.$queryRawUnsafe(
-      "SELECT * FROM gl_accounts WHERE id = $1::uuid FOR UPDATE",
-      accountId,
-    )) as Array<Record<string, unknown>> | null;
-    const locked = Array.isArray(rows) ? rows[0] : undefined;
-    if (locked) {
-      return locked as unknown as LedgerAccountRecord;
-    }
-  }
-  return client.glAccount.findUnique({ where: { id: accountId } });
-}
-
-/** The database clock. The application clock is only a fallback for narrow test doubles. */
-async function databaseNow(client: CheckpointPrismaClient): Promise<Date> {
-  if (client.$queryRawUnsafe) {
-    const rows = (await client.$queryRawUnsafe("SELECT clock_timestamp() AS now")) as Array<{ now?: unknown }> | null;
-    const value = Array.isArray(rows) ? rows[0]?.now : undefined;
-    if (value instanceof Date && !Number.isNaN(value.getTime())) {
-      return value;
-    }
-    if (typeof value === "string") {
-      const parsed = new Date(value);
-      if (!Number.isNaN(parsed.getTime())) {
-        return parsed;
+    let verdict = this.judge(glAccountId, shardId, row);
+    if (verdict.status === "GAP") {
+      // The hint may have hidden a legitimately old line; look at the whole range before alarming.
+      const full = await read(false);
+      if (full) {
+        row = full;
+        verdict = this.judge(glAccountId, shardId, row);
       }
     }
+    return verdict;
   }
-  return new Date();
-}
 
-/**
- * Shard-vs-journal parity for the accounts that have shard rows. Rows that do
- * not look like parity rows (a narrow test double answering every raw query
- * with account rows) are ignored.
- */
-export async function checkShardParity(
-  client: Pick<CheckpointPrismaClient, "$queryRawUnsafe">,
-  accountIds?: readonly string[],
-): Promise<ShardParityResult> {
-  if (typeof client.$queryRawUnsafe !== "function") {
-    return { ok: true, checked: 0, mismatches: [] };
-  }
-  const filtered = accountIds !== undefined;
-  if (filtered && accountIds.length === 0) {
-    return { ok: true, checked: 0, mismatches: [] };
-  }
-  const rows = (await (filtered
-    ? client.$queryRawUnsafe(`${PARITY_SQL} WHERE g.id = ANY($1::uuid[])`, accountIds)
-    : client.$queryRawUnsafe(PARITY_SQL))) as Array<Record<string, unknown>> | null;
-  const mismatches: ShardParityMismatch[] = [];
-  let checked = 0;
-  for (const row of Array.isArray(rows) ? rows : []) {
-    if (row.shardTotal === undefined || row.journalTotal === undefined || row.id === undefined) {
-      continue;
+  private judge(glAccountId: string, shardId: number, row: ShardSnapshotRow): ShardCaptureResult {
+    const lineSeq = BigInt(row.line_seq);
+    const previousSeq = BigInt(row.cp_seq);
+    const found = BigInt(row.found);
+    const balance = decimal(row.balance);
+    const expected = decimal(row.cp_balance).plus(decimal(row.delta));
+    const drift = balance.minus(expected);
+    const base = {
+      glAccountId,
+      shardId,
+      balance,
+      lineSeq,
+      previousSeq,
+      linesFound: found,
+      drift,
+      firstFailure: false,
+    };
+    const expectedLines = lineSeq - previousSeq;
+    if (found !== expectedLines) {
+      return { ...base, status: "GAP", checkpointSeq: previousSeq, checkpointBalance: decimal(row.cp_balance), linesCovered: 0n };
     }
-    checked += 1;
-    const shardTotal = decimal(row.shardTotal as DecimalInput);
-    const journalTotal = decimal(row.journalTotal as DecimalInput);
-    const drift = shardTotal.minus(journalTotal);
     if (!drift.isZero()) {
-      mismatches.push({ accountId: String(row.id), shardTotal, journalTotal, drift });
+      return { ...base, status: "PARITY", checkpointSeq: previousSeq, checkpointBalance: decimal(row.cp_balance), linesCovered: 0n };
     }
+    if (expectedLines === 0n) {
+      return { ...base, status: "NOOP", checkpointSeq: previousSeq, checkpointBalance: decimal(row.cp_balance), linesCovered: 0n };
+    }
+    return { ...base, status: "ADVANCED", checkpointSeq: lineSeq, checkpointBalance: balance, linesCovered: expectedLines };
   }
-  return { ok: mismatches.length === 0, checked, mismatches };
-}
 
-function lineDate(line: JournalLineRecord): Date | undefined {
-  const candidate = line as JournalLineRecord & {
-    createdAt?: Date;
-    entry?: { createdAt?: Date };
-  };
-  return candidate.createdAt ?? candidate.entry?.createdAt;
-}
-
-function sumLines(
-  lines: readonly JournalLineRecord[],
-  after: Date | undefined,
-  before: Date | undefined,
-  afterExclusive = false,
-): Decimal {
-  let total = new Decimal(0);
-  for (const line of lines) {
-    const date = lineDate(line);
-    if (after && date) {
-      if (afterExclusive ? date.getTime() <= after.getTime() : date.getTime() < after.getTime()) {
-        continue;
+  /**
+   * Captures one shard. Returns the verdict; on ADVANCED the checkpoint row has been moved (monotonically:
+   * a concurrent capture that got further wins and this one reports NOOP). On GAP or PARITY nothing moves, the
+   * failure is recorded on the checkpoint row and `firstFailure` tells the caller whether to raise an alert.
+   */
+  async captureShard(glAccountId: string, shardId: number): Promise<ShardCaptureResult> {
+    const verdict = await this.inspectShard(glAccountId, shardId);
+    if (verdict.status === "ADVANCED") {
+      const moved = await this.db.$queryRawUnsafe<Array<{ moved: number }>>(
+        `INSERT INTO gl_shard_checkpoints AS c
+           (gl_account_id, shard_id, checkpoint_balance, checkpoint_seq, checkpoint_at, verified_at, status, failure_kind, consecutive_failures)
+         VALUES ($1::uuid, $2::smallint, $3::numeric, $4::bigint, now(), now(), 'OK', NULL, 0)
+         ON CONFLICT (gl_account_id, shard_id) DO UPDATE SET
+           checkpoint_balance = EXCLUDED.checkpoint_balance,
+           checkpoint_seq = EXCLUDED.checkpoint_seq,
+           checkpoint_at = now(), verified_at = now(),
+           status = 'OK', failure_kind = NULL, consecutive_failures = 0
+         WHERE c.checkpoint_seq < EXCLUDED.checkpoint_seq
+         RETURNING 1 AS moved`,
+        glAccountId,
+        shardId,
+        verdict.checkpointBalance.toFixed(4),
+        verdict.checkpointSeq.toString(),
+      );
+      if (moved.length === 0) {
+        return { ...verdict, status: "NOOP", checkpointSeq: verdict.previousSeq, linesCovered: 0n };
       }
+      return verdict;
     }
-    if (before && date && date.getTime() > before.getTime()) {
-      continue;
+    if (verdict.status === "NOOP") {
+      // Proven consistent with nothing to fold in: refresh `verified_at`, and clear an old failure.
+      await this.db.$queryRawUnsafe(
+        `UPDATE gl_shard_checkpoints SET verified_at = now(), status = 'OK', failure_kind = NULL, consecutive_failures = 0
+         WHERE gl_account_id = $1::uuid AND shard_id = $2::smallint AND (status <> 'OK' OR verified_at IS NULL OR verified_at < now() - interval '1 minute')`,
+        glAccountId,
+        shardId,
+      );
+      return verdict;
     }
-    const amount = decimal(line.amount);
-    total = line.direction === "DEBIT" ? total.plus(amount) : total.minus(amount);
+    const recorded = await this.db.$queryRawUnsafe<Array<{ consecutive_failures: number }>>(
+      `INSERT INTO gl_shard_checkpoints AS c
+         (gl_account_id, shard_id, status, failure_kind, consecutive_failures, last_failure_at)
+       VALUES ($1::uuid, $2::smallint, $3, $4, 1, now())
+       ON CONFLICT (gl_account_id, shard_id) DO UPDATE SET
+         status = EXCLUDED.status, failure_kind = EXCLUDED.failure_kind,
+         consecutive_failures = c.consecutive_failures + 1, last_failure_at = now()
+       RETURNING consecutive_failures`,
+      glAccountId,
+      shardId,
+      verdict.status,
+      verdict.status === "GAP"
+        ? `found ${verdict.linesFound} of ${verdict.lineSeq - verdict.previousSeq} lines`
+        : `drift ${verdict.drift.toFixed(4)}`,
+    );
+    return { ...verdict, firstFailure: Number(recorded[0]?.consecutive_failures ?? 0) === 1 };
   }
-  return total;
+
+  /** Captures every shard row of an account (the manual "checkpoint now" action). */
+  async captureAccount(glAccountId: string): Promise<ShardCaptureResult[]> {
+    const shards = await this.db.$queryRawUnsafe<Array<{ shard_id: number }>>(
+      `SELECT shard_id FROM gl_account_shards WHERE gl_account_id = $1::uuid ORDER BY shard_id`,
+      glAccountId,
+    );
+    const results: ShardCaptureResult[] = [];
+    for (const shard of shards) {
+      results.push(await this.captureShard(glAccountId, Number(shard.shard_id)));
+    }
+    return results;
+  }
+
+  /**
+   * Shards that deserve a checkpoint: enough new lines, or any new line and an old (or missing) checkpoint.
+   * Shards in a failed state are retried at most every `retryFailedSeconds`.
+   */
+  async findCandidates(options: {
+    minLines: number;
+    maxAgeSeconds: number;
+    retryFailedSeconds?: number;
+    limit: number;
+  }): Promise<Array<{ glAccountId: string; shardId: number; pendingLines: bigint }>> {
+    const rows = await this.db.$queryRawUnsafe<Array<{ id: string; shard_id: number; pending: string }>>(
+      `SELECT s.gl_account_id::text AS id, s.shard_id, (s.line_seq - COALESCE(c.checkpoint_seq, 0))::text AS pending
+       FROM gl_account_shards s
+       LEFT JOIN gl_shard_checkpoints c ON c.gl_account_id = s.gl_account_id AND c.shard_id = s.shard_id
+       WHERE s.line_seq > COALESCE(c.checkpoint_seq, 0)
+         AND (s.line_seq - COALESCE(c.checkpoint_seq, 0) >= $1::bigint
+              OR c.checkpoint_at IS NULL
+              OR c.checkpoint_at < now() - make_interval(secs => $2::double precision))
+         AND (COALESCE(c.status, 'OK') = 'OK'
+              OR c.last_failure_at IS NULL
+              OR c.last_failure_at < now() - make_interval(secs => $3::double precision))
+       ORDER BY (s.line_seq - COALESCE(c.checkpoint_seq, 0)) DESC
+       LIMIT $4::int`,
+      options.minLines,
+      options.maxAgeSeconds,
+      options.retryFailedSeconds ?? 600,
+      options.limit,
+    );
+    return rows.map((row) => ({ glAccountId: row.id, shardId: Number(row.shard_id), pendingLines: BigInt(row.pending) }));
+  }
 }

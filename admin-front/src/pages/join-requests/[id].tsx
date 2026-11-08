@@ -44,6 +44,7 @@ import { DescriptionList, type DescriptionItem } from "@/components/ui/Descripti
 import { MonoRef } from "@/components/ui/MonoRef";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { describeAuditChange } from "@/utils/auditSummary";
 const parse = (payload: unknown): JoinRequestDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
     return (source.joinRequest ?? source) as JoinRequestDetail;
@@ -121,25 +122,8 @@ const emptyOwner = (): OwnerForm => ({
 
 const clean = (value: string): string | undefined => (value.trim().length > 0 ? value.trim() : undefined);
 
-const auditValue = (value: unknown): string => {
-    if (value === null || value === undefined) return "—";
-    if (typeof value === "string") return value.length > 80 ? `${value.slice(0, 77)}…` : value;
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
-    try {
-        const text = JSON.stringify(value);
-        return text.length > 80 ? `${text.slice(0, 77)}…` : text;
-    } catch {
-        return String(value);
-    }
-};
-
-const auditChangeSummary = (entry: JoinAuditEntry): string => {
-    const before = jsonRecord(entry.beforeJson);
-    const after = jsonRecord(entry.afterJson);
-    const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)])).slice(0, 4);
-    if (keys.length === 0) return "";
-    return keys.map((key) => `${key}: ${auditValue(before[key])} → ${auditValue(after[key])}`).join(" · ");
-};
+const auditChangeSummary = (entry: { beforeJson?: unknown; afterJson?: unknown }): string =>
+    describeAuditChange(entry.beforeJson, entry.afterJson);
 
 const JoinRequestDetailPage = dc(() => {
     const { t } = useLocale();
@@ -560,12 +544,21 @@ const JoinRequestDetailPage = dc(() => {
             showSnackBar({ type: "warning", message: t("This file type cannot be previewed.") });
             return;
         }
+        // Open the tab synchronously, before the await: browsers only allow a
+        // popup from the click handler itself.
+        const target = window.open("", "_blank");
+        if (target) target.opener = null;
         try {
             const response = await api.get(urlsMap.kybDocumentContent(document.id), { responseType: "blob" });
             const url = URL.createObjectURL(new Blob([response.data], { type: mime }));
-            window.open(url, "_blank", "noopener,noreferrer");
+            if (target) {
+                target.location.href = url;
+            } else {
+                window.open(url, "_blank", "noopener,noreferrer");
+            }
             setTimeout(() => URL.revokeObjectURL(url), 60_000);
         } catch (cause) {
+            target?.close();
             showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
         }
     };

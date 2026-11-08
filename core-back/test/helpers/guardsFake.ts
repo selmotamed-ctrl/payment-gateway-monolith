@@ -25,6 +25,9 @@ import { createFakeRepositories } from "./fakeRepositories";
 export interface GuardState {
   merchant: MerchantRow;
   link: PaymentLinkRow;
+  /** Status of the link's application and wallet (the guard refuses a non-ACTIVE one). Defaults to ACTIVE. */
+  applicationStatus?: string;
+  walletStatus?: string;
   /** The attempts that already exist, the window of a velocity rule sees them. */
   attempts: PaymentAttemptRow[];
   amlCases: AmlCaseRow[];
@@ -643,7 +646,13 @@ export const createPrismaGuardFixture = (
     },
     application: {
       findUnique: async ({ where }: { where: { id: string } }) =>
-        where.id === state.link.applicationId ? { merchantId: state.merchant.id } : null,
+        where.id === state.link.applicationId
+          ? { merchantId: state.merchant.id, status: state.applicationStatus ?? "ACTIVE" }
+          : null,
+    },
+    wallet: {
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        where.id === state.link.walletId ? { status: state.walletStatus ?? "ACTIVE" } : null,
     },
     velocityRule: {
       findMany: async () => state.velocityRules,

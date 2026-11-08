@@ -134,7 +134,7 @@ export const assertAllowedUpload = (
 export const zListQuery = z
   .object({
     search: z.string().max(200).optional(),
-    page: z.coerce.number().int().min(1).max(10000).optional(),
+    page: z.coerce.number().int().min(1).optional(),
     pageSize: z.coerce.number().int().min(1).max(200).optional(),
     sortKey: z.string().max(64).optional(),
     sortDirection: z.enum(["asc", "desc"]).optional(),

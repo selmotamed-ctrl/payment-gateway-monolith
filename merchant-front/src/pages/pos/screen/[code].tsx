@@ -45,7 +45,34 @@ const PosScreenPage = dc(() => {
     const applyFrame = (data: string) => {
         try {
             const payload = JSON.parse(data);
-            state.value = payload.screen ?? payload;
+            if (payload?.screen) {
+                state.value = payload.screen as ScreenState;
+                error.value = null;
+                return;
+            }
+            // The stream sends `event: attempts` with an array of attempt rows.
+            const attempts = Array.isArray(payload)
+                ? payload
+                : Array.isArray(payload?.attempts)
+                    ? payload.attempts
+                    : [];
+            const latest = attempts[0] ?? null;
+            if (!latest) {
+                error.value = null;
+                return;
+            }
+            const previous = state.value;
+            state.value = {
+                screenCode: code(),
+                merchantName: user.value?.userInfo?.merchantTradeName ?? previous?.merchantName ?? "",
+                linkKey: previous?.linkKey ?? null,
+                amount: latest.totalChargedAmount ?? latest.requestedAmount ?? previous?.amount ?? null,
+                currency: latest.currency ?? previous?.currency ?? null,
+                railCode: latest.railCode ?? previous?.railCode ?? null,
+                status: latest.status ?? previous?.status ?? null,
+                reference: latest.reference ?? previous?.reference ?? null,
+                updatedAt: latest.updatedAt ?? latest.createdAt ?? previous?.updatedAt ?? null,
+            };
             error.value = null;
         } catch {
             error.value = t("Something went wrong");

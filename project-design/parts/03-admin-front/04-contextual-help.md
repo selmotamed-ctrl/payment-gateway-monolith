@@ -36,7 +36,7 @@ gaps:
 
 ## 1. Purpose and scope
 
-This part owns the admin contextual-help button and drawer, the 23-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
+This part owns the admin contextual-help button and drawer, the 25-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
 
 ## 2. As-built architecture
 

@@ -2,8 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { Decimal } from "decimal.js";
 import type { PrismaClient } from "../../generated/prisma/client";
 import { LedgerPoster, type JournalTemplate } from "../../engine/ledger/LedgerPoster";
-import { createLedgerShardWriter } from "../../lib/storageEngine/ledgerShardWriter";
-import { shardIdForAttempt } from "../../lib/storageEngine/shardBalances";
+import { clearShardWidthCache, routeLine } from "../../lib/storageEngine/shardRouting";
 import {
   cleanupLedger,
   createPrisma,
@@ -103,7 +102,8 @@ describeDatabase("ledger shard projection (live PostgreSQL)", () => {
       accountType: "MERCHANT_WALLET",
     });
     const accountIds = [system.id, merchant.id];
-    const poster = new LedgerPoster(client, undefined, createLedgerShardWriter(16));
+    clearShardWidthCache();
+    const poster = new LedgerPoster(client);
 
     try {
       const refs = new Set<string>();
@@ -113,7 +113,7 @@ describeDatabase("ledger shard projection (live PostgreSQL)", () => {
         for (;;) {
           const candidate = `${refPrefix}-${counter}`;
           counter += 1;
-          if (!refs.has(candidate) && shardIdForAttempt(candidate, "TREASURY") === wantedShard) {
+          if (!refs.has(candidate) && routeLine("TREASURY", "DEBIT", candidate, 16) === wantedShard) {
             refs.add(candidate);
             break;
           }
@@ -148,6 +148,12 @@ describeDatabase("ledger shard projection (live PostgreSQL)", () => {
       expect(
         systemShards.filter((row) => !new Decimal(row.currentBalance.toString()).isZero()),
       ).toHaveLength(16);
+      // every shard owns a gapless sequence: line_seq is the number of lines posted to it
+      for (const shard of systemShards) {
+        const onShard = await client.journalLine.count({ where: { glAccountId: system.id, shardId: shard.shardId } });
+        expect(shard.lineSeq).toBe(BigInt(onShard));
+        expect(onShard).toBeGreaterThan(0);
+      }
 
       const merchantShards = await client.glAccountShard.findMany({
         where: { glAccountId: merchant.id },
@@ -181,7 +187,8 @@ describeDatabase("ledger shard projection (live PostgreSQL)", () => {
       accountType: "MERCHANT_WALLET",
     });
     const accountIds = [system.id, merchant.id];
-    const poster = new LedgerPoster(client, undefined, createLedgerShardWriter(16));
+    clearShardWidthCache();
+    const poster = new LedgerPoster(client);
 
     try {
       const refs = Array.from(
@@ -220,23 +227,48 @@ describeDatabase("ledger shard projection (live PostgreSQL)", () => {
     }
   });
 
-  test("ensureAccountShards provisions the full shard set idempotently", async () => {
+  test("ensureAccountShards provisions the full shard set idempotently and never touches existing shard rows", async () => {
     const { ensureAccountShards } = await import("../../lib/storageEngine/ledgerShardWriter");
-    const account = await seedGlAccount(client, { shardCount: 0 });
+    // The account starts with shard 0 (created by the gl_accounts_create_shards trigger).
+    const account = await seedGlAccount(client, { shardCount: 1 });
+    const refPrefix = uniqueId("ensure-shards");
     try {
       const executor = client as unknown as {
         $executeRawUnsafe: (query: string, ...values: unknown[]) => Promise<number>;
       };
+      expect(await client.glAccountShard.count({ where: { glAccountId: account.id } })).toBe(1);
+      await new LedgerPoster(client).post(
+        {
+          refType: "ADJUSTMENT",
+          refId: `${refPrefix}-seed`,
+          description: "ensure shards",
+          lines: [
+            { direction: "DEBIT", amount: "2.0000", account: { accountType: "TREASURY", accountId: account.id } },
+            { direction: "CREDIT", amount: "2.0000", account: { accountType: "TREASURY", accountId: account.id } },
+          ],
+        },
+        { currency: "LYD" },
+      );
+      const before = await client.glAccountShard.findUniqueOrThrow({ where: { glAccountId_shardId: { glAccountId: account.id, shardId: 0 } } });
+      expect(before.lineSeq).toBe(2n);
+
       await ensureAccountShards(executor, account.id, 16);
-      expect(
-        await client.glAccountShard.count({ where: { glAccountId: account.id } }),
-      ).toBe(16);
+      expect(await client.glAccountShard.count({ where: { glAccountId: account.id } })).toBe(16);
       await ensureAccountShards(executor, account.id, 16);
-      expect(
-        await client.glAccountShard.count({ where: { glAccountId: account.id } }),
-      ).toBe(16);
+      expect(await client.glAccountShard.count({ where: { glAccountId: account.id } })).toBe(16);
+      // existing rows keep their sequence and balance (ON CONFLICT DO NOTHING)
+      const after = await client.glAccountShard.findUniqueOrThrow({ where: { glAccountId_shardId: { glAccountId: account.id, shardId: 0 } } });
+      expect(after.lineSeq).toBe(2n);
+      // `from` only creates the range above it; narrowing or an equal width is a no-op; the width is clamped to 256
+      await ensureAccountShards(executor, account.id, 20, 16);
+      expect(await client.glAccountShard.count({ where: { glAccountId: account.id } })).toBe(20);
+      await ensureAccountShards(executor, account.id, 4);
+      await ensureAccountShards(executor, account.id, 20, 20);
+      expect(await client.glAccountShard.count({ where: { glAccountId: account.id } })).toBe(20);
+      await ensureAccountShards(executor, account.id, 100_000, 250);
+      expect(await client.glAccountShard.count({ where: { glAccountId: account.id } })).toBe(26);
     } finally {
-      await cleanupLedger(client, [account.id], uniqueId("ensure-unused"));
+      await cleanupLedger(client, [account.id], refPrefix);
     }
   });
 });

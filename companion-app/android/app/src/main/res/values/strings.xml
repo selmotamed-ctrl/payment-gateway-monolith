@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PG Companion</string>
+    <string name="title_activity_main">PG Companion</string>
+    <string name="package_name">ly.paymentgateway.companion</string>
+    <string name="custom_url_scheme">ly.paymentgateway.companion</string>
+    <string name="shortcut_continue">Continue reading</string>
+    <string name="shortcut_continue_long">Continue reading the Guide or Academy</string>
+    <string name="shortcut_search">Search</string>
+    <string name="shortcut_search_long">Search the offline Guide and Academy</string>
+    <string name="shortcut_saved">Saved</string>
+    <string name="shortcut_saved_long">Open bookmarks and highlights</string>
+    <string name="shortcut_guide">Open Guide</string>
+    <string name="shortcut_guide_long">Open the interactive Guide</string>
+</resources>

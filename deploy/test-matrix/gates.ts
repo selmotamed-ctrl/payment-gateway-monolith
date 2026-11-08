@@ -151,11 +151,23 @@ const invariantChecks = (ctx: GateContext): GateCheck[] => {
     SELECT gl_account_id, SUM(current_balance) AS shard_total FROM gl_account_shards GROUP BY gl_account_id
   ) sh USING (gl_account_id)
   WHERE COALESCE(jl.journal_total, 0) <> COALESCE(sh.shard_total, 0)`);
+  // Per shard: balance = sum of its lines, checkpoint = sum of its lines up to the checkpoint sequence, and the
+  // sequenced line count equals line_seq (gapless). See BALANCE_PARITY_QUERY in the restore drill.
+  const shardProof = scalar(ctx, `SELECT COUNT(*)::text FROM gl_account_shards s
+    LEFT JOIN gl_shard_checkpoints c ON c.gl_account_id = s.gl_account_id AND c.shard_id = s.shard_id
+    CROSS JOIN LATERAL (
+      SELECT COALESCE(SUM(x.signed), 0) AS total,
+             COALESCE(SUM(x.signed) FILTER (WHERE x.shard_seq <= COALESCE(c.checkpoint_seq, 0)), 0) AS upto_checkpoint,
+             COUNT(*) FILTER (WHERE x.shard_seq > COALESCE(c.baseline_seq, 0)) AS sequenced
+      FROM (SELECT CASE WHEN l.direction = 'DEBIT' THEN l.amount ELSE -l.amount END AS signed, l.shard_seq
+            FROM journal_lines l WHERE l.gl_account_id = s.gl_account_id AND l.shard_id = s.shard_id) x) j
+    WHERE s.current_balance <> j.total OR COALESCE(c.checkpoint_balance, 0) <> j.upto_checkpoint OR j.sequenced <> s.line_seq - COALESCE(c.baseline_seq, 0)`);
   // Compare the decimal string exactly; never parse money into a float.
   const zero = /^-?0(\.0+)?$/.test(drift);
   return [
     check("double-entry drift is exactly zero", zero, `drift=${drift} LYD`, { drift }),
     check("gl_account_shards equals journal_lines", shardMismatch === 0, `mismatched accounts=${shardMismatch}`, { shardMismatch }),
+    check("every shard proves its checkpoint and sequence", shardProof === 0, `failing shards=${shardProof}`, { shardProof }),
   ];
 };
 
@@ -559,12 +571,38 @@ const gateBackup = async (ctx: GateContext): Promise<GateCheck[]> => {
     if (["PASSED", "SUCCEEDED", "COMPLETED", "FAILED"].includes(finalStatus)) break;
   }
   const drill = await adminFetch(ctx, token, "/system/backups/drill", { method: "POST", body: JSON.stringify({}) });
+  const drillBody = await drill.json().catch(() => ({})) as { drillId?: string };
+  // The drill is asynchronous: poll the overview until THIS drill reaches a
+  // terminal status, then assert the restored copy is internally consistent.
+  interface LatestDrill {
+    id?: string;
+    status?: string;
+    doubleEntryDrift?: number | string | null;
+    balanceMismatches?: number | null;
+    auditBrokenLinks?: number | null;
+  }
+  let latestDrill: LatestDrill | undefined;
+  const drillStarted = Date.now();
+  while (drill.ok && drillBody.drillId && Date.now() - drillStarted < ctx.intensity.slo.backupTimeoutSec * 1000) {
+    await sleep(2_000);
+    const response = await adminFetch(ctx, token, "/system/backups/overview");
+    const body = await response.json().catch(() => ({})) as { latestDrill?: LatestDrill | null };
+    if (body.latestDrill?.id === drillBody.drillId) {
+      latestDrill = body.latestDrill;
+      if (latestDrill.status === "PASSED" || latestDrill.status === "FAILED") break;
+    }
+  }
+  const drillDone = latestDrill?.status === "PASSED" || latestDrill?.status === "FAILED";
+  const drillSummary = `drill=${drillBody.drillId ?? "none"} status=${latestDrill?.status ?? "UNKNOWN"} after ${Math.round((Date.now() - drillStarted) / 1000)}s`;
   return [
     check("backup overview is reachable", overview.ok, `status=${overview.status}`),
     check("backup overview reports WAL archiving healthy", overviewBody.walArchiveHealthy === true, JSON.stringify(overviewBody).slice(0, 200)),
     check(`full backup completes within ${ctx.intensity.slo.backupTimeoutSec}s`, ["PASSED", "SUCCEEDED", "COMPLETED"].includes(finalStatus), `trigger=${trigger.status} job=${triggerBody.backupJobId ?? "none"} status=${finalStatus} after ${Math.round((Date.now() - started) / 1000)}s`),
-    check("restore drill is accepted", drill.ok, `status=${drill.status}`),
-    skip("restore drill completes", "drill completion is not polled yet (daemon /v1/runs not wired)"),
+    check("restore drill is accepted", drill.ok && Boolean(drillBody.drillId), `status=${drill.status} drill=${drillBody.drillId ?? "none"}`),
+    check("restore drill completes and passes", drillDone && latestDrill?.status === "PASSED", drillSummary, latestDrill ? { drillStatus: latestDrill.status ?? "UNKNOWN", doubleEntryDrift: String(latestDrill.doubleEntryDrift), balanceMismatches: String(latestDrill.balanceMismatches), auditBrokenLinks: String(latestDrill.auditBrokenLinks) } : undefined),
+    check("restored copy has zero double-entry drift", drillDone && Number(latestDrill?.doubleEntryDrift) === 0, `doubleEntryDrift=${String(latestDrill?.doubleEntryDrift)}`),
+    check("restored copy has no balance mismatches", drillDone && latestDrill?.balanceMismatches === 0, `balanceMismatches=${String(latestDrill?.balanceMismatches)}`),
+    check("restored audit chain has no broken links", drillDone && latestDrill?.auditBrokenLinks === 0, `auditBrokenLinks=${String(latestDrill?.auditBrokenLinks)}`),
   ];
 };
 

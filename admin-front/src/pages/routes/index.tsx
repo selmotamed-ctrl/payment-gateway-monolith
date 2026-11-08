@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale, useTheme } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAlert, VBtn, VSelect, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -31,6 +31,31 @@ import { FormChecklist } from "@/components/ui/FormChecklist";
 import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { SectionFields } from "@/components/SectionFields";
+import { CostModelBuilder } from "@/components/builders/CostModelBuilder";
+import { MismatchPolicyBuilder, RouteScopeBuilder } from "@/components/builders/RouteScopeBuilder";
+import { MaintenanceWindowsBuilder } from "@/components/builders/MaintenanceWindowsBuilder";
+import { KeyValueSummary } from "@/components/builders/KeyValueSummary";
+import {
+    formatCostModel,
+    isScopeEmpty,
+    parseCostModel,
+    parseMaintenanceWindows,
+    parseMismatchPolicy,
+    parseRouteScope,
+    serializeCostModel,
+    serializeMaintenanceWindows,
+    serializeMismatchPolicy,
+    serializeRouteScope,
+    validateCostModel,
+    validateMaintenanceWindows,
+    validateMismatchPolicy,
+    validateRouteScope,
+    type CostModelState,
+    type MaintenanceWindowRow,
+    type MismatchPolicyState,
+    type RouteScopeState,
+} from "@/components/builders/model";
+import { toCapView, type RouteCapRow, type RouteCapView } from "@/pages/finance/liquidity/routeCaps";
 const SUMMARY_EXPORT_CHECKS = [
     { key: "ROUTE_SCOPE_VERIFIED", label: "Route portfolio scope verified" },
     { key: "STATUS_HEALTH_REVIEWED", label: "Status and health reviewed" },
@@ -61,6 +86,8 @@ type GatewayRoute = {
     status: string;
     healthState: string;
     scope: unknown;
+    mismatchPolicy?: unknown;
+    maintenanceWindows?: unknown;
 };
 
 type RouteSummary = {
@@ -105,10 +132,13 @@ const RoutesPage = dc(() => {
         minAmount: "",
         maxAmount: "",
         dailyCapAmount: "",
-        costModel: "{}",
-        scope: "{}",
         status: "ACTIVE",
     });
+    const costState = ref<CostModelState>(parseCostModel({}));
+    const scopeState = ref<RouteScopeState>(parseRouteScope({}));
+    const mismatchState = ref<MismatchPolicyState>(parseMismatchPolicy({}));
+    const windowRows = ref<MaintenanceWindowRow[]>([]);
+    const routeCaps = ref<Record<string, RouteCapView>>({});
     const createOpen = ref(false);
     const creating = ref(false);
     const routeForm = ref({ railId: "", gatewayId: "", priority: 100, limitAmount: "" });
@@ -187,6 +217,7 @@ const RoutesPage = dc(() => {
     const refreshAll = () => {
         refreshHook.value?.reset();
         void loadSummary();
+        void loadRouteCaps();
     };
 
     const onFiltersChanged = (key: string, value: unknown) => {
@@ -200,7 +231,20 @@ const RoutesPage = dc(() => {
         refreshHook.value?.reset();
     };
 
+    /** Live daily-cap utilisation per route (needs `finance:read`; the badges are simply absent without it). */
+    const loadRouteCaps = async () => {
+        try {
+            const response = await api.get(urlsMap.financeRouteCaps);
+            const payload = response.data?.data ?? response.data ?? {};
+            const rows = (payload.routes ?? []) as RouteCapRow[];
+            routeCaps.value = Object.fromEntries(rows.map((row) => [row.routeId, toCapView(row)]));
+        } catch {
+            routeCaps.value = {};
+        }
+    };
+
     void loadSummary();
+    void loadRouteCaps();
 
     const openCreateRoute = async () => {
         createOpen.value = true;
@@ -265,10 +309,12 @@ const RoutesPage = dc(() => {
             minAmount: route.minAmount ?? "",
             maxAmount: route.maxAmount ?? "",
             dailyCapAmount: route.dailyCapAmount ?? "",
-            costModel: JSON.stringify(route.costModel ?? {}, null, 2),
-            scope: JSON.stringify(route.scope ?? {}, null, 2),
             status: route.status,
         };
+        costState.value = parseCostModel(route.costModel);
+        scopeState.value = parseRouteScope(route.scope);
+        mismatchState.value = parseMismatchPolicy(route.mismatchPolicy);
+        windowRows.value = parseMaintenanceWindows(route.maintenanceWindows);
         routeEditChecklist.value = {};
         dialogOpen.value = true;
     };
@@ -305,13 +351,28 @@ const RoutesPage = dc(() => {
         if (!editingRoute.value || actionLoading.value) {
             return;
         }
-        let costModel: unknown;
-        let scope: unknown;
-        try {
-            costModel = JSON.parse(routeEditForm.value.costModel || "{}");
-            scope = JSON.parse(routeEditForm.value.scope || "{}");
-        } catch {
-            showSnackBar({ type: "error", message: t("Cost model and scope must be valid JSON") });
+        if (validateCostModel(costState.value.form).length > 0) {
+            showSnackBar({ type: "error", message: t("Fix the cost model errors before saving") });
+            return;
+        }
+        if (validateRouteScope(scopeState.value.form).length > 0) {
+            showSnackBar({ type: "error", message: t("Fix the scope errors before saving") });
+            return;
+        }
+        if (validateMismatchPolicy(mismatchState.value) !== null) {
+            showSnackBar({ type: "error", message: t("The mismatch tolerance must be a non-negative amount with up to 4 decimals") });
+            return;
+        }
+        if (validateMaintenanceWindows(windowRows.value).length > 0) {
+            showSnackBar({ type: "error", message: t("Fix the maintenance window errors before saving") });
+            return;
+        }
+        const costModel = serializeCostModel(costState.value);
+        const scope = serializeRouteScope(scopeState.value);
+        // The API merges `scope` / `costModel` only when they are not empty, so an emptied scope cannot be saved as "no scope".
+        const hadScope = Object.keys(parseRouteScope(editingRoute.value.scope).extras).length > 0 || !isScopeEmpty(parseRouteScope(editingRoute.value.scope).form);
+        if (hadScope && Object.keys(scope).length === 0) {
+            showSnackBar({ type: "warning", message: t("The route scope cannot be cleared through the API. Keep at least one restriction.") });
             return;
         }
         if (!routeEditChecklistComplete.value) {
@@ -328,8 +389,11 @@ const RoutesPage = dc(() => {
                 ...(form.minAmount.trim() ? { minAmount: form.minAmount.trim() } : {}),
                 ...(form.maxAmount.trim() ? { maxAmount: form.maxAmount.trim() } : {}),
                 ...(form.dailyCapAmount.trim() ? { dailyCapAmount: form.dailyCapAmount.trim() } : {}),
-                ...(costModel && typeof costModel === "object" && Object.keys(costModel as object).length ? { costModel } : {}),
-                ...(scope && typeof scope === "object" && Object.keys(scope as object).length ? { scope } : {}),
+                ...(Object.keys(costModel).length ? { costModel } : {}),
+                ...(Object.keys(scope).length ? { scope } : {}),
+                // Both are sent even when empty: an empty list / policy is how an operator clears them.
+                mismatchPolicy: serializeMismatchPolicy(mismatchState.value),
+                maintenanceWindows: serializeMaintenanceWindows(windowRows.value),
                 checklist: ROUTE_EDIT_CHECKS.filter((check) => routeEditChecklist.value[check.key]).map((check) => check.key),
             });
             if (form.status !== editingRoute.value.status) {
@@ -427,7 +491,19 @@ const RoutesPage = dc(() => {
         { key: "gatewayCode", label: "Gateway Code", value: (row) => row.gatewayCode, Value: ({ row }) => <MonoRef value={row.gatewayCode} /> },
         { key: "credentialPolicy", label: "Credential Policy", value: (row) => row.credentialPolicy },
         { key: "priority", label: "Priority", value: (row) => String(row.priority ?? "") },
-        { key: "costModel", label: "Cost Model", value: (row) => (typeof row.costModel === "string" ? row.costModel : JSON.stringify(row.costModel ?? {})) },
+        {
+            key: "costModel",
+            label: "Cost Model",
+            value: (row) => formatCostModel(row.costModel),
+            Value: ({ row }: { row: GatewayRoute }) => {
+                const text = formatCostModel(row.costModel, { labels: { min: t("min"), max: t("max"), tiers: t("tiers"), tiered: t("Tiered") } });
+                return text ? (
+                    <MetaPill size="x-small" variant="tonal" color="primary"><span dir="ltr">{text}</span></MetaPill>
+                ) : (
+                    <span style={{ color: "var(--pg-ink-faint)" }}>—</span>
+                );
+            },
+        },
         {
             key: "minAmount",
             label: "Amount",
@@ -440,7 +516,27 @@ const RoutesPage = dc(() => {
                 </div>
             ),
         },
-        { key: "dailyCapAmount", label: "Amount Due", value: (row) => row.dailyCapAmount, Value: ({ row }) => <MoneyDisplay amount={row.dailyCapAmount ?? "0"} currency={"LYD"} size="sm" /> },
+        {
+            key: "dailyCapAmount",
+            label: "Amount Due",
+            value: (row) => row.dailyCapAmount,
+            Value: ({ row }: { row: GatewayRoute }) => {
+                const cap = routeCaps.value[row.id];
+                return (
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                        <MoneyDisplay amount={row.dailyCapAmount ?? "0"} currency={"LYD"} size="sm" />
+                        {cap?.capped && (
+                            <StatusBadge
+                                status={cap.exhausted ? "DAILY_CAP_EXCEEDED" : "CAP_USED"}
+                                label={cap.exhausted ? t("Daily cap reached") : `${cap.utilisationLabel} ${t("of daily cap")}`}
+                                toneOverride={cap.tone}
+                                showDot={false}
+                            />
+                        )}
+                    </div>
+                );
+            },
+        },
         {
             key: "status",
             label: "Status",
@@ -633,20 +729,25 @@ const RoutesPage = dc(() => {
                             onUpdate:modelValue={(v: string) => (routeEditForm.value.status = v)}
                         />
                     </FormField>
-                    <FormField label={t("Cost model (JSON)")} style={{ gridColumn: "span 2" }} sensitiveMakerChecker>
-                        <VTextarea
-                            rows={4}
-                            modelValue={routeEditForm.value.costModel}
-                            onUpdate:modelValue={(v: string) => (routeEditForm.value.costModel = v)}
-                        />
-                    </FormField>
-                    <FormField label={t("Scope (JSON)")} style={{ gridColumn: "span 2" }} sensitiveMakerChecker>
-                        <VTextarea
-                            rows={3}
-                            modelValue={routeEditForm.value.scope}
-                            onUpdate:modelValue={(v: string) => (routeEditForm.value.scope = v)}
-                        />
-                    </FormField>
+                </SectionFields>
+                <SectionFields title={t("Cost model")} subtitle={t("How the platform estimates the cost of routing a payment through this route.")}>
+                    <div style={{ gridColumn: "1 / -1" }}>
+                        <CostModelBuilder modelValue={costState.value} onUpdate:modelValue={(value: CostModelState) => (costState.value = value)} />
+                    </div>
+                </SectionFields>
+                <SectionFields title={t("Scope and constraints")} subtitle={t("Restrict which traffic may use this route.")}>
+                    <div style={{ gridColumn: "1 / -1" }}>
+                        <RouteScopeBuilder modelValue={scopeState.value} onUpdate:modelValue={(value: RouteScopeState) => (scopeState.value = value)} />
+                    </div>
+                </SectionFields>
+                <SectionFields title={t("Mismatch policy and maintenance")} subtitle={t("The tolerance applies to settlement reconciliation; a route is hidden from checkout during a maintenance window (UTC).")}>
+                    <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <MismatchPolicyBuilder modelValue={mismatchState.value} onUpdate:modelValue={(value: MismatchPolicyState) => (mismatchState.value = value)} />
+                        {Object.keys(mismatchState.value.extras).length > 0 && (
+                            <KeyValueSummary value={mismatchState.value.extras} />
+                        )}
+                        <MaintenanceWindowsBuilder modelValue={windowRows.value} onUpdate:modelValue={(value: MaintenanceWindowRow[]) => (windowRows.value = value)} />
+                    </div>
                 </SectionFields>
                 <FormChecklist
                     checks={[...ROUTE_EDIT_CHECKS]}

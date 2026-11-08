@@ -130,14 +130,14 @@ PG_REPLICA_NODES="pg-rep-1@10.0.1.11:22:10.1.1.11:5432"
 PG_MANAGE_VIA_SSH="true"
 PG_PRIMARY_NODE="pg-pri@10.0.1.10:22:10.1.1.10:5432"
 PG_DB_NAME="pg_authoritative"
-PG_DB_USER="pg_authoritative_user"
+PG_DB_USER="gw_authoritative_user"
 PG_DB_PASSWORD="strong-pg-Xk7Qm2Zr"
 PG_SSH_KEY_PATH="~/.ssh/pg"
 `));
     const database = effectiveDatabase(config);
     expect(database.engine).toBe("postgresql");
     expect(database.name).toBe("pg_authoritative");
-    expect(database.user).toBe("pg_authoritative_user");
+    expect(database.user).toBe("gw_authoritative_user");
     expect(database.password).toBe("strong-pg-Xk7Qm2Zr");
     expect(database.host).toBe("10.1.1.10");
     expect(database.port).toBe(5432);
@@ -156,14 +156,21 @@ BACKUP_ENCRYPTION_KEY_HEX="9f3a7c1e5b2d84f06a1c3e7b9d2f4a8c5e0b6d1a3f7c9e2b4d8a0
     expect(result.problems.join(" ")).toContain("BACKUP_PRIMARY_S3_ENDPOINT must be an absolute http(s) URL");
   });
 
-  test("backup without S3 bucket or encryption key is rejected", () => {
-    const result = loadDeployConfig(withOverrides(`
+  test("backup without an encryption key is always rejected; S3 is required only by the engines that need it", () => {
+    const base = `
 BACKUP_ENABLED="true"
 BACKUP_NODE="backup-1@10.0.3.10:22:10.1.3.10:4090"
 BACKUP_SSH_KEY_PATH="~/.ssh/backup"
-`));
-    expect(result.ok).toBe(false);
-    const problems = result.problems.join(" ");
+`;
+    // default engine (pg-native): the key is required, S3 is optional (local repository only)
+    const native = loadDeployConfig(withOverrides(base));
+    expect(native.ok).toBe(false);
+    expect(native.problems.join(" ")).toContain("BACKUP_ENCRYPTION_KEY_HEX");
+    expect(native.problems.join(" ")).not.toContain("BACKUP_PRIMARY_S3_BUCKET");
+    // barman (explicit): S3 is required as well
+    const barman = loadDeployConfig(withOverrides(`${base}BACKUP_ENGINE_MODE="barman"\n`));
+    expect(barman.ok).toBe(false);
+    const problems = barman.problems.join(" ");
     expect(problems).toContain("BACKUP_PRIMARY_S3_BUCKET");
     expect(problems).toContain("BACKUP_ENCRYPTION_KEY_HEX");
     expect(problems).toContain("BACKUP_PRIMARY_S3_ENDPOINT");
@@ -175,7 +182,7 @@ BACKUP_SSH_KEY_PATH="~/.ssh/backup"
     expect(loadDeployConfig(text).ok).toBe(false);
     // ...but is otherwise structurally valid once every placeholder secret is replaced with a real-looking value.
     const filled = text.replace(/^([A-Z_]+)="[^"\n]*(?:change-me|changeme)[^"\n]*"/gim, (m, key: string) => (key === "DATABASE_URL" ? m : `${key}="Xk7Qm2Zr-${key.length}-9Lp4Vn8Bc3Wd6Th-Hy5Jp0Sa2Fg7"`))
-      .replace("postgresql://pg_core_user:change-me-strong-db-password@", "postgresql://pg_core_user:Xk7Qm2Zr-db_password-9Lp4Vn8Bc3Wd6Th@");
+      .replace("postgresql://gw_core_user:change-me-strong-db-password@", "postgresql://gw_core_user:Xk7Qm2Zr-db_password-9Lp4Vn8Bc3Wd6Th@");
     const example = requireConfig(filled);
     expect(example.PG_VERSION).toBe("18");
     expect(example.PGBOUNCER_PORT).toBe(6432);

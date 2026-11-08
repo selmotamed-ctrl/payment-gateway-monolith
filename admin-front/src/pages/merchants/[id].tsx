@@ -67,6 +67,24 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
+import { TableRowActions } from "@/components/Table/TableRowActions";
+import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
+import { walletActionsFor, type WalletAction } from "@/pages/wallets/walletActions";
+import { ApplicationDetailDrawer } from "./components/ApplicationDetailDrawer";
+import ReasonModal from "./components/ReasonModal";
+import BeneficialOwnersCard from "./components/BeneficialOwnersCard";
+import MerchantAccessCard from "./components/MerchantAccessCard";
+import RevalidationModal from "./components/RevalidationModal";
+import { AuditChangeChips } from "@/components/AuditChangeChips";
+import { summarizeAuditChange } from "@/utils/auditSummary";
+import { ApprovalSubmittedNotice, MiniTable, MoneyOrRestricted, PillList, RestrictedValue } from "./components/commerceBits";
+import { isRestricted } from "./commerceGovernance";
+import { notifyOutcome, reportCommerceError, runGoverned } from "./governedRequest";
+import { railWhitelistModeOf } from "@/pages/applications/applicationActions";
+import { KYB_DOC_TYPE_LABELS, type KybDocType } from "./revalidation";
+
 const parse = (payload: unknown): MerchantDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
     const merchant = ((source.merchant ?? source) ?? {}) as Record<string, any>;
@@ -101,16 +119,6 @@ const detailItem = (label: string, value: unknown, _hint?: string, _source?: str
               ? <MonoRef value={String(value)} />
               : String(value),
 });
-
-const jsonText = (value: unknown): string => {
-    if (value === undefined) return "";
-    if (typeof value === "string") return value;
-    try {
-        return JSON.stringify(value, null, 2);
-    } catch {
-        return String(value);
-    }
-};
 
 const readQueryString = (value: unknown): string | null => {
     const raw = Array.isArray(value) ? value[0] : value;
@@ -151,6 +159,16 @@ const MerchantDetailPage = dc(() => {
     const sectionCommandSeq = ref(0);
     const activeTab = ref<MerchantDetailTab>(readQueryString(route.query.tab) === "transactions" ? "transactions" : "all");
     const reference = computed(() => readQueryString(route.query.reference));
+    const openWallet = (id: string) => void router.push({ name: "WalletDetail", params: { id } });
+    const openApplicationId = ref<string | null>(null);
+    const openEntryId = ref<string | null>(null);
+    const revalidationOpen = ref(false);
+    const walletTarget = ref<{ wallet: MerchantWalletRow; action: WalletAction } | null>(null);
+    const walletSubmitting = ref(false);
+    const walletModalError = ref("");
+    const walletNotice = ref<{ approvalRequestId: string | null } | null>(null);
+    const walletRefresh = ref<(() => void) | null>(null);
+    const applicationRefresh = ref<(() => void) | null>(null);
 
     watch(
         () => readQueryString(route.query.tab),
@@ -166,6 +184,8 @@ const MerchantDetailPage = dc(() => {
     const canFinancial = computed(() => !isSupport.value && hasOneOfAuthorities(["merchant:write", "finance:read", "finance:write"]));
     const canAml = computed(() => !isSupport.value && hasOneOfAuthorities(["aml.read_confidential", "aml.review", "aml:read", "compliance:read"]));
     const canInquire = computed(() => hasOneOfAuthorities(["attempt:inquire"]));
+    const canKyb = computed(() => hasOneOfAuthorities(["kyb:write", "merchant:write"]));
+    const canWriteCommerce = computed(() => hasOneOfAuthorities(["merchant:write"]));
     const statusHelp = computed(() => merchantStatusHelp(merchant.value?.status ?? ""));
     const balance = computed(() => merchant.value?.walletBalance?.balance ?? null);
     const currency = computed(() => merchant.value?.walletBalance?.wallets?.[0]?.currency ?? "LYD");
@@ -224,8 +244,8 @@ const MerchantDetailPage = dc(() => {
         }
     };
 
-    const load = async () => {
-        loading.value = true;
+    const load = async (silent = false) => {
+        if (!silent) loading.value = true;
         error.value = null;
         try {
             const response = await api.get(urlsMap.merchantDetail(merchantId.value));
@@ -242,9 +262,13 @@ const MerchantDetailPage = dc(() => {
                 stats.value = null;
             }
         } catch (cause) {
-            error.value = extractApiErrorMessage(cause);
-            merchant.value = null;
-            stats.value = null;
+            if (silent && merchant.value) {
+                showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
+            } else {
+                error.value = extractApiErrorMessage(cause);
+                merchant.value = null;
+                stats.value = null;
+            }
         } finally {
             loading.value = false;
         }
@@ -302,6 +326,45 @@ const MerchantDetailPage = dc(() => {
             await load();
         } catch (cause) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
+        }
+    };
+
+    const reloadSilently = () => void load(true);
+
+    const entryLink = (id: string | null | undefined, restricted = false) => {
+        if (restricted) return <RestrictedValue />;
+        if (!id) return <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>;
+        return (
+            <VBtn
+                size="x-small"
+                variant="text"
+                style={{ textTransform: "none", paddingInline: "4px", minWidth: "0" }}
+                aria-label={t("Open journal entry")}
+                onClick={() => {
+                    openEntryId.value = id;
+                }}
+            >
+                <span dir="ltr" style={{ fontFamily: "var(--pg-font-mono)", fontSize: "11.5px" }}>{id.slice(0, 8)}</span>
+            </VBtn>
+        );
+    };
+
+    const submitWalletAction = async (reason: string) => {
+        const current = walletTarget.value;
+        if (!current) return;
+        walletSubmitting.value = true;
+        walletModalError.value = "";
+        try {
+            const outcome = await runGoverned(() => api.post(urlsMap.walletStatus(current.wallet.id), { status: current.action.targetStatus, reason }));
+            notifyOutcome(outcome, "Wallet frozen");
+            walletNotice.value = outcome.kind === "approval" ? { approvalRequestId: outcome.approvalRequestId } : null;
+            walletTarget.value = null;
+            walletRefresh.value?.();
+            reloadSilently();
+        } catch (cause) {
+            walletModalError.value = reportCommerceError(cause);
+        } finally {
+            walletSubmitting.value = false;
         }
     };
 
@@ -546,6 +609,12 @@ const MerchantDetailPage = dc(() => {
             });
         }
         headers.push({
+            key: "ledgerEntry",
+            label: "Ledger entry",
+            value: (row) => row.ledgerEntryId ?? "",
+            Value: ({ row }: { row: MerchantTransaction }) => entryLink(row.ledgerEntryId, (row.redactedFields ?? []).includes("ledgerEntryId")),
+        });
+        headers.push({
             key: "operatorCase",
             label: "Operator case",
             headerTooltip: COLUMN_HELP.transactionCase,
@@ -560,24 +629,90 @@ const MerchantDetailPage = dc(() => {
 
     const applicationHeaders = computed<TableHeader<MerchantApplicationRow>[]>(() => {
         const headers: TableHeader<MerchantApplicationRow>[] = [
-            { key: "name", label: "Application", sortKey: "name", headerTooltip: COLUMN_HELP.applicationName, value: (row) => row.name, Value: ({ row }: { row: MerchantApplicationRow }) => (
-                <ThemedView style={{ gap: "2px" }}>
-                    <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>{row.name}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.id}</ThemedText>
-                </ThemedView>
-            ) },
+            {
+                key: "name",
+                label: "Application",
+                sortKey: "name",
+                headerTooltip: COLUMN_HELP.applicationName,
+                value: (row) => row.name,
+                Value: ({ row }: { row: MerchantApplicationRow }) => (
+                    <ThemedView style={{ gap: "2px" }}>
+                        <VBtn
+                            size="small"
+                            variant="text"
+                            style={{ paddingInline: "2px", textTransform: "none", justifyContent: "flex-start", fontWeight: 600 }}
+                            onClick={() => {
+                                openApplicationId.value = row.id;
+                            }}
+                        >
+                            {row.name}
+                        </VBtn>
+                        <MonoRef value={row.id} truncate={14} />
+                    </ThemedView>
+                ),
+            },
             { key: "status", label: "Status", sortKey: "status", headerTooltip: COLUMN_HELP.applicationStatus, value: (row) => row.status, Value: ({ row }: { row: MerchantApplicationRow }) => <StatusBadge status={row.status} label={row.status} toneOverride={asBadgeTone(statusTone(row.status))} /> },
-            { key: "wallet", label: "Wallet", value: (row) => row.assignedWallet.id, Value: ({ row }: { row: MerchantApplicationRow }) => (
-                <ThemedView style={{ gap: "2px" }}>
-                    <ThemedText style={{ fontSize: "12px" }}>{row.assignedWallet.currency}</ThemedText>
-                    <ThemedText style={{ fontSize: "10px", opacity: 0.55, direction: "ltr" }}>{row.assignedWallet.id}</ThemedText>
-                </ThemedView>
-            ) },
+            {
+                key: "wallet",
+                label: "Wallet",
+                value: (row) => row.assignedWallet.id,
+                Value: ({ row }: { row: MerchantApplicationRow }) => (
+                    <ThemedView style={{ gap: "2px" }}>
+                        <ThemedText style={{ fontSize: "12px" }}>{row.assignedWallet.currency}</ThemedText>
+                        <MonoRef value={row.assignedWallet.id} truncate={14} />
+                    </ThemedView>
+                ),
+            },
             { key: "links", label: "Links / tokens", headerTooltip: COLUMN_HELP.applicationLinks, value: (row) => `${row.paymentLinkCount}/${row.accessTokenCount}`, Value: ({ row }: { row: MerchantApplicationRow }) => <ThemedText style={{ fontSize: "12px" }}>{row.paymentLinkCount} / {row.accessTokenCount}</ThemedText> },
             { key: "pos", label: "POS", value: (row) => String(row.posTerminalCount) },
-            { key: "railWhitelist", label: "Rails", headerTooltip: COLUMN_HELP.applicationRails, value: (row) => row.railWhitelistMode, Value: ({ row }: { row: MerchantApplicationRow }) => <StatusBadge status={row.railWhitelistMode} label={row.railWhitelistMode === "ALL" ? t("All rails") : row.railWhitelistMode === "NONE" ? t("No rails") : `${row.railWhitelistCount} ${t("rails")}`} toneOverride="neutral" /> },
+            {
+                key: "railWhitelist",
+                label: "Rails",
+                headerTooltip: COLUMN_HELP.applicationRails,
+                value: (row) => (row.railWhitelist ?? []).join(" ") || row.railWhitelistMode,
+                Value: ({ row }: { row: MerchantApplicationRow }) => {
+                    const mode = row.railWhitelist === undefined ? row.railWhitelistMode : railWhitelistModeOf(row.railWhitelist);
+                    if (mode === "ALL") return <StatusBadge status="ACTIVE" label={t("All rails")} toneOverride="neutral" />;
+                    if (mode === "NONE") return <StatusBadge status="BLOCKED" label={t("No rails")} toneOverride="warning" />;
+                    return row.railWhitelist ? <PillList items={row.railWhitelist} max={3} /> : <StatusBadge status="LIST" label={`${row.railWhitelistCount} ${t("rails")}`} toneOverride="neutral" />;
+                },
+            },
             { key: "domains", label: "Domains", headerTooltip: COLUMN_HELP.applicationDomains, value: (row) => String(row.redirectDomainCount) },
             { key: "createdAt", label: "Created", sortKey: "createdAt", value: (row) => row.createdAt, Value: ({ row }: { row: MerchantApplicationRow }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.createdAt)}</ThemedText> },
+            {
+                key: "actions",
+                label: "Action",
+                sortable: false,
+                Value: ({ row }: { row: MerchantApplicationRow }) => (
+                    <TableRowActions
+                        primaryAction={{
+                            label: t("Inspect"),
+                            icon: "mdi-application-outline",
+                            onClick: () => {
+                                openApplicationId.value = row.id;
+                            },
+                        }}
+                        items={[
+                            {
+                                key: "wallet",
+                                label: t("Open wallet"),
+                                icon: "mdi-wallet-outline",
+                                onClick: () => {
+                                    openWallet(row.assignedWallet.id);
+                                },
+                            },
+                            {
+                                key: "page",
+                                label: t("Open in Applications"),
+                                icon: "mdi-open-in-new",
+                                onClick: () => {
+                                    void router.push({ name: "Applications", query: { open: row.id } });
+                                },
+                            },
+                        ]}
+                    />
+                ),
+            },
         ];
         if (!isSupport.value) {
             headers.splice(3, 0, {
@@ -586,40 +721,90 @@ const MerchantDetailPage = dc(() => {
                 sortKey: "expectedMonthlyVolume",
                 headerTooltip: COLUMN_HELP.applicationVolume,
                 value: (row) => row.expectedMonthlyVolume ?? "",
-                Value: ({ row }: { row: MerchantApplicationRow }) => <MoneyDisplay amount={row.expectedMonthlyVolume} currency={row.assignedWallet.currency} size="sm" />,
+                Value: ({ row }: { row: MerchantApplicationRow }) => <MoneyOrRestricted amount={row.expectedMonthlyVolume} currency={row.assignedWallet.currency} restricted={isRestricted(row.redactedFields, "expectedMonthlyVolume", row.expectedMonthlyVolume)} />,
             });
         }
         return headers;
     });
 
-    const walletHeaders = computed<TableHeader<MerchantWalletRow>[]>(() => {
-        const headers: TableHeader<MerchantWalletRow>[] = [
-            { key: "id", label: "Wallet", headerTooltip: COLUMN_HELP.walletId, value: (row) => row.id, Value: ({ row }: { row: MerchantWalletRow }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.id}</ThemedText> },
-            { key: "currency", label: "Currency", sortKey: "currency", value: (row) => row.currency },
-            { key: "status", label: "Status", sortKey: "status", value: (row) => row.status, Value: ({ row }: { row: MerchantWalletRow }) => <StatusBadge status={row.status} label={row.status} toneOverride={asBadgeTone(statusTone(row.status))} /> },
-        ];
-        if (canFinancial.value) {
-            headers.push(
-                { key: "balance", label: "Ledger balance", headerTooltip: COLUMN_HELP.walletBalance, value: (row) => row.balance ?? "", Value: ({ row }: { row: MerchantWalletRow }) => <MoneyDisplay amount={row.balance} currency={row.currency} size="sm" /> },
-                { key: "checkpoint", label: "Checkpoint", headerTooltip: COLUMN_HELP.walletCheckpoint, value: (row) => row.checkpointBalance ?? "" },
-            );
-        }
-        headers.push(
-            { key: "applications", label: "Apps", value: (row) => String(row.applicationCount) },
-            { key: "links", label: "Links", value: (row) => String(row.paymentLinkCount) },
-            { key: "cashouts", label: "Cash-outs", headerTooltip: COLUMN_HELP.walletCashouts, value: (row) => `${row.pendingCashoutCount}/${row.cashoutCount}` },
-            { key: "createdAt", label: "Created", sortKey: "createdAt", value: (row) => row.createdAt, Value: ({ row }: { row: MerchantWalletRow }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.createdAt)}</ThemedText> },
-        );
-        return headers;
-    });
+    const walletHeaders = computed<TableHeader<MerchantWalletRow>[]>(() => [
+        {
+            key: "id",
+            label: "Wallet",
+            headerTooltip: COLUMN_HELP.walletId,
+            value: (row) => row.id,
+            Value: ({ row }: { row: MerchantWalletRow }) => (
+                <VBtn
+                    size="small"
+                    variant="text"
+                    style={{ paddingInline: "2px", textTransform: "none", justifyContent: "flex-start" }}
+                    onClick={() => {
+                        openWallet(row.id);
+                    }}
+                >
+                    <MonoRef value={row.id} truncate={14} />
+                </VBtn>
+            ),
+        },
+        { key: "currency", label: "Currency", sortKey: "currency", value: (row) => row.currency },
+        { key: "status", label: "Status", sortKey: "status", value: (row) => row.status, Value: ({ row }: { row: MerchantWalletRow }) => <StatusBadge status={row.status} label={row.status} toneOverride={asBadgeTone(statusTone(row.status))} /> },
+        {
+            key: "balance",
+            label: "Ledger balance",
+            headerTooltip: COLUMN_HELP.walletBalance,
+            value: (row) => row.balance ?? "",
+            Value: ({ row }: { row: MerchantWalletRow }) => <MoneyOrRestricted amount={row.balance} currency={row.currency} restricted={isRestricted(row.redactedFields, "balance", row.balance)} />,
+        },
+        {
+            key: "checkpoint",
+            label: "Checkpoint",
+            headerTooltip: COLUMN_HELP.walletCheckpoint,
+            value: (row) => row.checkpointBalance ?? "",
+            Value: ({ row }: { row: MerchantWalletRow }) => <MoneyOrRestricted amount={row.checkpointBalance} currency={row.currency} restricted={isRestricted(row.redactedFields, "checkpointBalance", row.checkpointBalance)} />,
+        },
+        { key: "applications", label: "Apps", value: (row) => String(row.applicationCount) },
+        { key: "links", label: "Links", value: (row) => String(row.paymentLinkCount) },
+        { key: "cashouts", label: "Cash-outs", headerTooltip: COLUMN_HELP.walletCashouts, value: (row) => `${row.pendingCashoutCount}/${row.cashoutCount}` },
+        { key: "createdAt", label: "Created", sortKey: "createdAt", value: (row) => row.createdAt, Value: ({ row }: { row: MerchantWalletRow }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.createdAt)}</ThemedText> },
+        {
+            key: "actions",
+            label: "Action",
+            sortable: false,
+            Value: ({ row }: { row: MerchantWalletRow }) => (
+                <TableRowActions
+                    primaryAction={{
+                        label: t("Inspect"),
+                        icon: "mdi-wallet-outline",
+                        onClick: () => {
+                            openWallet(row.id);
+                        },
+                    }}
+                    items={[
+                        ...walletActionsFor(row.status, { canWrite: canWriteCommerce.value }).map((action) => ({
+                            key: action.key,
+                            label: t(action.label),
+                            icon: action.icon,
+                            danger: action.danger,
+                            dividerBefore: true,
+                            onClick: () => {
+                                walletModalError.value = "";
+                                walletTarget.value = { wallet: row, action };
+                            },
+                        })),
+                    ]}
+                />
+            ),
+        },
+    ]);
 
     const cashoutHeaders: TableHeader<MerchantCashout>[] = [
         { key: "id", label: "Cash-out", value: (row) => row.id, Value: ({ row }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.id}</ThemedText> },
         { key: "amount", label: "Amount", sortKey: "amount", value: (row) => row.amount, Value: ({ row }) => <MoneyDisplay amount={row.amount} currency={row.currency} size="sm" /> },
         { key: "state", label: "State", sortKey: "state", value: (row) => row.state, Value: ({ row }) => <StatusBadge status={row.state} label={row.state} toneOverride={asBadgeTone(statusTone(row.state))} /> },
         { key: "wallet", label: "Wallet", value: (row) => row.wallet.id, Value: ({ row }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.wallet.id}</ThemedText> },
-        { key: "destination", label: "Destination", headerTooltip: COLUMN_HELP.cashoutDestination, value: (row) => JSON.stringify(row.destination), Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{String(row.destination.bank ?? row.destination.bankName ?? "—")} · {String(row.destination.account ?? row.destination.accountNumber ?? row.destination.iban ?? "—")}</ThemedText> },
+        { key: "destination", label: "Destination", headerTooltip: COLUMN_HELP.cashoutDestination, value: (row) => `${String(row.destination.bank ?? row.destination.bankName ?? "")} ${String(row.destination.account ?? row.destination.accountNumber ?? row.destination.iban ?? "")}`.trim(), Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{String(row.destination.bank ?? row.destination.bankName ?? "—")} · {String(row.destination.account ?? row.destination.accountNumber ?? row.destination.iban ?? "—")}</ThemedText> },
         { key: "adjustment", label: "Adjustment", value: (row) => row.adjustment?.state ?? "", Value: ({ row }) => row.adjustment ? <StatusBadge status={row.adjustment.state} label={row.adjustment.state} toneOverride={asBadgeTone(statusTone(row.adjustment.state))} /> : <ThemedText style={{ opacity: 0.55 }}>—</ThemedText> },
+        { key: "journal", label: "Journal entry", value: (row) => row.adjustment?.journalEntryId ?? "", Value: ({ row }) => entryLink(row.adjustment?.journalEntryId) },
         { key: "createdAt", label: "Created", sortKey: "createdAt", value: (row) => row.createdAt, Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.createdAt)}</ThemedText> },
     ];
 
@@ -632,6 +817,7 @@ const MerchantDetailPage = dc(() => {
         { key: "openedAt", label: "Opened", sortKey: "openedAt", value: (row) => row.openedAt, Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.openedAt)}</ThemedText> },
         { key: "evidenceDueAt", label: "Evidence due", sortKey: "evidenceDueAt", value: (row) => row.evidenceDueAt ?? "", Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.evidenceDueAt)}</ThemedText> },
         { key: "adjustment", label: "Adjustment", value: (row) => row.adjustment?.state ?? "", Value: ({ row }) => row.adjustment ? <StatusBadge status={row.adjustment.state} label={row.adjustment.state} toneOverride={asBadgeTone(statusTone(row.adjustment.state))} /> : <ThemedText style={{ opacity: 0.55 }}>—</ThemedText> },
+        { key: "journal", label: "Journal entry", value: (row) => row.adjustment?.journalEntryId ?? "", Value: ({ row }) => entryLink(row.adjustment?.journalEntryId) },
     ];
 
     const adjustmentHeaders: TableHeader<MerchantAdjustment>[] = [
@@ -642,7 +828,7 @@ const MerchantDetailPage = dc(() => {
         { key: "attempt", label: "Source attempt", value: (row) => row.sourceAttempt?.reference ?? "", Value: ({ row }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.sourceAttempt?.reference ?? "—"}</ThemedText> },
         { key: "dispute", label: "Dispute", value: (row) => row.dispute?.externalDisputeRef ?? "" },
         { key: "reason", label: "Reason", headerTooltip: COLUMN_HELP.adjustmentReason, value: (row) => row.reason },
-        { key: "journal", label: "Journal entry", value: (row) => row.journalEntryId ?? "" },
+        { key: "journal", label: "Journal entry", value: (row) => row.journalEntryId ?? "", Value: ({ row }) => entryLink(row.journalEntryId) },
         { key: "createdAt", label: "Created", sortKey: "createdAt", value: (row) => row.createdAt, Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.createdAt)}</ThemedText> },
     ];
 
@@ -662,7 +848,12 @@ const MerchantDetailPage = dc(() => {
         { key: "actor", label: "Actor", value: (row) => row.actorEmail, Value: ({ row }) => <ThemedText style={{ fontSize: "11px", direction: "ltr" }}>{row.actorEmail}</ThemedText> },
         { key: "entity", label: "Entity", value: (row) => `${row.entityType} ${row.entityId}`, Value: ({ row }) => <ThemedText style={{ fontSize: "10px", direction: "ltr", opacity: 0.7 }}>{row.entityType} · {row.entityId}</ThemedText> },
         { key: "approval", label: "Approval", value: (row) => row.approvalRequestId ?? "" },
-        { key: "change", label: "Change", value: (row) => row.redacted ? "" : `${JSON.stringify(row.before ?? {})} ${JSON.stringify(row.after ?? {})}`, Value: ({ row }) => <ThemedText style={{ fontSize: "10px", opacity: 0.7 }}>{row.redacted ? t("Restricted") : `${jsonText(row.before).slice(0, 60)} → ${jsonText(row.after).slice(0, 60)}`}</ThemedText> },
+        {
+            key: "change",
+            label: "Change",
+            value: (row) => (row.redacted ? "" : summarizeAuditChange(row.before, row.after).join(" ")),
+            Value: ({ row }) => (row.redacted ? <RestrictedValue /> : <AuditChangeChips before={row.before} after={row.after} />),
+        },
         { key: "createdAt", label: "Created", sortKey: "createdAt", value: (row) => row.createdAt, Value: ({ row }) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(row.createdAt)}</ThemedText> },
     ];
 
@@ -670,7 +861,7 @@ const MerchantDetailPage = dc(() => {
         { value: "all", label: t("All") },
         { value: "details", label: t("Details") },
         { value: "transactions", label: t("Transactions") },
-        ...(canFinancial.value ? [{ value: "wallets", label: t("Wallets") }] : []),
+        { value: "wallets", label: t("Wallets") },
         { value: "applications", label: t("Applications") },
         ...(canFinancial.value ? [{ value: "finance", label: t("Finance") }] : []),
         ...(!isSupport.value ? [{ value: "compliance", label: t("Compliance") }] : []),
@@ -831,7 +1022,7 @@ const MerchantDetailPage = dc(() => {
                         </>
                     )}
 
-                    {show("wallets") && canFinancial.value && (
+                    {show("wallets") && (
                         <CollapsibleSection
                             command={sectionCommand.value}
                             alwaysOpen={activeTab.value !== "all"}
@@ -840,6 +1031,12 @@ const MerchantDetailPage = dc(() => {
                             defaultOpen={true}
                             storageKey={`merchant:${merchantId.value}:wallets`}
                         >
+                            {walletNotice.value && (
+                                <ApprovalSubmittedNotice approvalRequestId={walletNotice.value.approvalRequestId} onDismiss={() => (walletNotice.value = null)} />
+                            )}
+                            {isSupport.value && (
+                                <VAlert type="info" variant="tonal" density="compact">{t("Balances are hidden for your role and shown as Restricted.")}</VAlert>
+                            )}
                             <MerchantResourceTable<MerchantWalletRow>
                                 title={t("Wallets")}
                                 url={urlsMap.merchantWallets(merchantId.value)}
@@ -848,6 +1045,7 @@ const MerchantDetailPage = dc(() => {
                                 filters={walletFilters()}
                                 pageSize={10}
                                 noElevation={true}
+                                onRefreshReady={(refresh) => (walletRefresh.value = refresh)}
                             />
                         </CollapsibleSection>
                     )}
@@ -870,6 +1068,7 @@ const MerchantDetailPage = dc(() => {
                                 filters={applicationFilters(entry.wallets ?? [])}
                                 pageSize={10}
                                 noElevation={true}
+                                onRefreshReady={(refresh) => (applicationRefresh.value = refresh)}
                             />
                         </CollapsibleSection>
                     )}
@@ -949,9 +1148,22 @@ const MerchantDetailPage = dc(() => {
                                             </ThemedView>
                                             {change.makerReason && <ThemedText style={{ fontSize: "12px" }}>{change.makerReason}</ThemedText>}
                                             <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatDateTime(change.createdAt)} · {change.mode}</ThemedText>
-                                            {change.makerUserId === currentUserId.value && ["DRAFT", "PENDING_REVIEW"].includes(change.state) && (
-                                                <VBtn size="x-small" variant="text" color="error" onClick={() => openWithdraw(change)}>{t("Withdraw")}</VBtn>
-                                            )}
+                                            {change.payloadDiffJson && <JsonDiffViewer diff={change.payloadDiffJson} />}
+                                            <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                                                <VBtn
+                                                    size="x-small"
+                                                    variant="text"
+                                                    prependIcon="mdi-open-in-new"
+                                                    onClick={() => {
+                                                        void router.push({ name: "Approvals", query: { open: change.id } });
+                                                    }}
+                                                >
+                                                    {t("Open in Approvals")}
+                                                </VBtn>
+                                                {change.makerUserId === currentUserId.value && ["DRAFT", "PENDING_REVIEW"].includes(change.state) && (
+                                                    <VBtn size="x-small" variant="text" color="error" onClick={() => openWithdraw(change)}>{t("Withdraw")}</VBtn>
+                                                )}
+                                            </ThemedView>
                                         </SurfaceCardText>
                                     </SurfaceCard>
                                 ))}
@@ -969,6 +1181,16 @@ const MerchantDetailPage = dc(() => {
                                         <StatusBadge status={amlCase.severity} label={amlCase.severity} toneOverride={asBadgeTone(statusTone(amlCase.severity))} />
                                         <ThemedText style={{ fontSize: "12px" }}>{amlCase.triggerReason}</ThemedText>
                                         <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{formatDateTime(amlCase.createdAt)}</ThemedText>
+                                        <VBtn
+                                            size="x-small"
+                                            variant="text"
+                                            prependIcon="mdi-open-in-new"
+                                            onClick={() => {
+                                                void router.push({ name: "AmlCases", query: { open: amlCase.id } });
+                                            }}
+                                        >
+                                            {t("Open case")}
+                                        </VBtn>
                                     </ThemedView>
                                 ))}
                             </SurfaceCardText>
@@ -996,61 +1218,88 @@ const MerchantDetailPage = dc(() => {
                         </SurfaceCard>
                     )}
 
-                    {show("compliance") && entry.kybDocuments && entry.kybDocuments.length > 0 && (
+                    {show("compliance") && !isSupport.value && (
                         <SurfaceCard>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("KYB evidence")}</ThemedText>
-                                    <VBtn size="small" variant="text" onClick={() => void router.push({ name: "KybReview" })}>{t("Open KYB review")}</VBtn>
+                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                <ThemedView style={{ flexDirection: "row", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+                                    <ThemedView style={{ gap: "2px" }}>
+                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("KYB evidence")}</ThemedText>
+                                        <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                                            {entry.kybStatus ? (
+                                                <StatusBadge status={entry.kybStatus} label={kybStatusHelp(entry.kybStatus).label} toneOverride={asBadgeTone(kybStatusHelp(entry.kybStatus).tone)} />
+                                            ) : (
+                                                <RestrictedValue />
+                                            )}
+                                            <ThemedText style={{ fontSize: "12px", opacity: 0.7 }}>{`${t("Next KYB review")}: ${formatDateTime(entry.nextKybReviewAt)}`}</ThemedText>
+                                        </ThemedView>
+                                    </ThemedView>
+                                    <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                                        {canKyb.value && (
+                                            <VBtn
+                                                size="small"
+                                                variant="tonal"
+                                                prependIcon="mdi-file-sync-outline"
+                                                onClick={() => {
+                                                    revalidationOpen.value = true;
+                                                }}
+                                            >
+                                                {t("Request KYB revalidation")}
+                                            </VBtn>
+                                        )}
+                                        <VBtn size="small" variant="text" onClick={() => void router.push({ name: "KybReview" })}>{t("Open KYB review")}</VBtn>
+                                    </ThemedView>
                                 </ThemedView>
-                                {entry.kybDocuments.map((document) => (
-                                    <ThemedView key={document.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                        <StatusBadge status={document.status} label={document.status} toneOverride={asBadgeTone(statusTone(document.status))} />
-                                        <StatusBadge status={document.avStatus} label={document.avStatus} toneOverride={asBadgeTone(statusTone(document.avStatus))} />
-                                        <ThemedText style={{ fontSize: "12px" }}>{document.docType} · {document.originalFileName || document.id}</ThemedText>
-                                        <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "KybReviewDetail", params: { id: document.id } })}>{t("Open")}</VBtn>
+                                {(entry.kybDocuments ?? []).length === 0 ? (
+                                    <EmptyState icon="mdi-file-document-outline" title={t("No KYB documents")} description={t("No KYB document has been uploaded for this merchant yet.")} />
+                                ) : (
+                                    (entry.kybDocuments ?? []).map((document) => (
+                                        <ThemedView key={document.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                                            <StatusBadge status={document.status} label={document.status} toneOverride={asBadgeTone(statusTone(document.status))} />
+                                            <StatusBadge status={document.avStatus} label={document.avStatus} toneOverride={asBadgeTone(statusTone(document.avStatus))} />
+                                            <ThemedText style={{ fontSize: "12px" }}>{document.docType} · {document.originalFileName || document.id}</ThemedText>
+                                            <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "KybReviewDetail", params: { id: document.id } })}>{t("Open")}</VBtn>
+                                        </ThemedView>
+                                    ))
+                                )}
+                                {(entry.revalidations ?? []).length > 0 && (
+                                    <ThemedView style={{ gap: "6px" }}>
+                                        <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Revalidation requests")}</ThemedText>
+                                        <MiniTable
+                                            ariaLabel={t("Revalidation requests")}
+                                            emptyLabel={t("No open revalidation requests")}
+                                            rows={entry.revalidations ?? []}
+                                            rowKey={(row: { id: string }) => row.id}
+                                            columns={[
+                                                { key: "docType", label: t("Document type"), render: (row: { docType: string }) => t(KYB_DOC_TYPE_LABELS[row.docType as KybDocType] ?? row.docType) },
+                                                { key: "status", label: t("Status"), render: (row: { status: string }) => <StatusBadge status={row.status} label={row.status} toneOverride={asBadgeTone(statusTone(row.status))} /> },
+                                                { key: "dueAt", label: t("Due date"), render: (row: { dueAt: string | null }) => formatDateTime(row.dueAt) },
+                                                { key: "message", label: t("Message"), render: (row: { message: string }) => row.message },
+                                            ]}
+                                        />
                                     </ThemedView>
-                                ))}
+                                )}
                             </SurfaceCardText>
                         </SurfaceCard>
                     )}
 
-                    {show("compliance") && entry.beneficialOwners && entry.beneficialOwners.length > 0 && (
-                        <SurfaceCard>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Beneficial owners")}</ThemedText>
-                                {entry.beneficialOwners.map((owner) => (
-                                    <ThemedView key={owner.id} style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                        <StatusBadge status={owner.screeningStatus} label={owner.screeningStatus} toneOverride={asBadgeTone(statusTone(owner.screeningStatus))} />
-                                        {owner.pepDeclared && <StatusBadge status="PEP" label="PEP" toneOverride="danger" />}
-                                        <ThemedText style={{ fontSize: "12px" }}>{owner.fullNameEn || owner.fullNameAr} · {owner.role} · {owner.ownershipPercent ?? "—"}%</ThemedText>
-                                    </ThemedView>
-                                ))}
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                    {show("compliance") && !isSupport.value && (
+                        <BeneficialOwnersCard
+                            merchantId={merchantId.value}
+                            initialOwners={entry.beneficialOwners ?? []}
+                            canWrite={canKyb.value}
+                            closed={entry.status === "CLOSED"}
+                            onChanged={reloadSilently}
+                        />
                     )}
 
-                    {show("access") && entry.users && entry.users.length > 0 && canWrite.value && (
-                        <SurfaceCard>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Merchant users and access")}</ThemedText>
-                                {entry.users.map((merchantUser) => (
-                                    <ThemedText key={merchantUser.id} style={{ fontSize: "12px" }}>
-                                        {merchantUser.email} · {merchantUser.role} · {merchantUser.status} · MFA {merchantUser.mfaRequired ? "on" : "off"}
-                                    </ThemedText>
-                                ))}
-                                {entry.accessTokens?.map((token) => (
-                                    <ThemedText key={token.id} style={{ fontSize: "12px" }}>
-                                        {t("Token")} {token.name} · ****{token.lastFour} · {token.revokedAt ? t("Revoked") : t("Active")} · {t("last used")} {formatDateTime(token.lastUsedAt)}
-                                    </ThemedText>
-                                ))}
-                                {entry.credentialSets?.map((credential) => (
-                                    <ThemedText key={credential.id} style={{ fontSize: "12px" }}>
-                                        {t("Credential set")} {credential.id} · {credential.env} · {credential.status}
-                                    </ThemedText>
-                                ))}
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                    {show("access") && ((entry.users ?? []).length > 0 || (entry.accessTokens ?? []).length > 0 || (entry.credentialSets ?? []).length > 0) && (
+                        <MerchantAccessCard
+                            users={entry.users ?? []}
+                            tokens={entry.accessTokens ?? []}
+                            credentialSets={entry.credentialSets ?? []}
+                            canWrite={canWriteCommerce.value}
+                            onChanged={reloadSilently}
+                        />
                     )}
 
                     {show("access") && (
@@ -1143,6 +1392,39 @@ const MerchantDetailPage = dc(() => {
                         transactionOpen.value = false;
                         void router.push({ name: "OperatorCaseDetail", params: { id: caseId } });
                     }}
+                />
+                <ApplicationDetailDrawer
+                    applicationId={openApplicationId.value}
+                    onClose={() => (openApplicationId.value = null)}
+                    onChanged={() => {
+                        applicationRefresh.value?.();
+                        reloadSilently();
+                    }}
+                />
+                <JournalEntryDrawer entryId={openEntryId.value} onClose={() => (openEntryId.value = null)} />
+                <RevalidationModal
+                    modelValue={revalidationOpen.value}
+                    merchantId={merchantId.value}
+                    onUpdate:modelValue={(value: boolean) => (revalidationOpen.value = value)}
+                    onDone={reloadSilently}
+                />
+                <ReasonModal
+                    modelValue={walletTarget.value !== null}
+                    onUpdate:modelValue={(value: boolean) => {
+                        if (!value) walletTarget.value = null;
+                    }}
+                    title={walletTarget.value ? `${t(walletTarget.value.action.label)} · ${walletTarget.value.wallet.currency}` : ""}
+                    description={
+                        walletTarget.value?.action.mode === "approval"
+                            ? t("Restoring a frozen wallet needs an independent checker.")
+                            : t("A frozen wallet cannot be debited by cash-outs until it is restored.")
+                    }
+                    mode={walletTarget.value?.action.mode ?? "immediate"}
+                    danger={walletTarget.value?.action.danger ?? false}
+                    submitLabel={walletTarget.value ? t(walletTarget.value.action.label) : ""}
+                    loading={walletSubmitting.value}
+                    errorMessage={walletModalError.value}
+                    onSubmit={(reason: string) => void submitWalletAction(reason)}
                 />
                 <FormModal
                     modelValue={withdrawOpen.value}

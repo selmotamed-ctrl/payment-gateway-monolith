@@ -47,6 +47,17 @@ export const envSchema = z.strictObject({
   HOST: z.string().min(1).default("127.0.0.1"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   DATABASE_URL: postgresUrl("DATABASE_URL"),
+  /**
+   * Session-scoped endpoint for the singleton-worker leader election.
+   *
+   * PostgreSQL advisory locks live on ONE backend session, so this URL must
+   * reach PostgreSQL directly or through a session-pooled PgBouncer database
+   * (never a transaction-pooled one). Deploy generates a session alias when
+   * PgBouncer is enabled; without PgBouncer it falls back to DATABASE_URL.
+   */
+  LEADER_ELECTION_DATABASE_URL: optionalPostgresUrl("LEADER_ELECTION_DATABASE_URL"),
+  /** True when the deployment fronts PostgreSQL with PgBouncer (transaction pooling for normal traffic). */
+  PGBOUNCER_ENABLED: booleanFromEnvironment.default(false),
   /** Comma-separated streaming replica URLs used by ReadStore routing. */
   DATABASE_REPLICA_URLS: z.string().default(""),
   /** Dedicated tamper-evident audit database (pg_audit_db). */
@@ -60,7 +71,8 @@ export const envSchema = z.strictObject({
   STORAGE_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   STORAGE_LOG_BUFFER_MAX: z.coerce.number().int().positive().max(100_000).default(5000),
   STORAGE_LOG_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().max(60_000).default(250),
-  STORAGE_SHARD_COUNT: z.coerce.number().int().positive().max(16).default(16),
+  /** Initial routing width of system GL accounts (wallets start at 1). Accounts are widened later by the shard scaler. 1..256. */
+  STORAGE_SHARD_COUNT: z.coerce.number().int().positive().max(256).default(16),
   // Processed outbox_events / shipped audit_outbox rows are pruned after this
   // window (0 disables pruning). The dedicated audit DB is the durable copy.
   STORAGE_OUTBOX_RETENTION_MS: z.coerce.number().int().nonnegative().default(3_600_000),
@@ -124,6 +136,45 @@ export const envSchema = z.strictObject({
    * without deleting anything.
    */
   RETENTION_DRY_RUN: booleanFromEnvironment.default(false),
+  /**
+   * The ledger checkpoint worker keeps every shard's checkpoint close to its head with a verified O(delta)
+   * proof (no locks, payments are never delayed). It is on by default; it is idempotent and safe to disable.
+   */
+  WORKER_LEDGER_CHECKPOINT_ENABLED: booleanFromEnvironment.default(true),
+  /** How often the checkpoint worker looks for shards that need a checkpoint. */
+  WORKER_LEDGER_CHECKPOINT_INTERVAL_MS: z.coerce.number().int().positive().default(30_000),
+  /** How many shards the checkpoint worker captures in one pass. */
+  WORKER_LEDGER_CHECKPOINT_BATCH_SIZE: z.coerce.number().int().positive().max(10_000).default(50),
+  /** A shard is checkpointed once this many lines were posted since its last checkpoint. */
+  LEDGER_CHECKPOINT_MIN_LINES: z.coerce.number().int().positive().default(5000),
+  /** ... or once it has any new line and its checkpoint is older than this (milliseconds). */
+  LEDGER_CHECKPOINT_MAX_AGE_MS: z.coerce.number().int().positive().default(900_000),
+  /**
+   * The ledger shard scaler measures the posting rate of every shard and widens a GL account that stays hot.
+   * It is ON by default and widens accounts itself (audited as GL_ACCOUNT_SHARDS_SCALED). Set
+   * LEDGER_SHARD_SCALER_DRY_RUN=true to make it only audit what it would do (GL_ACCOUNT_SHARDS_SCALE_PROPOSED).
+   */
+  WORKER_LEDGER_SHARD_SCALER_ENABLED: booleanFromEnvironment.default(true),
+  /** How often the shard scaler samples the shard sequences. */
+  WORKER_LEDGER_SHARD_SCALER_INTERVAL_MS: z.coerce.number().int().positive().default(30_000),
+  /** Detect and audit only (no account is widened). Off by default: the scaler widens hot accounts automatically. */
+  LEDGER_SHARD_SCALER_DRY_RUN: booleanFromEnvironment.default(false),
+  /**
+   * Automatic repair of a shard that keeps failing its checkpoint proof: only a persistent PARITY failure with an
+   * intact sequence is recomputed from the journal. Anything else (a GAP, a damaged sequence, a large correction) is
+   * left to a person. Set LEDGER_SHARD_AUTO_REPAIR_ENABLED=false to turn it off.
+   */
+  LEDGER_SHARD_AUTO_REPAIR_ENABLED: booleanFromEnvironment.default(true),
+  /** Consecutive failed proofs required before an automatic repair (checks are retried about every 10 minutes). */
+  LEDGER_SHARD_AUTO_REPAIR_MIN_FAILURES: z.coerce.number().int().min(1).default(3),
+  /** Largest correction (absolute, in money units) an automatic repair may apply; a larger one is left to a person. */
+  LEDGER_SHARD_AUTO_REPAIR_MAX_ABS_DRIFT: z.coerce.number().nonnegative().default(100),
+  /** Lines per second per shard above which an account is considered hot (a shard row serializes its postings). */
+  LEDGER_SHARD_UP_LINES_PER_SEC: z.coerce.number().positive().default(150),
+  /** Largest routing width the scaler will give an account (1..256). */
+  LEDGER_SHARD_MAX_WIDTH: z.coerce.number().int().positive().max(256).default(64),
+  /** Minimum time between two scalings of the same account (milliseconds). */
+  LEDGER_SHARD_COOLDOWN_MS: z.coerce.number().int().positive().default(600_000),
   /**
    * The durable job queue of `core-back`. It drains the background jobs (the
    * statement reconciliation and the dispute / adjustment execution).
@@ -200,9 +251,53 @@ const isTestEnvironment = (): boolean => process.env.NODE_ENV === "test";
 let cached: CoreEnv | undefined;
 let warnedAboutTestEnvironment = false;
 
+const sameDatabaseEndpoint = (left: string, right: string): boolean => {
+  try {
+    const a = new URL(left);
+    const b = new URL(right);
+    const port = (url: URL): string => url.port || "5432";
+    return a.hostname === b.hostname && port(a) === port(b) && a.pathname === b.pathname;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Cross-field checks that a strict object cannot express.
+ *
+ * With PgBouncer enabled the ordinary `DATABASE_URL` is transaction-pooled, so
+ * a session advisory lock cannot survive on it. Deploy generates a distinct
+ * session alias; accepting the pooled URL here would silently defeat every
+ * singleton worker, so the process refuses to boot instead.
+ */
+export const crossFieldIssues = (value: CoreEnv): string[] => {
+  const issues: string[] = [];
+  if (!value.WORKER_ENABLED || !value.PGBOUNCER_ENABLED) {
+    return issues;
+  }
+  if (!value.LEADER_ELECTION_DATABASE_URL) {
+    issues.push(
+      "LEADER_ELECTION_DATABASE_URL is required when WORKER_ENABLED and PGBOUNCER_ENABLED are true " +
+        "(point it at the PgBouncer session alias, never the transaction-pooled DATABASE_URL)",
+    );
+    return issues;
+  }
+  if (sameDatabaseEndpoint(value.LEADER_ELECTION_DATABASE_URL, value.DATABASE_URL)) {
+    issues.push(
+      "LEADER_ELECTION_DATABASE_URL must not be the transaction-pooled DATABASE_URL " +
+        "(use the session-pooled alias or a direct PostgreSQL URL)",
+    );
+  }
+  return issues;
+};
+
 const parseEnvironment = (): { ok: true; data: CoreEnv } | { ok: false; issues: string[] } => {
   const result = envSchema.safeParse(readEnvironment());
   if (result.success) {
+    const issues = crossFieldIssues(result.data);
+    if (issues.length > 0) {
+      return { ok: false, issues };
+    }
     return { ok: true, data: result.data };
   }
   return {
@@ -233,6 +328,8 @@ const resolveEnvironment = (): CoreEnv => {
     HOST: "127.0.0.1",
     NODE_ENV: "test",
     DATABASE_URL: "postgresql://postgres@127.0.0.1:55432/payment_gateway_monolith_test",
+    LEADER_ELECTION_DATABASE_URL: undefined,
+    PGBOUNCER_ENABLED: false,
     DATABASE_REPLICA_URLS: "",
     AUDIT_DATABASE_URL: undefined,
     LOG_DATABASE_URL: undefined,
@@ -269,6 +366,20 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_RETENTION_INTERVAL_MS: 3_600_000,
     WORKER_RETENTION_BATCH_SIZE: 500,
     RETENTION_DRY_RUN: false,
+    WORKER_LEDGER_CHECKPOINT_ENABLED: true,
+    WORKER_LEDGER_CHECKPOINT_INTERVAL_MS: 30_000,
+    WORKER_LEDGER_CHECKPOINT_BATCH_SIZE: 50,
+    LEDGER_CHECKPOINT_MIN_LINES: 5000,
+    LEDGER_CHECKPOINT_MAX_AGE_MS: 900_000,
+    WORKER_LEDGER_SHARD_SCALER_ENABLED: true,
+    WORKER_LEDGER_SHARD_SCALER_INTERVAL_MS: 30_000,
+    LEDGER_SHARD_SCALER_DRY_RUN: false,
+    LEDGER_SHARD_AUTO_REPAIR_ENABLED: true,
+    LEDGER_SHARD_AUTO_REPAIR_MIN_FAILURES: 3,
+    LEDGER_SHARD_AUTO_REPAIR_MAX_ABS_DRIFT: 100,
+    LEDGER_SHARD_UP_LINES_PER_SEC: 150,
+    LEDGER_SHARD_MAX_WIDTH: 64,
+    LEDGER_SHARD_COOLDOWN_MS: 600_000,
     WORKER_BACKGROUND_JOBS_ENABLED: true,
     WORKER_BACKGROUND_JOBS_INTERVAL_MS: 2000,
     WORKER_BACKGROUND_JOBS_BATCH_SIZE: 10,
@@ -316,6 +427,7 @@ export const reloadEnv = (): CoreEnv => {
 
 const redactedKeys = new Set([
   "DATABASE_URL",
+  "LEADER_ELECTION_DATABASE_URL",
   "KMS_MASTER_KEY",
   "MTLS_SERVER_KEY_PATH",
 ]);

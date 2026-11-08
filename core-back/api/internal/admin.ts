@@ -6,7 +6,11 @@ import { client } from "../../prisma/client";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { createReconciliationUploadHandler } from "./reconciliationUpload";
 import { backupInternalRouter } from "./backups";
+import { adminCommerceRouter } from "./adminCommerce";
 import { academyInternalRouter } from "./academy";
+import { adminLedgerRouter } from "./adminLedger";
+import { adminOperationsRouter } from "./adminOperations";
+import { adminSystemRouter } from "./adminSystem";
 import { publicProgress } from "../../engine/academy/progress";
 import { loadCatalog } from "../../engine/academy/catalog";
 import { getPlatformRuntime } from "../../engine/runtime";
@@ -97,7 +101,7 @@ import { executeGlobalSearch } from "../../lib/globalSearch";
 import { getConfiguredAuditStore, readThroughReplicaOrPrimary } from "../../lib/storageEngine";
 import { getBackupControlClient, isBackupDaemonConfigured } from "../../lib/storageEngine/backupControlClient";
 import { backupPolicySchema } from "./backups";
-import { loadLiveAccountBalances } from "../../lib/storageEngine/shardBalances";
+import { loadAccountCheckpointSummary, loadLiveAccountBalances, naturalShardBalance } from "../../lib/storageEngine/shardBalances";
 import type { Decimal } from "decimal.js";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { LedgerPoster } from "../../engine/ledger/LedgerPoster";
@@ -609,6 +613,7 @@ router.post("/auth/login", async (request: Request, response: Response) => {
       issueMfaChallenge(tx as never, {
         userId: staffUser.id,
         channel: "ADMIN",
+        phone: staffUser.phone,
         phoneLast4: (staffUser.phone ?? "").slice(-4),
         ip,
       }),
@@ -697,6 +702,10 @@ router.post("/auth/logout", async (request: Request, response: Response) => {
   response.json({ revoked: true });
 });
 router.use("/system/backups", backupInternalRouter);
+router.use("/", adminCommerceRouter);
+router.use(adminLedgerRouter);
+router.use(adminOperationsRouter);
+router.use(adminSystemRouter);
 router.use("/academy", academyInternalRouter);
 
 /** Any staff read authority: the floor for the cross-cutting dashboard, lookup and search routes. */
@@ -962,6 +971,7 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
 });
 
 router.post("/stats/export-audit", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["security:read", "security:write"]);
   const body = parseOrThrow(
     z.object({
       period: z.string().min(1).max(32),
@@ -2366,7 +2376,6 @@ router.post("/join-requests/admin-assisted", async (request: Request, response: 
         accountType: "MERCHANT_WALLET",
         ownerId: merchant.id,
         currency: "LYD",
-        checkpointBalance: new Prisma.Decimal(0),
       },
     });
     await tx.wallet.create({
@@ -2813,12 +2822,20 @@ router.post("/join-requests/:id/submit", async (request: Request, response: Resp
     throw new ApiError(409, "JOIN_REQUEST_PAYOUT_BANK_REQUIRED", "Payout bank details are required");
   }
   // GAP-017: the KYB payout hash is mandatory; it binds every cash-out destination.
-  if (!joinRequest.merchant.payoutAccountHash && !payoutAccountHash(joinRequest.merchant.payoutBankDetailsJson)) {
+  const payoutHash = joinRequest.merchant.payoutAccountHash
+    ?? payoutAccountHash(joinRequest.merchant.payoutBankDetailsJson);
+  if (!payoutHash) {
     throw new ApiError(
       409,
       "JOIN_REQUEST_PAYOUT_HASH_REQUIRED",
       "The payout bank details must include a bank and an account number or IBAN",
     );
+  }
+  if (!joinRequest.merchant.payoutAccountHash) {
+    await client.merchant.update({
+      where: { id: joinRequest.merchantId },
+      data: { payoutAccountHash: payoutHash },
+    });
   }
   if (owners.length === 0) {
     throw new ApiError(409, "JOIN_REQUEST_OWNER_REQUIRED", "At least one beneficial owner is required");
@@ -5051,6 +5068,7 @@ router.get("/merchants/:id/applications", async (request: Request, response: Res
         posTerminalCount: application._count.posTerminals,
         railWhitelistMode: railWhitelist === null ? "ALL" : railWhitelist.length === 0 ? "NONE" : "LIST",
         railWhitelistCount: railWhitelist?.length ?? 0,
+        railWhitelist,
         redirectDomainCount: redirectDomains.length,
         redirectDomains: flags.canSensitive ? redirectDomains : [],
         createdAt: application.createdAt,
@@ -5090,12 +5108,15 @@ router.get("/merchants/:id/wallets", async (request: Request, response: Response
         glAccountId: true,
         createdAt: true,
         _count: { select: { applications: true, paymentLinks: true, cashoutRequests: true } },
-        glAccount: { select: { checkpointBalance: true } },
       },
     }),
     client.wallet.count({ where: where as never }),
     flags.canFinancial ? merchantWalletBalance(client, id) : Promise.resolve(null),
   ]);
+  const checkpointSummaries = flags.canFinancial && wallets.length > 0
+    ? await loadAccountCheckpointSummary(client as never, wallets.map((wallet) => wallet.glAccountId))
+    : [];
+  const checkpointByAccount = new Map(checkpointSummaries.map((row) => [row.id, row.checkpointBalance]));
   const balanceMap = new Map((balances?.wallets ?? []).map((wallet) => [wallet.id, wallet.balance]));
   const pendingByWallet = new Map<string, number>();
   if (flags.canFinancial && wallets.length > 0) {
@@ -5114,7 +5135,8 @@ router.get("/merchants/:id/wallets", async (request: Request, response: Response
       status: wallet.status,
       glAccountId: wallet.glAccountId,
       balance: flags.canFinancial ? balanceMap.get(wallet.id) ?? "0.0000" : null,
-      checkpointBalance: flags.canFinancial ? merchantMoney(wallet.glAccount.checkpointBalance) : null,
+      // Natural sign like `balance`; the stored (debit-positive) shard checkpoints are summed per wallet account.
+      checkpointBalance: flags.canFinancial ? merchantMoney(naturalShardBalance("MERCHANT_WALLET", checkpointByAccount.get(wallet.glAccountId) ?? "0")) : null,
       applicationCount: wallet._count.applications,
       paymentLinkCount: wallet._count.paymentLinks,
       cashoutCount: wallet._count.cashoutRequests,
@@ -9376,15 +9398,7 @@ router.post("/operator-cases/:id/resolve", async (request: Request, response: Re
   });
 });
 
-router.get("/attempts/:id", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["attempt:read"]);
-  const { id } = parseOrThrow(idSchema, request.params);
-  const attempt = await client.paymentAttempt.findUnique({ where: { id } });
-  if (!attempt) {
-    throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "The payment attempt does not exist");
-  }
-  response.json({ attempt });
-});
+// GET /attempts/:id (attempt detail) is served by adminOperations.ts, mounted next to /system/backups.
 
 router.post("/attempts/:id/inquire", async (request: Request, response: Response) => {
   requireAuthorities(request, ["attempt:inquire"]);
@@ -12550,6 +12564,8 @@ router.patch("/rails/:id", async (request: Request, response: Response) => {
         capabilities: z.record(z.string().max(40), z.boolean()).optional(),
         instructionsAr: z.string().max(2000).optional(),
         instructionsEn: z.string().max(2000).optional(),
+        // null clears the logo; a uuid must reference a registered asset.
+        logoAssetId: z.string().uuid().nullable().optional(),
         checklist: z.array(z.enum([
           "NAMES_VERIFIED",
           "LIMITS_VERIFIED",
@@ -12564,9 +12580,14 @@ router.patch("/rails/:id", async (request: Request, response: Response) => {
   if (!rail) {
     throw new ApiError(404, "RAIL_NOT_FOUND", "The rail does not exist");
   }
+  if (body.logoAssetId) {
+    const asset = await client.asset.findUnique({ where: { id: body.logoAssetId }, select: { id: true } });
+    if (!asset) throw new ApiError(404, "ASSET_NOT_FOUND", "The logo asset does not exist");
+  }
   const updated = await client.rail.update({
     where: { id },
     data: {
+      logoAssetId: body.logoAssetId,
       nameAr: body.nameAr,
       nameEn: body.nameEn,
       blocked: body.blocked,
@@ -12585,11 +12606,11 @@ router.patch("/rails/:id", async (request: Request, response: Response) => {
       action: "RAIL_UPDATED",
       entityType: "RAIL",
       entityId: updated.id,
-      beforeJson: { nameAr: rail.nameAr, nameEn: rail.nameEn, blocked: rail.blocked, minAmount: String(rail.minAmount), maxAmount: String(rail.maxAmount) },
-      afterJson: { nameAr: updated.nameAr, nameEn: updated.nameEn, blocked: updated.blocked, minAmount: String(updated.minAmount), maxAmount: String(updated.maxAmount), checklist: body.checklist ?? [] },
+      beforeJson: { nameAr: rail.nameAr, nameEn: rail.nameEn, blocked: rail.blocked, minAmount: String(rail.minAmount), maxAmount: String(rail.maxAmount), logoAssetId: rail.logoAssetId },
+      afterJson: { nameAr: updated.nameAr, nameEn: updated.nameEn, blocked: updated.blocked, minAmount: String(updated.minAmount), maxAmount: String(updated.maxAmount), logoAssetId: updated.logoAssetId, checklist: body.checklist ?? [] },
     },
   });
-  response.json({ id: updated.id, blocked: updated.blocked });
+  response.json({ id: updated.id, blocked: updated.blocked, logoAssetId: updated.logoAssetId });
 });
 
 router.put("/rails/:id/fields", async (request: Request, response: Response) => {
@@ -12891,6 +12912,13 @@ router.patch("/routes/:id", async (request: Request, response: Response) => {
         dailyCapAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
         scope: z.record(z.string().max(64), z.unknown()).optional(),
         costModel: z.record(z.string().max(64), z.unknown()).optional(),
+        // `tolerance_amount` is the only key the settlement engine reads; other keys are kept as stored.
+        mismatchPolicy: z.record(z.string().max(64), z.unknown()).optional(),
+        // Absolute UTC windows: the route is hidden while start <= now < end (VisibleRailsResolver). [] clears them.
+        maintenanceWindows: z
+          .array(z.object({ start: z.string().min(10).max(64), end: z.string().min(10).max(64) }).catchall(z.unknown()))
+          .max(50)
+          .optional(),
         checklist: z.array(z.enum([
           "PRIORITY_WEIGHT_REVIEWED",
           "LIMITS_CAP_VERIFIED",
@@ -12905,9 +12933,25 @@ router.patch("/routes/:id", async (request: Request, response: Response) => {
   if (!route) {
     throw new ApiError(404, "ROUTE_NOT_FOUND", "The route does not exist");
   }
+  const windows = body.maintenanceWindows;
+  if (windows) {
+    const parsed = windows.map((window) => ({ start: Date.parse(window.start), end: Date.parse(window.end) }));
+    if (parsed.some((window) => Number.isNaN(window.start) || Number.isNaN(window.end))) {
+      throw new ApiError(400, "MAINTENANCE_WINDOW_INVALID", "Every maintenance window needs a valid start and end instant");
+    }
+    if (parsed.some((window) => window.end <= window.start)) {
+      throw new ApiError(400, "MAINTENANCE_WINDOW_INVALID", "A maintenance window must end after it starts");
+    }
+  }
+  const tolerance = body.mismatchPolicy?.tolerance_amount ?? body.mismatchPolicy?.toleranceAmount;
+  if (tolerance !== undefined && tolerance !== null && !/^\d{1,14}(\.\d{1,4})?$/.test(String(tolerance))) {
+    throw new ApiError(400, "MISMATCH_TOLERANCE_INVALID", "The mismatch tolerance must be a non-negative amount with up to 4 decimals");
+  }
   const updated = await client.railRoute.update({
     where: { id },
     data: {
+      mismatchPolicy: body.mismatchPolicy === undefined ? undefined : json(body.mismatchPolicy),
+      maintenanceWindows: windows === undefined ? undefined : json(windows),
       priority: body.priority,
       weight: body.weight,
       minAmount: body.minAmount ? new Prisma.Decimal(body.minAmount) : undefined,
@@ -14509,7 +14553,10 @@ router.post("/commission-profiles", async (request: Request, response: Response)
         calcType: z.enum(["FLAT", "PERCENTAGE", "TIERED", "HYBRID"]),
         flatFee: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).default("0.0000"),
         percentageRate: z.string().regex(/^\d{1,6}(\.\d{1,6})?$/).default("0.000000"),
-        tiersJson: z.record(z.string().max(64), z.unknown()).optional(),
+        // An ordered tier list (what the fee calculator reads). The legacy index-keyed object is still accepted.
+        tiersJson: z
+          .union([z.array(z.record(z.string().max(64), z.unknown())).max(20), z.record(z.string().max(64), z.unknown())])
+          .optional(),
         minFee: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).default("0.0000"),
         maxFee: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
         feeBearerDefault: z.enum(["MERCHANT_ABSORBS", "PAYER_SURCHARGE", "SPLIT"]).default("MERCHANT_ABSORBS"),
@@ -15119,38 +15166,54 @@ const buildLiquiditySnapshot = async () => {
   );
   const clearingAccounts = await client.glAccount.findMany({
     where: { accountType: "GATEWAY_CLEARING" },
-    select: { id: true, gatewayId: true, checkpointAt: true, checkpointBalance: true, gateway: { select: { code: true, name: true } } },
+    select: { id: true, gatewayId: true },
   });
   const clearingAccountIds = clearingAccounts.map((account) => account.id);
-  const clearingLines = clearingAccountIds.length === 0
+  // Balance = the shard totals of each gateway's clearing accounts. The age buckets are the NET signed
+  // movement (debit positive) of the lines of the last three days, bounded by `created_at` so the cost does not
+  // grow with history and does not depend on any checkpoint; "older" is whatever is left of the balance.
+  const clearingLive = await loadLiveAccountBalances(client as never, clearingAccountIds);
+  const clearingMovement = clearingAccountIds.length === 0
     ? []
-    : await client.journalLine.findMany({
-        where: { glAccountId: { in: clearingAccountIds } },
-        select: { glAccountId: true, direction: true, amount: true, createdAt: true },
-      });
+    : ((await client.$queryRawUnsafe(
+        `SELECT a.gateway_id::text AS "gatewayId",
+                COALESCE(SUM(x.signed) FILTER (WHERE x.age <= 0), 0)::text AS t0,
+                COALESCE(SUM(x.signed) FILTER (WHERE x.age = 1), 0)::text AS t1,
+                COALESCE(SUM(x.signed) FILTER (WHERE x.age = 2), 0)::text AS t2
+         FROM (
+           SELECT jl.gl_account_id,
+                  FLOOR(EXTRACT(EPOCH FROM ((now() AT TIME ZONE 'UTC') - jl.created_at)) / 86400)::int AS age,
+                  CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END AS signed
+           FROM journal_lines jl
+           WHERE jl.gl_account_id = ANY($1::uuid[])
+             AND jl.created_at >= (now() AT TIME ZONE 'UTC') - interval '3 days'
+         ) x
+         INNER JOIN gl_accounts a ON a.id = x.gl_account_id
+         GROUP BY a.gateway_id`,
+        clearingAccountIds,
+      )) as Array<{ gatewayId: string | null; t0: string; t1: string; t2: string }>);
   const clearingBalanceByGateway = new Map<string, Decimal>();
   const clearingBucketsByGateway = new Map<string, { t0: Decimal; t1: Decimal; t2: Decimal; older: Decimal }>();
+  const liveByAccount = new Map(clearingLive.map((row) => [row.id, decimal(row.balance)]));
   for (const account of clearingAccounts) {
     if (!account.gatewayId) continue;
-    let balance = decimal(account.checkpointBalance ?? 0);
-    const buckets = { t0: decimal(0), t1: decimal(0), t2: decimal(0), older: decimal(0) };
-    for (const line of clearingLines) {
-      if (line.glAccountId !== account.id) continue;
-      if (account.checkpointAt && line.createdAt <= account.checkpointAt) continue;
-      const value = decimal(line.amount);
-      if (line.direction === "DEBIT") balance = balance.plus(value);
-      else balance = balance.minus(value);
-      const ageDays = Math.floor((Date.now() - line.createdAt.getTime()) / (24 * 60 * 60 * 1000));
-      const key = ageDays <= 0 ? "t0" : ageDays <= 1 ? "t1" : ageDays <= 2 ? "t2" : "older";
-      buckets[key] = buckets[key].plus(value);
+    clearingBalanceByGateway.set(
+      account.gatewayId,
+      (clearingBalanceByGateway.get(account.gatewayId) ?? decimal(0)).plus(liveByAccount.get(account.id) ?? decimal(0)),
+    );
+  }
+  for (const row of clearingMovement) {
+    if (!row.gatewayId) continue;
+    const balance = clearingBalanceByGateway.get(row.gatewayId) ?? decimal(0);
+    const t0 = decimal(row.t0);
+    const t1 = decimal(row.t1);
+    const t2 = decimal(row.t2);
+    clearingBucketsByGateway.set(row.gatewayId, { t0, t1, t2, older: balance.minus(t0).minus(t1).minus(t2) });
+  }
+  for (const [gatewayId, balance] of clearingBalanceByGateway) {
+    if (!clearingBucketsByGateway.has(gatewayId)) {
+      clearingBucketsByGateway.set(gatewayId, { t0: decimal(0), t1: decimal(0), t2: decimal(0), older: balance });
     }
-    clearingBalanceByGateway.set(account.gatewayId, (clearingBalanceByGateway.get(account.gatewayId) ?? decimal(0)).plus(balance));
-    const current = clearingBucketsByGateway.get(account.gatewayId) ?? { t0: decimal(0), t1: decimal(0), t2: decimal(0), older: decimal(0) };
-    current.t0 = current.t0.plus(buckets.t0);
-    current.t1 = current.t1.plus(buckets.t1);
-    current.t2 = current.t2.plus(buckets.t2);
-    current.older = current.older.plus(buckets.older);
-    clearingBucketsByGateway.set(account.gatewayId, current);
   }
   const gatewayCodes = new Map(
     (await client.gateway.findMany({ select: { id: true, code: true, name: true } })).map((gateway) => [gateway.id, gateway]),

@@ -19,11 +19,13 @@ import { envSchema } from "../lib/env";
 import type { NotificationRow, NotificationTemplateRow, PrismaLike } from "../engine/db/ports";
 import {
   CURRENCY_SCOPED_GL_ACCOUNT_TYPES,
+  GL_ACCOUNT_SHARD_COUNT,
   SUPPORTED_CURRENCIES,
   seedSystemGlAccounts,
   systemGlAccountSeedKey,
 } from "../prisma/seedGlAccounts";
 import { LedgerPoster } from "../engine/ledger/LedgerPoster";
+import { initialShardWidth } from "../lib/storageEngine/shardRouting";
 import { createFakePrisma, fakeTable, resetFakeDatabase } from "./helpers/fakePrisma";
 
 /**
@@ -477,7 +479,9 @@ describe("currency scoped GL accounts", () => {
         );
         expect(matches.length).toBe(1);
         expect(matches[0]?.seedKey).toBe(systemGlAccountSeedKey(accountType, currency));
-        expect(String(matches[0]?.checkpointBalance)).toBe("0");
+        // The account stores no checkpoint any more; it stores its routing width (system accounts spread, wallets one shard).
+        expect(matches[0]?.checkpointBalance).toBeUndefined();
+        expect(matches[0]?.shardCount).toBe(initialShardWidth(accountType, GL_ACCOUNT_SHARD_COUNT));
       }
     }
 

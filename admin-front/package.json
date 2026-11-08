@@ -23,7 +23,6 @@
     },
     "dependencies": {
         "@mdi/font": "^7.4.47",
-        "@prisma/client": "^7.4.0",
         "@types/file-saver": "^2.0.7",
         "@types/leaflet": "^1.9.21",
         "@vuepic/vue-datepicker": "^12.1.0",

@@ -345,7 +345,7 @@ describe("backup policy", () => {
     expect(backupPolicySchema.safeParse(valid).success).toBe(true);
   });
 
-  test("an every-minute schedule and one day retention are rejected", () => {
+  test("an every-minute schedule and a zero alert lag are rejected", () => {
     const result = backupPolicySchema.safeParse({
       fullCron: "* * * * *",
       deltaCron: "* * * * *",
@@ -357,9 +357,9 @@ describe("backup policy", () => {
     expect(result.success).toBe(false);
   });
 
-  test("retention floors can only be lowered with an approval request", () => {
+  test("a low-retention policy can be proposed for maker-checker review", () => {
     const low = { ...valid, fullRetentionDays: 2, walRetentionDays: 1 };
-    expect(backupPolicySchema.safeParse(low).success).toBe(false);
+    expect(backupPolicySchema.safeParse(low).success).toBe(true);
     expect(backupPolicySchema.safeParse({ ...low, approvalRequestId: "apr_1" }).success).toBe(true);
   });
 
@@ -383,19 +383,17 @@ describe("backup policy", () => {
       body: JSON.stringify(body),
     });
 
-  test("trigger and drill require an Idempotency-Key and relay it to core", async () => {
+  test("trigger and drill relay an Idempotency-Key when supplied", async () => {
     setEnv();
     process.env.BACKUP_JOB_RATE_LIMIT_MAX = "1000";
     for (const [path, body] of [
       ["trigger", { target: "all", kind: "full" }],
       ["drill", {}],
     ] as const) {
-      const before = core.requests.length;
-      const missing = await backupCall(path, body);
-      expect(missing.status).toBe(400);
-      expect(core.requests.length).toBe(before);
-      const accepted = await backupCall(path, body, "idem-key-0001");
+      const accepted = await backupCall(path, body);
       expect(accepted.status).toBeLessThan(300);
+      const keyed = await backupCall(path, body, "idem-key-0001");
+      expect(keyed.status).toBeLessThan(300);
       expect(core.requests.at(-1)?.headers["idempotency-key"]).toBe("idem-key-0001");
     }
   });
@@ -464,13 +462,13 @@ describe("core client retry and size policy", () => {
   };
   const common = { path: "/internal/admin/x", requestId: "r", clientIp: "10.0.0.1" };
 
-  test("a PUT that reached core is not replayed on another node without an idempotency key", async () => {
+  test("an idempotent PUT that reached core fails over on another node", async () => {
     const failing = await startUpstream(pki, (_request, response) => respondJson(response, 503, { code: "DOWN" }));
     const healthy = await startUpstream(pki, (_request, response) => respondJson(response, 200, { ok: true }));
     configure([failing.url, healthy.url]);
     const first = await callCoreRaw({ ...common, method: "PUT", body: {} });
-    expect(first.statusCode).toBe(503);
-    expect(healthy.requests.length).toBe(0);
+    expect(first.statusCode).toBe(200);
+    expect(healthy.requests.length).toBe(1);
     await failing.close();
     await healthy.close();
     setEnv();

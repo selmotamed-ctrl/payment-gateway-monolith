@@ -2788,7 +2788,8 @@ const blueprint6: BlueprintCatalogEntry = {
           pathToken: "evo-pay-webhook",
           verifyMethod: "RSA",
           signatureHeader: "X-Signature",
-          timestampToleranceSec: 300,
+          timestampToleranceSec: 0, // no signed timestamp selector: no replay window
+
           ipAllowlist: ["192.0.2.0/24"],
           bodyFormat: "JSON",
           correlationSelector: "merchantTransInfo.merchantTransID",

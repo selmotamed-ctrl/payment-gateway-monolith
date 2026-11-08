@@ -1,6 +1,18 @@
-import { defineComponent, useId, type VNodeChild } from "vue";
+import { defineComponent, onBeforeUnmount, ref, useId, watch, type VNodeChild } from "vue";
 import { VBtn, VNavigationDrawer } from "vuetify/components";
 import { useLocale } from "vuetify";
+
+/**
+ * Open drawers, oldest first. Vuetify gives EARLIER registered layout items the HIGHER z-index,
+ * so a drawer that is always mounted (a nested "inspect" drawer rendered next to its parent)
+ * would otherwise open underneath the drawer that opened it. Each open drawer therefore gets
+ * a z-index from its position in this stack: the most recently opened is always on top.
+ * The range stays below Vuetify's dialogs and menus (2000+), so a modal opened from a drawer
+ * still covers it.
+ */
+const openStack: symbol[] = [];
+const STACK_BASE_Z_INDEX = 1100;
+const STACK_STEP = 4;
 
 export const SlideOverDrawer = defineComponent({
     name: "SlideOverDrawer",
@@ -15,6 +27,27 @@ export const SlideOverDrawer = defineComponent({
         const { t } = useLocale();
         const titleId = useId();
         const close = () => emit("update:modelValue", false);
+        const stackId = Symbol("slide-over");
+        const zIndex = ref<number | undefined>(undefined);
+        const leaveStack = () => {
+            const at = openStack.indexOf(stackId);
+            if (at >= 0) openStack.splice(at, 1);
+        };
+        watch(
+            () => props.modelValue,
+            (open) => {
+                if (open) {
+                    leaveStack();
+                    openStack.push(stackId);
+                    zIndex.value = STACK_BASE_Z_INDEX + (openStack.length - 1) * STACK_STEP;
+                } else {
+                    leaveStack();
+                    zIndex.value = undefined;
+                }
+            },
+            { immediate: true },
+        );
+        onBeforeUnmount(leaveStack);
         return (): VNodeChild => (
             <VNavigationDrawer
                 modelValue={props.modelValue}
@@ -23,6 +56,7 @@ export const SlideOverDrawer = defineComponent({
                 temporary
                 width={props.width}
                 class="pg-slide-over"
+                style={zIndex.value === undefined ? undefined : { zIndex: zIndex.value }}
                 tag="aside"
                 aria-labelledby={titleId}
             >

@@ -15,7 +15,7 @@ import { isApiError, toErrorEnvelope } from "./lib/error";
 import { requestLoggerMiddleware, setAccessLogSink } from "./lib/requestLogger";
 import { rawBodyMiddleware } from "./lib/rawBody";
 import { client } from "./prisma/client";
-import { getStorageEngine, shutdownStorageEngine } from "./lib/storageEngine";
+import { getStorageEngine, getStorageEngineIfConfigured, shutdownStorageEngine } from "./lib/storageEngine";
 import { setPlatformStorage } from "./engine/runtime";
 import { invalidationBus } from "./lib/invalidationBus";
 import { storageTelemetry } from "./lib/storageEngine";
@@ -99,11 +99,13 @@ export const createApp = (options: CreateAppOptions = {}) => {
         degraded: true,
       };
     }
+    const leader = getStorageEngineIfConfigured()?.leaderElection?.status?.() ?? null;
     const degraded = !workersEnabled || !queueReachable || queue.degraded;
     response.json({
       msg: degraded ? "DEGRADED" : "OK",
       status: degraded ? "degraded" : "ok",
       service: "core-back",
+      leader,
       queue: {
         enabled: workersEnabled,
         queued: queue.queued,
@@ -260,6 +262,17 @@ export const start = async () => {
   const storage = getStorageEngine();
   setPlatformStorage(storage);
   setAccessLogSink(storage.logSink);
+
+  // Singleton workers rely on a session advisory lock. Prove the configured
+  // endpoint preserves one before any worker ticks: a transaction-pooled
+  // PgBouncer URL would silently allow two nodes to lead at once.
+  if (env.WORKER_ENABLED && storage.leaderElection?.verifySessionSafety) {
+    const status = await storage.leaderElection.verifySessionSafety();
+    const endpoint = status.endpoint
+      ? `${status.endpoint.host}:${status.endpoint.port}/${status.endpoint.database}`
+      : "configured client factory";
+    console.log(`Leader-election endpoint verified as session-safe (${endpoint})`);
+  }
   const workers = env.WORKER_ENABLED
     ? createProductionWorkerRuntime({
         db: client as never,

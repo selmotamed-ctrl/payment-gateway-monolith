@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["deploy.ts", "lib/**/*.ts", "provisioners/**/*.ts", "test/**/*.ts", "test-matrix/**/*.ts"]
+  "include": ["deploy.ts", "lib/**/*.ts", "provisioners/**/*.ts", "test/**/*.ts", "test-matrix/**/*.ts", "stress/**/*.ts"]
 }

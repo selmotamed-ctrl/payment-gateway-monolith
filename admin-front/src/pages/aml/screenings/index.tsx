@@ -29,6 +29,8 @@ import type { MetricItem } from "@/components/ui/MetricStrip";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
+import { MetaPill } from "@/components/ui/MetaPill";
+import { listVersionChips } from "./listVersions";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { SectionFields } from "@/components/SectionFields";
@@ -553,7 +555,21 @@ const AmlScreeningsPage = dc(() => {
                                     { label: t("Score"), value: selected.value.score || "—" },
                                     { label: t("Requested"), value: formatDateTime(selected.value.requestedAt) },
                                     { label: t("Completed"), value: formatDateTime(selected.value.completedAt) },
-                                    { label: t("List versions"), value: JSON.stringify(selected.value.lists ?? {}) },
+                                    {
+                                        label: t("List versions"),
+                                        value:
+                                            listVersionChips(selected.value.lists).length === 0 ? (
+                                                "—"
+                                            ) : (
+                                                <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "4px", justifyContent: "flex-end" }}>
+                                                    {listVersionChips(selected.value.lists).map((chip) => (
+                                                        <MetaPill key={chip.list} size="x-small" variant="outlined">
+                                                            {chip.version ? `${t(chip.list)} · ${chip.version}` : t(chip.list)}
+                                                        </MetaPill>
+                                                    ))}
+                                                </span>
+                                            ),
+                                    },
                                 ]} />
                             </ThemedView>
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>

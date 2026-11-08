@@ -12,7 +12,9 @@
     "test-matrix:plan": "bun run test-matrix/cli.ts plan",
     "test-matrix:bootstrap": "bun run test-matrix/cli.ts bootstrap",
     "test-matrix:teardown": "bun run test-matrix/cli.ts teardown",
-    "test-matrix": "bun run test-matrix/cli.ts run"
+    "test-matrix": "bun run test-matrix/cli.ts run",
+    "stress": "bun run stress/cli.ts",
+    "stress:list": "bun run stress/cli.ts list"
   },
   "dependencies": {
     "zod": "^4.5.4"

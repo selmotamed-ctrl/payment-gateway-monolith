@@ -206,7 +206,7 @@ The compliance test (`src/components/ui/__tests__/ui-abstraction-compliance.test
 
 - `DataTable` supports local data or registry-driven "server" mode; `ApiTable` is parent-fetch driven. `TableFilters`, `TableRowActions`, `HeaderFooter` and `tableRegistry` provide the shared chrome.
 - There are 19 registry configurations. Server mode fetches `page=1&pageSize=200`, then paginates locally; it is not true server-side pagination beyond the first 200 rows.
-- Rows are compact and neutral; status is a badge/dot, not a full-row tint. Action columns use one primary action plus a `TableRowActions` overflow menu.
+- Rows are compact and neutral; status is a badge/dot, not a full-row tint. Action columns use one primary action plus a `TableRowActions` overflow menu. The action column is sticky to the inline end, so it never requires horizontal scrolling; right-click anywhere on a row (or `Shift+F10` from the keyboard) opens the same actions at the pointer, with the primary action first. Links and form fields keep their native context menu, and the visible overflow button remains the touch path.
 - Filter types are text, local autocomplete, API autocomplete, boolean, number range and date range; active filters render as removable chips.
 - Only `DataTable` server mode persists search/filter/sort in `sessionStorage` (`pg.table.<route.name>`, or a configured storage key). `ApiTable` does not.
 

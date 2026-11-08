@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { parseAuthorities } from "../api/middleware/authDoubleCheck";
 import { loadSeederConfig, PROFILES } from "../prisma/syntheticSeeder/config";
 import { createIdFactory } from "../prisma/syntheticSeeder/context";
+import { initialShardWidth, routeLine } from "../lib/storageEngine/shardRouting";
 import { ATTEMPT_TRANSITIONS, invalidPathStep } from "../prisma/syntheticSeeder/lifecycle";
 import { buildBreakdown, commissionForProfile, gatewayFeeForRoute, wireAmount } from "../prisma/syntheticSeeder/money";
 import { encryptPendingSecrets } from "../prisma/syntheticSeeder/sync/encryptSecrets";
@@ -95,12 +96,67 @@ describe("the generated history satisfies every invariant", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  test("checkpoints reproduce the plain balances and cover every account", () => {
+  test("every shard has its checkpoint and the shard proofs hold", () => {
     const ctx = run();
-    const accounts = new Set([...ctx.dataset.glAccounts.map((a) => a.id), ...ctx.refs.glAccounts.map((a) => a.id)]);
-    expect(ctx.checkpoints.size).toBe(accounts.size);
-    expect(checkInvariants(ctx).byRule["checkpoint.live-balance"]).toBeUndefined();
-    expect(checkInvariants(ctx).byRule["shard.sum"]).toBeUndefined();
+    const report = checkInvariants(ctx);
+    expect(ctx.checkpoints.size).toBe(ctx.dataset.glAccountShards.length);
+    // every account (seeder-created or baseline) owns shard rows 0..width-1
+    const widths = new Map<string, number>();
+    for (const account of ctx.refs.glAccounts) widths.set(account.id, account.shardCount ?? initialShardWidth(account.accountType));
+    for (const account of ctx.dataset.glAccounts) widths.set(String(account.id), Number(account.shardCount));
+    const shardsByAccount = new Map<string, number[]>();
+    for (const shard of ctx.dataset.glAccountShards) shardsByAccount.set(shard.glAccountId, [...(shardsByAccount.get(shard.glAccountId) ?? []), shard.shardId]);
+    for (const [id, width] of widths) expect((shardsByAccount.get(id) ?? []).sort((a, b) => a - b)).toEqual(Array.from({ length: width }, (_v, i) => i));
+    expect(report.byRule["shard.checkpoint-live"]).toBeUndefined();
+    expect(report.byRule["shard.seq-gapless"]).toBeUndefined();
+    expect(report.byRule["shard.sum"]).toBeUndefined();
+  });
+
+  test("lines are routed by the engine's routeLine and sequenced gaplessly in posting order", () => {
+    const ctx = run("sequencing", { paymentAttempts: 1500, paymentLinks: 600 });
+    const types = new Map<string, string>();
+    for (const account of ctx.refs.glAccounts) types.set(account.id, account.accountType);
+    for (const account of ctx.dataset.glAccounts) types.set(String(account.id), String(account.accountType));
+    const widths = new Map<string, number>();
+    for (const account of ctx.refs.glAccounts) widths.set(account.id, account.shardCount ?? initialShardWidth(account.accountType));
+    for (const account of ctx.dataset.glAccounts) widths.set(String(account.id), Number(account.shardCount));
+    const refIdByEntry = new Map(ctx.dataset.journalEntries.map((entry) => [String(entry.id), String(entry.refId)]));
+    const perShard = new Map<string, Array<{ seq: number; at: number; index: number }>>();
+    ctx.dataset.journalLines.forEach((line, index) => {
+      const id = String(line.glAccountId);
+      expect(line.shardId).toBe(routeLine(types.get(id)!, line.direction, refIdByEntry.get(String(line.entryId))!, widths.get(id)!));
+      expect(Number.isInteger(line.shardSeq) && line.shardSeq >= 1).toBe(true);
+      const key = `${id}:${line.shardId}`;
+      perShard.set(key, [...(perShard.get(key) ?? []), { seq: line.shardSeq, at: line.createdAt.getTime(), index }]);
+    });
+    let widest = 0;
+    for (const [key, lines] of perShard) {
+      const bySeq = [...lines].sort((a, b) => a.seq - b.seq);
+      // seq is 1..n, and follows (createdAt, generation index)
+      bySeq.forEach((line, i) => {
+        expect(line.seq).toBe(i + 1);
+        if (i > 0) expect(line.at > bySeq[i - 1]!.at || (line.at === bySeq[i - 1]!.at && line.index > bySeq[i - 1]!.index)).toBe(true);
+      });
+      const row = ctx.dataset.glAccountShards.find((shard) => `${shard.glAccountId}:${shard.shardId}` === key)!;
+      expect(row.lineSeq).toBe(lines.length);
+      const checkpoint = ctx.checkpoints.get(key)!;
+      expect(checkpoint.seq).toBe(lines.filter((line) => line.at <= checkpoint.at.getTime()).length);
+      widest = Math.max(widest, Number(key.split(":")[1]));
+    }
+    expect(widest).toBeGreaterThan(0); // system accounts really spread over several shards
+    // wallets are one shard wide: all of their lines sit on shard 0
+    for (const wallet of ctx.dataset.wallets) {
+      expect(widths.get(String(wallet.glAccountId))).toBe(1);
+      expect(ctx.dataset.journalLines.filter((line) => line.glAccountId === wallet.glAccountId).every((line) => line.shardId === 0)).toBe(true);
+    }
+    // a checkpoint covers a non-trivial prefix for some shard
+    expect([...ctx.checkpoints.values()].some((checkpoint) => checkpoint.seq > 0 && checkpoint.seq < ctx.dataset.glAccountShards.find((s) => s.glAccountId === checkpoint.glAccountId && s.shardId === checkpoint.shardId)!.lineSeq)).toBe(true);
+  });
+
+  test("sequencing is deterministic", () => {
+    const shape = (ctx: ReturnType<typeof run>) => ctx.dataset.journalLines.map((line) => `${line.id}:${line.shardId}:${line.shardSeq}`).join("|")
+      + [...ctx.checkpoints.values()].map((checkpoint) => `${checkpoint.glAccountId}:${checkpoint.shardId}:${checkpoint.seq}:${checkpoint.balance}`).join("|");
+    expect(shape(run("det-seq"))).toBe(shape(run("det-seq")));
   });
 
   test("a refunded attempt carries an executed refund whose amount fits the charge", () => {
@@ -291,10 +347,31 @@ describe("the audit really detects each class of defect", () => {
     expect(rules["attempt.settled-without-ledger"]).toBeGreaterThan(0);
   });
   test("a stale checkpoint and a float amount", () => {
-    const rules = tamper((ctx) => { ctx.checkpoints.get([...ctx.checkpoints.keys()][0]!)!.balance = "1.0000"; ctx.dataset.journalLines[1]!.amount = 1.5 as never; });
-    expect(rules["checkpoint.live-balance"]).toBeGreaterThan(0);
+    const rules = tamper((ctx) => { ctx.checkpoints.values().next().value!.balance = "1.0000"; ctx.dataset.journalLines[1]!.amount = 1.5 as never; });
+    expect(rules["shard.checkpoint-live"]).toBeGreaterThan(0);
     expect(rules["ledger.not-decimal-string"]).toBeGreaterThan(0);
   });
+  test("a checkpoint sequence that is not the cut prefix", () => {
+    const rules = tamper((ctx) => {
+      const checkpoint = [...ctx.checkpoints.values()].find((candidate) => candidate.seq > 1)!;
+      checkpoint.seq -= 1;
+    });
+    expect(rules["shard.checkpoint-live"]).toBeGreaterThan(0);
+  });
+  test("a gap or a duplicate in a shard sequence", () => {
+    const gap = tamper((ctx) => { ctx.dataset.journalLines.find((line) => line.shardSeq === 2)!.shardSeq = 5; });
+    expect(gap["shard.seq-gapless"]).toBeGreaterThan(0);
+    const duplicate = tamper((ctx) => { ctx.dataset.journalLines.find((line) => line.shardSeq === 2)!.shardSeq = 1; });
+    expect(duplicate["shard.seq-gapless"]).toBeGreaterThan(0);
+    const stale = tamper((ctx) => { ctx.dataset.glAccountShards.find((shard) => shard.lineSeq > 0)!.lineSeq += 1; });
+    expect(stale["shard.seq-gapless"]).toBeGreaterThan(0);
+  });
+  test("a shard balance that is not the sum of its lines", () => {
+    const rules = tamper((ctx) => { ctx.dataset.glAccountShards.find((shard) => shard.lineSeq > 0)!.currentBalance = "123456.0000"; });
+    expect(rules["shard.sum"]).toBeGreaterThan(0);
+    expect(rules["shard.checkpoint-live"]).toBeGreaterThan(0);
+  });
+
 });
 
 describe("staff, secrets, configuration and the writer", () => {
@@ -304,6 +381,29 @@ describe("staff, secrets, configuration and the writer", () => {
     for (const user of staff) expect(parseAuthorities(user.authoritiesMap).length).toBeGreaterThan(0);
     expect(ctx.dataset.users.find((u) => u.role === "FINANCE")!.isChecker).toBe(true);
     expect(ctx.dataset.users.find((u) => u.role === "OPERATOR" && u.status === "ACTIVE")!.isMaker).toBe(true);
+  });
+  test("an attempt that reached the gateway carries the state variables its inquiry URL needs (no `URL parameter is missing`)", () => {
+    const ctx = run("inquiry-state", { paymentAttempts: 2500, paymentLinks: 1200 });
+    const keys = ctx.refs.gatewayStateKeys!;
+    let checked = 0;
+    for (const secret of ctx.meta!.pendingSecrets.filter((entry) => entry.field === "contextCiphertext")) {
+      const meta = ctx.meta!.attempts.get(String(secret.row.id))!;
+      const state = JSON.parse(secret.plaintext) as Record<string, string>;
+      const required = keys[meta.gatewayCode] ?? [];
+      if (!meta.reachedGateway || Object.keys(state).length === 0) {
+        for (const key of required) expect(state[key]).toBeUndefined(); // never reached the gateway / blocked: nothing to inquire about
+        continue;
+      }
+      for (const key of required) expect(typeof state[key]).toBe("string");
+      if (meta.gatewayCode === "moamalat") {
+        expect(state.MerchantReference).toBe(String(secret.row.reference));
+        expect(state.AmountTrxn).toBe(String(secret.row.gatewayAmountWire));
+        expect(state.SecureHash).toMatch(/^[0-9a-f]{16,}$/);
+      }
+      if (meta.gatewayCode === "neompay") expect(state.request_id).toBe(String(secret.row.providerReference)); // Fake Rails resolves it by provider reference
+      checked += required.length > 0 ? 1 : 0;
+    }
+    expect(checked).toBeGreaterThan(50);
   });
   test("sensitive columns are encrypted through the Vault, never plain base64", async () => {
     const ctx = run();
@@ -335,7 +435,7 @@ describe("staff, secrets, configuration and the writer", () => {
       ["merchant", "user"], ["user", "approvalRequest"], ["approvalRequest", "joinRequest"], ["amlScreening", "joinRequest"],
       ["glAccount", "wallet"], ["wallet", "application"], ["journalEntry", "paymentAttempt"], ["paymentLink", "paymentAttempt"],
       ["paymentAttempt", "dispute"], ["dispute", "adjustment"], ["adjustment", "cashoutRequest"], ["amlRule", "amlCase"],
-      ["journalEntry", "amlCase"], ["amlCase", "regulatoryReport"], ["reconciliationItem", "operatorCase"], ["gatewayVersion", "confirmationChannel"],
+      ["journalEntry", "amlCase"], ["journalLine", "glAccountShard"], ["amlCase", "regulatoryReport"], ["reconciliationItem", "operatorCase"], ["gatewayVersion", "confirmationChannel"],
     ] as const) {
       expect(at(parent)).toBeGreaterThanOrEqual(0);
       expect(at(parent)).toBeLessThan(at(child));

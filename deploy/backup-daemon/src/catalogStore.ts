@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { BackupEngineMode } from "./config";
 import type { BackupKind, BackupTarget } from "./backupEngine";
 import type { DrillReport } from "./restoreDrillRunner";
+import type { CatalogMirror } from "./catalogMirror";
 
 export type BackupRunStatus = "QUEUED" | "RUNNING" | "PASSED" | "FAILED";
 
@@ -56,6 +57,8 @@ export interface CatalogStoreOptions {
   maxRuns?: number;
   maxDrills?: number;
   onWarning?: (message: string) => void;
+  /** Encrypted, signed copy of the catalog on the storage tiers (also the recovery source on a fresh host). */
+  mirror?: CatalogMirror;
 }
 
 export const defaultCatalogFileSystem: CatalogFileSystem = {
@@ -83,7 +86,7 @@ const backupRunSchema = z.object({
   id: z.string().min(1),
   target: z.enum(["all", "postgres_core", "audit_db", "redis"]),
   kind: z.enum(["full", "delta"]),
-  engine: z.enum(["wal-g", "barman"]),
+  engine: z.enum(["pg-native", "wal-g", "barman"]),
   status: z.enum(["QUEUED", "RUNNING", "PASSED", "FAILED"]),
   startedAt: z.string().min(1),
   completedAt: z.string().min(1).optional(),
@@ -159,6 +162,13 @@ export class CatalogStore {
   private persistent = true;
   private persistenceError: string | undefined;
   private loadWarning: string | undefined;
+  private mirror: CatalogMirror | undefined;
+  private mirrorBusy = false;
+  private mirrorPending: string | undefined;
+  private mirrorChain: Promise<void> = Promise.resolve();
+  private mirrorError: string | undefined;
+  /** True when this catalog was rebuilt from the mirror because no local file existed. */
+  public recovered = false;
 
   private constructor(
     private readonly path: string,
@@ -170,6 +180,7 @@ export class CatalogStore {
     this.clock = options.clock ?? (() => new Date());
     this.maxRuns = options.maxRuns ?? 500;
     this.maxDrills = options.maxDrills ?? 100;
+    this.mirror = options.mirror;
   }
 
   public static async load(options: CatalogStoreOptions): Promise<CatalogStore> {
@@ -177,12 +188,24 @@ export class CatalogStore {
     const defaultPolicy = options.defaultPolicy ?? createDefaultPolicy();
     let raw: string | undefined;
     let warning: string | undefined;
+    let recoveredFromMirror = false;
 
     try {
       raw = await fileSystem.readFile(options.path, "utf8");
     } catch (error) {
       if (!isNotFound(error)) {
         warning = `catalog could not be read: ${error instanceof Error ? error.message : String(error)}`;
+      } else if (options.mirror) {
+        // A fresh or replaced host: rebuild from the signed copy on the storage tiers.
+        try {
+          const remote = await options.mirror.download();
+          if (remote !== null) {
+            raw = remote;
+            recoveredFromMirror = true;
+          }
+        } catch (mirrorError) {
+          warning = `catalog mirror could not be read: ${mirrorError instanceof Error ? mirrorError.message : String(mirrorError)}`;
+        }
       }
     }
 
@@ -207,12 +230,15 @@ export class CatalogStore {
 
     const store = new CatalogStore(options.path, initial, options);
     store.loadWarning = warning;
+    store.recovered = recoveredFromMirror && parsed !== undefined;
     if (warning) {
       store.persistenceError = warning;
       if (raw === undefined) store.persistent = false;
       options.onWarning?.(warning);
     }
-    if (raw === undefined && warning === undefined) {
+    if (store.recovered) {
+      await store.save();
+    } else if (raw === undefined && warning === undefined) {
       await store.save();
     } else if (warning !== undefined && raw !== undefined) {
       await store.save();
@@ -259,6 +285,41 @@ export class CatalogStore {
     return clone(updated);
   }
 
+  /**
+   * Runs that were QUEUED/RUNNING when the daemon stopped can never finish: nothing is running them any more.
+   * Without this they stay "RUNNING" forever and the Admin Portal shows a backup that is not happening.
+   */
+  public async failInterruptedRuns(reason = "interrupted: the daemon restarted before this job finished"): Promise<string[]> {
+    const interrupted = this.catalog.runs.filter((run) => run.status === "QUEUED" || run.status === "RUNNING");
+    if (interrupted.length === 0) return [];
+    const at = this.clock().toISOString();
+    for (const run of interrupted) {
+      run.status = "FAILED";
+      run.completedAt = at;
+      run.errorMessage = reason;
+    }
+    await this.save();
+    return interrupted.map((run) => run.id);
+  }
+
+  public hasFinishedJob(id: string): boolean {
+    return (
+      this.catalog.runs.some((run) => run.id === id && (run.status === "PASSED" || run.status === "FAILED")) ||
+      this.catalog.drills.some((drill) => drill.id === id)
+    );
+  }
+
+  /** Adds history rebuilt from the repository without duplicating ids already known. */
+  public async importRuns(runs: BackupRun[]): Promise<number> {
+    const known = new Set(this.catalog.runs.map((run) => run.id));
+    const fresh = runs.filter((run) => !known.has(run.id));
+    if (fresh.length === 0) return 0;
+    this.catalog.runs = [...this.catalog.runs, ...fresh.map((run) => clone(run))].sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+    this.prune();
+    await this.save();
+    return fresh.length;
+  }
+
   public async addDrill(report: DrillReport): Promise<DrillReport> {
     this.catalog.drills.unshift(clone(report));
     this.prune();
@@ -291,7 +352,42 @@ export class CatalogStore {
   public async save(): Promise<boolean> {
     const payload = `${JSON.stringify(this.catalog, null, 2)}\n`;
     this.writeChain = this.writeChain.then(() => this.writeAtomically(payload));
-    return this.writeChain;
+    const ok = await this.writeChain;
+    this.scheduleMirror(payload);
+    return ok;
+  }
+
+  public getMirrorError(): string | undefined {
+    return this.mirrorError;
+  }
+
+  /** Resolves once every queued mirror upload has finished (used on shutdown and in tests). */
+  public async whenMirrored(): Promise<void> {
+    await this.mirrorChain;
+  }
+
+  /** Latest-wins, never blocks a catalog write, never throws. */
+  private scheduleMirror(payload: string): void {
+    if (!this.mirror) return;
+    this.mirrorPending = payload;
+    if (this.mirrorBusy) return;
+    this.mirrorBusy = true;
+    this.mirrorChain = (async () => {
+      try {
+        while (this.mirrorPending !== undefined) {
+          const next = this.mirrorPending;
+          this.mirrorPending = undefined;
+          try {
+            await this.mirror!.upload(next);
+            this.mirrorError = undefined;
+          } catch (error) {
+            this.mirrorError = error instanceof Error ? error.message : String(error);
+          }
+        }
+      } finally {
+        this.mirrorBusy = false;
+      }
+    })();
   }
 
   private prune(): void {

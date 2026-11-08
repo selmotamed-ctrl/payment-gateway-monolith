@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { BackupEngine, RecoverResult } from "./backupEngine";
 import { buildPsqlCommand } from "./backupEngine";
 import type { CommandResult, CommandRunner } from "./commandRunner";
-import { collectSecretValues, redactText, type BackupDaemonConfig } from "./config";
+import { auditEndpoint, collectSecretValues, isAuditDedicatedCluster, redactText, type BackupDaemonConfig } from "./config";
 
 export interface DrillCheckResult {
   ok: boolean;
@@ -53,34 +53,56 @@ export interface RestoreDrillDependencies {
 export interface DrillRunOptions {
   id?: string;
   requestedBy?: string;
+  /** Recover to this moment instead of "now - 5 minutes". Must not be in the future. */
+  targetTime?: Date;
+  /** Disaster-recovery rehearsal: replay ALL available WAL instead of stopping at a time. Excludes `targetTime`. */
+  latest?: boolean;
 }
 
 export const DOUBLE_ENTRY_QUERY =
   "SELECT COALESCE(SUM(CASE WHEN direction='DEBIT' THEN amount ELSE -amount END), 0)::text FROM journal_lines;";
 
 /**
- * Design lines 1168-1169, adapted for PostgreSQL's uuid/text columns:
- * `last_checkpoint_id` is TEXT while `journal_lines.id` is UUID, so the uuid is
- * cast to text for the comparison instead of forcing an unsafe text->uuid cast.
+ * Per-shard ledger proof on the RESTORED database, counting the shards that fail it (0 = healthy). For every shard:
+ *   * its balance equals the sum of ALL its journal lines (pre-genesis lines are shard 0, sequence 0),
+ *   * its checkpoint balance equals the sum of the lines up to the checkpoint sequence, and
+ *   * the number of sequenced lines above the shard's `baseline_seq` (0 unless an approved re-baseline repaired a damaged
+ *     sequence) equals `line_seq - baseline_seq` (gapless, no duplicates, nothing lost).
+ * This replaces the old account-level comparison against `last_checkpoint_id`, which compared a line UUID with a text
+ * marker and no longer exists: the boundary of a checkpoint is the shard's own gapless sequence.
  */
 export const BALANCE_PARITY_QUERY =
-  "SELECT COUNT(*)::text FROM gl_accounts g " +
-  "WHERE (SELECT SUM(s.current_balance) FROM gl_account_shards s WHERE s.gl_account_id = g.id) <> " +
-  "(g.checkpoint_balance + COALESCE((SELECT SUM(CASE WHEN l.direction='DEBIT' THEN l.amount ELSE -l.amount END) " +
-  "FROM journal_lines l WHERE l.gl_account_id = g.id AND " +
-  "(g.last_checkpoint_id IS NULL OR l.id::text > g.last_checkpoint_id)), 0));";
+  "SELECT COUNT(*)::text FROM gl_account_shards s " +
+  "LEFT JOIN gl_shard_checkpoints c ON c.gl_account_id = s.gl_account_id AND c.shard_id = s.shard_id " +
+  "CROSS JOIN LATERAL (" +
+  "SELECT COALESCE(SUM(x.signed), 0) AS total, " +
+  "COALESCE(SUM(x.signed) FILTER (WHERE x.shard_seq <= COALESCE(c.checkpoint_seq, 0)), 0) AS upto_checkpoint, " +
+  "COUNT(*) FILTER (WHERE x.shard_seq > COALESCE(c.baseline_seq, 0)) AS sequenced " +
+  "FROM (SELECT CASE WHEN l.direction = 'DEBIT' THEN l.amount ELSE -l.amount END AS signed, l.shard_seq " +
+  "FROM journal_lines l WHERE l.gl_account_id = s.gl_account_id AND l.shard_id = s.shard_id) x) j " +
+  "WHERE s.current_balance <> j.total " +
+  "OR COALESCE(c.checkpoint_balance, 0) <> j.upto_checkpoint " +
+  "OR j.sequenced <> s.line_seq - COALESCE(c.baseline_seq, 0);";
 
 export const JOURNAL_LINE_COUNT_QUERY = "SELECT COUNT(*)::text FROM journal_lines;";
 
 export const REPLAYED_LSN_QUERY =
   "SELECT COALESCE(pg_last_wal_replay_lsn(), pg_current_wal_lsn())::text;";
 
+/**
+ * The audit trigger hashes `before_json::text` / `after_json::text` (JSONB text
+ * form: `{"a": 1}` with spaces, keys ordered by length). Re-serializing parsed
+ * JSON can never reproduce that, so the query returns the database's own text
+ * and the timestamp formatted exactly as the trigger formats it.
+ */
 export const AUDIT_CHAIN_QUERY =
   "SELECT COALESCE(json_agg(row_to_json(t) ORDER BY t.\"seqNo\"::bigint), '[]'::json)::text " +
-  "FROM (SELECT seq_no::text AS \"seqNo\", id::text AS \"id\", created_at AS \"createdAt\", " +
+  "FROM (SELECT seq_no::text AS \"seqNo\", id::text AS \"id\", " +
+  "to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS \"createdAt\", " +
   "actor_id::text AS \"actorId\", action, entity_type AS \"entityType\", entity_id AS \"entityId\", " +
-  "before_json AS \"beforeJson\", after_json AS \"afterJson\", prev_hash AS \"prevHash\", " +
-  "row_hash AS \"rowHash\" FROM audit_records ORDER BY seq_no ASC) t;";
+  "before_json AS \"beforeJson\", after_json AS \"afterJson\", " +
+  "before_json::text AS \"beforeJsonText\", after_json::text AS \"afterJsonText\", " +
+  "prev_hash AS \"prevHash\", row_hash AS \"rowHash\" FROM audit_records ORDER BY seq_no ASC) t;";
 
 export const GENESIS_HASH = "0".repeat(64);
 
@@ -110,6 +132,9 @@ export interface AuditChainRow {
   entityId: string;
   beforeJson: unknown;
   afterJson: unknown;
+  /** `before_json::text` / `after_json::text` exactly as PostgreSQL renders them (what the trigger hashed). */
+  beforeJsonText?: string;
+  afterJsonText?: string;
   prevHash: string;
   rowHash: string;
 }
@@ -138,15 +163,46 @@ export const buildAuditCanonicalPayload = (prevHash: string, row: AuditChainRow)
 export const computeAuditRowHash = (prevHash: string, row: AuditChainRow): string =>
   createHash("sha256").update(buildAuditCanonicalPayload(prevHash, row), "utf8").digest("hex");
 
+/** The trigger's canonical form: the database's own JSONB text, not a re-serialization. */
+export const buildTriggerCanonicalPayload = (prevHash: string, row: AuditChainRow & { beforeJsonText: string; afterJsonText: string }): string =>
+  [
+    prevHash,
+    row.id,
+    typeof row.createdAt === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(row.createdAt)
+      ? row.createdAt
+      : (row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt)).toISOString(),
+    row.actorId,
+    row.action,
+    row.entityType,
+    row.entityId,
+    row.beforeJsonText,
+    row.afterJsonText,
+  ].join("|");
+
+/** A row is intact when EITHER canonical form reproduces its stored hash. */
+export const auditRowHashMatches = (prevHash: string, row: AuditChainRow): boolean => {
+  if (row.beforeJsonText !== undefined && row.afterJsonText !== undefined) {
+    const triggerHash = createHash("sha256")
+      .update(buildTriggerCanonicalPayload(prevHash, row as AuditChainRow & { beforeJsonText: string; afterJsonText: string }), "utf8")
+      .digest("hex");
+    if (row.rowHash === triggerHash) return true;
+  }
+  return row.rowHash === computeAuditRowHash(prevHash, row);
+};
+
 export const verifyAuditChain = (rows: AuditChainRow[]): AuditVerification => {
   let previousHash = GENESIS_HASH;
   let brokenLinks = 0;
   let firstBrokenSeqNo: string | null = null;
+  let expectedSeq = 1;
   for (const row of rows) {
-    const expected = computeAuditRowHash(previousHash, row);
     const linkBroken = row.prevHash !== previousHash;
-    const hashBroken = row.rowHash !== expected;
-    if (linkBroken || hashBroken) {
+    const hashBroken = !auditRowHashMatches(previousHash, row);
+    // seq_no is gap-free by construction, so a missing number means a deleted row.
+    const seqNumber = Number(row.seqNo);
+    const gap = Number.isFinite(seqNumber) && seqNumber !== expectedSeq;
+    expectedSeq = Number.isFinite(seqNumber) ? seqNumber + 1 : expectedSeq + 1;
+    if (linkBroken || hashBroken || gap) {
       brokenLinks += 1;
       if (firstBrokenSeqNo === null) firstBrokenSeqNo = String(row.seqNo);
     }
@@ -179,6 +235,8 @@ export const parseAuditRows = (stdout: string): AuditChainRow[] => {
       entityId: String(entry.entityId ?? entry.entity_id ?? ""),
       beforeJson: entry.beforeJson ?? entry.before_json ?? {},
       afterJson: entry.afterJson ?? entry.after_json ?? {},
+      ...(typeof entry.beforeJsonText === "string" ? { beforeJsonText: entry.beforeJsonText } : {}),
+      ...(typeof entry.afterJsonText === "string" ? { afterJsonText: entry.afterJsonText } : {}),
       prevHash: String(entry.prevHash ?? entry.prev_hash ?? ""),
       rowHash: String(entry.rowHash ?? entry.row_hash ?? ""),
     };
@@ -261,6 +319,41 @@ const defaultChecks = (): DrillReport["checks"] => ({
   auditChain: { ok: false, detail: "not executed" },
 });
 
+/**
+ * Settings forced onto EVERY scratch cluster. The restored `postgresql.auto.conf`
+ * still carries the production `archive_command`; without this a promoted
+ * scratch cluster would push its own WAL into the real archive and corrupt
+ * point-in-time recovery for production.
+ */
+export const SCRATCH_SAFETY_CONF =
+  "archive_mode = off\n" +
+  "archive_command = ''\n" +
+  "primary_conninfo = ''\n" +
+  "primary_slot_name = ''\n" +
+  "synchronous_standby_names = ''\n" +
+  "summarize_wal = off\n" +
+  "ssl = off\n" +
+  "hot_standby = on\n";
+
+/** pg_controldata labels -> postgresql.conf names. Hot standby refuses to start below the primary's values. */
+const CONTROL_DATA_SETTINGS: Array<[string, string]> = [
+  ["max_connections setting", "max_connections"],
+  ["max_worker_processes setting", "max_worker_processes"],
+  ["max_wal_senders setting", "max_wal_senders"],
+  ["max_prepared_xacts setting", "max_prepared_transactions"],
+  ["max_locks_per_xact setting", "max_locks_per_transaction"],
+];
+
+export const parseControlData = (stdout: string): string => {
+  const lines: string[] = [];
+  for (const [label, name] of CONTROL_DATA_SETTINGS) {
+    const match = new RegExp(`^${label}:\\s*(\\d+)\\s*$`, "m").exec(stdout);
+    if (match?.[1]) lines.push(`${name} = ${match[1]}`);
+  }
+  if (/^track_commit_timestamp setting:\s*on\s*$/m.test(stdout)) lines.push("track_commit_timestamp = on");
+  return lines.length > 0 ? `${lines.join("\n")}\n` : "";
+};
+
 export class RestoreDrillRunner {
   private readonly fileSystem: DrillFileSystem;
   private readonly clock: () => Date;
@@ -278,7 +371,9 @@ export class RestoreDrillRunner {
     const config = this.deps.config;
     const startedAtDate = this.clock();
     const startedAt = startedAtDate.toISOString();
-    const targetTime = new Date(startedAtDate.getTime() - 5 * 60 * 1000);
+    const latest = options.latest === true;
+    // For "latest" there is no target; the report carries the moment the drill started.
+    const targetTime = latest ? startedAtDate : (options.targetTime ?? new Date(startedAtDate.getTime() - 5 * 60 * 1000));
     const id = options.id ?? this.idFactory();
     const checks = defaultChecks();
     let replayedLsn = "";
@@ -288,11 +383,13 @@ export class RestoreDrillRunner {
     let journalLineCount = 0;
     let errorMessage: string | undefined;
 
+    // A shared audit database lives inside the core cluster, so one scratch cluster serves every check.
+    const dedicatedAudit = isAuditDedicatedCluster(config);
     const coreScratch = config.BACKUP_SCRATCH_DIR;
     const auditScratch = config.BACKUP_SCRATCH_AUDIT_DIR;
     const corePort = config.BACKUP_SCRATCH_PORT;
     const auditPort = config.BACKUP_SCRATCH_AUDIT_PORT;
-    const scratchDirectories = [coreScratch, auditScratch];
+    const scratchDirectories = dedicatedAudit ? [coreScratch, auditScratch] : [coreScratch];
     const pgCtl = join(config.PG_BIN_DIR, "pg_ctl");
 
     const stopScratch = async (scratch: string): Promise<void> => {
@@ -317,16 +414,28 @@ export class RestoreDrillRunner {
         {
           id: "scratch",
           host: "127.0.0.1",
-          port: target === "audit_db" ? auditPort : corePort,
+          port: target === "audit_db" && dedicatedAudit ? auditPort : corePort,
         },
+        // Audit data is only granted to the audit role (and a dedicated audit cluster does not even have the core
+        // application role): always read it as PG_AUDIT_USER (which falls back to the primary role when unset).
+        target === "audit_db" ? auditEndpoint(config).user : config.PG_PRIMARY_USER,
       );
       try {
         return await this.deps.runner.run(command.command, command.args, {
-          env: command.env,
+          env: { ...(command.env ?? {}), PGSSLMODE: "disable" },
           timeoutMs: command.timeoutMs,
         });
       } catch (error) {
         return { code: 124, stdout: "", stderr: safeError(error, config) };
+      }
+    };
+
+    const logTail = async (scratch: string): Promise<string> => {
+      try {
+        const text = await this.fileSystem.readFile(join(scratch, "postgresql.log"));
+        return redactText(text.trim().split(/\r?\n/).slice(-6).join(" | "), collectSecretValues(config)).slice(-600);
+      } catch {
+        return "";
       }
     };
 
@@ -365,18 +474,51 @@ export class RestoreDrillRunner {
       }
     };
 
+    /**
+     * A physical backup holds PGDATA only. Debian-style clusters keep
+     * postgresql.conf / pg_hba.conf in /etc, so the restored directory may have
+     * no configuration at all. Build a minimal one, sized from pg_controldata so
+     * hot standby can start.
+     */
+    const ensureScratchConfig = async (scratch: string): Promise<void> => {
+      if (!(await this.fileSystem.exists(join(scratch, "postgresql.conf")))) {
+        const control = await this.deps.runner
+          .run(join(config.PG_BIN_DIR, "pg_controldata"), [scratch], { timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS })
+          .catch(() => ({ code: 1, stdout: "", stderr: "" }));
+        const sized = control.code === 0 ? parseControlData(control.stdout) : "";
+        await this.fileSystem.writeFile(
+          join(scratch, "postgresql.conf"),
+          `# generated by pg-backup-daemon for a scratch restore\n${sized}fsync = off\nfull_page_writes = off\n`,
+        );
+      }
+      if (!(await this.fileSystem.exists(join(scratch, "pg_hba.conf")))) {
+        await this.fileSystem.writeFile(
+          join(scratch, "pg_hba.conf"),
+          "local all all trust\nhost all all 127.0.0.1/32 trust\n",
+        );
+      }
+      if (!(await this.fileSystem.exists(join(scratch, "pg_ident.conf")))) {
+        await this.fileSystem.writeFile(join(scratch, "pg_ident.conf"), "");
+      }
+    };
+
     const writeRecoveryFiles = async (
       scratch: string,
       recovered: RecoverResult,
     ): Promise<void> => {
-      if (!recovered.recoveryConf) return;
+      await ensureScratchConfig(scratch);
       const autoConfPath = join(scratch, "postgresql.auto.conf");
       const existing = await this.fileSystem.readFile(autoConfPath).catch(() => "");
-      const separator = existing.trim().length > 0 ? "\n" : "";
-      await this.fileSystem.writeFile(autoConfPath, `${existing}${separator}${recovered.recoveryConf}`);
-      const recoverySignal = join(scratch, "recovery.signal");
-      if (!(await this.fileSystem.exists(recoverySignal))) {
-        await this.fileSystem.writeFile(recoverySignal, "");
+      const separator = existing.trim().length > 0 && !existing.endsWith("\n") ? "\n" : "";
+      await this.fileSystem.writeFile(
+        autoConfPath,
+        `${existing}${separator}${recovered.recoveryConf ?? ""}${SCRATCH_SAFETY_CONF}`,
+      );
+      if (recovered.recoveryConf) {
+        const recoverySignal = join(scratch, "recovery.signal");
+        if (!(await this.fileSystem.exists(recoverySignal))) {
+          await this.fileSystem.writeFile(recoverySignal, "");
+        }
       }
     };
 
@@ -396,10 +538,36 @@ export class RestoreDrillRunner {
         { timeoutMs: config.BACKUP_COMMAND_TIMEOUT_MS },
       );
       if (start.code !== 0) {
+        const tail = await logTail(scratch);
         throw new Error(
-          `${label} pg_ctl start failed: ${(start.stderr || start.stdout).trim().slice(0, 500)}`,
+          `${label} pg_ctl start failed: ${(start.stderr || start.stdout).trim().slice(0, 500)}${tail ? ` [${tail}]` : ""}`,
         );
       }
+    };
+
+    /**
+     * `pg_ctl -w start` returns as soon as the server accepts read-only
+     * connections, which can be BEFORE WAL replay reaches the target and the
+     * cluster promotes. Checks must only run on the final, promoted state.
+     */
+    const waitForRecoveryPromotion = async (scratch: string, target: "postgres_core" | "audit_db", label: string): Promise<void> => {
+      const timeoutMs = config.BACKUP_RECOVERY_TIMEOUT_MS;
+      const intervalMs = 250;
+      let waited = 0;
+      let failures = 0;
+      while (waited <= timeoutMs) {
+        const result = await psql("SELECT pg_is_in_recovery();", "postgres", target);
+        if (result.code === 0 && /^f/i.test(result.stdout.trim())) return;
+        failures = result.code === 0 ? 0 : failures + 1;
+        if (failures >= 40) {
+          const tail = await logTail(scratch);
+          throw new Error(`${label} scratch cluster stopped answering during recovery${tail ? ` [${tail}]` : ""}`);
+        }
+        await this.sleep(intervalMs);
+        waited += intervalMs;
+      }
+      const tail = await logTail(scratch);
+      throw new Error(`${label} recovery did not finish within ${Math.round(timeoutMs / 1000)}s (target ${targetTime.toISOString()})${tail ? ` [${tail}]` : ""}`);
     };
 
     try {
@@ -417,22 +585,28 @@ export class RestoreDrillRunner {
         targetTime,
         targetDir: coreScratch,
         port: corePort,
+        ...(latest ? { latest: true } : {}),
       });
-      const auditRecovered = await this.deps.engine.recover({
-        target: "audit_db",
-        targetTime,
-        targetDir: auditScratch,
-        port: auditPort,
-      });
+      const auditRecovered = dedicatedAudit
+        ? await this.deps.engine.recover({
+            target: "audit_db",
+            targetTime,
+            targetDir: auditScratch,
+            port: auditPort,
+            ...(latest ? { latest: true } : {}),
+          })
+        : undefined;
       replayedLsn = coreRecovered.replayedLsn ?? "";
 
       await ensureCluster(coreScratch, coreRecovered, "core");
-      await ensureCluster(auditScratch, auditRecovered, "audit");
+      if (auditRecovered) await ensureCluster(auditScratch, auditRecovered, "audit");
       await writeRecoveryFiles(coreScratch, coreRecovered);
-      await writeRecoveryFiles(auditScratch, auditRecovered);
+      if (auditRecovered) await writeRecoveryFiles(auditScratch, auditRecovered);
 
       await startCluster(coreScratch, corePort, "core");
-      await startCluster(auditScratch, auditPort, "audit");
+      if (auditRecovered) await startCluster(auditScratch, auditPort, "audit");
+      if (coreRecovered.recoveryConf) await waitForRecoveryPromotion(coreScratch, "postgres_core", "core");
+      if (auditRecovered?.recoveryConf) await waitForRecoveryPromotion(auditScratch, "audit_db", "audit");
 
       const doubleEntry = await psql(DOUBLE_ENTRY_QUERY, config.PG_PRIMARY_DB_NAME, "postgres_core");
       doubleEntryDrift = doubleEntry.code === 0 ? doubleEntry.stdout.trim() : "";
@@ -461,17 +635,37 @@ export class RestoreDrillRunner {
             : `balance parity query failed: ${(parity.stderr || parity.stdout).trim().slice(0, 300)}`,
       };
 
+      // Shared cluster: the audit database normally came back inside the physical restore; if it did not,
+      // restore the newest logical dump into the same scratch cluster.
+      let auditNote = "";
+      if (!dedicatedAudit) {
+        const present = await psql(
+          `SELECT 1 FROM pg_database WHERE datname = '${config.PG_AUDIT_DB_NAME.replace(/'/g, "''")}';`,
+          "postgres",
+          "postgres_core",
+        );
+        if (present.code === 0 && present.stdout.trim() !== "1" && this.deps.engine.restoreLogical) {
+          const restored = await this.deps.engine.restoreLogical({
+            database: config.PG_AUDIT_DB_NAME,
+            host: "127.0.0.1",
+            port: corePort,
+            user: config.PG_PRIMARY_USER,
+          });
+          auditNote = ` (${restored.detail})`;
+        }
+      }
+
       const auditResult = await psql(AUDIT_CHAIN_QUERY, config.PG_AUDIT_DB_NAME, "audit_db");
       if (auditResult.code !== 0) {
         checks.auditChain = {
           ok: false,
-          detail: `audit chain query failed: ${(auditResult.stderr || auditResult.stdout).trim().slice(0, 300)}`,
+          detail: `audit chain query failed: ${(auditResult.stderr || auditResult.stdout).trim().slice(0, 300)}${auditNote}`,
         };
       } else {
         try {
           const verification = verifyAuditChain(parseAuditRows(auditResult.stdout));
           auditBrokenLinks = verification.brokenLinks;
-          checks.auditChain = { ok: verification.valid, detail: verification.detail };
+          checks.auditChain = { ok: verification.valid, detail: `${verification.detail}${auditNote}` };
         } catch (error) {
           checks.auditChain = { ok: false, detail: `audit chain parse failed: ${safeError(error, config)}` };
         }

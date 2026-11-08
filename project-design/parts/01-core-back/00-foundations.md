@@ -233,7 +233,7 @@ TCP + TLS 1.3 handshake (client cert required)
 6. **Unexpected errors do not leak internals.** The response is `SERVER_ERROR` with `Internal server error` and a reference.
 7. **The database client is lazy and process-global.** Module import does not connect.
 8. **The storage engine is the transactional owner.** Routes should not open ad-hoc long transactions when a storage port exists.
-9. **Schema version 10 is required.** The seeders enforce it; the API currently does not at boot.
+9. **Schema version 11 is required.** The seeders enforce it; the API currently does not at boot.
 10. **The TLS server requires a client certificate.** There is no optional-client-cert mode in production startup.
 
 ## 5. Data / API / config / deployment surface
@@ -277,7 +277,7 @@ TCP + TLS 1.3 handshake (client cert required)
 1. Generate certs.
 2. Set `DATABASE_URL`.
 3. Apply migrations.
-4. Seed (this also checks schema version 10).
+4. Seed (this also checks schema version 11).
 5. `bun run start`.
 6. Probe `/health` over mTLS with a client cert.
 
@@ -370,4 +370,4 @@ No build or test was run for this documentation change.
 
 ## Security hardening (2026-11-05)
 
-Schema version is now 10 (see the data part). Login and MFA throttles live in `lib/auth/throttle.ts` as in-process counters (per instance). Create-admin (`scripts/createAdminPlan.ts`): MFA is on by default (`--no-mfa` or `ADMIN_MFA=false` disables it), `--password` on the command line is rejected, and the password comes from `ADMIN_PASSWORD`.
+Schema version is now 11 (see the data part). Login and MFA throttles live in `lib/auth/throttle.ts` (Redis-backed shared state when `REDIS_URL` is set, per-process memory otherwise). Create-admin (`scripts/createAdminPlan.ts`): MFA is on by default and requires a delivery phone (`--phone` or `ADMIN_PHONE`); `--no-mfa` or `ADMIN_MFA=false` disables it, `--password` on the command line is rejected, and the password comes from `ADMIN_PASSWORD`.

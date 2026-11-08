@@ -33,6 +33,41 @@ type TeamMember = {
 
 const ROLES = ["MERCHANT_ADMIN", "MERCHANT_STAFF", "MERCHANT_CASHIER"];
 const SCOPES = ["links", "payments", "wallets", "cashout", "applications", "pos", "tokens", "credentials", "users", "stats", "statements"];
+// The portal groups map to the closed core authority catalogue. Sending the
+// group names themselves is rejected by core (unknown authority) and would let
+// the UI drift from the server-enforced vocabulary.
+const AUTHORITY_GROUPS: Record<string, string[]> = {
+    links: ["link:read", "link:write"],
+    payments: ["payment:read"],
+    wallets: ["wallet:create"],
+    cashout: ["cashout:read", "cashout:request"],
+    applications: ["application:manage"],
+    pos: ["pos:manage"],
+    tokens: ["token:manage"],
+    credentials: ["credential:manage"],
+    users: ["user:manage"],
+    stats: ["merchant:read"],
+    statements: ["merchant:read"],
+    onboarding: ["onboarding:write"],
+    disputes: ["dispute:respond"],
+};
+const AUTHORITY_GROUP_BY_VALUE = new Map<string, string>(
+    Object.entries(AUTHORITY_GROUPS).flatMap(([group, authorities]) =>
+        authorities.map((authority) => [authority, group] as [string, string]),
+    ),
+);
+const expandAuthorities = (groups: string[]): string[] => [
+    ...new Set(
+        groups.flatMap((group) => AUTHORITY_GROUPS[group] ?? (group.includes(":") ? [group] : [])),
+    ),
+];
+const authorityGroups = (authoritiesMap: Record<string, boolean> | undefined): string[] => [
+    ...new Set(
+        Object.entries(authoritiesMap ?? {})
+            .filter(([, enabled]) => !!enabled)
+            .map(([authority]) => AUTHORITY_GROUP_BY_VALUE.get(authority) ?? authority),
+    ),
+];
 
 const TeamPage = dc(() => {
     const { t } = useLocale();
@@ -88,9 +123,7 @@ const TeamPage = dc(() => {
             status: member?.status === "SUSPENDED" ? "SUSPENDED" : "ACTIVE",
             role: member?.role ?? "MERCHANT_STAFF",
             appScopeIds: [...(member?.appScopeIds ?? [])],
-            authorities: Object.entries(member?.authoritiesMap ?? {})
-                .filter(([, enabled]) => !!enabled)
-                .map(([authority]) => authority),
+            authorities: authorityGroups(member?.authoritiesMap),
         };
         dialogOpen.value = true;
     };
@@ -100,7 +133,7 @@ const TeamPage = dc(() => {
         formError.value = "";
         try {
             const authoritiesMap: Record<string, boolean> = {};
-            for (const authority of form.value.authorities) {
+            for (const authority of expandAuthorities(form.value.authorities)) {
                 authoritiesMap[authority] = true;
             }
             if (editing.value) {
@@ -141,11 +174,7 @@ const TeamPage = dc(() => {
         {
             key: "authorities",
             label: "Authorities",
-            value: (row) =>
-                Object.entries(row.authoritiesMap ?? {})
-                    .filter(([, enabled]) => !!enabled)
-                    .map(([authority]) => authority)
-                    .join(", ") || "-",
+            value: (row) => authorityGroups(row.authoritiesMap).join(", ") || "-",
         },
         {
             key: "status",
@@ -299,7 +328,7 @@ const TeamPage = dc(() => {
                     </FormField>
                     <FormField label={t("Authorities")}>
                         <VSelect
-                            items={SCOPES.map((scope) => ({ title: `${scope}.*`, value: scope }))}
+                            items={Object.keys(AUTHORITY_GROUPS).map((scope) => ({ title: `${scope}.*`, value: scope }))}
                             modelValue={form.value.authorities}
                             onUpdate:modelValue={(v: string[]) => (form.value.authorities = v)}
                             multiple

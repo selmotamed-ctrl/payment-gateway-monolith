@@ -1,8 +1,10 @@
 import type { PrismaClient } from "../../../generated/prisma/client";
-import type { SeederContext } from "../context";
+import type { SeederContext, ShardCheckpointSnapshot } from "../context";
 
 /**
  * Topological FK-ordered, chunked `createMany` writer.
+ *
+ * Shard rows and per-shard checkpoints are upserted (the DB trigger creates the shard rows with the account).
  *
  * 120k attempts and ~490k journal lines must not be written one row at a time.
  * The writer streams 2,500-row chunks and keeps the insert order consistent
@@ -41,7 +43,6 @@ const STEPS: Step[] = [
   { model: "kybDocument", key: "kybDocuments" },
   { model: "beneficialOwner", key: "beneficialOwners" },
   { model: "glAccount", key: "glAccounts" },
-  { model: "glAccountShard", key: "glAccountShards" },
   { model: "wallet", key: "wallets" },
   { model: "application", key: "applications" },
   { model: "accessToken", key: "accessTokens" },
@@ -65,6 +66,9 @@ const STEPS: Step[] = [
   { model: "attemptStepLog", key: "attemptStepLogs" },
   { model: "inboundEvent", key: "inboundEvents" },
   { model: "journalLine", key: "journalLines" },
+  // Shard balances and `line_seq` come AFTER the lines they count. The checkpoint worker runs in the live core while the
+  // seeder writes, so a shard that was ahead of its lines would fail its proof ("0 of N lines found") and raise a P1 case.
+  { model: "glAccountShard", key: "glAccountShards" },
   { model: "reconciliationRun", key: "reconciliationRuns" },
   { model: "reconciliationItem", key: "reconciliationItems" },
   { model: "dispute", key: "disputes" },
@@ -102,6 +106,54 @@ const insertChunked = async (
   return written;
 };
 
+/**
+ * Shard rows: the DB trigger `gl_accounts_create_shards` has ALREADY created shard rows 0..shard_count-1 for
+ * every account inserted above (and baseline accounts have theirs), so a plain insert would collide. Each chunk
+ * is one `INSERT ... ON CONFLICT DO UPDATE` over `unnest` arrays: it fills balance + `line_seq` on the existing
+ * rows and still inserts a row the trigger did not create.
+ */
+const upsertShards = async (prisma: PrismaClient, rows: any[]): Promise<number> => {
+  let written = 0;
+  for (let offset = 0; offset < rows.length; offset += CHUNK) {
+    const chunk = rows.slice(offset, offset + CHUNK);
+    written += await prisma.$executeRawUnsafe(
+      `INSERT INTO "gl_account_shards" ("gl_account_id", "shard_id", "current_balance", "line_seq", "updated_at")
+       SELECT t.gl_account_id::uuid, t.shard_id::smallint, t.current_balance::numeric(18,4), t.line_seq::bigint, t.updated_at::timestamptz
+       FROM unnest($1::text[], $2::int[], $3::text[], $4::text[], $5::text[]) AS t(gl_account_id, shard_id, current_balance, line_seq, updated_at)
+       ON CONFLICT ("gl_account_id", "shard_id") DO UPDATE
+         SET "current_balance" = EXCLUDED."current_balance", "line_seq" = EXCLUDED."line_seq", "updated_at" = EXCLUDED."updated_at"`,
+      chunk.map((row) => String(row.glAccountId)),
+      chunk.map((row) => Number(row.shardId)),
+      chunk.map((row) => String(row.currentBalance)),
+      chunk.map((row) => String(row.lineSeq)),
+      chunk.map((row) => (row.updatedAt as Date).toISOString()),
+    );
+  }
+  return written;
+};
+
+const upsertShardCheckpoints = async (prisma: PrismaClient, rows: ShardCheckpointSnapshot[]): Promise<number> => {
+  let written = 0;
+  for (let offset = 0; offset < rows.length; offset += CHUNK) {
+    const chunk = rows.slice(offset, offset + CHUNK);
+    written += await prisma.$executeRawUnsafe(
+      `INSERT INTO "gl_shard_checkpoints" ("gl_account_id", "shard_id", "checkpoint_balance", "checkpoint_seq", "checkpoint_at", "verified_at", "status")
+       SELECT t.gl_account_id::uuid, t.shard_id::smallint, t.balance::numeric(18,4), t.seq::bigint, t.at::timestamptz, t.at::timestamptz, 'OK'
+       FROM unnest($1::text[], $2::int[], $3::text[], $4::text[], $5::text[]) AS t(gl_account_id, shard_id, balance, seq, at)
+       ON CONFLICT ("gl_account_id", "shard_id") DO UPDATE
+         SET "checkpoint_balance" = EXCLUDED."checkpoint_balance", "checkpoint_seq" = EXCLUDED."checkpoint_seq",
+             "checkpoint_at" = EXCLUDED."checkpoint_at", "verified_at" = EXCLUDED."verified_at", "status" = 'OK',
+             "failure_kind" = NULL, "consecutive_failures" = 0, "last_failure_at" = NULL`,
+      chunk.map((row) => row.glAccountId),
+      chunk.map((row) => row.shardId),
+      chunk.map((row) => row.balance),
+      chunk.map((row) => String(row.seq)),
+      chunk.map((row) => row.at.toISOString()),
+    );
+  }
+  return written;
+};
+
 export interface WriteReport {
   model: string;
   rows: number;
@@ -116,37 +168,20 @@ export const bulkDataWriter = async (
     const source = ctx.dataset[step.key] as any[];
     if (!source || source.length === 0) continue;
     const rows = step.transform ? step.transform(source) : source;
-    let written: number;
-    if (step.model === "glAccountShard") {
-      written = 0;
-      for (const row of rows) {
-        await prisma.glAccountShard.upsert({
-          where: { glAccountId_shardId: { glAccountId: row.glAccountId, shardId: row.shardId } },
-          update: { currentBalance: row.currentBalance, updatedAt: row.updatedAt },
-          create: row,
-        });
-        written += 1;
-      }
-    } else {
-      written = await insertChunked(prisma, step.model, rows);
-    }
+    const written = step.model === "glAccountShard"
+      ? await upsertShards(prisma, rows)
+      : await insertChunked(prisma, step.model, rows);
     report.push({ model: step.model, rows: written });
     if (process.env.SYNTHETIC_SEED_VERBOSE === "true") {
       console.log(`  ${step.model}: ${written}`);
     }
   }
 
-  // Apply the monthly GL checkpoints (including the already-seeded accounts).
-  for (const [accountId, checkpoint] of ctx.checkpoints) {
-    await prisma.glAccount
-      .update({
-        where: { id: accountId },
-        data: {
-          checkpointBalance: checkpoint.balance,
-          checkpointAt: checkpoint.at,
-          lastCheckpointId: checkpoint.lastCheckpointId,
-        },
-      });
+  // The per-shard month-end checkpoints reference the shard rows, so they come after them.
+  const checkpointRows = await upsertShardCheckpoints(prisma, [...ctx.checkpoints.values()]);
+  report.push({ model: "glShardCheckpoint", rows: checkpointRows });
+  if (process.env.SYNTHETIC_SEED_VERBOSE === "true") {
+    console.log(`  glShardCheckpoint: ${checkpointRows}`);
   }
 
   return report;

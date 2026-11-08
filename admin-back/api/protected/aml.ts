@@ -320,6 +320,20 @@ router.post(
   }),
 );
 
+const reportingRulePromoteSchema = z.object({}).strict();
+
+router.post(
+  "/reporting-rules/:id/promote",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/reporting-rules/${encodeURIComponent(context.params.id ?? "")}/promote`,
+    paramsSchema: z.object({ id: zIdentifier }),
+    schema: reportingRulePromoteSchema,
+    // Promotion is a maker-checker request: core answers `202 Accepted`.
+    relayStatus: true,
+  }),
+);
+
 router.get(
   "/reports",
   coreForward({

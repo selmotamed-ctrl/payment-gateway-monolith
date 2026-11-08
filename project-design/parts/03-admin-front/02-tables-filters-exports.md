@@ -3,8 +3,8 @@ id: admin-ui.tables
 title: Tables Filters and Exports
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-07
+verified_against: d695518+working-tree
 code:
   - admin-front/src/components/Table/**
   - admin-front/src/utils/xlsx/**
@@ -12,12 +12,14 @@ code:
   - admin-front/src/components/ui/FormChecklist.tsx
   - admin-front/src/constants/env/index.ts
   - admin-front/src/pages/**
+  - admin-front/src/components/Table/registry/**
 design_sources:
   - design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md
   - design/06-ui/portal_ui_abstraction_and_modern_fintech_redesign_2.md
   - design/06-ui/portal_ui_implementation_plan.md
 tests:
   - tests/e2e/admin/table-and-padding-geometry.spec.ts
+  - tests/e2e/admin/table-row-context-menu.spec.ts
   - tests/e2e/admin/create.spec.ts
   - admin-front/src/components/ui/__tests__/ui-abstraction-compliance.test.ts
 gaps:
@@ -46,6 +48,7 @@ The v2 design intends tables to look operational rather than decorative:
 5. **Stable chrome.** Toolbar, filters, table card, and footer use explicit padding tokens and the `.pg-table-card` class.
 6. **Predictable exports.** Every spreadsheet export goes through the shared XLSX pipeline, with translated headers, styled header rows, frozen header row, widths, and a stable title.
 7. **Human checklist before risky exports.** Summary/export cards can require checklist items; deploy flags can hide checklists without changing behavior.
+8. **Actions are always reachable.** The action column is sticky to the inline end, so the visible primary action and the overflow trigger never require horizontal scrolling. A row-level context menu offers the same actions at the pointer (right-click) and from the keyboard (`Shift+F10`); the menu lists the primary action first, then the overflow items. The sticky trigger remains the touch path and the accessible baseline; links and form fields keep their native context menu.
 
 ## 3. As-built architecture
 
@@ -57,12 +60,22 @@ The v2 design intends tables to look operational rather than decorative:
 | `DataTable` | `admin-front/src/components/Table/DataTable.tsx` | Either local data mode or "server" mode driven by a `server` prop or `tableRegistry[route.name]`. Server mode fetches one page of up to 200 rows and paginates locally. Persists server search/filter/sort state in `sessionStorage`. |
 | `Table` | `admin-front/src/components/Table/Table.tsx` | Renders the Vuetify table, compact row styling, selection, column filters, row tone, and cell rendering. |
 | `TableFilters` | `admin-front/src/components/Table/TableFilters.tsx` | Renders filter controls by type, active chips, summary text, a mobile/desktop surface, and an injection key so the toolbar can toggle filters. |
-| `TableRowActions` | `admin-front/src/components/Table/TableRowActions.tsx` | One optional primary action plus a right-aligned overflow menu. Supports danger/disabled/hidden items and dividers. |
+| `TableRowActions` | `admin-front/src/components/Table/TableRowActions.tsx` | One optional primary action plus a right-aligned overflow menu. Supports danger/disabled/hidden items and dividers. It also binds the row context menu (`contextmenu` + `Shift+F10`), shares the menu panel with the overflow trigger, and owns the one-open-menu coordinator. |
 | `HeaderFooter` | `admin-front/src/components/Table/HeaderFooter.tsx` | Desktop/mobile toolbar and pagination, search, refresh, filter trigger, record count, XLSX button, and `useTableXlsx`. |
 | `tableRegistry` | `admin-front/src/components/Table/tableRegistry.ts` | Maps a route name to a URL, list key, filters, default sort, optional storage key, params, and row mapper. |
 | `filters` | `admin-front/src/components/Table/filters.ts` | Filter union type, active-state detection, query mapping, and server config type. |
 | `referenceOptions` | `admin-front/src/components/Table/referenceOptions.ts` | Cached `/options/:kind` loaders for merchant/rail/gateway/user/wallet filters. |
 | `statusTone` | `admin-front/src/components/Table/statusTone.ts` | Status-to-tone mapping used by filters and status pills. |
+
+### 3.1.1 Row context menu and sticky action column (2026-11-07)
+
+- **Sticky action column.** `.table-wrapper .pg-col-actions` is `position: sticky; inset-inline-end: 0` with an opaque surface background, a header above the body cells, and the hover surface on `tr:hover`. Removing `.modern-table { overflow: hidden }` was required so the sticky cell resolves against `.table-wrapper` (the actual horizontal scroll container).
+- **One integration point.** `TableRowActions` finds its row (`root.closest("tr")`) on mount, marks it with `data-pg-row-actions-bound="true"`, and binds `contextmenu` and `keydown`. No page changes are needed; `MiniTable` rows that use the same component are covered too. The first action cell in a row owns the binding.
+- **Context menu semantics.** Right-click opens the shared menu at the pointer through a hidden fixed activator; Vuetify flips it near the viewport edge and handles RTL. The activator's element ref MUST be composed with the one Vuetify passes in `activatorProps.ref` (`composeActivatorRef`): a second `ref` on the same element, before or after the spread, replaces Vuetify's and the menu then has no anchor and opens at the top-left of the page (found and fixed 2026-11-08; the same applies to the overflow button, whose focus return depends on its own ref). The e2e specs assert the menu position against the pointer. The menu always contains the primary action first (disabled/loading respected), a divider, then the visible overflow items. `hidden`/`disabled`/`dividerBefore` behave exactly as in the overflow menu.
+- **Native exclusions.** `a`, inputs, text areas, selects, contenteditable fields, Vuetify field/checkbox/switch/radio/slider controls and `[data-no-row-context-menu]` keep the browser menu. Right-clicking a button (including the action buttons) opens the row menu.
+- **Keyboard and focus.** `Shift+F10`/the ContextMenu key on any focused, non-editable element in the row opens the menu anchored at the action cell. Opening moves focus to the first enabled item; `Escape` is handled by a capture-phase window listener (so it also works when another overlay owns the global-top flag and when focus stayed on the row) and `restoreFocus()` returns focus to the overflow/primary button. The visible action button remains the accessible baseline.
+- **One menu at a time.** A module-level closer is registered when either the overflow or the context menu opens; opening another row's menu closes the previous one. The button and context menus share the same panel renderer (max-height `min(70vh, 420px)`, internal scrolling).
+- **Scope.** Admin shared tables (`ApiTable`/`DataTable`/`DataPage`) and `TableRowActions` used inside `MiniTable` rows. Custom inline action cells that do not use `TableRowActions` are not covered. The merchant portal uses the identical component and CSS copy.
 
 ### 3.2 Filter types
 
@@ -291,3 +304,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical table/export part. Records the 19 registry configurations, hybrid 200-row server mode, current-page-only XLSX export, summary export surfaces, and runtime checklist flags.
+
+## Registry slices (2026-11-06)
+
+`components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`.

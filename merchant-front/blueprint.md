@@ -6,7 +6,7 @@ Generated from: `merchant-ui.portal`, `merchant-ui.guide`.
 
 ## Merchant Portal
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-07
 
 ## 1. Purpose and scope
 
@@ -168,6 +168,7 @@ The link amount is stored server-side; the checkout page never accepts a client 
 - Creates a terminal with name and location.
 - Creates/pairs a screen with a screen name and type.
 - Shows screen role/status and actions.
+- The shared table subsystem mirrors the admin copy: the action column is sticky to the inline end and `TableRowActions` opens the same actions from a row right-click or `Shift+F10` (primary action first, then the overflow items). The visible overflow button remains the touch path.
 
 `PosScreen` (`/portal/pos/screen/:code`):
 
@@ -376,9 +377,10 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 - **Cash-out:** an `idempotencyKey` per intent; amount validated against `^\d{1,14}(\.\d{1,4})?$` and greater than zero; a confirm dialog before submit.
 - **Google login/register** send a fixed `redirectUri` path and payload; `payload.redirectUrl` must be https on `VITE_IDENTITY_HOSTS` (default `accounts.google.com`).
 - **Checkout links** are built from `VITE_CHECKOUT_BASE_URL` (fallback `location.origin`).
-- **POS screen stream** uses fetch streaming with `Authorization` and reconnect backoff (not verified against live merchant-back).
+- **POS screen stream** uses fetch streaming with `Authorization` and reconnect backoff; the `event: attempts` array is mapped to the screen snapshot (latest attempt amount/currency/status/reference) instead of being assigned as the state object.
 - `resolveUploadPathWithMat` was removed. The landing page no longer names internal ledger accounts (`CUSTOMER_PAYMENT`, `YOUR_WALLET`, `PLATFORM_FEE`) or internal action names.
-- New env: `VITE_CHECKOUT_BASE_URL` (optional), `VITE_IDENTITY_HOSTS`. `.env.example` ships; copy to `.env`.
+- New env: `VITE_CHECKOUT_BASE_URL` (injected by the deploy engine from `CHECKOUT_DOMAIN`/ports; fallback `location.origin`), `VITE_IDENTITY_HOSTS`. `.env.example` ships; copy to `.env`.
+- **Authorities:** the Team page maps its group selectors to the closed core catalogue (`link:read`/`link:write`, `payment:read`, `wallet:create`, `cashout:read`/`cashout:request`, `application:manage`, `pos:manage`, `token:manage`, `credential:manage`, `user:manage`, `onboarding:write`, `dispute:respond`, `merchant:read`) instead of sending group names. The developer guide documents the canonical token scopes (`link:write`, `link:read`, `payment:read`); legacy scopes are accepted and normalised by core.
 - Catalogue keys added (EN and AR): "Enter a valid amount greater than zero (up to 4 decimals).", "Confirm Cash-Out", landing "Customer payment" and "Illustrative".
 
 ## Gap resolutions (2026-11-05)

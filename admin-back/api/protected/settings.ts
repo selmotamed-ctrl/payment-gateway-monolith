@@ -1,8 +1,9 @@
 import express from "express";
 import { z } from "zod";
-import { zJsonObject } from "../../lib/zReady";
+import { zJsonObject, zListQuery } from "../../lib/zReady";
 import { toCoreSettingsUpdate } from "../contract";
 import { coreForward } from "../forward";
+import { encode, uuidParamsSchema } from "./mutationSchemas";
 
 const router = express.Router();
 
@@ -206,6 +207,38 @@ router.put(
       const { checklist, ...value } = body as Record<string, unknown>;
       return checklist === undefined ? { value } : { value, checklist };
     },
+  }),
+);
+
+/**
+ * Notification templates are versioned: a PUT creates version+1 and deactivates the old row,
+ * it never edits in place (core: `settings:read` / `settings:write`).
+ */
+export const notificationTemplateUpdateSchema = z
+  .object({
+    subjectTemplate: z.string().max(500).nullable().optional(),
+    bodyTemplate: z.string().min(1).max(10000),
+    confidentialityClass: z.enum(["PUBLIC", "MERCHANT", "INTERNAL"]).optional(),
+  })
+  .strict();
+
+router.get(
+  "/notification-templates",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/settings/notification-templates",
+    querySchema: zListQuery,
+  }),
+);
+
+router.put(
+  "/notification-templates/:id",
+  coreForward({
+    method: "PUT",
+    path: (context) => `/internal/admin/settings/notification-templates/${encode(context.params.id)}`,
+    paramsSchema: uuidParamsSchema,
+    schema: notificationTemplateUpdateSchema,
+    relayStatus: true,
   }),
 );
 

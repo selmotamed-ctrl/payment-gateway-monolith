@@ -28,7 +28,7 @@ const paymentQuerySchema = z
       .optional(),
     from: z.string().max(64).optional(),
     to: z.string().max(64).optional(),
-    page: z.coerce.number().int().min(1).max(10000).optional(),
+    page: z.coerce.number().int().min(1).optional(),
     pageSize: z.coerce.number().int().min(1).max(200).optional(),
   })
   .passthrough();

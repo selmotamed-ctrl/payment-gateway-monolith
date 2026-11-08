@@ -203,7 +203,7 @@ There is no disk spool. There is no `gateway_wire_logs` table. The request logge
 
 ### 3.9 Sharding and ledger writes
 
-`shardBalances.ts` defines 16 default shards, excludes `MERCHANT_WALLET`, uses FNV-1a over the attempt/reference id and computes `shardId = hash % count`; unsharded accounts use shard 0 (`shardBalances.ts:1-32`). `ledgerShardWriter.ts` upserts `gl_account_shards` with a signed delta (`credit` negative, `debit` positive) and can pre-create all shards for an account (`ledgerShardWriter.ts:8-51`). `createLedgerPoster` wires the shard writer and an optional `ledger.entry_posted` outbox writer (`ledgerPosterFactory.ts:17-40`). The hardening migration adds a `0 <= shard_id < 16` check.
+Shard routing is per account (`gl_accounts.shard_count`, 1..256; system accounts start at `STORAGE_SHARD_COUNT`, default 16, wallets at 1). `shardRouting.ts` is pure: `routeLine` picks `fnv1a(refId) % width` (balance-reducing wallet lines always shard 0), `foldShardBumps` folds one posting into one `(delta, line count)` per shard in `(account, shard)` order, and `assignShardSeqs` turns the returned high-water marks into per-line sequence numbers. `ledgerShardWriter.ts` runs ONE `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` per posting that adds the signed delta and the line count to `gl_account_shards` BEFORE the lines are inserted, so each line carries `shard_id` and a gapless `shard_seq` (see `core.ledger` 3.5). `ensureAccountShards(executor, id, width, from)` creates shard rows when an account is widened; new accounts get theirs from the `gl_accounts_create_shards` trigger. `createLedgerPoster` wires the shard writer (also the default of a bare `LedgerPoster`) and an optional `ledger.entry_posted` outbox writer. Migration `20261107090000_shard_sequenced_checkpoints` relaxed the shard range to `0 <= shard_id < 256`.
 
 ### 3.10 Read models
 
@@ -238,7 +238,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 - Cache contents are not authoritative. A Redis failure must not fail a payment under the default policy; velocity follows `REDIS_VELOCITY_FAILURE_POLICY` (`local-fallback` default, `fail-open`, `fail-closed`).
 - The in-memory velocity fallback (`local-fallback`) is per process and does not coordinate across core nodes: a cluster of N nodes tolerates up to N times the limit during an outage.
 - The log sink is best-effort. It may drop the oldest step log when its buffer is full, may drop access logs on a failed flush and does not spool to disk.
-- `gl_account_shards.shard_id` is limited to `0..15`; the default shard count is 16 and `MERCHANT_WALLET` is always one shard.
+- `gl_account_shards.shard_id` and `journal_lines.shard_id` are limited to `0..255`; an account routes over `gl_accounts.shard_count` (1..256) shards; system accounts start at 16 and `MERCHANT_WALLET` at 1.
 - Backup daemon calls are mTLS when the base URL is HTTPS; a missing client certificate is not silently replaced by an insecure channel.
 - `StorageEngine.shutdown()` must be called on process shutdown so monitors, buffers and pools are released.
 
@@ -271,7 +271,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 | `STORAGE_QUERY_TIMEOUT_MS` | Default query timeout budget | `5000` |
 | `STORAGE_LOG_BUFFER_MAX` | Log buffer bound | `5000` |
 | `STORAGE_LOG_FLUSH_INTERVAL_MS` | Log flush interval | `250` |
-| `STORAGE_SHARD_COUNT` | GL shard count, max 16 | `16` |
+| `STORAGE_SHARD_COUNT` | Initial routing width of system GL accounts (1..256); the shard scaler widens hot accounts later | `16` |
 | `STORAGE_OUTBOX_RETENTION_MS` | Processed `outbox_events` older than this are pruned (0 = keep) | `3600000` |
 | `STORAGE_AUDIT_OUTBOX_RETENTION_MS` | Shipped `audit_outbox` rows older than this are pruned (0 = keep) | `3600000` |
 | `BACKUP_DAEMON_URL` | Daemon base URL | unset |
@@ -307,7 +307,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 - Audit shipper with idempotent append and audit hash-chain verification.
 - LSN/lag-aware replica router with primary fallback.
 - Redis cache adapter with Lua velocity and memory fallback.
-- 16-way shard arithmetic and shard-aware ledger writer.
+- Per-account sequenced shard writer (routing width, gapless per-shard sequence) and the shard scaler.
 - Dedicated audit DB and log DB adapters.
 - Backup control client with TLS/mTLS support and typed errors.
 - Storage health snapshot API.
@@ -403,6 +403,7 @@ There is no benchmark in this part that proves the blueprint's 1,000+ TPS sustai
 - `core-back/lib/storageEngine/auditAndLogAdapters.ts`
 - `core-back/lib/storageEngine/shardBalances.ts`
 - `core-back/lib/storageEngine/ledgerShardWriter.ts`
+- `core-back/lib/storageEngine/shardRouting.ts`
 - `core-back/lib/storageEngine/ledgerPosterFactory.ts`
 - `core-back/lib/storageEngine/backupControlClient.ts`
 - `core-back/lib/storageEngine/lsn.ts`

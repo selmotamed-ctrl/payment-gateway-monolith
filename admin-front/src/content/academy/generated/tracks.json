@@ -237,13 +237,15 @@
       "l-m8-6",
       "l-m9-1",
       "l-m9-2",
-      "l-m10-3"
+      "l-m10-3",
+      "l-m10-4"
     ],
     "labIds": [
       "lab-runbook-drill",
       "lab-build-a-rail",
       "lab-rails-visibility",
-      "lab-gate-review"
+      "lab-gate-review",
+      "lab-backup-dr-desk"
     ],
     "examId": "exam-gateway-admin"
   },
@@ -267,11 +269,13 @@
       "l-m8-6",
       "l-m9-1",
       "l-m9-2",
-      "l-m10-3"
+      "l-m10-3",
+      "l-m10-4"
     ],
     "labIds": [
       "lab-runbook-drill",
-      "lab-gate-review"
+      "lab-gate-review",
+      "lab-backup-dr-desk"
     ],
     "examId": "exam-security-admin"
   }

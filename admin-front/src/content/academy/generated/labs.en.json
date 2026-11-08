@@ -4314,5 +4314,320 @@
         ]
       }
     ]
+  },
+  {
+    "id": "lab-backup-dr-desk",
+    "module": "m10",
+    "title": "Backup and Recovery Desk: read the screen, judge the drill",
+    "minutes": 25,
+    "tracks": [
+      "GATEWAY_ADMIN",
+      "SECURITY_ADMIN"
+    ],
+    "refs": [
+      "b12-09",
+      "b12-10",
+      "b12-11",
+      "b10-05"
+    ],
+    "briefing": "You are on duty at the Backups screen. Read the tiles, know what a restore drill checks, react to a failed drill and review a policy change.",
+    "passPercent": 80,
+    "tasks": [
+      {
+        "id": "b1",
+        "kind": "choice",
+        "title": "Read the tiles",
+        "panels": [
+          {
+            "title": "Backups screen, summary tiles",
+            "rows": [
+              [
+                "WAL archive lag",
+                "4,200 s (alert threshold 300 s): Critical"
+              ],
+              [
+                "Daemon status",
+                "Reachable: Healthy"
+              ],
+              [
+                "Storage targets",
+                "2/3: Attention"
+              ],
+              [
+                "Last backup",
+                "Passed, 02:00 UTC today"
+              ],
+              [
+                "Latest restore drill",
+                "Drill passed, Sunday 04:00 UTC"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What is the most urgent problem?",
+        "points": 10,
+        "options": [
+          {
+            "id": "a",
+            "label": "Archiving is far behind and one storage target has failed, so recent changes are not safely stored",
+            "correct": true,
+            "feedback": "Correct. A passed nightly backup does not cover the last hours; WAL piles up on the database disk."
+          },
+          {
+            "id": "b",
+            "label": "Nothing: the last backup passed and the last drill passed",
+            "correct": false,
+            "feedback": "Both are old news. The lag tile is Critical and a target is down.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "The daemon is unreachable",
+            "correct": false,
+            "feedback": "Daemon status says Reachable."
+          }
+        ]
+      },
+      {
+        "id": "b2",
+        "kind": "multi",
+        "title": "What a drill checks",
+        "panels": [
+          {
+            "title": "Restore drill",
+            "text": "The daemon restores the latest backup chain into a scratch cluster, replays WAL to the target time and then checks the restored data."
+          }
+        ],
+        "prompt": "Which checks are part of every restore drill?",
+        "points": 12,
+        "options": [
+          {
+            "id": "a",
+            "label": "Double-entry zero drift",
+            "correct": true,
+            "feedback": "Yes. Debits equal credits in the restored ledger."
+          },
+          {
+            "id": "b",
+            "label": "Sharded balance parity",
+            "correct": true,
+            "feedback": "Yes. Shard totals match the journal lines."
+          },
+          {
+            "id": "c",
+            "label": "Audit hash chain, including a gap-free sequence",
+            "correct": true,
+            "feedback": "Yes. Every audit record is present, in order and untampered."
+          },
+          {
+            "id": "d",
+            "label": "Checkout page loads in Arabic",
+            "correct": false,
+            "feedback": "Not a drill check."
+          },
+          {
+            "id": "e",
+            "label": "Production CPU stays under 50 percent",
+            "correct": false,
+            "feedback": "The drill does not run on production."
+          }
+        ]
+      },
+      {
+        "id": "b3",
+        "kind": "order",
+        "title": "Order the drill",
+        "panels": [
+          {
+            "title": "What the daemon does during a drill"
+          }
+        ],
+        "prompt": "Put the steps in order.",
+        "points": 12,
+        "items": [
+          {
+            "id": "a",
+            "label": "Restore the latest backup chain into an isolated scratch cluster (loopback, port 55432, archiving off)"
+          },
+          {
+            "id": "b",
+            "label": "Replay archived WAL to the target time (default: now minus 5 minutes)"
+          },
+          {
+            "id": "c",
+            "label": "Wait until recovery has finished"
+          },
+          {
+            "id": "d",
+            "label": "Run the three invariant checks"
+          },
+          {
+            "id": "e",
+            "label": "Sign the report with HMAC-SHA256"
+          },
+          {
+            "id": "f",
+            "label": "Destroy the scratch cluster"
+          }
+        ],
+        "correctOrder": [
+          "a",
+          "b",
+          "c",
+          "d",
+          "e",
+          "f"
+        ],
+        "feedback": "Restore, replay, wait for recovery, check, sign, destroy. Checks run only after recovery has finished, and no customer data is left behind."
+      },
+      {
+        "id": "b4",
+        "kind": "choice",
+        "title": "A failed drill",
+        "panels": [
+          {
+            "title": "Latest restore drill: Drill failed",
+            "rows": [
+              [
+                "Double-entry zero drift",
+                "Passed"
+              ],
+              [
+                "Sharded balance parity",
+                "Passed"
+              ],
+              [
+                "Audit hash chain",
+                "Failed"
+              ]
+            ]
+          }
+        ],
+        "prompt": "What is the right reaction?",
+        "points": 12,
+        "options": [
+          {
+            "id": "a",
+            "label": "Priority-1 incident: escalate to the Security Admin, keep every backup and do not alter audit records",
+            "correct": true,
+            "feedback": "Correct. An audit chain failure may mean tampering or damage."
+          },
+          {
+            "id": "b",
+            "label": "Ignore it: the money checks passed",
+            "correct": false,
+            "feedback": "Any failed check is priority 1.",
+            "critical": true
+          },
+          {
+            "id": "c",
+            "label": "Delete the audit database and run another drill",
+            "correct": false,
+            "feedback": "Never destroy evidence.",
+            "critical": true
+          },
+          {
+            "id": "d",
+            "label": "Run drills until one passes and file only that one",
+            "correct": false,
+            "feedback": "Hiding a failure is as bad as the failure."
+          }
+        ]
+      },
+      {
+        "id": "b5",
+        "kind": "checklist",
+        "title": "Review a policy change",
+        "panels": [
+          {
+            "title": "You are the second Security Admin. Request BACKUP_POLICY, PENDING_REVIEW.",
+            "rows": [
+              [
+                "Maker",
+                "Omar (a different person)"
+              ],
+              [
+                "Changed field",
+                "Full retention days: 56 to 1"
+              ],
+              [
+                "Other fields",
+                "unchanged"
+              ],
+              [
+                "Maker's reason",
+                "Free up disk space"
+              ]
+            ]
+          }
+        ],
+        "prompt": "Tick only the statements the record supports.",
+        "points": 10,
+        "items": [
+          {
+            "id": "c1",
+            "label": "I am a different person from the maker",
+            "shouldTick": true,
+            "why": "Stated in the request; the checker must differ from the maker."
+          },
+          {
+            "id": "c2",
+            "label": "The change cuts the history we can recover from to about one day",
+            "shouldTick": true,
+            "why": "Retention goes from 56 days to 1."
+          },
+          {
+            "id": "c3",
+            "label": "The maker has confirmed with the Security team that one day is enough",
+            "shouldTick": false,
+            "why": "Nothing in the record says so; do not tick what you did not verify."
+          },
+          {
+            "id": "c4",
+            "label": "Approving will apply the change to the daemon and write BACKUP_POLICY_UPDATED to the audit log",
+            "shouldTick": true,
+            "why": "That is what approval does."
+          },
+          {
+            "id": "c5",
+            "label": "The Alert lag threshold is also changing",
+            "shouldTick": false,
+            "why": "Only Full retention days differs."
+          }
+        ],
+        "criticalWrong": [
+          "c3"
+        ]
+      },
+      {
+        "id": "b6",
+        "kind": "numeric",
+        "title": "The restore chain",
+        "panels": [
+          {
+            "title": "Defaults",
+            "rows": [
+              [
+                "Full backup",
+                "Sunday 02:00 UTC"
+              ],
+              [
+                "Delta backup",
+                "Monday to Saturday 02:00 UTC"
+              ],
+              [
+                "Disk failure",
+                "Wednesday 14:35 UTC"
+              ]
+            ]
+          }
+        ],
+        "prompt": "How many backups (the full plus the deltas) form the restore chain before WAL is replayed?",
+        "points": 10,
+        "answer": "4",
+        "tolerance": "0",
+        "feedback": "One full (Sunday) plus deltas on Monday, Tuesday and Wednesday 02:00. Each delta builds on the previous one. WAL then covers the time after Wednesday 02:00."
+      }
+    ]
   }
 ]

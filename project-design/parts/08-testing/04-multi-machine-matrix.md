@@ -20,7 +20,7 @@ tests:
 gaps:
   - No live run of the redesigned harness has been executed; the only live evidence is the archived 2026-11-03 T1 run (deploy OK, gate 1 passed, gate 2 failed with admin 403), which predates the redesign.
   - Gate 2/9/10 admin calls use a locally signed session JWT; the 2026-11-03 T1 run got HTTP 403 from admin-back, so the admin-auth path for the lab must be confirmed (session store and admin LAN guard) before those gates can pass.
-  - Chaos fault `primary-pitr` (primary wipe + PITR restore) is not implemented and is reported as SKIP; gate 10 does not poll restore-drill completion (SKIP check).
+  - Chaos fault `primary-pitr` (primary wipe + PITR restore) is not implemented and is reported as SKIP; gate 10 now polls restore-drill completion (see below).
   - The deploy engine plans SSH user/key/sudo per tier, not per host, so every machine in a lab must share one SSH user, key and sudo mode.
   - Multiple REDIS_NODES are provisioned independently (no replication) and core uses only the first, so derived topologies place exactly one Redis node; `redis-stop` is a full cache outage.
   - The scale gate removes stopped checkout nodes from the client target set (direct node targeting); it does not exercise Nginx upstream failover.
@@ -155,3 +155,7 @@ Verified 2026-11-04: `cd deploy && bun run typecheck` passes; `bun test` 232 pas
 
 - 2026-11-03: two-machine T1–T8 lab (`testing.two-machine-matrix`).
 - 2026-11-04: replaced by the JSON-configured multi-machine harness (`testing.multi-machine-matrix`); hard-coded lab credentials removed.
+
+## Gate 10 and the backup engine (2026-11-06)
+
+`gateBackup` triggers a full backup, polls it, triggers a restore drill and polls `/system/backups/overview` until `latestDrill.id` equals the drill id and its status is `PASSED` or `FAILED` (same timeout as the backup), then asserts `status === "PASSED"`, `Number(doubleEntryDrift) === 0`, `balanceMismatches === 0` and `auditBrokenLinks === 0`; the former hard-coded SKIP is gone. The WAL check reads the overview's `walArchiveHealthy` (added by core). `LAB_BACKUP_MODE=pg-native` selects the engine. The dedicated-backup-host and host-loss scenarios are now exercised for pg-native by `deploy/backup-daemon/test/lab/two-host.lab.test.ts` (see `deploy.backup` section 3.7): all 8 steps passed on one LAN pair. That lab is separate from this matrix harness and is not part of CI.

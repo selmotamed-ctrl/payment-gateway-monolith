@@ -55,6 +55,8 @@ export interface GlRef {
   env: string | null;
   ownerId: string | null;
   credentialSetId?: string | null;
+  /** Routing width of the account (baseline accounts are read from the DB; absent in tests). */
+  shardCount?: number;
   currency?: string | null;
 }
 export interface UserRef {
@@ -105,6 +107,13 @@ export interface SeedReferences {
   requiredDocumentsSetting?: unknown;
   /** Existing confirmation channels (the baseline webhook channels). */
   confirmationChannels?: Array<{ id: string; gatewayVersionId: string; type: string }>;
+  /**
+   * Per gateway code, the names of the attempt-state variables its flows READ (step parameters bound to the `STATE`
+   * source, e.g. `order_id`, `payment_id`). A real attempt that reached the gateway holds them after INITIATE; the
+   * inquiry (ExpirySweeper, PollWorker) builds its URL from them and fails with "URL parameter '<name>' is missing"
+   * when they are absent.
+   */
+  gatewayStateKeys?: Record<string, string[]>;
 }
 
 /**
@@ -209,9 +218,21 @@ export interface SeederContext {
   refs: SeedReferences;
   /** Monotonic id factory, namespaced so two seeds never collide. */
   nextId: (entity: string) => string;
-  /** Monthly GL checkpoint snapshots applied after the bulk insert. */
-  checkpoints: Map<string, { balance: string; at: Date; lastCheckpointId: string }>;
+  /**
+   * Per-shard checkpoints (month-end cut), keyed `${glAccountId}:${shardId}`, written after the shard rows.
+   * `seq` is the number of the shard's lines with createdAt <= `at` (a prefix of its sequence).
+   */
+  checkpoints: Map<string, ShardCheckpointSnapshot>;
   meta?: SeederMeta;
+}
+
+export interface ShardCheckpointSnapshot {
+  glAccountId: string;
+  shardId: number;
+  /** Signed (debit-positive) balance of the shard's lines with shard_seq <= seq, as a 4-decimal string. */
+  balance: string;
+  seq: number;
+  at: Date;
 }
 
 export const emptyMeta = (): SeederMeta => ({
@@ -263,7 +284,7 @@ export const loadReferences = async (prisma: PrismaClient): Promise<SeedReferenc
     include: { gateway: { select: { code: true } } },
   });
   const glAccounts = await prisma.glAccount.findMany({
-    select: { id: true, accountType: true, gatewayId: true, env: true, ownerId: true, credentialSetId: true, currency: true },
+    select: { id: true, accountType: true, gatewayId: true, env: true, ownerId: true, credentialSetId: true, currency: true, shardCount: true },
   });
   const adminUsers = await prisma.user.findMany({
     where: {
@@ -283,6 +304,19 @@ export const loadReferences = async (prisma: PrismaClient): Promise<SeedReferenc
   const confirmationChannels = await prisma.confirmationChannel.findMany({
     select: { id: true, gatewayVersionId: true, type: true },
   });
+  const stateParameters = await prisma.stepParameter.findMany({
+    // REFUND / VOID read call-time inputs (`adjustmentId`), not variables the attempt stored after INITIATE.
+    where: { source: "STATE", step: { flow: { phase: { notIn: ["REFUND", "VOID"] } } } },
+    select: { key: true, selector: true, step: { select: { flow: { select: { gatewayVersion: { select: { gateway: { select: { code: true } } } } } } } } },
+  });
+  const stateKeySets = new Map<string, Set<string>>();
+  for (const parameter of stateParameters) {
+    const code = parameter.step.flow.gatewayVersion.gateway.code;
+    const keys = stateKeySets.get(code) ?? new Set<string>();
+    keys.add(parameter.selector ?? parameter.key);
+    stateKeySets.set(code, keys);
+  }
+  const gatewayStateKeys = Object.fromEntries([...stateKeySets].map(([code, keys]) => [code, [...keys].sort()]));
   const requiredDocuments = await prisma.platformSetting.findFirst({
     where: { key: "onboarding.required_documents" },
     orderBy: { version: "desc" },
@@ -348,6 +382,7 @@ export const loadReferences = async (prisma: PrismaClient): Promise<SeedReferenc
     notificationTemplates,
     requiredDocumentsSetting: requiredDocuments?.valueJson ?? null,
     confirmationChannels,
+    gatewayStateKeys,
   };
 };
 

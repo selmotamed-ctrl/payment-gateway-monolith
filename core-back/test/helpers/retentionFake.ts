@@ -450,9 +450,7 @@ const toGlAccount = (row: FakeRow | undefined): Record<string, unknown> | null =
     credentialSetId: row.credentialSetId ?? row.credential_set_id ?? null,
     env: row.env ?? null,
     currency: row.currency ?? null,
-    checkpointBalance: row.checkpointBalance ?? row.checkpoint_balance ?? 0,
-    checkpointAt: row.checkpointAt ?? row.checkpoint_at ?? null,
-    lastCheckpointId: row.lastCheckpointId ?? row.last_checkpoint_id ?? null,
+    shardCount: row.shardCount ?? row.shard_count ?? 1,
   };
 };
 
@@ -510,9 +508,7 @@ export const createRetentionFake = (): RetentionFake => {
       if (!row) {
         throw new Error(`Fake gl_account '${args.where.id}' not found`);
       }
-      if (args.data.checkpointBalance !== undefined) row.checkpoint_balance = args.data.checkpointBalance;
-      if (args.data.checkpointAt !== undefined) row.checkpoint_at = args.data.checkpointAt;
-      if (args.data.lastCheckpointId !== undefined) row.last_checkpoint_id = args.data.lastCheckpointId;
+      if (args.data.shardCount !== undefined) row.shard_count = args.data.shardCount;
       return toGlAccount(row);
     },
   };

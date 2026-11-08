@@ -266,7 +266,7 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 Applies to all three copies of the client:
 - Only transport/TLS errors and 502/503/504 mark a node unhealthy.
 - Header names and values are validated as printable ASCII (`400 CORE_HEADER_INVALID`); edge-owned headers are applied last, and `x-real-client-ip` is always overwritten with the resolved IP.
-- PUT/DELETE are replayed after send only with an `Idempotency-Key`/opt-in, or on a connect-phase failure.
+- PUT/DELETE are HTTP-idempotent and are replayed after send like GET/HEAD/OPTIONS; POST/PATCH still need an `Idempotency-Key`/opt-in, and a connect-phase failure is always retryable.
 - SSE streams use their own agent pool (128 sockets) with `MAX_STREAMS_PER_IP` (default 5) and abort upstream on early client disconnect.
 - Buffered responses are capped (`CORE_MAX_RESPONSE_BYTES` default 64 MiB, `CORE_TOTAL_DEADLINE_MS` default 300000).
 - Admin `x-pg-min-lsn` is validated against `^hex/hex$` (400 otherwise).
@@ -304,7 +304,7 @@ The return URL is an untrusted browser hint. Core inspects the attempt, triggers
 
 - disables `x-powered-by`;
 - sets `trust proxy` to false;
-- emits permissive CORS without credentials unless `CORS_ALLOWED_ORIGINS` is set, plus hand-written security headers;
+- emits no CORS headers unless `CORS_ALLOWED_ORIGINS` is set (same-origin by default; credentials disabled), plus hand-written security headers;
 - installs request logging;
 - serves unauthenticated `GET /health`;
 - mounts `/api/v1/inbound` with `inboundRouter` **before** the JSON body parser, so the inbound router can install its own raw parser;

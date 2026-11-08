@@ -10,6 +10,7 @@ import {
     getEmbedAllowlist,
     isAllowedEmbedUrl,
     isNonProductionBuild,
+    normalizeOrigins,
     planEmbedScripts,
     sanitizeSandbox,
 } from "@/utils/security/embedPolicy";
@@ -30,11 +31,16 @@ export const EmbeddedWidgetRenderer = dc(
         const loading = ref(true);
         const localError = ref<string | null>(null);
         const iframeRef = ref<HTMLIFrameElement | null>(null);
+        // The server-configured widget origins extend (never replace) the
+        // built-in provider allow-list.
+        const widgetAllowlist = computed(
+            () => new Set([...embedAllowlist, ...normalizeOrigins(props.action.allowed_origins)]),
+        );
         const scriptPlan = computed(() =>
-            planEmbedScripts(props.action.script_urls, props.action.script_sri_hashes, embedAllowlist),
+            planEmbedScripts(props.action.script_urls, props.action.script_sri_hashes, widgetAllowlist.value),
         );
         const iframeSrc = computed(() =>
-            isAllowedEmbedUrl(props.action.iframe_src, embedAllowlist) ? (props.action.iframe_src as string) : null,
+            isAllowedEmbedUrl(props.action.iframe_src, widgetAllowlist.value) ? (props.action.iframe_src as string) : null,
         );
 
         const onScriptLoad = () => {

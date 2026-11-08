@@ -210,7 +210,7 @@ const PayPage = dc(() => {
             return;
         }
         stream = new EventSource(urlsMap.payStatusStream(linkKey.value, attemptId));
-        stream.onmessage = (event) => {
+        const handleFrame = (event: MessageEvent) => {
             try {
                 const payload = JSON.parse(event.data);
                 const snapshot = (payload.attempt ?? payload) as AttemptSnapshot;
@@ -219,6 +219,10 @@ const PayPage = dc(() => {
                 actionError.value = t("Something went wrong");
             }
         };
+        // core emits the progress as a named `status` event, not the default
+        // `message` event; handle both so the payer sees intermediate states.
+        stream.addEventListener("status", handleFrame as EventListener);
+        stream.onmessage = handleFrame;
         stream.onerror = () => {
             // Stream failed or closed: fall back to polling the logs endpoint (backoff, stops on terminal state).
             stream?.close();
@@ -264,6 +268,11 @@ const PayPage = dc(() => {
             return;
         }
         if (["VERIFYING", "UNKNOWN", "AUTHORIZING"].includes(snapshot.status)) {
+            phase.value = "CONFIRMING";
+        }
+        // A captured payment under an AML hold is not settled until compliance
+        // releases it; do not keep asking the payer to confirm.
+        if (snapshot.substatus === "AML_HOLD" && !isTerminalStatus(snapshot.status)) {
             phase.value = "CONFIRMING";
         }
     };
@@ -386,6 +395,11 @@ const PayPage = dc(() => {
         try {
             await api.post(urlsMap.payCancel(linkKey.value, attempt.value.attemptId), {});
             closeStream();
+            // A cancelled attempt is terminal: the next click is a new intent.
+            clearIdempotencyKey("initiate", linkKey.value);
+            clearAttemptId(linkKey.value);
+            attempt.value = null;
+            clientAction.value = null;
             phase.value = "ERROR";
         } catch (e) {
             actionError.value = safeError(e);
@@ -647,6 +661,14 @@ const PayPage = dc(() => {
                                         rails={summary.value?.visibleRails ?? []}
                                         selectedCode={selectedRail.value?.code ?? null}
                                         onSelect={(rail) => {
+                                            if (selectedRail.value?.code !== rail.code) {
+                                                // A different rail is a different payment
+                                                // intent; do not replay the old attempt.
+                                                clearIdempotencyKey("initiate", linkKey.value);
+                                                clearAttemptId(linkKey.value);
+                                                attempt.value = null;
+                                                clientAction.value = null;
+                                            }
                                             selectedRail.value = rail;
                                             formValues.value = {};
                                             formErrors.value = {};

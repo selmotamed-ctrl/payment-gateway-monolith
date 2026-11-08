@@ -3,7 +3,7 @@ id: admin-ui.routes
 title: Admin Route and Page Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-06
 verified_against: 5a24f6f+working-tree
 code:
   - admin-front/src/router/index.ts
@@ -15,21 +15,33 @@ code:
   - checkout-front/src/router/index.ts
   - checkout-front/src/pages/**
   - admin-front/src/utils/routeAuthorities.ts
+  - admin-front/src/pages/wallets/**
+  - admin-front/src/components/ledger/**
+  - admin-front/src/pages/applications/**
+  - admin-front/src/pages/transactions/**
+  - admin-front/src/pages/credential-sets/**
+  - admin-front/src/pages/finance/journal-entries/**
+  - admin-front/src/pages/system/jobs-outbox/**
 design_sources:
   - design/06-ui/portal_ui_implementation_plan.md
   - design/10-fixes/_0001_operator_cases.md
   - design/07-guides-and-academy/guide_system_design_and_content.md
 tests:
   - tests/e2e/admin/shell.spec.ts
+  - tests/e2e/admin/wallet-details.spec.ts
+  - tests/unit/wallet-details.test.ts
   - tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts
   - tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts
   - tests/e2e/exhaustive/exhaustive-checkout-surface.spec.ts
   - tests/e2e/admin/global-search.spec.ts
   - tests/unit/frontend-security-admin.test.ts
+  - tests/unit/commerce-actions.test.ts
+  - tests/unit/ledger-ops-ledger.test.ts
+  - tests/unit/ledger-ops-operations.test.ts
 gaps:
-  - Eight admin route names have no effective UI authority gate; AdminGuide and AdminAcademy are deliberate learning surfaces, while AdminUsers, AdminUserDetail, PricingControls, GatewayAiImport, AdminPlatformSettings, and AdminCheckoutHelp are privilege gaps.
   - The merchant Statements route has no router-level authority entry even though navigation hides it without statement authority.
   - The checkout catch-all NotFound page links to a non-existent Dashboard route, so its recovery button returns to the catch-all.
+  - The admin route table is advisory and must stay aligned with core authority names; a mismatch hides a page the server would allow (or shows one it denies).
 ---
 
 # Admin Route and Page Catalog
@@ -212,10 +224,9 @@ The merchant portal has a similar gap: `Statements` is shown in navigation only 
 
 ### Partial
 
-- Admin route authority coverage is incomplete: six privileged surfaces are ungated in the UI.
 - Merchant `Statements` is not route-gated.
 - Contextual help covers most admin routes but not all (see `04-contextual-help.md`).
-- Admin `AdminUsers` explicitly uses an empty authority array while the backend requires `user:read`/`security:read`; this is a deliberate-looking but unsafe pattern.
+- The admin route-authority table is advisory and must be kept in sync with core; the Guide/Academy reader routes are login-only and the Team page keeps its own `SECURITY_ADMIN` check.
 
 ### Missing / deferred
 
@@ -270,4 +281,22 @@ These suites require a running stack and are skipped without the live/edge servi
 
 ## Security hardening (2026-11-05)
 
-The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard: `PUBLIC_FOR_AUTHENTICATED` is Dashboard, AdminGuide and AdminAcademy; `AUTHORITY_ALIASES` normalizes dotted and colon forms. Entries were added for AdminUsers, AdminUserDetail, AdminPlatformSettings, PricingControls, GatewayAiImport and AdminCheckoutHelp. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
+The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard. `PUBLIC_FOR_AUTHENTICATED` covers Dashboard, every Guide reader route and every Academy route (the Team page keeps its own `SECURITY_ADMIN` check); `AUTHORITY_ALIASES` normalizes dotted and colon forms. AdminUsers/Detail accept `user:read`/`user:write`/`security:*`, AdminPlatformSettings accepts `settings:read`/`settings:write` (plus the security fallback), and PricingControls includes `liquidity.read`. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
+
+## Admin UI completion: six new routes (2026-11-06)
+
+Six protected children were added to `admin-front/src/router/index.ts` (and the sidebar in `layouts/sections.tsx`, authorities in `utils/routeAuthorities.ts`, guide context-map screens). The numbered table in 3.2 and the "37" counts in this part predate the Guide/Academy routes; the router now has **60** protected children (the six below included), so treat the table as a historical catalog and this section as current for these routes.
+
+| Path | Name | Sidebar section | UI authority | Backend authority | Purpose |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `/wallets` | `Wallets` | Onboarding | `merchants.read` or `support.read_merchant` | `merchant:read` (freeze `merchant:write`) | Cross-merchant wallets: KPI strip, live/checkpoint balance ("Restricted" for non-financial roles), freeze (immediate) / unfreeze (approval) from the row menu. **Inspect** (or the wallet id) navigates to `WalletDetail`; `?open=<id>` redirects there. "Inspect GL account" still opens the GL drawer. |
+| `/wallets/:id` | `WalletDetail` (`meta.parentName: Wallets`) | Onboarding | same as `Wallets` | `merchant:read` (freeze `merchant:write`) | Wallet details page replacing the old wallet drawer: header with status badge, frozen banner, pending approvals, Freeze/Request unfreeze, Refresh; metric strip (live, checkpoint, posted since checkpoint, pending cash-outs). `?tab=` (`overview` default, `statement`, `links`, `activity`): Overview (details card, shard table with a padded **Total** row and a shards-vs-live-balance integrity badge), Statement (`AccountLinesTable`: server-paginated posting lines with side/reference-type/date filters, search, totals of the whole filtered set, links to the source record and to the journal entry drawer), Links and cash-outs (assigned applications, last 10 cash-outs), Status history (`/wallets/:id/audit-events`: when, action, change, reason, by, approval). Merchant 360 and the application drawer link here. |
+| `/applications` | `Applications` ("Applications & Channels") | Onboarding | same | `merchant:read` / `merchant:write` | Tabs Applications, Payment Links, POS Terminals; drawer with rail whitelist, redirect domains, API tokens (revoke), link cancel, terminal status; suspend immediate, reactivation and policy edits go to approval. `?tab=links\|pos`, `?open=<id>`. |
+| `/transactions` | `Transactions` ("Transactions & Webhooks") | Operations | `merchants.read`, `support.read_merchant` or `attempt:read` | `attempt:read` (+`merchant:read`/`finance:read`) | Tabs Payment Attempts and Inbound Webhooks (verified / unmatched filters); the attempt drawer shows summary, step logs, inbound events and the checkout retry group as structured rows. |
+| `/credential-sets` | `CredentialSets` | Gateways | `credentials.manage` or `gateways.edit` | `credential:read`/`gateway:read`, `credential:write` | Vault entries: create, rotate, verify, revoke (reason); secrets are write-only. `?highlight=<id>` (from search hits and Merchant 360). |
+| `/finance/journal-entries` | `JournalEntries` | Finance | `profit.read` or `liquidity.read` | `finance:read` | Double-entry explorer: balanced badge, T-account drawer, GL account drawer; `?glAccountId=`, `?open=`. |
+| `/system/jobs-outbox` | `JobsOutbox` ("Jobs & Outbox") | Operations | `security:read` | `security:read` / `security:write` | Outbox and audit-outbox monitors (no retry exists), background-job requeue, failed-notification retry. The metric strip also shows the ledger automation: shards behind their checkpoint (with the most pending lines), shards failing the checkpoint proof, and the last shard scaling. |
+
+Existing routes that changed: `Invariant` is now "Ledger Audit & Invariant" with per-account actions (shards and lines, journal entries, checkpoint rollup); `MerchantDetail` shows the Wallets tab to every `merchant:read` role and gained interactive wallets/applications, structured beneficial owners, KYB revalidation, access rows and pending-change diffs; `Gateways` gained a route-health drawer; `Liquidity` shows route daily-cap utilisation; `GatewayRoutes`, `AdminPlatformSettings`, `Reconciliation`, `AmlRules`, `Rails`, `Approvals`, `AuditLog`, `Disputes`, `PricingControls` lost their raw-JSON views/inputs (see `admin-ui.system`). The GL account drawer (`GlAccountDrawer`) shows the routing width, a derived checkpoint status badge, a per-shard table (balance, lines, pending, checkpoint, checkpoint age, status, padded Total row), the paginated Lines table, "Run checkpoint rollup" (verifies every shard, names a failing one) and "Set shard count" (`finance:write`, reason, audited) and, per failed shard, **Repair** (`ShardRepairModal`: preview from the journal; an intact shard is recomputed at once with a reason, a damaged one is submitted to Approvals as `GL_SHARD_REPAIR`). Shared drawers are opened by id prop and clear themselves on `close`: `JournalEntryDrawer`, `GlAccountDrawer`, `WalletDetailDrawer`, `ApplicationDetailDrawer`. `attempt:read` was added to `AUTHORITY_ALIASES` (no portal equivalent).
+
+Gaps: the dashboards/global search still route `payment_attempt` hits to Merchant 360's transactions tab (a test pins it; `Transactions?open=` would be a one-line change); approvals' "Open subject" has no target for `WALLET`/`APPLICATION`/`POS_TERMINAL`; merchant users open the `AdminUserDetail` route (works: `GET /users/:id` serves any user id).

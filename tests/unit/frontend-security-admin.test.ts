@@ -1,6 +1,7 @@
 // Regression tests for the admin-front security fixes (F7, F8, blob previews, backups page helpers).
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AUTHORITY_ALIASES,
@@ -17,7 +18,8 @@ import {
   validatePolicyForm,
 } from "../../admin-front/src/utils/backupsGuard";
 
-const read = (p: string) => readFileSync(fileURLToPath(new URL(`../../${p}`, import.meta.url)), "utf8");
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const read = (p: string) => readFileSync(resolve(REPO_ROOT, p), "utf8");
 
 describe("F7 no VITE_AUTHORIZED auth bypass", () => {
   test("admin user state no longer reads VITE_AUTHORIZED", () => {

@@ -36,6 +36,7 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 const parse = (payload: unknown): OperatorCaseDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
@@ -1013,7 +1014,7 @@ const OperatorCaseDetailPage = dc(() => {
                                             <ThemedText style={{ fontSize: "11px", opacity: 0.7 }}>
                                                 {audit.actor?.email ?? audit.actorId} · {audit.role} · {t("Audit ID")}: {audit.id} · {t("Approval ID")}: {audit.approvalRequestId ?? "—"}
                                             </ThemedText>
-                                            <pre style={preStyle}>{jsonText({ before: audit.beforeJson, after: audit.afterJson })}</pre>
+                                            <JsonDiffViewer diff={{ before: audit.beforeJson, after: audit.afterJson }} />
                                         </ThemedView>
                                     ))}
                                     {(detail.value.auditTrail ?? []).length === 0 && (

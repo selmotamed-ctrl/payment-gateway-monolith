@@ -5,7 +5,7 @@
     "screen": "Approvals",
     "risk": "HIGH",
     "irreversible": true,
-    "body": "**What this does**\nYou are approving a change proposed by someone else. Approving also **executes** the change immediately.\n\n**Check first**\n- [ ] I opened **Details** and read the old value and the new value.\n- [ ] I understand what this will change, and can say it in one sentence.\n- [ ] The merchant name, amount and currency are the ones I expect.\n- [ ] The maker's reason makes sense and is more than \"ok\".\n- [ ] I am not the maker, and nobody asked me to approve without reading.\n- [ ] The environment badge is correct (`SANDBOX` or `LIVE`).\n\n**Never**\n- Never approve something you cannot explain.\n- Never approve because someone is waiting or in a hurry.\n- Never approve on the strength of a phone call or chat message.\n\n**If you made a mistake**\nTell your manager and the owner of the area at once. A change that was executed is corrected by a new approved change, not by editing. See [[a:b10-09]].",
+    "body": "**What this does**\nYou are approving a change proposed by someone else. Approving also **executes** the change immediately.\n\n**Check first**\n- [ ] I opened **Details** and read the old value and the new value.\n- [ ] I understand what this will change, and can say it in one sentence.\n- [ ] The merchant name, amount and currency are the ones I expect.\n- [ ] The maker's reason makes sense and is more than \"ok\".\n- [ ] I am not the maker, and nobody asked me to approve without reading.\n- [ ] The environment badge is correct (`SANDBOX` or `LIVE`).\n\n**Never**\n- Never approve something you cannot explain.\n- Never approve because someone is waiting or in a hurry.\n- Never approve on the strength of a phone call or chat message.\n\n**If you made a mistake**\nTell your manager and the owner of the area at once. A change that was executed is corrected by a new approved change, not by editing. See [[a:b10-09|You made a mistake]].",
     "checklist": [
       "I opened **Details** and read the old value and the new value.",
       "I understand what this will change, and can say it in one sentence.",
@@ -35,14 +35,14 @@
     "screen": "Adjustments",
     "risk": "HIGH",
     "irreversible": true,
-    "body": "**What this does**\nYou are proposing a money movement: a refund, a chargeback, a manual credit or debit, or a correction. A different Finance user must approve it.\n\n**Check first**\n- [ ] I found the original payment by its **reference**.\n- [ ] The amount does not exceed the original payment, and the currency is the same.\n- [ ] I chose the correct type and the correct account.\n- [ ] I decided deliberately whether the commission is reversed.\n- [ ] I checked whether a dispute already covers this payment, so money is not returned twice.\n- [ ] My reason says what I checked, what I found and why ([[a:b04-06]]).\n\n**Never**\n- Never propose from a screenshot, phone call or chat alone.\n- Never split one adjustment into several to avoid review.\n\n**If you made a mistake**\nIf it is still pending, withdraw it. If it was executed, propose an offsetting adjustment with **Reverse**. Never edit an executed adjustment.",
+    "body": "**What this does**\nYou are proposing a money movement: a refund, a chargeback, a manual credit or debit, or a correction. A different Finance user must approve it.\n\n**Check first**\n- [ ] I found the original payment by its **reference**.\n- [ ] The amount does not exceed the original payment, and the currency is the same.\n- [ ] I chose the correct type and the correct account.\n- [ ] I decided deliberately whether the commission is reversed.\n- [ ] I checked whether a dispute already covers this payment, so money is not returned twice.\n- [ ] My reason says what I checked, what I found and why ([[a:b04-06|Writing a reason that survives an audit]]).\n\n**Never**\n- Never propose from a screenshot, phone call or chat alone.\n- Never split one adjustment into several to avoid review.\n\n**If you made a mistake**\nIf it is still pending, withdraw it. If it was executed, propose an offsetting adjustment with **Reverse**. Never edit an executed adjustment.",
     "checklist": [
       "I found the original payment by its **reference**.",
       "The amount does not exceed the original payment, and the currency is the same.",
       "I chose the correct type and the correct account.",
       "I decided deliberately whether the commission is reversed.",
       "I checked whether a dispute already covers this payment, so money is not returned twice.",
-      "My reason says what I checked, what I found and why ([[a:b04-06]])."
+      "My reason says what I checked, what I found and why ([[a:b04-06|Writing a reason that survives an audit]])."
     ]
   },
   {
@@ -51,7 +51,7 @@
     "screen": "Adjustments",
     "risk": "HIGH",
     "irreversible": true,
-    "body": "**What this does**\nYou are proposing a new adjustment that cancels the effect of an earlier one. The earlier one stays in the books.\n\n**Check first**\n- [ ] I confirmed the earlier adjustment is the wrong one, by reading its details.\n- [ ] I understand the money will move in the opposite direction.\n- [ ] I wrote the reason, including what went wrong the first time.\n- [ ] The merchant name, amount and currency match the earlier adjustment.\n\n**Never**\n- Never reverse to hide a mistake without telling your manager.\n- Never reverse the same adjustment twice.\n\n**If you made a mistake**\nWithdraw the pending reversal if it is wrong, and tell Finance. See [[a:b08-08]].",
+    "body": "**What this does**\nYou are proposing a new adjustment that cancels the effect of an earlier one. The earlier one stays in the books.\n\n**Check first**\n- [ ] I confirmed the earlier adjustment is the wrong one, by reading its details.\n- [ ] I understand the money will move in the opposite direction.\n- [ ] I wrote the reason, including what went wrong the first time.\n- [ ] The merchant name, amount and currency match the earlier adjustment.\n\n**Never**\n- Never reverse to hide a mistake without telling your manager.\n- Never reverse the same adjustment twice.\n\n**If you made a mistake**\nWithdraw the pending reversal if it is wrong, and tell Finance. See [[a:b08-08|Adjustments]].",
     "checklist": [
       "I confirmed the earlier adjustment is the wrong one, by reading its details.",
       "I understand the money will move in the opposite direction.",
@@ -94,13 +94,13 @@
     "screen": "OperatorCases",
     "risk": "CRITICAL",
     "irreversible": true,
-    "body": "**What this does**\nYou are deciding that an uncertain payment **succeeded** or **failed**. This credits money or frees a link, and it needs a second person.\n\n**Check first**\n- [ ] I pressed **Inquire** and read the answer in the step log.\n- [ ] I have **evidence from the partner**: a statement line or a written reply naming our reference or the provider reference.\n- [ ] The amount and currency in the evidence match the attempt.\n- [ ] The environment is `LIVE` and this is the right attempt.\n- [ ] My reason names the evidence ([[a:b04-06]]).\n\n**Never**\n- Never resolve because it is old.\n- Never resolve from a customer's screenshot or phone call.\n- Never ask the customer to pay again.\n\n**If you made a mistake**\nTell your manager and Finance. A wrongly credited payment or a wrongly failed one is corrected by a new approved adjustment. See [[a:b07-03]].",
+    "body": "**What this does**\nYou are deciding that an uncertain payment **succeeded** or **failed**. This credits money or frees a link, and it needs a second person.\n\n**Check first**\n- [ ] I pressed **Inquire** and read the answer in the step log.\n- [ ] I have **evidence from the partner**: a statement line or a written reply naming our reference or the provider reference.\n- [ ] The amount and currency in the evidence match the attempt.\n- [ ] The environment is `LIVE` and this is the right attempt.\n- [ ] My reason names the evidence ([[a:b04-06|Writing a reason that survives an audit]]).\n\n**Never**\n- Never resolve because it is old.\n- Never resolve from a customer's screenshot or phone call.\n- Never ask the customer to pay again.\n\n**If you made a mistake**\nTell your manager and Finance. A wrongly credited payment or a wrongly failed one is corrected by a new approved adjustment. See [[a:b07-03|UNKNOWN]].",
     "checklist": [
       "I pressed **Inquire** and read the answer in the step log.",
       "I have **evidence from the partner**: a statement line or a written reply naming our reference or the provider reference.",
       "The amount and currency in the evidence match the attempt.",
       "The environment is `LIVE` and this is the right attempt.",
-      "My reason names the evidence ([[a:b04-06]])."
+      "My reason names the evidence ([[a:b04-06|Writing a reason that survives an audit]])."
     ]
   },
   {
@@ -109,7 +109,7 @@
     "screen": "OperatorCases",
     "risk": "HIGH",
     "irreversible": true,
-    "body": "**What this does**\nYou are freeing the slot held by an uncertain payment so that the link can be used again.\n\n**Check first**\n- [ ] I have evidence that **no money moved** for this attempt.\n- [ ] I understand the customer could still pay twice if I am wrong.\n- [ ] The case notes explain the evidence.\n\n**Never**\n- Never release while the partner might still confirm.\n- Never release to satisfy an impatient merchant.\n\n**If you made a mistake**\nIf the customer paid again, handle the second payment as an overpayment through Finance ([[a:b07-08]]) and tell your manager.",
+    "body": "**What this does**\nYou are freeing the slot held by an uncertain payment so that the link can be used again.\n\n**Check first**\n- [ ] I have evidence that **no money moved** for this attempt.\n- [ ] I understand the customer could still pay twice if I am wrong.\n- [ ] The case notes explain the evidence.\n\n**Never**\n- Never release while the partner might still confirm.\n- Never release to satisfy an impatient merchant.\n\n**If you made a mistake**\nIf the customer paid again, handle the second payment as an overpayment through Finance ([[a:b07-08|Late success, conflicts and amount mismatches]]) and tell your manager.",
     "checklist": [
       "I have evidence that **no money moved** for this attempt.",
       "I understand the customer could still pay twice if I am wrong.",
@@ -136,7 +136,7 @@
     "screen": "JoinRequests",
     "risk": "HIGH",
     "irreversible": false,
-    "body": "**What this does**\nYou are approving a business to take live payments. The merchant becomes active at once, or after a second reviewer if one is required.\n\n**Check first**\n- [ ] All seven checks are done and recorded.\n- [ ] Screening is `CLEAR`, or a possible match was decided by Compliance.\n- [ ] The payout account is in the merchant's legal name.\n- [ ] The proposed risk tier is justified.\n- [ ] No unresolved duplicate or related-party flag.\n- [ ] I am not pressured by a deadline or a sales request.\n\n**Never**\n- Never approve with an incomplete checklist.\n- Never discuss screening with the applicant.\n\n**If you made a mistake**\nTell Compliance. An approved merchant can be suspended; a wrongly approved one is reviewed under [[a:b05-08]].",
+    "body": "**What this does**\nYou are approving a business to take live payments. The merchant becomes active at once, or after a second reviewer if one is required.\n\n**Check first**\n- [ ] All seven checks are done and recorded.\n- [ ] Screening is `CLEAR`, or a possible match was decided by Compliance.\n- [ ] The payout account is in the merchant's legal name.\n- [ ] The proposed risk tier is justified.\n- [ ] No unresolved duplicate or related-party flag.\n- [ ] I am not pressured by a deadline or a sales request.\n\n**Never**\n- Never approve with an incomplete checklist.\n- Never discuss screening with the applicant.\n\n**If you made a mistake**\nTell Compliance. An approved merchant can be suspended; a wrongly approved one is reviewed under [[a:b05-08|The Merchants screen]].",
     "checklist": [
       "All seven checks are done and recorded.",
       "Screening is `CLEAR`, or a possible match was decided by Compliance.",
@@ -265,7 +265,7 @@
     "screen": "GatewayWizard",
     "risk": "CRITICAL",
     "irreversible": false,
-    "body": "**What this does**\nYou are asking a Security Admin to approve a configuration for live money.\n\n**Check first**\n- [ ] I read the compiled request preview and the amount pipeline results.\n- [ ] The 15-scenario suite and contract tests are green.\n- [ ] The money step cannot retry automatically.\n- [ ] Every weak channel must ask the partner.\n- [ ] I named a rollback version and a canary plan.\n- [ ] I did not use a real secret in any example.\n\n**Never**\n- Never submit with a failing gate.\n- Never skip reading the preview.\n\n**If you made a mistake**\nWithdraw the submission. If it went live badly, roll back to the named version and follow [[a:b10-02]].",
+    "body": "**What this does**\nYou are asking a Security Admin to approve a configuration for live money.\n\n**Check first**\n- [ ] I read the compiled request preview and the amount pipeline results.\n- [ ] The 15-scenario suite and contract tests are green.\n- [ ] The money step cannot retry automatically.\n- [ ] Every weak channel must ask the partner.\n- [ ] I named a rollback version and a canary plan.\n- [ ] I did not use a real secret in any example.\n\n**Never**\n- Never submit with a failing gate.\n- Never skip reading the preview.\n\n**If you made a mistake**\nWithdraw the submission. If it went live badly, roll back to the named version and follow [[a:b10-02|RB-01 Gateway outage and the circuit breaker]].",
     "checklist": [
       "I read the compiled request preview and the amount pipeline results.",
       "The 15-scenario suite and contract tests are green.",
@@ -310,12 +310,55 @@
     "screen": "Reconciliation",
     "risk": "HIGH",
     "irreversible": false,
-    "body": "**What this does**\nYou are matching a partner's statement against our books. Problem lines open cases.\n\n**Check first**\n- [ ] The file is the right partner, the right period and the right source.\n- [ ] The preview shows columns read correctly (amount, fee, date, time zone).\n- [ ] This file has not been loaded before.\n- [ ] I know what to do with mismatches ([[a:b08-06]]).\n\n**Never**\n- Never edit the file to make it match.\n- Never run a file from an unknown source.\n\n**If you made a mistake**\nTell Finance. A wrong run is corrected through cases and adjustments, never by editing.",
+    "body": "**What this does**\nYou are matching a partner's statement against our books. Problem lines open cases.\n\n**Check first**\n- [ ] The file is the right partner, the right period and the right source.\n- [ ] The preview shows columns read correctly (amount, fee, date, time zone).\n- [ ] This file has not been loaded before.\n- [ ] I know what to do with mismatches ([[a:b08-06|Reconciliation]]).\n\n**Never**\n- Never edit the file to make it match.\n- Never run a file from an unknown source.\n\n**If you made a mistake**\nTell Finance. A wrong run is corrected through cases and adjustments, never by editing.",
     "checklist": [
       "The file is the right partner, the right period and the right source.",
       "The preview shows columns read correctly (amount, fee, date, time zone).",
       "This file has not been loaded before.",
-      "I know what to do with mismatches ([[a:b08-06]])."
+      "I know what to do with mismatches ([[a:b08-06|Reconciliation]])."
+    ]
+  },
+  {
+    "id": "sg-trigger-backup",
+    "title": "Run a backup now",
+    "screen": "SystemBackups",
+    "risk": "MEDIUM",
+    "irreversible": false,
+    "body": "**What this does**\nYou ask the backup daemon to take a **Full** or **Delta** backup of one store or of all stores right now. It runs in the background and is queued behind any job already running.\n\n**Check first**\n- [ ] **Daemon status** says **Reachable** and the banner about an unreachable daemon is not shown.\n- [ ] **Storage targets** shows every target **Healthy**.\n- [ ] I know why I need it now (for example before maintenance, a configuration change or a certificate rotation).\n- [ ] I chose the right **Backup target** and **Backup kind**. **All targets** with **Full** loads production, so I will do it when the platform is calm.\n\n**Never**\n- Never click **Run backup now** repeatedly to \"make it go faster\"; extra requests are queued behind the first.\n- Never treat a started backup as finished. Wait for **Passed**.\n\n**If you made a mistake**\nA backup cannot harm data, only load the system. If you started the wrong one, let it finish and tell the Security Admin. If it ends **Failed**, read the **Error** column and see [[a:b12-10|The Backups screen]].",
+    "checklist": [
+      "**Daemon status** says **Reachable** and the banner about an unreachable daemon is not shown.",
+      "**Storage targets** shows every target **Healthy**.",
+      "I know why I need it now (for example before maintenance, a configuration change or a certificate rotation).",
+      "I chose the right **Backup target** and **Backup kind**. **All targets** with **Full** loads production, so I will do it when the platform is calm."
+    ]
+  },
+  {
+    "id": "sg-run-restore-drill",
+    "title": "Run a restore drill",
+    "screen": "SystemBackups",
+    "risk": "MEDIUM",
+    "irreversible": false,
+    "body": "**What this does**\nYou ask the daemon to restore the latest backup chain into an isolated scratch cluster, replay the archived WAL to a target time and run the three invariant checks. Production is not touched and the scratch cluster is destroyed afterwards.\n\n**Check first**\n- [ ] **Daemon status** says **Reachable**.\n- [ ] I understand it can take several minutes and runs after any job already running.\n- [ ] I will read the result in **Latest restore drill** and will not assume success.\n- [ ] I know that a failed check is a priority-1 incident ([[s:s-restore-drill-failed|A restore drill failed]]).\n\n**Never**\n- Never ignore a **Drill failed** result because the money checks passed.\n- Never delete or prune backups to make a drill pass.\n\n**If you made a mistake**\nAn extra drill is harmless. If a result is red, follow [[s:s-restore-drill-failed|A restore drill failed]] at once.",
+    "checklist": [
+      "**Daemon status** says **Reachable**.",
+      "I understand it can take several minutes and runs after any job already running.",
+      "I will read the result in **Latest restore drill** and will not assume success.",
+      "I know that a failed check is a priority-1 incident ([[s:s-restore-drill-failed|A restore drill failed]])."
+    ]
+  },
+  {
+    "id": "sg-update-backup-policy",
+    "title": "Change the backup schedule or retention",
+    "screen": "SystemBackups",
+    "risk": "HIGH",
+    "irreversible": false,
+    "body": "**What this does**\nYou propose new cron schedules (Full, Delta, Drill), retention (**Full retention days**, **WAL retention days**) or the **Alert lag threshold**. A second Security Admin must approve before anything changes.\n\n**Check first**\n- [ ] I have a written reason, for example a change of agreed recovery targets.\n- [ ] Every cron expression has five fields and is in UTC.\n- [ ] Retention is not lowered: shorter retention can destroy the history we need for recovery or an investigation.\n- [ ] The **Alert lag threshold** is not raised just to hide a warning.\n- [ ] I will ask a different Security Admin to review the `BACKUP_POLICY` request on **Approvals** ([[a:b12-11|Operating backups safely]]).\n\n**Never**\n- Never ask someone to approve a policy change without telling them what it does.\n- Never use a second account of your own as the checker.\n\n**If you made a mistake**\nBefore it is approved, ask for the request to be rejected and submit a corrected one. After approval, submit and approve a new change that restores the old values; the audit log keeps both.",
+    "checklist": [
+      "I have a written reason, for example a change of agreed recovery targets.",
+      "Every cron expression has five fields and is in UTC.",
+      "Retention is not lowered: shorter retention can destroy the history we need for recovery or an investigation.",
+      "The **Alert lag threshold** is not raised just to hide a warning.",
+      "I will ask a different Security Admin to review the `BACKUP_POLICY` request on **Approvals** ([[a:b12-11|Operating backups safely]])."
     ]
   }
 ]

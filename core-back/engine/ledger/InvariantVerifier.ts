@@ -1,6 +1,18 @@
 import { Decimal } from "decimal.js";
 import { decimal, type JournalLineRecord, type LedgerAccountRecord } from "./LedgerPoster";
-import type { AccountBalance } from "./CheckpointService";
+
+export interface AccountBalance {
+  accountId: string;
+  accountType: LedgerAccountRecord["accountType"];
+  /** Sum of the shard checkpoints (debit-positive). */
+  checkpointBalance: Decimal;
+  /** Lines posted since the checkpoints (live minus checkpoint). */
+  delta: Decimal;
+  /** Live balance, debit-positive: the sum of the account's shards. */
+  liveBalance: Decimal;
+  /** Oldest shard checkpoint of the account, when it has any. */
+  checkpointAt?: Date;
+}
 
 export interface InvariantPrismaClient {
   glAccount: {
@@ -113,50 +125,47 @@ export class InvariantVerifier {
   }
 
   /**
-   * The live balance of an account is the checkpoint balance plus the journal
-   * lines that were posted after the checkpoint. Summing every line would
-   * double count the window that the checkpoint already covers.
+   * The live balance of an account is the sum of its shard balances (debit-positive); the checkpoint part
+   * is the sum of the shard checkpoints, so `delta` is what has been posted since.
+   *
+   * The 60 s ledger equation is checked from the SHARD balances: O(shards), independent of how much
+   * history the journal holds. What ties the shards to the journal is the checkpointer, which proves for
+   * every shard that `checkpoint + lines in (checkpoint_seq, line_seq] = shard balance` before it moves
+   * (see CheckpointService), and the restore drill, which re-derives it from the whole journal.
    */
   private async loadBalances(): Promise<AccountBalance[]> {
     if (!this.client) {
       return [];
     }
     if (this.useSql && typeof this.client.$queryRawUnsafe === "function") {
-      // Exact NUMERIC sums in the database, one statement for the whole chart
-      // of accounts (was: one journal_lines query per account every 60 s,
-      // summed row by row in JS).
       const rows = (await this.client.$queryRawUnsafe(
         `SELECT g.id::text AS id, g.account_type::text AS "accountType",
-                g.checkpoint_balance::text AS "checkpointBalance", g.checkpoint_at AS "checkpointAt",
-                COALESCE(SUM(CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END), 0)::text AS delta
+                COALESCE(SUM(c.checkpoint_balance), 0)::text AS "checkpointBalance",
+                MIN(c.checkpoint_at) AS "checkpointAt",
+                COALESCE(SUM(s.current_balance), 0)::text AS live
          FROM gl_accounts g
-         LEFT JOIN journal_lines jl
-           ON jl.gl_account_id = g.id
-          AND (g.checkpoint_at IS NULL OR jl.created_at > g.checkpoint_at)
-         GROUP BY g.id, g.account_type, g.checkpoint_balance, g.checkpoint_at`,
-      )) as Array<{ id: string; accountType: string; checkpointBalance: string | null; checkpointAt: Date | null; delta: string }>;
+         LEFT JOIN gl_account_shards s ON s.gl_account_id = g.id
+         LEFT JOIN gl_shard_checkpoints c ON c.gl_account_id = s.gl_account_id AND c.shard_id = s.shard_id
+         GROUP BY g.id, g.account_type`,
+      )) as Array<{ id: string; accountType: string; checkpointBalance: string | null; checkpointAt: Date | null; live: string }>;
       return rows.map((row) => {
         const checkpointBalance = decimal(row.checkpointBalance ?? 0);
-        const delta = decimal(row.delta ?? 0);
+        const liveBalance = decimal(row.live ?? 0);
         return {
           accountId: row.id,
           accountType: row.accountType as AccountBalance["accountType"],
           checkpointBalance,
-          delta,
-          liveBalance: checkpointBalance.plus(delta),
+          delta: liveBalance.minus(checkpointBalance),
+          liveBalance,
           checkpointAt: row.checkpointAt ?? undefined,
         };
       });
     }
+    // Test doubles without raw SQL: sum every journal line of every account.
     const accounts = await this.client.glAccount.findMany();
     const balances: AccountBalance[] = [];
     for (const account of accounts) {
-      const checkpointBalance = decimal(account.checkpointBalance ?? 0);
-      const lines = await this.client.journalLine.findMany({
-        where: account.checkpointAt
-          ? { glAccountId: account.id, createdAt: { gt: account.checkpointAt } }
-          : { glAccountId: account.id },
-      });
+      const lines = await this.client.journalLine.findMany({ where: { glAccountId: account.id } });
       let delta = new Decimal(0);
       for (const line of lines) {
         const amount = decimal(line.amount);
@@ -165,10 +174,9 @@ export class InvariantVerifier {
       balances.push({
         accountId: account.id,
         accountType: account.accountType,
-        checkpointBalance,
+        checkpointBalance: new Decimal(0),
         delta,
-        liveBalance: checkpointBalance.plus(delta),
-        checkpointAt: account.checkpointAt ?? undefined,
+        liveBalance: delta,
       });
     }
     return balances;

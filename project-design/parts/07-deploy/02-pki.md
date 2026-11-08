@@ -97,6 +97,7 @@ Leaves are RSA 2048, signed by the internal CA, with:
 | `audit-db-client` | `audit-db-client` | none | clientAuth | audit DB configured |
 | `log-db-client` | `log-db-client` | none | clientAuth | log DB configured |
 | `backup-client` | `backup-client` | none | clientAuth | backup configured |
+| `wal-archive-client` | `wal-archive-client` | none | clientAuth | backup configured |
 
 The core certificate also carries clientAuth so the core host can use it as a client for its own loopback `/health` probe. The backup server certificate also carries clientAuth because the deploy health probe presents it as a client.
 
@@ -129,13 +130,15 @@ Expiry is not part of the reuse decision. `verifyPki()` reports remaining days, 
 | merchant | CA, `merchant-back-client` cert/key |
 | checkout | CA, `checkout-back-client` cert/key |
 | Fake Rails | CA, `fake-rails` cert/key |
-| pg-primary / pg-replica / pgbouncer | CA, `pg-client` cert/key |
+| pg-primary / pg-replica / pgbouncer | CA, `pg-client` cert/key (pg-primary also `wal-archive-client` cert/key) |
 | Redis | CA, `redis-client` cert/key |
-| audit DB | CA, `audit-db-client` cert/key |
+| audit DB | CA, `audit-db-client` cert/key, `wal-archive-client` cert/key |
 | log DB | CA, `log-db-client` cert/key |
 | backup | CA, `backup-daemon` cert/key, `pg-client` cert/key, `backup-client` cert/key |
 
 `readMaterial()` returns the certificate for the CA and both certificate and key for non-CA material. The CA private key is never returned for distribution.
+
+`wal-archive-client` (CN `wal-archive-client`) exists so a database host can push WAL to the backup daemon with a certificate that can do nothing else: the daemon maps it to the `wal` role (only `PUT /v1/wal/...`), while `backup-client` is the `control` role. It is deliberately distributed only to `pg-primary` and `audit-db` hosts, never to core or the backup host, and is installed in `/etc/pg-deploy/certs` with the key group-readable by `postgres` (`archive_command` runs as that user). Existing client leaves are not re-issued when only another file is missing.
 
 `deploy.ts` calls `uploadStorageCertificates()` in step 3 for hosts with a storage role. It writes to `/etc/pg-deploy/certs` for storage hosts, or `BACKUP_DAEMON_CERT_DIR` for a backup host. Compute services later receive `certFilesForHost()` under `<remoteDir>/shared/certs` in `deployService()`.
 

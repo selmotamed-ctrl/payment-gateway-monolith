@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VFileInput, VProgressCircular, VSelect, VSwitch, VTextField, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VFileInput, VProgressCircular, VSelect, VSwitch, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -38,6 +38,14 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { SectionFields } from "@/components/SectionFields";
+import { ColumnMappingBadges, ParserConfigBuilder, firstParserError } from "@/components/builders/ParserConfigBuilder";
+import {
+    isParserConfigUnchanged,
+    parseParserConfig,
+    summarizeColumnMapping,
+    serializeParserConfig,
+    type ParserConfigState,
+} from "@/components/builders/model";
 const UPLOAD_CHECKS = [
     { key: "SOURCE_VERIFIED", label: "Statement source verified" },
     { key: "FILE_REVIEWED", label: "Statement file reviewed" },
@@ -222,8 +230,8 @@ const ReconciliationPage = dc(() => {
         settlementLagDays: "0",
         dedupeKeyTemplate: "",
         active: true,
-        parserConfig: "{}",
     });
+    const parserState = ref<ParserConfigState>(parseParserConfig({}));
     const selectedRun = ref<ReconciliationRunDetail | null>(null);
     const detailLoading = ref(false);
 
@@ -407,8 +415,8 @@ const ReconciliationPage = dc(() => {
             settlementLagDays: String(source.settlementLagDays),
             dedupeKeyTemplate: source.dedupeKeyTemplate ?? "",
             active: source.active,
-            parserConfig: JSON.stringify(source.parserConfig ?? {}, null, 2),
         };
+        parserState.value = parseParserConfig(source.parserConfig);
         sourceError.value = null;
         sourceEditChecklist.value = {};
         sourceEditOpen.value = true;
@@ -418,17 +426,14 @@ const ReconciliationPage = dc(() => {
 
     const saveSourceEdit = async () => {
         if (!editingSource.value || sourceSaving.value) return;
-        let parserConfig: unknown;
-        try {
-            parserConfig = JSON.parse(sourceForm.value.parserConfig || "{}");
-        } catch {
-            sourceError.value = t("Parser config must be valid JSON.");
+        const parserError = firstParserError(parserState.value.form, t);
+        if (parserError) {
+            sourceError.value = parserError;
             return;
         }
-        if (parserConfig === null || typeof parserConfig !== "object" || Array.isArray(parserConfig)) {
-            sourceError.value = t("Parser config must be a JSON object.");
-            return;
-        }
+        // The API merges parserConfig shallowly, so the complete object is always sent; skip it when nothing changed.
+        const parserConfig = serializeParserConfig(parserState.value);
+        const parserChanged = !isParserConfigUnchanged(parserState.value, editingSource.value.parserConfig);
         const lag = Number(sourceForm.value.settlementLagDays);
         if (!Number.isInteger(lag) || lag < 0 || lag > 365) {
             sourceError.value = t("Settlement lag must be between 0 and 365 days.");
@@ -446,7 +451,7 @@ const ReconciliationPage = dc(() => {
                 settlementLagDays: lag,
                 dedupeKeyTemplate: sourceForm.value.dedupeKeyTemplate.trim() || null,
                 active: sourceForm.value.active,
-                parserConfig,
+                ...(parserChanged ? { parserConfig } : {}),
             });
             showSnackBar({ type: "success", message: t("Statement source updated") });
             sourceEditOpen.value = false;
@@ -585,12 +590,8 @@ const ReconciliationPage = dc(() => {
         {
             key: "mapping",
             label: "Mapped columns",
-            value: (row) => String(Object.keys(row.columnMapping ?? {}).length),
-            Value: ({ row }: { row: StatementSource }) => (
-                <ThemedText style={{ fontSize: "10px", direction: "ltr", maxWidth: "260px", wordBreak: "break-word" }}>
-                    {JSON.stringify(row.columnMapping ?? {})}
-                </ThemedText>
-            ),
+            value: (row) => summarizeColumnMapping(row.parserConfig).mapped.join(", "),
+            Value: ({ row }: { row: StatementSource }) => <ColumnMappingBadges parserConfig={row.parserConfig} />,
         },
         {
             key: "active",
@@ -927,15 +928,11 @@ const ReconciliationPage = dc(() => {
                     <FormField label={t("Dedupe key template")}>
                         <VTextField modelValue={sourceForm.value.dedupeKeyTemplate} onUpdate:modelValue={(value: string) => (sourceForm.value.dedupeKeyTemplate = value)} hideDetails />
                     </FormField>
-                    <FormField label={t("Parser config JSON")}>
-                        <VTextarea
-                            modelValue={sourceForm.value.parserConfig}
-                            onUpdate:modelValue={(value: string) => (sourceForm.value.parserConfig = value)}
-                            rows={8}
-                            hideDetails
-                            style={{ fontFamily: "ui-monospace, monospace", direction: "ltr" }}
-                        />
-                    </FormField>
+                </SectionFields>
+                <SectionFields title={t("Statement parser")} subtitle={t("How uploaded statement files of this source are read.")}>
+                    <div style={{ gridColumn: "1 / -1" }}>
+                        <ParserConfigBuilder modelValue={parserState.value} onUpdate:modelValue={(value: ParserConfigState) => (parserState.value = value)} />
+                    </div>
                 </SectionFields>
                 <FormChecklist
                     checks={[...SOURCE_EDIT_CHECKS]}

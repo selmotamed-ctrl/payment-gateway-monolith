@@ -108,11 +108,56 @@ is then only a compatibility fallback.
 | `--update` | Do not bootstrap; also disables an environment `fresh`. |
 | `--enforce-firewall` | Apply the current UFW plan without a full bootstrap. |
 | `--skip-build` | Reuse the existing `*/dist` builds. Missing edge dist files fail later. |
+| `--rebuild` | Ignore the frontend build cache and rebuild every SPA. |
+| `--force-restart` | Restart PostgreSQL, PgBouncer, Redis and the backup daemon even when nothing changed (normally they are only reloaded or restarted when their configuration changed). |
 | `--skip-verify` | Skip step 12. A deploy can then report success without a live probe. |
 | `--rotate-certs` | Regenerate the internal CA and every leaf certificate. |
 | `--dry-run` | Validate and print commands; execute no remote command and skip local builds/verification. |
 
 Unknown options and unknown `--only` roles abort before any SSH connection.
+
+### Convergence: reload when you can, restart only when you must
+
+Storage services are **converged**, not bounced. Every config file is written
+only if its bytes changed (the runner compares before writing), and each service
+is then handled by the least disruptive action:
+
+| Service | Down | Config changed | Nothing changed |
+| :--- | :--- | :--- | :--- |
+| PostgreSQL | start | `reload`, then **restart only if** `pg_settings.pending_restart` | nothing |
+| PgBouncer | start | `reload` (SIGHUP); restart only for restart-only settings (`listen_*`, `unix_socket_*`...) or after PostgreSQL restarted | nothing |
+| Redis / Valkey | start | restart (this flushes the L2 cache and velocity counters) | nothing |
+| Backup daemon | start | restart when its source, env or unit changed | nothing |
+| MinIO | install + start | n/a (left alone while healthy) | nothing |
+
+The deploy prints one `services:` line per provisioner (`started`, `restarted`,
+`reloaded` or `unchanged`). PgBouncer gets a systemd drop-in
+(`KillSignal=SIGINT`, `TimeoutStopSec=15s`): PgBouncer 1.23+ treats SIGTERM as
+"wait for every client to disconnect", so a pool with live clients never stopped
+and systemd waited out its 90 s timeout (3 times per deploy before this change).
+Packages are installed only when missing, and `pacman -Sy` (a partial upgrade)
+is never used.
+
+### Frontend builds and the timing report
+
+Frontend builds start in the background at step 2 (in parallel, at most
+`ceil(cores/2)` at once) and overlap with storage provisioning; each SPA is
+awaited right before the tier that ships it. A build is **skipped** when the
+SHA-256 of the frontend source tree plus its deploy-injected build environment
+matches the stamp in `dist/.pg-build-stamp` (`--rebuild` forces it). Only the
+SPAs of the selected roles are built.
+
+The run ends with the wall-clock time of every step and the slowest remote
+commands; any single command over 30 s is flagged as it finishes. Remote
+commands over ssh share one multiplexed connection per host
+(`PG_DEPLOY_SSH_MUX=0` disables it), and every configured credential value is
+masked in logs and error messages.
+
+### Stress-testing the deploy
+
+`bun run stress` (from `deploy/`) drives the real engine against this machine's
+real services under load, faults and tampering. See
+[`stress/README.md`](stress/README.md).
 
 ### Roles accepted by `--only`
 
@@ -229,7 +274,9 @@ topology example.
    used, falling back to `PG_DB_*`.
 3. A derived `DATABASE_URL` uses the PostgreSQL credentials, primary private IP
    and PgBouncer port when enabled; otherwise the explicit `DATABASE_URL` is
-   used.
+   used. `LEADER_ELECTION_DATABASE_URL` is derived separately (the
+   `pgw_session` alias, or a direct URL when PgBouncer is disabled); an explicit
+   value in the deploy env overrides the derived one.
 4. `CORE_BACK_URLS` wins over derived `https://<core-private-ip>:<port>` URLs.
 5. A node's `servicePort` overrides the tier backend port for that node.
 6. CLI flags override the corresponding environment value for one run.
@@ -361,10 +408,14 @@ the distribution defaults.
 
 ### PgBouncer
 
-PgBouncer runs in transaction mode on the primary and replicas. The generated
-`pgbouncer.ini` has **no `[databases]` mapping**, so a core connection to `:6432`
-has no configured route to the application database. Enabling the pooler
-without adding that mapping can make the deployed core unable to connect.
+PgBouncer runs in transaction mode for the application database on the primary
+and replicas. The generated `pgbouncer.ini` maps `PG_DB_NAME` to the local
+PostgreSQL port, and adds `pgw_session`, a second alias to the same database
+with `pool_mode=session`. The session alias exists for the singleton-worker
+leader election (`LEADER_ELECTION_DATABASE_URL`); PostgreSQL advisory locks do
+not survive transaction pooling. The provisioner proves a login through both
+aliases before core starts. An explicit `LEADER_ELECTION_DATABASE_URL` in the
+deploy env overrides the derived URL for an external database or pooler.
 
 ### Redis
 
@@ -632,16 +683,16 @@ bun run test-matrix --topologies=T1 --intensity=smoke
 
 - `DEPLOY_ENV` unset means `production`: Fake Rails, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION` and the synthetic seeder are refused. Use `development|staging|test` explicitly.
 - Placeholder / low-entropy secrets (`change-me`, `password`, `admin`, repeated or sequential patterns) are rejected; `KMS_MASTER_KEY` needs >= 32 chars. Secrets may not contain quotes, backslash, `$`, backtick or whitespace.
-- `BACKUP_WALG_SHA256` (SHA-256 of the pinned WAL-G asset) is required for `BACKUP_ENGINE_MODE=wal-g`; `BUN_SHA256` is needed to install bun (otherwise an existing bun is reused).
+- `BACKUP_WALG_SHA256` (SHA-256 of the pinned WAL-G asset) is required only when WAL-G must be downloaded; an already installed binary is reused. `BUN_SHA256` is needed to install bun (otherwise an existing `/usr/local/bin/bun` or `~/.bun/bin/bun` is reused).
 - `--fresh` against a non-empty database is refused unless `--force-fresh` (or `DEPLOY_FORCE_FRESH=1`). Update deploys run `migrate deploy` on the first core node when migrations are pending, after a pre-migration dump.
 - PostgreSQL binds `127.0.0.1,<node private IP>`; `PG_RAM_GB` derives memory settings; `PG_IO_METHOD` defaults to `worker`; `PG_REPLICA_REBUILD=true` is needed to re-clone an existing standby.
 
 ### Additional hardening notes (2026-11-05)
 
 - `deploy/lib/quoting.ts` is the single quoting helper set used by the provisioners and `deploy.ts`; `backup.env` and `wal-g.env` are rendered `KEY='value'` and a single quote in a value is rejected.
-- WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed; `BACKUP_WALG_SHA256` is required in wal-g mode and you must supply the real value. barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`); bun installs from a pinned download verified against `BUN_SHA256` (`BUN_VERSION`).
+- WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed when downloaded; supply `BACKUP_WALG_SHA256` for a fresh install (an installed `wal-g` is reused). barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`); bun installs from a pinned download verified against `BUN_SHA256` (`BUN_VERSION`), with `unzip` installed by the fresh-host bootstrap.
 - The off-site mirror uses `rclone copy`/`rsync` without `--delete` unless `BACKUP_SECONDARY_MIRROR_DELETE=true`.
 - The backup daemon authorizes mTLS clients by certificate CN or DNS SAN against `BACKUP_ALLOWED_CLIENT_CNS` (default `backup-client`); verified live on Windows only.
-- New optional keys: `BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION`, `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; lab: `LAB_WALG_SHA256`.
+- New optional keys: `BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION`, `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `BACKUP_S3_ALLOW_INSECURE_HTTP` (managed MinIO over http; independent of the daemon protocol), `KYB_SCANNER_MODE` (`eicar` content gate by default), `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; lab: `LAB_WALG_SHA256`.
 - `deploy.env.example` ships `DEPLOY_ENV=production` and placeholder secrets, so it fails validation until you replace them.
 - Open: legacy per-service `deploy.yml` workflows deploy without tests, with `StrictHostKeyChecking=no` and `rsync --delete`; the backup daemon runs as the `postgres` user; PostgreSQL TLS is not provisioned. See `project-design/TRACKER.md`.

@@ -3,13 +3,22 @@ id: core.ledger
 title: Double-Entry Ledger
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-07
+verified_against: working-tree
 code:
   - core-back/engine/ledger/LedgerPoster.ts
   - core-back/engine/ledger/CheckpointService.ts
   - core-back/engine/ledger/InvariantVerifier.ts
   - core-back/lib/storageEngine/ledgerShardWriter.ts
+  - core-back/lib/storageEngine/shardRouting.ts
+  - core-back/engine/ledger/ShardScaler.ts
+  - core-back/engine/ledger/shardScaling.ts
+  - core-back/engine/ledger/ShardRepair.ts
+  - core-back/prisma/migrations/20261107150000_shard_repairs/migration.sql
+  - core-back/engine/ledger/ledgerAlerts.ts
+  - core-back/engine/workers/LedgerCheckpointWorker.ts
+  - core-back/engine/workers/LedgerShardScalerWorker.ts
+  - core-back/prisma/migrations/20261107090000_shard_sequenced_checkpoints/migration.sql
   - core-back/lib/storageEngine/shardBalances.ts
   - core-back/lib/storageEngine/ledgerPosterFactory.ts
   - core-back/lib/storageEngine/uowAdapter.ts
@@ -30,16 +39,19 @@ tests:
   - core-back/test/exhaustive/02-ledger/commission-hierarchy-and-bearers.test.ts
   - core-back/test/exhaustive/02-ledger/property-fuzzer-10k.test.ts
   - core-back/test/storage-engine/ledger-shards.test.ts
+  - core-back/test/ledger-shard-sequence.test.ts
+  - core-back/test/cashout-lock-order.test.ts
+  - core-back/test/ledger-shard-repair.test.ts
+  - core-back/test/ledger-shard-repair-api.test.ts
+  - core-back/test/ledger-shard-auto-repair.test.ts
   - core-back/test/storage-engine/uow.test.ts
   - core-back/test/storage-engine/write-path.integration.test.ts
   - core-back/test/security-regressions/h7-rounding.test.ts
   - core-back/test/security-regressions/h4-cashout.test.ts
   - core-back/test/hardening-gap-regressions.test.ts
 gaps:
-  - "`CheckpointService` is not scheduled or wired into the production runtime; no checkpoint history table exists."
-  - "Merchant balance fallbacks add every journal line to `checkpoint_balance`, so a captured checkpoint would be double counted."
   - "No database trigger enforces a balanced journal entry; balance is enforced by `LedgerPoster.validateTemplate` and checked periodically by the invariant worker."
-  - "Shard rows are projected on write but are not rebuilt or reconciled; a missing shard falls back to journal-line reads."
+  - "Automatic shard scale-down is deferred; the shard scaler only widens (live by default) and an admin can set any width manually."
   - "Idempotent replay returns the existing entry with an empty line list and does not compare the replay payload with the original posting."
   - "Historical design and two test titles still say 15/16 templates even though the code defines 17 scenarios and 20 matrix variants."
   - "Production must connect as the non-owner role `pgw_app`; if it connects as the owner that ran the migrations the REVOKE layer is moot (the triggers still reject UPDATE/DELETE/TRUNCATE). GAP-013 resolved 2026-11-05 with this operational caveat."
@@ -192,54 +204,74 @@ The exact builders are in `core-back/engine/ledger/LedgerPoster.ts:285` through 
 
 The raw `buildLedgerTemplate` is still public and is used by settlement sweeps, fee variance, suspense, AML, adjustments, cash-out, and tests. Its defaults are convenience defaults, not a production authority: any new production caller should pass explicit money.
 
-### 3.5 Shard writer and shard balances
+### 3.5 Shards, sequences and routing
 
-`createLedgerShardWriter` (`core-back/lib/storageEngine/ledgerShardWriter.ts:8`) projects every journal line into `gl_account_shards`:
+An account's balance is the sum of its **shards** (`gl_account_shards`, debit-positive). A shard is also a **gapless sequence**: `gl_account_shards.line_seq` counts the lines posted to it, and every `journal_lines` row stores the `shard_id` it was posted to and its `shard_seq` (>= 1; 0 marks pre-genesis lines folded into the genesis checkpoint).
 
-- default shard count is 16 (`DEFAULT_SHARD_COUNT`);
-- `MERCHANT_WALLET` uses one shard, `shard_id = 0`;
-- every other account type uses `fnv1aHash(refId) % shardCount`;
-- a debit is a positive delta, a credit is negative;
-- the insert uses `ON CONFLICT (gl_account_id, shard_id) DO UPDATE` and creates the shard row on demand;
-- the write runs inside the same transaction as the journal line.
+`createLedgerShardWriter` (`core-back/lib/storageEngine/ledgerShardWriter.ts`) runs inside the posting transaction and **before the lines are inserted**:
 
-`shardIdForAttempt` receives `line.refId` for every reference type, not only payment attempts. An adjustment, dispute, settlement batch, or fee variance therefore hashes its own reference. `ensureAccountShards` exists to pre-provision all shards for an account, but production does not call it; the seed provisions shards for the seeded system accounts and merchant shards are created on first posting.
+1. it loads each account's routing width (`gl_accounts.shard_count`, 1..256) from a 3-second process cache plus one batched query on a miss (a stale width is harmless: lines store their own shard and shard rows are never deleted);
+2. `routeLine` (`lib/storageEngine/shardRouting.ts`) picks `fnv1a(refId) % width`; **balance-reducing lines of a `MERCHANT_WALLET` (debits) always go to shard 0**;
+3. one statement `INSERT ... ON CONFLICT DO UPDATE` locks the touched shard rows in `(account, shard)` order, adds the signed delta to `current_balance` and the number of lines to `line_seq`, and `RETURNING`s the new `line_seq`;
+4. `assignShardSeqs` gives the j-th line of a posting on a shard the number `high-water - n + j`; the poster then inserts the lines with `shard_id` and `shard_seq`.
 
-`naturalShardBalance` (`core-back/lib/storageEngine/shardBalances.ts:86`) negates credit-positive accounts so a shard sum can be displayed as a natural balance. `loadShardBalanceRows` groups by account and returns only accounts that actually have shard rows.
+The shard row lock is held until commit, so the sequence of a shard is serialized and **commit order equals sequence order**: any snapshot that sees a shard at `(balance B, line_seq S)` also sees every line with `shard_seq <= S`, and committed sequences are gapless (a rolled-back posting rolls back its bump too). An idempotent replay returns before any shard work and never advances a sequence. The DB guard `journal_lines_shard_seq_positive (CHECK shard_seq > 0) NOT VALID` rejects any new line that forgot its sequence; uniqueness of the sequence cannot be a unique index on the partitioned table, so it is proven by the checkpointer (below). The covering index `journal_lines_shard_seq_idx (gl_account_id, shard_id, shard_seq) INCLUDE (direction, amount)` serves the range scans.
+
+Every account always has shard rows `0 .. shard_count-1`: the trigger `gl_accounts_create_shards` creates them with the account. System accounts start 16 wide (`STORAGE_SHARD_COUNT`, `initialShardWidth`), wallets 1 wide; the shard scaler (section 3.9) and the admin override widen an account later. `loadLiveAccountBalances` (`lib/storageEngine/shardBalances.ts`) is the single live-balance read: the shard sum converted to the account's natural sign; there is no journal fallback.
 
 ### 3.6 Checkpoints
 
-`CheckpointService.captureCheckpoint` (`core-back/engine/ledger/CheckpointService.ts:44`):
+A checkpoint is **per shard**: a `(balance, sequence)` pair in `gl_shard_checkpoints` (a shard without a row is at `(0, 0)`). The boundary is the shard's own gapless sequence, never a timestamp (`journal_lines.created_at` is stamped by the app process, so a time boundary could miss a line that commits late). The account stores no checkpoint: `checkpointBalance`/`checkpointAt` in the admin APIs are derived (sum of shard checkpoints, oldest checkpoint time).
 
-1. locks the GL account with `SELECT ... FOR UPDATE` when raw SQL is available;
-2. sums all journal lines up to `asOf`;
-3. chooses `lastCheckpointId` from the latest journal entry, or a synthetic `checkpoint:<account>:<timestamp>` string;
-4. writes `checkpointBalance`, `checkpointAt`, and `lastCheckpointId` onto `gl_accounts`.
+`CheckpointService.captureShard` (`core-back/engine/ledger/CheckpointService.ts`) reads, in ONE statement (one snapshot), the shard `(B, S)`, its checkpoint `(Bc, Sc)` and `n = COUNT, delta = SUM` of the lines with `shard_seq in (Sc, S]`, and proves:
 
-`getLiveBalance` adds the checkpoint balance to lines strictly after `checkpointAt` (`CheckpointService.ts:94`). There is no checkpoint-history table; the checkpoint is represented only by the three fields on `gl_accounts`. `captureCheckpoint` has no production caller: only the ledger tests and the exhaustive checkpoint suite exercise it. The runtime reads `checkpointBalance`/`checkpointAt` in the verifier and in the admin fallback, but no scheduled job captures new checkpoints.
+- **gapless** `n = S - Sc` (a missing, duplicate or misattributed line is detected), and
+- **parity** `Bc + delta = B`.
+
+Only then does a second, tiny monotonic upsert (`WHERE checkpoint_seq < EXCLUDED.checkpoint_seq`) move the checkpoint. It is O(lines since the last checkpoint), takes no lock on the shard or the account, and never blocks a posting; a capture that races a newer one reports NOOP. A `created_at` lower bound prunes the monthly partitions and is retried without the hint before a GAP is reported. A GAP or PARITY result does **not** move the checkpoint: the failure is recorded on the checkpoint row (`status`, `failure_kind`, `consecutive_failures`), the first failure opens a P1 `MISMATCH` operator case keyed `ledger.shard:<account>:<shard>` and writes a `LEDGER_SHARD_CHECKPOINT_FAILED` audit row.
+
+`LedgerCheckpointWorker` (section 3.9) runs it automatically and, when a shard keeps failing, repairs it (section 3.10); `POST /finance/gl-accounts/:id/checkpoint` ("Run checkpoint rollup", `finance:write`, reason, audited) runs it for every shard of one account.
 
 ### 3.7 Invariant verifier
 
-`InvariantVerifier.verify` accepts either a Prisma-like client or a balance provider. With a client it loads every GL account and sums the lines after that account's checkpoint (`InvariantVerifier.ts:107`). It groups natural balances by account type and computes the invariant. `assertInvariant` throws on non-zero drift.
+`InvariantVerifier.verify` accepts either a Prisma-like client or a balance provider. With `{sql: true}` it reads, in one statement, each account's live balance (the sum of its shards) and its shard checkpoints, groups natural balances by account type and computes the invariant. The 60 s check is therefore **O(shards)**, independent of how much history the journal holds. What ties the shards to the journal is the checkpointer (it proves `checkpoint + lines in the sequence range = shard balance` before every advance, in a chain from the genesis checkpoint) and the restore drill (it re-derives balances, checkpoints and sequence counts from the whole journal of a restored database). The non-SQL path used by test doubles sums every journal line.
 
 Production uses the verifier in two places:
 
-- `LedgerInvariantWorker` checks every 60 seconds and opens one open `MISMATCH`/`P1` operator case when drift is non-zero (`core-back/engine/workers/LedgerInvariantWorker.ts:16`);
-- the admin finance/invariant endpoint computes the same snapshot on demand (`core-back/api/internal/admin.ts:15090`).
+- `LedgerInvariantWorker` checks every 60 seconds and opens one `MISMATCH`/`P1` operator case (keyed `ledger.invariant`, so it never suppresses or is suppressed by a per-shard case) when drift is non-zero;
+- the admin finance/invariant endpoint computes the same snapshot on demand.
 
-### 3.8 Balance-read reality
+### 3.8 Balance reads
 
-There is no single balance-read path. The actual sources are:
+Every live balance is the shard sum from `loadLiveAccountBalances` (merchant balance routes, `merchantWalletBalance`, the admin wallet and ledger views, the liquidity view). The cash-out and chargeback checks use `lockWalletLedgerBalance` (`core-back/lib/cashoutBalance.ts`). Wallet **debits are serialized by a transaction-scoped advisory lock on the wallet, taken FIRST**, before the transaction holds any shard row, so only other debiters ever wait for it and a waiter holds no shard row (no lock cycle is possible). A caller that knows the posting it is about to make (the cash-out) then calls `LedgerPoster.lockShardsFor(template, context, tx)`, which locks every shard row that posting will update in one statement in the global `(account, shard)` order (`lockShardsForLines`), exactly the order postings use, so a refund posting to shard 0 cannot slip in between the check and the debit and a payment confirmation can never form an opposite-order cycle with it. Only then does a final statement sum all shards (credits on other shards can only raise the balance, so the check is conservative). Regression: `test/cashout-lock-order.test.ts` (the old order deadlocks 75 times in 120 operations in the worst case; the new one never). Aging buckets of the gateway clearing view are the net signed movement of the last three days plus the balance (`admin.ts`), so they do not depend on any checkpoint.
 
-| Reader | Source | Behavior when shards are absent |
-| :--- | :--- | :--- |
-| Merchant `GET /wallets/:id/balance` | shard sum first | falls back to `checkpointBalance + every journal line` (`core-back/api/internal/merchant.ts:1370`) |
-| `merchantWalletBalance` helper | shard sum first | falls back to `checkpointBalance + every journal line` (`core-back/lib/merchantOps.ts:176`) |
-| Admin ledger balances | shard sum first | falls back to `checkpointBalance + lines since checkpointAt` (`core-back/api/internal/admin.ts:14626`) |
-| Invariant verifier | checkpoint plus lines since checkpoint | always journal-based |
-| Merchant `getWalletBalance` repository | sum of shard rows | returns zero when no shard rows exist (`core-back/engine/db/repositories.ts:162`) |
+### 3.10 Shard repair
 
-The merchant fallbacks start from the checkpoint balance and then add *all* journal lines. As long as no checkpoint has been captured (`checkpointBalance = 0`, `checkpointAt = null`) this is correct. If `CheckpointService` is ever activated, those fallbacks will double count the checkpoint window. This is a code gap, not an intentional design.
+A shard is a **projection** of the immutable journal. When it disagrees with the journal the journal is right, so a repair **recomputes the projection from the journal** (`engine/ledger/ShardRepair.ts`). It never posts a ledger entry to "fix" a shard: an adjusting entry would change the journal too and leave the shard exactly as wrong (and record a false economic event). A real money error is a business correction through the Adjustments flow, not a projection repair.
+
+`planShardRepair` reads the shard and ALL its journal lines and decides, from whether the shard's sequence is intact (above `gl_shard_checkpoints.baseline_seq`, exactly `baseline+1 .. line_seq`, each used once):
+
+- **RECOMPUTE** (sequence intact; only the stored balance or checkpoint disagrees): `current_balance := sum of ALL the shard's lines`, checkpoint := `(that sum, line_seq)`. Safe to automate.
+- **REBASELINE** (sequence damaged: a line is missing or a number is duplicated): recomputing could drop money the shard held if the journal lost a line, so a person decides. `current_balance := journal sum`, `line_seq := max(line_seq, highest sequence found)` (a number is never reused), checkpoint := that point and `baseline_seq` := that point, so the damaged history before it is exempt from the gapless proof (the restore drill and the deploy gate honour `baseline_seq`).
+
+`applyShardRepair` takes `FOR UPDATE` on the shard row (every line insert needs it first, so the shard's lines cannot change), RE-PLANS under the lock, refuses with `SHARD_REPAIR_PLAN_CHANGED` when the plan no longer hashes to what the caller previewed/approved, applies the change, appends a `gl_shard_repairs` row, writes the audit row `GL_SHARD_REPAIRED` and annotates the open per-shard operator case (which stays OPEN for a person to resolve). Timeouts: `lock_timeout 10s`, `statement_timeout 120s`.
+
+Who may do what:
+
+| | Automatic | Manual, single user | Manual, approved |
+| :--- | :--- | :--- | :--- |
+| PARITY, sequence intact (RECOMPUTE) | yes, guarded | yes (`finance:write`, reason, preview hash) | yes |
+| GAP / damaged sequence (REBASELINE) | **never** | refused (`409 SHARD_REPAIR_NEEDS_APPROVAL`) | yes (maker-checker, subject `GL_SHARD_REPAIR`) |
+
+The automatic repair (`LedgerCheckpointWorker`, `LEDGER_SHARD_AUTO_REPAIR_*`, on by default) only repairs a shard that failed its proof `LEDGER_SHARD_AUTO_REPAIR_MIN_FAILURES` times in a row (3: about 30 minutes at the 10-minute retry), whose failure kind is PARITY, whose sequence is intact and whose correction is at most `LEDGER_SHARD_AUTO_REPAIR_MAX_ABS_DRIFT` (100). The guard is re-evaluated under the lock; a declined shard is logged once per plan and left to a person. Manual preview/recompute/request endpoints are in the API surface; the approval is bound to the previewed `planHash`.
+
+**Future: archived journal lines.** `planShardRepair` and the deep checks assume every line of a shard is in `journal_lines`, which is true today (nothing is archived). When old lines are moved to an archive, a repair will use archive plus live by default and the checkpoint anchor only when a deploy variable enables it; see `future.ledger-archive` (`09-future-and-unimplemented/04-ledger-archive-and-shard-repair.md`).
+
+### 3.9 Automation workers and shard scaling
+
+- **`LedgerCheckpointWorker`** (`engine/workers/LedgerCheckpointWorker.ts`, leader-elected, default on): every `WORKER_LEDGER_CHECKPOINT_INTERVAL_MS` it captures the shards with the most pending lines (`>= LEDGER_CHECKPOINT_MIN_LINES`, or any pending line with a checkpoint older than `LEDGER_CHECKPOINT_MAX_AGE_MS`), one shard per call, bounded by `WORKER_LEDGER_CHECKPOINT_BATCH_SIZE`. Failed shards are retried only every 10 minutes. Routine successes only update the checkpoint row; one aggregated `LEDGER_CHECKPOINT_SWEEP` audit row per hour summarises them.
+- **`LedgerShardScalerWorker`** (`engine/workers/LedgerShardScalerWorker.ts`, leader-elected, **live by default**): it samples every shard's `line_seq`, turns the delta into lines per second per shard and asks the pure policy `decideShardWidth` (`engine/ledger/ShardScaler.ts`). A shard row serializes its postings, so the hottest shard's rate is the bottleneck signal; the account is widened when its EWMA stays above `LEDGER_SHARD_UP_LINES_PER_SEC` for two samples and the cooldown (`LEDGER_SHARD_COOLDOWN_MS`, persisted as `gl_accounts.shard_scaled_at`) has passed. The new width aims at half the threshold per shard, grows at most 4x per step and stops at `LEDGER_SHARD_MAX_WIDTH`. A wallet whose shard 0 is the only hot shard (debit-bound) is not widened. By default it widens the account through `applyShardWidth` and audits `GL_ACCOUNT_SHARDS_SCALED`; with `LEDGER_SHARD_SCALER_DRY_RUN=true` it only audits `GL_ACCOUNT_SHARDS_SCALE_PROPOSED` once per proposed width and changes nothing. Calibrate `LEDGER_SHARD_UP_LINES_PER_SEC` on the target hardware.
+- **`applyShardWidth`** (`engine/ledger/shardScaling.ts`) is the one operation both the worker and `POST /finance/gl-accounts/:id/shards/scale` (`finance:write`, reason) use: in one transaction it takes `FOR NO KEY UPDATE` on the account row (which does not conflict with the FK `KEY SHARE` of postings), updates `shard_count`/`shard_scaled_at`, creates missing shard rows and writes the audit row `GL_ACCOUNT_SHARDS_SCALED`. Narrowing only changes where new lines go; existing shards keep their balances, sequences and checkpoints.
 
 ## 4. Contracts and invariants
 
@@ -249,8 +281,8 @@ The merchant fallbacks start from the checkpoint balance and then add *all* jour
 4. Journal lines are append-only. The application exposes no update or delete path, and retention deliberately excludes `journal_entries` and `journal_lines`.
 5. A zero optional leg is omitted rather than booked as a zero line (`optionalLine`, `LedgerPoster.ts:252`).
 6. Account resolution never invents an account: a missing scoped account falls back only to the same type and currency, and then fails with `GL_ACCOUNT_NOT_FOUND`.
-7. Shard projection is in the same transaction as the journal line. A shard balance is the signed sum of every line projected to that shard; the natural balance negates credit-positive accounts.
-8. A checkpoint is a snapshot, not a replacement for journal lines. A live balance is checkpoint plus later lines. A checkpoint must serialize against postings to the same account.
+7. Shard projection and sequence reservation are in the same transaction as the journal line. A shard balance is the signed sum of every line posted to that shard; the natural balance negates credit-positive accounts. The sequence numbers of a shard are gapless.
+8. A checkpoint is a verified `(balance, sequence)` pair of one shard, not a replacement for journal lines: `balance = previous checkpoint + the lines in the sequence range`, proven before it moves. Checkpointing never locks a shard or an account.
 9. The invariant equation is the authoritative system-wide check. A non-zero drift is an operational incident and opens a P1 case.
 10. Adjustment, refund, chargeback, cash-out, AML release/void, and suspense postings use the same ledger and the same idempotency contract.
 
@@ -302,17 +334,16 @@ Use `postScenario` for settlement sweeps, fee variance, suspense, AML, and adjus
 ### Adding an account or currency
 
 1. Add/seed `gl_accounts` rows for every currency-scoped account type.
-2. Seed or allow the shard writer to create shards. `ensureAccountShards` is available for explicit provisioning.
+2. The `gl_accounts_create_shards` trigger creates the shard rows with the account; set `shard_count` (`initialShardWidth`) when creating it.
 3. Add the currency to the seed and to any currency validation before accepting payments in it.
 4. Verify a posting in that currency resolves every account type it uses; otherwise the confirmation fails with `GL_ACCOUNT_NOT_FOUND`.
 
 ### Investigating a balance
 
-1. Read `gl_accounts.checkpoint_balance` and `checkpoint_at`.
-2. Read `gl_account_shards` for the account. If rows exist, their signed sum is the intended fast balance.
-3. If no shard rows exist, use the admin/journal fallback: checkpoint plus lines since `checkpointAt`.
-4. Do not use the merchant fallback as the authority once checkpoints are active; it adds all lines.
-5. Run the invariant verifier. Non-zero drift means the journal itself is inconsistent, not merely a stale shard.
+1. Open the GL account drawer (Ledger Audit & Invariant, Journal Entries, Wallets): the live balance is the sum of the shard rows; each shard shows its line sequence, pending lines and checkpoint.
+2. A shard marked `PARITY` or `GAP` failed its proof: `PARITY` means its balance differs from checkpoint + journal lines (drift shown); `GAP` means the lines in its sequence range are missing or duplicated. Its checkpoint did not move and a P1 operator case `ledger.shard:<account>:<shard>` is open. Do not "fix" the balance by hand; escalate to Finance and engineering with the account and shard ids.
+3. Run the invariant verifier. Non-zero drift means the system-wide equation is off.
+4. Use **Repair** on the failed shard (GL account drawer): it previews the correction computed from the journal. An intact sequence is recomputed immediately (or automatically after repeated failures); a damaged sequence is submitted to Approvals as a re-baseline. "Run checkpoint rollup" re-verifies the account afterwards. A money error found this way is corrected through the Adjustments flow, never by editing a shard.
 
 ## 7. Status and deviations
 
@@ -322,33 +353,31 @@ Use `postScenario` for settlement sweeps, fee variance, suspense, AML, and adjus
 - 17 scenario builders and strict payment-confirmation builder.
 - Balanced-template validation, positive line validation, idempotent posting.
 - Account resolution with scoped and platform-wide fallback.
-- Transactional shard projection with 16-way hashing and one-shard merchant wallets.
-- Checkpoint capture/get-live-balance service (code-complete, not scheduled).
-- Scheduled invariant worker and on-demand verifier.
+- Sequenced shard writer: per-account routing width, gapless per-shard sequence, wallet debits pinned to shard 0.
+- Per-shard verified checkpoints, automatic checkpoint worker, manual "checkpoint now".
+- Hot-account detection and automatic widening (live by default) plus an audited manual width override.
+- O(shards) invariant check every 60 s and an on-demand verifier.
 - Suspense routing and AML hold/release/void posting.
 - Adjustment, refund, chargeback, cash-out, settlement sweep, and fee-variance postings.
 
 ### Partial
 
-- **Checkpoint lifecycle** — the service exists but no runtime schedules it, no checkpoint history is retained, and no administrative route captures one.
-- **Shard lifecycle** — writes are projected, but there is no rebuild, reconciliation, or drift detector for shards; `ensureAccountShards` is test-only.
-- **Balance reads** — three different read paths exist. Admin and verifier use “since checkpoint”; merchant fallbacks use “all lines”.
-- **Scenario coverage** — some scenarios are exercised mainly by template tests (`PLATFORM_HELD_*`, `PAYER_SURCHARGE`, `SPLIT`, `MERCHANT_DIRECT` netting) rather than by every runtime path. The engine and governance paths use the main confirmation, sweep, suspense, AML, refund, chargeback, and cash-out scenarios.
-- **Database enforcement** — only the positive-amount check and the approval maker/checker constraint are in PostgreSQL; journal balance is application-level.
+- **Failure handling** — a failed shard is detected, alerted, held at its last good checkpoint and repaired from the journal (automatically for a persistent PARITY with an intact sequence, manually otherwise; section 3.10). A re-baselined shard keeps a documented exemption (`baseline_seq`) for its damaged history.
+- **Scaler calibration** — the scaler is live by default but its thresholds are defaults chosen from a local benchmark (about 1,000 postings/s on one shard with a 1 ms transaction); real transactions hold the shard lock longer, so watch the `GL_ACCOUNT_SHARDS_SCALED` audit rows on the target hardware and tune `LEDGER_SHARD_UP_LINES_PER_SEC` (or set `LEDGER_SHARD_SCALER_DRY_RUN=true` to observe without widening).
+- **Scenario coverage** — some scenarios are exercised mainly by template tests (`PLATFORM_HELD_*`, `PAYER_SURCHARGE`, `SPLIT`, `MERCHANT_DIRECT` netting) rather than by every runtime path.
+- **Database enforcement** — only the positive-amount check, the shard-sequence guard and the approval maker/checker constraint are in PostgreSQL; journal balance is application-level.
 
 ### Missing / deferred
 
 - No database trigger or deferred constraint that rejects an unbalanced journal entry.
-- No `ledger_checkpoints` table or checkpoint audit trail.
-- No shard repair/rebuild command.
-- No automatic shard-to-journal reconciliation alert separate from the invariant worker.
+- No automatic scale-down of shard widths.
+- No checkpoint history table (the audit rows and the checkpoint row's status columns are the record).
 - No support for currencies beyond the seeded `LYD`, `USD`, `EUR` without manual seeding.
 
 ### Known bugs / risks
 
-- **Code gap:** merchant wallet and `merchantWalletBalance` fallbacks double count a captured checkpoint because they add every line to `checkpointBalance`. They are currently masked because no checkpoint is captured in production.
 - **Code gap:** idempotent replay of the same `(refType, refId)` with a different template silently returns the first entry; it does not compare the line set or amounts. A caller that reuses a reference for a different economic event loses the second posting.
-- **Code gap:** `getWalletBalance` in the repository returns `0` when an account has no shard rows, unlike the API helper that falls back to journal lines. Callers using the repository directly must not treat zero as authoritative before shards exist.
+- **Risk:** the single-hot-shard write path is about 25-30% slower than before the sequence was added (benchmark 2026-11-07: p50 1.4 ms to 1.8 ms single-threaded; about 1,000 to 750 postings/s on one shard) because the sequence is reserved under the shard lock before the lines are inserted and a fifth index exists on `journal_lines`. That is the case the shard scaler relieves.
 - **Documentation gap:** `core-back/test/engine/ledger.test.ts` describes “all 16 journal entry templates”; the exhaustive matrix header says “15” and asserts 20 labels. The canonical count is 17 scenarios / 20 staged variants.
 - **Risk:** the raw scenario builder defaults commission/provider/gateway fee. A production caller that forgets a fee will silently book the default rather than fail. Use `postPaymentConfirmation` or pass every amount explicitly.
 

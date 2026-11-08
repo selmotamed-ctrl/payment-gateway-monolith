@@ -101,8 +101,11 @@ describe("H8 callbackVerifier", () => {
     expect(lookup).toContain("verified: true");
     // The unverified row is stored under a unique pending key ...
     expect(src).toContain(":pending:${randomUUID()}");
-    // ... and only claims the canonical key once verified.
-    expect(src).toContain("verified ? { ...finalData, dedupeKey } : finalData");
+    // ... claims the canonical key atomically before the engine side effects ...
+    expect(src).toContain("let ownsCanonicalKey = false;");
+    expect(src).toContain("data: { dedupeKey }");
+    // ... and releases it when verification fails, so a genuine retry can win.
+    expect(src).toContain("if (!verified && ownsCanonicalKey)");
     // The unverified body is size-capped.
     expect(src).toContain("rawBody.subarray(0, UNVERIFIED_BODY_STORAGE_CAP)");
   });

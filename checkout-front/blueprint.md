@@ -114,7 +114,7 @@ The page validates with `schema.safeParse(normalized)` and maps the first issue 
 }
 ```
 
-The client generates a fresh idempotency key per initiate/confirm attempt. The response is `InitiateResponse` with `attemptId`, `reference`, `status` and `clientAction`. The page stores the attempt, opens the SSE stream, starts a countdown if the action has `expires_at`, and sets phase `ACTION`.
+The client keeps one idempotency key per initiate intent and reuses it on retry; cancel and a rail change clear it (and the saved attempt) so the next click is a new intent. The response is `InitiateResponse` with `attemptId`, `reference`, `status`, optional `hold: true` and `clientAction`. The page stores the attempt, opens the SSE stream, starts a countdown if the action has `expires_at`, and sets phase `ACTION`.
 
 A client-supplied `amount` or `currency` is outside this contract and is rejected by `checkout-back`/`core-back`.
 
@@ -128,13 +128,13 @@ A client-supplied `amount` or `currency` is outside this contract and is rejecte
 | `SHOW_QR_OR_CODE` | `QrOrCodeRenderer` | Renders QR data URL, optional pay code, bilingual instructions, deep link, expiry. |
 | `SHOW_PUSH_OR_TRANSFER` | `PushOrTransferRenderer` | Shows destination/reference/wallet hint, instructions, optional proof upload, expiry. |
 
-`OtpFormRenderer` limits the OTP to the action length and normalizes Arabic digits. `RedirectRenderer` requires a non-empty allowlist with no `*`, https only (http only for localhost in DEV), exact host match (`*.host` entries for subdomains) and no credentials. `EmbeddedWidgetRenderer` uses an allow-list of bare https origins compared exactly to `new URL(src).origin`, and a fail-closed postMessage bridge (see Security hardening).
+`OtpFormRenderer` limits the OTP to the action length and normalizes Arabic digits. `RedirectRenderer` requires a non-empty allowlist with no `*`, https only (http only for localhost in DEV), exact host match (`*.host` entries for subdomains) and no credentials. `EmbeddedWidgetRenderer` uses an allow-list of exact origins (https, plus loopback http for the local Fake Rails emulator), extends it with the server-configured `allowed_origins`, requires SRI for external https scripts (the loopback emulator is exempt), and uses a fail-closed postMessage bridge that also accepts script/SDK widgets without a local iframe when the origin is allowed.
 
 ### 3.7 Confirm, resend, cancel
 
 - `confirmOtp` posts `{ otp, idempotencyKey }` to `POST .../confirm`, applies the returned snapshot, and moves to `CONFIRMING` for `VERIFYING`/`UNKNOWN`.
 - `resendOtp` posts to `POST .../resend` and shows a notice; it does not reset the attempt.
-- `cancelAttempt` posts to `POST .../cancel`, closes the stream and moves to `ERROR`.
+- `cancelAttempt` posts to `POST .../cancel`, closes the stream, clears the initiate idempotency key/attempt id and moves to `ERROR`.
 - `sendClientEvent` posts to `POST .../client-event` with `{ event, payload }`.
 
 Client events are canonicalized through a local alias map:
@@ -148,6 +148,8 @@ Client events are canonicalized through a local alias map:
 These events are hints. The core must still verify the payment through a trusted channel.
 
 ### 3.8 SSE status stream
+
+The page listens for both the named `status` event and default `message` frames; a stream failure falls back to capped-backoff polling of the logs endpoint. A captured payment under an AML hold (`substatus: AML_HOLD`) moves to `CONFIRMING` and only shows the receipt after the compliance release settles it.
 
 After initiate, the page creates:
 
@@ -244,7 +246,7 @@ Environment: `VITE_API_URL` (edge base), `VITE_SEND_NOT_FOUND_TRANSLATIONS`, `VI
 
 - `SUMMARY` is a declared but unused visible phase.
 - SSE has no reconnect/backoff or polling fallback.
-- Embedded widgets depend on a hard-coded host allowlist; a new provider requires a code change.
+- Embedded widgets have a built-in provider allow-list; the server-configured `allowed_origins` extends it, so a new provider normally needs data (widget definition), not a code change.
 - The 404 surface exists but has a broken recovery link.
 - `PushOrTransferRenderer` has an `onCancel` prop with no rendered cancel control.
 
@@ -307,7 +309,7 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 ## Security hardening (2026-11-05)
 
 - **Status stream** is absolute under `/api` (`urlsMap.payStatusStream` uses `getBaseUrl`) with a capped-backoff polling fallback through `payLogs` (1.5 s up to 15 s, stopping on a terminal status).
-- **Embedded widgets.** The allow-list holds bare https origins compared exactly to `new URL(src).origin` (no credentials, no subdomain wildcard, test host only in non-production builds); `iframe_src` gets the same check; iframe sandbox is intersected with allow-scripts/allow-forms/allow-popups; SRI is matched by index and a script without a valid hash is rejected. The postMessage bridge fails closed: `event.origin` must be in `allowed_origins` and `event.source` must be the iframe's `contentWindow`; only a sanitized payload is forwarded.
+- **Embedded widgets.** The allow-list holds exact origins (https, plus loopback http for the local Fake Rails emulator) and is extended by the server-configured `allowed_origins`; `iframe_src` gets the same check; iframe sandbox is intersected with allow-scripts/allow-forms/allow-popups; SRI is matched by index and required for external https scripts (the loopback emulator is exempt). The postMessage bridge fails closed on the origin; when this component owns an iframe, `event.source` must also match its `contentWindow`, while script/SDK widgets without a local iframe rely on the origin allow-list. Only a sanitized payload (including a nested `payload`) is forwarded.
 - **Redirects:** no `*`, https only (http only for localhost in DEV), exact host match (`*.host` entries allow subdomains), no credentials.
 - **Deep links:** https plus `moamalat:`, `evowallet:`, `numopay:` schemes, with `rel="noopener noreferrer"`.
 - **Idempotency keys** use `crypto.randomUUID`, persisted per link in `sessionStorage`. The `attemptId` is persisted and a reload resumes from `payLogs`.

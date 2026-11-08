@@ -192,8 +192,8 @@ describe("H1 merchant authorization", () => {
     const create = routeBody("post", "/tokens");
     expect(create).toContain("TOKEN_EXPIRY_INVALID");
     expect(create).toContain("expiresAt: tokenExpiresAt");
-    expect(create).toContain("assertKnownTokenScopes(body.scopes)");
-    expect(create).toContain("assertGrantableMerchantAuthorities(principal, body.scopes)");
+    expect(create).toContain("assertKnownTokenScopes(tokenScopes)");
+    expect(create).toContain("assertGrantableMerchantAuthorities(principal, tokenScopes)");
     const guard = readFileSync("api/middleware/authDoubleCheck.ts", "utf8");
     expect(guard).toContain("ACCESS_TOKEN_EXPIRED");
   });

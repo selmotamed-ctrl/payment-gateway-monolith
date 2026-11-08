@@ -35,9 +35,9 @@ const access: FrontendAccessContext = {
 describe("client search target registry", () => {
   test("registers every built-in target with unique order", () => {
     const targets = clientSearchRegistry.getAllOrdered();
-    expect(targets).toHaveLength(20);
-    expect(new Set(targets.map((target) => target.type)).size).toBe(20);
-    expect(new Set(targets.map((target) => target.order)).size).toBe(20);
+    expect(targets).toHaveLength(21);
+    expect(new Set(targets.map((target) => target.type)).size).toBe(21);
+    expect(new Set(targets.map((target) => target.order)).size).toBe(21);
   });
 
   test("resolves real route names and attempt deep links", () => {
@@ -50,6 +50,15 @@ describe("client search target registry", () => {
       name: "MerchantDetail",
       params: { id: "merchant-1" },
       query: { tab: "transactions", reference: "TX-1" },
+    });
+  });
+
+  test("routes credential set hits to the vault page highlighted", () => {
+    const plugin = clientSearchRegistry.get("credential_set");
+    expect(plugin?.primaryRouteName).toBe("CredentialSets");
+    expect(plugin?.resolveTarget({ id: "cred-1", title: "almadar" }, "almadar")).toEqual({
+      name: "CredentialSets",
+      query: { highlight: "cred-1" },
     });
   });
 

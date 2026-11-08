@@ -1,527 +1,373 @@
 # pg-backup-daemon
 
-Backup and point-in-time-recovery control plane for the PostgreSQL 18 storage
-tier. It wraps WAL-G or Barman, owns the full/delta/drill schedule, keeps a local
-catalog, exposes an mTLS HTTP API, and runs scratch restore plus ledger/audit
-invariant drills.
+Backup and point-in-time-recovery (PITR) control plane for the PostgreSQL 18
+storage tier. It takes full and incremental backups, archives WAL continuously,
+keeps an encrypted multi-tier repository, owns the full/delta/drill schedule,
+exposes an mTLS HTTP API and proves every backup with scratch-cluster restore
+drills that check the ledger and audit invariants.
 
 It is not a PostgreSQL provisioner and it is not the approval workflow. The
-deploy engine configures the cluster and archive commands; `core-back` owns the
-admin-facing proxy and maker-checker policy changes.
+deploy engine configures the cluster, archiving and certificates; `core-back`
+owns the admin-facing proxy and the maker-checker policy approval.
 
-## 1. Architecture
+## 1. Engines
+
+`BACKUP_ENGINE_MODE` selects one of three engines. They share the scheduler, the
+catalog, the HTTP API, the job queue and the restore drill.
+
+| Engine | Where it can run | What it needs | Notes |
+| :--- | :--- | :--- | :--- |
+| `pg-native` | Same host as the primary **or** a dedicated backup host | PostgreSQL 18 client tools, `zstd`, `tar` | No external backup tool. Uses the PostgreSQL replication protocol, so it behaves identically in both topologies. S3 is optional. |
+| `wal-g` | Same host as the primary only (reads `PGDATA`, peer auth as `postgres`) | `wal-g`, S3/MinIO | Daemon runs as `postgres`. |
+| `barman` | Dedicated backup host | `barman`, `barman-cloud-backup`, S3/MinIO | Retention is applied by Barman. |
+
+`pg-native` is the default: the deploy resolves `BACKUP_ENGINE_MODE=auto` (and an omitted
+value) to `pg-native`; `wal-g` and `barman` are explicit choices that have not been
+exercised live.
+
+### 1.1 pg-native
 
 ```text
-/etc/pg-backup/backup.env
-          |
-          v
-   config.ts (Zod) --> commandRunner.ts (spawn, timeout, redaction)
-          |                         |
-          |                         +--> backupEngine.ts (WAL-G / Barman)
-          |                         +--> restoreDrillRunner.ts
-          v
-   catalogStore.ts <---- scheduler.ts (full / delta / drill)
-          |
-          v
-   server.ts (Bun.serve, mTLS) <---- core-back / operators
+ PostgreSQL primary (+ pg_audit_db)                   pg-backup-daemon
+ ┌────────────────────────────┐                ┌───────────────────────────────────┐
+ │ replication protocol  ─────┼──────────────▶ │ pg_basebackup (full / incremental)│
+ │ (pg_basebackup,            │                │ pg_receivewal  (continuous WAL)   │
+ │  pg_receivewal, slot)      │                │ pg_dump -Fc    (logical)          │
+ │                            │                │ pg_verifybackup --no-parse-wal    │
+ │ archive_command = curl ────┼── mTLS PUT ──▶ │ PUT /v1/wal/:target/:file         │
+ └────────────────────────────┘                └──────────────┬────────────────────┘
+                                                              │ tar → zstd → AES-256-GCM
+                                       ┌──────────────────────┼─────────────────────┐
+                                       ▼                      ▼                     ▼
+                                Tier 1 local repo      Tier 2 S3/MinIO       Tier 3 off-site vault
+                                (instant restore)      (optional)            (append-only)
 ```
 
-Startup (`src/index.ts`):
+**Backups**
 
-1. Load and validate the environment.
-2. Create a `SpawnCommandRunner` with `BACKUP_COMMAND_TIMEOUT_MS`.
-3. Create the WAL-G or Barman engine.
-4. Load the JSON catalog, falling back to in-memory operation if it is
-   unwritable or corrupt.
-5. Build the default policy from the cron/retention/alert environment.
-6. Create the drill runner, scheduler and HTTP server.
-7. Start the scheduler when `SCHEDULER_ENABLED=true`.
-8. Log the listener, engine and scheduler state.
-9. On `SIGTERM`/`SIGINT`, stop the scheduler and server, wait up to 15 seconds
-   for in-flight work and exit.
+- **Full** (`pg_basebackup --format=tar --wal-method=stream --manifest-checksums=SHA256`):
+  verified with `pg_verifybackup --format=tar --no-parse-wal` (tar-format
+  verification cannot parse WAL; the restore drill proves the WAL), then packed
+  `tar → zstd -6 → AES-256-GCM` and stored on every tier.
+- **Logical dump** (`pg_dump --format=custom --compress=zstd:6`) of the core and
+  audit databases with every full backup; checked with `pg_restore --list`.
+- **Delta** (`pg_basebackup --incremental=<parent backup_manifest>`, PostgreSQL 17+):
+  requires `summarize_wal = on` and a previous verified backup of the target. A
+  delta **fails loudly** rather than silently becoming a full backup.
+- A backup's signed manifest is written **last**; until it exists the backup does
+  not exist. A failed run removes everything it wrote.
+- Redis (`redis` target) is dumped with `redis-cli --rdb` and stored encrypted in
+  the repository.
 
-## 2. Engines
+**Continuous WAL (two paths, de-duplicated)**
 
-`createBackupEngine()` selects `WalGEngine` or `BarmanEngine` from
-`BACKUP_ENGINE_MODE`.
+1. `pg_receivewal --synchronous` against a persistent replication slot, supervised
+   with restart/backoff. Completed segments are encrypted into the repository and
+   removed from the private spool; the `.partial` segment stays so recovery can
+   use even the newest WAL.
+2. The database's `archive_command` pushes each completed segment over mTLS
+   (`curl --upload-file`) to `PUT /v1/wal/:target/:file` using the dedicated
+   `wal-archive-client` certificate. The database host needs no S3 credentials.
 
-### WAL-G
+Storing the same bytes twice is acknowledged (idempotent); different bytes for an
+existing name are refused with **409** and never overwrite the archive. WAL is
+acknowledged once it is on the first tier; the other tiers are mirrored
+asynchronously with retry and a periodic reconcile pass.
 
-Targets: `postgres_core`, `audit_db`, `redis`. Kinds: `full`, `delta`.
+**Restore** (`recover`): picks the newest verified backup that finished at or
+before the target time, resolves its chain back to a full backup, fetches each
+artifact from the first tier whose copy matches the signed SHA-256 (a bit-rotted
+local copy falls through to S3 or the vault), decrypts and extracts it, runs
+`pg_combinebackup` for chains, and returns a recovery fragment whose
+`restore_command` is `bun src/walFetchCli.ts <target> %f %p`. The restore command
+reads the daemon's environment, which the scratch PostgreSQL inherits.
 
-- `target=all` expands to core plus audit, and also Redis when `REDIS_URL` is
-  set.
-- An `audit_db` target requires `PG_AUDIT_DATA_DIR`; the daemon refuses to
-  substitute the core data directory.
-- Full uses `wal-g backup-push <dataDir>`; delta adds `--delta`.
-- After a PostgreSQL backup it verifies the prefix with `wal-g st ls`.
-- A secondary target is mirrored with `rclone sync` (S3/rclone destination) or
-  `rsync -a --delete` (SSH path).
-- `prune("all","full")` runs `wal-g delete retain FULL <count> --confirm` for
-  core and audit. Delta pruning is a no-op.
-- `listBackups()` parses `wal-g backup-list --json`.
-- `recover()` fetches the latest base backup and returns a recovery fragment
-  containing `restore_command` and `recovery_target_time`.
-- Redis runs `BGSAVE`, `redis-cli --rdb <tmp>`, then
-  `rclone copyto <tmp> <corePrefix>/redis/dump.rdb` and removes the temp file.
+**Retention** follows the *live* maker-checker policy (`fullRetentionDays`,
+`walRetentionDays`), not the boot-time environment: whole backup chains older than
+the window are removed with their artifacts and logical dumps; the newest full
+backup is never removed; WAL older than the first segment needed by the oldest
+retained full backup (and older than the WAL window) is removed; timeline history
+files are kept. Delta pruning is non-destructive.
 
-WAL-G health checks the S3 prefix, PostgreSQL (`SELECT 1`), optional secondary
-and Redis targets, WAL lag (from the first `PG_REPLICA_NODES` entry when set,
-otherwise the primary), and archive lag/bytes from `pg_stat_archiver`. It is
-healthy when every target passes and archive lag is within
-`BACKUP_ALERT_LAG_SECONDS`.
+### 1.2 Cluster topology
 
-### Barman
+The audit database either lives **inside the primary cluster** (shared) or in its
+own cluster (dedicated). `isAuditDedicatedCluster()` is true when
+`PG_AUDIT_DATA_DIR` is set or `PG_AUDIT_HOST` differs from `PG_PRIMARY_HOST`.
+`PG_AUDIT_PORT` is deliberately not part of the decision (it defaults to 5434).
 
-- `target=all` expands the same way, including audit and optional Redis.
-- Runs `barman check`, `barman backup` or `--incremental`, then
-  `barman-cloud-backup`.
-- Reports only `primary-s3`; there is no secondary mirror in Barman mode.
-- Lists with `barman list-backup`.
-- `recover()` picks the latest backup and runs `barman recover --target-time`.
-- `prune()` is a no-op because Barman applies server-side retention.
+| | Shared | Dedicated |
+| :--- | :--- | :--- |
+| `postgres_core` | physical backup (contains both databases) | physical backup of the primary |
+| `audit_db` | **logical dump** + signed manifest, never needs `PG_AUDIT_DATA_DIR` | physical backup of the audit cluster + dump |
+| `target=all` | core, audit dump (skipped if the audit DB does not exist), redis if configured | core, audit, redis if configured |
+| Restore drill | one scratch cluster | two scratch clusters |
 
-Barman health runs `barman check` for core and audit, checks the S3 target with
-the **WAL-G** `st ls` command, checks PostgreSQL, and adds optional secondary and
-Redis targets. Barman-only installations therefore need WAL-G installed for the
-health probe and still do not fully validate Barman's cloud/retention path.
+This applies to all three engines.
 
-## 3. Scheduler
+### 1.3 WAL-G and Barman specifics
 
-`src/scheduler.ts` uses a strict five-field cron parser: no macros and no
-seconds field.
+- **WAL-G** talks to PostgreSQL over the local socket as `postgres` (peer auth).
+  It must **not** be pointed at `PG_PRIMARY_HOST`/`PG_PRIMARY_USER`: that is the
+  application role, which cannot start a backup. A shared-cluster audit database
+  is backed up with a logical dump; `prune` uses `retain FULL <ceil(days/7)>`
+  from the live policy.
+- **Barman** health checks `barman check` for core (and audit only for a dedicated
+  cluster) and proves the object store with the daemon's own S3 client. It never
+  calls `wal-g`. Retention is applied server-side by Barman.
 
-- Jobs: `full`, `delta`, `drill`.
-- Tick cadence: `SCHEDULER_TICK_MS` (default 30 seconds).
-- The policy is re-read from the catalog on every tick; a `PUT /v1/policy`
-  change takes effect without a restart.
-- A due job is skipped when another scheduled job is running.
-- Runs are recorded as `QUEUED`, `RUNNING`, `PASSED` or `FAILED`.
-- A successful full backup triggers a best-effort prune.
-- A drill is recorded with a signed report.
-- Scheduled backups always use `target=all`.
+## 2. Security model
 
-HTTP-triggered backups are not globally serialized with each other or with the
-scheduler; only the scheduler refuses to overlap its own jobs.
+**Encryption envelope** (`src/cryptoEnvelope.ts`): every artifact and WAL file is
+`"PGBKv2" | version | salt(16) | iv(12) | AES-256-GCM ciphertext | tag(16)`.
+The payload key is `HKDF-SHA256(master, salt, "pg-backup-v2:payload:<target>:<id>")`;
+the header and `<target>:<id>` are bound as GCM additional data, so ciphertext
+cannot be moved to another artifact. Compression happens before encryption.
+Decryption fails closed on any modification (body, IV, salt, tag, magic,
+truncation, appended bytes, wrong key, wrong target/id) and never leaves partial
+plaintext behind.
+
+**Signed manifests**: `<backupId>.manifest.json` carries LSNs, WAL segment range,
+parent backup, sizes, `sha256` of plaintext and ciphertext, encryption metadata,
+`pg_verifybackup` result and storage tiers, signed with HMAC-SHA256 under
+`HKDF(master, "pg-backup-v2-catalog", "manifest-hmac-sha256")`. A manifest that
+does not verify is ignored by restore and retention.
+
+**Catalog mirroring**: every catalog save uploads an encrypted, signed copy
+(`catalog/catalog.json.enc`) to each tier. A replacement host with no local
+catalog recovers runs, drills and the approved policy from it, and rebuilds run
+history from manifests when no copy exists.
+
+**mTLS roles.** The public listener is a `node:tls` server (Bun's `node:https`
+does not expose `getPeerCertificate()`), which classifies the client certificate
+and bridges the connection to a per-role inner listener:
+
+| Client certificate CN | Role | Reaches |
+| :--- | :--- | :--- |
+| in `BACKUP_ALLOWED_CLIENT_CNS` (default `backup-client`) | `control` | every route **except** WAL upload |
+| in `BACKUP_WAL_CLIENT_CNS` (default `wal-archive-client`) | `wal` | **only** `PUT /v1/wal/...` |
+| anything else | - | `403` |
+
+The WAL client certificate lives on the database hosts, so a compromised database
+host can push WAL but cannot read the catalog, change the policy or trigger jobs.
+Keep the two lists disjoint.
+
+## 3. Job queue and idempotency
+
+All long-running work (HTTP backups, HTTP drills, scheduled slots) goes through
+one FIFO queue (`src/jobQueue.ts`): jobs run strictly one at a time in acceptance
+order, so two clicks on "Run backup now" can never start overlapping
+`pg_basebackup` / `pg_ctl` processes. A scheduled slot that finds the queue busy
+is skipped with a warning.
+
+`Idempotency-Key` (1-128 chars of `[A-Za-z0-9._:-]`) on a trigger or drill returns
+`202` with the **original** job id and `deduplicated: true` instead of queueing a
+second job. Keys are scoped per route and expire after 24 h. They are persisted to
+`<catalog dir>/idempotency-keys.json`; after a restart only keys of jobs that really
+finished are restored, runs the dead process left `QUEUED`/`RUNNING` are marked
+`FAILED (interrupted)`, and an interrupted job's key is dropped so a retry starts a
+fresh job. A pid lock (`<catalog dir>/daemon.lock`) refuses a second daemon on the
+same state directory. A full queue (25 waiting) answers `429` and leaves a
+`FAILED` run row rather than a phantom `QUEUED` one.
 
 ## 4. HTTP API
 
-`src/server.ts` uses `Bun.serve` with a JSON handler.
-
-| Method | Path | Request | Response |
+| Method | Path | Role | Notes |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/health` | - | Liveness, engine mode and version. Does not run engine health checks. |
-| `GET` | `/v1/overview` | - | Engine health, WAL lag, targets, policy/schedule, scheduler state, recent runs and drills. |
-| `POST` | `/v1/backups/trigger` | `{ "target": "all" \| "postgres_core" \| "audit_db" \| "redis", "kind": "full" \| "delta", "requestedBy"?: string }` | `202` with `backupJobId`, `acceptedAt`; work continues asynchronously. |
-| `PUT` | `/v1/policy` | Full policy object: `fullCron`, `deltaCron`, `drillCron`, `fullRetentionDays`, `walRetentionDays`, `alertLagSeconds`, optional `updatedBy` | Updated policy. This is a full object, not a patch. |
-| `GET` | `/v1/runs?limit=` | `limit` 1-500 | Recent backup runs. |
-| `POST` | `/v1/drills/run` | Optional `{ "requestedBy"?: string }` | `202` with `drillId`, `acceptedAt`; work continues asynchronously. |
-| `GET` | `/v1/drills?limit=` | `limit` 1-500 | Recent drill reports. |
+| `GET` | `/health` | control | Liveness, engine mode, version. Does not run engine checks. |
+| `GET` | `/v1/overview` | control | Engine health, WAL lag, targets, policy/schedule, scheduler state, `jobs` (`active`, `queued`), `walArchive` (pg-native), recent runs and drills. |
+| `POST` | `/v1/backups/trigger` | control | `{ target, kind, requestedBy? }` → `202 { backupJobId, acceptedAt, queuePosition }`. |
+| `POST` | `/v1/drills/run` | control | `{ requestedBy?, targetTime? }` → `202 { drillId, acceptedAt, queuePosition }`. `targetTime` is ISO-8601 and not in the future; default is now − 5 minutes. |
+| `PUT` | `/v1/policy` | control | Full policy object (not a patch). No maker-checker here; core adds it. |
+| `GET` | `/v1/runs?limit=`, `/v1/drills?limit=` | control | 1-500. |
+| `PUT` | `/v1/wal/:target/:file` | wal | Raw body ≤ `BACKUP_WAL_PUSH_MAX_BYTES` (64 MiB). `target` is `postgres_core` or `audit_db`; `file` is a 24-hex segment, `<8hex>.history` or `<24hex>.<8hex>.backup`. `200 { status: "stored" \| "duplicate" }`, `409` on conflict, `413`/`400` on bad input, `501` on engines without WAL ingest. |
 
-Bodies are capped at 256 KiB. Responses use `cache-control: no-store`,
+Bodies other than WAL are capped at 256 KiB. Responses use `cache-control: no-store`,
 `x-request-id` and recursive credential redaction. Errors use
 `{ error: { code, message, requestId } }`.
 
-`PUT /v1/policy` itself has no maker-checker. The core proxy adds approval
-semantics, but any CA-signed client that can reach the daemon can call the
-daemon endpoint directly.
+## 5. WAL health
 
-## 5. mTLS
+`pg_stat_archiver.last_archived_wal` is a segment **file name**, not an LSN. The
+status query returns it as text and the byte lag is computed from segment numbers
+(`src/walNames.ts`); it is never passed to `pg_wal_lsn_diff()`. Lag is
+only reported while archiving is genuinely behind: a COMPLETED segment is waiting
+(current segment > last archived + 1) or the archiver is failing, so an idle
+database (no WAL) does not alarm; the segment being written is not late.
 
-`loadTlsOptions()`:
-
-- returns plain HTTP only when `BACKUP_ALLOW_INSECURE_HTTP=true`;
-- otherwise requires `BACKUP_DAEMON_CERT_PATH`, `BACKUP_DAEMON_KEY_PATH` and
-  `BACKUP_DAEMON_CA_CERT_PATH`;
-- sets `requestCert: true` and `rejectUnauthorized: true`.
-
-The daemon verifies that a client certificate chains to the configured CA but
-does not inspect the client CN. Any CA-signed client can call every route. Core
-presents the `backup-client` certificate.
-
-Certificate/key pairing is validated at config load: the cert and key must be
-provided together, and a CA requires both.
-
-## 6. Catalog
-
-`src/catalogStore.ts` keeps runs, drills and policy in one JSON file
-(`BACKUP_CATALOG_PATH`).
-
-- Writes are serialized and atomic (temp file plus rename).
-- It keeps at most 500 runs and 100 drills.
-- A missing file is created on first use.
-- A corrupt or unwritable file is replaced in memory and reported; the daemon
-  keeps running without persistence.
-- The catalog is not encrypted and is not backed up by the daemon.
-- `fullRetentionDays` is stored in the policy; WAL-G pruning still uses
-  `BACKUP_RETENTION_FULL_COUNT` from the environment.
-
-## 7. Restore drill
+## 6. Restore drill
 
 `src/restoreDrillRunner.ts`:
 
-1. Sets `targetTime = now - 5 minutes`.
-2. Stops prior scratch clusters and removes/creates the scratch directories.
-3. Calls `engine.recover()` for `postgres_core` and `audit_db`.
-4. Refuses `initdb` over a failed restore unless the engine explicitly reports
-   an initialized empty directory.
-5. Writes `recovery.conf` content into `postgresql.auto.conf` and creates
-   `recovery.signal`.
-6. Starts both clusters on loopback with `pg_ctl` at the configured scratch
-   ports.
-7. Runs:
-   - double-entry zero drift on `journal_lines`;
-   - sharded balance parity on `gl_accounts`/`gl_account_shards`;
-   - the audit hash chain on `audit_records`.
-8. Builds a report with status, duration, target time, replayed LSN, drift,
-   mismatch counts, broken links and per-check details.
-9. Signs the report with HMAC-SHA256 using `BACKUP_ENCRYPTION_KEY_HEX`.
-10. Stops and removes both scratch clusters in `finally`.
+1. `targetTime` = the requested time or now − 5 minutes; stop and clear scratch.
+2. `engine.recover()` for the core cluster (and the audit cluster only when dedicated).
+3. Make the data directory startable: a physical backup holds `PGDATA` only, and
+   Debian-style clusters keep `postgresql.conf`/`pg_hba.conf` outside it, so a
+   minimal config is generated, sized from `pg_controldata` (hot standby refuses to
+   start below the primary's `max_connections` and friends).
+4. Append recovery settings **and force archiving off** (`archive_mode=off`,
+   `archive_command=''`, no replication slot/standby names, `ssl=off`). The
+   restored `postgresql.auto.conf` contains the production `archive_command`;
+   without this a promoted scratch cluster pushes its own timeline into the
+   production archive and breaks every later restore.
+5. Start on loopback and **wait for recovery to finish and promote**
+   (`pg_is_in_recovery() = f`, up to `BACKUP_RECOVERY_TIMEOUT_MS`); `pg_ctl -w start`
+   returns as soon as read-only connections are accepted. A failed start includes
+   the tail of the server log in the report.
+6. Run exactly three checks: double-entry zero drift, sharded balance parity, and
+   the audit hash chain. Audit queries run as `PG_AUDIT_USER` (the primary role when
+   unset): only that role is granted on the audit database.
+7. Sign the report (HMAC-SHA256) and destroy the scratch cluster in `finally`.
 
-A failed restore, start or check still produces a signed `FAILED` report when it
-goes through the scheduler or HTTP path. The drill requires an audit recovery
-target; without an audit database/`PG_AUDIT_DATA_DIR` (WAL-G) or audit Barman
-server, the drill fails.
+The **audit chain** is verified against what the database trigger actually hashed
+(`before_json::text` / `after_json::text`, with the timestamp formatted as the
+trigger formats it) or the application's stable-JSON form, and `seq_no` must be
+gap-free so a deleted row is detected. In a shared cluster the audit database
+comes back inside the physical restore; if it does not, the newest logical dump is
+restored into the same scratch cluster.
 
-The provisioner also installs `/usr/local/bin/pg-backup-restore-drill`, a
-narrower shell drill that restores core and checks the double-entry invariant
-only.
+## 7. Environment contract
 
-## 8. Environment contract
+`src/config.ts` is the source of truth; unknown keys are ignored. Boolean values
+accept `true`, `1`, `yes`, `on`. Empty strings count as unset.
 
-`src/config.ts` is the source of truth. Unknown environment keys are ignored.
+### Engine, storage and encryption
 
-### Engine, encryption and commands
+| Key | Default | Meaning |
+| :--- | :--- | :--- |
+| `BACKUP_ENGINE_MODE` | required | `pg-native`, `wal-g` or `barman`. |
+| `BACKUP_ENCRYPTION_KEY_HEX` | required | Hex, ≥ 16 bytes, even length (the deploy requires 64 hex chars). Encrypts artifacts, signs manifests, catalog and drill reports. |
+| `BACKUP_COMPRESSION` | `zstd` | WAL-G/Barman compression. (pg-native always uses zstd.) |
+| `BACKUP_LOCAL_REPO_DIR` | `/var/lib/pg-backup/repo` for pg-native, empty otherwise | Tier 1 local repository. |
+| `BACKUP_PRIMARY_S3_ENDPOINT`, `BACKUP_PRIMARY_S3_BUCKET` | required for wal-g/barman, optional for pg-native | Tier 2. Provide both or neither. Bucket may be `s3://bucket/prefix`. |
+| `BACKUP_PRIMARY_S3_ACCESS_KEY`, `BACKUP_PRIMARY_S3_SECRET_KEY` | empty | Provide both or neither. |
+| `BACKUP_CORE_S3_PREFIX`, `BACKUP_AUDIT_S3_PREFIX` | `<bucket>/postgres_core`, `<bucket>/audit_db` | WAL-G/Barman prefixes. |
+| `BACKUP_SECONDARY_SSH_TARGET` | empty | Tier 3: `user@host:/path` (rsync + remote `sha256sum`), `s3://...` or `rclone:` target. |
+| `BACKUP_SECONDARY_MIRROR_DELETE` | `false` | `true` lets the vault delete; the default is append-only. |
+| `BACKUP_WAL_SPOOL_DIR` | `/var/lib/pg-backup/wal_spool` | Private (0700) plaintext spool for `pg_receivewal`. |
+| `BACKUP_STAGING_DIR` | `/var/lib/pg-backup/staging` | `pg_basebackup`/`pg_combinebackup`/`pg_dump` working area. |
+| `BACKUP_WAL_STREAMING_ENABLED` | `true` | Run `pg_receivewal` (pg-native). |
+| `BACKUP_STREAM_ALERT_BYTES` | `268435456` | The WAL stream is unhealthy once this many bytes behind the primary (from the replication slot). |
+| `BACKUP_WAL_PUSH_MAX_BYTES` | `67108864` | Cap for `PUT /v1/wal`. |
+| `BACKUP_COMMAND_TIMEOUT_MS` | `1800000` | Timeout for a single external command. |
+| `BACKUP_RECOVERY_TIMEOUT_MS` | `600000` | How long a drill waits for WAL replay to finish and promote. |
 
-| Key | Required | Default | Meaning |
-| :--- | :--- | :--- | :--- |
-| `BACKUP_ENGINE_MODE` | yes | - | `wal-g` or `barman`. |
-| `BACKUP_COMPRESSION` | no | `zstd` | `zstd`, `lz4`, `lzma`, `brotli` or `none`. |
-| `BACKUP_ENCRYPTION_KEY_HEX` | yes | - | Hex, at least 16 bytes, even length; used for encryption and drill-report signing. The deploy schema requires exactly 64 hex characters. |
-| `BACKUP_PRIMARY_S3_ENDPOINT` | yes | - | Absolute URL for S3/MinIO/R2. |
-| `BACKUP_PRIMARY_S3_BUCKET` | yes | - | Bucket/prefix, for example `s3://payment-gateway-backups/prod`. |
-| `BACKUP_PRIMARY_S3_ACCESS_KEY` | no | empty | Must be paired with the secret key. |
-| `BACKUP_PRIMARY_S3_SECRET_KEY` | no | empty | Must be paired with the access key. |
-| `BACKUP_CORE_S3_PREFIX` | no | `<bucket>/postgres_core` | WAL-G prefix for the core database. |
-| `BACKUP_AUDIT_S3_PREFIX` | no | `<bucket>/audit_db` | WAL-G prefix for the audit database. |
-| `BACKUP_SECONDARY_SSH_TARGET` | no | empty | Optional secondary vault (`user@host:/path`, `s3://...` or `rclone:` target). |
-| `BACKUP_COMMAND_TIMEOUT_MS` | no | `1800000` | Timeout for a WAL-G/Barman/pg command. |
-| `BACKUP_ALLOW_INSECURE_HTTP` | no | `false` | Development-only plain HTTP listener. |
+### Schedule, retention, alerts
 
-### Schedule, retention and alerts
-
-| Key | Required | Default | Meaning |
-| :--- | :--- | :--- | :--- |
-| `BACKUP_FULL_CRON` | no | `0 2 * * 0` | Five-field full-backup cron. |
-| `BACKUP_DELTA_CRON` | no | `0 2 * * 1-6` | Five-field delta-backup cron. |
-| `BACKUP_DRILL_CRON` | no | `0 4 * * 0` | Five-field restore/invariant drill cron. |
-| `BACKUP_RETENTION_FULL_COUNT` | no | `8` | Full backups retained by WAL-G prune. |
-| `BACKUP_RETENTION_WAL_DAYS` | no | `14` | WAL retention in the default policy and provisioned Barman retention. |
-| `BACKUP_ALERT_LAG_SECONDS` | no | `300` | Archive lag that marks the daemon unhealthy. |
-| `SCHEDULER_ENABLED` | no | `true` | Run the in-process scheduler. |
-| `SCHEDULER_TICK_MS` | no | `30000` | Scheduler evaluation cadence. |
+`BACKUP_FULL_CRON` (`0 2 * * 0`), `BACKUP_DELTA_CRON` (`0 2 * * 1-6`),
+`BACKUP_DRILL_CRON` (`0 4 * * 0`), `BACKUP_RETENTION_FULL_COUNT` (`8`, seeds the
+default policy as `count × 7` days), `BACKUP_RETENTION_WAL_DAYS` (`14`),
+`BACKUP_ALERT_LAG_SECONDS` (`300`), `SCHEDULER_ENABLED` (`true`),
+`SCHEDULER_TICK_MS` (`30000`). Cron is strictly five fields. After the first start
+the live policy (changed through core's maker-checker) governs.
 
 ### Listener and mTLS
 
-| Key | Required | Default | Meaning |
-| :--- | :--- | :--- | :--- |
-| `BACKUP_DAEMON_PORT` | no | `4090` | Control-plane listener. |
-| `BACKUP_DAEMON_BIND_HOST` | no | `127.0.0.1` | Listener bind address. |
-| `BACKUP_DAEMON_CERT_PATH` | conditional | - | Server certificate; required with the key unless insecure HTTP is allowed. |
-| `BACKUP_DAEMON_KEY_PATH` | conditional | - | Server private key; paired with the certificate. |
-| `BACKUP_DAEMON_CA_CERT_PATH` | conditional | - | Client CA; required for mTLS. |
+`BACKUP_DAEMON_PORT` (`4090`), `BACKUP_DAEMON_BIND_HOST` (`127.0.0.1`),
+`BACKUP_DAEMON_CERT_PATH` / `_KEY_PATH` / `_CA_CERT_PATH` (required together
+unless `BACKUP_ALLOW_INSECURE_HTTP=true`, which is development only),
+`BACKUP_ALLOWED_CLIENT_CNS` (`backup-client`), `BACKUP_WAL_CLIENT_CNS`
+(`wal-archive-client`).
 
-### PostgreSQL 18 connection and paths
+### PostgreSQL
 
-| Key | Required | Default | Meaning |
-| :--- | :--- | :--- | :--- |
-| `PG_PRIMARY_HOST` | no | `127.0.0.1` | Primary host. |
-| `PG_PRIMARY_PORT` | no | `5432` | Primary port. |
-| `PG_PRIMARY_USER` | no | `postgres` | Backup/restore role. |
-| `PG_PRIMARY_PASSWORD` | no | empty | Role password, exported as `PGPASSWORD` to `psql`. |
-| `PG_PRIMARY_DB_NAME` | no | `payment_gateway_prod` | Core database. |
-| `PG_AUDIT_DB_NAME` | no | `pg_audit_db` | Audit database. |
-| `PG_REPLICA_NODES` | no | empty | Comma-separated `nodeId@sshHost:sshPort:privateIp:servicePort`, `host:port` or `host`. The first entry is used for WAL-lag health. |
-| `PG_DATA_DIR` | no | `/var/lib/postgresql/18/main` | Core data directory used by WAL-G. |
-| `PG_AUDIT_DATA_DIR` | no | - | Audit data directory; required for the WAL-G audit target. |
-| `PG_BIN_DIR` | no | `/usr/lib/postgresql/18/bin` | `pg_ctl`, `initdb`, `psql`. |
-| `WALG_BIN` | no | `wal-g` | WAL-G binary. |
-| `BARMAN_BIN` | no | `barman` | Barman binary. |
-| `BARMAN_CLOUD_BIN` | no | `barman-cloud-backup` | Barman Cloud binary. |
-| `BARMAN_SERVER` | no | primary host | Barman server name for core. The deploy sets it to `PG_DB_NAME`. |
-| `BARMAN_AUDIT_SERVER` | no | `PG_AUDIT_DB_NAME` | Barman server name for audit. The deploy sets it from `BARMAN_AUDIT_SERVER` or `AUDIT_DB_NAME`. |
+| Key | Default | Meaning |
+| :--- | :--- | :--- |
+| `PG_PRIMARY_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_DB_NAME` | `127.0.0.1` / `5432` / `postgres` / empty / `payment_gateway_prod` | Primary. |
+| `PG_AUDIT_DB_NAME` | `pg_audit_db` | Audit database. |
+| `PG_AUDIT_HOST`, `PG_AUDIT_USER`, `PG_AUDIT_PASSWORD` | unset | Set when the audit database is on a different host/role (see 1.2). |
+| `PG_AUDIT_PORT` | `5434` | Port of a dedicated audit cluster. |
+| `PG_AUDIT_DATA_DIR` | unset | Dedicated audit cluster data directory (also marks it dedicated). |
+| `PG_LOG_DB_NAME` | unset | Log database name (topology helper). |
+| `PG_REPLICATION_USER`, `PG_REPLICATION_PASSWORD` | primary role | Role for `pg_basebackup` / `pg_receivewal`. |
+| `PG_REPLICATION_SLOT`, `PG_AUDIT_REPLICATION_SLOT` | `pg_backup_core`, `pg_backup_audit` | Persistent slots for continuous WAL. |
+| `PG_SSLMODE` | `prefer` | `PGSSLMODE` for daemon connections (the deploy sets `require`). |
+| `PG_DATA_DIR` | `/var/lib/postgresql/18/main` | Used by WAL-G. |
+| `PG_BIN_DIR` | `/usr/lib/postgresql/18/bin` | `psql`, `pg_basebackup`, `pg_ctl`, ... |
+| `PG_REPLICA_NODES` | empty | First entry feeds WAL-lag health. |
+| `WALG_BIN`, `BARMAN_BIN`, `BARMAN_CLOUD_BIN`, `BARMAN_SERVER`, `BARMAN_AUDIT_SERVER`, `WALG_ENV_FILE`, `WALG_ENV_FILE_AUDIT` | | Engine-specific. |
 
-### Catalog, scratch and Redis
+### Catalog, scratch, Redis
 
-| Key | Required | Default | Meaning |
-| :--- | :--- | :--- | :--- |
-| `BACKUP_CATALOG_PATH` | no | `/var/lib/pg-backup/catalog.json` | Run/drill/policy catalog. |
-| `BACKUP_SCRATCH_DIR` | no | `/var/lib/pg-backup/scratch` | Core scratch restore directory. |
-| `BACKUP_SCRATCH_PORT` | no | `55432` | Core scratch PostgreSQL port. |
-| `BACKUP_SCRATCH_AUDIT_DIR` | no | `<scratch>/audit` | Audit scratch restore directory. |
-| `BACKUP_SCRATCH_AUDIT_PORT` | no | `55433` | Audit scratch PostgreSQL port. |
-| `REDIS_URL` | no | - | Enables Redis snapshots and the `redis` target. |
-| `REDIS_CLI_BIN` | no | `redis-cli` | Redis CLI binary. |
+`BACKUP_CATALOG_PATH` (`/var/lib/pg-backup/catalog.json`; delta manifests live in a
+`manifests/` directory beside it), `BACKUP_SCRATCH_DIR` (`/var/lib/pg-backup/scratch`),
+`BACKUP_SCRATCH_PORT` (`55432`), `BACKUP_SCRATCH_AUDIT_DIR`,
+`BACKUP_SCRATCH_AUDIT_PORT` (`55433`, dedicated only), `REDIS_URL`, `REDIS_CLI_BIN`.
 
-Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive); any other
-string is false. Cron fields are strictly five fields; `@daily` and second-based
-expressions are rejected.
+Keep the scratch directory path short: PostgreSQL's Unix socket path limit is 107
+bytes and the drill places the socket in the scratch directory.
 
-## 9. Deploy-generated environment
+## 8. Deploy-generated environment and unit
 
-In a deployment, do not copy `backup.env.example` manually.
-`deploy/provisioners/backupEngineProvisioner.ts` writes
-`/etc/pg-backup/backup.env` from `deploy/deploy.env` and
-`deploy/deploy.ts` syncs `deploy/backup-daemon` to `/opt/pg-backup-daemon`.
+`deploy/provisioners/backupEngineProvisioner.ts` writes `/etc/pg-backup/backup.env`
+from `deploy/deploy.env` and the systemd unit; `deploy/deploy.ts` syncs this
+directory to `/opt/pg-backup-daemon`. `backup.env.example` is a
+local/troubleshooting reference only.
 
-The generated file includes:
+The unit runs as `postgres` only for WAL-G co-located with the primary, otherwise
+as `pgbackup`; it sets `HOME` and `BUN_INSTALL_CACHE_DIR` under `/var/lib/pg-backup`
+and no longer forces a `postgres` supplementary group (which stops systemd on a
+host without that group). The deploy chowns the certificate directory to the daemon
+user and waits for the unit to stay active, printing `journalctl` on failure.
 
-- engine, compression, encryption, S3 endpoint/bucket/keys and prefixes;
-- `BARMAN_SERVER` set to `PG_DB_NAME` and `BARMAN_AUDIT_SERVER` set to
-  `BARMAN_AUDIT_SERVER` or `AUDIT_DB_NAME` from `deploy.env`;
-- secondary target, cron schedules, retention and alert lag;
-- listener port, bind host and certificate paths under
-  `BACKUP_DAEMON_CERT_DIR`;
-- PostgreSQL primary host/port/user/password/database, audit database, replica
-  list, data directories and binary directory;
-- catalog, scratch paths/ports, scheduler settings and command timeout;
-- WAL-G/Barman/redis-cli binary paths and the derived Redis URL.
-
-The deploy also writes `/etc/pg-backup/wal-g.env`, plus
-`/etc/pg-backup/wal-g-core.env` and `/etc/pg-backup/wal-g-audit.env` on the
-archive hosts. It creates `/etc/systemd/system/pg-backup-daemon.service`,
-`/etc/cron.d/pg-backup`, `/usr/local/bin/pg-backup-daemon-trigger` and
-`/usr/local/bin/pg-backup-restore-drill`.
-
-`BACKUP_DAEMON_CERT_DIR` and `BACKUP_PGPASSFILE` are deploy keys. The daemon
-config does not validate `BACKUP_PGPASSFILE`, but the systemd environment still
-passes it to Barman subprocesses. `PG_DB_NAME` is also present in the generated
-environment but is not read by the daemon schema.
-
-`backup.env.example` is a local/troubleshooting reference only. It is not the
-production source of truth.
-
-## 10. systemd and source deployment
-
-The provisioner writes a unit equivalent to:
-
-```ini
-[Unit]
-Description=Payment Gateway pg-backup-daemon (WAL-G / Barman control plane)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=pgbackup
-Group=pgbackup
-WorkingDirectory=/opt/pg-backup-daemon
-EnvironmentFile=/etc/pg-backup/backup.env
-Environment=BACKUP_DAEMON_PORT=4090
-ExecStart=/usr/local/bin/bun run src/index.ts
-Restart=always
-RestartSec=3
-LimitNOFILE=65536
-NoNewPrivileges=true
-ProtectSystem=strict
-ReadWritePaths=/var/lib/pg-backup /var/log/pg-backup <catalog dir> <cert dir> <scratch dirs> <pgpass dir>
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`deployBackupDaemon()` installs `/opt/pg-backup-daemon`, rsyncs the source with
-`--delete` (excluding `node_modules`, `.git`, `dist`, `test`, `*.log`, `.env`),
-chowns it to `pgbackup`, ensures `/usr/local/bin/bun`, runs
-`bun install --frozen-lockfile` as `pgbackup`, and enables/restarts the unit.
-
-When the scheduler is enabled, `/etc/cron.d/pg-backup` only contains a comment.
-When it is disabled, the file drives full/delta triggers as `pgbackup` and the
-weekly shell drill as root.
-
-Certificate ownership is an open risk: the deploy uploads the daemon key/cert
-through sudo (root-owned 0600 under a directory owned by `pgbackup`) and does not
-chown the files to `pgbackup`. The daemon may be unable to read its key. Verify
-ownership and startup on a staging host before claiming mTLS readiness.
-
-## 11. Operations
-
-### Local run
+## 9. Operations
 
 ```bash
 cd deploy/backup-daemon
 bun install
-bun run start
+bun run start            # development: set BACKUP_ALLOW_INSECURE_HTTP=true
 bun run typecheck
-bun test
+bun test                 # includes the live PostgreSQL test when the binaries exist
 ```
 
-For local use without certificates, set `BACKUP_ALLOW_INSECURE_HTTP=true`
-explicitly. Do not use that setting in production.
+`test/live-pg18-pitr.test.ts` runs a private throwaway cluster under `/tmp` on free
+ports and exercises the whole path (see the project design part
+`deploy.backup`). It skips with a message when `initdb`, `pg_basebackup`,
+`pg_combinebackup`, `zstd`, `curl`, `tar` or `openssl` are missing.
 
-### Deployed service
+Deployed service:
 
 ```bash
 systemctl status pg-backup-daemon
 journalctl -u pg-backup-daemon --since '1 hour ago'
-cat /etc/pg-backup/backup.env          # sensitive
 ```
 
-### mTLS calls
-
-The deployed trigger script uses `internal-ca.crt`, `backup-client.crt` and
-`backup-client.key` from `BACKUP_DAEMON_CERT_DIR`:
+mTLS calls use the `backup-client` certificate:
 
 ```bash
 CERT_DIR=/var/lib/pg-backup/shared/certs
-HOST=10.10.13.10
-PORT=4090
+curl -fsS --cacert "$CERT_DIR/internal-ca.crt" --cert "$CERT_DIR/backup-client.crt" \
+  --key "$CERT_DIR/backup-client.key" "https://$HOST:4090/v1/overview"
 
-curl -fsS \
-  --cacert "$CERT_DIR/internal-ca.crt" \
-  --cert "$CERT_DIR/backup-client.crt" \
-  --key "$CERT_DIR/backup-client.key" \
-  "https://$HOST:$PORT/v1/overview"
-
-curl -fsS \
-  --cacert "$CERT_DIR/internal-ca.crt" \
-  --cert "$CERT_DIR/backup-client.crt" \
-  --key "$CERT_DIR/backup-client.key" \
-  -H 'content-type: application/json' \
-  -X POST \
-  --data '{"target":"all","kind":"full"}' \
-  "https://$HOST:$PORT/v1/backups/trigger"
-
-curl -fsS \
-  --cacert "$CERT_DIR/internal-ca.crt" \
-  --cert "$CERT_DIR/backup-client.crt" \
-  --key "$CERT_DIR/backup-client.key" \
-  -H 'content-type: application/json' \
-  -X POST \
-  --data '{}' \
-  "https://$HOST:$PORT/v1/drills/run"
+curl -fsS --cacert "$CERT_DIR/internal-ca.crt" --cert "$CERT_DIR/backup-client.crt" \
+  --key "$CERT_DIR/backup-client.key" -H 'content-type: application/json' \
+  -H 'Idempotency-Key: manual-2026-11-06-1' -X POST \
+  --data '{"target":"all","kind":"full"}' "https://$HOST:4090/v1/backups/trigger"
 ```
 
-Trigger and drill calls return `202`; poll `/v1/runs` and `/v1/drills` or the
-catalog for completion. `/health` is liveness only; use `/v1/overview` for engine
-health.
+## 10. Two-host lab
 
-### Admin and core workflow
-
-`core-back/lib/storageEngine/backupControlClient.ts` uses the internal CA and
-`backup-client` certificate. Core exposes overview/trigger/drill/policy/catalog
-under its internal backups API. `admin-back` applies `security:read` /
-`security:write` and proxies the calls.
-
-`PUT /policy` without an `approvalRequestId` creates a `BACKUP_POLICY` approval
-and returns `202`. With an approved request id, core checks the subject type,
-state and maker != checker, sends the approved payload to the daemon, marks the
-approval `EXECUTED` and writes an audit record. The daemon endpoint itself does
-not enforce this workflow.
-
-## 12. Routine checks
-
-- `/v1/overview` is healthy and every target has a detail.
-- The latest full/delta run is `PASSED` and within the expected schedule.
-- WAL archive lag is below `BACKUP_ALERT_LAG_SECONDS`.
-- The latest drill is `PASSED`, signed, and its target time is recent.
-- The catalog file exists and is writable; startup logs do not say
-  "catalog is running in memory only".
-- `systemctl status pg-backup-daemon` is active and the key is readable by
-  `pgbackup`.
-- The primary S3 bucket and optional secondary target are reachable.
-- Barman mode also has a working WAL-G binary for the S3 health check.
-
-## 13. Troubleshooting
-
-| Symptom | Likely cause / action |
-| :--- | :--- |
-| Startup exits with a Zod message | Fix the named environment key. Cron must be five fields; the encryption key must be hex, even-length, >= 16 bytes; S3 keys must be paired. |
-| `TLS requires ...` or `mTLS requires ...` | Set both cert/key and the CA, or explicitly allow insecure HTTP for local development only. |
-| Daemon fails to start as `pgbackup` | Check ownership/mode of `BACKUP_DAEMON_CERT_PATH` and `BACKUP_DAEMON_KEY_PATH`; the deploy uploads them as root and does not chown them. |
-| `/v1/overview` reports `primary-s3` unhealthy | Check endpoint/bucket/keys, `rclone`, and WAL-G. Barman health still uses WAL-G `st ls`. |
-| `all` backup fails immediately | `all` includes `audit_db`; set `PG_AUDIT_DATA_DIR` (WAL-G), or configure the audit Barman server / `BARMAN_AUDIT_SERVER`. |
-| Delta backup fails | WAL-G delta requires a prior base backup. Run a full first; the error text notes this. |
-| `redis` target fails | Set `REDIS_URL`; Redis upload also requires `rclone` and a reachable core S3 prefix. |
-| Drill fails at audit recovery | The drill requires the audit target; configure `PG_AUDIT_DATA_DIR` or the audit Barman server. |
-| Drill leaves scratch directories | An interrupted cleanup can leave `/var/lib/pg-backup/scratch` content; inspect and remove only when no drill is running. |
-| Policy update returns `400 validation_error` | `PUT /v1/policy` requires the full policy object, not a partial patch, and valid five-field crons. |
-| Trigger returns `202` but nothing happens | Check the daemon log, `/v1/runs`, engine binary availability, and whether another scheduled job is running. HTTP triggers themselves are not serialized. |
-| Catalog warning at startup | The path is unwritable or the JSON is corrupt; the daemon is running in memory and will lose history on restart. Fix permissions or remove the corrupt file. |
-| Barman backup succeeds but health fails | Install WAL-G for the S3 check, or treat the S3 target result as a known Barman-mode limitation. |
-
-## 14. Known gaps
-
-- Backup daemon certificate/key files may be root-owned and unreadable by
-  `pgbackup`; deploy readiness is unproven until a staging run checks effective
-  ownership and mTLS startup.
-- Barman health depends on the WAL-G binary and does not fully validate Barman's
-  cloud/retention path.
-- A backup target of `all` always includes `audit_db`, even when audit is not
-  configured; WAL-G then fails without `PG_AUDIT_DATA_DIR`, and Barman needs an
-  audit server.
-- HTTP-triggered backups are not globally serialized; only the scheduler skips
-  overlap with its own jobs.
-- Log-database backups are not a daemon target; only core, audit and optional
-  Redis are covered.
-- The daemon accepts any CA-signed client certificate and does not authorize a
-  client CN per route. A direct client can call `PUT /v1/policy` and bypass core
-  maker-checker.
-- The provisioned weekly shell drill only checks the core double-entry
-  invariant; it does not run the balance-parity or audit-chain checks.
-- The JSON catalog is unencrypted, count-retained and not itself backed up.
-- There is no verify-only restore mode; every drill performs a full scratch
-  restore of core and audit.
-- WAL-G installation is a moving `latest` Ubuntu 20.04 binary and is not
-  checksum-verified.
-- The daemon's policy `fullRetentionDays` is metadata; WAL-G pruning uses
-  `BACKUP_RETENTION_FULL_COUNT`.
-- An interrupted drill cleanup can leave scratch clusters or directories.
-- A failed drill still produces a signed `FAILED` report on the scheduled/HTTP
-  paths; it does not restore the live database.
-
-## 15. Tests
+`test/lab/two-host.lab.test.ts` runs the primary on this machine and the daemon alone on a second machine
+as a systemd service (user `pgbackup`, no PostgreSQL server there). Credentials come only from the environment:
 
 ```bash
-cd deploy/backup-daemon
-bun run typecheck
-bun test
-cd ..
-bun test test/provisioners.test.ts
+LAB_B_HOST=10.0.0.5 LAB_B_USER=ops LAB_B_PASSWORD=... bun test test/lab/two-host.lab.test.ts
 ```
 
-| Suite | Tests | Coverage |
-| :--- | ---: | :--- |
-| `test/backupEngine.test.ts` | 18 | WAL-G/Barman command builders, target routing, audit refusal, parsing, mirroring, Redis. |
-| `test/catalogStore.test.ts` | 6 | Atomic writes, corruption, retention, policy. |
-| `test/commandRunner.test.ts` | 3 | Spawn, timeout, output capture. |
-| `test/config.test.ts` | 7 | Defaults, validation, redaction. |
-| `test/cron.test.ts` | 8 | Five-field cron parsing and next-run calculation. |
-| `test/restoreDrillRunner.test.ts` | 10 | Drill success/failure, initdb guard, audit-chain verification, cleanup. |
-| `test/scheduler.test.ts` | 3 | Policy reload, overlap skipping, state. |
-| `test/server.test.ts` | 16 | HTTP contract, validation, redaction, mTLS refusal, async jobs. |
+It needs the PostgreSQL 18 packages, bun, zstd, curl, tar, rsync and sudo on host B, and the PostgreSQL
+binaries (plus optional pgbench) on host A. `LAB_KEEP=1` leaves host B provisioned. It opens the daemon
+port in host B's ufw to host A only and removes the rule afterwards. It checks provisioning, mTLS, full and
+incremental backup, WAL by both paths, restore drills on B while the primary keeps committing, and a total
+loss of the primary recovered from B alone.
 
-Not covered: a real WAL-G/Barman backup or restore, a real PostgreSQL 18 scratch
-drill, daemon startup as `pgbackup` with deployed certificate ownership,
-Barman-only health, or core maker-checker against the daemon.
+## 11. Known limits
 
-## 16. Design links
-
-Canonical design:
-
-- [`project-design/parts/07-deploy/06-backup-daemon.md`](../../project-design/parts/07-deploy/06-backup-daemon.md)
-- [`project-design/parts/07-deploy/05-storage-provisioners.md`](../../project-design/parts/07-deploy/05-storage-provisioners.md)
-- [`project-design/parts/07-deploy/07-health-rollback-and-recovery.md`](../../project-design/parts/07-deploy/07-health-rollback-and-recovery.md)
-- [`project-design/parts/01-core-back/09-backup-control.md`](../../project-design/parts/01-core-back/09-backup-control.md)
-- [`project-design/appendices/env-and-config-matrix.md`](../../project-design/appendices/env-and-config-matrix.md)
-
-Historical reference only:
-
-- [`design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md`](../../design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md)
-- [`design/03-deployment/payment_gateway_deployment_and_guides_architecture.md`](../../design/03-deployment/payment_gateway_deployment_and_guides_architecture.md)
-
-Related operator docs:
-
-- [`deploy/README.md`](../README.md)
-- [`deploy/DEPLOYMENT_GUIDE.md`](../DEPLOYMENT_GUIDE.md)
-- [`backup.env.example`](backup.env.example)
+- The log database is not a backup target.
+- The `pg-native` engine passed the two-host lab (section 10) on one pair of machines;
+  WAL-G and Barman have not run on two hosts and the lab is manual (not in CI).
+- The job queue is per daemon process and the pid lock covers one state directory on
+  one host; two daemons on different hosts sharing one bucket are not detected.
+- `pg_verifybackup` cannot parse WAL in tar mode; WAL correctness is proven by the
+  restore drill, not at backup time.
+- Only the default tablespace layout is supported: a cluster with extra tablespaces is
+  refused at backup time instead of producing a backup that cannot be restored.

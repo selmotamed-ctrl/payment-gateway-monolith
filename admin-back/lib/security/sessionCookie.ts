@@ -56,7 +56,19 @@ export const clearSessionCookie = (res: Response): void => {
 
 /** Turns the session cookie into the bearer header when the caller sent no Authorization. */
 export const cookieSession: RequestHandler = (req: Request, _res: Response, next: NextFunction) => {
+  // A leftover cookie must not authenticate (or block a login with the CSRF
+  // check) when the cookie mode is off.
+  if (!sessionCookieModeEnabled()) {
+    next();
+    return;
+  }
   if (req.headers.authorization) {
+    next();
+    return;
+  }
+  // Login/MFA are not authenticated by the cookie; a stale cookie must not
+  // force the CSRF header on them (login would otherwise fail with 403).
+  if (/(?:^|\/)(?:auth\/)?(?:login|mfa)$/.test(req.path)) {
     next();
     return;
   }

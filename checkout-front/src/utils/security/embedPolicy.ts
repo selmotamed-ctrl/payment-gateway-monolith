@@ -26,24 +26,33 @@ export const isNonProductionBuild = (): boolean => {
     return env.DEV === true || (typeof env.MODE === "string" && env.MODE !== "production" && env.PROD !== true);
 };
 
-const parseHttpsOrigin = (url: unknown): string | null => {
+/** The local Fake Rails emulator is plain http on loopback; every other origin must be https. */
+export const isLoopbackHttpOrigin = (origin: string): boolean => /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin);
+
+const parseOrigin = (url: unknown): string | null => {
     if (typeof url !== "string" || !url) {
         return null;
     }
     try {
         const parsed = new URL(url);
-        if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+        if (parsed.username || parsed.password) {
             return null;
         }
-        return parsed.origin;
+        if (parsed.protocol === "https:") {
+            return parsed.origin;
+        }
+        if (parsed.protocol === "http:" && isLoopbackHttpOrigin(parsed.origin)) {
+            return parsed.origin;
+        }
+        return null;
     } catch {
         return null;
     }
 };
 
 export const isAllowedEmbedUrl = (url: unknown, allowlist: ReadonlySet<string>): boolean => {
-    const origin = parseHttpsOrigin(url);
-    return origin !== null && allowlist.has(origin);
+    const origin = parseOrigin(url);
+    return origin !== null && (allowlist.has(origin) || isLoopbackHttpOrigin(origin));
 };
 
 /** Normalises a server-supplied `allowed_origins` list to exact https origins (invalid entries dropped). */
@@ -53,7 +62,7 @@ export const normalizeOrigins = (origins: unknown): string[] => {
     }
     const out = new Set<string>();
     for (const entry of origins) {
-        const origin = parseHttpsOrigin(entry);
+        const origin = parseOrigin(entry);
         if (origin) {
             out.add(origin);
         }
@@ -85,10 +94,14 @@ export const planEmbedScripts = (
             return;
         }
         const integrity = hashes[index];
-        if (typeof integrity !== "string" || !SRI_PATTERN.test(integrity.trim())) {
+        const hasIntegrity = typeof integrity === "string" && SRI_PATTERN.test(integrity.trim());
+        // SRI is mandatory for external https scripts. The loopback Fake Rails
+        // emulator serves a dynamic script that cannot carry a stable hash.
+        const loopback = isLoopbackHttpOrigin(parseOrigin(url) ?? "");
+        if (!hasIntegrity && !loopback) {
             return;
         }
-        plan.push({ url: url as string, integrity: integrity.trim() });
+        plan.push({ url: url as string, integrity: hasIntegrity ? (integrity as string).trim() : "" });
     });
     return plan;
 };
@@ -106,7 +119,7 @@ export const sanitizeSandbox = (requested: unknown): string => {
     return granted.length ? granted.join(" ") : DEFAULT_SANDBOX;
 };
 
-const EVENT_NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,39}$/;
+const EVENT_NAME = /^[A-Za-z][A-Za-z0-9_.:-]{0,79}$/;
 const DATA_KEY = /^[A-Za-z0-9_]{1,40}$/;
 const MAX_DATA_KEYS = 20;
 const MAX_STRING = 256;
@@ -125,24 +138,31 @@ export const sanitizeBridgePayload = (raw: unknown): BridgePayload | null => {
     }
     const data: Record<string, unknown> = {};
     let count = 0;
-    for (const [key, value] of Object.entries(body)) {
-        if (key === "event" || key === "type" || !DATA_KEY.test(key)) {
-            continue;
+    const copy = (source: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(source)) {
+            if (key === "event" || key === "type" || !DATA_KEY.test(key)) {
+                continue;
+            }
+            if (count >= MAX_DATA_KEYS) {
+                return;
+            }
+            if (typeof value === "string") {
+                data[key] = value.slice(0, MAX_STRING);
+            } else if (typeof value === "number" && Number.isFinite(value)) {
+                data[key] = value;
+            } else if (typeof value === "boolean") {
+                data[key] = value;
+            } else {
+                continue;
+            }
+            count += 1;
         }
-        if (count >= MAX_DATA_KEYS) {
-            break;
-        }
-        if (typeof value === "string") {
-            data[key] = value.slice(0, MAX_STRING);
-        } else if (typeof value === "number" && Number.isFinite(value)) {
-            data[key] = value;
-        } else if (typeof value === "boolean") {
-            data[key] = value;
-        } else {
-            continue;
-        }
-        count += 1;
+    };
+    const nested = body.payload;
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+        copy(nested as Record<string, unknown>);
     }
+    copy(body);
     return { event: rawEvent, data };
 };
 
@@ -157,13 +177,20 @@ export const createBridgeHandler = (opts: {
     getIframeWindow: () => unknown;
     onCallback: (payload: BridgePayload) => void;
 }) => {
-    const allowed = new Set(normalizeOrigins(opts.allowedOrigins));
+    const allowed = new Set([
+        ...normalizeOrigins(opts.allowedOrigins),
+        ...getEmbedAllowlist(isNonProductionBuild()),
+    ]);
     return (event: BridgeEvent): void => {
-        if (!allowed.size || typeof event.origin !== "string" || !allowed.has(event.origin)) {
+        const originAllowed = typeof event.origin === "string" && (allowed.has(event.origin) || isLoopbackHttpOrigin(event.origin));
+        if (!allowed.size || !originAllowed) {
             return;
         }
         const iframeWindow = opts.getIframeWindow();
-        if (!iframeWindow || event.source !== iframeWindow) {
+        // Script/SDK widgets (no iframe in this component) create their own
+        // frame; the origin allow-list is the control there. An iframe we own
+        // must also match event.source.
+        if (iframeWindow && event.source !== iframeWindow) {
             return;
         }
         const payload = sanitizeBridgePayload(event.data);

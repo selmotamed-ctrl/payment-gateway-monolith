@@ -201,15 +201,17 @@ describe("F3 postMessage bridge fails closed and verifies the source window", ()
     handler({ origin: "https://ok.com", source: { foreign: true }, data: { type: "x" } });
     expect(got).toHaveLength(0);
   });
-  test("no iframe window means nothing is accepted", () => {
+  test("a script/SDK widget without an iframe is accepted only from an allowed origin", () => {
     const got: unknown[] = [];
     const handler = createBridgeHandler({
       allowedOrigins: ["https://ok.com"],
       getIframeWindow: () => null,
       onCallback: (p) => got.push(p),
     });
-    handler({ origin: "https://ok.com", source: null, data: { event: "x" } });
+    handler({ origin: "https://evil.com", source: null, data: { event: "x" } });
     expect(got).toHaveLength(0);
+    handler({ origin: "https://ok.com", source: null, data: { event: "x" } });
+    expect(got).toHaveLength(1);
   });
   test("valid message is forwarded with a whitelisted payload shape", () => {
     const { got, handler } = collect(["https://ok.com/"]);

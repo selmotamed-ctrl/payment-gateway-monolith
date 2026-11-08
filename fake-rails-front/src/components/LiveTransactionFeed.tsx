@@ -16,6 +16,8 @@ export const LiveTransactionFeed = dc(
     const events = ref<LiveEvent[]>([]);
     const connected = ref(false);
     let source: EventSource | undefined;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let stopped = false;
 
     const push = (type: string, data: string) => {
       try {
@@ -26,10 +28,13 @@ export const LiveTransactionFeed = dc(
       }
     };
 
-    onMounted(async () => {
+    const connect = async () => {
+      if (stopped) return;
       try {
+        // The ticket is single-use, so every reconnect needs a fresh one.
         source = new EventSource(await streamUrl());
       } catch {
+        reconnectTimer = setTimeout(connect, 5_000);
         return;
       }
       source.addEventListener("ready", () => { connected.value = true; });
@@ -37,10 +42,21 @@ export const LiveTransactionFeed = dc(
       source.addEventListener("webhook.sent", (event) => push("webhook.sent", (event as MessageEvent).data));
       source.addEventListener("webhook.failed", (event) => push("webhook.failed", (event as MessageEvent).data));
       source.addEventListener("transaction.action", (event) => push("transaction.action", (event as MessageEvent).data));
-      source.onerror = () => { connected.value = false; };
-    });
+      source.onerror = () => {
+        connected.value = false;
+        source?.close();
+        source = undefined;
+        if (!stopped) reconnectTimer = setTimeout(connect, 2_000);
+      };
+    };
 
-    onBeforeUnmount(() => source?.close());
+    onMounted(() => { void connect(); });
+
+    onBeforeUnmount(() => {
+      stopped = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      source?.close();
+    });
 
     return () => (
       <SurfaceCard

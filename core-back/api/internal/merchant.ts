@@ -4,6 +4,7 @@ import * as ipaddr from "ipaddr.js";
 import { z } from "zod";
 import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
+import { assertCommerceActive, assertPosTerminalActive } from "../../lib/commerceStatus";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { detectDuplicateFlags, nationalIdHash, payoutAccountHash } from "../../lib/joinRequestOnboarding";
@@ -27,11 +28,12 @@ import {
   assertKnownMerchantAuthorities,
   assertKnownTokenScopes,
   assertMerchantAuthority,
+  normalizeTokenScopes,
 } from "../../lib/auth/merchantAuthorities";
 import { lockWalletLedgerBalance, openCashoutTotal } from "../../lib/cashoutBalance";
 import { Vault } from "../../engine/crypto/Vault";
 import { decimal } from "../../engine/ledger/LedgerPoster";
-import { loadLiveAccountBalances } from "../../lib/storageEngine/shardBalances";
+import { loadAccountCheckpointSummary, loadLiveAccountBalances, naturalShardBalance } from "../../lib/storageEngine/shardBalances";
 import { moneyFromDecimal } from "../../engine/db/money";
 import { getPlatformRuntime } from "../../engine/runtime";
 import { readThroughReplicaOrPrimary } from "../../lib/storageEngine";
@@ -744,7 +746,6 @@ router.post("/auth/register", async (request: Request, response: Response) => {
         accountType: "MERCHANT_WALLET",
         ownerId: merchant.id,
         currency: "LYD",
-        checkpointBalance: new Prisma.Decimal(0),
       },
     });
     const wallet = await tx.wallet.create({
@@ -872,6 +873,7 @@ router.post("/auth/login", async (request: Request, response: Response) => {
       issueMfaChallenge(tx as never, {
         userId: user.id,
         channel: "MERCHANT",
+        phone: user.phone,
         phoneLast4: (user.phone ?? "").slice(-4),
         ip,
       }),
@@ -1405,7 +1407,6 @@ router.post("/wallets", async (request: Request, response: Response) => {
         accountType: "MERCHANT_WALLET",
         ownerId: merchantId,
         currency: body.currency.toUpperCase(),
-        checkpointBalance: new Prisma.Decimal(0),
       },
     });
     return tx.wallet.create({
@@ -1430,19 +1431,21 @@ router.get("/wallets/:id/balance", async (request: Request, response: Response) 
   const { id } = parseOrThrow(idSchema, request.params);
   const wallet = await client.wallet.findFirst({
     where: { id, merchantId },
-    select: { id: true, currency: true, glAccountId: true, glAccount: { select: { checkpointBalance: true } } },
+    select: { id: true, currency: true, glAccountId: true },
   });
   if (!wallet) {
     throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
   }
-  // One statement: shard total, or checkpoint + post-checkpoint lines.
+  // The balance is the shard total; the checkpoint is derived from the shard checkpoints.
   const [live] = await loadLiveAccountBalances(client as never, [wallet.glAccountId]);
+  const [checkpoint] = await loadAccountCheckpointSummary(client as never, [wallet.glAccountId]);
   const balance = decimal(live?.balance ?? 0);
   response.json({
     walletId: wallet.id,
     currency: wallet.currency,
     balance: balance.toFixed(4),
-    checkpointBalance: decimal(wallet.glAccount.checkpointBalance).toFixed(4),
+    // Natural sign like `balance` (a merchant in credit reads positive); the stored checkpoint is debit-positive.
+    checkpointBalance: decimal(naturalShardBalance("MERCHANT_WALLET", checkpoint?.checkpointBalance ?? "0")).toFixed(4),
   });
 });
 
@@ -1679,6 +1682,12 @@ const createLink = async (merchantId: string, body: z.infer<typeof linkCreateSch
   if (!merchant) {
     throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
   }
+  // A suspended application or a frozen wallet can not take in new payment links.
+  assertCommerceActive({
+    applicationStatus: application.status,
+    walletStatus: wallet.status,
+    env: merchant.status === "ACTIVE" ? "LIVE" : "SANDBOX",
+  });
   const key = `pl_${randomBytes(12).toString("base64url")}`;
   const link = await client.paymentLink.create({
     data: {
@@ -1948,8 +1957,10 @@ const cashoutDestinationSchema = z
     bankAccountId: z.string().min(1).max(64).optional(),
   })
   .strict()
-  .refine((value) => Boolean(value.accountNumber || value.iban || value.bankAccountId), {
-    error: "an account number, an IBAN or a bank account id is required",
+  .refine((value) => Boolean(value.accountNumber || value.iban), {
+    // The KYB payout hash is derived from the bank + account number/IBAN;
+    // a bankAccountId alone can never match it.
+    error: "an account number or an IBAN is required",
   });
 
 router.post("/cashouts", async (request: Request, response: Response) => {
@@ -1961,6 +1972,7 @@ router.post("/cashouts", async (request: Request, response: Response) => {
       .object({
         walletId: z.string().min(1).max(64),
         amount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/),
+        currency: z.string().length(3).optional(),
         destinationBank: cashoutDestinationSchema,
         idempotencyKey: z.string().min(8).max(128).optional(),
       })
@@ -1986,11 +1998,24 @@ router.post("/cashouts", async (request: Request, response: Response) => {
   if (wallet.status !== "ACTIVE") {
     throw new ApiError(409, "WALLET_NOT_ACTIVE", "Cash-outs are only available from an active wallet");
   }
+  if (body.currency && body.currency.toUpperCase() !== wallet.currency) {
+    throw new ApiError(400, "CASHOUT_CURRENCY_MISMATCH", "The cash-out currency must match the wallet currency");
+  }
   // GAP-017: the payout destination is ALWAYS bound to the KYB-verified payout account.
-  // A merchant without a KYB payoutAccountHash cannot cash out at all (it is no longer
-  // flagged payoutVerified:false), and a session alone can never redirect a cash-out:
-  // the account only changes through the maker-checker merchant edit approval.
-  if (!merchant.payoutAccountHash) {
+  // Legacy merchants may have the bank details but a null hash (the column was
+  // introduced after they onboarded): derive and backfill it instead of locking
+  // them out.
+  let verifiedPayoutHash = merchant.payoutAccountHash;
+  if (!verifiedPayoutHash) {
+    verifiedPayoutHash = payoutAccountHash(merchant.payoutBankDetailsJson);
+    if (verifiedPayoutHash) {
+      await client.merchant.update({
+        where: { id: merchant.id },
+        data: { payoutAccountHash: verifiedPayoutHash },
+      });
+    }
+  }
+  if (!verifiedPayoutHash) {
     throw new ApiError(
       403,
       "CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED",
@@ -1998,7 +2023,7 @@ router.post("/cashouts", async (request: Request, response: Response) => {
     );
   }
   const destinationHash = payoutAccountHash(body.destinationBank);
-  if (!destinationHash || destinationHash !== merchant.payoutAccountHash) {
+  if (!destinationHash || destinationHash !== verifiedPayoutHash) {
     throw new ApiError(
       403,
       "CASHOUT_DESTINATION_NOT_VERIFIED",
@@ -2018,12 +2043,26 @@ router.post("/cashouts", async (request: Request, response: Response) => {
     return;
   }
   let freshlyCreated = false;
+  let replayedInTransaction = false;
   const created = await client.$transaction(async (tx) => {
+    // Re-check the idempotency key inside the wallet lock: a concurrent retry
+    // must replay the winner, not fail the balance check against its reservation.
+    const racedBeforeLock = await tx.cashoutRequest.findFirst({ where: { merchantId, idempotencyKey } });
+    if (racedBeforeLock) {
+      replayedInTransaction = true;
+      return racedBeforeLock;
+    }
     // Serialise concurrent requests of the wallet, then check the available balance:
     // the ledger balance minus the cash-outs that are already waiting.
     const ledgerBalance = await lockWalletLedgerBalance(tx, wallet.glAccountId);
     const reserved = await openCashoutTotal(tx, wallet.id);
     if (ledgerBalance.minus(reserved).lt(decimal(body.amount))) {
+      // The winner may have committed while this transaction waited for the lock.
+      const raced = await tx.cashoutRequest.findFirst({ where: { merchantId, idempotencyKey } });
+      if (raced) {
+        replayedInTransaction = true;
+        return raced;
+      }
       throw new ApiError(409, "INSUFFICIENT_BALANCE", "The available balance does not cover this cash-out");
     }
     const row = await tx.cashoutRequest.create({
@@ -2060,7 +2099,7 @@ router.post("/cashouts", async (request: Request, response: Response) => {
   if (!created) {
     throw new ApiError(409, "CASHOUT_CONFLICT", "The cash-out could not be created");
   }
-  if (freshlyCreated) {
+  if (freshlyCreated && !replayedInTransaction) {
     response.status(201).json({ id: created.id, state: created.state });
     return;
   }
@@ -2126,8 +2165,9 @@ router.post("/tokens", async (request: Request, response: Response) => {
       .strict(),
     request.body,
   );
-  assertKnownTokenScopes(body.scopes);
-  assertGrantableMerchantAuthorities(principal, body.scopes);
+  const tokenScopes = normalizeTokenScopes(body.scopes);
+  assertKnownTokenScopes(tokenScopes);
+  assertGrantableMerchantAuthorities(principal, tokenScopes);
   let tokenExpiresAt: Date | null = null;
   if (body.expiresAt) {
     tokenExpiresAt = new Date(body.expiresAt);
@@ -2150,7 +2190,7 @@ router.post("/tokens", async (request: Request, response: Response) => {
       name: body.name,
       tokenHash: hashAccessToken(plaintext),
       lastFour: plaintext.slice(-4),
-      scopes: body.scopes,
+      scopes: tokenScopes,
       expiresAt: tokenExpiresAt,
       ipWhitelistEnabled: Boolean(body.allowedCidrs?.length),
       ips: body.allowedCidrs
@@ -2643,6 +2683,11 @@ router.patch("/pos/terminals/:id", async (request: Request, response: Response) 
   if (!terminal) {
     throw new ApiError(404, "POS_TERMINAL_NOT_FOUND", "The POS terminal does not exist");
   }
+  // A BLOCKED terminal is a staff decision: only an approved admin
+  // reactivation lifts it, never the merchant's own PATCH.
+  if (terminal.status === "BLOCKED" && body.status !== undefined && body.status !== "BLOCKED") {
+    throw new ApiError(409, "POS_TERMINAL_BLOCKED", "A blocked terminal can only be reactivated by the platform");
+  }
   const updated = await client.posTerminal.update({
     where: { id: terminal.id },
     data: { name: body.name, location: body.location, status: body.status },
@@ -2658,6 +2703,7 @@ router.post("/pos/terminals/:id/screens", async (request: Request, response: Res
   if (!terminal) {
     throw new ApiError(404, "POS_TERMINAL_NOT_FOUND", "The POS terminal does not exist");
   }
+  assertPosTerminalActive(terminal.status);
   const screenCode = `scr_${randomBytes(9).toString("base64url")}`;
   const authToken = randomBytes(24).toString("base64url");
   const screen = await client.posScreen.create({
@@ -2682,11 +2728,13 @@ router.get("/pos/screens/:screenCode/stream", async (request: Request, response:
   const screenCode = String(request.params.screenCode ?? "");
   const screen = await client.posScreen.findFirst({
     where: { screenCode, pos: { application: { merchantId } } },
-    select: { id: true },
+    select: { id: true, posId: true, pos: { select: { status: true } } },
   });
   if (!screen) {
     throw new ApiError(404, "POS_SCREEN_NOT_FOUND", "The POS screen does not exist");
   }
+  // A screen of an inactive or blocked terminal does not authenticate.
+  assertPosTerminalActive(screen.pos.status);
   let lastHeartbeatAt = 0;
   response.setHeader("content-type", "text/event-stream");
   response.setHeader("cache-control", "no-cache, no-transform");
@@ -2723,6 +2771,12 @@ router.get("/pos/screens/:screenCode/stream", async (request: Request, response:
     // open screen (nothing reads last_active_at at finer resolution).
     if (Date.now() - lastHeartbeatAt >= 60_000) {
       lastHeartbeatAt = Date.now();
+      // A terminal deactivated or blocked while the stream is open ends it.
+      const terminal = await client.posTerminal.findUnique({ where: { id: screen.posId }, select: { status: true } });
+      if (terminal?.status !== "ACTIVE") {
+        response.end();
+        return;
+      }
       await client.posScreen.update({ where: { id: screen.id }, data: { lastActiveAt: new Date() }, select: { id: true } });
     }
     // Filter on the merchant_id column ([merchant_id, created_at] index)

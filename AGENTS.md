@@ -17,6 +17,7 @@
 | `admin-back/`, `merchant-back/`, `checkout-back/` | mTLS-only edge BFFs with least-in-flight `CORE_BACK_URLS` pools. |
 | `admin-front/`, `merchant-front/`, `checkout-front/` | Vue 3 + Vuetify 3 + TSX portals. |
 | `fake-rails-back/`, `fake-rails-front/` | Optional Fake Payment Rails emulator and tester portal. |
+| `companion-app/` | Offline Android Guide + Academy companion; canonical-content snapshot and signed APK build. |
 | `deploy/` | Multi-host deploy engine, storage provisioners, PKI, firewall, backup daemon. |
 | `tests/` | Playwright/Vitest suites, including live-stack journeys. |
 | `project-design/` | Canonical design, status, tracker and generated appendices. |
@@ -59,6 +60,7 @@ cd checkout-back && bun run typecheck && bun test
 cd admin-front && bun run build
 cd merchant-front && bun run build
 cd checkout-front && bun run build
+cd companion-app && bun run content:check && bun run typecheck && bun test && bun run build
 ```
 
 Database-backed suites require PostgreSQL 18 and Redis; report skipped suites explicitly. Run `scripts/run-benchmarks.sh` for storage benchmarks.

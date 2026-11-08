@@ -133,7 +133,8 @@ CORE_NODES="core-1@10.10.1.11:22:10.10.1.11:4000,core-2@10.10.1.11:22:10.10.1.12
     }
 
     const backup = hostWithRole(plan, "backup")!;
-    expect(backup.firewall.find((rule) => rule.port === 4090)?.fromCidrs).toEqual(["10.10.1.11", "10.10.1.12"]);
+    // core control plane + WAL archive push from the primary and the dedicated audit DB
+    expect(backup.firewall.find((rule) => rule.port === 4090)?.fromCidrs).toEqual(["10.10.1.11", "10.10.1.12", "10.10.10.10", "10.10.12.10"]);
   });
 
   test("exposes storage, replicas and backup on the plan", () => {

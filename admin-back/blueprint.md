@@ -266,7 +266,7 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 Applies to all three copies of the client:
 - Only transport/TLS errors and 502/503/504 mark a node unhealthy.
 - Header names and values are validated as printable ASCII (`400 CORE_HEADER_INVALID`); edge-owned headers are applied last, and `x-real-client-ip` is always overwritten with the resolved IP.
-- PUT/DELETE are replayed after send only with an `Idempotency-Key`/opt-in, or on a connect-phase failure.
+- PUT/DELETE are HTTP-idempotent and are replayed after send like GET/HEAD/OPTIONS; POST/PATCH still need an `Idempotency-Key`/opt-in, and a connect-phase failure is always retryable.
 - SSE streams use their own agent pool (128 sockets) with `MAX_STREAMS_PER_IP` (default 5) and abort upstream on early client disconnect.
 - Buffered responses are capped (`CORE_MAX_RESPONSE_BYTES` default 64 MiB, `CORE_TOTAL_DEADLINE_MS` default 300000).
 - Admin `x-pg-min-lsn` is validated against `^hex/hex$` (400 otherwise).
@@ -275,7 +275,7 @@ Applies to all three copies of the client:
 
 ## Admin Edge BFF
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-06
 
 ## 1. Purpose and scope
 
@@ -328,7 +328,7 @@ The listener binds to `ADMIN_BIND_HOST` (default `127.0.0.1`). The deploy engine
 
 `extractAuthorityHints()` does not verify the token signature and does not check `exp` or `nbf`. It rejects a token only when a present `typ` is not `session`, a present `iss` is not `payment-gateway-core`, or a present `aud` does not include `payment-gateway-admin` (the admin channel audience; the former `payment-gateway-edge` is no longer accepted, GAP-020). A caller can therefore craft a token that satisfies the edge's AML or backup gate; `core-back` will still reject it. This is documented as advisory gating, not authentication.
 
-`ADMIN_AUTHORITY_HINTS` filters which requested authority strings the edge checks. If the configured list is empty, the edge skips the check. If a requested authority is not in the configured list, it is not counted as expected; if no expected authorities remain, the route passes.
+`ADMIN_AUTHORITY_HINTS` is an optional RESTRICTION list (default empty = no restriction). When set, a guard whose required authorities do not intersect the list denies the request; it can only narrow access, never widen it. A stale old-style value copied from an earlier README can therefore deny routes, so upgrade configs should leave it unset unless intentionally restricting.
 
 ### 3.3 Forwarding behavior
 
@@ -376,9 +376,9 @@ All routes are prefixed with `/api/v1/admin`. The auth routes are inside the LAN
 | Options | `GET /options/:kind` |
 | Stats | `GET /stats/overview`, `GET /stats/recent-activity`, `GET /stats/export`, `POST /stats/export-audit`, plus export variants |
 | Audit logs | `GET /audit-logs`, `GET /audit-logs/:id`, `GET /audit-logs/export`, `GET /audit-logs/summary`, `GET /audit-logs/summary/export` |
-| System backups | `GET /system/backups/overview`, `POST /system/backups/trigger`, `POST /system/backups/drill`, `PUT /system/backups/policy` |
+| System backups | `GET /system/backups/overview`, `GET /system/backups/catalog`, `POST /system/backups/trigger`, `POST /system/backups/drill`, `PUT /system/backups/policy` |
 
-The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` to every AML route. The backup router applies `security:read`/`gateway:read` to the overview and `security:write` to trigger, drill and policy. The remaining routes rely on `requireSession` plus core-side authority enforcement.
+The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` to every AML route. The backup router applies `security:read`/`gateway:read` to the overview and catalog and `security:write` to trigger, drill and policy. The remaining routes rely on `requireSession` plus core-side authority enforcement.
 
 ## 4. Contracts and invariants
 
@@ -406,7 +406,7 @@ The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "am
 | `CORE_REQUEST_TIMEOUT_MS` | `60000` | Core request timeout. |
 | `TRUSTED_PROXY_CIDRS` | loopback only (`127.0.0.0/8,::1/128`; deploy sets `127.0.0.1/32,::1/128`) | Peers whose forwarded IP headers are trusted. |
 | `ADMIN_LAN_CIDRS` | loopback plus RFC1918 ranges | Allowed admin clients. |
-| `ADMIN_AUTHORITY_HINTS` | roles plus `aml:*` and `security:*` | Edge-checkable authority vocabulary. |
+| `ADMIN_AUTHORITY_HINTS` | empty (no restriction) | Optional restriction list; when set, a guard must match one of its entries. |
 | `MAX_JSON_BODY_BYTES` | `4194304` | JSON limit. |
 | `MAX_UPLOAD_BYTES` | `20971520` | Multipart limit. |
 | `UPLOAD_ALLOWED_MIME` | `text/csv,application/vnd.ms-excel,application/json` | Reconciliation upload MIME list. |
@@ -514,13 +514,32 @@ The tests use a local HTTPS/HTTP stub and do not require PostgreSQL or Redis. A 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+- 2026-11-06: removed the arbitrary `page <= 10000` cap from `zListQuery`; the admin journal-entries last-page jump (page 23397 on the stress dataset) was rejected with `400 VALIDATION_FAILED` before reaching core. `pageSize` stays capped at 200. Regression test added to `admin-back/test/admin-ui-completion.test.ts`.
 
 ## Security hardening (2026-11-05)
 
 - **authorityGuard.** Rejects `alg: none` and non-HS256 tokens and bad signature segment shape; requires `typ`, `iss`, `aud` and `exp` and enforces `exp`/`nbf`. `ADMIN_AUTHORITY_HINTS` (default empty) can only restrict, never skip a guard. Matching is case-sensitive. `requireSession` returns `401 AUTH_INVALID` for tokens that are not live core-shaped sessions. `*` is honoured at the edge; core re-verifies (the edge cannot verify signatures because the key lives in core).
 - **Deny-by-default any-of authority lists** on: users, join-requests, kyb-documents, merchants suspend/close, approvals, gateways, gateway-versions, rails, routes, assets, credential-sets, reconciliation, settings (restore-preview is a read, restore-apply a write), audit-logs, operator-cases, gateway-inquiries, attempts, disputes, adjustments, cashouts, commission-profiles, velocity-rules, finance and system/backups. Search, academy, options and stats are left to core.
-- **Backups.** Policy cron is validated (5 fields; minimum gaps full 60, delta 5, drill 60 minutes); retention floors full >= 7 days and WAL >= 3 days unless `approvalRequestId` is supplied. Backup trigger and drill require an `Idempotency-Key` header (8-128 URL-safe characters) relayed to core, with `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
+- **Backups.** Policy cron is validated (5 fields; minimum gaps full 60, delta 5, drill 60 minutes) and `alertLagSeconds` must be >= 1. Retention is NOT floored at the edge: every policy change is a maker-checker proposal, and the maker must be able to propose a low-retention policy for the checker to review. Trigger/drill are rate-limited by `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes); an `Idempotency-Key` is relayed when supplied, but core has no replay store yet, so it is not an idempotency guarantee.
 - **KYB uploads.** Upload runs `assertAllowedUpload` (png/jpeg/pdf) plus zod validation; the content route forces `Content-Disposition: attachment`, a CSP sandbox and a Content-Type allow-list. `logoUrl` must be http(s).
 - **Limiters** key on the resolved client IP plus a per-account limiter on login/MFA. Admin `x-pg-min-lsn` is validated (400).
-- **Logout and session cookie (GAP-019, RESOLVED 2026-11-05).** `POST /api/v1/admin/auth/logout` (public router, `logoutHandler`) forwards to core `POST /internal/admin/auth/logout`, which revokes the session `jti`, and clears the session cookie. With `SESSION_COOKIE_MODE=true` (default `false`) login and MFA responses move the token into the `pg_admin_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/admin`, 12 h, `Secure` unless `SESSION_COOKIE_SECURE=false`, default `true`) and return `sessionCookie: true` instead of `token` (`captureSessionToken`); the `cookieSession` middleware, mounted first on the admin router, converts the cookie into the `Authorization: Bearer` header when the caller sent none and requires `x-pg-csrf: 1` on unsafe methods (`403 CSRF_HEADER_REQUIRED`). Both settings are validated by `admin-back/lib/env`.
+- **Logout and session cookie (GAP-019, RESOLVED 2026-11-05).** `POST /api/v1/admin/auth/logout` (public router, `logoutHandler`) forwards to core `POST /internal/admin/auth/logout`, which revokes the session `jti`, and clears the session cookie. With `SESSION_COOKIE_MODE=true` (default `false`) login and MFA responses move the token into the `pg_admin_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/admin`, 12 h, `Secure` unless `SESSION_COOKIE_SECURE=false`, default `true`) and return `sessionCookie: true` instead of `token` (`captureSessionToken`); the `cookieSession` middleware, mounted first on the admin router, converts the cookie into the `Authorization: Bearer` header only when the mode is on and the caller sent none, and requires `x-pg-csrf: 1` on unsafe methods (`403 CSRF_HEADER_REQUIRED`). Login/MFA are exempt from the cookie conversion so a stale cookie cannot block a new sign-in; logout is outside the auth limiter. Both settings are validated by `admin-back/lib/env`.
 - **Session audience and breaker (GAP-020, GAP-021).** The advisory authority guard now requires `aud=payment-gateway-admin`. The core upstream client removes a node from rotation only after `CORE_FAILURE_THRESHOLD = 3` consecutive failures. Sessions minted before the audience change are rejected and administrators must sign in again.
+
+## Admin UI completion forwards (2026-11-06)
+
+New `coreForward` routes (new files `wallets.ts`, `applications.ts` (applications + `paymentLinksRouter` + `posTerminalsRouter`), `transactions.ts` (transactions + `inboundEventsRouter`), `system.ts`, plus additions to `merchants.ts`, `gateways.ts`, `settings.ts`, `finance.ts`, `aml.ts`) registered in `protected/index.ts` with the same any-of authorities core enforces:
+
+| Mount | Read | Write |
+| :--- | :--- | :--- |
+| `/wallets` (+ `/:id/statement`, `/:id/audit-events`), `/applications`, `/payment-links`, `/pos-terminals` | `merchant:read` | `merchant:write` |
+| `/transactions` | `attempt:read`, `merchant:read`, `finance:read` | n/a |
+| `/inbound-events` | `attempt:read`, `case:read` | n/a |
+| `/system/*` (jobs-outbox, jobs, outbox, audit-outbox, notifications), mounted after `/system/backups` | `security:read` | `security:write` |
+| `/finance/journal-entries`, `/finance/gl-accounts/:id` (+ `/lines`) | `finance:read` | checkpoint, `/shards/scale`, `/shards/:shardId/repair` and `/repair/request` `finance:write` (`/repair-plan` `finance:read`) |
+| `/gateways/:id/health` | `gateway:read` | n/a |
+| `/settings/notification-templates` | `settings:read` | `settings:write` |
+| `/merchants/:id/beneficial-owners`, `/merchants/:id/revalidations` | `merchant:read` or `kyb:read` | `kyb:write` or `merchant:write` (the rest of `/merchants` stays `merchant:write`; `kyb:write` does not unlock suspend) |
+| `/aml/reporting-rules/:id/promote`, `/finance/route-caps` | already in core; now forwarded | |
+
+Contracts enforced at the edge: bodies are `.strict()` zod; `reason` is `z.string().trim().min(10).max(500)` (shared `mutationSchemas.ts`; also required on job requeue, notification retry and GL checkpoint); mutation enums are the safe subsets (wallet `FROZEN|ACTIVE`, application `SUSPENDED|ACTIVE`, POS `INACTIVE|BLOCKED|ACTIVE`, link `CANCELLED`); path ids must be UUIDs; list queries pass through every scalar filter. `zListQuery` requires `page >= 1` and caps `pageSize` at 200 but has no upper page bound, so a "last page" jump on a multi-million-row ledger is forwarded instead of failing validation; deep offset pages remain an offset-pagination cost (GAP-006). `relayStatus` passes core's 200/201/202 to the client unchanged (202 = submitted for approval). There is no outbox retry route (core has none).

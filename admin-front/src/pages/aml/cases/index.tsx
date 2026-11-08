@@ -35,6 +35,8 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { SectionFields } from "@/components/SectionFields";
+import { JsonValueList } from "@/components/ui/JsonValueList";
+import { describeSeverityInputs } from "./severityInputs";
 type AmlCase = {
     id: string;
     caseRef: string;
@@ -182,6 +184,7 @@ const AmlCasesPage = dc(() => {
     const proposeOpen = ref(false);
     const actionError = ref("");
     const selected = ref<AmlCaseDetail | null>(null);
+    const severityView = computed(() => describeSeverityInputs(selected.value?.severityInputs));
     const detailLoading = ref(false);
     const resolution = ref("RELEASE");
     const rationale = ref("");
@@ -732,9 +735,26 @@ const AmlCasesPage = dc(() => {
 
                         <ThemedView style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                             <ThemedText type="defaultSemiBold">{t("Severity inputs")}</ThemedText>
-                            <pre style={{ margin: 0, padding: "8px 10px", borderRadius: "var(--pg-radius-sm)", background: "var(--pg-bg-surface-subtle)", border: "1px solid var(--pg-border-subtle)", fontSize: "10px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", direction: "ltr", maxHeight: "160px", overflow: "auto" }}>
-                                {JSON.stringify(selected.value.severityInputs ?? {}, null, 2)}
-                            </pre>
+                            {severityView.value.kind === "empty" ? (
+                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{t("No severity inputs recorded.")}</ThemedText>
+                            ) : severityView.value.kind === "steps" ? (
+                                <DescriptionList
+                                    ariaLabel={t("Severity inputs")}
+                                    items={severityView.value.steps.map((step) => ({
+                                        label: t(step.label),
+                                        value: (
+                                            <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: "6px", justifyContent: "flex-end" }}>
+                                                {step.effect && <span dir="auto">{step.effect}</span>}
+                                                {step.from && <StatusBadge status={step.from} showDot={false} />}
+                                                {step.from && step.to && <span aria-hidden="true">→</span>}
+                                                {step.to && <StatusBadge status={step.to} showDot={false} />}
+                                            </span>
+                                        ),
+                                    }))}
+                                />
+                            ) : (
+                                <JsonValueList value={severityView.value.value} ariaLabel={t("Severity inputs")} />
+                            )}
                         </ThemedView>
                     </>
                 )}

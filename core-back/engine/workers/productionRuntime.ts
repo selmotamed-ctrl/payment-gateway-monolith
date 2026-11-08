@@ -1,3 +1,4 @@
+import { Decimal } from "decimal.js";
 import type { PrismaLike } from "../db/ports";
 import { env } from "../../lib/env";
 import { getPlatformRuntime } from "../runtime";
@@ -8,6 +9,8 @@ import { ExpirySweeperWorker } from "./ExpirySweeperWorker";
 import { PollWorker } from "./PollWorker";
 import { InboundInboxWorker } from "./InboundInboxWorker";
 import { OutboxNotificationWorker } from "./OutboxNotificationWorker";
+import { LedgerCheckpointWorker } from "./LedgerCheckpointWorker";
+import { LedgerShardScalerWorker } from "./LedgerShardScalerWorker";
 import { LedgerInvariantWorker } from "./LedgerInvariantWorker";
 import { JoinRequestExpiryWorker } from "./JoinRequestExpiryWorker";
 import { PeriodicScreeningWorker } from "./PeriodicScreeningWorker";
@@ -37,6 +40,22 @@ import {
 
 export interface ProductionWorkerRuntimeOptions {
   db: PrismaLike;
+  /** Ledger checkpoint worker (per-shard, verified, lock-free). Each falls back to its env key. */
+  ledgerCheckpointEnabled?: boolean;
+  ledgerCheckpointIntervalMs?: number;
+  ledgerCheckpointBatchSize?: number;
+  ledgerCheckpointMinLines?: number;
+  ledgerCheckpointMaxAgeMs?: number;
+  ledgerShardAutoRepairEnabled?: boolean;
+  ledgerShardAutoRepairMinFailures?: number;
+  ledgerShardAutoRepairMaxAbsDrift?: number;
+  /** Ledger shard scaler (dry run by default). Each falls back to its env key. */
+  ledgerShardScalerEnabled?: boolean;
+  ledgerShardScalerIntervalMs?: number;
+  ledgerShardScalerDryRun?: boolean;
+  ledgerShardUpLinesPerSec?: number;
+  ledgerShardMaxWidth?: number;
+  ledgerShardCooldownMs?: number;
   intervalMs?: number;
   batchSize?: number;
   maxAttempts?: number;
@@ -276,6 +295,38 @@ export const createProductionWorkerRuntime = (
     new InboundInboxWorker({ ...workerOptions, handler, maxAttempts: options.maxAttempts }),
     new OutboxNotificationWorker({ ...workerOptions, sender }),
     new LedgerInvariantWorker(workerOptions),
+    // Per-shard ledger checkpoints: verified, O(delta), lock-free (idempotent, so safe to run anywhere).
+    ...((options.ledgerCheckpointEnabled ?? env.WORKER_LEDGER_CHECKPOINT_ENABLED)
+      ? [
+          new LedgerCheckpointWorker({
+            ...workerOptions,
+            intervalMs: options.ledgerCheckpointIntervalMs ?? env.WORKER_LEDGER_CHECKPOINT_INTERVAL_MS,
+            batchSize: options.ledgerCheckpointBatchSize ?? env.WORKER_LEDGER_CHECKPOINT_BATCH_SIZE,
+            minLines: options.ledgerCheckpointMinLines ?? env.LEDGER_CHECKPOINT_MIN_LINES,
+            maxAgeMs: options.ledgerCheckpointMaxAgeMs ?? env.LEDGER_CHECKPOINT_MAX_AGE_MS,
+            autoRepair: {
+              enabled: options.ledgerShardAutoRepairEnabled ?? env.LEDGER_SHARD_AUTO_REPAIR_ENABLED,
+              minConsecutiveFailures: options.ledgerShardAutoRepairMinFailures ?? env.LEDGER_SHARD_AUTO_REPAIR_MIN_FAILURES,
+              maxAbsDelta: new Decimal(options.ledgerShardAutoRepairMaxAbsDrift ?? env.LEDGER_SHARD_AUTO_REPAIR_MAX_ABS_DRIFT),
+            },
+          }),
+        ]
+      : []),
+    // Hot-account detection: widens a GL account that keeps one shard saturated (dry run until calibrated).
+    ...((options.ledgerShardScalerEnabled ?? env.WORKER_LEDGER_SHARD_SCALER_ENABLED)
+      ? [
+          new LedgerShardScalerWorker({
+            ...workerOptions,
+            intervalMs: options.ledgerShardScalerIntervalMs ?? env.WORKER_LEDGER_SHARD_SCALER_INTERVAL_MS,
+            dryRun: options.ledgerShardScalerDryRun ?? env.LEDGER_SHARD_SCALER_DRY_RUN,
+            config: {
+              upLinesPerSec: options.ledgerShardUpLinesPerSec ?? env.LEDGER_SHARD_UP_LINES_PER_SEC,
+              maxWidth: options.ledgerShardMaxWidth ?? env.LEDGER_SHARD_MAX_WIDTH,
+              cooldownMs: options.ledgerShardCooldownMs ?? env.LEDGER_SHARD_COOLDOWN_MS,
+            },
+          }),
+        ]
+      : []),
     // The onboarding drafts that are abandoned, and the review requests whose
     // SLA elapsed, are expired instead of sitting open forever (design §18).
     new JoinRequestExpiryWorker(workerOptions),
@@ -359,6 +410,16 @@ export const createProductionWorkerRuntime = (
         ]
       : []),
   ];
+
+  // The health/deploy probes expect exactly one holder for every singleton
+  // key. The list is built from the workers that are actually enabled.
+  const expectedLeaderKeys = workers.flatMap((worker) => {
+    const candidate = worker as { clusterSingleton?: boolean; leaderKey?: string };
+    return candidate.clusterSingleton === true && typeof candidate.leaderKey === "string"
+      ? [candidate.leaderKey]
+      : [];
+  });
+  options.storage?.leaderElection?.setExpected?.(expectedLeaderKeys);
 
   return {
     workers,

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 import { promises as nodeFs, chmodSync, mkdtempSync, rmSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
@@ -6,6 +7,8 @@ import { join } from "node:path";
 import tls from "node:tls";
 import { z } from "zod";
 import type { BackupEngine, BackupStorageTarget, WalHealth } from "./backupEngine";
+import { JobQueue, QueueFullError } from "./jobQueue";
+import { WalIngestError } from "./walArchive";
 import { BACKUP_KINDS, BACKUP_TARGETS } from "./backupEngine";
 import type { CatalogStore } from "./catalogStore";
 import {
@@ -37,12 +40,25 @@ export interface BackupDaemonServerOptions {
   clock?: () => Date;
   idFactory?: () => string;
   logger?: Pick<Console, "info" | "warn" | "error">;
+  /** Shared with the scheduler so a manual trigger and a scheduled slot never overlap. */
+  jobs?: JobQueue;
 }
 
+/**
+ * Who is calling. `control` is the core-back `backup-client` certificate (every
+ * route except WAL ingest); `wal` is the database host's `wal-archive-client`
+ * certificate (ONLY `PUT /v1/wal/...`); `open` is plain-HTTP development mode
+ * where no identity exists and every route is reachable.
+ */
+export type CallerRole = "control" | "wal" | "open";
+
 export interface HandlerBundle {
+  /** Handler for the `open` role (plain HTTP / tests). */
   handler: (request: Request) => Promise<Response>;
+  handlerFor: (role: CallerRole) => (request: Request) => Promise<Response>;
   whenIdle: () => Promise<void>;
   pendingCount: () => number;
+  jobs: JobQueue;
 }
 
 export class HttpError extends Error {
@@ -76,7 +92,14 @@ export const triggerBackupSchema = z.object({
 
 export const drillRunSchema = z.object({
   requestedBy: z.string().trim().min(1).max(200).optional(),
+  /** Recover to this moment (ISO-8601, not in the future). Defaults to now - 5 minutes. */
+  targetTime: z.string().trim().min(1).max(40).optional(),
+  /** Replay ALL available WAL (disaster-recovery rehearsal). Mutually exclusive with `targetTime`. */
+  latest: z.boolean().optional(),
 });
+
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+const WAL_ROUTE = /^\/v1\/wal\/([a-z_]+)\/([^/]+)$/;
 
 const emptyWal = (): WalHealth => ({
   archiveLagSeconds: 0,
@@ -127,6 +150,7 @@ const parseLimit = (url: URL, fallback = 30): number => {
 export const createBackupDaemonHandler = (options: BackupDaemonServerOptions): HandlerBundle => {
   const { config, engine, drillRunner, catalog } = options;
   const clock = options.clock ?? (() => new Date());
+  const jobs = options.jobs ?? new JobQueue({ clock, logger: options.logger });
   const idFactory = options.idFactory ?? (() => randomUUID());
   const version = options.version ?? "1.0.0";
   const secretValues = collectSecretValues(config);
@@ -160,18 +184,34 @@ export const createBackupDaemonHandler = (options: BackupDaemonServerOptions): H
   };
 
   const whenIdle = async (): Promise<void> => {
-    while (pending.size > 0) {
+    while (pending.size > 0 || jobs.isBusy()) {
       await Promise.allSettled([...pending]);
+      await jobs.whenIdle();
+    }
+  };
+
+  const idempotencyKeyOf = (request: Request): string | undefined => {
+    const raw = request.headers.get("idempotency-key")?.trim();
+    if (!raw) return undefined;
+    if (!IDEMPOTENCY_KEY_PATTERN.test(raw)) {
+      throw new HttpError(400, "invalid_idempotency_key", "Idempotency-Key must be 1-128 characters of [A-Za-z0-9._:-]");
+    }
+    return raw;
+  };
+
+  const enqueue = (spec: Parameters<JobQueue["enqueue"]>[0]): ReturnType<JobQueue["enqueue"]> => {
+    try {
+      return jobs.enqueue(spec);
+    } catch (error) {
+      if (error instanceof QueueFullError) throw new HttpError(429, "queue_full", error.message);
+      throw error;
     }
   };
 
   const safeMessage = (error: unknown): string =>
     redactText(error instanceof Error ? error.message : String(error), secretValues).slice(0, 2000);
 
-  return {
-    whenIdle,
-    pendingCount: () => pending.size,
-    handler: async (request: Request): Promise<Response> => {
+  const handle = async (request: Request, role: CallerRole): Promise<Response> => {
       const requestId = request.headers.get("x-request-id")?.trim() || randomUUID();
       const respond = (data: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response =>
         new Response(JSON.stringify(redactSensitiveData(data, secretValues)), {
@@ -195,9 +235,34 @@ export const createBackupDaemonHandler = (options: BackupDaemonServerOptions): H
           }
         };
 
+        const walMatch = WAL_ROUTE.exec(path);
+        if (role === "wal" && !walMatch) {
+          throw new HttpError(403, "forbidden", "this client certificate may only upload WAL");
+        }
+        if (role === "control" && walMatch) {
+          throw new HttpError(403, "forbidden", "WAL upload requires the WAL archive client certificate");
+        }
+
         if (path === "/health") {
           requireMethod("GET");
           return respond({ status: "ok", engineMode: config.BACKUP_ENGINE_MODE, version });
+        }
+
+        if (walMatch) {
+          requireMethod("PUT");
+          if (!engine.ingestWal) {
+            throw new HttpError(501, "wal_push_not_supported", `engine ${config.BACKUP_ENGINE_MODE} does not accept WAL uploads`);
+          }
+          if (!request.body) throw new HttpError(400, "empty_wal_file", "empty WAL upload");
+          const lengthHeader = request.headers.get("content-length");
+          const declared = lengthHeader !== null && /^\d+$/.test(lengthHeader) ? Number(lengthHeader) : null;
+          try {
+            const outcome = await engine.ingestWal(walMatch[1]!, decodeURIComponent(walMatch[2]!), Readable.fromWeb(request.body as never), declared);
+            return respond({ status: outcome.status, key: outcome.key, bytes: outcome.bytes });
+          } catch (error) {
+            if (error instanceof WalIngestError) throw new HttpError(error.status, error.code, error.message);
+            throw error;
+          }
         }
 
         if (path === "/v1/overview") {
@@ -249,6 +314,8 @@ export const createBackupDaemonHandler = (options: BackupDaemonServerOptions): H
             backups,
             latestDrill: catalog.latestDrill(),
             drills,
+            jobs: { active: jobs.activeJob(), queued: jobs.queuedCount() },
+            ...(engine.walStatus ? { walArchive: engine.walStatus() } : {}),
           });
         }
 
@@ -258,46 +325,71 @@ export const createBackupDaemonHandler = (options: BackupDaemonServerOptions): H
           if (!parsed.success) {
             throw new HttpError(400, "validation_error", issueMessage(parsed.error));
           }
+          const idempotencyKey = idempotencyKeyOf(request);
+          const known = idempotencyKey ? jobs.lookupKey("backup", idempotencyKey) : undefined;
+          if (known) {
+            return respond({ backupJobId: known.id, acceptedAt: known.acceptedAt, deduplicated: true }, 202);
+          }
           const acceptedAt = clock().toISOString();
           const id = reserveId();
-          const run = {
+          // addRun inserts the row synchronously, and nothing awaits between this lookup and enqueue(),
+          // so two requests with the same key can never both get past the check above.
+          const ready = catalog.addRun({
             id,
             target: parsed.data.target,
             kind: parsed.data.kind,
             engine: config.BACKUP_ENGINE_MODE,
-            status: "QUEUED" as const,
+            status: "QUEUED",
             startedAt: acceptedAt,
             storageTargets: [],
-          };
-          await catalog.addRun(run);
-
-          const job = (async (): Promise<void> => {
-            await catalog.updateRun(id, { status: "RUNNING" });
-            try {
-              const result = await engine.triggerBackup(parsed.data.target, parsed.data.kind);
-              const completed = clock();
-              await catalog.updateRun(id, {
-                status: "PASSED",
-                completedAt: completed.toISOString(),
-                durationMs: Math.max(0, completed.getTime() - Date.parse(acceptedAt)),
-                sizeBytes: result.sizeBytes,
-                startLsn: result.startLsn,
-                endLsn: result.endLsn,
-                storageTargets: result.storageTargets ?? [],
-              });
-            } catch (error) {
-              const completed = clock();
-              await catalog.updateRun(id, {
-                status: "FAILED",
-                completedAt: completed.toISOString(),
-                durationMs: Math.max(0, completed.getTime() - Date.parse(acceptedAt)),
-                storageTargets: [],
-                errorMessage: safeMessage(error),
-              });
-            }
-          })();
-          track(job);
-          return respond({ backupJobId: id, acceptedAt }, 202);
+          });
+          let ticket: ReturnType<JobQueue["enqueue"]>;
+          try {
+            ticket = enqueue({
+              id,
+              kind: "backup",
+              scope: "backup",
+              idempotencyKey,
+              run: async () => {
+                await ready;
+                const startedMs = clock().getTime();
+                await catalog.updateRun(id, { status: "RUNNING" });
+                try {
+                  const result = await engine.triggerBackup(parsed.data.target, parsed.data.kind);
+                  const completed = clock();
+                  await catalog.updateRun(id, {
+                    status: "PASSED",
+                    completedAt: completed.toISOString(),
+                    durationMs: Math.max(0, completed.getTime() - startedMs),
+                    sizeBytes: result.sizeBytes,
+                    startLsn: result.startLsn,
+                    endLsn: result.endLsn,
+                    storageTargets: result.storageTargets ?? [],
+                  });
+                } catch (error) {
+                  const completed = clock();
+                  await catalog.updateRun(id, {
+                    status: "FAILED",
+                    completedAt: completed.toISOString(),
+                    durationMs: Math.max(0, completed.getTime() - startedMs),
+                    storageTargets: [],
+                    errorMessage: safeMessage(error),
+                  });
+                }
+              },
+            });
+          } catch (error) {
+            await ready;
+            await catalog.updateRun(id, {
+              status: "FAILED",
+              completedAt: clock().toISOString(),
+              errorMessage: safeMessage(error),
+            });
+            throw error;
+          }
+          await ready;
+          track(ticket.done);
+          return respond({ backupJobId: id, acceptedAt, queuePosition: ticket.position }, 202);
         }
 
         if (path === "/v1/drills/run") {
@@ -306,43 +398,65 @@ export const createBackupDaemonHandler = (options: BackupDaemonServerOptions): H
           if (!parsed.success) {
             throw new HttpError(400, "validation_error", issueMessage(parsed.error));
           }
-          const acceptedAt = clock().toISOString();
-          const id = reserveId();
-          const startedMs = Date.parse(acceptedAt);
-
-          const job = (async (): Promise<void> => {
-            try {
-              const report = await drillRunner.run({ id, requestedBy: parsed.data.requestedBy });
-              await catalog.addDrill(report);
-            } catch (error) {
-              const completed = clock();
-              const failed: DrillReport = {
-                id,
-                status: "FAILED",
-                startedAt: acceptedAt,
-                completedAt: completed.toISOString(),
-                durationMs: Math.max(0, completed.getTime() - startedMs),
-                targetTime: new Date(startedMs - 5 * 60 * 1000).toISOString(),
-                replayedLsn: "",
-                doubleEntryDrift: "",
-                balanceMismatches: 0,
-                auditBrokenLinks: 0,
-                journalLineCount: 0,
-                checks: {
-                  doubleEntry: { ok: false, detail: "not executed" },
-                  balanceParity: { ok: false, detail: "not executed" },
-                  auditChain: { ok: false, detail: "not executed" },
-                },
-                errorMessage: safeMessage(error),
-              };
-              await catalog.addDrill({
-                ...failed,
-                reportSignature: signDrillReport(failed, config.BACKUP_ENCRYPTION_KEY_HEX),
-              });
+          if (parsed.data.latest && parsed.data.targetTime !== undefined) {
+            throw new HttpError(400, "validation_error", "latest and targetTime are mutually exclusive");
+          }
+          let targetTime: Date | undefined;
+          if (parsed.data.targetTime !== undefined) {
+            targetTime = new Date(parsed.data.targetTime);
+            if (Number.isNaN(targetTime.getTime())) {
+              throw new HttpError(400, "validation_error", "targetTime must be an ISO-8601 timestamp");
             }
-          })();
-          track(job);
-          return respond({ drillId: id, acceptedAt }, 202);
+            if (targetTime.getTime() > clock().getTime()) {
+              throw new HttpError(400, "validation_error", "targetTime cannot be in the future");
+            }
+          }
+          const idempotencyKey = idempotencyKeyOf(request);
+          const acceptedAt = clock().toISOString();
+          const id = idempotencyKey ? (jobs.lookupKey("drill", idempotencyKey)?.id ?? reserveId()) : reserveId();
+          const ticket = enqueue({
+            id,
+            kind: "drill",
+            scope: "drill",
+            idempotencyKey,
+            run: async () => {
+              const startedMs = clock().getTime();
+              try {
+                const report = await drillRunner.run({ id, requestedBy: parsed.data.requestedBy, targetTime, ...(parsed.data.latest ? { latest: true } : {}) });
+                await catalog.addDrill(report);
+              } catch (error) {
+                const completed = clock();
+                const failed: DrillReport = {
+                  id,
+                  status: "FAILED",
+                  startedAt: new Date(startedMs).toISOString(),
+                  completedAt: completed.toISOString(),
+                  durationMs: Math.max(0, completed.getTime() - startedMs),
+                  targetTime: (targetTime ?? new Date(startedMs - 5 * 60 * 1000)).toISOString(),
+                  replayedLsn: "",
+                  doubleEntryDrift: "",
+                  balanceMismatches: 0,
+                  auditBrokenLinks: 0,
+                  journalLineCount: 0,
+                  checks: {
+                    doubleEntry: { ok: false, detail: "not executed" },
+                    balanceParity: { ok: false, detail: "not executed" },
+                    auditChain: { ok: false, detail: "not executed" },
+                  },
+                  errorMessage: safeMessage(error),
+                };
+                await catalog.addDrill({
+                  ...failed,
+                  reportSignature: signDrillReport(failed, config.BACKUP_ENCRYPTION_KEY_HEX),
+                });
+              }
+            },
+          });
+          if (ticket.deduplicated) {
+            return respond({ drillId: ticket.id, acceptedAt: ticket.acceptedAt, deduplicated: true }, 202);
+          }
+          track(ticket.done);
+          return respond({ drillId: id, acceptedAt, queuePosition: ticket.position }, 202);
         }
 
         if (path === "/v1/policy") {
@@ -376,13 +490,26 @@ export const createBackupDaemonHandler = (options: BackupDaemonServerOptions): H
             error.status,
           );
         }
+        // The client went away mid-request (timeout, reset, a client that closed a pooled socket): nobody is left to
+        // answer and it is not a server fault. Logging it as an "unhandled request failure" only creates noise that
+        // hides real problems.
+        if ((error as { name?: string } | null)?.name === "AbortError") {
+          return new Response(null, { status: 499 });
+        }
         options.logger?.error("unhandled request failure", error);
         return respond(
           { error: { code: "internal_error", message: "internal server error", requestId } },
           500,
         );
       }
-    },
+  };
+
+  return {
+    whenIdle,
+    pendingCount: () => pending.size + (jobs.isBusy() ? 1 : 0),
+    jobs,
+    handler: (request: Request) => handle(request, "open"),
+    handlerFor: (role: CallerRole) => (request: Request) => handle(request, role),
   };
 };
 
@@ -456,18 +583,24 @@ const FORBIDDEN_RESPONSE =
   `content-length: ${Buffer.byteLength(FORBIDDEN_BODY)}\r\n\r\n${FORBIDDEN_BODY}`;
 
 /**
- * Bun.serve cannot expose the peer certificate, so the public TLS listener is a
- * node:tls server that verifies the client certificate, checks its identity
- * against the allowlist (403 otherwise) and only then bridges the decrypted
- * stream to the Bun HTTP handler on a private unix socket (loopback port on
- * Windows).
+ * Bun.serve cannot expose the peer certificate (and Bun's node:https server has no
+ * `socket.getPeerCertificate()` either), so the public TLS listener is a node:tls
+ * server that verifies the client certificate, classifies its identity and only then
+ * bridges the decrypted stream to an inner Bun HTTP server on a private unix socket
+ * (loopback port on Windows).
+ *
+ * Authorization is per ROLE, enforced by which inner server the connection is bridged
+ * to: `backup-client` certificates reach the control-plane handler, `wal-archive-client`
+ * certificates reach a handler that serves nothing but `PUT /v1/wal/...`. Anything else
+ * gets 403. No HTTP parsing happens in the gateway, so there is nothing to desynchronize.
  */
 const startMtlsGateway = async (
   options: BackupDaemonServerOptions,
   tlsOptions: Bun.TLSOptions,
   bundle: HandlerBundle,
 ): Promise<RunningBackupDaemonServer> => {
-  const allowed = parseAllowedClientCns(options.config.BACKUP_ALLOWED_CLIENT_CNS);
+  const controlAllowed = parseAllowedClientCns(options.config.BACKUP_ALLOWED_CLIENT_CNS);
+  const walAllowed = parseAllowedClientCns(options.config.BACKUP_WAL_CLIENT_CNS);
   const fail = (error: Error): Response => {
     options.logger?.error("server error", error);
     return new Response(
@@ -476,17 +609,24 @@ const startMtlsGateway = async (
     );
   };
   let socketDir: string | undefined;
-  let inner: ReturnType<typeof Bun.serve>;
-  let upstream: net.NetConnectOpts;
-  if (process.platform === "win32") {
-    inner = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: bundle.handler, error: fail });
-    upstream = { host: "127.0.0.1", port: inner.port ?? 0 };
-  } else {
+  if (process.platform !== "win32") {
     socketDir = mkdtempSync(join(tmpdir(), "pg-backup-daemon-"));
     chmodSync(socketDir, 0o700);
-    const socketPath = join(socketDir, "api.sock");
-    inner = Bun.serve({ unix: socketPath, fetch: bundle.handler, error: fail });
-    upstream = { path: socketPath };
+  }
+  const inners: Partial<Record<"control" | "wal", { server: ReturnType<typeof Bun.serve>; upstream: net.NetConnectOpts }>> = {};
+  for (const role of ["control", "wal"] as const) {
+    const fetchHandler = bundle.handlerFor(role);
+    const maxRequestBodySize = options.config.BACKUP_WAL_PUSH_MAX_BYTES + 1024 * 1024;
+    if (process.platform === "win32") {
+      const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: fetchHandler, error: fail, maxRequestBodySize });
+      inners[role] = { server, upstream: { host: "127.0.0.1", port: server.port ?? 0 } };
+    } else {
+      const socketPath = join(socketDir!, `${role}.sock`);
+      inners[role] = {
+        server: Bun.serve({ unix: socketPath, fetch: fetchHandler, error: fail, maxRequestBodySize }),
+        upstream: { path: socketPath },
+      };
+    }
   }
   const front = tls.createServer(
     {
@@ -498,13 +638,20 @@ const startMtlsGateway = async (
     },
     (socket) => {
       const peer = socket.getPeerCertificate();
-      if (!socket.authorized || !isAllowedClientIdentity(peer, allowed)) {
-        options.logger?.warn("rejected mTLS client: certificate identity not in BACKUP_ALLOWED_CLIENT_CNS");
+      const role: "control" | "wal" | null = !socket.authorized
+        ? null
+        : isAllowedClientIdentity(peer, controlAllowed)
+          ? "control"
+          : isAllowedClientIdentity(peer, walAllowed)
+            ? "wal"
+            : null;
+      if (role === null) {
+        options.logger?.warn("rejected mTLS client: certificate identity is not authorized for any role");
         socket.on("error", () => undefined);
         socket.end(FORBIDDEN_RESPONSE);
         return;
       }
-      const backend = net.connect(upstream);
+      const backend = net.connect(inners[role]!.upstream);
       socket.on("error", () => backend.destroy());
       backend.on("error", () => socket.destroy());
       socket.pipe(backend);
@@ -517,10 +664,11 @@ const startMtlsGateway = async (
   });
   return {
     ...bundle,
-    server: inner,
+    server: inners.control!.server,
     stop: () => {
       front.close();
-      inner.stop(true);
+      inners.control!.server.stop(true);
+      inners.wal!.server.stop(true);
       if (socketDir) rmSync(socketDir, { recursive: true, force: true });
     },
   };
@@ -536,6 +684,7 @@ export const startBackupDaemonServer = async (
     hostname: options.config.BACKUP_DAEMON_BIND_HOST,
     port: options.config.BACKUP_DAEMON_PORT,
     fetch: bundle.handler,
+    maxRequestBodySize: options.config.BACKUP_WAL_PUSH_MAX_BYTES + 1024 * 1024,
     error: (error) => {
       options.logger?.error("server error", error);
       return new Response(

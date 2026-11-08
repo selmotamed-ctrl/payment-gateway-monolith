@@ -29,6 +29,8 @@ import { MetaPill } from "@/components/ui/MetaPill";
 import type { MetricItem } from "@/components/ui/MetricStrip";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { JsonDiffViewer } from "@/components/ui/JsonDiffViewer";
+import { AuditChangeChips } from "@/components/AuditChangeChips";
+import { summarizeAuditChange } from "@/utils/auditSummary";
 type AuditLog = {
     id: string;
     createdAt: string;
@@ -69,16 +71,6 @@ const formatDateTime = (value: string | null | undefined): string => {
         hour: "2-digit",
         minute: "2-digit",
     }).format(date);
-};
-
-const jsonPreview = (value: unknown): string => {
-    if (value === null || value === undefined) return "—";
-    try {
-        const text = JSON.stringify(value);
-        return text.length > 140 ? `${text.slice(0, 137)}…` : text;
-    } catch {
-        return String(value);
-    }
 };
 
 const AuditLogsPage = dc(() => {
@@ -302,12 +294,8 @@ const AuditLogsPage = dc(() => {
         {
             key: "change",
             label: "Change",
-            value: (row) => jsonPreview(row.afterJson),
-            Value: ({ row }: { row: AuditLog }) => (
-                <ThemedText style={{ fontSize: "10px", opacity: 0.7, direction: "ltr", maxWidth: "300px", wordBreak: "break-word" }}>
-                    {jsonPreview(row.afterJson)}
-                </ThemedText>
-            ),
+            value: (row) => summarizeAuditChange(row.beforeJson, row.afterJson).join(" "),
+            Value: ({ row }: { row: AuditLog }) => <AuditChangeChips before={row.beforeJson} after={row.afterJson} />,
         },
         {
             key: "approval",
@@ -460,7 +448,7 @@ const AuditLogsPage = dc(() => {
                             ]}
                         />
                         <VDivider />
-                        <JsonDiffViewer before={selected.value.beforeJson} after={selected.value.afterJson} />
+                        <JsonDiffViewer diff={{ before: selected.value.beforeJson, after: selected.value.afterJson }} />
                     </>
                 ) : null}
             </FormModal>

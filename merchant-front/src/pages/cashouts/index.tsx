@@ -33,6 +33,27 @@ type Cashout = {
     subtractedAt: string | null;
 };
 
+const fallbackRandomId = (): string => {
+    const webCrypto = globalThis.crypto;
+    if (webCrypto && typeof webCrypto.randomUUID === "function") {
+        return webCrypto.randomUUID();
+    }
+    const bytes = new Uint8Array(16);
+    if (webCrypto && typeof webCrypto.getRandomValues === "function") {
+        webCrypto.getRandomValues(bytes);
+    } else {
+        for (let index = 0; index < bytes.length; index += 1) {
+            bytes[index] = Math.floor(Math.random() * 256);
+        }
+    }
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+
+const randomIntentKey = (): string => fallbackRandomId();
+
 const CashoutsPage = dc(() => {
     const { t } = useLocale();
     const rows = ref<Cashout[]>([]);
@@ -50,7 +71,7 @@ const CashoutsPage = dc(() => {
     const walletOptions = ref<{ title: string; value: string }[]>([]);
     const formError = ref("");
     // One idempotency key per cash-out intent: reused when the same request is retried, renewed after success or when the dialog is reopened.
-    let intentKey = crypto.randomUUID();
+    let intentKey = randomIntentKey();
 
     const loadWallets = async () => {
         const response = await api.get(urlsMap.options("wallets"), { params: { limit: 100 } });
@@ -116,7 +137,7 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
                     ...(iban.value ? { iban: iban.value } : {}),
                 },
             });
-            intentKey = crypto.randomUUID();
+            intentKey = randomIntentKey();
             dialogOpen.value = false;
             showSnackBar({ type: "success", message: t("Request Cash-Out") });
             await load();
@@ -186,7 +207,7 @@ ${t("IBAN (optional)")}: ${iban.value}` : ""}`,
                                 accountNumber.value = "";
                                 iban.value = "";
                                 formError.value = "";
-                                intentKey = crypto.randomUUID();
+                                intentKey = randomIntentKey();
                                 void loadWallets();
                                 dialogOpen.value = true;
                             }}

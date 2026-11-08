@@ -7,3 +7,5 @@ test-matrix/reports/
 test-matrix/*.local.json
 deploy.env.local
 deploy.env.*.local
+stress/.work/
+stress/reports/

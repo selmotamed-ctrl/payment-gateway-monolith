@@ -38,6 +38,8 @@ export type DynamicAttempt = AdapterAttempt & {
 export interface DynamicAttemptPatch {
   status?: AdapterAttemptStatus;
   substatus?: string;
+  /** Explicitly clears the persisted substatus (used when a finalize completes). */
+  clearSubstatus?: boolean;
   canonicalError?: string;
   otpAttempts?: number;
   pointOfNoReturn?: boolean;
@@ -54,6 +56,16 @@ export interface DynamicAttemptPatch {
 export interface AttemptRepository {
   getAttempt(attemptId: string): Promise<DynamicAttempt | null>;
   updateAttempt(attemptId: string, patch: DynamicAttemptPatch, transaction?: unknown): Promise<DynamicAttempt>;
+  /**
+   * Atomically claims a non-terminal attempt for finalization (single-writer).
+   * Returns false when another finalizer already owns it. Optional so the
+   * in-memory test repositories keep their simple contract.
+   */
+  claimFinalize?(
+    attemptId: string,
+    expectedStatus: AdapterAttemptStatus,
+    transaction?: unknown,
+  ): Promise<boolean>;
 }
 
 export interface SlotReservation {
@@ -755,7 +767,7 @@ export class DynamicRailEngine {
     await this.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
       attemptId: attempt.id,
       status: nextStatus,
-      substatus: patch.substatus,
+      substatus: patch.substatus ?? undefined,
       merchantId: attempt.merchantId,
     } satisfies AttemptTransitionEvent);
     return updated;
@@ -1099,7 +1111,7 @@ export class DynamicRailEngine {
       throw engineError("ATTEMPT_TERMINAL", `The attempt is ${fresh.status} and can no longer be finalized`, 409);
     }
     if ((fresh.substatus ?? attempt.substatus) === AML_HOLD_SUBSTATUS) {
-      return this.escrowHeldCapture(attempt);
+      return this.escrowHeldCapture(fresh);
     }
     const previousStatus = attempt.status;
     const post = async (transaction?: unknown): Promise<string> => {
@@ -1142,7 +1154,29 @@ export class DynamicRailEngine {
       return result.entry.id;
     };
 
+    const claim = this.options.attempts.claimFinalize;
     const finalize = async (transaction?: unknown): Promise<SlotCommitResult> => {
+      // Single-writer claim: two concurrent verified callbacks for the same
+      // attempt must settle exactly once. The loser reads the winner's result
+      // instead of committing the slot and posting the journal a second time.
+      if (claim) {
+        const claimed = await claim.call(this.options.attempts, attempt.id, fresh.status, transaction);
+        if (!claimed) {
+          const latest = await this.options.attempts.getAttempt(attempt.id);
+          if (!latest || latest.status !== "SUCCEEDED") {
+            throw engineError(
+              "ATTEMPT_FINALIZE_CONFLICT",
+              `The attempt is already being finalized (status ${latest?.status ?? "unknown"})`,
+              409,
+            );
+          }
+          attempt.status = "SUCCEEDED";
+          attempt.substatus = latest.substatus;
+          return latest.substatus === "SUSPENSE_SETTLEMENT"
+            ? { outcome: "SUSPENSE", ...(latest.ledgerEntryId ? { journalEntryId: latest.ledgerEntryId } : {}) }
+            : { outcome: "COMMITTED", ...(latest.ledgerEntryId ? { journalEntryId: latest.ledgerEntryId } : {}) };
+        }
+      }
       // The slot decision comes first: it either advances the counters (the
       // normal path) or books the money to SUSPENSE and drafts the refund. All
       // three effects - the slot decision, the journal posting and the
@@ -1160,6 +1194,7 @@ export class DynamicRailEngine {
       const ledgerEntryId = await post(transaction);
       await this.options.attempts.updateAttempt(attempt.id, {
         status: "SUCCEEDED",
+        clearSubstatus: true,
         ledgerEntryId,
       }, transaction);
       return { outcome: "COMMITTED", journalEntryId: ledgerEntryId };
@@ -1170,9 +1205,7 @@ export class DynamicRailEngine {
       ? await runner(finalize, { attemptId: attempt.id })
       : await finalize();
     attempt.status = "SUCCEEDED";
-    if (result.outcome === "SUSPENSE") {
-      attempt.substatus = "SUSPENSE_SETTLEMENT";
-    }
+    attempt.substatus = result.outcome === "SUSPENSE" ? "SUSPENSE_SETTLEMENT" : undefined;
     await this.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
       attemptId: attempt.id,
       status: "SUCCEEDED",
@@ -1213,23 +1246,61 @@ export class DynamicRailEngine {
    */
   private async escrowHeldCapture(attempt: DynamicAttempt): Promise<SlotCommitResult> {
     const poster = this.options.ledgerPoster;
+    let journalEntryId: string | undefined;
     if (poster && (attempt.ownershipMode ?? "PLATFORM_CLEARING") !== "MERCHANT_DIRECT") {
       if (!poster.postScenario) {
         throw engineError("AML_HOLD_ESCROW_UNSUPPORTED", "The ledger poster cannot book the AML hold escrow", 500);
       }
-      const amount = decimal(attempt.totalChargedAmount ?? attempt.requestedAmount);
-      const post = (transaction?: unknown) => poster.postScenario!(
-        "AML_HOLD_AND_RELEASE",
-        attempt.id,
-        { amount: amount.toFixed(4), commissionAmount: 0, merchantAmount: 0 },
-        this.ledgerContext(attempt),
-        transaction,
-      );
-      const runner = this.options.transactionRunner;
-      const posted = runner ? await runner(post, { attemptId: attempt.id }) : await post();
-      return { outcome: "HELD", journalEntryId: posted.entry.id, reason: "AML_HOLD_ESCROWED" };
+      if (attempt.ledgerEntryId) {
+        // A duplicate verified capture: the escrow of this attempt is already
+        // booked, so there is nothing to post again.
+        journalEntryId = attempt.ledgerEntryId;
+      } else {
+        const amount = decimal(attempt.totalChargedAmount ?? attempt.requestedAmount);
+        const persist = async (transaction?: unknown) => {
+          const posted = await poster.postScenario!(
+            "AML_HOLD_AND_RELEASE",
+            attempt.id,
+            { amount: amount.toFixed(4), commissionAmount: 0, merchantAmount: 0 },
+            this.ledgerContext(attempt),
+            transaction,
+          );
+          await this.options.attempts.updateAttempt(attempt.id, {
+            substatus: AML_HOLD_SUBSTATUS,
+            ledgerEntryId: posted.entry.id,
+          }, transaction);
+          return posted;
+        };
+        const runner = this.options.transactionRunner;
+        const posted = runner ? await runner(persist, { attemptId: attempt.id }) : await persist();
+        journalEntryId = posted.entry.id;
+      }
     }
-    return { outcome: "HELD", reason: "AML_HOLD_NO_ESCROW" };
+    attempt.substatus = AML_HOLD_SUBSTATUS;
+    if (journalEntryId) {
+      attempt.ledgerEntryId = journalEntryId;
+    }
+    // The capture is a trusted success signal even though the money is not
+    // settled: a later contradicting failure may not release the slot while
+    // the escrow is booked.
+    const context = await this.readContext(attempt);
+    context.trustedSuccessObserved = true;
+    if (this.options.contextCipher) {
+      await this.options.attempts.updateAttempt(attempt.id, {
+        contextCiphertext: await this.options.contextCipher.encrypt(context),
+      });
+    }
+    await this.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
+      attemptId: attempt.id,
+      status: attempt.status,
+      substatus: AML_HOLD_SUBSTATUS,
+      merchantId: attempt.merchantId,
+    } satisfies AttemptTransitionEvent);
+    return {
+      outcome: "HELD",
+      ...(journalEntryId ? { journalEntryId } : {}),
+      reason: journalEntryId ? "AML_HOLD_ESCROWED" : "AML_HOLD_NO_ESCROW",
+    };
   }
 
   private async evaluateReporting(attempt: DynamicAttempt): Promise<void> {

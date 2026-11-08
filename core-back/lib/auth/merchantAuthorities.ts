@@ -37,6 +37,25 @@ const CATALOGUE_SET: ReadonlySet<string> = new Set(MERCHANT_AUTHORITY_CATALOGUE)
 export const API_TOKEN_SCOPE_CATALOGUE = ["link:write", "link:read", "payment:read"] as const;
 const TOKEN_SCOPE_SET: ReadonlySet<string> = new Set(API_TOKEN_SCOPE_CATALOGUE);
 
+/**
+ * Legacy token scopes that were documented before the catalogue was closed.
+ * They are accepted and normalised to the canonical resource:action scope so
+ * existing integrations keep working after the upgrade.
+ */
+const TOKEN_SCOPE_ALIASES: Readonly<Record<string, string>> = {
+  "links:create": "link:write",
+  "links:write": "link:write",
+  "links:cancel": "link:write",
+  "links:read": "link:read",
+  "payments:read": "payment:read",
+  "payments:write": "payment:read",
+};
+
+export const normalizeTokenScopes = (scopes: readonly string[]): string[] => {
+  const normalized = scopes.map((scope) => TOKEN_SCOPE_ALIASES[scope] ?? scope);
+  return [...new Set(normalized)];
+};
+
 /** Privileged authorities: never implied for anyone but a MERCHANT_ADMIN holding `merchant:write`. */
 export const PRIVILEGED_MERCHANT_AUTHORITIES = [
   "user:manage",
@@ -63,7 +82,10 @@ const IMPLIED_BY_MERCHANT_WRITE = [
 export const effectiveMerchantAuthorities = (
   principal: Pick<Principal, "kind" | "role" | "authorities">,
 ): Set<string> => {
-  const held = new Set<string>(principal.authorities.filter((authority) => authority !== "*"));
+  const source = principal.kind === "apiToken"
+    ? normalizeTokenScopes(principal.authorities)
+    : principal.authorities;
+  const held = new Set<string>(source.filter((authority) => authority !== "*"));
   if (principal.kind === "apiToken") {
     if (held.has("link:write")) held.add("link:read");
     return held;
@@ -74,7 +96,13 @@ export const effectiveMerchantAuthorities = (
       for (const privileged of PRIVILEGED_MERCHANT_AUTHORITIES) held.add(privileged);
     }
   }
-  if (held.has("merchant:read") || held.has("link:write")) held.add("link:read");
+  if (held.has("merchant:read") || held.has("link:write")) {
+    held.add("link:read");
+    held.add("payment:read");
+    // The portal projects the cash-out screen from merchant:read; core must
+    // agree, otherwise the screen is visible but its list returns 403.
+    held.add("cashout:read");
+  }
   return held;
 };
 
@@ -107,7 +135,7 @@ export const assertKnownMerchantAuthorities = (requested: readonly string[]): vo
 };
 
 export const assertKnownTokenScopes = (requested: readonly string[]): void => {
-  const unknown = requested.filter((scope) => !TOKEN_SCOPE_SET.has(scope));
+  const unknown = normalizeTokenScopes(requested).filter((scope) => !TOKEN_SCOPE_SET.has(scope));
   if (unknown.length > 0) {
     throw new ApiError(400, "UNKNOWN_TOKEN_SCOPE", "The scope list contains unknown scopes", {
       unknown,

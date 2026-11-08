@@ -25,6 +25,10 @@ export const withIpv6Loopback = (cidrs: string): string => {
   return entries.join(",");
 };
 
+/** PostgreSQL reserves the `pg_` prefix for roles: `CREATE ROLE pg_*` always fails, so such a setting can never work. */
+const notReservedRole = (value: string): boolean => !/^pg_/i.test(value);
+const RESERVED_ROLE_MESSAGE = "must not start with pg_ (role names with that prefix are reserved by PostgreSQL)";
+
 const cidrList = z
   .string()
   .trim()
@@ -210,9 +214,16 @@ const base = z.strictObject({
     .min(1)
     .max(64)
     .regex(/^[A-Za-z0-9_]+$/, "must be an identifier")
+    .refine(notReservedRole, RESERVED_ROLE_MESSAGE)
     .optional(),
   DB_PASSWORD: secretValue(8, 256).optional(),
   DATABASE_URL: z.string().trim().min(1).max(1000).optional(),
+  /**
+   * Optional override for the session-scoped leader-election endpoint. Deploy
+   * derives a PgBouncer session alias (or a direct URL) automatically; set
+   * this only for an externally managed database or a custom pooler.
+   */
+  LEADER_ELECTION_DATABASE_URL: z.string().trim().min(1).max(1000).optional(),
 
   // 1b. Horizontal compute node arrays (override the single-host fields above)
   CORE_NODES: nodeList,
@@ -291,8 +302,14 @@ const base = z.strictObject({
   KMS_MASTER_KEY: secretValue(32),
   KMS_MASTER_KEY_ID: z.string().trim().max(64).default("v1"),
   KMS_MASTER_KEY_HEX: z.string().trim().regex(/^[0-9a-fA-F]{64}$/).or(z.literal("")).default(""),
-  STORAGE_SHARD_COUNT: z.coerce.number().int().min(1).max(32).default(16),
+  STORAGE_SHARD_COUNT: z.coerce.number().int().min(1).max(256).default(16),
   READ_REPLICA_MAX_LAG_MS: z.coerce.number().int().min(0).max(600_000).default(2_000),
+  /**
+   * KYB document scanner mode. `eicar` is the built-in content gate (EICAR +
+   * active-content sniffing) for deployments without a real malware engine;
+   * `disabled` leaves every document PENDING (reviewers cannot preview it).
+   */
+  KYB_SCANNER_MODE: z.enum(["eicar", "disabled"]).default("eicar"),
   BASE_CURRENCY: z.string().trim().length(3).default("LYD"),
   GATEWAY_TIMEZONE: z.string().trim().min(1).max(64).default("Africa/Tripoli"),
   REDIS_URL: z.string().trim().max(500).optional(),
@@ -345,7 +362,8 @@ const base = z.strictObject({
     .min(1)
     .max(64)
     .regex(/^[A-Za-z0-9_]+$/, "must be an identifier")
-    .default("pg_core_user"),
+    .refine(notReservedRole, RESERVED_ROLE_MESSAGE)
+    .default("gw_core_user"),
   PG_DB_PASSWORD: optionalSecret,
   PG_REPLICATION_USER: z
     .string()
@@ -353,7 +371,8 @@ const base = z.strictObject({
     .min(1)
     .max(64)
     .regex(/^[A-Za-z0-9_]+$/, "must be an identifier")
-    .default("pg_replicator"),
+    .refine(notReservedRole, RESERVED_ROLE_MESSAGE)
+    .default("gw_replicator"),
   PG_REPLICATION_PASSWORD: optionalSecret,
   PGBOUNCER_ENABLED: booleanish.default(false),
   PGBOUNCER_PORT: port.default(6432),
@@ -399,7 +418,8 @@ const base = z.strictObject({
     .min(1)
     .max(64)
     .regex(/^[A-Za-z0-9_]+$/, "must be an identifier")
-    .default("pg_audit_writer"),
+    .refine(notReservedRole, RESERVED_ROLE_MESSAGE)
+    .default("gw_audit_writer"),
   AUDIT_DB_PASSWORD: optionalSecret,
 
   // 12. Dedicated operational/step log database
@@ -422,7 +442,8 @@ const base = z.strictObject({
     .min(1)
     .max(64)
     .regex(/^[A-Za-z0-9_]+$/, "must be an identifier")
-    .default("pg_log_writer"),
+    .refine(notReservedRole, RESERVED_ROLE_MESSAGE)
+    .default("gw_log_writer"),
   LOG_DB_PASSWORD: optionalSecret,
   LOG_RETENTION_MONTHS: z.coerce.number().int().min(1).max(120).default(12),
 
@@ -433,7 +454,13 @@ const base = z.strictObject({
   BACKUP_SSH_PORT: port.default(22),
   BACKUP_SSH_KEY_PATH: sshPath.optional(),
   BACKUP_SUDO_PASSWORD: z.string().max(256).default(""),
-  BACKUP_ENGINE_MODE: z.enum(["wal-g", "barman"]).default("wal-g"),
+  // "pg-native" = the daemon's own PostgreSQL-native engine (pg_basebackup /
+  // pg_receivewal / WAL-over-mTLS ingest) with a local repo; S3 is optional.
+  BACKUP_ENGINE_MODE: z.enum(["pg-native", "wal-g", "barman"]).default("pg-native"),
+  // Local repository directory of the pg-native engine (base backups + WAL).
+  BACKUP_LOCAL_REPO_DIR: safeDir(300).default("/var/lib/pg-backup/repo"),
+  // Timeout core-back applies to every backup-daemon control call.
+  BACKUP_DAEMON_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(15_000),
   BACKUP_COMPRESSION: z.enum(["zstd", "lz4", "lzma", "brotli", "none"]).default("zstd"),
   BACKUP_ENCRYPTION_KEY_HEX: z
     .string()
@@ -471,6 +498,8 @@ const base = z.strictObject({
   BACKUP_SCHEDULER_TICK_MS: z.coerce.number().int().positive().max(3_600_000).default(30_000),
   // Subject CNs (or DNS SANs) of the mTLS client certificates allowed to call the backup daemon.
   BACKUP_ALLOWED_CLIENT_CNS: z.string().trim().min(1).max(500).regex(/^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$/, "must be a comma separated list of certificate names").default("backup-client"),
+  // Least-privilege WAL ingest: only these CNs may PUT /v1/wal/... on the daemon.
+  BACKUP_WAL_CLIENT_CNS: z.string().trim().min(1).max(500).regex(/^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$/, "must be a comma separated list of certificate names").default("wal-archive-client"),
   BACKUP_DAEMON_BIND_HOST: hostLike.default(""),
   BACKUP_DAEMON_CERT_DIR: safeDir(300).default("/var/lib/pg-backup/shared/certs"),
   BACKUP_CATALOG_PATH: safeDir(300).default("/var/lib/pg-backup/catalog.json"),
@@ -481,6 +510,8 @@ const base = z.strictObject({
   BACKUP_SCRATCH_AUDIT_PORT: port.default(55433),
   BACKUP_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().max(86_400_000).default(1_800_000),
   BACKUP_ALLOW_INSECURE_HTTP: booleanish.default(false),
+  /** Managed MinIO is installed without TLS; this gate is independent of the daemon's mTLS protocol. */
+  BACKUP_S3_ALLOW_INSECURE_HTTP: booleanish.default(false),
   BACKUP_WALG_BIN: binName.default("wal-g"),
   // Pinned WAL-G release. The downloaded asset is verified against BACKUP_WALG_SHA256 (REQUIRED for wal-g mode).
   BACKUP_WALG_VERSION: z.string().trim().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/, "must be a release such as 3.0.9").default("3.0.9"),
@@ -512,6 +543,15 @@ export const pgStorageConfigured = (config: DeployConfig): boolean =>
   || config.PG_REPLICA_NODES.trim().length > 0
   || config.PG_DB_PASSWORD.length > 0;
 
+/**
+ * PgBouncer database alias used ONLY by the singleton-worker leader election.
+ *
+ * It maps to the same real database as the application pool but is served with
+ * `pool_mode=session`, because PostgreSQL advisory locks live on a backend
+ * session and transaction pooling would let two core nodes lead at once.
+ */
+export const PGBOUNCER_SESSION_ALIAS = "pgw_session";
+
 export const redisStorageConfigured = (config: DeployConfig): boolean =>
   config.REDIS_MANAGE_VIA_SSH || parseNodeList(config.REDIS_NODES).length > 0;
 
@@ -532,16 +572,15 @@ const safeParseNodes = (value: string): NodeSpec[] => {
 };
 
 /**
- * `BACKUP_ENGINE_MODE=auto` picks WAL-G when the backup node shares the PG
- * primary's private IP (WAL-G reads the local data dir) and Barman when the
- * backup node is a different host. Explicit values are untouched.
+ * `BACKUP_ENGINE_MODE=auto` (and the default) is `pg-native`: it works the same
+ * on the primary's host and on a dedicated backup host, needs no external
+ * backup tool, and is the only engine verified end to end (single host live
+ * test and a real two-host lab). `wal-g` (co-located only) and `barman`
+ * (dedicated host) stay available as explicit choices and keep their rules.
  */
-export const resolveBackupEngineMode = (env: Record<string, string>): "wal-g" | "barman" | undefined => {
+export const resolveBackupEngineMode = (env: Record<string, string>): "pg-native" | "wal-g" | "barman" | undefined => {
   const raw = (env.BACKUP_ENGINE_MODE ?? "").trim();
-  if (raw !== "auto") return undefined;
-  const backupIp = safeParseNodes(env.BACKUP_NODE ?? "")[0]?.privateIp;
-  const primaryIp = safeParseNodes(env.PG_PRIMARY_NODE ?? "")[0]?.privateIp;
-  return backupIp && primaryIp && backupIp !== primaryIp ? "barman" : "wal-g";
+  return raw === "auto" ? "pg-native" : undefined;
 };
 
 /** Effective S3 mode after resolving "auto" against the endpoint host. */
@@ -559,6 +598,10 @@ export const resolveBackupS3Mode = (config: DeployConfig): "external" | "managed
     ? "managed-minio"
     : "external";
 };
+
+/** True when an S3 object store is part of the backup setup (pg-native may be local-repo only). */
+export const backupS3Configured = (config: Pick<DeployConfig, "BACKUP_ENGINE_MODE" | "BACKUP_PRIMARY_S3_ENDPOINT">): boolean =>
+  config.BACKUP_ENGINE_MODE !== "pg-native" || config.BACKUP_PRIMARY_S3_ENDPOINT.trim().length > 0;
 
 export const backupStorageConfigured = (config: DeployConfig): boolean =>
   config.BACKUP_ENABLED || config.BACKUP_NODE.trim().length > 0;
@@ -619,6 +662,32 @@ export const effectiveDatabase = (config: DeployConfig): {
     privateIp: pg ? (primary?.privateIp ?? config.DB_PRIVATE_IP ?? null) : (config.DB_PRIVATE_IP ?? primary?.privateIp ?? null),
     managedViaSsh: config.DB_MANAGE_VIA_SSH || config.PG_MANAGE_VIA_SSH,
   };
+};
+
+/**
+ * The session-safe URL the core uses for singleton-worker leader election.
+ *
+ * With PgBouncer enabled it is the `pgw_session` alias (same pooler port,
+ * `pool_mode=session`). Without PgBouncer it is the direct PostgreSQL port,
+ * encrypted with `sslmode=no-verify` for the deploy-managed self-signed
+ * certificate. Null means core falls back to `DATABASE_URL` (external or
+ * development database).
+ */
+export const leaderElectionDatabaseUrl = (config: DeployConfig): string | null => {
+  if (!pgStorageConfigured(config)) {
+    return null;
+  }
+  const primary = parseNodeList(config.PG_PRIMARY_NODE)[0] ?? null;
+  if (!primary) {
+    return null;
+  }
+  const database = effectiveDatabase(config);
+  const credentials = `${encodeURIComponent(database.user)}:${encodeURIComponent(database.password)}`;
+  if (config.PGBOUNCER_ENABLED) {
+    return `postgresql://${credentials}@${primary.privateIp}:${config.PGBOUNCER_PORT}/${PGBOUNCER_SESSION_ALIAS}`;
+  }
+  const tls = config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : "";
+  return `postgresql://${credentials}@${primary.privateIp}:${primary.servicePort}/${database.name}${tls}`;
 };
 
 const PLACEHOLDER_MARKERS = ["change-me", "changeme", "change_me", "replace-me", "replaceme", "replace_me", "your-", "your_", "example", "placeholder", "password", "passwd", "admin", "default", "secret123", "xxxx"];
@@ -762,6 +831,9 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
       problems.push("DATABASE_URL should point at DB_PRIVATE_IP");
     }
   }
+  if (config.LEADER_ELECTION_DATABASE_URL && !/^postgres(ql)?:\/\//.test(config.LEADER_ELECTION_DATABASE_URL)) {
+    problems.push("LEADER_ELECTION_DATABASE_URL must be a PostgreSQL URL");
+  }
   // A single-box installation legitimately co-locates the database with the
   // core (the database binds to 127.0.0.1 and is never exposed); on separate
   // nodes the operator points DATABASE_URL at the database host's private IP.
@@ -838,11 +910,14 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   if (config.BACKUP_ENABLED) {
     if (!config.BACKUP_NODE) problems.push("BACKUP_NODE is required when BACKUP_ENABLED=true");
     if (!config.BACKUP_SSH_KEY_PATH) problems.push("BACKUP_SSH_KEY_PATH is required when BACKUP_ENABLED=true");
-    if (!config.BACKUP_PRIMARY_S3_BUCKET) problems.push("BACKUP_PRIMARY_S3_BUCKET is required when BACKUP_ENABLED=true");
+    // pg-native keeps a local repository, so S3 is optional there (air-gapped setup).
+    const s3Required = backupS3Configured(config);
+    if (s3Required && !config.BACKUP_PRIMARY_S3_BUCKET) problems.push("BACKUP_PRIMARY_S3_BUCKET is required when BACKUP_ENABLED=true");
+    if (!s3Required && config.BACKUP_PRIMARY_S3_BUCKET) problems.push("BACKUP_PRIMARY_S3_BUCKET requires BACKUP_PRIMARY_S3_ENDPOINT (leave both empty for a local-repo-only pg-native setup)");
     if (!config.BACKUP_ENCRYPTION_KEY_HEX) problems.push("BACKUP_ENCRYPTION_KEY_HEX is required when BACKUP_ENABLED=true");
-    if (config.BACKUP_ENGINE_MODE === "wal-g" && !config.BACKUP_WALG_SHA256) {
-      problems.push("BACKUP_WALG_SHA256 is required when BACKUP_ENGINE_MODE=wal-g (SHA-256 of the pinned WAL-G release asset; the install fails closed without it)");
-    }
+    // BACKUP_WALG_SHA256 is required only when WAL-G must be downloaded; an
+    // already installed binary is reused. The install command fails closed if
+    // a download is needed without a checksum.
     const endpointIsHttpUrl = (() => {
       try {
         const endpoint = new URL(config.BACKUP_PRIMARY_S3_ENDPOINT);
@@ -851,10 +926,10 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
         return false;
       }
     })();
-    if (!endpointIsHttpUrl) {
+    if (s3Required && !endpointIsHttpUrl) {
       problems.push("BACKUP_PRIMARY_S3_ENDPOINT must be an absolute http(s) URL when BACKUP_ENABLED=true");
     }
-    if (resolveBackupS3Mode(config) === "managed-minio") {
+    if (s3Required && resolveBackupS3Mode(config) === "managed-minio") {
       if (!config.BACKUP_PRIMARY_S3_ACCESS_KEY) problems.push("BACKUP_PRIMARY_S3_ACCESS_KEY is required for a managed MinIO (it becomes the MinIO root user)");
       if (config.BACKUP_PRIMARY_S3_ACCESS_KEY && config.BACKUP_PRIMARY_S3_ACCESS_KEY.length < 3) problems.push("BACKUP_PRIMARY_S3_ACCESS_KEY must be at least 3 characters for a managed MinIO");
       if (config.BACKUP_PRIMARY_S3_SECRET_KEY.length < 8) problems.push("BACKUP_PRIMARY_S3_SECRET_KEY must be at least 8 characters for a managed MinIO");
@@ -863,11 +938,11 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
       }
       try {
         const endpoint = new URL(config.BACKUP_PRIMARY_S3_ENDPOINT);
-        if (endpoint.protocol === "http:" && !config.BACKUP_ALLOW_INSECURE_HTTP) {
-          problems.push("a managed MinIO on an http:// endpoint requires BACKUP_ALLOW_INSECURE_HTTP=true");
+        if (endpoint.protocol === "http:" && !config.BACKUP_S3_ALLOW_INSECURE_HTTP) {
+          problems.push("a managed MinIO on an http:// endpoint requires BACKUP_S3_ALLOW_INSECURE_HTTP=true");
         }
         if (endpoint.protocol === "https:") {
-          problems.push("a managed MinIO is installed without TLS; use an http:// endpoint (with BACKUP_ALLOW_INSECURE_HTTP=true) or BACKUP_S3_MODE=external");
+          problems.push("a managed MinIO is installed without TLS; use an http:// endpoint (with BACKUP_S3_ALLOW_INSECURE_HTTP=true) or BACKUP_S3_MODE=external");
         }
       } catch {
         /* already reported above */

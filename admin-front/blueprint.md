@@ -6,7 +6,7 @@ Generated from: `admin-ui.system`, `admin-ui.routes`, `admin-ui.tables`, `admin-
 
 ## Admin UI System
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-07
 
 ## 1. Purpose and scope
 
@@ -35,7 +35,7 @@ The key intent from `design/90-archive/superseded-ui/portal_ui_abstraction_and_m
 4. **A precision shell.** A 248 px permanent drawer on desktop, a 56 px flat app bar, keycap-style active navigation, collapsible section groups, breadcrumbs, a global search entry point, help entry point, theme/locale controls, and an operator identity card.
 5. **A split-screen auth surface.** Institutional brand and security posture on one side; the login panel on the other.
 6. **A primitive layer instead of page-level Vuetify soup.** Pages compose `PageHeader`, `StatusBadge`, `MoneyDisplay`, `MonoRef`, `MetricStrip`, `SurfaceCard`, `FormModal`, `FormField`, `SlideOverDrawer`, `DescriptionList`, `SegmentedTabs`, `EmptyState`, and `JsonDiffViewer`. The unified table surface is the fourteenth deliverable even though the design prose sometimes calls it a fourteenth primitive.
-7. **Disciplined tables.** 40 px single-line rows, no rainbow row tints, one primary row action plus an overflow menu, collapsible filters, and XLSX export through the shared pipeline.
+7. **Disciplined tables.** 40 px single-line rows, no rainbow row tints, one primary row action plus an overflow menu, a sticky action column, a row-level right-click/`Shift+F10` context menu that reuses the same action model, collapsible filters, and XLSX export through the shared pipeline.
 8. **No global scaling transform.** A previous whole-app `transform: scale(0.9)` caused fixed-position and RTL problems and was removed. The old `SCALING_FEATURE.md` files were deleted; do not reintroduce them.
 
 The implementation plan records one correction to the design prose: the blueprint says "14 primitives" but names 13 components. The 13 named exports plus the unified table surface are the actual contract checked by the compliance test.
@@ -97,7 +97,8 @@ No external font request is required. `tests/e2e/admin/a11y.spec.ts` and the she
 | `SurfaceCard` | Flat hairline card with padding/title slots; `SurfaceCardText` is its body extra. |
 | `FormModal` | Standard modal shell with title, body, footer, submit/loading/error behavior. |
 | `FormField` | Static label, hint, error, required marker, and maker-checker hint wrapper. |
-| `SlideOverDrawer` | Right/end slide-over shell used for details and contextual help. |
+| `SlideOverDrawer` | Right/end slide-over shell used for details and contextual help. Open drawers keep a module-level stack and take a z-index from their position in it (base 1100, step 4, below Vuetify dialogs/menus), so the drawer opened last is always on top even when it is an always-mounted sibling of its parent (Vuetify otherwise gives earlier-registered items the higher z-index). |
+| `AccountLinesTable` (`components/ledger`) | Server-paginated posting lines of one GL account with side/reference-type/date filters, search and totals of the filtered set; used by the wallet statement and the GL account drawer (`financeGlAccountLines`, `walletStatement`). |
 | `DescriptionList` | Label/value lists with money, mono, and column options. |
 | `SegmentedTabs` | Compact tab switch used for periods, roles, languages, and modes. |
 | `EmptyState` | Empty/error-adjacent illustration-free state block. |
@@ -191,6 +192,7 @@ However, the stale files are still physically present:
 - Adding a status: use `StatusBadge` and keep the tone mapping centralized.
 - Rendering money: use `MoneyDisplay`/`MoneyText` or decimal-backed utilities; never format money with floating point.
 - Adding a drawer/modal: use `SlideOverDrawer`/`FormModal` so focus, padding, and footer behavior stay consistent.
+- Totals rows go in a `<tfoot>` of a `.pg-unified-table`/`.pg-table-card` table: the shared stylesheet gives them the body-row padding, edge insets and a top rule (before 2026-11-07 a `tfoot` had no padding and its label touched the table border).
 - Changing the theme: edit `plugins/vuetify.ts` and the `--pg-*` tokens together; do not add page-local hard-coded palettes.
 - Learning surfaces: the Guide (`styles/guide.css`) and the Academy (`styles/academy/*.css`, see `03-guide-and-academy.md` §7.6) are built from these primitives and tokens. A feature area may add its own stylesheet under `src/styles/` imported from `main.ts`, but must not inject runtime `<style>` blocks, introduce a second palette, or cap the page width below the `ScreenContainer`; only reading text takes a measure (75 ch).
 - Deploy-time visibility: set `ADMIN_SHOW_CHECKLISTS` and `ADMIN_SHOW_HELP_PANELS` in `deploy.env`; the deploy engine writes `runtime-config.js`. Rebuilding the SPA is not required for the runtime flags to change.
@@ -279,9 +281,21 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 - **Logout and cookie sessions (GAP-019, RESOLVED).** The user store logout calls `POST v1/admin/auth/logout` (`urlsMap.authLogout`) through `revokeServerSession` (best effort, never throws) and always clears the local session. `utils/security/sessionToken.ts` handles the cookie mode: a login payload with `sessionCookie: true` is kept as the non-secret `cookie-session` sentinel and requests send `X-Pg-Csrf: 1` instead of a bearer token.
 - **XLSX 0.20.3 (GAP-029).** `xlsx` is pinned to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` (the maintained SheetJS build; the npm registry copy 0.18.5 is vulnerable) and `@types/xlsx` was dropped. The shared XLSX pipeline is unchanged. `@prisma/client` is still listed in `admin-front/package.json` although nothing imports it (residual).
 
+## No raw operational JSON; structured builders (2026-11-06)
+
+**Rule:** operational data is never shown as `JSON.stringify`/`<pre>`, and never edited in a JSON textarea. Allowed exceptions: raw HTTP wire traces (`gateways/ai-import`, the step/webhook trace blocks of `operator-cases/[id]`), data exports (`audit-logs` CSV/XLSX columns, the platform-settings backup file), and plain-text message bodies (rail instructions, notification template body, restore reason).
+
+- **`JsonDiffViewer`** (rewritten) takes `diff: unknown`: an RFC-6902 array, `{operations}`, `{before, after}` or a plain payload (`DRAFT_AML_RULE`, `CREATE_ADJUSTMENT`...). The pure model `components/ui/jsonDiffModel.ts` humanises paths (`/payoutBankDetailsJson/iban` -> "Payout Bank Details · IBAN"), flattens nested objects to sub-rows, classifies money keys (`*Amount|*Ceiling|*Fee|*Balance|*Volume` -> `MoneyDisplay`), status strings (`StatusBadge`), lists (chips) and dates. `JsonValueCell`/`JsonValueList` render the same values as key/value rows. `components/JsonPatchDiff` is now a thin wrapper.
+- **`summarizeAuditChange(before, after)`** (`utils/auditSummary.ts`) returns the humanised labels of the changed top-level keys (ignoring identical values and timestamps); `components/AuditChangeChips.tsx` shows up to 3 chips plus "+N more" in the audit-log table, Merchant 360 and the case timeline.
+- **Builders** (`components/builders/**`, each with a pure model under `builders/model/` and unit tests): `CostModelBuilder` (+`formatCostModel`: `1.25% + 0.500 LYD (min…, max…)`), `RouteScopeBuilder` + `MismatchPolicyBuilder` (`tolerance_amount`, the only key the settlement engine reads), `MaintenanceWindowsBuilder` (absolute UTC `start`/`end`; a route is hidden while `start <= now < end`), `ParserConfigBuilder`/`ColumnMappingBadges` (statement sources), `AmlParamsBuilder`/summaries (7 rule types; `scope` is edited as a structured tree and the UI states that the engine does not evaluate it), `PlatformSettingTypedEditor` + `SettingValueView` (typed editors for the decision register OD-1..OD-11 and the policy keys; unknown keys fall back to a structured tree editor that preserves them), `LogoAssetPicker`, `ChipListInput`, `OptionChips`, `RepeatableRows`, `KeyValueSummary`, `StructuredValueEditor`. Every builder round-trips unknown keys losslessly.
+- **Commission tiers:** `CommissionTiersEditor` (`pages/finance/pricing/components`) edits `{ upTo, flat, percent }` (percent is a fraction) and is shown for TIERED only (the calculator ignores tiers for FLAT/PERCENTAGE/HYBRID). The create form also carries min/max fee, fee bearer, rounding mode and optional merchant/application scope.
+- **Shared drawers** (`components/ledger/JournalEntryDrawer`, `GlAccountDrawer`; `pages/merchants/components/WalletDetailDrawer`, `ApplicationDetailDrawer`) are opened by an id prop (`null` = closed) and emit `close`/`changed`. Governed actions share `ReasonModal` (>=10 characters) and a 202 handler that explains "submitted for approval" and links to `/approvals`.
+- **i18n slices:** `constants/i18n/{commerce,ledgerOps,forms,builders}.ts` are merged by `plugins/i18n.ts` after the main catalogue; each new string has an `[English, Arabic]` pair and unit tests assert EN/AR sync. Table filter configs live in `components/Table/registry/{commerce,ledgerOps,forms}.ts` and are spread into `tableRegistry`.
+- Compliance gate (`components/ui/__tests__/ui-abstraction-compliance.test.ts`): every standard route page uses `PageHeader` (helper components belong in `components/` subfolders), no raw `VCard`/`VDialog`/`VChip`.
+
 ## Admin Route and Page Catalog
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-06
 
 ## 1. Purpose and scope
 
@@ -461,10 +475,9 @@ The merchant portal has a similar gap: `Statements` is shown in navigation only 
 
 ### Partial
 
-- Admin route authority coverage is incomplete: six privileged surfaces are ungated in the UI.
 - Merchant `Statements` is not route-gated.
 - Contextual help covers most admin routes but not all (see `04-contextual-help.md`).
-- Admin `AdminUsers` explicitly uses an empty authority array while the backend requires `user:read`/`security:read`; this is a deliberate-looking but unsafe pattern.
+- The admin route-authority table is advisory and must be kept in sync with core; the Guide/Academy reader routes are login-only and the Team page keeps its own `SECURITY_ADMIN` check.
 
 ### Missing / deferred
 
@@ -519,11 +532,29 @@ These suites require a running stack and are skipped without the live/edge servi
 
 ## Security hardening (2026-11-05)
 
-The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard: `PUBLIC_FOR_AUTHENTICATED` is Dashboard, AdminGuide and AdminAcademy; `AUTHORITY_ALIASES` normalizes dotted and colon forms. Entries were added for AdminUsers, AdminUserDetail, AdminPlatformSettings, PricingControls, GatewayAiImport and AdminCheckoutHelp. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
+The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard. `PUBLIC_FOR_AUTHENTICATED` covers Dashboard, every Guide reader route and every Academy route (the Team page keeps its own `SECURITY_ADMIN` check); `AUTHORITY_ALIASES` normalizes dotted and colon forms. AdminUsers/Detail accept `user:read`/`user:write`/`security:*`, AdminPlatformSettings accepts `settings:read`/`settings:write` (plus the security fallback), and PricingControls includes `liquidity.read`. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
+
+## Admin UI completion: six new routes (2026-11-06)
+
+Six protected children were added to `admin-front/src/router/index.ts` (and the sidebar in `layouts/sections.tsx`, authorities in `utils/routeAuthorities.ts`, guide context-map screens). The numbered table in 3.2 and the "37" counts in this part predate the Guide/Academy routes; the router now has **60** protected children (the six below included), so treat the table as a historical catalog and this section as current for these routes.
+
+| Path | Name | Sidebar section | UI authority | Backend authority | Purpose |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `/wallets` | `Wallets` | Onboarding | `merchants.read` or `support.read_merchant` | `merchant:read` (freeze `merchant:write`) | Cross-merchant wallets: KPI strip, live/checkpoint balance ("Restricted" for non-financial roles), freeze (immediate) / unfreeze (approval) from the row menu. **Inspect** (or the wallet id) navigates to `WalletDetail`; `?open=<id>` redirects there. "Inspect GL account" still opens the GL drawer. |
+| `/wallets/:id` | `WalletDetail` (`meta.parentName: Wallets`) | Onboarding | same as `Wallets` | `merchant:read` (freeze `merchant:write`) | Wallet details page replacing the old wallet drawer: header with status badge, frozen banner, pending approvals, Freeze/Request unfreeze, Refresh; metric strip (live, checkpoint, posted since checkpoint, pending cash-outs). `?tab=` (`overview` default, `statement`, `links`, `activity`): Overview (details card, shard table with a padded **Total** row and a shards-vs-live-balance integrity badge), Statement (`AccountLinesTable`: server-paginated posting lines with side/reference-type/date filters, search, totals of the whole filtered set, links to the source record and to the journal entry drawer), Links and cash-outs (assigned applications, last 10 cash-outs), Status history (`/wallets/:id/audit-events`: when, action, change, reason, by, approval). Merchant 360 and the application drawer link here. |
+| `/applications` | `Applications` ("Applications & Channels") | Onboarding | same | `merchant:read` / `merchant:write` | Tabs Applications, Payment Links, POS Terminals; drawer with rail whitelist, redirect domains, API tokens (revoke), link cancel, terminal status; suspend immediate, reactivation and policy edits go to approval. `?tab=links\|pos`, `?open=<id>`. |
+| `/transactions` | `Transactions` ("Transactions & Webhooks") | Operations | `merchants.read`, `support.read_merchant` or `attempt:read` | `attempt:read` (+`merchant:read`/`finance:read`) | Tabs Payment Attempts and Inbound Webhooks (verified / unmatched filters); the attempt drawer shows summary, step logs, inbound events and the checkout retry group as structured rows. |
+| `/credential-sets` | `CredentialSets` | Gateways | `credentials.manage` or `gateways.edit` | `credential:read`/`gateway:read`, `credential:write` | Vault entries: create, rotate, verify, revoke (reason); secrets are write-only. `?highlight=<id>` (from search hits and Merchant 360). |
+| `/finance/journal-entries` | `JournalEntries` | Finance | `profit.read` or `liquidity.read` | `finance:read` | Double-entry explorer: balanced badge, T-account drawer, GL account drawer; `?glAccountId=`, `?open=`. |
+| `/system/jobs-outbox` | `JobsOutbox` ("Jobs & Outbox") | Operations | `security:read` | `security:read` / `security:write` | Outbox and audit-outbox monitors (no retry exists), background-job requeue, failed-notification retry. The metric strip also shows the ledger automation: shards behind their checkpoint (with the most pending lines), shards failing the checkpoint proof, and the last shard scaling. |
+
+Existing routes that changed: `Invariant` is now "Ledger Audit & Invariant" with per-account actions (shards and lines, journal entries, checkpoint rollup); `MerchantDetail` shows the Wallets tab to every `merchant:read` role and gained interactive wallets/applications, structured beneficial owners, KYB revalidation, access rows and pending-change diffs; `Gateways` gained a route-health drawer; `Liquidity` shows route daily-cap utilisation; `GatewayRoutes`, `AdminPlatformSettings`, `Reconciliation`, `AmlRules`, `Rails`, `Approvals`, `AuditLog`, `Disputes`, `PricingControls` lost their raw-JSON views/inputs (see `admin-ui.system`). The GL account drawer (`GlAccountDrawer`) shows the routing width, a derived checkpoint status badge, a per-shard table (balance, lines, pending, checkpoint, checkpoint age, status, padded Total row), the paginated Lines table, "Run checkpoint rollup" (verifies every shard, names a failing one) and "Set shard count" (`finance:write`, reason, audited) and, per failed shard, **Repair** (`ShardRepairModal`: preview from the journal; an intact shard is recomputed at once with a reason, a damaged one is submitted to Approvals as `GL_SHARD_REPAIR`). Shared drawers are opened by id prop and clear themselves on `close`: `JournalEntryDrawer`, `GlAccountDrawer`, `WalletDetailDrawer`, `ApplicationDetailDrawer`. `attempt:read` was added to `AUTHORITY_ALIASES` (no portal equivalent).
+
+Gaps: the dashboards/global search still route `payment_attempt` hits to Merchant 360's transactions tab (a test pins it; `Transactions?open=` would be a one-line change); approvals' "Open subject" has no target for `WALLET`/`APPLICATION`/`POS_TERMINAL`; merchant users open the `AdminUserDetail` route (works: `GET /users/:id` serves any user id).
 
 ## Tables Filters and Exports
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-07
 
 ## 1. Purpose and scope
 
@@ -542,6 +573,7 @@ The v2 design intends tables to look operational rather than decorative:
 5. **Stable chrome.** Toolbar, filters, table card, and footer use explicit padding tokens and the `.pg-table-card` class.
 6. **Predictable exports.** Every spreadsheet export goes through the shared XLSX pipeline, with translated headers, styled header rows, frozen header row, widths, and a stable title.
 7. **Human checklist before risky exports.** Summary/export cards can require checklist items; deploy flags can hide checklists without changing behavior.
+8. **Actions are always reachable.** The action column is sticky to the inline end, so the visible primary action and the overflow trigger never require horizontal scrolling. A row-level context menu offers the same actions at the pointer (right-click) and from the keyboard (`Shift+F10`); the menu lists the primary action first, then the overflow items. The sticky trigger remains the touch path and the accessible baseline; links and form fields keep their native context menu.
 
 ## 3. As-built architecture
 
@@ -553,12 +585,22 @@ The v2 design intends tables to look operational rather than decorative:
 | `DataTable` | `admin-front/src/components/Table/DataTable.tsx` | Either local data mode or "server" mode driven by a `server` prop or `tableRegistry[route.name]`. Server mode fetches one page of up to 200 rows and paginates locally. Persists server search/filter/sort state in `sessionStorage`. |
 | `Table` | `admin-front/src/components/Table/Table.tsx` | Renders the Vuetify table, compact row styling, selection, column filters, row tone, and cell rendering. |
 | `TableFilters` | `admin-front/src/components/Table/TableFilters.tsx` | Renders filter controls by type, active chips, summary text, a mobile/desktop surface, and an injection key so the toolbar can toggle filters. |
-| `TableRowActions` | `admin-front/src/components/Table/TableRowActions.tsx` | One optional primary action plus a right-aligned overflow menu. Supports danger/disabled/hidden items and dividers. |
+| `TableRowActions` | `admin-front/src/components/Table/TableRowActions.tsx` | One optional primary action plus a right-aligned overflow menu. Supports danger/disabled/hidden items and dividers. It also binds the row context menu (`contextmenu` + `Shift+F10`), shares the menu panel with the overflow trigger, and owns the one-open-menu coordinator. |
 | `HeaderFooter` | `admin-front/src/components/Table/HeaderFooter.tsx` | Desktop/mobile toolbar and pagination, search, refresh, filter trigger, record count, XLSX button, and `useTableXlsx`. |
 | `tableRegistry` | `admin-front/src/components/Table/tableRegistry.ts` | Maps a route name to a URL, list key, filters, default sort, optional storage key, params, and row mapper. |
 | `filters` | `admin-front/src/components/Table/filters.ts` | Filter union type, active-state detection, query mapping, and server config type. |
 | `referenceOptions` | `admin-front/src/components/Table/referenceOptions.ts` | Cached `/options/:kind` loaders for merchant/rail/gateway/user/wallet filters. |
 | `statusTone` | `admin-front/src/components/Table/statusTone.ts` | Status-to-tone mapping used by filters and status pills. |
+
+### 3.1.1 Row context menu and sticky action column (2026-11-07)
+
+- **Sticky action column.** `.table-wrapper .pg-col-actions` is `position: sticky; inset-inline-end: 0` with an opaque surface background, a header above the body cells, and the hover surface on `tr:hover`. Removing `.modern-table { overflow: hidden }` was required so the sticky cell resolves against `.table-wrapper` (the actual horizontal scroll container).
+- **One integration point.** `TableRowActions` finds its row (`root.closest("tr")`) on mount, marks it with `data-pg-row-actions-bound="true"`, and binds `contextmenu` and `keydown`. No page changes are needed; `MiniTable` rows that use the same component are covered too. The first action cell in a row owns the binding.
+- **Context menu semantics.** Right-click opens the shared menu at the pointer through a hidden fixed activator; Vuetify flips it near the viewport edge and handles RTL. The activator's element ref MUST be composed with the one Vuetify passes in `activatorProps.ref` (`composeActivatorRef`): a second `ref` on the same element, before or after the spread, replaces Vuetify's and the menu then has no anchor and opens at the top-left of the page (found and fixed 2026-11-08; the same applies to the overflow button, whose focus return depends on its own ref). The e2e specs assert the menu position against the pointer. The menu always contains the primary action first (disabled/loading respected), a divider, then the visible overflow items. `hidden`/`disabled`/`dividerBefore` behave exactly as in the overflow menu.
+- **Native exclusions.** `a`, inputs, text areas, selects, contenteditable fields, Vuetify field/checkbox/switch/radio/slider controls and `[data-no-row-context-menu]` keep the browser menu. Right-clicking a button (including the action buttons) opens the row menu.
+- **Keyboard and focus.** `Shift+F10`/the ContextMenu key on any focused, non-editable element in the row opens the menu anchored at the action cell. Opening moves focus to the first enabled item; `Escape` is handled by a capture-phase window listener (so it also works when another overlay owns the global-top flag and when focus stayed on the row) and `restoreFocus()` returns focus to the overflow/primary button. The visible action button remains the accessible baseline.
+- **One menu at a time.** A module-level closer is registered when either the overflow or the context menu opens; opening another row's menu closes the previous one. The button and context menus share the same panel renderer (max-height `min(70vh, 420px)`, internal scrolling).
+- **Scope.** Admin shared tables (`ApiTable`/`DataTable`/`DataPage`) and `TableRowActions` used inside `MiniTable` rows. Custom inline action cells that do not use `TableRowActions` are not covered. The merchant portal uses the identical component and CSS copy.
 
 ### 3.2 Filter types
 
@@ -788,15 +830,19 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 - 2026-11-03 — Initial canonical table/export part. Records the 19 registry configurations, hybrid 200-row server mode, current-page-only XLSX export, summary export surfaces, and runtime checklist flags.
 
+## Registry slices (2026-11-06)
+
+`components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`.
+
 ## Admin Guide and Academy
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-07
 
 ## 1. Purpose and scope
 
 This part owns two employee learning products in `admin-front`:
 
-- The Admin Interactive Guide at `/guide/**`: 14 books, 125 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
+- The Admin Interactive Guide at `/guide/**`: 14 books, 134 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
 - The Employee Academy under `/academy/**`: eight tracks, lessons with practice checks, simulated labs, server-graded certification exams, 12-month badges, certificates and a `SECURITY_ADMIN` team view.
 
 It does not own the merchant guide or the checkout help center. The future-guide design is now implemented; its detailed implementation notes live in `06-guide-v2.md`.
@@ -810,19 +856,21 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | Artifact | Count / notes |
 | :--- | :--- |
 | `books.json` | 14 books |
-| `articles.en.json` | 125 articles with headings, plain text, roles, UI status and related ids |
+| `articles.en.json` | 134 articles with headings, plain text, roles, UI status and related ids |
 | `glossary.en.json` | 151 terms with aliases, Arabic term and related slugs |
-| `cards.en.json` | 22 cards and 99 required checklist items |
-| `playbook.en.json` | 29 situations with screens, cases and articles |
+| `cards.en.json` | 25 cards and 112 required checklist items |
+| `playbook.en.json` | 32 situations with screens, cases and articles |
 | `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
 | `faq.en.json` | 58 quick answers |
 | `data.json` | `ledger-events`, `visible-rails`, `attempt-transitions` |
-| `context-map.json` | 23 screens plus the `General` fallback |
+| `context-map.json` | 25 screens (including `Wallets` and `SystemBackups`), the last being the `General` fallback |
 | `error-codes.en.json` | 19 codes parsed from `b13-01` |
 | `edge-cases.en.json` | 140 rows parsed from the v4.1 design |
 | `meta.json` | `contentVersion`, deterministic `generatedAt`, counts and source SHA-256 |
 
 The extractor output is deterministic and byte-stable. The content test re-runs it into a temporary directory and fails on drift, count changes, unresolved links, empty bodies, external URLs, missing context-map routes, missing widgets or a gzip total above 400 KB.
+
+`scripts/overhaul-guide-and-academy-clarity.ts` is the content clarity gate. It labels every bare inline `[[a:…]]` / `[[c:…]]` / `[[s:…]]` / `[[g:…]]` token outside tables with a short natural title, skips code fences, table rows and already-labelled links, and supports `--check` (used by `guide-content.test.ts`). Table cells stay unlabelled because a `|` inside a link label would split the markdown cell; the readers shorten bare table links at render time instead. Parenthetical reference dumps are removed at render time (see §3), so the canonical prose preserves the links. The clarity overhaul (2026-11-07) rewrote 101 Guide articles (Books 2 and 4–12; Books 0, 1, 3 and 13 untouched) so each opens with a `:::summary` "In plain words" callout and a plain-language opening, and rewrote 40 Academy lessons as self-contained 350–600 word tutorials (all 50 lessons are now in that form); it also added short labels on bare references. Counts, ids, headings, check ids, quiz structure and table rows are unchanged. Each rewrite was validated mechanically and then reviewed independently against the old text and the code; the factual corrections that review found are listed in `design/07-guides-and-academy/guide_content_fixes.md` and `academy_content_fixes.md`. The authoring standard is §10.
 
 ## 3. Guide reader and navigation
 
@@ -839,7 +887,14 @@ Eight routes are registered with no authority gate:
 | `AdminGuideCards` | `/guide/cards/:id?` | Safeguard card catalog |
 | `AdminGuideEdgeCases` | `/guide/edge-cases` | Filterable 140-case catalog |
 
-`MarkdownView` uses `markdown-it` (`html:false`, `linkify:false`) and adds callouts, diagram fences, table scrolling, stable heading ids, article/card/situation/glossary links, glossary auto-linking (first occurrence per article, never in headings, links, code or table headers) and widget placeholders. The glossary popover is keyboard reachable and focus-trapped.
+`MarkdownView` uses `markdown-it` (`html:false`, `linkify:false`) and adds callouts, diagram fences, table scrolling, stable heading ids, article/card/situation/glossary links, glossary auto-linking (first occurrence per article, never in headings, links, code or table headers) and widget placeholders. The glossary popover is keyboard reachable and focus-trapped. Markdown and edge-case tables keep a `9.5em` minimum column width, so a table narrower than that budget scrolls horizontally inside its focusable wrapper (with themed thin scrollbars and contained overscroll) instead of compressing; cells use `overflow-wrap: normal` and never break a word letter by letter. The edge-case filter controls also cap at the row width so the page itself never overflows on a phone.
+
+The clarity renderer adds:
+
+- **Automatic parenthetical extraction.** Parenthetical pointers such as `([[a:b06-12]])`, `(see [[a:b07-03]])` or `(see [[a:b06-05]], [[a:b06-07]])` are removed from the sentence, deduplicated and rendered in a per-`##`-section **Related** tray of typed pills (`Guide`, `Screen`, `Playbook`, `Term`). Meaningful parenthetical prose is preserved: `(called rails, see [[a:b02-06]])` becomes `(called rails)`. Links extracted this way carry `data-ref-kind` and `data-ref-id`.
+- **Short inline labels.** A bare `[[a:id]]` renders the target's short title (the clause before a colon, or at most 12 words) instead of dumping the full 10-to-15-word title into the sentence. The full title is still the anchor's `title` attribute.
+- **Summary and reference callouts.** `:::summary` renders a warm "In plain words" banner for a two-sentence orientation at the top of an article; `:::refs` renders a "Where to go next" callout whose links explain why the reader would follow them. Explicit `:::refs` links are excluded from the automatic section tray to avoid duplicates.
+- **Reference preview popover.** In the full reader (not compact embedded views), clicking a guide, screen or playbook pill opens a keyboard-accessible popover with the type badge, title, reading time or risk, a short plain-text body and two actions: **Stay here** and **Read full page →**. Compact views (`ContextHelpDrawer`, `SafeguardDialog`, Academy help drills) keep direct navigation so the hosting dialog is not covered.
 
 ## 4. Search and contextual help
 
@@ -890,11 +945,11 @@ Specification: `design/07-guides-and-academy/academy_system_design_and_content.m
 
 | Output | Content | Audience |
 | :--- | :--- | :--- |
-| `admin-front/src/content/academy/generated/` | `meta`, `tracks`, `modules`, `lessons.en` (markdown `body`, rendered `html`, `plainText`), `checks.en` (98 practice questions WITH keys), `labs.en` (WITH keys), `drills.en`, `pages.en`, `lab-vectors`, `exam-blueprints.public` (no question ids) | browser |
-| `core-back/content/academy/exam-bank.json` | 218 exam-pool questions WITH keys + 8 blueprints | server only, never served |
+| `admin-front/src/content/academy/generated/` | `meta`, `tracks`, `modules`, `lessons.en` (markdown `body`, rendered `html`, `plainText`), `checks.en` (100 practice questions WITH keys), `labs.en` (WITH keys), `drills.en`, `pages.en`, `lab-vectors`, `exam-blueprints.public` (no question ids) | browser |
+| `core-back/content/academy/exam-bank.json` | 223 exam-pool questions WITH keys + 8 blueprints | server only, never served |
 | `core-back/content/academy/catalog.json` | tracks → lesson/lab/exam ids, lesson/lab titles, badge ids; no questions | server (eligibility, team view) |
 
-Counts (asserted by `academy-content.test.ts`): 8 tracks, 11 modules, 49 lessons (20 Foundation + 29 role), 98 checks, 218 exam-pool questions (203 single, 13 number, 2 order; 40 critical), 15 labs / 86 tasks, 8 exams, 10 drills, 7 pages (+ `lab-vectors`). Generated output is ~75 KB gzipped (budget 600 KB). Exam-pool question ids never appear under `admin-front/src/content/academy/generated/`.
+Counts (asserted by `academy-content.test.ts`): 8 tracks, 11 modules, 50 lessons (20 Foundation + 30 role), 100 checks, 223 exam-pool questions (208 single, 13 number, 2 order; 43 critical), 16 labs / 92 tasks, 8 exams, 11 drills, 7 pages (+ `lab-vectors`). Generated output is ~75 KB gzipped (budget 600 KB). Exam-pool question ids never appear under `admin-front/src/content/academy/generated/`.
 
 ### 7.2 Tracks, badges, routes
 
@@ -962,6 +1017,20 @@ The first rebuild (7.1-7.5) was functionally complete but visually foreign: it i
 
 **Test hooks kept** (see `tests/e2e/admin/academy-*.spec.ts`, `academy-live.ts`): `.ac-wrap`, `.ac-nav`, `.ac-card` (never nested, so the overlap check holds), `.ac-chip[data-track]`, `aria-busy` skeletons, every heading/button/label/region name the specs query. No logic file changed (`useAcademyProgress`, `progressMerge`, `nextStep`, `labScoring`, `useEligibility`, `readingOpened`).
 
+### 7.7 Content accuracy pass (2026-11-05)
+
+The guide was checked against the built admin screens and the current core behaviour. Stale "no screen" claims were removed: staff user management (Admin Users), audit search (Audit Log), commission/velocity changes (Pricing & Limits) and versioned platform settings (Platform Settings) all have screens. The menu table now lists Audit Log, Admin Users, Inquiry Schedule, Backups, Platform Settings and Pricing & Limits, and the Admin Users, Inquiry Schedule and Platform Settings articles describe those screens. MFA is described as an SMS code to the registered phone (not an authenticator app), sign-out is documented as server-side revocation, the authority catalogue is described as closed with no self-escalation, reconciliation fingerprints are per statement source, and the Backups screen/drill/policy flow is described. Academy `l-m1-5` uses the same SMS wording. The exact corrections are logged in `guide_content_fixes.md` and `academy_content_fixes.md`.
+
+### 7.8 Offline companion (2026-11-06)
+
+`companion-app/` is a separate offline-first Android app that mirrors the complete Guide and
+the learner-facing Academy. It runs the same canonical extractors with redirected output and
+commits the resulting snapshot in `companion-app/public/content/`. It deliberately excludes
+the Academy exam bank, team view and server-graded certification. The app is documented in
+`project-design/parts/10-companion/00-offline-companion.md` and
+`design/06-ui/pg_companion_offline_android_app.md`. No runtime code in `admin-front` is
+imported by the companion; this part remains the authority for the web Guide/Academy.
+
 ## 8. Contracts and invariants
 
 1. The design file content is the single source of truth; article prose is never retyped into TSX.
@@ -982,11 +1051,36 @@ The first rebuild (7.1-7.5) was functionally complete but visually foreign: it i
 
 ```bash
 cd admin-front && bun run content:guide && bun run content:academy && bun run type-check && bun run test:unit && bun run build
+bun scripts/overhaul-guide-and-academy-clarity.ts --check
 cd ../tests && bunx vitest run unit/guide- unit/academy-
 cd ../core-back && bun run typecheck && bun test test/academy-
 cd ../admin-back && bun run typecheck && bun test test/academy-progress.test.ts test/admin-surface.test.ts
 cd ../tests && bunx playwright test --project=admin e2e/admin/guide-*.spec.ts e2e/admin/academy-*.spec.ts   # needs a deployed stack
 ```
+
+## 10. Authoring standard (readability)
+
+Every new or edited Guide article and Academy lesson follows this standard. Readers range from an intern to the CEO and most read English as a second language, so articles are **layered**: the summary and tables serve the expert, the story and example serve the newcomer.
+
+**Article anatomy.** (1) `:::summary Big picture in 20 seconds`: at most two sentences, 45 words. (2) An opening in everyday terms (a situation the reader knows, or their real question), with at most one analogy, noting where it stops being true. (3) Short `###` sections whose headings say what they answer (never `##`). (4) A worked example with the shared cast wherever numbers or a sequence matter. (5) Reference tables only for lookup, each introduced by one sentence, at most five columns, no explanations hidden in cells. (6) Operator articles end with what you do and never do. (7) At most three callouts and an optional `:::refs` of at most three links, each with a reason to click.
+
+**Sentences.** Average at most 18 words, none over 28; one idea per sentence, four sentences per paragraph at most; active voice. Introduce a term in its own short sentence before using it; at most one parenthesis per paragraph. One name per concept; spell out abbreviations at first use; no idioms, no "simply/just/obviously". Code identifiers stay exact in backticks, but say what they mean in words first. LYD amounts use three decimals (25.500 LYD) and every example sum must be recomputed.
+
+**Links.** Inline links use a natural two-to-six word anchor that reads as part of the sentence; never a parenthetical link, never an article id in prose. Inside a table use a bare `[[a:id]]`. Every existing link target is kept.
+
+**Shared cast.** Layla (payer), Noon Mart (merchant), Sadad / MobiCash / Edfali (partner wallets), Ali (operator), Huda (finance), Omar (compliance). Default example: Layla pays 25.500 LYD for a phone case at Noon Mart with Sadad. Example roles must follow the approval matrix (`b04-05`). Invented numbers are labelled as examples.
+
+**Facts are sacred.** Rewriting changes readability only. Never add, drop, soften or strengthen a claim, state name, number, limit, role, screen name or safeguard. A claim the code contradicts is corrected only with evidence recorded in the `*_content_fixes.md` files; a disagreement between text and code that needs a product decision goes to `*_content_questions.md`.
+
+**Lessons.** Six headings in order (`You will be able to`, `Key ideas`, `A worked example`, `Common mistakes`, `Read now`, `Check yourself`); 350–600 words that a learner can pass without opening the Guide; every correct answer and the reason each wrong option is wrong is taught in the lesson; check ids and Read-now links unchanged.
+
+**Review before merging.** A mechanical diff (header, link targets, widgets, dropped numbers and code terms) is not enough: the rewrite of 101 articles and 50 lessons found 21 high-severity and about 67 medium problems (invented behaviour, wrong example roles, misleading analogies) only when a second reader compared old text, new text and the code.
+
+## Backup and disaster-recovery content (2026-11-06)
+
+Added from `design/02-storage-and-performance/backup_engine_reliability_architecture_and_test_plan.md` section 5, corrected against the real product: Guide articles `b12-09` (full/delta/WAL/PITR, topologies, encryption and the three storage tiers), `b12-10` (the Backups screen: real tile, badge and column labels) and `b12-11` (manual triggers, maker-checker policy changes, queueing and idempotency); safeguard cards `sg-trigger-backup`, `sg-run-restore-drill`, `sg-update-backup-policy`; situations `s-backup-daemon-unreachable`, `s-wal-archive-lag-high`, `s-restore-drill-failed`; a `SystemBackups` context-map screen. Academy: lesson `l-m10-4` (GATEWAY_ADMIN and SECURITY_ADMIN tracks only, to avoid adding certification time for every learner), lab `lab-backup-dr-desk`, drill `drill-pitr-recovery` and exam questions `q-m10-113..117`.
+
+Corrections to the draft: the exam question ids `q-m10-004..008` collided with existing questions and were renumbered; the extractor requires exactly two checks per lesson, so the third moved into the exam pool; `@@map` takes a JSON block, not the draft's one-liner; the real route is `SystemBackups` (not `AdminSystemBackups`); the menu path is Operations -> Backups; the drill has three invariant checks, not five gates; unverified claims (cron gap minimums, hard-coded retention defaults, a 30-second tick) were removed. Content stays English-only like the rest of the Guide/Academy bodies. The three new cards are content only: they are not wired into `pages/system/backups/index.tsx` with `useSafeguard`.
 
 ## Contextual Help
 
@@ -994,7 +1088,7 @@ cd ../tests && bunx playwright test --project=admin e2e/admin/guide-*.spec.ts e2
 
 ## 1. Purpose and scope
 
-This part owns the admin contextual-help button and drawer, the 23-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
+This part owns the admin contextual-help button and drawer, the 25-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
 
 ## 2. As-built architecture
 

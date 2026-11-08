@@ -1,8 +1,24 @@
 import {
   parseNodeList,
+  PGBOUNCER_SESSION_ALIAS,
   type DeployConfig,
   type NodeSpec,
 } from "../lib/configSchema";
+import {
+  ensurePackagesScript,
+  isChanged,
+  outcomeBounced,
+  parseApplyOutcome,
+  pgbouncerApplyScript,
+  pgbouncerRestartSignature,
+  pgbouncerSystemdDropIn,
+  PGBOUNCER_DROPIN_PATH,
+  PGBOUNCER_SIGNATURE_PATH,
+  postgresApplyScript,
+  poolerLoginScript,
+  type ApplyOutcome,
+  type ProvisionRunner,
+} from "../lib/converge";
 import type { SshTarget } from "../lib/hostPlanner";
 import { assertSingleLine, dollarTag, pgbouncerQuoted, pgpassField, shellQuote, sqlIdent, sqlLiteral } from "../lib/quoting";
 
@@ -13,12 +29,18 @@ import { assertSingleLine, dollarTag, pgbouncerQuoted, pgpassField, shellQuote, 
  * `provisionPostgres18` only performs remote work through the supplied runner.
  */
 
-export interface ProvisionRunner {
-  dryRun?: boolean;
-  run(target: SshTarget, command: string, options?: { sudo?: boolean; sudoUser?: string; cwd?: string; timeoutMs?: number }): unknown;
-  capture(target: SshTarget, command: string, options?: { sudo?: boolean; sudoUser?: string; cwd?: string }): string;
-  writeRemoteFile(input: { target: SshTarget; path: string; content: string | Buffer; mode?: number; sudo?: boolean }): void;
-}
+export type { ProvisionRunner };
+
+/**
+ * True when two node specs are the same PostgreSQL cluster (same SSH host and
+ * service port, e.g. core + audit + log all on 5432). Such a cluster has ONE
+ * postgresql.conf, pg_hba.conf and WAL archive stream, so only one provisioner
+ * may own each of them.
+ */
+export const isSameCluster = (
+  a: { sshHost: string; servicePort: number } | null | undefined,
+  b: { sshHost: string; servicePort: number } | null | undefined,
+): boolean => a != null && b != null && a.sshHost === b.sshHost && a.servicePort === b.servicePort;
 
 export interface PgNodeRef {
   nodeId?: string;
@@ -34,6 +56,8 @@ export interface PostgresProvisionInput {
   runner: ProvisionRunner;
   config: DeployConfig;
   dryRun?: boolean;
+  /** Restart every service even when nothing changed (`--force-restart`). */
+  forceRestart?: boolean;
   primary?: PgNodeRef | null;
   replicas?: PgNodeRef[];
 }
@@ -41,6 +65,8 @@ export interface PostgresProvisionInput {
 export interface ProvisionReport {
   commands: string[];
   nodes: string[];
+  /** What happened to each managed service (`<host>:<service>` -> outcome); lets tests and the timing report prove nothing was bounced needlessly. */
+  outcomes?: Record<string, ApplyOutcome>;
 }
 
 const version = (config?: Pick<DeployConfig, "PG_VERSION">): string => config?.PG_VERSION ?? "18";
@@ -96,6 +122,19 @@ export const postgresMainConfigPath = (
   cluster: PgCluster,
 ): string => `/etc/postgresql/${version(config)}/${cluster.name}/postgresql.conf`;
 
+/**
+ * Loopback + the node's private IP, de-duplicated: on a single-host install the
+ * private IP IS 127.0.0.1, and PostgreSQL fails to start when it is told to
+ * bind the same address twice ("could not bind IPv4 address ... Address already
+ * in use").
+ */
+export const postgresListenAddresses = (privateIp?: string): string => {
+  const addresses = ["127.0.0.1", ...(privateIp ?? "").split(",")]
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return [...new Set(addresses)].join(",");
+};
+
 export const postgresMainConfigSnippet = (
   config: Pick<DeployConfig, "PG_VERSION"> & Partial<Pick<DeployConfig, "PG_RAM_GB" | "PG_IO_METHOD">>,
   cluster: PgCluster,
@@ -104,7 +143,7 @@ export const postgresMainConfigSnippet = (
 ): string => `data_directory = '${cluster.dataDir}'
 hba_file = '${cluster.hbaPath}'
 port = ${cluster.port}
-${postgresConfigSnippet(config, privateIp ? `127.0.0.1,${privateIp}` : "*")}${postgresTlsSnippet(cluster)}`;
+${postgresConfigSnippet(config, privateIp ? postgresListenAddresses(privateIp) : "*")}${postgresTlsSnippet(cluster)}`;
 
 const nodeEndpoint = (node: PgNodeRef | string): string =>
   typeof node === "string" ? node : node.privateIp ?? node.sshHost ?? "127.0.0.1";
@@ -229,8 +268,16 @@ After=network.target
 Type=simple
 User=postgres
 Group=postgres
+# /run is a tmpfs, so the socket directory is gone after every reboot. Without
+# this the postmaster dies with "could not create lock file
+# /run/postgresql/.s.PGSQL.<port>.lock" and never comes back up.
+RuntimeDirectory=postgresql
+RuntimeDirectoryMode=2775
 ExecStart=/usr/bin/postgres -D ${cluster.dataDir} -p ${cluster.port}
-ExecReload=/bin/kill -HUP \$MAINPID
+ExecReload=/bin/kill -HUP \\$MAINPID
+# SIGINT = fast shutdown. The default SIGTERM is a smart shutdown that waits for every session to end.
+KillSignal=SIGINT
+TimeoutStopSec=60s
 Restart=on-failure
 
 [Install]
@@ -238,23 +285,34 @@ WantedBy=multi-user.target
 UNIT
 fi
 systemctl daemon-reload
-systemctl enable --now ${cluster.service} || true`;
+# Started (with the final configuration) by applyPostgresCluster, not here.
+systemctl enable ${cluster.service} >/dev/null 2>&1 || true`;
+
+/**
+ * PostgreSQL server + client packages (pg_ctl, initdb, pg_basebackup, pg_dump, psql ...).
+ * Shared by the cluster bootstrap and by the backup host, which needs the same
+ * binaries even when it is a dedicated backup-only machine.
+ */
+export const postgresServerPackages = (
+  config: Pick<DeployConfig, "PG_VERSION">,
+): { debian: string[]; arch: string[] } => ({
+  debian: [`postgresql-${version(config)}`, `postgresql-client-${version(config)}`, `postgresql-contrib-${version(config)}`],
+  arch: ["postgresql"],
+});
 
 export const bootstrapCommands = (
   config: DeployConfig,
   role: "primary" | "replica" | "pgbouncer" = "primary",
   cluster: PgCluster = pgClusterFor(config, "primary", { privateIp: "127.0.0.1", servicePort: 5432 }),
 ): string[] => [
-  `if command -v apt-get >/dev/null 2>&1; then
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql-${version(config)} postgresql-contrib-${version(config)} pgbouncer
-elif command -v pacman >/dev/null 2>&1; then
-  pacman -Sy --noconfirm postgresql pgbouncer
-else
-  echo "unsupported package manager" >&2; exit 1
-fi`,
+  `if ! command -v apt-get >/dev/null 2>&1 && ! command -v pacman >/dev/null 2>&1; then echo "unsupported package manager" >&2; exit 1; fi
+${ensurePackagesScript({
+    debian: [...postgresServerPackages(config).debian, "pgbouncer"],
+    arch: [...postgresServerPackages(config).arch, "pgbouncer"],
+  })}`,
   ensureClusterScript(config, cluster),
-  ...(role === "primary" || role === "pgbouncer" ? ["systemctl enable --now pgbouncer || true"] : []),
+  // Enabled for boot, started by applyPgbouncer with its final configuration.
+  ...(role === "primary" || role === "pgbouncer" ? ["systemctl enable pgbouncer >/dev/null 2>&1 || true"] : []),
 ];
 
 /** pg_hba policy: TLS + SCRAM for every application/replication source. */
@@ -272,6 +330,19 @@ export const pgHbaSnippet = (config: DeployConfig, allowedSources: string[]): st
   ].join("\n") + "\n";
 };
 
+/**
+ * Idempotent creation of the streaming-replication role (used by replicas,
+ * Barman and the pg-native daemon).
+ */
+export const replicationRoleSql = (config: Pick<DeployConfig, "PG_REPLICATION_USER" | "PG_REPLICATION_PASSWORD">): string => {
+  const replUser = sqlIdent(config.PG_REPLICATION_USER, "PG_REPLICATION_USER");
+  const replUserLit = sqlLiteral(config.PG_REPLICATION_USER, "PG_REPLICATION_USER");
+  const replPw = sqlLiteral(config.PG_REPLICATION_PASSWORD, "PG_REPLICATION_PASSWORD");
+  const body = `IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${replUserLit}) THEN CREATE ROLE ${replUser} WITH REPLICATION LOGIN PASSWORD ${replPw}; ELSE ALTER ROLE ${replUser} WITH REPLICATION LOGIN PASSWORD ${replPw}; END IF;`;
+  const tag = dollarTag(body);
+  return `DO ${tag} BEGIN ${body} END ${tag};`;
+};
+
 /** Primary SQL: application role/database, replication role and TLS host rules. */
 export const primaryBootstrapSql = (config: DeployConfig, replicas: Array<PgNodeRef | string>): string => {
   const replicaSources = replicas.map((node) => nodeEndpoint(node));
@@ -279,9 +350,6 @@ export const primaryBootstrapSql = (config: DeployConfig, replicas: Array<PgNode
   const appUser = sqlIdent(config.PG_DB_USER, "PG_DB_USER");
   const appUserLit = sqlLiteral(config.PG_DB_USER, "PG_DB_USER");
   const appPw = sqlLiteral(config.PG_DB_PASSWORD, "PG_DB_PASSWORD");
-  const replUser = sqlIdent(config.PG_REPLICATION_USER, "PG_REPLICATION_USER");
-  const replUserLit = sqlLiteral(config.PG_REPLICATION_USER, "PG_REPLICATION_USER");
-  const replPw = sqlLiteral(config.PG_REPLICATION_PASSWORD, "PG_REPLICATION_PASSWORD");
   const dbName = sqlIdent(config.PG_DB_NAME, "PG_DB_NAME");
   const dbNameLit = sqlLiteral(config.PG_DB_NAME, "PG_DB_NAME");
   // Dollar-quote tag is chosen so it cannot occur in the (already SQL-escaped) body.
@@ -293,7 +361,7 @@ export const primaryBootstrapSql = (config: DeployConfig, replicas: Array<PgNode
   return [
     doBlock(`IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${appUserLit}) THEN CREATE ROLE ${appUser} LOGIN PASSWORD ${appPw}; ELSE ALTER ROLE ${appUser} PASSWORD ${appPw}; END IF;`),
     `SELECT ${createDb} WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = ${dbNameLit})\\gexec`,
-    doBlock(`IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${replUserLit}) THEN CREATE ROLE ${replUser} WITH REPLICATION LOGIN PASSWORD ${replPw}; ELSE ALTER ROLE ${replUser} WITH REPLICATION LOGIN PASSWORD ${replPw}; END IF;`),
+    replicationRoleSql(config),
     ...replicas.map((node, index) => {
       const slot = sqlLiteral(slotName(node, index), "replication slot");
       return doBlock(`IF NOT EXISTS (SELECT FROM pg_replication_slots WHERE slot_name = ${slot}) THEN PERFORM pg_create_physical_replication_slot(${slot}); END IF;`);
@@ -342,7 +410,7 @@ export const replicaCommands = (
   const primaryPort = nodePort(primary);
   const targetCluster = cluster ?? pgClusterFor(config ?? { PG_VERSION: "18" }, "replica", replica);
   const dataDir = targetCluster.dataDir;
-  const user = config?.PG_REPLICATION_USER ?? "pg_replicator";
+  const user = config?.PG_REPLICATION_USER ?? "gw_replicator";
   const slot = slotName(replica);
   const autoConf = `${dataDir}/postgresql.auto.conf`;
   return [
@@ -368,9 +436,20 @@ runuser -u postgres -- env PGPASSFILE=/var/lib/postgresql/.pgpass PGSSLMODE=requ
 const connValue = (value: string): string =>
   `'${assertSingleLine(value, "pgbouncer value").replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 
-/** The exact PgBouncer transaction-pooling configuration. */
-export const pgbouncerIni = (config: DeployConfig, serverPort = 5432): string => `[databases]
+/**
+ * The exact PgBouncer configuration.
+ *
+ * The application database stays in transaction mode (the pooler's reason to
+ * exist). A second alias, `pgw_session`, maps to the SAME real database with
+ * `pool_mode=session`, because PostgreSQL advisory locks live on a backend
+ * session. Singleton workers connect only through the session alias.
+ */
+export const pgbouncerIni = (config: DeployConfig, serverPort = 5432): string => {
+  const coreNodes = parseNodeList(config.CORE_NODES).length || 1;
+  const sessionPoolSize = Math.max(8, coreNodes * 2 + 4);
+  return `[databases]
 ${assertSingleLine(config.PG_DB_NAME, "PG_DB_NAME")} = host=127.0.0.1 port=${serverPort} dbname=${connValue(config.PG_DB_NAME)} user=${connValue(config.PG_DB_USER)} password=${connValue(config.PG_DB_PASSWORD)}
+${PGBOUNCER_SESSION_ALIAS} = host=127.0.0.1 port=${serverPort} dbname=${connValue(config.PG_DB_NAME)} user=${connValue(config.PG_DB_USER)} password=${connValue(config.PG_DB_PASSWORD)} pool_mode=session pool_size=${sessionPoolSize}
 
 [pgbouncer]
 listen_addr = 0.0.0.0
@@ -386,13 +465,14 @@ ignore_startup_parameters = extra_float_digits,search_path
 auth_type = scram-sha-256
 auth_file = /etc/pgbouncer/userlist.txt
 `;
+};
 
 export const pgbouncerUserlist = (config: DeployConfig): string =>
   `${pgbouncerQuoted(config.PG_DB_USER)} ${pgbouncerQuoted(config.PG_DB_PASSWORD)}\n${pgbouncerQuoted(config.PG_REPLICATION_USER)} ${pgbouncerQuoted(config.PG_REPLICATION_PASSWORD)}\n`;
 
-const write = (runner: ProvisionRunner, target: SshTarget, path: string, content: string, mode = 0o600): void => {
-  runner.writeRemoteFile({ target, path, content, mode, sudo: true });
-};
+/** Writes a root-owned file and reports whether its content changed. */
+const write = (runner: ProvisionRunner, target: SshTarget, path: string, content: string, mode = 0o600): boolean =>
+  isChanged(runner.writeRemoteFile({ target, path, content, mode, sudo: true }));
 
 /**
  * The systemd unit decides which account owns the PgBouncer config: Debian
@@ -415,6 +495,63 @@ const pgbouncerConfigOwnership = (): string => {
 };
 
 /**
+ * Brings one PostgreSQL cluster to its configured state with the least
+ * disruption (see postgresApplyScript): start if down, reload on a config
+ * change, restart only for a postmaster-level (`pending_restart`) change.
+ */
+export const applyPostgresCluster = (input: {
+  runner: ProvisionRunner;
+  ssh: SshTarget;
+  cluster: PgCluster;
+  /** A config/hba file (or ALTER SYSTEM) changed since the last apply. */
+  changed: boolean;
+  force?: boolean;
+  commands?: string[];
+  outcomes?: Record<string, ApplyOutcome>;
+}): ApplyOutcome => {
+  const script = postgresApplyScript({ unit: input.cluster.service, port: input.cluster.port, changed: input.changed, force: input.force });
+  input.commands?.push(script);
+  const outcome = parseApplyOutcome(String(input.runner.capture(input.ssh, script, { sudo: true, timeoutMs: 5 * 60_000 })));
+  if (input.outcomes) input.outcomes[`${input.ssh.host}:${input.cluster.service}`] = outcome;
+  return outcome;
+};
+
+/**
+ * Writes PgBouncer's configuration, its fast-stop systemd drop-in and applies
+ * it: reload for ordinary changes, restart only for restart-only settings or
+ * after the upstream PostgreSQL bounced, start if down, otherwise nothing.
+ */
+export const applyPgbouncer = (input: {
+  runner: ProvisionRunner;
+  ssh: SshTarget;
+  config: DeployConfig;
+  serverPort: number;
+  /** The upstream PostgreSQL was started/restarted in this run (its server connections are gone). */
+  upstreamBounced: boolean;
+  force?: boolean;
+  commands?: string[];
+  outcomes?: Record<string, ApplyOutcome>;
+}): ApplyOutcome => {
+  const { runner, ssh, config } = input;
+  const ini = pgbouncerIni(config, input.serverPort);
+  const iniChanged = write(runner, ssh, "/etc/pgbouncer/pgbouncer.ini", ini, 0o640);
+  const userlistChanged = write(runner, ssh, "/etc/pgbouncer/userlist.txt", pgbouncerUserlist(config), 0o600);
+  const dropInChanged = write(runner, ssh, PGBOUNCER_DROPIN_PATH, pgbouncerSystemdDropIn(), 0o644);
+  const signatureChanged = write(runner, ssh, PGBOUNCER_SIGNATURE_PATH, pgbouncerRestartSignature(ini), 0o644);
+  runner.run(ssh, pgbouncerConfigOwnership(), { sudo: true });
+  const script = pgbouncerApplyScript({
+    port: config.PGBOUNCER_PORT,
+    daemonReload: dropInChanged,
+    restart: input.force === true || input.upstreamBounced || signatureChanged,
+    reload: iniChanged || userlistChanged,
+  });
+  input.commands?.push(script);
+  const outcome = parseApplyOutcome(String(runner.capture(ssh, script, { sudo: true, timeoutMs: 5 * 60_000 })));
+  if (input.outcomes) input.outcomes[`${ssh.host}:pgbouncer`] = outcome;
+  return outcome;
+};
+
+/**
  * Applies PostgreSQL 18, streaming replicas and PgBouncer. The runner is the
  * only side effect; tests pass a recording fake.
  */
@@ -432,6 +569,7 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
   const primaryIp = nodeEndpoint(primary);
   const primaryCluster = pgClusterFor(config, "primary", primary);
   nodes.push(primaryIp);
+  const outcomes: Record<string, ApplyOutcome> = {};
   for (const command of bootstrapCommands(config, "primary", primaryCluster)) {
     commands.push(command);
     runner.run(primarySsh, command, { sudo: true });
@@ -440,7 +578,7 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
     commands.push(command);
     runner.run(primarySsh, command, { sudo: true });
   }
-  write(runner, primarySsh, postgresMainConfigPath(config, primaryCluster), postgresMainConfigSnippet(config, primaryCluster, primaryIp), 0o644);
+  const confChanged = write(runner, primarySsh, postgresMainConfigPath(config, primaryCluster), postgresMainConfigSnippet(config, primaryCluster, primaryIp), 0o644);
   const replicaRefs = replicas;
   const primaryAllowed = [
     primaryIp,
@@ -451,21 +589,28 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
     ...parseNodeList(config.AUDIT_DB_NODE).map((node) => node.privateIp),
     ...parseNodeList(config.LOG_DB_NODE).map((node) => node.privateIp),
   ];
-  write(runner, primarySsh, primaryCluster.hbaPath, pgHbaSnippet(config, primaryAllowed), 0o640);
+  const hbaChanged = write(runner, primarySsh, primaryCluster.hbaPath, pgHbaSnippet(config, primaryAllowed), 0o640);
   runner.run(primarySsh, `chown postgres:postgres ${primaryCluster.hbaPath} && chmod 0640 ${primaryCluster.hbaPath}`, { sudo: true });
+  // Start / reload / (only if a postmaster setting changed) restart, then wait
+  // for readiness. The bootstrap SQL below needs a running server.
+  const primaryOutcome = applyPostgresCluster({
+    runner,
+    ssh: primarySsh,
+    cluster: primaryCluster,
+    changed: confChanged || hbaChanged,
+    force: input.forceRestart,
+    commands,
+    outcomes,
+  });
   // Secret-bearing SQL: private 0700 dir owned by postgres, 0600 file, removed on exit.
   const bootstrapDir = `/var/lib/postgresql/.pg18-bootstrap-${process.pid}`;
   const bootstrapSqlPath = `${bootstrapDir}/bootstrap.sql`;
   runner.run(primarySsh, `install -d -m 0700 -o postgres -g postgres ${shellQuote(bootstrapDir)}`, { sudo: true });
   write(runner, primarySsh, bootstrapSqlPath, primaryBootstrapSql(config, replicaRefs), 0o600);
   runner.run(primarySsh, `chown postgres:postgres ${shellQuote(bootstrapSqlPath)}`, { sudo: true });
-  const bootstrap = `trap ${shellQuote(`rm -rf ${shellQuote(bootstrapDir)}`)} EXIT; runuser -u postgres -- psql -v ON_ERROR_STOP=1 -f ${shellQuote(bootstrapSqlPath)}`;
+  const bootstrap = `trap ${shellQuote(`rm -rf ${shellQuote(bootstrapDir)}`)} EXIT; runuser -u postgres -- psql -v ON_ERROR_STOP=1 -p ${primaryCluster.port} -f ${shellQuote(bootstrapSqlPath)}`;
   commands.push(bootstrap);
   runner.run(primarySsh, bootstrap, { sudo: true });
-  runner.run(primarySsh, `systemctl restart ${primaryCluster.service}`, { sudo: true });
-  const primaryReady = `for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p ${primaryCluster.port} >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`;
-  commands.push(primaryReady);
-  runner.run(primarySsh, primaryReady, { sudo: true });
   const journalPartitionCron = `30 1 * * * root runuser -u postgres -- psql -p ${primaryCluster.port} -d ${config.PG_DB_NAME} -c 'SELECT ensure_journal_line_partitions(18)' >/var/log/pg-journal-partitions.log 2>&1`;
   runner.writeRemoteFile({
     target: primarySsh,
@@ -477,12 +622,43 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
   commands.push("install /etc/cron.d/pg-journal-partitions");
 
   if (config.PGBOUNCER_ENABLED) {
-    write(runner, primarySsh, "/etc/pgbouncer/pgbouncer.ini", pgbouncerIni(config, primaryCluster.port), 0o640);
-    write(runner, primarySsh, "/etc/pgbouncer/userlist.txt", pgbouncerUserlist(config), 0o600);
-    runner.run(primarySsh, pgbouncerConfigOwnership(), { sudo: true });
-    const restart = "systemctl enable --now pgbouncer && systemctl restart pgbouncer";
-    commands.push(restart);
-    runner.run(primarySsh, restart, { sudo: true });
+    applyPgbouncer({
+      runner,
+      ssh: primarySsh,
+      config,
+      serverPort: primaryCluster.port,
+      upstreamBounced: outcomeBounced(primaryOutcome),
+      force: input.forceRestart,
+      commands,
+      outcomes,
+    });
+    // The bootstrap SQL may just have (re)created the database or role; make
+    // sure the pooler really serves it before anything migrates through it.
+    const login = poolerLoginScript({
+      port: config.PGBOUNCER_PORT,
+      database: config.PG_DB_NAME,
+      user: config.PG_DB_USER,
+      pgpassLine: `${pgpassField("127.0.0.1")}:${config.PGBOUNCER_PORT}:${pgpassField(config.PG_DB_NAME)}:${pgpassField(config.PG_DB_USER)}:${pgpassField(config.PG_DB_PASSWORD)}`,
+    });
+    commands.push(login);
+    runner.run(primarySsh, login, { sudo: false, timeoutMs: 2 * 60_000 });
+
+    // The singleton workers use the session alias for their advisory locks.
+    // Prove it is served before core starts: a reload normally publishes a new
+    // [databases] entry, but a restart is the safe fallback if it did not.
+    const leaderLogin = poolerLoginScript({
+      port: config.PGBOUNCER_PORT,
+      database: PGBOUNCER_SESSION_ALIAS,
+      user: config.PG_DB_USER,
+      pgpassLine: `${pgpassField("127.0.0.1")}:${config.PGBOUNCER_PORT}:${pgpassField(PGBOUNCER_SESSION_ALIAS)}:${pgpassField(config.PG_DB_USER)}:${pgpassField(config.PG_DB_PASSWORD)}`,
+    });
+    commands.push(leaderLogin);
+    try {
+      runner.run(primarySsh, leaderLogin, { sudo: false, timeoutMs: 2 * 60_000 });
+    } catch {
+      runner.run(primarySsh, "systemctl restart pgbouncer", { sudo: true, timeoutMs: 2 * 60_000 });
+      runner.run(primarySsh, leaderLogin, { sudo: false, timeoutMs: 2 * 60_000 });
+    }
   }
 
   const pgbouncerHosts = new Set<string>([primarySsh.host]);
@@ -499,8 +675,8 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
       commands.push(command);
       runner.run(replicaSsh, command, { sudo: true });
     }
-    write(runner, replicaSsh, postgresMainConfigPath(config, replicaCluster), postgresMainConfigSnippet(config, replicaCluster, replicaIp), 0o644);
-    write(
+    const replicaConfChanged = write(runner, replicaSsh, postgresMainConfigPath(config, replicaCluster), postgresMainConfigSnippet(config, replicaCluster, replicaIp), 0o644);
+    const replicaHbaChanged = write(
       runner,
       replicaSsh,
       replicaCluster.hbaPath,
@@ -517,19 +693,34 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
       commands.push(command);
       runner.run(replicaSsh, command, { sudo: true });
     }
+    // An already-initialised standby is only started by replicaCommands; apply
+    // its (possibly changed) configuration with reload / pending-restart.
+    const replicaOutcome = applyPostgresCluster({
+      runner,
+      ssh: replicaSsh,
+      cluster: replicaCluster,
+      changed: replicaConfChanged || replicaHbaChanged,
+      force: input.forceRestart,
+      commands,
+      outcomes,
+    });
     // One PgBouncer per host. A host that also runs the primary keeps the
     // primary pool; a replica-only host gets a pool pointed at its replica.
     if (config.PGBOUNCER_ENABLED && !pgbouncerHosts.has(replicaSsh.host)) {
       pgbouncerHosts.add(replicaSsh.host);
-      write(runner, replicaSsh, "/etc/pgbouncer/pgbouncer.ini", pgbouncerIni(config, replicaCluster.port), 0o640);
-      write(runner, replicaSsh, "/etc/pgbouncer/userlist.txt", pgbouncerUserlist(config), 0o600);
-      runner.run(replicaSsh, pgbouncerConfigOwnership(), { sudo: true });
-      const restart = "systemctl enable --now pgbouncer && systemctl restart pgbouncer";
-      commands.push(restart);
-      runner.run(replicaSsh, restart, { sudo: true });
+      applyPgbouncer({
+        runner,
+        ssh: replicaSsh,
+        config,
+        serverPort: replicaCluster.port,
+        upstreamBounced: outcomeBounced(replicaOutcome),
+        force: input.forceRestart,
+        commands,
+        outcomes,
+      });
     }
     const slot = slotName(replica, index);
     commands.push(`pg_create_physical_replication_slot('${slot}')`);
   }
-  return { commands, nodes };
+  return { commands, nodes, outcomes };
 };

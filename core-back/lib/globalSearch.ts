@@ -7,6 +7,7 @@ import {
   ApprovalState,
   AttemptStatus,
   CashoutState,
+  CredentialStatus,
   DisputeStatus,
   GatewayInquiryScheduleStatus,
   GatewayStatus,
@@ -1360,6 +1361,56 @@ export const gatewayProvider = defineSearchProvider({
   }),
 });
 
+/**
+ * Credential sets (gateway vault entries). Only metadata is selected: the
+ * encrypted entries and the mTLS certificate never leave the vault, so a search
+ * hit can identify a set (gateway, environment, owner, status) and nothing more.
+ */
+export const credentialSetProvider = defineSearchProvider({
+  type: "credential_set",
+  aliases: ["credential_sets", "credentials", "credential"],
+  order: 165,
+  canAccess: (actor) => hasAuthority(actor, "credential:read") || hasAuthority(actor, "gateway:read"),
+  fetchCandidates: async ({ prisma, parsed, take }) => {
+    const query = parsed.term;
+    const status = scopedStatusIn<CredentialStatus>(parsed, CredentialStatus);
+    return prisma.credentialSet.findMany({
+      where: {
+        ...(status ? { status } : {}),
+        OR: [
+          ...idSearchFilter(query),
+          { externalMerchantId: { contains: query, mode: "insensitive" as const } },
+          { gateway: { is: { code: { contains: query, mode: "insensitive" as const } } } },
+          { gateway: { is: { name: { contains: query, mode: "insensitive" as const } } } },
+        ],
+      },
+      select: {
+        id: true,
+        env: true,
+        ownerType: true,
+        externalMerchantId: true,
+        status: true,
+        updatedAt: true,
+        gateway: { select: { code: true, name: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+      take,
+    });
+  },
+  extractMatchSignals: (row) => ({
+    exactFields: [row.id, row.externalMerchantId],
+    primaryTextFields: [row.gateway.code, row.gateway.name],
+    timestamp: row.updatedAt,
+  }),
+  toResultItem: (row) => ({
+    id: row.id,
+    title: `${row.gateway.name} (${row.gateway.code}) · ${row.env}`,
+    subtitle: [row.ownerType, row.externalMerchantId].filter(Boolean).join(" · ") || undefined,
+    reference: row.externalMerchantId || row.id,
+    status: row.status,
+  }),
+});
+
 export const railProvider = defineSearchProvider({
   type: "rail",
   aliases: ["rails"],
@@ -1618,6 +1669,7 @@ export const builtinSearchProviders = [
   amlRuleProvider,
   amlReportProvider,
   gatewayProvider,
+  credentialSetProvider,
   railProvider,
   routeProvider,
   userProvider,
@@ -1641,6 +1693,7 @@ defaultSearchRegistry
   .register(amlRuleProvider)
   .register(amlReportProvider)
   .register(gatewayProvider)
+  .register(credentialSetProvider)
   .register(railProvider)
   .register(routeProvider)
   .register(userProvider)

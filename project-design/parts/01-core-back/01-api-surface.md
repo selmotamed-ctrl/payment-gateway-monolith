@@ -3,7 +3,7 @@ id: core.api
 title: Core API Surface
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-06
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/api/index.ts
@@ -23,6 +23,13 @@ code:
   - core-back/lib/auth/mfaChallenges.ts
   - core-back/lib/auth/throttle.ts
   - core-back/lib/cashoutBalance.ts
+  - core-back/api/internal/adminCommerce.ts
+  - core-back/api/internal/adminLedger.ts
+  - core-back/api/internal/ledgerLines.ts
+  - core-back/api/internal/adminOperations.ts
+  - core-back/api/internal/adminSystem.ts
+  - core-back/api/internal/adminSliceHelpers.ts
+  - core-back/lib/commerceStatus.ts
 design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#16-complete-multi-service-api-surface-mapping
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#161-checkout-back-public-api-apiv1pay-apiv1inbound--forwards-to-core-back-internalcheckout
@@ -47,6 +54,13 @@ tests:
   - core-back/test/security-regressions/h4-cashout.test.ts
   - core-back/test/security-regressions/m4-idempotency.test.ts
   - core-back/test/security-regressions/c1-forged-success.test.ts
+  - core-back/test/admin-commerce.test.ts
+  - core-back/test/security-regressions/commerce-status-enforcement.test.ts
+  - core-back/test/admin-slice/admin-ledger.test.ts
+  - core-back/test/admin-slice/admin-operations.test.ts
+  - core-back/test/admin-slice/admin-system.test.ts
+  - core-back/test/commission-tiers.test.ts
+  - core-back/test/admin-slice/admin-rails-routes.test.ts
 gaps:
   - APPLICATION approvals have no executable handler and remain pending.
   - Cashout processing, some settings writes, commission creation and velocity-rule creation execute without the approval queue.
@@ -615,7 +629,7 @@ No build or test was run for this documentation change. Database-backed route te
 - The idempotency lookup is scoped to `(linkId, idempotencyKey)`; a unique-constraint race on create is treated as a replay.
 
 ### MFA and login
-- MFA challenges are rows in `mfa_challenges`: the client sees an opaque UUID, the code is stored as an HMAC, the challenge is single-use and bound to a channel (`ADMIN`/`MERCHANT`). Five wrong guesses kill the challenge and trigger a 15-minute user cool-down. Challenges expire after 5 minutes; at most 5 SMS sends per 15 minutes; a new challenge supersedes open ones. The password step is required before a challenge is issued. `signMfaChallenge`/`verifyMfaChallengeToken` were removed.
+- MFA challenges are rows in `mfa_challenges`: the client sees an opaque UUID, the code is stored as an HMAC, the challenge is single-use and bound to a channel (`ADMIN`/`MERCHANT`). Five wrong guesses kill the challenge and trigger a 15-minute user cool-down. Challenges expire after 5 minutes; at most 5 SMS sends per 15 minutes; a new challenge supersedes open ones. The password step is required before a challenge is issued. The notification carries the code and the full destination phone encrypted (never plaintext; the worker decrypts at send time); an account with `mfaRequired` but no phone gets `409 MFA_DESTINATION_MISSING` instead of an undeliverable challenge. `signMfaChallenge`/`verifyMfaChallengeToken` were removed.
 - `/internal/merchant/auth/verify-identity` is retired and always returns `410 IDENTITY_VERIFICATION_RETIRED`.
 - The SMS code is no longer stored in plaintext in `notifications.payload_json`: a Vault-encrypted `codeCiphertext` is opened by `OutboxNotificationWorker` at send time.
 - Login performs a dummy bcrypt for unknown users. Throttles: per identifier (5 failures lock for 15 minutes), per IP (30 failures), MFA verify per IP (20 failures). These counters are in-process memory (per instance); the DB attempt counter is the durable guarantee.
@@ -626,11 +640,11 @@ A closed catalogue in `lib/auth/merchantAuthorities.ts` is enforced route by rou
 - Coarse: `merchant:read`, `merchant:write`, `link:write`, `payment:read`.
 - Fine-grained: `link:read`, `wallet:create`, `application:manage`, `pos:manage`, `onboarding:write`, `dispute:respond`, `cashout:read`, `cashout:request`, `user:manage`, `token:manage`, `credential:manage`.
 - API token scopes are limited to `link:write`, `link:read`, `payment:read`. Clients can never supply `*` or unknown strings (`UNKNOWN_AUTHORITY`, `UNKNOWN_TOKEN_SCOPE`). Callers can only grant authorities they hold (`AUTHORITY_ESCALATION_FORBIDDEN`); only `MERCHANT_ADMIN` can grant the admin role (`ROLE_ESCALATION_FORBIDDEN`); no self-modification (`SELF_MODIFICATION_FORBIDDEN`); user create/patch is audited.
-- API tokens may only call `/external/*` (`API_TOKEN_SCOPE_VIOLATION`). Token `expiresAt` is validated, stored, listed and enforced (`TOKEN_EXPIRY_INVALID`, `ACCESS_TOKEN_EXPIRED`). `*` is honoured only for staff principals.
+- API tokens may only call `/external/*` (`API_TOKEN_SCOPE_VIOLATION`). Token `expiresAt` is validated, stored, listed and enforced (`TOKEN_EXPIRY_INVALID`, `ACCESS_TOKEN_EXPIRED`). `*` is honoured only for staff principals. The scope catalogue is `link:write`, `link:read`, `payment:read`; the legacy documented aliases (`links:create`, `links:write`, `links:cancel`, `links:read`, `payments:read`, `payments:write`) are normalised on creation and when an existing token is evaluated, so old tokens keep working.
 - Legacy: `merchant:write` implies the non-privileged fine-grained set for any role and the privileged four (`user:manage`, `token:manage`, `credential:manage`, `cashout:request`) only for `MERCHANT_ADMIN`. Existing tokens with other scope strings fail the external routes.
 
 ### Cash-outs
-- Merchant `POST /cashouts` requires an idempotency key (body `idempotencyKey` or `Idempotency-Key` header; replay returns 200, a different payload returns `409 IDEMPOTENCY_KEY_REUSED`, a missing key `IDEMPOTENCY_KEY_REQUIRED`). It checks the ledger balance minus open cash-outs, records `requestedByUserId` and audits. The destination is a typed structure (bank, account number, IBAN, holder, SWIFT). The merchant must have a KYB `payoutAccountHash` (else `403 CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED`) and the destination must hash to it (else `403 CASHOUT_DESTINATION_NOT_VERIFIED`); the destination is stored `payoutVerified:true`. Payout-account changes go only through the maker-checker merchant edit and the hash is recomputed on approval (GAP-017, resolved 2026-11-05).
+- Merchant `POST /cashouts` requires an idempotency key (body `idempotencyKey` or `Idempotency-Key` header; replay returns 200, a different payload returns `409 IDEMPOTENCY_KEY_REUSED`, a missing key `IDEMPOTENCY_KEY_REQUIRED`). It checks the ledger balance minus open cash-outs, records `requestedByUserId` and audits. The idempotency lookup is repeated inside the wallet-lock transaction (and again before an insufficient-balance refusal), so a concurrent retry replays the winner. The destination is a typed structure (bank, account number, IBAN, holder, SWIFT; a bank-account id alone is rejected because the payout hash is derived from bank + account/IBAN). The merchant must have a KYB `payoutAccountHash` (else `403 CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED`); a legacy merchant whose column is null but whose bank details are derivable gets the hash backfilled instead of being locked out, and the destination must hash to it (else `403 CASHOUT_DESTINATION_NOT_VERIFIED`); the destination is stored `payoutVerified:true`. Payout-account changes go only through the maker-checker merchant edit and the hash is recomputed on approval (GAP-017, resolved 2026-11-05).
 - Staff process route requires `cashout:review` (`finance:write` alone no longer suffices); the maker is a merchant user, the checker is staff. State machine and ledger rules are in the governance part.
 
 ### Admin user routes
@@ -643,3 +657,37 @@ A closed catalogue in `lib/auth/merchantAuthorities.ts` is enforced route by rou
 - Admin join-request `submit` returns `409 JOIN_REQUEST_PAYOUT_HASH_REQUIRED` and merchant `propose-edit` returns `422 PAYOUT_ACCOUNT_HASH_REQUIRED` for a payout account that yields no hash (GAP-017).
 - AML case release returns `409 AML_HOLD_CAPTURE_NOT_VERIFIED` when no escrow exists; verified callbacks/finalisation on terminal attempts return `409 ATTEMPT_TERMINAL` (GAP-015/GAP-016).
 - The reconciliation upload looks the duplicate run up per `(source, file_hash)` (GAP-018).
+
+## Admin UI completion endpoints (2026-11-06)
+
+Four new router modules are mounted from `admin.ts` (next to `/system/backups`): `adminCommerce.ts`, `adminLedger.ts`, `adminOperations.ts`, `adminSystem.ts` (shared helpers in `adminSliceHelpers.ts`). All are under `/internal/admin`, use `requireAuthorities` (any-of), `buildListQuery`/`listResponse`, 4-decimal money strings, stable `ApiError` codes, and write audit rows (`writeAudit`; `audit_log` has no merchant column, so the merchant id is recorded in `afterJson`). Secrets never leave: no `tokenHash`, `authTokenHash`, `nationalIdCiphertext`, `rawBodyBytes`, `addressCiphertext`, `entriesCiphertext`.
+
+**Commerce (`merchant:read` reads, `merchant:write` mutations)**
+
+| Endpoint | Notes |
+| :--- | :--- |
+| `GET /wallets`, `/wallets/summary`, `/wallets/:id` | Live balance = shard sum, checkpoint balance; both are in the wallet's NATURAL sign (a merchant owed 25.000 reads `25.0000` for both; a zero is never `-0.0000`; shard rows stay debit-positive as stored) and `null` + `redactedFields` for SUPPORT/plain `merchant:read`. Detail adds GL account, shards, applications, last 10 cash-outs and pending approvals; it no longer embeds statement lines (see `/statement`). |
+| `GET /wallets/:id/statement` | Paginated posting lines of the wallet's GL account (the lines of `glAccountId`), `merchant:read`. Query: shared list params (`page`, `pageSize` ≤ 200, default 25, `sortKey` `createdAt`/`amount`, `from`/`to`), `direction` (`DEBIT`/`CREDIT`), `refType` (list), `search` (memo or reference). Response `{lines, total, page, pageSize, totals: {lineCount, totalDebit, totalCredit, netDebit}, currency, redactedFields}`; totals cover the whole filtered set. Roles without financial visibility get an empty page, `totals` money `null` and `redactedFields: ["statementLines"]`. `400 INVALID_FILTER`, `404 WALLET_NOT_FOUND`. Shared helper `api/internal/ledgerLines.ts`. |
+| `GET /wallets/:id/audit-events` | Status history of one wallet (`entityType=WALLET`: `WALLET_FROZEN`, `WALLET_UNFROZEN`), newest first, paginated, `merchant:read`; `before`/`after` (status, reason) are `null` with `redacted: true` without sensitive merchant access. |
+| `POST /wallets/:id/status` | FROZEN immediate (`WALLET_FROZEN`); ACTIVE = approval (`202`, subject `WALLET`). `409 WALLET_INVALID_TRANSITION`, `WALLET_APPROVAL_PENDING`. |
+| `GET /applications`, `/applications/summary`, `/applications/:id` | Real `railWhitelist` (`string[]\|null`) + mode/count, redirect domains (empty + `redactedFields` for non-sensitive principals), tokens (status ACTIVE/REVOKED/EXPIRED, CIDRs), payment links, POS terminals. |
+| `PATCH /applications/:id` | SUSPENDED alone immediate (`APPLICATION_SUSPENDED`); reactivation and any policy edit (rails, redirect domains, assigned wallet) = one approval (`202`, subject `APPLICATION`). Validates rails exist, https hostnames, same-merchant/currency ACTIVE wallet. |
+| `POST /applications/:id/tokens/:tokenId/revoke` | Irreversible, audited; `409 TOKEN_ALREADY_REVOKED`. Core has no token cache (`authDoubleCheck` reads the row each request). |
+| `GET /payment-links`, `POST /payment-links/:id/state` | Only PENDING->CANCELLED (`PAYMENT_LINK_CANCELLED`). |
+| `GET /pos-terminals`, `POST /pos-terminals/:id/status` | ACTIVE->INACTIVE/BLOCKED immediate; to ACTIVE = approval (subject `POS_TERMINAL`). |
+| `GET\|POST /merchants/:id/beneficial-owners`, `PATCH\|DELETE .../:ownerId` | Body = join-request owner schema; national id encrypted (`kyb-national-id`) + hash; identity/PEP edits reset screening; DELETE deactivates. `409 OWNERSHIP_PERCENT_EXCEEDED`. Reads `merchant:read`/`kyb:read`/`kyb:write`; writes `kyb:write`/`merchant:write`. |
+| `POST /merchants/:id/revalidations` | `KybRevalidationRequest`, merchant `kybStatus=PENDING`, `KYB_REVALIDATION_DUE` notification; `409 KYB_REVALIDATION_ALREADY_OPEN`. |
+
+`GET /merchants/:id/applications` now also returns `railWhitelist`.
+
+**Ledger (`finance:read`; checkpoint `finance:write`)**: `GET /finance/journal-entries` (+`/summary`, `/:id`; balanced/unbalanced, `currency: "MIXED"`, reference route hint; `JournalEntry` has `refType/refId/description`, `postedAt` = `createdAt`; lines queried by `entryId` only because `journal_lines` is partitioned), `GET /finance/gl-accounts/:id` (live + natural balance, `shardCount`/`shardScaledAt`, derived account `checkpointBalance`/`checkpointAt`, `checkpoint{status,pendingLines,shardsBehind}` and per-shard `lineSeq`/`checkpointSeq`/`checkpointBalance`/`checkpointAt`/`pendingLines`/`status`; sequence numbers are strings; the fixed `recentLines` array was removed), `GET /finance/gl-accounts/:id/lines` (paginated posting lines with the same filters, `totals` and envelope as the wallet statement; `404 GL_ACCOUNT_NOT_FOUND`), `POST /finance/gl-accounts/:id/checkpoint` (`{reason}` required; captures EVERY shard with the verified O(delta) per-shard proof, no locks; a shard that fails is not advanced and the call answers `409 LEDGER_SHARD_PARITY_MISMATCH` with `{shardId, kind GAP|PARITY, shardTotal, journalTotal, drift, linesFound, linesExpected}`), `POST /finance/gl-accounts/:id/shards/scale` (`{width 1..256, reason}`, `finance:write`; widening creates shard rows, narrowing only changes routing; audited `GL_ACCOUNT_SHARDS_SCALED`; `409 SHARD_WIDTH_UNCHANGED`), `GET /finance/gl-accounts/:id/shards/:shardId/repair-plan` (`finance:read`; preview computed from the whole journal of the shard: `needsRepair`, `kind` RECOMPUTE|REBASELINE, `sequenceIntact`, stored vs journal balance, `delta`, `planHash`), `POST /finance/gl-accounts/:id/shards/:shardId/repair` (`{reason, planHash}`, `finance:write`; recomputes an INTACT shard immediately; `409 SHARD_REPAIR_PLAN_CHANGED`, `SHARD_REPAIR_NEEDS_APPROVAL`, `SHARD_REPAIR_NOT_NEEDED`; audited `GL_SHARD_REPAIRED`) and `POST /finance/gl-accounts/:id/shards/:shardId/repair/request` (same body; submits approval subject `GL_SHARD_REPAIR`, bound to `planHash`, `202`; required for REBASELINE; `409 SHARD_REPAIR_APPROVAL_PENDING`).
+
+**Operations**: `GET /transactions` (+`/summary`; `attempt:read`/`merchant:read`/`finance:read`; SUPPORT gets amounts, references and ledger entry `null` + `redactedFields`), `GET /inbound-events` and `/:id` (`attempt:read`/`case:read`; `verified`, `unmatchedOnly`; detail returns redacted headers, a 2 KB redacted body preview, size and sha256, never raw bytes), `GET /attempts/:id` (moved from `admin.ts`; keeps the `attempt` key, adds merchant/application/rail/gateway, ordered re-redacted `stepLogs`, `inboundEvents`, `attemptGroup`, cases, disputes, adjustments; `contextCiphertext` stripped), `GET /gateways/:id/health` (`gateway:read`; per ROUTE: last 100 `GatewayHealthSample` windows with success rate, 30 days of `RmRouteDailyVolume`, 24h summary).
+
+**System (`security:read` reads, `security:write` actions; templates `settings:read`/`settings:write`)**: `GET /system/jobs-outbox/summary`, `GET /system/jobs` + `POST /system/jobs/:id/requeue` (FAILED only, resets attempts; `{reason}`), `GET /system/outbox` (monitor only: no failure column exists so there is deliberately no retry; BigInt ids as strings, offset paging), `GET /system/audit-outbox`, `GET /system/notifications` (default FAILED) + `POST /system/notifications/:id/retry` (`{reason}`), `GET /settings/notification-templates` (active versions; `?history=true`) and `PUT /settings/notification-templates/:id` (new version in one transaction under a row lock, audit `NOTIFICATION_TEMPLATE_VERSIONED`; `422 TEMPLATE_UNKNOWN_PLACEHOLDERS`, `409 TEMPLATE_UNCHANGED`/`VERSION_CONFLICT`/`VERSION_NOT_ACTIVE`).
+
+### Rail logo, route policy and commission tiers (2026-11-06)
+
+- `PATCH /rails/:id` accepts `logoAssetId` (uuid, or `null` to clear). A uuid must reference a registered `Asset` (`404 ASSET_NOT_FOUND`); the audit row records the before/after logo. The edge schema and `toCoreRailUpdate` forward it. `POST /assets` still registers metadata only (name, type, size, SHA-256, storage key): it does not store image bytes, which remains a gap.
+- `PATCH /routes/:id` accepts `mismatchPolicy` (object; only `tolerance_amount`/`toleranceAmount` is read by the settlement engine, other keys are kept as stored; a malformed tolerance is `400 MISMATCH_TOLERANCE_INVALID`) and `maintenanceWindows` (`[{ start, end }]`, max 50, absolute instants; `end <= start` or an unparsable instant is `400 MAINTENANCE_WINDOW_INVALID`; `[]` clears). Omitted fields are left untouched; the edge forwards empty values so an operator can clear them.
+- **Commission tiers were broken end to end and are fixed.** The admin edge persisted UI tiers as an index-keyed object (`{"0": {...}}`) and core's create schema (`z.record`) could not take an array, while the fee calculator (`commissionForProfile`, `checkout.ts`) only reads `tiersJson` when it is an array: a TIERED profile created through the UI silently priced at its minimum fee. Now `POST /commission-profiles` accepts an ordered array (or the legacy object), the edge forwards the array, and `commissionTiers()` normalises both shapes (object keys ordered numerically), which also reprices already-stored legacy rows correctly. Tier keys are `upTo`, `flat`, `percent` (a fraction). **Behaviour change for existing data:** a legacy TIERED profile now prices by its tiers instead of the minimum fee. The edge also forwards `minFee`, `maxFee`, `feeBearerDefault`, `roundingMode`, `merchantId`, `applicationId` (core already accepted them; the strict edge schema dropped them). Note `percentageRate` is a **fraction** (`0.0300` = 3%), as the seed data stores it; the form now says so.

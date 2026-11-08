@@ -218,6 +218,12 @@ const daemonOverview = async (): Promise<{
   }
 };
 
+/** Only well-formed keys are forwarded; the daemon rejects anything else with 400. */
+const idempotencyKeyOf = (request: Request): string | undefined => {
+  const raw = request.header("idempotency-key")?.trim();
+  return raw && /^[A-Za-z0-9._:-]{1,128}$/.test(raw) ? raw : undefined;
+};
+
 router.get("/overview", async (request: Request, response: Response) => {
   requireAuthorities(request, ["security:read", "gateway:read"]);
   const [daemon, runs, drills] = await Promise.all([
@@ -238,6 +244,12 @@ router.get("/overview", async (request: Request, response: Response) => {
     engineMode: overview?.engineMode ?? "none",
     healthy: overview?.healthy ?? false,
     wal: overview?.wal ?? emptyWal,
+    // One boolean for "is WAL reaching the archive in time": the daemon is healthy AND the archive lag is
+    // within the alert threshold. Certification gate 10 and dashboards read this instead of re-deriving it.
+    walArchiveHealthy: Boolean(
+      overview?.healthy &&
+        (overview?.wal?.archiveLagSeconds ?? 0) <= (overview?.policy?.alertLagSeconds ?? defaultPolicy.alertLagSeconds),
+    ),
     targets: overview?.targets ?? [],
     schedule: overview?.schedule ?? defaultPolicy,
     policy: overview?.policy ?? defaultPolicy,
@@ -263,7 +275,19 @@ router.post("/trigger", async (request: Request, response: Response) => {
     body.target,
     body.kind,
     actor.userId ?? undefined,
+    idempotencyKeyOf(request),
   );
+  if (accepted.deduplicated) {
+    // A retry of an already accepted request: the daemon returned the original job, nothing new was queued.
+    response.status(202).json({
+      backupJobId: accepted.backupJobId,
+      acceptedAt: accepted.acceptedAt,
+      target: body.target,
+      kind: body.kind,
+      deduplicated: true,
+    });
+    return;
+  }
 
   const engineMode = (await daemonOverview()).overview?.engineMode ?? "unknown";
   await client.backupCatalogRun
@@ -298,7 +322,11 @@ router.post("/drill", async (request: Request, response: Response) => {
     );
   }
   const actor = actorFromRequest(request);
-  const accepted = await getBackupControlClient().runDrill(actor.userId ?? undefined);
+  const accepted = await getBackupControlClient().runDrill(actor.userId ?? undefined, idempotencyKeyOf(request));
+  if (accepted.deduplicated) {
+    response.status(202).json({ drillId: accepted.drillId, acceptedAt: accepted.acceptedAt, deduplicated: true });
+    return;
+  }
   const startedAt = new Date(accepted.acceptedAt);
   await client.backupRestoreDrill
     .create({

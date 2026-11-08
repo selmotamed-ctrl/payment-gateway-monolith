@@ -1789,7 +1789,7 @@
     "related": [
       "otp"
     ],
-    "short": "A second proof of identity, usually a code from an app.",
+    "short": "A second proof of identity, usually a six-digit code sent by SMS to your registered phone.",
     "ar": "التحقق متعدد العوامل"
   },
   {

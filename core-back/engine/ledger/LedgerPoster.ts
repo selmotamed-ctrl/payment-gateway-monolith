@@ -1,3 +1,4 @@
+import { createLedgerShardWriter, lockShardsForLines } from "../../lib/storageEngine/ledgerShardWriter";
 import { Decimal } from "decimal.js";
 import { ApiError } from "../../lib/error";
 
@@ -58,6 +59,9 @@ export interface JournalLineRecord {
   glAccountId: string;
   direction: LedgerDirection;
   amount: DecimalInput;
+  /** The shard the line was posted to and its place in that shard's gapless sequence (>= 1 for real lines). */
+  shardId?: number;
+  shardSeq?: bigint;
 }
 
 export interface LedgerPrismaClient {
@@ -102,16 +106,23 @@ export interface LedgerShardLine {
   amount: DecimalInput;
 }
 
+/** Where one journal line is posted: its shard and its number in that shard's sequence. */
+export interface LedgerShardAssignment {
+  shardId: number;
+  shardSeq: bigint;
+}
+
 /**
- * Projects every posted journal line onto `gl_account_shards`. The writer is
- * optional so the in-memory unit tests keep using the append-only ledger
- * without a database. When present it runs inside the SAME transaction as the
- * journal line, so shard balances can never drift from the ledger.
+ * Reserves the shard and sequence number of every line and projects the lines onto `gl_account_shards`.
+ * It runs inside the SAME transaction as the journal lines and BEFORE they are inserted (the sequence is
+ * part of each line), so shard balances can never drift from the ledger. The result is aligned with the
+ * input lines. The default writer (`createLedgerShardWriter`) does nothing against test doubles that
+ * cannot run raw SQL.
  */
 export type LedgerShardWriter = (
   transaction: LedgerPrismaClient,
   lines: readonly LedgerShardLine[],
-) => Promise<void>;
+) => Promise<LedgerShardAssignment[]>;
 
 export interface LedgerAccountSelector {
   accountType: LedgerAccountType;
@@ -655,7 +666,7 @@ export class LedgerPoster {
   constructor(
     client: LedgerPrismaClient,
     transactionRunner?: LedgerTransactionRunner,
-    private readonly shardWriter?: LedgerShardWriter,
+    private readonly shardWriter: LedgerShardWriter = createLedgerShardWriter(),
     private readonly postedOutboxWriter?: LedgerPostedOutboxWriter,
   ) {
     this.client = client;
@@ -722,11 +733,27 @@ export class LedgerPoster {
         }
       }
       const accountIds = await this.resolveAccountIds(runner, template.lines, context);
+      // The shard (and its sequence) is reserved BEFORE the lines are inserted: the sequence number is part of
+      // each line, and the shard row lock taken here is held until commit.
+      const assignments = await this.shardWriter(
+        runner,
+        template.lines.map((line, index) => ({
+          entryId: entry.id,
+          refType: template.refType,
+          refId: template.refId,
+          glAccountId: accountIds[index]!,
+          accountType: line.account.accountType,
+          direction: line.direction,
+          amount: line.amount,
+        })),
+      );
       const lineData = template.lines.map((line, index) => ({
         entryId: entry.id,
         glAccountId: accountIds[index]!,
         direction: line.direction,
         amount: decimal(line.amount),
+        shardId: assignments[index]!.shardId,
+        shardSeq: assignments[index]!.shardSeq,
       }));
       let lines: JournalLineRecord[];
       if (typeof runner.journalLine.createManyAndReturn === "function") {
@@ -737,26 +764,39 @@ export class LedgerPoster {
           lines.push(await runner.journalLine.create({ data }));
         }
       }
-      if (this.shardWriter) {
-        await this.shardWriter(
-          runner,
-          template.lines.map((line, index) => ({
-            entryId: entry.id,
-            refType: template.refType,
-            refId: template.refId,
-            glAccountId: accountIds[index]!,
-            accountType: line.account.accountType,
-            direction: line.direction,
-            amount: line.amount,
-          })),
-        );
-      }
       if (this.postedOutboxWriter) {
         await this.postedOutboxWriter(runner, entry, lines);
       }
       return { entry, lines, created: true, idempotent: false };
     };
     return transaction ? write(transaction) : this.transactionRunner(write);
+  }
+
+  /**
+   * Locks the shard rows that posting `template` will update, in the global (account, shard) order, WITHOUT posting
+   * anything. Call it before reading a balance you must act on (a cash-out check) so the shard locks are acquired in
+   * the same order as every posting does; locking the wallet first and letting the posting lock the rest afterwards
+   * is the classic opposite-order deadlock with a concurrent posting. The locks last until the transaction ends.
+   */
+  async lockShardsFor(
+    template: JournalTemplate,
+    context: LedgerPostContext,
+    transaction: LedgerPrismaClient,
+  ): Promise<void> {
+    this.validateTemplate(template);
+    const accountIds = await this.resolveAccountIds(transaction, template.lines, context);
+    await lockShardsForLines(
+      transaction,
+      template.lines.map((line, index) => ({
+        entryId: "",
+        refType: template.refType,
+        refId: template.refId,
+        glAccountId: accountIds[index]!,
+        accountType: line.account.accountType,
+        direction: line.direction,
+        amount: line.amount,
+      })),
+    );
   }
 
   async postScenario(

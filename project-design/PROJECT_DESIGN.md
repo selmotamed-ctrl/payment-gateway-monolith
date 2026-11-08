@@ -56,9 +56,12 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Fixtures, Mock API and Live Stack](#testingfixtures) — `partial`
 - [Benchmarks and Performance Gates](#testingbenchmarks) — `partial`
 - [Multi-Machine Topology and Stress Matrix](#testingmulti-machine-matrix) — `partial`
+- [Deploy Stress Harness](#testingdeploy-stress) — `partial`
 - [Voucher Provider Management System (Future)](#futurevoucher) — `missing`
 - [Smart AI Spec Importer and Voucher Half (Future)](#futuresmart-ai-voucher) — `missing`
 - [Deferred and Partial Features](#futuredeferred) — `deferred`
+- [Ledger Archive and Shard Repair Anchors (Future)](#futureledger-archive) — `missing`
+- [Offline Android Companion](#companionoffline) — `partial`
 
 ---
 
@@ -135,7 +138,7 @@ The product scope implemented in code includes:
 
 - Payment links with single-use and multi-use slots, link cancellation, visible rails and fee breakdowns.
 - A universal rail engine with seven runtime phases, a separate credential-check phase, 39 transforms, crypto profiles and a scoped SSRF guard.
-- A PostgreSQL 18 schema with 76 models and 105 enums at schema version 10, and eight migrations: baseline, storage engine, CQRS read models, storage hardening, DB read/write optimisation, MFA challenges, append-only ledger guards and statement source/file-hash uniqueness.
+- A PostgreSQL 18 schema with 76 models and 105 enums at schema version 11, and eight migrations: baseline, storage engine, CQRS read models, storage hardening, DB read/write optimisation, MFA challenges, append-only ledger guards and statement source/file-hash uniqueness.
 - A double-entry ledger, 17 `LedgerScenario` values and 11 GL account types, with sharded system GL accounts.
 - Merchant onboarding, KYB documents, beneficial owners, screening, AML rules/cases, regulatory reports, disputes, adjustments, cash-outs and reconciliation.
 - Admin and merchant authentication with password login, optional MFA challenge, session JWTs and merchant `pg_live_` API tokens.
@@ -208,7 +211,7 @@ Production operation uses `deploy/deploy.ts` with `deploy/deploy.env`. The engin
 ### Implemented
 
 - Seven-service split with database exclusivity and mTLS channel binding.
-- PostgreSQL 18 storage engine, schema version 10, migrations, replica reads, Redis cache/velocity, audit and log adapters.
+- PostgreSQL 18 storage engine, schema version 11, migrations, replica reads, Redis cache/velocity, audit and log adapters.
 - Dynamic rail engine, transform library, crypto profiles, visible-rails formula and the core API namespaces.
 - Merchant onboarding, KYB, AML, disputes, adjustments, cash-outs, reconciliation and ledger scenarios.
 - Admin back office and merchant portal foundations, hosted checkout, and optional Fake Rails.
@@ -222,7 +225,7 @@ Production operation uses `deploy/deploy.ts` with `deploy/deploy.env`. The engin
 - **Backup daemon mTLS.** Core and daemon configuration use different certificate variable names; the daemon can fall back to `127.0.0.1` without mTLS until the deployment writes are aligned.
 - **Replica routing.** Only global search and a small set of merchant list routes use `readStore`; most dashboards/lists/exports read the primary.
 - **Observability.** No metrics endpoint, tracing, storage health HTTP surface or structured JSON log contract; see `00-platform/04-observability.md`.
-- **Schema version at boot.** `ensureSchemaVersion()` exists and requires version 10, but core startup does not call it; only the seeders do.
+- **Schema version at boot.** `ensureSchemaVersion()` exists and requires version 11, but core startup does not call it; only the seeders do.
 
 ### Missing / deferred
 
@@ -297,7 +300,7 @@ A cross-cutting security hardening pass touched core payment engine, auth/author
 
 <a id="platformtopology"></a>
 
-> **Part ID:** `platform.topology` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `platform.topology` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
 
 # Service Topology
 
@@ -559,7 +562,7 @@ admin-front -> admin-back -> /internal/admin/system/backups/*
 - **Multi-host verification.** The topology code and unit tests exist, but no production-shaped deployment, replica failover, rolling batch or backup restore is recorded in this repository state.
 - **Storage mTLS.** Deploy generates storage certificates; PostgreSQL and Redis configuration do not consume them, so the storage-plane certificate chain is not an enforced channel today.
 - **Backup daemon mTLS.** Core reads `BACKUP_DAEMON_CA_CERT_PATH`, `BACKUP_DAEMON_CLIENT_CERT_PATH` and `BACKUP_DAEMON_CLIENT_KEY_PATH`; the daemon reads `BACKUP_DAEMON_CERT_PATH`, `BACKUP_DAEMON_KEY_PATH` and `BACKUP_DAEMON_CA_CERT_PATH`. The provisioner mapping is not aligned in the current tree, so a staging verification is required.
-- **Core node identity.** All core nodes share the same server certificate role; there is no node-specific identity or leader election inside core. Workers rely on database `SKIP LOCKED` claims and conditional updates.
+- **Core node identity.** All core nodes share the same server certificate role. Claim-based workers rely on database `SKIP LOCKED` claims and conditional updates; singleton workers elect one leader with a PostgreSQL session advisory lock over `LEADER_ELECTION_DATABASE_URL` (PgBouncer `pgw_session`, `pool_mode=session`, or direct PostgreSQL). The lock is backend-specific, so `DATABASE_URL` (transaction-pooled) is never used for it; core verifies the session at boot and fails closed if the backend changes or the lock row is missing.
 
 ### Missing / deferred
 
@@ -726,7 +729,7 @@ There is no mapping from a certificate to a specific core node or tenant. One ce
 | Control | Admin | Merchant | API token | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | Password login | Yes | Yes | N/A | bcrypt cost 12 |
-| MFA challenge issued when `user.mfaRequired` | Yes | Yes | N/A | 6-digit code, HMAC stored in challenge token, notification row queued |
+| MFA challenge issued when `user.mfaRequired` | Yes | Yes | N/A | 6-digit code, HMAC stored on the `mfa_challenges` row; code and full phone encrypted in the notification row; no phone -> `409 MFA_DESTINATION_MISSING` |
 | MFA enforced on every request | No | No | N/A | `resolveSessionPrincipal` does not inspect `claims.mfa` |
 | Session revocation | No per-session revocation | No per-session revocation | Yes, `revokedAt` | Disabling a user blocks the next request because the user is re-read; changing a password does not invalidate existing JWTs |
 | IP allowlist | Edge LAN CIDR only | API token CIDR only | Yes | Core does not enforce an admin IP list |
@@ -1017,7 +1020,7 @@ Fake Rails tester tokens stay in localStorage (GAP-019 residual); httpOnly cooki
 ## Gap resolutions (2026-11-05)
 
 - **Session identity, revocation and per-channel audience (GAP-019, GAP-020; RESOLVED).** `signSession(claims, channel)` mints HS256 tokens with a unique `jti` and the audience of the channel: `admin` -> `payment-gateway-admin`, `merchant` -> `payment-gateway-merchant`, `checkout` -> `payment-gateway-checkout` (`SESSION_AUDIENCES`). `verifySessionToken(token, channel?)` accepts any of the three audiences, or exactly the given channel, and exposes `jti`, `exp` and `channel` on `SessionClaims`. Because the audience changed, **sessions issued before this deploy (audience `payment-gateway-edge`) are rejected and every admin and merchant user must sign in again.** Revocation: `POST /internal/{admin,merchant}/auth/logout` calls `revokePrincipalSession`, which stores `revoked:<jti>` in the shared auth state until the token's own expiry (`core-back/lib/auth/revocation.ts`, 12 h bound), and `resolveSessionPrincipal` refuses revoked sessions. The edges proxy `POST /api/v1/admin/auth/logout` and the merchant equivalent; `admin-front` calls the admin logout best effort from its user store and always clears the local session.
-- **Optional httpOnly session cookie (GAP-019).** `SESSION_COOKIE_MODE` (`true`/`false`, default `false`) and `SESSION_COOKIE_SECURE` (default `true`; set `false` only for plain-HTTP local development) are validated in the admin-back and merchant-back env. In cookie mode login/MFA responses set the token as an `HttpOnly; SameSite=Strict` cookie (`pg_admin_session` path `/api/v1/admin`, `pg_merchant_session` path `/api/v1/merchant`, 12 h, `Secure` unless disabled) and the body carries `sessionCookie: true` instead of `token`; the edge turns the cookie back into the `Authorization: Bearer` header it forwards to core when the caller sent none, so core verifies the same JWT. Cookie-authenticated unsafe methods must carry the `x-pg-csrf: 1` header (`403 CSRF_HEADER_REQUIRED`). The fronts keep a non-secret `cookie-session` sentinel (`utils/security/sessionToken.ts`) and send the CSRF header instead of a bearer token. Bearer headers keep working unchanged in both modes. The mode is off by default; enabling it needs HTTPS (or `SESSION_COOKIE_SECURE=false` locally).
+- **Optional httpOnly session cookie (GAP-019).** `SESSION_COOKIE_MODE` (`true`/`false`, default `false`) and `SESSION_COOKIE_SECURE` (default `true`; set `false` only for plain-HTTP local development) are validated in the admin-back and merchant-back env. In cookie mode login/MFA responses set the token as an `HttpOnly; SameSite=Strict` cookie (`pg_admin_session` path `/api/v1/admin`, `pg_merchant_session` path `/api/v1/merchant`, 12 h, `Secure` unless disabled) and the body carries `sessionCookie: true` instead of `token`; the edge turns the cookie back into the `Authorization: Bearer` header it forwards to core when the caller sent none, so core verifies the same JWT. Cookie-authenticated unsafe methods must carry the `x-pg-csrf: 1` header (`403 CSRF_HEADER_REQUIRED`). The cookie is ignored entirely when the mode is off, and login/MFA are exempt from the CSRF conversion so a stale cookie cannot block a new sign-in. The fronts keep a non-secret `cookie-session` sentinel (`utils/security/sessionToken.ts`) and send the CSRF header instead of a bearer token. Bearer headers keep working unchanged in both modes. The mode is off by default; enabling it needs HTTPS (or `SESSION_COOKIE_SECURE=false` locally). The frontend logout revoke call has a 5-second timeout and clears the local session regardless.
 - **Shared throttle state (GAP-027).** `core-back/lib/auth/sharedState.ts` exposes an `AuthStateStore` (`incrWindow`, `setFlag`, `flagRemainingMs`, `del`, `clear`) backed by Redis when `REDIS_URL` is configured and by a bounded in-memory store (20,000 entries, oldest half dropped under a key flood) otherwise or when a Redis call fails. Login, MFA and the revoke list use it; keys are hashed, never a clear identifier. The policy is availability over strictness: login keeps working during a Redis outage.
 - **PCI scope (GAP-026, partially resolved).** `deploy/docs/pci-scope.md` is the normative scope statement: the gateway is out of PCI DSS cardholder-data scope by design (no PAN, CVV/CVC, PIN or track data is received, processed, stored or logged; only opaque processor tokens, statuses and at most last four digits plus brand). `deploy/lib/configSchema.ts` `panRailGuardProblems` makes `loadDeployConfig` reject any `deploy.env` key naming a PAN/CVV/card-number rail and any value holding a Luhn-valid 13-19 digit token. **Still open:** the core-back guard (rejecting PAN-capable rails at registration and PAN-shaped request fields, and redacting PAN-shaped log strings) is not implemented.
 - **Still open.** GAP-023 (operator-supplied SHA256 values) and GAP-025 (real malware scanner).
@@ -1026,7 +1029,7 @@ Fake Rails tester tokens stay in localStorage (GAP-019 residual); httpOnly cooki
 
 <a id="platformruntime"></a>
 
-> **Part ID:** `platform.runtime` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `platform.runtime` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
 
 # Runtime and Configuration
 
@@ -1064,7 +1067,7 @@ The historical design requires:
 
 The exported `env` is a Proxy that parses lazily and caches outside tests. In `NODE_ENV=test` the cache is bypassed so multiple test files can boot different configurations in one process. If the test environment is missing configuration, the loader prints one warning and returns a full fallback object with a local test database, test master key and worker defaults; non-test invalid configuration prints the invalid key names and exits with code 1.
 
-`envSummary()` redacts only `DATABASE_URL`, `KMS_MASTER_KEY` and `MTLS_SERVER_KEY_PATH`. Replica/audit/log URLs and other certificate paths are not redacted by that helper. It is not an HTTP route.
+`envSummary()` redacts `DATABASE_URL`, `LEADER_ELECTION_DATABASE_URL`, `KMS_MASTER_KEY` and `MTLS_SERVER_KEY_PATH`. Replica/audit/log URLs and other certificate paths are not redacted by that helper. It is not an HTTP route.
 
 Edge env loaders follow the same pattern: strict-ish Zod object, cached outside tests, explicit `process.exit(1)` on invalid production config. `admin-back` additionally parses `CORE_BACK_URLS` into a de-duplicated HTTPS list.
 
@@ -1085,6 +1088,8 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | Key | Default | Consumer |
 | :--- | :--- | :--- |
 | `DATABASE_URL` | required | Prisma primary |
+| `LEADER_ELECTION_DATABASE_URL` | unset | session-scoped leader election; required when `PGBOUNCER_ENABLED=true` |
+| `PGBOUNCER_ENABLED` | `false` | deploy sets it when the pooler fronts PostgreSQL; enforces the session endpoint |
 | `DATABASE_REPLICA_URLS` | empty | read replicas |
 | `AUDIT_DATABASE_URL` | unset | dedicated audit store |
 | `LOG_DATABASE_URL` | unset | dedicated log sink |
@@ -1094,7 +1099,7 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `STORAGE_QUERY_TIMEOUT_MS` | `5000` | storage/transaction timeout |
 | `STORAGE_LOG_BUFFER_MAX` | `5000` (max 100000) | log buffer |
 | `STORAGE_LOG_FLUSH_INTERVAL_MS` | `250` (max 60000) | log flush |
-| `STORAGE_SHARD_COUNT` | `16` (max 16) | ledger poster shard count |
+| `STORAGE_SHARD_COUNT` | `16` (max 256) | initial routing width of system GL accounts (wallets start at 1) |
 
 #### mTLS and backup control plane
 
@@ -1126,6 +1131,20 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `WORKER_RETENTION_ENABLED` | `false` | retention worker |
 | `WORKER_RETENTION_INTERVAL_MS` | `3600000` | retention cadence |
 | `WORKER_RETENTION_BATCH_SIZE` | `500` (max 10000) | retention batch |
+| `WORKER_LEDGER_CHECKPOINT_ENABLED` | `true` | per-shard ledger checkpoint worker |
+| `WORKER_LEDGER_CHECKPOINT_INTERVAL_MS` | `30000` | checkpoint cadence |
+| `WORKER_LEDGER_CHECKPOINT_BATCH_SIZE` | `50` (max 10000) | shards captured per pass |
+| `LEDGER_CHECKPOINT_MIN_LINES` | `5000` | pending lines that trigger a checkpoint |
+| `LEDGER_CHECKPOINT_MAX_AGE_MS` | `900000` | age after which any pending shard is checkpointed |
+| `LEDGER_SHARD_AUTO_REPAIR_ENABLED` | `true` | automatic repair of a persistently failing PARITY shard with an intact sequence |
+| `LEDGER_SHARD_AUTO_REPAIR_MIN_FAILURES` | `3` | consecutive failed proofs before an automatic repair |
+| `LEDGER_SHARD_AUTO_REPAIR_MAX_ABS_DRIFT` | `100` | largest correction an automatic repair may apply |
+| `WORKER_LEDGER_SHARD_SCALER_ENABLED` | `true` | hot-account shard scaler |
+| `WORKER_LEDGER_SHARD_SCALER_INTERVAL_MS` | `30000` | scaler sampling cadence |
+| `LEDGER_SHARD_SCALER_DRY_RUN` | `false` | `true` = audit proposals only (nothing is widened); the default lets the scaler widen hot accounts |
+| `LEDGER_SHARD_UP_LINES_PER_SEC` | `150` | hot threshold, lines per second per shard |
+| `LEDGER_SHARD_MAX_WIDTH` | `64` (max 256) | widest routing width the scaler assigns |
+| `LEDGER_SHARD_COOLDOWN_MS` | `600000` | minimum time between two scalings of one account |
 | `RETENTION_DRY_RUN` | `false` | retention dry run |
 | `WORKER_BACKGROUND_JOBS_ENABLED` | `true` | durable job queue; boot refuses false |
 | `WORKER_BACKGROUND_JOBS_INTERVAL_MS` | `2000` | queue drain cadence |
@@ -1209,7 +1228,7 @@ and throws if the version is not 8. The check is invoked by `prisma/seed.ts`, `p
 - `OutboxRelayWorker` and `AuditShipperWorker` only when a storage engine is supplied; the audit shipper additionally requires a `DedicatedAuditDatabaseDriver`, which exists only when `AUDIT_DATABASE_URL` is set.
 - `BackgroundJobWorker` when background jobs are enabled, with `RECONCILIATION_RUN` and `ADJUSTMENT_EXECUTION` handlers.
 
-Workers are in-process; horizontal nodes rely on database claim semantics (`FOR UPDATE SKIP LOCKED`, conditional terminal updates and leases) rather than a leader election.
+Workers are in-process. Non-singleton workers rely on database claim semantics (`FOR UPDATE SKIP LOCKED`, conditional terminal updates and leases). Singleton workers (`ExpirySweeper`, `InboundInbox`, `JoinRequestExpiry`, `KybExpiry`, `LedgerInvariant`, `PeriodicScreening`, `Retention`, `LedgerCheckpoint`, `LedgerShardScaler`) additionally hold a PostgreSQL session advisory lock through `LEADER_ELECTION_DATABASE_URL`. That endpoint is a PgBouncer `pgw_session` alias with `pool_mode=session` when `PGBOUNCER_ENABLED=true` (or a direct PostgreSQL URL); core refuses the transaction-pooled `DATABASE_URL`, probes the session at boot and re-proves backend/lock ownership on every tick (fail closed).
 
 ### 3.7 Health and degradation
 
@@ -1288,7 +1307,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 5. **The raw body is preserved before JSON parsing.** Webhook signatures and uploaded document bytes must be exact.
 6. **A request id is always returned.** Invalid or missing client values are replaced with a UUID.
 7. **Redis is never authoritative for money.** When Redis is unavailable the cache/velocity adapter falls back to memory and invalidation stays local.
-8. **Schema version 10 is the contract.** Seeders enforce it; migrations are deployed separately.
+8. **Schema version 11 is the contract.** Seeders enforce it; migrations are deployed separately.
 9. **Workers are stateless across nodes.** Coordination is by database claims, not by an in-memory scheduler.
 10. **The admin UI flags are deployment-owned.** A source build uses the frontend defaults; a deployed build receives the deploy engine's values.
 
@@ -1317,7 +1336,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 | Backup daemon | No | Backup routes return 503 |
 | Notification webhook | No | Log transport reports SENT |
 | Fake Rails | No | Only required by synthetic seeding/seeding routes |
-| Schema version 10 | Yes at seed time | Seeders fail; server boot does not check |
+| Schema version 11 | Yes at seed time | Seeders fail; server boot does not check |
 
 ### 5.3 Config consumers outside the env proxy
 
@@ -1347,7 +1366,7 @@ bun run start
 - Set `DATABASE_REPLICA_URLS` to a comma-separated list to enable replica reads.
 - Set `AUDIT_DATABASE_URL` and `LOG_DATABASE_URL` to enable the dedicated adapters; otherwise audit shipping is skipped and log records stay in memory.
 - Set `REDIS_URL` or `REDIS_NODES` for cross-node cache/velocity and invalidation.
-- Keep `STORAGE_SHARD_COUNT` at 16; the ledger shard constraint and the migration assume `shard_id` in `[0,16)`.
+- `STORAGE_SHARD_COUNT` is only the INITIAL width of system GL accounts (default 16, range 1..256, the same range in core env, the DB check and the deploy schema). The shard scaler widens hot accounts afterwards; the scaler is ON by default (`LEDGER_SHARD_SCALER_DRY_RUN=false`) with conservative thresholds; calibrate `LEDGER_SHARD_UP_LINES_PER_SEC` on the target hardware, and set the flag to `true` to watch proposals without widening anything.
 
 ### 6.3 Diagnose degradation
 
@@ -1386,7 +1405,7 @@ bun run start
 - **Logging.** `LOG_LEVEL` is unused; console ids differ from request ids; no structured JSON log contract; database query counts are always zero.
 - **Worker controls.** `WORKER_CONCURRENCY` and `WORKER_REQUEST_TIMEOUT_MS` are parsed but not wired to the production worker runtime.
 - **Health.** Only the background-job queue is checked; storage, replicas, Redis, audit/log and backup are not.
-- **Env secrecy.** `envSummary` redacts only three keys; replica/audit/log URLs and many certificate paths are not redacted by that helper.
+- **Env secrecy.** `envSummary` redacts `DATABASE_URL`, `LEADER_ELECTION_DATABASE_URL`, `KMS_MASTER_KEY` and `MTLS_SERVER_KEY_PATH`; replica/audit/log URLs and many certificate paths are not redacted by that helper.
 - **Fake Rails CIDR.** `FAKE_RAILS_ALLOWED_CIDRS` is accepted but not consumed by the engine guard.
 
 ### Missing / deferred
@@ -1455,7 +1474,7 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 
 ## 11. Security hardening config changes (2026-11-05)
 
-- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); `KYB_SCANNER_MODE` unset fails closed (`eicar` is dev/test only); `REQUIRED_SCHEMA_VERSION = 10`.
+- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING); `REQUIRED_SCHEMA_VERSION = 11`.
 - Edges: `TRUSTED_PROXY_CIDRS` default loopback only; `MAX_INBOUND_BODY_BYTES` default 1 MiB; `CORS_ALLOWED_ORIGINS` (no CORS headers on admin/merchant when unset); newly wired rate-limit window envs `AUTH_/ADMIN_/API_/EXTERNAL_/PAY_/INBOUND_RATE_LIMIT_WINDOW_MS`; `CORE_MAX_RESPONSE_BYTES` (64 MiB), `CORE_TOTAL_DEADLINE_MS` (300000), `MAX_STREAMS_PER_IP` (5), `ADMIN_AUTHORITY_HINTS` (default empty, restrict-only), merchant `TOKEN_MAX_SCOPES`, `TOKEN_MAX_TTL_DAYS`, `TOKEN_DEFAULT_TTL_DAYS`, `UPLOAD_RATE_LIMIT_MAX`, admin `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
 - Frontends: `VITE_CHECKOUT_BASE_URL`, `VITE_IDENTITY_HOSTS` (merchant), `VITE_CHECKOUT_ORIGIN` (fake-rails). Real `.env` files in the frontends are no longer tracked; copy `.env.example` to `.env` on a fresh clone.
 - Deploy and daemon keys are listed in the deploy parts.
@@ -2099,7 +2118,7 @@ TCP + TLS 1.3 handshake (client cert required)
 6. **Unexpected errors do not leak internals.** The response is `SERVER_ERROR` with `Internal server error` and a reference.
 7. **The database client is lazy and process-global.** Module import does not connect.
 8. **The storage engine is the transactional owner.** Routes should not open ad-hoc long transactions when a storage port exists.
-9. **Schema version 10 is required.** The seeders enforce it; the API currently does not at boot.
+9. **Schema version 11 is required.** The seeders enforce it; the API currently does not at boot.
 10. **The TLS server requires a client certificate.** There is no optional-client-cert mode in production startup.
 
 ## 5. Data / API / config / deployment surface
@@ -2143,7 +2162,7 @@ TCP + TLS 1.3 handshake (client cert required)
 1. Generate certs.
 2. Set `DATABASE_URL`.
 3. Apply migrations.
-4. Seed (this also checks schema version 10).
+4. Seed (this also checks schema version 11).
 5. `bun run start`.
 6. Probe `/health` over mTLS with a client cert.
 
@@ -2236,13 +2255,13 @@ No build or test was run for this documentation change.
 
 ## Security hardening (2026-11-05)
 
-Schema version is now 10 (see the data part). Login and MFA throttles live in `lib/auth/throttle.ts` as in-process counters (per instance). Create-admin (`scripts/createAdminPlan.ts`): MFA is on by default (`--no-mfa` or `ADMIN_MFA=false` disables it), `--password` on the command line is rejected, and the password comes from `ADMIN_PASSWORD`.
+Schema version is now 11 (see the data part). Login and MFA throttles live in `lib/auth/throttle.ts` (Redis-backed shared state when `REDIS_URL` is set, per-process memory otherwise). Create-admin (`scripts/createAdminPlan.ts`): MFA is on by default and requires a delivery phone (`--phone` or `ADMIN_PHONE`); `--no-mfa` or `ADMIN_MFA=false` disables it, `--password` on the command line is rejected, and the password comes from `ADMIN_PASSWORD`.
 
 ---
 
 <a id="coreapi"></a>
 
-> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Core API Surface
 
@@ -2801,7 +2820,7 @@ No build or test was run for this documentation change. Database-backed route te
 - The idempotency lookup is scoped to `(linkId, idempotencyKey)`; a unique-constraint race on create is treated as a replay.
 
 ### MFA and login
-- MFA challenges are rows in `mfa_challenges`: the client sees an opaque UUID, the code is stored as an HMAC, the challenge is single-use and bound to a channel (`ADMIN`/`MERCHANT`). Five wrong guesses kill the challenge and trigger a 15-minute user cool-down. Challenges expire after 5 minutes; at most 5 SMS sends per 15 minutes; a new challenge supersedes open ones. The password step is required before a challenge is issued. `signMfaChallenge`/`verifyMfaChallengeToken` were removed.
+- MFA challenges are rows in `mfa_challenges`: the client sees an opaque UUID, the code is stored as an HMAC, the challenge is single-use and bound to a channel (`ADMIN`/`MERCHANT`). Five wrong guesses kill the challenge and trigger a 15-minute user cool-down. Challenges expire after 5 minutes; at most 5 SMS sends per 15 minutes; a new challenge supersedes open ones. The password step is required before a challenge is issued. The notification carries the code and the full destination phone encrypted (never plaintext; the worker decrypts at send time); an account with `mfaRequired` but no phone gets `409 MFA_DESTINATION_MISSING` instead of an undeliverable challenge. `signMfaChallenge`/`verifyMfaChallengeToken` were removed.
 - `/internal/merchant/auth/verify-identity` is retired and always returns `410 IDENTITY_VERIFICATION_RETIRED`.
 - The SMS code is no longer stored in plaintext in `notifications.payload_json`: a Vault-encrypted `codeCiphertext` is opened by `OutboxNotificationWorker` at send time.
 - Login performs a dummy bcrypt for unknown users. Throttles: per identifier (5 failures lock for 15 minutes), per IP (30 failures), MFA verify per IP (20 failures). These counters are in-process memory (per instance); the DB attempt counter is the durable guarantee.
@@ -2812,11 +2831,11 @@ A closed catalogue in `lib/auth/merchantAuthorities.ts` is enforced route by rou
 - Coarse: `merchant:read`, `merchant:write`, `link:write`, `payment:read`.
 - Fine-grained: `link:read`, `wallet:create`, `application:manage`, `pos:manage`, `onboarding:write`, `dispute:respond`, `cashout:read`, `cashout:request`, `user:manage`, `token:manage`, `credential:manage`.
 - API token scopes are limited to `link:write`, `link:read`, `payment:read`. Clients can never supply `*` or unknown strings (`UNKNOWN_AUTHORITY`, `UNKNOWN_TOKEN_SCOPE`). Callers can only grant authorities they hold (`AUTHORITY_ESCALATION_FORBIDDEN`); only `MERCHANT_ADMIN` can grant the admin role (`ROLE_ESCALATION_FORBIDDEN`); no self-modification (`SELF_MODIFICATION_FORBIDDEN`); user create/patch is audited.
-- API tokens may only call `/external/*` (`API_TOKEN_SCOPE_VIOLATION`). Token `expiresAt` is validated, stored, listed and enforced (`TOKEN_EXPIRY_INVALID`, `ACCESS_TOKEN_EXPIRED`). `*` is honoured only for staff principals.
+- API tokens may only call `/external/*` (`API_TOKEN_SCOPE_VIOLATION`). Token `expiresAt` is validated, stored, listed and enforced (`TOKEN_EXPIRY_INVALID`, `ACCESS_TOKEN_EXPIRED`). `*` is honoured only for staff principals. The scope catalogue is `link:write`, `link:read`, `payment:read`; the legacy documented aliases (`links:create`, `links:write`, `links:cancel`, `links:read`, `payments:read`, `payments:write`) are normalised on creation and when an existing token is evaluated, so old tokens keep working.
 - Legacy: `merchant:write` implies the non-privileged fine-grained set for any role and the privileged four (`user:manage`, `token:manage`, `credential:manage`, `cashout:request`) only for `MERCHANT_ADMIN`. Existing tokens with other scope strings fail the external routes.
 
 ### Cash-outs
-- Merchant `POST /cashouts` requires an idempotency key (body `idempotencyKey` or `Idempotency-Key` header; replay returns 200, a different payload returns `409 IDEMPOTENCY_KEY_REUSED`, a missing key `IDEMPOTENCY_KEY_REQUIRED`). It checks the ledger balance minus open cash-outs, records `requestedByUserId` and audits. The destination is a typed structure (bank, account number, IBAN, holder, SWIFT). The merchant must have a KYB `payoutAccountHash` (else `403 CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED`) and the destination must hash to it (else `403 CASHOUT_DESTINATION_NOT_VERIFIED`); the destination is stored `payoutVerified:true`. Payout-account changes go only through the maker-checker merchant edit and the hash is recomputed on approval (GAP-017, resolved 2026-11-05).
+- Merchant `POST /cashouts` requires an idempotency key (body `idempotencyKey` or `Idempotency-Key` header; replay returns 200, a different payload returns `409 IDEMPOTENCY_KEY_REUSED`, a missing key `IDEMPOTENCY_KEY_REQUIRED`). It checks the ledger balance minus open cash-outs, records `requestedByUserId` and audits. The idempotency lookup is repeated inside the wallet-lock transaction (and again before an insufficient-balance refusal), so a concurrent retry replays the winner. The destination is a typed structure (bank, account number, IBAN, holder, SWIFT; a bank-account id alone is rejected because the payout hash is derived from bank + account/IBAN). The merchant must have a KYB `payoutAccountHash` (else `403 CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED`); a legacy merchant whose column is null but whose bank details are derivable gets the hash backfilled instead of being locked out, and the destination must hash to it (else `403 CASHOUT_DESTINATION_NOT_VERIFIED`); the destination is stored `payoutVerified:true`. Payout-account changes go only through the maker-checker merchant edit and the hash is recomputed on approval (GAP-017, resolved 2026-11-05).
 - Staff process route requires `cashout:review` (`finance:write` alone no longer suffices); the maker is a merchant user, the checker is staff. State machine and ledger rules are in the governance part.
 
 ### Admin user routes
@@ -2829,6 +2848,40 @@ A closed catalogue in `lib/auth/merchantAuthorities.ts` is enforced route by rou
 - Admin join-request `submit` returns `409 JOIN_REQUEST_PAYOUT_HASH_REQUIRED` and merchant `propose-edit` returns `422 PAYOUT_ACCOUNT_HASH_REQUIRED` for a payout account that yields no hash (GAP-017).
 - AML case release returns `409 AML_HOLD_CAPTURE_NOT_VERIFIED` when no escrow exists; verified callbacks/finalisation on terminal attempts return `409 ATTEMPT_TERMINAL` (GAP-015/GAP-016).
 - The reconciliation upload looks the duplicate run up per `(source, file_hash)` (GAP-018).
+
+## Admin UI completion endpoints (2026-11-06)
+
+Four new router modules are mounted from `admin.ts` (next to `/system/backups`): `adminCommerce.ts`, `adminLedger.ts`, `adminOperations.ts`, `adminSystem.ts` (shared helpers in `adminSliceHelpers.ts`). All are under `/internal/admin`, use `requireAuthorities` (any-of), `buildListQuery`/`listResponse`, 4-decimal money strings, stable `ApiError` codes, and write audit rows (`writeAudit`; `audit_log` has no merchant column, so the merchant id is recorded in `afterJson`). Secrets never leave: no `tokenHash`, `authTokenHash`, `nationalIdCiphertext`, `rawBodyBytes`, `addressCiphertext`, `entriesCiphertext`.
+
+**Commerce (`merchant:read` reads, `merchant:write` mutations)**
+
+| Endpoint | Notes |
+| :--- | :--- |
+| `GET /wallets`, `/wallets/summary`, `/wallets/:id` | Live balance = shard sum, checkpoint balance; both are in the wallet's NATURAL sign (a merchant owed 25.000 reads `25.0000` for both; a zero is never `-0.0000`; shard rows stay debit-positive as stored) and `null` + `redactedFields` for SUPPORT/plain `merchant:read`. Detail adds GL account, shards, applications, last 10 cash-outs and pending approvals; it no longer embeds statement lines (see `/statement`). |
+| `GET /wallets/:id/statement` | Paginated posting lines of the wallet's GL account (the lines of `glAccountId`), `merchant:read`. Query: shared list params (`page`, `pageSize` ≤ 200, default 25, `sortKey` `createdAt`/`amount`, `from`/`to`), `direction` (`DEBIT`/`CREDIT`), `refType` (list), `search` (memo or reference). Response `{lines, total, page, pageSize, totals: {lineCount, totalDebit, totalCredit, netDebit}, currency, redactedFields}`; totals cover the whole filtered set. Roles without financial visibility get an empty page, `totals` money `null` and `redactedFields: ["statementLines"]`. `400 INVALID_FILTER`, `404 WALLET_NOT_FOUND`. Shared helper `api/internal/ledgerLines.ts`. |
+| `GET /wallets/:id/audit-events` | Status history of one wallet (`entityType=WALLET`: `WALLET_FROZEN`, `WALLET_UNFROZEN`), newest first, paginated, `merchant:read`; `before`/`after` (status, reason) are `null` with `redacted: true` without sensitive merchant access. |
+| `POST /wallets/:id/status` | FROZEN immediate (`WALLET_FROZEN`); ACTIVE = approval (`202`, subject `WALLET`). `409 WALLET_INVALID_TRANSITION`, `WALLET_APPROVAL_PENDING`. |
+| `GET /applications`, `/applications/summary`, `/applications/:id` | Real `railWhitelist` (`string[]\|null`) + mode/count, redirect domains (empty + `redactedFields` for non-sensitive principals), tokens (status ACTIVE/REVOKED/EXPIRED, CIDRs), payment links, POS terminals. |
+| `PATCH /applications/:id` | SUSPENDED alone immediate (`APPLICATION_SUSPENDED`); reactivation and any policy edit (rails, redirect domains, assigned wallet) = one approval (`202`, subject `APPLICATION`). Validates rails exist, https hostnames, same-merchant/currency ACTIVE wallet. |
+| `POST /applications/:id/tokens/:tokenId/revoke` | Irreversible, audited; `409 TOKEN_ALREADY_REVOKED`. Core has no token cache (`authDoubleCheck` reads the row each request). |
+| `GET /payment-links`, `POST /payment-links/:id/state` | Only PENDING->CANCELLED (`PAYMENT_LINK_CANCELLED`). |
+| `GET /pos-terminals`, `POST /pos-terminals/:id/status` | ACTIVE->INACTIVE/BLOCKED immediate; to ACTIVE = approval (subject `POS_TERMINAL`). |
+| `GET\|POST /merchants/:id/beneficial-owners`, `PATCH\|DELETE .../:ownerId` | Body = join-request owner schema; national id encrypted (`kyb-national-id`) + hash; identity/PEP edits reset screening; DELETE deactivates. `409 OWNERSHIP_PERCENT_EXCEEDED`. Reads `merchant:read`/`kyb:read`/`kyb:write`; writes `kyb:write`/`merchant:write`. |
+| `POST /merchants/:id/revalidations` | `KybRevalidationRequest`, merchant `kybStatus=PENDING`, `KYB_REVALIDATION_DUE` notification; `409 KYB_REVALIDATION_ALREADY_OPEN`. |
+
+`GET /merchants/:id/applications` now also returns `railWhitelist`.
+
+**Ledger (`finance:read`; checkpoint `finance:write`)**: `GET /finance/journal-entries` (+`/summary`, `/:id`; balanced/unbalanced, `currency: "MIXED"`, reference route hint; `JournalEntry` has `refType/refId/description`, `postedAt` = `createdAt`; lines queried by `entryId` only because `journal_lines` is partitioned), `GET /finance/gl-accounts/:id` (live + natural balance, `shardCount`/`shardScaledAt`, derived account `checkpointBalance`/`checkpointAt`, `checkpoint{status,pendingLines,shardsBehind}` and per-shard `lineSeq`/`checkpointSeq`/`checkpointBalance`/`checkpointAt`/`pendingLines`/`status`; sequence numbers are strings; the fixed `recentLines` array was removed), `GET /finance/gl-accounts/:id/lines` (paginated posting lines with the same filters, `totals` and envelope as the wallet statement; `404 GL_ACCOUNT_NOT_FOUND`), `POST /finance/gl-accounts/:id/checkpoint` (`{reason}` required; captures EVERY shard with the verified O(delta) per-shard proof, no locks; a shard that fails is not advanced and the call answers `409 LEDGER_SHARD_PARITY_MISMATCH` with `{shardId, kind GAP|PARITY, shardTotal, journalTotal, drift, linesFound, linesExpected}`), `POST /finance/gl-accounts/:id/shards/scale` (`{width 1..256, reason}`, `finance:write`; widening creates shard rows, narrowing only changes routing; audited `GL_ACCOUNT_SHARDS_SCALED`; `409 SHARD_WIDTH_UNCHANGED`), `GET /finance/gl-accounts/:id/shards/:shardId/repair-plan` (`finance:read`; preview computed from the whole journal of the shard: `needsRepair`, `kind` RECOMPUTE|REBASELINE, `sequenceIntact`, stored vs journal balance, `delta`, `planHash`), `POST /finance/gl-accounts/:id/shards/:shardId/repair` (`{reason, planHash}`, `finance:write`; recomputes an INTACT shard immediately; `409 SHARD_REPAIR_PLAN_CHANGED`, `SHARD_REPAIR_NEEDS_APPROVAL`, `SHARD_REPAIR_NOT_NEEDED`; audited `GL_SHARD_REPAIRED`) and `POST /finance/gl-accounts/:id/shards/:shardId/repair/request` (same body; submits approval subject `GL_SHARD_REPAIR`, bound to `planHash`, `202`; required for REBASELINE; `409 SHARD_REPAIR_APPROVAL_PENDING`).
+
+**Operations**: `GET /transactions` (+`/summary`; `attempt:read`/`merchant:read`/`finance:read`; SUPPORT gets amounts, references and ledger entry `null` + `redactedFields`), `GET /inbound-events` and `/:id` (`attempt:read`/`case:read`; `verified`, `unmatchedOnly`; detail returns redacted headers, a 2 KB redacted body preview, size and sha256, never raw bytes), `GET /attempts/:id` (moved from `admin.ts`; keeps the `attempt` key, adds merchant/application/rail/gateway, ordered re-redacted `stepLogs`, `inboundEvents`, `attemptGroup`, cases, disputes, adjustments; `contextCiphertext` stripped), `GET /gateways/:id/health` (`gateway:read`; per ROUTE: last 100 `GatewayHealthSample` windows with success rate, 30 days of `RmRouteDailyVolume`, 24h summary).
+
+**System (`security:read` reads, `security:write` actions; templates `settings:read`/`settings:write`)**: `GET /system/jobs-outbox/summary`, `GET /system/jobs` + `POST /system/jobs/:id/requeue` (FAILED only, resets attempts; `{reason}`), `GET /system/outbox` (monitor only: no failure column exists so there is deliberately no retry; BigInt ids as strings, offset paging), `GET /system/audit-outbox`, `GET /system/notifications` (default FAILED) + `POST /system/notifications/:id/retry` (`{reason}`), `GET /settings/notification-templates` (active versions; `?history=true`) and `PUT /settings/notification-templates/:id` (new version in one transaction under a row lock, audit `NOTIFICATION_TEMPLATE_VERSIONED`; `422 TEMPLATE_UNKNOWN_PLACEHOLDERS`, `409 TEMPLATE_UNCHANGED`/`VERSION_CONFLICT`/`VERSION_NOT_ACTIVE`).
+
+### Rail logo, route policy and commission tiers (2026-11-06)
+
+- `PATCH /rails/:id` accepts `logoAssetId` (uuid, or `null` to clear). A uuid must reference a registered `Asset` (`404 ASSET_NOT_FOUND`); the audit row records the before/after logo. The edge schema and `toCoreRailUpdate` forward it. `POST /assets` still registers metadata only (name, type, size, SHA-256, storage key): it does not store image bytes, which remains a gap.
+- `PATCH /routes/:id` accepts `mismatchPolicy` (object; only `tolerance_amount`/`toleranceAmount` is read by the settlement engine, other keys are kept as stored; a malformed tolerance is `400 MISMATCH_TOLERANCE_INVALID`) and `maintenanceWindows` (`[{ start, end }]`, max 50, absolute instants; `end <= start` or an unparsable instant is `400 MAINTENANCE_WINDOW_INVALID`; `[]` clears). Omitted fields are left untouched; the edge forwards empty values so an operator can clear them.
+- **Commission tiers were broken end to end and are fixed.** The admin edge persisted UI tiers as an index-keyed object (`{"0": {...}}`) and core's create schema (`z.record`) could not take an array, while the fee calculator (`commissionForProfile`, `checkout.ts`) only reads `tiersJson` when it is an array: a TIERED profile created through the UI silently priced at its minimum fee. Now `POST /commission-profiles` accepts an ordered array (or the legacy object), the edge forwards the array, and `commissionTiers()` normalises both shapes (object keys ordered numerically), which also reprices already-stored legacy rows correctly. Tier keys are `upTo`, `flat`, `percent` (a fraction). **Behaviour change for existing data:** a legacy TIERED profile now prices by its tiers instead of the minimum fee. The edge also forwards `minFee`, `maxFee`, `feeBearerDefault`, `roundingMode`, `merchantId`, `applicationId` (core already accepted them; the strict edge schema dropped them). Note `percentageRate` is a **fraction** (`0.0300` = 3%), as the seed data stores it; the form now says so.
 
 ---
 
@@ -3465,13 +3518,13 @@ No build or test was run for this documentation change. Tests that require Postg
 - **Outbound URL compile.** An empty `allowed_hosts` list fails closed (`HOST_ALLOWLIST_EMPTY`) unless `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST=true` (default false). Private, loopback and link-local literals are blocked at compile time unless `allowPrivateHosts` is set. Consumer layers keep their own DNS/literal guards and the Fake Rails exception.
 - **Tests.** `core-back/test/security-regressions/{c1-forged-success,h8-webhook,m10-ssrf}`.
 - **Re-finalize guard (GAP-016, RESOLVED 2026-11-05).** `finalizeGuardFor(status)` classifies an attempt: `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` are `IDEMPOTENT` (already settled), `CANCELLED` and `BLOCKED` are `REFUSE`, everything else (including `FAILED` and `EXPIRED`, so a late success is still recovered) is `ALLOW`. `verifyCallback` applies it before the trusted-facts check: a duplicate of the trusted success on a settled attempt is a no-op that returns the current state, a contradicting (failure/untrusted) signal on a settled attempt throws `409 ATTEMPT_TERMINAL`, and a callback for a cancelled/blocked attempt throws `409 ATTEMPT_TERMINAL`. `finalizeSuccess` re-reads the attempt status first so a stale in-memory attempt cannot settle twice (idempotent settled attempts return `COMMITTED`, or `SUSPENSE` for `SUSPENSE_SETTLEMENT`, with the stored ledger entry id).
-- **AML hold escrow after capture (GAP-015, RESOLVED 2026-11-05).** The guard pipeline no longer books escrow when it decides `HOLD` (no money has been captured yet, so `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` would fabricate a balance); the decision reason is now `AML_HOLD_PENDING_CAPTURE` and `hold_journal_entry_id` is no longer written on the case. When a verified gateway capture of an AML-held attempt reaches `finalizeSuccess`, `escrowHeldCapture` books the escrow (`AML_HOLD_AND_RELEASE` scenario, idempotent per `PAYMENT_ATTEMPT`/attempt id, in the transaction runner when present) and returns the new `SlotCommitResult.outcome` `HELD`: the attempt is NOT settled, the slot is NOT committed, and the result keeps the `AML_HOLD` substatus. The checker's release (see `core.governance`) settles it and is refused until the escrow exists. Residual: a merchant-direct (`MERCHANT_DIRECT`) held attempt holds no platform cash, so nothing is booked (`AML_HOLD_NO_ESCROW`) and release/void have no escrow to move.
+- **AML hold escrow after capture (GAP-015, RESOLVED 2026-11-05).** The guard pipeline no longer books escrow when it decides `HOLD` (no money has been captured yet, so `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` would fabricate a balance); the decision reason is now `AML_HOLD_PENDING_CAPTURE` and `hold_journal_entry_id` is no longer written on the case. When a verified gateway capture of an AML-held attempt reaches `finalizeSuccess`, `escrowHeldCapture` books the escrow (`AML_HOLD_AND_RELEASE` scenario, idempotent per `PAYMENT_ATTEMPT`/attempt id, in the transaction runner when present) and returns the new `SlotCommitResult.outcome` `HELD`: the attempt is NOT settled, the slot is NOT committed, and the result keeps the `AML_HOLD` substatus. Because the money can only be captured by the rail, the checkout initiate route does NOT stop a `HOLD` attempt before `engine.initiate`; the attempt continues through the normal rail flow and a held attempt remains confirmable (`claimAttemptForConfirm` no longer excludes the `AML_HOLD` substatus). Cancel and expiry still refuse to touch a held attempt. The checker's release (see `core.governance`) settles it and is refused until the escrow exists. A duplicate finalize is refused atomically (`claimFinalize` conditional update), so two concurrent verified callbacks cannot settle/commit the slot twice. Residual: a merchant-direct (`MERCHANT_DIRECT`) held attempt holds no platform cash, so nothing is booked (`AML_HOLD_NO_ESCROW`) and release/void have no escrow to move.
 
 ---
 
 <a id="coreledger"></a>
 
-> **Part ID:** `core.ledger` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.ledger` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `working-tree`
 
 # Double-Entry Ledger
 
@@ -3620,54 +3673,74 @@ The exact builders are in `core-back/engine/ledger/LedgerPoster.ts:285` through 
 
 The raw `buildLedgerTemplate` is still public and is used by settlement sweeps, fee variance, suspense, AML, adjustments, cash-out, and tests. Its defaults are convenience defaults, not a production authority: any new production caller should pass explicit money.
 
-### 3.5 Shard writer and shard balances
+### 3.5 Shards, sequences and routing
 
-`createLedgerShardWriter` (`core-back/lib/storageEngine/ledgerShardWriter.ts:8`) projects every journal line into `gl_account_shards`:
+An account's balance is the sum of its **shards** (`gl_account_shards`, debit-positive). A shard is also a **gapless sequence**: `gl_account_shards.line_seq` counts the lines posted to it, and every `journal_lines` row stores the `shard_id` it was posted to and its `shard_seq` (>= 1; 0 marks pre-genesis lines folded into the genesis checkpoint).
 
-- default shard count is 16 (`DEFAULT_SHARD_COUNT`);
-- `MERCHANT_WALLET` uses one shard, `shard_id = 0`;
-- every other account type uses `fnv1aHash(refId) % shardCount`;
-- a debit is a positive delta, a credit is negative;
-- the insert uses `ON CONFLICT (gl_account_id, shard_id) DO UPDATE` and creates the shard row on demand;
-- the write runs inside the same transaction as the journal line.
+`createLedgerShardWriter` (`core-back/lib/storageEngine/ledgerShardWriter.ts`) runs inside the posting transaction and **before the lines are inserted**:
 
-`shardIdForAttempt` receives `line.refId` for every reference type, not only payment attempts. An adjustment, dispute, settlement batch, or fee variance therefore hashes its own reference. `ensureAccountShards` exists to pre-provision all shards for an account, but production does not call it; the seed provisions shards for the seeded system accounts and merchant shards are created on first posting.
+1. it loads each account's routing width (`gl_accounts.shard_count`, 1..256) from a 3-second process cache plus one batched query on a miss (a stale width is harmless: lines store their own shard and shard rows are never deleted);
+2. `routeLine` (`lib/storageEngine/shardRouting.ts`) picks `fnv1a(refId) % width`; **balance-reducing lines of a `MERCHANT_WALLET` (debits) always go to shard 0**;
+3. one statement `INSERT ... ON CONFLICT DO UPDATE` locks the touched shard rows in `(account, shard)` order, adds the signed delta to `current_balance` and the number of lines to `line_seq`, and `RETURNING`s the new `line_seq`;
+4. `assignShardSeqs` gives the j-th line of a posting on a shard the number `high-water - n + j`; the poster then inserts the lines with `shard_id` and `shard_seq`.
 
-`naturalShardBalance` (`core-back/lib/storageEngine/shardBalances.ts:86`) negates credit-positive accounts so a shard sum can be displayed as a natural balance. `loadShardBalanceRows` groups by account and returns only accounts that actually have shard rows.
+The shard row lock is held until commit, so the sequence of a shard is serialized and **commit order equals sequence order**: any snapshot that sees a shard at `(balance B, line_seq S)` also sees every line with `shard_seq <= S`, and committed sequences are gapless (a rolled-back posting rolls back its bump too). An idempotent replay returns before any shard work and never advances a sequence. The DB guard `journal_lines_shard_seq_positive (CHECK shard_seq > 0) NOT VALID` rejects any new line that forgot its sequence; uniqueness of the sequence cannot be a unique index on the partitioned table, so it is proven by the checkpointer (below). The covering index `journal_lines_shard_seq_idx (gl_account_id, shard_id, shard_seq) INCLUDE (direction, amount)` serves the range scans.
+
+Every account always has shard rows `0 .. shard_count-1`: the trigger `gl_accounts_create_shards` creates them with the account. System accounts start 16 wide (`STORAGE_SHARD_COUNT`, `initialShardWidth`), wallets 1 wide; the shard scaler (section 3.9) and the admin override widen an account later. `loadLiveAccountBalances` (`lib/storageEngine/shardBalances.ts`) is the single live-balance read: the shard sum converted to the account's natural sign; there is no journal fallback.
 
 ### 3.6 Checkpoints
 
-`CheckpointService.captureCheckpoint` (`core-back/engine/ledger/CheckpointService.ts:44`):
+A checkpoint is **per shard**: a `(balance, sequence)` pair in `gl_shard_checkpoints` (a shard without a row is at `(0, 0)`). The boundary is the shard's own gapless sequence, never a timestamp (`journal_lines.created_at` is stamped by the app process, so a time boundary could miss a line that commits late). The account stores no checkpoint: `checkpointBalance`/`checkpointAt` in the admin APIs are derived (sum of shard checkpoints, oldest checkpoint time).
 
-1. locks the GL account with `SELECT ... FOR UPDATE` when raw SQL is available;
-2. sums all journal lines up to `asOf`;
-3. chooses `lastCheckpointId` from the latest journal entry, or a synthetic `checkpoint:<account>:<timestamp>` string;
-4. writes `checkpointBalance`, `checkpointAt`, and `lastCheckpointId` onto `gl_accounts`.
+`CheckpointService.captureShard` (`core-back/engine/ledger/CheckpointService.ts`) reads, in ONE statement (one snapshot), the shard `(B, S)`, its checkpoint `(Bc, Sc)` and `n = COUNT, delta = SUM` of the lines with `shard_seq in (Sc, S]`, and proves:
 
-`getLiveBalance` adds the checkpoint balance to lines strictly after `checkpointAt` (`CheckpointService.ts:94`). There is no checkpoint-history table; the checkpoint is represented only by the three fields on `gl_accounts`. `captureCheckpoint` has no production caller: only the ledger tests and the exhaustive checkpoint suite exercise it. The runtime reads `checkpointBalance`/`checkpointAt` in the verifier and in the admin fallback, but no scheduled job captures new checkpoints.
+- **gapless** `n = S - Sc` (a missing, duplicate or misattributed line is detected), and
+- **parity** `Bc + delta = B`.
+
+Only then does a second, tiny monotonic upsert (`WHERE checkpoint_seq < EXCLUDED.checkpoint_seq`) move the checkpoint. It is O(lines since the last checkpoint), takes no lock on the shard or the account, and never blocks a posting; a capture that races a newer one reports NOOP. A `created_at` lower bound prunes the monthly partitions and is retried without the hint before a GAP is reported. A GAP or PARITY result does **not** move the checkpoint: the failure is recorded on the checkpoint row (`status`, `failure_kind`, `consecutive_failures`), the first failure opens a P1 `MISMATCH` operator case keyed `ledger.shard:<account>:<shard>` and writes a `LEDGER_SHARD_CHECKPOINT_FAILED` audit row.
+
+`LedgerCheckpointWorker` (section 3.9) runs it automatically and, when a shard keeps failing, repairs it (section 3.10); `POST /finance/gl-accounts/:id/checkpoint` ("Run checkpoint rollup", `finance:write`, reason, audited) runs it for every shard of one account.
 
 ### 3.7 Invariant verifier
 
-`InvariantVerifier.verify` accepts either a Prisma-like client or a balance provider. With a client it loads every GL account and sums the lines after that account's checkpoint (`InvariantVerifier.ts:107`). It groups natural balances by account type and computes the invariant. `assertInvariant` throws on non-zero drift.
+`InvariantVerifier.verify` accepts either a Prisma-like client or a balance provider. With `{sql: true}` it reads, in one statement, each account's live balance (the sum of its shards) and its shard checkpoints, groups natural balances by account type and computes the invariant. The 60 s check is therefore **O(shards)**, independent of how much history the journal holds. What ties the shards to the journal is the checkpointer (it proves `checkpoint + lines in the sequence range = shard balance` before every advance, in a chain from the genesis checkpoint) and the restore drill (it re-derives balances, checkpoints and sequence counts from the whole journal of a restored database). The non-SQL path used by test doubles sums every journal line.
 
 Production uses the verifier in two places:
 
-- `LedgerInvariantWorker` checks every 60 seconds and opens one open `MISMATCH`/`P1` operator case when drift is non-zero (`core-back/engine/workers/LedgerInvariantWorker.ts:16`);
-- the admin finance/invariant endpoint computes the same snapshot on demand (`core-back/api/internal/admin.ts:15090`).
+- `LedgerInvariantWorker` checks every 60 seconds and opens one `MISMATCH`/`P1` operator case (keyed `ledger.invariant`, so it never suppresses or is suppressed by a per-shard case) when drift is non-zero;
+- the admin finance/invariant endpoint computes the same snapshot on demand.
 
-### 3.8 Balance-read reality
+### 3.8 Balance reads
 
-There is no single balance-read path. The actual sources are:
+Every live balance is the shard sum from `loadLiveAccountBalances` (merchant balance routes, `merchantWalletBalance`, the admin wallet and ledger views, the liquidity view). The cash-out and chargeback checks use `lockWalletLedgerBalance` (`core-back/lib/cashoutBalance.ts`). Wallet **debits are serialized by a transaction-scoped advisory lock on the wallet, taken FIRST**, before the transaction holds any shard row, so only other debiters ever wait for it and a waiter holds no shard row (no lock cycle is possible). A caller that knows the posting it is about to make (the cash-out) then calls `LedgerPoster.lockShardsFor(template, context, tx)`, which locks every shard row that posting will update in one statement in the global `(account, shard)` order (`lockShardsForLines`), exactly the order postings use, so a refund posting to shard 0 cannot slip in between the check and the debit and a payment confirmation can never form an opposite-order cycle with it. Only then does a final statement sum all shards (credits on other shards can only raise the balance, so the check is conservative). Regression: `test/cashout-lock-order.test.ts` (the old order deadlocks 75 times in 120 operations in the worst case; the new one never). Aging buckets of the gateway clearing view are the net signed movement of the last three days plus the balance (`admin.ts`), so they do not depend on any checkpoint.
 
-| Reader | Source | Behavior when shards are absent |
-| :--- | :--- | :--- |
-| Merchant `GET /wallets/:id/balance` | shard sum first | falls back to `checkpointBalance + every journal line` (`core-back/api/internal/merchant.ts:1370`) |
-| `merchantWalletBalance` helper | shard sum first | falls back to `checkpointBalance + every journal line` (`core-back/lib/merchantOps.ts:176`) |
-| Admin ledger balances | shard sum first | falls back to `checkpointBalance + lines since checkpointAt` (`core-back/api/internal/admin.ts:14626`) |
-| Invariant verifier | checkpoint plus lines since checkpoint | always journal-based |
-| Merchant `getWalletBalance` repository | sum of shard rows | returns zero when no shard rows exist (`core-back/engine/db/repositories.ts:162`) |
+### 3.10 Shard repair
 
-The merchant fallbacks start from the checkpoint balance and then add *all* journal lines. As long as no checkpoint has been captured (`checkpointBalance = 0`, `checkpointAt = null`) this is correct. If `CheckpointService` is ever activated, those fallbacks will double count the checkpoint window. This is a code gap, not an intentional design.
+A shard is a **projection** of the immutable journal. When it disagrees with the journal the journal is right, so a repair **recomputes the projection from the journal** (`engine/ledger/ShardRepair.ts`). It never posts a ledger entry to "fix" a shard: an adjusting entry would change the journal too and leave the shard exactly as wrong (and record a false economic event). A real money error is a business correction through the Adjustments flow, not a projection repair.
+
+`planShardRepair` reads the shard and ALL its journal lines and decides, from whether the shard's sequence is intact (above `gl_shard_checkpoints.baseline_seq`, exactly `baseline+1 .. line_seq`, each used once):
+
+- **RECOMPUTE** (sequence intact; only the stored balance or checkpoint disagrees): `current_balance := sum of ALL the shard's lines`, checkpoint := `(that sum, line_seq)`. Safe to automate.
+- **REBASELINE** (sequence damaged: a line is missing or a number is duplicated): recomputing could drop money the shard held if the journal lost a line, so a person decides. `current_balance := journal sum`, `line_seq := max(line_seq, highest sequence found)` (a number is never reused), checkpoint := that point and `baseline_seq` := that point, so the damaged history before it is exempt from the gapless proof (the restore drill and the deploy gate honour `baseline_seq`).
+
+`applyShardRepair` takes `FOR UPDATE` on the shard row (every line insert needs it first, so the shard's lines cannot change), RE-PLANS under the lock, refuses with `SHARD_REPAIR_PLAN_CHANGED` when the plan no longer hashes to what the caller previewed/approved, applies the change, appends a `gl_shard_repairs` row, writes the audit row `GL_SHARD_REPAIRED` and annotates the open per-shard operator case (which stays OPEN for a person to resolve). Timeouts: `lock_timeout 10s`, `statement_timeout 120s`.
+
+Who may do what:
+
+| | Automatic | Manual, single user | Manual, approved |
+| :--- | :--- | :--- | :--- |
+| PARITY, sequence intact (RECOMPUTE) | yes, guarded | yes (`finance:write`, reason, preview hash) | yes |
+| GAP / damaged sequence (REBASELINE) | **never** | refused (`409 SHARD_REPAIR_NEEDS_APPROVAL`) | yes (maker-checker, subject `GL_SHARD_REPAIR`) |
+
+The automatic repair (`LedgerCheckpointWorker`, `LEDGER_SHARD_AUTO_REPAIR_*`, on by default) only repairs a shard that failed its proof `LEDGER_SHARD_AUTO_REPAIR_MIN_FAILURES` times in a row (3: about 30 minutes at the 10-minute retry), whose failure kind is PARITY, whose sequence is intact and whose correction is at most `LEDGER_SHARD_AUTO_REPAIR_MAX_ABS_DRIFT` (100). The guard is re-evaluated under the lock; a declined shard is logged once per plan and left to a person. Manual preview/recompute/request endpoints are in the API surface; the approval is bound to the previewed `planHash`.
+
+**Future: archived journal lines.** `planShardRepair` and the deep checks assume every line of a shard is in `journal_lines`, which is true today (nothing is archived). When old lines are moved to an archive, a repair will use archive plus live by default and the checkpoint anchor only when a deploy variable enables it; see `future.ledger-archive` (`09-future-and-unimplemented/04-ledger-archive-and-shard-repair.md`).
+
+### 3.9 Automation workers and shard scaling
+
+- **`LedgerCheckpointWorker`** (`engine/workers/LedgerCheckpointWorker.ts`, leader-elected, default on): every `WORKER_LEDGER_CHECKPOINT_INTERVAL_MS` it captures the shards with the most pending lines (`>= LEDGER_CHECKPOINT_MIN_LINES`, or any pending line with a checkpoint older than `LEDGER_CHECKPOINT_MAX_AGE_MS`), one shard per call, bounded by `WORKER_LEDGER_CHECKPOINT_BATCH_SIZE`. Failed shards are retried only every 10 minutes. Routine successes only update the checkpoint row; one aggregated `LEDGER_CHECKPOINT_SWEEP` audit row per hour summarises them.
+- **`LedgerShardScalerWorker`** (`engine/workers/LedgerShardScalerWorker.ts`, leader-elected, **live by default**): it samples every shard's `line_seq`, turns the delta into lines per second per shard and asks the pure policy `decideShardWidth` (`engine/ledger/ShardScaler.ts`). A shard row serializes its postings, so the hottest shard's rate is the bottleneck signal; the account is widened when its EWMA stays above `LEDGER_SHARD_UP_LINES_PER_SEC` for two samples and the cooldown (`LEDGER_SHARD_COOLDOWN_MS`, persisted as `gl_accounts.shard_scaled_at`) has passed. The new width aims at half the threshold per shard, grows at most 4x per step and stops at `LEDGER_SHARD_MAX_WIDTH`. A wallet whose shard 0 is the only hot shard (debit-bound) is not widened. By default it widens the account through `applyShardWidth` and audits `GL_ACCOUNT_SHARDS_SCALED`; with `LEDGER_SHARD_SCALER_DRY_RUN=true` it only audits `GL_ACCOUNT_SHARDS_SCALE_PROPOSED` once per proposed width and changes nothing. Calibrate `LEDGER_SHARD_UP_LINES_PER_SEC` on the target hardware.
+- **`applyShardWidth`** (`engine/ledger/shardScaling.ts`) is the one operation both the worker and `POST /finance/gl-accounts/:id/shards/scale` (`finance:write`, reason) use: in one transaction it takes `FOR NO KEY UPDATE` on the account row (which does not conflict with the FK `KEY SHARE` of postings), updates `shard_count`/`shard_scaled_at`, creates missing shard rows and writes the audit row `GL_ACCOUNT_SHARDS_SCALED`. Narrowing only changes where new lines go; existing shards keep their balances, sequences and checkpoints.
 
 ## 4. Contracts and invariants
 
@@ -3677,8 +3750,8 @@ The merchant fallbacks start from the checkpoint balance and then add *all* jour
 4. Journal lines are append-only. The application exposes no update or delete path, and retention deliberately excludes `journal_entries` and `journal_lines`.
 5. A zero optional leg is omitted rather than booked as a zero line (`optionalLine`, `LedgerPoster.ts:252`).
 6. Account resolution never invents an account: a missing scoped account falls back only to the same type and currency, and then fails with `GL_ACCOUNT_NOT_FOUND`.
-7. Shard projection is in the same transaction as the journal line. A shard balance is the signed sum of every line projected to that shard; the natural balance negates credit-positive accounts.
-8. A checkpoint is a snapshot, not a replacement for journal lines. A live balance is checkpoint plus later lines. A checkpoint must serialize against postings to the same account.
+7. Shard projection and sequence reservation are in the same transaction as the journal line. A shard balance is the signed sum of every line posted to that shard; the natural balance negates credit-positive accounts. The sequence numbers of a shard are gapless.
+8. A checkpoint is a verified `(balance, sequence)` pair of one shard, not a replacement for journal lines: `balance = previous checkpoint + the lines in the sequence range`, proven before it moves. Checkpointing never locks a shard or an account.
 9. The invariant equation is the authoritative system-wide check. A non-zero drift is an operational incident and opens a P1 case.
 10. Adjustment, refund, chargeback, cash-out, AML release/void, and suspense postings use the same ledger and the same idempotency contract.
 
@@ -3730,17 +3803,16 @@ Use `postScenario` for settlement sweeps, fee variance, suspense, AML, and adjus
 ### Adding an account or currency
 
 1. Add/seed `gl_accounts` rows for every currency-scoped account type.
-2. Seed or allow the shard writer to create shards. `ensureAccountShards` is available for explicit provisioning.
+2. The `gl_accounts_create_shards` trigger creates the shard rows with the account; set `shard_count` (`initialShardWidth`) when creating it.
 3. Add the currency to the seed and to any currency validation before accepting payments in it.
 4. Verify a posting in that currency resolves every account type it uses; otherwise the confirmation fails with `GL_ACCOUNT_NOT_FOUND`.
 
 ### Investigating a balance
 
-1. Read `gl_accounts.checkpoint_balance` and `checkpoint_at`.
-2. Read `gl_account_shards` for the account. If rows exist, their signed sum is the intended fast balance.
-3. If no shard rows exist, use the admin/journal fallback: checkpoint plus lines since `checkpointAt`.
-4. Do not use the merchant fallback as the authority once checkpoints are active; it adds all lines.
-5. Run the invariant verifier. Non-zero drift means the journal itself is inconsistent, not merely a stale shard.
+1. Open the GL account drawer (Ledger Audit & Invariant, Journal Entries, Wallets): the live balance is the sum of the shard rows; each shard shows its line sequence, pending lines and checkpoint.
+2. A shard marked `PARITY` or `GAP` failed its proof: `PARITY` means its balance differs from checkpoint + journal lines (drift shown); `GAP` means the lines in its sequence range are missing or duplicated. Its checkpoint did not move and a P1 operator case `ledger.shard:<account>:<shard>` is open. Do not "fix" the balance by hand; escalate to Finance and engineering with the account and shard ids.
+3. Run the invariant verifier. Non-zero drift means the system-wide equation is off.
+4. Use **Repair** on the failed shard (GL account drawer): it previews the correction computed from the journal. An intact sequence is recomputed immediately (or automatically after repeated failures); a damaged sequence is submitted to Approvals as a re-baseline. "Run checkpoint rollup" re-verifies the account afterwards. A money error found this way is corrected through the Adjustments flow, never by editing a shard.
 
 ## 7. Status and deviations
 
@@ -3750,33 +3822,31 @@ Use `postScenario` for settlement sweeps, fee variance, suspense, AML, and adjus
 - 17 scenario builders and strict payment-confirmation builder.
 - Balanced-template validation, positive line validation, idempotent posting.
 - Account resolution with scoped and platform-wide fallback.
-- Transactional shard projection with 16-way hashing and one-shard merchant wallets.
-- Checkpoint capture/get-live-balance service (code-complete, not scheduled).
-- Scheduled invariant worker and on-demand verifier.
+- Sequenced shard writer: per-account routing width, gapless per-shard sequence, wallet debits pinned to shard 0.
+- Per-shard verified checkpoints, automatic checkpoint worker, manual "checkpoint now".
+- Hot-account detection and automatic widening (live by default) plus an audited manual width override.
+- O(shards) invariant check every 60 s and an on-demand verifier.
 - Suspense routing and AML hold/release/void posting.
 - Adjustment, refund, chargeback, cash-out, settlement sweep, and fee-variance postings.
 
 ### Partial
 
-- **Checkpoint lifecycle** — the service exists but no runtime schedules it, no checkpoint history is retained, and no administrative route captures one.
-- **Shard lifecycle** — writes are projected, but there is no rebuild, reconciliation, or drift detector for shards; `ensureAccountShards` is test-only.
-- **Balance reads** — three different read paths exist. Admin and verifier use “since checkpoint”; merchant fallbacks use “all lines”.
-- **Scenario coverage** — some scenarios are exercised mainly by template tests (`PLATFORM_HELD_*`, `PAYER_SURCHARGE`, `SPLIT`, `MERCHANT_DIRECT` netting) rather than by every runtime path. The engine and governance paths use the main confirmation, sweep, suspense, AML, refund, chargeback, and cash-out scenarios.
-- **Database enforcement** — only the positive-amount check and the approval maker/checker constraint are in PostgreSQL; journal balance is application-level.
+- **Failure handling** — a failed shard is detected, alerted, held at its last good checkpoint and repaired from the journal (automatically for a persistent PARITY with an intact sequence, manually otherwise; section 3.10). A re-baselined shard keeps a documented exemption (`baseline_seq`) for its damaged history.
+- **Scaler calibration** — the scaler is live by default but its thresholds are defaults chosen from a local benchmark (about 1,000 postings/s on one shard with a 1 ms transaction); real transactions hold the shard lock longer, so watch the `GL_ACCOUNT_SHARDS_SCALED` audit rows on the target hardware and tune `LEDGER_SHARD_UP_LINES_PER_SEC` (or set `LEDGER_SHARD_SCALER_DRY_RUN=true` to observe without widening).
+- **Scenario coverage** — some scenarios are exercised mainly by template tests (`PLATFORM_HELD_*`, `PAYER_SURCHARGE`, `SPLIT`, `MERCHANT_DIRECT` netting) rather than by every runtime path.
+- **Database enforcement** — only the positive-amount check, the shard-sequence guard and the approval maker/checker constraint are in PostgreSQL; journal balance is application-level.
 
 ### Missing / deferred
 
 - No database trigger or deferred constraint that rejects an unbalanced journal entry.
-- No `ledger_checkpoints` table or checkpoint audit trail.
-- No shard repair/rebuild command.
-- No automatic shard-to-journal reconciliation alert separate from the invariant worker.
+- No automatic scale-down of shard widths.
+- No checkpoint history table (the audit rows and the checkpoint row's status columns are the record).
 - No support for currencies beyond the seeded `LYD`, `USD`, `EUR` without manual seeding.
 
 ### Known bugs / risks
 
-- **Code gap:** merchant wallet and `merchantWalletBalance` fallbacks double count a captured checkpoint because they add every line to `checkpointBalance`. They are currently masked because no checkpoint is captured in production.
 - **Code gap:** idempotent replay of the same `(refType, refId)` with a different template silently returns the first entry; it does not compare the line set or amounts. A caller that reuses a reference for a different economic event loses the second posting.
-- **Code gap:** `getWalletBalance` in the repository returns `0` when an account has no shard rows, unlike the API helper that falls back to journal lines. Callers using the repository directly must not treat zero as authoritative before shards exist.
+- **Risk:** the single-hot-shard write path is about 25-30% slower than before the sequence was added (benchmark 2026-11-07: p50 1.4 ms to 1.8 ms single-threaded; about 1,000 to 750 postings/s on one shard) because the sequence is reserved under the shard lock before the lines are inserted and a fifth index exists on `journal_lines`. That is the case the shard scaler relieves.
 - **Documentation gap:** `core-back/test/engine/ledger.test.ts` describes “all 16 journal entry templates”; the exhaustive matrix header says “15” and asserts 20 labels. The canonical count is 17 scenarios / 20 staged variants.
 - **Risk:** the raw scenario builder defaults commission/provider/gateway fee. A production caller that forgets a fee will silently book the default rather than fail. Use `postPaymentConfirmation` or pass every amount explicitly.
 
@@ -3847,7 +3917,7 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 
 <a id="coregovernance"></a>
 
-> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Governance and Compliance
 
@@ -3977,12 +4047,12 @@ The seven design layers map to code as follows:
 
 Screening is a provider interface (`ScreeningProvider`) with Arabic normalization, name similarity, internal watch-list provider, mock provider, and a cached provider. `MerchantScreeningService` persists `aml_screenings` and `aml_screening_matches` with list versions and input hashes, applies owner screening status, and raises a confirmed-match case only. Potential matches remain in the screening queue for disposition.
 
-The AML rule engine (`core-back/engine/guards/AmlRuleEngine.ts`) supports `SINGLE_AMOUNT`, `CUMULATIVE_WINDOW`, `STRUCTURING`, `RISK_TIER`, `COUNTERPARTY_COUNTRY`, `RAIL`, and `MERCHANT_DIRECT_AMOUNT`; actions are `HOLD`, `FLAG`, `BLOCK`, `CASE_ONLY`. Severity starts at the rule base, correlates with velocity, raises for high merchant tier, volume multiple, another open case, confirmed sanctions, and potential PEP. On a `HOLD`, the guard posts `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` and stores the hold journal entry on the case.
+The AML rule engine (`core-back/engine/guards/AmlRuleEngine.ts`) supports `SINGLE_AMOUNT`, `CUMULATIVE_WINDOW`, `STRUCTURING`, `RISK_TIER`, `COUNTERPARTY_COUNTRY`, `RAIL`, and `MERCHANT_DIRECT_AMOUNT`; actions are `HOLD`, `FLAG`, `BLOCK`, `CASE_ONLY`. Severity starts at the rule base, correlates with velocity, raises for high merchant tier, volume multiple, another open case, confirmed sanctions, and potential PEP. On a `HOLD`, the guard only records the decision (`AML_HOLD_PENDING_CAPTURE`) and the `AML_HOLD` substatus; it does NOT post anything, because no money has been captured yet. The escrow is booked by the engine after a verified gateway capture (see `core.engine`).
 
 AML case resolution (`GovernanceExecution.ts:1470`):
 
-- `RELEASE` posts `AML_HOLD_AND_RELEASE` release lines, sets attempt `SUCCEEDED`, commits the link slot.
-- `REJECT` posts `AML_VOID`, sets attempt `FAILED`, releases the slot.
+- `RELEASE` posts `AML_HOLD_AND_RELEASE` release lines only when the verified-capture escrow exists (otherwise `409 AML_HOLD_CAPTURE_NOT_VERIFIED`), sets attempt `SUCCEEDED`, clears the `AML_HOLD` substatus, commits the link slot.
+- `REJECT` posts `AML_VOID` only when an escrow exists; a not-yet-captured hold is simply failed with no posting, and the attempt substatus becomes `AML_VOID`.
 - `ESCALATE` leaves the money in `AML_HOLD`, sets `ESCALATED_STR`, and opens a P1 operator case.
 - `HOLD` freezes the case without moving money.
 - `MERCHANT_DIRECT` cases never post.
@@ -4204,11 +4274,29 @@ Some governance tests use fake clients; database-backed suites require PostgreSQ
 - **Per-source statement file hash (GAP-018, RESOLVED with a residual).** Migration `20261105130000_statement_unique_source_file_hash` drops the global `reconciliation_runs_file_hash_key` index and creates the unique index `reconciliation_runs_statement_source_id_file_hash_key` on `(statement_source_id, file_hash)` plus a non-unique `reconciliation_runs_file_hash_idx`. The same bytes may now be uploaded for two sources; one source never gets two runs. `findRunByFileHash(tx, fileHash, sourceId)` is source-scoped and the upload handler keeps a defence-in-depth check that a run of another source is never answered as this source's. Residual: the concurrent duplicate-upload race described in the frontmatter gaps.
 - **Still open.** GAP-025: KYB scanning is content sniffing plus EICAR only; a real malware scanner is not integrated.
 
+## Governed commerce state changes and intake enforcement (2026-11-06)
+
+**Rule (project invariant: sensitive actions use maker-checker).** Moving an entity to a *more restrictive* state is immediate: it requires a trimmed `reason` of 10-500 characters and writes an audit row. Moving it to a *less restrictive* state, or changing what it may accept, is a maker-checker approval:
+
+| Entity | Immediate (audited) | Approval subject |
+| :--- | :--- | :--- |
+| Wallet | ACTIVE -> FROZEN (`WALLET_FROZEN`) | `WALLET`: FROZEN -> ACTIVE (`WALLET_UNFROZEN`) |
+| Application | ACTIVE -> SUSPENDED, alone (`APPLICATION_SUSPENDED`) | `APPLICATION`: reactivation (`APPLICATION_REACTIVATED`) and any edit of rail whitelist, redirect domains or assigned wallet (`APPLICATION_UPDATED`) |
+| POS terminal | ACTIVE -> INACTIVE/BLOCKED, INACTIVE -> BLOCKED (`POS_TERMINAL_STATUS_CHANGED`) | `POS_TERMINAL`: to ACTIVE |
+| Payment link | PENDING -> CANCELLED (`PAYMENT_LINK_CANCELLED`, no reactivation) | none |
+| Access token | revoke (`ACCESS_TOKEN_REVOKED`, irreversible) | none |
+
+`executeWalletStatusChange`, `executeApplicationChange` and `executePosTerminalStatusChange` (`GovernanceExecution.ts`) are dispatched from `executeApprovalSubject`; each re-validates the entity's current state (the application executor also checks `fromStatus` and `baseUpdatedAt`, wallet ownership/currency/ACTIVE and rail codes), audits in the same transaction and is idempotent. maker != checker is enforced by the existing approval machinery. The three subject types map to the MERCHANT approval domain (`approvalQueue.ts`). Side effect: the pre-existing merchant-side `PATCH /applications/:id` approvals (subject `APPLICATION`) previously had no executor and now execute.
+
+**Enforcement (a freeze that does not freeze would be a defect).** Before this change the checkout intake checked link state and merchant status but not application or wallet status; wallet status was only enforced for cash-outs. `lib/commerceStatus.ts` now raises `409 APPLICATION_NOT_ACTIVE` / `WALLET_NOT_ACTIVE` / `POS_TERMINAL_NOT_ACTIVE` in: `AttemptGuardPipeline.guard` (the choke point for every attempt, via optional `payments.findLinkCommerceStatus`), checkout `ensureLinkUsable` (initiate) and the confirm SUBMIT step, merchant `createLink` (`POST /links` and `/external/links`), POS screen stream connect (an open stream ends at the next minute heartbeat) and POS screen creation. A merchant can no longer lift a BLOCKED terminal through its own `PATCH /pos/terminals/:id` (`409 POS_TERMINAL_BLOCKED`). LIVE traffic requires ACTIVE; SANDBOX additionally tolerates application PENDING/DRAFT and wallet PENDING (the OD-10 sandbox-before-approval flow); SUSPENDED/CLOSED applications and FROZEN/CLOSED wallets are blocked in both. Not gated by design: display-only `GET /pay/:linkKey`, resend/client-event routes, and inbound provider webhooks (already-captured money must still be processed).
+
+**Known limits.** A merchant can still move its own INACTIVE terminal back to ACTIVE (INACTIVE cannot be told apart from a staff-set INACTIVE; only BLOCKED is staff-only). `approvalSubjectContext` (admin.ts) has no case for the three new subjects, so the approvals detail shows the generic payload diff.
+
 ---
 
 <a id="coreworkers"></a>
 
-> **Part ID:** `core.workers` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.workers` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
 
 # Background Workers and Outboxes
 
@@ -4265,7 +4353,9 @@ The loop is not a distributed lock by itself. Cross-node safety comes from `FOR 
 | `PollWorker` | `next_check_at <= now`, every poll interval | `FOR UPDATE SKIP LOCKED`, batch | Reconciles inquiry schedules, applies route backoff `[5,15,30,60,120,300]` seconds with a 900 s default window, transitions terminal states once, updates schedule metadata. | Implemented |
 | `InboundInboxWorker` | `processed_at IS NULL`, every poll interval | `FOR UPDATE SKIP LOCKED`, batch | Calls the engine callback verifier, retries `RETRYABLE` errors up to `maxAttempts` (production default 3; class default 5), opens an operator case on terminal failure. | Partial / idle |
 | `OutboxNotificationWorker` | `status = QUEUED` and `next_attempt_at <= now`, every poll interval | `FOR UPDATE SKIP LOCKED`, batch | Finds template, treats missing/tipping-off templates as delivery failures, redacts AML payload, renders, sends; retries with exponential backoff up to 8 attempts. | Implemented |
-| `LedgerInvariantWorker` | every 60 s | Single verifier pass | Verifies the system-wide invariant; logs drift and opens one open `MISMATCH`/`P1` operator case. | Implemented |
+| `LedgerInvariantWorker` | every 60 s | Single verifier pass (O(shards)) | Verifies the system-wide invariant from the shard balances; logs drift and opens one `MISMATCH`/`P1` operator case keyed `ledger.invariant`. | Implemented |
+| `LedgerCheckpointWorker` | `WORKER_LEDGER_CHECKPOINT_INTERVAL_MS` (30 s), leader-elected | Shards with the most pending lines, bounded by the batch size | Captures each shard with the verified O(delta) proof of `CheckpointService` (no locks); a failed proof opens a per-shard P1 case and an audit row; hourly `LEDGER_CHECKPOINT_SWEEP` audit summary. | Implemented |
+| `LedgerShardScalerWorker` | `WORKER_LEDGER_SHARD_SCALER_INTERVAL_MS` (30 s), leader-elected | One statement over all shard sequences | Measures lines/s per shard, widens a hot account through `applyShardWidth` (live by default, audited `GL_ACCOUNT_SHARDS_SCALED`; `LEDGER_SHARD_SCALER_DRY_RUN=true` only audits `GL_ACCOUNT_SHARDS_SCALE_PROPOSED`). | Implemented |
 | `JoinRequestExpiryWorker` | every poll interval | Raw updates, batch on overdue reviews | Expires `DRAFT` older than 30 days; expires overdue `SUBMITTED`/`IN_REVIEW`/`INFO_REQUESTED` reviews; excludes `PENDING_CHECKER`. | Partial |
 | `PeriodicScreeningWorker` | every poll interval; 24 h rescreen interval | `FOR UPDATE SKIP LOCKED` on due merchants, then merchant row lock | Refreshes watch-list versions, screens merchant and owners, applies owner statuses, raises one confirmed-match case and suspends the merchant. | Implemented (L2 only) |
 | `KybExpiryWorker` | every 6 h (`WORKER_KYB_EXPIRY_INTERVAL_MS`), batch 200 | Query + per-merchant transaction | Marks expired documents, queues 30/7-day notices, suspends after grace, starts periodic revalidations, expires overdue revalidations. | Implemented |
@@ -4320,9 +4410,11 @@ The synchronous route stores the raw body and a redacted header subset, not the 
 
 The production sender uses the webhook transport when `NOTIFICATION_WEBHOOK_URL` is configured and the log transport otherwise. The log transport reports `SENT`, never `DELIVERED`; `IN_APP` notifications are delivered by the notification row itself. The rendered body of an `INTERNAL` template is never written to the log.
 
-### 3.8 Ledger invariant worker
+### 3.8 Ledger invariant, checkpoint and shard-scaler workers
 
-`LedgerInvariantWorker` runs `InvariantVerifier` every 60 seconds. On non-zero drift it logs the left/right sides, calls the optional `onDrift`, and opens a single open `MISMATCH`/`P1` case with a four-hour SLA. It does not halt payouts itself; the operator case and the admin invariant panel are the control surface.
+`LedgerInvariantWorker` runs `InvariantVerifier` every 60 seconds over the shard balances. On non-zero drift it logs the left/right sides, calls the optional `onDrift`, and opens a single `MISMATCH`/`P1` case (subject key `ledger.invariant`) with a four-hour SLA. It does not halt payouts itself; the operator case and the admin invariant panel are the control surface.
+
+`LedgerCheckpointWorker` and `LedgerShardScalerWorker` are leader-elected singletons (the checkpoint capture is idempotent, so a duplicate run is harmless). The checkpoint worker keeps every shard's checkpoint close to its head; the scaler samples every shard's `line_seq` once per interval and keeps only the previous sample in leader memory (the first tick after a failover warms the baseline; the cooldown is persisted in `gl_accounts.shard_scaled_at`). Both are described in `core.ledger` 3.9; their surfaces are the GL account drawer, the Jobs & Outbox "ledger automation" tiles and the audit log.
 
 ### 3.9 Onboarding expiry
 
@@ -4438,6 +4530,12 @@ It degrades when workers are disabled, the queue cannot be read, or the oldest q
 | `WORKER_KYB_EXPIRY_INTERVAL_MS`, `WORKER_KYB_EXPIRY_BATCH_SIZE` | 21,600,000, 200 | KYB cadence and batch. |
 | `WORKER_RETENTION_ENABLED`, `WORKER_RETENTION_INTERVAL_MS`, `WORKER_RETENTION_BATCH_SIZE` | `false`, 3,600,000, 500 | Retention enablement, cadence, batch. |
 | `RETENTION_DRY_RUN` | `false` | Counts without deleting. |
+| `WORKER_LEDGER_CHECKPOINT_ENABLED`, `WORKER_LEDGER_CHECKPOINT_INTERVAL_MS`, `WORKER_LEDGER_CHECKPOINT_BATCH_SIZE` | `true`, 30,000, 50 | Per-shard checkpoint worker enablement, cadence, shards per pass. |
+| `LEDGER_CHECKPOINT_MIN_LINES`, `LEDGER_CHECKPOINT_MAX_AGE_MS` | 5000, 900,000 | A shard is checkpointed at this many pending lines, or when it has any and its checkpoint is older than this. |
+| `LEDGER_SHARD_AUTO_REPAIR_ENABLED`, `LEDGER_SHARD_AUTO_REPAIR_MIN_FAILURES`, `LEDGER_SHARD_AUTO_REPAIR_MAX_ABS_DRIFT` | `true`, 3, 100 | Automatic repair of a persistently failing PARITY shard whose sequence is intact (recomputed from the journal); a GAP, a damaged sequence or a larger correction is left to a person. |
+| `WORKER_LEDGER_SHARD_SCALER_ENABLED`, `WORKER_LEDGER_SHARD_SCALER_INTERVAL_MS` | `true`, 30,000 | Shard scaler enablement and sampling cadence. |
+| `LEDGER_SHARD_SCALER_DRY_RUN` | `false` | `true` = detect and audit only; the default lets the scaler widen hot accounts (`GL_ACCOUNT_SHARDS_SCALED`). |
+| `LEDGER_SHARD_UP_LINES_PER_SEC`, `LEDGER_SHARD_MAX_WIDTH`, `LEDGER_SHARD_COOLDOWN_MS` | 150, 64, 600,000 | Hot threshold per shard, widest routing width, minimum time between two scalings of an account. |
 | `WORKER_BACKGROUND_JOBS_ENABLED`, `WORKER_BACKGROUND_JOBS_INTERVAL_MS`, `WORKER_BACKGROUND_JOBS_BATCH_SIZE` | `true`, 2000, 10 | Durable queue enablement, cadence, batch. |
 | `WORKER_BACKGROUND_JOBS_LEASE_SECONDS`, `WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS` | 300, 300000 | Crash-recovery lease and health degradation threshold. |
 
@@ -4560,7 +4658,7 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 ## 11. Security hardening (2026-11-05)
 
 - `OutboxNotificationWorker` opens the Vault-encrypted `codeCiphertext` of SMS MFA notifications at send time; `notifications.payload_json` no longer carries the plaintext code.
-- **Multi-node claiming and leader election (GAP-012, RESOLVED 2026-11-05).** Every `FOR UPDATE SKIP LOCKED` claim now runs inside a transaction (`BaseWorker.inTransaction`, 15 s timeout, 5 s max wait; a test double without `$transaction` runs the callback directly), because a SKIP LOCKED lock taken outside a transaction is released the instant the statement ends. `PollWorker` (`payment_attempts.next_check_at`) and `OutboxNotificationWorker` (`notifications.next_attempt_at`) claim and lease in ONE statement: the claimed rows are updated to `now + claimLeaseSeconds` (`WorkerOptions.claimLeaseSeconds`, default 120 s) before the lock is released at commit, the inquiry/delivery then runs outside the transaction (a held row lock would deadlock the engine, which updates the same attempt on another connection), every outcome rewrites the schedule column, and a crashed node's rows become due again when the lease expires. `ExpirySweeperWorker` and `InboundInboxWorker` have no lease column, so they are cluster singletons whose exclusivity comes from leader election (the conditional terminal transition remains the last line of defence for expiry; a webhook must never be handled twice). Singleton workers (`BaseWorker.singleton`): `ExpirySweeper`, `InboundInbox`, `JoinRequestExpiry`, `KybExpiry`, `LedgerInvariant`, `PeriodicScreening` and `Retention`. Their tick runs only on the node that holds the PostgreSQL advisory lock for `worker:<name>` (`PgAdvisoryLeaderElection`, `core-back/lib/storageEngine/leaderElection.ts`; the lock name is `<namespace>:worker:<name>`, default namespace `pgw`, hashed with `hashtextextended`). It uses `pg_try_advisory_lock` on ONE dedicated, non-pooled connection (`application_name=pg-core-back-leader`); a leader re-validates with `SELECT 1` on every tick, a dropped connection clears the held keys (PostgreSQL releases the lock server side, which is the failover) and any election error fails closed (the singleton skips the tick). The storage engine creates the election from the primary URL (`StorageEngine.leaderElection`, disable with `leaderElection: false`) and `createProductionWorkerRuntime` passes it to the workers; without one (unit tests, single-process) workers behave as before. **Caveat: advisory locks are session-level, so point the election at PostgreSQL or a session-pooled endpoint, never at PgBouncer in transaction-pooling mode.**
+- **Multi-node claiming and leader election (GAP-012, RESOLVED 2026-11-05).** Every `FOR UPDATE SKIP LOCKED` claim now runs inside a transaction (`BaseWorker.inTransaction`, 15 s timeout, 5 s max wait; a test double without `$transaction` runs the callback directly), because a SKIP LOCKED lock taken outside a transaction is released the instant the statement ends. `PollWorker` (`payment_attempts.next_check_at`) and `OutboxNotificationWorker` (`notifications.next_attempt_at`) claim and lease in ONE statement: the claimed rows are updated to `now + claimLeaseSeconds` (`WorkerOptions.claimLeaseSeconds`, default 120 s) before the lock is released at commit, the inquiry/delivery then runs outside the transaction (a held row lock would deadlock the engine, which updates the same attempt on another connection), every outcome rewrites the schedule column, and a crashed node's rows become due again when the lease expires. `ExpirySweeperWorker` has no lease column and is a cluster singleton whose exclusivity comes from leader election (the conditional terminal transition remains the last line of defence). `InboundInboxWorker` is also a singleton, but since 2026-11-07 it additionally owns a durable `claimed_at`/`claimed_by` lease, so even a brief leadership overlap cannot process a webhook twice. Singleton workers (`BaseWorker.singleton`): `ExpirySweeper`, `InboundInbox`, `JoinRequestExpiry`, `KybExpiry`, `LedgerInvariant`, `PeriodicScreening` and `Retention`. Their tick runs only on the node that holds the PostgreSQL advisory lock for `worker:<name>` (`PgAdvisoryLeaderElection`, `core-back/lib/storageEngine/leaderElection.ts`; the lock name is `<namespace>:worker:<name>`, default namespace `pgw`, hashed with `hashtextextended`). It uses `pg_try_advisory_lock` on ONE dedicated, session-stable connection (`application_name=pg-core-back-leader`). Since 2026-11-07 the storage engine creates the election from `LEADER_ELECTION_DATABASE_URL` (falling back to `DATABASE_URL` only when PgBouncer is disabled), and a leader re-validates on every tick with a combined backend-PID + `pg_locks` ownership probe; a change, a missing lock row, a refused unlock or a dropped connection clears the held keys and the singleton skips the tick (fail closed). Boot runs `verifySessionSafety()`: a second client must not be able to acquire the probe key and the backend PID must stay stable, otherwise core refuses to start. Deploy generates a `pgw_session` PgBouncer alias with `pool_mode=session`; the transaction-pooled `DATABASE_URL` is rejected by the environment guard when `PGBOUNCER_ENABLED=true`. `createProductionWorkerRuntime` passes the election to the workers and registers the expected singleton keys on it for `/health`. Without an election (unit tests, single-process) workers behave as before.
 - The re-finalize guard for terminal attempts in `verifyCallback`/`finalizeSuccess` is implemented in the engine (GAP-016, RESOLVED 2026-11-05; see `core.engine`). `PollWorker`/`ExpirySweeper` still never settle an AML-held attempt (`AML_HOLD` substatus).
 
 ---
@@ -4739,7 +4837,7 @@ There is no disk spool. There is no `gateway_wire_logs` table. The request logge
 
 ### 3.9 Sharding and ledger writes
 
-`shardBalances.ts` defines 16 default shards, excludes `MERCHANT_WALLET`, uses FNV-1a over the attempt/reference id and computes `shardId = hash % count`; unsharded accounts use shard 0 (`shardBalances.ts:1-32`). `ledgerShardWriter.ts` upserts `gl_account_shards` with a signed delta (`credit` negative, `debit` positive) and can pre-create all shards for an account (`ledgerShardWriter.ts:8-51`). `createLedgerPoster` wires the shard writer and an optional `ledger.entry_posted` outbox writer (`ledgerPosterFactory.ts:17-40`). The hardening migration adds a `0 <= shard_id < 16` check.
+Shard routing is per account (`gl_accounts.shard_count`, 1..256; system accounts start at `STORAGE_SHARD_COUNT`, default 16, wallets at 1). `shardRouting.ts` is pure: `routeLine` picks `fnv1a(refId) % width` (balance-reducing wallet lines always shard 0), `foldShardBumps` folds one posting into one `(delta, line count)` per shard in `(account, shard)` order, and `assignShardSeqs` turns the returned high-water marks into per-line sequence numbers. `ledgerShardWriter.ts` runs ONE `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` per posting that adds the signed delta and the line count to `gl_account_shards` BEFORE the lines are inserted, so each line carries `shard_id` and a gapless `shard_seq` (see `core.ledger` 3.5). `ensureAccountShards(executor, id, width, from)` creates shard rows when an account is widened; new accounts get theirs from the `gl_accounts_create_shards` trigger. `createLedgerPoster` wires the shard writer (also the default of a bare `LedgerPoster`) and an optional `ledger.entry_posted` outbox writer. Migration `20261107090000_shard_sequenced_checkpoints` relaxed the shard range to `0 <= shard_id < 256`.
 
 ### 3.10 Read models
 
@@ -4774,7 +4872,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 - Cache contents are not authoritative. A Redis failure must not fail a payment under the default policy; velocity follows `REDIS_VELOCITY_FAILURE_POLICY` (`local-fallback` default, `fail-open`, `fail-closed`).
 - The in-memory velocity fallback (`local-fallback`) is per process and does not coordinate across core nodes: a cluster of N nodes tolerates up to N times the limit during an outage.
 - The log sink is best-effort. It may drop the oldest step log when its buffer is full, may drop access logs on a failed flush and does not spool to disk.
-- `gl_account_shards.shard_id` is limited to `0..15`; the default shard count is 16 and `MERCHANT_WALLET` is always one shard.
+- `gl_account_shards.shard_id` and `journal_lines.shard_id` are limited to `0..255`; an account routes over `gl_accounts.shard_count` (1..256) shards; system accounts start at 16 and `MERCHANT_WALLET` at 1.
 - Backup daemon calls are mTLS when the base URL is HTTPS; a missing client certificate is not silently replaced by an insecure channel.
 - `StorageEngine.shutdown()` must be called on process shutdown so monitors, buffers and pools are released.
 
@@ -4807,7 +4905,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 | `STORAGE_QUERY_TIMEOUT_MS` | Default query timeout budget | `5000` |
 | `STORAGE_LOG_BUFFER_MAX` | Log buffer bound | `5000` |
 | `STORAGE_LOG_FLUSH_INTERVAL_MS` | Log flush interval | `250` |
-| `STORAGE_SHARD_COUNT` | GL shard count, max 16 | `16` |
+| `STORAGE_SHARD_COUNT` | Initial routing width of system GL accounts (1..256); the shard scaler widens hot accounts later | `16` |
 | `STORAGE_OUTBOX_RETENTION_MS` | Processed `outbox_events` older than this are pruned (0 = keep) | `3600000` |
 | `STORAGE_AUDIT_OUTBOX_RETENTION_MS` | Shipped `audit_outbox` rows older than this are pruned (0 = keep) | `3600000` |
 | `BACKUP_DAEMON_URL` | Daemon base URL | unset |
@@ -4843,7 +4941,7 @@ The public `GET /health` in `core-back/index.ts:76-115` does not call `StorageEn
 - Audit shipper with idempotent append and audit hash-chain verification.
 - LSN/lag-aware replica router with primary fallback.
 - Redis cache adapter with Lua velocity and memory fallback.
-- 16-way shard arithmetic and shard-aware ledger writer.
+- Per-account sequenced shard writer (routing width, gapless per-shard sequence) and the shard scaler.
 - Dedicated audit DB and log DB adapters.
 - Backup control client with TLS/mTLS support and typed errors.
 - Storage health snapshot API.
@@ -4939,6 +5037,7 @@ There is no benchmark in this part that proves the blueprint's 1,000+ TPS sustai
 - `core-back/lib/storageEngine/auditAndLogAdapters.ts`
 - `core-back/lib/storageEngine/shardBalances.ts`
 - `core-back/lib/storageEngine/ledgerShardWriter.ts`
+- `core-back/lib/storageEngine/shardRouting.ts`
 - `core-back/lib/storageEngine/ledgerPosterFactory.ts`
 - `core-back/lib/storageEngine/backupControlClient.ts`
 - `core-back/lib/storageEngine/lsn.ts`
@@ -5036,7 +5135,7 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 
 <a id="coredata"></a>
 
-> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
 
 # Data Schema and Migrations
 
@@ -5048,7 +5147,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 76 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — four committed migrations;
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 10 and the boot guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 14 and the boot guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -5070,7 +5169,7 @@ The historical design treats PostgreSQL 18 as the only runtime database and the 
 The blueprint's stale counts are corrected here:
 
 - the schema is not 64 models and 100 enums; it is 76 models and 105 enums;
-- the schema version is 10, not 5 or 6;
+- the schema version is 14, not 5 or 6;
 - there is not one migration that creates shards, outboxes and all tables. The baseline creates the tables, the storage migration adds indexes, the CQRS migration adds read models, and the hardening migration adds partitions, checks and search indexes;
 - `rm_merchant_dashboard_stats` and `rm_wallet_statements` do not exist. The actual read models are `rm_merchant_daily_stats` and `rm_route_daily_volumes`.
 
@@ -5103,7 +5202,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 10`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 13`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5291,7 +5390,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 10.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 14.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -5306,7 +5405,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 76 models and 105 enums in the Prisma datamodel.
-- Schema version 10 with an equality check used by the seeders.
+- Schema version 11 with an equality check used by the seeders.
 - Four committed migrations with the intended separation: baseline, storage indexes, CQRS read models, hardening.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -5409,19 +5508,25 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-Migration `20261104120000_mfa_challenges` (schema version 10, `REQUIRED_SCHEMA_VERSION = 10`; model count 75 to 76):
-- creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
-- adds `access_tokens.expires_at`;
-- adds `cashout_requests.idempotency_key` (unique per merchant) and `cashout_requests.requested_by_user_id`;
-- bumps `schema_versions` to 10.
+The current schema version is 14 (`REQUIRED_SCHEMA_VERSION = 14`; model count 78). The schema migrations since version 10 are:
 
-Notes: the schema version and model counts quoted elsewhere in this part are updated to 10 and 76; the change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply this migration before starting the new core build, because merchant cash-out, API-token expiry and MFA depend on the new columns and table.
+- `20261104120000_mfa_challenges` (version 10):
+  - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
+  - adds `access_tokens.expires_at`;
+  - adds `cashout_requests.idempotency_key` (unique per merchant) and `cashout_requests.requested_by_user_id`.
+- `20261105090000_append_only_ledger_guards`: append-only triggers on `journal_entries`, `journal_lines` (and partitions) and `audit_log`, plus the non-owner `pgw_app` role. Audit retention deletes remain possible inside a transaction that sets `pgw.audit_retention` (accidental-error protection, not privilege separation from a compromised app role).
+- `20261105130000_statement_unique_source_file_hash`: replaces the global `reconciliation_runs.file_hash` unique index with `(statement_source_id, file_hash)`, sets `timestamp_tolerance_sec = 0` for legacy keyed channels with no signed timestamp source (the verifier now fails closed on a missing signed timestamp), and bumps `schema_versions` to 11.
+- `20261107090000_shard_sequenced_checkpoints` (version 12): per-shard sequenced ledger checkpoints, `journal_lines.shard_id/shard_seq`, the `gl_shard_checkpoints` table, per-account shard width and `operator_cases.subject_key` (see `core.ledger`).
+- `20261107150000_shard_repairs` (version 14): `gl_shard_checkpoints.baseline_seq` (the exemption marker of a re-baselined shard) and the append-only history table `gl_shard_repairs` (see `core.ledger` 3.10).
+- `20261107120000_inbound_event_claims` (version 13): adds nullable `inbound_events.claimed_at` and `claimed_by` plus `(processed_at, claimed_at)`, the durable lease the inbound webhook worker uses to prevent duplicate processing across a brief leadership overlap.
+
+The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
 ---
 
 <a id="coresearch"></a>
 
-> **Part ID:** `core.search` · **Status:** `partial` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.search` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Global Search
 
@@ -5816,11 +5921,15 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 
 - 2026-11-03 — Initial canonical extraction. Records the 20 providers, registry, parser, ranking weights, authority predicates, BFF limiter, palette/targets/`useOpenQuery`, and the actual gaps: dormant `supportsTokenKind`, missing fields, no full-text search, per-process limiter and no deep-search scale benchmark. See `project-design/TRACKER.md`.
 
+## Credential set provider (2026-11-06)
+
+`credentialSetProvider` (`type: "credential_set"`, aliases `credential_sets`/`credentials`/`credential`, order 165) is the 21st built-in provider. Access: `credential:read` or `gateway:read` (the same any-of as `GET /credential-sets`). It matches id, `externalMerchantId`, gateway code and gateway name, supports the scoped status filter (`CredentialStatus`), and selects only metadata (gateway, environment, owner type, external merchant id, status): never `entriesCiphertext` or the mTLS certificate (a test asserts the `select`). The admin palette routes these hits to `CredentialSets` with `?highlight=<id>`. Before this change the palette plugin existed in the plan but no backend provider did.
+
 ---
 
 <a id="corebackup"></a>
 
-> **Part ID:** `core.backup` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.backup` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `747d9bc+working-tree`
 
 # Backup Control
 
@@ -5923,7 +6032,7 @@ There is no maker-checker on `POST /trigger` or `POST /drill`; both are direct `
 
 ### 3.3 Catalog synchronization
 
-`GET /overview` reads local runs and drills first, then checks whether the daemon is configured. If configured, it calls `GET /v1/overview`; on success it calls `syncDaemonCatalog`:
+`GET /overview` adds `walArchiveHealthy` (the daemon is healthy AND `wal.archiveLagSeconds` is within the policy `alertLagSeconds`; false when the daemon is unconfigured or unreachable), which certification gate 10 reads. It reads local runs and drills first, then checks whether the daemon is configured. If configured, it calls `GET /v1/overview`; on success it calls `syncDaemonCatalog`:
 
 - every daemon backup run is upserted into `backup_catalog_runs` by id;
 - every daemon drill is upserted into `backup_restore_drills` by id;
@@ -6048,7 +6157,7 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 
 ### 3.10 Admin BFF and UI
 
-`admin-back/api/protected/backups.ts` proxies overview/trigger/drill/policy under `/api/v1/admin/system/backups` with the same authority split as core. It does not expose `/catalog`.
+`admin-back/api/protected/backups.ts` proxies overview/catalog/trigger/drill/policy under `/api/v1/admin/system/backups` with the same authority split as core (`GET /catalog` needs `security:read` or `gateway:read` and stays available while the daemon is in maintenance). A well-formed `Idempotency-Key` on trigger/drill is relayed to core.
 
 `admin-front/src/pages/system/backups/index.tsx`:
 
@@ -6081,7 +6190,7 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 - `BackupRestoreDrill` — id, status, timestamps, target time, replayed LSN, double-entry drift, balance mismatches, audit broken links, journal line count, checks JSON, signature, error.
 - `ApprovalRequest` — backs the policy maker-checker workflow with `subjectType = "BACKUP_POLICY"`.
 - Core routes: `GET /internal/admin/system/backups/overview`, `POST /trigger`, `POST /drill`, `PUT /policy`, `GET /catalog`.
-- Admin BFF routes: `GET /api/v1/admin/system/backups/overview`, `POST /trigger`, `POST /drill`, `PUT /policy`.
+- Admin BFF routes: `GET /api/v1/admin/system/backups/overview`, `GET /catalog`, `POST /trigger`, `POST /drill`, `PUT /policy`.
 
 ### Daemon environment (selected)
 
@@ -6104,18 +6213,18 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 
 `deploy/provisioners/backupEngineProvisioner.ts` writes `/etc/pg-backup/backup.env`, `/etc/pg-backup/wal-g.env`, the `pgbackup` systemd unit, `/etc/cron.d/pg-backup`, the trigger and restore-drill scripts, Barman configuration/PGPASSFILE in Barman mode, archive_command/restore_command settings and the journal partition cron.
 
-`deploy/deploy.ts` syncs the daemon source to `/opt/pg-backup-daemon`, chowns the install directory to `pgbackup`, uploads storage certificates to `BACKUP_DAEMON_CERT_DIR`, and enables the unit. `deploy/lib/hostPlanner.ts` injects `BACKUP_DAEMON_URL` and the client cert paths into core.
+`deploy/deploy.ts` syncs the daemon source to `/opt/pg-backup-daemon`, chowns the install directory and the certificate directory to the daemon user (`pgbackup`, or `postgres` for wal-g co-located with the primary), uploads storage certificates to `BACKUP_DAEMON_CERT_DIR`, enables the unit and waits for it to stay active. `deploy/lib/hostPlanner.ts` (`backupCoreEnv`) injects `BACKUP_DAEMON_URL`, the client cert paths and `BACKUP_DAEMON_TIMEOUT_MS` into core whenever `BACKUP_ENABLED`, independent of `pgStorageConfigured`.
 
 ## 6. Operational usage
 
 - Set `BACKUP_DAEMON_URL` and client CA/cert/key paths in core. Use HTTPS in production; plain HTTP is local only.
 - Ensure the daemon has a primary S3 bucket and an encryption key. A typo fails at boot, not during a restore.
 - For a manual backup, call the admin page or `POST /trigger`; poll `/overview` or `/runs` for completion.
-- For `target=all`, confirm `PG_AUDIT_DATA_DIR` is set and the audit database is reachable.
+- For `target=all`, the audit database is backed up logically when it shares the primary cluster, or physically when `PG_AUDIT_DATA_DIR`/`PG_AUDIT_HOST` mark a dedicated cluster; confirm it is reachable.
 - For a policy change, submit without an approval id, then have a different `security:write` user submit with the returned id.
 - Watch `archiveLagSeconds` against `BACKUP_ALERT_LAG_SECONDS`. A non-zero lag with a healthy bucket usually means archive_command, credentials or the archive process is failing.
 - Inspect `backup_catalog_runs` and `backup_restore_drills` for the local copy and the daemon catalog for the in-process view. A failed drill's three checks identify double-entry, parity or audit-chain failure.
-- After a real restore, verify schema version 10, the ledger invariant, shard parity and audit chain.
+- After a real restore, verify schema version 11, the ledger invariant, shard parity and audit chain.
 - Do not rely on policy `fullRetentionDays` for WAL-G pruning; WAL-G uses `BACKUP_RETENTION_FULL_COUNT` and Barman uses its server-side policy.
 
 ## 7. Status and deviations
@@ -6146,113 +6255,44 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 
 ### Missing / deferred
 
-- Certificate ownership fix: files under `BACKUP_DAEMON_CERT_DIR` are uploaded as root with mode 0600 and no `chown pgbackup`, so the daemon cannot read them.
-- Audit drill role mapping: the restored audit cluster is queried with `PG_PRIMARY_USER`, while the audit database uses `AUDIT_DB_USER`.
-- Barman audit slot: `barmanConfig` declares `slot_name = barman_audit`, but `barmanStreamingSql()` only creates the `barman` slot.
-- WAL archive lag correctness: `WAL_ARCHIVE_STATUS_QUERY` passes `COALESCE(last_archived_wal, '')` to `pg_wal_lsn_diff`, and an empty string is not a valid `pg_lsn`.
-- WAL replay lag semantics: `WAL_LAG_QUERY` uses replay/receive LSN on the first replica (or primary) and is labeled `lastArchivedLsn`; it is not the archive lag.
-- Retention enforcement: WAL-G prune uses the environment full count; catalog policy days are not applied. Barman uses a static server policy.
-- Secondary mirroring for Barman/Redis: Barman returns only `primary-s3`; Redis writes only to the core prefix.
+- Secondary mirroring for Barman/Redis (WAL-G/Barman engines only): Barman returns only `primary-s3`; Redis writes only to the core prefix. The pg-native engine mirrors everything.
 - Redis schedule: no `redis` cron; scheduled full/delta jobs use `target=all`, and a `delta` Redis run still performs a full BGSAVE/RDB copy.
 - UTC cron: the in-process scheduler has no timezone field and evaluates UTC; the system-cron fallback uses host local time, so the historical Tripoli schedule is not honored consistently.
-- Barman health: `BarmanEngine.overviewHealth` still calls WAL-G bucket/WAL commands.
-- Catalog exposure and destructive-action controls: admin-back does not proxy `/catalog`; trigger/drill are not maker-checker protected.
-- Restore drill target selection: the drill always uses now minus 5 minutes.
+- Destructive-action controls: trigger/drill are not maker-checker protected.
+
+### Resolved 2026-11-06
+
+- Daemon certificate ownership: the deploy chowns `BACKUP_DAEMON_CERT_DIR` to the daemon user and the unit waits for readiness (see `deploy.backup`).
+- Barman audit slot: `barmanStreamingSql()` creates `barman_audit` for a dedicated audit cluster (or on the core cluster when audit shares it).
+- WAL archive lag: the status query no longer passes a file name to `pg_wal_lsn_diff`; lag bytes come from segment numbers.
+- Retention: WAL-G prune uses `ceil(fullRetentionDays/7)` from the live policy; pg-native prunes by the live policy.
+- Barman health no longer calls WAL-G.
+- Catalog exposure: `admin-back` proxies `GET /catalog`.
+- Audit drill role mapping: the daemon's drill now queries the audit database as `PG_AUDIT_USER` (primary role when unset), in shared and dedicated topologies.
+- Archive lag no longer grows on an idle database (counted only while a completed segment waits or the archiver fails).
+- Drill target: the daemon accepts an explicit `targetTime` (the default is still now minus 5 minutes).
 
 ### Known bugs / risks
 
-- The certificate ownership gap blocks the intended mTLS daemon path; code/deploy gap.
-- The audit role mismatch can produce a false `FAILED` drill on a correctly restored audit database; code gap.
-- The `barman_audit` slot mismatch can break audit streaming while core works; code gap.
-- An empty `last_archived_wal` can make health report zero lag instead of "no archive yet"; code gap.
-- The scheduler advances `next` before skip-on-overlap, so a long-running job can silently miss a slot; code risk.
-- A failed prune is only logged, while the backup remains `PASSED`; operational risk.
-- The daemon catalog cap diverges from the unbounded PostgreSQL history; design gap.
-- The first policy submission returns `PENDING_REVIEW`; an operator who skips the checker step may believe the schedule changed; UX risk.
-- Scratch port collisions fail the drill; operational risk.
-- `target=all` fails when audit is not configured; select `postgres_core` explicitly for core-only backups.
-
-## 8. Verification and tests
-
-Relevant test files:
-
-- `core-back/test/backup-admin/backup-control-client.test.ts` — client requests, TLS options, typed errors, timeouts and singleton reset.
-- `core-back/test/backup-admin/backup-admin-routes.test.ts` — overview/trigger/drill/policy/catalog behavior against a fake daemon and live PostgreSQL.
-- `deploy/backup-daemon/test/config.test.ts` — environment validation, redaction and defaults.
-- `deploy/backup-daemon/test/cron.test.ts` — five-field parser, UTC evaluation and next-run calculation.
-- `deploy/backup-daemon/test/backupEngine.test.ts` — command builders, WAL-G/Barman selection, Redis snapshot commands, WAL queries and pruning.
-- `deploy/backup-daemon/test/catalogStore.test.ts` — atomic writes, corrupt-file fallback, caps and policy.
-- `deploy/backup-daemon/test/scheduler.test.ts` — due-job selection, overlap skipping, policy reload, prune and drill.
-- `deploy/backup-daemon/test/server.test.ts` — routes, validation, redaction, background tasks and mTLS-related options.
-- `deploy/backup-daemon/test/restoreDrillRunner.test.ts` — scratch restore orchestration, checks, signature and failure reports.
-- `tests/e2e/admin/backups.spec.ts` — admin backup page behavior with mocked APIs.
-
-Commands:
-
-```bash
-cd core-back && bun test test/backup-admin
-cd deploy/backup-daemon && bun test
-cd deploy && bun test
-cd tests && bunx playwright test -c playwright.config.ts -g "backup"
-```
-
-Core backup-admin route tests that touch PostgreSQL skip when the database is unreachable. The daemon tests are unit-level and use fake command runners/file systems; they do **not** run a real WAL-G/Barman backup or a real PostgreSQL restore. The Playwright backup test mocks the API and needs no live stack. No test or benchmark was run for this documentation change.
-
-## 9. Source references
-
-### Old design sections
-
-- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-segment-4--backup-management-orchestrator--admin-control-plane-pg-backup-daemon--core-back--admin-front`
-- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-1-architecture-wrapping-wal-g--barman-with-an-admin-accessible-control-plane`
-- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#5-2-core-back--admin-front-backup-management-api-contract`
-- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#6-segment-5--horizontal-node-scaling--multi-host-storage-orchestration-in-deploydeployenv--deploydeployts`
-- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md`
-- `design/00-process/blueprint-management.md#5-documentation-corrections-backlog`
-
-### Code paths
-
-- `core-back/api/internal/backups.ts`
-- `core-back/lib/storageEngine/backupControlClient.ts`
-- `core-back/lib/storageEngine/auditAndLogAdapters.ts`
-- `core-back/lib/audit/writeAudit.ts`
-- `core-back/prisma/schema.prisma` (`BackupCatalogRun`, `BackupRestoreDrill`, `ApprovalRequest`)
-- `deploy/backup-daemon/src/index.ts`
-- `deploy/backup-daemon/src/config.ts`
-- `deploy/backup-daemon/src/server.ts`
-- `deploy/backup-daemon/src/backupEngine.ts`
-- `deploy/backup-daemon/src/scheduler.ts`
-- `deploy/backup-daemon/src/cron.ts`
-- `deploy/backup-daemon/src/catalogStore.ts`
-- `deploy/backup-daemon/src/restoreDrillRunner.ts`
-- `deploy/backup-daemon/src/commandRunner.ts`
-- `deploy/provisioners/backupEngineProvisioner.ts`
-- `deploy/lib/hostPlanner.ts`
-- `deploy/deploy.ts`
-- `admin-back/api/protected/backups.ts`
-- `admin-front/src/pages/system/backups/index.tsx`
-
-### Generated appendices
-
-- `project-design/appendices/api-route-matrix.md` — core, BFF and portal backup routes
-- `project-design/appendices/env-and-config-matrix.md` — daemon and core backup environment keys
-- `project-design/appendices/schema-catalog.md` — backup catalog/drill models
-- `project-design/appendices/migration-catalog.md` — migration that introduced the backup models
+- None specific to the backup control plane beyond the open gaps above.
 
 ## 10. Change history
+
+- 2026-11-06 — Backup engine reliability implementation: `walArchiveHealthy` on the overview, `Idempotency-Key` forwarding with `deduplicated` handling, `/catalog` edge route; gaps resolved as listed above. See `deploy.backup`.
 
 - 2026-11-03 — Initial canonical extraction. Records the core API, daemon API, WAL-G/Barman engines, UTC scheduler, JSON catalog, policy maker-checker, restore drill, catalog sync and target-aware behavior, plus the certificate ownership, audit role, Barman slot, WAL lag, retention, secondary mirroring, Redis schedule, UTC cron and Barman health gaps. See `project-design/TRACKER.md`.
 
 ## 11. Security hardening (2026-11-05)
 
 - Off-site mirroring no longer deletes by default; set `BACKUP_SECONDARY_MIRROR_DELETE=true` to opt in.
-- Admin edge backup trigger/drill calls require an `Idempotency-Key` header that is relayed to core; policy cron and retention floors are validated at the edge (see the admin edge part).
+- Admin edge backup trigger/drill calls relay a well-formed `Idempotency-Key` header to core and on to the daemon, which deduplicates retries (the edge does not require the header); policy cron is validated at the edge (see the admin edge part).
 - The backup daemon authorizes its mTLS clients by certificate CN/SAN; see the backup daemon part.
 
 ---
 
 <a id="coreseeder"></a>
 
-> **Part ID:** `core.seeder` · **Status:** `partial` · **Last verified:** 2026-11-04 · **Verified against:** `55a2892+working-tree`
+> **Part ID:** `core.seeder` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `55a2892+working-tree`
 
 # Synthetic Seeder
 
@@ -6334,6 +6374,8 @@ Since 2026-11-04 every volume drives generation. `joinRequests`, `wallets`, `app
 
 `nextId` returns `<8 hex>-<4 hex>-7<3 hex>-8<3 hex>-<12 hex counter>` where the first 64 bits come from `sha256(namespace, seedKey)`. Two different seed keys or namespaces therefore never collide (the old factory ignored both and `skipDuplicates` silently dropped the second history), while a run stays deterministic. Rows keep unique keys that matter for re-runs (`seed_key` of GL accounts and commission profiles, e-mails, references) namespaced by seed key as well.
 
+`SeedReferences.gatewayStateKeys` (since 2026-11-08) maps each gateway code to the attempt-state variables its flows read (`step_parameters` bound to the `STATE` source in every phase except REFUND/VOID, whose `adjustmentId` is a call-time input), loaded from the live flows. Generator 04 writes them into the encrypted `context_ciphertext` of every attempt that reached the gateway (`order_id`, `payment_id`, `payment_uuid`, `transfer_uuid`, `request_id` carry the provider reference, which Fake Rails resolves by our, provider or network reference; `MerchantReference`, `AmountTrxn` and `SecureHash` carry the real reference, wire amount and a hash). Before this, a seeded in-flight attempt had only `{process_id, phase}` and the ExpirySweeper/PollWorker inquiry failed with `URL parameter 'order_id' is missing` (or `payment_id`).
+
 ### 3.4 Timeline
 
 `core-back/prisma/syntheticSeeder/timelineClock.ts`:
@@ -6354,7 +6396,7 @@ Local hours are `Africa/Tripoli` wall-clock hours (UTC+2, no DST) and are stored
 | `02_merchantCohortGenerator` | Merchants with a consistent lifecycle (request -> submission -> review -> proposal -> decision -> activation -> suspension/closure), category-driven profiles, unique phones, IBAN-shaped payout accounts; earlier REJECTED/EXPIRED/WITHDRAWN join requests linked by `resubmission_of_id`; KYB document chains (superseded copies, expiry, 30-day notice, duplicate-hash showcase); beneficial owners summing to 100 %; wallets + GL accounts; applications; users and identities; tokens; POS terminals only for counter categories; merchant-owned credentials; negotiated commission profiles (fractional rates) and the historical platform default. National ids are queued for Vault encryption. |
 | `03_gatewayLifecycleGenerator` | Later versions next to the baseline LIVE version (ROLLED_BACK -> baseline, SANDBOX_VERIFIED/DRAFT, PENDING_APPROVAL for two gateways) with environments, auth, settings and evidence; webhook channels only for baseline versions without one; statement sources; route health DERIVED from the generated attempts (last 30 days). |
 | `04_linksAndAttemptsGenerator` | Heavy-tailed merchant volumes, category ticket bands, rail popularity, per-rail decline/abandon pressure; links with fee bearer, reuse and expiry; attempts built from engine-valid status paths with monotonic timestamps; pricing mirrored from the checkout (`money.ts`); step logs, inbound webhooks, attempt groups; live tail of in-flight/UNKNOWN/held attempts near `T_NOW`; late successes and SUSPENSE settlements. |
-| `05_ledgerAndCheckpoints` | Confirmation, AML hold/release/void and SUSPENSE postings through the engine templates; AML hold cases; shard balances and one checkpoint instant for all accounts, computed after every posting (`generateCheckpoints`). |
+| `05_ledgerAndCheckpoints` | Confirmation, AML hold/release/void and SUSPENSE postings through the engine templates; AML hold cases; then (`generateCheckpoints`, last, after every posting) the per-shard sequencing: every line is routed with the engine's `routeLine` at its account's `shardCount` (system accounts 16, wallets 1), sequenced gaplessly per (account, shard) in posting order (`created_at`, ties by generation order), shard balances/`line_seq`, and one checkpoint per shard at the end of the last complete UTC month. |
 | `06_reconAndStatements` | Per-source windows fed by the settled attempts (each once); MATCHED lines carry the settled amount and fee; exceptions (mismatch, missing at gateway, missing locally, duplicate) within the operator-case budget; `SETTLEMENT_SWEEP` for platform-cleared matched lines. |
 | `07_disputesCashoutsAdjustments` | Executed REFUND adjustments with `FULL_REFUND`/`INTERNAL_REFUND` journals and the REFUNDED/PARTIALLY_REFUNDED step; disputes with the reserve journal, drafted CHARGEBACK adjustments and WON/LOST outcomes; cash-outs and manual debits sized so wallets never go negative; manual credits and corrections; open refund requests. |
 | `08_amlAndGovernanceQueues` | Onboarding/owner/periodic screenings with matches, screening AML cases, STR reports, approvals bound to real subjects (join requests, adjustments, AML cases, gateway versions, merchants, commission profiles) with maker != checker and role flags, notifications from the baseline catalogue, audit rows derived from real events, detail change logs. |
@@ -6380,7 +6422,7 @@ Local hours are `Africa/Tripoli` wall-clock hours (UTC+2, no DST) and are stored
 - journal entries before attempts, because attempts carry `ledger_entry_id`;
 - journal lines after attempts and inbound events;
 - disputes and adjustments initially strip their circular references, then link them in a second pass;
-- monthly GL checkpoints are applied last with per-account `update` calls.
+- shard rows and per-shard checkpoints: the DB trigger `gl_accounts_create_shards` already creates shard rows `0..shard_count-1` for every inserted account, so shard rows (`current_balance`, `line_seq`) and `gl_shard_checkpoints` are written last (the shard step comes right AFTER `journalLine` in `WRITE_ORDER`, tested: the checkpoint worker runs in the live core while the seeder writes, and a shard whose `line_seq` is ahead of its lines fails its proof with `GAP: 0 of N lines found` and raises a P1 operator case; found 2026-11-08 when a STRESS run left 900 such cases) with chunked `INSERT ... ON CONFLICT DO UPDATE` over `unnest` arrays (never a plain insert, never one query per row); journal lines carry `shard_id`/`shard_seq` (>= 1; the `shard_seq > 0` check applies to new rows).
 
 Each model is written in 2,500-row `createMany` chunks with `skipDuplicates: true`. The writer skips any empty collection. The six in-memory collections not written are `rails`, `railFields`, `railRoutes`, `widgets`, `redirects` and `pollPolicies`; these are expected to exist from the baseline blueprint seed and are only used as read-only references.
 
@@ -6426,7 +6468,7 @@ Unlike the base generators, this enrichment uses the real Vault.
 `verify/invariants.ts#checkInvariants` runs on the in-memory graph before the write (a violation aborts) and `postSeedAudit` repeats it, then compares the database with the dataset. Exact money (BigInt scaled by 10^4) is used throughout. It asserts, per rule name:
 
 - **relations**: every foreign key (`FK_EDGES`, 78 edges incl. baseline references) points at an existing row; wallet GL account is the merchant's `MERCHANT_WALLET`; link wallet/application/merchant coherence; unique ids, e-mails, references, idempotency keys, journal `(ref_type, ref_id)`, dispute `(gateway, ref)`;
-- **ledger**: every entry balanced, every line > 0 and a 4-decimal string, system drift exactly 0, lines dated like their entry, nothing in the future; checkpoint + lines after the checkpoint = plain sum for every account; shard sums = line sums;
+- **ledger**: every entry balanced, every line > 0 and a 4-decimal string, system drift exactly 0, lines dated like their entry, nothing in the future; per shard (`shard.seq-gapless`) the sequence `1..line_seq` is present exactly once and `line_seq` = the line count, (`shard.sum`) the shard balance = the signed sum of ALL its lines, (`shard.checkpoint-live`) shard balance = `checkpoint_balance` + the lines after `checkpoint_seq` (and `checkpoint_balance` = the lines up to it, the checkpointed lines being exactly those at or before the cut, a prefix of the sequence, the cut not in the future);
 - **settlement math**: wallet credit = `net_merchant_amount`, income credit = commission, fee accrual = gateway fee (accrual routes), MERCHANT_DIRECT never credits a wallet, the credited wallet is the link's wallet;
 - **lifecycle**: each attempt's path is made of engine transitions (`lifecycle.ts`, compared with `ALLOWED_TRANSITIONS` by a test), starts at CREATED/BLOCKED, ends at its status, timestamps monotonic and <= `T_NOW`, `terminal_at` iff terminal, in-flight attempts still inside their TTL, amounts consistent with the fee-bearer breakdown, settled amount only on settled statuses, ledger entry only on settled attempts and unique;
 - **links**: `confirmed_count`/`active_locked_count` equal the attempts, no slot overflow, COMPLETED exactly when full, no stale PENDING, attempt-group success counts;
@@ -6463,7 +6505,7 @@ The data was re-derived from the real engine rules instead of random rows. Defec
 | Area | Defect | Fix |
 | :--- | :--- | :--- |
 | Ledger | Hand-written account choice, float sums, per-gateway/env clearing accounts the baseline never creates; settlement-sweep and refund legs invented | `postTemplate` posts the engine's `buildPaymentConfirmationTemplate`/`buildLedgerTemplate` output, validated by `LedgerPoster.validateTemplate`, with accounts resolved like `LedgerPoster.resolveAccountId` (platform fallback); decimal.js/BigInt only |
-| Checkpoints | Taken before refunds/cash-outs were posted, so lines dated before the checkpoint were missed | `generateCheckpoints` runs last; one instant for all accounts |
+| Checkpoints | Taken before refunds/cash-outs were posted, so lines dated before the checkpoint were missed | `generateCheckpoints` runs last; one cut instant for all shards (the 2026-11-07 sequenced model: per-shard `checkpoint_seq`/`checkpoint_balance`) |
 | Fees | Random 0.2-0.9 % gateway fee and 0.5-2.5 % commission; surcharge ignored | Commission profile hierarchy, fee-bearer breakdown, route cost model and wire rounding mirrored from the checkout (`money.ts`) |
 | Lifecycle | Terminal times random 1-120 min after creation, in-flight attempts years old, `EXPIRED + LATE_SUCCESS_PENDING` and `VERIFYING + AML_HOLD` statuses the engine never produces, no refund/dispute sequencing | Engine-valid paths with one timestamp per step; late successes end SUCCEEDED (or SUSPENSE); held payments are `CREATED + AML_HOLD` with a hold entry and case; live tail only near `T_NOW`; refunds/disputes append their status step |
 | Links | Counters patched after the fact; random link for each attempt | Counters follow the attempts; sequential retries respect the slot rule |
@@ -6654,7 +6696,7 @@ The unit tests do not require a live database or Fake Rails. The actual `seed-sy
 
 <a id="coretests"></a>
 
-> **Part ID:** `core.tests` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.tests` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Tests and Benchmarks
 
@@ -6739,6 +6781,12 @@ Database-dependent suites:
 - `core-back/test/exhaustive/_harness.ts` probes `EXHAUSTIVE_DATABASE_URL` / `POSTGRES_TEST_DATABASE_URL` and exports `databaseIsReachable`; several exhaustive files use `databaseIsReachable ? describe : describe.skip`.
 - `core-back/test/e2e/postgres-payment.test.ts` uses `test.skipIf(!reachable)` for live payment tests and a few PostgreSQL-invariant tests.
 - `core-back/test/storage-engine/*.test.ts` also registers a placeholder `test.skip(... requires the live database)` so the skip is visible.
+
+Sequenced per-shard ledger suites (2026-11-07):
+
+- Pure: `core-back/test/engine/shard-scaler.test.ts` (`decideShardWidth` threshold, sustained-overload streak, EWMA, cooldown, maximum width, x4 step cap, half-threshold target, the wallet "shard 0 pinned by balance-reducing lines" hold; `shardRouting.ts` `routeLine`, `foldShardBumps`, `assignShardSeqs`, `initialShardWidth`, `clampShardWidth`, `loadShardWidths` cache). `core-back/test/helpers/fakeCheckpointDb.ts` is an in-memory double of the three shard tables that answers exactly the `CheckpointService` statements, for the unit tests (GAP-011, catalog case 110, ledger and phase 2 tests).
+- Live PostgreSQL: `ledger-shard-sequence.test.ts` (gapless per-shard sequences, capture under load, GAP/PARITY, the wallet debit lock and the pre-locked posting shards of a spread wallet), `ledger-shard-repair.test.ts` (plan/apply of RECOMPUTE and REBASELINE, stale plan hash, repair under load, the automatic policy), `ledger-shard-repair-api.test.ts` (preview, authorities, immediate recompute, approval-bound re-baseline executed by a different checker, stale approval refused), `ledger-shard-auto-repair.test.ts` (`LedgerCheckpointWorker` repairs only a persistent PARITY within the limit; a GAP, a disabled policy and a large drift are not repaired), `cashout-lock-order.test.ts` (cash-outs and payment confirmations on the same rows never deadlock and never overdraw), `ledger-shard-scaling.test.ts` (`applyShardWidth` concurrent with postings, stale `expectedOldWidth`, narrowing is routing-only, audit), `ledger-checkpoint-worker.test.ts` (`LedgerCheckpointWorker` by volume and age, one operator case and one audit row per failing shard, `LedgerShardScalerWorker` dry run and live), `exhaustive/02-ledger/checkpoints-and-invariant.test.ts` (per-shard checkpoints, SQL invariant), `exhaustive/01-schema/*` (new columns, constraints and the shard trigger).
+- Shared-database hygiene: the system-wide invariant (`test/exhaustive/_harness.ts` `verifyInvariant`) sums the SHARD balances and the journal. A suite that posts through the poster to a shared account and then deletes its lines must also undo the shard projection (`test/helpers/ledgerMaintenance.ts` `deleteJournalLinesAndUndoShards`), and `test/admin-slice/harness.ts` `neutraliseLedgerSince` offsets through the poster (`postEntry`). Tests that need a deliberately unbalanced entry use the shard writer directly (`postEntry`), never a nested Prisma create without `shardId`/`shardSeq`.
 
 Redis-dependent suites:
 
@@ -7035,6 +7083,12 @@ New suites in `core-back/test/security-regressions/`: `c1-forged-success`, `c2-m
 
 Known gaps: true concurrency needs PostgreSQL 18 and is not exercised; the RetentionWorker fake parser (`test/helpers/retentionFake.ts`) cannot parse the new InvariantVerifier query (test drift, not a product bug).
 
+## Admin UI completion suites (2026-11-06)
+
+New core suites: `test/admin-commerce.test.ts` (22, DB-backed: redaction, immediate-vs-approval transitions, executors, owner PII, revalidation, intake enforcement over real routers), `test/security-regressions/commerce-status-enforcement.test.ts` (10, no DB: LIVE/SANDBOX gate matrix, guard pipeline creates no attempt for a suspended application or frozen wallet, source tripwires on every intake path), `test/admin-slice/admin-ledger|operations|system.test.ts` (7 + 7 + 13, DB-backed, harness in `test/admin-slice/harness.ts`), `test/admin-slice/admin-rails-routes.test.ts` (3, DB-backed through the REAL admin router with real signed admin sessions), `test/commission-tiers.test.ts` (7, no DB) and the credential-set provider cases in `test/globalSearch.test.ts`. DB-backed files skip themselves when `POSTGRES_TEST_DATABASE_URL`/`DATABASE_URL` does not point at a migrated database whose name contains "test".
+
+To run them against a private, throwaway cluster (never the live databases): `initdb -D $DIR/data -U lead --auth=trust`, `pg_ctl -D $DIR/data -o "-p 56434 -k $DIR -c listen_addresses=127.0.0.1 -c fsync=off" start`, `createdb -h 127.0.0.1 -p 56434 -U lead lead_test`, `DATABASE_URL=postgresql://lead@127.0.0.1:56434/lead_test bunx prisma migrate deploy`, then `POSTGRES_TEST_DATABASE_URL=$DATABASE_URL bun test <file>`; a throwaway `valkey-server --port 56379 --save ""` covers the Redis-backed suites. Stop and delete both when done.
+
 ---
 
 <a id="edgeshared"></a>
@@ -7301,7 +7355,7 @@ The suites cover URL parsing, least-in-flight and round-robin selection, cooldow
 Applies to all three copies of the client:
 - Only transport/TLS errors and 502/503/504 mark a node unhealthy.
 - Header names and values are validated as printable ASCII (`400 CORE_HEADER_INVALID`); edge-owned headers are applied last, and `x-real-client-ip` is always overwritten with the resolved IP.
-- PUT/DELETE are replayed after send only with an `Idempotency-Key`/opt-in, or on a connect-phase failure.
+- PUT/DELETE are HTTP-idempotent and are replayed after send like GET/HEAD/OPTIONS; POST/PATCH still need an `Idempotency-Key`/opt-in, and a connect-phase failure is always retryable.
 - SSE streams use their own agent pool (128 sockets) with `MAX_STREAMS_PER_IP` (default 5) and abort upstream on early client disconnect.
 - Buffered responses are capped (`CORE_MAX_RESPONSE_BYTES` default 64 MiB, `CORE_TOTAL_DEADLINE_MS` default 300000).
 - Admin `x-pg-min-lsn` is validated against `^hex/hex$` (400 otherwise).
@@ -7312,7 +7366,7 @@ Applies to all three copies of the client:
 
 <a id="edgeadmin"></a>
 
-> **Part ID:** `edge.admin` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `edge.admin` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Admin Edge BFF
 
@@ -7367,7 +7421,7 @@ The listener binds to `ADMIN_BIND_HOST` (default `127.0.0.1`). The deploy engine
 
 `extractAuthorityHints()` does not verify the token signature and does not check `exp` or `nbf`. It rejects a token only when a present `typ` is not `session`, a present `iss` is not `payment-gateway-core`, or a present `aud` does not include `payment-gateway-admin` (the admin channel audience; the former `payment-gateway-edge` is no longer accepted, GAP-020). A caller can therefore craft a token that satisfies the edge's AML or backup gate; `core-back` will still reject it. This is documented as advisory gating, not authentication.
 
-`ADMIN_AUTHORITY_HINTS` filters which requested authority strings the edge checks. If the configured list is empty, the edge skips the check. If a requested authority is not in the configured list, it is not counted as expected; if no expected authorities remain, the route passes.
+`ADMIN_AUTHORITY_HINTS` is an optional RESTRICTION list (default empty = no restriction). When set, a guard whose required authorities do not intersect the list denies the request; it can only narrow access, never widen it. A stale old-style value copied from an earlier README can therefore deny routes, so upgrade configs should leave it unset unless intentionally restricting.
 
 ### 3.3 Forwarding behavior
 
@@ -7415,9 +7469,9 @@ All routes are prefixed with `/api/v1/admin`. The auth routes are inside the LAN
 | Options | `GET /options/:kind` |
 | Stats | `GET /stats/overview`, `GET /stats/recent-activity`, `GET /stats/export`, `POST /stats/export-audit`, plus export variants |
 | Audit logs | `GET /audit-logs`, `GET /audit-logs/:id`, `GET /audit-logs/export`, `GET /audit-logs/summary`, `GET /audit-logs/summary/export` |
-| System backups | `GET /system/backups/overview`, `POST /system/backups/trigger`, `POST /system/backups/drill`, `PUT /system/backups/policy` |
+| System backups | `GET /system/backups/overview`, `GET /system/backups/catalog`, `POST /system/backups/trigger`, `POST /system/backups/drill`, `PUT /system/backups/policy` |
 
-The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` to every AML route. The backup router applies `security:read`/`gateway:read` to the overview and `security:write` to trigger, drill and policy. The remaining routes rely on `requireSession` plus core-side authority enforcement.
+The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` to every AML route. The backup router applies `security:read`/`gateway:read` to the overview and catalog and `security:write` to trigger, drill and policy. The remaining routes rely on `requireSession` plus core-side authority enforcement.
 
 ## 4. Contracts and invariants
 
@@ -7445,7 +7499,7 @@ The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "am
 | `CORE_REQUEST_TIMEOUT_MS` | `60000` | Core request timeout. |
 | `TRUSTED_PROXY_CIDRS` | loopback only (`127.0.0.0/8,::1/128`; deploy sets `127.0.0.1/32,::1/128`) | Peers whose forwarded IP headers are trusted. |
 | `ADMIN_LAN_CIDRS` | loopback plus RFC1918 ranges | Allowed admin clients. |
-| `ADMIN_AUTHORITY_HINTS` | roles plus `aml:*` and `security:*` | Edge-checkable authority vocabulary. |
+| `ADMIN_AUTHORITY_HINTS` | empty (no restriction) | Optional restriction list; when set, a guard must match one of its entries. |
 | `MAX_JSON_BODY_BYTES` | `4194304` | JSON limit. |
 | `MAX_UPLOAD_BYTES` | `20971520` | Multipart limit. |
 | `UPLOAD_ALLOWED_MIME` | `text/csv,application/vnd.ms-excel,application/json` | Reconciliation upload MIME list. |
@@ -7553,22 +7607,41 @@ The tests use a local HTTPS/HTTP stub and do not require PostgreSQL or Redis. A 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+- 2026-11-06: removed the arbitrary `page <= 10000` cap from `zListQuery`; the admin journal-entries last-page jump (page 23397 on the stress dataset) was rejected with `400 VALIDATION_FAILED` before reaching core. `pageSize` stays capped at 200. Regression test added to `admin-back/test/admin-ui-completion.test.ts`.
 
 ## Security hardening (2026-11-05)
 
 - **authorityGuard.** Rejects `alg: none` and non-HS256 tokens and bad signature segment shape; requires `typ`, `iss`, `aud` and `exp` and enforces `exp`/`nbf`. `ADMIN_AUTHORITY_HINTS` (default empty) can only restrict, never skip a guard. Matching is case-sensitive. `requireSession` returns `401 AUTH_INVALID` for tokens that are not live core-shaped sessions. `*` is honoured at the edge; core re-verifies (the edge cannot verify signatures because the key lives in core).
 - **Deny-by-default any-of authority lists** on: users, join-requests, kyb-documents, merchants suspend/close, approvals, gateways, gateway-versions, rails, routes, assets, credential-sets, reconciliation, settings (restore-preview is a read, restore-apply a write), audit-logs, operator-cases, gateway-inquiries, attempts, disputes, adjustments, cashouts, commission-profiles, velocity-rules, finance and system/backups. Search, academy, options and stats are left to core.
-- **Backups.** Policy cron is validated (5 fields; minimum gaps full 60, delta 5, drill 60 minutes); retention floors full >= 7 days and WAL >= 3 days unless `approvalRequestId` is supplied. Backup trigger and drill require an `Idempotency-Key` header (8-128 URL-safe characters) relayed to core, with `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
+- **Backups.** Policy cron is validated (5 fields; minimum gaps full 60, delta 5, drill 60 minutes) and `alertLagSeconds` must be >= 1. Retention is NOT floored at the edge: every policy change is a maker-checker proposal, and the maker must be able to propose a low-retention policy for the checker to review. Trigger/drill are rate-limited by `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes); an `Idempotency-Key` is relayed when supplied, but core has no replay store yet, so it is not an idempotency guarantee.
 - **KYB uploads.** Upload runs `assertAllowedUpload` (png/jpeg/pdf) plus zod validation; the content route forces `Content-Disposition: attachment`, a CSP sandbox and a Content-Type allow-list. `logoUrl` must be http(s).
 - **Limiters** key on the resolved client IP plus a per-account limiter on login/MFA. Admin `x-pg-min-lsn` is validated (400).
-- **Logout and session cookie (GAP-019, RESOLVED 2026-11-05).** `POST /api/v1/admin/auth/logout` (public router, `logoutHandler`) forwards to core `POST /internal/admin/auth/logout`, which revokes the session `jti`, and clears the session cookie. With `SESSION_COOKIE_MODE=true` (default `false`) login and MFA responses move the token into the `pg_admin_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/admin`, 12 h, `Secure` unless `SESSION_COOKIE_SECURE=false`, default `true`) and return `sessionCookie: true` instead of `token` (`captureSessionToken`); the `cookieSession` middleware, mounted first on the admin router, converts the cookie into the `Authorization: Bearer` header when the caller sent none and requires `x-pg-csrf: 1` on unsafe methods (`403 CSRF_HEADER_REQUIRED`). Both settings are validated by `admin-back/lib/env`.
+- **Logout and session cookie (GAP-019, RESOLVED 2026-11-05).** `POST /api/v1/admin/auth/logout` (public router, `logoutHandler`) forwards to core `POST /internal/admin/auth/logout`, which revokes the session `jti`, and clears the session cookie. With `SESSION_COOKIE_MODE=true` (default `false`) login and MFA responses move the token into the `pg_admin_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/admin`, 12 h, `Secure` unless `SESSION_COOKIE_SECURE=false`, default `true`) and return `sessionCookie: true` instead of `token` (`captureSessionToken`); the `cookieSession` middleware, mounted first on the admin router, converts the cookie into the `Authorization: Bearer` header only when the mode is on and the caller sent none, and requires `x-pg-csrf: 1` on unsafe methods (`403 CSRF_HEADER_REQUIRED`). Login/MFA are exempt from the cookie conversion so a stale cookie cannot block a new sign-in; logout is outside the auth limiter. Both settings are validated by `admin-back/lib/env`.
 - **Session audience and breaker (GAP-020, GAP-021).** The advisory authority guard now requires `aud=payment-gateway-admin`. The core upstream client removes a node from rotation only after `CORE_FAILURE_THRESHOLD = 3` consecutive failures. Sessions minted before the audience change are rejected and administrators must sign in again.
+
+## Admin UI completion forwards (2026-11-06)
+
+New `coreForward` routes (new files `wallets.ts`, `applications.ts` (applications + `paymentLinksRouter` + `posTerminalsRouter`), `transactions.ts` (transactions + `inboundEventsRouter`), `system.ts`, plus additions to `merchants.ts`, `gateways.ts`, `settings.ts`, `finance.ts`, `aml.ts`) registered in `protected/index.ts` with the same any-of authorities core enforces:
+
+| Mount | Read | Write |
+| :--- | :--- | :--- |
+| `/wallets` (+ `/:id/statement`, `/:id/audit-events`), `/applications`, `/payment-links`, `/pos-terminals` | `merchant:read` | `merchant:write` |
+| `/transactions` | `attempt:read`, `merchant:read`, `finance:read` | n/a |
+| `/inbound-events` | `attempt:read`, `case:read` | n/a |
+| `/system/*` (jobs-outbox, jobs, outbox, audit-outbox, notifications), mounted after `/system/backups` | `security:read` | `security:write` |
+| `/finance/journal-entries`, `/finance/gl-accounts/:id` (+ `/lines`) | `finance:read` | checkpoint, `/shards/scale`, `/shards/:shardId/repair` and `/repair/request` `finance:write` (`/repair-plan` `finance:read`) |
+| `/gateways/:id/health` | `gateway:read` | n/a |
+| `/settings/notification-templates` | `settings:read` | `settings:write` |
+| `/merchants/:id/beneficial-owners`, `/merchants/:id/revalidations` | `merchant:read` or `kyb:read` | `kyb:write` or `merchant:write` (the rest of `/merchants` stays `merchant:write`; `kyb:write` does not unlock suspend) |
+| `/aml/reporting-rules/:id/promote`, `/finance/route-caps` | already in core; now forwarded | |
+
+Contracts enforced at the edge: bodies are `.strict()` zod; `reason` is `z.string().trim().min(10).max(500)` (shared `mutationSchemas.ts`; also required on job requeue, notification retry and GL checkpoint); mutation enums are the safe subsets (wallet `FROZEN|ACTIVE`, application `SUSPENDED|ACTIVE`, POS `INACTIVE|BLOCKED|ACTIVE`, link `CANCELLED`); path ids must be UUIDs; list queries pass through every scalar filter. `zListQuery` requires `page >= 1` and caps `pageSize` at 200 but has no upper page bound, so a "last page" jump on a multi-million-row ledger is forwarded instead of failing validation; deep offset pages remain an offset-pagination cost (GAP-006). `relayStatus` passes core's 200/201/202 to the client unchanged (202 = submitted for approval). There is no outbox retry route (core has none).
 
 ---
 
 <a id="edgemerchant"></a>
 
-> **Part ID:** `edge.merchant` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `edge.merchant` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Merchant Edge BFF
 
@@ -7715,6 +7788,7 @@ The merchant portal session is a core-issued token. The edge never verifies its 
 - Uploaded KYB and dispute files are validated for MIME, magic bytes and size before the core call.
 - Team/user and credential-set operations are forwarded with the caller's bearer token; the core enforces merchant roles and maker-checker where applicable.
 - The POS SSE route requires a bearer header, then proxies the core stream.
+- List queries accept any positive `page` (no arbitrary upper bound) and cap `pageSize` at 200, so deep pages on large merchant datasets are forwarded rather than rejected with `400 VALIDATION_FAILED`; deep offset pages remain an offset-pagination cost (GAP-006).
 
 ## 5. Data / API / config / deployment surface
 
@@ -7838,6 +7912,7 @@ These suites do not require PostgreSQL or Redis. The Google route is expected to
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+- 2026-11-06: removed the arbitrary `page <= 10000` cap from `zListQuery` and the five list query schemas that duplicated it (`payments`, `links`, `cashouts`, `disputes`, wallet statements); `pageSize` stays capped at 200. Regression tests forward page 23397 on all six merchant list routes.
 
 ## 11. Cross-node POS updates (2026-11-03)
 
@@ -7854,7 +7929,7 @@ The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` an
 
 ## Gap resolutions (2026-11-05)
 
-- **Logout and session cookie (GAP-019, RESOLVED).** `POST /api/v1/merchant/auth/logout` forwards to core `POST /internal/merchant/auth/logout` (session `jti` revocation) and clears the cookie. `SESSION_COOKIE_MODE` (default `false`) and `SESSION_COOKIE_SECURE` (default `true`) are validated in `merchant-back/lib/env`; in cookie mode the token is set as the `pg_merchant_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/merchant`, 12 h), the body carries `sessionCookie: true`, and cookie-authenticated writes require `x-pg-csrf: 1`. The mode is off by default.
+- **Logout and session cookie (GAP-019, RESOLVED).** `POST /api/v1/merchant/auth/logout` forwards to core `POST /internal/merchant/auth/logout` (session `jti` revocation) and clears the cookie. `SESSION_COOKIE_MODE` (default `false`) and `SESSION_COOKIE_SECURE` (default `true`) are validated in `merchant-back/lib/env`; in cookie mode the token is set as the `pg_merchant_session` HttpOnly, `SameSite=Strict` cookie (path `/api/v1/merchant`, 12 h), the body carries `sessionCookie: true`, and cookie-authenticated writes require `x-pg-csrf: 1`. The cookie is ignored when the mode is off; login/MFA are exempt from the CSRF conversion so a stale cookie cannot block sign-in. The mode is off by default.
 - **Audience and breaker (GAP-020, GAP-021).** Merchant sessions carry `aud=payment-gateway-merchant`; a session minted for another channel is refused by core (`401 SESSION_AUDIENCE_INVALID`). The upstream client uses `CORE_FAILURE_THRESHOLD = 3`.
 
 ---
@@ -7892,7 +7967,7 @@ The return URL is an untrusted browser hint. Core inspects the attempt, triggers
 
 - disables `x-powered-by`;
 - sets `trust proxy` to false;
-- emits permissive CORS without credentials unless `CORS_ALLOWED_ORIGINS` is set, plus hand-written security headers;
+- emits no CORS headers unless `CORS_ALLOWED_ORIGINS` is set (same-origin by default; credentials disabled), plus hand-written security headers;
 - installs request logging;
 - serves unauthenticated `GET /health`;
 - mounts `/api/v1/inbound` with `inboundRouter` **before** the JSON body parser, so the inbound router can install its own raw parser;
@@ -8110,7 +8185,7 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 
 <a id="admin-uisystem"></a>
 
-> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
 
 # Admin UI System
 
@@ -8141,7 +8216,7 @@ The key intent from `design/90-archive/superseded-ui/portal_ui_abstraction_and_m
 4. **A precision shell.** A 248 px permanent drawer on desktop, a 56 px flat app bar, keycap-style active navigation, collapsible section groups, breadcrumbs, a global search entry point, help entry point, theme/locale controls, and an operator identity card.
 5. **A split-screen auth surface.** Institutional brand and security posture on one side; the login panel on the other.
 6. **A primitive layer instead of page-level Vuetify soup.** Pages compose `PageHeader`, `StatusBadge`, `MoneyDisplay`, `MonoRef`, `MetricStrip`, `SurfaceCard`, `FormModal`, `FormField`, `SlideOverDrawer`, `DescriptionList`, `SegmentedTabs`, `EmptyState`, and `JsonDiffViewer`. The unified table surface is the fourteenth deliverable even though the design prose sometimes calls it a fourteenth primitive.
-7. **Disciplined tables.** 40 px single-line rows, no rainbow row tints, one primary row action plus an overflow menu, collapsible filters, and XLSX export through the shared pipeline.
+7. **Disciplined tables.** 40 px single-line rows, no rainbow row tints, one primary row action plus an overflow menu, a sticky action column, a row-level right-click/`Shift+F10` context menu that reuses the same action model, collapsible filters, and XLSX export through the shared pipeline.
 8. **No global scaling transform.** A previous whole-app `transform: scale(0.9)` caused fixed-position and RTL problems and was removed. The old `SCALING_FEATURE.md` files were deleted; do not reintroduce them.
 
 The implementation plan records one correction to the design prose: the blueprint says "14 primitives" but names 13 components. The 13 named exports plus the unified table surface are the actual contract checked by the compliance test.
@@ -8203,7 +8278,8 @@ No external font request is required. `tests/e2e/admin/a11y.spec.ts` and the she
 | `SurfaceCard` | Flat hairline card with padding/title slots; `SurfaceCardText` is its body extra. |
 | `FormModal` | Standard modal shell with title, body, footer, submit/loading/error behavior. |
 | `FormField` | Static label, hint, error, required marker, and maker-checker hint wrapper. |
-| `SlideOverDrawer` | Right/end slide-over shell used for details and contextual help. |
+| `SlideOverDrawer` | Right/end slide-over shell used for details and contextual help. Open drawers keep a module-level stack and take a z-index from their position in it (base 1100, step 4, below Vuetify dialogs/menus), so the drawer opened last is always on top even when it is an always-mounted sibling of its parent (Vuetify otherwise gives earlier-registered items the higher z-index). |
+| `AccountLinesTable` (`components/ledger`) | Server-paginated posting lines of one GL account with side/reference-type/date filters, search and totals of the filtered set; used by the wallet statement and the GL account drawer (`financeGlAccountLines`, `walletStatement`). |
 | `DescriptionList` | Label/value lists with money, mono, and column options. |
 | `SegmentedTabs` | Compact tab switch used for periods, roles, languages, and modes. |
 | `EmptyState` | Empty/error-adjacent illustration-free state block. |
@@ -8297,6 +8373,7 @@ However, the stale files are still physically present:
 - Adding a status: use `StatusBadge` and keep the tone mapping centralized.
 - Rendering money: use `MoneyDisplay`/`MoneyText` or decimal-backed utilities; never format money with floating point.
 - Adding a drawer/modal: use `SlideOverDrawer`/`FormModal` so focus, padding, and footer behavior stay consistent.
+- Totals rows go in a `<tfoot>` of a `.pg-unified-table`/`.pg-table-card` table: the shared stylesheet gives them the body-row padding, edge insets and a top rule (before 2026-11-07 a `tfoot` had no padding and its label touched the table border).
 - Changing the theme: edit `plugins/vuetify.ts` and the `--pg-*` tokens together; do not add page-local hard-coded palettes.
 - Learning surfaces: the Guide (`styles/guide.css`) and the Academy (`styles/academy/*.css`, see `03-guide-and-academy.md` §7.6) are built from these primitives and tokens. A feature area may add its own stylesheet under `src/styles/` imported from `main.ts`, but must not inject runtime `<style>` blocks, introduce a second palette, or cap the page width below the `ScreenContainer`; only reading text takes a measure (75 ch).
 - Deploy-time visibility: set `ADMIN_SHOW_CHECKLISTS` and `ADMIN_SHOW_HELP_PANELS` in `deploy.env`; the deploy engine writes `runtime-config.js`. Rebuilding the SPA is not required for the runtime flags to change.
@@ -8385,11 +8462,23 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 - **Logout and cookie sessions (GAP-019, RESOLVED).** The user store logout calls `POST v1/admin/auth/logout` (`urlsMap.authLogout`) through `revokeServerSession` (best effort, never throws) and always clears the local session. `utils/security/sessionToken.ts` handles the cookie mode: a login payload with `sessionCookie: true` is kept as the non-secret `cookie-session` sentinel and requests send `X-Pg-Csrf: 1` instead of a bearer token.
 - **XLSX 0.20.3 (GAP-029).** `xlsx` is pinned to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` (the maintained SheetJS build; the npm registry copy 0.18.5 is vulnerable) and `@types/xlsx` was dropped. The shared XLSX pipeline is unchanged. `@prisma/client` is still listed in `admin-front/package.json` although nothing imports it (residual).
 
+## No raw operational JSON; structured builders (2026-11-06)
+
+**Rule:** operational data is never shown as `JSON.stringify`/`<pre>`, and never edited in a JSON textarea. Allowed exceptions: raw HTTP wire traces (`gateways/ai-import`, the step/webhook trace blocks of `operator-cases/[id]`), data exports (`audit-logs` CSV/XLSX columns, the platform-settings backup file), and plain-text message bodies (rail instructions, notification template body, restore reason).
+
+- **`JsonDiffViewer`** (rewritten) takes `diff: unknown`: an RFC-6902 array, `{operations}`, `{before, after}` or a plain payload (`DRAFT_AML_RULE`, `CREATE_ADJUSTMENT`...). The pure model `components/ui/jsonDiffModel.ts` humanises paths (`/payoutBankDetailsJson/iban` -> "Payout Bank Details · IBAN"), flattens nested objects to sub-rows, classifies money keys (`*Amount|*Ceiling|*Fee|*Balance|*Volume` -> `MoneyDisplay`), status strings (`StatusBadge`), lists (chips) and dates. `JsonValueCell`/`JsonValueList` render the same values as key/value rows. `components/JsonPatchDiff` is now a thin wrapper.
+- **`summarizeAuditChange(before, after)`** (`utils/auditSummary.ts`) returns the humanised labels of the changed top-level keys (ignoring identical values and timestamps); `components/AuditChangeChips.tsx` shows up to 3 chips plus "+N more" in the audit-log table, Merchant 360 and the case timeline.
+- **Builders** (`components/builders/**`, each with a pure model under `builders/model/` and unit tests): `CostModelBuilder` (+`formatCostModel`: `1.25% + 0.500 LYD (min…, max…)`), `RouteScopeBuilder` + `MismatchPolicyBuilder` (`tolerance_amount`, the only key the settlement engine reads), `MaintenanceWindowsBuilder` (absolute UTC `start`/`end`; a route is hidden while `start <= now < end`), `ParserConfigBuilder`/`ColumnMappingBadges` (statement sources), `AmlParamsBuilder`/summaries (7 rule types; `scope` is edited as a structured tree and the UI states that the engine does not evaluate it), `PlatformSettingTypedEditor` + `SettingValueView` (typed editors for the decision register OD-1..OD-11 and the policy keys; unknown keys fall back to a structured tree editor that preserves them), `LogoAssetPicker`, `ChipListInput`, `OptionChips`, `RepeatableRows`, `KeyValueSummary`, `StructuredValueEditor`. Every builder round-trips unknown keys losslessly.
+- **Commission tiers:** `CommissionTiersEditor` (`pages/finance/pricing/components`) edits `{ upTo, flat, percent }` (percent is a fraction) and is shown for TIERED only (the calculator ignores tiers for FLAT/PERCENTAGE/HYBRID). The create form also carries min/max fee, fee bearer, rounding mode and optional merchant/application scope.
+- **Shared drawers** (`components/ledger/JournalEntryDrawer`, `GlAccountDrawer`; `pages/merchants/components/WalletDetailDrawer`, `ApplicationDetailDrawer`) are opened by an id prop (`null` = closed) and emit `close`/`changed`. Governed actions share `ReasonModal` (>=10 characters) and a 202 handler that explains "submitted for approval" and links to `/approvals`.
+- **i18n slices:** `constants/i18n/{commerce,ledgerOps,forms,builders}.ts` are merged by `plugins/i18n.ts` after the main catalogue; each new string has an `[English, Arabic]` pair and unit tests assert EN/AR sync. Table filter configs live in `components/Table/registry/{commerce,ledgerOps,forms}.ts` and are spread into `tableRegistry`.
+- Compliance gate (`components/ui/__tests__/ui-abstraction-compliance.test.ts`): every standard route page uses `PageHeader` (helper components belong in `components/` subfolders), no raw `VCard`/`VDialog`/`VChip`.
+
 ---
 
 <a id="admin-uiroutes"></a>
 
-> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
 
 # Admin Route and Page Catalog
 
@@ -8571,10 +8660,9 @@ The merchant portal has a similar gap: `Statements` is shown in navigation only 
 
 ### Partial
 
-- Admin route authority coverage is incomplete: six privileged surfaces are ungated in the UI.
 - Merchant `Statements` is not route-gated.
 - Contextual help covers most admin routes but not all (see `04-contextual-help.md`).
-- Admin `AdminUsers` explicitly uses an empty authority array while the backend requires `user:read`/`security:read`; this is a deliberate-looking but unsafe pattern.
+- The admin route-authority table is advisory and must be kept in sync with core; the Guide/Academy reader routes are login-only and the Team page keeps its own `SECURITY_ADMIN` check.
 
 ### Missing / deferred
 
@@ -8629,13 +8717,31 @@ These suites require a running stack and are skipped without the live/edge servi
 
 ## Security hardening (2026-11-05)
 
-The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard: `PUBLIC_FOR_AUTHENTICATED` is Dashboard, AdminGuide and AdminAcademy; `AUTHORITY_ALIASES` normalizes dotted and colon forms. Entries were added for AdminUsers, AdminUserDetail, AdminPlatformSettings, PricingControls, GatewayAiImport and AdminCheckoutHelp. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
+The `VITE_AUTHORIZED` bypass was removed. The route authority table moved to `src/utils/routeAuthorities.ts` with a default-deny guard. `PUBLIC_FOR_AUTHENTICATED` covers Dashboard, every Guide reader route and every Academy route (the Team page keeps its own `SECURITY_ADMIN` check); `AUTHORITY_ALIASES` normalizes dotted and colon forms. AdminUsers/Detail accept `user:read`/`user:write`/`security:*`, AdminPlatformSettings accepts `settings:read`/`settings:write` (plus the security fallback), and PricingControls includes `liquidity.read`. These checks are advisory; core enforces authorities. Any route not in the table is denied to authenticated users unless it is in `PUBLIC_FOR_AUTHENTICATED`.
+
+## Admin UI completion: six new routes (2026-11-06)
+
+Six protected children were added to `admin-front/src/router/index.ts` (and the sidebar in `layouts/sections.tsx`, authorities in `utils/routeAuthorities.ts`, guide context-map screens). The numbered table in 3.2 and the "37" counts in this part predate the Guide/Academy routes; the router now has **60** protected children (the six below included), so treat the table as a historical catalog and this section as current for these routes.
+
+| Path | Name | Sidebar section | UI authority | Backend authority | Purpose |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `/wallets` | `Wallets` | Onboarding | `merchants.read` or `support.read_merchant` | `merchant:read` (freeze `merchant:write`) | Cross-merchant wallets: KPI strip, live/checkpoint balance ("Restricted" for non-financial roles), freeze (immediate) / unfreeze (approval) from the row menu. **Inspect** (or the wallet id) navigates to `WalletDetail`; `?open=<id>` redirects there. "Inspect GL account" still opens the GL drawer. |
+| `/wallets/:id` | `WalletDetail` (`meta.parentName: Wallets`) | Onboarding | same as `Wallets` | `merchant:read` (freeze `merchant:write`) | Wallet details page replacing the old wallet drawer: header with status badge, frozen banner, pending approvals, Freeze/Request unfreeze, Refresh; metric strip (live, checkpoint, posted since checkpoint, pending cash-outs). `?tab=` (`overview` default, `statement`, `links`, `activity`): Overview (details card, shard table with a padded **Total** row and a shards-vs-live-balance integrity badge), Statement (`AccountLinesTable`: server-paginated posting lines with side/reference-type/date filters, search, totals of the whole filtered set, links to the source record and to the journal entry drawer), Links and cash-outs (assigned applications, last 10 cash-outs), Status history (`/wallets/:id/audit-events`: when, action, change, reason, by, approval). Merchant 360 and the application drawer link here. |
+| `/applications` | `Applications` ("Applications & Channels") | Onboarding | same | `merchant:read` / `merchant:write` | Tabs Applications, Payment Links, POS Terminals; drawer with rail whitelist, redirect domains, API tokens (revoke), link cancel, terminal status; suspend immediate, reactivation and policy edits go to approval. `?tab=links\|pos`, `?open=<id>`. |
+| `/transactions` | `Transactions` ("Transactions & Webhooks") | Operations | `merchants.read`, `support.read_merchant` or `attempt:read` | `attempt:read` (+`merchant:read`/`finance:read`) | Tabs Payment Attempts and Inbound Webhooks (verified / unmatched filters); the attempt drawer shows summary, step logs, inbound events and the checkout retry group as structured rows. |
+| `/credential-sets` | `CredentialSets` | Gateways | `credentials.manage` or `gateways.edit` | `credential:read`/`gateway:read`, `credential:write` | Vault entries: create, rotate, verify, revoke (reason); secrets are write-only. `?highlight=<id>` (from search hits and Merchant 360). |
+| `/finance/journal-entries` | `JournalEntries` | Finance | `profit.read` or `liquidity.read` | `finance:read` | Double-entry explorer: balanced badge, T-account drawer, GL account drawer; `?glAccountId=`, `?open=`. |
+| `/system/jobs-outbox` | `JobsOutbox` ("Jobs & Outbox") | Operations | `security:read` | `security:read` / `security:write` | Outbox and audit-outbox monitors (no retry exists), background-job requeue, failed-notification retry. The metric strip also shows the ledger automation: shards behind their checkpoint (with the most pending lines), shards failing the checkpoint proof, and the last shard scaling. |
+
+Existing routes that changed: `Invariant` is now "Ledger Audit & Invariant" with per-account actions (shards and lines, journal entries, checkpoint rollup); `MerchantDetail` shows the Wallets tab to every `merchant:read` role and gained interactive wallets/applications, structured beneficial owners, KYB revalidation, access rows and pending-change diffs; `Gateways` gained a route-health drawer; `Liquidity` shows route daily-cap utilisation; `GatewayRoutes`, `AdminPlatformSettings`, `Reconciliation`, `AmlRules`, `Rails`, `Approvals`, `AuditLog`, `Disputes`, `PricingControls` lost their raw-JSON views/inputs (see `admin-ui.system`). The GL account drawer (`GlAccountDrawer`) shows the routing width, a derived checkpoint status badge, a per-shard table (balance, lines, pending, checkpoint, checkpoint age, status, padded Total row), the paginated Lines table, "Run checkpoint rollup" (verifies every shard, names a failing one) and "Set shard count" (`finance:write`, reason, audited) and, per failed shard, **Repair** (`ShardRepairModal`: preview from the journal; an intact shard is recomputed at once with a reason, a damaged one is submitted to Approvals as `GL_SHARD_REPAIR`). Shared drawers are opened by id prop and clear themselves on `close`: `JournalEntryDrawer`, `GlAccountDrawer`, `WalletDetailDrawer`, `ApplicationDetailDrawer`. `attempt:read` was added to `AUTHORITY_ALIASES` (no portal equivalent).
+
+Gaps: the dashboards/global search still route `payment_attempt` hits to Merchant 360's transactions tab (a test pins it; `Transactions?open=` would be a one-line change); approvals' "Open subject" has no target for `WALLET`/`APPLICATION`/`POS_TERMINAL`; merchant users open the `AdminUserDetail` route (works: `GET /users/:id` serves any user id).
 
 ---
 
 <a id="admin-uitables"></a>
 
-> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
 
 # Tables Filters and Exports
 
@@ -8656,6 +8762,7 @@ The v2 design intends tables to look operational rather than decorative:
 5. **Stable chrome.** Toolbar, filters, table card, and footer use explicit padding tokens and the `.pg-table-card` class.
 6. **Predictable exports.** Every spreadsheet export goes through the shared XLSX pipeline, with translated headers, styled header rows, frozen header row, widths, and a stable title.
 7. **Human checklist before risky exports.** Summary/export cards can require checklist items; deploy flags can hide checklists without changing behavior.
+8. **Actions are always reachable.** The action column is sticky to the inline end, so the visible primary action and the overflow trigger never require horizontal scrolling. A row-level context menu offers the same actions at the pointer (right-click) and from the keyboard (`Shift+F10`); the menu lists the primary action first, then the overflow items. The sticky trigger remains the touch path and the accessible baseline; links and form fields keep their native context menu.
 
 ## 3. As-built architecture
 
@@ -8667,12 +8774,22 @@ The v2 design intends tables to look operational rather than decorative:
 | `DataTable` | `admin-front/src/components/Table/DataTable.tsx` | Either local data mode or "server" mode driven by a `server` prop or `tableRegistry[route.name]`. Server mode fetches one page of up to 200 rows and paginates locally. Persists server search/filter/sort state in `sessionStorage`. |
 | `Table` | `admin-front/src/components/Table/Table.tsx` | Renders the Vuetify table, compact row styling, selection, column filters, row tone, and cell rendering. |
 | `TableFilters` | `admin-front/src/components/Table/TableFilters.tsx` | Renders filter controls by type, active chips, summary text, a mobile/desktop surface, and an injection key so the toolbar can toggle filters. |
-| `TableRowActions` | `admin-front/src/components/Table/TableRowActions.tsx` | One optional primary action plus a right-aligned overflow menu. Supports danger/disabled/hidden items and dividers. |
+| `TableRowActions` | `admin-front/src/components/Table/TableRowActions.tsx` | One optional primary action plus a right-aligned overflow menu. Supports danger/disabled/hidden items and dividers. It also binds the row context menu (`contextmenu` + `Shift+F10`), shares the menu panel with the overflow trigger, and owns the one-open-menu coordinator. |
 | `HeaderFooter` | `admin-front/src/components/Table/HeaderFooter.tsx` | Desktop/mobile toolbar and pagination, search, refresh, filter trigger, record count, XLSX button, and `useTableXlsx`. |
 | `tableRegistry` | `admin-front/src/components/Table/tableRegistry.ts` | Maps a route name to a URL, list key, filters, default sort, optional storage key, params, and row mapper. |
 | `filters` | `admin-front/src/components/Table/filters.ts` | Filter union type, active-state detection, query mapping, and server config type. |
 | `referenceOptions` | `admin-front/src/components/Table/referenceOptions.ts` | Cached `/options/:kind` loaders for merchant/rail/gateway/user/wallet filters. |
 | `statusTone` | `admin-front/src/components/Table/statusTone.ts` | Status-to-tone mapping used by filters and status pills. |
+
+### 3.1.1 Row context menu and sticky action column (2026-11-07)
+
+- **Sticky action column.** `.table-wrapper .pg-col-actions` is `position: sticky; inset-inline-end: 0` with an opaque surface background, a header above the body cells, and the hover surface on `tr:hover`. Removing `.modern-table { overflow: hidden }` was required so the sticky cell resolves against `.table-wrapper` (the actual horizontal scroll container).
+- **One integration point.** `TableRowActions` finds its row (`root.closest("tr")`) on mount, marks it with `data-pg-row-actions-bound="true"`, and binds `contextmenu` and `keydown`. No page changes are needed; `MiniTable` rows that use the same component are covered too. The first action cell in a row owns the binding.
+- **Context menu semantics.** Right-click opens the shared menu at the pointer through a hidden fixed activator; Vuetify flips it near the viewport edge and handles RTL. The activator's element ref MUST be composed with the one Vuetify passes in `activatorProps.ref` (`composeActivatorRef`): a second `ref` on the same element, before or after the spread, replaces Vuetify's and the menu then has no anchor and opens at the top-left of the page (found and fixed 2026-11-08; the same applies to the overflow button, whose focus return depends on its own ref). The e2e specs assert the menu position against the pointer. The menu always contains the primary action first (disabled/loading respected), a divider, then the visible overflow items. `hidden`/`disabled`/`dividerBefore` behave exactly as in the overflow menu.
+- **Native exclusions.** `a`, inputs, text areas, selects, contenteditable fields, Vuetify field/checkbox/switch/radio/slider controls and `[data-no-row-context-menu]` keep the browser menu. Right-clicking a button (including the action buttons) opens the row menu.
+- **Keyboard and focus.** `Shift+F10`/the ContextMenu key on any focused, non-editable element in the row opens the menu anchored at the action cell. Opening moves focus to the first enabled item; `Escape` is handled by a capture-phase window listener (so it also works when another overlay owns the global-top flag and when focus stayed on the row) and `restoreFocus()` returns focus to the overflow/primary button. The visible action button remains the accessible baseline.
+- **One menu at a time.** A module-level closer is registered when either the overflow or the context menu opens; opening another row's menu closes the previous one. The button and context menus share the same panel renderer (max-height `min(70vh, 420px)`, internal scrolling).
+- **Scope.** Admin shared tables (`ApiTable`/`DataTable`/`DataPage`) and `TableRowActions` used inside `MiniTable` rows. Custom inline action cells that do not use `TableRowActions` are not covered. The merchant portal uses the identical component and CSS copy.
 
 ### 3.2 Filter types
 
@@ -8902,11 +9019,15 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 - 2026-11-03 — Initial canonical table/export part. Records the 19 registry configurations, hybrid 200-row server mode, current-page-only XLSX export, summary export surfaces, and runtime checklist flags.
 
+## Registry slices (2026-11-06)
+
+`components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`.
+
 ---
 
 <a id="admin-uiguide"></a>
 
-> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `working-tree`
+> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `working-tree`
 
 # Admin Guide and Academy
 
@@ -8914,7 +9035,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 This part owns two employee learning products in `admin-front`:
 
-- The Admin Interactive Guide at `/guide/**`: 14 books, 125 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
+- The Admin Interactive Guide at `/guide/**`: 14 books, 134 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
 - The Employee Academy under `/academy/**`: eight tracks, lessons with practice checks, simulated labs, server-graded certification exams, 12-month badges, certificates and a `SECURITY_ADMIN` team view.
 
 It does not own the merchant guide or the checkout help center. The future-guide design is now implemented; its detailed implementation notes live in `06-guide-v2.md`.
@@ -8928,19 +9049,21 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | Artifact | Count / notes |
 | :--- | :--- |
 | `books.json` | 14 books |
-| `articles.en.json` | 125 articles with headings, plain text, roles, UI status and related ids |
+| `articles.en.json` | 134 articles with headings, plain text, roles, UI status and related ids |
 | `glossary.en.json` | 151 terms with aliases, Arabic term and related slugs |
-| `cards.en.json` | 22 cards and 99 required checklist items |
-| `playbook.en.json` | 29 situations with screens, cases and articles |
+| `cards.en.json` | 25 cards and 112 required checklist items |
+| `playbook.en.json` | 32 situations with screens, cases and articles |
 | `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
 | `faq.en.json` | 58 quick answers |
 | `data.json` | `ledger-events`, `visible-rails`, `attempt-transitions` |
-| `context-map.json` | 23 screens plus the `General` fallback |
+| `context-map.json` | 25 screens (including `Wallets` and `SystemBackups`), the last being the `General` fallback |
 | `error-codes.en.json` | 19 codes parsed from `b13-01` |
 | `edge-cases.en.json` | 140 rows parsed from the v4.1 design |
 | `meta.json` | `contentVersion`, deterministic `generatedAt`, counts and source SHA-256 |
 
 The extractor output is deterministic and byte-stable. The content test re-runs it into a temporary directory and fails on drift, count changes, unresolved links, empty bodies, external URLs, missing context-map routes, missing widgets or a gzip total above 400 KB.
+
+`scripts/overhaul-guide-and-academy-clarity.ts` is the content clarity gate. It labels every bare inline `[[a:…]]` / `[[c:…]]` / `[[s:…]]` / `[[g:…]]` token outside tables with a short natural title, skips code fences, table rows and already-labelled links, and supports `--check` (used by `guide-content.test.ts`). Table cells stay unlabelled because a `|` inside a link label would split the markdown cell; the readers shorten bare table links at render time instead. Parenthetical reference dumps are removed at render time (see §3), so the canonical prose preserves the links. The clarity overhaul (2026-11-07) rewrote 101 Guide articles (Books 2 and 4–12; Books 0, 1, 3 and 13 untouched) so each opens with a `:::summary` "In plain words" callout and a plain-language opening, and rewrote 40 Academy lessons as self-contained 350–600 word tutorials (all 50 lessons are now in that form); it also added short labels on bare references. Counts, ids, headings, check ids, quiz structure and table rows are unchanged. Each rewrite was validated mechanically and then reviewed independently against the old text and the code; the factual corrections that review found are listed in `design/07-guides-and-academy/guide_content_fixes.md` and `academy_content_fixes.md`. The authoring standard is §10.
 
 ## 3. Guide reader and navigation
 
@@ -8957,7 +9080,14 @@ Eight routes are registered with no authority gate:
 | `AdminGuideCards` | `/guide/cards/:id?` | Safeguard card catalog |
 | `AdminGuideEdgeCases` | `/guide/edge-cases` | Filterable 140-case catalog |
 
-`MarkdownView` uses `markdown-it` (`html:false`, `linkify:false`) and adds callouts, diagram fences, table scrolling, stable heading ids, article/card/situation/glossary links, glossary auto-linking (first occurrence per article, never in headings, links, code or table headers) and widget placeholders. The glossary popover is keyboard reachable and focus-trapped.
+`MarkdownView` uses `markdown-it` (`html:false`, `linkify:false`) and adds callouts, diagram fences, table scrolling, stable heading ids, article/card/situation/glossary links, glossary auto-linking (first occurrence per article, never in headings, links, code or table headers) and widget placeholders. The glossary popover is keyboard reachable and focus-trapped. Markdown and edge-case tables keep a `9.5em` minimum column width, so a table narrower than that budget scrolls horizontally inside its focusable wrapper (with themed thin scrollbars and contained overscroll) instead of compressing; cells use `overflow-wrap: normal` and never break a word letter by letter. The edge-case filter controls also cap at the row width so the page itself never overflows on a phone.
+
+The clarity renderer adds:
+
+- **Automatic parenthetical extraction.** Parenthetical pointers such as `([[a:b06-12]])`, `(see [[a:b07-03]])` or `(see [[a:b06-05]], [[a:b06-07]])` are removed from the sentence, deduplicated and rendered in a per-`##`-section **Related** tray of typed pills (`Guide`, `Screen`, `Playbook`, `Term`). Meaningful parenthetical prose is preserved: `(called rails, see [[a:b02-06]])` becomes `(called rails)`. Links extracted this way carry `data-ref-kind` and `data-ref-id`.
+- **Short inline labels.** A bare `[[a:id]]` renders the target's short title (the clause before a colon, or at most 12 words) instead of dumping the full 10-to-15-word title into the sentence. The full title is still the anchor's `title` attribute.
+- **Summary and reference callouts.** `:::summary` renders a warm "In plain words" banner for a two-sentence orientation at the top of an article; `:::refs` renders a "Where to go next" callout whose links explain why the reader would follow them. Explicit `:::refs` links are excluded from the automatic section tray to avoid duplicates.
+- **Reference preview popover.** In the full reader (not compact embedded views), clicking a guide, screen or playbook pill opens a keyboard-accessible popover with the type badge, title, reading time or risk, a short plain-text body and two actions: **Stay here** and **Read full page →**. Compact views (`ContextHelpDrawer`, `SafeguardDialog`, Academy help drills) keep direct navigation so the hosting dialog is not covered.
 
 ## 4. Search and contextual help
 
@@ -9008,11 +9138,11 @@ Specification: `design/07-guides-and-academy/academy_system_design_and_content.m
 
 | Output | Content | Audience |
 | :--- | :--- | :--- |
-| `admin-front/src/content/academy/generated/` | `meta`, `tracks`, `modules`, `lessons.en` (markdown `body`, rendered `html`, `plainText`), `checks.en` (98 practice questions WITH keys), `labs.en` (WITH keys), `drills.en`, `pages.en`, `lab-vectors`, `exam-blueprints.public` (no question ids) | browser |
-| `core-back/content/academy/exam-bank.json` | 218 exam-pool questions WITH keys + 8 blueprints | server only, never served |
+| `admin-front/src/content/academy/generated/` | `meta`, `tracks`, `modules`, `lessons.en` (markdown `body`, rendered `html`, `plainText`), `checks.en` (100 practice questions WITH keys), `labs.en` (WITH keys), `drills.en`, `pages.en`, `lab-vectors`, `exam-blueprints.public` (no question ids) | browser |
+| `core-back/content/academy/exam-bank.json` | 223 exam-pool questions WITH keys + 8 blueprints | server only, never served |
 | `core-back/content/academy/catalog.json` | tracks → lesson/lab/exam ids, lesson/lab titles, badge ids; no questions | server (eligibility, team view) |
 
-Counts (asserted by `academy-content.test.ts`): 8 tracks, 11 modules, 49 lessons (20 Foundation + 29 role), 98 checks, 218 exam-pool questions (203 single, 13 number, 2 order; 40 critical), 15 labs / 86 tasks, 8 exams, 10 drills, 7 pages (+ `lab-vectors`). Generated output is ~75 KB gzipped (budget 600 KB). Exam-pool question ids never appear under `admin-front/src/content/academy/generated/`.
+Counts (asserted by `academy-content.test.ts`): 8 tracks, 11 modules, 50 lessons (20 Foundation + 30 role), 100 checks, 223 exam-pool questions (208 single, 13 number, 2 order; 43 critical), 16 labs / 92 tasks, 8 exams, 11 drills, 7 pages (+ `lab-vectors`). Generated output is ~75 KB gzipped (budget 600 KB). Exam-pool question ids never appear under `admin-front/src/content/academy/generated/`.
 
 ### 7.2 Tracks, badges, routes
 
@@ -9080,6 +9210,20 @@ The first rebuild (7.1-7.5) was functionally complete but visually foreign: it i
 
 **Test hooks kept** (see `tests/e2e/admin/academy-*.spec.ts`, `academy-live.ts`): `.ac-wrap`, `.ac-nav`, `.ac-card` (never nested, so the overlap check holds), `.ac-chip[data-track]`, `aria-busy` skeletons, every heading/button/label/region name the specs query. No logic file changed (`useAcademyProgress`, `progressMerge`, `nextStep`, `labScoring`, `useEligibility`, `readingOpened`).
 
+### 7.7 Content accuracy pass (2026-11-05)
+
+The guide was checked against the built admin screens and the current core behaviour. Stale "no screen" claims were removed: staff user management (Admin Users), audit search (Audit Log), commission/velocity changes (Pricing & Limits) and versioned platform settings (Platform Settings) all have screens. The menu table now lists Audit Log, Admin Users, Inquiry Schedule, Backups, Platform Settings and Pricing & Limits, and the Admin Users, Inquiry Schedule and Platform Settings articles describe those screens. MFA is described as an SMS code to the registered phone (not an authenticator app), sign-out is documented as server-side revocation, the authority catalogue is described as closed with no self-escalation, reconciliation fingerprints are per statement source, and the Backups screen/drill/policy flow is described. Academy `l-m1-5` uses the same SMS wording. The exact corrections are logged in `guide_content_fixes.md` and `academy_content_fixes.md`.
+
+### 7.8 Offline companion (2026-11-06)
+
+`companion-app/` is a separate offline-first Android app that mirrors the complete Guide and
+the learner-facing Academy. It runs the same canonical extractors with redirected output and
+commits the resulting snapshot in `companion-app/public/content/`. It deliberately excludes
+the Academy exam bank, team view and server-graded certification. The app is documented in
+`project-design/parts/10-companion/00-offline-companion.md` and
+`design/06-ui/pg_companion_offline_android_app.md`. No runtime code in `admin-front` is
+imported by the companion; this part remains the authority for the web Guide/Academy.
+
 ## 8. Contracts and invariants
 
 1. The design file content is the single source of truth; article prose is never retyped into TSX.
@@ -9100,11 +9244,36 @@ The first rebuild (7.1-7.5) was functionally complete but visually foreign: it i
 
 ```bash
 cd admin-front && bun run content:guide && bun run content:academy && bun run type-check && bun run test:unit && bun run build
+bun scripts/overhaul-guide-and-academy-clarity.ts --check
 cd ../tests && bunx vitest run unit/guide- unit/academy-
 cd ../core-back && bun run typecheck && bun test test/academy-
 cd ../admin-back && bun run typecheck && bun test test/academy-progress.test.ts test/admin-surface.test.ts
 cd ../tests && bunx playwright test --project=admin e2e/admin/guide-*.spec.ts e2e/admin/academy-*.spec.ts   # needs a deployed stack
 ```
+
+## 10. Authoring standard (readability)
+
+Every new or edited Guide article and Academy lesson follows this standard. Readers range from an intern to the CEO and most read English as a second language, so articles are **layered**: the summary and tables serve the expert, the story and example serve the newcomer.
+
+**Article anatomy.** (1) `:::summary Big picture in 20 seconds`: at most two sentences, 45 words. (2) An opening in everyday terms (a situation the reader knows, or their real question), with at most one analogy, noting where it stops being true. (3) Short `###` sections whose headings say what they answer (never `##`). (4) A worked example with the shared cast wherever numbers or a sequence matter. (5) Reference tables only for lookup, each introduced by one sentence, at most five columns, no explanations hidden in cells. (6) Operator articles end with what you do and never do. (7) At most three callouts and an optional `:::refs` of at most three links, each with a reason to click.
+
+**Sentences.** Average at most 18 words, none over 28; one idea per sentence, four sentences per paragraph at most; active voice. Introduce a term in its own short sentence before using it; at most one parenthesis per paragraph. One name per concept; spell out abbreviations at first use; no idioms, no "simply/just/obviously". Code identifiers stay exact in backticks, but say what they mean in words first. LYD amounts use three decimals (25.500 LYD) and every example sum must be recomputed.
+
+**Links.** Inline links use a natural two-to-six word anchor that reads as part of the sentence; never a parenthetical link, never an article id in prose. Inside a table use a bare `[[a:id]]`. Every existing link target is kept.
+
+**Shared cast.** Layla (payer), Noon Mart (merchant), Sadad / MobiCash / Edfali (partner wallets), Ali (operator), Huda (finance), Omar (compliance). Default example: Layla pays 25.500 LYD for a phone case at Noon Mart with Sadad. Example roles must follow the approval matrix (`b04-05`). Invented numbers are labelled as examples.
+
+**Facts are sacred.** Rewriting changes readability only. Never add, drop, soften or strengthen a claim, state name, number, limit, role, screen name or safeguard. A claim the code contradicts is corrected only with evidence recorded in the `*_content_fixes.md` files; a disagreement between text and code that needs a product decision goes to `*_content_questions.md`.
+
+**Lessons.** Six headings in order (`You will be able to`, `Key ideas`, `A worked example`, `Common mistakes`, `Read now`, `Check yourself`); 350–600 words that a learner can pass without opening the Guide; every correct answer and the reason each wrong option is wrong is taught in the lesson; check ids and Read-now links unchanged.
+
+**Review before merging.** A mechanical diff (header, link targets, widgets, dropped numbers and code terms) is not enough: the rewrite of 101 articles and 50 lessons found 21 high-severity and about 67 medium problems (invented behaviour, wrong example roles, misleading analogies) only when a second reader compared old text, new text and the code.
+
+## Backup and disaster-recovery content (2026-11-06)
+
+Added from `design/02-storage-and-performance/backup_engine_reliability_architecture_and_test_plan.md` section 5, corrected against the real product: Guide articles `b12-09` (full/delta/WAL/PITR, topologies, encryption and the three storage tiers), `b12-10` (the Backups screen: real tile, badge and column labels) and `b12-11` (manual triggers, maker-checker policy changes, queueing and idempotency); safeguard cards `sg-trigger-backup`, `sg-run-restore-drill`, `sg-update-backup-policy`; situations `s-backup-daemon-unreachable`, `s-wal-archive-lag-high`, `s-restore-drill-failed`; a `SystemBackups` context-map screen. Academy: lesson `l-m10-4` (GATEWAY_ADMIN and SECURITY_ADMIN tracks only, to avoid adding certification time for every learner), lab `lab-backup-dr-desk`, drill `drill-pitr-recovery` and exam questions `q-m10-113..117`.
+
+Corrections to the draft: the exam question ids `q-m10-004..008` collided with existing questions and were renumbered; the extractor requires exactly two checks per lesson, so the third moved into the exam pool; `@@map` takes a JSON block, not the draft's one-liner; the real route is `SystemBackups` (not `AdminSystemBackups`); the menu path is Operations -> Backups; the drill has three invariant checks, not five gates; unverified claims (cron gap minimums, hard-coded retention defaults, a 30-second tick) were removed. Content stays English-only like the rest of the Guide/Academy bodies. The three new cards are content only: they are not wired into `pages/system/backups/index.tsx` with `useSafeguard`.
 
 ---
 
@@ -9116,7 +9285,7 @@ cd ../tests && bunx playwright test --project=admin e2e/admin/guide-*.spec.ts e2
 
 ## 1. Purpose and scope
 
-This part owns the admin contextual-help button and drawer, the 23-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
+This part owns the admin contextual-help button and drawer, the 25-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
 
 ## 2. As-built architecture
 
@@ -9509,7 +9678,7 @@ Delivered:
 - Eight guide routes: home, book, article, glossary, tools, playbook, cards and edge cases.
 - Markdown reader with callouts, diagram fences, tables, stable heading ids, safe article/card/situation/glossary links and first-occurrence glossary popovers.
 - MiniSearch command palette with Arabic-aware normalisation, grouping, recents and keyboard navigation.
-- Contextual help button/drawer driven by the 23-screen context map, mounted automatically by `PageHeader`.
+- Contextual help button/drawer driven by the 25-screen context map, mounted automatically by `PageHeader`.
 - 22 safeguard integrations at risky action points; Continue is disabled until all required checks are ticked.
 - Five client-only simulators with published test vectors.
 - Guide read tracking stored in the shared Academy progress JSON with a `localStorage` fallback.
@@ -9538,7 +9707,7 @@ cd ../tests && bunx playwright test --project=admin e2e/admin/guide-reader.spec.
 
 <a id="merchant-uiportal"></a>
 
-> **Part ID:** `merchant-ui.portal` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `merchant-ui.portal` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
 
 # Merchant Portal
 
@@ -9702,6 +9871,7 @@ The link amount is stored server-side; the checkout page never accepts a client 
 - Creates a terminal with name and location.
 - Creates/pairs a screen with a screen name and type.
 - Shows screen role/status and actions.
+- The shared table subsystem mirrors the admin copy: the action column is sticky to the inline end and `TableRowActions` opens the same actions from a row right-click or `Shift+F10` (primary action first, then the overflow items). The visible overflow button remains the touch path.
 
 `PosScreen` (`/portal/pos/screen/:code`):
 
@@ -9910,9 +10080,10 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 - **Cash-out:** an `idempotencyKey` per intent; amount validated against `^\d{1,14}(\.\d{1,4})?$` and greater than zero; a confirm dialog before submit.
 - **Google login/register** send a fixed `redirectUri` path and payload; `payload.redirectUrl` must be https on `VITE_IDENTITY_HOSTS` (default `accounts.google.com`).
 - **Checkout links** are built from `VITE_CHECKOUT_BASE_URL` (fallback `location.origin`).
-- **POS screen stream** uses fetch streaming with `Authorization` and reconnect backoff (not verified against live merchant-back).
+- **POS screen stream** uses fetch streaming with `Authorization` and reconnect backoff; the `event: attempts` array is mapped to the screen snapshot (latest attempt amount/currency/status/reference) instead of being assigned as the state object.
 - `resolveUploadPathWithMat` was removed. The landing page no longer names internal ledger accounts (`CUSTOMER_PAYMENT`, `YOUR_WALLET`, `PLATFORM_FEE`) or internal action names.
-- New env: `VITE_CHECKOUT_BASE_URL` (optional), `VITE_IDENTITY_HOSTS`. `.env.example` ships; copy to `.env`.
+- New env: `VITE_CHECKOUT_BASE_URL` (injected by the deploy engine from `CHECKOUT_DOMAIN`/ports; fallback `location.origin`), `VITE_IDENTITY_HOSTS`. `.env.example` ships; copy to `.env`.
+- **Authorities:** the Team page maps its group selectors to the closed core catalogue (`link:read`/`link:write`, `payment:read`, `wallet:create`, `cashout:read`/`cashout:request`, `application:manage`, `pos:manage`, `token:manage`, `credential:manage`, `user:manage`, `onboarding:write`, `dispute:respond`, `merchant:read`) instead of sending group names. The developer guide documents the canonical token scopes (`link:write`, `link:read`, `payment:read`); legacy scopes are accepted and normalised by core.
 - Catalogue keys added (EN and AR): "Enter a valid amount greater than zero (up to 4 decimals).", "Confirm Cash-Out", landing "Customer payment" and "Illustrative".
 
 ## Gap resolutions (2026-11-05)
@@ -10307,7 +10478,7 @@ The page validates with `schema.safeParse(normalized)` and maps the first issue 
 }
 ```
 
-The client generates a fresh idempotency key per initiate/confirm attempt. The response is `InitiateResponse` with `attemptId`, `reference`, `status` and `clientAction`. The page stores the attempt, opens the SSE stream, starts a countdown if the action has `expires_at`, and sets phase `ACTION`.
+The client keeps one idempotency key per initiate intent and reuses it on retry; cancel and a rail change clear it (and the saved attempt) so the next click is a new intent. The response is `InitiateResponse` with `attemptId`, `reference`, `status`, optional `hold: true` and `clientAction`. The page stores the attempt, opens the SSE stream, starts a countdown if the action has `expires_at`, and sets phase `ACTION`.
 
 A client-supplied `amount` or `currency` is outside this contract and is rejected by `checkout-back`/`core-back`.
 
@@ -10321,13 +10492,13 @@ A client-supplied `amount` or `currency` is outside this contract and is rejecte
 | `SHOW_QR_OR_CODE` | `QrOrCodeRenderer` | Renders QR data URL, optional pay code, bilingual instructions, deep link, expiry. |
 | `SHOW_PUSH_OR_TRANSFER` | `PushOrTransferRenderer` | Shows destination/reference/wallet hint, instructions, optional proof upload, expiry. |
 
-`OtpFormRenderer` limits the OTP to the action length and normalizes Arabic digits. `RedirectRenderer` requires a non-empty allowlist with no `*`, https only (http only for localhost in DEV), exact host match (`*.host` entries for subdomains) and no credentials. `EmbeddedWidgetRenderer` uses an allow-list of bare https origins compared exactly to `new URL(src).origin`, and a fail-closed postMessage bridge (see Security hardening).
+`OtpFormRenderer` limits the OTP to the action length and normalizes Arabic digits. `RedirectRenderer` requires a non-empty allowlist with no `*`, https only (http only for localhost in DEV), exact host match (`*.host` entries for subdomains) and no credentials. `EmbeddedWidgetRenderer` uses an allow-list of exact origins (https, plus loopback http for the local Fake Rails emulator), extends it with the server-configured `allowed_origins`, requires SRI for external https scripts (the loopback emulator is exempt), and uses a fail-closed postMessage bridge that also accepts script/SDK widgets without a local iframe when the origin is allowed.
 
 ### 3.7 Confirm, resend, cancel
 
 - `confirmOtp` posts `{ otp, idempotencyKey }` to `POST .../confirm`, applies the returned snapshot, and moves to `CONFIRMING` for `VERIFYING`/`UNKNOWN`.
 - `resendOtp` posts to `POST .../resend` and shows a notice; it does not reset the attempt.
-- `cancelAttempt` posts to `POST .../cancel`, closes the stream and moves to `ERROR`.
+- `cancelAttempt` posts to `POST .../cancel`, closes the stream, clears the initiate idempotency key/attempt id and moves to `ERROR`.
 - `sendClientEvent` posts to `POST .../client-event` with `{ event, payload }`.
 
 Client events are canonicalized through a local alias map:
@@ -10341,6 +10512,8 @@ Client events are canonicalized through a local alias map:
 These events are hints. The core must still verify the payment through a trusted channel.
 
 ### 3.8 SSE status stream
+
+The page listens for both the named `status` event and default `message` frames; a stream failure falls back to capped-backoff polling of the logs endpoint. A captured payment under an AML hold (`substatus: AML_HOLD`) moves to `CONFIRMING` and only shows the receipt after the compliance release settles it.
 
 After initiate, the page creates:
 
@@ -10437,7 +10610,7 @@ Environment: `VITE_API_URL` (edge base), `VITE_SEND_NOT_FOUND_TRANSLATIONS`, `VI
 
 - `SUMMARY` is a declared but unused visible phase.
 - SSE has no reconnect/backoff or polling fallback.
-- Embedded widgets depend on a hard-coded host allowlist; a new provider requires a code change.
+- Embedded widgets have a built-in provider allow-list; the server-configured `allowed_origins` extends it, so a new provider normally needs data (widget definition), not a code change.
 - The 404 surface exists but has a broken recovery link.
 - `PushOrTransferRenderer` has an `onCancel` prop with no rendered cancel control.
 
@@ -10500,7 +10673,7 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 ## Security hardening (2026-11-05)
 
 - **Status stream** is absolute under `/api` (`urlsMap.payStatusStream` uses `getBaseUrl`) with a capped-backoff polling fallback through `payLogs` (1.5 s up to 15 s, stopping on a terminal status).
-- **Embedded widgets.** The allow-list holds bare https origins compared exactly to `new URL(src).origin` (no credentials, no subdomain wildcard, test host only in non-production builds); `iframe_src` gets the same check; iframe sandbox is intersected with allow-scripts/allow-forms/allow-popups; SRI is matched by index and a script without a valid hash is rejected. The postMessage bridge fails closed: `event.origin` must be in `allowed_origins` and `event.source` must be the iframe's `contentWindow`; only a sanitized payload is forwarded.
+- **Embedded widgets.** The allow-list holds exact origins (https, plus loopback http for the local Fake Rails emulator) and is extended by the server-configured `allowed_origins`; `iframe_src` gets the same check; iframe sandbox is intersected with allow-scripts/allow-forms/allow-popups; SRI is matched by index and required for external https scripts (the loopback emulator is exempt). The postMessage bridge fails closed on the origin; when this component owns an iframe, `event.source` must also match its `contentWindow`, while script/SDK widgets without a local iframe rely on the origin allow-list. Only a sanitized payload (including a nested `payload`) is forwarded.
 - **Redirects:** no `*`, https only (http only for localhost in DEV), exact host match (`*.host` entries allow subdomains), no credentials.
 - **Deep links:** https plus `moamalat:`, `evowallet:`, `numopay:` schemes, with `rel="noopener noreferrer"`.
 - **Idempotency keys** use `crypto.randomUUID`, persisted per link in `sessionStorage`. The `attemptId` is persisted and a reload resumes from `payLogs`.
@@ -10836,7 +11009,7 @@ The design describes Nginx in front of the service. The service itself is plain 
 
 ### 3.2 Environment and guardrails
 
-`fake-rails-back/lib/env/index.ts` defines the Zod schema and a lazy proxy so importing the module does not parse the environment. Required values have no defaults: `FAKE_RAILS_ADMIN_USER` (4-128 chars), `FAKE_RAILS_ADMIN_PASSWORD` (12-512), `FAKE_RAILS_JWT_SECRET` (16-512) and `FAKE_RAILS_SEEDER_TOKEN` (16-512).
+`fake-rails-back/lib/env/index.ts` defines the Zod schema and a lazy proxy so importing the module does not parse the environment. Required values have no defaults: `FAKE_RAILS_ADMIN_USER` (4-128 chars), `FAKE_RAILS_ADMIN_PASSWORD` (12-512), `FAKE_RAILS_JWT_SECRET` (32-512) and `FAKE_RAILS_SEEDER_TOKEN` (32-512).
 
 | Key | Default | Purpose |
 | :--- | :--- | :--- |
@@ -12130,7 +12303,7 @@ The node spec carries only host, SSH port, private IP and service port. SSH user
 | Redis | `REDIS_MANAGE_VIA_SSH`, `REDIS_NODES`, `REDIS_SSH_USER`, `REDIS_SSH_PORT`, `REDIS_SSH_KEY_PATH`, `REDIS_SUDO_PASSWORD`, `REDIS_PASSWORD`, `REDIS_MAXMEMORY` | Cache/velocity nodes. |
 | Audit database | `AUDIT_DB_MANAGE_VIA_SSH`, `AUDIT_DB_NODE`, `AUDIT_DB_SSH_USER`, `AUDIT_DB_SSH_PORT`, `AUDIT_DB_SSH_KEY_PATH`, `AUDIT_DB_SUDO_PASSWORD`, `AUDIT_DB_NAME`, `AUDIT_DB_USER`, `AUDIT_DB_PASSWORD` | Append-only audit database. |
 | Log database | `LOG_DB_MANAGE_VIA_SSH`, `LOG_DB_NODE`, `LOG_DB_SSH_USER`, `LOG_DB_SSH_PORT`, `LOG_DB_SSH_KEY_PATH`, `LOG_DB_SUDO_PASSWORD`, `LOG_DB_NAME`, `LOG_DB_USER`, `LOG_DB_PASSWORD`, `LOG_RETENTION_MONTHS` | Partitioned operational log database. |
-| Backup | `BACKUP_ENABLED`, `BACKUP_NODE`, `BACKUP_SSH_USER`, `BACKUP_SSH_PORT`, `BACKUP_SSH_KEY_PATH`, `BACKUP_SUDO_PASSWORD`, `BACKUP_ENGINE_MODE`, `BACKUP_COMPRESSION`, `BACKUP_ENCRYPTION_KEY_HEX`, `BACKUP_PRIMARY_S3_*`, `BACKUP_CORE_S3_PREFIX`, `BACKUP_AUDIT_S3_PREFIX`, `BACKUP_SECONDARY_SSH_TARGET`, cron/retention/alert keys, `BACKUP_DAEMON_*`, `BACKUP_CATALOG_PATH`, `BACKUP_PGPASSFILE`, `BACKUP_SCRATCH_*`, `BACKUP_COMMAND_TIMEOUT_MS`, `BACKUP_ALLOW_INSECURE_HTTP`, binary paths, `BARMAN_AUDIT_SERVER` | WAL-G/Barman, daemon listener, catalog, drills and schedule. |
+| Backup | `BACKUP_ENABLED`, `BACKUP_NODE`, `BACKUP_SSH_USER`, `BACKUP_SSH_PORT`, `BACKUP_SSH_KEY_PATH`, `BACKUP_SUDO_PASSWORD`, `BACKUP_ENGINE_MODE` (`pg-native`/`wal-g`/`barman`/`auto`), `BACKUP_LOCAL_REPO_DIR`, `BACKUP_WAL_CLIENT_CNS`, `BACKUP_DAEMON_TIMEOUT_MS`, `BACKUP_COMPRESSION`, `BACKUP_ENCRYPTION_KEY_HEX`, `BACKUP_PRIMARY_S3_*`, `BACKUP_CORE_S3_PREFIX`, `BACKUP_AUDIT_S3_PREFIX`, `BACKUP_SECONDARY_SSH_TARGET`, cron/retention/alert keys, `BACKUP_DAEMON_*`, `BACKUP_CATALOG_PATH`, `BACKUP_PGPASSFILE`, `BACKUP_SCRATCH_*`, `BACKUP_COMMAND_TIMEOUT_MS`, `BACKUP_ALLOW_INSECURE_HTTP` (daemon protocol), `BACKUP_S3_ALLOW_INSECURE_HTTP` (managed MinIO on http), binary paths, `BARMAN_AUDIT_SERVER` | WAL-G/Barman, daemon listener, catalog, drills and schedule. |
 | Fake Rails | `FAKE_RAILS_ENABLED`, `FAKE_RAILS_ALLOW_IN_PRODUCTION`, `FAKE_RAILS_NODE`, `FAKE_RAILS_SSH_*`, `FAKE_RAILS_PRIVATE_IP`, `FAKE_RAILS_BACK_PORT`, `FAKE_RAILS_NGINX_PORT`, `FAKE_RAILS_SSL*`, `FAKE_RAILS_DOMAIN`, `FAKE_RAILS_PUBLIC_BASE_URL`, `FAKE_RAILS_REMOTE_DIR`, `FAKE_RAILS_ALLOWED_CIDRS`, `FAKE_RAILS_ALLOWED_HOSTS`, `FAKE_RAILS_ADMIN_*`, `FAKE_RAILS_JWT_SECRET`, `FAKE_RAILS_SEEDER_TOKEN`, `SEED_FAKE_RAILS_BLUEPRINTS` | Optional emulator and tester portal. |
 | Synthetic seeder | `RUN_SYNTHETIC_HISTORY_SEED`, `SYNTHETIC_SEED_PROFILE`, `SYNTHETIC_SEED_KEY`, `SYNTHETIC_YEARS_SPAN` | Test-server-only historical data. |
 | Test marker | `IS_TEST_SERVER` | Required for the synthetic seed and used as a test-installation declaration. |
@@ -12347,7 +12520,7 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 - **Environment.** `DEPLOY_ENV` now defaults to `production` and gains `test`. In production `FAKE_RAILS_ENABLED`, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION=true` and the synthetic seeder are refused. `deploy.env.example` ships `DEPLOY_ENV=production` and placeholders, so it deliberately fails validation until replaced.
 - **Secrets.** `weakSecretReason` rejects placeholders (`change-me`, `password`, `admin`, `example`...), repeated/sequential patterns and low entropy. `KMS_MASTER_KEY` needs at least 32 characters; the JWT secret must differ from the seeder token.
 - **Schema.** Charsets are restricted for secrets, SSH users, `*_REMOTE_DIR`, `PG_DATA_DIR`, backup/cert paths (absolute, no `..`), cron expressions, binary names and hosts.
-- **New optional keys.** `BACKUP_WALG_VERSION` (default 3.0.9), `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION` (3.10.1), `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; required `BACKUP_WALG_SHA256` in wal-g mode; lab key `LAB_WALG_SHA256`.
+- **New optional keys.** `BACKUP_WALG_VERSION` (default 3.0.9), `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION` (3.10.1), `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `BACKUP_S3_ALLOW_INSECURE_HTTP`, `KYB_SCANNER_MODE` (`eicar` content gate by default, `disabled` leaves documents PENDING), `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; `BACKUP_WALG_SHA256` is required only when WAL-G has to be downloaded (an installed binary is reused); lab key `LAB_WALG_SHA256`.
 - `PG_REPLICATION_*` is no longer written to the core app env.
 
 ## Gap resolutions (2026-11-05)
@@ -12442,6 +12615,8 @@ Nginx plans are filtered per role and attached to the matching compute host(s). 
 - Redis: `redis-client`;
 - audit: `audit-db-client`;
 - log: `log-db-client`.
+
+`coreEnv()` spreads `backupCoreEnv(config)` right after `storageEnv(config)`: whenever `BACKUP_ENABLED` core receives `BACKUP_DAEMON_URL` (https unless `BACKUP_ALLOW_INSECURE_HTTP`), the CA/client cert/key paths and `BACKUP_DAEMON_TIMEOUT_MS`, independent of `pgStorageConfigured()` (before this, a `DB_*` deployment got `503 BACKUP_DAEMON_NOT_CONFIGURED` because `storageEnv` returned early). The backup host's firewall rule for `BACKUP_DAEMON_PORT` also admits the PostgreSQL primary and dedicated audit IPs so their `archive_command` can reach the WAL ingest route.
 
 Display bundles are not the same as actual distribution. `certFilesForHost()` in `deploy/lib/pkiManager.ts` filters the generated storage clients by what actually exists and adds `backup-client` for the backup role. The cert bundle display can therefore list a storage client name that was not generated when that storage feature is disabled; the actual upload loop is driven by `certFilesForHost`.
 
@@ -12715,6 +12890,7 @@ Leaves are RSA 2048, signed by the internal CA, with:
 | `audit-db-client` | `audit-db-client` | none | clientAuth | audit DB configured |
 | `log-db-client` | `log-db-client` | none | clientAuth | log DB configured |
 | `backup-client` | `backup-client` | none | clientAuth | backup configured |
+| `wal-archive-client` | `wal-archive-client` | none | clientAuth | backup configured |
 
 The core certificate also carries clientAuth so the core host can use it as a client for its own loopback `/health` probe. The backup server certificate also carries clientAuth because the deploy health probe presents it as a client.
 
@@ -12747,13 +12923,15 @@ Expiry is not part of the reuse decision. `verifyPki()` reports remaining days, 
 | merchant | CA, `merchant-back-client` cert/key |
 | checkout | CA, `checkout-back-client` cert/key |
 | Fake Rails | CA, `fake-rails` cert/key |
-| pg-primary / pg-replica / pgbouncer | CA, `pg-client` cert/key |
+| pg-primary / pg-replica / pgbouncer | CA, `pg-client` cert/key (pg-primary also `wal-archive-client` cert/key) |
 | Redis | CA, `redis-client` cert/key |
-| audit DB | CA, `audit-db-client` cert/key |
+| audit DB | CA, `audit-db-client` cert/key, `wal-archive-client` cert/key |
 | log DB | CA, `log-db-client` cert/key |
 | backup | CA, `backup-daemon` cert/key, `pg-client` cert/key, `backup-client` cert/key |
 
 `readMaterial()` returns the certificate for the CA and both certificate and key for non-CA material. The CA private key is never returned for distribution.
+
+`wal-archive-client` (CN `wal-archive-client`) exists so a database host can push WAL to the backup daemon with a certificate that can do nothing else: the daemon maps it to the `wal` role (only `PUT /v1/wal/...`), while `backup-client` is the `control` role. It is deliberately distributed only to `pg-primary` and `audit-db` hosts, never to core or the backup host, and is installed in `/etc/pg-deploy/certs` with the key group-readable by `postgres` (`archive_command` runs as that user). Existing client leaves are not re-issued when only another file is missing.
 
 `deploy.ts` calls `uploadStorageCertificates()` in step 3 for hosts with a storage role. It writes to `/etc/pg-deploy/certs` for storage hosts, or `BACKUP_DAEMON_CERT_DIR` for a backup host. Compute services later receive `certFilesForHost()` under `<remoteDir>/shared/certs` in `deployService()`.
 
@@ -12958,7 +13136,7 @@ Every host gets a default-deny inbound policy. Only role-specific ports are open
 - admin only from the LAN;
 - merchant/checkout public ports open, backends loopback-only;
 - storage services only from core, backup and peer storage nodes;
-- backup daemon only from core.
+- backup daemon only from core and, for WAL ingest (`PUT /v1/wal`), the PostgreSQL primary and dedicated audit hosts.
 
 If several roles share a host, the rules are the union of the role rules. The SSH rule is always emitted first and `ufw --force enable` is last, so a failed rule cannot lock the operator out.
 
@@ -13200,7 +13378,7 @@ The Fake Rails nginx vhost now also applies `allow`/`deny` rules from `FAKE_RAIL
 
 <a id="deploypipeline"></a>
 
-> **Part ID:** `deploy.pipeline` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `deploy.pipeline` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
 
 # Deployment Pipeline
 
@@ -13222,11 +13400,15 @@ It also requires atomic releases, a symlinked `current`, least-privilege environ
 
 `main()` parses CLI options, checks that `deploy.env` exists, loads and validates it, runs `findSshConflicts()`, calls `planHosts()`, prints `renderTopology()` and creates an `SshRunner` with `verbose: true`.
 
+`--force-restart` and `--rebuild` are the two engine-level overrides of the convergence and build-cache behaviour. After loading the config, the runner registers every credential value (any key matching PASSWORD/SECRET/TOKEN/MASTER_KEY/ACCESS_KEY/ENCRYPTION_KEY/JWT/SEED_KEY with a value of at least 8 characters) and masks it **wherever it appears** in logs, the timing report, thrown error messages, the verification report and the final failure line. `redactSecrets` alone only recognised `NAME=value`; the health verifier's pgpass lines (`host:port:db:user:PASSWORD`) and connection URLs were printed in clear before this change.
+
 A missing file, schema error, cross-field error or SSH credential conflict aborts before any remote command. With `--dry-run`, every later command is logged instead of executed. Every logged command line passes through `redactSecrets` (`deploy/lib/sshRunner.ts`), which masks the value of any `NAME=value` whose name contains PASSWORD, PASSWD, SECRET, TOKEN, AUTH, API_KEY, ACCESS_KEY or MASTER_KEY (for example `PGPASSWORD=`, `REDISCLI_AUTH=`); before 2026-11-04 these were printed in the clear.
 
-### 3.2 Step 2: build SPAs locally
+### 3.2 Step 2: build SPAs locally (background, cached)
 
-`buildFrontends()` runs `bun run build` locally for `admin-front`, `merchant-front`, `checkout-front` and, when enabled, `fake-rails-front`. Admin builds receive `VITE_SHOW_CHECKLISTS`, `VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST` and `VITE_SHOW_HELP_PANELS` from the deploy config. The step is skipped with `--skip-build` or `--dry-run`; it builds all three SPAs regardless of `--only`.
+`startFrontendBuilds()` (`deploy/lib/frontendBuild.ts`) starts `bun run build` for the SPAs of the **selected roles** (`admin-front`, `merchant-front`, `checkout-front`, and `fake-rails-front` when enabled; an `--only=core` run builds none) and **returns immediately**: at most `ceil(cores/2)` (max 4) run at once, output goes to a log file (never a pipe, so a parent blocked in a synchronous ssh call cannot stall a build), and the main loop `await`s each SPA right before the tier that ships it, so the builds overlap with storage provisioning (step 5). A failing build rejects with its log tail where it is awaited; on a failed deploy the remaining builds are killed. Admin builds receive `VITE_SHOW_CHECKLISTS`, `VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST` and `VITE_SHOW_HELP_PANELS`; merchant and Fake Rails builds receive their checkout origin.
+
+**Build cache:** the fingerprint is the SHA-256 of the frontend's source tree (file paths and bytes; `node_modules`, `dist`, `.vite`, coverage and `*.log` excluded; `.env*` included) plus the sorted deploy-injected build environment. A build is skipped when `dist/index.html` exists and `dist/.pg-build-stamp` equals the fingerprint. The stamp records the **post-build** state, because some builds rewrite tracked sources (`unplugin-vue-components` regenerates `src/components.d.ts`), which made a pre-build stamp miss on every run. `--rebuild` ignores the cache; `--skip-build` and `--dry-run` skip the step. `.pg-build-stamp` is excluded from the rsync of `dist`.
 
 ### 3.3 Step 3: PKI
 
@@ -13257,6 +13439,8 @@ The firewall is only applied in fresh or enforce mode. An ordinary `--update` do
 
 The step requires a core host in the plan.
 
+Provisioning **converges** rather than restarts (see `deploy.storage` section 16): a second run with unchanged configuration leaves PostgreSQL, PgBouncer, Redis and the backup daemon running and the step takes seconds (it took 4m53s when every service was restarted and PgBouncer waited out three 90 s stop timeouts). Each provisioner reports `started` / `restarted` / `reloaded` / `unchanged` per service on a `services:` line; `--force-restart` restarts them regardless.
+
 Provisioning is gated by `--only` and by the management flags:
 
 - PostgreSQL 18 primary/replicas/PgBouncer when `PG_MANAGE_VIA_SSH` and the relevant `--only` selection;
@@ -13276,12 +13460,15 @@ No dump is taken on a fresh install. A failure aborts before migrations. `pg_dum
 
 After `provisionBackupEngine()`, `deployBackupDaemon()`:
 
-- creates `/opt/pg-backup-daemon` owned by the effective target user (the SSH user remotely, the orchestrator's OS user locally);
+- creates `/opt/pg-backup-daemon` owned by the effective target user (the SSH user remotely, the orchestrator's OS user locally) and hands the source tree (not `node_modules`) to that user for the rsync;
 - rsyncs `deploy/backup-daemon` with `--delete`, excluding `node_modules`, `.git`, `dist`, `test`, `*.log` and `.env`;
-- chowns the install directory to `postgres:postgres` (the daemon's service user);
+- hands the source tree back to `postgres:postgres` (the daemon's service user);
 - ensures Bun exists and installs a real copy at `/usr/local/bin/bun` (not a symlink through the SSH user's home, which may not be traversable by `postgres`);
-- runs `bun install --frozen-lockfile` as `postgres`;
-- runs `systemctl daemon-reload && systemctl enable pg-backup-daemon && systemctl restart pg-backup-daemon`.
+- runs `bun install --frozen-lockfile` as `postgres` only when the rsync changed something or `node_modules` is missing;
+- chowns the source tree and `/var/lib/pg-backup/.bun-cache` to the daemon account (`backupDaemonUser()`: `postgres` only for WAL-G co-located with the primary, else `pgbackup`) and runs `bun install` as that account with `HOME` and `BUN_INSTALL_CACHE_DIR` set;
+- runs `systemctl daemon-reload && systemctl enable pg-backup-daemon`, then **starts the unit if it is down and restarts it only if the source, env, unit or archive environment changed** (or `--force-restart`), logging `backup daemon started|restarted|unchanged`.
+
+After the start/restart decision the same remote script runs `daemonReadinessWait()`: it polls up to 10 s for the unit to be active and to stay active for one more second (so `Restart=always` cannot hide a crash loop), and on failure prints `journalctl -u pg-backup-daemon -n 40 --no-pager` to stderr and exits 1, so a startup failure surfaces in step 5 instead of at the first health probe.
 
 The systemd unit and `/etc/pg-backup/backup.env` are written by the provisioner, not by `deployBackupDaemon()`. If `BACKUP_ENABLED` is true but the plan has no backup host, the deploy warns and skips the daemon; validation normally prevents that.
 
@@ -13343,7 +13530,7 @@ The synthetic seed requires `IS_TEST_SERVER=true` and Fake Rails enabled at conf
 - public merchant/checkout vhosts from the host itself (admin LAN vhost skipped);
 - Fake Rails backend and vhost when enabled;
 - PostgreSQL primary/replicas with `pg_isready` and `psql SELECT 1`;
-- PgBouncer `SELECT 1` when enabled;
+- PgBouncer `SELECT 1` when enabled, through both the application database and the `pgw_session` leader-election alias;
 - Redis `PING` with `REDISCLI_AUTH`;
 - audit/log `SELECT 1`;
 - backup-daemon `/health` over mTLS when configured.
@@ -13360,6 +13547,12 @@ Prune old releases
 ```
 
 Actual pruning already happened inside each `deployService()` call. The guide's statements that pruning is step 13 or step 11 are historical/wrong. Because pruning is per service, a host with several services prunes each service's release tree separately.
+
+### 3.11a Runner behaviour and the timing report
+
+- **Timings:** every command and write is timed (secrets scrubbed). A command that takes 30 s or more is flagged as it finishes (`! slow command`). After step 14 the deploy prints wall-clock per step and the slowest commands over 1 s.
+- **Change detection:** `writeRemoteFile()` returns whether the content changed; `sync()` returns `{ changed, files }` from `rsync --itemize-changes` (directory mtime touches do not count).
+- **Multiplexing:** remote targets share one ssh connection per host (`ControlMaster=auto`, `ControlPersist=120`, sockets in a private 0700 `mkdtemp` directory, closed by `SshRunner.close()` at the end or on failure). `PG_DEPLOY_SSH_MUX=0` disables it. Local targets and dry runs never use it.
 
 ### 3.12 Step 14: audit summary
 
@@ -13485,7 +13678,7 @@ Relevant suites:
 - `deploy/test/provisioners.test.ts`: provisioner command builders.
 - `deploy/test/exhaustive-deploy-matrix.test.ts`: broad plan behavior.
 
-No test performs a real multi-host deployment, migration, PM2 restart or Nginx reload. A live staging run is required for those.
+The unit tests mock the runner. `deploy/stress` (see `testing.deploy-stress`) drives the real engine against real services on the dev box, including the real ssh transport (via `127.0.0.2`), PM2 restarts, Nginx reloads and multi-node rolling deploys; a genuinely separate-machine run is still the job of the multi-machine matrix.
 
 ## 9. Source references
 
@@ -13540,8 +13733,9 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 - **Pre-migrate dump.** `pg_dump` uses `PGPASSFILE` (never `PGPASSWORD`), runs under `umask 077` into a 0700 backups directory, and only the newest `KEEP_RELEASES` dumps are kept. The earlier statements in this part that the dump embeds `PGPASSWORD` are superseded.
 - **Migrations.** `planMigrations()` is exported; only the first core node migrates. `--fresh` against a non-empty database is refused unless `--force-fresh` or `DEPLOY_FORCE_FRESH=1`. Update deploys run `migrate deploy` when migrations are pending or unknown. The dump is taken before migrating in both modes when the database is non-empty or unknown.
 - **sshRunner** local-sudo writes use an `mkdtemp` 0700 directory removed in `finally`.
-- **Bun** is installed from a pinned download verified against `BUN_SHA256` (no `curl | bash`).
-- **nginx templates**: `server_tokens off` and `limit_req` (with `limit_req_status 429`) in all six; the fakerails vhost gets `allow`/`deny` from `FAKE_RAILS_ALLOWED_CIDRS`, `script-src 'self'`, `object-src 'none'`, `frame-ancestors 'self'` (previously `'self' *`); the checkout CSP is unchanged.
+- **Bun** is installed from a pinned download verified against `BUN_SHA256` (no `curl | bash`); the fresh-host bootstrap installs `unzip`, and an existing `/usr/local/bin/bun` or `~/.bun/bin/bun` is reused.
+- **Frontend build env**: the deploy injects `VITE_CHECKOUT_BASE_URL` into merchant-front and `VITE_CHECKOUT_ORIGIN` into fake-rails-front from `CHECKOUT_DOMAIN`/ports, so checkout links and hosted-widget postMessage targets do not fall back to the wrong origin.
+- **nginx templates**: `server_tokens off` and `limit_req` (with `limit_req_status 429`) in all six; the fakerails vhost gets `allow`/`deny` from `FAKE_RAILS_ALLOWED_CIDRS`, `script-src 'self'`, `object-src 'none'`, and a computed `frame-ancestors` list (self + merchant/checkout origins + loopback) so the hosted widget can still be embedded; the checkout CSP is unchanged.
 - **scripts/deploy-localhost.sh** refuses `NODE_ENV=production` unless `LOCAL_TARGET=1`, no longer falls back to default secrets (random secrets via `openssl rand` go to a 0600 `.local/secrets.env` or `LOCAL_SECRETS_FILE`), and requires `DB_PASSWORD`.
 - **CI and legacy deploy workflows (GAP-014, RESOLVED 2026-11-05).** `.github/workflows/ci.yml` (jobs `design`, `backend`, `frontend`; triggers push to `main`/`ayoub`, pull requests and manual dispatch; `contents: read`; concurrency-cancelled per ref) runs the AGENTS.md gate: `bun scripts/project-design/build.ts --check`, then for `core-back`, `deploy`, `deploy/backup-daemon`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` a frozen-lockfile install, typecheck and `bun test`, and for `admin-front`, `merchant-front`, `checkout-front` and `fake-rails-front` a frozen-lockfile install and `bun run build`. Suites that need PostgreSQL 18 and Redis skip themselves when the services are absent. The per-service `*/.github/workflows/deploy.yml` workflows are now legacy and manual only (`workflow_dispatch` with a typed `deploy` confirmation): they run the service typecheck/tests first, run the deploy job in the `legacy-deploy` environment, use `StrictHostKeyChecking=yes` with a pinned `known_hosts` taken from the **`SSH_KNOWN_HOSTS` secret (which operators must now create, with the server's verified host key lines)**, sync additively (no `rsync --delete`) and never scan the host key on first use. The supported deploy path remains the multi-host engine in `deploy/`. Tests: `deploy/test/ci-workflows.test.ts`.
 - **Replica pgpass (GAP-028, RESOLVED).** The replica `.pgpass` is streamed over stdin; see `deploy.storage`.
@@ -13551,7 +13745,7 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 
 <a id="deploystorage"></a>
 
-> **Part ID:** `deploy.storage` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `deploy.storage` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
 
 # Storage Provisioners
 
@@ -13608,7 +13802,7 @@ The file contains no `ssl`, `ssl_cert_file`, `ssl_key_file`, `ssl_ca_file` or `s
 
 The primary source list includes the primary itself, every replica, every core private IP, and the backup/audit/log node private IPs. The replica source list includes the primary and the backup nodes.
 
-The provisioner writes `pg_hba.conf`, applies the bootstrap SQL through `su - postgres`, restarts PostgreSQL, and installs `/etc/cron.d/pg-journal-partitions`:
+The provisioner writes `postgresql.conf` and `pg_hba.conf` (only when their bytes changed), **applies the cluster** (section 16: start if down, reload on change, restart only on `pending_restart`), then runs the bootstrap SQL through `runuser -u postgres -- psql -p <port>` against the now-running cluster, and installs `/etc/cron.d/pg-journal-partitions`:
 
 ```text
 30 1 * * * root su - postgres -c "psql -d <PG_DB_NAME> -c 'SELECT ensure_journal_line_partitions(18)'" >/var/log/pg-journal-partitions.log 2>&1
@@ -13631,14 +13825,17 @@ The slots are created on the primary by `primaryBootstrapSql()`. Replication is 
 
 ### 3.3 PgBouncer
 
-When `PGBOUNCER_ENABLED=true`, PgBouncer is installed and configured on the primary and every replica. `/etc/pgbouncer/pgbouncer.ini` sets `listen_addr=0.0.0.0`, `listen_port=6432`, transaction pooling, `server_tls_sslmode=prefer`, the configured client/pool limits, reserve 10, prepared statements, SCRAM auth and `/etc/pgbouncer/userlist.txt`. The userlist contains the application and replication users with plaintext passwords, mode 0600. PgBouncer is restarted after writing it.
+When `PGBOUNCER_ENABLED=true`, PgBouncer is installed and configured on the primary and every replica. `/etc/pgbouncer/pgbouncer.ini` sets `listen_addr=0.0.0.0`, `listen_port=6432`, transaction pooling for the application database, `server_tls_sslmode=require`, the configured client/pool limits, reserve 10, prepared statements, SCRAM auth and `/etc/pgbouncer/userlist.txt`. The userlist contains the application and replication users with plaintext passwords, mode 0600. PgBouncer is applied by reload, or restarted only when needed (section 16).
+
+The `[databases]` section also contains a session-scoped alias, `pgw_session`, mapping to the same real database with `pool_mode=session` and `pool_size = max(8, 2 × core nodes + 4)`. It exists solely for the singleton-worker advisory-lock leader election (`LEADER_ELECTION_DATABASE_URL`): PostgreSQL session locks do not survive transaction pooling. The ordinary `PG_DB_NAME` entry stays transaction-pooled for application traffic. After PgBouncer is applied, the provisioner proves a login through both the application database and `pgw_session`; if the alias is not yet served after a reload, it restarts PgBouncer once and retries, so core never starts against a missing session route.
 
 After writing both files, the provisioner resolves the service account from `systemctl show -p User --value pgbouncer` (falling back to `pgbouncer`, then `postgres`) and applies `0640` to the ini and `0600` to the userlist. This is required because Ubuntu's unit runs as `postgres` and does not create a `pgbouncer` system user; a root-owned `0640` file otherwise fails with `could not load file "/etc/pgbouncer/pgbouncer.ini": Permission denied`.
 
 Important as-built facts:
 
 - The `[databases]` section maps `PG_DB_NAME` to `127.0.0.1:<primaryPort>` with `PG_DB_USER` and its password, so a client connecting to `:6432` with that database name reaches the local PostgreSQL primary.
-- `server_tls_sslmode = prefer` encrypts the PgBouncer-to-PostgreSQL leg when the server offers TLS; it does not verify the server certificate (`verify-full` would) and supplies no client certificate.
+- `pgw_session` is a second alias to the same database with `pool_mode=session`; deploy writes `LEADER_ELECTION_DATABASE_URL=postgresql://…@<primary>:6432/pgw_session` into the core environment (or a direct PostgreSQL URL with `sslmode=no-verify` when PgBouncer is disabled). An explicit `LEADER_ELECTION_DATABASE_URL` in the deploy env overrides the derived value for an external database/pooler.
+- `server_tls_sslmode = require` encrypts the PgBouncer-to-PostgreSQL leg; it does not verify the server certificate (`verify-full` would) and supplies no client certificate.
 - There is no `client_tls_sslmode`, `client_tls_cert_file` or `client_tls_key_file`; clients are not required to present a certificate.
 - `listen_addr = 0.0.0.0` is protected by UFW only; the plan opens 6432 to core sources.
 
@@ -13646,13 +13843,13 @@ The core environment points `PG_PRIMARY_PORT` and `DATABASE_REPLICA_URLS` at `PG
 
 ### 3.4 Redis
 
-`redisProvisioner.ts` installs `redis-server`, enables it, and writes both `/etc/redis/redis.conf.d/zz-pg-switch.conf` and `/etc/redis/redis.conf` with a deduplicated private-IP + loopback bind, `protected-mode yes`, the node port, `requirepass <REDIS_PASSWORD>`, `save 3600 1`, maxmemory/policy `allkeys-lru`, no append-only file, `daemonize no`, `supervised systemd` and `dir /var/lib/pg-redis`. It writes a systemd drop-in for `redis-server` and `valkey` granting `ReadWritePaths=/var/lib/pg-redis`, runs `systemctl daemon-reload`, runs `ufw allow` for core and backup sources, restarts Redis and verifies with `REDISCLI_AUTH=<password> redis-cli -p <port> PING`.
+`redisProvisioner.ts` installs `redis-server`, enables it, and writes both `/etc/redis/redis.conf.d/zz-pg-switch.conf` and `/etc/redis/redis.conf` with a deduplicated private-IP + loopback bind, `protected-mode yes`, the node port, `requirepass <REDIS_PASSWORD>`, `save 3600 1`, maxmemory/policy `allkeys-lru`, no append-only file, `daemonize no`, `supervised systemd` and `dir /var/lib/pg-redis`. It writes a systemd drop-in for `redis-server` and `valkey` granting `ReadWritePaths=/var/lib/pg-redis`, runs `systemctl daemon-reload`, runs `ufw allow` for core and backup sources, restarts Redis **only if its effective config or drop-in changed (or it is down)** and verifies with `REDISCLI_AUTH=<password> redis-cli -p <port> PING`.
 
 There is no `tls-port`, `tls-cert-file`, `tls-key-file`, `tls-ca-cert-file` or `tls-auth-clients` setting. Redis traffic is plaintext inside the private network. The generated `redis-client` certificate is unused.
 
 ### 3.5 Audit database
 
-`auditAndLogDbProvisioner.ts` installs PostgreSQL on `AUDIT_DB_NODE` when `AUDIT_DB_MANAGE_VIA_SSH` is true, applies a minimal PostgreSQL config (`listen_addresses='*'`, `wal_level=replica`, senders/slots), writes a `pg_hba` restricted to core and backup sources, restarts PostgreSQL, creates the audit role/database, and applies:
+`auditAndLogDbProvisioner.ts` installs PostgreSQL on `AUDIT_DB_NODE` when `AUDIT_DB_MANAGE_VIA_SSH` is true, applies a minimal PostgreSQL config (`listen_addresses='*'`, `wal_level=replica`, senders/slots), writes a `pg_hba` restricted to core and backup sources (both skipped when the node is the primary's own cluster; see section 16), applies the cluster, creates the audit role/database, and applies:
 
 - `pg_trgm`;
 - `audit_records` with `seq_no` identity, UUID primary key, actor/action/entity fields, before/after JSON, `prev_hash`, `row_hash`;
@@ -13680,8 +13877,8 @@ The retention function only drops partitions whose names match the monthly suffi
 
 `provisionBackupEngine()` installs:
 
-- `barman`, `zstd`, `lz4`, `brotli`, `xz-utils`, `rclone`, `curl`, `ca-certificates`;
-- WAL-G when `BACKUP_ENGINE_MODE=wal-g`, by downloading the pinned asset (`BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`) and verifying it against the required `BACKUP_WALG_SHA256` (fail closed), then chmod +x;
+- `barman` (not for pg-native), `zstd`, `lz4`, `brotli`, `xz-utils`, `rclone`, `curl`, `ca-certificates`, and the PostgreSQL 18 client AND server packages (`postgresServerPackages()`), because the daemon runs `pg_basebackup`, `pg_receivewal`, `pg_verifybackup`, `pg_combinebackup`, `pg_dump`, `pg_restore`, `pg_ctl`, `initdb` and `psql` even on a dedicated backup host; on a host that runs no managed PostgreSQL cluster the default `postgresql` service is disabled and masked;
+- WAL-G when `BACKUP_ENGINE_MODE=wal-g`: an already installed `wal-g` is reused; otherwise the pinned asset (`BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`) is downloaded and verified against `BACKUP_WALG_SHA256` (fail closed when no checksum is supplied), then chmod +x;
 - the `pgbackup` system user and `/var/lib/pg-backup`, log and cert directories;
 - `/etc/pg-backup/backup.env` from `backupDaemonEnv()`;
 - `/etc/pg-backup/wal-g.env` for the core target;
@@ -13692,7 +13889,7 @@ The retention function only drops partitions whose names match the monthly suffi
 
 Archive configuration:
 
-- WAL-G: writes `/etc/pg-backup/wal-g-core.env` on the primary and sets `archive_mode=on`, `archive_command` to `wal-g wal-push %p` with the core prefix, `restore_command` to `wal-g wal-fetch`, and `archive_timeout=60s`; restarts PostgreSQL.
+- WAL-G: writes `/etc/pg-backup/wal-g-core.env` on the primary and sets `archive_mode=on`, `archive_command` to `wal-g wal-push %p` with the core prefix, `restore_command` to `wal-g wal-fetch`, and `archive_timeout=60s`; the cluster is reloaded only if `postgresql.auto.conf` changed and restarted only if a setting is `pending_restart` (`archive_mode` off -> on on the first deploy).
 - Barman: sets `wal_level=replica`, `archive_mode=off`, creates the `barman` slot and uses `barman-wal-archive <backupIp> <server> %p` from `streaming_archiver=on`. It writes `/etc/barman.conf` with a server section using the replication user, a `slot_name`, and `backup_method=postgres`.
 
 The same archive configuration is applied to the audit database when `AUDIT_DB_MANAGE_VIA_SSH` is true, with `archive_command` targeting the audit prefix/server.
@@ -13712,12 +13909,14 @@ Before verification, `ensureObjectStore()` runs on the backup host:
 - `BACKUP_S3_MODE` = `auto` (default) | `managed-minio` | `external`. `auto` resolves to `managed-minio` when the endpoint host is loopback, the backup node private IP or its SSH host, otherwise `external` (`resolveBackupS3Mode`).
 - `external`: never touched, only verified.
 - `managed-minio`: a healthy endpoint is left running; otherwise the engine installs `minio` (MinIO no longer publishes binaries and `dl.min.io` answers 410, so: an existing `minio` on the host, else `BACKUP_MINIO_BINARY_URL` (http(s):// or file://), else a source build with Go, `go install github.com/minio/minio@BACKUP_MINIO_VERSION`, several minutes; with none of these it fails with an actionable message), creates the `minio-user` account and `BACKUP_MINIO_DATA_DIR`, writes `/etc/default/minio` (0640 root:minio-user; root user/password = `BACKUP_PRIMARY_S3_ACCESS_KEY`/`SECRET_KEY`) and a `minio.service` unit, starts it, waits for health and creates the bucket from `BACKUP_PRIMARY_S3_BUCKET` (SigV4-signed `curl -X PUT`, HTTP 200/409 accepted; no `mc` needed). Install steps fail loudly: an earlier version continued past a failed download and started a unit with no binary. Loopback endpoints bind 127.0.0.1 only; others bind 0.0.0.0. Console port: `BACKUP_MINIO_CONSOLE_PORT`.
-- Config validation (managed only): access key ≥3 chars, secret ≥8, bucket `s3://dns-bucket[/prefix]`, http endpoint requires `BACKUP_ALLOW_INSECURE_HTTP=true`, https endpoints are rejected (no TLS is provisioned; use `external`).
-- `BACKUP_ENGINE_MODE=auto` resolves at load time: `wal-g` when `BACKUP_NODE` shares the PG primary's private IP, `barman` when it is a different host. Explicit `wal-g`/`barman` unchanged.
+- Config validation (managed only): access key ≥3 chars, secret ≥8, bucket `s3://dns-bucket[/prefix]`, an http endpoint requires `BACKUP_S3_ALLOW_INSECURE_HTTP=true` (independent of the daemon's `BACKUP_ALLOW_INSECURE_HTTP`), https endpoints are rejected (no TLS is provisioned; use `external`).
+- `BACKUP_ENGINE_MODE` defaults to `pg-native` and `auto` resolves to `pg-native` (ADR-0004): it works on the primary's host and on a dedicated backup host, needs no S3 and no external backup tool. Explicit `wal-g`/`barman` are unchanged; the rule forbidding `wal-g` on a separate host still applies to `wal-g` only.
+- pg-native cluster settings (`pgNativeArchiveSql`): `wal_level=replica`, `archive_mode=on`, `archive_command = curl --fail ... --cert /etc/pg-deploy/certs/wal-archive-client.crt ... --upload-file %p https://<backup>:<port>/v1/wal/<postgres_core|audit_db>/%f`, `archive_timeout=60s`, `summarize_wal=on`, `max_wal_senders`/`max_replication_slots` raised to 10 only when below 4, `RESET restore_command`, and the replication role (`replicationRoleSql`). The provisioner checks that the `postgres` OS user can read the WAL client key and fails the deploy otherwise. Managed clusters already carry a `hostssl replication` rule for the backup node; an externally managed PostgreSQL needs it added by hand.
+- `barmanStreamingSql(config, target)` creates `barman_audit` on a dedicated audit cluster (or on the core cluster when the audit database shares it), never a dangling slot on the primary.
 - `BACKUP_ENGINE_MODE=auto` and `BACKUP_S3_MODE` keys are validated at load; MinIO install order and failure behaviour are described above (and in `04-pipeline.md` §13).
 - The two-machine test matrix sets `BACKUP_S3_MODE=external` because it provisions its own object store.
 
-The systemd unit runs `bun run src/index.ts` as `postgres` (WAL-G) or `pgbackup` (Barman) with `EnvironmentFile=/etc/pg-backup/backup.env`, `ProtectSystem=strict`, `PrivateTmp=true`, `NoNewPrivileges=true`, and `ReadWritePaths` for the backup, log, catalog, cert, scratch and pgpass directories.
+The systemd unit runs `bun run src/index.ts` as `postgres` (WAL-G co-located with the primary) or `pgbackup` (everything else), with no `SupplementaryGroups` (which stopped systemd with status 216/GROUP on a host without a `postgres` group), `HOME`/`BUN_INSTALL_CACHE_DIR` under `/var/lib/pg-backup`, `EnvironmentFile=/etc/pg-backup/backup.env`, `ProtectSystem=strict`, `PrivateTmp=true`, `NoNewPrivileges=true`, and `ReadWritePaths` for the backup, log, catalog, cert, scratch and pgpass directories.
 
 ## 4. Contracts and invariants
 
@@ -13743,7 +13942,7 @@ The systemd unit runs `bun run src/index.ts` as `postgres` (WAL-G) or `pgbackup`
 | Redis | `REDIS_MANAGE_VIA_SSH`, `REDIS_NODES`, `REDIS_SSH_*`, `REDIS_PASSWORD`, `REDIS_MAXMEMORY`, `REDIS_URL` |
 | Audit | `AUDIT_DB_MANAGE_VIA_SSH`, `AUDIT_DB_NODE`, `AUDIT_DB_SSH_*`, `AUDIT_DB_NAME`, `AUDIT_DB_USER`, `AUDIT_DB_PASSWORD` |
 | Log | `LOG_DB_MANAGE_VIA_SSH`, `LOG_DB_NODE`, `LOG_DB_SSH_*`, `LOG_DB_NAME`, `LOG_DB_USER`, `LOG_DB_PASSWORD`, `LOG_RETENTION_MONTHS` |
-| Backup | `BACKUP_ENABLED`, `BACKUP_NODE`, `BACKUP_ENGINE_MODE` (`wal-g`/`barman`/`auto`), `BACKUP_PRIMARY_S3_*`, `BACKUP_S3_MODE`, `BACKUP_MINIO_*`, `BACKUP_CORE_S3_PREFIX`, `BACKUP_AUDIT_S3_PREFIX`, `BACKUP_SECONDARY_SSH_TARGET`, `BACKUP_FULL_CRON`, `BACKUP_DELTA_CRON`, `BACKUP_DRILL_CRON`, retention/alert keys, `BACKUP_WALG_BIN`, `BACKUP_BARMAN_BIN`, `BACKUP_BARMAN_CLOUD_BIN` |
+| Backup | `BACKUP_ENABLED`, `BACKUP_NODE`, `BACKUP_ENGINE_MODE` (`pg-native` default / `wal-g` / `barman` / `auto` = `pg-native`), `BACKUP_PRIMARY_S3_*`, `BACKUP_S3_MODE`, `BACKUP_MINIO_*`, `BACKUP_CORE_S3_PREFIX`, `BACKUP_AUDIT_S3_PREFIX`, `BACKUP_SECONDARY_SSH_TARGET`, `BACKUP_FULL_CRON`, `BACKUP_DELTA_CRON`, `BACKUP_DRILL_CRON`, retention/alert keys, `BACKUP_WALG_BIN`, `BACKUP_BARMAN_BIN`, `BACKUP_BARMAN_CLOUD_BIN` |
 
 ### Generated files
 
@@ -13784,7 +13983,7 @@ sudo systemctl status pg-backup-daemon
 sudo journalctl -u pg-backup-daemon --since '1 hour ago'
 ```
 
-If PgBouncer is enabled, add a `[databases]` section to `pgbouncer.ini` and restart it before declaring the pooler usable.
+If PgBouncer is enabled, add a `[databases]` section to `pgbouncer.ini` and reload (or, if a restart-only setting changed, restart) it before declaring the pooler usable.
 
 ## 7. Status and deviations
 
@@ -13825,7 +14024,7 @@ If PgBouncer is enabled, add a `[databases]` section to `pgbouncer.ini` and rest
 - The audit/log `pg_hba` uses `hostssl` but the provisioner does not set SSL files, so the effective TLS depends on distribution defaults.
 - The log retention function is destructive; a bad `LOG_RETENTION_MONTHS` can drop recent partitions.
 - `listen_addresses='*'` with UFW-only protection means a firewall misconfiguration exposes the database ports.
-- The backup provisioner restarts PostgreSQL after changing `archive_command`; a failure can leave the cluster stopped.
+- The backup provisioner restarts PostgreSQL only when `archive_mode` (or another postmaster setting) actually changes; that first restart can still fail and leave the cluster stopped.
 
 ## 8. Verification and tests
 
@@ -13910,257 +14109,312 @@ Not covered:
 
 ## 15. PostgreSQL/pooler readiness (2026-11-04)
 
-- `provisionPostgres18()` waits for `pg_isready` on the primary port after restarting PostgreSQL.
-- `provisionBackupEngine()` waits after the core and audit archive restarts, restarts PgBouncer after the last PostgreSQL restart, and waits for PgBouncer on `PGBOUNCER_PORT`. The audit target can share the primary cluster, so its restart could otherwise leave PgBouncer caching `the database system is shutting down (server_login_retry)` when the core release runs migrations through `:6432`.
+- `applyPostgresCluster()` waits for `pg_isready` on the cluster port after every start/reload/restart.
+- `provisionBackupEngine()` waits after an archive-config restart, re-applies PgBouncer (restart) only if a PostgreSQL cluster actually restarted, and waits for PgBouncer on `PGBOUNCER_PORT`. The audit target can share the primary cluster, so its restart could otherwise leave PgBouncer caching `the database system is shutting down (server_login_retry)` when the core release runs migrations through `:6432`.
 - These waits prevent the core migration step from racing a PostgreSQL restart on single-machine and co-located audit deployments.
+
+## 16. Convergence instead of restarts (2026-11-05)
+
+**Problem (measured):** a no-op `--update` storage deploy took 4m53s. PgBouncer 1.26 handles `SIGTERM` as "wait for all clients to disconnect"; core-back keeps pooled client connections open, so `systemctl restart pgbouncer` waited out systemd's 90 s `TimeoutStopSec` and then `SIGKILL`ed it. The deploy restarted PgBouncer three times per run (PostgreSQL provisioner, then the backup provisioner twice), PostgreSQL up to three times, Redis (flushing the L2 cache and velocity counters) and the backup daemon (possibly mid-backup), all unconditionally.
+
+**Design (`deploy/lib/converge.ts`, pure script builders; applied by the provisioners):**
+
+- `SshRunner.writeRemoteFile()` returns whether the bytes changed (remote `cmp -s`, then `install`/atomic `mv`; the mode is re-asserted when unchanged). A runner that returns nothing (test fakes) counts as "changed".
+- PostgreSQL (`applyPostgresCluster`): inactive -> `systemctl reset-failed` then `enable --now` (a failed boot leaves the unit in `start-limit-hit`, where a plain start is refused with "start request repeated too quickly"); `--force-restart` -> restart; config/hba/auto.conf changed -> `systemctl reload`, wait for `pg_conf_load_time()` to move, then restart **only if** `count(*) FROM pg_settings WHERE pending_restart` is non-zero; else nothing. Always waits for `pg_isready`. The cluster is now applied before the bootstrap SQL runs (the SQL needs a running server and uses `-p <cluster port>`).
+- PgBouncer (`applyPgbouncer`): writes `pgbouncer.ini`, `userlist.txt`, the drop-in and a restart signature. The drop-in `/etc/systemd/system/pgbouncer.service.d/zz-pg-switch.conf` sets `KillSignal=SIGINT` (safe shutdown, exits in ~0.1 s with idle clients attached; verified against SIGTERM, which never exits) and `TimeoutStopSec=15s`. Down -> start; PostgreSQL restarted in this run, the restart signature (`listen_addr`, `listen_port`, `unix_socket_*`, `so_reuseport`, `pidfile`, `logfile`) changed, or `--force-restart` -> restart; any other ini/userlist change -> `reload`; else nothing.
+- Redis/Valkey: the installed unit is detected from real unit files (`redis-server`, `redis`, `valkey`; a drop-in-only stub does not count). Only that flavour's config files and drop-in decide the restart, which still runs `CONFIG SET save ""` first.
+- Backup daemon (`deployBackupDaemon`): rsync reports changes (`--itemize-changes`); the unit is started if down and restarted only if the source, `backup.env`, the unit or the archive environment changed. Ownership of the source tree is handed to the deploy user and back without touching `node_modules`.
+- Packages: `ensurePackagesScript` installs only what is missing (`dpkg-query` / `pacman -Qq`); `apt-get update` runs only when something is missing; `pacman -Sy <pkg>` (an unsupported partial upgrade) is never used (also removed from `bootstrapPackagesCommand`); the pinned barman `pip install` is skipped when the version already matches.
+- Audit/log databases whose node is the primary's own cluster (`isSameCluster`: same SSH host and service port) no longer rewrite that cluster's `postgresql.conf`/`pg_hba.conf` (the primary's source list is a superset; the two provisioners used to flip-flop the file and reload twice). Likewise the backup provisioner no longer re-points the shared cluster's `archive_command` at the `audit_db` prefix after setting the `postgres_core` one: before this change a co-located deploy left the cluster archiving WAL to `<bucket>/audit_db` and changed `archive_command` twice per run. The core target now owns the stream.
+- Pooler login verification (`poolerLoginScript`): after PgBouncer is applied, the PostgreSQL provisioner proves a real login and `SELECT 1` through `:<PGBOUNCER_PORT>` (up to 45 s, private 0600 PGPASSFILE). PgBouncer caches a failed server login for `server_login_retry` (15 s), so after a database is dropped and recreated (fresh seed, restore) it answers `database "x" does not exist` and an immediately following `prisma migrate deploy` fails; the old unconditional restart hid this. Found by the destructive stress scenario.
+- Latent bugs fixed on the way: the generated Arch/custom-cluster unit had `ExecReload=/bin/kill -HUP ` (the unquoted heredoc expanded `$MAINPID` to nothing, so `systemctl reload` could not work) and no `KillSignal`; replica clusters now get their config applied (they were only started); a bootstrap `psql` ran without `-p`, so a non-5432 primary would have bootstrapped the wrong cluster.
+
+**Result on the dev box (live, same stack):** first run after the change 6.9 s (one deliberate, fast PgBouncer restart to install the drop-in), every later no-op storage run 5.1-5.4 s with every service `unchanged`; full no-op update 23 s, of which 11 s is the core release. See `testing.deploy-stress` for the repeatable proof.
+
+## 17. Direct PostgreSQL URLs must use TLS (audit-logs 500, 2026-11-05)
+
+**Symptom:** `GET /api/v1/admin/audit-logs` returned 500 on the admin portal while `/audit-logs/summary` returned 200. Core's audit store failed with `no pg_hba.conf entry for host "127.0.0.1", user "gw_audit_user", database "pg_audit_db", no encryption`.
+
+**Root cause (pre-existing, not an environment problem):** commit `167aec5` (GAP-022) made `pgHbaSnippet()` emit only `hostssl` rules, but `hostPlanner` still generated `AUDIT_DATABASE_URL`, `LOG_DATABASE_URL` and `DATABASE_REPLICA_URLS` without a TLS parameter. Core's audit/log pools are plain `pg.Pool({ connectionString })`, so as soon as a deploy applied the new `pg_hba.conf` every direct connection was rejected: the audit-log list/export/detail reads, and the audit and log writers behind the same pools. Only the PgBouncer-fronted `DATABASE_URL` kept working (PgBouncer's client side is plain; it speaks TLS to PostgreSQL itself). No test tied the generated URLs to the generated `pg_hba`.
+
+**Fix:** `directTlsQuery()` in `hostPlanner.ts` appends `?sslmode=no-verify` to those three URLs when the deploy manages the target (`PG_MANAGE_VIA_SSH`, `AUDIT_DB_MANAGE_VIA_SSH`, `LOG_DB_MANAGE_VIA_SSH`). `no-verify` is the mode node-postgres (`pg-connection-string` 2.x) maps to `ssl: { rejectUnauthorized: false }`: encrypted, certificate not verified, which is exactly the documented posture of the self-signed per-cluster certificate; `require` would reject that certificate. Externally managed databases keep the operator's URL. Regression tests (`deploy/test/converge.test.ts`) assert that the generated `pg_hba` has no non-TLS rule, that all three URLs carry the parameter for managed clusters and not for external ones, and that the parameter parses to `rejectUnauthorized: false`.
+
+**Still open:** `DATABASE_URL` when `PGBOUNCER_ENABLED=false` goes straight to PostgreSQL without TLS and would be rejected the same way; it cannot simply take `sslmode=no-verify` because Prisma's schema engine does not understand that value. Verifying server certificates (`verify-full` with a CA-signed server certificate) remains GAP-022.
 
 ## Security hardening (2026-11-05)
 
 - **Quoting.** Provisioners (postgres18, auditAndLogDb, backupEngine) use `deploy/lib/quoting.ts`: SQL literals are escaped, DO blocks use collision-free dollar tags, and `pgbouncer.ini`, `userlist` and `.pgpass` are escaped. `backup.env` and `wal-g.env` are rendered `KEY='value'` (a single quote in a value is rejected).
 - **Credentials.** `pg_basebackup` uses `PGPASSFILE`, never `PGPASSWORD`. Bootstrap/audit/log/archive SQL lives in a private 0700 postgres-owned directory, mode 0600, removed by trap/finally.
-- **WAL-G.** `restore_command` is a valid `postgresql.conf` literal (inner quotes doubled). The daemon setting `WALG_ENV_FILE` keeps S3/encryption secrets out of that line; the provisioner writes `/etc/pg-backup/wal-g.env` 0640 root:postgres. WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed with required `BACKUP_WALG_SHA256`; barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`).
+- **WAL-G.** `restore_command` is a valid `postgresql.conf` literal (inner quotes doubled). The daemon settings `WALG_ENV_FILE`/`WALG_ENV_FILE_AUDIT` keep S3/encryption secrets out of that line; the provisioner writes `/etc/pg-backup/wal-g-core.env` and `/etc/pg-backup/wal-g-audit.env` (0640 root:postgres), so the audit restore uses the audit prefix instead of the core prefix. WAL-G is pinned (`BACKUP_WALG_VERSION=3.0.9`, `BACKUP_WALG_ASSET`) and sha256-verified fail-closed when it must be downloaded; barman is pinned (`BACKUP_BARMAN_VERSION=3.10.1`).
 - **Mirror and restore.** The off-site mirror uses `rclone copy`/`rsync` without `--delete` unless `BACKUP_SECONDARY_MIRROR_DELETE=true`. The scratch restore cluster starts with `-c archive_mode=off`.
-- **PostgreSQL.** `listen_addresses = 127.0.0.1,<private IP>`; memory settings derive from optional `PG_RAM_GB` (unset keeps 8GB/24GB/1GB); `PG_IO_METHOD` defaults to `worker` (io_uring is opt-in); an existing standby (PG_VERSION and `standby.signal` present) is not rebuilt unless `PG_REPLICA_REBUILD=true`.
+- **PostgreSQL.** `listen_addresses = 127.0.0.1,<private IP>`, de-duplicated (`postgresListenAddresses`) so a single-host install where the private IP is `127.0.0.1` emits one entry; memory settings derive from optional `PG_RAM_GB` (unset keeps 8GB/24GB/1GB); `PG_IO_METHOD` defaults to `worker` (io_uring is opt-in); an existing standby (PG_VERSION and `standby.signal` present) is not rebuilt unless `PG_REPLICA_REBUILD=true`.
 - **Still open.** Real SHA256 values for WAL-G/bun/barman must be supplied by the operator (GAP-023). GAP-022 and GAP-028 are resolved (see the gap resolutions below).
 
 ## Gap resolutions (2026-11-05)
 
 - **PostgreSQL TLS and hostssl-only (GAP-022, RESOLVED).** `postgresTlsSnippet` appends `ssl = on`, `ssl_cert_file`/`ssl_key_file` under `<cluster hba dir>/tls`, `ssl_min_protocol_version = 'TLSv1.2'` and `password_encryption = 'scram-sha-256'` to each cluster's configuration. `pgTlsCommands` idempotently creates a self-signed RSA-4096 certificate (825 days, 0600 key owned by `postgres`) on the primary and replicas unless an operator already installed one. `pgHbaSnippet` now emits only `hostssl` rules (loopback `127.0.0.1/32` and `::1/128`, every allowed source for data and replication); the plain `host` rules were removed. Replica `pg_basebackup` runs with `PGSSLMODE=require` and PgBouncer uses `server_tls_sslmode = require`.
-- **Backup daemon user (GAP-022, corrected 2026-11-06).** `backupDaemonUser()` returns `postgres` in WAL-G mode (base backups read PGDATA and use peer auth, so a dedicated account cannot work) and `pgbackup` in Barman mode; the unit also sets `PrivateTmp=true` so the mTLS front can create its socket. Verified live: the daemon answers mTLS only (no client certificate and plain HTTP are refused) and a full WAL-G backup reaches MinIO. In Barman mode the provisioner runs the daemon systemd unit as `User=pgbackup`/`Group=pgbackup` with `SupplementaryGroups=postgres`, adds `postgres` to the `pgbackup` group, and owns `/var/lib/pg-backup`, the daemon certificate directory, the log directory, the barman state directory, `BACKUP_PGPASSFILE` and `/etc/pg-backup/wal-g.env` (`root:pgbackup`, 0640) accordingly.
+- **Backup daemon user (GAP-022, corrected 2026-11-06; refined 2026-11-06).** `backupDaemonUser()` returns `postgres` only for WAL-G co-located with the primary (`isBackupColocatedWithPrimary`) and `pgbackup` otherwise; the earlier statement below that it returns `postgres` in WAL-G mode regardless of host is superseded. Original: `backupDaemonUser()` returns `postgres` in WAL-G mode (base backups read PGDATA and use peer auth, so a dedicated account cannot work) and `pgbackup` in Barman mode; the unit also sets `PrivateTmp=true` so the mTLS front can create its socket. Verified live: the daemon answers mTLS only (no client certificate and plain HTTP are refused) and a full WAL-G backup reaches MinIO. In Barman mode the provisioner runs the daemon systemd unit as `User=pgbackup`/`Group=pgbackup` with `SupplementaryGroups=postgres`, adds `postgres` to the `pgbackup` group, and owns `/var/lib/pg-backup`, the daemon certificate directory, the log directory, the barman state directory, `BACKUP_PGPASSFILE` and `/etc/pg-backup/wal-g.env` (`root:pgbackup`, 0640) accordingly.
 - **Replica pgpass over stdin (GAP-028, RESOLVED).** `replicaPgpassContent` renders the replication `.pgpass` line and `provisionPostgres18` streams it to `/var/lib/postgresql/.pgpass` (0600) with the remote-file writer; the replication password no longer appears in any command argv. `replicaCommands` only checks and `chown`/`chmod`s the file.
 - **UTC (GAP-030).** The cluster configuration also sets `timezone = 'UTC'` and `log_timezone = 'UTC'` (the engine pins its own sessions, see `core.storage`).
 - **Still open.** GAP-023: real SHA256 values for WAL-G, bun and barman (`BACKUP_WALG_SHA256`, `BUN_SHA256`) must be supplied by the operator for each release.
+
+## 18. PostgreSQL did not survive a reboot on a single Arch/Garuda host (2026-11-06)
+
+**Symptom:** every database-backed command failed with `Transaction API error: Unable to start a transaction in the given time` (Prisma `$transaction` maxWait) while PgBouncer logged `client_login_timeout (server down)`. `systemctl status postgresql@18-*` showed `start-limit-hit`.
+
+**Root cause (two generated-config defects, both only on the Arch/custom-cluster path):**
+
+1. On a single-host deploy `DB_PRIVATE_IP` is `127.0.0.1`, and `postgresMainConfigSnippet` rendered `listen_addresses = '127.0.0.1,127.0.0.1'`. PostgreSQL binds the first entry, then fails the duplicate with `could not bind IPv4 address "127.0.0.1": Address already in use` and exits.
+2. The generated `postgresql@18-<cluster>.service` had no `RuntimeDirectory`, and `/run` is a tmpfs, so after every reboot `/run/postgresql` did not exist and the postmaster died with `could not create lock file "/run/postgresql/.s.PGSQL.<port>.lock"`. `ensureClusterScript` only created the directory during bootstrap. The start limit then left the unit refusing further starts.
+
+**Fix:** `postgresListenAddresses()` de-duplicates loopback + private IP (`127.0.0.1` stays a single entry); the generated unit sets `RuntimeDirectory=postgresql` and `RuntimeDirectoryMode=2775`, so systemd recreates the socket directory before every start; and `postgresApplyScript` runs `systemctl reset-failed "$unit"` before starting an inactive cluster so a start-limit from an earlier boot cannot block recovery.
+
+**Verified live:** `./deploy/deploy.sh --update --skip-build --only=storage` brought the primary cluster, Redis and PgBouncer back (`Verification OK`); `/etc/postgresql/18/main/postgresql.conf` then had `listen_addresses = '127.0.0.1'`, the unit had `RuntimeDirectory=postgresql`, and `create-dev-users` completed against the pooler.
+
+## Backup engine reliability (2026-11-06)
+
+- **`pg-native` engine wiring.** `backupDaemonEnv()` emits `BACKUP_LOCAL_REPO_DIR` (pg-native), `BACKUP_WAL_CLIENT_CNS`, `PG_AUDIT_HOST` (only for a dedicated audit cluster), `PG_AUDIT_USER/_PASSWORD`, `PG_LOG_DB_NAME`, `PG_REPLICATION_USER/_PASSWORD`, `PG_REPLICATION_SLOT=pg_backup_core` and `PG_SSLMODE=require`; S3 prefixes are empty when no S3 is configured. S3 (`ensureObjectStore`, `verifyBackupTargetCommands`) is skipped when `BACKUP_PRIMARY_S3_ENDPOINT` is empty in pg-native mode, which is the air-gapped LAN setup.
+- **Certificate and ownership fixes.** `uploadStorageCertificates()` chowns the daemon certificate directory to the daemon user (0750 dir, 0640 certs, 0600 keys) and `deployBackupDaemon()` uses `backupDaemonUser()` for ownership and `bun install` (run with `HOME` and `BUN_INSTALL_CACHE_DIR`), then waits up to 10 s for the unit to stay active; on failure it prints `journalctl -u pg-backup-daemon -n 40` and exits 1. Ownership under `/var/lib/pg-backup` is fixed with `find ... ! -user/-group` so a multi-terabyte local repository is not re-chowned on every deploy.
+- **Lab.** `LAB_BACKUP_MODE=pg-native` selects the engine in the multi-machine lab; `BACKUP_WALG_SHA256` is only set when `LAB_WALG_SHA256` is (an all-zero checksum could never verify and aborted the install).
+- **Reserved role names (fixed).** `AUDIT_DB_USER`/`LOG_DB_USER` used to default to `pg_audit_writer`/`pg_log_writer`; PostgreSQL reserves the `pg_` prefix, so `CREATE ROLE` always failed for a deployment relying on the defaults. The defaults are now `gw_audit_writer`/`gw_log_writer` and a `pg_`-prefixed value is rejected at config load.
+- **More reserved defaults (found by the two-host lab).** `PG_DB_USER` and `PG_REPLICATION_USER` also defaulted to `pg_core_user`/`pg_replicator`; they are now `gw_core_user`/`gw_replicator` and all role settings (`DB_USER`, `PG_DB_USER`, `PG_REPLICATION_USER`, `AUDIT_DB_USER`, `LOG_DB_USER`) reject a `pg_` prefix.
+- **Bun for the service user.** `bunInstallCommand` installs a REAL `/usr/local/bin/bun` (temp file + `mv`, so a running daemon is not hit by "text file busy") and converts an existing symlink, because a symlink into `/home/<user>/.bun` cannot be executed by the unprivileged daemon user.
+- **Cron drill fallback.** `pg-backup-restore-drill` now asks the daemon for a drill for every engine (the root shell script that restored without WAL replay is removed).
+
+## PgBouncer session alias for leader election (2026-11-07)
+
+- The generated `[databases]` section now contains `pgw_session`, an alias to the same database with `pool_mode=session` and `pool_size=max(8, 2 × CORE_NODES + 4)`; the application database remains `pool_mode=transaction`.
+- Core receives `LEADER_ELECTION_DATABASE_URL` (derived as `postgresql://…@<primary>:<PGBOUNCER_PORT>/pgw_session`; direct PostgreSQL with `sslmode=no-verify` when PgBouncer is disabled). An explicit deploy-env value overrides it.
+- After `applyPgbouncer()`, the provisioner logs in through `pgw_session`; a reload normally publishes the new alias, otherwise it restarts PgBouncer once and retries. Core refuses to boot if the session endpoint is missing or transaction-pooled.
+- No firewall change: the alias uses the existing `PGBOUNCER_PORT` rule from core nodes; PostgreSQL's own port remains closed to core when PgBouncer is enabled.
 
 ---
 
 <a id="deploybackup"></a>
 
-> **Part ID:** `deploy.backup` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `deploy.backup` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `747d9bc+working-tree`
 
 # Backup Daemon
 
 ## 1. Purpose and scope
 
-`pg-backup-daemon` is the backup and point-in-time-recovery control plane for the storage tier. It wraps WAL-G or Barman, owns the full/delta/drill schedule, keeps a local catalog, exposes an mTLS HTTP API and runs scratch restore plus ledger/audit invariant drills.
+`pg-backup-daemon` is the backup and point-in-time-recovery (PITR) control plane for the storage tier. It takes full and incremental backups, archives WAL continuously, keeps an encrypted multi-tier repository, owns the full/delta/drill schedule, keeps a signed catalog, exposes an mTLS HTTP API and runs scratch-cluster restore drills that check the ledger and audit invariants.
 
-It owns engine selection, scheduling, the catalog, the HTTP API, target/WAL health and drills. It does not own the PostgreSQL cluster, archive configuration (the provisioner does), the admin approval workflow (core does) or the admin UI.
+It does not own the PostgreSQL cluster or its archive settings (the provisioner does), the admin approval workflow (core does) or the admin UI.
 
 ## 2. Design intent (extracted and synthesized from ./design)
 
-The design calls for a Bun service that supports WAL-G on the database host and Barman on a dedicated backup host, streams WAL with compression and client-side encryption, takes weekly full and daily delta backups for core and audit, snapshots Redis, mirrors to an optional secondary vault, and runs a weekly scratch restore that verifies double-entry zero drift, sharded balance parity and the audit hash chain before signing and cleaning up.
-
-It exposes overview, trigger, policy, run and drill endpoints over mTLS to core, which surfaces them to the admin portal. Policy changes require core-side maker-checker. The historical design's Tripoli 03:00 and hourly Redis claims are superseded; the code uses UTC cron expressions and triggered Redis snapshots.
+The original design called for a Bun service wrapping WAL-G (same host) or Barman (separate host). `design/02-storage-and-performance/backup_engine_reliability_architecture_and_test_plan.md` (2026-11-06) added a root-cause audit and a topology-agnostic `pg-native` engine. It was implemented with the deviations in section 9.
 
 ## 3. As-built architecture
 
 ### 3.1 Process lifecycle
 
-`src/index.ts` loads and validates the environment, creates a `SpawnCommandRunner`, creates the WAL-G/Barman engine, loads the catalog (or falls back to memory), builds a default policy, creates the drill runner, scheduler and server, starts the scheduler when enabled, and logs the listener/engine/scheduler state. SIGTERM/SIGINT stops the scheduler and server, waits up to 15 seconds for in-flight work and exits.
+`src/index.ts` loads and validates the environment, builds the storage tiers (`buildRepository`), loads the catalog with an encrypted mirror (recovering from it on a fresh host), builds the engine with the live policy as retention source, rebuilds run history from manifests when no catalog exists, creates one shared `JobQueue`, the drill runner, the scheduler and the server, then starts the engine's background workers (WAL streaming, WAL mirroring) and the scheduler. On SIGTERM/SIGINT it stops the scheduler and server, waits up to 15 seconds for in-flight work, stops the workers and flushes the catalog mirror.
 
-### 3.2 HTTP server and mTLS
+### 3.2 Engines
 
-`src/server.ts` uses `Bun.serve` with a JSON handler:
+`createBackupEngine()` selects `PgNativeEngine`, `WalGEngine` or `BarmanEngine` from `BACKUP_ENGINE_MODE`.
 
-| Method | Path | Purpose |
+| Engine | Where it runs | Needs |
 | :--- | :--- | :--- |
-| GET | `/health` | Liveness, engine mode and version. Does not run engine health checks. |
-| GET | `/v1/overview` | Engine health, WAL lag, targets, schedule/policy, scheduler state, recent backups and drills. |
-| POST | `/v1/backups/trigger` | Validates `{ target, kind }`, queues a run and returns 202. |
-| PUT | `/v1/policy` | Persists cron/retention/lag and returns the policy. |
-| GET | `/v1/runs`, `/v1/drills` | Recent records with `limit` 1-500. |
-| POST | `/v1/drills/run` | Queues a drill and returns 202. |
+| `pg-native` | same host or a dedicated backup host | PostgreSQL 18 client/server binaries, `zstd`, `tar`; S3 optional |
+| `wal-g` | same host as the primary (reads `PGDATA`, peer auth as `postgres`) | `wal-g`, S3 |
+| `barman` | dedicated backup host | `barman`, `barman-cloud-backup`, S3 |
 
-Bodies are capped at 256 KiB. Responses use `cache-control: no-store` and recursively redact credential-shaped keys/values. `HttpError` becomes a JSON envelope; unexpected errors become a generic 500 with a request id.
+**Cluster topology** (`config.ts`): `isAuditDedicatedCluster()` is true when `PG_AUDIT_DATA_DIR` is set or `PG_AUDIT_HOST` differs from `PG_PRIMARY_HOST`. `PG_AUDIT_PORT` is deliberately not used (it defaults to 5434 and would make every shared deployment look dedicated). `target=all` expands to `postgres_core`, `audit_db` (when an audit database is configured) and `redis` (when `REDIS_URL` is set). In a shared cluster `audit_db` is a logical dump plus signed manifest (skipped for `all` when the database is absent, an error for an explicit request); in a dedicated cluster it is a physical backup plus a dump. This applies to all three engines, so `PG_AUDIT_DATA_DIR is required` no longer occurs.
 
-`loadTlsOptions()` returns plain HTTP only when `BACKUP_ALLOW_INSECURE_HTTP=true`. Otherwise it requires the server certificate, key and CA and sets `requestCert: true`, `rejectUnauthorized: true`. The daemon verifies the client chain but does not inspect the client CN; any CA-signed client can call every route. Core presents `backup-client`.
+**pg-native backups**
 
-### 3.3 Engines
+- Tablespaces: a cluster with non-default tablespaces is refused before any backup is produced (and a produced backup containing anything but `base.tar`/`pg_wal.tar`/`backup_manifest` is refused), because the native restore would silently lose them.
+- Full: `pg_basebackup --format=tar --wal-method=stream --checkpoint=fast --manifest-checksums=SHA256`, verified with `pg_verifybackup --format=tar --no-parse-wal` (tar verification cannot parse WAL), then `tar -> zstd -6 -> AES-256-GCM` into every tier. A logical `pg_dump --format=custom --compress=zstd:6` of the core and audit databases is stored with every full backup and checked with `pg_restore --list`.
+- Delta: `pg_basebackup --incremental=<parent backup_manifest>` (PostgreSQL 17+). It requires `summarize_wal = on` and a previous verified backup and otherwise fails; it never silently becomes a full. The parent's `backup_manifest` is kept under `<catalog dir>/manifests/` and recovered from the parent artifact when local state is gone.
+- The signed manifest is written last; a failed run deletes everything it wrote.
+- Redis is dumped with `redis-cli --rdb` and stored encrypted in the repository.
 
-`createBackupEngine()` selects `WalGEngine` or `BarmanEngine`.
+**Continuous WAL** has two de-duplicated paths. `pg_receivewal --synchronous` runs supervised (restart with backoff, interruptible on stop) against a persistent slot (`PG_REPLICATION_SLOT`, created with `--if-not-exists`); finished segments are encrypted into the repository and leave the private 0700 spool, the `.partial` segment stays so a restore can use it. Independently the database's `archive_command` runs `curl --upload-file` to `PUT /v1/wal/:target/:file` over mTLS with the `wal-archive-client` certificate. Ingest is idempotent (same bytes acknowledged), refuses different bytes for an existing name with 409 (the archive is never overwritten) and is acknowledged once stored on the first tier; other tiers are mirrored asynchronously with retry and a periodic reconcile. A streamed segment that conflicts is quarantined under the spool `conflicts/` directory.
 
-**WAL-G**:
+**Disaster recovery ("latest")**: `RecoverRequest.latest` (HTTP `POST /v1/drills/run {"latest": true}`, exclusive with `targetTime`) omits `recovery_target_*` so PostgreSQL replays every archived segment plus the streamed `.partial` one and promotes when the WAL runs out. It is supported by all three engines (Barman omits `--target-time`). It is how a lost primary is rehearsed from the backup host alone.
 
-- `triggerBackup("all", kind)` expands to `postgres_core`, `audit_db` and, when `REDIS_URL` is set, `redis`;
-- refuses `audit_db` when `PG_AUDIT_DATA_DIR` is empty;
-- runs `wal-g backup-push <dataDir>` for full, `--delta` for delta;
-- verifies the bucket with `wal-g st ls <prefix>`;
-- mirrors with `rclone sync` or `rsync -a --delete` when a secondary target exists;
-- `prune("all","full")` runs `wal-g delete retain FULL <count> --confirm`; delta pruning is a no-op;
-- lists with `wal-g backup-list --json`; `recover()` fetches the latest base backup and returns a recovery fragment;
-- Redis backup runs `BGSAVE`, `redis-cli --rdb <tmp>` and `rclone copyto <tmp> <corePrefix>/redis/dump.rdb`, then removes the temp file.
+**Restore** picks the newest verified backup finished at or before the target time, resolves its chain to a full backup, fetches each artifact from the first tier whose copy matches the signed SHA-256 (a damaged local copy falls through to the next tier), decrypts and extracts it, runs `pg_combinebackup` for chains, extracts the newest backup's `pg_wal.tar`, and returns a recovery fragment whose `restore_command` is `bun src/walFetchCli.ts <target> %f %p`. `walFetchCli` reads the daemon environment (inherited by the scratch PostgreSQL), takes the WAL from the first tier that has it, decrypts it, and falls back to the streamed `.partial` file. `recovery_target_time` uses a numeric UTC offset because PostgreSQL rejects an ISO `Z` suffix while reading its configuration.
 
-Health checks the S3 target with `wal-g st ls`, PostgreSQL with `psql SELECT 1`, optional secondary/Redis, WAL lag from the first replica or primary, and archive lag/bytes from `pg_stat_archiver`. It is healthy when every target passes and archive lag is within `BACKUP_ALERT_LAG_SECONDS`.
+**Retention** (`prune`) follows the live maker-checker policy: whole backup chains older than `fullRetentionDays` are removed with their artifacts and dumps, the newest full backup and its deltas are never removed, WAL older than the first segment of the oldest retained full backup (and older than `walRetentionDays` on the local tier) is removed, timeline history files are kept, tampered manifests are ignored and never trigger deletes. WAL-G prunes `retain FULL ceil(days/7)` from the same policy; Barman keeps server-side retention.
 
-**Barman**:
+**WAL-G and Barman** keep their command builders. WAL-G talks to PostgreSQL over the local socket as `postgres`; it is intentionally NOT pointed at `PG_PRIMARY_HOST`/`PG_PRIMARY_USER` (that is the application role, which cannot start a backup). Barman health runs `barman check` (audit only for a dedicated cluster) and proves the object store with the daemon's own S3 client; it never calls `wal-g`.
 
-- `triggerBackup` expands `all` the same way (including audit), runs `barman check`, `barman backup`/`--incremental`, then `barman-cloud-backup`; it reports only `primary-s3`, with no secondary mirror;
-- lists with `barman list-backup`; `recover()` picks the latest and runs `barman recover --target-time`; `prune()` is a no-op because Barman applies server-side retention.
+**Archive lag** only counts while archiving is genuinely behind: time since the last archive is reported when a COMPLETED segment is waiting (current segment > last archived + 1) or the archiver is failing (`last_failed_time` newer than `last_archived_time`); the segment currently being written is not late, so an idle database (no WAL) no longer alarms.
 
-Barman health runs `barman check` for core and audit, checks S3 with the **WAL-G** `st ls` command, checks PostgreSQL, and adds optional secondary/Redis. Barman health therefore requires WAL-G and does not prove Barman's cloud/retention path. This document does not claim complete Barman health.
+**WAL stream lag**: the `wal-stream-<target>` health target shows how far the stream is behind the primary, read from `pg_replication_slots.restart_lsn` (visible to every role, unlike `pg_stat_replication`), and is unhealthy above `BACKUP_STREAM_ALERT_BYTES` (default 256 MiB). A running stream that is a gigabyte behind is not protecting the data; `pg_stat_archiver` lag alone did not show that.
 
-### 3.4 Scheduler
+**Health** reports every storage tier (local repository, S3, off-site vault), the primary (and dedicated audit) cluster, Redis, `wal-stream-<target>` and a WAL mirror backlog, plus WAL lag from `pg_stat_archiver`. `last_archived_wal` is a segment file name; the byte lag is computed from segment numbers (`walNames.ts`) and the file name is never passed to `pg_wal_lsn_diff()`.
 
-`src/scheduler.ts` uses a strict five-field cron parser (no macros or seconds), computes the next full/delta/drill slots, ticks every `SCHEDULER_TICK_MS` (default 30 seconds), reloads policy from the catalog, skips a due job when another job is running, records runs as `QUEUED`/`RUNNING`/`PASSED`/`FAILED`, reserves unique ids, attempts a full prune after a successful full backup, and records signed drill reports. A policy update through `PUT /v1/policy` takes effect on the next tick without a restart.
+### 3.3 Storage tiers and encryption
 
-### 3.5 Catalog
+`artifactStore.ts` defines three tiers behind one interface, addressed by relative keys (`backups/<target>/<id>.tar.zst.enc`, `wal/<target>/<segment>.zst.enc`, `logical/<db>/<id>.dump.enc`, `catalog/catalog.json.enc`): a local repository (atomic temp+rename), S3/MinIO/R2 through `Bun.S3Client` (SigV4), and an off-site vault (`rsync` with a remote `sha256sum` check, or `rclone`). The vault is append-only unless `BACKUP_SECONDARY_MIRROR_DELETE=true`. Local and S3 are required for a write to succeed; the vault is best effort. S3 is optional for `pg-native`.
 
-`src/catalogStore.ts` stores runs, drills and policy in one JSON file (`BACKUP_CATALOG_PATH`), writes atomically via temp file + rename, serializes writes, keeps at most 500 runs and 100 drills, validates on load, falls back to in-memory operation when unwritable or corrupt, and reports the persistence error. The catalog is not encrypted and is not backed up by the daemon.
+`cryptoEnvelope.ts`: `"PGBKv2" | version | salt(16) | iv(12) | AES-256-GCM ciphertext | tag(16)`; payload key `HKDF-SHA256(master, salt, "pg-backup-v2:payload:<target>:<id>")`; the header and `<target>:<id>` are GCM additional data; compression precedes encryption; any modification fails closed and leaves no partial plaintext. Manifest times (`startedAt`/`completedAt`) come from the PRIMARY's `clock_timestamp()` (falling back to the local clock), because recovery targets are the primary's commit times and a dedicated backup host's clock can disagree. Manifests (`BackupManifest`, schema 2) record LSNs, WAL range, parent, sizes, SHA-256 of plaintext and ciphertext, encryption metadata, the `pg_verifybackup` result and tiers, and are HMAC-SHA256 signed under `HKDF(master, "pg-backup-v2-catalog", "manifest-hmac-sha256")`. A manifest that does not verify is ignored.
+
+### 3.4 HTTP server, roles and job queue
+
+`src/server.ts` serves JSON; bodies other than WAL are capped at 256 KiB, responses are `no-store` with recursive credential redaction.
+
+| Method | Path | Role | Purpose |
+| :--- | :--- | :--- | :--- |
+| GET | `/health` | control | liveness, engine mode, version |
+| GET | `/v1/overview` | control | health, WAL, targets, policy, scheduler, `jobs`, `walArchive`, recent runs/drills |
+| POST | `/v1/backups/trigger` | control | `{ target, kind }` -> 202 `{ backupJobId, queuePosition }` |
+| POST | `/v1/drills/run` | control | `{ requestedBy?, targetTime? }` -> 202 `{ drillId, queuePosition }` |
+| PUT | `/v1/policy` | control | full policy object |
+| GET | `/v1/runs`, `/v1/drills` | control | `limit` 1-500 |
+| PUT | `/v1/wal/:target/:file` | wal | raw WAL body <= `BACKUP_WAL_PUSH_MAX_BYTES`; 200/409/413/400/501 |
+
+**mTLS roles.** The public listener is a `node:tls` server (Bun's `node:https` has no `getPeerCertificate()`; verified on Bun 1.4) that verifies the client chain, classifies the certificate CN/DNS SAN and bridges the decrypted stream to a per-role inner Bun listener on a private unix socket (loopback port on win32): `BACKUP_ALLOWED_CLIENT_CNS` (default `backup-client`) -> `control` (every route except WAL upload); `BACKUP_WAL_CLIENT_CNS` (default `wal-archive-client`) -> `wal` (only WAL upload); anything else 403. No HTTP is parsed in the gateway. The `wal-archive-client` certificate lives on the database hosts, so a compromised database host can push WAL but cannot read the catalog, change the policy or trigger jobs. Plain HTTP exists only with `BACKUP_ALLOW_INSECURE_HTTP=true` (role `open`).
+
+**Job queue** (`jobQueue.ts`): every backup and drill, HTTP or scheduled, runs through one FIFO queue, one job at a time; a scheduled slot that finds the queue busy is skipped with a warning; the queue holds 25 waiting jobs, beyond which a request gets 429 and a FAILED run row. `Idempotency-Key` (1-128 chars of `[A-Za-z0-9._:-]`) returns 202 with the original job id and `deduplicated: true`; keys are scoped per route, expire after 24 h and the dedupe check and enqueue are atomic.
+
+**Restart behavior** (`startup.ts`, `instanceLock.ts`): keys are persisted to `<catalog dir>/idempotency-keys.json`. At boot, runs left `QUEUED`/`RUNNING` by the previous process are marked `FAILED` ("interrupted: the daemon restarted...") instead of staying `RUNNING` forever, and keys are restored only for jobs that really finished: an interrupted job's key is dropped, so a client retry starts a fresh job instead of being handed the id of one that died with the old process. A pid lock (`<catalog dir>/daemon.lock`) refuses a second daemon on the same state directory (a stale or recycled-pid lock is taken over); it does not detect a daemon on another host.
+
+### 3.5 Scheduler, catalog and mirror
+
+`scheduler.ts` is unchanged except that it enqueues through the shared queue. `catalogStore.ts` keeps runs, drills and policy in one atomically written JSON file and, when a mirror is configured, uploads an encrypted, HMAC-signed copy to every tier after each save (latest-wins, never blocks or breaks a write). With no local catalog the store recovers from the first tier whose copy decrypts and verifies; a tampered or wrong-key copy is ignored. `importRuns` merges history rebuilt from manifests.
 
 ### 3.6 Restore drill
 
-`src/restoreDrillRunner.ts`:
+`restoreDrillRunner.ts` (`targetTime` defaults to now - 5 minutes and may be supplied, never in the future):
 
-1. Sets `targetTime = now - 5 minutes` and stops/removes prior scratch clusters.
-2. Calls `engine.recover()` for `postgres_core` and `audit_db`.
-3. Refuses `initdb` over a failed restore unless the engine explicitly reports an initialized empty directory.
-4. Writes `recovery.conf` into `postgresql.auto.conf`, creates `recovery.signal`, and starts both clusters on the configured ports over loopback.
-5. Runs the double-entry zero-drift query, the sharded-balance parity query and the audit hash-chain query.
-6. Builds a report with status, duration, target time, replayed LSN, drift, mismatch counts, broken links and per-check details.
-7. Signs it with HMAC-SHA256 using `BACKUP_ENCRYPTION_KEY_HEX`.
-8. Stops and removes both scratch clusters in `finally`.
+1. Stops and clears scratch; recovers the core cluster (and the audit cluster only when dedicated).
+2. Makes the data directory startable: a physical backup holds `PGDATA` only and Debian-style clusters keep `postgresql.conf`/`pg_hba.conf` outside it, so a minimal config is generated, sized from `pg_controldata` (hot standby refuses to start below the primary's `max_connections` and related settings).
+3. Appends the recovery settings and forces archiving off (`archive_mode=off`, `archive_command=''`, no slot/standby names, `ssl=off`). The restored `postgresql.auto.conf` carries the production `archive_command`; without this a promoted scratch cluster pushed `00000002.history` and timeline-2 WAL into the production archive in the live test and every later restore failed.
+4. Starts on loopback and waits for recovery to finish and promote (`pg_is_in_recovery() = f`, up to `BACKUP_RECOVERY_TIMEOUT_MS`); a failed start includes the server-log tail.
+5. Runs three checks: double-entry zero drift, sharded balance parity, and the audit hash chain. Core queries run as `PG_PRIMARY_USER`; audit queries always run as `PG_AUDIT_USER` (the primary role when unset), because only the audit role is granted on the audit database and a dedicated audit cluster does not have the core application role.
+6. Signs the report with HMAC-SHA256 and destroys the scratch cluster.
 
-A failed restore, start or check still produces a signed `FAILED` report through the scheduler or HTTP path. The drill requires an audit recovery target; without an audit database or `PG_AUDIT_DATA_DIR`, the audit recovery fails and the drill fails.
+The audit chain accepts either canonical form: the database's own `before_json::text`/`after_json::text` with the timestamp formatted as the trigger formats it (what the trigger hashes), or the application's stable-JSON form; `seq_no` must be gap-free so a deleted row is detected. In a shared cluster a missing audit database is restored from the newest logical dump into the same scratch cluster.
 
-### 3.7 Core and admin integration
+### 3.7 Two-host lab
 
-`core-back/lib/storageEngine/backupControlClient.ts` builds a TLS 1.3 keep-alive agent with the internal CA and `backup-client` cert/key and calls overview/health/trigger/drill/policy/runs/drills.
+`deploy/backup-daemon/test/lab/two-host.lab.test.ts` (skipped unless `LAB_B_HOST`, `LAB_B_USER`, `LAB_B_PASSWORD` are set; credentials only from the environment; `LAB_KEEP=1` leaves host B provisioned) puts a throwaway primary on this machine (Debian-style config, TLS on, scram, `hostssl`-only for host B) and the daemon alone on a second machine as the `pg-backup-daemon` systemd service running as `pgbackup`, with no PostgreSQL server running there. The backup env, the systemd unit, the `archive_command` and the cluster SQL are rendered by the REAL provisioner functions; the only substitution is host A's certificate directory (no root on A). It also runs the deploy engine's `bunInstallCommand` and opens the daemon port in the host's ufw to host A alone, as the deploy firewall policy does. Verified: B is a dedicated backup host (no PostgreSQL server, nothing on 5432, daemon user `pgbackup`); mTLS across the LAN with `wal-archive-client` limited to WAL; full backup over `hostssl` + scram with `pg_dump` as the least-privilege audit role; WAL by both paths; delta; 24 restore drills on B in 41 s while the primary held 3,005 tps / 0.08 ms before and 2,995 tps / 0.09 ms during; and host A total loss (`kill -9`, data deleted) recovered from B alone: 128 of 128 ledger lines including commits never archived, 84 audit rows, drift 0.0000.
 
-`core-back/api/internal/backups.ts`:
+### 3.8 Core, edge and deploy integration
 
-- `GET /overview` requires `security:read` or `gateway:read`, fetches daemon health and upserts runs/drills with `Promise.allSettled`;
-- `POST /trigger` and `POST /drill` require `security:write`, require a configured daemon, call it and insert a local queued row;
-- `PUT /policy` requires `security:write`; without `approvalRequestId` it creates a `BACKUP_POLICY` approval (`PENDING_REVIEW`, 7-day expiry) and returns 202; with an id it checks subject type, state and maker != checker, sends the **approved payload** to the daemon, marks the approval `EXECUTED`, bumps the base version and writes an audit record;
-- `GET /catalog` returns local runs/drills.
+`core-back` forwards a well-formed `Idempotency-Key` to the daemon and returns `deduplicated` without a new local row; `GET /overview` adds `walArchiveHealthy` (daemon healthy and archive lag within the policy alert threshold). `admin-back` relays the key and exposes `GET /system/backups/catalog`. `hostPlanner.backupCoreEnv()` injects `BACKUP_DAEMON_URL`, cert paths and `BACKUP_DAEMON_TIMEOUT_MS` into core whenever `BACKUP_ENABLED`, independent of `pgStorageConfigured`.
 
-`admin-back/api/protected/backups.ts` applies `security:read`/`security:write` at the edge, forwards overview/trigger/drill/policy and relays core status. The daemon's own `PUT /v1/policy` has no maker-checker, so a direct mTLS client can bypass the core approval workflow.
-
-### 3.8 Systemd and source deployment
-
-`backupEngineProvisioner.ts` writes `/etc/systemd/system/pg-backup-daemon.service`: `User/Group=pgbackup`, `WorkingDirectory=/opt/pg-backup-daemon`, `EnvironmentFile=/etc/pg-backup/backup.env`, `ExecStart=/usr/local/bin/bun run src/index.ts`, `Restart=always`, `RestartSec=3`, `LimitNOFILE=65536`, `NoNewPrivileges=true`, `ProtectSystem=strict`, and `ReadWritePaths` for backup, log, catalog, cert, scratch and pgpass directories.
-
-`deploy.ts` copies `deploy/backup-daemon` to `/opt/pg-backup-daemon` with rsync `--delete`, excludes `node_modules`, `.git`, `dist`, `test`, `*.log` and `.env`, chowns to `pgbackup`, runs `bun install --frozen-lockfile` as `pgbackup`, and enables/restarts the unit.
-
-The provisioner writes `/etc/cron.d/pg-backup`: when the scheduler is enabled only a comment; otherwise full/delta trigger lines as `pgbackup` and the drill script as root. `/usr/local/bin/pg-backup-restore-drill` restores core and checks double-entry only; it is narrower than the in-process drill.
+`backupEngineProvisioner.ts` writes `backup.env`, the unit and (pg-native) the DB-host settings (`archive_mode=on`, `archive_command` via curl, `archive_timeout=60s`, `summarize_wal=on`, the replication role); it installs the PostgreSQL client and server binaries on the backup host and masks the default `postgresql` service on a host that runs no managed cluster. `backupDaemonUser()` is `postgres` only for wal-g co-located with the primary, otherwise `pgbackup`. The unit has no `SupplementaryGroups`, sets `HOME` and `BUN_INSTALL_CACHE_DIR` under `/var/lib/pg-backup` and includes the local repository in `ReadWritePaths`. The cron drill fallback (`pg-backup-restore-drill`, used only when the daemon scheduler is disabled) asks the daemon for a drill for EVERY engine; the former root shell script (latest base backup, no WAL replay, double-entry only) is gone. `deploy.ts` chowns the daemon certificate directory to the daemon user, installs `wal-archive-client` and the CA in `/etc/pg-deploy/certs` on PostgreSQL hosts (key group-readable by `postgres`), runs `bun install` as the daemon user and waits up to 10 s for the unit to stay active, printing `journalctl` and exiting 1 on failure. `pkiManager` issues `wal-archive-client` (CN `wal-archive-client`) and distributes it only to `pg-primary` and `audit-db` hosts.
 
 ## 4. Contracts and invariants
 
-- The daemon listens over mTLS by default and refuses plain HTTP unless explicitly allowed for development.
-- Core presents a CA-signed `backup-client` certificate; the daemon does not authorize a CN per route.
-- Trigger and drill return 202 and complete asynchronously; the catalog is the state store.
-- Scheduled jobs do not overlap; HTTP triggers are not globally serialized.
-- Catalog writes are atomic; a failed write does not crash the daemon.
-- Secrets are redacted from responses and error messages.
-- Full backups are followed by a best-effort prune; delta pruning is non-destructive.
-- Audit backups require `PG_AUDIT_DATA_DIR`; the daemon never substitutes the core data directory.
-- Drills restore core and audit, check three invariants, sign the report and always clean up scratch clusters.
-- Policy changes through core require maker-checker; the daemon endpoint itself does not.
+- The daemon listens over mTLS by default and refuses plain HTTP unless explicitly allowed.
+- Control routes require a `backup-client` CN; WAL upload requires a `wal-archive-client` CN and nothing else; the lists must be disjoint.
+- Backups, drills and scheduled slots never overlap; trigger and drill return 202 and complete asynchronously; the catalog is the state store.
+- A stored WAL file is never overwritten; a backup does not exist until its signed manifest does.
+- Every artifact is authenticated-encrypted; a tampered manifest, ciphertext or catalog copy fails closed.
+- A drill never writes into the production archive and always destroys its scratch cluster.
+- Secrets are redacted from responses and error text; passwords travel only in child environments.
+- Retention follows the live policy and never removes the newest full backup.
 
 ## 5. Data / API / config / deployment surface
 
-| Group | Keys |
-| :--- | :--- |
-| Engine/encryption | `BACKUP_ENGINE_MODE`, `BACKUP_COMPRESSION`, `BACKUP_ENCRYPTION_KEY_HEX`, `BACKUP_ALLOW_INSECURE_HTTP`, `BACKUP_COMMAND_TIMEOUT_MS` |
-| S3/secondary | `BACKUP_PRIMARY_S3_ENDPOINT`, `BACKUP_PRIMARY_S3_BUCKET`, `BACKUP_PRIMARY_S3_ACCESS_KEY`, `BACKUP_PRIMARY_S3_SECRET_KEY`, `BACKUP_CORE_S3_PREFIX`, `BACKUP_AUDIT_S3_PREFIX`, `BACKUP_SECONDARY_SSH_TARGET` |
-| Schedule/retention | `BACKUP_FULL_CRON`, `BACKUP_DELTA_CRON`, `BACKUP_DRILL_CRON`, `BACKUP_RETENTION_FULL_COUNT`, `BACKUP_RETENTION_WAL_DAYS`, `BACKUP_ALERT_LAG_SECONDS`, `SCHEDULER_ENABLED`, `SCHEDULER_TICK_MS` |
-| Listener/mTLS | `BACKUP_DAEMON_PORT`, `BACKUP_DAEMON_BIND_HOST`, `BACKUP_DAEMON_CERT_PATH`, `BACKUP_DAEMON_KEY_PATH`, `BACKUP_DAEMON_CA_CERT_PATH` |
-| PostgreSQL | `PG_PRIMARY_HOST`, `PG_PRIMARY_PORT`, `PG_PRIMARY_USER`, `PG_PRIMARY_PASSWORD`, `PG_PRIMARY_DB_NAME`, `PG_AUDIT_DB_NAME`, `PG_REPLICA_NODES`, `PG_DATA_DIR`, `PG_AUDIT_DATA_DIR`, `PG_BIN_DIR` |
-| Catalog/scratch | `BACKUP_CATALOG_PATH`, `BACKUP_SCRATCH_DIR`, `BACKUP_SCRATCH_PORT`, `BACKUP_SCRATCH_AUDIT_DIR`, `BACKUP_SCRATCH_AUDIT_PORT`, `PGPASSFILE` |
-| Binaries | `WALG_BIN`, `BARMAN_BIN`, `BARMAN_CLOUD_BIN`, `BARMAN_SERVER`, `BARMAN_AUDIT_SERVER` |
-| Redis | `REDIS_URL`, `REDIS_CLI_BIN` |
-
-`BACKUP_ENCRYPTION_KEY_HEX` must be hex, at least 16 bytes and even length; the deploy requires exactly 64 hex characters. `backup.env.example` is a local/troubleshooting reference; a deployment generates `/etc/pg-backup/backup.env` from `deploy.env`.
+See `deploy/backup-daemon/README.md` section 7 for the full key table. Additions in this change: `BACKUP_ENGINE_MODE=pg-native`; `BACKUP_LOCAL_REPO_DIR`, `BACKUP_WAL_SPOOL_DIR`, `BACKUP_STAGING_DIR`, `BACKUP_WAL_CLIENT_CNS`, `BACKUP_WAL_PUSH_MAX_BYTES`, `BACKUP_WAL_STREAMING_ENABLED`, `BACKUP_RECOVERY_TIMEOUT_MS`; `PG_AUDIT_HOST/_USER/_PASSWORD`, `PG_LOG_DB_NAME`, `PG_REPLICATION_USER/_PASSWORD`, `PG_REPLICATION_SLOT`, `PG_AUDIT_REPLICATION_SLOT`, `PG_SSLMODE`. `BACKUP_PRIMARY_S3_ENDPOINT/_BUCKET` are optional for `pg-native` and required for the others. Deploy-side keys: `BACKUP_LOCAL_REPO_DIR`, `BACKUP_WAL_CLIENT_CNS`, `BACKUP_DAEMON_TIMEOUT_MS`.
 
 ## 6. Operational usage
 
 ```bash
-cd deploy/backup-daemon
-bun install
-bun run start
-bun test
-bun run typecheck
+cd deploy/backup-daemon && bun install && bun run typecheck && bun test
 ```
 
-On a deployed host, use `systemctl status pg-backup-daemon`, `journalctl -u pg-backup-daemon`, and a curl request with `internal-ca.crt`, `backup-client.crt` and `backup-client.key` to `/v1/overview`. Admin triggers and policy changes go through core; policy changes require a second user.
+On a deployed host use `systemctl status pg-backup-daemon`, `journalctl -u pg-backup-daemon` and a `curl` with `internal-ca.crt`, `backup-client.crt` and `backup-client.key`. Admin triggers and policy changes go through core; policy changes require a second user. A manual drill accepts `targetTime` directly on the daemon.
+
+## 6a. Engine default (ADR-0004)
+
+`BACKUP_ENGINE_MODE` defaults to `pg-native` and `auto` means `pg-native`; `wal-g` and `barman` must be chosen explicitly and keep their rules (wal-g only on the primary's host). S3 is optional for pg-native and required for the others. See `DECISIONS.md` ADR-0004 for the evidence and the consequences.
 
 ## 7. Status and deviations
 
 ### Implemented
 
-- WAL-G/Barman full/delta backup, listing, restore, verification and cloud copy.
-- Optional Redis snapshot.
-- S3 primary and optional secondary mirror for WAL-G.
-- In-process cron scheduler with policy reload and overlap skipping.
-- Atomic JSON catalog with in-memory fallback.
-- Core+audit drill with double-entry, balance parity and audit-chain checks and HMAC-signed reports.
-- mTLS server with client-certificate verification and secret redaction.
-- Core proxy/approval integration and admin edge routes.
-- Provisioner-generated env, systemd unit, cron and source deployment.
+- pg-native full/delta/logical backups, signed manifests, three-tier storage, chain restore, live-policy retention, continuous WAL (mTLS push + `pg_receivewal`), job queue and idempotency, per-role mTLS, catalog mirror and recovery.
+- WAL-G/Barman fixes (shared audit, Barman health, archive status query, policy retention) and the drill fixes (JSONB-text audit hashes, gap check, shared cluster, config bootstrap, archive neutralization, promotion wait, target time).
+- Deploy wiring fixes and gate 10 completion polling.
 
 ### Partial
 
-- Barman health depends on WAL-G for the S3 target.
-- No per-CN daemon authorization.
-- The shell drill is narrower than the in-process drill.
-- The catalog is one unencrypted JSON file with count-based retention.
+- The deploy engine's SSH execution of the pg-native provisioning has not been run end to end against a host (see the gaps).
 
 ### Missing / deferred
 
-- Log-database backup target.
-- HTTP trigger serialization/backpressure.
-- Automatic certificate/key ownership correction for `pgbackup`.
-- Catalog backup and encryption.
-- A verify-only restore mode.
+- Log-database backup target, a verify-only restore mode, multi-tablespace restore (refused at backup time).
 
-### Known bugs / risks
+### Resolved by the two-host lab (same day)
 
-- `all` includes `audit_db` without checking whether audit is configured; WAL-G needs `PG_AUDIT_DATA_DIR` and Barman needs an audit server.
-- A Barman-only installation reports the primary S3 target unhealthy because health uses WAL-G.
-- The backup cert/key may be root-owned and unreadable by `pgbackup`, preventing mTLS startup and failing the deploy probe.
-- Any CA-signed certificate can call the policy endpoint directly and bypass maker-checker.
-- Concurrent HTTP triggers are not serialized.
-- The drill requires audit recovery even for a core-only intent.
-- An interrupted cleanup can leave scratch clusters/directories.
-- The catalog may contain host/run metadata and is not encrypted.
+- Host-loss recovery with zero loss of committed data ("latest" mode), restore drills not stalling the primary, and the dedicated-host provisioning path on a real systemd host; WAL stream lag now visible in health; manifest times independent of the backup host's clock; the daemon no longer logs a client disconnect as an unhandled failure.
+
+### Resolved after the first implementation pass (same day)
+
+- Idle-database false lag alarms; idempotency keys lost on restart and runs stuck `RUNNING` after a crash; second daemon on one state directory; unrestorable backups of clusters with extra tablespaces; the narrow root shell drill; drill role mapping for audit queries (dedicated and shared); the reserved `pg_audit_writer`/`pg_log_writer` default role names; least-privilege audit dump.
 
 ## 8. Verification and tests
 
 ```bash
 cd deploy/backup-daemon && bun run typecheck && bun test
-cd deploy && bun test test/provisioners.test.ts
+cd deploy && bun run typecheck && bun test
+cd core-back && bun test test/backup-admin      # DB-backed: needs a private PostgreSQL
+cd admin-back && bun test test/backups.test.ts
 ```
 
-Covered: WAL-G/Barman command builders and target routing; audit data-directory refusal; scheduler policy reload/overlap; catalog atomicity/corruption/retention; cron parsing; HTTP contract/validation/redaction; mTLS refusal of plain HTTP; drill success/failure, initdb guard, audit-chain verification and cleanup; provisioner env/unit/cron/scripts.
+`live-pg18-pitr.test.ts` runs a private throwaway PostgreSQL under `/tmp` (Debian-style external config, `ALTER SYSTEM` archive settings, `max_connections=150`) with the real daemon over mTLS, `curl` as `archive_command` and real `pg_receivewal`. It covers: full backup with logical dumps, ciphertext and manifest checks, PITR to a point before an injected operator error (the error is excluded, 64 journal lines recovered), a full+delta chain restored through `pg_combinebackup`, the production archive staying free of timeline-2 files, a double-entry drift, a shard drift, a tampered audit row and a deleted audit row each failing exactly the right check, and a one-byte corrupted local copy surviving through the S3 copy while corrupting both fails at the integrity gate. A negative control (archive safety removed) makes it fail as expected. It skips when the PostgreSQL 17+ binaries, `zstd`, `curl`, `tar` or `openssl` are missing.
 
-Not covered: a real WAL-G/Barman backup or restore; a real PostgreSQL 18 scratch drill; daemon startup as `pgbackup` with deployed cert ownership; Barman-only health; core maker-checker against the daemon.
+The live test also runs the audit database as the deployment's least-privilege role (`PG_AUDIT_USER`, SELECT/INSERT on `audit_records` only) for both the logical dump and the drill's chain check, and asserts that role cannot read the ledger or delete audit rows.
 
-## 9. Source references
+Not covered: the dedicated-backup-host and host-loss topologies on real machines, a dedicated audit cluster drill live (unit-tested), S3 against a real MinIO (a fake `S3ClientLike` and `Bun.S3Client` contract only), the off-site vault against a real SSH host.
+
+## 9. Deviations from the 2026-11-06 reliability design
+
+| Design claim | What was found and done |
+| :--- | :--- |
+| RC-05: the node:tls to unix-socket bridge drops frames | Not reproduced: 50 sequential and 50 concurrent keep-alive TLS 1.3 requests plus a POST passed on Linux. The bridge is kept. |
+| Fix 3: use `node:https` and `req.socket.getPeerCertificate()` | `getPeerCertificate` is `undefined` on Bun 1.4's `node:https`. Authorization is done by classifying the certificate in the `node:tls` front and bridging to per-role inner listeners. |
+| `pg_verifybackup` on tar backups | Requires `--no-parse-wal`; the drill proves the WAL. |
+| `isAuditDedicatedCluster` includes `PG_AUDIT_PORT !== PG_PRIMARY_PORT` | The port defaults to 5434, so every shared deployment would look dedicated; the port is excluded. |
+| `walGEnvironment` should use `PG_PRIMARY_HOST`/`PG_PRIMARY_USER` | Rejected: that is the application role and cannot start a backup; WAL-G runs as `postgres` on the local socket. |
+| DB hosts push WAL with `pg-client` or `backup-client` | A dedicated `wal-archive-client` certificate is used. `pg-client`'s key also lives on core hosts and `backup-client` has full control-plane authority. |
+| `recovery_target_time` as ISO with `Z` | PostgreSQL rejects it at startup; a numeric UTC offset is used (also fixes WAL-G's recovery config). |
+| (not in the design) scratch cluster inherits `archive_command` | Archiving is forced off in every scratch cluster. |
+| (not in the design) restored `PGDATA` has no configuration on Debian layouts | A minimal config sized from `pg_controldata` is generated. |
+| Fix 6: academy question ids `q-m10-004..008` | They collided with existing questions; new ids continue the sequence. |
+| (not in the design) default PostgreSQL role names | `PG_DB_USER` (`pg_core_user`) and `PG_REPLICATION_USER` (`pg_replicator`) defaulted to reserved `pg_*` names too, found when the lab rendered the real provisioner SQL. Defaults are now `gw_core_user`/`gw_replicator`, every role setting rejects `pg_*`, and test fixtures that used `pg_owner`/`pg_authoritative_user` were renamed. |
+| (not in the design) `bunInstallCommand` symlinked bun into a home directory | The lab's first real run failed with `status=203/EXEC`: `/usr/local/bin/bun` was a symlink into `/home/<user>/.bun` (home is 0750), unreadable by the service user. The command now installs a real copy atomically and converts an existing symlink. |
+| (not in the design) default audit/log role names | `AUDIT_DB_USER`/`LOG_DB_USER` defaulted to `pg_audit_writer`/`pg_log_writer`; PostgreSQL reserves `pg_*` so `CREATE ROLE` always failed. Defaults are now `gw_audit_writer`/`gw_log_writer` and `pg_*` is rejected at config load. |
+| `BACKUP_ENGINE_MODE` default becomes `pg-native` | Adopted on 2026-11-06 (ADR-0004), after the single-host live test and the two-host lab. It was first left unchanged: `auto` keeps wal-g/barman until the two-host lab has run pg-native. |
+| RC-03 root cause | Narrower than claimed: a full run re-chowned the certificate directory later in the storage step; it affected partial and rotate-only runs. |
+| RC-07 `go install @latest` | Already a pinned version; only the lab's all-zero `BACKUP_WALG_SHA256` fallback was a defect. |
+| Design 5.1/5.2 "5-gate" drill | The drill has three invariant checks; guide and academy content say so. |
+
+## 10. Source references
 
 ### Old design sections
 
-- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` section 5.1 and 5.2.
-- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6, deployment pipeline.
+- `design/02-storage-and-performance/backup_engine_reliability_architecture_and_test_plan.md`
+- `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` sections 5.1 and 5.2.
+- `design/03-deployment/payment_gateway_deployment_and_guides_architecture.md` section 6.
 
 ### Code paths
 
-- `deploy/backup-daemon/src/index.ts`, `server.ts`, `backupEngine.ts`, `scheduler.ts`, `catalogStore.ts`, `restoreDrillRunner.ts`, `config.ts`.
-- `deploy/provisioners/backupEngineProvisioner.ts`, `deploy/deploy.ts`.
-- `core-back/lib/storageEngine/backupControlClient.ts`, `core-back/api/internal/backups.ts`.
-- `admin-back/api/protected/backups.ts`.
+- `deploy/backup-daemon/src/`: `index.ts`, `server.ts`, `jobQueue.ts`, `backupEngine.ts`, `pgNativeEngine.ts`, `pgTools.ts`, `walArchive.ts`, `walNames.ts`, `walFetchCli.ts`, `logicalDump.ts`, `artifactStore.ts`, `repository.ts`, `cryptoEnvelope.ts`, `catalogStore.ts`, `catalogMirror.ts`, `restoreDrillRunner.ts`, `scheduler.ts`, `config.ts`, `util.ts`.
+- `deploy/provisioners/backupEngineProvisioner.ts`, `deploy/provisioners/postgres18Provisioner.ts`, `deploy/deploy.ts`, `deploy/lib/hostPlanner.ts`, `deploy/lib/pkiManager.ts`, `deploy/test-matrix/gates.ts`.
+- `core-back/lib/storageEngine/backupControlClient.ts`, `core-back/api/internal/backups.ts`, `admin-back/api/protected/backups.ts`.
 
 ### Generated appendices
 
 - `project-design/appendices/env-and-config-matrix.md`
 - `project-design/appendices/stale-claims-register.md`
 
-## 10. Change history
+## 11. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
-
-## Security hardening (2026-11-05)
-
-- **mTLS authorization.** In TLS mode a `node:tls` front listener verifies the client certificate and checks its CN or DNS SAN against `BACKUP_ALLOWED_CLIENT_CNS` (default `backup-client`); anything else gets 403. It is bridged to `Bun.serve` over a private unix socket (a loopback port on win32). Verified live on Windows only; the Linux unix-socket path is untested.
-- New daemon setting `WALG_ENV_FILE` keeps secrets out of the `restore_command` line. The daemon mirror does not delete unless `BACKUP_SECONDARY_MIRROR_DELETE=true`.
-- **Daemon user (GAP-022, RESOLVED 2026-11-05).** The provisioned systemd unit runs as `pgbackup` (`SupplementaryGroups=postgres`) instead of `postgres`, and PostgreSQL accepts only TLS connections (`hostssl`-only `pg_hba`, see `deploy.storage`). The daemon code itself is unchanged.
+- 2026-11-05: mTLS per-CN authorization, WAL-G env files, mirror delete opt-in.
+- 2026-11-06: two-host lab pass: "latest" recovery, primary-clock manifests, stream lag health, `AbortError` handling, reserved default role names (`PG_DB_USER`, `PG_REPLICATION_USER`), real-copy bun install, the lab itself.
+- 2026-11-06: gap-closure pass: idle lag, restart state and instance lock, tablespace guard, drill role mapping, cron fallback drill, reserved default role names, least-privilege live coverage.
+- 2026-11-06: backup engine reliability implementation (previous revision): pg-native engine, three-tier encrypted repository, signed manifests and catalog mirror, WAL ingest over mTLS plus streaming, shared job queue and idempotency, per-role mTLS, topology-aware audit handling, drill fixes, deploy wiring fixes; section 9 lists where the design was corrected.
 
 ---
 
@@ -14258,9 +14512,9 @@ Fake Rails gets backend and vhost `/health` probes, with `-k` when SSL is enable
 | Redis | `REDISCLI_AUTH=<password> redis-cli -h 127.0.0.1 -p <port> PING`, expecting `PONG`. |
 | Audit DB | `psql SELECT 1` with the audit user/password. |
 | Log DB | `psql SELECT 1` with the log user/password. |
-| Backup daemon | HTTPS `/health` with the CA and the `backup-daemon` certificate/key when `BACKUP_ALLOW_INSECURE_HTTP=false`; plain HTTP when it is `true`. Expects `"status":"ok"` or `ok`. |
+| Backup daemon | HTTPS `/health` with the CA and the `backup-client` certificate/key when `BACKUP_ALLOW_INSECURE_HTTP=false`; plain HTTP when it is `true`. Expects `"status":"ok"` or `ok`. |
 
-The mTLS backup probe uses the daemon's server certificate (which also has clientAuth) rather than `backup-client`. It depends on the daemon being able to read its own 0600 key; if the key is root-owned and the daemon runs as `postgres`, the probe fails. When `BACKUP_ALLOW_INSECURE_HTTP=true` the daemon serves plain HTTP and the verifier uses an unauthenticated HTTP probe on the same host/port, so development deployments do not fail on TLS.
+The mTLS backup probe presents the `backup-client` certificate/key, matching the daemon's CN allow-list; the daemon's own server certificate is not a client identity and is rejected. When `BACKUP_ALLOW_INSECURE_HTTP=true` the daemon serves plain HTTP and the verifier uses an unauthenticated HTTP probe on the same host/port, so development deployments do not fail on TLS.
 
 ### 3.6 Verification aggregation
 
@@ -14774,7 +15028,7 @@ Security regression suites exist for core-back (`test/security-regressions/`), t
 
 <a id="testingsuites"></a>
 
-> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
 
 # Test Suite Catalog
 
@@ -14915,7 +15169,8 @@ The 140-case catalog lives in `core-back/test/edge-cases/catalog-140.test.ts`, n
 
 There is **no** `core-back/test/exhaustive/09-storage-backup` directory. The runner's `T-EX-09` executes:
 
-- `core-back/test/storage-engine` — unit and live PostgreSQL storage tests, including `uow`, `read-store`, `ledger-shards`, `audit-chain`, `cache-velocity`, `outbox-workers`, `log-sink`, `engine-factory`, `write-path.integration` and `performance`.
+- `core-back/test/storage-engine` — unit and live PostgreSQL storage tests, including `uow`, `read-store`, `ledger-shards`, `audit-chain`, `cache-velocity`, `outbox-workers`, `log-sink`, `engine-factory`, `write-path.integration` and `performance`. `leader-election-pgbouncer.test.ts` starts a throwaway PgBouncer (skipped when PostgreSQL or the `pgbouncer` binary is unavailable) and proves that transaction pooling lets two clients hold one advisory lock, that the `pgw_session` alias enforces one leader and fails over after `pg_terminate_backend`, and that the boot probe accepts only the session alias.
+- `core-back/test/hardening-gap-regressions.test.ts` covers the leader-election environment guard, backend-PID/`pg_locks` ownership checks, refused unlocks, the session-safety probe and the durable `inbound_events` claim lease.
 - `core-back/test/backup-admin` — backup routes and control client.
 - `deploy/backup-daemon/test` — 71 declarations across 8 files.
 
@@ -15102,6 +15357,37 @@ This catalog is derived by counting literal declarations and inspecting the suit
 | `tests/unit/frontend-security-{admin,checkout,merchant}.test.ts` | frontend allow-lists, guards, validation |
 
 Run with `bun test ./path`. Concurrency tests need PostgreSQL 18 and are not covered.
+
+## Admin UI completion suites (2026-11-06)
+
+- **Unit (`tests/unit`, vitest, 490 passing in 30 files):** pure logic of the new UI: governance action tables per state (immediate vs approval), owner/revalidation forms, journal/route-cap/lifecycle/health/jobs models, the JSON diff model, audit summaries (`formatAuditValue`, `describeAuditChange`), commission tiers, dispute evidence mapping, and the builders' round trips (cost model, scope, maintenance windows, parser config, AML params, settings schemas, template variables) including unknown-key preservation. `commerce-i18n` and `builders-api-error-i18n` assert that every message key the logic can produce has an Arabic entry. `frontend-security-admin` (default-deny route authorities, alias map) and `guide-content` (every router name has a context-map screen) caught the six new routes until they were registered properly. `guide-markdown-refs` covers the clarity renderer helpers (parenthetical reference extraction, meaningful-prose preservation, short labels, preview snippets); `guide-content` also runs the clarity `--check` gate.
+- **E2E (Playwright, needs Chrome: set `PLAYWRIGHT_CHROME_PATH=/usr/bin/google-chrome-stable` when the bundled browser is not installed):** `e2e/admin/wallet-details.spec.ts` drives the wallet details page against mocked responses (Inspect and old `?open=` links land on `/wallets/:id`; the shard **Total** row has cell padding; the statement is paged by the server with totals of the whole result and a side filter sent as `direction=`; the tab survives a reload; a journal entry opens above the page and above the GL account drawer, checked with `elementFromPoint`; the GL drawer paginates its lines; a frozen wallet shows the banner and the status history). `e2e/admin/commerce-governance.spec.ts` drives the wallets page against realistic mocked responses (restricted balances render "Restricted" and never 0; a freeze needs a >=10-character reason and sends exactly `{status: "FROZEN", reason}`; restoring returns HTTP 202 and is reported as submitted for approval; a read-only role gets no freeze action). `exhaustive-admin-surface.spec.ts` now covers 31 routes (the six new ones included) across 3 viewports x 2 locales x 2 themes (372 combinations: no horizontal overflow, correct direction and theme, app bar never overlapping). `e2e/admin/backups.spec.ts` was updated for the second confirmation the page has asked for since the frontend hardening commit (its spec was stale). `e2e/admin/guide-reader.spec.ts` also holds the phone-width regression for guides: a wide article table and the edge-case catalogue must scroll inside their wrapper, keep `overflow-wrap: normal` on cells and never make the page itself overflow horizontally.
+- **Component compliance (`admin-front` `bun run test:unit`):** helper components must live in `components/` subfolders so every route page keeps `PageHeader` (the test stops at the first offender).
+
+## Backup daemon suites (2026-11-06)
+
+`deploy/backup-daemon/test/` (220 tests): `cryptoEnvelope` (HKDF, round trip, every tamper class, signed manifests), `storage` (local/S3/vault tiers, repository fan-out and verified fallback), `wal` (WAL names and lag arithmetic, idempotent ingest and 409 conflicts, mirroring, `pg_receivewal` supervision), `jobQueue`, `catalogMirror`, `pgNativeEngine` (chain resolution, live-policy retention, delta preconditions), `mtlsRoles` (real TLS 1.3 role separation, 50 sequential + 50 concurrent keep-alive requests), plus the updated `backupEngine`, `config`, `server` and `restoreDrillRunner` suites.
+
+`test/lab/two-host.lab.test.ts` is the TWO-HOST LAB (primary on host A, daemon alone on host B over a real LAN, as a systemd service running as `pgbackup`); it skips unless `LAB_B_HOST`, `LAB_B_USER` and `LAB_B_PASSWORD` are set and is not part of CI. `live-pg18-pitr.test.ts` is a LIVE integration test: a private throwaway PostgreSQL under `/tmp` with a Debian-style external config, the real daemon over mTLS, `curl` as `archive_command` and real `pg_receivewal`. It runs full and incremental backups, PITR to a point before an injected operator error, a full+delta chain through `pg_combinebackup`, fault injection (double-entry drift, shard drift, tampered and deleted audit rows, one-byte backup corruption with tier fallback) and asserts the production archive stays free of timeline-2 files. It skips with a message when the PostgreSQL 17+ binaries, `zstd`, `curl`, `tar` or `openssl` are missing.
+
+## Offline companion suites (2026-11-06)
+
+`companion-app/tests/` (Vitest, 23 tests / 4 files) covers the generated content bundle
+(counts, cross-document links, lesson reading/check references, external-URL and exam-bank
+leak guards), markdown rendering for every article and lesson (unresolved links, callouts,
+glossary terms, widget placeholders, stable heading ids, structural lesson trimming,
+parenthetical reference extraction, summary/refs callouts, section trays, short labels,
+preview snippets and the focusable scrollable table wrapper), the offline MiniSearch index
+(`LIMIT_EXCEEDED`, maker-checker, glossary terms), and all 18 published Academy lab-scoring
+vectors.
+
+`companion-app/scripts/check-content.ts` is the build gate: it re-runs the canonical Guide
+and Academy extractors, compares their output with `admin-front/src/content/**/generated`,
+rebuilds the bundle and fails on any drift. `build-apk.sh` runs it before typecheck, tests,
+web build, Capacitor sync and Gradle. Web Playwright sweeps 24 routes at 360/390/768 px in
+light/dark/sepia and English/Arabic chrome; the signed APK is verified with `apksigner`.
+No Android device was connected, so on-device install, airplane-mode, notification reboot
+and real-device performance tests remain open.
 
 ---
 
@@ -15808,6 +16094,76 @@ Verified 2026-11-04: `cd deploy && bun run typecheck` passes; `bun test` 232 pas
 
 - 2026-11-03: two-machine T1–T8 lab (`testing.two-machine-matrix`).
 - 2026-11-04: replaced by the JSON-configured multi-machine harness (`testing.multi-machine-matrix`); hard-coded lab credentials removed.
+
+## Gate 10 and the backup engine (2026-11-06)
+
+`gateBackup` triggers a full backup, polls it, triggers a restore drill and polls `/system/backups/overview` until `latestDrill.id` equals the drill id and its status is `PASSED` or `FAILED` (same timeout as the backup), then asserts `status === "PASSED"`, `Number(doubleEntryDrift) === 0`, `balanceMismatches === 0` and `auditBrokenLinks === 0`; the former hard-coded SKIP is gone. The WAL check reads the overview's `walArchiveHealthy` (added by core). `LAB_BACKUP_MODE=pg-native` selects the engine. The dedicated-backup-host and host-loss scenarios are now exercised for pg-native by `deploy/backup-daemon/test/lab/two-host.lab.test.ts` (see `deploy.backup` section 3.7): all 8 steps passed on one LAN pair. That lab is separate from this matrix harness and is not part of CI.
+
+---
+
+<a id="testingdeploy-stress"></a>
+
+> **Part ID:** `testing.deploy-stress` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `1d91a3a+working-tree`
+
+# Deploy Stress Harness
+
+## 1. Purpose
+
+`deploy/stress` drives the **real** `deploy/deploy.ts` against **this machine's real services** (PostgreSQL, PgBouncer, Redis/Valkey, MinIO, the backup daemon, PM2, nginx, Fake Rails) under database load, portal traffic, injected faults and config tampering, and asserts on what the services actually did. Nothing is mocked: process identity, `pg_settings.pending_restart`, journal lines and measured outage windows are the evidence. It exists because the unit tests mock the runner and therefore could not see that every deploy restarted PgBouncer three times at 90 s each (see `deploy.storage` section 16).
+
+## 2. How it works
+
+- `bun run stress` (from `deploy/`) reads `deploy/deploy.env` (`--env=` to override) and never modifies it. Every scenario deploys a throw-away copy with its overrides (`stress/env.ts`, parsed with the engine's own `parseDeployEnv`) and always re-deploys the original in cleanup. Derived env files carry the lab's secrets and are deleted when the run ends.
+- Deploys run as child processes (async) so in-process load generators keep running: `startDbLoad` holds long-lived pooled connections through PgBouncer (small query every 50-250 ms, idle in between, which is exactly the shape that hangs a stock `systemctl restart pgbouncer`) and records errors and per-worker outage time; `startAvailabilityProbe` hits the four portal vhosts every 100 ms (a connection error or 502/503/504 is "down"; a 404 from the backend means it is up).
+- A snapshot (`stress/probes.ts`) captures every service's identity in one sudo round trip (postmaster start time, `pending_restart` count, archive-command hash, `MainPID` + start timestamp of PgBouncer/MinIO/the daemon/nginx, Redis `run_id`) plus the deploy user's `pg-` PM2 apps. Two snapshots differing on a bounce key prove a service was restarted.
+- Reports: `stress/reports/<runId>/report.{md,json}` (commit, host, seed, per-scenario checks and measurements); per-deploy logs in `stress/.work/<runId>/`. Both are git-ignored.
+- `--destructive` gates the scenario that drops databases; `--intensity`, `--budget-factor` and `--seed` scale load, time budgets and the soak's reproducible fault choice.
+
+## 3. Scenarios
+
+| Id | Asserts |
+| :--- | :--- |
+| `noop-redeploy` | Repeated no-op deploys start/restart nothing, change no service identity, flag no slow command, keep a Redis sentinel key, raise zero DB-client errors, stay within budget. |
+| `pgbouncer-reload` | A pool-size change reloads PgBouncer (same process, SIGHUP in the journal, new value on disk, zero client errors); restoring it is also a reload. |
+| `pgbouncer-restart-under-load` | `systemctl restart pgbouncer` with 30 live clients is fast and the unit stops on SIGINT; `--force-restart` of PostgreSQL + PgBouncer completes in seconds and every client recovers. |
+| `postgres-pending-restart` | `PG_RAM_GB=16` restarts PostgreSQL exactly once (`shared_buffers` 4GB), PgBouncer follows, nothing stays `pending_restart`; repeating it bounces nothing; the original value is restored. |
+| `redis-config-change` | An unchanged redeploy keeps the Redis process and a cache key; a `maxmemory` change restarts it and is applied. |
+| `chaos-recovery` | Nine faults, each repaired by one deploy: kill -9 PgBouncer, stop PostgreSQL/Redis/MinIO/the daemon, corrupt `pgbouncer.ini`, delete the PgBouncer drop-in and signature, hand-edit `postgresql.conf` and `pg_hba.conf`; then a final no-op bounces nothing. |
+| `deploy-under-traffic` | DB clients see zero errors and each portal outage window is bounded while a full deploy runs. |
+| `ssh-transport` | The whole deploy over real ssh + sudo-over-ssh + rsync-over-ssh (`127.0.0.2` as the hop, the real services stay on `127.0.0.1`); a no-op over ssh bounces nothing; multiplexing is not slower; no control master is left behind. |
+| `multi-node-rolling` | Two nodes per tier with `--rolling-batch=1`: portals stay up; scaling back retires the orphaned PM2 apps. |
+| `soak` | Seeded random fault + deploy cycles under DB load, then a closing no-op that must bounce nothing. |
+| `fresh-database-stress-seed` (destructive) | Drops the application, audit and log databases, flushes Redis, deploys from empty with Fake Rails and the `STRESS` synthetic seed, takes a full backup through the daemon, then a no-op deploy must bounce nothing. |
+
+## 4. Measured results (dev box, 8 cores, 31 GB, live data ~2.8 GB)
+
+| Measurement | Before | After |
+| :--- | ---: | ---: |
+| Storage-tier no-op deploy | 4m53s | 5.1 s |
+| Full no-op `--update` (build cache warm) | 5m14s (`--skip-build`) | 21-23 s |
+| `systemctl restart pgbouncer`, 30 live clients | 90 s (SIGKILL after timeout) | 0.19 s |
+| Forced restart of PostgreSQL + PgBouncer (`--force-restart`) | n/a | 4.8 s, longest client outage 2.0 s |
+| Longest client outage across two PostgreSQL restarts | n/a | 2.6 s |
+| Single-node portal outage during a full deploy | not measured | 0.41 s (`:8080/:8081/:8082`), 0.31 s (Fake Rails) |
+| Rolling deploy, two nodes per tier | not measured | 0 s outage on every portal, 0 DB errors, 36 s |
+| No-op deploy over ssh | not measured | 31 s multiplexed vs 80 s with one connection per command |
+| Soak (6 random faults) | n/a | 15,664 queries, longest single-client outage 3.1 s |
+
+## 5. Defects the harness found in the engine
+
+- **Redis alias unit:** on Arch `redis.service` is a symlink to `valkey.service`; the new unit detector picked `redis`, and `systemctl enable` refuses linked units, so a stopped Redis could not be brought back. Detection now ignores symlinks and the start path does `enable || true` then `start`.
+- It also confirmed, with live evidence, the original defects fixed in `deploy.storage` section 16 (SIGTERM hang, unconditional restarts, the flip-flopping `archive_command`).
+
+## 6. Running it
+
+```bash
+cd deploy
+bun run stress:list
+bun run stress                          # non-destructive
+bun run stress -- --destructive         # + fresh database + STRESS seed + backup
+```
+
+Operator notes live in `deploy/stress/README.md`.
 
 ---
 
@@ -16711,5 +17067,181 @@ No test currently verifies D-04 success, D-06 projection, D-08 encrypted storage
 ## 10. Change history
 
 - 2026-11-03: initial deferred/partial register. Status values are per item; the part-level status is `deferred`.
+
+---
+
+<a id="futureledger-archive"></a>
+
+> **Part ID:** `future.ledger-archive` · **Status:** `missing` · **Last verified:** 2026-11-08 · **Verified against:** `working-tree`
+
+# Ledger Archive and Shard Repair Anchors (Future)
+
+## 1. Purpose and scope
+
+This part records a design decision for a feature that does **not exist yet**: moving old journal lines out of `journal_lines` into an archive to keep the live table small, and what that means for the per-shard checkpoints and for shard repair (`core.ledger` sections 3.6 and 3.10). It is not current behaviour. When archiving is implemented, move this part out of `09-future-and-unimplemented/` into `01-core-back/` and update `project-design/TRACKER.md`.
+
+## 2. Owner decision: the archive is the default source of truth for a repair
+
+Once old lines are archived, a shard's balance can no longer be recomputed from the live table alone. A repair of a damaged shard (RECOMPUTE or REBASELINE) has two possible sources:
+
+1. **Archive plus live** — sum every line that ever existed: the archived lines of the shard plus its live lines. This is the strongest source.
+2. **Anchor plus live** — start from the shard's last trusted checkpoint (its balance at the archive cut) and add the live lines after it. This is cheap and needs no archive access, but it is only as trustworthy as that checkpoint.
+
+**Decision (2026-11-08):** a repair uses **archive plus live by default**. The **anchor shortcut is used only when the deployment explicitly enables it through a deploy environment variable** (to be named when the feature is built, for example `LEDGER_SHARD_REPAIR_USE_ANCHOR`, default `false`, defined in `core-back/lib/env/index.ts`, `deploy/lib/configSchema.ts`, `deploy/lib/hostPlanner.ts` and the deploy env examples). With the variable off, a repair that cannot read the archive must refuse, never fall back silently to the anchor.
+
+## 3. Requirements for the feature
+
+These are what makes either source safe:
+
+- **Archive only below a verified checkpoint.** A shard's lines are archived up to a sequence number whose checkpoint was proven (`CheckpointService.captureShard`) at that moment.
+- **A per-shard anchor.** Record `archived_through_seq`, the balance at that point and a manifest of the archived range (line count, signed sum, content hash). The archive is verified against the manifest before the live rows are deleted.
+- **The archive is immutable and independently readable.** An archive that cannot be read must make a default-mode repair fail with a clear error.
+- **Repair planning is source-aware.** `planShardRepair` takes the line source (archive plus live, or anchor plus live), checks that the archive agrees with the anchor manifest in the default mode and reports any difference, and records the source used in `gl_shard_repairs.details_json` and the audit row.
+- **The other deep checks follow the same rule.** The restore drill parity query and the deploy gate count only the lines above the archive anchor (the same way they already honour `baseline_seq`), or read the archive in default mode.
+- **Append-only protection.** The archive path needs its own guards: the ledger triggers still reject deletes, so the archiver is a deliberate maintenance operation (`pgw.ledger_maintenance`), audited, and never part of the general retention worker.
+- **`baseline_seq` stays compatible.** A re-baselined shard keeps its exemption for the damaged history; the archive anchor must not be placed below an unrepaired gap.
+
+## 4. Verification when implemented
+
+Real-PostgreSQL tests with a small archive: repair from archive plus live equals the pre-archive repair result; the anchor mode equals it when the checkpoint was proven; a tampered archive (manifest mismatch) is detected; a default-mode repair refuses when the archive is unreadable; the restore drill and deploy gate pass on a shard with an archived prefix.
+
+---
+
+<a id="companionoffline"></a>
+
+> **Part ID:** `companion.offline` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `working-tree`
+
+# Offline Android Companion
+
+## 1. Purpose and scope
+
+PG Companion (`companion-app/`, application ID `ly.paymentgateway.companion`) is a private,
+offline-first Android application containing the complete Admin Interactive Guide and the
+learner-facing Employee Academy. It is a new standalone workspace and does not import
+runtime code from `admin-front`, `admin-back`, `core-back` or `deploy`.
+
+It exists so staff can read the guide and practise Academy material away from the live admin
+portal. It has no login, no server progress sync, no backend calls and no analytics. Official
+certification exams are deliberately excluded because their question bank and answer keys
+must never leave the server.
+
+The approved blueprint is `design/06-ui/pg_companion_offline_android_app.md`; the
+implementation contract is `companion-app/BLUEPRINT.md`.
+
+## 2. Content pipeline
+
+The app mirrors the true content during build:
+
+1. `companion-app/scripts/sync-content.ts` runs the canonical extractors
+   `admin-front/scripts/extract-guide-content.ts` and
+   `admin-front/scripts/extract-academy-content.ts` with output paths redirected into
+   `companion-app/.cache/`.
+2. `scripts/build-bundle.ts` validates counts, ids, cross-document links, lesson reading and
+   check references, lab references, exam-bank leakage, external URLs and private-key
+   markers. It writes `public/content/bundle.json` and `manifest.json`.
+3. The exam bank and server catalog stay in `.cache` and are never copied into the app.
+4. `scripts/check-content.ts` re-runs the extractors and fails if the committed snapshot is
+   stale, or if `admin-front` generated content has drifted.
+
+The current snapshot contains 14 guide books, 134 articles, 151 glossary terms, 25 safeguard
+cards, 32 situations, 58 quick answers, 19 error codes, 140 edge cases; and 8 Academy tracks,
+11 modules, 50 lessons, 100 practice checks, 16 labs / 92 tasks, 11 drills and 6 learner pages.
+The exam bank has 223 questions with keys but is not in the bundle.
+
+## 3. Application
+
+The client is Vue 3 + TypeScript + Vite + Capacitor 8. It uses hash routing, no Vuetify, no
+remote UI assets, and a self-contained markdown renderer with callouts, guide links,
+glossary auto-linking, heading ids, table/diagram handling and simulator placeholders.
+Article and lesson tables keep a `9.5em` minimum column width and scroll horizontally
+inside a focusable wrapper (themed thin scrollbars, contained overscroll) on narrow
+screens; cells use `overflow-wrap: normal`, so a long identifier or word is never broken
+letter by letter.
+
+The clarity renderer matches the Admin Guide: parenthetical reference dumps are removed from
+sentences and collected into a per-section **Related** tray of typed pills; bare inline links
+use a short natural title rather than the full article title; `:::summary` renders an
+"In plain words" banner and `:::refs` renders a "Where to go next" footer; and tapping a
+guide, screen or playbook pill opens a **reference preview sheet** with a short body,
+**Keep reading here** and **Open full page →**. The sheet is dismissible by backdrop,
+Escape or its close button.
+
+Screens:
+
+- Today: continue reading, deterministic daily brief, reading rhythm, role reading path.
+- Guide: home, book, article reader, glossary, safeguard cards, playbook, 140 edge cases,
+  quick answers/error codes, five simulators.
+- Academy: tracks, modules, lessons, practice checks, all 16 labs with offline scoring,
+  drills, help pages and a practice exam.
+- Saved: article/lesson bookmarks, section bookmarks, highlights and notes.
+- Search: offline MiniSearch over guide and academy.
+- Settings: theme, text size, serif reading font, language/RTL, reading path, reminders,
+  export/import, content updates, versions.
+
+Progress, bookmarks, reading positions, highlights, reading days and settings use Capacitor
+Preferences. Notes/highlights and downloaded content bundles use Capacitor Filesystem. No
+critical state is stored only in WebView localStorage.
+
+## 4. Reminders and reading experience
+
+Reading reminders are opt-in, scheduled with `@capacitor/local-notifications` as inexact,
+Doze-friendly one-shot reminders for a rolling window. The app re-arms them on launch/resume
+and the plugin restores them after boot. Reminders are skipped when the user already read
+that day or the chosen time falls inside quiet hours. Android 13+ notification permission is
+requested only when the user enables reminders.
+
+The reading experience avoids punitive streak mechanics. It shows a weekly reading rhythm,
+with rest days allowed, a deterministic daily brief, focus mode, bookmarks, highlights,
+notes, light/dark/sepia themes, adjustable typography, subtle completion feedback and native
+app shortcuts (Continue, Search, Saved, Guide). Android installation is private; the APK and
+content bundle must not be published publicly.
+
+## 5. Updates and signing
+
+Content-only updates are signed manifests plus a bundle:
+
+- `bun run content:key` creates the Ed25519 content key in `.keys/` and writes the public key
+  to `public/content/public-key.txt`.
+- `COMPANION_UPDATE_BASE_URL=... bun run release:content` writes
+  `release/content-<hash>.json` and `release/manifest.json` with a signature over the bundle
+  SHA-256.
+- The client verifies the pinned signature, bundle SHA-256 and bundle schema before writing a
+  versioned file and switching the active pointer atomically. A bad update falls back to the
+  APK bundle. Content updates are data-only and cannot execute code.
+
+APK releases use a separate long-lived release keystore generated on first local build at
+`.keys/companion-release.jks` (password in `.keys/keystore.env`, mode 0600, gitignored).
+The same package name and signing key are required for in-place updates. The APK is signed
+and verified with `apksigner`; `allowBackup` and cleartext traffic are disabled, and the
+exact-alarm permission is removed because reminders are intentionally inexact.
+
+`.github/workflows/companion.yml` builds and tests on content changes, publishes a private
+release when the signing secrets are present, and can be run manually. Content OTA needs a
+private HTTPS endpoint; if one is not available, APK releases carry the latest content.
+
+## 6. Build
+
+`companion-app/build-apk.sh` (also `bun run apk`) performs content sync, content check,
+typecheck, tests, web build, Capacitor sync, Gradle APK build, signing, `apksigner`
+verification, copy to `release/` and SHA-256/build-info generation. It detects a JDK 21
+installation (including `$HOME/.jdks/temurin-21`), Android SDK platform 36 and build-tools.
+`--offline-snapshot`, `--debug`, `--install` and `--skip-tests` are available.
+
+The 2026-11-06 build produced a 3.8 MiB signed APK with SHA-256
+`75960424c47ca254a009a4c91156584a8c03a5eaaf15cf7ead245b66d4e1f013`.
+
+## 7. Verification
+
+- `bun run content:check` passes against the canonical extractors.
+- `bun run typecheck` passes.
+- `bun test` passes 23 tests: content integrity, markdown rendering (including parenthetical
+  extraction, summary/refs callouts, section trays, preview-snippet helpers and the
+  scrollable table wrapper), offline search and all 18 published lab-scoring vectors.
+- Web Playwright smoke covers 24 routes at 360/390/768 px, light/dark/sepia, English/Arabic
+  chrome, with no horizontal overflow or console errors.
+- The release APK passes `apksigner verify`; the content manifest signature and bundle
+  SHA-256 were independently verified.
+- Not run: installation on a physical device or emulator, airplane-mode smoke, notification
+  delivery after reboot, and real-device performance measurements.
 
 ---

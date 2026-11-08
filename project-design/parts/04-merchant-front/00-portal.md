@@ -3,8 +3,8 @@ id: merchant-ui.portal
 title: Merchant Portal
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-07
+verified_against: d695518+working-tree
 code:
   - merchant-front/src/router/index.ts
   - merchant-front/src/layouts/**
@@ -22,6 +22,7 @@ design_sources:
   - design/06-ui/merchant_landing_page_redesign.md
 tests:
   - tests/e2e/merchant/shell.spec.ts
+  - tests/e2e/merchant/table-row-context-menu.spec.ts
   - tests/e2e/merchant/auth.spec.ts
   - tests/e2e/merchant/a11y.spec.ts
   - tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts
@@ -37,8 +38,8 @@ gaps:
   - The portal has no route-level maker-checker visualization for pending application changes beyond status badges and pending states.
   - The public landing page's developer CTA targets `/portal/guide/developers`, which requires sign-in; the login page always lands on the dashboard (no return-to), so a visitor must navigate to the guide again after signing in.
   - FIXED 2026-11-04: the developer guide content (D-01/D-04/D-05) and the code generator now use the real edge schema (`title`, `maxUses`, no `redirectUrl`/`applicationId`/`infiniteUse`) and the real `201` response (`key`, `state`, `visibleRails`). Remaining: the webhook sample in the generator is unverified (no outbound merchant webhooks are implemented).
-  - POS screen stream uses fetch streaming with Authorization and reconnect backoff; not verified against live merchant-back.
-  - "Residual (GAP-019/GAP-029): the merchant session token lives in client storage unless the edge runs `SESSION_COOKIE_MODE=true`; `@prisma/client` is still listed (unused) in `merchant-front/package.json`."
+  - POS screen stream uses fetch streaming with Authorization and reconnect backoff; the attempts-array mapping is covered by unit tests but not verified against a live merchant-back.
+  - "Residual (GAP-019): the merchant session token lives in client storage unless the edge runs `SESSION_COOKIE_MODE=true`."
 ---
 
 # Merchant Portal
@@ -203,6 +204,7 @@ The link amount is stored server-side; the checkout page never accepts a client 
 - Creates a terminal with name and location.
 - Creates/pairs a screen with a screen name and type.
 - Shows screen role/status and actions.
+- The shared table subsystem mirrors the admin copy: the action column is sticky to the inline end and `TableRowActions` opens the same actions from a row right-click or `Shift+F10` (primary action first, then the overflow items). The visible overflow button remains the touch path.
 
 `PosScreen` (`/portal/pos/screen/:code`):
 
@@ -411,9 +413,10 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 - **Cash-out:** an `idempotencyKey` per intent; amount validated against `^\d{1,14}(\.\d{1,4})?$` and greater than zero; a confirm dialog before submit.
 - **Google login/register** send a fixed `redirectUri` path and payload; `payload.redirectUrl` must be https on `VITE_IDENTITY_HOSTS` (default `accounts.google.com`).
 - **Checkout links** are built from `VITE_CHECKOUT_BASE_URL` (fallback `location.origin`).
-- **POS screen stream** uses fetch streaming with `Authorization` and reconnect backoff (not verified against live merchant-back).
+- **POS screen stream** uses fetch streaming with `Authorization` and reconnect backoff; the `event: attempts` array is mapped to the screen snapshot (latest attempt amount/currency/status/reference) instead of being assigned as the state object.
 - `resolveUploadPathWithMat` was removed. The landing page no longer names internal ledger accounts (`CUSTOMER_PAYMENT`, `YOUR_WALLET`, `PLATFORM_FEE`) or internal action names.
-- New env: `VITE_CHECKOUT_BASE_URL` (optional), `VITE_IDENTITY_HOSTS`. `.env.example` ships; copy to `.env`.
+- New env: `VITE_CHECKOUT_BASE_URL` (injected by the deploy engine from `CHECKOUT_DOMAIN`/ports; fallback `location.origin`), `VITE_IDENTITY_HOSTS`. `.env.example` ships; copy to `.env`.
+- **Authorities:** the Team page maps its group selectors to the closed core catalogue (`link:read`/`link:write`, `payment:read`, `wallet:create`, `cashout:read`/`cashout:request`, `application:manage`, `pos:manage`, `token:manage`, `credential:manage`, `user:manage`, `onboarding:write`, `dispute:respond`, `merchant:read`) instead of sending group names. The developer guide documents the canonical token scopes (`link:write`, `link:read`, `payment:read`); legacy scopes are accepted and normalised by core.
 - Catalogue keys added (EN and AR): "Enter a valid amount greater than zero (up to 4 decimals).", "Confirm Cash-Out", landing "Customer payment" and "Illustrative".
 
 ## Gap resolutions (2026-11-05)

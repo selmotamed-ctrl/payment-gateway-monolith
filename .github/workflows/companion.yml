@@ -1,0 +1,130 @@
+name: Companion Android Build
+
+on:
+  push:
+    paths:
+      - "companion-app/**"
+      - "design/07-guides-and-academy/**"
+      - "admin-front/scripts/extract-guide-content.ts"
+      - "admin-front/scripts/extract-academy-content.ts"
+      - ".github/workflows/companion.yml"
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a private release with the APK and content update"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: companion-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      COMPANION_CONTENT_SIGNING_KEY: ${{ secrets.COMPANION_CONTENT_SIGNING_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" >/dev/null
+
+      - name: Install admin extractor dependencies
+        working-directory: admin-front
+        run: bun install --frozen-lockfile
+
+      - name: Install companion dependencies
+        working-directory: companion-app
+        run: bun install --frozen-lockfile
+
+      - name: Restore release keystore
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/companion-release.jks"
+          chmod 600 "$RUNNER_TEMP/companion-release.jks"
+          {
+            echo "COMPANION_KEYSTORE_FILE=$RUNNER_TEMP/companion-release.jks"
+            echo "COMPANION_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            echo "COMPANION_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}"
+            echo "COMPANION_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}"
+          } >> "$GITHUB_ENV"
+
+      - name: Derive content public key for this build
+        if: env.COMPANION_CONTENT_SIGNING_KEY != ''
+        working-directory: companion-app
+        run: |
+          node -e "import('@noble/ed25519').then(async (ed) => { const sk = Uint8Array.from(Buffer.from(process.env.COMPANION_CONTENT_SIGNING_KEY, 'hex')); const pk = await ed.getPublicKeyAsync(sk); require('node:fs').writeFileSync('public/content/public-key.txt', Buffer.from(pk).toString('hex') + '\n'); })"
+
+      - name: Build, test and produce APK
+        working-directory: companion-app
+        env:
+          CI: "true"
+          COMPANION_VERSION_CODE: ${{ github.run_number }}
+          COMPANION_VERSION_NAME: "1.0.${{ github.run_number }}"
+          VITE_COMPANION_UPDATE_URL: ${{ vars.COMPANION_UPDATE_BASE_URL }}
+        run: ./build-apk.sh
+
+      - name: Produce signed content update
+        if: env.COMPANION_CONTENT_SIGNING_KEY != '' && vars.COMPANION_UPDATE_BASE_URL != ''
+        working-directory: companion-app
+        env:
+          COMPANION_CONTENT_SIGNING_KEY: ${{ secrets.COMPANION_CONTENT_SIGNING_KEY }}
+          COMPANION_UPDATE_BASE_URL: ${{ vars.COMPANION_UPDATE_BASE_URL }}
+        run: bun run release:content
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pg-companion-${{ github.run_number }}
+          path: |
+            companion-app/release/*.apk
+            companion-app/release/build-info.json
+            companion-app/release/SHA256SUMS
+            companion-app/release/manifest.json
+            companion-app/release/content-*.json
+          if-no-files-found: error
+
+      - name: Publish private release
+        if: env.ANDROID_KEYSTORE_BASE64 != '' && github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.publish)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: companion-${{ github.run_number }}
+          name: PG Companion ${{ github.run_number }}
+          body: |
+            PG Companion build ${{ github.run_number }}.
+            Content is validated against the canonical Guide and Academy extractors.
+            This release is private and contains internal training material.
+          files: |
+            companion-app/release/*.apk
+            companion-app/release/build-info.json
+            companion-app/release/SHA256SUMS
+            companion-app/release/manifest.json
+            companion-app/release/content-*.json
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

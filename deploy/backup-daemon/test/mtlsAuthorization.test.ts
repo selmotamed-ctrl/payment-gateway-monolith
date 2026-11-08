@@ -6,7 +6,7 @@ import { join } from "node:path";
 import tls from "node:tls";
 import { CatalogStore, createDefaultPolicy } from "../src/catalogStore";
 import { isAllowedClientIdentity, parseAllowedClientCns, startBackupDaemonServer } from "../src/server";
-import { FakeEngine, MemoryCatalogFileSystem, makeConfig, makeDrillReport } from "./helpers";
+import { FakeEngine, MemoryCatalogFileSystem, freePort, makeConfig, makeDrillReport } from "./helpers";
 
 describe("mTLS client authorization (D7/B-H2)", () => {
   test("allowlist matches subject CN or DNS SAN only", () => {
@@ -45,7 +45,7 @@ describe("mTLS client authorization (D7/B-H2)", () => {
       run(["req", "-newkey", "rsa:2048", "-nodes", "-keyout", `${name}.key`, "-out", `${name}.csr`, "-subj", `/CN=${name}`]);
       run(["x509", "-req", "-in", `${name}.csr`, "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", `${name}.crt`, "-days", "2", "-extfile", "ext.cnf"]);
     }
-    const port = 47000 + Math.floor(Math.random() * 1000);
+    const port = await freePort();
     const config = makeConfig({
       BACKUP_ALLOW_INSECURE_HTTP: "false",
       BACKUP_DAEMON_BIND_HOST: "127.0.0.1",

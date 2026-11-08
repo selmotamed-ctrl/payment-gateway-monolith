@@ -23,7 +23,10 @@ import {
   parseReplicaNodes,
   parseWalGBackupList,
 } from "../src/backupEngine";
-import { ENCRYPTION_KEY_HEX, PG_PASSWORD, RecordingRunner, S3_ACCESS_KEY, S3_SECRET_KEY, makeConfig } from "./helpers";
+import { rmSync } from "node:fs";
+import { ArtifactRepository, MemoryArtifactStore } from "../src/artifactStore";
+import { expandTargets } from "../src/backupEngine";
+import { ENCRYPTION_KEY_HEX, PG_PASSWORD, RecordingRunner, S3_ACCESS_KEY, S3_SECRET_KEY, dumpAwareRunner, makeConfig, tempDir } from "./helpers";
 
 describe("WAL-G command builders", () => {
   const config = makeConfig({
@@ -271,36 +274,92 @@ describe("target-aware engine routing", () => {
     );
   });
 
-  test("WAL-G refuses audit backups without a dedicated audit data directory", async () => {
-    const runner = new RecordingRunner();
-    const engine = new WalGEngine(makeConfig(), runner);
-    await expect(engine.triggerBackup("audit_db", "full")).rejects.toThrow("PG_AUDIT_DATA_DIR");
-    expect(runner.calls).toHaveLength(0);
+  test("WAL-G backs up a shared-cluster audit database logically and never needs PG_AUDIT_DATA_DIR (RC-09)", async () => {
+    const staging = await tempDir();
+    try {
+      const config = makeConfig({ BACKUP_STAGING_DIR: staging, PG_AUDIT_USER: "gw_audit_writer", PG_AUDIT_PASSWORD: "audit-secret-pw" });
+      const runner = dumpAwareRunner();
+      const s3 = new MemoryArtifactStore("primary-s3");
+      const engine = new WalGEngine(config, runner, { repository: new ArtifactRepository([s3]) });
+      const result = await engine.triggerBackup("audit_db", "full");
+
+      expect(result.storageTargets).toEqual(["primary-s3"]);
+      // No wal-g invocation at all: the audit database is already inside the core physical backup.
+      expect(runner.calls.some((call) => call.command === "wal-g")).toBe(false);
+      const dump = runner.calls.find((call) => call.command.endsWith("pg_dump"));
+      expect(dump?.args).toEqual(expect.arrayContaining(["--format=custom", "-d", config.PG_AUDIT_DB_NAME]));
+      // the dump runs as the least-privilege audit role, with its password in the environment only
+      expect(dump?.args[dump.args.indexOf("-U") + 1]).toBe("gw_audit_writer");
+      expect(dump?.args.join(" ")).not.toContain("audit-secret-pw");
+      expect(dump?.options?.env?.PGPASSWORD).toBe("audit-secret-pw");
+      expect(runner.calls.some((call) => call.command.endsWith("pg_restore") && call.args.includes("--list"))).toBe(true);
+      const keys = [...s3.objects.keys()];
+      expect(keys.some((key) => key.startsWith(`logical/${config.PG_AUDIT_DB_NAME}/`) && key.endsWith(".dump.enc"))).toBe(true);
+      expect(keys.some((key) => key.startsWith("backups/audit_db/") && key.endsWith(".manifest.json"))).toBe(true);
+      // The dump is encrypted: the plaintext archive header must not be visible in storage.
+      const dumpObject = s3.objects.get(keys.find((key) => key.endsWith(".dump.enc"))!)!;
+      expect(dumpObject.includes(Buffer.from("PGDMP"))).toBe(false);
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
   });
 
-  test("WAL-G prunes full backups for each target and leaves delta pruning non-destructive", async () => {
-    const config = makeConfig();
+  test("target=all with a shared audit database no longer throws and skips a missing audit database", async () => {
+    const staging = await tempDir();
+    try {
+      const config = makeConfig({ BACKUP_STAGING_DIR: staging });
+      const runner = dumpAwareRunner({ auditDatabasePresent: false });
+      const engine = new WalGEngine(config, runner, { repository: new ArtifactRepository([new MemoryArtifactStore("primary-s3")]) });
+      await expect(engine.triggerBackup("all", "full")).resolves.toMatchObject({ storageTargets: ["primary-s3"] });
+      expect(runner.calls.filter((call) => call.command === "wal-g" && call.args[0] === "backup-push")).toHaveLength(1);
+      // An explicit audit_db request must fail loudly instead of silently skipping.
+      await expect(engine.triggerBackup("audit_db", "full")).rejects.toThrow("does not exist");
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
+  });
+
+  test("expandTargets follows the topology: audit is always a target, redis only when configured", () => {
+    expect(expandTargets(makeConfig(), "all")).toEqual(["postgres_core", "audit_db"]);
+    expect(expandTargets(makeConfig({ REDIS_URL: "redis://127.0.0.1:6379" }), "all")).toEqual(["postgres_core", "audit_db", "redis"]);
+    expect(expandTargets(makeConfig(), "redis")).toEqual(["redis"]);
+  });
+
+  test("WAL-G prunes the core target, and the audit target only for a dedicated cluster; delta pruning is non-destructive", async () => {
     const runner = new RecordingRunner();
-    const engine = new WalGEngine(config, runner);
-    await engine.prune("all", "full");
-    expect(runner.calls.map((call) => call.args)).toEqual([
-      ["delete", "retain", "FULL", "8", "--confirm"],
-      ["delete", "retain", "FULL", "8", "--confirm"],
-    ]);
-    expect(runner.calls.map((call) => call.options?.env?.WALG_S3_PREFIX)).toEqual([
+    await new WalGEngine(makeConfig(), runner).prune("all", "full");
+    expect(runner.calls.map((call) => call.args)).toEqual([["delete", "retain", "FULL", "8", "--confirm"]]);
+
+    const dedicated = makeConfig({ PG_AUDIT_DATA_DIR: "/var/lib/postgresql/18/audit" });
+    const dedicatedRunner = new RecordingRunner();
+    await new WalGEngine(dedicated, dedicatedRunner).prune("all", "full");
+    expect(dedicatedRunner.calls.map((call) => call.options?.env?.WALG_S3_PREFIX)).toEqual([
       "s3://libya-pg-backups-primary/prod/postgres_core",
       "s3://libya-pg-backups-primary/prod/audit_db",
     ]);
 
-    runner.calls.length = 0;
-    await engine.prune("postgres_core", "delta");
-    expect(runner.calls).toHaveLength(0);
+    dedicatedRunner.calls.length = 0;
+    await new WalGEngine(dedicated, dedicatedRunner).prune("postgres_core", "delta");
+    expect(dedicatedRunner.calls).toHaveLength(0);
+  });
+
+  test("WAL-G retention follows the live maker-checker policy, not the boot-time environment", async () => {
+    const runner = new RecordingRunner();
+    const engine = new WalGEngine(makeConfig(), runner, { getPolicy: () => ({ fullRetentionDays: 21, walRetentionDays: 7 }) });
+    await engine.prune("postgres_core", "full");
+    expect(runner.calls[0]?.args).toEqual(["delete", "retain", "FULL", "3", "--confirm"]);
+
+    // A policy edited down to one day still keeps at least one full backup.
+    const minimal = new RecordingRunner();
+    await new WalGEngine(makeConfig(), minimal, { getPolicy: () => ({ fullRetentionDays: 1, walRetentionDays: 1 }) }).prune("postgres_core", "full");
+    expect(minimal.calls[0]?.args).toEqual(["delete", "retain", "FULL", "1", "--confirm"]);
   });
 
   test("Barman handles core and audit separately with their own server names", async () => {
     const config = makeConfig({
       BACKUP_ENGINE_MODE: "barman",
       PG_PRIMARY_HOST: "db.internal",
+      PG_AUDIT_DATA_DIR: "/var/lib/postgresql/18/audit",
       BARMAN_SERVER: "primary",
       BARMAN_AUDIT_SERVER: "audit-primary",
     });
@@ -347,5 +406,98 @@ describe("target-aware engine routing", () => {
       "--target-time",
       "2026-11-03T09:55:00.000Z",
     ]);
+  });
+});
+
+describe("recover to latest (disaster recovery)", () => {
+  const request = { target: "postgres_core" as const, targetTime: new Date("2026-11-03T09:55:00.000Z"), targetDir: "/var/lib/pg-backup/scratch", port: 55432 };
+
+  test("WAL-G: a target-time recovery sets recovery_target_time, latest sets NONE so PostgreSQL replays until the archive ends", async () => {
+    const engine = new WalGEngine(makeConfig(), new RecordingRunner());
+    const timed = await engine.recover(request);
+    expect(timed.recoveryConf).toContain("recovery_target_time = '2026-11-03 09:55:00.000+00'");
+    expect(timed.recoveryConf).toContain("recovery_target_action = 'promote'");
+    const latest = await engine.recover({ ...request, latest: true });
+    expect(latest.recoveryConf).toContain("restore_command");
+    expect(latest.recoveryConf).not.toContain("recovery_target");
+  });
+
+  test("Barman: latest omits --target-time", async () => {
+    const config = makeConfig({ BACKUP_ENGINE_MODE: "barman", BARMAN_SERVER: "primary" });
+    const runner = new RecordingRunner();
+    await new BarmanEngine(config, runner).recover({ ...request, latest: true });
+    const recover = runner.calls.find((call) => call.args[0] === "recover")!;
+    expect(recover.args).not.toContain("--target-time");
+    const timedRunner = new RecordingRunner();
+    await new BarmanEngine(config, timedRunner).recover(request);
+    expect(timedRunner.calls.find((call) => call.args[0] === "recover")!.args).toContain("--target-time");
+  });
+});
+
+describe("Barman health (RC-06)", () => {
+  test("never calls wal-g: object-store health comes from the daemon's own S3 client, audit server only when dedicated", async () => {
+    const runner = new RecordingRunner();
+    const s3 = new MemoryArtifactStore("primary-s3");
+    const config = makeConfig({ BACKUP_ENGINE_MODE: "barman" });
+    const health = await new BarmanEngine(config, runner, { repository: new ArtifactRepository([s3]) }).overviewHealth();
+
+    expect(runner.calls.some((call) => call.command === "wal-g")).toBe(false);
+    expect(health.targets.find((target) => target.id === "primary-s3")).toMatchObject({ healthy: true });
+    expect(health.targets.some((target) => target.id === "barman-audit")).toBe(false);
+
+    const dedicated = makeConfig({ BACKUP_ENGINE_MODE: "barman", PG_AUDIT_DATA_DIR: "/var/lib/postgresql/18/audit" });
+    const dedicatedHealth = await new BarmanEngine(dedicated, new RecordingRunner(), { repository: new ArtifactRepository([s3]) }).overviewHealth();
+    expect(dedicatedHealth.targets.some((target) => target.id === "barman-audit")).toBe(true);
+
+    s3.failPuts = true;
+    const down = await new BarmanEngine(config, new RecordingRunner(), { repository: new ArtifactRepository([s3]) }).overviewHealth();
+    expect(down.targets.find((target) => target.id === "primary-s3")?.healthy).toBe(false);
+    expect(down.healthy).toBe(false);
+  });
+});
+
+describe("WAL archive status (RC-08)", () => {
+  test("the query never passes the WAL file name to pg_wal_lsn_diff and returns six fields", () => {
+    expect(WAL_ARCHIVE_STATUS_QUERY).not.toContain("pg_wal_lsn_diff");
+    expect(WAL_ARCHIVE_STATUS_QUERY).toContain("pg_walfile_name(pg_current_wal_lsn())");
+    expect(WAL_ARCHIVE_STATUS_QUERY).toContain("COALESCE(last_archived_wal, '')");
+  });
+
+  test("health parses a real 24-character segment name and computes lag bytes from segment numbers", async () => {
+    const runner = new RecordingRunner((command, args) => {
+      const query = args.at(-1) ?? "";
+      if (query === WAL_ARCHIVE_STATUS_QUERY) {
+        return { code: 0, stdout: "00000001000000000000001A|42|27|0|0/1F000028|00000001000000000000001F|false\n", stderr: "" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    });
+    const health = await new WalGEngine(makeConfig(), runner).overviewHealth();
+    expect(health.wal.archiveLagSeconds).toBe(42);
+    expect(health.wal.lastArchivedLsn).toBe("00000001000000000000001A");
+    // 0x1F - 0x1A = 5 segments of 16 MiB
+    expect(health.wal.lagBytes).toBe(5 * 16 * 1024 * 1024);
+    expect(health.wal.currentLsn).toBe("0/1F000028");
+  });
+
+  test("health on an idle database stays healthy however long ago the last archive was", async () => {
+    const runner = new RecordingRunner((command, args) =>
+      (args.at(-1) ?? "") === WAL_ARCHIVE_STATUS_QUERY
+        ? { code: 0, stdout: "00000001000000000000001A|90000|27|0|0/1B000028|00000001000000000000001B|false\n", stderr: "" }
+        : { code: 0, stdout: "", stderr: "" },
+    );
+    const health = await new WalGEngine(makeConfig(), runner).overviewHealth();
+    expect(health.wal.archiveLagSeconds).toBe(0);
+    expect(health.healthy).toBe(true);
+  });
+
+  test("the initial empty archiver state (no segment archived yet) is valid and reports zero lag", async () => {
+    const runner = new RecordingRunner((command, args) =>
+      (args.at(-1) ?? "") === WAL_ARCHIVE_STATUS_QUERY
+        ? { code: 0, stdout: "|0|0|0|0/1000028|000000010000000000000001|false\n", stderr: "" }
+        : { code: 0, stdout: "", stderr: "" },
+    );
+    const health = await new WalGEngine(makeConfig(), runner).overviewHealth();
+    expect(health.wal.archiveLagSeconds).toBe(0);
+    expect(health.wal.lagBytes).toBe(0);
   });
 });

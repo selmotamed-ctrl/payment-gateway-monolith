@@ -1,56 +1,61 @@
 import { computed, defineComponent, type PropType, type VNodeChild } from "vue";
 import { useLocale } from "vuetify";
+import { JsonValueCell } from "./JsonValueCell";
+import { MetaPill } from "./MetaPill";
+import {
+    entryView,
+    humanizeSegment,
+    normalizeDiff,
+    type DiffEntry,
+    type EntryOp,
+    type JsonPatchOperation,
+} from "./jsonDiffModel";
 
-export interface JsonPatchOperation {
-    op: "add" | "remove" | "replace" | "move" | "copy" | "test";
-    path: string;
-    value?: unknown;
-    from?: string;
-    oldValue?: unknown;
-    before?: unknown;
-}
+export type { JsonPatchOperation } from "./jsonDiffModel";
 
-type DiffRow = { path: string; before: string; after: string };
-
-const stableStringify = (value: unknown): string => {
-    if (value === undefined) return "—";
-    if (value === null) return "null";
-    if (typeof value === "string") return value;
-    try {
-        return JSON.stringify(value, null, 2);
-    } catch {
-        return String(value);
-    }
+const OP_PILL: Record<EntryOp, { color: string; label: string } | null> = {
+    add: { color: "success", label: "Added" },
+    remove: { color: "danger", label: "Removed" },
+    replace: { color: "info", label: "Changed" },
+    move: { color: "warning", label: "Moved" },
+    copy: { color: "warning", label: "Copied" },
+    test: { color: "neutral", label: "Checked" },
+    value: null,
 };
 
-const flatten = (value: unknown, prefix = ""): Array<[string, unknown]> => {
-    if (value === null || value === undefined || typeof value !== "object" || Array.isArray(value)) {
-        return [[prefix || "(root)", value]];
-    }
-    const rows: Array<[string, unknown]> = [];
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-        const path = prefix ? `${prefix}.${key}` : key;
-        if (child !== null && typeof child === "object" && !Array.isArray(child)) {
-            rows.push(...flatten(child, path));
-        } else {
-            rows.push([path, child]);
-        }
-    }
-    return rows;
-};
+const headerCell = {
+    textAlign: "start",
+    padding: "9px 12px",
+    fontSize: "11px",
+    fontWeight: 600,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    color: "var(--pg-ink-muted)",
+    backgroundColor: "var(--pg-bg-surface-subtle)",
+    borderBottom: "1px solid var(--pg-border-subtle)",
+    whiteSpace: "nowrap",
+} as const;
 
-const parsePayload = (payload: string | unknown): unknown => {
-    if (typeof payload !== "string") return payload;
-    try {
-        return JSON.parse(payload);
-    } catch {
-        return payload;
-    }
-};
+const bodyCell = {
+    padding: "8px 12px",
+    borderBottom: "1px solid var(--pg-border-subtle)",
+    verticalAlign: "top",
+    maxInlineSize: "340px",
+    overflowWrap: "anywhere",
+    fontSize: "13px",
+    color: "var(--pg-ink-primary)",
+} as const;
 
+/**
+ * Human-readable change viewer. `diff` accepts an RFC-6902 patch array, a
+ * `{ before, after }` pair or a plain payload object; the legacy props
+ * (`operations`, `before`/`after`, `beforeJson`/`afterJson`, `payloadDiffJson`)
+ * keep working and are folded into the same model.
+ */
 export const JsonDiffViewer = defineComponent({
     name: "JsonDiffViewer",
     props: {
+        diff: { type: null as unknown as PropType<unknown> },
         operations: { type: Array as PropType<JsonPatchOperation[]>, default: () => [] },
         before: { type: [Object, String] as PropType<Record<string, unknown> | string | null>, default: null },
         after: { type: [Object, String] as PropType<Record<string, unknown> | string | null>, default: null },
@@ -60,147 +65,111 @@ export const JsonDiffViewer = defineComponent({
     },
     setup(props) {
         const { t } = useLocale();
-        const rows = computed<DiffRow[]>(() => {
-            let operations = props.operations ?? [];
-            if (operations.length === 0 && props.payloadDiffJson) {
-                const parsed = parsePayload(props.payloadDiffJson);
-                operations = Array.isArray(parsed)
-                    ? parsed
-                    : Array.isArray((parsed as { operations?: unknown })?.operations)
-                      ? ((parsed as { operations: JsonPatchOperation[] }).operations)
-                      : [];
-            }
-            if (operations.length > 0) {
-                return operations.map((operation) => {
-                    const oldValue = operation.oldValue ?? operation.before;
-                    let before = "—";
-                    let after = "—";
-                    if (operation.op === "add") {
-                        before = "—";
-                        after = stableStringify(operation.value);
-                    } else if (operation.op === "remove") {
-                        before = stableStringify(oldValue ?? operation.value);
-                        after = "—";
-                    } else if (operation.op === "replace") {
-                        before = stableStringify(oldValue);
-                        after = stableStringify(operation.value);
-                    } else if (operation.op === "move") {
-                        before = operation.from ?? "—";
-                        after = operation.path;
-                    } else if (operation.op === "copy") {
-                        before = operation.from ?? "—";
-                        after = operation.path;
-                    } else if (operation.op === "test") {
-                        before = stableStringify(oldValue);
-                        after = stableStringify(operation.value);
-                    }
-                    return { path: operation.path, before, after };
-                });
-            }
-            const beforeSource = parsePayload(props.beforeJson ?? props.before);
-            const afterSource = parsePayload(props.afterJson ?? props.after);
-            if (beforeSource || afterSource) {
-                const beforeMap = new Map(flatten(beforeSource));
-                const afterMap = new Map(flatten(afterSource));
-                const keys = Array.from(new Set([...beforeMap.keys(), ...afterMap.keys()])).sort();
-                return keys
-                    .filter((key) => stableStringify(beforeMap.get(key)) !== stableStringify(afterMap.get(key)))
-                    .map((key) => ({
-                        path: key,
-                        before: beforeMap.has(key) ? stableStringify(beforeMap.get(key)) : "—",
-                        after: afterMap.has(key) ? stableStringify(afterMap.get(key)) : "—",
-                    }));
-            }
-            return [];
+
+        const model = computed(() => {
+            if (props.diff !== undefined) return normalizeDiff(props.diff);
+            if ((props.operations ?? []).length > 0) return normalizeDiff(props.operations);
+            if (props.payloadDiffJson) return normalizeDiff(props.payloadDiffJson);
+            return normalizeDiff({ before: props.beforeJson ?? props.before, after: props.afterJson ?? props.after });
         });
 
-        return (): VNodeChild => (
-            <div class="pg-unified-table pg-json-diff" style={{ border: "1px solid var(--pg-border-subtle)", borderRadius: "var(--pg-radius-md)", overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-                    <caption class="pg-sr-only">{t("Proposed change")}</caption>
-                    <thead>
-                        <tr>
-                            {[t("Field Path"), t("Current / Before"), t("Proposed / After")].map((label) => (
-                                <th
-                                    key={label}
-                                    scope="col"
-                                    style={{
-                                        textAlign: "start",
-                                        padding: "9px 12px",
-                                        fontSize: "11px",
-                                        fontWeight: 600,
-                                        letterSpacing: "0.04em",
-                                        textTransform: "uppercase",
-                                        color: "var(--pg-ink-muted)",
-                                        backgroundColor: "var(--pg-bg-surface-subtle)",
-                                        borderBottom: "1px solid var(--pg-border-subtle)",
-                                        whiteSpace: "nowrap",
-                                    }}
-                                >
-                                    {label}
-                                </th>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {rows.value.length === 0 ? (
+        const labelOf = (entry: DiffEntry): string =>
+            entry.segments.length === 0
+                ? t("Entire record")
+                : entry.segments.map((segment) => t(humanizeSegment(segment))).join(" · ");
+
+        const renderSide = (entry: DiffEntry, side: "before" | "after"): VNodeChild => {
+            if ((entry.op === "move" || entry.op === "copy") && side === "before") {
+                return <span dir="auto">{entry.fromLabel ?? "—"}</span>;
+            }
+            if ((entry.op === "move" || entry.op === "copy") && side === "after") {
+                return <span dir="auto">{labelOf(entry)}</span>;
+            }
+            return <JsonValueCell view={entryView(entry, side)} />;
+        };
+
+        return (): VNodeChild => {
+            const { mode, entries } = model.value;
+            const twoColumn = mode === "payload";
+            const headers = twoColumn
+                ? [t("Field"), t("Value")]
+                : [t("Field"), t("Current / Before"), t("Proposed / After")];
+            return (
+                <div
+                    class="pg-unified-table pg-json-diff"
+                    style={{ border: "1px solid var(--pg-border-subtle)", borderRadius: "var(--pg-radius-md)", overflowX: "auto" }}
+                >
+                    <table style={{ inlineSize: "100%", borderCollapse: "collapse" }}>
+                        <caption class="pg-sr-only">{t("Proposed change")}</caption>
+                        <thead>
                             <tr>
-                                <td
-                                    colspan={3}
-                                    style={{ padding: "18px 12px", color: "var(--pg-ink-muted)", textAlign: "center" }}
-                                >
-                                    {t("No changes recorded.")}
-                                </td>
+                                {headers.map((label) => (
+                                    <th key={label} scope="col" style={headerCell}>
+                                        {label}
+                                    </th>
+                                ))}
                             </tr>
-                        ) : (
-                            rows.value.map((row, idx) => (
-                                <tr key={`${row.path}-${idx}`}>
+                        </thead>
+                        <tbody>
+                            {entries.length === 0 ? (
+                                <tr>
                                     <td
-                                        class="pg-mono"
-                                        style={{
-                                            padding: "8px 12px",
-                                            borderBottom: "1px solid var(--pg-border-subtle)",
-                                            fontSize: "12px",
-                                            verticalAlign: "top",
-                                        }}
+                                        colspan={headers.length}
+                                        style={{ padding: "18px 12px", color: "var(--pg-ink-muted)", textAlign: "center" }}
                                     >
-                                        {row.path}
-                                    </td>
-                                    <td
-                                        style={{
-                                            padding: "8px 12px",
-                                            borderBottom: "1px solid var(--pg-border-subtle)",
-                                            backgroundColor: "var(--pg-status-danger-bg)",
-                                            color: "var(--pg-status-danger-text)",
-                                            whiteSpace: "pre-wrap",
-                                            verticalAlign: "top",
-                                            maxWidth: "320px",
-                                            overflowWrap: "anywhere",
-                                        }}
-                                    >
-                                        {row.before}
-                                    </td>
-                                    <td
-                                        style={{
-                                            padding: "8px 12px",
-                                            borderBottom: "1px solid var(--pg-border-subtle)",
-                                            backgroundColor: "var(--pg-status-success-bg)",
-                                            color: "var(--pg-status-success-text)",
-                                            whiteSpace: "pre-wrap",
-                                            verticalAlign: "top",
-                                            maxWidth: "320px",
-                                            overflowWrap: "anywhere",
-                                        }}
-                                    >
-                                        {row.after}
+                                        {t("No changes recorded.")}
                                     </td>
                                 </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
-            </div>
-        );
+                            ) : (
+                                entries.map((entry, index) => {
+                                    const pill = OP_PILL[entry.op];
+                                    return (
+                                        <tr key={`${entry.path}-${index}`}>
+                                            <th
+                                                scope="row"
+                                                title={entry.path || undefined}
+                                                style={{ ...bodyCell, textAlign: "start", fontWeight: 500, minInlineSize: "140px" }}
+                                            >
+                                                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                                    <span>{labelOf(entry)}</span>
+                                                    {pill && (
+                                                        <MetaPill size="x-small" color={pill.color}>
+                                                            {t(pill.label)}
+                                                        </MetaPill>
+                                                    )}
+                                                </span>
+                                            </th>
+                                            {twoColumn ? (
+                                                <td style={bodyCell}>{renderSide(entry, "after")}</td>
+                                            ) : (
+                                                <>
+                                                    <td
+                                                        style={{
+                                                            ...bodyCell,
+                                                            backgroundColor: entry.hasBefore ? "var(--pg-status-danger-bg)" : undefined,
+                                                        }}
+                                                    >
+                                                        {renderSide(entry, "before")}
+                                                    </td>
+                                                    <td
+                                                        style={{
+                                                            ...bodyCell,
+                                                            backgroundColor: entry.hasAfter ? "var(--pg-status-success-bg)" : undefined,
+                                                        }}
+                                                    >
+                                                        {renderSide(entry, "after")}
+                                                    </td>
+                                                </>
+                                            )}
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            );
+        };
     },
 });
 

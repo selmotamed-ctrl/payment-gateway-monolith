@@ -35,7 +35,9 @@
 }
 
 .modern-table {
-    overflow: hidden;
+    /* Keep the table itself non-scrolling so position: sticky cells resolve
+       against .table-wrapper (the horizontal scroll container). */
+    overflow: visible;
 }
 
 .table-data-row {

@@ -101,7 +101,9 @@ class FakeRunner implements ProvisionRunner {
   run(target: SshTarget, command: string): void {
     this.runs.push({ target, command });
   }
-  capture(): string {
+  readonly captures: Array<{ target: SshTarget; command: string }> = [];
+  capture(target: SshTarget, command: string): string {
+    this.captures.push({ target, command });
     return "";
   }
   writeRemoteFile(input: { target: SshTarget; path: string; content: string | Buffer; mode?: number }): void {
@@ -141,6 +143,12 @@ describe("PostgreSQL 18 provisioner", () => {
     expect(commands.join("\n")).toContain("pgbouncer");
   });
 
+  test("the generated cluster unit recreates /run/postgresql after a reboot", () => {
+    const commands = bootstrapCommands(config()).join("\n");
+    expect(commands).toContain("RuntimeDirectory=postgresql");
+    expect(commands).toContain("RuntimeDirectoryMode=2775");
+  });
+
   test("replica commands use streaming basebackup with -R, a password and the created slot", () => {
     const commands = replicaCommands(
       { nodeId: "pg-pri", privateIp: "10.10.10.10", servicePort: 5432 },
@@ -151,7 +159,7 @@ describe("PostgreSQL 18 provisioner", () => {
     expect(commands).toContain("PGPASSFILE=/var/lib/postgresql/.pgpass");
     expect(commands).not.toContain("PGPASSWORD=");
     expect(commands).toContain("/var/lib/postgresql/.pgpass");
-    expect(commands).toContain("pg_basebackup -h '10.10.10.10' -p 5432 -U 'pg_replicator'");
+    expect(commands).toContain("pg_basebackup -h '10.10.10.10' -p 5432 -U 'gw_replicator'");
     expect(commands).toContain("-Fp -Xs -P -R -S");
     expect(commands).toContain("primary_slot_name");
   });
@@ -168,6 +176,9 @@ describe("PostgreSQL 18 provisioner", () => {
     expect(ini).toContain("max_prepared_statements = 256");
     expect(ini).toContain("server_reset_query_always = 0");
     expect(ini).toContain("ignore_startup_parameters = extra_float_digits,search_path");
+    // The leader election gets a session-scoped alias on the same port.
+    expect(ini).toContain("pgw_session = ");
+    expect(ini).toContain("pool_mode=session");
   });
 
   test("provisioning writes config, pg_hba, roles, slots and replica basebackup", () => {
@@ -230,11 +241,12 @@ describe("Redis provisioner", () => {
     expect(runner.writes.some((write) => write.path === "/etc/redis/redis.conf")).toBe(true);
     expect(runner.writes.some((write) => write.path === "/etc/systemd/system/redis-server.service.d/zz-pg-switch.conf")).toBe(true);
     expect(runner.writes.some((write) => write.path === "/etc/systemd/system/valkey.service.d/zz-pg-switch.conf")).toBe(true);
-    const restart = runner.runs.find((run) => run.command.includes("redis-cli"));
-    expect(restart?.command).toContain("systemctl daemon-reload");
-    expect(restart?.command).toContain('CONFIG SET save ""');
-    expect(restart?.command).toContain("REDISCLI_AUTH='ultra-strong-redis-K7p2Zq9w'");
-    expect(restart?.command).toContain("redis-cli -p 6379 PING");
+    // The restart decision lives in the apply script (run through capture so its outcome marker is read).
+    const apply = runner.captures.find((run) => run.command.includes("redis-cli"));
+    expect(apply?.command).toContain("systemctl daemon-reload");
+    expect(apply?.command).toContain('CONFIG SET save ""');
+    expect(apply?.command).toContain("REDISCLI_AUTH='ultra-strong-redis-K7p2Zq9w'");
+    expect(apply?.command).toContain("redis-cli -p 6379 PING");
     expect(runner.runs.some((run) => run.command.includes("redis-server"))).toBe(true);
   });
 });
@@ -247,7 +259,7 @@ describe("Audit and log database provisioner", () => {
     expect(AUDIT_DB_DDL).toContain("BEFORE UPDATE OR DELETE OR TRUNCATE");
     expect(AUDIT_DB_DDL).toContain("REVOKE UPDATE, DELETE, TRUNCATE ON audit_records FROM PUBLIC");
     const ddl = auditDatabaseDdl(config());
-    expect(ddl).toContain('GRANT SELECT, INSERT ON audit_records TO "pg_audit_writer"');
+    expect(ddl).toContain('GRANT SELECT, INSERT ON audit_records TO "gw_audit_writer"');
     expect(ddl).toContain("GRANT USAGE, SELECT ON ALL SEQUENCES");
     expect(ddl).toContain("ALTER DEFAULT PRIVILEGES");
     expect(ddl).not.toContain("GRANT UPDATE");
@@ -258,7 +270,7 @@ describe("Audit and log database provisioner", () => {
     expect(LOG_DB_DDL).toContain("attempt_step_logs");
     expect(LOG_DB_DDL).toContain("http_access_logs");
     const ddl = logDatabaseDdl(config());
-    expect(ddl).toContain('GRANT SELECT, INSERT ON attempt_step_logs, http_access_logs TO "pg_log_writer"');
+    expect(ddl).toContain('GRANT SELECT, INSERT ON attempt_step_logs, http_access_logs TO "gw_log_writer"');
     expect(ddl).toContain("GRANT USAGE, SELECT ON ALL SEQUENCES");
     expect(ddl).not.toContain("GRANT UPDATE");
   });
@@ -443,6 +455,7 @@ BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/dev"
 BACKUP_PRIMARY_S3_ACCESS_KEY="minio-admin"
 BACKUP_PRIMARY_S3_SECRET_KEY="minio-secret-123"
 BACKUP_ALLOW_INSECURE_HTTP="true"
+BACKUP_S3_ALLOW_INSECURE_HTTP="true"
 ${extra}`.replace(/BACKUP_NODE="[^"]*"/, 'BACKUP_NODE="backup-1@10.10.10.10:22:10.10.10.10:4090"'),
     );
 
@@ -484,13 +497,20 @@ ${extra}`.replace(/BACKUP_NODE="[^"]*"/, 'BACKUP_NODE="backup-1@10.10.10.10:22:1
     expect(bad.problems.join(" ")).toContain("at least 8 characters");
   });
 
-  test("BACKUP_ENGINE_MODE=auto picks wal-g when co-located and barman otherwise", () => {
+  test("BACKUP_ENGINE_MODE=auto and the default are pg-native, co-located or not; explicit wal-g/barman are kept and still validated", () => {
     const pg = SOURCE.match(/PG_PRIMARY_NODE="[^@"]*@[^:"]*:\d+:([^:"]*):/)?.[1] ?? "";
     const same = loadDeployConfig(`${SOURCE}
 BACKUP_WALG_SHA256="${"a".repeat(64)}"`.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="auto"').replace(/BACKUP_NODE="[^"]*"/, `BACKUP_NODE="backup-1@${pg}:22:${pg}:4090"`));
     expect(same.problems).toEqual([]);
-    expect(same.config?.BACKUP_ENGINE_MODE).toBe("wal-g");
+    expect(same.config?.BACKUP_ENGINE_MODE).toBe("pg-native");
     const diff = loadDeployConfig(SOURCE.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="auto"'));
-    expect(diff.config?.BACKUP_ENGINE_MODE).toBe("barman");
+    expect(diff.config?.BACKUP_ENGINE_MODE).toBe("pg-native");
+    // omitted entirely: the same default
+    const omitted = loadDeployConfig(SOURCE.replace(/^BACKUP_ENGINE_MODE=.*$/m, ""));
+    expect(omitted.config?.BACKUP_ENGINE_MODE).toBe("pg-native");
+    // explicit choices are untouched
+    expect(loadDeployConfig(SOURCE).config?.BACKUP_ENGINE_MODE).toBe("barman");
+    const walgRemote = loadDeployConfig(SOURCE.replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="wal-g"'));
+    expect(walgRemote.problems.join(" ")).toContain("must equal PG_PRIMARY_NODE");
   });
 });

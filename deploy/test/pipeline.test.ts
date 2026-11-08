@@ -36,7 +36,7 @@ PG_PRIMARY_NODE="pg-pri@10.10.10.10:22:10.10.10.10:5432"
 PG_REPLICA_NODES="pg-rep-1@10.10.10.11:22:10.10.10.11:5432"
 PG_SSH_KEY_PATH="~/.ssh/pg"
 PG_DB_NAME="pg_authoritative"
-PG_DB_USER="pg_owner"
+PG_DB_USER="gw_owner"
 PG_DB_PASSWORD="ultra-strong-pg-K7p2Zq9w"
 PGBOUNCER_ENABLED="true"
 `;
@@ -53,14 +53,14 @@ describe("pre-migration backup", () => {
     expect(backup.host).toBe("10.10.10.10");
     expect(backup.port).toBe(5432);
     expect(backup.database).toBe("pg_authoritative");
-    expect(backup.user).toBe("pg_owner");
+    expect(backup.user).toBe("gw_owner");
     // The password is streamed into a 0600 PGPASSFILE, never placed on the command line.
     expect(backup.command).not.toContain("ultra-strong-pg-K7p2Zq9w");
     expect(backup.command).not.toContain("PGPASSWORD");
     expect(backup.command).toContain("PGPASSFILE='/var/www/pg-core/shared/backups/pre-migrate.pgpass'");
-    expect(backup.pgpassContent).toBe("10.10.10.10:5432:*:pg_owner:ultra-strong-pg-K7p2Zq9w\n");
+    expect(backup.pgpassContent).toBe("10.10.10.10:5432:*:gw_owner:ultra-strong-pg-K7p2Zq9w\n");
     expect(backup.command).toContain("umask 077");
-    expect(backup.command).toContain("pg_dump --no-password -h '10.10.10.10' -p 5432 -U 'pg_owner' -Fc");
+    expect(backup.command).toContain("pg_dump --no-password -h '10.10.10.10' -p 5432 -U 'gw_owner' -Fc");
     expect(backup.command).toContain(".dump");
     expect(backup.command).not.toContain("6432");
   });

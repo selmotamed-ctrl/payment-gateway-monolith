@@ -1,6 +1,7 @@
 // Regression tests for the merchant-front and fake-rails-front security fixes (F9, F10, F1 POS stream, F13).
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { urlsMap } from "../../merchant-front/src/constants/urlsMap";
 import { isValidPositiveAmount } from "../../merchant-front/src/utils/security/amount";
@@ -13,7 +14,8 @@ import { buildCheckoutUrl, resolveCheckoutBase } from "../../merchant-front/src/
 import { createSseParser, openSseStream } from "../../merchant-front/src/utils/security/sseFetch";
 import { isSafeRedirectUrl, resolveCheckoutOrigin } from "../../fake-rails-front/src/utils/security";
 
-const read = (p: string) => readFileSync(fileURLToPath(new URL(`../../${p}`, import.meta.url)), "utf8");
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const read = (p: string) => readFileSync(resolve(REPO_ROOT, p), "utf8");
 
 describe("F1 merchant POS screen stream", () => {
   test("posScreenStream resolves under /api", () => {
@@ -87,7 +89,7 @@ describe("F10 cash-out request", () => {
   test("page sends an idempotency key, validates and confirms", () => {
     const src = read("merchant-front/src/pages/cashouts/index.tsx");
     expect(src).toContain("idempotencyKey:");
-    expect(src).toContain("crypto.randomUUID()");
+    expect(src).toContain("randomIntentKey");
     expect(src).toContain("isValidPositiveAmount(amount.value)");
     expect(src).toContain("showConfirm(");
     expect(src).toContain("accountNumber.value");

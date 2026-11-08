@@ -173,6 +173,24 @@ export class PrismaAttemptRepository implements AttemptRepository {
     return row ? toAttempt(row) : null;
   }
 
+  /**
+   * Single-writer finalization claim: only one transaction can move the
+   * attempt out of its observed status. A concurrent duplicate callback then
+   * fails the claim instead of settling and consuming the link slot twice.
+   */
+  async claimFinalize(
+    attemptId: string,
+    expectedStatus: string,
+    transaction?: unknown,
+  ): Promise<boolean> {
+    const target = (transaction ?? this.client) as PrismaLike;
+    const result = await target.paymentAttempt.updateMany({
+      where: { id: attemptId, status: expectedStatus, terminalAt: null },
+      data: { substatus: "FINALIZING" },
+    });
+    return Number(result?.count ?? 0) === 1;
+  }
+
   async updateAttempt(
     attemptId: string,
     patch: DynamicAttemptPatch,
@@ -182,6 +200,7 @@ export class PrismaAttemptRepository implements AttemptRepository {
     const data: Record<string, unknown> = {};
     if (patch.status !== undefined) data.status = patch.status;
     if (patch.substatus !== undefined) data.substatus = patch.substatus;
+    if (patch.clearSubstatus) data.substatus = null;
     if (patch.canonicalError !== undefined) data.substatus = patch.canonicalError;
     if (patch.otpAttempts !== undefined) data.otpAttempts = patch.otpAttempts;
     if (patch.ledgerEntryId !== undefined) data.ledgerEntryId = patch.ledgerEntryId;

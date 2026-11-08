@@ -160,15 +160,17 @@
   {
     "id": "m10",
     "title": "Security and deployment",
-    "minutes": 70,
+    "minutes": 95,
     "objective": "You can resist social engineering, handle data and understand the deployment model.",
     "lessonIds": [
       "l-m10-1",
       "l-m10-2",
-      "l-m10-3"
+      "l-m10-3",
+      "l-m10-4"
     ],
     "labIds": [
-      "lab-security-desk"
+      "lab-security-desk",
+      "lab-backup-dr-desk"
     ]
   }
 ]

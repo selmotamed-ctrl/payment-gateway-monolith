@@ -3,8 +3,8 @@ id: core.workers
 title: Background Workers and Outboxes
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-07
+verified_against: d695518+working-tree
 code:
   - deploy/provisioners/auditAndLogDbProvisioner.ts
   - core-back/engine/workers/workerRuntime.ts
@@ -15,6 +15,8 @@ code:
   - core-back/engine/workers/InboundInboxWorker.ts
   - core-back/engine/workers/OutboxNotificationWorker.ts
   - core-back/engine/workers/LedgerInvariantWorker.ts
+  - core-back/engine/workers/LedgerCheckpointWorker.ts
+  - core-back/engine/workers/LedgerShardScalerWorker.ts
   - core-back/engine/workers/JoinRequestExpiryWorker.ts
   - core-back/engine/workers/PeriodicScreeningWorker.ts
   - core-back/engine/workers/KybExpiryWorker.ts
@@ -49,6 +51,8 @@ tests:
   - core-back/test/storage-engine/write-path.integration.test.ts
   - core-back/test/exhaustive/06-concurrency/confirm-webhook-return-race.test.ts
   - core-back/test/security-regressions/c2-mfa.test.ts
+  - core-back/test/hardening-gap-regressions.test.ts
+  - core-back/test/storage-engine/leader-election-pgbouncer.test.ts
 gaps:
   - The trigger is installed by the deploy provisioner, not by a Prisma migration, so an externally managed audit database must run the provisioner DDL.
   - "The inbound webhook route verifies and processes synchronously; `InboundInboxWorker` is wired but has no producer, so it is effectively idle."
@@ -61,7 +65,7 @@ gaps:
   - "`JoinRequestExpiryWorker` uses raw updates without audit rows or merchant notifications."
   - "Per-worker health and metrics are not exposed; `/health` reports only durable-queue depth/age."
   - "`WORKER_CONCURRENCY` exists in env validation but is not used by the worker runtime."
-  - "Singleton leader election uses a session-level advisory lock on one dedicated connection, so it does not work through PgBouncer transaction pooling; `claimLeaseSeconds` (default 120) must exceed the longest per-row processing time (GAP-012, resolved 2026-11-05 with this caveat)."
+  - "Singleton leader election uses a session-level advisory lock on one dedicated connection. RESOLVED 2026-11-07: the endpoint is now `LEADER_ELECTION_DATABASE_URL` (a PgBouncer `pgw_session` alias with `pool_mode=session`, or direct PostgreSQL); core refuses to boot when `PGBOUNCER_ENABLED=true` and the URL is missing or still the transaction-pooled `DATABASE_URL`, and a boot-time probe plus per-tick backend-PID/`pg_locks` ownership checks fail closed. `InboundInboxWorker` also has a durable claim lease (`claimed_at`/`claimed_by`), so even a brief leadership overlap cannot process a webhook twice. `claimLeaseSeconds` (default 120) must exceed the longest per-row processing time. FIXED 2026-11-08: the claim statement used one untyped parameter for `claimed_at` (`timestamptz`) and `updated_at` (`timestamp`), which PostgreSQL rejects with 42P08, so the worker failed every tick; both uses are now explicitly cast and `test/inbound-inbox-claim-pg.test.ts` prepares the real statement."
 ---
 
 # Background Workers and Outboxes
@@ -119,7 +123,9 @@ The loop is not a distributed lock by itself. Cross-node safety comes from `FOR 
 | `PollWorker` | `next_check_at <= now`, every poll interval | `FOR UPDATE SKIP LOCKED`, batch | Reconciles inquiry schedules, applies route backoff `[5,15,30,60,120,300]` seconds with a 900 s default window, transitions terminal states once, updates schedule metadata. | Implemented |
 | `InboundInboxWorker` | `processed_at IS NULL`, every poll interval | `FOR UPDATE SKIP LOCKED`, batch | Calls the engine callback verifier, retries `RETRYABLE` errors up to `maxAttempts` (production default 3; class default 5), opens an operator case on terminal failure. | Partial / idle |
 | `OutboxNotificationWorker` | `status = QUEUED` and `next_attempt_at <= now`, every poll interval | `FOR UPDATE SKIP LOCKED`, batch | Finds template, treats missing/tipping-off templates as delivery failures, redacts AML payload, renders, sends; retries with exponential backoff up to 8 attempts. | Implemented |
-| `LedgerInvariantWorker` | every 60 s | Single verifier pass | Verifies the system-wide invariant; logs drift and opens one open `MISMATCH`/`P1` operator case. | Implemented |
+| `LedgerInvariantWorker` | every 60 s | Single verifier pass (O(shards)) | Verifies the system-wide invariant from the shard balances; logs drift and opens one `MISMATCH`/`P1` operator case keyed `ledger.invariant`. | Implemented |
+| `LedgerCheckpointWorker` | `WORKER_LEDGER_CHECKPOINT_INTERVAL_MS` (30 s), leader-elected | Shards with the most pending lines, bounded by the batch size | Captures each shard with the verified O(delta) proof of `CheckpointService` (no locks); a failed proof opens a per-shard P1 case and an audit row; hourly `LEDGER_CHECKPOINT_SWEEP` audit summary. | Implemented |
+| `LedgerShardScalerWorker` | `WORKER_LEDGER_SHARD_SCALER_INTERVAL_MS` (30 s), leader-elected | One statement over all shard sequences | Measures lines/s per shard, widens a hot account through `applyShardWidth` (live by default, audited `GL_ACCOUNT_SHARDS_SCALED`; `LEDGER_SHARD_SCALER_DRY_RUN=true` only audits `GL_ACCOUNT_SHARDS_SCALE_PROPOSED`). | Implemented |
 | `JoinRequestExpiryWorker` | every poll interval | Raw updates, batch on overdue reviews | Expires `DRAFT` older than 30 days; expires overdue `SUBMITTED`/`IN_REVIEW`/`INFO_REQUESTED` reviews; excludes `PENDING_CHECKER`. | Partial |
 | `PeriodicScreeningWorker` | every poll interval; 24 h rescreen interval | `FOR UPDATE SKIP LOCKED` on due merchants, then merchant row lock | Refreshes watch-list versions, screens merchant and owners, applies owner statuses, raises one confirmed-match case and suspends the merchant. | Implemented (L2 only) |
 | `KybExpiryWorker` | every 6 h (`WORKER_KYB_EXPIRY_INTERVAL_MS`), batch 200 | Query + per-merchant transaction | Marks expired documents, queues 30/7-day notices, suspends after grace, starts periodic revalidations, expires overdue revalidations. | Implemented |
@@ -174,9 +180,11 @@ The synchronous route stores the raw body and a redacted header subset, not the 
 
 The production sender uses the webhook transport when `NOTIFICATION_WEBHOOK_URL` is configured and the log transport otherwise. The log transport reports `SENT`, never `DELIVERED`; `IN_APP` notifications are delivered by the notification row itself. The rendered body of an `INTERNAL` template is never written to the log.
 
-### 3.8 Ledger invariant worker
+### 3.8 Ledger invariant, checkpoint and shard-scaler workers
 
-`LedgerInvariantWorker` runs `InvariantVerifier` every 60 seconds. On non-zero drift it logs the left/right sides, calls the optional `onDrift`, and opens a single open `MISMATCH`/`P1` case with a four-hour SLA. It does not halt payouts itself; the operator case and the admin invariant panel are the control surface.
+`LedgerInvariantWorker` runs `InvariantVerifier` every 60 seconds over the shard balances. On non-zero drift it logs the left/right sides, calls the optional `onDrift`, and opens a single `MISMATCH`/`P1` case (subject key `ledger.invariant`) with a four-hour SLA. It does not halt payouts itself; the operator case and the admin invariant panel are the control surface.
+
+`LedgerCheckpointWorker` and `LedgerShardScalerWorker` are leader-elected singletons (the checkpoint capture is idempotent, so a duplicate run is harmless). The checkpoint worker keeps every shard's checkpoint close to its head; the scaler samples every shard's `line_seq` once per interval and keeps only the previous sample in leader memory (the first tick after a failover warms the baseline; the cooldown is persisted in `gl_accounts.shard_scaled_at`). Both are described in `core.ledger` 3.9; their surfaces are the GL account drawer, the Jobs & Outbox "ledger automation" tiles and the audit log.
 
 ### 3.9 Onboarding expiry
 
@@ -292,6 +300,12 @@ It degrades when workers are disabled, the queue cannot be read, or the oldest q
 | `WORKER_KYB_EXPIRY_INTERVAL_MS`, `WORKER_KYB_EXPIRY_BATCH_SIZE` | 21,600,000, 200 | KYB cadence and batch. |
 | `WORKER_RETENTION_ENABLED`, `WORKER_RETENTION_INTERVAL_MS`, `WORKER_RETENTION_BATCH_SIZE` | `false`, 3,600,000, 500 | Retention enablement, cadence, batch. |
 | `RETENTION_DRY_RUN` | `false` | Counts without deleting. |
+| `WORKER_LEDGER_CHECKPOINT_ENABLED`, `WORKER_LEDGER_CHECKPOINT_INTERVAL_MS`, `WORKER_LEDGER_CHECKPOINT_BATCH_SIZE` | `true`, 30,000, 50 | Per-shard checkpoint worker enablement, cadence, shards per pass. |
+| `LEDGER_CHECKPOINT_MIN_LINES`, `LEDGER_CHECKPOINT_MAX_AGE_MS` | 5000, 900,000 | A shard is checkpointed at this many pending lines, or when it has any and its checkpoint is older than this. |
+| `LEDGER_SHARD_AUTO_REPAIR_ENABLED`, `LEDGER_SHARD_AUTO_REPAIR_MIN_FAILURES`, `LEDGER_SHARD_AUTO_REPAIR_MAX_ABS_DRIFT` | `true`, 3, 100 | Automatic repair of a persistently failing PARITY shard whose sequence is intact (recomputed from the journal); a GAP, a damaged sequence or a larger correction is left to a person. |
+| `WORKER_LEDGER_SHARD_SCALER_ENABLED`, `WORKER_LEDGER_SHARD_SCALER_INTERVAL_MS` | `true`, 30,000 | Shard scaler enablement and sampling cadence. |
+| `LEDGER_SHARD_SCALER_DRY_RUN` | `false` | `true` = detect and audit only; the default lets the scaler widen hot accounts (`GL_ACCOUNT_SHARDS_SCALED`). |
+| `LEDGER_SHARD_UP_LINES_PER_SEC`, `LEDGER_SHARD_MAX_WIDTH`, `LEDGER_SHARD_COOLDOWN_MS` | 150, 64, 600,000 | Hot threshold per shard, widest routing width, minimum time between two scalings of an account. |
 | `WORKER_BACKGROUND_JOBS_ENABLED`, `WORKER_BACKGROUND_JOBS_INTERVAL_MS`, `WORKER_BACKGROUND_JOBS_BATCH_SIZE` | `true`, 2000, 10 | Durable queue enablement, cadence, batch. |
 | `WORKER_BACKGROUND_JOBS_LEASE_SECONDS`, `WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS` | 300, 300000 | Crash-recovery lease and health degradation threshold. |
 
@@ -414,5 +428,5 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 ## 11. Security hardening (2026-11-05)
 
 - `OutboxNotificationWorker` opens the Vault-encrypted `codeCiphertext` of SMS MFA notifications at send time; `notifications.payload_json` no longer carries the plaintext code.
-- **Multi-node claiming and leader election (GAP-012, RESOLVED 2026-11-05).** Every `FOR UPDATE SKIP LOCKED` claim now runs inside a transaction (`BaseWorker.inTransaction`, 15 s timeout, 5 s max wait; a test double without `$transaction` runs the callback directly), because a SKIP LOCKED lock taken outside a transaction is released the instant the statement ends. `PollWorker` (`payment_attempts.next_check_at`) and `OutboxNotificationWorker` (`notifications.next_attempt_at`) claim and lease in ONE statement: the claimed rows are updated to `now + claimLeaseSeconds` (`WorkerOptions.claimLeaseSeconds`, default 120 s) before the lock is released at commit, the inquiry/delivery then runs outside the transaction (a held row lock would deadlock the engine, which updates the same attempt on another connection), every outcome rewrites the schedule column, and a crashed node's rows become due again when the lease expires. `ExpirySweeperWorker` and `InboundInboxWorker` have no lease column, so they are cluster singletons whose exclusivity comes from leader election (the conditional terminal transition remains the last line of defence for expiry; a webhook must never be handled twice). Singleton workers (`BaseWorker.singleton`): `ExpirySweeper`, `InboundInbox`, `JoinRequestExpiry`, `KybExpiry`, `LedgerInvariant`, `PeriodicScreening` and `Retention`. Their tick runs only on the node that holds the PostgreSQL advisory lock for `worker:<name>` (`PgAdvisoryLeaderElection`, `core-back/lib/storageEngine/leaderElection.ts`; the lock name is `<namespace>:worker:<name>`, default namespace `pgw`, hashed with `hashtextextended`). It uses `pg_try_advisory_lock` on ONE dedicated, non-pooled connection (`application_name=pg-core-back-leader`); a leader re-validates with `SELECT 1` on every tick, a dropped connection clears the held keys (PostgreSQL releases the lock server side, which is the failover) and any election error fails closed (the singleton skips the tick). The storage engine creates the election from the primary URL (`StorageEngine.leaderElection`, disable with `leaderElection: false`) and `createProductionWorkerRuntime` passes it to the workers; without one (unit tests, single-process) workers behave as before. **Caveat: advisory locks are session-level, so point the election at PostgreSQL or a session-pooled endpoint, never at PgBouncer in transaction-pooling mode.**
+- **Multi-node claiming and leader election (GAP-012, RESOLVED 2026-11-05).** Every `FOR UPDATE SKIP LOCKED` claim now runs inside a transaction (`BaseWorker.inTransaction`, 15 s timeout, 5 s max wait; a test double without `$transaction` runs the callback directly), because a SKIP LOCKED lock taken outside a transaction is released the instant the statement ends. `PollWorker` (`payment_attempts.next_check_at`) and `OutboxNotificationWorker` (`notifications.next_attempt_at`) claim and lease in ONE statement: the claimed rows are updated to `now + claimLeaseSeconds` (`WorkerOptions.claimLeaseSeconds`, default 120 s) before the lock is released at commit, the inquiry/delivery then runs outside the transaction (a held row lock would deadlock the engine, which updates the same attempt on another connection), every outcome rewrites the schedule column, and a crashed node's rows become due again when the lease expires. `ExpirySweeperWorker` has no lease column and is a cluster singleton whose exclusivity comes from leader election (the conditional terminal transition remains the last line of defence). `InboundInboxWorker` is also a singleton, but since 2026-11-07 it additionally owns a durable `claimed_at`/`claimed_by` lease, so even a brief leadership overlap cannot process a webhook twice. Singleton workers (`BaseWorker.singleton`): `ExpirySweeper`, `InboundInbox`, `JoinRequestExpiry`, `KybExpiry`, `LedgerInvariant`, `PeriodicScreening` and `Retention`. Their tick runs only on the node that holds the PostgreSQL advisory lock for `worker:<name>` (`PgAdvisoryLeaderElection`, `core-back/lib/storageEngine/leaderElection.ts`; the lock name is `<namespace>:worker:<name>`, default namespace `pgw`, hashed with `hashtextextended`). It uses `pg_try_advisory_lock` on ONE dedicated, session-stable connection (`application_name=pg-core-back-leader`). Since 2026-11-07 the storage engine creates the election from `LEADER_ELECTION_DATABASE_URL` (falling back to `DATABASE_URL` only when PgBouncer is disabled), and a leader re-validates on every tick with a combined backend-PID + `pg_locks` ownership probe; a change, a missing lock row, a refused unlock or a dropped connection clears the held keys and the singleton skips the tick (fail closed). Boot runs `verifySessionSafety()`: a second client must not be able to acquire the probe key and the backend PID must stay stable, otherwise core refuses to start. Deploy generates a `pgw_session` PgBouncer alias with `pool_mode=session`; the transaction-pooled `DATABASE_URL` is rejected by the environment guard when `PGBOUNCER_ENABLED=true`. `createProductionWorkerRuntime` passes the election to the workers and registers the expected singleton keys on it for `/health`. Without an election (unit tests, single-process) workers behave as before.
 - The re-finalize guard for terminal attempts in `verifyCallback`/`finalizeSuccess` is implemented in the engine (GAP-016, RESOLVED 2026-11-05; see `core.engine`). `PollWorker`/`ExpirySweeper` still never settle an AML-held attempt (`AML_HOLD` substatus).

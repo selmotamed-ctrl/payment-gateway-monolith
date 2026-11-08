@@ -87,7 +87,7 @@ describeDatabase("transactional write-path helpers (live PostgreSQL)", () => {
     const refId = uniqueId("shard-read");
     const treasury = await seedGlAccount(client, { accountType: "TREASURY", shardCount: 16 });
     const wallet = await seedGlAccount(client, { accountType: "MERCHANT_WALLET", shardCount: 1 });
-    const poster = createLedgerPoster(client, { emitOutbox: true, shardCount: 16 });
+    const poster = createLedgerPoster(client, { emitOutbox: true });
     try {
       const posted = await poster.post({
         refType: "PAYMENT_ATTEMPT",

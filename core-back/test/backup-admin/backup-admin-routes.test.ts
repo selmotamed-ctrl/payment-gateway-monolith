@@ -106,17 +106,24 @@ const startApp = async (): Promise<RunningApp> => {
 
 interface RunningDaemon {
   url: string;
-  requests: Array<{ method: string; url: string; body: string }>;
+  requests: Array<{ method: string; url: string; body: string; headers: http.IncomingHttpHeaders }>;
   close: () => Promise<void>;
 }
 
-const startDaemon = async (): Promise<RunningDaemon> => {
-  const requests: Array<{ method: string; url: string; body: string }> = [];
+interface DaemonOptions {
+  walLagSeconds?: number;
+  healthy?: boolean;
+  /** Answer trigger/drill as an Idempotency-Key retry of this already accepted job. */
+  deduplicatedJobId?: string;
+}
+
+const startDaemon = async (options: DaemonOptions = {}): Promise<RunningDaemon> => {
+  const requests: RunningDaemon["requests"] = [];
   const overview = {
     generatedAt: "2026-01-01T00:00:00.000Z",
     engineMode: "postgres",
-    healthy: true,
-    wal: { archiveLagSeconds: 1, currentLsn: "0/10", lastArchivedLsn: "0/9", lagBytes: 8 },
+    healthy: options.healthy ?? true,
+    wal: { archiveLagSeconds: options.walLagSeconds ?? 1, currentLsn: "0/10", lastArchivedLsn: "0/9", lagBytes: 8 },
     targets: [{ id: "s3", name: "offsite", kind: "s3", healthy: true }],
     schedule: {
       fullCron: "0 2 * * 0",
@@ -143,7 +150,7 @@ const startDaemon = async (): Promise<RunningDaemon> => {
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
       const body = Buffer.concat(chunks).toString("utf8");
-      requests.push({ method: request.method ?? "", url: request.url ?? "", body });
+      requests.push({ method: request.method ?? "", url: request.url ?? "", body, headers: request.headers });
       const send = (status: number, payload: unknown): void => {
         const text = JSON.stringify(payload);
         response.writeHead(status, {
@@ -158,15 +165,17 @@ const startDaemon = async (): Promise<RunningDaemon> => {
       }
       if (request.method === "POST" && request.url === "/v1/backups/trigger") {
         send(202, {
-          backupJobId: uniqueUuid(),
+          backupJobId: options.deduplicatedJobId ?? uniqueUuid(),
           acceptedAt: new Date().toISOString(),
+          ...(options.deduplicatedJobId ? { deduplicated: true } : {}),
         });
         return;
       }
       if (request.method === "POST" && request.url === "/v1/drills/run") {
         send(202, {
-          drillId: uniqueUuid(),
+          drillId: options.deduplicatedJobId ?? uniqueUuid(),
           acceptedAt: new Date().toISOString(),
+          ...(options.deduplicatedJobId ? { deduplicated: true } : {}),
         });
         return;
       }
@@ -295,6 +304,79 @@ describeDatabase("backup internal routes against a fake daemon (live PostgreSQL)
       expect(Array.isArray(body.localCatalog)).toBe(false);
       expect(body.localCatalog).toMatchObject({ backups: expect.any(Array), drills: expect.any(Array) });
       expect(daemon.requests.some((request) => request.url === "/v1/overview")).toBe(true);
+    } finally {
+      await app.close();
+      await daemon.close();
+      configureDaemon(undefined);
+    }
+  });
+
+  test("walArchiveHealthy is true only when the daemon is healthy AND archive lag is within the alert threshold", async () => {
+    const check = async (options: DaemonOptions): Promise<unknown> => {
+      const daemon = await startDaemon(options);
+      configureDaemon(daemon.url);
+      const app = await startApp();
+      try {
+        const response = await fetch(`${app.url}/system/backups/overview`);
+        return ((await response.json()) as Record<string, unknown>).walArchiveHealthy;
+      } finally {
+        await app.close();
+        await daemon.close();
+        configureDaemon(undefined);
+      }
+    };
+    expect(await check({ walLagSeconds: 1 })).toBe(true); // alertLagSeconds is 60
+    expect(await check({ walLagSeconds: 60 })).toBe(true); // at the threshold
+    expect(await check({ walLagSeconds: 61 })).toBe(false); // beyond it
+    expect(await check({ walLagSeconds: 1, healthy: false })).toBe(false); // unhealthy storage target
+  });
+
+  test("walArchiveHealthy is false when the daemon is not configured", async () => {
+    configureDaemon(undefined);
+    const app = await startApp();
+    try {
+      const body = (await (await fetch(`${app.url}/system/backups/overview`)).json()) as Record<string, unknown>;
+      expect(body.walArchiveHealthy).toBe(false);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("an Idempotency-Key is forwarded to the daemon; a deduplicated answer queues nothing new locally", async () => {
+    const original = uniqueUuid();
+    const daemon = await startDaemon({ deduplicatedJobId: original });
+    configureDaemon(daemon.url);
+    const app = await startApp();
+    try {
+      const response = await fetch(`${app.url}/system/backups/trigger`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": "click-12345678" },
+        body: JSON.stringify({ target: "all", kind: "full" }),
+      });
+      expect(response.status).toBe(202);
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({ backupJobId: original, deduplicated: true });
+      const forwarded = daemon.requests.find((request) => request.url === "/v1/backups/trigger");
+      expect(forwarded?.headers["idempotency-key"]).toBe("click-12345678");
+      expect(await client.backupCatalogRun.findUnique({ where: { id: original } })).toBeNull();
+
+      const drill = await fetch(`${app.url}/system/backups/drill`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": "drill-12345678" },
+        body: "{}",
+      });
+      expect(await drill.json()).toMatchObject({ drillId: original, deduplicated: true });
+      expect(daemon.requests.find((request) => request.url === "/v1/drills/run")?.headers["idempotency-key"]).toBe("drill-12345678");
+      expect(await client.backupRestoreDrill.findUnique({ where: { id: original } })).toBeNull();
+
+      // a malformed key is not forwarded (the daemon would answer 400)
+      await fetch(`${app.url}/system/backups/trigger`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": "bad key!" },
+        body: JSON.stringify({ target: "all", kind: "full" }),
+      });
+      const last = daemon.requests.filter((request) => request.url === "/v1/backups/trigger").at(-1);
+      expect(last?.headers["idempotency-key"]).toBeUndefined();
     } finally {
       await app.close();
       await daemon.close();

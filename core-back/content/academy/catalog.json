@@ -1,7 +1,7 @@
 {
   "contentVersion": "1.0.0",
   "recertifyFrom": "1.0.0",
-  "contentHash": "29d41f2d15cb7deb0e0993d7256538503983d89179f5be1f224382986981ee90",
+  "contentHash": "5702a80cc0cae8650606fa2f6d670d973c851c11f73478a06388e7823cde4043",
   "tracks": [
     {
       "id": "FOUNDATION",
@@ -220,13 +220,15 @@
         "l-m8-6",
         "l-m9-1",
         "l-m9-2",
-        "l-m10-3"
+        "l-m10-3",
+        "l-m10-4"
       ],
       "labIds": [
         "lab-runbook-drill",
         "lab-build-a-rail",
         "lab-rails-visibility",
-        "lab-gate-review"
+        "lab-gate-review",
+        "lab-backup-dr-desk"
       ],
       "examId": "exam-gateway-admin"
     },
@@ -247,11 +249,13 @@
         "l-m8-6",
         "l-m9-1",
         "l-m9-2",
-        "l-m10-3"
+        "l-m10-3",
+        "l-m10-4"
       ],
       "labIds": [
         "lab-runbook-drill",
-        "lab-gate-review"
+        "lab-gate-review",
+        "lab-backup-dr-desk"
       ],
       "examId": "exam-security-admin"
     }
@@ -401,10 +405,12 @@
       "lessonIds": [
         "l-m10-1",
         "l-m10-2",
-        "l-m10-3"
+        "l-m10-3",
+        "l-m10-4"
       ],
       "labIds": [
-        "lab-security-desk"
+        "lab-security-desk",
+        "lab-backup-dr-desk"
       ]
     }
   ],
@@ -653,6 +659,11 @@
       "id": "l-m10-3",
       "module": "m10",
       "title": "Deployment, environments and secrets"
+    },
+    {
+      "id": "l-m10-4",
+      "module": "m10",
+      "title": "Backups, point-in-time recovery and restore drills"
     }
   ],
   "labs": [
@@ -744,6 +755,12 @@
       "id": "lab-gate-review",
       "module": "m8",
       "title": "Go-Live Gate Review: be the approver",
+      "passPercent": 80
+    },
+    {
+      "id": "lab-backup-dr-desk",
+      "module": "m10",
+      "title": "Backup and Recovery Desk: read the screen, judge the drill",
       "passPercent": 80
     }
   ]

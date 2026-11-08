@@ -1,6 +1,8 @@
 import { Decimal } from "decimal.js";
+import { Prisma } from "../../generated/prisma/client";
 import { ApiError } from "../../lib/error";
 import { lockWalletLedgerBalance } from "../../lib/cashoutBalance";
+import { applyShardRepair } from "../ledger/ShardRepair";
 import { payoutAccountHash } from "../../lib/joinRequestOnboarding";
 import { nextKybReviewAt, parseKybRefreshPolicy } from "../../lib/kybReview";
 import {
@@ -509,21 +511,21 @@ export const evaluateCommissionReceivableCeiling = async (
 };
 
 /**
- * The merchant wallet balance, computed from the posted journal lines.
+ * The merchant's wallet balance (credit positive), summed over its wallets from their shards.
+ *
+ * Each wallet is read through `lockWalletLedgerBalance`, so the caller holds the wallets' debit locks until
+ * its transaction ends: a check-then-debit (the chargeback ceiling) can no longer race another debit of the
+ * same wallet, and no journal line is loaded into memory.
  */
 const resolveMerchantWalletBalance = async (tx: Tx, merchantId: string): Promise<Decimal> => {
   const glAccounts = modelOf(tx, "glAccount");
-  const journalLines = modelOf(tx, "journalLine");
-  const accounts = await glAccounts.findMany({ where: { accountType: "MERCHANT_WALLET", ownerId: merchantId } });
-  if (!accounts.length) {
-    return new Decimal(0);
-  }
-  const ids = accounts.map((account: any) => String(account.id));
-  const lines = await journalLines.findMany({ where: { glAccountId: { in: ids } } });
+  const accounts = await glAccounts.findMany({
+    where: { accountType: "MERCHANT_WALLET", ownerId: merchantId },
+    orderBy: { id: "asc" },
+  });
   let balance = new Decimal(0);
-  for (const line of lines) {
-    const amount = toDecimal(line.amount);
-    balance = line.direction === "CREDIT" ? balance.plus(amount) : balance.minus(amount);
+  for (const account of accounts) {
+    balance = balance.plus(await lockWalletLedgerBalance(tx, String(account.id)));
   }
   return balance;
 };
@@ -629,7 +631,6 @@ export async function activateApprovedJoinRequest(
         accountType: "MERCHANT_WALLET",
         ownerId: merchantId,
         currency: "LYD",
-        checkpointBalance: 0,
       },
     });
     await wallets.create({
@@ -1078,6 +1079,239 @@ export async function executeVelocityRuleDeactivation(
 }
 
 /**
+ * Unfreezes a wallet (FROZEN -> ACTIVE) after a checker approves it.
+ *
+ * Freezing is immediate and audited; only the loosening direction is a
+ * maker-checker change. The current state is re-validated here, never trusted
+ * from the moment the approval was requested.
+ */
+export async function executeWalletStatusChange(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    approvalId: string;
+    walletId: string;
+    payload: unknown;
+    checkerUserId: string;
+    checkerRole: string;
+  },
+): Promise<GovernanceExecutionResult> {
+  const wallets = modelOf(tx, "wallet");
+  const wallet = await wallets.findUnique({ where: { id: input.walletId } });
+  if (!wallet) {
+    throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist");
+  }
+  const payload = asRecord(input.payload);
+  const target = String(payload.toStatus ?? payload.status ?? "ACTIVE").toUpperCase();
+  if (target !== "ACTIVE") {
+    throw new ApiError(400, "WALLET_APPROVAL_PAYLOAD_INVALID", "Only a reactivation is executed through an approval");
+  }
+  if (wallet.status === "ACTIVE") {
+    return { status: "EXECUTED", entityId: wallet.id, idempotent: true };
+  }
+  if (wallet.status !== "FROZEN") {
+    throw new ApiError(409, "WALLET_STATE_CHANGED", "The wallet is no longer frozen", {
+      currentStatus: wallet.status,
+    });
+  }
+  const updated = await wallets.update({ where: { id: wallet.id }, data: { status: "ACTIVE" } });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "WALLET_UNFROZEN",
+    entityType: "WALLET",
+    entityId: updated.id,
+    beforeJson: { status: wallet.status },
+    afterJson: { status: "ACTIVE", reason: payload.reason ?? null },
+    approvalRequestId: input.approvalId,
+  });
+  return { status: "EXECUTED", entityId: updated.id, idempotent: false };
+}
+
+/**
+ * Reactivates a POS terminal (INACTIVE/BLOCKED -> ACTIVE) after approval.
+ */
+export async function executePosTerminalStatusChange(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    approvalId: string;
+    terminalId: string;
+    payload: unknown;
+    checkerUserId: string;
+    checkerRole: string;
+  },
+): Promise<GovernanceExecutionResult> {
+  const terminals = modelOf(tx, "posTerminal");
+  const terminal = await terminals.findUnique({ where: { id: input.terminalId } });
+  if (!terminal) {
+    throw new ApiError(404, "POS_TERMINAL_NOT_FOUND", "The POS terminal does not exist");
+  }
+  const payload = asRecord(input.payload);
+  const target = String(payload.toStatus ?? payload.status ?? "ACTIVE").toUpperCase();
+  if (target !== "ACTIVE") {
+    throw new ApiError(400, "POS_TERMINAL_APPROVAL_PAYLOAD_INVALID", "Only a reactivation is executed through an approval");
+  }
+  if (terminal.status === "ACTIVE") {
+    return { status: "EXECUTED", entityId: terminal.id, idempotent: true };
+  }
+  if (payload.fromStatus !== undefined && payload.fromStatus !== null && payload.fromStatus !== terminal.status) {
+    throw new ApiError(409, "POS_TERMINAL_STATE_CHANGED", "The POS terminal changed after the approval was requested", {
+      expected: payload.fromStatus,
+      currentStatus: terminal.status,
+    });
+  }
+  const updated = await terminals.update({ where: { id: terminal.id }, data: { status: "ACTIVE" } });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "POS_TERMINAL_STATUS_CHANGED",
+    entityType: "POS_TERMINAL",
+    entityId: updated.id,
+    beforeJson: { status: terminal.status },
+    afterJson: { status: "ACTIVE", reason: payload.reason ?? null },
+    approvalRequestId: input.approvalId,
+  });
+  return { status: "EXECUTED", entityId: updated.id, idempotent: false };
+}
+
+const stringListOrNull = (value: unknown): string[] | null => {
+  if (value === null) return null;
+  if (!Array.isArray(value)) {
+    throw new ApiError(400, "APPLICATION_APPROVAL_PAYLOAD_INVALID", "A list of strings was expected");
+  }
+  return [...new Set(value.map((entry) => String(entry)))];
+};
+
+/**
+ * Applies an application change that loosens what the application may accept:
+ * SUSPENDED -> ACTIVE, a new rail whitelist, a new redirect allowlist or a new
+ * settlement wallet. Everything is re-validated against the current rows.
+ */
+export async function executeApplicationChange(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: {
+    approvalId: string;
+    applicationId: string;
+    payload: unknown;
+    checkerUserId: string;
+    checkerRole: string;
+  },
+): Promise<GovernanceExecutionResult> {
+  const applications = modelOf(tx, "application");
+  const application = await applications.findUnique({ where: { id: input.applicationId } });
+  if (!application) {
+    throw new ApiError(404, "APPLICATION_NOT_FOUND", "The application does not exist");
+  }
+  const payload = asRecord(input.payload);
+  const data: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  const before: Record<string, unknown> = {};
+
+  if (payload.baseUpdatedAt !== undefined && payload.baseUpdatedAt !== null) {
+    const current = application.updatedAt instanceof Date ? application.updatedAt.toISOString() : null;
+    if (current !== null && current !== payload.baseUpdatedAt) {
+      throw new ApiError(409, "APPLICATION_STATE_CHANGED", "The application changed after the approval was requested", {
+        expected: payload.baseUpdatedAt,
+        current,
+      });
+    }
+  }
+  if (payload.fromStatus !== undefined && payload.fromStatus !== null && payload.fromStatus !== application.status) {
+    throw new ApiError(409, "APPLICATION_STATE_CHANGED", "The application status changed after the approval was requested", {
+      expected: payload.fromStatus,
+      currentStatus: application.status,
+    });
+  }
+
+  if (payload.status !== undefined && payload.status !== null) {
+    const target = String(payload.status).toUpperCase();
+    if (target !== "ACTIVE") {
+      throw new ApiError(400, "APPLICATION_APPROVAL_PAYLOAD_INVALID", "Only a reactivation is executed through an approval");
+    }
+    if (application.status !== "ACTIVE") {
+      if (application.status !== "SUSPENDED") {
+        throw new ApiError(409, "APPLICATION_STATE_CHANGED", "Only a suspended application can be reactivated", {
+          currentStatus: application.status,
+        });
+      }
+      data.status = "ACTIVE";
+      before.status = application.status;
+      after.status = "ACTIVE";
+    }
+  }
+  if (payload.assignedWalletId !== undefined && payload.assignedWalletId !== null) {
+    const wallet = await modelOf(tx, "wallet").findUnique({ where: { id: String(payload.assignedWalletId) } });
+    if (!wallet || wallet.merchantId !== application.merchantId) {
+      throw new ApiError(404, "WALLET_NOT_FOUND", "The wallet does not exist for this merchant");
+    }
+    const currentWallet = await modelOf(tx, "wallet").findUnique({ where: { id: application.assignedWalletId } });
+    if (currentWallet && currentWallet.currency !== wallet.currency) {
+      throw new ApiError(409, "WALLET_CURRENCY_MISMATCH", "The new wallet must use the same currency as the current one");
+    }
+    if (wallet.status !== "ACTIVE") {
+      throw new ApiError(409, "WALLET_NOT_ACTIVE", "The application can only be assigned to an active wallet");
+    }
+    if (wallet.id !== application.assignedWalletId) {
+      data.assignedWalletId = wallet.id;
+      before.assignedWalletId = application.assignedWalletId;
+      after.assignedWalletId = wallet.id;
+    }
+  }
+  if (Object.hasOwn(payload, "railWhitelist")) {
+    const rails = stringListOrNull(payload.railWhitelist);
+    if (rails !== null && rails.length > 0) {
+      const known = await modelOf(tx, "rail").findMany({ where: { code: { in: rails } }, select: { code: true } });
+      const knownCodes = new Set(known.map((rail: { code: string }) => rail.code));
+      const unknown = rails.filter((code) => !knownCodes.has(code));
+      if (unknown.length > 0) {
+        throw new ApiError(409, "RAIL_NOT_FOUND", "The rail whitelist contains an unknown rail", { unknown });
+      }
+    }
+    data.railWhitelist = rails === null ? Prisma.DbNull : rails;
+    before.railWhitelist = application.railWhitelist ?? null;
+    after.railWhitelist = rails;
+  }
+  if (Object.hasOwn(payload, "redirectDomainAllowlist")) {
+    const domains = stringListOrNull(payload.redirectDomainAllowlist) ?? [];
+    data.redirectDomainAllowlist = domains;
+    before.redirectDomainAllowlist = application.redirectDomainAllowlist ?? null;
+    after.redirectDomainAllowlist = domains;
+  }
+  for (const field of ["name", "businessUseDescription"] as const) {
+    if (typeof payload[field] === "string" && payload[field] !== application[field]) {
+      data[field] = payload[field];
+      before[field] = application[field] ?? null;
+      after[field] = payload[field];
+    }
+  }
+  if (typeof payload.expectedMonthlyVolume === "string") {
+    data.expectedMonthlyVolume = new Decimal(payload.expectedMonthlyVolume).toFixed(4);
+    before.expectedMonthlyVolume = application.expectedMonthlyVolume === undefined
+      ? null
+      : new Decimal(String(application.expectedMonthlyVolume)).toFixed(4);
+    after.expectedMonthlyVolume = data.expectedMonthlyVolume;
+  }
+
+  if (Object.keys(data).length === 0) {
+    return { status: "EXECUTED", entityId: application.id, idempotent: true };
+  }
+  const updated = await applications.update({ where: { id: application.id }, data });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: data.status === "ACTIVE" ? "APPLICATION_REACTIVATED" : "APPLICATION_UPDATED",
+    entityType: "APPLICATION",
+    entityId: updated.id,
+    beforeJson: before,
+    afterJson: { ...after, reason: payload.reason ?? null },
+    approvalRequestId: input.approvalId,
+  });
+  return { status: "EXECUTED", entityId: updated.id, idempotent: false };
+}
+
+/**
  * Applies a pending authority/role change of a user (design §7.1).
  */
 export async function executeUserAuthorityChange(
@@ -1487,6 +1721,10 @@ const finalizeAmlAttempt = async (
     where: { id: String(attempt.id), terminalAt: null },
     data: {
       status: input.status,
+      // The AML hold substatus is cleared: the case owns the hold only until it
+      // is resolved. Leaving `AML_HOLD` behind would make a later late-success
+      // recovery divert a voided attempt back into the escrow branch.
+      substatus: input.action === "RELEASE" ? "AML_RELEASED" : "AML_VOID",
       terminalAt: new Date(),
       nextCheckAt: null,
       ...(input.ledgerEntryId ? { ledgerEntryId: input.ledgerEntryId } : {}),
@@ -2616,8 +2854,19 @@ export async function executeCashout(
     throw conflict();
   }
 
-  // Available-balance check under the wallet shard lock.
-  const balance = await lockWalletLedgerBalance(tx, String(wallet.glAccountId));
+  // The journal this cash-out will post. Its shard rows are locked in the global order BEFORE the balance is read
+  // (see `lockWalletLedgerBalance`): locking the wallet first and the treasury shard later, while a payment
+  // confirmation locks them the other way round, is a deadlock.
+  const journal = buildLedgerTemplate("CASHOUT", { amount });
+  // The journal reference is the cash-out id: a stable idempotency key, so the ledger itself
+  // refuses a second payout of the same request.
+  journal.refId = String(cashout.id);
+  const journalContext = { accounts: { MERCHANT_WALLET: String(wallet.glAccountId) } };
+
+  // Available-balance check under the wallet debit lock and the posting's shard locks.
+  const balance = await lockWalletLedgerBalance(tx, String(wallet.glAccountId), {
+    lockShards: () => ctx.ledgerPoster.lockShardsFor(journal, journalContext, tx as never),
+  });
   if (balance.lt(amount)) {
     throw new ApiError(409, "CASHOUT_INSUFFICIENT_BALANCE", "The wallet balance does not cover this cash-out", {
       cashoutId: String(cashout.id),
@@ -2637,15 +2886,7 @@ export async function executeCashout(
     },
   });
 
-  const journal = buildLedgerTemplate("CASHOUT", { amount });
-  // The journal reference is the cash-out id: a stable idempotency key, so the ledger itself
-  // refuses a second payout of the same request.
-  journal.refId = String(cashout.id);
-  const posted = await ctx.ledgerPoster.post(
-    journal,
-    { accounts: { MERCHANT_WALLET: String(wallet.glAccountId) } },
-    tx as never,
-  );
+  const posted = await ctx.ledgerPoster.post(journal, journalContext, tx as never);
 
   await modelOf(tx, "adjustment").update({
     where: { id: String(adjustment.id) },
@@ -3397,6 +3638,48 @@ export async function executeApprovalSubject(
     return executeVelocityRuleDeactivation(ctx, tx, {
       approvalId: input.approval.id,
       ruleId: input.approval.subjectId,
+      payload: input.approval.payloadDiffJson,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "GL_SHARD_REPAIR") {
+    const payload = (input.approval.payloadDiffJson ?? {}) as Record<string, unknown>;
+    const result = await applyShardRepair(tx as never, {
+      glAccountId: String(payload.glAccountId ?? ""),
+      shardId: Number(payload.shardId),
+      mode: "APPROVED",
+      allowedKinds: ["RECOMPUTE", "REBASELINE"],
+      // The approval is bound to the plan the maker previewed: a shard that moved since is refused, never repaired blindly.
+      expectedPlanHash: String(payload.planHash ?? ""),
+      reason: String(payload.reason ?? "approved shard repair").slice(0, 1000),
+      actor: { actorId: input.checkerUserId, role: input.checkerRole },
+      approvalRequestId: input.approval.id,
+    });
+    return { status: "EXECUTED", entityId: input.approval.subjectId, idempotent: !result.repaired };
+  }
+  if (subjectType === "WALLET") {
+    return executeWalletStatusChange(ctx, tx, {
+      approvalId: input.approval.id,
+      walletId: input.approval.subjectId,
+      payload: input.approval.payloadDiffJson,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "APPLICATION") {
+    return executeApplicationChange(ctx, tx, {
+      approvalId: input.approval.id,
+      applicationId: input.approval.subjectId,
+      payload: input.approval.payloadDiffJson,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "POS_TERMINAL") {
+    return executePosTerminalStatusChange(ctx, tx, {
+      approvalId: input.approval.id,
+      terminalId: input.approval.subjectId,
       payload: input.approval.payloadDiffJson,
       checkerUserId: input.checkerUserId,
       checkerRole: input.checkerRole,

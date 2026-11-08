@@ -1,6 +1,6 @@
 import express from "express";
 import { z } from "zod";
-import { zBaseVersion, zIdentifier, zJsonPatch, zPaginationQuery, zReason } from "../../lib/zReady";
+import { zBaseVersion, zIdentifier, zJsonPatch, zPaginationQuery, zReason, zUuid } from "../../lib/zReady";
 import {
   toCoreMerchantClose,
   toCoreMerchantDescriptive,
@@ -10,6 +10,7 @@ import {
   toCoreMerchantWithdraw,
 } from "../contract";
 import { coreForward } from "../forward";
+import { encode, uuidParamsSchema } from "./mutationSchemas";
 
 const router = express.Router();
 
@@ -301,6 +302,111 @@ router.get(
     path: (context) =>
       `/internal/admin/merchants/${encodeURIComponent(context.params.id ?? "")}/detail-changes`,
     paramsSchema: idParamsSchema,
+  }),
+);
+
+/**
+ * Beneficial owners and KYB revalidation requests (core: `kyb:write` any-of `merchant:write`).
+ * The owner body mirrors the join-request owner handlers; the national id is write-only.
+ */
+const ownerFields = {
+  fullName: z.string().trim().min(2).max(160),
+  fullNameEn: z.string().trim().min(2).max(160).optional(),
+  identityType: z.enum(["NATIONAL_ID", "PASSPORT"]),
+  identityNumber: z.string().trim().min(4).max(32),
+  nationality: z.string().length(2).optional(),
+  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  ownershipPercent: z.string().regex(/^\d{1,3}(?:\.\d{1,2})?$/).optional(),
+  role: z.enum(["OWNER", "DIRECTOR", "SIGNATORY", "CONTROLLER"]).optional(),
+  pepDeclared: z.boolean().optional(),
+  position: z.string().trim().min(2).max(80).optional(),
+};
+
+export const beneficialOwnerCreateSchema = z.object(ownerFields).strict();
+
+export const beneficialOwnerPatchSchema = z
+  .object(ownerFields)
+  .partial()
+  .strict()
+  .refine((value) => Object.values(value).some((field) => field !== undefined), {
+    message: "at least one field is required",
+    path: ["fullName"],
+  });
+
+export const KYB_DOCUMENT_TYPES = [
+  "COMMERCIAL_REGISTRY",
+  "TAX_CERTIFICATE",
+  "ARTICLES_OF_ASSOCIATION",
+  "OWNER_ID",
+  "SIGNATORY_ID",
+  "PROOF_OF_ADDRESS",
+  "BANK_LETTER",
+  "SECTOR_LICENSE",
+  "OTHER",
+] as const;
+
+export const merchantRevalidationSchema = z
+  .object({
+    docType: z.enum(KYB_DOCUMENT_TYPES),
+    dueAt: z.string().trim().min(10).max(64),
+    message: z.string().trim().min(3).max(1000),
+    reasonCode: z.string().trim().min(1).max(64).optional(),
+  })
+  .strict();
+
+const ownerParamsSchema = z.object({ id: zUuid, ownerId: zUuid }).strict();
+
+router.get(
+  "/:id/beneficial-owners",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/merchants/${encode(context.params.id)}/beneficial-owners`,
+    paramsSchema: uuidParamsSchema,
+  }),
+);
+
+router.post(
+  "/:id/beneficial-owners",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/merchants/${encode(context.params.id)}/beneficial-owners`,
+    paramsSchema: uuidParamsSchema,
+    schema: beneficialOwnerCreateSchema,
+    relayStatus: true,
+  }),
+);
+
+router.patch(
+  "/:id/beneficial-owners/:ownerId",
+  coreForward({
+    method: "PATCH",
+    path: (context) =>
+      `/internal/admin/merchants/${encode(context.params.id)}/beneficial-owners/${encode(context.params.ownerId)}`,
+    paramsSchema: ownerParamsSchema,
+    schema: beneficialOwnerPatchSchema,
+    relayStatus: true,
+  }),
+);
+
+router.delete(
+  "/:id/beneficial-owners/:ownerId",
+  coreForward({
+    method: "DELETE",
+    path: (context) =>
+      `/internal/admin/merchants/${encode(context.params.id)}/beneficial-owners/${encode(context.params.ownerId)}`,
+    paramsSchema: ownerParamsSchema,
+    relayStatus: true,
+  }),
+);
+
+router.post(
+  "/:id/revalidations",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/merchants/${encode(context.params.id)}/revalidations`,
+    paramsSchema: uuidParamsSchema,
+    schema: merchantRevalidationSchema,
+    relayStatus: true,
   }),
 );
 

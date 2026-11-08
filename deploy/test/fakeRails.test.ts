@@ -97,7 +97,9 @@ describe("Arch Linux and localhost support", () => {
   });
 
   test("uses pacman on Arch and apt-get on Debian", () => {
-    expect(bootstrapPackagesCommand("arch")).toContain("pacman -Sy");
+    // `pacman -Sy <pkg>` is a partial upgrade (unsupported); only `-S --needed` is used.
+    expect(bootstrapPackagesCommand("arch")).toContain("pacman -S --noconfirm --needed");
+    expect(bootstrapPackagesCommand("arch")).not.toContain("pacman -Sy");
     expect(bootstrapPackagesCommand("arch")).not.toContain("apt-get");
     expect(bootstrapPackagesCommand("debian")).toContain("apt-get");
     expect(installPackageCommand("arch", "ufw")).toContain("pacman -S");

@@ -163,7 +163,7 @@ export class BackupControlClient {
     method: string,
     path: string,
     body?: unknown,
-    options: { timeoutMs?: number } = {},
+    options: { timeoutMs?: number; idempotencyKey?: string } = {},
   ): Promise<T> {
     if (!this.baseUrl) {
       throw new BackupDaemonNotConfiguredError();
@@ -183,6 +183,7 @@ export class BackupControlClient {
           agent: this.agent,
           headers: {
             accept: "application/json",
+            ...(options.idempotencyKey ? { "idempotency-key": options.idempotencyKey } : {}),
             ...(payload
               ? {
                   "content-type": "application/json",
@@ -263,20 +264,32 @@ export class BackupControlClient {
     target: BackupTarget,
     kind: BackupKind,
     requestedBy?: string,
-  ): Promise<{ backupJobId: string; acceptedAt: string }> {
-    return this.call("POST", "/v1/backups/trigger", {
-      target,
-      kind,
-      ...(requestedBy ? { requestedBy } : {}),
-    });
+    idempotencyKey?: string,
+  ): Promise<{ backupJobId: string; acceptedAt: string; deduplicated?: boolean }> {
+    return this.call(
+      "POST",
+      "/v1/backups/trigger",
+      {
+        target,
+        kind,
+        ...(requestedBy ? { requestedBy } : {}),
+      },
+      { idempotencyKey },
+    );
   }
 
   public runDrill(
     requestedBy?: string,
-  ): Promise<{ drillId: string; acceptedAt: string }> {
-    return this.call("POST", "/v1/drills/run", {
-      ...(requestedBy ? { requestedBy } : {}),
-    });
+    idempotencyKey?: string,
+  ): Promise<{ drillId: string; acceptedAt: string; deduplicated?: boolean }> {
+    return this.call(
+      "POST",
+      "/v1/drills/run",
+      {
+        ...(requestedBy ? { requestedBy } : {}),
+      },
+      { idempotencyKey },
+    );
   }
 
   public updatePolicy(policy: BackupPolicy): Promise<{ policy: BackupPolicy }> {

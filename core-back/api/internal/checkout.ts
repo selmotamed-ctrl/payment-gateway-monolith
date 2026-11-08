@@ -6,6 +6,7 @@ import { z } from "zod";
 import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
 import { ApiError, parseOrThrow } from "../../lib/error";
+import { assertCommerceActive } from "../../lib/commerceStatus";
 import { VisibleRailsResolver, evaluateRouteDailyCap, type RailRecord, type RailRouteRecord, type CredentialSetRecord, type CommissionProfileRecord } from "../../engine/flow/VisibleRailsResolver";
 import { loadRailCatalog, asStringArray } from "../../engine/flow/VisibleRailsCatalog";
 import { decimal } from "../../engine/ledger/LedgerPoster";
@@ -97,6 +98,8 @@ interface LoadedLink {
   merchantTradeName: string;
   merchantLegalName: string;
   merchantStatus: string;
+  applicationStatus: string;
+  walletStatus: string;
   merchantRiskTier: string;
   merchantContactPhone: string | null;
   merchantContactEmail: string | null;
@@ -108,9 +111,11 @@ const loadLink = async (linkKey: string): Promise<LoadedLink | null> => {
     // Only the columns the checkout uses (the merchant row carries payout
     // bank JSON and other wide columns that the payer flow never needs).
     include: {
+      wallet: { select: { status: true } },
       application: {
         select: {
           merchantId: true,
+          status: true,
           railWhitelist: true,
           merchant: {
             select: {
@@ -150,6 +155,8 @@ const loadLink = async (linkKey: string): Promise<LoadedLink | null> => {
     merchantTradeName: link.application.merchant.tradeName,
     merchantLegalName: link.application.merchant.legalName,
     merchantStatus: link.application.merchant.status,
+    applicationStatus: link.application.status,
+    walletStatus: link.wallet.status,
     merchantRiskTier: link.application.merchant.riskTier,
     merchantContactPhone: link.application.merchant.contactPhone,
     merchantContactEmail: link.application.merchant.contactEmail,
@@ -225,7 +232,27 @@ const roundingModeOf = (mode: unknown): Decimal.Rounding => {
   }
 };
 
-const commissionForProfile = (
+/**
+ * The ordered tier list of a commission profile. Profiles are stored as an array,
+ * but the admin edge used to persist the tiers as an index-keyed object
+ * (`{"0": {...}, "1": {...}}`), which the calculator silently ignored (the fee
+ * collapsed to the minimum). Both shapes are accepted; object keys are ordered
+ * numerically so a legacy row prices exactly as the operator entered it.
+ */
+export const commissionTiers = (tiersJson: unknown): Array<Record<string, unknown>> => {
+  const isTier = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  if (Array.isArray(tiersJson)) return tiersJson.filter(isTier);
+  if (isTier(tiersJson)) {
+    return Object.entries(tiersJson)
+      .filter(([key, value]) => /^\d+$/.test(key) && isTier(value))
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([, value]) => value as Record<string, unknown>);
+  }
+  return [];
+};
+
+export const commissionForProfile = (
   profile: {
     calcType: string;
     flatFee: Prisma.Decimal;
@@ -244,7 +271,7 @@ const commissionForProfile = (
     value = value.plus(decimal(amount).mul(decimal(profile.percentageRate)));
   }
   if (profile.calcType === "TIERED") {
-    const tiers = Array.isArray(profile.tiersJson) ? (profile.tiersJson as Array<Record<string, unknown>>) : [];
+    const tiers = commissionTiers(profile.tiersJson);
     for (const tier of tiers) {
       const upTo = tier.upTo ?? tier.up_to;
       if (upTo === undefined || decimal(amount).lte(decimal(String(upTo)))) {
@@ -755,6 +782,12 @@ const ensureLinkUsable = (link: LoadedLink): void => {
   if (link.expiresAt && link.expiresAt.getTime() <= Date.now()) {
     throw new ApiError(409, "PAYMENT_LINK_EXPIRED", "The payment link has expired");
   }
+  // A suspended application or a frozen wallet takes in no payment.
+  assertCommerceActive({
+    applicationStatus: link.applicationStatus,
+    walletStatus: link.walletStatus,
+    env: resolveEnvironment(link.merchantStatus),
+  });
 };
 
 const NON_CANCELLABLE_STATUSES = [
@@ -835,7 +868,6 @@ export const claimAttemptForConfirm = async (
           AND terminal_at IS NULL
           AND status IN (${statusPlaceholders})
           AND NOT (status = 'UNKNOWN' AND point_of_no_return = true)
-          AND (substatus IS NULL OR substatus <> '${AML_HOLD_SUBSTATUS}')
           AND (
             (customer_fields_masked #>> '{${CONFIRM_IDEMPOTENCY_FIELD}}') IS NULL
             OR (customer_fields_masked #>> '{${CONFIRM_IDEMPOTENCY_FIELD}}') <> ${keyPlaceholder}
@@ -1245,19 +1277,14 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
     return;
   }
 
-  if (decision.outcome === "HOLD") {
-    // The money is escrowed and the attempt waits for the resolution of the
-    // AML case. It is never settled from here.
-    response.status(202).json({
-      attemptId: decision.attemptId,
-      reference: decision.reference,
-      status: "CREATED",
-      code: decision.customerMessageCode,
-      hold: true,
-      clientAction: null,
-    });
-    return;
-  }
+  // A held payment is NOT stopped before the gateway: the hold is a decision
+  // about where the captured money goes (design §11.3 entry 7, "AML Threshold
+  // Hold on Confirmation"). The attempt therefore continues through the normal
+  // rail flow; only the final settlement is diverted to `AML_HOLD` when a
+  // verified capture arrives (DynamicRailEngine.finalizeSuccess). Stopping the
+  // flow here would mean no gateway capture ever happens and the hold could
+  // never be released.
+  const amlHeld = decision.outcome === "HOLD";
 
   const attemptId = decision.attemptId;
   if (!attemptId) {
@@ -1321,6 +1348,7 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
     attemptId: attempt.id,
     reference: attempt.reference,
     status: attemptRow?.status ?? engineResult.status,
+    ...(amlHeld ? { hold: true } : {}),
     clientAction,
   });
 });
@@ -1452,6 +1480,17 @@ route.post("/pay/:linkKey/logs/:attemptId/confirm", async (request: Request, res
   // The atomic claim still guarantees that only one caller runs SUBMIT.
   if (!["CREATED", "INITIATING", "AWAITING_CUSTOMER", "VERIFYING", "UNKNOWN", "AUTHORIZING"].includes(attempt.status)) {
     throw new ApiError(409, "ATTEMPT_NOT_CONFIRMABLE", "The attempt is not in a confirmable state");
+  }
+
+  // Continuing a payment (the SUBMIT phase) needs an active application and
+  // wallet too: a freeze that lands mid-flow stops the charge from being sent.
+  const confirmLink = await loadLink(linkKey);
+  if (confirmLink) {
+    assertCommerceActive({
+      applicationStatus: confirmLink.applicationStatus,
+      walletStatus: confirmLink.walletStatus,
+      env: resolveEnvironment(confirmLink.merchantStatus),
+    });
   }
 
   // The SUBMIT stack, the trusted success facts and the ledger posting are
@@ -1663,6 +1702,9 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
     }
   }
 
+  const pendingDedupeKey = createHash("sha256")
+    .update(`${channel.id}:pending:${randomUUID()}`, "utf8")
+    .digest("hex");
   const stored = await client.inboundEvent.create({
     data: {
       channelId: channel.id,
@@ -1674,10 +1716,39 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
       sourceIp,
       verified: false,
       verificationError: "VERIFICATION_PENDING",
-      dedupeKey: createHash("sha256").update(`${channel.id}:pending:${randomUUID()}`, "utf8").digest("hex"),
+      dedupeKey: pendingDedupeKey,
       receivedAt: new Date(),
     },
   });
+
+  // Claim the canonical dedupe key BEFORE the engine side effects. The unique
+  // index is the single-writer guard: only one delivery can settle this body.
+  // A forged copy that wins the claim releases it again when verification
+  // fails, so the genuine retry can still claim it.
+  let ownsCanonicalKey = false;
+  try {
+    await client.inboundEvent.update({
+      where: { id: stored.id },
+      data: { dedupeKey },
+    });
+    ownsCanonicalKey = true;
+  } catch (error) {
+    if ((error as { code?: string })?.code !== "P2002") {
+      throw error;
+    }
+    const owner = await client.inboundEvent.findFirst({
+      where: { channelId: channel.id, dedupeKey, verified: true },
+    });
+    if (owner) {
+      response.status(channel.ackStatus).send(
+        channel.ackBodyTemplate ? renderTemplate(channel.ackBodyTemplate, { dedupeKey }) : "",
+      );
+      return;
+    }
+    // A concurrent delivery owns the pending claim. Continue: finalization is
+    // claimed atomically per attempt, and the final update below marks this
+    // row DUPLICATE if the other delivery wins.
+  }
 
   const correlation = extractCorrelation(rawBody, channel.correlationSelector);
   const attempt = correlation
@@ -1724,6 +1795,15 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
     processingResult = "REJECTED";
   }
 
+  if (!verified && ownsCanonicalKey) {
+    // Nothing was trusted: release the canonical key so the genuine delivery
+    // (or a corrected retry) can claim it. Keep a unique pending key.
+    await client.inboundEvent.update({
+      where: { id: stored.id },
+      data: { dedupeKey: pendingDedupeKey },
+    });
+  }
+
   const finalData = {
     verified,
     verificationError,
@@ -1734,7 +1814,7 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
   try {
     await client.inboundEvent.update({
       where: { id: stored.id },
-      data: verified ? { ...finalData, dedupeKey } : finalData,
+      data: verified && !ownsCanonicalKey ? { ...finalData, dedupeKey } : finalData,
     });
   } catch (error) {
     if (verified && (error as { code?: string })?.code === "P2002") {

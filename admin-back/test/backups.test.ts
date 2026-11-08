@@ -99,6 +99,10 @@ const startBackupsTestCore = async (pki: TestPki): Promise<BackupsTestCore> => {
         json(200, overviewPayload);
         return;
       }
+      if (path === "/internal/admin/system/backups/catalog" && request.method === "GET") {
+        json(200, { runs: [], drills: [] });
+        return;
+      }
       if (path === "/internal/admin/system/backups/trigger" && request.method === "POST") {
         json(202, { backupJobId: "bkp_job_1", acceptedAt: "2026-11-03T00:00:01.000Z" });
         return;
@@ -178,6 +182,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve) => edgeServer.close(() => resolve()));
   await core.close();
+  delete process.env.ADMIN_AUTHORITY_HINTS;
+  delete process.env.BACKUP_JOB_RATE_LIMIT_MAX;
 });
 
 const call = (
@@ -215,6 +221,36 @@ describe("system backups route surface", () => {
     expect(forwarded?.headers.authorization).toBe(`Bearer ${operator}`);
     const payload = (await response.json()) as { daemonReachable?: boolean };
     expect(payload.daemonReachable).toBe(true);
+  });
+
+  test("forwards the local catalog read (available while the daemon is in maintenance)", async () => {
+    const response = await call("GET", "/api/v1/admin/system/backups/catalog", { token: securityReader });
+    expect(response.status).toBe(200);
+    const forwarded = core.requests.at(-1);
+    expect(forwarded?.method).toBe("GET");
+    expect(forwarded?.url).toBe("/internal/admin/system/backups/catalog");
+    expect(forwarded?.headers.authorization).toBe(`Bearer ${securityReader}`);
+  });
+
+  test("the catalog read needs a bearer token and security:read or gateway:read", async () => {
+    expect((await call("GET", "/api/v1/admin/system/backups/catalog")).status).toBe(401);
+    const before = core.requests.length;
+    const denied = await call("GET", "/api/v1/admin/system/backups/catalog", {
+      token: signSession({ sub: "u-aml", role: "COMPLIANCE", authorities: ["aml:read"] }),
+    });
+    expect(denied.status).toBe(403);
+    expect(core.requests.length).toBe(before);
+  });
+
+  test("relays a well-formed Idempotency-Key to core on trigger and drill", async () => {
+    await call("POST", "/api/v1/admin/system/backups/trigger", {
+      token: securityWriter,
+      body: { target: "all", kind: "full" },
+      idempotencyKey: "relay-key-0001",
+    });
+    expect(core.requests.at(-1)?.headers["idempotency-key"]).toBe("relay-key-0001");
+    await call("POST", "/api/v1/admin/system/backups/drill", { token: securityWriter, body: {}, idempotencyKey: "relay-key-0002" });
+    expect(core.requests.at(-1)?.headers["idempotency-key"]).toBe("relay-key-0002");
   });
 
   test("allows the overview for a security read authority", async () => {

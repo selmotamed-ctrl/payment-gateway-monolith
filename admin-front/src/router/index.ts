@@ -61,6 +61,27 @@ const router = createRouter({
                     meta: { parentName: "Merchants" },
                 },
                 {
+                    path: "wallets",
+                    name: "Wallets",
+                    component: () => import("@/pages/wallets/index"),
+                },
+                {
+                    path: "wallets/:id",
+                    name: "WalletDetail",
+                    component: () => import("@/pages/wallets/[id]"),
+                    meta: { parentName: "Wallets" },
+                },
+                {
+                    path: "applications",
+                    name: "Applications",
+                    component: () => import("@/pages/applications/index"),
+                },
+                {
+                    path: "transactions",
+                    name: "Transactions",
+                    component: () => import("@/pages/transactions/index"),
+                },
+                {
                     path: "approvals",
                     name: "Approvals",
                     component: () => import("@/pages/approvals/index"),
@@ -154,9 +175,19 @@ const router = createRouter({
                     component: () => import("@/pages/finance/liquidity/index"),
                 },
                 {
+                    path: "finance/journal-entries",
+                    name: "JournalEntries",
+                    component: () => import("@/pages/finance/journal-entries/index"),
+                },
+                {
                     path: "finance/invariant",
                     name: "Invariant",
                     component: () => import("@/pages/finance/invariant/index"),
+                },
+                {
+                    path: "credential-sets",
+                    name: "CredentialSets",
+                    component: () => import("@/pages/credential-sets/index"),
                 },
                 {
                     path: "gateways",
@@ -296,6 +327,11 @@ const router = createRouter({
                     path: "system/backups",
                     name: "SystemBackups",
                     component: () => import("@/pages/system/backups/index"),
+                },
+                {
+                    path: "system/jobs-outbox",
+                    name: "JobsOutbox",
+                    component: () => import("@/pages/system/jobs-outbox/index"),
                 },
             ],
             meta: {

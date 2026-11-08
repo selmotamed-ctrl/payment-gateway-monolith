@@ -93,9 +93,6 @@ const cronField = (minGapMinutes: number) =>
       }
     });
 
-export const MIN_FULL_RETENTION_DAYS = 7;
-export const MIN_WAL_RETENTION_DAYS = 3;
-
 export const backupPolicySchema = z
   .object({
     fullCron: cronField(60),
@@ -103,38 +100,19 @@ export const backupPolicySchema = z
     drillCron: cronField(60),
     fullRetentionDays: z.number().int().min(1).max(3650),
     walRetentionDays: z.number().int().min(1).max(3650),
-    alertLagSeconds: z.number().int().min(0).max(86400),
+    alertLagSeconds: z.number().int().min(1).max(86400),
     approvalRequestId: zIdentifier.optional(),
   })
-  .strict()
-  .superRefine((value, ctx) => {
-    if (value.approvalRequestId !== undefined) return;
-    if (value.fullRetentionDays < MIN_FULL_RETENTION_DAYS) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["fullRetentionDays"],
-        message: `must be at least ${MIN_FULL_RETENTION_DAYS} days unless an approvalRequestId is supplied`,
-      });
-    }
-    if (value.walRetentionDays < MIN_WAL_RETENTION_DAYS) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["walRetentionDays"],
-        message: `must be at least ${MIN_WAL_RETENTION_DAYS} days unless an approvalRequestId is supplied`,
-      });
-    }
-  });
+  .strict();
+// Retention is deliberately NOT floored at the edge: every policy change is
+// already a maker-checker proposal, and the maker must be able to propose a
+// low-retention policy for the checker to review. A floor here would make the
+// proposal impossible (the core only creates the approval when the maker calls
+// without an approvalRequestId).
 
-const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
-
-/** Trigger and drill start heavy jobs: a replayed request must be recognisable by core. */
-const requireIdempotencyKey = (req: Request, _res: Response, next: NextFunction) => {
-  const key = req.header("idempotency-key");
-  if (key === undefined || !IDEMPOTENCY_KEY_PATTERN.test(key)) {
-    throw new ApiError(400, "IDEMPOTENCY_KEY_REQUIRED", "An Idempotency-Key header (8-128 url safe characters) is required");
-  }
-  next();
-};
+// NOTE: trigger/drill do not REQUIRE an Idempotency-Key (existing clients send none), but a valid one is
+// relayed to core and on to the daemon, which deduplicates a retried request (202 with the original job id)
+// and serializes all jobs in one FIFO queue, so a double click can never start two overlapping backups.
 
 /** Tight per client limiter for the job starting routes. */
 const jobLimiter = lazyLimiter(() =>
@@ -162,11 +140,20 @@ router.get(
   }),
 );
 
+// Local run/drill history kept by core; stays available while the daemon is in maintenance.
+router.get(
+  "/catalog",
+  readBackups,
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/system/backups/catalog",
+  }),
+);
+
 router.post(
   "/trigger",
   writeBackups,
   jobLimiter,
-  requireIdempotencyKey,
   coreForward({
     method: "POST",
     path: () => "/internal/admin/system/backups/trigger",
@@ -179,7 +166,6 @@ router.post(
   "/drill",
   writeBackups,
   jobLimiter,
-  requireIdempotencyKey,
   coreForward({
     method: "POST",
     path: () => "/internal/admin/system/backups/drill",

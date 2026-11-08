@@ -182,6 +182,16 @@ const isAcceptedAdminResponse = (
   ) {
     return true;
   }
+  // Less restrictive wallet / POS transitions and application edits are approval requests.
+  if (
+    method === "POST" &&
+    /^\/internal\/admin\/(wallets|pos-terminals)\/[^/]+\/status$/.test(path)
+  ) {
+    return body.status === "ACTIVE";
+  }
+  if (method === "PATCH" && /^\/internal\/admin\/applications\/[^/]+$/.test(path)) {
+    return !(body.status === "SUSPENDED" && Object.keys(body).length === 2);
+  }
   return false;
 };
 

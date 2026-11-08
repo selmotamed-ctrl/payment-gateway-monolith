@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn } from "vuetify/components";
+import { VAlert, VBtn, VProgressLinear } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -20,6 +20,7 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { DescriptionList } from "@/components/ui/DescriptionList";
+import { buildCapViews, type CapTone, type RouteCapRow } from "./routeCaps";
 type Liquidity = {
     currency?: string;
     treasuryBalance?: string;
@@ -33,6 +34,10 @@ type Liquidity = {
     holdsAndReserves?: { amlHold: string; chargebackReserve: string; suspense: string; oldestItemAgeDays: number; bySeverity: Record<string, number> };
     receivables?: { commissionReceivable: string; negativeBalances: string; ceiling: string };
 };
+
+type RouteCapsPayload = { currency?: string; timeZone?: string; businessDay?: { since: string; until: string }; routes?: RouteCapRow[] };
+
+const CAP_COLOR: Record<CapTone, string> = { success: "success", warning: "warning", danger: "error", neutral: "secondary" };
 
 const LiquidityPage = dc(() => {
     const { t } = useLocale();
@@ -54,7 +59,28 @@ const LiquidityPage = dc(() => {
         }
     };
 
+    // ---- live route daily-cap utilisation (separate call: a failure must not hide the snapshot)
+    const caps = ref<RouteCapsPayload | null>(null);
+    const capsError = ref<string | null>(null);
+    const loadCaps = async () => {
+        capsError.value = null;
+        try {
+            const response = await api.get(urlsMap.financeRouteCaps);
+            caps.value = (response.data?.data ?? response.data ?? {}) as RouteCapsPayload;
+        } catch (e) {
+            caps.value = null;
+            capsError.value = extractApiErrorMessage(e);
+        }
+    };
+    const capViews = computed(() => buildCapViews(caps.value?.routes ?? []));
+
+    const refreshAll = () => {
+        void load();
+        void loadCaps();
+    };
+
     void load();
+    void loadCaps();
 
     const exportSnapshot = async () => {
         if (exportLoading.value) return;
@@ -117,7 +143,7 @@ const LiquidityPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Updated")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
-                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSnapshot()}>{t("Export snapshot")}</VBtn>
                         </ThemedView>
                     )}
@@ -241,6 +267,68 @@ const LiquidityPage = dc(() => {
                                 )}
                             </SurfaceCard>
                         </ThemedView>
+
+                        <SurfaceCard
+                            title={t("Route daily-cap utilisation")}
+                            subtitle={
+                                caps.value?.timeZone
+                                    ? `${t("Business day")} · ${caps.value.timeZone}${capViews.value.exhaustedCount > 0 ? ` · ${capViews.value.exhaustedCount} ${t("exhausted")}` : ""}`
+                                    : t("Succeeded volume against each route's daily cap")
+                            }
+                            noPadding
+                        >
+                            {capsError.value ? (
+                                <StateView error={capsError.value} minHeight="120px" onRetry={() => void loadCaps()} />
+                            ) : capViews.value.capped.length === 0 ? (
+                                <EmptyState
+                                    title={t("No capped routes")}
+                                    description={caps.value ? `${t("No route has a daily cap configured.")} ${capViews.value.uncappedCount} ${t("uncapped routes.")}` : t("Loading route caps")}
+                                />
+                            ) : (
+                                <div class="pg-unified-table" style={{ overflowX: "auto" }}>
+                                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                        <thead>
+                                            <tr>
+                                                <th style={{ textAlign: "start" }}>{t("Rail route")}</th>
+                                                <th style={{ textAlign: "start", minWidth: "180px" }}>{t("Utilisation")}</th>
+                                                <th style={{ textAlign: "end" }}>{t("Processed")}</th>
+                                                <th style={{ textAlign: "end" }}>{t("Daily cap")}</th>
+                                                <th style={{ textAlign: "end" }}>{t("Remaining")}</th>
+                                                <th style={{ textAlign: "start" }}>{t("Status")}</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {capViews.value.capped.map((view) => (
+                                                <tr key={view.routeId}>
+                                                    <td>
+                                                        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                            <MonoRef value={view.railCode} copyable={false} />
+                                                            <MonoRef value={view.gatewayId} truncate={12} />
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                                            <VProgressLinear modelValue={view.barPercent} height={8} rounded color={CAP_COLOR[view.tone]} aria-label={`${view.railCode} ${view.utilisationLabel}`} />
+                                                            <span class="pg-tabular" style={{ fontSize: "11.5px", color: "var(--pg-ink-secondary)" }}>{view.utilisationLabel}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ textAlign: "end" }}><MoneyDisplay amount={view.processed} currency={caps.value?.currency ?? currency()} size="sm" showCurrency={false} /></td>
+                                                    <td style={{ textAlign: "end" }}>{view.cap ? <MoneyDisplay amount={view.cap} currency={caps.value?.currency ?? currency()} size="sm" showCurrency={false} /> : "—"}</td>
+                                                    <td style={{ textAlign: "end" }}>{view.remaining ? <MoneyDisplay amount={view.remaining} currency={caps.value?.currency ?? currency()} size="sm" showCurrency={false} /> : "—"}</td>
+                                                    <td>
+                                                        {view.exhausted ? (
+                                                            <StatusBadge status="DAILY_CAP_EXCEEDED" label={t("Daily cap exceeded")} toneOverride="danger" />
+                                                        ) : (
+                                                            <StatusBadge status="WITHIN_CAP" label={view.tone === "warning" ? t("Near cap") : t("Within cap")} toneOverride={view.tone === "warning" ? "warning" : "success"} showDot={false} />
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </SurfaceCard>
                     </ThemedView>
                 )}
             </ThemedView>

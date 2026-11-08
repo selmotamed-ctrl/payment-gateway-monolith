@@ -1213,6 +1213,9 @@ export const toCoreRailUpdate = (body: unknown): JsonRecord => {
   if (displayOrder !== undefined) result.displayOrder = displayOrder;
   const capabilities = toCapabilitiesRecord(source.capabilities);
   if (Object.keys(capabilities).length > 0) result.capabilities = capabilities;
+  // null clears the logo, a uuid sets it (core verifies the asset exists)
+  if (source.logoAssetId === null) result.logoAssetId = null;
+  else if (typeof source.logoAssetId === "string" && source.logoAssetId.length > 0) result.logoAssetId = source.logoAssetId;
   return result;
 };
 
@@ -1323,6 +1326,9 @@ export const toCoreRouteUpdate = (body: unknown): JsonRecord => {
   if (Object.keys(costModel).length > 0) result.costModel = costModel;
   const scope = asRecord(source.scope);
   if (Object.keys(scope).length > 0) result.scope = scope;
+  // An empty policy / window list is meaningful (reset to default / no maintenance), so only absence skips them.
+  if (source.mismatchPolicy !== undefined && isRecord(source.mismatchPolicy)) result.mismatchPolicy = source.mismatchPolicy;
+  if (Array.isArray(source.maintenanceWindows)) result.maintenanceWindows = source.maintenanceWindows.filter(isRecord).slice(0, 50);
   for (const key of ["minAmount", "maxAmount", "dailyCapAmount"] as const) {
     const value = asString(source[key]);
     if (value && DECIMAL_PATTERN.test(value)) result[key] = value;
@@ -1556,13 +1562,21 @@ export const toCoreCommissionProfileCreate = (body: unknown): JsonRecord => {
   if (percentageRate && /^\d{1,6}(\.\d{1,6})?$/.test(percentageRate)) {
     result.percentageRate = percentageRate;
   }
+  // Core's fee calculator reads an ORDERED ARRAY of tiers; an index-keyed object is ignored.
   const tiers = asArray(source.tiers).filter(isRecord).slice(0, 20);
-  if (tiers.length > 0) {
-    result.tiersJson = tiers.reduce<JsonRecord>((accumulator, tier, index) => {
-      accumulator[String(index)] = tier;
-      return accumulator;
-    }, {});
-  }
+  if (tiers.length > 0) result.tiersJson = tiers;
+  const minFee = asString(source.minFee);
+  if (minFee && DECIMAL_PATTERN.test(minFee)) result.minFee = minFee;
+  const maxFee = asString(source.maxFee);
+  if (maxFee && DECIMAL_PATTERN.test(maxFee)) result.maxFee = maxFee;
+  const feeBearerDefault = asString(source.feeBearerDefault);
+  if (feeBearerDefault) result.feeBearerDefault = feeBearerDefault;
+  const roundingMode = asString(source.roundingMode);
+  if (roundingMode) result.roundingMode = roundingMode;
+  const merchantId = asString(source.merchantId);
+  if (merchantId) result.merchantId = merchantId;
+  const applicationId = asString(source.applicationId);
+  if (applicationId) result.applicationId = applicationId;
   return result;
 };
 

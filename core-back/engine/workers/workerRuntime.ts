@@ -92,6 +92,11 @@ export abstract class BaseWorker {
     return `worker:${this.name}`;
   }
 
+  /** Public read-only view used to build the expected singleton-key list. */
+  get clusterSingleton(): boolean {
+    return this.singleton;
+  }
+
   /** Runs one tick unless this node is not the leader of a singleton worker. */
   private async tickIfLeader(): Promise<void> {
     if (this.singleton && this.leaderElection) {

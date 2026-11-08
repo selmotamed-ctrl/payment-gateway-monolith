@@ -18,7 +18,7 @@ export const CORE_FAILURE_THRESHOLD = 3;
 const DEFAULT_MAX_ATTEMPTS = 2;
 const MAX_STREAM_SOCKETS = 128;
 /** Methods whose replay after the request reached the wire cannot duplicate an effect. */
-const REPLAY_SAFE_METHODS = new Set<CoreHttpMethod>(["GET", "HEAD", "OPTIONS"]);
+const REPLAY_SAFE_METHODS = new Set<CoreHttpMethod>(["GET", "HEAD", "OPTIONS", "PUT", "DELETE"]);
 const IDEMPOTENT_METHODS = new Set<CoreHttpMethod>([
   "GET",
   "HEAD",

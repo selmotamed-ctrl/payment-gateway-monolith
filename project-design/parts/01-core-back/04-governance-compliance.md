@@ -3,7 +3,7 @@ id: core.governance
 title: Governance and Compliance
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-06
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/engine/governance/ApprovalService.ts
@@ -28,6 +28,8 @@ code:
   - core-back/lib/cashoutBalance.ts
   - core-back/lib/kybScan.ts
   - core-back/lib/auth/merchantAuthorities.ts
+  - core-back/lib/commerceStatus.ts
+  - core-back/api/internal/adminCommerce.ts
 design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#part-ix-platform-interfaces-onboarding-governance-compliance-program
   - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#15
@@ -59,6 +61,8 @@ tests:
   - core-back/test/security-regressions/h4-cashout.test.ts
   - core-back/test/security-regressions/h1h2-authz.test.ts
   - core-back/test/security-regressions/m9-m12-upload-kyb.test.ts
+  - core-back/test/admin-commerce.test.ts
+  - core-back/test/security-regressions/commerce-status-enforcement.test.ts
 gaps:
   - "`executeApprovalSubject` has no handler for `APPLICATION`, `CASHOUT_REQUEST`, or `PLATFORM_SETTING`; an application-sensitive change cannot be executed through the approvals route."
   - "`PUT /admin/settings` writes platform settings directly without an approval request or maker-checker."
@@ -202,12 +206,12 @@ The seven design layers map to code as follows:
 
 Screening is a provider interface (`ScreeningProvider`) with Arabic normalization, name similarity, internal watch-list provider, mock provider, and a cached provider. `MerchantScreeningService` persists `aml_screenings` and `aml_screening_matches` with list versions and input hashes, applies owner screening status, and raises a confirmed-match case only. Potential matches remain in the screening queue for disposition.
 
-The AML rule engine (`core-back/engine/guards/AmlRuleEngine.ts`) supports `SINGLE_AMOUNT`, `CUMULATIVE_WINDOW`, `STRUCTURING`, `RISK_TIER`, `COUNTERPARTY_COUNTRY`, `RAIL`, and `MERCHANT_DIRECT_AMOUNT`; actions are `HOLD`, `FLAG`, `BLOCK`, `CASE_ONLY`. Severity starts at the rule base, correlates with velocity, raises for high merchant tier, volume multiple, another open case, confirmed sanctions, and potential PEP. On a `HOLD`, the guard posts `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` and stores the hold journal entry on the case.
+The AML rule engine (`core-back/engine/guards/AmlRuleEngine.ts`) supports `SINGLE_AMOUNT`, `CUMULATIVE_WINDOW`, `STRUCTURING`, `RISK_TIER`, `COUNTERPARTY_COUNTRY`, `RAIL`, and `MERCHANT_DIRECT_AMOUNT`; actions are `HOLD`, `FLAG`, `BLOCK`, `CASE_ONLY`. Severity starts at the rule base, correlates with velocity, raises for high merchant tier, volume multiple, another open case, confirmed sanctions, and potential PEP. On a `HOLD`, the guard only records the decision (`AML_HOLD_PENDING_CAPTURE`) and the `AML_HOLD` substatus; it does NOT post anything, because no money has been captured yet. The escrow is booked by the engine after a verified gateway capture (see `core.engine`).
 
 AML case resolution (`GovernanceExecution.ts:1470`):
 
-- `RELEASE` posts `AML_HOLD_AND_RELEASE` release lines, sets attempt `SUCCEEDED`, commits the link slot.
-- `REJECT` posts `AML_VOID`, sets attempt `FAILED`, releases the slot.
+- `RELEASE` posts `AML_HOLD_AND_RELEASE` release lines only when the verified-capture escrow exists (otherwise `409 AML_HOLD_CAPTURE_NOT_VERIFIED`), sets attempt `SUCCEEDED`, clears the `AML_HOLD` substatus, commits the link slot.
+- `REJECT` posts `AML_VOID` only when an escrow exists; a not-yet-captured hold is simply failed with no posting, and the attempt substatus becomes `AML_VOID`.
 - `ESCALATE` leaves the money in `AML_HOLD`, sets `ESCALATED_STR`, and opens a P1 operator case.
 - `HOLD` freezes the case without moving money.
 - `MERCHANT_DIRECT` cases never post.
@@ -428,3 +432,21 @@ Some governance tests use fake clients; database-backed suites require PostgreSQ
 - **Payout account maker-checker and mandatory hash (GAP-017, RESOLVED).** A cash-out requires a KYB `payoutAccountHash` on the merchant (`403 CASHOUT_PAYOUT_ACCOUNT_NOT_VERIFIED` otherwise) and the destination must hash to it (`403 CASHOUT_DESTINATION_NOT_VERIFIED`); destinations are always stored `payoutVerified: true`, so the unverified-destination path no longer exists. Join-request submit is refused with `409 JOIN_REQUEST_PAYOUT_HASH_REQUIRED` unless the payout details yield a hash. A payout-account change only happens through the maker-checker merchant edit (`propose-edit`): a replacement of `/payoutBankDetailsJson` must carry a bank and an account number or IBAN and a `remove` is refused (`422 PAYOUT_ACCOUNT_HASH_REQUIRED`); `executeMerchantPatch` recomputes `payoutAccountHash` from the approved account on execution and refuses an account that yields no hash.
 - **Per-source statement file hash (GAP-018, RESOLVED with a residual).** Migration `20261105130000_statement_unique_source_file_hash` drops the global `reconciliation_runs_file_hash_key` index and creates the unique index `reconciliation_runs_statement_source_id_file_hash_key` on `(statement_source_id, file_hash)` plus a non-unique `reconciliation_runs_file_hash_idx`. The same bytes may now be uploaded for two sources; one source never gets two runs. `findRunByFileHash(tx, fileHash, sourceId)` is source-scoped and the upload handler keeps a defence-in-depth check that a run of another source is never answered as this source's. Residual: the concurrent duplicate-upload race described in the frontmatter gaps.
 - **Still open.** GAP-025: KYB scanning is content sniffing plus EICAR only; a real malware scanner is not integrated.
+
+## Governed commerce state changes and intake enforcement (2026-11-06)
+
+**Rule (project invariant: sensitive actions use maker-checker).** Moving an entity to a *more restrictive* state is immediate: it requires a trimmed `reason` of 10-500 characters and writes an audit row. Moving it to a *less restrictive* state, or changing what it may accept, is a maker-checker approval:
+
+| Entity | Immediate (audited) | Approval subject |
+| :--- | :--- | :--- |
+| Wallet | ACTIVE -> FROZEN (`WALLET_FROZEN`) | `WALLET`: FROZEN -> ACTIVE (`WALLET_UNFROZEN`) |
+| Application | ACTIVE -> SUSPENDED, alone (`APPLICATION_SUSPENDED`) | `APPLICATION`: reactivation (`APPLICATION_REACTIVATED`) and any edit of rail whitelist, redirect domains or assigned wallet (`APPLICATION_UPDATED`) |
+| POS terminal | ACTIVE -> INACTIVE/BLOCKED, INACTIVE -> BLOCKED (`POS_TERMINAL_STATUS_CHANGED`) | `POS_TERMINAL`: to ACTIVE |
+| Payment link | PENDING -> CANCELLED (`PAYMENT_LINK_CANCELLED`, no reactivation) | none |
+| Access token | revoke (`ACCESS_TOKEN_REVOKED`, irreversible) | none |
+
+`executeWalletStatusChange`, `executeApplicationChange` and `executePosTerminalStatusChange` (`GovernanceExecution.ts`) are dispatched from `executeApprovalSubject`; each re-validates the entity's current state (the application executor also checks `fromStatus` and `baseUpdatedAt`, wallet ownership/currency/ACTIVE and rail codes), audits in the same transaction and is idempotent. maker != checker is enforced by the existing approval machinery. The three subject types map to the MERCHANT approval domain (`approvalQueue.ts`). Side effect: the pre-existing merchant-side `PATCH /applications/:id` approvals (subject `APPLICATION`) previously had no executor and now execute.
+
+**Enforcement (a freeze that does not freeze would be a defect).** Before this change the checkout intake checked link state and merchant status but not application or wallet status; wallet status was only enforced for cash-outs. `lib/commerceStatus.ts` now raises `409 APPLICATION_NOT_ACTIVE` / `WALLET_NOT_ACTIVE` / `POS_TERMINAL_NOT_ACTIVE` in: `AttemptGuardPipeline.guard` (the choke point for every attempt, via optional `payments.findLinkCommerceStatus`), checkout `ensureLinkUsable` (initiate) and the confirm SUBMIT step, merchant `createLink` (`POST /links` and `/external/links`), POS screen stream connect (an open stream ends at the next minute heartbeat) and POS screen creation. A merchant can no longer lift a BLOCKED terminal through its own `PATCH /pos/terminals/:id` (`409 POS_TERMINAL_BLOCKED`). LIVE traffic requires ACTIVE; SANDBOX additionally tolerates application PENDING/DRAFT and wallet PENDING (the OD-10 sandbox-before-approval flow); SUSPENDED/CLOSED applications and FROZEN/CLOSED wallets are blocked in both. Not gated by design: display-only `GET /pay/:linkKey`, resend/client-event routes, and inbound provider webhooks (already-captured money must still be processed).
+
+**Known limits.** A merchant can still move its own INACTIVE terminal back to ACTIVE (INACTIVE cannot be told apart from a staff-set INACTIVE; only BLOCKED is staff-only). `approvalSubjectContext` (admin.ts) has no case for the three new subjects, so the approvals detail shows the generic payload diff.

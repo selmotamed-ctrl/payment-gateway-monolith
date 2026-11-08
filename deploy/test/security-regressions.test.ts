@@ -197,8 +197,13 @@ describe("D4 env files", () => {
     const text = renderEnvFile(backupDaemonEnv(load()));
     for (const line of text.trim().split("\n")) expect(line).toMatch(/^[A-Za-z_][A-Za-z0-9_]*='[^'\n]*'$/);
   });
-  test("the restore drill script starts the scratch cluster with archive_mode=off", () => {
-    expect(scratchRestoreVerifierScript(load())).toContain("archive_mode=off");
+  test("the restore drill script delegates to the daemon, which forces archive_mode=off in every scratch cluster", () => {
+    const script = scratchRestoreVerifierScript(load());
+    expect(script).toContain("/v1/drills/run");
+    // it must not start a PostgreSQL of its own (the daemon's drill owns that, with archiving disabled)
+    expect(script).not.toContain("pg_ctl");
+    const daemonSource = readFileSync(path.join(import.meta.dir, "..", "backup-daemon", "src", "restoreDrillRunner.ts"), "utf8");
+    expect(daemonSource).toContain("archive_mode = off");
   });
 });
 
@@ -324,8 +329,14 @@ describe("supply-chain pinning", () => {
     const cmd = walGInstallCommand({ ...load(), BACKUP_WALG_SHA256: "a".repeat(64) });
     expect(cmd).toContain("sha256sum -c");
     expect(cmd).toContain("/v3.0.9/");
-    expect(() => walGInstallCommand({ ...load(), BACKUP_WALG_SHA256: "" })).toThrow("BACKUP_WALG_SHA256");
-    expect(loadDeployConfig(SOURCE.replace(/^BACKUP_WALG_SHA256=.*$/m, "").replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="wal-g"').replace('BACKUP_NODE="backup-1@10.10.13.10:22:10.10.13.10:4090"', 'BACKUP_NODE="backup-1@10.10.10.10:22:10.10.10.10:4090"')).ok).toBe(false);
+    // Without a checksum an installed WAL-G is still reused, but a download
+    // is refused with a clear, fail-closed command.
+    expect(walGInstallCommand({ ...load(), BACKUP_WALG_SHA256: "" })).toContain("BACKUP_WALG_SHA256 is not set");
+    // The config loads (an existing binary needs no checksum); the install
+    // command itself refuses a download without one.
+    const noSha = loadDeployConfig(SOURCE.replace(/^BACKUP_WALG_SHA256=.*$/m, "").replace('BACKUP_ENGINE_MODE="barman"', 'BACKUP_ENGINE_MODE="wal-g"').replace('BACKUP_NODE="backup-1@10.10.13.10:22:10.10.13.10:4090"', 'BACKUP_NODE="backup-1@10.10.10.10:22:10.10.10.10:4090"'));
+    expect(noSha.ok).toBe(true);
+    expect(walGInstallCommand(noSha.config!)).toContain("BACKUP_WALG_SHA256 is not set");
   });
   test("bun is never installed with curl | bash", () => {
     const withSha = bunInstallCommand({ BUN_VERSION: "1.3.5", BUN_SHA256: "b".repeat(64) });
@@ -354,6 +365,16 @@ describe("PostgreSQL / backup / nginx hardening", () => {
     expect(snippet).toContain("shared_buffers = 16GB");
     expect(snippet).toContain("effective_cache_size = 48GB");
     expect(snippet).toContain("io_method = 'worker'");
+  });
+  test("a single-host primary does not bind loopback twice (PostgreSQL would fail to start)", async () => {
+    const { postgresMainConfigSnippet, postgresListenAddresses, pgClusterFor } = await import("../provisioners/postgres18Provisioner");
+    const cfg = load();
+    const cluster = pgClusterFor(cfg, "primary", { privateIp: "127.0.0.1", servicePort: 5432 });
+    const snippet = postgresMainConfigSnippet(cfg, cluster, "127.0.0.1");
+    expect(snippet).toContain("listen_addresses = '127.0.0.1'");
+    expect(snippet).not.toContain("127.0.0.1,127.0.0.1");
+    expect(postgresListenAddresses("127.0.0.1,127.0.0.1")).toBe("127.0.0.1");
+    expect(postgresListenAddresses(" 10.0.0.5,127.0.0.1 ")).toBe("127.0.0.1,10.0.0.5");
   });
   test("nginx templates rate limit, hide the version and the fake-rails vhost has an allowlist and tight CSP", () => {
     const dir = path.join(import.meta.dir, "..", "templates");

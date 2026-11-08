@@ -1127,9 +1127,10 @@ model GlAccount {
   credentialSetId   String?       @map("credential_set_id") @db.Uuid
   env               String?
   currency          String        @db.Char(3)
-  lastCheckpointId  String?       @map("last_checkpoint_id")
-  checkpointBalance Decimal       @default(0) @map("checkpoint_balance") @db.Decimal(18, 4)
-  checkpointAt      DateTime?     @map("checkpoint_at")
+  /// Routing width: new lines go to shard `hash(refId) % shardCount` (wallet debits always to shard 0).
+  /// Widening never remaps history because every journal line stores its own shard.
+  shardCount        Int           @default(1) @map("shard_count") @db.SmallInt
+  shardScaledAt     DateTime?     @map("shard_scaled_at") @db.Timestamptz(3)
   seedKey           String?       @unique @map("seed_key")
 
   wallet        Wallet?          @relation("WalletGlAccount")
@@ -1171,6 +1172,10 @@ model JournalLine {
   glAccountId String           @map("gl_account_id") @db.Uuid
   direction   JournalDirection
   amount      Decimal          @db.Decimal(18, 4)
+  /// The shard this line was posted to, and its position in that shard's gapless sequence.
+  /// shard_seq 0 = pre-genesis (folded into the genesis checkpoint); real lines are >= 1.
+  shardId     Int              @map("shard_id") @db.SmallInt
+  shardSeq    BigInt           @map("shard_seq")
 
   entry     JournalEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
   glAccount GlAccount    @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
@@ -1180,6 +1185,7 @@ model JournalLine {
   @@id([id, createdAt])
   @@index([entryId, createdAt])
   @@index([glAccountId, createdAt])
+  @@index([glAccountId, shardId, shardSeq])
   @@map("journal_lines")
 }
 
@@ -2080,6 +2086,9 @@ model InboundEvent {
   receivedAt          DateTime  @map("received_at")
   processedAt         DateTime? @map("processed_at")
   processingResult    String?   @map("processing_result") @db.Text
+  /// Lease held by the node currently processing the event (at-most-once claim).
+  claimedAt           DateTime? @map("claimed_at") @db.Timestamptz(3)
+  claimedBy           String?   @map("claimed_by") @db.Text
 
   channel ConfirmationChannel @relation(fields: [channelId], references: [id], onDelete: Restrict)
   gateway Gateway             @relation(fields: [gatewayId], references: [id], onDelete: Restrict)
@@ -2088,6 +2097,7 @@ model InboundEvent {
   @@unique([channelId, dedupeKey])
   @@index([gatewayId])
   @@index([attemptId, receivedAt])
+  @@index([processedAt, claimedAt])
   @@map("inbound_events")
 }
 
@@ -2104,6 +2114,8 @@ model OperatorCase {
   assigneeUserId       String?              @map("assignee_user_id") @db.Uuid
   resolutionNotes      String?              @map("resolution_notes") @db.Text
   approvalRequestId    String?              @map("approval_request_id") @db.Uuid
+  /// De-duplication key for automated alerts, unique among unresolved cases of one kind.
+  subjectKey           String?              @map("subject_key")
 
   attempt            PaymentAttempt?          @relation(fields: [attemptId], references: [id], onDelete: SetNull)
   reconciliationItem ReconciliationItem?      @relation("OperatorCaseReconciliationItem", fields: [reconciliationItemId], references: [id], onDelete: SetNull)
@@ -2711,11 +2723,67 @@ model GlAccountShard {
   glAccountId    String    @map("gl_account_id") @db.Uuid
   shardId        Int       @map("shard_id") @db.SmallInt
   currentBalance Decimal   @default(0) @map("current_balance") @db.Decimal(18, 4)
+  /// High-water of lines assigned to this shard (bumped with the balance, under the row lock).
+  lineSeq        BigInt    @default(0) @map("line_seq")
   updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
   glAccount      GlAccount @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
+  checkpoint     GlShardCheckpoint?
+  repairs        GlShardRepair[]
 
   @@id([glAccountId, shardId])
   @@map("gl_account_shards")
+}
+
+/// Append-only history of every shard repair (RECOMPUTE from the journal, or an approved REBASELINE).
+model GlShardRepair {
+  id                  String   @id @default(uuid(7)) @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  glAccountId         String   @map("gl_account_id") @db.Uuid
+  shardId             Int      @map("shard_id") @db.SmallInt
+  /// RECOMPUTE | REBASELINE
+  kind                String
+  /// AUTO | MANUAL | APPROVED
+  mode                String
+  planHash            String   @map("plan_hash")
+  beforeBalance       Decimal  @map("before_balance") @db.Decimal(18, 4)
+  afterBalance        Decimal  @map("after_balance") @db.Decimal(18, 4)
+  delta               Decimal  @db.Decimal(18, 4)
+  beforeLineSeq       BigInt   @map("before_line_seq")
+  afterLineSeq        BigInt   @map("after_line_seq")
+  beforeCheckpointSeq BigInt   @map("before_checkpoint_seq")
+  afterCheckpointSeq  BigInt   @map("after_checkpoint_seq")
+  baselineSeqAfter    BigInt   @map("baseline_seq_after")
+  actorId             String?  @map("actor_id") @db.Uuid
+  reason              String
+  approvalRequestId   String?  @map("approval_request_id") @db.Uuid
+  detailsJson         Json     @default("{}") @map("details_json")
+  shard               GlAccountShard @relation(fields: [glAccountId, shardId], references: [glAccountId, shardId], onDelete: Restrict)
+
+  @@index([glAccountId, shardId, createdAt])
+  @@map("gl_shard_repairs")
+}
+
+/// The checkpoint of one shard: its balance as of line sequence `checkpointSeq`, proven against the journal
+/// by the checkpointer (balance = previous checkpoint + the lines in the sequence range, gapless).
+/// A shard without a row is at (0, seq 0).
+model GlShardCheckpoint {
+  glAccountId         String    @map("gl_account_id") @db.Uuid
+  shardId             Int       @map("shard_id") @db.SmallInt
+  checkpointBalance   Decimal   @default(0) @map("checkpoint_balance") @db.Decimal(18, 4)
+  checkpointSeq       BigInt    @default(0) @map("checkpoint_seq")
+  checkpointAt        DateTime? @map("checkpoint_at") @db.Timestamptz(3)
+  verifiedAt          DateTime? @map("verified_at") @db.Timestamptz(3)
+  /// OK | GAP | PARITY (CHECK constraint in the migration).
+  status              String    @default("OK")
+  failureKind         String?   @map("failure_kind")
+  consecutiveFailures Int       @default(0) @map("consecutive_failures")
+  lastFailureAt       DateTime? @map("last_failure_at") @db.Timestamptz(3)
+  /// Lines with a sequence at or below this are exempt from the gapless proof (set only by an approved re-baseline).
+  baselineSeq         BigInt    @default(0) @map("baseline_seq")
+  shard               GlAccountShard @relation(fields: [glAccountId, shardId], references: [glAccountId, shardId], onDelete: Restrict)
+
+  @@id([glAccountId, shardId])
+  @@map("gl_shard_checkpoints")
 }
 
 model OutboxEvent {

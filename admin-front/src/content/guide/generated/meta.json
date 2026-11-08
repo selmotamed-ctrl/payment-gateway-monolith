@@ -3,17 +3,17 @@
   "generatedAt": "1970-01-01T00:00:00.000Z",
   "counts": {
     "books": 14,
-    "articles": 125,
+    "articles": 134,
     "glossaryTerms": 151,
-    "safeguardCards": 22,
-    "safeguardChecklistItems": 99,
-    "situations": 29,
+    "safeguardCards": 25,
+    "safeguardChecklistItems": 112,
+    "situations": 32,
     "readingPaths": 8,
     "quickAnswers": 58,
     "dataBlocks": 3,
-    "contextMapScreens": 23,
+    "contextMapScreens": 25,
     "errorCodes": 19,
     "edgeCases": 140
   },
-  "sourceSha256": "65fcf35f9af44139d93f67630af37c209d99c72292616d649f6ab29af8252116"
+  "sourceSha256": "4a2dbbf28d2fe9fefe4a7b9e437f68416fe3d97b0af2d37e358ffff7cc94f7f9"
 }

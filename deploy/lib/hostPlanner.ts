@@ -1,6 +1,7 @@
 import {
   edgeCoreUrls,
   effectiveDatabase,
+  leaderElectionDatabaseUrl,
   parseNodeList,
   pgStorageConfigured,
   withIpv6Loopback,
@@ -20,7 +21,7 @@ import {
 
 export type ServiceName = string;
 export type NginxSiteName = "admin-lan" | "merchant-public" | "checkout-public" | "merchant-lan" | "checkout-lan" | "fake-rails";
-export type CertBundle = "core-server" | "admin-client" | "merchant-client" | "checkout-client" | "fake-rails-server" | "backup-server" | "pg-client" | "redis-client" | "audit-db-client" | "log-db-client";
+export type CertBundle = "core-server" | "admin-client" | "merchant-client" | "checkout-client" | "fake-rails-server" | "backup-server" | "backup-client" | "wal-archive-client" | "pg-client" | "redis-client" | "audit-db-client" | "log-db-client";
 
 export interface SshTarget {
   host: string;
@@ -241,6 +242,23 @@ const allEdgePrivateIps = (config: DeployConfig): string[] => {
 const backupPrivateIp = (config: DeployConfig): string | null =>
   parseNodeList(config.BACKUP_NODE)[0]?.privateIp ?? null;
 
+/**
+ * core-back's backup-daemon client settings. Independent of the PostgreSQL
+ * storage env: a core host that talks to an externally managed database
+ * (`DB_*`) still needs to reach the backup daemon whenever backups are on.
+ */
+export const backupCoreEnv = (config: DeployConfig): Record<string, string> => {
+  if (!config.BACKUP_ENABLED) return {};
+  const scheme = config.BACKUP_ALLOW_INSECURE_HTTP ? "http" : "https";
+  return {
+    BACKUP_DAEMON_URL: `${scheme}://${backupPrivateIp(config) ?? "127.0.0.1"}:${config.BACKUP_DAEMON_PORT}`,
+    BACKUP_DAEMON_CA_CERT_PATH: "shared/certs/internal-ca.crt",
+    BACKUP_DAEMON_CLIENT_CERT_PATH: "shared/certs/backup-client.crt",
+    BACKUP_DAEMON_CLIENT_KEY_PATH: "shared/certs/backup-client.key",
+    BACKUP_DAEMON_TIMEOUT_MS: String(config.BACKUP_DAEMON_TIMEOUT_MS),
+  };
+};
+
 const storageEnv = (config: DeployConfig): Record<string, string> => {
   if (!pgStorageConfigured(config)) return {};
   const primary = parseNodeList(config.PG_PRIMARY_NODE)[0];
@@ -249,9 +267,13 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
   // Replicas are read directly on their own PostgreSQL port. Routing them
   // through a single PgBouncer port would point every co-located replica back
   // at the primary and silently defeat read scaling.
+  // pg_hba.conf of a deploy-managed cluster has only `hostssl` rules (GAP-022),
+  // so every direct (not PgBouncer-fronted) connection must negotiate TLS.
+  const pgManaged = config.PG_MANAGE_VIA_SSH;
   const replicaUrls = replicas.map((node) =>
-    `postgresql://${encodeURIComponent(database.user)}:${encodeURIComponent(database.password)}@${node.privateIp}:${node.servicePort}/${database.name}`,
+    `postgresql://${encodeURIComponent(database.user)}:${encodeURIComponent(database.password)}@${node.privateIp}:${node.servicePort}/${database.name}${directTlsQuery(pgManaged)}`,
   );
+  const leaderUrl = leaderElectionDatabaseUrl(config);
   return {
     ...(primary ? {
       PG_PRIMARY_HOST: primary.privateIp,
@@ -267,17 +289,24 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
     PGBOUNCER_DEFAULT_POOL_SIZE: String(config.PGBOUNCER_DEFAULT_POOL_SIZE),
     PGBOUNCER_MAX_CLIENT_CONN: String(config.PGBOUNCER_MAX_CLIENT_CONN),
     PGBOUNCER_MAX_PREPARED_STATEMENTS: String(config.PGBOUNCER_MAX_PREPARED_STATEMENTS),
+    // Session-scoped endpoint for the singleton-worker advisory locks. With
+    // PgBouncer this is the pgw_session alias (pool_mode=session); without it,
+    // a direct PostgreSQL URL. Never the transaction-pooled DATABASE_URL.
+    ...(leaderUrl ? { LEADER_ELECTION_DATABASE_URL: leaderUrl } : {}),
     ...(replicaUrls.length > 0 ? { DATABASE_REPLICA_URLS: replicaUrls.join(",") } : {}),
-    ...(config.AUDIT_DB_NODE ? { AUDIT_DATABASE_URL: `postgresql://${encodeURIComponent(config.AUDIT_DB_USER)}:${encodeURIComponent(config.AUDIT_DB_PASSWORD)}@${parseNodeList(config.AUDIT_DB_NODE)[0]?.privateIp}:${parseNodeList(config.AUDIT_DB_NODE)[0]?.servicePort}/${config.AUDIT_DB_NAME}` } : {}),
-    ...(config.LOG_DB_NODE ? { LOG_DATABASE_URL: `postgresql://${encodeURIComponent(config.LOG_DB_USER)}:${encodeURIComponent(config.LOG_DB_PASSWORD)}@${parseNodeList(config.LOG_DB_NODE)[0]?.privateIp}:${parseNodeList(config.LOG_DB_NODE)[0]?.servicePort}/${config.LOG_DB_NAME}` } : {}),
-    ...(config.BACKUP_ENABLED ? {
-      BACKUP_DAEMON_URL: `https://${backupPrivateIp(config) ?? "127.0.0.1"}:${config.BACKUP_DAEMON_PORT}`,
-      BACKUP_DAEMON_CA_CERT_PATH: "shared/certs/internal-ca.crt",
-      BACKUP_DAEMON_CLIENT_CERT_PATH: "shared/certs/backup-client.crt",
-      BACKUP_DAEMON_CLIENT_KEY_PATH: "shared/certs/backup-client.key",
-    } : {}),
+    ...(config.AUDIT_DB_NODE ? { AUDIT_DATABASE_URL: `postgresql://${encodeURIComponent(config.AUDIT_DB_USER)}:${encodeURIComponent(config.AUDIT_DB_PASSWORD)}@${parseNodeList(config.AUDIT_DB_NODE)[0]?.privateIp}:${parseNodeList(config.AUDIT_DB_NODE)[0]?.servicePort}/${config.AUDIT_DB_NAME}${directTlsQuery(config.AUDIT_DB_MANAGE_VIA_SSH)}` } : {}),
+    ...(config.LOG_DB_NODE ? { LOG_DATABASE_URL: `postgresql://${encodeURIComponent(config.LOG_DB_USER)}:${encodeURIComponent(config.LOG_DB_PASSWORD)}@${parseNodeList(config.LOG_DB_NODE)[0]?.privateIp}:${parseNodeList(config.LOG_DB_NODE)[0]?.servicePort}/${config.LOG_DB_NAME}${directTlsQuery(config.LOG_DB_MANAGE_VIA_SSH)}` } : {}),
   };
 };
+
+/**
+ * Query string for a direct PostgreSQL connection to a deploy-managed cluster.
+ * The server certificate is self-signed per cluster, so `no-verify` (encrypt,
+ * do not verify) is the mode node-postgres understands for that posture;
+ * `require` would reject the certificate. Externally managed databases keep
+ * the operator's URL untouched.
+ */
+export const directTlsQuery = (managedByDeploy: boolean): string => (managedByDeploy ? "?sslmode=no-verify" : "");
 
 const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> => {
   const database = effectiveDatabase(config);
@@ -298,11 +327,18 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
     KMS_MASTER_KEY: config.KMS_MASTER_KEY,
     STORAGE_SHARD_COUNT: String(config.STORAGE_SHARD_COUNT),
     READ_REPLICA_MAX_LAG_MS: String(config.READ_REPLICA_MAX_LAG_MS),
+    KYB_SCANNER_MODE: config.KYB_SCANNER_MODE,
     TRUST_PROXY: "false",
     LOG_LEVEL: "info",
     WORKER_ENABLED: "true",
     ...(redisUrl ? { REDIS_URL: redisUrl } : {}),
     ...storageEnv(config),
+    // An explicit session endpoint for an external database / custom pooler
+    // wins over the derived PgBouncer alias.
+    ...(config.LEADER_ELECTION_DATABASE_URL
+      ? { LEADER_ELECTION_DATABASE_URL: config.LEADER_ELECTION_DATABASE_URL }
+      : {}),
+    ...backupCoreEnv(config),
     FAKE_RAILS_ENABLED: config.FAKE_RAILS_ENABLED ? "true" : "false",
     FAKE_RAILS_ALLOW_IN_PRODUCTION: config.FAKE_RAILS_ALLOW_IN_PRODUCTION ? "true" : "false",
     IS_TEST_SERVER: config.IS_TEST_SERVER ? "true" : "false",
@@ -353,7 +389,18 @@ const fakeRailsEnv = (config: DeployConfig): Record<string, string> => ({
   FAKE_RAILS_ADMIN_PASSWORD: config.FAKE_RAILS_ADMIN_PASSWORD ?? "",
   FAKE_RAILS_JWT_SECRET: config.FAKE_RAILS_JWT_SECRET ?? "",
   FAKE_RAILS_SEEDER_TOKEN: config.FAKE_RAILS_SEEDER_TOKEN ?? "",
-  FAKE_RAILS_ALLOWED_CIDRS: withIpv6Loopback(config.FAKE_RAILS_ALLOWED_CIDRS),
+  // The local nginx proxies to the backend from loopback. Even when an operator
+  // narrows the client allowlist, the proxy peer must remain reachable or every
+  // legitimate user is refused.
+  FAKE_RAILS_ALLOWED_CIDRS: (() => {
+    const entries = withIpv6Loopback(config.FAKE_RAILS_ALLOWED_CIDRS)
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    if (!entries.includes("127.0.0.1/32")) entries.push("127.0.0.1/32");
+    if (!entries.includes("::1/128")) entries.push("::1/128");
+    return entries.join(",");
+  })(),
 });
 
 /**
@@ -613,6 +660,11 @@ const buildNginx = (config: DeployConfig, privateIp?: string, nodes: ComputeNode
 };
 const buildCertBundles = (role: HostRole, config?: DeployConfig): CertBundle[] => {
   const storageCerts: CertBundle[] = config && storageEnabled(config) ? ["pg-client", "redis-client", "audit-db-client", "log-db-client"] : [];
+  // backup-client (core-back -> backup daemon) must reach core whenever backups
+  // are on, also when the database itself is externally managed (DB_*).
+  if (config?.BACKUP_ENABLED) storageCerts.push("backup-client");
+  // Least privilege: only the hosts whose PostgreSQL archives WAL get the WAL ingest client.
+  const walCerts: CertBundle[] = config?.BACKUP_ENABLED ? ["wal-archive-client"] : [];
   switch (role) {
     case "core":
       return ["core-server", ...storageCerts];
@@ -625,14 +677,15 @@ const buildCertBundles = (role: HostRole, config?: DeployConfig): CertBundle[] =
     case "fake-rails":
       return ["fake-rails-server"];
     case "backup":
-      return ["backup-server", "pg-client"];
+      return ["backup-server", "backup-client", "pg-client"];
     case "pg-primary":
+      return ["pg-client", ...walCerts];
     case "pg-replica":
       return ["pg-client"];
     case "redis":
       return ["redis-client"];
     case "audit-db":
-      return ["audit-db-client"];
+      return ["audit-db-client", ...walCerts];
     case "log-db":
       return ["log-db-client"];
     default:
@@ -843,7 +896,13 @@ const buildStorageFirewall = (config: DeployConfig, node: StorageNodePlan, allSt
     case "backup":
       return [
         sshRule,
-        { port: config.BACKUP_DAEMON_PORT, proto: "tcp", fromCidrs: coreIps, comment: "backup-daemon mTLS from core nodes" },
+        // Core nodes drive the control plane; the PostgreSQL primary and the
+        // dedicated audit DB push WAL (archive_command -> PUT /v1/wal/...).
+        { port: config.BACKUP_DAEMON_PORT, proto: "tcp", fromCidrs: [...new Set([
+          ...coreIps,
+          ...(allStorage.postgres.primary ? [allStorage.postgres.primary.privateIp] : []),
+          ...(allStorage.auditDb ? [allStorage.auditDb.privateIp] : []),
+        ])], comment: "backup-daemon mTLS from core nodes + WAL archive push from PostgreSQL hosts" },
       ];
     default:
       return [sshRule];

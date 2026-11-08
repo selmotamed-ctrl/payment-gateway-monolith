@@ -2,6 +2,9 @@ import { urlsMap } from "@/constants/urlsMap";
 import type { FilterOption, TableFilter, TableServerConfig } from "./filters";
 import { createOptionsLoader } from "./referenceOptions";
 import { rowTone, statusTone } from "./statusTone";
+import { commerceTables } from "./registry/commerce";
+import { ledgerOpsTables } from "./registry/ledgerOps";
+import { formsTables } from "./registry/forms";
 
 export type { TableServerConfig };
 
@@ -44,6 +47,8 @@ const APPROVAL_SUBJECT_TYPE = [
     "JOIN_REQUEST",
     "KYB_DOCUMENT",
     "APPLICATION",
+    "WALLET",
+    "POS_TERMINAL",
     "ADJUSTMENT",
     "CASHOUT_REQUEST",
     "COMMISSION_PROFILE",
@@ -337,6 +342,9 @@ export const tableRegistry: Record<string, TableServerConfig> = {
         defaultSort: { key: "createdAt", direction: "desc" },
         storageKey: "pg.admin.reconciliation.sources",
     },
+    ...commerceTables,
+    ...ledgerOpsTables,
+    ...formsTables,
 };
 
 export const rowToneFor = rowTone;
