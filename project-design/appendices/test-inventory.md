@@ -179,7 +179,7 @@
 | `core-back/test/storage-engine/cache-velocity.test.ts` | 274 | 10 |
 | `core-back/test/storage-engine/db-optimisation.test.ts` | 342 | 17 |
 | `core-back/test/storage-engine/engine-factory.test.ts` | 107 | 3 |
-| `core-back/test/storage-engine/helpers/db.ts` | 545 | 0 |
+| `core-back/test/storage-engine/helpers/db.ts` | 563 | 0 |
 | `core-back/test/storage-engine/leader-election-pgbouncer.test.ts` | 220 | 3 |
 | `core-back/test/storage-engine/ledger-shards.test.ts` | 275 | 3 |
 | `core-back/test/storage-engine/log-sink.test.ts` | 233 | 8 |

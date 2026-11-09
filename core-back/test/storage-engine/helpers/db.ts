@@ -69,26 +69,6 @@ export const createPrisma = (options: PrismaOptions = {}): PrismaClient =>
     log: [],
   });
 
-export interface PoolOptions {
-  url?: string;
-  schema?: string;
-  max?: number;
-  connectionTimeoutMillis?: number;
-}
-
-export const createPool = (options: PoolOptions = {}): Pool => {
-  const config: PoolConfig = {
-    connectionString: pinUtcInConnectionUrl(options.url ?? DATABASE_URL),
-    max: options.max ?? 5,
-    connectionTimeoutMillis: options.connectionTimeoutMillis ?? 3_000,
-  };
-  if (options.schema) {
-    config.options = `-c search_path=${options.schema}`;
-  }
-  return new Pool(config);
-};
-
-/** A Prisma client whose entire connection pool uses the supplied schema. */
 /**
  * The URL of a client that works in `schema`: UTC pinned AND `search_path` set. Both are startup `options`, and the
  * `options` parameter of the connection URL overrides the `options` of the pool config (node-postgres parses the URL
@@ -100,6 +80,26 @@ export const schemaConnectionUrl = (schema: string, url: string = DATABASE_URL):
   const existing = pinned.searchParams.get("options") ?? "";
   pinned.searchParams.set("options", `${existing} -c search_path=${schema}`.trim());
   return pinned.toString();
+};
+
+export interface PoolOptions {
+  url?: string;
+  schema?: string;
+  max?: number;
+  connectionTimeoutMillis?: number;
+}
+
+export const createPool = (options: PoolOptions = {}): Pool => {
+  const config: PoolConfig = {
+    // The search_path must be merged into the connection URL (see schemaConnectionUrl); a separate
+    // `options` field would be overwritten by the URL's own timezone option in node-postgres.
+    connectionString: options.schema
+      ? schemaConnectionUrl(options.schema, options.url ?? DATABASE_URL)
+      : pinUtcInConnectionUrl(options.url ?? DATABASE_URL),
+    max: options.max ?? 5,
+    connectionTimeoutMillis: options.connectionTimeoutMillis ?? 3_000,
+  };
+  return new Pool(config);
 };
 
 export const createPrismaForSchema = (
@@ -376,6 +376,14 @@ export const createLogSandbox = async (prefix = "logs"): Promise<LogSandbox> => 
   await admin.end();
 
   const pool = createPool({ max: 5, schema });
+  const actual = await pool.query<{ schema: string }>("SELECT current_schema() AS schema");
+  if (actual.rows[0]?.schema !== schema) {
+    await pool.end().catch(() => undefined);
+    await dropSchema(schema);
+    throw new Error(
+      `createLogSandbox: expected search_path ${schema}, got ${actual.rows[0]?.schema ?? "null"}`,
+    );
+  }
   return {
     schema,
     pool,
@@ -524,6 +532,16 @@ export const createWorkerSandbox = async (
   await admin.query(workerTablesDdl(schema));
   await admin.end();
   const client = createPrismaForSchema(schema, { max: 10 });
+  const actual = await client.$queryRawUnsafe<Array<{ schema: string }>>(
+    "SELECT current_schema() AS schema",
+  );
+  if (actual[0]?.schema !== schema) {
+    await client.$disconnect().catch(() => undefined);
+    await dropSchema(schema);
+    throw new Error(
+      `createWorkerSandbox: expected search_path ${schema}, got ${actual[0]?.schema ?? "null"}`,
+    );
+  }
   const extras = new Set<PrismaClient>();
   return {
     schema,
