@@ -111,6 +111,11 @@ const router = createRouter({
                     component: () => import("@/pages/developers/webhooks/index"),
                 },
                 {
+                    path: "reports",
+                    name: "MerchantReports",
+                    component: () => import("@/pages/reports/index"),
+                },
+                {
                     path: "credentials",
                     name: "Credentials",
                     component: () => import("@/pages/credentials/index"),

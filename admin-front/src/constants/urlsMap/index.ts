@@ -286,6 +286,19 @@ export const urlsMap = {
     academyExamEligibility: (examId: string) => `v1/admin/academy/exams/${encodeURIComponent(examId)}/eligibility`,
     academyExamStart: (examId: string) => `v1/admin/academy/exams/${encodeURIComponent(examId)}/start`,
     academyExamSubmit: (examId: string) => `v1/admin/academy/exams/${encodeURIComponent(examId)}/submit`,
+
+    reportEngineTranscript: "v1/admin/report-engine/transcript",
+    reportEngineVerify: "v1/admin/report-engine/specs/verify",
+    reportEngineSpecs: "v1/admin/report-engine/specs",
+    reportEngineOverride: (id: string) => `v1/admin/report-engine/specs/${encodeURIComponent(id)}/authority-override`,
+    reportEngineCatalog: "v1/admin/report-engine/catalog",
+    reportEngineAutocomplete: (sourceKey: string) => `v1/admin/report-engine/autocomplete/${encodeURIComponent(sourceKey)}`,
+    reportEngineExecute: (code: string) => `v1/admin/report-engine/catalog/${encodeURIComponent(code)}/execute`,
+    reportEngineChrome: "v1/admin/report-engine/chrome",
+    reportEngineChromeDefault: (id: string) => `v1/admin/report-engine/chrome/${encodeURIComponent(id)}/set-default`,
+    reportEngineAmlBypassPending: "v1/admin/report-engine/aml-bypass/pending",
+    reportEngineAmlBypassApprove: (id: string) => `v1/admin/report-engine/aml-bypass/${encodeURIComponent(id)}/approve`,
+    reportEngineAmlBypassReject: (id: string) => `v1/admin/report-engine/aml-bypass/${encodeURIComponent(id)}/reject`,
 } as const;
 
 export type UrlsMap = typeof urlsMap;

@@ -24,6 +24,7 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Backup Control](#corebackup) — `partial`
 - [Synthetic Seeder](#coreseeder) — `partial`
 - [Tests and Benchmarks](#coretests) — `partial`
+- [Dynamic Report Engine SDK and Report Studio Host](#corereport-engine) — `implemented`
 - [Shared Core Upstream Client](#edgeshared) — `implemented`
 - [Admin Edge BFF](#edgeadmin) — `partial`
 - [Merchant Edge BFF](#edgemerchant) — `partial`
@@ -35,8 +36,10 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Contextual Help](#admin-uihelp) — `implemented`
 - [Backups Settings and Operations](#admin-uioperations) — `partial`
 - [Admin Guide v2](#admin-uiguide-v2) — `implemented`
+- [Report Catalog, Studio and Chrome](#admin-uireport-studio) — `implemented`
 - [Merchant Portal](#merchant-uiportal) — `partial`
 - [Merchant Guide and Developer API](#merchant-uiguide) — `partial`
+- [Merchant Reports](#merchant-uireports) — `implemented`
 - [Checkout Payer Flow](#checkout-uiflow) — `partial`
 - [Checkout Help Center](#checkout-uihelp) — `partial`
 - [Fake Rails Backend Architecture](#fake-railsbackend) — `partial`
@@ -1099,6 +1102,8 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `PGBOUNCER_ENABLED` | `false` | deploy sets it when the pooler fronts PostgreSQL; enforces the session endpoint |
 | `DATABASE_REPLICA_URLS` | empty | read replicas |
 | `AUDIT_DATABASE_URL` | unset | dedicated audit store |
+| `REPORT_READONLY_DATABASE_URL` | unset | dedicated report read-only pool; falls back to a replica or `DATABASE_URL` |
+| `REPORT_ASSET_STORAGE_DIR` | `.report-assets` | persistent report asset directory; set outside the release tree |
 | `LOG_DATABASE_URL` | unset | dedicated log sink |
 | `REDIS_URL` | unset | cache/velocity and invalidation |
 | `REDIS_NODES` | empty | first node used when `REDIS_URL` is absent |
@@ -5305,7 +5310,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 25 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 27 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -5360,7 +5365,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 25`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 27`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5373,7 +5378,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261109210000_ledger_query_and_index_optimization`, schema version 25). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261110130000_report_engine_merchant_and_aml`, schema version 27). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -5550,7 +5555,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 25.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 27.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -5565,7 +5570,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 84 models and 105 enums in the Prisma datamodel.
-- Schema version 25 with an equality check used by the seeders.
+- Schema version 27 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -5668,7 +5673,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 25 (`REQUIRED_SCHEMA_VERSION = 25`; model count 84). The schema migrations since version 10 are:
+The current schema version is 27 (`REQUIRED_SCHEMA_VERSION = 27`; model count 88). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -5734,6 +5739,14 @@ Open: a deploy-time guard that refuses to run this migration on a database with 
 Operationally, the migration drops and rebuilds the two `journal_lines` indexes on the partitioned parent, which takes an `ACCESS EXCLUSIVE` lock on every partition for the duration of each build. It is a direct migration because the project has no live production data; on a populated database, run it in a maintenance window (the same operational rule as the shard-checkpoint migration in section 12).
 
 The query rules that depend on these indexes are in `core.ledger` section 3.11 and `core-back/README.md` section 3.1.
+
+## 16. Report engine schema (schema version 26, 2026-11-09)
+
+`20261110120000_dynamic_report_engine_sdk` adds the report-engine registry and bumps `REQUIRED_SCHEMA_VERSION` to 26. It defines `ReportSpecStatus`, `ReportChromeType`, `ReportAudienceScope`, `ReportAuthorityMode`, `report_asset_bundles`, `report_chrome_specs`, `report_definition_specs` and `report_execution_audit`. The partial unique index `report_chrome_specs_one_default_per_type_idx` permits only one published global default header and one footer. The four models are listed in `core.report-engine` section 6.
+
+## 17. Report engine hardening and merchant execution (schema version 27, 2026-11-09)
+
+`20261110130000_report_engine_merchant_and_aml` adds `report_definition_specs.allow_confidential_aml_bypass` (default false), a partial unique index on `report_definition_specs(code) WHERE is_latest_published = true`, and append-only triggers on `report_execution_audit`. The AML bypass is only applied after a different MLRO or Security Admin approves a `REPORT_AML_BYPASS` approval request. The merchant report API forces `merchant_scope_input_key` from the authenticated merchant and rejects any non-merchant-scopable model.
 
 ---
 
@@ -7307,6 +7320,136 @@ To run them against a private, throwaway cluster (never the live databases): `in
 
 ---
 
+<a id="corereport-engine"></a>
+
+> **Part ID:** `core.report-engine` · **Status:** `implemented` · **Last verified:** 2026-11-09 · **Verified against:** `working-tree`
+
+# Dynamic Report Engine SDK and Report Studio Host
+
+## 1. Purpose and scope
+
+The report engine turns a declarative, AI-authored `ReportDescriptorSpec` into a bilingual, read-only financial report without storing or executing raw SQL. It is split into two layers:
+
+- `core-back/lib/reportEngineSdk/**` is a host-agnostic SDK. It knows the DSL, the compilers, the five verification layers, the read-only PostgreSQL executor and the AI transcripts. It imports no `core-back/api`, `core-back/engine` or generated Prisma client modules.
+- `core-back/engine/reportStudio/**` is the payment-gateway host adapter. It supplies the live schema catalog, authority/domain/optimization metadata, autocomplete providers, asset storage and the `ReportEngineHostConfig`.
+
+`core-back/api/internal/adminReportEngine.ts` exposes the SDK through internal admin routes. `admin-back/api/protected/reportEngine.ts` proxies the same surface to the admin portal.
+
+## 2. DSL and verification
+
+`ReportDescriptorSpec v1.0` contains:
+
+- `inputs`: typed form fields compiled to Zod (`string`, `uuid`, `number`, `integer`, `amount_minor`, `boolean`, `date`, `datetime`, `daterange`, `enum`, `multi_enum`, `entity_autocomplete`, `entity_multi_autocomplete`) with presets and a dependent autocomplete source.
+- `datasets`: a safe AST (`from_model`, joins, select aliases, where tree, group by, having, window fields, order by, limit). The compiler emits only parameterized `SELECT` statements.
+- `transforms`: deterministic post-query operations (`COMPUTE_COLUMN`, `JOIN_DATASETS`, `PIVOT_DATASET`, `COMPARE_WITH_ASSET`).
+- `sections`: `KPI_GRID`, `DATA_TABLE`, `CHART`, `VECTOR_DRAW`, `HTML_TEMPLATE`, `IMAGE_BANNER`, `PAGE_BREAK`.
+- `i18n.locales`: mandatory `en` and `ar` dictionaries; additional locales are allowed but must cover every referenced key.
+- `required_assets`: flat-file image, JSON or CSV assets delivered in a partnered `.zip`.
+
+The verification pipeline is:
+
+1. **Layer 1** — Zod schema and bilingual completeness (`SpecStructuralValidator.ts`).
+2. **Layer 2** — read-only AST safety, mandatory partition filters, merchant isolation, forbidden secret columns, `EXPLAIN` cost and sequential-scan guard (`QuerySafetyAndOptValidator.ts`).
+3. **Layer 3** — automatic authority inference, cross-domain conflict detection and Security Admin override (`AuthorityInferenceEngine.ts`).
+4. **Layer 4** — HTML/CSS/SVG sanitizer and `.zip` asset validation (magic bytes, traversal, zip bombs, comparison data) (`CssAndHtmlSanitizer.ts`, `AssetBundleValidator.ts`).
+5. **Layer 5** — read-only dry run with synthesized inputs (`ReportDryRunSimulator.ts`).
+
+`buildReportRepairPrompt` returns a deterministic Markdown prompt containing the original JSON, every diagnostic path/code and the `aiFixHint`.
+
+## 3. Read-only execution line
+
+`PostgresReadOnlyReportExecutor` enforces the following before and during every query:
+
+- `assertPureSelectSql` rejects anything that is not a single `SELECT`/`WITH` statement and blocks `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `COPY`, `CALL`, `DO`, DDL, `pg_sleep` and other unsafe functions.
+- The transaction is `BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`.
+- Session settings are `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `work_mem` and UTC.
+- Rows are capped by the dataset `limit` and the host `maxRowsPerDataset`.
+- The pool is a dedicated pool; it is not the application pool and does not accept writes.
+
+The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back query to the standard execution error response.
+
+## 4. Host catalog and authority metadata
+
+`core-back/engine/reportStudio/schemaCatalog.ts` parses `core-back/prisma/schema.prisma` at startup (cached) and builds `CatalogModelDef` entries:
+
+- model/table names, scalar columns (keyed by database column name), enums, relations;
+- domain (`LEDGER`, `PAYMENTS`, `MERCHANTS`, `COMPLIANCE_AML`, `GATEWAYS`, `SECURITY_AUDIT`, ...);
+- natural roles and required authorities;
+- merchant-scopable column and confidential AML marker;
+- optimization rules (`journal_lines` requires a bounded `created_at`; `payment_attempts` requires a bounded range; row limits);
+- `minorUnitScale: 1000` for the synthetic `amount_minor`/`balance_minor` vocabulary used by the DSL.
+
+`core-back/engine/reportStudio/paymentGatewayHostConfig.ts` assembles the host config, including the read-only pool (replica URL when configured), asset storage and autocomplete providers.
+
+`autocompleteProviders.ts` provides the eight sources: `merchants`, `applications`, `gateways`, `payment_rails`, `gl_accounts`, `currencies`, `staff_users`, `aml_cases`.
+
+## 5. API surface
+
+`core-back/api/internal/adminReportEngine.ts` (mounted in `core-back/api/internal/admin.ts`):
+
+| Method | Path | Purpose |
+| :--- | :--- | :--- |
+| GET | `/report-engine/transcript` | AI authoring transcript for report descriptors. |
+| GET | `/report-engine/chrome/transcript` | AI authoring transcript for chrome specs. |
+| POST | `/report-engine/specs/verify` | Parse and run all five verification layers; returns diagnostics and the repair prompt. |
+| POST | `/report-engine/specs` | Persist a verified draft; optionally publish. |
+| POST | `/report-engine/specs/:id/authority-override` | Security Admin override with justification; requires `security:write`. |
+| GET | `/report-engine/catalog` | Published catalog filtered by the actor's authority policy. |
+| GET | `/report-engine/autocomplete` | Autocomplete provider query. |
+| POST | `/report-engine/execute` | Read-only execution; returns datasets, resolved chrome, asset data URLs and verification hash. |
+| GET | `/report-engine/chrome` | Chrome registry. |
+| POST | `/report-engine/chrome` | Create/update a chrome spec. |
+| POST | `/report-engine/chrome/:id/set-default` | Set the single published global default per type. |
+
+`admin-back/api/protected/reportEngine.ts` forwards the same routes under `/api/v1/admin/report-engine/*` with the admin authority guard.
+
+## 6. Schema versions 26 and 27
+
+`20261110120000_dynamic_report_engine_sdk` adds:
+
+- enums `ReportSpecStatus`, `ReportChromeType`, `ReportAudienceScope`, `ReportAuthorityMode`;
+- `report_asset_bundles` (bundle SHA-256, storage key, total bytes, file count, manifest, uploader);
+- `report_chrome_specs` (code/version, type, status, single global default per type via a partial unique index, supported locales, spec JSON/SHA-256, publisher);
+- `report_definition_specs` (code/version, category, audience, status, latest-published flag, supported/default locales, spec JSON/SHA-256, verification report, inferred roles/authorities, conflict status, confidential AML flag, override fields, publisher);
+- `report_execution_audit` (spec, code/version, actor, locale, scoped merchant, redacted inputs, row count, duration, node, verification hash, render target).
+
+`REQUIRED_SCHEMA_VERSION` is 27; version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
+
+## 7. Security invariants
+
+- Report SQL is never stored or accepted as raw SQL; only the AST is persisted.
+- Every query runs in a read-only transaction on a dedicated pool.
+- A merchant-facing report must bind `merchant_id` to the merchant scope input; the API also rejects a merchant actor whose application scope does not match.
+- `FORBIDDEN_SECRET` columns (credential ciphertext, password hashes, sealed secrets) are rejected at Layer 2 and never appear in the transcript catalog.
+- A Security Admin override requires the `security:write` authority and a non-empty justification; the override is stored on the spec and audited.
+- The execution audit stores redacted inputs and a SHA-256 verification hash of the executed datasets.
+
+## 8. Tests
+
+`core-back/test/reportEngineSdk/**` implements the RE-T01..RE-T22 matrix (plus extra dry-run/transcript cases). `admin-front/src/lib/reportEngineSdk/__tests__/**` covers formatting, RTL vector mirroring, chrome binding, the language prompt options, the paged-media document and the client sanitizer. The exhaustive schema suite and `phase1-mtls-and-schema.test.ts` verify schema version 27 and the four new models.
+
+## 9. Merchant report runner
+
+`core-back/api/internal/merchantReportEngine.ts` is mounted under `/internal/merchant/report-engine` after merchant authentication. It exposes a catalog, autocomplete and execute route. Every merchant execution:
+
+- requires `report_engine:run`;
+- accepts only `MERCHANT_FACING`/`BOTH` reports;
+- runs `validateMerchantReportScope` (every base/join model must be merchant-scopable, every model must be filtered by the scope input, and no OR branch may escape it);
+- overwrites `inputs[report.merchant_scope_input_key]` with `principal.merchantId`;
+- records the forced merchant ID in `report_execution_audit`.
+
+`merchant-back/api/protected/reportEngine.ts` proxies the routes, and `merchant-front/src/pages/reports/index.tsx` is the portal page. The merchant SDK is a mirrored copy of the admin frontend SDK because this repository has no shared frontend workspace package.
+
+## 10. Security additions
+
+- `PII_MASKED` values are redacted after query execution unless the actor holds `piiUnmaskAuthorities` (default `security:write`).
+- Confidential AML reports require MLRO/Compliance access. A Security Admin may request `allowConfidentialAmlBypass`, but it applies only after a different MLRO/Security Admin approves the `REPORT_AML_BYPASS` request.
+- Chrome templates, inline chrome, `global_scoped_css` and custom SVG templates are sanitized. `<style>`, external `src`/`href`, `@import`, event handlers and executable URI schemes are rejected.
+- Chrome `required_assets` are loaded during execution and during the Chrome preview.
+- Schema version 27 adds the AML bypass flag, latest-published uniqueness and append-only execution audit.
+
+---
+
 <a id="edgeshared"></a>
 
 > **Part ID:** `edge.shared` · **Status:** `implemented` · **Last verified:** 2026-11-08 · **Verified against:** `5a24f6f+working-tree`
@@ -8157,6 +8300,16 @@ The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` an
 
 `lib/authLimiters.ts` mirrors the admin account limiters; `lib/security/sessionCookie.ts` exports `assertMerchantSessionShape`, which `api/upload.ts` applies (with the existing limiter and size cap) before any body is buffered.
 
+## 8. Merchant report proxy (2026-11-09)
+
+`merchant-back/api/protected/reportEngine.ts` is mounted at `/report-engine` and forwards:
+
+- `GET /catalog` to `/internal/merchant/report-engine/catalog`;
+- `GET /autocomplete/:sourceKey` to the merchant autocomplete route;
+- `POST /catalog/:code/execute` to the merchant execute route.
+
+The edge validates only the public shape (`inputs`, `locale`, `renderMode`). Core enforces the merchant authority, audience scope, forced merchant ID and report safety. A client-supplied merchant ID is rejected by the strict edge schema and would be overwritten by core even if it reached it.
+
 ---
 
 <a id="edgecheckout"></a>
@@ -8750,7 +8903,7 @@ The historical operator-case design also expects a dedicated operator-case inqui
 
 `admin-front/src/layouts/sections.tsx` groups visible navigation into Overview, Onboarding, Governance, Operations, Finance, Gateways, and Learning. Sections and route items are filtered by their `if` callbacks. Empty sections are removed.
 
-### 3.2 Admin protected routes (37)
+### 3.2 Admin protected routes (40)
 
 The authority column is the UI gate. "None" means no effective `routesAuthorities` entry; the backend may still require an authority. Help shows the guide screen used by the generated context map; "none" means no mapping resolves.
 
@@ -8789,6 +8942,9 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 31 | `/rails` | `Rails` | `gateways.edit` | 3 / 3.2 | Rail catalog, collection modes and customer fields. |
 | 32 | `/routes` | `GatewayRoutes` | `gateways.edit` | 3 / 3.2 | Route priority, limits, credential policy and circuit-breaker health. |
 | 33 | `/guide` | `AdminGuide` | none (intentional) | 1 / 1.1 | Interactive admin system guide, glossary, simulators and checklists. |
+| 38 | `/reports/catalog` | `ReportsCatalog` | `reports.run` (projected from `report_engine:run`) | none | Published report catalog, language prompt, typed inputs, preview and print. |
+| 39 | `/reports/studio` | `ReportsStudio` | `reports.studio` (projected from `report_engine:author`) | none | AI transcript, JSON spec editor, five-layer verification, authority override and publish. |
+| 40 | `/reports/chrome` | `ReportsChrome` | `reports.studio` (projected from `report_engine:author`) | none | Reusable header/footer registry and single global default per type. |
 | 34 | `/academy` | `AdminAcademy` | none (intentional learning) | 1 / 1.1 | Employee Academy home (full-width hero with the single Continue action and progress rings, tracks, certificates list, Guide reading). Sub-routes `AdminAcademyTracks`, `AdminAcademyTrack`, `AdminAcademyModule`, `AdminAcademyLesson`, `AdminAcademyLab`, `AdminAcademyExam`, `AdminAcademyCertificate`, `AdminAcademyHelp` (none gated) and `AdminAcademyTeam` (role `SECURITY_ADMIN`); see `03-guide-and-academy.md` §7. |
 | 35 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
 | 36 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | 4 / 4.2 | Checkout support config, preview, version history and diff. |
@@ -9274,7 +9430,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 This part owns two employee learning products in `admin-front`:
 
-- The Admin Interactive Guide at `/guide/**`: 14 books, 134 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
+- The Admin Interactive Guide at `/guide/**`: 14 books, 135 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
 - The Employee Academy under `/academy/**`: eight tracks, lessons with practice checks, simulated labs, server-graded certification exams, 12-month badges, certificates and a `SECURITY_ADMIN` team view.
 
 It does not own the merchant guide or the checkout help center. The future-guide design is now implemented; its detailed implementation notes live in `06-guide-v2.md`.
@@ -9288,14 +9444,14 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | Artifact | Count / notes |
 | :--- | :--- |
 | `books.json` | 14 books |
-| `articles.en.json` | 134 articles with headings, plain text, roles, UI status and related ids |
+| `articles.en.json` | 135 articles with headings, plain text, roles, UI status and related ids |
 | `glossary.en.json` | 151 terms with aliases, Arabic term and related slugs |
 | `cards.en.json` | 25 cards and 112 required checklist items |
 | `playbook.en.json` | 32 situations with screens, cases and articles |
 | `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
 | `faq.en.json` | 58 quick answers |
 | `data.json` | `ledger-events`, `visible-rails`, `attempt-transitions` |
-| `context-map.json` | 25 screens (including `Wallets` and `SystemBackups`), the last being the `General` fallback |
+| `context-map.json` | 26 screens (including `Wallets` and `SystemBackups`), the last being the `General` fallback |
 | `error-codes.en.json` | 19 codes parsed from `b13-01` |
 | `edge-cases.en.json` | 140 rows parsed from the v4.1 design |
 | `meta.json` | `contentVersion`, deterministic `generatedAt`, counts and source SHA-256 |
@@ -9941,6 +10097,72 @@ cd admin-front && bun run content:guide && bun run type-check && bun run test:un
 cd ../tests && bun run test:unit
 cd ../tests && bunx playwright test --project=admin e2e/admin/guide-reader.spec.ts e2e/admin/guide-palette.spec.ts e2e/admin/guide-context.spec.ts e2e/admin/guide-safeguard.spec.ts
 ```
+
+---
+
+<a id="admin-uireport-studio"></a>
+
+> **Part ID:** `admin-ui.report-studio` · **Status:** `implemented` · **Last verified:** 2026-11-09 · **Verified against:** `working-tree`
+
+# Report Catalog, Studio and Chrome
+
+## 1. Routes
+
+| Path | Route name | Authority | Purpose |
+| :--- | :--- | :--- | :--- |
+| `/reports/catalog` | `ReportsCatalog` | `reports.draft` / `reports.run` | Published reports, language selection, input form and print/preview. |
+| `/reports/studio` | `ReportsStudio` | `reports.studio` | AI transcript, JSON spec editor, five-layer verification, authority override and publish. |
+| `/reports/chrome` | `ReportsChrome` | `reports.studio` | Reusable header/footer registry and default selection. |
+
+The routes are registered in `admin-front/src/router/index.ts`, projected from `report_engine:author` / `report_engine:run` in `core-back/lib/auth/uiAuthorities.ts`, and shown in the Reporting section of the shell.
+
+## 2. Catalog
+
+The catalog page:
+
+- loads the authority-filtered published catalog from the edge;
+- prompts for a locale when the report supports more than one (`ReportLanguagePromptDialog`);
+- renders the typed input form (`ReportInputForm`) with entity autocomplete and date-range validation;
+- executes the report, shows KPI/table/chart/vector sections, and prints through the isolated Paged.js surface;
+- exposes the verification hash and the resolved header/footer.
+
+## 3. Studio
+
+The Studio page:
+
+- downloads the report authoring transcript from the API;
+- accepts a `ReportDescriptorSpec` JSON and an optional `.zip` asset bundle;
+- runs the five verification layers and renders every diagnostic with path, code, severity and `aiFixHint`;
+- shows the AI repair prompt for a rejected spec;
+- saves a draft and publishes a verified version;
+- shows the inferred roles/authorities and, for a Security Admin, the override form with a mandatory justification.
+
+## 4. Chrome registry
+
+The Chrome page lists header/footer specs, their type/status/supported locales and the single global default per type. It creates a new version from an edited spec and sets the global default. The default seed creates `cbl-institutional-header-v1` and `cbl-institutional-footer-v1`.
+
+## 5. Client rendering SDK
+
+`admin-front/src/lib/reportEngineSdk/**` is independent of the pages:
+
+- `render/reportHtmlRenderer.ts` renders KPI, table, chart, vector, HTML and image sections and binds chrome variables;
+- `print/ClientVectorPdfExporter.ts` builds the `@page` CSS Paged.js document with running header/footer, repeated table headers and vector charts;
+- `components/ReportVectorDrawRenderer.tsx` mirrors nodes for RTL;
+- `components/ReportChartRenderer.ts` renders ECharts SVG;
+- `sanitizer/ClientDomSanitizer.ts` strips active content before preview/print;
+- `utils/inputDefaults.ts` and `utils/localeMeta.ts` resolve presets and language options.
+
+## 6. Tests
+
+`admin-front/src/lib/reportEngineSdk/__tests__/**` covers value formatting, preset defaults, Arabic KPI/table/vector rendering, RTL mirroring, chrome binding, the paged-media document, the language options and the fallback sanitizer. The Vitest include list was extended to run these tests.
+
+## 7. Audience, chrome and AML controls
+
+The Catalog has All / Backoffice Internal / Merchant Reports tabs. Chrome selectors are hidden when the report sets `allow_runtime_chrome_selection=false`. CSV/XLSX exports include every dataset (with a `dataset` column).
+
+The Studio reports the domain filter using catalog domains (`LEDGER`, `PAYMENTS`, ...), can download the Chrome transcript, supports clearing an override, and can request a confidential AML bypass. An MLRO or Security Admin sees the pending bypass list and can approve/reject it; maker and checker must differ.
+
+The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type.
 
 ---
 
@@ -10605,6 +10827,26 @@ The content test is a Bun test; the Playwright suites require the live stack.
 ## 10. Change history
 
 - 2026-11-03 — Initial canonical merchant guide/developer API part. Confirms 10 operations chapters, 5 developer chapters, first-5 checklist, decimal.js fee calculator, four-language code generator, and five webhook checks.
+
+---
+
+<a id="merchant-uireports"></a>
+
+> **Part ID:** `merchant-ui.reports` · **Status:** `implemented` · **Last verified:** 2026-11-09 · **Verified against:** `working-tree`
+
+# Merchant Reports
+
+## 1. Route and authority
+
+`/portal/reports` (`MerchantReports`) is visible with the `reports.run` UI authority, projected from the merchant `report_engine:run` authority. Core also implies `report_engine:run` from `merchant:read`/`merchant:write`.
+
+## 2. Behavior
+
+The page lists only published `MERCHANT_FACING`/`BOTH` reports whose scope passes `validateMerchantReportScope`. The merchant scope input is hidden; the server overwrites it with the authenticated merchant ID, so a client cannot request another merchant's data. The page provides the language prompt, Paged.js vector preview, print and CSV/XLSX export. It never shows Studio or Chrome management.
+
+## 3. Server enforcement
+
+`core-back/api/internal/merchantReportEngine.ts` enforces the scope, audience, locale, read-only execution and audit. `merchant-back` proxies only the catalog, autocomplete and execute routes; authoring remains admin-only.
 
 ---
 
@@ -15487,6 +15729,14 @@ The seeder checks live in suite 10, and the deploy matrix lives in `deploy/test/
 
 This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations, so the executed test count is higher, especially in suites 01-04. It is far below the 38,500 claim. The stale-claims register records 1,778; the working tree has about 29 more declarations.
 
+### 3.14 Report engine SDK tests
+
+`core-back/test/reportEngineSdk/**` implements the RE-T01..RE-T22 matrix from `design/12-reporting/dynamic_ai_transcript_report_engine_sdk_plan.md`: structural/bilingual validation, partition and EXPLAIN safety, forbidden secrets, merchant isolation, authority inference/override, read-only executor rejection and timeout recovery, asset bundle traversal/magic bytes, sanitizer, transforms, chrome resolution, input Zod compilation, dry run, transcript/repair prompt and SDK decoupling. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers value formatting, preset defaults, Arabic/RTL rendering, chrome binding, language options, paged-media CSS and the client sanitizer. The frontend Vitest include list was extended for the report SDK tests.
+
+### 3.15 Report engine and merchant report tests
+
+`core-back/test/reportEngineSdk/**` now covers the original RE-T01..RE-T22 matrix plus PII masking, confidential AML denial/bypass, merchant scope (including OR-bypass), semantic AST diagnostics, asset validation, chrome resolution and SDK decoupling. `merchant-back/test/core-forwarding.test.ts` covers the merchant catalog/execute/autocomplete proxy. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers the client renderer, chrome variables, enum translation, vector canvas and paged-media contract. The Guide content test was updated for the new Reports screen/article.
+
 ## 4. Contracts and invariants
 
 1. **Suite numbering is not the same as directory numbering.** The runner's `T-EX-09b` and `T-EX-10` do not match the design's Suite 10 and 11.
@@ -17419,7 +17669,7 @@ The app mirrors the true content during build:
 4. `scripts/check-content.ts` re-runs the extractors and fails if the committed snapshot is
    stale, or if `admin-front` generated content has drifted.
 
-The current snapshot contains 14 guide books, 134 articles, 151 glossary terms, 25 safeguard
+The current snapshot contains 14 guide books, 135 articles, 151 glossary terms, 25 safeguard
 cards, 32 situations, 58 quick answers, 19 error codes, 140 edge cases; and 8 Academy tracks,
 11 modules, 50 lessons, 100 practice checks, 16 labs / 92 tasks, 11 drills and 6 learner pages.
 The exam bank has 223 questions with keys but is not in the bundle.

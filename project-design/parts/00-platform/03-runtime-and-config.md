@@ -112,6 +112,8 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `PGBOUNCER_ENABLED` | `false` | deploy sets it when the pooler fronts PostgreSQL; enforces the session endpoint |
 | `DATABASE_REPLICA_URLS` | empty | read replicas |
 | `AUDIT_DATABASE_URL` | unset | dedicated audit store |
+| `REPORT_READONLY_DATABASE_URL` | unset | dedicated report read-only pool; falls back to a replica or `DATABASE_URL` |
+| `REPORT_ASSET_STORAGE_DIR` | `.report-assets` | persistent report asset directory; set outside the release tree |
 | `LOG_DATABASE_URL` | unset | dedicated log sink |
 | `REDIS_URL` | unset | cache/velocity and invalidation |
 | `REDIS_NODES` | empty | first node used when `REDIS_URL` is absent |

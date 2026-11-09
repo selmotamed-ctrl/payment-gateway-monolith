@@ -52,6 +52,9 @@ export const routesAuthorities: Record<string, string[]> = {
     AdminPlatformSettings: ["settings:read", "settings:write", "security:read", "security:write"],
     AdminCheckoutHelp: ["settings:read", "settings:write", "gateways.edit", "security:write"],
     SystemBackups: ["security:read", "gateway:read"],
+    ReportsCatalog: ["reports.draft", "report_engine:run", "report_engine:author", "report:review", "report:approve"],
+    ReportsStudio: ["reports.studio", "report_engine:author", "report:approve"],
+    ReportsChrome: ["reports.studio", "report:approve", "security:write"],
 };
 
 /** Authenticated routes that intentionally need login only (content has its own role checks). */
@@ -92,6 +95,10 @@ export const AUTHORITY_ALIASES: Record<string, string[]> = {
     "security:read": [],
     "security:write": [],
     "dispute:read": [],
+    "report_engine:author": ["reports.draft", "reports.studio"],
+    "report_engine:run": ["reports.draft", "reports.run"],
+    "report:review": ["reports.draft"],
+    "report:approve": ["reports.draft"],
 };
 
 export const normalizeAuthorities = (list: readonly string[]): string[] => {

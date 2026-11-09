@@ -3044,3 +3044,137 @@ model RmRouteDailyVolume {
   @@index([day])
   @@map("rm_route_daily_volumes")
 }
+
+// ---------------------------------------------------------------------------
+// Dynamic Report Engine SDK (schema version 26)
+// ---------------------------------------------------------------------------
+
+enum ReportSpecStatus {
+  DRAFT
+  VERIFIED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ReportChromeType {
+  HEADER
+  FOOTER
+}
+
+enum ReportAudienceScope {
+  BACKOFFICE_INTERNAL
+  MERCHANT_FACING
+  BOTH
+}
+
+enum ReportAuthorityMode {
+  INFERRED_STRICT
+  SECURITY_ADMIN_OVERRIDE
+}
+
+model ReportAssetBundle {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  bundleSha256     String   @unique @map("bundle_sha256") @db.Char(64)
+  storageKey       String   @map("storage_key") @db.Text
+  totalBytes       Int      @map("total_bytes")
+  fileCount        Int      @map("file_count")
+  manifestJson     Json     @map("manifest_json")
+  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  chromeSpecs ReportChromeSpecRecord[]
+  reportSpecs ReportDefinitionSpecRecord[]
+
+  @@index([uploadedByUserId, createdAt(sort: Desc)], map: "report_asset_bundles_uploader_created_idx")
+  @@map("report_asset_bundles")
+}
+
+model ReportChromeSpecRecord {
+  id                String             @id @default(uuid(7)) @db.Uuid
+  code              String             @db.VarChar(64)
+  version           Int                @default(1)
+  name              String             @db.VarChar(120)
+  chromeType        ReportChromeType   @map("chrome_type")
+  status            ReportSpecStatus   @default(DRAFT)
+  isDefaultGlobal   Boolean            @default(false) @map("is_default_global")
+  supportedLocales  String[]           @map("supported_locales")
+  specJson          Json               @map("spec_json")
+  specSha256        String             @map("spec_sha256") @db.VarChar(64)
+  assetBundleId     String?            @map("asset_bundle_id") @db.Uuid
+  assetBundle       ReportAssetBundle? @relation(fields: [assetBundleId], references: [id], onDelete: SetNull)
+  createdByUserId   String             @map("created_by_user_id") @db.Uuid
+  publishedByUserId String?            @map("published_by_user_id") @db.Uuid
+  publishedAt       DateTime?          @map("published_at") @db.Timestamptz(3)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([code, version], map: "report_chrome_specs_code_version_key")
+  @@index([chromeType, status, isDefaultGlobal], map: "report_chrome_specs_type_status_default_idx")
+  @@map("report_chrome_specs")
+}
+
+model ReportDefinitionSpecRecord {
+  id                         String              @id @default(uuid(7)) @db.Uuid
+  code                       String              @db.VarChar(64)
+  version                    Int                 @default(1)
+  category                   String              @db.VarChar(48)
+  audienceScope              ReportAudienceScope @map("audience_scope")
+  status                     ReportSpecStatus    @default(DRAFT)
+  isLatestPublished          Boolean             @default(false) @map("is_latest_published")
+  supportedLocales           String[]            @map("supported_locales")
+  defaultLocale              String              @default("en") @map("default_locale") @db.VarChar(16)
+  specJson                   Json                @map("spec_json")
+  specSha256                 String              @map("spec_sha256") @db.VarChar(64)
+  verificationReportJson     Json                @map("verification_report_json")
+  assetBundleId              String?             @map("asset_bundle_id") @db.Uuid
+  assetBundle                ReportAssetBundle?  @relation(fields: [assetBundleId], references: [id], onDelete: SetNull)
+
+  authorityMode              ReportAuthorityMode @default(INFERRED_STRICT) @map("authority_mode")
+  inferredRoles              String[]            @map("inferred_roles")
+  inferredAuthorities        String[]            @map("inferred_authorities")
+  conflictStatus             String              @default("NONE") @map("conflict_status") @db.VarChar(48)
+  requiresConfidentialAml    Boolean             @default(false) @map("requires_confidential_aml")
+  overrideAllowedRoles       String[]            @map("override_allowed_roles")
+  overrideAllowedAuthorities String[]            @map("override_allowed_authorities")
+  overrideJustification      String?             @map("override_justification") @db.Text
+  allowConfidentialAmlBypass Boolean             @default(false) @map("allow_confidential_aml_bypass")
+  overriddenByUserId         String?             @map("overridden_by_user_id") @db.Uuid
+  overriddenAt               DateTime?           @map("overridden_at") @db.Timestamptz(3)
+
+  createdByUserId            String              @map("created_by_user_id") @db.Uuid
+  publishedByUserId          String?             @map("published_by_user_id") @db.Uuid
+  publishedAt                DateTime?           @map("published_at") @db.Timestamptz(3)
+  createdAt                  DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                  DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  executions ReportExecutionAuditRecord[]
+
+  @@unique([code, version], map: "report_definition_specs_code_version_key")
+  @@index([status, isLatestPublished, category], map: "report_definition_specs_published_cat_idx")
+  @@index([audienceScope, status], map: "report_definition_specs_audience_status_idx")
+  @@map("report_definition_specs")
+}
+
+model ReportExecutionAuditRecord {
+  id                 String                     @id @default(uuid(7)) @db.Uuid
+  reportSpecId       String                     @map("report_spec_id") @db.Uuid
+  reportSpec         ReportDefinitionSpecRecord @relation(fields: [reportSpecId], references: [id], onDelete: Restrict)
+  reportCode         String                     @map("report_code") @db.VarChar(64)
+  reportVersion      Int                        @map("report_version")
+  actorUserId        String                     @map("actor_user_id") @db.Uuid
+  actorRole          String                     @map("actor_role") @db.VarChar(48)
+  selectedLocale     String                     @map("selected_locale") @db.VarChar(16)
+  scopedMerchantId   String?                    @map("scoped_merchant_id") @db.Uuid
+  inputsRedactedJson Json                       @map("inputs_redacted_json")
+  rowCountTotal      Int                        @map("row_count_total")
+  durationMs         Int                        @map("duration_ms")
+  servedByNode       String                     @map("served_by_node") @db.VarChar(64)
+  verificationSha256 String                     @map("verification_sha256") @db.VarChar(64)
+  renderTarget       String                     @default("CLIENT_PAGED_VECTOR") @map("render_target") @db.VarChar(32)
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([actorUserId, createdAt(sort: Desc)], map: "report_execution_audit_actor_created_idx")
+  @@index([scopedMerchantId, createdAt(sort: Desc)], map: "report_execution_audit_merchant_created_idx")
+  @@index([reportSpecId, createdAt(sort: Desc)], map: "report_execution_audit_spec_created_idx")
+  @@map("report_execution_audit")
+}

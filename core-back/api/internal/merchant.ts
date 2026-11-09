@@ -46,6 +46,7 @@ import { WATCHLIST_SETTING_KEY } from "../../engine/guards/AttemptGuardPipeline"
 import { publishWatchlist } from "../../engine/guards/ScreeningProvider";
 import { asStringArray, resolveVisibleRails } from "../../engine/flow/VisibleRailsCatalog";
 import { json, jsonOptional } from "./json";
+import { merchantReportEngineRouter } from "./merchantReportEngine";
 import {
   clientIp,
   principalOf,
@@ -997,6 +998,7 @@ router.use((request, _response, next) => {
   }
   next();
 });
+router.use("/report-engine", merchantReportEngineRouter);
 
 const OPTION_LIMIT = 100;
 

@@ -27,6 +27,7 @@ export const MERCHANT_AUTHORITY_CATALOGUE = [
   "user:manage",
   "token:manage",
   "credential:manage",
+  "report_engine:run",
 ] as const;
 
 export type MerchantAuthority = (typeof MERCHANT_AUTHORITY_CATALOGUE)[number];
@@ -72,6 +73,7 @@ const IMPLIED_BY_MERCHANT_WRITE = [
   "onboarding:write",
   "dispute:respond",
   "cashout:read",
+  "report_engine:run",
 ] as const;
 
 /**
@@ -102,6 +104,7 @@ export const effectiveMerchantAuthorities = (
     // The portal projects the cash-out screen from merchant:read; core must
     // agree, otherwise the screen is visible but its list returns 403.
     held.add("cashout:read");
+    held.add("report_engine:run");
   }
   return held;
 };

@@ -4,6 +4,7 @@ import { client, ensureSchemaVersion } from "./client";
 import { seedBlueprints, seedPlatformCredentialSets } from "./seedBlueprints";
 import { seedCheckoutSupport, seedRailHelpGuides } from "./seedGuides";
 import { seedSystemGlAccounts } from "./seedGlAccounts";
+import { seedDefaultChromeSpecs } from "../engine/reportStudio/seedDefaultChromeSpecs";
 
 const platformSettings = [
   {
@@ -369,6 +370,14 @@ const seed = async () => {
         mfaSecretCiphertext: null,
       },
     });
+  }
+
+  // Default bilingual report chrome (header/footer) for the Report Studio.
+  const chromeSeedUser = await client.user.findUnique({
+    where: { email: "security-admin@payment-gateway.internal" },
+  });
+  if (chromeSeedUser) {
+    await seedDefaultChromeSpecs(client, chromeSeedUser.id);
   }
 
   for (const template of notificationTemplates) {

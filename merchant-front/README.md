@@ -74,7 +74,7 @@ Public routes:
 | `/register` | `Register` | Merchant account registration; visitor-only. |
 | `/:pathMatch(.*)*` | `NotFound` | Public 404 page. |
 
-Protected `/portal` routes (16 children; `/portal` redirects to the dashboard):
+Protected `/portal` routes (17 children; `/portal` redirects to the dashboard):
 
 | Path | Route name | UI gate | Purpose |
 | :--- | :--- | :--- | :--- |
@@ -93,6 +93,7 @@ Protected `/portal` routes (16 children; `/portal` redirects to the dashboard):
 | `/portal/cashouts` | `Cashouts` | `cashout.read` or `cashout.request` | Cash-out requests, wallet, amount and bank destination. |
 | `/portal/developers/tokens` | `DeveloperTokens` | `tokens.read` | API token creation, one-time secret, scopes, IP allowlist and revocation. |
 | `/portal/credentials` | `Credentials` | `credentials.manage` | Merchant-owned gateway credential sets and environments. |
+| `/portal/reports` | `MerchantReports` | `reports.run` | Merchant-safe report catalog, language prompt, print and CSV/XLSX export. |
 | `/portal/team` | `Team` | `users.manage` | Team members, roles, scopes and authorities. |
 
 ### Authority-gating gaps

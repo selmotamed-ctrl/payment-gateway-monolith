@@ -8,8 +8,10 @@ import { commerceCatalogue } from "../../admin-front/src/constants/i18n/commerce
 import { ledgerOpsCatalogue } from "../../admin-front/src/constants/i18n/ledgerOps";
 import { formsCatalogue } from "../../admin-front/src/constants/i18n/forms";
 import { buildersCatalogue } from "../../admin-front/src/constants/i18n/builders";
+import { reportsCatalogue } from "../../admin-front/src/constants/i18n/reports";
 import { appCatalogue as merchantApp } from "../../merchant-front/src/constants/i18nCatalogue";
 import { landingCatalogue } from "../../merchant-front/src/constants/landingCatalogue";
+import { merchantReportCatalogue } from "../../merchant-front/src/constants/reportCatalogue";
 import { appCatalogue as checkoutApp } from "../../checkout-front/src/constants/i18nCatalogue";
 
 /**
@@ -34,6 +36,7 @@ const fronts: Array<{ name: string; src: string; catalogues: Catalogue[] }> = [
       { name: "ledgerOps", entries: ledgerOpsCatalogue },
       { name: "forms", entries: formsCatalogue },
       { name: "builders", entries: buildersCatalogue },
+      { name: "reports", entries: reportsCatalogue },
     ],
   },
   {
@@ -41,6 +44,7 @@ const fronts: Array<{ name: string; src: string; catalogues: Catalogue[] }> = [
     src: join(ROOT, "merchant-front", "src"),
     catalogues: [
       { name: "landingCatalogue", entries: landingCatalogue },
+      { name: "reportCatalogue", entries: merchantReportCatalogue },
       { name: "i18nCatalogue", entries: merchantApp },
     ],
   },

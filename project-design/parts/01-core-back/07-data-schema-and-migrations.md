@@ -22,6 +22,8 @@ code:
   - core-back/prisma/migrations/20261107150000_shard_repairs/migration.sql
   - core-back/prisma/migrations/20261108090000_partition_truncate_guard/migration.sql
   - core-back/prisma/migrations/20261109210000_ledger_query_and_index_optimization/migration.sql
+  - core-back/prisma/migrations/20261110120000_dynamic_report_engine_sdk/migration.sql
+  - core-back/prisma/migrations/20261110130000_report_engine_merchant_and_aml/migration.sql
 tests:
   - core-back/test/exhaustive/01-schema/**
   - core-back/test/phase1-mtls-and-schema.test.ts
@@ -29,10 +31,11 @@ tests:
   - core-back/test/synthetic-seeder.test.ts
   - core-back/test/security-regressions/c2-mfa.test.ts
   - core-back/test/security-regressions/h4-cashout.test.ts
+  - core-back/test/reportEngineSdk/**
 gaps:
   - Core tables use `TIMESTAMP(3)` while storage-engine tables use `TIMESTAMPTZ(3)`.
   - The migration history is forward-only; there are no down migrations.
-  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 25.
+  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 27.
   - `journal_lines` partition maintenance depends on an external deploy cron.
   - The generated schema catalog appendix is produced by the project-design generator and is not hand-maintained.
 ---
@@ -47,7 +50,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 25 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 27 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -102,7 +105,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 25`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 27`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -115,7 +118,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261109210000_ledger_query_and_index_optimization`, schema version 25). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261110130000_report_engine_merchant_and_aml`, schema version 27). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -292,7 +295,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 25.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 27.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -307,7 +310,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 84 models and 105 enums in the Prisma datamodel.
-- Schema version 25 with an equality check used by the seeders.
+- Schema version 27 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -410,7 +413,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 25 (`REQUIRED_SCHEMA_VERSION = 25`; model count 84). The schema migrations since version 10 are:
+The current schema version is 27 (`REQUIRED_SCHEMA_VERSION = 27`; model count 88). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -476,3 +479,11 @@ Open: a deploy-time guard that refuses to run this migration on a database with 
 Operationally, the migration drops and rebuilds the two `journal_lines` indexes on the partitioned parent, which takes an `ACCESS EXCLUSIVE` lock on every partition for the duration of each build. It is a direct migration because the project has no live production data; on a populated database, run it in a maintenance window (the same operational rule as the shard-checkpoint migration in section 12).
 
 The query rules that depend on these indexes are in `core.ledger` section 3.11 and `core-back/README.md` section 3.1.
+
+## 16. Report engine schema (schema version 26, 2026-11-09)
+
+`20261110120000_dynamic_report_engine_sdk` adds the report-engine registry and bumps `REQUIRED_SCHEMA_VERSION` to 26. It defines `ReportSpecStatus`, `ReportChromeType`, `ReportAudienceScope`, `ReportAuthorityMode`, `report_asset_bundles`, `report_chrome_specs`, `report_definition_specs` and `report_execution_audit`. The partial unique index `report_chrome_specs_one_default_per_type_idx` permits only one published global default header and one footer. The four models are listed in `core.report-engine` section 6.
+
+## 17. Report engine hardening and merchant execution (schema version 27, 2026-11-09)
+
+`20261110130000_report_engine_merchant_and_aml` adds `report_definition_specs.allow_confidential_aml_bypass` (default false), a partial unique index on `report_definition_specs(code) WHERE is_latest_published = true`, and append-only triggers on `report_execution_audit`. The AML bypass is only applied after a different MLRO or Security Admin approves a `REPORT_AML_BYPASS` approval request. The merchant report API forces `merchant_scope_input_key` from the authenticated merchant and rejects any non-merchant-scopable model.

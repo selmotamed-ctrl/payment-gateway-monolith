@@ -11,6 +11,7 @@ import { academyInternalRouter } from "./academy";
 import { adminLedgerRouter } from "./adminLedger";
 import { adminOperationsRouter } from "./adminOperations";
 import { adminSystemRouter } from "./adminSystem";
+import { adminReportEngineRouter } from "./adminReportEngine";
 import { publicProgress } from "../../engine/academy/progress";
 import { loadCatalog } from "../../engine/academy/catalog";
 import { getPlatformRuntime } from "../../engine/runtime";
@@ -766,6 +767,7 @@ router.use("/", adminCommerceRouter);
 router.use(adminLedgerRouter);
 router.use(adminOperationsRouter);
 router.use(adminSystemRouter);
+router.use(adminReportEngineRouter);
 router.use("/academy", academyInternalRouter);
 
 /** Any staff read authority: the floor for the cross-cutting dashboard, lookup and search routes. */

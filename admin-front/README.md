@@ -82,7 +82,7 @@ Visibility resolution:
 
 ## 5. Route and page map
 
-The router has 37 protected children under `/`, a visitor-only `/login`, and a catch-all `NotFound`. `/` redirects to `Dashboard`. Detail routes use `meta.parentName` for active navigation, breadcrumbs and contextual help.
+The router has 40 protected children under `/`, a visitor-only `/login`, and a catch-all `NotFound`. `/` redirects to `Dashboard`. Detail routes use `meta.parentName` for active navigation, breadcrumbs and contextual help.
 
 | Path | Route name | UI gate | Purpose |
 | :--- | :--- | :--- | :--- |
@@ -118,6 +118,9 @@ The router has 37 protected children under `/`, a visitor-only `/login`, and a c
 | `/gateways/wizard/:id` | `GatewayWizard` | `gateways.edit` | Eight-step gateway version wizard. |
 | `/rails` | `Rails` | `gateways.edit` | Rail catalog, collection modes and customer fields. |
 | `/routes` | `GatewayRoutes` | `gateways.edit` | Route priority, limits, credential policy and circuit-breaker health. |
+| `/reports/catalog` | `ReportsCatalog` | `reports.run` | Published report catalog, language prompt, typed inputs, preview and print. |
+| `/reports/studio` | `ReportsStudio` | `reports.studio` | AI transcript, JSON spec editor, five-layer verification, authority override and publish. |
+| `/reports/chrome` | `ReportsChrome` | `reports.studio` | Reusable header/footer registry and global default selection. |
 | `/guide` | `AdminGuide` | none (intentional learning surface) | Interactive admin guide, glossary, simulators and checklists. |
 | `/academy`, `/academy/tracks`, `/academy/track/:trackId`, `/academy/module/:moduleId`, `/academy/lesson/:lessonId`, `/academy/lab/:labId`, `/academy/exam/:examId`, `/academy/certificate/:badgeId`, `/academy/help` | `AdminAcademy*` | none (intentional learning surface) | Employee Academy: tracks, lessons, labs, server-graded exams, certificates. |
 | `/academy/team` | `AdminAcademyTeam` | role `SECURITY_ADMIN` | Team certification view with CSV export. |
@@ -170,7 +173,7 @@ Public routes are `/login` (`Login`, visitor-only) and `/:pathMatch(.*)*` (`NotF
 
 ### Guide and academy
 
-- `/guide` is the Admin Interactive Guide v1.0: 14 books, 125 articles, 151 glossary terms, 22 safeguard cards, 29 situations, 8 reading paths, 58 quick answers, 19 error codes and a 140-case edge-case catalogue, extracted deterministically from `design/07-guides-and-academy/guide_system_design_and_content.md` into `src/content/guide/generated/` (`bun run content:guide`). Eight routes (home, book, article, glossary, tools, playbook, cards, edge cases), a MiniSearch command palette, five client-only simulators and per-article read tracking stored in the shared Academy progress JSON. Canonical part: [Admin Guide v2](../project-design/parts/03-admin-front/06-guide-v2.md).
+- `/guide` is the Admin Interactive Guide v1.0: 14 books, 135 articles, 151 glossary terms, 25 safeguard cards, 32 situations, 8 reading paths, 58 quick answers, 19 error codes and a 140-case edge-case catalogue, extracted deterministically from `design/07-guides-and-academy/guide_system_design_and_content.md` into `src/content/guide/generated/` (`bun run content:guide`). Eight routes (home, book, article, glossary, tools, playbook, cards, edge cases), a MiniSearch command palette, five client-only simulators and per-article read tracking stored in the shared Academy progress JSON. Canonical part: [Admin Guide v2](../project-design/parts/03-admin-front/06-guide-v2.md).
 - Guide search is MiniSearch over articles, glossary, cards, situations, FAQ and error codes with Arabic-aware normalisation; `Ctrl+K` also searches platform records and admin pages.
 - `/academy` is the Employee Academy: 8 tracks (Foundation plus one per role), 11 modules, 49 lessons with 98 practice checks, 15 labs (86 tasks), 218 exam-pool questions (40 critical) and 8 server-graded exams. Content is extracted from the design file (`bun scripts/extract-academy-content.ts`); exam answer keys live only in `core-back`. The UI is full-width and built from the shared admin primitives plus `src/styles/academy/*.css` and `src/components/academy/ui/*` (visual system v2, [Admin Guide and Academy §7.6](../project-design/parts/03-admin-front/03-guide-and-academy.md)).
 - Mastery is computed client-side: all lessons complete, the lab passed and a 100% quiz. Badges are derived, not manually granted. The backend stores progress JSON but does not independently validate answers, labs or mastery.

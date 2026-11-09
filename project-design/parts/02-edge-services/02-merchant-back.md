@@ -28,11 +28,13 @@ tests:
   - merchant-back/test/merchant-kyb-and-external.test.ts
   - merchant-back/test/env-isolation.test.ts
   - merchant-back/test/security-regressions.test.ts
+  - merchant-back/test/core-forwarding.test.ts
 gaps:
   - The edge checks the session/JWT shape and principal type; core-back verifies the signature, expiry, user status, authorities and session revoke list. Per-call MFA state is still not asserted.
   - The external merchant API validates the `pg_live_` token format and applies per-token/IP limits; the token hash, revocation, expiry and IP allowlist are enforced by core-back.
   - POST /merchant/auth/google always returns 501 because core has no configured OIDC provider.
   - The options router is implemented but not mounted anywhere.
+  - Merchant report routes are read-only catalog/execute proxies; report authoring and chrome management remain admin-only.
   - The POS SSE stream has a fixed configured timeout and no resume, replay or polling fallback at the edge.
 ---
 
@@ -328,3 +330,13 @@ The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` an
 ## Remediation round 2 (2026-11-08): limiters and session shape
 
 `lib/authLimiters.ts` mirrors the admin account limiters; `lib/security/sessionCookie.ts` exports `assertMerchantSessionShape`, which `api/upload.ts` applies (with the existing limiter and size cap) before any body is buffered.
+
+## 8. Merchant report proxy (2026-11-09)
+
+`merchant-back/api/protected/reportEngine.ts` is mounted at `/report-engine` and forwards:
+
+- `GET /catalog` to `/internal/merchant/report-engine/catalog`;
+- `GET /autocomplete/:sourceKey` to the merchant autocomplete route;
+- `POST /catalog/:code/execute` to the merchant execute route.
+
+The edge validates only the public shape (`inputs`, `locale`, `renderMode`). Core enforces the merchant authority, audience scope, forced merchant ID and report safety. A client-supplied merchant ID is rejected by the strict edge schema and would be overwritten by core even if it reached it.

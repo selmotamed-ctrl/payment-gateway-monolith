@@ -205,7 +205,7 @@ export const loadArticles: (lang:"en"|"ar") => Promise<Article[]>; // dynamic im
 | Item | Count | Source |
 | :--- | :--- | :--- |
 | Books | 14 | `@@book` blocks |
-| Articles | 134 | `@@article` blocks |
+| Articles | 135 | `@@article` blocks |
 | Glossary terms | 151 | `@@term` lines |
 | Safeguard cards | 25 | `@@card` blocks (the 22 ids in §II-7 plus `sg-trigger-backup`, `sg-run-restore-drill`, `sg-update-backup-policy`) |
 | Safeguard checklist items | 112 | lines `- [ ] ` inside cards |
@@ -213,7 +213,7 @@ export const loadArticles: (lang:"en"|"ar") => Promise<Article[]>; // dynamic im
 | Reading paths | 8 | `@@path` lines (`ALL` plus the 7 staff roles) |
 | Quick answers (FAQ) | 58 | `@@faq` blocks |
 | Data blocks | 3 | `ledger-events` (16 events), `visible-rails` (7 vectors), `attempt-transitions` |
-| Context map screens | 25 | `screens` array of `context-map` |
+| Context map screens | 26 | `screens` array of `context-map` |
 | Error codes (from b13-01) | 19 | first-column backticked tokens |
 | Edge cases | 140 | parsed from the repository's v4 design file |
 
@@ -1572,6 +1572,36 @@ There is **no retry** on the two outbox tabs. The screen says: "This is a monito
 
 :::warning Find out why before you re-queue
 A job that failed may fail again for the same reason. Read the **Last error** first. If you do not understand it, ask Engineering before you click **Re-queue**.
+:::
+@@end
+
+
+@@article id=b03-15 book=3 order=15 title="Reports: the catalog, the studio and shared headers and footers" roles=SECURITY_ADMIN,FINANCE,COMPLIANCE,OPERATOR minutes=4 ui=AVAILABLE related=b03-13,b03-14,b12-08
+:::summary Big picture in 20 seconds
+The Reporting section has three screens. **Report Catalog** runs a published report and prints or exports it. **Report Studio** verifies a report definition written by an AI and publishes it. **Headers & Footers** stores the reusable page chrome. A report is declarative: it never contains raw SQL, and every query runs read-only.
+:::
+
+### Why reports are separate from dashboards
+A dashboard shows a live summary. A report is a document: it has a title, a period, a language, a page header and footer, and a verification hash. You can print it as a vector PDF or export its data. The report engine executes only the declarative query definition that was verified and published. It cannot write to the database.
+
+### Report Catalog
+Open **Reporting → Catalog**. Only reports your role can run are listed. Choose a report, fill its inputs, choose the output language when more than one is available, and click **Generate Report**. The preview shows the exact paginated pages; **Print** opens the browser's vector PDF dialog, and **Export CSV** / **Export XLSX** download the report data. If the report has a merchant input, the merchant is chosen there; a merchant report generated for a merchant is limited to that merchant's data.
+
+### Report Studio
+Open **Reporting → Studio**. First download the AI transcript. It contains the live schema, the allowed query vocabulary and the bilingual rules. Give it to the external AI, then paste the JSON it returns and verify it. The scorecard shows five layers: schema and translations, query safety and partition pruning, authority inference, asset and HTML safety, and a read-only dry run. If a layer fails, copy the repair prompt back to the AI. When everything passes, save it as verified or publish it. A conflict between domains is shown as a warning; a Security Admin can attach an authority override with a written justification.
+
+### Headers & Footers
+Open **Reporting → Headers & Footers**. A header or footer is its own reusable spec with a bilingual template and optional logo assets. Only one published header and one published footer can be the global default. A report can use the global default, a specific registered chrome, an inline template, or none.
+
+### Safety rules
+* A report spec never contains raw SQL; the engine compiles the declarative query.
+* `journal_lines` queries must include a bounded `created_at` range.
+* Credential ciphertext, password hashes and other forbidden secrets are never selectable.
+* A merchant-facing report must be filtered by the merchant scope input on every merchant-scoped model.
+* Report execution is recorded with the actor, language, row count, duration and verification hash.
+
+:::tip If a report will not run
+Read the diagnostic code and its **How to fix** line. Do not edit the JSON by guesswork. In the Studio, the same diagnostic is available as a copyable repair prompt for the AI.
 :::
 @@end
 
@@ -7425,6 +7455,23 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
     "s-wal-archive-lag-high",
     "s-restore-drill-failed"
    ]
+  },
+  {
+   "screenId": "Reports",
+   "routeNames": [
+    "ReportsCatalog",
+    "ReportsStudio",
+    "ReportsChrome"
+   ],
+   "pageDir": "pages/reports",
+   "summary": "The reporting workspace: run a published report with its inputs and language, verify and publish a declarative report definition, and manage reusable bilingual headers and footers.",
+   "articles": [
+    "b03-15",
+    "b03-13",
+    "b03-14"
+   ],
+   "cards": [],
+   "situations": []
   },
   {
    "screenId": "General",

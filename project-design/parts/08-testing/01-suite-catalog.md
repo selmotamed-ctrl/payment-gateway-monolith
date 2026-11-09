@@ -267,6 +267,14 @@ The seeder checks live in suite 10, and the deploy matrix lives in `deploy/test/
 
 This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations, so the executed test count is higher, especially in suites 01-04. It is far below the 38,500 claim. The stale-claims register records 1,778; the working tree has about 29 more declarations.
 
+### 3.14 Report engine SDK tests
+
+`core-back/test/reportEngineSdk/**` implements the RE-T01..RE-T22 matrix from `design/12-reporting/dynamic_ai_transcript_report_engine_sdk_plan.md`: structural/bilingual validation, partition and EXPLAIN safety, forbidden secrets, merchant isolation, authority inference/override, read-only executor rejection and timeout recovery, asset bundle traversal/magic bytes, sanitizer, transforms, chrome resolution, input Zod compilation, dry run, transcript/repair prompt and SDK decoupling. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers value formatting, preset defaults, Arabic/RTL rendering, chrome binding, language options, paged-media CSS and the client sanitizer. The frontend Vitest include list was extended for the report SDK tests.
+
+### 3.15 Report engine and merchant report tests
+
+`core-back/test/reportEngineSdk/**` now covers the original RE-T01..RE-T22 matrix plus PII masking, confidential AML denial/bypass, merchant scope (including OR-bypass), semantic AST diagnostics, asset validation, chrome resolution and SDK decoupling. `merchant-back/test/core-forwarding.test.ts` covers the merchant catalog/execute/autocomplete proxy. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers the client renderer, chrome variables, enum translation, vector canvas and paged-media contract. The Guide content test was updated for the new Reports screen/article.
+
 ## 4. Contracts and invariants
 
 1. **Suite numbering is not the same as directory numbering.** The runner's `T-EX-09b` and `T-EX-10` do not match the design's Suite 10 and 11.

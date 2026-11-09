@@ -329,3 +329,30 @@ describe("deep pagination is forwarded on every merchant list", () => {
     });
   }
 });
+
+describe("merchant report-engine forwarding", () => {
+  test("GET /report-engine/catalog forwards to the merchant core route", async () => {
+    const response = await fetch(`${edgeUrl}/api/v1/merchant/report-engine/catalog`, { headers: auth });
+    expect(response.status).toBe(200);
+    expect(forwarded()?.url).toBe("/internal/merchant/report-engine/catalog");
+  });
+
+  test("POST /report-engine/catalog/:code/execute keeps only the public execute payload", async () => {
+    const response = await postJson("/api/v1/merchant/report-engine/catalog/merchant-daily/execute", {
+      inputs: { periodRange: { start: "2026-01-01T00:00:00.000Z", end: "2026-01-31T23:59:59.999Z" } },
+      locale: "ar",
+    });
+    expect(response.status).toBe(200);
+    expect(forwarded()?.url).toBe("/internal/merchant/report-engine/catalog/merchant-daily/execute");
+    expect(forwardedBody()).toEqual({
+      inputs: { periodRange: { start: "2026-01-01T00:00:00.000Z", end: "2026-01-31T23:59:59.999Z" } },
+      locale: "ar",
+    });
+  });
+
+  test("merchant report autocomplete forwards only the merchant route", async () => {
+    const response = await fetch(`${edgeUrl}/api/v1/merchant/report-engine/autocomplete/applications?q=shop`, { headers: auth });
+    expect(response.status).toBe(200);
+    expect(forwarded()?.url).toBe("/internal/merchant/report-engine/autocomplete/applications?q=shop");
+  });
+});
