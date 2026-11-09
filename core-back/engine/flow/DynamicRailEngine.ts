@@ -1,6 +1,6 @@
 import { Decimal } from "decimal.js";
 import { invalidationBus, type InvalidationBus } from "../../lib/invalidationBus";
-import { decimal, refundScenarioFor, type DecimalInput, type LedgerPostContext, type LedgerScenario, type LedgerScenarioInput, type PaymentConfirmationInput } from "../ledger/LedgerPoster";
+import { decimal, type DecimalInput, type LedgerPostContext, type LedgerScenario, type LedgerScenarioInput, type PaymentConfirmationInput } from "../ledger/LedgerPoster";
 import { StepExecutor, type FlowStep, type StepExecutionContext, type StepExecutionResult } from "./StepExecutor";
 import type { LogSinkPort } from "../../lib/storageEngine/ports";
 import type {
@@ -31,7 +31,6 @@ export type DynamicAttempt = AdapterAttempt & {
   ledgerEntryId?: string;
   contextCiphertext?: string;
   publicOutputs?: Record<string, unknown>;
-  adjustmentState?: string;
   substatus?: string;
 };
 
@@ -46,7 +45,6 @@ export interface DynamicAttemptPatch {
   ledgerEntryId?: string;
   contextCiphertext?: string;
   publicOutputs?: Record<string, unknown>;
-  adjustmentState?: string;
   providerReference?: string;
   networkReference?: string;
   settledAmount?: string;
@@ -663,10 +661,10 @@ export class DynamicRailEngine {
       throw engineError("REFUND_AMOUNT_EXCEEDED", "Refund amount exceeds the settled amount");
     }
     const phase: FlowPhase = current.settledAmount === undefined ? "VOID" : "REFUND";
-    await this.options.attempts.updateAttempt(current.id, { adjustmentState: "EXECUTING" });
+    // The refund's own state lives on its Adjustment row (EXECUTING / EXECUTED), owned by the
+    // governance executor: `payment_attempts` has no adjustment-state column.
     const execution = await this.executePhase(phase, current, { amount: refundAmount.toFixed(4), adjustmentId });
     if (execution.status === "UNKNOWN") {
-      await this.options.attempts.updateAttempt(current.id, { adjustmentState: "EXECUTING" });
       await this.options.reconciliationScheduler?.schedule(current.id, adjustmentId);
       return this.toResult(current, {
         status: "UNKNOWN",
@@ -675,34 +673,18 @@ export class DynamicRailEngine {
       });
     }
     if (execution.status === "FAILED") {
-      await this.options.attempts.updateAttempt(current.id, { adjustmentState: "EXECUTING" });
       await this.options.reconciliationScheduler?.schedule(current.id, adjustmentId);
       return this.toResult(current, execution);
     }
-    if (this.options.ledgerPoster?.postScenario) {
-      const split = this.refundSplit(current, refundAmount);
-      const refundScenario = refundScenarioFor(current.ownershipMode);
-      // A merchant-direct refund only reverses the commission recognition; with no commission to
-      // reverse the merchant refunds the payer from their own gateway account and nothing posts.
-      const nothingToPost = refundScenario.stage === "REFUND" && split.commission.isZero();
-      if (!nothingToPost) {
-        await this.options.ledgerPoster.postScenario(
-          refundScenario.scenario,
-          adjustmentId,
-          {
-            amount: refundAmount,
-            commissionAmount: split.commission,
-            merchantAmount: split.merchant,
-            stage: refundScenario.stage,
-          },
-          this.ledgerContext(current),
-        );
-      }
-    }
+    // The engine moves the money at the gateway and records it on the attempt; it does not book
+    // the refund. The journal is posted once, by the governance finalizer
+    // (`finalizeRefundAdjustment`), from the approved adjustment: its amount, its
+    // `reverseCommission` choice and its target account, in the same transaction that marks the
+    // adjustment EXECUTED. Posting here as well raced that finalizer on the same
+    // (ADJUSTMENT, adjustmentId) key and, landing first, booked a proportional commission
+    // reversal the checker never approved.
     const fullyRefunded = refundAmount.eq(decimal(current.totalChargedAmount));
-    await this.transition(current, fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED", {
-      adjustmentState: "EXECUTED",
-    });
+    await this.transition(current, fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED");
     return this.toResult(current, {
       status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
       outputs: execution.outputs.public,
@@ -1397,14 +1379,6 @@ export class DynamicRailEngine {
     );
   }
 
-  private refundSplit(attempt: DynamicAttempt, amount: Decimal): { commission: Decimal; merchant: Decimal } {
-    const total = decimal(attempt.totalChargedAmount);
-    // Rounded once to the money scale; the merchant share is the exact remainder.
-    const commission = total.isZero()
-      ? new Decimal(0)
-      : this.commissionForAttempt(attempt).mul(amount).div(total).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
-    return { commission, merchant: amount.minus(commission) };
-  }
 
   private ledgerContext(attempt: DynamicAttempt): LedgerPostContext {
     return {

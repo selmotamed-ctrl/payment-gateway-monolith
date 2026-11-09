@@ -27,7 +27,6 @@ export interface AttemptRow {
   contextCiphertext: string;
   customerFieldsMasked: unknown;
   publicOutputs?: unknown;
-  adjustmentState?: string | null;
   ledgerEntryId?: string | null;
   merchantId?: string;
   applicationId?: string;
@@ -126,7 +125,6 @@ const toAttempt = (row: AttemptRow): DynamicAttempt => {
     context: masked,
     contextCiphertext: row.contextCiphertext,
     publicOutputs: (row.publicOutputs as Record<string, unknown> | undefined) ?? {},
-    adjustmentState: row.adjustmentState ?? undefined,
     ledgerEntryId: row.ledgerEntryId ?? undefined,
     merchantId: row.merchantId,
     applicationId: row.applicationId,
@@ -206,7 +204,6 @@ export class PrismaAttemptRepository implements AttemptRepository {
     if (patch.ledgerEntryId !== undefined) data.ledgerEntryId = patch.ledgerEntryId;
     if (patch.contextCiphertext !== undefined) data.contextCiphertext = patch.contextCiphertext;
     if (patch.publicOutputs !== undefined) data.publicOutputs = patch.publicOutputs;
-    if (patch.adjustmentState !== undefined) data.adjustmentState = patch.adjustmentState;
     if (patch.providerReference !== undefined) data.providerReference = patch.providerReference;
     if (patch.networkReference !== undefined) data.networkReference = patch.networkReference;
     if (patch.settledAmount !== undefined) data.settledAmount = patch.settledAmount;

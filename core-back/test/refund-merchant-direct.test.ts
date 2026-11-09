@@ -210,7 +210,7 @@ describe("commission receivable balance after a merchant-direct refund", () => {
   });
 });
 
-describe("DynamicRailEngine.refund picks the template from the ownership mode", () => {
+describe("DynamicRailEngine.refund leaves the booking to the governance finalizer", () => {
   const refundStep = [{ id: "refund-step", type: "HTTP", side_effect: "MOVES_MONEY" }] as never;
   const run = async (ownershipMode: "MERCHANT_DIRECT" | "PLATFORM_CLEARING" | "INTERNAL", amount: string) => {
     const calls: Array<{ scenario: string; refId: string; input: LedgerScenarioInput }> = [];
@@ -223,22 +223,51 @@ describe("DynamicRailEngine.refund picks the template from the ownership mode", 
     return { result, calls };
   };
 
-  test("a MERCHANT_DIRECT refund posts the commission-reversal stage, not FULL_REFUND", async () => {
-    const { result, calls } = await run("MERCHANT_DIRECT", "100.0000");
-    expect(result.status).toBe("REFUNDED");
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.scenario).toBe("MERCHANT_DIRECT_CONFIRMATION");
-    expect(calls[0]?.input.stage).toBe("REFUND");
+  // The engine used to post its own proportional split on the same (ADJUSTMENT, adjustmentId)
+  // key. It ran first, so the finalizer's post became a no-op and the approved
+  // `reverseCommission` choice and target account were ignored.
+  test("a refund moves the attempt to REFUNDED and posts nothing itself, in every ownership mode", async () => {
+    for (const mode of ["MERCHANT_DIRECT", "PLATFORM_CLEARING", "INTERNAL"] as const) {
+      const { result, calls } = await run(mode, "100.0000");
+      expect(result.status).toBe("REFUNDED");
+      expect(calls).toHaveLength(0);
+    }
   });
 
-  test("a partial MERCHANT_DIRECT refund reverses the proportional commission", async () => {
-    const { calls } = await run("MERCHANT_DIRECT", "50.0000");
-    expect(calls[0]?.scenario).toBe("MERCHANT_DIRECT_CONFIRMATION");
-    expect(String(calls[0]?.input.commissionAmount)).toBe("1.5");
+  test("a partial refund moves the attempt to PARTIALLY_REFUNDED and posts nothing itself", async () => {
+    const { result, calls } = await run("MERCHANT_DIRECT", "50.0000");
+    expect(result.status).toBe("PARTIALLY_REFUNDED");
+    expect(calls).toHaveLength(0);
   });
+});
 
-  test("platform-cleared and internal refunds keep their templates", async () => {
-    expect((await run("PLATFORM_CLEARING", "100.0000")).calls[0]?.scenario).toBe("FULL_REFUND");
-    expect((await run("INTERNAL", "100.0000")).calls[0]?.scenario).toBe("INTERNAL_REFUND");
+describe("the approved adjustment, not the engine, decides the refund booking", () => {
+  test("reverseCommission = false on a platform-cleared refund reverses no commission", async () => {
+    const fixture = createGovernanceFixture();
+    fixture.client.adjustment.create({
+      data: {
+        id: "refund-cleared-no-reverse",
+        type: "REFUND",
+        targetGlAccountId: "acc-wallet",
+        sourceAttemptId: "attempt-1",
+        amount: new Decimal(100),
+        reverseCommission: false,
+        reason: "customer request",
+        state: "PENDING_REVIEW",
+      },
+    });
+    const engine = { refund: async () => ({ status: "REFUNDED", attempt: { ownershipMode: "PLATFORM_CLEARING" } }) };
+
+    const result = await executeAdjustment(
+      { ...fixture.context, engine },
+      fixture.client as never,
+      { adjustmentId: "refund-cleared-no-reverse", checkerUserId: "user-finance", checkerRole: "FINANCE" },
+    );
+
+    expect(result.status).toBe("EXECUTED");
+    expect(refundLines("refund-cleared-no-reverse")).toEqual([
+      { direction: "DEBIT", account: "MERCHANT_WALLET", amount: "100.0000" },
+      { direction: "CREDIT", account: "TREASURY", amount: "100.0000" },
+    ]);
   });
 });

@@ -225,10 +225,10 @@ Every transition calls `attempts.updateAttempt`, then publishes `attempt:transit
 `refund(attempt, amount, adjustmentId)`:
 - Validates a positive amount not exceeding `totalChargedAmount`.
 - Chooses `VOID` when `settledAmount` is undefined, otherwise `REFUND`.
-- Sets `adjustmentState=EXECUTING`.
 - Executes the phase.
-- `UNKNOWN`/`FAILED` keep `EXECUTING` and schedule reconciliation.
-- On success, posts the ledger scenario (`INTERNAL_REFUND` for internal rails, otherwise `FULL_REFUND`) and transitions `REFUNDED` or `PARTIALLY_REFUNDED`.
+- `UNKNOWN`/`FAILED` leave the attempt unchanged and schedule reconciliation; the adjustment stays `EXECUTING` on its own row.
+- On success, transitions the attempt to `REFUNDED` or `PARTIALLY_REFUNDED`. It posts no journal: the refund is booked once by the governance finalizer (`finalizeRefundAdjustment`) from the approved adjustment, inside the transaction that marks the adjustment `EXECUTED`.
+- It writes no adjustment state: `payment_attempts` has no such column, and the refund's state lives on `adjustments.state`. (Fixed 2026-11-10: the engine used to write `adjustmentState` through the attempt repository, which Prisma rejected, so every approved refund threw before reaching the gateway. It also posted its own proportional commission split on the same `(ADJUSTMENT, adjustmentId)` key, which landed first and silently overrode the approved `reverseCommission` choice and target account.)
 
 The engine has a `FlowPhase` union of `PRE_INITIATE`, `INITIATE`, `SUBMIT`, `VERIFY`, `CANCEL`, `REFUND`, `VOID`. It has no public `cancel` method, and `CANCEL` is not executed anywhere in the current callers.
 
