@@ -113,7 +113,16 @@ Request logging writes console lines with a separate short id and an `http_acces
 - The migration order and files are generated in [`../project-design/appendices/migration-catalog.md`](../project-design/appendices/migration-catalog.md).
 - The committed history is forward-only: baseline schema, storage-engine indexes, CQRS read models and storage hardening. There are no down migrations. Recovery is restore/PITR or a new forward migration.
 - `journal_lines` is monthly range-partitioned by `created_at`; the primary key includes `created_at`. The deploy engine installs a daily partition-maintenance cron. Elsewhere, run `SELECT ensure_journal_line_partitions(18)` on a schedule.
-- Schema version 13 is required (latest migration `20261107120000_inbound_event_claims`; the preceding one is `20261107090000_shard_sequenced_checkpoints`). `ensureSchemaVersion()` is called by the baseline seeder, the Fake Rails seeder and the synthetic seeder, but not by the HTTP start path. A stale database can boot and fail later at query time.
+- Schema version 16 is required (latest migration `20261108150000_ledger_query_and_index_optimization`; the preceding ones are `20261108100000_session_revocations` and `20261108090000_partition_truncate_guard`). `ensureSchemaVersion()` is called by the baseline seeder, the Fake Rails seeder and the synthetic seeder, but not by the HTTP start path. A stale database can boot and fail later at query time.
+
+#### Query and indexing rules for the ledger tables
+
+Every query that touches `journal_entries`, `journal_lines` or `gl_account_shards` must keep its cost independent of history:
+
+1. **Bound `created_at` when querying `journal_lines` by `entry_id`.** The table is monthly range-partitioned by `created_at`, so `WHERE entry_id = $1` alone probes every monthly partition. A line is inserted in its entry's transaction, so use `createdAt: { gte: entry.createdAt - 5m, lte: entry.createdAt + 5m }`. Bound by the ENTRY, not by an older attempt: a `COMMISSION_NETTING` or delayed AML capture entry can be posted days after the attempt.
+2. **Never scan `journal_lines` for a live balance.** Live balances are the `gl_account_shards` sum (`loadLiveAccountBalances`, `lockWalletLedgerBalance`). The full-history scans in `CheckpointService`, `ShardRepair` and the restore drill are deliberate journal proofs.
+3. **Compute filtered statement counts and sums in one covering `groupBy`** (`by: ["direction"], _count: { _all: true }, _sum: { amount: true }`) over the same `where` as the page query; never add a separate `count()` for the same predicate.
+4. **Keep the covering payloads and the Visibility Map autovacuum settings.** Recreated indexes must keep `INCLUDE ("gl_account_id", "direction", "amount", "id")` on `journal_lines_entry_id_created_at_idx` and `INCLUDE ("direction", "amount", "entry_id", "id")` on `journal_lines_account_id_cov_idx`; every monthly partition must keep `autovacuum_vacuum_insert_scale_factor = 0.01` so PostgreSQL 18 maintains the Visibility Map for Index-Only Scans. `journal_entries` uses `journal_entries_created_at_idx` for list/summary and `journal_entries_trgm_search_idx` for admin search.
 
 ### 3.2 Storage engine ports
 

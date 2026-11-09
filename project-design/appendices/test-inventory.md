@@ -53,7 +53,7 @@
 | `core-back/test/engine/transform-pipeline.test.ts` | 225 | 33 |
 | `core-back/test/engine/visible-rails.test.ts` | 307 | 15 |
 | `core-back/test/exhaustive/01-schema/check-constraints-and-triggers.test.ts` | 456 | 24 |
-| `core-back/test/exhaustive/01-schema/indexes-and-query-plans.test.ts` | 164 | 6 |
+| `core-back/test/exhaustive/01-schema/indexes-and-query-plans.test.ts` | 166 | 6 |
 | `core-back/test/exhaustive/01-schema/models-and-columns.test.ts` | 302 | 23 |
 | `core-back/test/exhaustive/01-schema/unique-and-fk-constraints.test.ts` | 321 | 15 |
 | `core-back/test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` | 240 | 8 |
@@ -117,7 +117,7 @@
 | `core-back/test/onboarding-four-eyes.test.ts` | 200 | 18 |
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/partition-truncate-guard.test.ts` | 86 | 5 |
-| `core-back/test/phase1-mtls-and-schema.test.ts` | 392 | 14 |
+| `core-back/test/phase1-mtls-and-schema.test.ts` | 393 | 14 |
 | `core-back/test/phase2-ledger-and-governance.test.ts` | 281 | 11 |
 | `core-back/test/phase3-dynamic-engine-and-blueprints.test.ts` | 273 | 12 |
 | `core-back/test/phase4-onboarding-aml-disputes-recon.test.ts` | 237 | 16 |
@@ -157,6 +157,7 @@
 | `core-back/test/storage-engine/ledger-shards.test.ts` | 275 | 3 |
 | `core-back/test/storage-engine/log-sink.test.ts` | 233 | 8 |
 | `core-back/test/storage-engine/outbox-workers.test.ts` | 349 | 6 |
+| `core-back/test/storage-engine/performance/ledger-query-pruning-and-accuracy.test.ts` | 796 | 13 |
 | `core-back/test/storage-engine/performance/storage-performance.test.ts` | 363 | 11 |
 | `core-back/test/storage-engine/performance/write-path-benchmark.test.ts` | 111 | 2 |
 | `core-back/test/storage-engine/primitives.test.ts` | 195 | 16 |
@@ -333,5 +334,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **328**
-- Total literal test declarations: **3499**
+- Total files: **329**
+- Total literal test declarations: **3512**

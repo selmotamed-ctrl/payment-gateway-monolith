@@ -1603,7 +1603,7 @@ No build or test was run for this documentation change. Tests that require Postg
 
 ## Double-Entry Ledger
 
-> Status: `partial` · Last verified: 2026-11-08
+> Status: `partial` · Last verified: 2026-11-09
 
 ## 1. Purpose and scope
 
@@ -1822,6 +1822,15 @@ The automatic repair (`LedgerCheckpointWorker`, `LEDGER_SHARD_AUTO_REPAIR_*`, on
 - **`LedgerShardScalerWorker`** (`engine/workers/LedgerShardScalerWorker.ts`, leader-elected, **live by default**): it samples every shard's `line_seq`, turns the delta into lines per second per shard and asks the pure policy `decideShardWidth` (`engine/ledger/ShardScaler.ts`). A shard row serializes its postings, so the hottest shard's rate is the bottleneck signal; the account is widened when its EWMA stays above `LEDGER_SHARD_UP_LINES_PER_SEC` for two samples and the cooldown (`LEDGER_SHARD_COOLDOWN_MS`, persisted as `gl_accounts.shard_scaled_at`) has passed. The new width aims at half the threshold per shard, grows at most 4x per step and stops at `LEDGER_SHARD_MAX_WIDTH`. A wallet whose shard 0 is the only hot shard (debit-bound) is not widened. By default it widens the account through `applyShardWidth` and audits `GL_ACCOUNT_SHARDS_SCALED`; with `LEDGER_SHARD_SCALER_DRY_RUN=true` it only audits `GL_ACCOUNT_SHARDS_SCALE_PROPOSED` once per proposed width and changes nothing. Calibrate `LEDGER_SHARD_UP_LINES_PER_SEC` on the target hardware.
 - **`applyShardWidth`** (`engine/ledger/shardScaling.ts`) is the one operation both the worker and `POST /finance/gl-accounts/:id/shards/scale` (`finance:write`, reason) use: in one transaction it takes `FOR NO KEY UPDATE` on the account row (which does not conflict with the FK `KEY SHARE` of postings), updates `shard_count`/`shard_scaled_at`, creates missing shard rows and writes the audit row `GL_ACCOUNT_SHARDS_SCALED`. Narrowing only changes where new lines go; existing shards keep their balances, sequences and checkpoints.
 
+### 3.11 Query and indexing rules for the ledger tables
+
+Every new query that touches the ledger must obey four rules, so its cost stays independent of the historical table size (the query/index optimisation plan `design/02-storage-and-performance/ledger_scaling_partition_pruning_and_archive_anchor_plan.md`; regression suite `test/storage-engine/performance/ledger-query-pruning-and-accuracy.test.ts`):
+
+1. **Always bound `created_at` when querying `journal_lines` by `entry_id`.** `journal_lines` is monthly range-partitioned by `created_at`, so `WHERE entry_id = $1` alone probes every monthly partition. A line is inserted in the same transaction as its parent `JournalEntry`, so bound the lookup with the parent entry's timestamp (`createdAt: { gte: entry.createdAt - 5m, lte: entry.createdAt + 5m }`). Bound by the ENTRY, never by an older business object: a `COMMISSION_NETTING` entry or a delayed AML capture entry can be posted days after its `PaymentAttempt`.
+2. **Never scan `journal_lines` for a live account balance.** Live balances are the `gl_account_shards` sum, read in O(shards) by `loadLiveAccountBalances()` or `lockWalletLedgerBalance()`. The full-history scans in `CheckpointService`, `ShardRepair` and the restore drill are deliberate proofs of the journal, not balance reads.
+3. **Compute filtered statement counts and sums in one covering `groupBy`.** Use `groupBy({ by: ["direction"], where, _count: { _all: true }, _sum: { amount: true } })` over the exact `where` of the page query, so PostgreSQL satisfies the count and both side sums in one Index-Only Scan of `journal_lines_account_id_cov_idx`. Do not add a separate `count()` for the same predicate.
+4. **Preserve the covering payloads and the Visibility Map autovacuum settings.** Any migration that recreates the `journal_lines` indexes must keep `INCLUDE ("gl_account_id", "direction", "amount", "id")` on `journal_lines_entry_id_created_at_idx` and `INCLUDE ("direction", "amount", "entry_id", "id")` on `journal_lines_account_id_cov_idx`. Every monthly partition must keep `autovacuum_vacuum_insert_scale_factor = 0.01` (and `autovacuum_vacuum_insert_threshold = 1000`), because an append-only table is never vacuumed by the update/delete thresholds and PostgreSQL 18 needs the insert autovacuum to set the Visibility Map bits that Index-Only Scans require. `journal_entries` carries `journal_entries_created_at_idx` (INCLUDE `id, ref_type, ref_id`) for pagination/summary and `journal_entries_trgm_search_idx` for the admin search.
+
 ## 4. Contracts and invariants
 
 1. Every journal entry must have at least one debit and one credit, debit total must equal credit total, and every line amount must be strictly positive. `validateTemplate` enforces this before insertion (`LedgerPoster.ts:740`).
@@ -1839,10 +1848,10 @@ The automatic repair (`LedgerCheckpointWorker`, `LEDGER_SHARD_AUTO_REPAIR_*`, on
 
 ### Schema
 
-- `GlAccount`: `accountType`, `ownerId`, `gatewayId`, `credentialSetId`, `env`, `currency`, `lastCheckpointId`, `checkpointBalance`, `checkpointAt`, `seedKey`.
-- `GlAccountShard`: composite primary key `(glAccountId, shardId)`, `currentBalance`, `updatedAt`.
-- `JournalEntry`: unique `(refType, refId)`; `JournalRefType` values are `PAYMENT_ATTEMPT`, `ADJUSTMENT`, `AML_RELEASE`, `AML_VOID`, `SETTLEMENT_SWEEP`, `FEE_VARIANCE`, `COMMISSION_NETTING`, `DISPUTE_OUTCOME`.
-- `JournalLine`: `entryId`, `glAccountId`, `direction`, `amount`; primary key `(id, createdAt)` because the table is monthly range-partitioned; indexes on `(entryId, createdAt)` and `(glAccountId, createdAt)`.
+- `GlAccount`: `accountType`, `ownerId`, `gatewayId`, `credentialSetId`, `env`, `currency`, `shardCount`, `shardScaledAt`, `seedKey`. The account stores no checkpoint; its checkpoint fields are derived from its shard checkpoints.
+- `GlAccountShard`: composite primary key `(glAccountId, shardId)`, `currentBalance`, `lineSeq` (the shard's gapless high-water), `updatedAt`.
+- `JournalEntry`: unique `(refType, refId)`; `JournalRefType` values are `PAYMENT_ATTEMPT`, `ADJUSTMENT`, `AML_RELEASE`, `AML_VOID`, `SETTLEMENT_SWEEP`, `FEE_VARIANCE`, `COMMISSION_NETTING`, `DISPUTE_OUTCOME`. `journal_entries_created_at_idx` (INCLUDE `id, ref_type, ref_id`) serves the admin list/summary; `journal_entries_trgm_search_idx` (GIN on `ref_id`, `description`) serves the admin search.
+- `JournalLine`: `entryId`, `glAccountId`, `direction`, `amount`, `shardId`, `shardSeq`; primary key `(id, createdAt)` because the table is monthly range-partitioned; covering indexes `(entryId, createdAt) INCLUDE (glAccountId, direction, amount, id)` and `(glAccountId, createdAt) INCLUDE (direction, amount, entryId, id)`. The physical column order is UUIDs, timestamps, NUMERIC, the enum and the shard columns, so rows carry no alignment padding.
 - Database checks: `journal_lines_amount_positive`; no balance trigger.
 
 ### Configuration
@@ -1984,6 +1993,7 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 
 ## 10. Change history
 
+- 2026-11-09 — Ledger query/index optimisation: `journal_entries(created_at)` and trigram search indexes, covering `journal_lines` entry/account indexes, insert-autovacuum tuning for append-only partitions, partition-pruned entry/AML lookups, single-pass statement totals, and the checkout commission-receivable short-circuit plus a `je.created_at`-bounded aggregation. See `TRACKER.md` and section 3.11.
 - 2026-11-03 — Baseline verification against `5a24f6f+working-tree`: documented the 17 scenarios, 11 account types, shard writer, checkpoint and verifier behavior, balance-read differences, and the missing database balance enforcement.
 
 ## 11. Security hardening (2026-11-05)
@@ -2749,7 +2759,7 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 
 ## Storage Engine
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-09
 
 ## 1. Purpose and scope
 
@@ -3205,7 +3215,11 @@ Indexes: see migration `20261104090000_db_read_write_optimisation` in `core.data
 
 ### 12.5 Open work
 
-GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no cursor), GAP-DB-04 (engine re-reads, commission-receivable SUM scanning all receivable lines through a `pa.id::text` join, velocity per-rule queries, uncached flow/step/credential reads), GAP-DB-05 (admin lists/exports/summaries on the primary with wide columns, `reconciliation/runs` loading `file_content`, join-request mutations re-reading KYB `content_ciphertext`, bulk operator-case loops, `PUT /settings` per-entry reads), GAP-DB-06 (dashboards still do not read `rm_*`; merchant overview could use `rm_merchant_daily_stats` once per-rail and commission columns exist), and adoption of keyset pagination for the remaining lists.
+GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no cursor), GAP-DB-04 (engine re-reads, velocity per-rule queries and uncached flow/step/credential reads remain; the commission-receivable SUM is now short-circuited when the ceiling is null and partition-pruned by `je.created_at` when it is not), GAP-DB-05 (admin lists/exports/summaries on the primary with wide columns, `reconciliation/runs` loading `file_content`, join-request mutations re-reading KYB `content_ciphertext`, bulk operator-case loops, `PUT /settings` per-entry reads), GAP-DB-06 (dashboards still do not read `rm_*`; merchant overview could use `rm_merchant_daily_stats` once per-rail and commission columns exist), and adoption of keyset pagination for the remaining lists.
+
+## 13. 2026-11-09 ledger query/index optimisation
+
+`journal_entries` gained `journal_entries_created_at_idx` (INCLUDE `id, ref_type, ref_id`) and a `pg_trgm` GIN search index; the two hot `journal_lines` lookups became covering indexes (`INCLUDE` payloads); append-only insert autovacuum (`autovacuum_vacuum_insert_scale_factor = 0.01`) keeps the Visibility Map current for Index-Only Scans on every monthly partition. The admin journal entry list/detail, the GL/wallet statement totals and the AML hold lookup now bound `journal_lines.created_at` by the parent entry, so PostgreSQL prunes the monthly partitions; the statement totals are one covered `groupBy` instead of a `count()` plus a `groupBy`. The checkout guard passes the merchant row it already loaded and skips the commission-receivable query entirely when `commissionReceivableCeiling` is null; when a ceiling is configured the SQL drives from `payment_attempts(merchant_id)` and bounds `journal_lines.created_at` by the ENTRY it belongs to (a delayed `COMMISSION_NETTING` must still be counted). Schema version 16, migration `20261108150000_ledger_query_and_index_optimization`; regression suite `test/storage-engine/performance/ledger-query-pruning-and-accuracy.test.ts` (EC-01..EC-18).
 
 ## Gap resolutions (2026-11-05)
 
@@ -3215,7 +3229,7 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 
 ## Data Schema and Migrations
 
-> Status: `partial` · Last verified: 2026-11-08
+> Status: `partial` · Last verified: 2026-11-09
 
 ## 1. Purpose and scope
 
@@ -3223,9 +3237,9 @@ This part owns the PostgreSQL 18 relational model, the committed migration histo
 
 It covers:
 
-- `core-back/prisma/schema.prisma` — 76 Prisma models and 105 enums;
-- `core-back/prisma/migrations/**` — four committed migrations;
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 14 and the boot guard;
+- `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
+- `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 16 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -3280,20 +3294,20 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 13`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 16`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
 - it connects through the base client;
 - it reads `schema_versions.version` where `id = 1`;
-- it throws when the row is missing or does not equal 9;
+- it throws when the row is missing or does not equal `REQUIRED_SCHEMA_VERSION`;
 - it caches the successful check and resets the cached promise after a failure so a later call can retry.
 
 `core-back/prisma/seed.ts`, `seedFakeRails.ts` and `syntheticSeeder/index.ts` call `ensureSchemaVersion()` before writing. A stale database is therefore rejected by these seeders and by any caller that explicitly asserts the version. The core HTTP start path does not call it.
 
 ### 3.3 Migration history
 
-There are six committed migrations (the original four below, plus `20261104090000_db_read_write_optimisation` which adds indexes and bumps the schema version to 9, and `20261104120000_mfa_challenges`, described in section 11; the generated migration catalog is authoritative):
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261108150000_ledger_query_and_index_optimization`, schema version 16). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -3468,7 +3482,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 14.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 16.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -3482,9 +3496,9 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ### Implemented
 
-- 76 models and 105 enums in the Prisma datamodel.
-- Schema version 11 with an equality check used by the seeders.
-- Four committed migrations with the intended separation: baseline, storage indexes, CQRS read models, hardening.
+- 79 models and 105 enums in the Prisma datamodel.
+- Schema version 16 with an equality check used by the seeders.
+- The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
 - Maker-checker insert check and update trigger, slot invariant, positive journal amount, shard range and reference uniqueness.
@@ -3586,7 +3600,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 14 (`REQUIRED_SCHEMA_VERSION = 14`; model count 78). The schema migrations since version 10 are:
+The current schema version is 16 (`REQUIRED_SCHEMA_VERSION = 16`; model count 79). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -3626,6 +3640,19 @@ Open: a deploy-time guard that refuses to run this migration on a database with 
 ## 13. Session revocations (schema version 15)
 
 `20261108100000_session_revocations` adds the `session_revocations` model (`jti`, `expires_at`) and bumps `REQUIRED_SCHEMA_VERSION` to 15. `revokeSession` writes Redis (atomic `SET ... PX`) and the table; `isSessionRevoked` reads Redis first and the table when Redis misses or is down. Expired rows are deleted opportunistically on later revocations. `20261108090000_partition_truncate_guard` was amended (it is unreleased) so `pgw_guard_journal_line_partition` also grants the app role its DML on each partition and revokes UPDATE/DELETE/TRUNCATE, because partitions created by the cron run as `postgres` and do not inherit the owner's default privileges.
+
+## 14. Ledger query and index optimisation (schema version 16)
+
+`20261108150000_ledger_query_and_index_optimization` bumps `REQUIRED_SCHEMA_VERSION` to 16 and adds the indexes/tuning the admin ledger queries need:
+
+- `journal_entries_created_at_idx` (`created_at` INCLUDE `id, ref_type, ref_id`) for the journal list and the 24-hour summary, and `journal_entries_trgm_search_idx` (GIN on `ref_id`, `description`) for the admin search.
+- Covering `journal_lines_entry_id_created_at_idx` (`entry_id, created_at` INCLUDE `gl_account_id, direction, amount, id`) and `journal_lines_account_id_cov_idx` (`gl_account_id, created_at` INCLUDE `direction, amount, entry_id, id`). The key columns are unchanged, so the declared `@@index` parity in the exhaustive schema suite still holds.
+- Insert-triggered autovacuum (`autovacuum_vacuum_insert_scale_factor = 0.01`, threshold 1000) on `journal_entries` and every `journal_lines` partition, because append-only tables never receive the UPDATEs that normally refresh the Visibility Map that Index-Only Scans require. `ensure_journal_line_partitions` applies the same settings to future monthly partitions and keeps the truncate guard and `pgw_app` grants/revokes from `20261108090000_partition_truncate_guard`.
+- The development baseline `20261103180000_storage_hardening` orders the `journal_lines` columns by alignment width (UUIDs, timestamps, NUMERIC, enum); databases created before this change keep their existing physical order (the new migration does not rewrite the table).
+
+Operationally, the migration drops and rebuilds the two `journal_lines` indexes on the partitioned parent, which takes an `ACCESS EXCLUSIVE` lock on every partition for the duration of each build. It is a direct migration because the project has no live production data; on a populated database, run it in a maintenance window (the same operational rule as the shard-checkpoint migration in section 12).
+
+The query rules that depend on these indexes are in `core.ledger` section 3.11 and `core-back/README.md` section 3.1.
 
 ## Global Search
 

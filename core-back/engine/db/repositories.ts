@@ -181,26 +181,44 @@ export class PrismaRepositories implements Repositories {
       if (typeof (tx as Any).$queryRaw === "function") {
         // Recognition and netting entries are keyed by the attempt; a refund's commission
         // reversal is keyed by the adjustment, which points back at the attempt.
+        //
+        // journal_lines is monthly range-partitioned by created_at, so every branch bounds
+        // jl.created_at by the ENTRY it belongs to (je.created_at ± 5 minutes; a line is always
+        // inserted in its entry's transaction). Bounding by the attempt instead would be wrong:
+        // a COMMISSION_NETTING entry can be posted days after the attempt. The bounded window
+        // lets PostgreSQL prune every monthly partition outside each entry's month while the
+        // join drives from the indexed payment_attempts.merchant_id.
         const result = await tx.$queryRaw`
           SELECT COALESCE(SUM(movement.delta), 0) AS receivable
           FROM (
             SELECT CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END AS delta
-            FROM journal_lines jl
-            INNER JOIN gl_accounts a ON a.id = jl.gl_account_id
-            INNER JOIN journal_entries je ON je.id = jl.entry_id
-            INNER JOIN payment_attempts pa ON je.ref_id = pa.id::text
-            WHERE a.account_type = 'COMMISSION_RECEIVABLE'
-              AND pa.merchant_id = ${merchantId}::uuid
-              AND je.ref_type IN ('PAYMENT_ATTEMPT', 'COMMISSION_NETTING')
+            FROM payment_attempts pa
+            INNER JOIN journal_entries je
+              ON je.ref_id = pa.id::text
+             AND je.ref_type IN ('PAYMENT_ATTEMPT', 'COMMISSION_NETTING')
+            INNER JOIN journal_lines jl
+              ON jl.entry_id = je.id
+             AND jl.created_at >= je.created_at - interval '5 minutes'
+             AND jl.created_at <= je.created_at + interval '5 minutes'
+            INNER JOIN gl_accounts a
+              ON a.id = jl.gl_account_id
+             AND a.account_type = 'COMMISSION_RECEIVABLE'
+            WHERE pa.merchant_id = ${merchantId}::uuid
             UNION ALL
             SELECT CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END AS delta
-            FROM journal_lines jl
-            INNER JOIN gl_accounts a ON a.id = jl.gl_account_id
-            INNER JOIN journal_entries je ON je.id = jl.entry_id AND je.ref_type = 'ADJUSTMENT'
-            INNER JOIN adjustments adj ON je.ref_id = adj.id::text
-            INNER JOIN payment_attempts pa ON pa.id = adj.source_attempt_id
-            WHERE a.account_type = 'COMMISSION_RECEIVABLE'
-              AND pa.merchant_id = ${merchantId}::uuid
+            FROM payment_attempts pa
+            INNER JOIN adjustments adj ON pa.id = adj.source_attempt_id
+            INNER JOIN journal_entries je
+              ON je.ref_id = adj.id::text
+             AND je.ref_type = 'ADJUSTMENT'
+            INNER JOIN journal_lines jl
+              ON jl.entry_id = je.id
+             AND jl.created_at >= je.created_at - interval '5 minutes'
+             AND jl.created_at <= je.created_at + interval '5 minutes'
+            INNER JOIN gl_accounts a
+              ON a.id = jl.gl_account_id
+             AND a.account_type = 'COMMISSION_RECEIVABLE'
+            WHERE pa.merchant_id = ${merchantId}::uuid
           ) movement
         `;
         const first = rows<Any>(result)[0];

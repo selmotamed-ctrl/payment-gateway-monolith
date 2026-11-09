@@ -4,8 +4,8 @@
 
 - Models: **79**
 - Enums: **105**
-- Schema version: **15**
-- Migrations: **13**
+- Schema version: **16**
+- Migrations: **14**
 
 ## Models
 
@@ -212,3 +212,4 @@
 - `20261107150000_shard_repairs`
 - `20261108090000_partition_truncate_guard`
 - `20261108100000_session_revocations`
+- `20261108150000_ledger_query_and_index_optimization`

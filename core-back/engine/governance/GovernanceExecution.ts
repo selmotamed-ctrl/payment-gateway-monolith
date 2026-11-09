@@ -30,7 +30,7 @@ import {
   type LedgerPostContext,
   type LedgerOwnershipMode,
 } from "../ledger/LedgerPoster";
-import type { Repositories, Tx } from "../db/ports";
+import type { MerchantRow, Repositories, Tx } from "../db/ports";
 import { applyJsonPatch, type JsonPatchOperation } from "./ApprovalService";
 import {
   GoLiveGateValidator,
@@ -495,10 +495,26 @@ export const evaluateCommissionReceivableCeiling = async (
   tx: Tx,
   merchantId: string,
   settlementTarget?: string | null,
+  /** The merchant row the caller already loaded (the guard loads it once per attempt). */
+  loadedMerchant?: MerchantRow | null,
 ): Promise<CommissionReceivableCeilingEvaluation> => {
-  const merchant = await ctx.repositories.merchants.findMerchantById(tx, merchantId);
+  const merchant = loadedMerchant !== undefined
+    ? loadedMerchant
+    : await ctx.repositories.merchants.findMerchantById(tx, merchantId);
   const rawCeiling = merchant?.commissionReceivableCeiling;
   const ceiling = rawCeiling === null || rawCeiling === undefined ? null : toDecimal(rawCeiling);
+
+  // Fast path: with no receivable ceiling configured the journal_lines aggregation can never
+  // change the decision, so skip the query entirely (and do not re-read the merchant row).
+  if (ceiling === null) {
+    return decideCommissionReceivableCeiling({
+      merchantId,
+      receivable: new Decimal(0),
+      ceiling: null,
+      settlementTarget: settlementTarget ?? null,
+    });
+  }
+
   const receivableQuery = ctx.repositories.merchants.getCommissionReceivableBalance;
   const receivable = receivableQuery
     ? moneyToDecimal(await receivableQuery(tx, merchantId))
@@ -1590,18 +1606,38 @@ const resolveAmlHoldAmounts = async (
   // GAP-015: the escrow is booked when the gateway capture is verified, so it
   // is looked up by the attempt when the case does not point at it.
   let holdEntryId = amlCase.holdJournalEntryId ? String(amlCase.holdJournalEntryId) : null;
-  if (!holdEntryId && attempt?.id) {
-    const entry = await modelOf(tx, "journalEntry").findFirst({
-      where: { refType: "PAYMENT_ATTEMPT", refId: String(attempt.id) },
-    });
-    holdEntryId = entry?.id ? String(entry.id) : null;
-  }
+  // Always load the entry itself (whether the case points at it or it is resolved through the
+  // attempt) so the line lookup can be bounded by the ENTRY's timestamp. The capture entry can be
+  // created hours or days after the attempt, so bounding by attempt.createdAt would miss the escrow.
+  const holdEntry = holdEntryId
+    ? await modelOf(tx, "journalEntry").findFirst({ where: { id: holdEntryId } })
+    : attempt?.id
+      ? await modelOf(tx, "journalEntry").findFirst({
+          where: { refType: "PAYMENT_ATTEMPT", refId: String(attempt.id) },
+        })
+      : null;
+  holdEntryId = holdEntry?.id ? String(holdEntry.id) : holdEntryId;
+  const holdCreatedAt = holdEntry?.createdAt instanceof Date ? holdEntry.createdAt : null;
   if (holdEntryId) {
     const glAccounts = modelOf(tx, "glAccount");
     const journalLines = modelOf(tx, "journalLine");
     const holdAccounts = await glAccounts.findMany({ where: { accountType: "AML_HOLD" } });
     const holdIds = new Set(holdAccounts.map((account: any) => String(account.id)));
-    const lines = await journalLines.findMany({ where: { entryId: holdEntryId } });
+    // journal_lines is partitioned by created_at: the ±5 minute window (lines are inserted in the
+    // entry's transaction) prunes every monthly partition outside the hold entry's month.
+    const lines = await journalLines.findMany({
+      where: {
+        entryId: holdEntryId,
+        ...(holdCreatedAt
+          ? {
+              createdAt: {
+                gte: new Date(holdCreatedAt.getTime() - 5 * 60 * 1000),
+                lte: new Date(holdCreatedAt.getTime() + 5 * 60 * 1000),
+              },
+            }
+          : {}),
+      },
+    });
     for (const line of lines) {
       if (holdIds.has(String(line.glAccountId)) && line.direction === "CREDIT") {
         held = held.plus(toDecimal(line.amount));

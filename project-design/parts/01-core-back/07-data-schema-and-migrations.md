@@ -3,7 +3,7 @@ id: core.data
 title: Data Schema and Migrations
 status: partial
 confidence: high
-last_verified: 2026-11-08
+last_verified: 2026-11-09
 verified_against: d695518+working-tree
 code:
   - core-back/prisma/schema.prisma
@@ -21,6 +21,7 @@ code:
   - core-back/prisma/migrations/20261107090000_shard_sequenced_checkpoints/migration.sql
   - core-back/prisma/migrations/20261107150000_shard_repairs/migration.sql
   - core-back/prisma/migrations/20261108090000_partition_truncate_guard/migration.sql
+  - core-back/prisma/migrations/20261108150000_ledger_query_and_index_optimization/migration.sql
 tests:
   - core-back/test/exhaustive/01-schema/**
   - core-back/test/phase1-mtls-and-schema.test.ts
@@ -31,7 +32,7 @@ tests:
 gaps:
   - Core tables use `TIMESTAMP(3)` while storage-engine tables use `TIMESTAMPTZ(3)`.
   - The migration history is forward-only; there are no down migrations.
-  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 14.
+  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 16.
   - `journal_lines` partition maintenance depends on an external deploy cron.
   - The generated schema catalog appendix is produced by the project-design generator and is not hand-maintained.
 ---
@@ -44,9 +45,9 @@ This part owns the PostgreSQL 18 relational model, the committed migration histo
 
 It covers:
 
-- `core-back/prisma/schema.prisma` — 76 Prisma models and 105 enums;
-- `core-back/prisma/migrations/**` — four committed migrations;
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 14 and the boot guard;
+- `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
+- `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 16 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -101,20 +102,20 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 13`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 16`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
 - it connects through the base client;
 - it reads `schema_versions.version` where `id = 1`;
-- it throws when the row is missing or does not equal 9;
+- it throws when the row is missing or does not equal `REQUIRED_SCHEMA_VERSION`;
 - it caches the successful check and resets the cached promise after a failure so a later call can retry.
 
 `core-back/prisma/seed.ts`, `seedFakeRails.ts` and `syntheticSeeder/index.ts` call `ensureSchemaVersion()` before writing. A stale database is therefore rejected by these seeders and by any caller that explicitly asserts the version. The core HTTP start path does not call it.
 
 ### 3.3 Migration history
 
-There are six committed migrations (the original four below, plus `20261104090000_db_read_write_optimisation` which adds indexes and bumps the schema version to 9, and `20261104120000_mfa_challenges`, described in section 11; the generated migration catalog is authoritative):
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261108150000_ledger_query_and_index_optimization`, schema version 16). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -289,7 +290,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 14.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 16.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -303,9 +304,9 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ### Implemented
 
-- 76 models and 105 enums in the Prisma datamodel.
-- Schema version 11 with an equality check used by the seeders.
-- Four committed migrations with the intended separation: baseline, storage indexes, CQRS read models, hardening.
+- 79 models and 105 enums in the Prisma datamodel.
+- Schema version 16 with an equality check used by the seeders.
+- The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
 - Maker-checker insert check and update trigger, slot invariant, positive journal amount, shard range and reference uniqueness.
@@ -407,7 +408,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 14 (`REQUIRED_SCHEMA_VERSION = 14`; model count 78). The schema migrations since version 10 are:
+The current schema version is 16 (`REQUIRED_SCHEMA_VERSION = 16`; model count 79). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -447,3 +448,16 @@ Open: a deploy-time guard that refuses to run this migration on a database with 
 ## 13. Session revocations (schema version 15)
 
 `20261108100000_session_revocations` adds the `session_revocations` model (`jti`, `expires_at`) and bumps `REQUIRED_SCHEMA_VERSION` to 15. `revokeSession` writes Redis (atomic `SET ... PX`) and the table; `isSessionRevoked` reads Redis first and the table when Redis misses or is down. Expired rows are deleted opportunistically on later revocations. `20261108090000_partition_truncate_guard` was amended (it is unreleased) so `pgw_guard_journal_line_partition` also grants the app role its DML on each partition and revokes UPDATE/DELETE/TRUNCATE, because partitions created by the cron run as `postgres` and do not inherit the owner's default privileges.
+
+## 14. Ledger query and index optimisation (schema version 16)
+
+`20261108150000_ledger_query_and_index_optimization` bumps `REQUIRED_SCHEMA_VERSION` to 16 and adds the indexes/tuning the admin ledger queries need:
+
+- `journal_entries_created_at_idx` (`created_at` INCLUDE `id, ref_type, ref_id`) for the journal list and the 24-hour summary, and `journal_entries_trgm_search_idx` (GIN on `ref_id`, `description`) for the admin search.
+- Covering `journal_lines_entry_id_created_at_idx` (`entry_id, created_at` INCLUDE `gl_account_id, direction, amount, id`) and `journal_lines_account_id_cov_idx` (`gl_account_id, created_at` INCLUDE `direction, amount, entry_id, id`). The key columns are unchanged, so the declared `@@index` parity in the exhaustive schema suite still holds.
+- Insert-triggered autovacuum (`autovacuum_vacuum_insert_scale_factor = 0.01`, threshold 1000) on `journal_entries` and every `journal_lines` partition, because append-only tables never receive the UPDATEs that normally refresh the Visibility Map that Index-Only Scans require. `ensure_journal_line_partitions` applies the same settings to future monthly partitions and keeps the truncate guard and `pgw_app` grants/revokes from `20261108090000_partition_truncate_guard`.
+- The development baseline `20261103180000_storage_hardening` orders the `journal_lines` columns by alignment width (UUIDs, timestamps, NUMERIC, enum); databases created before this change keep their existing physical order (the new migration does not rewrite the table).
+
+Operationally, the migration drops and rebuilds the two `journal_lines` indexes on the partitioned parent, which takes an `ACCESS EXCLUSIVE` lock on every partition for the duration of each build. It is a direct migration because the project has no live production data; on a populated database, run it in a maintenance window (the same operational rule as the shard-checkpoint migration in section 12).
+
+The query rules that depend on these indexes are in `core.ledger` section 3.11 and `core-back/README.md` section 3.1.

@@ -3,7 +3,7 @@ id: core.ledger
 title: Double-Entry Ledger
 status: partial
 confidence: high
-last_verified: 2026-11-08
+last_verified: 2026-11-09
 verified_against: working-tree
 code:
   - core-back/engine/ledger/LedgerPoster.ts
@@ -22,6 +22,10 @@ code:
   - core-back/lib/storageEngine/shardBalances.ts
   - core-back/lib/storageEngine/ledgerPosterFactory.ts
   - core-back/lib/storageEngine/uowAdapter.ts
+  - core-back/api/internal/adminLedger.ts
+  - core-back/api/internal/ledgerLines.ts
+  - core-back/engine/db/repositories.ts
+  - core-back/prisma/migrations/20261108150000_ledger_query_and_index_optimization/migration.sql
   - core-back/prisma/seedGlAccounts.ts
   - core-back/prisma/schema.prisma
   - core-back/prisma/migrations/20261105090000_append_only_ledger_guards/migration.sql
@@ -47,6 +51,7 @@ tests:
   - core-back/test/ledger-shard-auto-repair.test.ts
   - core-back/test/storage-engine/uow.test.ts
   - core-back/test/storage-engine/write-path.integration.test.ts
+  - core-back/test/storage-engine/performance/ledger-query-pruning-and-accuracy.test.ts
   - core-back/test/security-regressions/h7-rounding.test.ts
   - core-back/test/security-regressions/h4-cashout.test.ts
   - core-back/test/hardening-gap-regressions.test.ts
@@ -277,6 +282,15 @@ The automatic repair (`LedgerCheckpointWorker`, `LEDGER_SHARD_AUTO_REPAIR_*`, on
 - **`LedgerShardScalerWorker`** (`engine/workers/LedgerShardScalerWorker.ts`, leader-elected, **live by default**): it samples every shard's `line_seq`, turns the delta into lines per second per shard and asks the pure policy `decideShardWidth` (`engine/ledger/ShardScaler.ts`). A shard row serializes its postings, so the hottest shard's rate is the bottleneck signal; the account is widened when its EWMA stays above `LEDGER_SHARD_UP_LINES_PER_SEC` for two samples and the cooldown (`LEDGER_SHARD_COOLDOWN_MS`, persisted as `gl_accounts.shard_scaled_at`) has passed. The new width aims at half the threshold per shard, grows at most 4x per step and stops at `LEDGER_SHARD_MAX_WIDTH`. A wallet whose shard 0 is the only hot shard (debit-bound) is not widened. By default it widens the account through `applyShardWidth` and audits `GL_ACCOUNT_SHARDS_SCALED`; with `LEDGER_SHARD_SCALER_DRY_RUN=true` it only audits `GL_ACCOUNT_SHARDS_SCALE_PROPOSED` once per proposed width and changes nothing. Calibrate `LEDGER_SHARD_UP_LINES_PER_SEC` on the target hardware.
 - **`applyShardWidth`** (`engine/ledger/shardScaling.ts`) is the one operation both the worker and `POST /finance/gl-accounts/:id/shards/scale` (`finance:write`, reason) use: in one transaction it takes `FOR NO KEY UPDATE` on the account row (which does not conflict with the FK `KEY SHARE` of postings), updates `shard_count`/`shard_scaled_at`, creates missing shard rows and writes the audit row `GL_ACCOUNT_SHARDS_SCALED`. Narrowing only changes where new lines go; existing shards keep their balances, sequences and checkpoints.
 
+### 3.11 Query and indexing rules for the ledger tables
+
+Every new query that touches the ledger must obey four rules, so its cost stays independent of the historical table size (the query/index optimisation plan `design/02-storage-and-performance/ledger_scaling_partition_pruning_and_archive_anchor_plan.md`; regression suite `test/storage-engine/performance/ledger-query-pruning-and-accuracy.test.ts`):
+
+1. **Always bound `created_at` when querying `journal_lines` by `entry_id`.** `journal_lines` is monthly range-partitioned by `created_at`, so `WHERE entry_id = $1` alone probes every monthly partition. A line is inserted in the same transaction as its parent `JournalEntry`, so bound the lookup with the parent entry's timestamp (`createdAt: { gte: entry.createdAt - 5m, lte: entry.createdAt + 5m }`). Bound by the ENTRY, never by an older business object: a `COMMISSION_NETTING` entry or a delayed AML capture entry can be posted days after its `PaymentAttempt`.
+2. **Never scan `journal_lines` for a live account balance.** Live balances are the `gl_account_shards` sum, read in O(shards) by `loadLiveAccountBalances()` or `lockWalletLedgerBalance()`. The full-history scans in `CheckpointService`, `ShardRepair` and the restore drill are deliberate proofs of the journal, not balance reads.
+3. **Compute filtered statement counts and sums in one covering `groupBy`.** Use `groupBy({ by: ["direction"], where, _count: { _all: true }, _sum: { amount: true } })` over the exact `where` of the page query, so PostgreSQL satisfies the count and both side sums in one Index-Only Scan of `journal_lines_account_id_cov_idx`. Do not add a separate `count()` for the same predicate.
+4. **Preserve the covering payloads and the Visibility Map autovacuum settings.** Any migration that recreates the `journal_lines` indexes must keep `INCLUDE ("gl_account_id", "direction", "amount", "id")` on `journal_lines_entry_id_created_at_idx` and `INCLUDE ("direction", "amount", "entry_id", "id")` on `journal_lines_account_id_cov_idx`. Every monthly partition must keep `autovacuum_vacuum_insert_scale_factor = 0.01` (and `autovacuum_vacuum_insert_threshold = 1000`), because an append-only table is never vacuumed by the update/delete thresholds and PostgreSQL 18 needs the insert autovacuum to set the Visibility Map bits that Index-Only Scans require. `journal_entries` carries `journal_entries_created_at_idx` (INCLUDE `id, ref_type, ref_id`) for pagination/summary and `journal_entries_trgm_search_idx` for the admin search.
+
 ## 4. Contracts and invariants
 
 1. Every journal entry must have at least one debit and one credit, debit total must equal credit total, and every line amount must be strictly positive. `validateTemplate` enforces this before insertion (`LedgerPoster.ts:740`).
@@ -294,10 +308,10 @@ The automatic repair (`LedgerCheckpointWorker`, `LEDGER_SHARD_AUTO_REPAIR_*`, on
 
 ### Schema
 
-- `GlAccount`: `accountType`, `ownerId`, `gatewayId`, `credentialSetId`, `env`, `currency`, `lastCheckpointId`, `checkpointBalance`, `checkpointAt`, `seedKey`.
-- `GlAccountShard`: composite primary key `(glAccountId, shardId)`, `currentBalance`, `updatedAt`.
-- `JournalEntry`: unique `(refType, refId)`; `JournalRefType` values are `PAYMENT_ATTEMPT`, `ADJUSTMENT`, `AML_RELEASE`, `AML_VOID`, `SETTLEMENT_SWEEP`, `FEE_VARIANCE`, `COMMISSION_NETTING`, `DISPUTE_OUTCOME`.
-- `JournalLine`: `entryId`, `glAccountId`, `direction`, `amount`; primary key `(id, createdAt)` because the table is monthly range-partitioned; indexes on `(entryId, createdAt)` and `(glAccountId, createdAt)`.
+- `GlAccount`: `accountType`, `ownerId`, `gatewayId`, `credentialSetId`, `env`, `currency`, `shardCount`, `shardScaledAt`, `seedKey`. The account stores no checkpoint; its checkpoint fields are derived from its shard checkpoints.
+- `GlAccountShard`: composite primary key `(glAccountId, shardId)`, `currentBalance`, `lineSeq` (the shard's gapless high-water), `updatedAt`.
+- `JournalEntry`: unique `(refType, refId)`; `JournalRefType` values are `PAYMENT_ATTEMPT`, `ADJUSTMENT`, `AML_RELEASE`, `AML_VOID`, `SETTLEMENT_SWEEP`, `FEE_VARIANCE`, `COMMISSION_NETTING`, `DISPUTE_OUTCOME`. `journal_entries_created_at_idx` (INCLUDE `id, ref_type, ref_id`) serves the admin list/summary; `journal_entries_trgm_search_idx` (GIN on `ref_id`, `description`) serves the admin search.
+- `JournalLine`: `entryId`, `glAccountId`, `direction`, `amount`, `shardId`, `shardSeq`; primary key `(id, createdAt)` because the table is monthly range-partitioned; covering indexes `(entryId, createdAt) INCLUDE (glAccountId, direction, amount, id)` and `(glAccountId, createdAt) INCLUDE (direction, amount, entryId, id)`. The physical column order is UUIDs, timestamps, NUMERIC, the enum and the shard columns, so rows carry no alignment padding.
 - Database checks: `journal_lines_amount_positive`; no balance trigger.
 
 ### Configuration
@@ -439,6 +453,7 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 
 ## 10. Change history
 
+- 2026-11-09 — Ledger query/index optimisation: `journal_entries(created_at)` and trigram search indexes, covering `journal_lines` entry/account indexes, insert-autovacuum tuning for append-only partitions, partition-pruned entry/AML lookups, single-pass statement totals, and the checkout commission-receivable short-circuit plus a `je.created_at`-bounded aggregation. See `TRACKER.md` and section 3.11.
 - 2026-11-03 — Baseline verification against `5a24f6f+working-tree`: documented the 17 scenarios, 11 account types, shard writer, checkpoint and verifier behavior, balance-read differences, and the missing database balance enforcement.
 
 ## 11. Security hardening (2026-11-05)

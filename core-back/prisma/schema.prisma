@@ -1161,6 +1161,9 @@ model JournalEntry {
   paymentAttempts PaymentAttempt[] @relation("PaymentAttemptLedgerEntry")
 
   @@unique([refType, refId])
+  // Admin list/summary queries order and filter by createdAt. The migration adds
+  // INCLUDE (id, ref_type, ref_id) and a pg_trgm GIN index on ref_id/description.
+  @@index([createdAt])
   @@map("journal_entries")
 }
 

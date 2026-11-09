@@ -3,7 +3,7 @@ id: platform.runtime
 title: Runtime and Configuration
 status: partial
 confidence: high
-last_verified: 2026-11-07
+last_verified: 2026-11-09
 verified_against: d695518+working-tree
 code:
   - core-back/index.ts
@@ -224,13 +224,13 @@ The storage engine is constructed before `listen`, but after the server object i
 
 ### 3.5 Schema version check
 
-`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 10`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
+`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 16`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
 
 ```sql
 SELECT "version" FROM "schema_versions" WHERE "id" = 1
 ```
 
-and throws if the version is not 8. The check is invoked by `prisma/seed.ts`, `prisma/seedFakeRails.ts` and `prisma/syntheticSeeder/index.ts`. It is **not** invoked by `core-back/index.ts`, so the API can boot against a stale schema and fail later at query time. Migration deployment is an external deploy step (`bunx prisma migrate deploy`).
+and throws if the version is not 16. The check is invoked by `prisma/seed.ts`, `prisma/seedFakeRails.ts` and `prisma/syntheticSeeder/index.ts`. It is **not** invoked by `core-back/index.ts`, so the API can boot against a stale schema and fail later at query time. Migration deployment is an external deploy step (`bunx prisma migrate deploy`).
 
 ### 3.6 Worker composition
 

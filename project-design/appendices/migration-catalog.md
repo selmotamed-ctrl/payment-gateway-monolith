@@ -7,7 +7,7 @@
 | `20261103000000_postgres18_init` | 2839 | PostgreSQL 18 baseline. Replaces the legacy MySQL migration history. |
 | `20261103120000_postgres18_storage_engine` | 115 | ============================================================================ |
 | `20261103130000_cqrs_read_models` | 27 | CQRS read models maintained asynchronously by OutboxRelayWorker. |
-| `20261103180000_storage_hardening` | 256 | ============================================================================ |
+| `20261103180000_storage_hardening` | 259 | ============================================================================ |
 | `20261104090000_db_read_write_optimisation` | 97 | ============================================================================ |
 | `20261104120000_mfa_challenges` | 51 | ============================================================================ |
 | `20261105090000_append_only_ledger_guards` | 158 | ============================================================================ |
@@ -17,3 +17,4 @@
 | `20261107150000_shard_repairs` | 53 | ============================================================================ |
 | `20261108090000_partition_truncate_guard` | 81 | Partitions created after 20261105090000_append_only_ledger_guards had no TRUNCATE guard. |
 | `20261108100000_session_revocations` | 25 | Durable copy of the session revoke list. |
+| `20261108150000_ledger_query_and_index_optimization` | 110 | ============================================================================ |
