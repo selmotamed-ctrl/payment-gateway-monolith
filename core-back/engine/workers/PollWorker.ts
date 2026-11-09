@@ -8,12 +8,32 @@ import {
   reconcileGatewayInquiries,
   updateGatewayInquiry,
 } from "./GatewayInquirySchedules";
+import {
+  createUnknownAttemptEscalator,
+  type UnknownAttemptEscalator,
+} from "./StaleUnknownAttempts";
 
 export interface PollWorkerDeps extends WorkerOptions {
   inquiry?: InquiryPort;
   defaultFirstAfterSeconds?: number;
   defaultBackoffSeconds?: number[];
   defaultMaxDurationSeconds?: number;
+  /**
+   * AUTO-19: hands an UNKNOWN attempt whose polling window elapsed to an
+   * operator (one keyed UNKNOWN case). Defaults to the database escalator
+   * built from `unknownCaseSlaHours` / `unknownCasePriority`.
+   */
+  unknownEscalator?: UnknownAttemptEscalator;
+  /** SLA of the UNKNOWN operator case. Default 24 h. */
+  unknownCaseSlaHours?: number;
+  /** Priority of the UNKNOWN operator case. Default P1. */
+  unknownCasePriority?: "P1" | "P2" | "P3";
+  /**
+   * When the escalation itself fails (e.g. the database is briefly away), the
+   * attempt is re-checked after this delay instead of being dropped from
+   * polling without a case. Default 300 s.
+   */
+  unknownEscalationRetrySeconds?: number;
 }
 
 export interface PollPolicy {
@@ -50,6 +70,8 @@ export class PollWorker extends BaseWorker {
   private readonly defaultFirstAfterSeconds: number;
   private readonly defaultBackoffSeconds: number[];
   private readonly defaultMaxDurationSeconds: number;
+  private readonly unknownEscalator: UnknownAttemptEscalator;
+  private readonly unknownEscalationRetrySeconds: number;
   private policies = new Map<string, PollPolicy>();
 
   constructor(deps: PollWorkerDeps) {
@@ -58,6 +80,12 @@ export class PollWorker extends BaseWorker {
     this.defaultFirstAfterSeconds = deps.defaultFirstAfterSeconds ?? 5;
     this.defaultBackoffSeconds = deps.defaultBackoffSeconds ?? [5, 15, 30, 60, 120, 300];
     this.defaultMaxDurationSeconds = deps.defaultMaxDurationSeconds ?? 900;
+    this.unknownEscalator = deps.unknownEscalator ?? createUnknownAttemptEscalator({
+      db: deps.db,
+      slaHours: deps.unknownCaseSlaHours,
+      priority: deps.unknownCasePriority,
+    });
+    this.unknownEscalationRetrySeconds = deps.unknownEscalationRetrySeconds ?? 300;
   }
 
   protected async tick(): Promise<void> {
@@ -149,6 +177,14 @@ export class PollWorker extends BaseWorker {
     const delaySeconds = computeBackoffDelaySeconds(policy, elapsedSeconds);
 
     if (delaySeconds === null) {
+      // AUTO-19: an UNKNOWN attempt is never failed here. It is handed to an
+      // operator through one keyed case before it leaves the polling loop; if
+      // the case cannot be opened the attempt stays due and is retried.
+      if (attempt.status === "UNKNOWN" && !(await this.escalateUnknown(attempt, now, elapsedSeconds))) {
+        const retryAt = new Date(now.getTime() + this.unknownEscalationRetrySeconds * 1000);
+        await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, { nextCheckAt: retryAt });
+        return;
+      }
       await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, { nextCheckAt: null });
       if (schedule) {
         await updateGatewayInquiry(this.db as Tx, schedule.id, {
@@ -254,6 +290,29 @@ export class PollWorker extends BaseWorker {
 
     if (terminal && (outcome.status === "FAILED" || outcome.status === "CANCELLED")) {
       await this.releaseSlot(attempt);
+    }
+  }
+
+  /** Returns false only when the escalation could not be recorded. */
+  private async escalateUnknown(attempt: PaymentAttemptRow, now: Date, elapsedSeconds: number): Promise<boolean> {
+    try {
+      const result = await this.unknownEscalator.escalate(attempt, {
+        now,
+        reason: `the polling window elapsed after ${elapsedSeconds}s without a definitive gateway answer`,
+      });
+      if (result.created) {
+        this.logger.warn("PollWorker: stale UNKNOWN attempt escalated to an operator", {
+          attemptId: attempt.id,
+          operatorCaseId: result.caseId,
+        });
+      }
+      return true;
+    } catch (error) {
+      this.logger.error("PollWorker: unable to escalate a stale UNKNOWN attempt", {
+        attemptId: attempt.id,
+        error: (error as Error).message,
+      });
+      return false;
     }
   }
 

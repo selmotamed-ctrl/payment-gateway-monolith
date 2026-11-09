@@ -37,6 +37,7 @@ Every file here is mapped in [`../project-design/appendices/design-source-map.md
 | `08-ai-onboarding/` | `smart_ai_rail_and_voucher_onboarding_plan.md`: BYO-AI spec importer (gateway half built; voucher half for the separate voucher system) | ACTIVE / FUTURE | `parts/01-core-back/02-engine.md`, `parts/09-future-and-unimplemented/02` |
 | `09-voucher-system-external/` | `Voucher-Provider-Management-System-Technical-Design.md`, `voucher-system-raw-design.md`: separate voucher system, kept for shared patterns | FUTURE / external | `parts/09-future-and-unimplemented/00` |
 | `10-fixes/` | `_0001_operator_cases.md`: operator cases feature fix (implemented) | REFERENCE | `parts/01-core-back/01,04`, `parts/03-admin-front/01` |
+| `11-automation/` | `background_automation_and_workers_plan.md`: missing and defective background automations, design per worker, phased roadmap (2026-11-09) | FUTURE (plan) | `parts/01-core-back/05-workers.md` |
 | `90-archive/superseded-architecture/` | Design v2 and refined design v4.1: predecessors of v5 | ARCHIVE | — |
 | `90-archive/superseded-ui/` | UI redesign v1: superseded by v2 | ARCHIVE | — |
 | `90-archive/superseded-testing/` | Two-machine T1–T8 plan: superseded by the multi-machine plan (it also contained a plaintext lab password; do not reuse) | ARCHIVE | — |

@@ -5,7 +5,7 @@ import { parseOrThrow } from "../../lib/error";
 import { zIdentifier, zPaginationQuery } from "../../lib/zReady";
 import { toCoreReconciliationSourceCreate, toCoreReconciliationUpload } from "../contract";
 import { coreForward } from "../forward";
-import { forwardUpload, uploadSingle } from "../upload";
+import { forwardUpload, uploadGuards, uploadSingle } from "../upload";
 
 const router = express.Router();
 
@@ -112,6 +112,7 @@ router.patch(
 
 router.post(
   "/upload",
+  ...uploadGuards,
   uploadSingle("statement"),
   async (req: Request, res: Response) => {
     const metadata = parseOrThrow(uploadSchema, req.body ?? {});

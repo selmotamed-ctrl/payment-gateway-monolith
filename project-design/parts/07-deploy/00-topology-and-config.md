@@ -98,7 +98,7 @@ The node spec carries only host, SSH port, private IP and service port. SSH user
 
 | Group | Keys | Purpose |
 | :--- | :--- | :--- |
-| Global | `DEPLOY_MODE`, `DEPLOY_ENV`, `KEEP_RELEASES`, `ROTATE_MTLS_CERTS`, `MTLS_VALIDITY_DAYS`, `LAN_ALLOWED_CIDRS`, `ROLLING_BATCH_SIZE` | Pipeline mode, release retention, certificate rotation and LAN policy. |
+| Global | `DEPLOY_MODE`, `DEPLOY_ENV`, `KEEP_RELEASES`, `ROTATE_MTLS_CERTS`, `MTLS_VALIDITY_DAYS`, `MTLS_RENEW_WITHIN_DAYS`, `LAN_ALLOWED_CIDRS`, `ROLLING_BATCH_SIZE` | Pipeline mode, release retention, certificate rotation and LAN policy. |
 | Legacy database | `DB_MANAGE_VIA_SSH`, `DB_SSH_HOST`, `DB_SSH_PORT`, `DB_SSH_USER`, `DB_SSH_KEY_PATH`, `DB_SUDO_PASSWORD`, `DB_PRIVATE_IP`, `DB_ENGINE`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DATABASE_URL` | Compatibility path for one externally managed PostgreSQL 18 database. |
 | Compute node arrays | `CORE_NODES`, `ADMIN_NODES`, `MERCHANT_NODES`, `CHECKOUT_NODES`, `CORE_BACK_URLS` | Horizontal compute tiers and an optional explicit edge upstream list. |
 | Core | `CORE_SSH_HOST`, `CORE_SSH_PORT`, `CORE_SSH_USER`, `CORE_SSH_KEY_PATH`, `CORE_SUDO_PASSWORD`, `CORE_PRIVATE_IP`, `CORE_PORT`, `CORE_REMOTE_DIR`, `RUN_PRISMA_SEED` | Core host, listener, release directory and optional seed. |
@@ -215,6 +215,7 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | `--enforce-firewall` | Re-apply UFW without a full bootstrap. |
 | `--skip-build`, `--skip-verify` | Skip local SPA builds or end-to-end verification. |
 | `--rotate-certs` | Rotate the CA and every leaf. |
+| `--check-certs` | Print the certificate expiry table and exit 1 when a certificate is missing, expired or inside `MTLS_RENEW_WITHIN_DAYS` (AUTO-28). |
 | `--dry-run` | Print commands; execute nothing. |
 
 ### Files
@@ -334,3 +335,7 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 - **PAN-rail guard (GAP-026, partially resolved).** `loadDeployConfig` runs `panRailGuardProblems` over the environment: a key naming a PAN/CVV/card-number rail (`PAN`, `CVV`, `CVV2`, `CVC`, `CVC2`, `CARD_NUMBER`, `CARD_NO`, `PAN_RAIL(S)`, `CARD_RAIL(S)` as an underscore-delimited token) or a value containing a Luhn-valid 13-19 digit run is refused with a `PAN_RAIL_GUARD` problem. The scope statement is `deploy/docs/pci-scope.md` (see `platform.security`); the core-back guard is still open.
 - **GAP-023 remains open:** real WAL-G, bun and barman SHA256 values are operator-supplied.
+
+## Remediation round 2 (2026-11-08): app role and host probe configuration
+
+`PG_APP_USER` (default `pgw_app_login`) and `PG_APP_PASSWORD` (at least 12 characters, different from the owner's) enable the role split: the owner (`PG_DB_USER`) runs migrations and seeders through `ownerUrl`, while the running services connect as `PG_APP_USER`, a plain LOGIN member of `pgw_app`. `PG_APP_USER` must not be `postgres`, `pgw_app` or `pgw_ledger_maintenance`, nor equal the owner or replication user. Without `PG_APP_PASSWORD` the legacy single-role behaviour is kept and the deploy warns.

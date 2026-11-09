@@ -28,6 +28,20 @@ const payloadFor = (transaction: NonNullable<ReturnType<typeof findTransactionAn
   status: "PAID",
 });
 
+/**
+ * What the PUBLIC hosted pages may see of a transaction. The session id is a reference anyone who
+ * holds the payer link knows, so the secret the payer must prove knowledge of (`expected_otp`) and
+ * the merchant callback target (`webhook_url`) are never part of it; testers read both on the
+ * authenticated portal routes.
+ */
+export const publicHostedTransaction = <T extends { expected_otp?: unknown; webhook_url?: unknown }>(
+  transaction: T | null | undefined,
+): Omit<T, "expected_otp" | "webhook_url"> | null => {
+  if (!transaction) return null;
+  const { expected_otp: _otp, webhook_url: _webhook, ...visible } = transaction;
+  return visible;
+};
+
 export const createHostedRouter = (): Router => {
   const router = Router();
 
@@ -35,7 +49,7 @@ export const createHostedRouter = (): Router => {
     const transaction = findTransactionAnyReference(request.params.id ?? "");
     if (!transaction) throw new ApiError(404, "SESSION_NOT_FOUND", "Unknown hosted session");
     response.json({
-      transaction,
+      transaction: publicHostedTransaction(transaction),
       rail: resolveRail(transaction.rail_code) ?? null,
       // GAP-024: the approve/decline POST must present this transaction-bound token.
       action_token: issueHostedActionToken(transaction.id),
@@ -108,7 +122,7 @@ export const createHostedRouter = (): Router => {
       ok: true,
       action: body.action,
       redirect_url: redirectUrl,
-      transaction: findTransactionAnyReference(transaction.id),
+      transaction: publicHostedTransaction(findTransactionAnyReference(transaction.id)),
     });
   });
 

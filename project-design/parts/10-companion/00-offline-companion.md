@@ -123,6 +123,7 @@ Content-only updates are signed manifests plus a bundle:
 - The client verifies the pinned signature, bundle SHA-256 and bundle schema before writing a
   versioned file and switching the active pointer atomically. A bad update falls back to the
   APK bundle. Content updates are data-only and cannot execute code.
+- Rollback protection (2026-11-08): the signature covers only the bundle SHA-256, so the manifest dates (`publishedAt`, `generatedAt`) are NOT authenticated and cannot be trusted to refuse an old bundle (an old genuine bundle plus its old signature, under a manifest with an edited future date, used to install). `installUpdate` therefore also compares the bundle's own `meta.generatedAt`, which sits inside the checksummed bytes, against the installed content (`assertBundleNotOlderThanInstalled`) and refuses an older one. The manifest check in `checkForUpdate` remains a courtesy pre-filter. A signature over a canonical `appId|contentVersion|contentHash|generatedAt|bundleSha256` string would also authenticate `contentVersion`/`minAppVersion`; it needs a versioned signature so installed apps keep accepting old manifests (open).
 
 APK releases use a separate long-lived release keystore generated on first local build at
 `.keys/companion-release.jks` (password in `.keys/keystore.env`, mode 0600, gitignored).
@@ -131,7 +132,7 @@ and verified with `apksigner`; `allowBackup` and cleartext traffic are disabled,
 exact-alarm permission is removed because reminders are intentionally inexact.
 
 `.github/workflows/companion.yml` builds and tests on content changes, publishes a private
-release when the signing secrets are present, and can be run manually. Content OTA needs a
+release when the signing secrets are present, and can be run manually. The signing secrets (release keystore and content-signing key) are only exposed to builds of the default branch; any other ref builds and tests without signing or publishing. Content OTA needs a
 private HTTPS endpoint; if one is not available, APK releases carry the latest content.
 
 ## 6. Build

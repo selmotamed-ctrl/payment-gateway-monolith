@@ -2,18 +2,29 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { backupS3Configured, effectiveDatabase, loadDeployConfig, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
+import { backupS3Configured, clamdManaged, effectiveDatabase, loadDeployConfig, pgAppRoleEnabled, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
-import { buildPki, certFilesForHost, readMaterial, verifyPki, WAL_ARCHIVE_CLIENT } from "./lib/pkiManager";
+import { buildPki, certFilesForHost, checkPkiExpiry, pkiRenewalReport, readMaterial, verifyPki, WAL_ARCHIVE_CLIENT } from "./lib/pkiManager";
+import {
+  CERTBOT_DEPLOY_HOOK_PATH,
+  CERTBOT_SERVICE_PATH,
+  CERTBOT_TIMER_PATH,
+  certbotDeployHook,
+  certbotRenewalEnableScript,
+  certbotRenewalService,
+  certbotRenewalTimer,
+} from "./lib/certRenewal";
 import { collectSecretValues, effectiveTargetHome, effectiveTargetUser, SshRunner, shellQuote } from "./lib/sshRunner";
 import { dollarTag, pgpassField, sqlIdent, sqlLiteral } from "./lib/quoting";
 import { applyFirewall, readFirewallStatus } from "./lib/firewallConfigurator";
 import { probeCoreService, probeEdgeService, renderVerification, verifyDeployment } from "./lib/healthVerifier";
 import { bootstrapPackagesCommand, detectHostOs } from "./lib/osDetector";
+import { bootstrapGaps, hostProbeScript } from "./lib/hostProbe";
 import { parseApplyOutcome } from "./lib/converge";
 import { startFrontendBuilds, type FrontendBuildHandle } from "./lib/frontendBuild";
 import { provisionPostgres18 } from "./provisioners/postgres18Provisioner";
 import { provisionRedis } from "./provisioners/redisProvisioner";
+import { provisionClamav } from "./provisioners/clamavProvisioner";
 import { provisionAuditAndLogDb } from "./provisioners/auditAndLogDbProvisioner";
 import { backupDaemonUser, provisionBackupEngine, STORAGE_CERT_DIR } from "./provisioners/backupEngineProvisioner";
 
@@ -47,6 +58,8 @@ interface CliOptions {
   skipBuild: boolean;
   skipVerify: boolean;
   rotateCerts: boolean;
+  /** Print the certificate expiry table and exit non-zero when anything expires within MTLS_RENEW_WITHIN_DAYS (AUTO-28). */
+  checkCerts: boolean;
   /** Restart PostgreSQL/PgBouncer/Redis/the backup daemon even when nothing changed. */
   forceRestart: boolean;
   /** Ignore the frontend build cache and rebuild every SPA. */
@@ -81,6 +94,7 @@ const parseArgs = (argv: string[]): CliOptions => {
     skipBuild: false,
     skipVerify: false,
     rotateCerts: false,
+    checkCerts: false,
     forceRestart: false,
     rebuild: false,
   };
@@ -93,6 +107,7 @@ const parseArgs = (argv: string[]): CliOptions => {
     else if (raw === "--skip-build") options.skipBuild = true;
     else if (raw === "--skip-verify") options.skipVerify = true;
     else if (raw === "--rotate-certs") options.rotateCerts = true;
+    else if (raw === "--check-certs") options.checkCerts = true;
     else if (raw === "--force-restart") options.forceRestart = true;
     else if (raw === "--rebuild") options.rebuild = true;
     else if (raw.startsWith("--env=")) options.envPath = resolve(REPO_ROOT, raw.slice(6));
@@ -243,6 +258,21 @@ const FRONTENDS: Record<"admin" | "merchant" | "checkout" | "fake-rails", string
 
 const nginxTemplatePath = (template: string): string => join(REPO_ROOT, "deploy", "templates", template);
 
+const certbotRenewalHosts = new Set<string>();
+
+/**
+ * AUTO-28: schedules certbot renewal (twice a day) and an Nginx reload after a renewal, once per host per run. Both
+ * files are rewritten only when they changed; a host without certbot or systemd only gets a warning.
+ */
+const ensureCertbotRenewal = (runner: SshRunner, host: HostPlan): void => {
+  if (certbotRenewalHosts.has(host.ssh.host)) return;
+  certbotRenewalHosts.add(host.ssh.host);
+  runner.writeRemoteFile({ target: host.ssh, path: CERTBOT_DEPLOY_HOOK_PATH, content: certbotDeployHook(), mode: 0o755, sudo: true });
+  runner.writeRemoteFile({ target: host.ssh, path: CERTBOT_SERVICE_PATH, content: certbotRenewalService(), mode: 0o644, sudo: true });
+  runner.writeRemoteFile({ target: host.ssh, path: CERTBOT_TIMER_PATH, content: certbotRenewalTimer(), mode: 0o644, sudo: true });
+  runner.run(host.ssh, certbotRenewalEnableScript(), { sudo: true });
+};
+
 /**
  * Resolves the TLS certificate of a public vhost.
  *
@@ -272,6 +302,7 @@ const resolvePublicCertificate = (
       `test -f ${certPath} || echo "!! missing certificate ${certPath}; run: certbot --nginx -d ${domain} --agree-tos -m ops@${domain}"`,
       { sudo: true },
     );
+    ensureCertbotRenewal(runner, host);
   }
   return { certPath, keyPath };
 };
@@ -515,20 +546,23 @@ const deployService = (input: {
         databaseNonEmpty: state.databaseNonEmpty,
         pendingMigrations: state.pendingMigrations,
         forceFresh: input.migration.forceFresh,
+        dryRun: runner.dryRun,
       });
       if (migrationPlan.refuse) throw new Error(migrationPlan.refuse);
       if (migrationPlan.dumpBeforeMigrate) {
         backupDatabase({ runner, config, host, releaseTimestamp });
       }
       if (migrationPlan.runMigrate) {
-        runner.run(host.ssh, `${bun} run migrate-deploy`, { cwd: appDir, sudo: false });
+        runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
+          runner.run(host.ssh, `${bun} ${flag} run migrate-deploy`.replace("  ", " "), { cwd: appDir, sudo: false }));
       } else {
         log("  no pending migrations");
       }
     }
     if (config.RUN_PRISMA_SEED) {
       const seedStarted = Date.now();
-      runner.run(host.ssh, `${bun} run db-seed`, { cwd: appDir, sudo: false });
+      runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
+        runner.run(host.ssh, `${bun} ${flag} run db-seed`.replace("  ", " "), { cwd: appDir, sudo: false }));
       const seedMs = Date.now() - seedStarted;
       if (!input.migration?.fresh && seedMs >= 3000) {
         log(`  hint: db-seed took ${(seedMs / 1000).toFixed(1)}s on every deploy; it is first-deploy reference data, so set RUN_PRISMA_SEED=false once it has run`);
@@ -716,6 +750,59 @@ export const preMigrationBackup = (
   };
 };
 
+const OWNER_ENV_FILE = ".env.owner";
+
+/**
+ * Runs `build(flag)` with the database OWNER's credentials when the application has its own non-owner role
+ * (`PG_APP_PASSWORD`). The runtime `.env` then carries only the application role; the owner's URL exists only in a
+ * temporary `.env.owner` (mode 0600) that is created for the one command and removed afterwards, even on failure,
+ * so a compromised service process cannot read the owner's credentials from its environment or from disk.
+ * `flag` is `--env-file=.env.owner` (Bun layers it over `.env`) or empty in the legacy single-role mode.
+ */
+export const runAsDatabaseOwner = <T>(
+  runner: SshRunner,
+  host: HostPlan,
+  appDir: string,
+  config: DeployConfig,
+  build: (envFlag: string) => () => T,
+): T => {
+  if (!pgAppRoleEnabled(config)) return build("")();
+  const ownerUrl = effectiveDatabase(config).ownerUrl;
+  if (!ownerUrl) throw new Error("The owner database URL could not be derived; set the PostgreSQL storage fields");
+  const envPath = `${appDir}/${OWNER_ENV_FILE}`;
+  runner.writeRemoteFile({ target: host.ssh, path: envPath, content: `DATABASE_URL="${ownerUrl}"\n`, mode: 0o600, sudo: false });
+  try {
+    return build(`--env-file=${OWNER_ENV_FILE}`)();
+  } finally {
+    runner.run(host.ssh, `rm -f ${shellQuote(envPath)}`, { sudo: false });
+  }
+};
+
+/** Installs the packages, Bun and PM2 a host needs (the `--fresh` bootstrap, for one host). */
+const bootstrapHost = (runner: SshRunner, host: HostPlan, config: DeployConfig): void => {
+  const os = detectHostOs(runner, host);
+  log(`  ${host.ssh.host}: detected ${os} package manager`);
+  const packages = bootstrapPackagesCommand(os);
+  if (packages) {
+    runner.run(host.ssh, packages, { sudo: true });
+  } else {
+    warn(`unknown OS on ${host.ssh.host}; install nginx/rsync/curl/nodejs manually`);
+  }
+  const targetUser = effectiveTargetUser(host.ssh);
+  const targetHome = effectiveTargetHome(host.ssh);
+  // PM2 is a Node program and its shebang is `node`; Bun lives on a stable
+  // absolute path (/usr/local/bin/bun, pinned + checksum verified).
+  runner.run(host.ssh, bunInstallCommand(config), { sudo: true });
+  runner.run(host.ssh, 'test -x "$HOME/.bun/bin/pm2" || PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun add -g pm2', { sudo: false });
+  // Best effort: re-register the PM2 process list on boot.
+  const pm2Path = `${targetHome}/.bun/bin:/usr/local/bin:/usr/bin:/bin`;
+  runner.run(
+    host.ssh,
+    `env PATH=${pm2Path} pm2 startup systemd -u ${targetUser} --hp ${targetHome} >/dev/null 2>&1 || true`,
+    { sudo: true },
+  );
+};
+
 /** Result of probing the target database before a migration run. */
 export interface MigrationPlanInput {
   fresh: boolean;
@@ -726,6 +813,8 @@ export interface MigrationPlanInput {
   /** true/false when probed, undefined when unknown. */
   pendingMigrations: boolean | undefined;
   forceFresh: boolean;
+  /** A dry run never probes, so an unknown emptiness is expected there and must not refuse. */
+  dryRun?: boolean;
 }
 
 export interface MigrationPlan {
@@ -739,7 +828,9 @@ export interface MigrationPlan {
 /**
  * The single decision point for schema migrations (pure, unit-tested):
  *  - only the first core node migrates;
- *  - `--fresh` against a non-empty database is refused unless --force-fresh;
+ *  - `--fresh` against a non-empty database is refused unless --force-fresh, and so is `--fresh`
+ *    when the emptiness probe FAILED (unknown is not "empty": a missing psql client or a refused
+ *    connection must not switch the safety check off);
  *  - update deploys run `migrate deploy` whenever migrations are (or may be) pending;
  *  - a dump is always taken first when the database is (or may be) non-empty.
  */
@@ -752,6 +843,13 @@ export const planMigrations = (input: MigrationPlanInput): MigrationPlan => {
         runMigrate: false,
         dumpBeforeMigrate: false,
         refuse: "--fresh refused: the target database is not empty. Re-run with --force-fresh (or DEPLOY_FORCE_FRESH=1) only if you intend to migrate over existing data; a pre-migration dump is taken first.",
+      };
+    }
+    if (input.databaseNonEmpty === undefined && !input.forceFresh && !input.dryRun) {
+      return {
+        runMigrate: false,
+        dumpBeforeMigrate: false,
+        refuse: "--fresh refused: the emptiness probe of the target database failed (is the PostgreSQL client installed on the core host and the database reachable?), so it cannot be shown to be empty. Fix the probe, or re-run with --force-fresh (or DEPLOY_FORCE_FRESH=1) if you accept the risk; a pre-migration dump is taken first.",
       };
     }
     return { runMigrate: true, dumpBeforeMigrate: maybeNonEmpty };
@@ -922,6 +1020,14 @@ const main = async (): Promise<void> => {
   if (conflicts.length > 0) {
     throw new Error(`Invalid host topology:\n- ${conflicts.join("\n- ")}`);
   }
+  if (options.checkCerts) {
+    // AUTO-28: read-only expiry report for cron / an alert hook; exit 1 when anything needs attention.
+    const window = config.MTLS_RENEW_WITHIN_DAYS > 0 ? config.MTLS_RENEW_WITHIN_DAYS : 30;
+    const report = checkPkiExpiry(buildPki({ config, dryRun: true }), window);
+    log(report.lines.join("\n"));
+    log(report.ok ? `\nAll certificates are valid for at least ${window} days.` : `\nAttention: leaves are re-issued by the next deploy; a CA near expiry needs --rotate-certs.`);
+    process.exit(report.ok ? 0 : 1);
+  }
   const plan = planHosts(config);
   log(renderTopology(plan));
   if (options.dryRun) {
@@ -965,8 +1071,14 @@ const main = async (): Promise<void> => {
     log(`  would ensure: ${[pki.ca, pki.server, pki.backup, ...pki.clients, ...pki.storageClients].map((material) => material.name).join(", ")}`);
     log(`  core SAN: ${(pki.server.sans ?? []).join(",")}`);
   } else {
+    if ((pki.renewed ?? []).length > 0) {
+      log(`  renewed (expiring within ${config.MTLS_RENEW_WITHIN_DAYS} days, same CA): ${(pki.renewed ?? []).join(", ")}`);
+    }
     for (const certificate of verifyPki(pki)) {
       log(`  ${certificate.name}: valid ${certificate.expiresInDays} day(s)${certificate.sans.length > 0 ? ` SAN=${certificate.sans.join(",")}` : ""}`);
+    }
+    for (const row of pkiRenewalReport(pki, config.MTLS_RENEW_WITHIN_DAYS > 0 ? config.MTLS_RENEW_WITHIN_DAYS : 30)) {
+      if (row.action !== "renew-on-deploy") warn(`${row.name}: ${row.action === "expired" ? "EXPIRED" : `expires in ${row.expiresInDays} day(s); replacing the CA is a rotation: run deploy with --rotate-certs`}`);
     }
   }
   uploadStorageCertificates(runner, plan, pki, config, options.dryRun);
@@ -974,35 +1086,29 @@ const main = async (): Promise<void> => {
   // ---- Step 4: bootstrap the unique hosts -------------------------------
   step(4, "Bootstrap the target hosts and apply the firewall");
   const fresh = options.fresh || (options.update ? false : config.DEPLOY_MODE === "fresh");
-  if (fresh || options.enforceFirewall) {
+  // `auto` (the default) decides PER HOST: a host with gaps is bootstrapped, a complete one is left alone. It used
+  // to behave like update mode, so a bare host only failed late, after core had been migrated and switched.
+  const autoProbe = !fresh && !options.update && config.DEPLOY_MODE === "auto";
+  if (fresh || options.enforceFirewall || autoProbe) {
     for (const host of plan.hosts) {
       if (!options.dryRun) {
         runner.assertKeyExists(host.ssh);
       }
       runner.run(host.ssh, "true");
-      if (fresh) {
-        const os = detectHostOs(runner, host);
-        log(`  ${host.ssh.host}: detected ${os} package manager`);
-        const packages = bootstrapPackagesCommand(os);
-        if (packages) {
-          runner.run(host.ssh, packages, { sudo: true });
+      let bootstrapThisHost = fresh;
+      if (autoProbe && !options.dryRun) {
+        const gaps = bootstrapGaps(runner.capture(host.ssh, hostProbeScript({ nginx: host.nginx.length > 0 }), { sudo: false }));
+        if (gaps.length > 0) {
+          log(`  ${host.ssh.host}: auto mode found a host that is not bootstrapped (${gaps.join(", ")}); bootstrapping it`);
+          bootstrapThisHost = true;
         } else {
-          warn(`unknown OS on ${host.ssh.host}; install nginx/rsync/curl/nodejs manually`);
+          log(`  ${host.ssh.host}: auto mode found a bootstrapped host`);
         }
-        const targetUser = effectiveTargetUser(host.ssh);
-        const targetHome = effectiveTargetHome(host.ssh);
-        // PM2 is a Node program and its shebang is `node`; Bun lives on a stable
-        // absolute path (/usr/local/bin/bun, pinned + checksum verified).
-        runner.run(host.ssh, bunInstallCommand(config), { sudo: true });
-        runner.run(host.ssh, 'test -x "$HOME/.bun/bin/pm2" || PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun add -g pm2', { sudo: false });
-        // Best effort: re-register the PM2 process list on boot.
-        const pm2Path = `${targetHome}/.bun/bin:/usr/local/bin:/usr/bin:/bin`;
-        runner.run(
-          host.ssh,
-          `env PATH=${pm2Path} pm2 startup systemd -u ${targetUser} --hp ${targetHome} >/dev/null 2>&1 || true`,
-          { sudo: true },
-        );
       }
+      if (bootstrapThisHost) {
+        bootstrapHost(runner, host, config);
+      }
+      if (autoProbe && !options.enforceFirewall && !bootstrapThisHost) continue;
       const firewall = applyFirewall({ runner, host, config, dryRun: options.dryRun });
       log(`  ${host.ssh.host}: ${firewall.commands.length} ufw rule(s)`);
       if (!options.dryRun) {
@@ -1012,6 +1118,7 @@ const main = async (): Promise<void> => {
   } else {
     log("  skipped (update mode; pass --fresh or --enforce-firewall to bootstrap)");
   }
+  if (autoProbe && options.dryRun) log("  auto mode: hosts are not probed in --dry-run");
 
   // ---- Step 5: storage provisioning and pre-migration backup -------------
   step(5, "Provision storage engines and take a pre-migration backup");
@@ -1024,14 +1131,26 @@ const main = async (): Promise<void> => {
   if (config.PG_MANAGE_VIA_SSH && shouldRunStorage(options, ["pg", "pg-primary", "pg-replica", "pgbouncer"])) {
     const report = provisionPostgres18({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });
     log(`  PostgreSQL ${config.PG_VERSION} primary/replicas: ${report.nodes.join(", ") || "none"}`);
+    for (const note of report.notes ?? []) warn(note);
     log(`  PgBouncer ${config.PGBOUNCER_ENABLED ? `:${config.PGBOUNCER_PORT}` : "disabled"}`);
     logOutcomes(report.outcomes);
   } else if (pgStorageConfigured(config)) {
     log("  PostgreSQL: skipped (--only excludes pg)");
   }
+  if (pgStorageConfigured(config) && !pgAppRoleEnabled(config)) {
+    warn("PG_APP_PASSWORD is not set: the application connects to PostgreSQL as the database OWNER, so the append-only ledger protection can be removed by anything that runs as the application. Set PG_APP_PASSWORD (and optionally PG_APP_USER) to run it as the non-owner `pgw_app` role.");
+  }
   if (config.REDIS_MANAGE_VIA_SSH && shouldRunStorage(options, ["redis"])) {
     const report = provisionRedis({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });
     log(`  Redis nodes: ${report.nodes.join(", ") || "none"}`);
+    logOutcomes(report.outcomes);
+  }
+  if (clamdManaged(config) && shouldRun(options, "core")) {
+    // AUTO-06: ClamAV (clamd + freshclam) on every core host, loopback only; the core env points at it.
+    const coreHosts = plan.hosts.filter((host) => host.roles.includes("core"));
+    const report = provisionClamav({ runner, config, hosts: coreHosts, dryRun: options.dryRun, forceRestart: options.forceRestart });
+    log(`  ClamAV (clamd ${options.dryRun ? "planned" : "converged"}) on: ${report.nodes.join(", ") || "none"}`);
+    for (const note of report.notes ?? []) warn(note);
     logOutcomes(report.outcomes);
   }
   if ((config.AUDIT_DB_MANAGE_VIA_SSH || config.LOG_DB_MANAGE_VIA_SSH) && shouldRunStorage(options, ["audit-db", "log-db"])) {
@@ -1071,6 +1190,10 @@ const main = async (): Promise<void> => {
     { index: 9, role: "merchant", title: "Deploy merchant-back + merchant-front to MERCHANT_HOST" },
     { index: 10, role: "checkout", title: "Deploy checkout-back + checkout-front to CHECKOUT_HOST" },
   ];
+  // The SPA builds run in the background since step 2. Wait for ALL of them before the first service
+  // is touched: otherwise a failed build was only noticed per role inside the loop below, after the
+  // database had been migrated and core had been switched to the new release.
+  if (builds) await builds.waitAll();
   for (const target of deployTargets) {
     step(target.index, target.title);
     if (!shouldRun(options, target.role)) {
@@ -1127,8 +1250,22 @@ const main = async (): Promise<void> => {
     }
   }
 
-  // ---- Step 11: seed the Fake Rails blueprints and synthetic history ------
-  step(11, "Seed Fake Rails blueprints and synthetic operational history");
+  // ---- Step 11: end-to-end verification (BEFORE the seed) ----------------
+  // A deployment that does not verify must stop here: the seed can run for up to an hour and writes ~280k rows
+  // that nobody wants on top of a release that already failed its health checks.
+  step(11, "End-to-end cross-host mTLS and health verification");
+  if (options.skipVerify || options.dryRun) {
+    log("  skipped");
+  } else {
+    const verification = verifyDeployment(runner, plan, config);
+    log(runner.scrub(renderVerification(verification)));
+    if (!verification.ok) {
+      throw new Error("Deployment verification failed. There is no automatic rollback and no rollback command: the previous release is still on disk (KEEP_RELEASES), but `current` already points at the new one and the database schema was already migrated and is NOT reverted. To go back, re-point <remote dir>/current to the previous release on each host, restart the PM2 services, and only then decide about the schema.");
+    }
+  }
+
+  // ---- Step 12: seed the Fake Rails blueprints and synthetic history ------
+  step(12, "Seed Fake Rails blueprints and synthetic operational history");
   if (options.dryRun) {
     log("  skipped (--dry-run)");
   } else if (!config.FAKE_RAILS_ENABLED) {
@@ -1142,14 +1279,16 @@ const main = async (): Promise<void> => {
     const coreSeedTarget = firstCore?.ssh ?? coreHost.ssh;
     const bun = 'PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun';
     if (config.SEED_FAKE_RAILS_BLUEPRINTS) {
-      runner.run(coreSeedTarget, `${bun} run seed-fake-rails`, { cwd: coreRemote, sudo: false, timeoutMs: 30 * 60_000 });
+      runAsDatabaseOwner(runner, coreHost, coreRemote, config, (flag) => () =>
+        runner.run(coreSeedTarget, `${bun} ${flag} run seed-fake-rails`.replace("  ", " "), { cwd: coreRemote, sudo: false, timeoutMs: 30 * 60_000 }));
       log("  fake rails blueprints seeded in core-back");
     }
     if (config.RUN_SYNTHETIC_HISTORY_SEED) {
       // The STANDARD profile generates/writes ~280k rows and syncs 120k
       // transactions to Fake Rails; on a single box this exceeds the default
       // 15-minute command timeout, so give it a generous ceiling.
-      const seeded = runner.run(coreSeedTarget, `${bun} run seed-synthetic-history`, { cwd: coreRemote, sudo: false, timeoutMs: 60 * 60_000 });
+      const seeded = runAsDatabaseOwner(runner, coreHost, coreRemote, config, (flag) => () =>
+        runner.run(coreSeedTarget, `${bun} ${flag} run seed-synthetic-history`.replace("  ", " "), { cwd: coreRemote, sudo: false, timeoutMs: 60 * 60_000 }));
       const summary = seeded.stdout.trim().split("\n").slice(-4).join("\n");
       if (summary) log(summary.split("\n").map((line) => `  ${line}`).join("\n"));
       if (seeded.stdout.includes("was already seeded successfully") || seeded.stdout.includes("synthetic history already present under seed key")) {
@@ -1160,18 +1299,6 @@ const main = async (): Promise<void> => {
     }
   } else {
     log("  skipped (--only excludes core)");
-  }
-
-  // ---- Step 12: end-to-end verification ---------------------------------
-  step(12, "End-to-end cross-host mTLS and health verification");
-  if (options.skipVerify || options.dryRun) {
-    log("  skipped");
-  } else {
-    const verification = verifyDeployment(runner, plan, config);
-    log(runner.scrub(renderVerification(verification)));
-    if (!verification.ok) {
-      throw new Error("Deployment verification failed; the previous release is still on disk for a rollback");
-    }
   }
 
   // ---- Step 13: prune ----------------------------------------------------

@@ -12,7 +12,7 @@ import { callCoreResponse } from "../../lib/mtlsClient";
 import { env } from "../../lib/env";
 import { parseCidrList, resolveClientIp } from "../../lib/net";
 import { resolveRequestId } from "../../lib/requestLogger";
-import { uploadSingle } from "../upload";
+import { uploadGuards, uploadSingle } from "../upload";
 import { assertAllowedUpload } from "../../lib/zReady";
 import { ApiError, parseOrThrow } from "../../lib/error";
 
@@ -185,6 +185,7 @@ router.delete(
 
 router.post(
   "/:id/kyb-documents",
+  ...uploadGuards,
   uploadSingle("file"),
   async (req: Request, res: Response): Promise<void> => {
     const file = req.file;

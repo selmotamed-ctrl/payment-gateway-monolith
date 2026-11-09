@@ -66,7 +66,7 @@ The node spec carries only host, SSH port, private IP and service port. SSH user
 
 | Group | Keys | Purpose |
 | :--- | :--- | :--- |
-| Global | `DEPLOY_MODE`, `DEPLOY_ENV`, `KEEP_RELEASES`, `ROTATE_MTLS_CERTS`, `MTLS_VALIDITY_DAYS`, `LAN_ALLOWED_CIDRS`, `ROLLING_BATCH_SIZE` | Pipeline mode, release retention, certificate rotation and LAN policy. |
+| Global | `DEPLOY_MODE`, `DEPLOY_ENV`, `KEEP_RELEASES`, `ROTATE_MTLS_CERTS`, `MTLS_VALIDITY_DAYS`, `MTLS_RENEW_WITHIN_DAYS`, `LAN_ALLOWED_CIDRS`, `ROLLING_BATCH_SIZE` | Pipeline mode, release retention, certificate rotation and LAN policy. |
 | Legacy database | `DB_MANAGE_VIA_SSH`, `DB_SSH_HOST`, `DB_SSH_PORT`, `DB_SSH_USER`, `DB_SSH_KEY_PATH`, `DB_SUDO_PASSWORD`, `DB_PRIVATE_IP`, `DB_ENGINE`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DATABASE_URL` | Compatibility path for one externally managed PostgreSQL 18 database. |
 | Compute node arrays | `CORE_NODES`, `ADMIN_NODES`, `MERCHANT_NODES`, `CHECKOUT_NODES`, `CORE_BACK_URLS` | Horizontal compute tiers and an optional explicit edge upstream list. |
 | Core | `CORE_SSH_HOST`, `CORE_SSH_PORT`, `CORE_SSH_USER`, `CORE_SSH_KEY_PATH`, `CORE_SUDO_PASSWORD`, `CORE_PRIVATE_IP`, `CORE_PORT`, `CORE_REMOTE_DIR`, `RUN_PRISMA_SEED` | Core host, listener, release directory and optional seed. |
@@ -183,6 +183,7 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | `--enforce-firewall` | Re-apply UFW without a full bootstrap. |
 | `--skip-build`, `--skip-verify` | Skip local SPA builds or end-to-end verification. |
 | `--rotate-certs` | Rotate the CA and every leaf. |
+| `--check-certs` | Print the certificate expiry table and exit 1 when a certificate is missing, expired or inside `MTLS_RENEW_WITHIN_DAYS` (AUTO-28). |
 | `--dry-run` | Print commands; execute nothing. |
 
 ### Files
@@ -302,6 +303,10 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 - **PAN-rail guard (GAP-026, partially resolved).** `loadDeployConfig` runs `panRailGuardProblems` over the environment: a key naming a PAN/CVV/card-number rail (`PAN`, `CVV`, `CVV2`, `CVC`, `CVC2`, `CARD_NUMBER`, `CARD_NO`, `PAN_RAIL(S)`, `CARD_RAIL(S)` as an underscore-delimited token) or a value containing a Luhn-valid 13-19 digit run is refused with a `PAN_RAIL_GUARD` problem. The scope statement is `deploy/docs/pci-scope.md` (see `platform.security`); the core-back guard is still open.
 - **GAP-023 remains open:** real WAL-G, bun and barman SHA256 values are operator-supplied.
+
+## Remediation round 2 (2026-11-08): app role and host probe configuration
+
+`PG_APP_USER` (default `pgw_app_login`) and `PG_APP_PASSWORD` (at least 12 characters, different from the owner's) enable the role split: the owner (`PG_DB_USER`) runs migrations and seeders through `ownerUrl`, while the running services connect as `PG_APP_USER`, a plain LOGIN member of `pgw_app`. `PG_APP_USER` must not be `postgres`, `pgw_app` or `pgw_ledger_maintenance`, nor equal the owner or replication user. Without `PG_APP_PASSWORD` the legacy single-role behaviour is kept and the deploy warns.
 
 ## Host Planner
 
@@ -746,6 +751,7 @@ The provisioner creates the directory for `pgbackup` and `deployBackupDaemon()` 
 | :--- | :--- | :--- |
 | `ROTATE_MTLS_CERTS` | `false` | Regenerate CA and all leaves. |
 | `MTLS_VALIDITY_DAYS` | `825` | Leaf validity. |
+| `MTLS_RENEW_WITHIN_DAYS` | `30` (0 = off) | A deploy re-issues leaves expiring within this many days with the same CA (AUTO-28). |
 | `CORE_NODES` / `CORE_PRIVATE_IP` | required | Core SAN IPs. |
 | `BACKUP_NODE` | optional | Backup SAN IP. |
 | `FAKE_RAILS_DOMAIN`, `FAKE_RAILS_PRIVATE_IP` | optional | Fake Rails SAN. |
@@ -812,13 +818,13 @@ Keep `deploy/deploy.env` and `deploy/.certs/` at restrictive permissions. Do not
 
 - Storage client certificates exist but are not consumed by PostgreSQL, PgBouncer, Redis, audit DB or log DB.
 - The backup daemon's cert/key ownership is not aligned with its `pgbackup` user.
-- Expiry is reported but does not force rotation.
+- A CA that nears its end is reported (`--check-certs`, the deploy warning) but never replaced automatically: replacing it is a rotation of every certificate (`--rotate-certs`).
 - The backup daemon does not authorize a client CN per route.
 
 ### Missing / deferred
 
 - end-to-end storage mTLS configuration (`ssl=on` with internal certs, `clientcert=verify-full`, Redis TLS, PgBouncer client TLS).
-- Automatic renewal before expiry.
+- (Done, AUTO-28) Leaf renewal before expiry: a normal deploy re-issues, with the existing CA, every leaf that expires within `MTLS_RENEW_WITHIN_DAYS` (default 30; 0 = off) and leaves the other files byte-identical; `deploy.ts --check-certs` prints the expiry table (`ok`, `RENEW`, `ROTATE-CA`, `EXPIRED`, `MISSING`) and exits 1 when anything needs attention, for cron or an alert hook. Still manual: nothing runs the deploy by itself, so a leaf is only renewed when somebody deploys within the window; the core's `platform.certificate` monitor check (AUTO-03) raises the case that tells them to.
 - A CRL/OCSP or short-lived certificate workflow.
 - Per-service certificate isolation on a co-located edge host.
 - Client-CN authorization on the backup daemon.
@@ -1490,15 +1496,19 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 
 - **Quoting.** `deploy/lib/quoting.ts` is the single helper set (`shellQuote`, `sqlLiteral`, `sqlIdent`, `dollarTag`, `pgbouncerQuoted`, `pgpassField`, `assertSingleLine`, `envAssign`). Paths are shell-quoted in rm/chown/mkdir/ln/xargs/pm2 commands.
 - **Pre-migrate dump.** `pg_dump` uses `PGPASSFILE` (never `PGPASSWORD`), runs under `umask 077` into a 0700 backups directory, and only the newest `KEEP_RELEASES` dumps are kept. The earlier statements in this part that the dump embeds `PGPASSWORD` are superseded.
-- **Migrations.** `planMigrations()` is exported; only the first core node migrates. `--fresh` against a non-empty database is refused unless `--force-fresh` or `DEPLOY_FORCE_FRESH=1`. Update deploys run `migrate deploy` when migrations are pending or unknown. The dump is taken before migrating in both modes when the database is non-empty or unknown.
+- **Migrations.** `planMigrations()` is exported; only the first core node migrates. `--fresh` against a non-empty database is refused unless `--force-fresh` or `DEPLOY_FORCE_FRESH=1`; since 2026-11-08 it is refused as well when the emptiness probe FAILED (no PostgreSQL client on the core host, refused connection: `databaseNonEmpty` unknown is no longer treated as empty), except in `--dry-run`. The frontend builds started in step 2 are all awaited (`builds.waitAll()`) before the first service is deployed, so a failed SPA build aborts before the database is migrated and core is switched. Update deploys run `migrate deploy` when migrations are pending or unknown. The dump is taken before migrating in both modes when the database is non-empty or unknown.
 - **sshRunner** local-sudo writes use an `mkdtemp` 0700 directory removed in `finally`.
 - **Bun** is installed from a pinned download verified against `BUN_SHA256` (no `curl | bash`); the fresh-host bootstrap installs `unzip`, and an existing `/usr/local/bin/bun` or `~/.bun/bin/bun` is reused.
 - **Frontend build env**: the deploy injects `VITE_CHECKOUT_BASE_URL` into merchant-front and `VITE_CHECKOUT_ORIGIN` into fake-rails-front from `CHECKOUT_DOMAIN`/ports, so checkout links and hosted-widget postMessage targets do not fall back to the wrong origin.
 - **nginx templates**: `server_tokens off` and `limit_req` (with `limit_req_status 429`) in all six; the fakerails vhost gets `allow`/`deny` from `FAKE_RAILS_ALLOWED_CIDRS`, `script-src 'self'`, `object-src 'none'`, and a computed `frame-ancestors` list (self + merchant/checkout origins + loopback) so the hosted widget can still be embedded; the checkout CSP is unchanged.
 - **scripts/deploy-localhost.sh** refuses `NODE_ENV=production` unless `LOCAL_TARGET=1`, no longer falls back to default secrets (random secrets via `openssl rand` go to a 0600 `.local/secrets.env` or `LOCAL_SECRETS_FILE`), and requires `DB_PASSWORD`.
-- **CI and legacy deploy workflows (GAP-014, RESOLVED 2026-11-05).** `.github/workflows/ci.yml` (jobs `design`, `backend`, `frontend`; triggers push to `main`/`ayoub`, pull requests and manual dispatch; `contents: read`; concurrency-cancelled per ref) runs the AGENTS.md gate: `bun scripts/project-design/build.ts --check`, then for `core-back`, `deploy`, `deploy/backup-daemon`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` a frozen-lockfile install, typecheck and `bun test`, and for `admin-front`, `merchant-front`, `checkout-front` and `fake-rails-front` a frozen-lockfile install and `bun run build`. Suites that need PostgreSQL 18 and Redis skip themselves when the services are absent. The per-service `*/.github/workflows/deploy.yml` workflows are now legacy and manual only (`workflow_dispatch` with a typed `deploy` confirmation): they run the service typecheck/tests first, run the deploy job in the `legacy-deploy` environment, use `StrictHostKeyChecking=yes` with a pinned `known_hosts` taken from the **`SSH_KNOWN_HOSTS` secret (which operators must now create, with the server's verified host key lines)**, sync additively (no `rsync --delete`) and never scan the host key on first use. The supported deploy path remains the multi-host engine in `deploy/`. Tests: `deploy/test/ci-workflows.test.ts`.
+- **CI and legacy deploy workflows (GAP-014, RESOLVED 2026-11-05).** `.github/workflows/ci.yml` (jobs `design`, `core-back`, `backend`, `frontend`; triggers push to `master` (the default branch; `main` and `ayoub` are kept), pull requests and manual dispatch; `contents: read`; concurrency-cancelled per ref) runs the AGENTS.md gate: `bun scripts/project-design/build.ts --check`, then for `deploy`, `deploy/backup-daemon`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` a frozen-lockfile install, typecheck and `bun test`, and for `admin-front`, `merchant-front`, `checkout-front` and `fake-rails-front` a frozen-lockfile install and `bun run build`. **Update 2026-11-08:** the workflow used to list `main`/`ayoub` only, so a push to `master` never ran CI, and it had no database, so every PostgreSQL/Redis suite skipped itself and a ledger regression could pass green. `core-back` now has its own job with `postgres:18` and `redis:7` service containers on the harness ports (`55432`, `56379`), generates the Prisma client and the mTLS test certificates, checks `server_version_num >= 180000`, applies the migrations to the test database, typechecks, runs `bun test` and then FAILS the job when bun reports any skipped test (the full suite reports 0 skips with the services present). The `backend` matrix no longer contains `core-back`. The companion workflow (`companion.yml`) only receives `ANDROID_KEYSTORE_BASE64` and `COMPANION_CONTENT_SIGNING_KEY` on the default branch (job-level `env` is empty elsewhere, so every `if: env.X != ''` step skips): a feature-branch push touching `companion-app/**` can no longer produce a production-signed APK, a signed content update or a release. The per-service `*/.github/workflows/deploy.yml` workflows are now legacy and manual only (`workflow_dispatch` with a typed `deploy` confirmation): they run the service typecheck/tests first, run the deploy job in the `legacy-deploy` environment, use `StrictHostKeyChecking=yes` with a pinned `known_hosts` taken from the **`SSH_KNOWN_HOSTS` secret (which operators must now create, with the server's verified host key lines)**, sync additively (no `rsync --delete`) and never scan the host key on first use. The supported deploy path remains the multi-host engine in `deploy/`. Tests: `deploy/test/ci-workflows.test.ts` (matrix, `master` trigger, the `core-back` job with services and the skip guard, companion secret gating, legacy deploy workflows).
 - **Replica pgpass (GAP-028, RESOLVED).** The replica `.pgpass` is streamed over stdin; see `deploy.storage`.
 - **Still open.** GAP-023: real WAL-G/bun/barman SHA256 values must be supplied by the operator.
+
+## Remediation round 2 (2026-11-08): auto probe, preflight and step order
+
+`DEPLOY_MODE=auto` now probes every host read-only in step 4 (`lib/hostProbe.ts`, a pure `bootstrapGaps()` over the probe output) and resolves each host to fresh, update or refuse (an edge host whose core has not been migrated is refused before anything changes). A resource preflight warns when PostgreSQL sizing (`PG_RAM_GB`) exceeds the host's memory. Verification (formerly step 12) now runs before the long seed (formerly step 11). `runAsDatabaseOwner` runs migrations and seeders with the owner URL. Tests: `deploy/test/hostProbe.test.ts`, `pipeline.test.ts`.
 
 ## Storage Provisioners
 
@@ -1510,6 +1520,7 @@ This part documents the four modular storage provisioners invoked by the deploym
 
 - `postgres18Provisioner.ts`: PostgreSQL 18 primary, replicas, replication slots, `pg_hba`, PgBouncer, tuning and journal partition cron;
 - `redisProvisioner.ts`: Redis cache/velocity nodes;
+- `clamavProvisioner.ts` (AUTO-06): ClamAV for the KYB document scan on every core host when `KYB_SCANNER_MODE=clamd` and no external `KYB_CLAMD_ADDRESS` is set. Installs `clamav-daemon` + `clamav-freshclam` (Arch: `clamav`) only when missing; writes a managed `/etc/clamav/clamd.conf` (TCP on `127.0.0.1:3310` only, local socket kept, `StreamMaxLength` and `MaxFileSize` 32M); downloads the first signature set (clamd will not start without one); disables Debian's `clamav-daemon.socket` (socket activation would own the sockets); starts clamd, or restarts it only when the configuration changed or on `--force-restart`; waits for `zPING`. The core env gets `KYB_CLAMD_ADDRESS=127.0.0.1:3310`. A host below 2 GB RAM or a failed first download (offline lab) is a warning, never a failed deploy: documents stay `PENDING` and the core's `kyb_scan_backlog` monitor check reports it. Not built: an offline signature mirror (`DatabaseMirror` is the ClamAV default) and a separate scanning host shared by several core nodes.
 - `auditAndLogDbProvisioner.ts`: append-only audit database and partitioned log database;
 - `backupEngineProvisioner.ts`: WAL-G/Barman archive engine, daemon environment/unit, schedules and S3/secondary target checks.
 
@@ -1819,6 +1830,7 @@ Not covered:
 
 - `deploy/provisioners/postgres18Provisioner.ts`
 - `deploy/provisioners/redisProvisioner.ts`
+- `deploy/provisioners/clamavProvisioner.ts`
 - `deploy/provisioners/auditAndLogDbProvisioner.ts`
 - `deploy/provisioners/backupEngineProvisioner.ts`
 - `deploy/lib/hostPlanner.ts`: storage env, URLs and node plans.
@@ -1942,6 +1954,12 @@ Not covered:
 - Core receives `LEADER_ELECTION_DATABASE_URL` (derived as `postgresql://…@<primary>:<PGBOUNCER_PORT>/pgw_session`; direct PostgreSQL with `sslmode=no-verify` when PgBouncer is disabled). An explicit deploy-env value overrides it.
 - After `applyPgbouncer()`, the provisioner logs in through `pgw_session`; a reload normally publishes the new alias, otherwise it restarts PgBouncer once and retries. Core refuses to boot if the session endpoint is missing or transaction-pooled.
 - No firewall change: the alias uses the existing `PGBOUNCER_PORT` rule from core nodes; PostgreSQL's own port remains closed to core when PgBouncer is enabled.
+
+## Remediation round 2 (2026-11-08): role split, PgBouncer TLS, Redis
+
+- PgBouncer authenticates each client as its own user (per-client userlist entry for `PG_APP_USER`) instead of forcing the owner, and terminates TLS on the client leg (`client_tls_sslmode`, self-signed certificate); `DATABASE_URL` carries `sslmode=no-verify` whenever the deploy manages the cluster (encrypted, not identity-verified; certificate verification remains open).
+- The bootstrap SQL creates the app login role as a member of `pgw_app` with no UPDATE/DELETE/TRUNCATE on the ledger and audit tables and no DDL. Validated end to end on a TLS PostgreSQL 18 with a real PgBouncer (owner migrations, app-role privilege probes, core's Prisma client). It has not run on a multi-host lab (GAP-057 stays partial).
+- Redis (`redisProvisioner.ts`): `maxmemory-policy volatile-ttl` plus AOF, so only keys with a TTL are evictable and a restart does not lose revoke flags; every durable key must carry a TTL.
 
 ## Backup Daemon
 
@@ -2259,7 +2277,7 @@ Fake Rails gets backend and vhost `/health` probes, with `-k` when SSL is enable
 | Redis | `REDISCLI_AUTH=<password> redis-cli -h 127.0.0.1 -p <port> PING`, expecting `PONG`. |
 | Audit DB | `psql SELECT 1` with the audit user/password. |
 | Log DB | `psql SELECT 1` with the log user/password. |
-| Backup daemon | HTTPS `/health` with the CA and the `backup-client` certificate/key when `BACKUP_ALLOW_INSECURE_HTTP=false`; plain HTTP when it is `true`. Expects `"status":"ok"` or `ok`. |
+| Backup daemon | HTTPS `/health` with the CA and the `backup-client` certificate/key when `BACKUP_ALLOW_INSECURE_HTTP=false`; plain HTTP when it is `true`. With the flag on, the pg-native `archive_command`/`restore_command` also use plain `http://` without a client certificate (the daemon, its health probe and `BACKUP_DAEMON_URL` already followed the flag; the WAL commands hard-coded `https://`, so every archive call failed while the health check passed and `pg_wal` filled the disk). Expects `"status":"ok"` or `ok`. |
 
 The mTLS backup probe presents the `backup-client` certificate/key, matching the daemon's CN allow-list; the daemon's own server certificate is not a client identity and is rejected. When `BACKUP_ALLOW_INSECURE_HTTP=true` the daemon serves plain HTTP and the verifier uses an unauthenticated HTTP probe on the same host/port, so development deployments do not fail on TLS.
 

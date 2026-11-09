@@ -43,7 +43,7 @@ describe("F7 no VITE_AUTHORIZED auth bypass", () => {
 describe("F8 route authority coverage (default-deny)", () => {
   const router = read("admin-front/src/router/index.ts");
   const names = [...router.matchAll(/^\s*name:\s*"([A-Za-z]+)"/gm)].map((m) => m[1]!);
-  const publicRoutes = new Set(["Login", "NotFound"]); // outside the requiresAuth layout
+  const publicRoutes = new Set(["Login", "AcceptInvitation", "NotFound"]); // outside the requiresAuth layout
 
   test("the router was parsed", () => {
     expect(names.length).toBeGreaterThan(30);

@@ -1,8 +1,8 @@
 /**
  * Suite 02.1 — the 15 journal-entry templates combinatorial matrix.
  *
- * 19 template variants × 3 currencies × 5 amount tiers × 4 fee configurations
- * = 1,140 independent journal constructions, each validated by the real
+ * 21 template variants × 3 currencies × 5 amount tiers × 4 fee configurations
+ * = 1,260 independent journal constructions, each validated by the real
  * production `LedgerPoster.validateTemplate`.
  */
 import { describe, expect, test } from "bun:test";
@@ -36,6 +36,7 @@ const TEMPLATES: readonly TemplateDefinition[] = [
   { label: "T5b split surcharge confirmation", scenario: "SPLIT_SURCHARGE_CONFIRMATION", surcharge: true, split: true },
   { label: "T6 merchant-direct commission recognition", scenario: "MERCHANT_DIRECT_CONFIRMATION" },
   { label: "T6b merchant-direct commission netting", scenario: "MERCHANT_DIRECT_CONFIRMATION", stage: "NETTING" },
+  { label: "T6c merchant-direct commission reversal on refund", scenario: "MERCHANT_DIRECT_CONFIRMATION", stage: "REFUND" },
   { label: "T7 AML hold at confirmation", scenario: "AML_HOLD_AND_RELEASE" },
   { label: "T7b AML checker release", scenario: "AML_HOLD_AND_RELEASE", stage: "RELEASE" },
   { label: "T8 cash-out subtraction", scenario: "CASHOUT" },
@@ -123,8 +124,8 @@ const buildInput = (
 
 describe("Suite 02 · all journal-entry templates", () => {
   test(`the matrix expands to ${TEMPLATES.length * ALL_CURRENCIES.length * AMOUNT_TIERS.length * FEE_CONFIGS.length} entries`, () => {
-    expect(TEMPLATES.length).toBe(20);
-    expect(TEMPLATES.length * ALL_CURRENCIES.length * AMOUNT_TIERS.length * FEE_CONFIGS.length).toBe(1200);
+    expect(TEMPLATES.length).toBe(21);
+    expect(TEMPLATES.length * ALL_CURRENCIES.length * AMOUNT_TIERS.length * FEE_CONFIGS.length).toBe(1260);
   });
 
   for (const definition of TEMPLATES) {
@@ -188,6 +189,17 @@ describe("Suite 02 · template account semantics", () => {
     expect(netting.lines.map((line) => line.account.accountType)).toEqual([
       "MERCHANT_WALLET",
       "COMMISSION_RECEIVABLE",
+    ]);
+
+    const refund = buildLedgerTemplate("MERCHANT_DIRECT_CONFIRMATION", {
+      amount,
+      commissionAmount: commission,
+      stage: "REFUND",
+    });
+    // A merchant-direct refund never touches the wallet or treasury: it only reverses commission.
+    expect(refund.lines.map((line) => [line.direction, line.account.accountType])).toEqual([
+      ["DEBIT", "PLATFORM_INCOME"],
+      ["CREDIT", "COMMISSION_RECEIVABLE"],
     ]);
   });
 

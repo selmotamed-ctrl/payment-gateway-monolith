@@ -1,3 +1,4 @@
+import { merchantSessionJwt, SESSION_BEARER } from "./helpers/session";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createTestPki, startTestCore } from "./helpers/core";
 
@@ -92,7 +93,7 @@ describe("access token creation policy", () => {
   const create = (body: unknown) =>
     fetch(`${base}/api/v1/merchant/tokens`, {
       method: "POST",
-      headers: { authorization: "Bearer session", "content-type": "application/json" },
+      headers: { authorization: SESSION_BEARER, "content-type": "application/json" },
       body: JSON.stringify(body),
     });
   const valid = {
@@ -156,7 +157,7 @@ describe("access token creation policy", () => {
     const send = (allowedCidrs: string[]) =>
       fetch(`${base}/api/v1/merchant/tokens/tok_1/ips`, {
         method: "PUT",
-        headers: { authorization: "Bearer session", "content-type": "application/json" },
+        headers: { authorization: SESSION_BEARER, "content-type": "application/json" },
         body: JSON.stringify({ allowedCidrs }),
       });
     expect((await send(["0.0.0.0/0"])).status).toBe(400);
@@ -193,6 +194,30 @@ describe("onboarding and upload routes", () => {
     expect(core.requests.length).toBe(before);
   });
 
+  test("a credential that is not shaped like a live merchant session is refused before the file is buffered", async () => {
+    const before = core.requests.length;
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const refused: Array<[string, string]> = [
+      ["a placeholder string", "Bearer x"],
+      ["an API token", "Bearer pg_live_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"],
+      ["an expired session", `Bearer ${merchantSessionJwt({ exp: nowSeconds - 10 })}`],
+      ["a session for the admin channel", `Bearer ${merchantSessionJwt({ aud: "payment-gateway-admin" })}`],
+      ["a token that is not a session", `Bearer ${merchantSessionJwt({ typ: "mfa-challenge" })}`],
+      ["an unsigned (alg none) token", `Bearer ${merchantSessionJwt({}, { alg: "none", typ: "JWT" })}`],
+    ];
+    for (const [label, authorization] of refused) {
+      bodyConsumedAtResponse = undefined;
+      const response = await fetch(`${base}/api/v1/merchant/onboarding/kyb-documents`, {
+        method: "POST",
+        headers: { authorization, "x-real-client-ip": "198.51.100.77" },
+        body: form(),
+      });
+      expect([label, response.status]).toEqual([label, 401]);
+      expect([label, bodyConsumedAtResponse as boolean | undefined]).toEqual([label, false]);
+    }
+    expect(core.requests.length).toBe(before);
+  });
+
   test("an unauthenticated onboarding call never reaches core", async () => {
     const before = core.requests.length;
     const response = await fetch(`${base}/api/v1/merchant/onboarding/join-request`);
@@ -206,7 +231,7 @@ describe("onboarding and upload routes", () => {
     bodyConsumedAtResponse = undefined;
     const response = await fetch(`${base}/api/v1/merchant/onboarding/kyb-documents`, {
       method: "POST",
-      headers: { authorization: "Bearer session", "x-real-client-ip": "198.51.100.51" },
+      headers: { authorization: SESSION_BEARER, "x-real-client-ip": "198.51.100.51" },
       body: form(),
     });
     process.env.MAX_UPLOAD_BYTES = "20971520";
@@ -221,13 +246,13 @@ describe("onboarding and upload routes", () => {
     fake.append("document", new Blob([Buffer.alloc(64, 0x41)], { type: "image/png" }), "x.png");
     const bad = await fetch(`${base}/api/v1/merchant/onboarding/kyb-documents`, {
       method: "POST",
-      headers: { authorization: "Bearer session", "x-real-client-ip": "198.51.100.52" },
+      headers: { authorization: SESSION_BEARER, "x-real-client-ip": "198.51.100.52" },
       body: fake,
     });
     expect(bad.status).toBe(415);
     const good = await fetch(`${base}/api/v1/merchant/onboarding/kyb-documents`, {
       method: "POST",
-      headers: { authorization: "Bearer session", "x-real-client-ip": "198.51.100.52" },
+      headers: { authorization: SESSION_BEARER, "x-real-client-ip": "198.51.100.52" },
       body: smallForm(),
     });
     expect(good.status).toBeLessThan(300);
@@ -246,7 +271,7 @@ describe("onboarding and upload routes", () => {
     for (let index = 0; index < 4; index += 1) {
       const response = await fetch(`${base}/api/v1/merchant/onboarding/kyb-documents`, {
         method: "POST",
-        headers: { authorization: "Bearer session", "x-real-client-ip": "198.51.100.30" },
+        headers: { authorization: SESSION_BEARER, "x-real-client-ip": "198.51.100.30" },
         body: small(),
       });
       statuses.push(response.status);
@@ -261,7 +286,7 @@ describe("onboarding and upload routes", () => {
     const put = (website: string) =>
       fetch(`${base}/api/v1/merchant/onboarding/join-request`, {
         method: "PUT",
-        headers: { authorization: "Bearer session", "content-type": "application/json" },
+        headers: { authorization: SESSION_BEARER, "content-type": "application/json" },
         body: JSON.stringify({ website }),
       }).then((response) => response.status);
     expect(await put("javascript:alert(1)")).toBe(400);
@@ -276,7 +301,7 @@ describe("cash-out idempotency", () => {
   const send = (headers: Record<string, string>, body: Record<string, unknown>) =>
     fetch(`${base}/api/v1/merchant/cashouts`, {
       method: "POST",
-      headers: { authorization: "Bearer session", "content-type": "application/json", ...headers },
+      headers: { authorization: SESSION_BEARER, "content-type": "application/json", ...headers },
       body: JSON.stringify(body),
     });
 
@@ -346,22 +371,43 @@ describe("client ip resolution and core headers", () => {
 });
 
 describe("authentication limiter", () => {
-  test("login attempts are limited per account even when the client ip changes", async () => {
+  const attempt = async (identifier: string, ip: string): Promise<number> =>
+    (await fetch(`${base}/api/v1/merchant/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-real-client-ip": ip },
+      body: JSON.stringify({ identifier, password: "wrong-password-1" }),
+    })).status;
+
+  test("failed logins are limited per account and address: an attacker cannot lock the owner out", async () => {
     process.env.AUTH_RATE_LIMIT_MAX = "2";
     resetEnvCache();
-    const statuses: number[] = [];
-    for (let index = 0; index < 4; index += 1) {
-      const response = await fetch(`${base}/api/v1/merchant/auth/login`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-real-client-ip": `198.51.100.${40 + index}` },
-        body: JSON.stringify({ identifier: "Victim@Example.com", password: "wrong-password-1" }),
-      });
-      statuses.push(response.status);
+    try {
+      const attacker = [] as number[];
+      for (let index = 0; index < 3; index += 1) attacker.push(await attempt("Owner@Example.com", "198.51.100.40"));
+      expect(attacker.slice(0, 2).every((status) => status !== 429)).toBe(true);
+      expect(attacker[2]).toBe(429);
+      // The owner, from their own address, is not locked out by the attacker's failures.
+      expect(await attempt("owner@example.com", "198.51.100.41")).toBe(401);
+    } finally {
+      delete process.env.AUTH_RATE_LIMIT_MAX;
+      resetEnvCache();
     }
-    delete process.env.AUTH_RATE_LIMIT_MAX;
+  });
+
+  test("guessing spread across addresses still hits the account-wide ceiling", async () => {
+    process.env.AUTH_RATE_LIMIT_MAX = "2";
     resetEnvCache();
-    expect(statuses.slice(0, 2).every((status) => status !== 429)).toBe(true);
-    expect(statuses.at(-1)).toBe(429);
+    try {
+      // ceiling = 2 x 5 = 10 failed requests for one account, whatever the address.
+      for (let index = 0; index < 10; index += 1) {
+        expect(await attempt("target@example.com", `198.51.100.${60 + index}`)).toBe(401);
+      }
+      expect(await attempt("target@example.com", "198.51.100.99")).toBe(429);
+      expect(await attempt("someone-else@example.com", "198.51.100.98")).not.toBe(429);
+    } finally {
+      delete process.env.AUTH_RATE_LIMIT_MAX;
+      resetEnvCache();
+    }
   });
 });
 

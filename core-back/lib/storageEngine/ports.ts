@@ -12,9 +12,17 @@ export type OutboxTopic =
   | "merchant.updated"
   | "kyb.document_uploaded"
   | "reconciliation.completed"
-  | "config.invalidated";
+  | "config.invalidated"
+  // Merchant webhook sources (AUTO-34), written in the same transaction as the state change.
+  | "link.expired"
+  | "dispute.opened"
+  | "dispute.closed"
+  | "cashout.paid"
+  | "cashout.failed";
 
 export interface OutboxEnvelope {
+  /** The `outbox_events.id` when the envelope was read from the table (stable event identity for consumers). */
+  id?: string;
   topic: OutboxTopic;
   aggregateType: string;
   aggregateId: string;

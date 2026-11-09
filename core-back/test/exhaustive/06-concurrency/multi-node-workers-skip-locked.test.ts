@@ -157,9 +157,10 @@ describeDb("Suite 06 · multi-node durable queue", () => {
     });
     await flaky.runOnce();
     expect((await readJob(id)).state).toBe("QUEUED");
-    // Make the retry immediately available.
+    // Make the retry immediately available. One second in the past: the worker compares `available_at` with ITS OWN clock,
+    // and a bare `now()` can be a millisecond ahead of it, which made this test fail about one run in three.
     await db.$executeRawUnsafe(
-      'UPDATE "background_jobs" SET "available_at" = now() WHERE "id" = $1',
+      `UPDATE "background_jobs" SET "available_at" = now() - interval '1 second' WHERE "id" = $1`,
       id,
     );
     await flaky.runOnce();

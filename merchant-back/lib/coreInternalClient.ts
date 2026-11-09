@@ -17,8 +17,14 @@ export const CORE_FAILURE_THRESHOLD = 3;
 
 const DEFAULT_MAX_ATTEMPTS = 2;
 const MAX_STREAM_SOCKETS = 128;
-/** Methods whose replay after the request reached the wire cannot duplicate an effect. */
-const REPLAY_SAFE_METHODS = new Set<CoreHttpMethod>(["GET", "HEAD", "OPTIONS", "PUT", "DELETE"]);
+/**
+ * Methods whose replay after the request reached the wire cannot duplicate an effect. `PUT` and
+ * `DELETE` are deliberately absent: they are idempotent in HTTP theory, but core's `PUT` routes
+ * create a new version per call, so a replay after a send would double-apply. They are still
+ * retried when the connection failed before anything was sent (see `IDEMPOTENT_METHODS`).
+ */
+const REPLAY_SAFE_METHODS = new Set<CoreHttpMethod>(["GET", "HEAD", "OPTIONS"]);
+/** Methods that are retried on the next node after a connect-phase failure. */
 const IDEMPOTENT_METHODS = new Set<CoreHttpMethod>([
   "GET",
   "HEAD",
@@ -152,6 +158,19 @@ const isClientAbort = (error: unknown): boolean => errorCodeOf(error) === "ABORT
 
 const isLocalRequestError = (error: unknown): boolean =>
   (error as { localRequestError?: boolean } | null)?.localRequestError === true;
+
+/**
+ * Message-framing and hop-by-hop headers are never taken from a caller. The edge writes the body
+ * itself (often re-serialised or decompressed), so a forwarded `content-length` that describes the
+ * ORIGINAL inbound body would not match the bytes written on the pooled keep-alive connection to
+ * core: the surplus would be parsed as the next request (request smuggling) and a shortfall would
+ * swallow the start of the next one. The real length is computed from the body in `buildRequestHeaders`.
+ */
+const FRAMING_HEADERS = ["content-length", "transfer-encoding", "content-encoding", "connection", "keep-alive", "upgrade", "te", "trailer", "host", "expect"];
+
+const stripFramingHeaders = (headers: Record<string, string>): void => {
+  for (const name of FRAMING_HEADERS) delete headers[name];
+};
 
 const HEADER_NAME_PATTERN = /^[a-z0-9!#$%&'*+.^_`|~-]+$/;
 const HEADER_VALUE_PATTERN = /^[\t\x20-\x7e]*$/;
@@ -422,7 +441,14 @@ const normalizeMaxAttempts = (value: number | undefined): number => {
   return Math.max(1, Math.floor(value));
 };
 
-const isNodeFailureStatus = (status: number): boolean => status === 502 || status === 503 || status === 504;
+/**
+ * A 502/503/504 that core (or the proxy in front of it) answered is an application decision, not a
+ * transport failure: it proves the node is reachable over mTLS. It may justify trying another node
+ * for a replay-safe request, but it must never take the node out of rotation. Core itself answers
+ * 503 for business conditions (for example "screening unavailable"), and counting those would let a
+ * provider outage take a single-core edge offline in repeating cooldown windows.
+ */
+const isUnavailableStatus = (status: number): boolean => status === 502 || status === 503 || status === 504;
 
 /**
  * A request that already reached the wire is only replayed when that cannot duplicate an
@@ -457,6 +483,8 @@ const buildRequestHeaders = (options: CoreRequestOptions): Record<string, string
   }
   const lsn = options.minLsn ?? options.consistencyLsn;
   if (lsn !== undefined && lsn.trim().length > 0) headers["x-pg-min-lsn"] = lsn;
+  stripFramingHeaders(headers);
+  if (options.body !== undefined) headers["content-length"] = String(Buffer.byteLength(options.body));
   assertHeaderSafe(headers);
   return headers;
 };
@@ -471,6 +499,7 @@ export const buildCoreHeaders = (options: CoreCallOptions): Record<string, strin
   for (const [key, value] of Object.entries(options.headers ?? {})) {
     headers[key.toLowerCase()] = value;
   }
+  stripFramingHeaders(headers);
   headers.accept = "application/json";
   headers["x-request-id"] = options.requestId;
   headers["x-real-client-ip"] = options.clientIp;
@@ -639,14 +668,13 @@ export const request = async (options: CoreRequestOptions): Promise<CoreResponse
     node.inFlight += 1;
     try {
       const response = await performRequest(node, options, headers);
-      if (isNodeFailureStatus(response.statusCode)) {
-        markNodeFailure(node);
+      // Any complete HTTP response proves the transport to this node works.
+      markNodeHealthy(node);
+      if (isUnavailableStatus(response.statusCode) && replayAfterSend) {
         lastResponse = response;
         lastError = undefined;
-        if (!replayAfterSend) break;
         continue;
       }
-      markNodeHealthy(node);
       return response;
     } catch (error) {
       lastError = error;
@@ -843,8 +871,9 @@ export const openCoreStream = async (options: CoreCallOptions): Promise<CoreStre
     node.inFlight += 1;
     try {
       const stream = await performStreamRequest(node, options, headers);
-      if (isNodeFailureStatus(stream.statusCode)) {
-        markNodeFailure(node);
+      // Any complete HTTP response proves the transport to this node works.
+      markNodeHealthy(node);
+      if (isUnavailableStatus(stream.statusCode)) {
         const canRetry =
           attempt + 1 < maxAttempts && hasSelectableNode(attempted);
         if (canRetry) {
@@ -855,7 +884,6 @@ export const openCoreStream = async (options: CoreCallOptions): Promise<CoreStre
         }
         return stream;
       }
-      markNodeHealthy(node);
       return stream;
     } catch (error) {
       lastError = error;

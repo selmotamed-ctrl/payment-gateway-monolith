@@ -3,6 +3,7 @@ import { loadDeployConfig, resolveBackupS3Mode, type DeployConfig } from "../lib
 import type { SshTarget } from "../lib/hostPlanner";
 import type { ProvisionRunner } from "../provisioners/postgres18Provisioner";
 import {
+  MEM_TOTAL_GB_COMMAND,
   bootstrapCommands,
   pgbouncerIni,
   postgresConfigPath,
@@ -11,6 +12,7 @@ import {
   primaryBootstrapSql,
   provisionPostgres18,
   replicaCommands,
+  resolvePostgresSizing,
 } from "../provisioners/postgres18Provisioner";
 import { provisionRedis, redisConfigSnippet, redisFirewallCommands } from "../provisioners/redisProvisioner";
 import {
@@ -217,6 +219,53 @@ describe("PostgreSQL 18 provisioner", () => {
   });
 });
 
+describe("PostgreSQL memory sizing preflight", () => {
+  test("an unset PG_RAM_GB is sized from the host's real RAM instead of assuming 32 GB", () => {
+    expect(resolvePostgresSizing(undefined, 8, "db-1")).toMatchObject({ ramGb: 8 });
+    expect(resolvePostgresSizing(undefined, 8, "db-1").notes[0]).toContain("sized from the host's 8 GB");
+    expect(postgresConfigSnippet({ PG_RAM_GB: 8 })).toContain("shared_buffers = 2GB");
+    expect(postgresConfigSnippet({ PG_RAM_GB: 8 })).toContain("effective_cache_size = 6GB");
+  });
+
+  test("an explicit PG_RAM_GB the host cannot hold is refused, one that fits is kept", () => {
+    expect(() => resolvePostgresSizing(32, 8, "db-1")).toThrow(/exceeds the 8 GB of RAM that db-1 has/);
+    expect(resolvePostgresSizing(16, 16, "db-1")).toEqual({ ramGb: 16, notes: [] });
+    expect(resolvePostgresSizing(8, 16, "db-1")).toEqual({ ramGb: 8, notes: [] });
+    // A little rounding slack (MemTotal reports less than the nominal size) does not refuse a correct setting.
+    expect(resolvePostgresSizing(16, 15, "db-1")).toEqual({ ramGb: 16, notes: [] });
+  });
+
+  test("a host that cannot be probed falls back loudly, not silently", () => {
+    const unknown = resolvePostgresSizing(undefined, undefined, "db-1");
+    expect(unknown.ramGb).toBeUndefined();
+    expect(unknown.notes[0]).toContain("PG_RAM_GB is not set");
+    expect(unknown.notes[0]).toContain("32 GB reference profile");
+    expect(resolvePostgresSizing(undefined, Number.NaN, "db-1").notes).toHaveLength(1);
+    expect(resolvePostgresSizing(24, undefined, "db-1")).toEqual({ ramGb: 24, notes: [] });
+  });
+
+  test("the primary is probed with the read-only command and sized with the result", () => {
+    const captured: string[] = [];
+    const writes: Array<{ path: string; content: string }> = [];
+    const runner: ProvisionRunner = {
+      dryRun: false,
+      run: () => undefined,
+      capture: (_target, command) => {
+        captured.push(command);
+        return command === MEM_TOTAL_GB_COMMAND ? "8\n" : "";
+      },
+      writeRemoteFile: (input) => {
+        writes.push({ path: input.path, content: input.content.toString() });
+      },
+    };
+    const report = provisionPostgres18({ runner, config: config() });
+    expect(captured).toContain(MEM_TOTAL_GB_COMMAND);
+    expect(report.notes?.some((note) => note.includes("sized from the host's 8 GB"))).toBe(true);
+    const conf = writes.find((write) => write.path.endsWith("postgresql.conf"));
+    expect(conf?.content).toContain("shared_buffers = 2GB");
+  });
+});
+
 describe("Redis provisioner", () => {
   test("binds the private IP, requires a password and saves hourly", () => {
     const snippet = redisConfigSnippet(config(), "10.10.11.10");
@@ -226,6 +275,18 @@ describe("Redis provisioner", () => {
     expect(snippet).toContain("maxmemory 4gb");
     expect(redisFirewallCommands(config()).join("\n")).toContain("10.10.1.11");
     expect(redisFirewallCommands(config()).join("\n")).toContain("10.10.13.10");
+  });
+
+  test("the revoke list is protected: no recency-only eviction, and an append-only file", () => {
+    const snippet = redisConfigSnippet(config(), "10.10.11.10");
+    // allkeys-lru evicted by recency alone and could drop a revoked session; volatile-ttl keeps the long-lived keys.
+    expect(snippet).toContain("maxmemory-policy volatile-ttl");
+    expect(snippet).not.toContain("allkeys-lru");
+    expect(snippet).not.toMatch(/maxmemory-policy (allkeys|noeviction)/);
+    // A restart used to bring revoked sessions back (an hourly snapshot was the only persistence).
+    expect(snippet).toContain("appendonly yes");
+    expect(snippet).toContain("appendfsync everysec");
+    expect(snippet).not.toContain("appendonly no");
   });
 
   test("does not bind the same loopback address twice on a single-machine deploy", () => {

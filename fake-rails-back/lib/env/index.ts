@@ -47,6 +47,11 @@ export const envSchema = z.object({
   // Failed logins per account (any IP) before it is locked for the rate window.
   FAKE_RAILS_PORTAL_ACCOUNT_LOCKOUT: z.coerce.number().int().positive().max(1000).default(5),
   FAKE_RAILS_ALLOWED_CIDRS: z.string().default("127.0.0.1/32,10.0.0.0/8,192.168.0.0/16"),
+  /**
+   * Extra hosts a webhook may be sent to, comma separated (`host` or `host:port`). The host of
+   * `CORE_INBOUND_BASE_URL` is always allowed; everything else is refused (SSRF).
+   */
+  FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS: z.string().default(""),
   FAKE_RAILS_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(10_000),
   FAKE_RAILS_MAX_BODY_BYTES: z.coerce.number().int().positive().max(50 * 1024 * 1024).default(10 * 1024 * 1024),
   FAKE_RAILS_PORTAL_RATE_LIMIT: z.coerce.number().int().positive().max(1000).default(10),

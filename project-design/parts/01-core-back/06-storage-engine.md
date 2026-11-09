@@ -3,7 +3,7 @@ id: core.storage
 title: Storage Engine
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-09
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/lib/storageEngine/telemetry.ts
@@ -23,7 +23,7 @@ gaps:
   - `ledger.entry_posted` and four other outbox topics have no-op handlers (`ledger.entry_posted` is no longer emitted by default).
   - Keyset pagination exists in `listQuery` (2026-11-04) but only the merchant payment list uses it; every other list/export is still offset-paged with a COUNT (GAP-002 partial).
   - Worker claim loops of ExpirySweeper, Poll, InboundInbox, OutboxNotification and PeriodicScreening run SKIP LOCKED outside a transaction, so the locks do not protect a batch across nodes (GAP-DB-02).
-  - Engine hot path still re-reads the attempt 3-4 times per request, runs the commission-receivable SUM over all receivable lines in the guard, and has no cache for flow/step/credential reads (GAP-DB-04).
+  - Engine hot path still re-reads the attempt 3-4 times per request and has no cache for flow/step/credential reads. The commission-receivable part of GAP-DB-04 was fixed on 2026-11-09: the guard passes the loaded merchant, short-circuits when the ceiling is null, and the remaining aggregation is partition-pruned by the entry timestamp.
   - Admin lists, exports and summaries still read the primary and pull wide JSON/bytea columns (reconciliation `file_content`, KYB `content_ciphertext`, `credential_sets.entries_ciphertext`) (GAP-DB-05).
   - There is no `gateway_wire_logs` table and no on-disk log spool.
   - Access logging records `dbQueries` and `dbDurationMs` as zero.
@@ -489,7 +489,11 @@ Indexes: see migration `20261104090000_db_read_write_optimisation` in `core.data
 
 ### 12.5 Open work
 
-GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no cursor), GAP-DB-04 (engine re-reads, commission-receivable SUM scanning all receivable lines through a `pa.id::text` join, velocity per-rule queries, uncached flow/step/credential reads), GAP-DB-05 (admin lists/exports/summaries on the primary with wide columns, `reconciliation/runs` loading `file_content`, join-request mutations re-reading KYB `content_ciphertext`, bulk operator-case loops, `PUT /settings` per-entry reads), GAP-DB-06 (dashboards still do not read `rm_*`; merchant overview could use `rm_merchant_daily_stats` once per-rail and commission columns exist), and adoption of keyset pagination for the remaining lists.
+GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no cursor), GAP-DB-04 (engine re-reads, velocity per-rule queries and uncached flow/step/credential reads remain; the commission-receivable SUM is now short-circuited when the ceiling is null and partition-pruned by `je.created_at` when it is not), GAP-DB-05 (admin lists/exports/summaries on the primary with wide columns, `reconciliation/runs` loading `file_content`, join-request mutations re-reading KYB `content_ciphertext`, bulk operator-case loops, `PUT /settings` per-entry reads), GAP-DB-06 (dashboards still do not read `rm_*`; merchant overview could use `rm_merchant_daily_stats` once per-rail and commission columns exist), and adoption of keyset pagination for the remaining lists.
+
+## 13. 2026-11-09 ledger query/index optimisation
+
+`journal_entries` gained `journal_entries_created_at_idx` (INCLUDE `id, ref_type, ref_id`) and a `pg_trgm` GIN search index; the two hot `journal_lines` lookups became covering indexes (`INCLUDE` payloads); append-only insert autovacuum (`autovacuum_vacuum_insert_scale_factor = 0.01`) keeps the Visibility Map current for Index-Only Scans on every monthly partition. The admin journal entry list/detail, the GL/wallet statement totals and the AML hold lookup now bound `journal_lines.created_at` by the parent entry, so PostgreSQL prunes the monthly partitions; the statement totals are one covered `groupBy` instead of a `count()` plus a `groupBy`. The checkout guard passes the merchant row it already loaded and skips the commission-receivable query entirely when `commissionReceivableCeiling` is null; when a ceiling is configured the SQL drives from `payment_attempts(merchant_id)` and bounds `journal_lines.created_at` by the ENTRY it belongs to (a delayed `COMMISSION_NETTING` must still be counted). Schema version 25, migration `20261109210000_ledger_query_and_index_optimization` (applied after the automation migrations); regression suite `test/storage-engine/performance/ledger-query-pruning-and-accuracy.test.ts` (EC-01..EC-18).
 
 ## Gap resolutions (2026-11-05)
 

@@ -5,7 +5,7 @@ import { parseOrThrow } from "../../lib/error";
 import { callCoreResponse } from "../../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../../lib/net";
 import { resolveRequestId } from "../../lib/requestLogger";
-import { zAdminRole, zBaseVersion, zEmail, zIdentifier, zPaginationQuery, zPassword } from "../../lib/zReady";
+import { zAdminRole, zBaseVersion, zEmail, zIdentifier, zPaginationQuery } from "../../lib/zReady";
 import { toCoreUserCreate, toCoreUserUpdate, toCoreUserUpdates } from "../contract";
 import { coreForward } from "../forward";
 
@@ -18,9 +18,9 @@ export const userCreateSchema = z
     email: zEmail,
     fullName: z.string().min(2).max(120).optional(),
     role: zAdminRole,
-    phone: z.string().min(6).max(20).optional(),
+    // No phone and no initial password: the invitee chooses both when accepting the emailed invitation,
+    // so the maker never knows the credentials or receives the MFA codes of the user they propose.
     locale: z.enum(["ar", "en"]).optional(),
-    temporaryPassword: zPassword.optional(),
     authorities: z.record(z.string().max(64), z.array(z.string().max(64)).max(50)).optional(),
     checklist: z
       .array(
@@ -114,6 +114,16 @@ router.post(
     schema: userCreateSchema,
     bodyFrom: (_req, body) => toCoreUserCreate(body),
     status: 201,
+  }),
+);
+
+/** Re-issues the invitation email of a user that is still INVITED (credentials set earlier are discarded). */
+router.post(
+  "/:id/invite",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/users/${encodeURIComponent(context.params.id ?? "")}/invite`,
+    paramsSchema: userParamsSchema,
   }),
 );
 

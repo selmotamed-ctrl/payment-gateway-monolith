@@ -31,6 +31,7 @@ export const routesAuthorities: {
     Disputes: ["payments.read"],
     Cashouts: ["cashout.read", "cashout.request"],
     DeveloperTokens: ["tokens.read"],
+    Webhooks: ["applications.read"],
     Credentials: ["credentials.manage"],
     Team: ["users.manage"],
 };
@@ -138,6 +139,12 @@ export const useSections = () => {
                     name: "DeveloperTokens",
                     icon: "mdi-key-variant",
                     if: () => hasOneOfAuthorities(["tokens.read"]),
+                },
+                {
+                    label: t("Webhooks"),
+                    name: "Webhooks",
+                    icon: "mdi-webhook",
+                    if: () => hasOneOfAuthorities(["applications.read"]),
                 },
                 {
                     label: t("Merchant Credentials"),

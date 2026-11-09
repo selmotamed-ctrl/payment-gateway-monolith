@@ -347,6 +347,14 @@ const router = createRouter({
             },
         },
         {
+            path: "/accept-invitation",
+            name: "AcceptInvitation",
+            component: () => import("@/pages/public/auth/accept-invitation"),
+            meta: {
+                requiresVisitor: true,
+            },
+        },
+        {
             path: "/:pathMatch(.*)*",
             name: "NotFound",
             component: () => import("@/pages/public/not-found/index"),

@@ -181,7 +181,8 @@ describe("PgBouncer convergence primitives", () => {
     const url = leaderElectionDatabaseUrl(pooled);
     expect(url).not.toBeNull();
     expect(url!).toContain(":6432/");
-    expect(url!.endsWith(`/${PGBOUNCER_SESSION_ALIAS}`)).toBe(true);
+    // PgBouncer's client side requires TLS now (self-signed, so encrypt without verifying).
+    expect(url!.endsWith(`/${PGBOUNCER_SESSION_ALIAS}?sslmode=no-verify`)).toBe(true);
     expect(url).not.toBe(`postgresql://${encodeURIComponent(pooled.PG_DB_USER)}:${encodeURIComponent(pooled.PG_DB_PASSWORD)}@127.0.0.1:6432/${pooled.PG_DB_NAME}`);
 
     const direct = leaderElectionDatabaseUrl({ ...pooled, PGBOUNCER_ENABLED: false } as DeployConfig);
@@ -513,8 +514,9 @@ describe("direct PostgreSQL connections must match the hostssl-only pg_hba (audi
     const env = coreEnv(plannable());
     expect(env.AUDIT_DATABASE_URL).toMatch(/\/pg_audit_db\?sslmode=no-verify$|\?sslmode=no-verify$/);
     expect(env.LOG_DATABASE_URL).toContain("?sslmode=no-verify");
-    // PgBouncer's client side is plain, and Prisma's engine does not understand no-verify
-    expect(env.DATABASE_URL).not.toContain("sslmode");
+    // PgBouncer requires TLS on its client side too (a plaintext hop across hosts is refused with "SSL required");
+    // node-postgres and Prisma's migration engine both accept sslmode=no-verify (verified against a real PgBouncer).
+    expect(env.DATABASE_URL).toContain("?sslmode=no-verify");
   });
 
   test("core receives the PgBouncer session alias for the leader election", () => {

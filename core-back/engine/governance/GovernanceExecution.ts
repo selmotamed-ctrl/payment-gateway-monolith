@@ -2,7 +2,9 @@ import { Decimal } from "decimal.js";
 import { Prisma } from "../../generated/prisma/client";
 import { ApiError } from "../../lib/error";
 import { lockWalletLedgerBalance } from "../../lib/cashoutBalance";
+import { env } from "../../lib/env";
 import { applyShardRepair } from "../ledger/ShardRepair";
+import type { CashoutCommissionNetting } from "../ledger/commissionNetting";
 import { payoutAccountHash } from "../../lib/joinRequestOnboarding";
 import { nextKybReviewAt, parseKybRefreshPolicy } from "../../lib/kybReview";
 import {
@@ -25,11 +27,12 @@ import {
   buildPaymentConfirmationTemplate,
   decimal,
   LedgerPoster,
+  refundScenarioFor,
   type JournalTemplate,
   type LedgerPostContext,
   type LedgerOwnershipMode,
 } from "../ledger/LedgerPoster";
-import type { Repositories, Tx } from "../db/ports";
+import type { MerchantRow, Repositories, Tx } from "../db/ports";
 import { applyJsonPatch, type JsonPatchOperation } from "./ApprovalService";
 import {
   GoLiveGateValidator,
@@ -39,6 +42,7 @@ import {
 import { ATTEMPT_TRANSITION_TOPIC, type SlotReservationStore } from "../flow/DynamicRailEngine";
 import { attemptRowToDynamicAttempt, type AttemptRow } from "../runtime/attemptRepository";
 import type { InvalidationBus } from "../../lib/invalidationBus";
+import { enqueueOutboxEvent } from "../../lib/storageEngine/outbox";
 
 /**
  * Executable governance.
@@ -112,6 +116,11 @@ export interface GovernanceExecutionContext {
   transitionBus?: Pick<InvalidationBus, "publish">;
   /** The slot store used by a manual operator-case outcome. */
   slots?: Pick<SlotReservationStore, "commitSlot" | "releaseSlot">;
+  /**
+   * Merchant-direct commission netting at cash-out time (AUTO-21, decision D8): before a cash-out is paid, the
+   * merchant's commission receivable is netted from the wallet balance that no open cash-out reserves.
+   */
+  commissionNetting?: CashoutCommissionNetting;
 }
 
 export interface ApprovalSubjectLike {
@@ -466,6 +475,12 @@ export const decideCommissionReceivableCeiling = (input: {
   receivable: Decimal;
   ceiling: Decimal | null;
   settlementTarget?: string | null;
+  /**
+   * What netting could still collect from the merchant's wallets now (balance - open cash-outs, never below zero).
+   * When given for a merchant-direct attempt, a receivable that netting cannot bring back under the ceiling is a PAUSE
+   * (decision D8): netting is only a way out when there is money to net. Unknown (omitted): NETTING, as before.
+   */
+  nettable?: Decimal | null;
 }): CommissionReceivableCeilingEvaluation => {
   const exceeded = input.ceiling !== null && input.receivable.gt(input.ceiling);
   if (!exceeded) {
@@ -478,7 +493,11 @@ export const decideCommissionReceivableCeiling = (input: {
       reason: input.ceiling === null ? "NO_CEILING" : "WITHIN_CEILING",
     };
   }
-  const netting = input.settlementTarget === "MERCHANT_DIRECT";
+  let netting = input.settlementTarget === "MERCHANT_DIRECT";
+  if (netting && input.nettable !== undefined && input.nettable !== null && input.ceiling !== null) {
+    const collectable = Decimal.min(input.receivable, Decimal.max(0, input.nettable));
+    netting = !input.receivable.minus(collectable).gt(input.ceiling);
+  }
   return {
     merchantId: input.merchantId,
     receivable: input.receivable,
@@ -489,24 +508,58 @@ export const decideCommissionReceivableCeiling = (input: {
   };
 };
 
+/** The merchant's open cash-out requests (they already reserve wallet balance). Zero without the model (fakes). */
+const merchantOpenCashoutTotal = async (tx: Tx, merchantId: string): Promise<Decimal> => {
+  const cashouts = (tx as any)?.cashoutRequest;
+  if (!cashouts || typeof cashouts.findMany !== "function") return new Decimal(0);
+  const rows = (await cashouts.findMany({
+    where: { merchantId, state: { in: ["PENDING", "PROCESSING"] } },
+    select: { amount: true },
+  })) as Array<{ amount: unknown }>;
+  return rows.reduce<Decimal>((total, row) => total.plus(toDecimal(row.amount)), new Decimal(0));
+};
+
 export const evaluateCommissionReceivableCeiling = async (
   ctx: Pick<GovernanceExecutionContext, "repositories">,
   tx: Tx,
   merchantId: string,
   settlementTarget?: string | null,
+  /** The merchant row the caller already loaded (the guard loads it once per attempt). */
+  loadedMerchant?: MerchantRow | null,
 ): Promise<CommissionReceivableCeilingEvaluation> => {
-  const merchant = await ctx.repositories.merchants.findMerchantById(tx, merchantId);
+  const merchant = loadedMerchant !== undefined
+    ? loadedMerchant
+    : await ctx.repositories.merchants.findMerchantById(tx, merchantId);
   const rawCeiling = merchant?.commissionReceivableCeiling;
   const ceiling = rawCeiling === null || rawCeiling === undefined ? null : toDecimal(rawCeiling);
+
+  // Fast path: with no receivable ceiling configured the journal_lines aggregation can never
+  // change the decision, so skip the query entirely (and do not re-read the merchant row).
+  if (ceiling === null) {
+    return decideCommissionReceivableCeiling({
+      merchantId,
+      receivable: new Decimal(0),
+      ceiling: null,
+      settlementTarget: settlementTarget ?? null,
+    });
+  }
+
   const receivableQuery = ctx.repositories.merchants.getCommissionReceivableBalance;
   const receivable = receivableQuery
     ? moneyToDecimal(await receivableQuery(tx, merchantId))
     : new Decimal(0);
+  // Only a merchant-direct attempt over the ceiling needs to know whether netting can still collect (decision D8).
+  let nettable: Decimal | null = null;
+  if (settlementTarget === "MERCHANT_DIRECT" && ceiling !== null && receivable.gt(ceiling)) {
+    const wallet = moneyToDecimal(await ctx.repositories.merchants.getWalletBalance(tx, merchantId));
+    nettable = Decimal.max(0, wallet.minus(await merchantOpenCashoutTotal(tx, merchantId)));
+  }
   return decideCommissionReceivableCeiling({
     merchantId,
     receivable,
     ceiling,
     settlementTarget: settlementTarget ?? null,
+    nettable,
   });
 };
 
@@ -1348,6 +1401,15 @@ export async function executeUserAuthorityChange(
     data.isChecker = payload.isChecker;
   }
   if (payload.status === "ACTIVE") {
+    // The invitee must have set their own password and MFA phone first (see `lib/staffInvitation.ts`);
+    // checked again here because the proposal may predate the invitation being completed.
+    if (!user.passwordHash || (user.mfaRequired !== false && !user.phone)) {
+      throw new ApiError(
+        409,
+        "USER_INVITATION_PENDING",
+        "The invitee has not accepted the invitation yet (no password or MFA phone set by the user)",
+      );
+    }
     data.status = "ACTIVE";
   }
   if (Object.keys(data).length === 0) {
@@ -1580,18 +1642,38 @@ const resolveAmlHoldAmounts = async (
   // GAP-015: the escrow is booked when the gateway capture is verified, so it
   // is looked up by the attempt when the case does not point at it.
   let holdEntryId = amlCase.holdJournalEntryId ? String(amlCase.holdJournalEntryId) : null;
-  if (!holdEntryId && attempt?.id) {
-    const entry = await modelOf(tx, "journalEntry").findFirst({
-      where: { refType: "PAYMENT_ATTEMPT", refId: String(attempt.id) },
-    });
-    holdEntryId = entry?.id ? String(entry.id) : null;
-  }
+  // Always load the entry itself (whether the case points at it or it is resolved through the
+  // attempt) so the line lookup can be bounded by the ENTRY's timestamp. The capture entry can be
+  // created hours or days after the attempt, so bounding by attempt.createdAt would miss the escrow.
+  const holdEntry = holdEntryId
+    ? await modelOf(tx, "journalEntry").findFirst({ where: { id: holdEntryId } })
+    : attempt?.id
+      ? await modelOf(tx, "journalEntry").findFirst({
+          where: { refType: "PAYMENT_ATTEMPT", refId: String(attempt.id) },
+        })
+      : null;
+  holdEntryId = holdEntry?.id ? String(holdEntry.id) : holdEntryId;
+  const holdCreatedAt = holdEntry?.createdAt instanceof Date ? holdEntry.createdAt : null;
   if (holdEntryId) {
     const glAccounts = modelOf(tx, "glAccount");
     const journalLines = modelOf(tx, "journalLine");
     const holdAccounts = await glAccounts.findMany({ where: { accountType: "AML_HOLD" } });
     const holdIds = new Set(holdAccounts.map((account: any) => String(account.id)));
-    const lines = await journalLines.findMany({ where: { entryId: holdEntryId } });
+    // journal_lines is partitioned by created_at: the ±5 minute window (lines are inserted in the
+    // entry's transaction) prunes every monthly partition outside the hold entry's month.
+    const lines = await journalLines.findMany({
+      where: {
+        entryId: holdEntryId,
+        ...(holdCreatedAt
+          ? {
+              createdAt: {
+                gte: new Date(holdCreatedAt.getTime() - 5 * 60 * 1000),
+                lte: new Date(holdCreatedAt.getTime() + 5 * 60 * 1000),
+              },
+            }
+          : {}),
+      },
+    });
     for (const line of lines) {
       if (holdIds.has(String(line.glAccountId)) && line.direction === "CREDIT") {
         held = held.plus(toDecimal(line.amount));
@@ -1935,7 +2017,22 @@ export interface DisputeIntakeInput {
   currency: string;
   actorUserId: string | null;
   actorRole: string | null;
+  /**
+   * When the merchant must have answered (AUTO-04, decision D1). Default: now plus the rail's own
+   * `capabilities.dispute_evidence_days` when it declares one, otherwise `DISPUTE_EVIDENCE_WINDOW_DAYS`. The binding rule
+   * is always the provider's, so a rail with its own window should declare it.
+   */
+  evidenceDueAt?: Date | null;
 }
+
+/** The days a merchant has to answer a dispute: the rail's declared window, else the platform default. */
+export const disputeEvidenceWindowDays = (railCapabilities: unknown): number => {
+  const declared =
+    railCapabilities && typeof railCapabilities === "object" && !Array.isArray(railCapabilities)
+      ? Number((railCapabilities as Record<string, unknown>).dispute_evidence_days)
+      : Number.NaN;
+  return Number.isFinite(declared) && declared > 0 ? declared : env.DISPUTE_EVIDENCE_WINDOW_DAYS;
+};
 
 export interface DisputeIntakeResult {
   disputeId: string;
@@ -1985,6 +2082,17 @@ export async function openDisputeWithDraftedAdjustment(
   const requestedAmount = toDecimal(input.amount);
   const chargebackAmount = Decimal.min(requestedAmount, unrefundedAmount);
 
+  const openedAt = new Date();
+  // The evidence deadline drives the reminders and the automatic outcome of the deadline worker; without it a dispute
+  // never expires (it had none before AUTO-04).
+  let evidenceDueAt = input.evidenceDueAt ?? null;
+  if (!evidenceDueAt) {
+    const railModel = (tx as any)?.rail;
+    const rail = railModel && typeof railModel.findUnique === "function"
+      ? await railModel.findUnique({ where: { id: input.railId }, select: { capabilities: true } })
+      : null;
+    evidenceDueAt = new Date(openedAt.getTime() + disputeEvidenceWindowDays(rail?.capabilities) * 86_400_000);
+  }
   const dispute = await disputes.create({
     data: {
       attemptId: input.attemptId,
@@ -1996,7 +2104,25 @@ export async function openDisputeWithDraftedAdjustment(
       amount: input.amount,
       currency,
       status: "OPENED",
-      openedAt: new Date(),
+      openedAt,
+      evidenceDueAt,
+    },
+  });
+  // The merchant webhook (AUTO-34), in the same transaction as the dispute.
+  await enqueueOutboxEvent(tx as never, {
+    topic: "dispute.opened",
+    aggregateType: "DISPUTE",
+    aggregateId: String(dispute.id),
+    merchantId: merchantId ? String(merchantId) : null,
+    payload: {
+      disputeId: String(dispute.id),
+      paymentId: input.attemptId,
+      externalReference: input.externalDisputeRef,
+      amount: input.amount.toFixed(4),
+      currency,
+      reasonCode: input.reasonCode ?? null,
+      evidenceDueAt: evidenceDueAt ? evidenceDueAt.toISOString() : null,
+      occurredAt: openedAt.toISOString(),
     },
   });
 
@@ -2057,7 +2183,9 @@ export async function openDisputeWithDraftedAdjustment(
       mode: "STANDARD",
       makerUserId: systemUserId,
       state: "PENDING_REVIEW",
-      expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      // The approval must outlive the dispute: the evidence window, the provider's ruling and a margin. It used to expire
+      // after 3 days, which would strand the drafted chargeback (and its reserve) long before the evidence deadline.
+      expiresAt: new Date(evidenceDueAt.getTime() + (env.DISPUTE_RULING_SLA_DAYS + 14) * 86_400_000),
     },
   });
 
@@ -2359,11 +2487,13 @@ const finalizeRefundAdjustment = async (
           ? "MERCHANT_DIRECT"
           : "PLATFORM_CLEARING";
     }
-    const templateName = ownershipMode === "INTERNAL" ? "INTERNAL_REFUND" : "FULL_REFUND";
-    const journal = buildLedgerTemplate(templateName, {
+    const refundScenario = refundScenarioFor(ownershipMode as LedgerOwnershipMode);
+    const templateName = refundScenario.label;
+    const journal = buildLedgerTemplate(refundScenario.scenario, {
       amount,
       commissionAmount: commission,
       merchantAmount,
+      stage: refundScenario.stage,
     });
     // Keyed by the adjustment, so even a race between two finalisers can only
     // ever create one journal entry.
@@ -2371,14 +2501,18 @@ const finalizeRefundAdjustment = async (
     if (journal.refType === "PAYMENT_ATTEMPT") {
       journal.refType = "ADJUSTMENT";
     }
-    const posted = await ctx.ledgerPoster.post(
-      journal,
-      await walletLedgerContext(tx, merchantId, accounts),
-      tx as never,
-    );
+    // A merchant-direct refund with no commission to reverse moves nothing on the ledger: the
+    // merchant refunds the payer from their own gateway account.
+    const posted = journal.lines.length === 0
+      ? null
+      : await ctx.ledgerPoster.post(
+        journal,
+        await walletLedgerContext(tx, merchantId, accounts),
+        tx as never,
+      );
     await adjustments.update({
       where: { id: String(adjustment.id) },
-      data: { state: "EXECUTED", journalEntryId: posted.entry.id },
+      data: { state: "EXECUTED", journalEntryId: posted?.entry.id ?? null },
     });
     await writeAudit(ctx, tx, {
       actorId: input.checkerUserId,
@@ -2391,7 +2525,7 @@ const finalizeRefundAdjustment = async (
         state: "EXECUTED",
         type: "REFUND",
         template: templateName,
-        journalEntryId: posted.entry.id,
+        journalEntryId: posted?.entry.id ?? null,
         amount: amount.toFixed(4),
         outcome: null,
       },
@@ -2401,8 +2535,8 @@ const finalizeRefundAdjustment = async (
       status: "EXECUTED" as const,
       entityId: String(adjustment.id),
       template: templateName,
-      journalEntryId: posted.entry.id,
-      idempotent: posted.idempotent,
+      journalEntryId: posted?.entry.id,
+      idempotent: posted?.idempotent ?? false,
     };
   });
 };
@@ -2464,6 +2598,77 @@ const executeRefundAdjustment = async (
   }
   return finalizeRefundAdjustment(ctx, fallbackTx, input, gatewayResult);
 };
+
+/**
+ * AUTO-20: books an EXECUTING refund whose gateway outcome a reconciliation
+ * inquiry has since confirmed. Only an EXECUTING refund is finalised here; the
+ * booking itself is the ordinary phase 3 (`finalizeRefundAdjustment`).
+ */
+export async function finalizeReconciledRefundAdjustment(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: { adjustmentId: string; actorUserId: string; actorRole: string; approvalRequestId?: string | null },
+  gatewayResult: { status: string; attempt?: { ownershipMode?: string | null } | null },
+): Promise<GovernanceExecutionResult> {
+  const adjustment = await modelOf(tx, "adjustment").findUnique({ where: { id: input.adjustmentId } });
+  if (!adjustment) {
+    throw new ApiError(404, "ADJUSTMENT_NOT_FOUND", "The adjustment does not exist");
+  }
+  if (String(adjustment.type) !== "REFUND") {
+    throw new ApiError(409, "ADJUSTMENT_NOT_REFUND", "The adjustment is not a refund");
+  }
+  if (adjustment.state !== "EXECUTING") {
+    return refundSkippedResult(adjustment, `ADJUSTMENT_NOT_EXECUTING:${String(adjustment.state)}`);
+  }
+  return finalizeRefundAdjustment(
+    ctx,
+    tx,
+    {
+      adjustmentId: input.adjustmentId,
+      checkerUserId: input.actorUserId,
+      checkerRole: input.actorRole,
+      approvalRequestId: input.approvalRequestId ?? null,
+    },
+    gatewayResult,
+  );
+}
+
+/**
+ * AUTO-20: closes an EXECUTING refund that the gateway definitively did not
+ * perform. The adjustment becomes REJECTED (so it no longer counts against the
+ * refundable amount); nothing is posted, because nothing was booked.
+ */
+export async function failReconciledRefundAdjustment(
+  ctx: GovernanceExecutionContext,
+  fallbackTx: Tx,
+  input: { adjustmentId: string; actorUserId: string; actorRole: string; reason: string; approvalRequestId?: string | null },
+): Promise<GovernanceExecutionResult> {
+  return runIsolatedTransaction(ctx, fallbackTx, async (tx) => {
+    const adjustments = modelOf(tx, "adjustment");
+    const claimed = await adjustments.updateMany({
+      where: { id: input.adjustmentId, type: "REFUND", state: "EXECUTING" },
+      data: { state: "REJECTED" },
+    });
+    if (!claimed || Number(claimed.count ?? 0) === 0) {
+      const current = await adjustments.findUnique({ where: { id: input.adjustmentId } });
+      if (!current) {
+        throw new ApiError(404, "ADJUSTMENT_NOT_FOUND", "The adjustment does not exist");
+      }
+      return refundSkippedResult(current, `ADJUSTMENT_NOT_EXECUTING:${String(current.state)}`);
+    }
+    await writeAudit(ctx, tx, {
+      actorId: input.actorUserId,
+      role: input.actorRole,
+      action: "ADJUSTMENT_REFUND_FAILED",
+      entityType: "ADJUSTMENT",
+      entityId: input.adjustmentId,
+      beforeJson: { state: "EXECUTING", type: "REFUND" },
+      afterJson: { state: "REJECTED", type: "REFUND", reason: input.reason },
+      approvalRequestId: input.approvalRequestId ?? null,
+    });
+    return { status: "EXECUTED" as const, entityId: input.adjustmentId, template: "REFUND_FAILED" };
+  });
+}
 
 /**
  * Executes an adjustment and posts the matching journal entry.
@@ -2690,6 +2895,19 @@ export async function executeAdjustment(
         adjustmentId: String(adjustment.id),
       },
     });
+    // The merchant webhook (AUTO-34), in the same transaction as the ruling.
+    await enqueueOutboxEvent(tx as never, {
+      topic: "dispute.closed",
+      aggregateType: "DISPUTE",
+      aggregateId: String(adjustment.disputeId),
+      merchantId: merchantId ? String(merchantId) : null,
+      payload: {
+        disputeId: String(adjustment.disputeId),
+        outcome: disputeOutcome === "WON" ? "WON" : "LOST",
+        amount: amount.toFixed(4),
+        occurredAt: new Date().toISOString(),
+      },
+    });
   }
 
   await writeAudit(ctx, tx, {
@@ -2801,6 +3019,14 @@ export async function executeCashout(
       where: { id: String(cashout.id) },
       data: { adjustmentId: String(adjustment.id) },
     });
+    // The merchant webhook (AUTO-34); the rejection reason is internal and is not sent.
+    await enqueueOutboxEvent(tx as never, {
+      topic: "cashout.failed",
+      aggregateType: "CASHOUT_REQUEST",
+      aggregateId: String(cashout.id),
+      merchantId: String(cashout.merchantId),
+      payload: { cashoutId: String(cashout.id), amount: amount.toFixed(4), currency: String(wallet.currency ?? "LYD").trim(), occurredAt: new Date().toISOString() },
+    });
     await writeAudit(ctx, tx, {
       actorId: input.actorUserId,
       role: input.actorRole,
@@ -2863,9 +3089,26 @@ export async function executeCashout(
   journal.refId = String(cashout.id);
   const journalContext = { accounts: { MERCHANT_WALLET: String(wallet.glAccountId) } };
 
+  // Merchant-direct commission netting (AUTO-21, decision D8): before the cash-out is paid, the merchant's commission
+  // receivable is netted from the wallet balance that no open cash-out reserves. This cash-out is already PROCESSING,
+  // so its own amount is reserved and netting can never take it. The netting postings and the cash-out are locked
+  // together, in one statement and the global shard order, so a concurrent posting cannot deadlock with them.
+  const netting = ctx.commissionNetting
+    ? await ctx.commissionNetting.prepare(tx, {
+        merchantId: String(cashout.merchantId),
+        walletId: String(wallet.id),
+        walletGlAccountId: String(wallet.glAccountId),
+        currency: String(wallet.currency ?? "LYD").trim(),
+        cashoutId: String(cashout.id),
+      })
+    : null;
+
   // Available-balance check under the wallet debit lock and the posting's shard locks.
   const balance = await lockWalletLedgerBalance(tx, String(wallet.glAccountId), {
-    lockShards: () => ctx.ledgerPoster.lockShardsFor(journal, journalContext, tx as never),
+    lockShards: () =>
+      netting
+        ? ctx.ledgerPoster.lockShardsForMany([{ template: journal, context: journalContext }, ...netting.lockTemplates], tx as never)
+        : ctx.ledgerPoster.lockShardsFor(journal, journalContext, tx as never),
   });
   if (balance.lt(amount)) {
     throw new ApiError(409, "CASHOUT_INSUFFICIENT_BALANCE", "The wallet balance does not cover this cash-out", {
@@ -2873,6 +3116,17 @@ export async function executeCashout(
       balance: balance.toFixed(4),
       amount: amount.toFixed(4),
     });
+  }
+  if (netting) {
+    const netted = await netting.apply(tx, balance);
+    // Netting leaves at least the open cash-outs (this one included) in the wallet; refuse if that ever stops holding.
+    if (balance.minus(netted).lt(amount)) {
+      throw new ApiError(409, "CASHOUT_INSUFFICIENT_BALANCE", "The wallet balance does not cover this cash-out after commission netting", {
+        cashoutId: String(cashout.id),
+        balance: balance.minus(netted).toFixed(4),
+        amount: amount.toFixed(4),
+      });
+    }
   }
 
   const adjustment = await modelOf(tx, "adjustment").create({
@@ -2895,6 +3149,14 @@ export async function executeCashout(
   const updated = await cashouts.update({
     where: { id: String(cashout.id) },
     data: { state: "COMPLETE", adjustmentId: String(adjustment.id) },
+  });
+  // The merchant webhook (AUTO-34), in the same transaction as the payout.
+  await enqueueOutboxEvent(tx as never, {
+    topic: "cashout.paid",
+    aggregateType: "CASHOUT_REQUEST",
+    aggregateId: String(cashout.id),
+    merchantId: String(cashout.merchantId),
+    payload: { cashoutId: String(cashout.id), amount: amount.toFixed(4), currency: String(wallet.currency ?? "LYD").trim(), occurredAt: new Date().toISOString() },
   });
 
   await writeAudit(ctx, tx, {

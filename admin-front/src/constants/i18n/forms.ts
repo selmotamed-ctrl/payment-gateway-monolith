@@ -112,7 +112,6 @@ export const formsCatalogue: Record<string, [string, string]> = {
     "Fixed fee": ["Fixed fee", "الرسوم الثابتة"],
     "No ceiling": ["No ceiling", "بلا سقف"],
     "Add tier": ["Add tier", "إضافة شريحة"],
-    "Remove tier": ["Remove tier", "حذف الشريحة"],
     "No tiers yet. Add the first tier.": ["No tiers yet. Add the first tier.", "لا توجد شرائح بعد. أضف الشريحة الأولى."],
     "Fix the highlighted tiers before saving.": ["Fix the highlighted tiers before saving.", "صحّح الشرائح المحددة قبل الحفظ."],
     "The first tier whose ceiling covers the amount applies. The rate is a decimal fraction, for example 0.015 for 1.5%.": ["The first tier whose ceiling covers the amount applies. The rate is a decimal fraction, for example 0.015 for 1.5%.", "تُطبَّق أول شريحة يغطي سقفها المبلغ. النسبة كسر عشري، مثل 0.015 لنسبة 1.5%."],

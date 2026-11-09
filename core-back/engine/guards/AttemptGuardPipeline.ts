@@ -1005,6 +1005,7 @@ export class AttemptGuardPipeline {
       tx,
       merchant.id,
       settlementTarget ?? null,
+      merchant,
     );
     if (receivable.decision === "PAUSE") {
       return { allowed: false, reason: receivable.reason };

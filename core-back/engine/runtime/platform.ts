@@ -2,7 +2,11 @@ import type { PrismaLike } from "../db/ports";
 import { PrismaRepositories } from "../db/repositories";
 import type { ApiConsumerConfig } from "../apiConsumer/ApiConsumer";
 import { ConsumerRegistry, consumerRegistryKey } from "../apiConsumer/ConsumerRegistry";
-import { DynamicRailEngine } from "../flow/DynamicRailEngine";
+import { DynamicRailEngine, type ReconciliationScheduler } from "../flow/DynamicRailEngine";
+import type { ReconciliationSchedulerLike } from "../governance/GovernanceExecution";
+import { createCashoutCommissionNetting, type CashoutCommissionNetting } from "../ledger/commissionNetting";
+import { createRefundInquiryScheduler } from "../workers/RefundInquiry";
+import { defaultWorkerLogger } from "../workers/workerRuntime";
 import { StepExecutor } from "../flow/StepExecutor";
 import { LedgerPoster } from "../ledger/LedgerPoster";
 import { Vault } from "../crypto/Vault";
@@ -52,6 +56,14 @@ export interface PlatformRuntime {
   repositories: PrismaRepositories;
   credentialCheck: CredentialCheckService;
   slots: PrismaSlotReservationStore;
+  /**
+   * AUTO-20: the production reconciliation scheduler. A refund whose gateway answer is UNKNOWN stays EXECUTING and
+   * a durable chain of `REFUND_INQUIRY` jobs asks the gateway again. Shared by the engine and every governance
+   * execution context.
+   */
+  refundScheduler: ReconciliationScheduler & ReconciliationSchedulerLike;
+  /** AUTO-21: merchant-direct commission netting at cash-out time; absent when `COMMISSION_NETTING_AT_CASHOUT=false`. */
+  commissionNetting?: CashoutCommissionNetting;
 }
 
 interface CredentialRow {
@@ -164,7 +176,13 @@ export const createPlatformRuntime = (
     flowProvider,
   });
 
+  const refundScheduler = createRefundInquiryScheduler({ db, logger: defaultWorkerLogger });
+  const commissionNetting = env.COMMISSION_NETTING_AT_CASHOUT
+    ? createCashoutCommissionNetting({ poster: ledgerPoster, dryRun: env.COMMISSION_NETTING_DRY_RUN })
+    : undefined;
+
   const engine = new DynamicRailEngine({
+    reconciliationScheduler: refundScheduler,
     attempts,
     slots,
     flowProvider,
@@ -265,6 +283,8 @@ export const createPlatformRuntime = (
     repositories,
     credentialCheck,
     slots,
+    refundScheduler,
+    ...(commissionNetting ? { commissionNetting } : {}),
   };
 };
 

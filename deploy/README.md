@@ -112,6 +112,7 @@ is then only a compatibility fallback.
 | `--force-restart` | Restart PostgreSQL, PgBouncer, Redis and the backup daemon even when nothing changed (normally they are only reloaded or restarted when their configuration changed). |
 | `--skip-verify` | Skip step 12. A deploy can then report success without a live probe. |
 | `--rotate-certs` | Regenerate the internal CA and every leaf certificate. |
+| `--check-certs` | Read-only certificate expiry table; exit 1 when something is missing, expired or inside `MTLS_RENEW_WITHIN_DAYS` (for cron/alerts). |
 | `--dry-run` | Validate and print commands; execute no remote command and skip local builds/verification. |
 
 Unknown options and unknown `--only` roles abort before any SSH connection.
@@ -319,8 +320,8 @@ even when `DEPLOY_ENV` is `development` or `staging`.
 | 8 | Deploy admin. |
 | 9 | Deploy merchant. |
 | 10 | Deploy checkout. |
-| 11 | Seed Fake Rails blueprints and optional synthetic history. |
-| 12 | Run end-to-end verification. |
+| 11 | Run end-to-end verification (before the seed: a release that fails its checks must not be followed by a long seed). |
+| 12 | Seed Fake Rails blueprints and optional synthetic history. |
 | 13 | Log the retained release count. Actual pruning already happened per service. |
 | 14 | Print commit, release timestamp, topology, hosts and certificate expiry. |
 
@@ -483,8 +484,11 @@ The CA private key never leaves the workstation. Distribution is host-level:
 
 Changing a private IP requires updating every `*_PRIVATE_IP`/node-array
 `privateIp` and running `--update --enforce-firewall`. The PKI step detects SAN
-drift and re-signs leaves from the existing CA. Expiry is reported but does not
-force rotation; use `--rotate-certs`.
+drift and re-signs leaves from the existing CA. A leaf that expires within
+`MTLS_RENEW_WITHIN_DAYS` (default 30) is re-issued by the same CA on the next
+deploy; a CA near its end is reported and needs `--rotate-certs`. Public
+`certbot` vhosts get a twice-daily `pg-certbot-renew.timer` and an Nginx reload
+hook (`/etc/letsencrypt/renewal-hooks/deploy/pg-reload-nginx.sh`).
 
 ### Storage mTLS is not consumed
 

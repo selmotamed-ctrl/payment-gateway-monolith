@@ -123,7 +123,7 @@ Fake Rails gets backend and vhost `/health` probes, with `-k` when SSL is enable
 | Redis | `REDISCLI_AUTH=<password> redis-cli -h 127.0.0.1 -p <port> PING`, expecting `PONG`. |
 | Audit DB | `psql SELECT 1` with the audit user/password. |
 | Log DB | `psql SELECT 1` with the log user/password. |
-| Backup daemon | HTTPS `/health` with the CA and the `backup-client` certificate/key when `BACKUP_ALLOW_INSECURE_HTTP=false`; plain HTTP when it is `true`. Expects `"status":"ok"` or `ok`. |
+| Backup daemon | HTTPS `/health` with the CA and the `backup-client` certificate/key when `BACKUP_ALLOW_INSECURE_HTTP=false`; plain HTTP when it is `true`. With the flag on, the pg-native `archive_command`/`restore_command` also use plain `http://` without a client certificate (the daemon, its health probe and `BACKUP_DAEMON_URL` already followed the flag; the WAL commands hard-coded `https://`, so every archive call failed while the health check passed and `pg_wal` filled the disk). Expects `"status":"ok"` or `ok`. |
 
 The mTLS backup probe presents the `backup-client` certificate/key, matching the daemon's CN allow-list; the daemon's own server certificate is not a client identity and is rejected. When `BACKUP_ALLOW_INSECURE_HTTP=true` the daemon serves plain HTTP and the verifier uses an unauthenticated HTTP probe on the same host/port, so development deployments do not fail on TLS.
 

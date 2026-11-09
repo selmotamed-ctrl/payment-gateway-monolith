@@ -416,6 +416,23 @@ describe("staff, secrets, configuration and the writer", () => {
     expect(ctx.dataset.beneficialOwners.every((owner) => String(owner.nationalIdCiphertext).startsWith("vault:v1:"))).toBe(true);
     expect(ctx.dataset.paymentAttempts.every((attempt) => String(attempt.contextCiphertext).startsWith("vault:v1:"))).toBe(true);
   });
+  test("an unknown seed profile is refused instead of silently becoming STANDARD", () => {
+    const saved = { profile: process.env.SYNTHETIC_SEED_PROFILE, data: process.env.SYNTHETIC_DATA_PROFILE };
+    try {
+      delete process.env.SYNTHETIC_DATA_PROFILE;
+      process.env.SYNTHETIC_SEED_PROFILE = "COMPAKT";
+      expect(() => loadSeederConfig()).toThrow(/Unknown synthetic seed profile "COMPAKT"/);
+      process.env.SYNTHETIC_SEED_PROFILE = "compact";
+      expect(loadSeederConfig().volumes.yearsSpan).toBe(PROFILES.COMPACT.yearsSpan);
+      process.env.SYNTHETIC_SEED_PROFILE = "";
+      expect(loadSeederConfig().volumes.yearsSpan).toBe(PROFILES.STANDARD.yearsSpan);
+      delete process.env.SYNTHETIC_SEED_PROFILE;
+      expect(loadSeederConfig().volumes.yearsSpan).toBe(PROFILES.STANDARD.yearsSpan);
+    } finally {
+      if (saved.profile === undefined) delete process.env.SYNTHETIC_SEED_PROFILE; else process.env.SYNTHETIC_SEED_PROFILE = saved.profile;
+      if (saved.data === undefined) delete process.env.SYNTHETIC_DATA_PROFILE; else process.env.SYNTHETIC_DATA_PROFILE = saved.data;
+    }
+  });
   test("the deployed years-span key is honoured", () => {
     const saved = { ...process.env };
     try {

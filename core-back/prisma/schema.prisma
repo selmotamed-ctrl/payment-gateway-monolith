@@ -195,6 +195,8 @@ enum ApprovalState {
   APPROVED
   EXECUTED
   REJECTED
+  /// Not decided before `expires_at`; closed by the expiry housekeeping worker (AUTO-05). Final: it can no longer be approved.
+  EXPIRED
 }
 
 enum GatewayKind {
@@ -607,6 +609,8 @@ enum BackgroundJobType {
   /// Executes a dispute intake or an approved adjustment (the ledger posting,
   /// the state change and the audit trail in one transaction).
   ADJUSTMENT_EXECUTION
+  /// Asks the gateway again about a refund stuck in EXECUTING, with backoff (AUTO-20).
+  REFUND_INQUIRY
 }
 
 /// The lifecycle of a durable background job.
@@ -873,6 +877,9 @@ model Merchant {
   beneficialOwners        BeneficialOwner[]
   notifications           Notification[]           @relation("MerchantNotifications")
 
+  webhookEndpoints  MerchantWebhookEndpoint[]
+  webhookDeliveries MerchantWebhookDelivery[]
+
   @@index([status])
   @@index([kybStatus])
   @@index([status, createdAt])
@@ -979,18 +986,83 @@ model Application {
   redirectDomainAllowlist Json?             @map("redirect_domain_allowlist")
   status                  ApplicationStatus @default(PENDING)
 
-  merchant           Merchant            @relation(fields: [merchantId], references: [id], onDelete: Restrict)
-  assignedWallet     Wallet              @relation("ApplicationWallet", fields: [assignedWalletId], references: [id], onDelete: Restrict)
+  merchant           Merchant                  @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  assignedWallet     Wallet                    @relation("ApplicationWallet", fields: [assignedWalletId], references: [id], onDelete: Restrict)
   posTerminals       PosTerminal[]
+  webhookEndpoints   MerchantWebhookEndpoint[]
   accessTokens       AccessToken[]
   paymentLinks       PaymentLink[]
-  commissionProfiles CommissionProfile[] @relation("ApplicationCommissionProfiles")
-  paymentAttempts    PaymentAttempt[]    @relation("ApplicationPaymentAttempts")
+  commissionProfiles CommissionProfile[]       @relation("ApplicationCommissionProfiles")
+  paymentAttempts    PaymentAttempt[]          @relation("ApplicationPaymentAttempts")
 
   @@index([merchantId])
   @@index([assignedWalletId])
   @@index([merchantId, status])
   @@map("applications")
+}
+
+/// AUTO-34: a merchant's webhook endpoint (one application can have several). The signing secret is vault-encrypted.
+model MerchantWebhookEndpoint {
+  id                       String    @id @default(uuid(7)) @db.Uuid
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+  merchantId               String    @map("merchant_id") @db.Uuid
+  applicationId            String    @map("application_id") @db.Uuid
+  url                      String
+  description              String?
+  /// JSON array of event type names; empty = every event type.
+  eventTypes               Json      @default("[]") @map("event_types")
+  /// ACTIVE | DISABLED (CHECK constraint).
+  status                   String    @default("ACTIVE")
+  disabledReason           String?   @map("disabled_reason")
+  disabledAt               DateTime? @map("disabled_at")
+  secretCiphertext         String    @map("secret_ciphertext")
+  previousSecretCiphertext String?   @map("previous_secret_ciphertext")
+  previousSecretExpiresAt  DateTime? @map("previous_secret_expires_at")
+  secretRotatedAt          DateTime? @map("secret_rotated_at")
+  failingSince             DateTime? @map("failing_since")
+  lastSuccessAt            DateTime? @map("last_success_at")
+  lastFailureAt            DateTime? @map("last_failure_at")
+
+  merchant    Merchant                  @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  application Application               @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  deliveries  MerchantWebhookDelivery[]
+
+  @@index([applicationId, status])
+  @@index([merchantId])
+  @@map("merchant_webhook_endpoints")
+}
+
+/// AUTO-34: one delivery of one event to one endpoint (unique per endpoint and event id).
+model MerchantWebhookDelivery {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  endpointId     String    @map("endpoint_id") @db.Uuid
+  merchantId     String    @map("merchant_id") @db.Uuid
+  eventId        String    @map("event_id")
+  eventType      String    @map("event_type")
+  /// The exact JSON text that is signed and sent (identical on every attempt).
+  body           String
+  /// PENDING | DELIVERED | PARKED (CHECK constraint).
+  status         String    @default("PENDING")
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime? @map("next_attempt_at")
+  lastAttemptAt  DateTime? @map("last_attempt_at")
+  lastStatusCode Int?      @map("last_status_code")
+  lastLatencyMs  Int?      @map("last_latency_ms")
+  lastError      String?   @map("last_error")
+  deliveredAt    DateTime? @map("delivered_at")
+  parkedAt       DateTime? @map("parked_at")
+  parkReason     String?   @map("park_reason")
+
+  endpoint MerchantWebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  merchant Merchant                @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+
+  @@unique([endpointId, eventId])
+  @@index([endpointId, createdAt])
+  @@index([merchantId, status, createdAt])
+  @@map("merchant_webhook_deliveries")
 }
 
 model Wallet {
@@ -1118,20 +1190,20 @@ model PosScreen {
 }
 
 model GlAccount {
-  id                String        @id @default(uuid(7)) @db.Uuid
-  createdAt         DateTime      @default(now()) @map("created_at")
-  updatedAt         DateTime      @updatedAt @map("updated_at")
-  accountType       GlAccountType @map("account_type")
-  ownerId           String?       @map("owner_id")
-  gatewayId         String?       @map("gateway_id") @db.Uuid
-  credentialSetId   String?       @map("credential_set_id") @db.Uuid
-  env               String?
-  currency          String        @db.Char(3)
+  id              String        @id @default(uuid(7)) @db.Uuid
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  accountType     GlAccountType @map("account_type")
+  ownerId         String?       @map("owner_id")
+  gatewayId       String?       @map("gateway_id") @db.Uuid
+  credentialSetId String?       @map("credential_set_id") @db.Uuid
+  env             String?
+  currency        String        @db.Char(3)
   /// Routing width: new lines go to shard `hash(refId) % shardCount` (wallet debits always to shard 0).
   /// Widening never remaps history because every journal line stores its own shard.
-  shardCount        Int           @default(1) @map("shard_count") @db.SmallInt
-  shardScaledAt     DateTime?     @map("shard_scaled_at") @db.Timestamptz(3)
-  seedKey           String?       @unique @map("seed_key")
+  shardCount      Int           @default(1) @map("shard_count") @db.SmallInt
+  shardScaledAt   DateTime?     @map("shard_scaled_at") @db.Timestamptz(3)
+  seedKey         String?       @unique @map("seed_key")
 
   wallet        Wallet?          @relation("WalletGlAccount")
   gateway       Gateway?         @relation("GatewayClearingAccounts", fields: [gatewayId], references: [id], onDelete: Restrict)
@@ -1161,6 +1233,9 @@ model JournalEntry {
   paymentAttempts PaymentAttempt[] @relation("PaymentAttemptLedgerEntry")
 
   @@unique([refType, refId])
+  // Admin list/summary queries order and filter by createdAt. The migration adds
+  // INCLUDE (id, ref_type, ref_id) and a pg_trgm GIN index on ref_id/description.
+  @@index([createdAt])
   @@map("journal_entries")
 }
 
@@ -1326,9 +1401,9 @@ model CashoutRequest {
   wallet     Wallet      @relation(fields: [walletId], references: [id], onDelete: Restrict)
   adjustment Adjustment? @relation("AdjustmentCashout", fields: [adjustmentId], references: [id], onDelete: SetNull)
 
+  @@unique([merchantId, idempotencyKey])
   @@index([merchantId])
   @@index([walletId])
-  @@unique([merchantId, idempotencyKey])
   @@index([merchantId, state, createdAt])
   @@index([walletId, createdAt])
   @@map("cashout_requests")
@@ -2246,6 +2321,8 @@ model ReconciliationItem {
   statementFee      Decimal              @map("statement_fee") @db.Decimal(18, 4)
   result            ReconciliationResult
   operatorCaseId    String?              @map("operator_case_id")
+  /// The statement row type (SETTLEMENT, CHARGEBACK, FEE, REVERSAL, UNKNOWN); null before AUTO-23.
+  rowType           String?              @map("row_type")
 
   run          ReconciliationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
   attempt      PaymentAttempt?   @relation(fields: [attemptId], references: [id], onDelete: SetNull)
@@ -2323,6 +2400,20 @@ model AuditLog {
   @@index([createdAt])
   @@index([actorId, createdAt])
   @@map("audit_log")
+}
+
+/// AUTO-27: signed anchors of the verified audit hash chain (append-only; see the migration).
+model AuditChainAnchor {
+  id                  String   @id @default(uuid(7)) @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at")
+  lastSeqNo           BigInt   @unique @map("last_seq_no")
+  lastRowHash         String   @map("last_row_hash") @db.Char(64)
+  rowsVerifiedTotal   BigInt   @map("rows_verified_total")
+  rowsVerifiedThisRun Int      @map("rows_verified_this_run")
+  keyId               String   @map("key_id")
+  signature           String   @db.Char(64)
+
+  @@map("audit_chain_anchors")
 }
 
 model UserIdentity {
@@ -2419,6 +2510,12 @@ model KybDocument {
   expiryNotice30SentAt   DateTime?         @map("expiry_notice_30_sent_at")
   expiryNotice7SentAt    DateTime?         @map("expiry_notice_7_sent_at")
   expiredAt              DateTime?         @map("expired_at")
+  avScannedAt            DateTime?         @map("av_scanned_at")
+  avEngine               String?           @map("av_engine") @db.Text
+  avSignature            String?           @map("av_signature") @db.Text
+  avScanAttempts         Int               @default(0) @map("av_scan_attempts")
+  avNextScanAt           DateTime?         @map("av_next_scan_at")
+  avLastError            String?           @map("av_last_error") @db.Text
 
   merchant                      Merchant                 @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   joinRequest                   JoinRequest?             @relation(fields: [joinRequestId], references: [id], onDelete: SetNull)
@@ -2616,6 +2713,11 @@ model RegulatoryReport {
   submittedAt       DateTime?              @map("submitted_at")
   confidential      Boolean                @default(true)
   approvalRequestId String?                @map("approval_request_id") @db.Uuid
+  /// Filing deadline (AUTO-16), set from the reporting rule when a scheduled draft is created.
+  dueAt             DateTime?              @map("due_at")
+  /// Scheduled-return identity (`PSP-M`, `AML-Q`, ...) and the period it covers (`2026-10`); unique together.
+  reportCode        String?                @map("report_code")
+  periodKey         String?                @map("period_key")
 
   amlCase         AmlCase?         @relation("RegulatoryReportAmlCase", fields: [amlCaseId], references: [id], onDelete: SetNull)
   approvalRequest ApprovalRequest? @relation("RegulatoryReportApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
@@ -2701,6 +2803,41 @@ model Notification {
   @@map("notifications")
 }
 
+/// Durable copy of the session revoke list (the Redis flag is the fast path and may be evicted or lost).
+/// Rows are pruned once the revoked token would have expired anyway.
+model SessionRevocation {
+  jti       String   @id
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@map("session_revocations")
+}
+
+/// Exactly-once markers of the deadline worker (AUTO-04, AUTO-22): one row per (subject, stage), claimed in the same
+/// transaction as the reminder, escalation or deadline outcome it guards.
+model DeadlineStage {
+  subjectType String   @map("subject_type") @db.VarChar(32)
+  subjectId   String   @map("subject_id") @db.VarChar(64)
+  stage       String   @db.VarChar(48)
+  firedAt     DateTime @default(now()) @map("fired_at") @db.Timestamptz(3)
+  detailJson  Json?    @map("detail_json")
+
+  @@id([subjectType, subjectId, stage])
+  @@index([firedAt])
+  @@map("deadline_stages")
+}
+
+/// Keyset cursors that singleton workers persist between ticks (AUTO-25), so a bounded pass walks the whole table and
+/// resumes after a restart or a leader change.
+model WorkerCursor {
+  name        String   @id @db.VarChar(96)
+  cursorValue String?  @map("cursor_value")
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@map("worker_cursors")
+}
+
 model PlatformSetting {
   id                String   @id @default(uuid(7)) @db.Uuid
   createdAt         DateTime @default(now()) @map("created_at")
@@ -2720,13 +2857,13 @@ model PlatformSetting {
 }
 
 model GlAccountShard {
-  glAccountId    String    @map("gl_account_id") @db.Uuid
-  shardId        Int       @map("shard_id") @db.SmallInt
-  currentBalance Decimal   @default(0) @map("current_balance") @db.Decimal(18, 4)
+  glAccountId    String             @map("gl_account_id") @db.Uuid
+  shardId        Int                @map("shard_id") @db.SmallInt
+  currentBalance Decimal            @default(0) @map("current_balance") @db.Decimal(18, 4)
   /// High-water of lines assigned to this shard (bumped with the balance, under the row lock).
-  lineSeq        BigInt    @default(0) @map("line_seq")
-  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
-  glAccount      GlAccount @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
+  lineSeq        BigInt             @default(0) @map("line_seq")
+  updatedAt      DateTime           @default(now()) @map("updated_at") @db.Timestamptz(3)
+  glAccount      GlAccount          @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
   checkpoint     GlShardCheckpoint?
   repairs        GlShardRepair[]
 
@@ -2736,27 +2873,27 @@ model GlAccountShard {
 
 /// Append-only history of every shard repair (RECOMPUTE from the journal, or an approved REBASELINE).
 model GlShardRepair {
-  id                  String   @id @default(uuid(7)) @db.Uuid
-  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  glAccountId         String   @map("gl_account_id") @db.Uuid
-  shardId             Int      @map("shard_id") @db.SmallInt
+  id                  String         @id @default(uuid(7)) @db.Uuid
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  glAccountId         String         @map("gl_account_id") @db.Uuid
+  shardId             Int            @map("shard_id") @db.SmallInt
   /// RECOMPUTE | REBASELINE
   kind                String
   /// AUTO | MANUAL | APPROVED
   mode                String
-  planHash            String   @map("plan_hash")
-  beforeBalance       Decimal  @map("before_balance") @db.Decimal(18, 4)
-  afterBalance        Decimal  @map("after_balance") @db.Decimal(18, 4)
-  delta               Decimal  @db.Decimal(18, 4)
-  beforeLineSeq       BigInt   @map("before_line_seq")
-  afterLineSeq        BigInt   @map("after_line_seq")
-  beforeCheckpointSeq BigInt   @map("before_checkpoint_seq")
-  afterCheckpointSeq  BigInt   @map("after_checkpoint_seq")
-  baselineSeqAfter    BigInt   @map("baseline_seq_after")
-  actorId             String?  @map("actor_id") @db.Uuid
+  planHash            String         @map("plan_hash")
+  beforeBalance       Decimal        @map("before_balance") @db.Decimal(18, 4)
+  afterBalance        Decimal        @map("after_balance") @db.Decimal(18, 4)
+  delta               Decimal        @db.Decimal(18, 4)
+  beforeLineSeq       BigInt         @map("before_line_seq")
+  afterLineSeq        BigInt         @map("after_line_seq")
+  beforeCheckpointSeq BigInt         @map("before_checkpoint_seq")
+  afterCheckpointSeq  BigInt         @map("after_checkpoint_seq")
+  baselineSeqAfter    BigInt         @map("baseline_seq_after")
+  actorId             String?        @map("actor_id") @db.Uuid
   reason              String
-  approvalRequestId   String?  @map("approval_request_id") @db.Uuid
-  detailsJson         Json     @default("{}") @map("details_json")
+  approvalRequestId   String?        @map("approval_request_id") @db.Uuid
+  detailsJson         Json           @default("{}") @map("details_json")
   shard               GlAccountShard @relation(fields: [glAccountId, shardId], references: [glAccountId, shardId], onDelete: Restrict)
 
   @@index([glAccountId, shardId, createdAt])
@@ -2767,19 +2904,19 @@ model GlShardRepair {
 /// by the checkpointer (balance = previous checkpoint + the lines in the sequence range, gapless).
 /// A shard without a row is at (0, seq 0).
 model GlShardCheckpoint {
-  glAccountId         String    @map("gl_account_id") @db.Uuid
-  shardId             Int       @map("shard_id") @db.SmallInt
-  checkpointBalance   Decimal   @default(0) @map("checkpoint_balance") @db.Decimal(18, 4)
-  checkpointSeq       BigInt    @default(0) @map("checkpoint_seq")
-  checkpointAt        DateTime? @map("checkpoint_at") @db.Timestamptz(3)
-  verifiedAt          DateTime? @map("verified_at") @db.Timestamptz(3)
+  glAccountId         String         @map("gl_account_id") @db.Uuid
+  shardId             Int            @map("shard_id") @db.SmallInt
+  checkpointBalance   Decimal        @default(0) @map("checkpoint_balance") @db.Decimal(18, 4)
+  checkpointSeq       BigInt         @default(0) @map("checkpoint_seq")
+  checkpointAt        DateTime?      @map("checkpoint_at") @db.Timestamptz(3)
+  verifiedAt          DateTime?      @map("verified_at") @db.Timestamptz(3)
   /// OK | GAP | PARITY (CHECK constraint in the migration).
-  status              String    @default("OK")
-  failureKind         String?   @map("failure_kind")
-  consecutiveFailures Int       @default(0) @map("consecutive_failures")
-  lastFailureAt       DateTime? @map("last_failure_at") @db.Timestamptz(3)
+  status              String         @default("OK")
+  failureKind         String?        @map("failure_kind")
+  consecutiveFailures Int            @default(0) @map("consecutive_failures")
+  lastFailureAt       DateTime?      @map("last_failure_at") @db.Timestamptz(3)
   /// Lines with a sequence at or below this are exempt from the gapless proof (set only by an approved re-baseline).
-  baselineSeq         BigInt    @default(0) @map("baseline_seq")
+  baselineSeq         BigInt         @default(0) @map("baseline_seq")
   shard               GlAccountShard @relation(fields: [glAccountId, shardId], references: [glAccountId, shardId], onDelete: Restrict)
 
   @@id([glAccountId, shardId])
@@ -2795,6 +2932,12 @@ model OutboxEvent {
   payloadJson   Json      @map("payload_json")
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   processedAt   DateTime? @map("processed_at") @db.Timestamptz(3)
+  /// Failed deliveries of this event (AUTO-02). It is parked after OUTBOX_MAX_ATTEMPTS.
+  attempts      Int       @default(0)
+  /// The last delivery error (bounded), kept for the operator.
+  lastError     String?   @map("last_error") @db.VarChar(1000)
+  /// Set when the event was parked: it keeps `processed_at` NULL but no longer blocks the relay.
+  parkedAt      DateTime? @map("parked_at") @db.Timestamptz(3)
 
   @@index([id], map: "outbox_events_unprocessed_idx")
   @@index([createdAt], map: "outbox_events_created_idx")

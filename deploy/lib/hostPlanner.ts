@@ -1,5 +1,7 @@
 import {
+  CLAMD_LOCAL_ADDRESS,
   edgeCoreUrls,
+  applicationCredentials,
   effectiveDatabase,
   leaderElectionDatabaseUrl,
   parseNodeList,
@@ -264,6 +266,9 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
   const primary = parseNodeList(config.PG_PRIMARY_NODE)[0];
   const replicas = parseNodeList(config.PG_REPLICA_NODES);
   const database = effectiveDatabase(config);
+  // The running application's credentials: the non-owner `pgw_app` member when `PG_APP_PASSWORD` is set. The owner's
+  // password never goes into the runtime environment in that mode (see `ownerDatabaseUrl`).
+  const app = applicationCredentials(config);
   // Replicas are read directly on their own PostgreSQL port. Routing them
   // through a single PgBouncer port would point every co-located replica back
   // at the primary and silently defeat read scaling.
@@ -271,7 +276,7 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
   // so every direct (not PgBouncer-fronted) connection must negotiate TLS.
   const pgManaged = config.PG_MANAGE_VIA_SSH;
   const replicaUrls = replicas.map((node) =>
-    `postgresql://${encodeURIComponent(database.user)}:${encodeURIComponent(database.password)}@${node.privateIp}:${node.servicePort}/${database.name}${directTlsQuery(pgManaged)}`,
+    `postgresql://${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}@${node.privateIp}:${node.servicePort}/${database.name}${directTlsQuery(pgManaged)}`,
   );
   const leaderUrl = leaderElectionDatabaseUrl(config);
   return {
@@ -279,8 +284,8 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
       PG_PRIMARY_HOST: primary.privateIp,
       PG_PRIMARY_PORT: String(config.PGBOUNCER_ENABLED ? config.PGBOUNCER_PORT : primary.servicePort),
       PG_DB_NAME: config.PG_DB_NAME,
-      PG_DB_USER: config.PG_DB_USER,
-      PG_DB_PASSWORD: config.PG_DB_PASSWORD,
+      PG_DB_USER: app.user,
+      PG_DB_PASSWORD: app.password,
     } : {}),
     PG_REPLICA_HOSTS: replicas.map((node) => `${node.privateIp}:${node.servicePort}`).join(","),
     PG_REPLICA_NODES: config.PG_REPLICA_NODES,
@@ -328,6 +333,8 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
     STORAGE_SHARD_COUNT: String(config.STORAGE_SHARD_COUNT),
     READ_REPLICA_MAX_LAG_MS: String(config.READ_REPLICA_MAX_LAG_MS),
     KYB_SCANNER_MODE: config.KYB_SCANNER_MODE,
+    ...(config.KYB_SCANNER_MODE === "clamd" ? { KYB_CLAMD_ADDRESS: config.KYB_CLAMD_ADDRESS || CLAMD_LOCAL_ADDRESS } : {}),
+    KYB_RESCAN_DAYS: String(config.KYB_RESCAN_DAYS),
     TRUST_PROXY: "false",
     LOG_LEVEL: "info",
     WORKER_ENABLED: "true",
@@ -421,7 +428,10 @@ const edgeEnv = (
     MTLS_CA_CERT_PATH: "shared/certs/internal-ca.crt",
     MTLS_CLIENT_CERT_PATH: `shared/certs/${role}-back-client.crt`,
     MTLS_CLIENT_KEY_PATH: `shared/certs/${role}-back-client.key`,
-    TRUSTED_PROXY_CIDRS: "127.0.0.1/32,::1/128",
+    // nginx proxies to the node's PRIVATE ip (the backends bind to it), so that address is the
+    // proxy the edge sees. With loopback only, `x-real-ip` was ignored and every client looked like
+    // the nginx host (IP allowlists, rate limits and audit rows all saw one address).
+    TRUSTED_PROXY_CIDRS: ["127.0.0.1/32", "::1/128", ...(node ? [`${node.privateIp}/32`] : [])].join(","),
     ...(node ? { NODE_ID: node.nodeId, NODE_PRIVATE_IP: node.privateIp } : {}),
   };
   switch (role) {

@@ -330,12 +330,10 @@ const cases: ContractCase[] = [
       email: "admin@example.com",
       fullName: "Admin",
       role: "FINANCE",
-      phone: "+218910000000",
       locale: "en",
-      temporaryPassword: "Str0ngPassw0rd",
       authorities: { aml: ["read", "write"] },
     },
-    allowedKeys: ["email", "phone", "password", "role", "authoritiesMap", "isMaker", "isChecker"],
+    allowedKeys: ["email", "role", "authoritiesMap", "isMaker", "isChecker"],
     requiredKeys: ["email", "role"],
   },
   {
@@ -1085,12 +1083,15 @@ describe("core contract field mapping", () => {
       email: "Admin@Example.com",
       fullName: "Admin",
       role: "COMPLIANCE",
+      // A legacy payload that still carries credentials: they are never forwarded to core.
       temporaryPassword: "Str0ngPassw0rd",
+      phone: "+218910000000",
       authorities: { aml: ["read", "write"], kyb: "read" },
     });
     expect(mapped.email).toBe("admin@example.com");
     expect(mapped.role).toBe("COMPLIANCE");
-    expect(mapped.password).toBe("Str0ngPassw0rd");
+    expect(mapped).not.toHaveProperty("password");
+    expect(mapped).not.toHaveProperty("phone");
     expect(mapped.authoritiesMap).toEqual(["aml:read", "aml:write", "kyb:read"]);
   });
 

@@ -1,8 +1,9 @@
 import express from "express";
 import rateLimiter from "express-rate-limit";
 import { z } from "zod";
-import { digestKeyPart, lazyLimiter, rateLimitKey } from "../../lib/clientIp";
+import { lazyLimiter, rateLimitKey } from "../../lib/clientIp";
 import { env } from "../../lib/env";
+import { createAccountLimiters, type AccountKey } from "../../lib/authLimiters";
 import { zMfaCode, zPassword } from "../../lib/zReady";
 import { captureSessionToken, logoutHandler } from "../../lib/security/sessionCookie";
 import { coreForward } from "../forward";
@@ -31,28 +32,22 @@ const bodyField = (req: express.Request, field: string): string | undefined => {
   return typeof value === "string" && value.length > 0 ? value.toLowerCase().trim() : undefined;
 };
 
-/**
- * Per account, independent of the client ip, so a distributed guessing run against one
- * identifier (login) or one mfa challenge is throttled as well.
- */
-const accountLimiter = lazyLimiter(() => rateLimiter({
-  windowMs: env.AUTH_RATE_LIMIT_WINDOW_MS,
-  max: () => env.AUTH_RATE_LIMIT_MAX,
-  skip: (req) => bodyField(req, "identifier") === undefined && bodyField(req, "challengeId") === undefined,
-  keyGenerator: (req) =>
-    `account:${digestKeyPart(bodyField(req, "identifier") ?? bodyField(req, "challengeId") ?? "")}`,
-  validate: { keyGeneratorIpFallback: false },
-  standardHeaders: false,
-  legacyHeaders: false,
-  handler: limited,
-}));
+const accountOf = (req: express.Request): AccountKey | undefined => {
+  const identifier = bodyField(req, "identifier");
+  if (identifier) return { kind: "account", value: identifier };
+  const challenge = bodyField(req, "challengeId");
+  return challenge ? { kind: "challenge", value: challenge } : undefined;
+};
+
+/** Per account and address (and an account-wide ceiling), counting failures only: see `lib/authLimiters.ts`. */
+const accountLimiters = createAccountLimiters(accountOf);
 
 // Logout is deliberately outside the login limiter: a page load with several
 // expired requests triggers it, and it must not consume the login budget.
 router.post("/logout", logoutHandler);
 
 router.use(authLimiter);
-router.post(["/login", "/mfa"], accountLimiter);
+router.post(["/login", "/mfa"], accountLimiters.perAddress, accountLimiters.ceiling);
 
 const loginSchema = z
   .object({
@@ -75,6 +70,27 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/auth/login",
     schema: loginSchema,
+  }),
+);
+
+/**
+ * Public: a staff invitee accepts the invitation emailed to them and chooses their own password and the
+ * phone that receives their sign-in codes. The account stays INVITED until a checker approves activation.
+ */
+const acceptInvitationSchema = z
+  .object({
+    token: z.string().min(16).max(256),
+    password: zPassword,
+    phone: z.string().trim().regex(/^\+?[0-9 ()-]{6,20}$/),
+  })
+  .strict();
+
+router.post(
+  "/accept-invitation",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/auth/accept-invitation",
+    schema: acceptInvitationSchema,
   }),
 );
 

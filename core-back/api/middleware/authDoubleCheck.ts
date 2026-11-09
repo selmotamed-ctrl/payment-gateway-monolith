@@ -23,6 +23,12 @@ export interface Principal {
   sessionExp?: number | null;
   /** Channel the session token was minted for (JWT audience). */
   sessionChannel?: SessionChannel | null;
+  /**
+   * The applications a merchant user is restricted to (`users.app_scope_ids`), read from the user
+   * row on every request so a change takes effect without a new login. Empty or absent means the
+   * user is not scoped and sees the whole merchant. API tokens are bound by `applicationId` instead.
+   */
+  appScopeIds?: string[];
 }
 
 declare global {
@@ -163,6 +169,7 @@ const resolveSessionPrincipal = async (token: string): Promise<Principal> => {
     sessionJti: claims.jti,
     sessionExp: claims.exp,
     sessionChannel: claims.channel,
+    appScopeIds: Array.isArray(user.appScopeIds) ? user.appScopeIds.map(String) : [],
   };
 };
 

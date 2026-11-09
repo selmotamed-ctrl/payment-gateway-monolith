@@ -10,6 +10,7 @@ code:
   - deploy/lib/converge.ts
   - deploy/provisioners/postgres18Provisioner.ts
   - deploy/provisioners/redisProvisioner.ts
+  - deploy/provisioners/clamavProvisioner.ts
   - deploy/provisioners/auditAndLogDbProvisioner.ts
   - deploy/provisioners/backupEngineProvisioner.ts
   - deploy/lib/configSchema.ts
@@ -49,6 +50,7 @@ This part documents the four modular storage provisioners invoked by the deploym
 
 - `postgres18Provisioner.ts`: PostgreSQL 18 primary, replicas, replication slots, `pg_hba`, PgBouncer, tuning and journal partition cron;
 - `redisProvisioner.ts`: Redis cache/velocity nodes;
+- `clamavProvisioner.ts` (AUTO-06): ClamAV for the KYB document scan on every core host when `KYB_SCANNER_MODE=clamd` and no external `KYB_CLAMD_ADDRESS` is set. Installs `clamav-daemon` + `clamav-freshclam` (Arch: `clamav`) only when missing; writes a managed `/etc/clamav/clamd.conf` (TCP on `127.0.0.1:3310` only, local socket kept, `StreamMaxLength` and `MaxFileSize` 32M); downloads the first signature set (clamd will not start without one); disables Debian's `clamav-daemon.socket` (socket activation would own the sockets); starts clamd, or restarts it only when the configuration changed or on `--force-restart`; waits for `zPING`. The core env gets `KYB_CLAMD_ADDRESS=127.0.0.1:3310`. A host below 2 GB RAM or a failed first download (offline lab) is a warning, never a failed deploy: documents stay `PENDING` and the core's `kyb_scan_backlog` monitor check reports it. Not built: an offline signature mirror (`DatabaseMirror` is the ClamAV default) and a separate scanning host shared by several core nodes.
 - `auditAndLogDbProvisioner.ts`: append-only audit database and partitioned log database;
 - `backupEngineProvisioner.ts`: WAL-G/Barman archive engine, daemon environment/unit, schedules and S3/secondary target checks.
 
@@ -358,6 +360,7 @@ Not covered:
 
 - `deploy/provisioners/postgres18Provisioner.ts`
 - `deploy/provisioners/redisProvisioner.ts`
+- `deploy/provisioners/clamavProvisioner.ts`
 - `deploy/provisioners/auditAndLogDbProvisioner.ts`
 - `deploy/provisioners/backupEngineProvisioner.ts`
 - `deploy/lib/hostPlanner.ts`: storage env, URLs and node plans.
@@ -481,3 +484,9 @@ Not covered:
 - Core receives `LEADER_ELECTION_DATABASE_URL` (derived as `postgresql://…@<primary>:<PGBOUNCER_PORT>/pgw_session`; direct PostgreSQL with `sslmode=no-verify` when PgBouncer is disabled). An explicit deploy-env value overrides it.
 - After `applyPgbouncer()`, the provisioner logs in through `pgw_session`; a reload normally publishes the new alias, otherwise it restarts PgBouncer once and retries. Core refuses to boot if the session endpoint is missing or transaction-pooled.
 - No firewall change: the alias uses the existing `PGBOUNCER_PORT` rule from core nodes; PostgreSQL's own port remains closed to core when PgBouncer is enabled.
+
+## Remediation round 2 (2026-11-08): role split, PgBouncer TLS, Redis
+
+- PgBouncer authenticates each client as its own user (per-client userlist entry for `PG_APP_USER`) instead of forcing the owner, and terminates TLS on the client leg (`client_tls_sslmode`, self-signed certificate); `DATABASE_URL` carries `sslmode=no-verify` whenever the deploy manages the cluster (encrypted, not identity-verified; certificate verification remains open).
+- The bootstrap SQL creates the app login role as a member of `pgw_app` with no UPDATE/DELETE/TRUNCATE on the ledger and audit tables and no DDL. Validated end to end on a TLS PostgreSQL 18 with a real PgBouncer (owner migrations, app-role privilege probes, core's Prisma client). It has not run on a multi-host lab (GAP-057 stays partial).
+- Redis (`redisProvisioner.ts`): `maxmemory-policy volatile-ttl` plus AOF, so only keys with a TTL are evictable and a restart does not lose revoke flags; every durable key must carry a TTL.

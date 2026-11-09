@@ -3,7 +3,7 @@ id: core.backup
 title: Backup Control
 status: partial
 confidence: high
-last_verified: 2026-11-06
+last_verified: 2026-11-08
 verified_against: 747d9bc+working-tree
 code:
   - core-back/api/internal/backups.ts
@@ -112,15 +112,18 @@ The trigger schema defaults `target` to `all` and `kind` to `full`.
 
 It returns HTTP 202 with `checkerRequired: true` and the approval id.
 
-With `approvalRequestId`, core:
+With `approvalRequestId`, core calls `executeBackupPolicyApproval` (`core-back/api/internal/backups.ts`). The same function backs `POST /approvals/:id/approve` for a `BACKUP_POLICY` approval, so the two entry points cannot differ:
 
-1. loads the approval and requires `subjectType = "BACKUP_POLICY"`;
-2. requires state `PENDING_REVIEW` or `APPROVED`;
-3. rejects when `approval.makerUserId === actor.userId` with `MAKER_CHECKER_VIOLATION`;
-4. requires the daemon to be configured;
-5. applies `approval.payloadDiffJson` to the daemon (not the current request body);
-6. marks the approval `EXECUTED`, records `checkerUserId` and increments `baseVersion`;
-7. writes a `BACKUP_POLICY_UPDATED` audit row with before/after JSON and a stable-JSON checksum prefix.
+1. the caller must hold checker authority (`approval:check`); `security:write` alone is refused with `403 APPROVAL_CHECKER_AUTHORITY_REQUIRED`;
+2. it loads the approval and requires `subjectType = "BACKUP_POLICY"` (`404 APPROVAL_NOT_FOUND` otherwise);
+3. it rejects `approval.makerUserId === actor.userId` with `409 APPROVAL_MAKER_EQUALS_CHECKER`;
+4. it requires state `PENDING_REVIEW` or `DRAFT` (`409 APPROVAL_NOT_PENDING`; an `APPROVED`, `EXECUTED` or `REJECTED` request can never be applied again) and an unexpired request (`409 APPROVAL_EXPIRED`);
+5. it requires the daemon to be configured (`503`);
+6. it CLAIMS the approval with a conditional `updateMany` (pending -> `APPROVED`, `checkerUserId` set) BEFORE calling the daemon, so two checkers racing apply the policy exactly once (the loser gets `409 APPROVAL_NOT_PENDING`);
+7. it applies `approval.payloadDiffJson` to the daemon (not the current request body) with `updatedBy` set to the checker; if the daemon call fails the claim is released (back to `PENDING_REVIEW`, `checkerUserId` cleared) so the request can be retried;
+8. in one transaction it marks the approval `EXECUTED`, records `checkerUserId`, increments `baseVersion` and writes a `BACKUP_POLICY_UPDATED` audit row (`entityId` = the approval id) with before/after JSON and a stable-JSON checksum prefix.
+
+Residual: if the process dies after the daemon accepted the policy but before step 8, the approval stays `APPROVED` with the checker recorded and the policy is already live; the daemon call is idempotent, but there is no automatic resume of that state.
 
 There is no maker-checker on `POST /trigger` or `POST /drill`; both are direct `security:write` actions.
 

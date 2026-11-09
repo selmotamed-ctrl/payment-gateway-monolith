@@ -17,7 +17,19 @@ export interface ThrottlePolicy {
   lockMs: number;
 }
 
-export const LOGIN_IDENTIFIER_POLICY: ThrottlePolicy = { maxFailures: 5, windowMs: 15 * 60_000, lockMs: 15 * 60_000 };
+/**
+ * The tight login lock is keyed on the identifier AND the client address: five wrong passwords from
+ * one address lock that identifier for that address only. Before this the lock was keyed on the
+ * identifier alone, so anyone who knew a victim's email or phone could keep the account locked for
+ * everybody (the check runs before the password is verified, so the owner's correct password was
+ * refused too) with five requests per 15 minutes.
+ */
+export const LOGIN_PAIR_POLICY: ThrottlePolicy = { maxFailures: 5, windowMs: 15 * 60_000, lockMs: 15 * 60_000 };
+/**
+ * A much higher identifier-only ceiling still stops guessing spread over many addresses against one
+ * account. Reaching it takes ten times the work of the old lock, and a successful login clears it.
+ */
+export const LOGIN_IDENTIFIER_POLICY: ThrottlePolicy = { maxFailures: 50, windowMs: 15 * 60_000, lockMs: 15 * 60_000 };
 export const LOGIN_IP_POLICY: ThrottlePolicy = { maxFailures: 30, windowMs: 15 * 60_000, lockMs: 15 * 60_000 };
 export const MFA_IP_POLICY: ThrottlePolicy = { maxFailures: 20, windowMs: 15 * 60_000, lockMs: 15 * 60_000 };
 
@@ -52,19 +64,25 @@ export const resetAuthThrottles = async (): Promise<void> => {
   await getAuthStateStore().clear();
 };
 
-/** Applies the identifier and IP login throttles before the password is checked. */
+/** The address part of the pair key; an unresolvable address shares one bucket instead of bypassing it. */
+const pairValue = (identifier: string, ip: string | null): string => `${identifier.toLowerCase()}|${ip ?? "unknown"}`;
+
+/** Applies the identifier ceiling, the identifier+IP lock and the IP throttle before the password is checked. */
 export const assertLoginAllowed = async (identifier: string, ip: string | null): Promise<void> => {
   await assertNotThrottled("login-id", identifier);
+  await assertNotThrottled("login-pair", pairValue(identifier, ip));
   if (ip) await assertNotThrottled("login-ip", ip);
 };
 
 export const recordLoginFailure = async (identifier: string, ip: string | null): Promise<void> => {
   await recordFailure("login-id", identifier, LOGIN_IDENTIFIER_POLICY);
+  await recordFailure("login-pair", pairValue(identifier, ip), LOGIN_PAIR_POLICY);
   if (ip) await recordFailure("login-ip", ip, LOGIN_IP_POLICY);
 };
 
-export const recordLoginSuccess = async (identifier: string): Promise<void> => {
+export const recordLoginSuccess = async (identifier: string, ip: string | null = null): Promise<void> => {
   await clearFailures("login-id", identifier);
+  await clearFailures("login-pair", pairValue(identifier, ip));
 };
 
 export const assertMfaAllowed = async (ip: string | null): Promise<void> => {

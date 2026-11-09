@@ -98,6 +98,16 @@ export class OutboxNotificationWorker extends BaseWorker {
       }
       delete payloadRaw.codeCiphertext;
     }
+    // A staff invitation token is stored sealed as well; it is opened for delivery only.
+    if (typeof payloadRaw.tokenCiphertext === "string") {
+      try {
+        payloadRaw.token = await openMfaCode(payloadRaw.tokenCiphertext);
+      } catch {
+        await this.fail(notification, now, "Invitation token could not be decrypted", notification.attempts);
+        return;
+      }
+      delete payloadRaw.tokenCiphertext;
+    }
     const payload = redactAmlPayload(payloadRaw, template.confidentialityClass);
     const subject = template.subjectTemplate ? renderTemplate(template.subjectTemplate, payload) : null;
     const body = renderTemplate(template.bodyTemplate, payload);

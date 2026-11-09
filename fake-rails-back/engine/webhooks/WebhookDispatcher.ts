@@ -1,3 +1,4 @@
+import { webhookTargetAllowed } from "../../lib/webhookTarget";
 import { getDb, nowIso, uuidv7, type FakeTransactionRow } from "../db";
 import { env } from "../../lib/env";
 import { Prng } from "../chaos/prng";
@@ -272,9 +273,19 @@ export class WebhookDispatcher {
     const row = this.get(deliveryId);
     if (!row || row.state === "SENT") return row;
     const headers = JSON.parse(row.request_headers_json) as Record<string, string>;
+    // Checked again at send time: a row stored before the allowlist existed (or edited in the database) must not
+    // turn the emulator into a request proxy either.
+    if (!webhookTargetAllowed(row.url)) {
+      getDb()
+        .prepare(`UPDATE fake_webhook_deliveries SET state = 'FAILED', error = ? WHERE id = ?`)
+        .run("webhook target host is not allowed", deliveryId);
+      return this.get(deliveryId);
+    }
     try {
       const response = await fetch(row.url, {
         method: "POST",
+        // A redirect would send the signed body to a host nobody validated: it counts as a failed delivery.
+        redirect: "manual",
         headers,
         body: row.request_body_raw,
         signal: AbortSignal.timeout(env.FAKE_RAILS_WEBHOOK_TIMEOUT_MS),

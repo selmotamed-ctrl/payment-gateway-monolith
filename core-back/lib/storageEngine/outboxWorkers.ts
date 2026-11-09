@@ -3,6 +3,7 @@ import type { PrismaClient } from "../../generated/prisma/client";
 import { computeAuditRowHash, DedicatedAuditDatabaseDriver } from "./auditAndLogAdapters";
 import type { AuditHashInput } from "./auditAndLogAdapters";
 import type { OutboxEnvelope } from "./ports";
+import { defaultWorkerHealthRegistry, type WorkerHealthRegistry } from "../../engine/workers/workerRuntime";
 
 export interface WorkerLoggerLike {
   info?: (message: string, meta?: Record<string, unknown>) => void;
@@ -18,6 +19,8 @@ interface OutboxRow {
   merchant_id: string | null;
   payload_json: unknown;
   created_at: Date;
+  /** Failed deliveries so far (AUTO-02); absent on rows read by older callers. */
+  attempts?: number | null;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> => {
@@ -384,6 +387,75 @@ export const nextPollDelayMs = (
   return Math.min(Math.max(baseMs, maxIdleMs), Math.max(baseMs, grown));
 };
 
+/** Names under which the storage-engine workers report to the worker health registry (AUTO-03). */
+export const RELAY_HEALTH_NAME = "OutboxRelayWorker";
+export const AUDIT_SHIPPER_HEALTH_NAME = "AuditShipperWorker";
+
+/** Default number of failed deliveries after which an outbox event is parked (AUTO-02). */
+export const DEFAULT_OUTBOX_MAX_ATTEMPTS = 10;
+
+/** Operator-case subject key for the parked events of one topic (one open case per topic). */
+export const outboxParkedSubjectKey = (topic: string): string => `outbox.parked:${topic}`;
+
+/** `last_error` written on events acknowledged without a consumer. */
+export const OUTBOX_UNKNOWN_TOPIC_ERROR = "UNKNOWN_TOPIC: no consumer is registered for this topic";
+
+const MAX_ERROR_LENGTH = 1_000;
+
+const errorText = (error: unknown): string =>
+  (error instanceof Error ? error.message : String(error)).slice(0, MAX_ERROR_LENGTH);
+
+export interface OutboxParkedEvent {
+  id: string;
+  topic: string;
+  attempts: number;
+  lastError: string;
+}
+
+export interface OutboxDeadLetterOptions {
+  /** Failed deliveries before an event is parked. Default {@link DEFAULT_OUTBOX_MAX_ATTEMPTS}. */
+  maxAttempts?: number;
+  /**
+   * Opens the operator case for a topic with newly parked events. Must be
+   * idempotent per `subjectKey` (one unresolved case per topic). Defaults to
+   * `raiseLedgerCase` on the relay database.
+   */
+  raiseCase?: (input: { subjectKey: string; notes: string }) => Promise<boolean>;
+  /** Writes one system audit row per parked event. Defaults to `writeSystemAudit`. */
+  audit?: (input: {
+    action: string;
+    entityType: string;
+    entityId: string;
+    before?: unknown;
+    after?: unknown;
+  }) => Promise<void>;
+}
+
+/** Backlog view of the outbox for the platform monitor (AUTO-03). */
+export interface OutboxBacklogStats {
+  /** Creation time of the oldest pending (not processed, not parked) event. */
+  oldestPendingCreatedAt: Date | null;
+  /** Age of that event at `now`, or null when nothing is pending. */
+  oldestPendingAgeMs: number | null;
+  /** Events parked after exhausting their attempts and waiting for an operator. */
+  parkedCount: number;
+}
+
+/** In-process counters of one relay instance (reset on restart). */
+export interface OutboxRelayCounters {
+  processed: number;
+  failedDeliveries: number;
+  parked: number;
+  unknownTopics: Record<string, number>;
+}
+
+interface DrainOutcome {
+  processed: number;
+  failed: number;
+  parked: OutboxParkedEvent[];
+  unknownTopics: Map<string, number>;
+}
+
 export class OutboxRelayWorker {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
@@ -392,6 +464,17 @@ export class OutboxRelayWorker {
   private lastPruneAt = 0;
   private readonly handlers: Record<string, OutboxHandler>;
   private readonly batchHandlers: Record<string, OutboxBatchHandler>;
+  private readonly maxAttempts: number;
+  private readonly health: WorkerHealthRegistry | null;
+  /** Topics whose case could not be raised yet (retried on the next drain). */
+  private readonly pendingCases = new Map<string, OutboxParkedEvent[]>();
+  private readonly fanout: Record<string, OutboxBatchHandler>;
+  private readonly counterState: OutboxRelayCounters = {
+    processed: 0,
+    failedDeliveries: 0,
+    parked: 0,
+    unknownTopics: {},
+  };
 
   constructor(
     private readonly db: PrismaClient,
@@ -401,21 +484,42 @@ export class OutboxRelayWorker {
       batchSize?: number;
       handlers?: Record<string, OutboxHandler>;
       batchHandlers?: Record<string, OutboxBatchHandler>;
+      /**
+       * Consumers that run IN ADDITION to the topic's own handler, in the same transaction (the merchant webhook
+       * fan-out, AUTO-34). A failing fan-out fails the batch like any consumer: the relay retries it and parks it.
+       */
+      fanout?: Record<string, OutboxBatchHandler>;
       retention?: OutboxRetentionOptions;
+      deadLetter?: OutboxDeadLetterOptions;
       logger?: WorkerLoggerLike;
+      /** Where the relay reports its health (AUTO-03). Default: the process-wide registry; `null` turns it off. */
+      healthRegistry?: WorkerHealthRegistry | null;
     } = {},
   ) {
-    // Topics without a consumer are acknowledged without work. A per-event
+    this.health = options.healthRegistry === undefined ? defaultWorkerHealthRegistry : options.healthRegistry;
+    // The relay idles with a back-off up to `maxIdleIntervalMs`: that is its real cadence for the staleness check.
+    this.health?.register(RELAY_HEALTH_NAME, { intervalMs: Math.max(options.intervalMs ?? 250, options.maxIdleIntervalMs ?? 2_000) });
+    // Topics without a consumer yet are acknowledged without work. A per-event
     // handler registered by the caller overrides the batch handler of the
-    // same topic.
+    // same topic. A topic that is in neither map is UNKNOWN: it is still
+    // acknowledged (a newer node may emit topics an older relay does not
+    // know), but it is logged, counted and marked in `last_error`.
     this.handlers = {
       "ledger.entry_posted": async () => undefined,
       "merchant.updated": async () => undefined,
       "kyb.document_uploaded": async () => undefined,
       "reconciliation.completed": async () => undefined,
       "config.invalidated": async () => undefined,
+      // Written by the expiry housekeeping worker (AUTO-11); the merchant webhook (AUTO-34) registers the real consumer.
+      "link.expired": async () => undefined,
+      // Written by the governance paths (AUTO-34); only the merchant webhook fan-out consumes them.
+      "dispute.opened": async () => undefined,
+      "dispute.closed": async () => undefined,
+      "cashout.paid": async () => undefined,
+      "cashout.failed": async () => undefined,
       ...options.handlers,
     };
+    this.fanout = options.fanout ?? {};
     this.batchHandlers = {
       "attempt.transitioned": projectAttemptTransitions,
       ...options.batchHandlers,
@@ -423,10 +527,16 @@ export class OutboxRelayWorker {
     for (const topic of Object.keys(options.handlers ?? {})) {
       delete this.batchHandlers[topic];
     }
+    this.maxAttempts = Math.max(1, Math.floor(options.deadLetter?.maxAttempts ?? DEFAULT_OUTBOX_MAX_ATTEMPTS));
   }
 
   public get isRunning(): boolean {
     return this.running;
+  }
+
+  /** A snapshot of the in-process counters. */
+  public get counters(): OutboxRelayCounters {
+    return { ...this.counterState, unknownTopics: { ...this.counterState.unknownTopics } };
   }
 
   public start(): void {
@@ -435,12 +545,14 @@ export class OutboxRelayWorker {
     }
     this.running = true;
     this.stopped = false;
+    this.health?.markStarted(RELAY_HEALTH_NAME);
     this.schedule(0);
   }
 
   public stop(): void {
     this.stopped = true;
     this.running = false;
+    this.health?.markStopped(RELAY_HEALTH_NAME);
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -475,10 +587,14 @@ export class OutboxRelayWorker {
   private async tick(): Promise<void> {
     const baseMs = this.options.intervalMs ?? 250;
     let drained = 0;
+    const startedAt = performance.now();
+    this.health?.recordTickStart(RELAY_HEALTH_NAME);
     try {
       drained = await this.drain();
       await this.pruneIfDue();
+      this.health?.recordSuccess(RELAY_HEALTH_NAME, new Date(), performance.now() - startedAt, { processed: drained });
     } catch (error) {
+      this.health?.recordFailure(RELAY_HEALTH_NAME, new Date(), performance.now() - startedAt, error);
       this.options.logger?.error?.("outbox relay failed", {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -494,53 +610,303 @@ export class OutboxRelayWorker {
     }
   }
 
+  private isKnownTopic(topic: string): boolean {
+    return Boolean(this.batchHandlers[topic] || this.handlers[topic]);
+  }
+
+  /**
+   * Delivers rows to their consumers: per-event handlers in id order, then one
+   * call per batch-handled topic. Throws on the first consumer error.
+   */
+  private async dispatch(rows: readonly OutboxRow[], tx: PrismaClient): Promise<void> {
+    const batched = new Map<string, OutboxEnvelope[]>();
+    const fannedOut = new Map<string, OutboxEnvelope[]>();
+    for (const row of rows) {
+      const event: OutboxEnvelope = {
+        id: String(row.id),
+        topic: row.topic as OutboxEnvelope["topic"],
+        aggregateType: row.aggregate_type,
+        aggregateId: row.aggregate_id,
+        merchantId: row.merchant_id,
+        payload: asRecord(row.payload_json),
+      };
+      if (this.fanout[event.topic]) {
+        const list = fannedOut.get(event.topic) ?? [];
+        list.push(event);
+        fannedOut.set(event.topic, list);
+      }
+      if (this.batchHandlers[event.topic]) {
+        const list = batched.get(event.topic) ?? [];
+        list.push(event);
+        batched.set(event.topic, list);
+        continue;
+      }
+      const handler = this.handlers[event.topic];
+      if (handler) {
+        await handler(event, tx);
+      }
+    }
+    for (const [topic, events] of batched) {
+      await this.batchHandlers[topic]!(events, tx);
+    }
+    for (const [topic, events] of fannedOut) {
+      await this.fanout[topic]!(events, tx);
+    }
+  }
+
+  /** Runs `work` inside a savepoint; on error the savepoint is rolled back and the error returned. */
+  private async inSavepoint(
+    tx: PrismaClient,
+    name: string,
+    work: () => Promise<void>,
+  ): Promise<unknown | null> {
+    await tx.$executeRawUnsafe(`SAVEPOINT ${name}`);
+    try {
+      await work();
+    } catch (error) {
+      await tx.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${name}`);
+      await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${name}`);
+      return error ?? new Error("outbox consumer failed");
+    }
+    await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${name}`);
+    return null;
+  }
+
+  /**
+   * Claims one batch and delivers it. The batch is first delivered as a whole
+   * inside a savepoint; when that fails (or when a claimed row already failed
+   * before) every row is retried alone in its own savepoint, so one poison
+   * event can no longer block the rows behind it. A failing row has its
+   * `attempts` incremented and is parked after `maxAttempts` failures. Returns
+   * the number of rows acknowledged.
+   */
   public async drain(): Promise<number> {
+    const outcome = await this.db.$transaction(
+      async (tx) => this.drainInTransaction(tx as unknown as PrismaClient),
+      { timeout: 30_000, maxWait: 5_000 },
+    );
+    this.counterState.processed += outcome.processed;
+    this.counterState.failedDeliveries += outcome.failed;
+    this.counterState.parked += outcome.parked.length;
+    for (const [topic, count] of outcome.unknownTopics) {
+      this.counterState.unknownTopics[topic] = (this.counterState.unknownTopics[topic] ?? 0) + count;
+      this.options.logger?.warn?.("outbox relay acknowledged events of an unknown topic", { topic, count });
+    }
+    await this.escalateParked(outcome.parked);
+    return outcome.processed;
+  }
+
+  private async drainInTransaction(tx: PrismaClient): Promise<DrainOutcome> {
     const batchSize = this.options.batchSize ?? 100;
-    return this.db.$transaction(async (tx) => {
-      const rows = await tx.$queryRawUnsafe<OutboxRow[]>(
-        `SELECT id, topic, aggregate_type, aggregate_id, merchant_id, payload_json, created_at
-         FROM outbox_events
-         WHERE processed_at IS NULL
-         ORDER BY id ASC
-         LIMIT $1
-         FOR UPDATE SKIP LOCKED`,
-        batchSize,
-      );
+    const outcome: DrainOutcome = { processed: 0, failed: 0, parked: [], unknownTopics: new Map() };
+    const rows = await tx.$queryRawUnsafe<OutboxRow[]>(
+      `SELECT id, topic, aggregate_type, aggregate_id, merchant_id, payload_json, created_at, attempts
+       FROM outbox_events
+       WHERE processed_at IS NULL
+         AND parked_at IS NULL
+       ORDER BY id ASC
+       LIMIT $1
+       FOR UPDATE SKIP LOCKED`,
+      batchSize,
+    );
+    if (rows.length === 0) {
+      return outcome;
+    }
 
-      if (rows.length === 0) {
-        return 0;
-      }
+    const known: OutboxRow[] = [];
+    const unknown: OutboxRow[] = [];
+    for (const row of rows) {
+      (this.isKnownTopic(row.topic) ? known : unknown).push(row);
+    }
 
-      const batched = new Map<string, OutboxEnvelope[]>();
-      for (const row of rows) {
-        const event: OutboxEnvelope = {
-          topic: row.topic as OutboxEnvelope["topic"],
-          aggregateType: row.aggregate_type,
-          aggregateId: row.aggregate_id,
-          merchantId: row.merchant_id,
-          payload: asRecord(row.payload_json),
-        };
-        if (this.batchHandlers[event.topic]) {
-          const list = batched.get(event.topic) ?? [];
-          list.push(event);
-          batched.set(event.topic, list);
-          continue;
+    const succeeded: OutboxRow[] = [];
+    const failures: Array<{ row: OutboxRow; error: string }> = [];
+    if (known.length > 0) {
+      const retrying = known.some((row) => Number(row.attempts ?? 0) > 0);
+      let batchError: unknown | null = new Error("skipped: batch contains a previously failed event");
+      if (!retrying) {
+        batchError = await this.inSavepoint(tx, "outbox_batch", () => this.dispatch(known, tx));
+      }
+      if (batchError === null) {
+        succeeded.push(...known);
+      } else {
+        if (!retrying) {
+          this.options.logger?.warn?.("outbox relay batch failed, retrying events one by one", {
+            events: known.length,
+            error: errorText(batchError),
+          });
         }
-        const handler = this.handlers[event.topic];
-        if (handler) {
-          await handler(event, tx as unknown as PrismaClient);
+        for (const row of known) {
+          const error = await this.inSavepoint(tx, "outbox_event", () => this.dispatch([row], tx));
+          if (error === null) {
+            succeeded.push(row);
+          } else {
+            failures.push({ row, error: errorText(error) });
+          }
         }
       }
-      for (const [topic, events] of batched) {
-        await this.batchHandlers[topic]!(events, tx as unknown as PrismaClient);
-      }
-      // One acknowledgement statement per batch instead of one per row.
+    }
+
+    // One acknowledgement statement per batch instead of one per row.
+    if (succeeded.length > 0) {
       await tx.$executeRawUnsafe(
         `UPDATE outbox_events SET processed_at = now() WHERE id = ANY($1::bigint[])`,
-        rows.map((row) => String(row.id)),
+        succeeded.map((row) => String(row.id)),
       );
-      return rows.length;
-    });
+    }
+    if (unknown.length > 0) {
+      await tx.$executeRawUnsafe(
+        `UPDATE outbox_events SET processed_at = now(), last_error = $2 WHERE id = ANY($1::bigint[])`,
+        unknown.map((row) => String(row.id)),
+        OUTBOX_UNKNOWN_TOPIC_ERROR,
+      );
+      for (const row of unknown) {
+        outcome.unknownTopics.set(row.topic, (outcome.unknownTopics.get(row.topic) ?? 0) + 1);
+      }
+    }
+    if (failures.length > 0) {
+      const updated = await tx.$queryRawUnsafe<
+        Array<{ id: string | number | bigint; topic: string; attempts: number; parked_at: Date | null; last_error: string | null }>
+      >(
+        `UPDATE outbox_events AS o
+         SET attempts = o.attempts + 1,
+             last_error = f.error,
+             parked_at = CASE WHEN o.attempts + 1 >= $3 THEN now() ELSE NULL END
+         FROM unnest($1::bigint[], $2::text[]) AS f(id, error)
+         WHERE o.id = f.id
+         RETURNING o.id, o.topic, o.attempts, o.parked_at, o.last_error`,
+        failures.map((failure) => String(failure.row.id)),
+        failures.map((failure) => failure.error),
+        this.maxAttempts,
+      );
+      for (const row of updated) {
+        if (row.parked_at) {
+          outcome.parked.push({
+            id: String(row.id),
+            topic: row.topic,
+            attempts: Number(row.attempts),
+            lastError: row.last_error ?? "",
+          });
+        }
+      }
+      this.options.logger?.warn?.("outbox relay delivery failed", {
+        failed: failures.length,
+        parked: outcome.parked.length,
+        ids: failures.map((failure) => String(failure.row.id)),
+      });
+    }
+    outcome.processed = succeeded.length + unknown.length;
+    outcome.failed = failures.length;
+    return outcome;
+  }
+
+  /**
+   * After the parking commit: one system audit row per parked event and one
+   * operator case per topic (idempotent while the case is unresolved). A case
+   * that cannot be raised is retried on the next drain.
+   */
+  private async escalateParked(parked: readonly OutboxParkedEvent[]): Promise<void> {
+    for (const event of parked) {
+      try {
+        await this.auditParked(event);
+      } catch (error) {
+        this.options.logger?.error?.("outbox relay could not audit a parked event", {
+          id: event.id,
+          topic: event.topic,
+          error: errorText(error),
+        });
+      }
+      const list = this.pendingCases.get(event.topic) ?? [];
+      list.push(event);
+      this.pendingCases.set(event.topic, list);
+    }
+    for (const [topic, events] of [...this.pendingCases]) {
+      const ids = events.map((event) => event.id);
+      const notes = (
+        `Outbox topic "${topic}" parked ${events.length} event(s) after ${this.maxAttempts} failed deliveries`
+        + ` (ids ${ids.slice(0, 20).join(", ")}${ids.length > 20 ? ", ..." : ""}).`
+        + ` Last error: ${events[events.length - 1]?.lastError ?? ""}.`
+        + " Fix the consumer, then requeue the parked events."
+      ).slice(0, MAX_ERROR_LENGTH);
+      try {
+        await this.raiseCase({ subjectKey: outboxParkedSubjectKey(topic), notes });
+        this.pendingCases.delete(topic);
+      } catch (error) {
+        this.options.logger?.error?.("outbox relay could not raise the parked-event case", {
+          topic,
+          error: errorText(error),
+        });
+      }
+    }
+  }
+
+  private async raiseCase(input: { subjectKey: string; notes: string }): Promise<boolean> {
+    if (this.options.deadLetter?.raiseCase) {
+      return this.options.deadLetter.raiseCase(input);
+    }
+    // Loaded lazily: the ledger alert module pulls in the governance graph,
+    // which itself depends on the storage engine.
+    const { raiseLedgerCase } = await import("../../engine/ledger/ledgerAlerts");
+    return raiseLedgerCase(this.db, input);
+  }
+
+  private async auditParked(event: OutboxParkedEvent): Promise<void> {
+    const input = {
+      action: "OUTBOX_EVENT_PARKED",
+      entityType: "OUTBOX_EVENT",
+      entityId: event.id,
+      before: { parked: false },
+      after: { parked: true, topic: event.topic, attempts: event.attempts, lastError: event.lastError },
+    };
+    if (this.options.deadLetter?.audit) {
+      await this.options.deadLetter.audit(input);
+      return;
+    }
+    const { writeSystemAudit } = await import("../../engine/ledger/ledgerAlerts");
+    await writeSystemAudit(this.db, input);
+  }
+
+  /**
+   * Returns parked events to the queue (attempts reset) so the relay delivers
+   * them again, e.g. after the consumer was fixed. Restricted to one topic when
+   * given. The caller audits the operator action.
+   */
+  public async requeueParked(topic?: string): Promise<number> {
+    return topic
+      ? this.db.$executeRawUnsafe(
+          `UPDATE outbox_events SET parked_at = NULL, attempts = 0
+           WHERE processed_at IS NULL AND parked_at IS NOT NULL AND topic = $1`,
+          topic,
+        )
+      : this.db.$executeRawUnsafe(
+          `UPDATE outbox_events SET parked_at = NULL, attempts = 0
+           WHERE processed_at IS NULL AND parked_at IS NOT NULL`,
+        );
+  }
+
+  /**
+   * Backlog figures for the monitor. Both statements read through the partial
+   * `outbox_events_unprocessed_idx` (parked rows keep `processed_at` NULL).
+   */
+  public async backlogStats(now: Date = new Date()): Promise<OutboxBacklogStats> {
+    const [oldest, parked] = await Promise.all([
+      this.db.$queryRawUnsafe<Array<{ created_at: Date }>>(
+        `SELECT created_at FROM outbox_events
+         WHERE processed_at IS NULL AND parked_at IS NULL
+         ORDER BY id ASC
+         LIMIT 1`,
+      ),
+      this.db.$queryRawUnsafe<Array<{ count: string | number | bigint }>>(
+        `SELECT count(*)::text AS count FROM outbox_events
+         WHERE processed_at IS NULL AND parked_at IS NOT NULL`,
+      ),
+    ]);
+    const createdAt = oldest[0]?.created_at ? new Date(oldest[0].created_at) : null;
+    return {
+      oldestPendingCreatedAt: createdAt,
+      oldestPendingAgeMs: createdAt ? Math.max(0, now.getTime() - createdAt.getTime()) : null,
+      parkedCount: Number(parked[0]?.count ?? 0),
+    };
   }
 
   private async pruneIfDue(): Promise<void> {
@@ -555,9 +921,11 @@ export class OutboxRelayWorker {
 
   /**
    * Deletes processed rows older than the retention window, oldest first, in
-   * bounded batches. It walks the primary key below the oldest unprocessed id
+   * bounded batches. It walks the primary key below the oldest pending id
    * (found through the partial unprocessed index), so it needs no extra index
-   * on `processed_at` and never touches pending work.
+   * on `processed_at` and never touches pending work. Parked rows are never
+   * deleted (they keep `processed_at` NULL and are excluded explicitly), and
+   * they do not hold the prune back either.
    */
   public async prune(now: Date = new Date()): Promise<number> {
     const retentionMs = this.options.retention?.retentionMs ?? 0;
@@ -570,8 +938,9 @@ export class OutboxRelayWorker {
       `DELETE FROM outbox_events
        WHERE id IN (
          SELECT id FROM outbox_events
-         WHERE id < COALESCE((SELECT min(id) FROM outbox_events WHERE processed_at IS NULL), 9223372036854775807)
+         WHERE id < COALESCE((SELECT min(id) FROM outbox_events WHERE processed_at IS NULL AND parked_at IS NULL), 9223372036854775807)
            AND processed_at IS NOT NULL
+           AND parked_at IS NULL
            AND processed_at < $1::timestamptz
          ORDER BY id ASC
          LIMIT $2
@@ -618,8 +987,15 @@ export class AuditShipperWorker {
       leaseMs?: number;
       retention?: OutboxRetentionOptions;
       logger?: WorkerLoggerLike;
+      /** Where the shipper reports its health (AUTO-03). Default: the process-wide registry; `null` turns it off. */
+      healthRegistry?: WorkerHealthRegistry | null;
     } = {},
-  ) {}
+  ) {
+    this.health = options.healthRegistry === undefined ? defaultWorkerHealthRegistry : options.healthRegistry;
+    this.health?.register(AUDIT_SHIPPER_HEALTH_NAME, { intervalMs: Math.max(options.intervalMs ?? 500, options.maxIdleIntervalMs ?? 5_000) });
+  }
+
+  private readonly health: WorkerHealthRegistry | null;
 
   public get isRunning(): boolean {
     return this.running;
@@ -631,12 +1007,14 @@ export class AuditShipperWorker {
     }
     this.running = true;
     this.stopped = false;
+    this.health?.markStarted(AUDIT_SHIPPER_HEALTH_NAME);
     this.schedule(0);
   }
 
   public stop(): void {
     this.stopped = true;
     this.running = false;
+    this.health?.markStopped(AUDIT_SHIPPER_HEALTH_NAME);
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -663,10 +1041,14 @@ export class AuditShipperWorker {
   private async tick(): Promise<void> {
     const baseMs = this.options.intervalMs ?? 500;
     let drained = 0;
+    const startedAt = performance.now();
+    this.health?.recordTickStart(AUDIT_SHIPPER_HEALTH_NAME);
     try {
       drained = await this.drain();
       await this.pruneIfDue();
+      this.health?.recordSuccess(AUDIT_SHIPPER_HEALTH_NAME, new Date(), performance.now() - startedAt, { processed: drained });
     } catch (error) {
+      this.health?.recordFailure(AUDIT_SHIPPER_HEALTH_NAME, new Date(), performance.now() - startedAt, error);
       this.options.logger?.error?.("audit shipper failed", {
         error: error instanceof Error ? error.message : String(error),
       });

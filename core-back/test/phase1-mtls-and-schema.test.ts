@@ -97,6 +97,16 @@ const designModelNames = [
   "GlShardCheckpoint",
   // Append-only history of every ledger shard repair.
   "GlShardRepair",
+  "SessionRevocation",
+  // Keyset cursors persisted by singleton workers (AUTO-25).
+  "WorkerCursor",
+  // Exactly-once markers of the deadline worker (AUTO-04, AUTO-22).
+  "DeadlineStage",
+  // Signed anchors of the verified audit hash chain (AUTO-27).
+  "AuditChainAnchor",
+  // Outbound merchant webhooks (AUTO-34).
+  "MerchantWebhookEndpoint",
+  "MerchantWebhookDelivery",
   "OutboxEvent",
   "AuditOutbox",
   "BackupCatalogRun",
@@ -162,16 +172,28 @@ describe("prisma schema", () => {
     // shard-sequenced checkpoint redesign raised the version to 12.
     expect(ordered).toContain("20261107090000_shard_sequenced_checkpoints");
     expect(ordered).toContain("20261107120000_inbound_event_claims");
-    expect(ordered.at(-1)).toBe("20261107150000_shard_repairs");
+    // The automation plan adds one migration per item; the ledger query/index optimisation is applied after them
+    // (schema version 25) so its partition function carries both the automation security hardening and the
+    // append-only autovacuum settings. The newest migration must be well-formed and set the required version.
+    expect(ordered.at(-1)).toBe("20261109210000_ledger_query_and_index_optimization");
+    expect(ordered).toContain("20261109200000_merchant_webhooks");
+    expect(ordered).toContain("20261109130000_journal_partition_worker");
+    expect(ordered).toContain("20261109120000_outbox_dead_letter_worker_cursors");
+    expect(ordered).toContain("20261108100000_session_revocations");
+    expect(ordered).toContain("20261108090000_partition_truncate_guard");
+    const guard = fs.readFileSync(path.join(migrationsDirectory, "20261108090000_partition_truncate_guard", "migration.sql"), "utf8");
+    expect(guard).toContain("pgw_guard_journal_line_partition");
+    expect(guard).not.toContain("schema_versions");
     const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
-    expect(newest).toMatch(/UPDATE "schema_versions"\s+SET "version" = 14\b/);
-    expect(REQUIRED_SCHEMA_VERSION).toBe(14);
+    expect(newest).toMatch(new RegExp(`UPDATE "schema_versions"\\s+SET "version" = ${REQUIRED_SCHEMA_VERSION}\\b`));
+    expect(REQUIRED_SCHEMA_VERSION).toBe(25);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),
         "utf8",
       );
-      expect(sql).toContain("CREATE");
+      // Every migration changes the schema; an ALTER-only migration (e.g. a new enum value) is valid too.
+      expect(sql).toMatch(/\b(CREATE|ALTER)\b/);
       expect(sql.toLowerCase()).not.toContain("engine=innodb");
       // MySQL identifier quoting is forbidden in executable SQL; a backtick inside a `--` comment is just prose.
       const executable = sql.split("\n").filter((line) => !line.trimStart().startsWith("--")).join("\n");

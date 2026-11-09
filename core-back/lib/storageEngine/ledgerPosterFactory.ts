@@ -12,6 +12,11 @@ export interface LedgerPosterOptions {
    * synchronously in the same transaction.
    */
   emitOutbox?: boolean;
+  /**
+   * Raw-SQL posting and a short-lived cache of resolved accounts (see `LedgerPosterOptions.rawSql`). On by default
+   * in production; `LEDGER_RAW_SQL=false` is the kill switch that returns to the ORM path without a deploy.
+   */
+  rawSql?: boolean;
 }
 
 /**
@@ -41,5 +46,6 @@ export const createLedgerPoster = (
             },
           });
         },
+    { rawSql: options.rawSql ?? process.env.LEDGER_RAW_SQL !== "false" },
   );
 };

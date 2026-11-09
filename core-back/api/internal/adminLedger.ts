@@ -148,10 +148,21 @@ router.get("/finance/journal-entries", async (request: Request, response: Respon
     }),
     countUnlessSkipped(built, () => client.journalEntry.count({ where: where as never })),
   ]);
+  // journal_lines is monthly range-partitioned by created_at. A page can span months (and an
+  // entry's lines are inserted in its own transaction), so bound the lookup by the page's
+  // oldest/newest entry timestamp plus a small margin: PostgreSQL then prunes every monthly
+  // partition outside that window instead of probing all of them for each entry id.
+  const entryTimes = entries.map((entry) => entry.createdAt.getTime());
   const lines = entries.length === 0
     ? []
     : await client.journalLine.findMany({
-        where: { entryId: { in: entries.map((entry) => entry.id) } },
+        where: {
+          entryId: { in: entries.map((entry) => entry.id) },
+          createdAt: {
+            gte: new Date(Math.min(...entryTimes) - 5 * 60 * 1000),
+            lte: new Date(Math.max(...entryTimes) + 5 * 60 * 1000),
+          },
+        },
         select: { entryId: true, direction: true, amount: true, glAccount: { select: { currency: true } } },
       });
   const byEntry = new Map<string, typeof lines>();
@@ -182,9 +193,17 @@ router.get("/finance/journal-entries/:id", async (request: Request, response: Re
   if (!entry) {
     throw new ApiError(404, "JOURNAL_ENTRY_NOT_FOUND", "The journal entry does not exist");
   }
-  // journal_lines is partitioned: always address it by entry_id (indexed), never by id alone.
+  // journal_lines is partitioned: always address it by entry_id (indexed) AND a createdAt
+  // window derived from the parent entry (lines are inserted in the entry's transaction),
+  // never by id alone, so PostgreSQL prunes every monthly partition outside the window.
   const lines = await client.journalLine.findMany({
-    where: { entryId: id },
+    where: {
+      entryId: id,
+      createdAt: {
+        gte: new Date(entry.createdAt.getTime() - 5 * 60 * 1000),
+        lte: new Date(entry.createdAt.getTime() + 5 * 60 * 1000),
+      },
+    },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: {
       id: true,
@@ -442,11 +461,15 @@ router.post("/finance/gl-accounts/:id/shards/:shardId/repair", async (request: R
   const id = requireUuidParam(request.params.id, "GL_ACCOUNT_NOT_FOUND", "The GL account does not exist");
   const shardId = shardIdParam(request.params.shardId);
   const body = parseOrThrow(repairBodySchema, request.body ?? {});
+  // The deep read runs here, outside the repair transaction and without the shard lock (AUTO-10); the apply only
+  // reads the lines posted since, under the lock.
+  const basePlan = await planShardRepair(client, id, shardId);
   const result = await applyShardRepair(client, {
     glAccountId: id,
     shardId,
     mode: "MANUAL",
     allowedKinds: ["RECOMPUTE"],
+    basePlan,
     expectedPlanHash: body.planHash,
     reason: body.reason,
     actor: { actorId: actor.actorId, role: actor.role },

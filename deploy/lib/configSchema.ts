@@ -188,6 +188,11 @@ const base = z.strictObject({
   KEEP_RELEASES: z.coerce.number().int().min(1).max(100).default(5),
   ROTATE_MTLS_CERTS: booleanish.default(false),
   MTLS_VALIDITY_DAYS: z.coerce.number().int().min(1).max(3650).default(825),
+  /**
+   * A normal deploy re-issues, with the SAME CA, every leaf certificate that expires within this many days
+   * (AUTO-28). 0 turns it off. The CA is never replaced by this: that is `--rotate-certs`.
+   */
+  MTLS_RENEW_WITHIN_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
   LAN_ALLOWED_CIDRS: cidrList.default("127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
   ROLLING_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(1),
 
@@ -308,8 +313,14 @@ const base = z.strictObject({
    * KYB document scanner mode. `eicar` is the built-in content gate (EICAR +
    * active-content sniffing) for deployments without a real malware engine;
    * `disabled` leaves every document PENDING (reviewers cannot preview it).
+   * `clamd` (AUTO-06) scans with ClamAV. With KYB_CLAMD_ADDRESS empty the deploy engine installs and configures
+   * clamd + freshclam on every core host (loopback 127.0.0.1:3310); with an address (a Unix socket path or
+   * host:port) it uses the operator's own daemon and installs nothing.
    */
-  KYB_SCANNER_MODE: z.enum(["eicar", "disabled"]).default("eicar"),
+  KYB_SCANNER_MODE: z.enum(["eicar", "disabled", "clamd"]).default("eicar"),
+  KYB_CLAMD_ADDRESS: z.string().trim().max(200).default(""),
+  /** CLEAN KYB documents are re-scanned after this many days (0 = never). */
+  KYB_RESCAN_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
   BASE_CURRENCY: z.string().trim().length(3).default("LYD"),
   GATEWAY_TIMEZONE: z.string().trim().min(1).max(64).default("Africa/Tripoli"),
   REDIS_URL: z.string().trim().max(500).optional(),
@@ -365,6 +376,22 @@ const base = z.strictObject({
     .refine(notReservedRole, RESERVED_ROLE_MESSAGE)
     .default("gw_core_user"),
   PG_DB_PASSWORD: optionalSecret,
+  /**
+   * The role the running application connects as. `PG_DB_USER` is the database OWNER (it runs the migrations) and
+   * the append-only ledger triggers cannot stop an owner from dropping them, so production must not run as it. The
+   * app role is a plain LOGIN role that is only a member of `pgw_app` (DML on the tables, no UPDATE/DELETE/TRUNCATE
+   * on the ledger and audit tables, no DDL). It is enabled by setting `PG_APP_PASSWORD`; without it the deploy keeps
+   * the legacy single-role behaviour and warns.
+   */
+  PG_APP_USER: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9_]+$/, "must be an identifier")
+    .refine(notReservedRole, RESERVED_ROLE_MESSAGE)
+    .default("pgw_app_login"),
+  PG_APP_PASSWORD: optionalSecret,
   PG_REPLICATION_USER: z
     .string()
     .trim()
@@ -626,6 +653,16 @@ export const edgeCoreUrls = (config: DeployConfig): string[] => {
 };
 
 /** The effective relational database (legacy DB_* or the PG 18 settings). */
+/** True when the running application gets its own, non-owner database role (`PG_APP_PASSWORD` is set). */
+export const pgAppRoleEnabled = (config: DeployConfig): boolean =>
+  pgStorageConfigured(config) && config.PG_APP_PASSWORD.length > 0;
+
+/** Credentials the RUNNING application uses: the `pgw_app` member when enabled, otherwise the owner (legacy). */
+export const applicationCredentials = (config: DeployConfig): { user: string; password: string } =>
+  pgAppRoleEnabled(config)
+    ? { user: config.PG_APP_USER, password: config.PG_APP_PASSWORD }
+    : { user: config.PG_DB_USER, password: config.PG_DB_PASSWORD };
+
 export const effectiveDatabase = (config: DeployConfig): {
   engine: DeployConfig["DB_ENGINE"];
   host: string | null;
@@ -634,6 +671,8 @@ export const effectiveDatabase = (config: DeployConfig): {
   user: string;
   password: string;
   url: string | null;
+  /** The owner's URL (migrations, seeders). Equal to `url` in the legacy single-role mode. */
+  ownerUrl: string | null;
   privateIp: string | null;
   managedViaSsh: boolean;
 } => {
@@ -648,8 +687,16 @@ export const effectiveDatabase = (config: DeployConfig): {
   const host = primary?.privateIp ?? config.DB_PRIVATE_IP ?? null;
   const port = primary?.servicePort ?? config.DB_PORT;
   const derivedPort = config.PGBOUNCER_ENABLED ? config.PGBOUNCER_PORT : port;
+  // The URL the application connects with: the app role when enabled (the owner only in the legacy mode), and TLS
+  // whenever the deploy manages the cluster: its pg_hba.conf is hostssl-only and PgBouncer now requires TLS on its
+  // client side too (the self-signed certificate is encrypted-but-unverified, hence `no-verify`).
+  const app = applicationCredentials(config);
   const url = pg && host
-    ? `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${derivedPort}/${name}`
+    ? `postgresql://${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}@${host}:${derivedPort}/${name}${config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : ""}`
+    : (config.DATABASE_URL ?? null);
+  // The owner's URL, for migrations and the test-server seeders only. It is never written to the runtime `.env`.
+  const ownerUrl = pg && host
+    ? `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${derivedPort}/${name}${config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : ""}`
     : (config.DATABASE_URL ?? null);
   return {
     engine: config.DB_ENGINE,
@@ -659,6 +706,7 @@ export const effectiveDatabase = (config: DeployConfig): {
     user,
     password,
     url,
+    ownerUrl,
     privateIp: pg ? (primary?.privateIp ?? config.DB_PRIVATE_IP ?? null) : (config.DB_PRIVATE_IP ?? primary?.privateIp ?? null),
     managedViaSsh: config.DB_MANAGE_VIA_SSH || config.PG_MANAGE_VIA_SSH,
   };
@@ -682,9 +730,10 @@ export const leaderElectionDatabaseUrl = (config: DeployConfig): string | null =
     return null;
   }
   const database = effectiveDatabase(config);
-  const credentials = `${encodeURIComponent(database.user)}:${encodeURIComponent(database.password)}`;
+  const app = applicationCredentials(config);
+  const credentials = `${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}`;
   if (config.PGBOUNCER_ENABLED) {
-    return `postgresql://${credentials}@${primary.privateIp}:${config.PGBOUNCER_PORT}/${PGBOUNCER_SESSION_ALIAS}`;
+    return `postgresql://${credentials}@${primary.privateIp}:${config.PGBOUNCER_PORT}/${PGBOUNCER_SESSION_ALIAS}${config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : ""}`;
   }
   const tls = config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : "";
   return `postgresql://${credentials}@${primary.privateIp}:${primary.servicePort}/${database.name}${tls}`;
@@ -723,6 +772,7 @@ export const weakSecretProblems = (config: DeployConfig): string[] => {
   const secrets: Array<[string, string | undefined]> = [
     ["KMS_MASTER_KEY", config.KMS_MASTER_KEY],
     ["PG_DB_PASSWORD", config.PG_DB_PASSWORD],
+    ["PG_APP_PASSWORD", config.PG_APP_PASSWORD],
     ["PG_REPLICATION_PASSWORD", config.PG_REPLICATION_PASSWORD],
     ["REDIS_PASSWORD", config.REDIS_PASSWORD],
     ["AUDIT_DB_PASSWORD", config.AUDIT_DB_PASSWORD],
@@ -769,11 +819,26 @@ export const productionGuardProblems = (config: DeployConfig): string[] => {
  * topology impossible (the database URL not matching the engine, a certbot
  * domain with no certificate path, a database host with no SSH target, …).
  */
+/** The address the deploy engine configures when it manages clamd itself (loopback on each core host). */
+export const CLAMD_LOCAL_ADDRESS = "127.0.0.1:3310";
+
+/** True when the deploy engine installs and configures ClamAV: the scanner is `clamd` and no external address was given. */
+export const clamdManaged = (config: Pick<DeployConfig, "KYB_SCANNER_MODE" | "KYB_CLAMD_ADDRESS">): boolean =>
+  config.KYB_SCANNER_MODE === "clamd" && config.KYB_CLAMD_ADDRESS.trim() === "";
+
 export const validateDeployConfig = (config: DeployConfig): string[] => {
   const problems: string[] = [];
   const pgConfigured = pgStorageConfigured(config);
   problems.push(...weakSecretProblems(config));
   problems.push(...productionGuardProblems(config));
+
+  if (config.KYB_SCANNER_MODE === "clamd") {
+    const address = config.KYB_CLAMD_ADDRESS;
+    const isSocket = /^(unix:)?\/[A-Za-z0-9._+@/-]+$/.test(address);
+    const hostPort = /^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9._-]+):([0-9]{1,5})$/.exec(address);
+    const portOk = hostPort ? Number(hostPort[2]) >= 1 && Number(hostPort[2]) <= 65_535 : false;
+    if (address && !isSocket && !portOk) problems.push("KYB_CLAMD_ADDRESS must be an absolute Unix socket path or host:port");
+  }
 
   if (pgConfigured && config.DB_ENGINE !== "postgresql") {
     problems.push("DB_ENGINE must be 'postgresql' when PostgreSQL 18 storage fields are configured");
@@ -805,6 +870,24 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   }
   if (pgConfigured && config.PG_DB_PASSWORD.length > 0 && config.PG_DB_PASSWORD.length < 8) {
     problems.push("PG_DB_PASSWORD must be at least 8 characters");
+  }
+  if (config.PG_APP_PASSWORD.length > 0) {
+    if (!pgConfigured) problems.push("PG_APP_PASSWORD requires the PostgreSQL 18 storage fields");
+    if (config.PG_APP_PASSWORD.length < 12) problems.push("PG_APP_PASSWORD must be at least 12 characters");
+    // These names already mean something: `postgres` is the superuser (the bootstrap would strip its powers),
+    // `pgw_app` is the group role the app role joins, `pgw_ledger_maintenance` is the ledger bypass role.
+    if (["postgres", "pgw_app", "pgw_ledger_maintenance"].includes(config.PG_APP_USER.toLowerCase())) {
+      problems.push(`PG_APP_USER must not be '${config.PG_APP_USER}': that name is already a privileged or group role`);
+    }
+    if (config.PG_APP_USER === config.PG_DB_USER) {
+      problems.push("PG_APP_USER must differ from PG_DB_USER: the application must not run as the database owner");
+    }
+    if (config.PG_APP_USER === (config.PG_REPLICATION_USER ?? "pg_replicator")) {
+      problems.push("PG_APP_USER must differ from PG_REPLICATION_USER");
+    }
+    if (config.PG_APP_PASSWORD === config.PG_DB_PASSWORD) {
+      problems.push("PG_APP_PASSWORD must differ from PG_DB_PASSWORD");
+    }
   }
   if (config.PGBOUNCER_ENABLED && !pgConfigured) {
     problems.push("PGBOUNCER_ENABLED requires the PostgreSQL 18 storage fields");

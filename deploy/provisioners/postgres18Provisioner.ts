@@ -1,5 +1,6 @@
 import {
   parseNodeList,
+  pgAppRoleEnabled,
   PGBOUNCER_SESSION_ALIAS,
   type DeployConfig,
   type NodeSpec,
@@ -67,6 +68,8 @@ export interface ProvisionReport {
   nodes: string[];
   /** What happened to each managed service (`<host>:<service>` -> outcome); lets tests and the timing report prove nothing was bounced needlessly. */
   outcomes?: Record<string, ApplyOutcome>;
+  /** Things the operator should read (for example how the memory settings were sized). */
+  notes?: string[];
 }
 
 const version = (config?: Pick<DeployConfig, "PG_VERSION">): string => config?.PG_VERSION ?? "18";
@@ -173,6 +176,42 @@ const specToRef = (spec: NodeSpec): PgNodeRef => ({
 const slotName = (node: PgNodeRef | string, index = 0): string => {
   const raw = typeof node === "string" ? `replica_${index + 1}` : node.nodeId ?? `replica_${index + 1}`;
   return raw.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^([^a-z])/, "r_$1").slice(0, 63);
+};
+
+/** Prints the host's RAM in whole GB (read-only). */
+export const MEM_TOTAL_GB_COMMAND = "awk '/^MemTotal:/ { printf \"%d\\n\", $2 / 1048576 }' /proc/meminfo";
+
+/**
+ * Memory sizing is a preflight, not a guess. With `PG_RAM_GB` unset the reference profile assumes a 32 GB host
+ * (`shared_buffers = 8GB`, `effective_cache_size = 24GB`), which on a smaller machine either fails to start or
+ * pushes the host into swap. So the host's real RAM is read and used when `PG_RAM_GB` is unset, and an explicit
+ * `PG_RAM_GB` that the host cannot hold is refused instead of deployed. Pure: `detectedGb` is `undefined` when the
+ * host could not be probed (a dry run, an unreadable `/proc/meminfo`).
+ */
+export const resolvePostgresSizing = (
+  configuredGb: number | undefined,
+  detectedGb: number | undefined,
+  host: string,
+): { ramGb: number | undefined; notes: string[] } => {
+  const known = detectedGb !== undefined && Number.isFinite(detectedGb) && detectedGb > 0 ? detectedGb : undefined;
+  if (known === undefined) {
+    return {
+      ramGb: configuredGb,
+      notes: configuredGb
+        ? []
+        : [`${host}: PG_RAM_GB is not set and the host's RAM could not be read, so the 32 GB reference profile is used (shared_buffers = 8GB). Set PG_RAM_GB to the database host's RAM.`],
+    };
+  }
+  if (configuredGb === undefined) {
+    return { ramGb: known, notes: [`${host}: PG_RAM_GB is not set; memory settings are sized from the host's ${known} GB of RAM.`] };
+  }
+  if (configuredGb > known * 1.1 + 1) {
+    throw new Error(
+      `PG_RAM_GB=${configuredGb} exceeds the ${known} GB of RAM that ${host} has: shared_buffers and effective_cache_size would not fit. `
+      + "Lower PG_RAM_GB (or unset it to size from the host).",
+    );
+  }
+  return { ramGb: configuredGb, notes: [] };
 };
 
 /** The exact PostgreSQL 18 tuning block from the storage architecture. */
@@ -358,8 +397,19 @@ export const primaryBootstrapSql = (config: DeployConfig, replicas: Array<PgNode
     return `DO ${tag} BEGIN ${body} END ${tag};`;
   };
   const createDb = sqlLiteral(`CREATE DATABASE ${dbName} OWNER ${appUser}`, "CREATE DATABASE");
+  // The runtime login role: a plain LOGIN member of `pgw_app` (DML only; no DDL, no UPDATE/DELETE/TRUNCATE on the
+  // ledger and audit tables). `pgw_app` itself is also created by the append-only migration; creating it here first
+  // lets the role exist before the first migration runs, and the migration's own IF NOT EXISTS keeps both safe.
+  const runtimeRole = pgAppRoleEnabled(config)
+    ? [
+        doBlock(`IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'pgw_app') THEN CREATE ROLE pgw_app NOLOGIN; END IF;`),
+        doBlock(`IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${sqlLiteral(config.PG_APP_USER, "PG_APP_USER")}) THEN CREATE ROLE ${sqlIdent(config.PG_APP_USER, "PG_APP_USER")} LOGIN PASSWORD ${sqlLiteral(config.PG_APP_PASSWORD, "PG_APP_PASSWORD")} NOSUPERUSER NOCREATEDB NOCREATEROLE; ELSE ALTER ROLE ${sqlIdent(config.PG_APP_USER, "PG_APP_USER")} PASSWORD ${sqlLiteral(config.PG_APP_PASSWORD, "PG_APP_PASSWORD")} NOSUPERUSER NOCREATEDB NOCREATEROLE; END IF;`),
+        `GRANT pgw_app TO ${sqlIdent(config.PG_APP_USER, "PG_APP_USER")};`,
+      ]
+    : [];
   return [
     doBlock(`IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${appUserLit}) THEN CREATE ROLE ${appUser} LOGIN PASSWORD ${appPw}; ELSE ALTER ROLE ${appUser} PASSWORD ${appPw}; END IF;`),
+    ...runtimeRole,
     `SELECT ${createDb} WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = ${dbNameLit})\\gexec`,
     replicationRoleSql(config),
     ...replicas.map((node, index) => {
@@ -436,8 +486,21 @@ runuser -u postgres -- env PGPASSFILE=/var/lib/postgresql/.pgpass PGSSLMODE=requ
 const connValue = (value: string): string =>
   `'${assertSingleLine(value, "pgbouncer value").replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 
+export const PGBOUNCER_TLS_DIR = "/etc/pgbouncer/tls";
+export const PGBOUNCER_TLS_KEY = `${PGBOUNCER_TLS_DIR}/server.key`;
+export const PGBOUNCER_TLS_CERT = `${PGBOUNCER_TLS_DIR}/server.crt`;
+
 /**
  * The exact PgBouncer configuration.
+ *
+ * Each client connects as ITSELF and PgBouncer opens the server connection with the same user and the password
+ * from the auth file. The `[databases]` entries used to force `user=PG_DB_USER password=...`, so every session
+ * the database saw was the table OWNER whatever role the application logged in with: the non-owner `pgw_app`
+ * role (and with it the append-only ledger protection) could never take effect through the pooler.
+ *
+ * The client side requires TLS (`client_tls_sslmode = require`): the core reaches PgBouncer across hosts, and the
+ * link used to be plaintext. The certificate is self-signed per host, so clients encrypt without verifying it
+ * (`sslmode=no-verify`), exactly like the direct PostgreSQL links.
  *
  * The application database stays in transaction mode (the pooler's reason to
  * exist). A second alias, `pgw_session`, maps to the SAME real database with
@@ -448,14 +511,17 @@ export const pgbouncerIni = (config: DeployConfig, serverPort = 5432): string =>
   const coreNodes = parseNodeList(config.CORE_NODES).length || 1;
   const sessionPoolSize = Math.max(8, coreNodes * 2 + 4);
   return `[databases]
-${assertSingleLine(config.PG_DB_NAME, "PG_DB_NAME")} = host=127.0.0.1 port=${serverPort} dbname=${connValue(config.PG_DB_NAME)} user=${connValue(config.PG_DB_USER)} password=${connValue(config.PG_DB_PASSWORD)}
-${PGBOUNCER_SESSION_ALIAS} = host=127.0.0.1 port=${serverPort} dbname=${connValue(config.PG_DB_NAME)} user=${connValue(config.PG_DB_USER)} password=${connValue(config.PG_DB_PASSWORD)} pool_mode=session pool_size=${sessionPoolSize}
+${assertSingleLine(config.PG_DB_NAME, "PG_DB_NAME")} = host=127.0.0.1 port=${serverPort} dbname=${connValue(config.PG_DB_NAME)}
+${PGBOUNCER_SESSION_ALIAS} = host=127.0.0.1 port=${serverPort} dbname=${connValue(config.PG_DB_NAME)} pool_mode=session pool_size=${sessionPoolSize}
 
 [pgbouncer]
 listen_addr = 0.0.0.0
 listen_port = ${config.PGBOUNCER_PORT}
 pool_mode = transaction
 server_tls_sslmode = require
+client_tls_sslmode = require
+client_tls_key_file = ${PGBOUNCER_TLS_KEY}
+client_tls_cert_file = ${PGBOUNCER_TLS_CERT}
 max_client_conn = ${config.PGBOUNCER_MAX_CLIENT_CONN}
 default_pool_size = ${config.PGBOUNCER_DEFAULT_POOL_SIZE}
 reserve_pool_size = 10
@@ -468,7 +534,27 @@ auth_file = /etc/pgbouncer/userlist.txt
 };
 
 export const pgbouncerUserlist = (config: DeployConfig): string =>
-  `${pgbouncerQuoted(config.PG_DB_USER)} ${pgbouncerQuoted(config.PG_DB_PASSWORD)}\n${pgbouncerQuoted(config.PG_REPLICATION_USER)} ${pgbouncerQuoted(config.PG_REPLICATION_PASSWORD)}\n`;
+  `${pgbouncerQuoted(config.PG_DB_USER)} ${pgbouncerQuoted(config.PG_DB_PASSWORD)}\n`
+  + (pgAppRoleEnabled(config) ? `${pgbouncerQuoted(config.PG_APP_USER)} ${pgbouncerQuoted(config.PG_APP_PASSWORD)}\n` : "")
+  + `${pgbouncerQuoted(config.PG_REPLICATION_USER)} ${pgbouncerQuoted(config.PG_REPLICATION_PASSWORD)}\n`;
+
+/**
+ * Creates (once) the self-signed certificate PgBouncer presents to its clients and hands it to the account the
+ * PgBouncer unit runs as. Idempotent: an existing certificate is kept, so a re-deploy does not rotate it.
+ */
+export const pgbouncerTlsCommand = (hostName: string): string => {
+  const subject = `/CN=${hostName.replace(/[^A-Za-z0-9.-]/g, "")}`;
+  return [
+    `install -d -m 0750 ${PGBOUNCER_TLS_DIR}`,
+    `if [ ! -s ${PGBOUNCER_TLS_KEY} ] || [ ! -s ${PGBOUNCER_TLS_CERT} ]; then (umask 077 && openssl req -x509 -newkey rsa:4096 -nodes -sha256 -days 825 -subj ${shellQuote(subject)} -keyout ${PGBOUNCER_TLS_KEY} -out ${PGBOUNCER_TLS_CERT}); fi`,
+    `pgbouncer_owner="$(systemctl show -p User --value pgbouncer 2>/dev/null)"`,
+    `[ -n "$pgbouncer_owner" ] || pgbouncer_owner=pgbouncer`,
+    `if ! id "$pgbouncer_owner" >/dev/null 2>&1; then pgbouncer_owner=postgres; fi`,
+    `chown "$pgbouncer_owner:" ${PGBOUNCER_TLS_DIR} ${PGBOUNCER_TLS_KEY} ${PGBOUNCER_TLS_CERT}`,
+    `chmod 0600 ${PGBOUNCER_TLS_KEY}`,
+    `chmod 0644 ${PGBOUNCER_TLS_CERT}`,
+  ].join(" && ");
+};
 
 /** Writes a root-owned file and reports whether its content changed. */
 const write = (runner: ProvisionRunner, target: SshTarget, path: string, content: string, mode = 0o600): boolean =>
@@ -539,6 +625,8 @@ export const applyPgbouncer = (input: {
   const dropInChanged = write(runner, ssh, PGBOUNCER_DROPIN_PATH, pgbouncerSystemdDropIn(), 0o644);
   const signatureChanged = write(runner, ssh, PGBOUNCER_SIGNATURE_PATH, pgbouncerRestartSignature(ini), 0o644);
   runner.run(ssh, pgbouncerConfigOwnership(), { sudo: true });
+  // The key and certificate must exist, readable by the PgBouncer account, before it starts with client TLS.
+  runner.run(ssh, pgbouncerTlsCommand(ssh.host), { sudo: true });
   const script = pgbouncerApplyScript({
     port: config.PGBOUNCER_PORT,
     daemonReload: dropInChanged,
@@ -578,7 +666,14 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
     commands.push(command);
     runner.run(primarySsh, command, { sudo: true });
   }
-  const confChanged = write(runner, primarySsh, postgresMainConfigPath(config, primaryCluster), postgresMainConfigSnippet(config, primaryCluster, primaryIp), 0o644);
+  const notes: string[] = [];
+  const sized = (target: SshTarget): DeployConfig => {
+    const detected = runner.dryRun ? undefined : Number.parseInt(String(runner.capture(target, MEM_TOTAL_GB_COMMAND, { sudo: false })).trim(), 10);
+    const sizing = resolvePostgresSizing(config.PG_RAM_GB, Number.isFinite(detected) ? detected : undefined, target.host);
+    notes.push(...sizing.notes);
+    return sizing.ramGb === undefined ? config : { ...config, PG_RAM_GB: sizing.ramGb };
+  };
+  const confChanged = write(runner, primarySsh, postgresMainConfigPath(config, primaryCluster), postgresMainConfigSnippet(sized(primarySsh), primaryCluster, primaryIp), 0o644);
   const replicaRefs = replicas;
   const primaryAllowed = [
     primaryIp,
@@ -675,7 +770,7 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
       commands.push(command);
       runner.run(replicaSsh, command, { sudo: true });
     }
-    const replicaConfChanged = write(runner, replicaSsh, postgresMainConfigPath(config, replicaCluster), postgresMainConfigSnippet(config, replicaCluster, replicaIp), 0o644);
+    const replicaConfChanged = write(runner, replicaSsh, postgresMainConfigPath(config, replicaCluster), postgresMainConfigSnippet(sized(replicaSsh), replicaCluster, replicaIp), 0o644);
     const replicaHbaChanged = write(
       runner,
       replicaSsh,
@@ -722,5 +817,5 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
     const slot = slotName(replica, index);
     commands.push(`pg_create_physical_replication_slot('${slot}')`);
   }
-  return { commands, nodes, outcomes };
+  return { commands, nodes, outcomes, ...(notes.length > 0 ? { notes } : {}) };
 };

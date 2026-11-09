@@ -114,6 +114,7 @@ describeDb("Suite 01 · storage-engine index inventory", () => {
     { table: "join_requests", name: "join_requests_trgm_search_idx", type: "gin" },
     { table: "users", name: "users_trgm_search_idx", type: "gin" },
     { table: "payment_attempts", name: "payment_attempts_trgm_search_idx", type: "gin" },
+    { table: "journal_entries", name: "journal_entries_trgm_search_idx", type: "gin" },
   ];
 
   for (const index of expected) {
@@ -142,6 +143,7 @@ describeDb("Suite 01 · hot query plans", () => {
     { table: "operator_cases", where: "\"state\" = 'OPEN' AND \"priority\" = 'P1'", label: "P1 operator queue" },
     { table: "notifications", where: "\"status\" = 'QUEUED'", label: "notification outbox" },
     { table: "journal_lines", where: "\"gl_account_id\" = '00000000-0000-0000-0000-000000000000'::uuid", label: "journal lines by account" },
+    { table: "journal_entries", where: "\"created_at\" >= now() - interval '1 day'", label: "journal entries by created_at" },
   ];
 
   for (const plan of plans) {

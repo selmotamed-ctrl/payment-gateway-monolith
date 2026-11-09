@@ -166,14 +166,31 @@ describe("C2 login and MFA throttling", () => {
     await resetAuthThrottles();
   });
 
-  test("repeated failures lock the identifier, a success clears the counter", async () => {
+  test("repeated failures lock the identifier for that address, a success clears the counter", async () => {
     for (let i = 0; i < 4; i += 1) await recordLoginFailure("Alice@Example.com", "10.0.0.9");
     await expect(assertLoginAllowed("alice@example.com", "10.0.0.9")).resolves.toBeUndefined();
-    await recordLoginSuccess("alice@example.com");
+    await recordLoginSuccess("alice@example.com", "10.0.0.9");
     for (let i = 0; i < 5; i += 1) await recordLoginFailure("alice@example.com", "10.0.0.9");
-    await expect(assertLoginAllowed("ALICE@example.com", "10.0.0.50")).rejects.toThrow();
+    await expect(assertLoginAllowed("ALICE@example.com", "10.0.0.9")).rejects.toThrow();
     // Another identifier from another address is not affected.
     await expect(assertLoginAllowed("bob@example.com", "10.0.0.50")).resolves.toBeUndefined();
+  });
+
+  test("an attacker's failures cannot lock the real owner out from the owner's own address", async () => {
+    // Anyone who knows a victim's email can send wrong passwords; that used to lock the account for everybody.
+    for (let i = 0; i < 30; i += 1) await recordLoginFailure("victim@example.com", "203.0.113.66");
+    await expect(assertLoginAllowed("victim@example.com", "203.0.113.66")).rejects.toThrow();
+    await expect(assertLoginAllowed("victim@example.com", "10.0.0.20")).resolves.toBeUndefined();
+    // The owner signing in clears nothing of the attacker's lock, and the attacker's lock is theirs alone.
+    await recordLoginSuccess("victim@example.com", "10.0.0.20");
+    await expect(assertLoginAllowed("victim@example.com", "203.0.113.66")).rejects.toThrow();
+  });
+
+  test("guessing spread over many addresses still hits the identifier-only ceiling", async () => {
+    for (let i = 0; i < 49; i += 1) await recordLoginFailure("target@example.com", `198.51.100.${i + 1}`);
+    await expect(assertLoginAllowed("target@example.com", "192.0.2.200")).resolves.toBeUndefined();
+    await recordLoginFailure("target@example.com", "198.51.100.200");
+    await expect(assertLoginAllowed("target@example.com", "192.0.2.201")).rejects.toThrow();
   });
 
   test("one address spraying many identifiers is throttled", async () => {

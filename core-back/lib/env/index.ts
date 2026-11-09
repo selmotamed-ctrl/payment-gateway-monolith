@@ -118,6 +118,62 @@ export const envSchema = z.strictObject({
    */
   WORKER_KYB_EXPIRY_BATCH_SIZE: z.coerce.number().int().positive().max(10_000).default(200),
   /**
+   * The KYB scan worker (AUTO-06): scans PENDING documents with the engine `KYB_SCANNER_MODE` selects (`clamd`,
+   * `eicar` for development, anything else = no scanner, documents stay PENDING) and re-scans CLEAN ones.
+   */
+  WORKER_KYB_SCAN_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_KYB_SCAN_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  WORKER_KYB_SCAN_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(20),
+  /** AUTO-07: statement schedule alerts. */
+  WORKER_STATEMENT_SCHEDULE_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_STATEMENT_SCHEDULE_INTERVAL_MS: z.coerce.number().int().positive().default(5 * 60 * 1000),
+  STATEMENT_SCHEDULE_GRACE_MINUTES: z.coerce.number().int().min(0).max(10_080).default(120),
+  STATEMENT_SCHEDULE_LOOKBACK_SLOTS: z.coerce.number().int().min(1).max(60).default(7),
+  /** AUTO-12: slot counter consistency audit (report only unless repair is on). */
+  WORKER_CONSISTENCY_AUDIT_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_CONSISTENCY_AUDIT_INTERVAL_MS: z.coerce.number().int().positive().default(60 * 60 * 1000),
+  CONSISTENCY_AUDIT_REPAIR: booleanFromEnvironment.default(false),
+  /** AUTO-34: outbound merchant webhooks (delivery worker, egress and failure policy). */
+  WORKER_MERCHANT_WEBHOOK_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_MERCHANT_WEBHOOK_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
+  WORKER_MERCHANT_WEBHOOK_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(50),
+  MERCHANT_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().positive().max(60_000).default(10_000),
+  MERCHANT_WEBHOOK_CONCURRENCY: z.coerce.number().int().positive().max(100).default(8),
+  /** Allows http:// and private destinations (development and Fake Rails labs only). */
+  MERCHANT_WEBHOOK_ALLOW_INSECURE: booleanFromEnvironment.default(false),
+  /** An endpoint that fails continuously this long is disabled and the merchant told. */
+  MERCHANT_WEBHOOK_DISABLE_AFTER_DAYS: z.coerce.number().int().min(1).max(60).default(5),
+  /** How long the previous signing secret keeps working after a rotation. */
+  MERCHANT_WEBHOOK_ROTATION_OVERLAP_HOURS: z.coerce.number().int().min(1).max(720).default(24),
+  /** AUTO-16: drafts the scheduled regulatory returns (draft only; a person files). */
+  WORKER_REGULATORY_REPORT_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_REGULATORY_REPORT_INTERVAL_MS: z.coerce.number().int().positive().default(60 * 60 * 1000),
+  /** Closed periods considered per scheduled return per tick (catch-up depth). */
+  REGULATORY_REPORT_MAX_PERIODS: z.coerce.number().int().min(1).max(24).default(2),
+  /** Lines one large-transaction batch carries before it is marked truncated. */
+  REGULATORY_REPORT_MAX_BATCH_LINES: z.coerce.number().int().positive().max(100_000).default(5000),
+  /** Business days before a report's due date at which the filers are reminded. */
+  REGULATORY_REPORT_REMINDER_BUSINESS_DAYS: z.coerce.number().int().min(0).max(30).default(3),
+  /** AUTO-27: daily verification of the live audit hash chain with a signed anchor (dedicated audit database only). */
+  WORKER_AUDIT_ANCHOR_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_AUDIT_ANCHOR_INTERVAL_MS: z.coerce.number().int().positive().default(24 * 60 * 60 * 1000),
+  AUDIT_ANCHOR_SEGMENT_ROWS: z.coerce.number().int().positive().max(100_000).default(5000),
+  AUDIT_ANCHOR_MAX_SEGMENTS_PER_TICK: z.coerce.number().int().positive().max(1000).default(40),
+  AUDIT_ANCHOR_KEY_ID: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/).default("audit-anchor-v1"),
+  /** AUTO-27: a PASSED full backup must exist within this window / a restore drill within the second. */
+  PLATFORM_MONITOR_BACKUP_MAX_FULL_AGE_MS: z.coerce.number().int().positive().default(36 * 60 * 60 * 1000),
+  PLATFORM_MONITOR_BACKUP_DRILL_MAX_AGE_MS: z.coerce.number().int().positive().default(8 * 24 * 60 * 60 * 1000),
+  KYB_SCANNER_MODE: z.string().optional(),
+  /** `clamd` endpoint: a Unix socket path (`/run/clamav/clamd.ctl`) or `host:port`. */
+  KYB_CLAMD_ADDRESS: z.string().optional(),
+  KYB_CLAMD_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  /** CLEAN documents are re-scanned after this many days (0 = never). */
+  KYB_RESCAN_DAYS: z.coerce.number().int().min(0).default(30),
+  /** Failed attempts after which a P2 case is opened (retries continue with backoff). */
+  KYB_SCAN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(8),
+  /** A PENDING document older than this raises the `kyb_scan_backlog` monitor finding. */
+  PLATFORM_MONITOR_KYB_SCAN_MAX_AGE_MS: z.coerce.number().int().positive().default(2 * 60 * 60 * 1000),
+  /**
    * The record retention worker (OD-4). It purges the regulatory evidence
    * that passed the retention period, and it is off unless a deployment
    * turns it on.
@@ -198,6 +254,115 @@ export const envSchema = z.strictObject({
    * degraded queue. The default is five minutes.
    */
   WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS: z.coerce.number().int().positive().default(300_000),
+  /**
+   * The platform monitor (AUTO-03) evaluates the health of the platform every minute on the cluster leader (worker
+   * staleness, checkpoint, outbox, audit outbox and job queue age, the default journal partition, certificate expiry,
+   * Redis, stale UNKNOWN attempts, refunds without a follow-up) and opens ONE keyed operator case per condition.
+   */
+  WORKER_PLATFORM_MONITOR_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_PLATFORM_MONITOR_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  /** A worker with no successful tick for this many intervals is reported. */
+  PLATFORM_MONITOR_WORKER_STALE_MULTIPLIER: z.coerce.number().positive().default(3),
+  /** Oldest unprocessed `outbox_events` row tolerated before the relay is reported as behind (milliseconds). */
+  PLATFORM_MONITOR_OUTBOX_MAX_AGE_MS: z.coerce.number().int().positive().default(300_000),
+  /** Oldest unshipped `audit_outbox` row tolerated before the audit shipper is reported as behind (milliseconds). */
+  PLATFORM_MONITOR_AUDIT_OUTBOX_MAX_AGE_MS: z.coerce.number().int().positive().default(300_000),
+  /**
+   * PEM files whose expiry is watched, as `label=path` pairs separated by commas. Empty: the mTLS server, CA and
+   * backup-client certificate paths that are configured are watched.
+   */
+  PLATFORM_MONITOR_CERT_FILES: z.string().default(""),
+  /** A certificate that expires within this many days is reported (P1). */
+  PLATFORM_MONITOR_CERT_WARN_DAYS: z.coerce.number().int().positive().default(30),
+  /**
+   * Failed deliveries after which a transactional-outbox event is parked (AUTO-02). A parked event stops blocking the
+   * relay, keeps its last error, and opens one operator case per topic.
+   */
+  OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(10),
+  /**
+   * Journal partition maintenance (AUTO-01): keeps the next N monthly `journal_lines` partitions in existence by calling
+   * the same database function the deploy cron calls, and raises a most-urgent case while rows sit in the default
+   * partition.
+   */
+  WORKER_JOURNAL_PARTITION_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_JOURNAL_PARTITION_INTERVAL_MS: z.coerce.number().int().positive().default(6 * 60 * 60 * 1000),
+  /** Months (counting the current one) that must exist ahead of the clock. */
+  LEDGER_PARTITION_MONTHS_AHEAD: z.coerce.number().int().min(1).max(60).default(6),
+  /**
+   * Expiry housekeeping (AUTO-05, AUTO-11): closes approval requests that nobody decided, revokes expired staff
+   * invitations, expires payment links, deletes old MFA challenges and session revocations, and removes the sealed
+   * MFA code / invitation token from finished notifications.
+   */
+  WORKER_EXPIRY_HOUSEKEEPING_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_EXPIRY_HOUSEKEEPING_INTERVAL_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
+  WORKER_EXPIRY_HOUSEKEEPING_BATCH_SIZE: z.coerce.number().int().positive().max(5000).default(200),
+  /** Hours an MFA challenge is kept after it was consumed or expired. */
+  MFA_CHALLENGE_RETENTION_HOURS: z.coerce.number().positive().default(24),
+  /** Minutes a finished notification keeps its sealed MFA code / invitation token. */
+  NOTIFICATION_SECRET_SCRUB_AFTER_MINUTES: z.coerce.number().positive().default(60),
+  /**
+   * SLA and deadline escalation (AUTO-04) and unratified emergency actions (AUTO-22): reminders, escalation cases and
+   * deadline outcomes for operator cases, AML cases, join requests, disputes, cash-outs and emergency approvals.
+   */
+  WORKER_DEADLINE_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_DEADLINE_INTERVAL_MS: z.coerce.number().int().positive().default(5 * 60 * 1000),
+  WORKER_DEADLINE_BATCH_SIZE: z.coerce.number().int().positive().max(2000).default(100),
+  /** Reminder lead of operator and AML cases (minutes) and of join requests (hours). */
+  DEADLINE_CASE_REMINDER_LEAD_MINUTES: z.coerce.number().int().positive().default(60),
+  DEADLINE_JOIN_REMINDER_LEAD_HOURS: z.coerce.number().int().positive().default(24),
+  /** Only deadlines of the last N hours are acted on: a first run never floods staff with years of old items. */
+  DEADLINE_CATCHUP_HOURS: z.coerce.number().int().positive().default(72),
+  /** SLA of the cases the deadline rules open (hours). */
+  DEADLINE_CASE_SLA_HOURS: z.coerce.number().positive().default(24),
+  /** Dispute evidence reminders (hours before the deadline, comma separated) and the provider ruling SLA (days). */
+  DISPUTE_REMINDER_HOURS: z.string().default("72,24"),
+  DISPUTE_RULING_SLA_DAYS: z.coerce.number().positive().default(30),
+  /** Days a merchant has to answer a dispute when the rail declares no window of its own (`capabilities.dispute_evidence_days`). */
+  DISPUTE_EVIDENCE_WINDOW_DAYS: z.coerce.number().positive().default(14),
+  /** Cash-out operator window in Libyan business hours (decision D2) and the reminder fraction. */
+  CASHOUT_SLA_BUSINESS_HOURS: z.coerce.number().positive().default(24),
+  CASHOUT_SLA_REMINDER_RATIO: z.coerce.number().gt(0).lt(1).default(0.75),
+  /** Emergency ratification (decision D7): grace after the deadline, escalation period, reminders (hours before). */
+  EMERGENCY_RATIFICATION_GRACE_HOURS: z.coerce.number().positive().default(48),
+  EMERGENCY_ESCALATE_EVERY_HOURS: z.coerce.number().positive().default(4),
+  EMERGENCY_REMINDER_HOURS: z.string().default("4,1"),
+  /**
+   * Token and credential expiry (AUTO-08) and scheduled credential re-verification (AUTO-26): notices 30, 7 and 1 days
+   * before an API token or a gateway credential set expires, a P1 case close to the expiry, and taking an expired set
+   * out of use. Re-verification calls the gateway, so it starts as a dry run.
+   */
+  WORKER_EXPIRY_NOTICE_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_EXPIRY_NOTICE_INTERVAL_MS: z.coerce.number().int().positive().default(60 * 60 * 1000),
+  TOKEN_EXPIRY_NOTICE_DAYS: z.string().default("30,7,1"),
+  CREDENTIAL_EXPIRY_NOTICE_DAYS: z.string().default("30,7,1"),
+  CREDENTIAL_EXPIRY_CASE_DAYS: z.coerce.number().int().positive().default(7),
+  /** Re-verify VERIFIED credential sets not verified for this many hours (0 turns it off). */
+  CREDENTIAL_REVERIFY_AFTER_HOURS: z.coerce.number().min(0).default(24),
+  CREDENTIAL_REVERIFY_BATCH_SIZE: z.coerce.number().int().positive().max(100).default(5),
+  CREDENTIAL_REVERIFY_DRY_RUN: booleanFromEnvironment.default(true),
+  /**
+   * Merchant-direct commission netting (AUTO-21, decision D8): a singleton job after the Tripoli day close nets the
+   * commission receivable against the merchant wallet (partial, carried forward, never below zero). It is state
+   * changing, so it starts as a DRY RUN that only audits what it would net (COMMISSION_NETTING_PROPOSED).
+   */
+  WORKER_COMMISSION_NETTING_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_COMMISSION_NETTING_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  COMMISSION_NETTING_DRY_RUN: booleanFromEnvironment.default(true),
+  /** Daily run time as `M H * * *` in Africa/Tripoli. */
+  COMMISSION_NETTING_CRON: z.string().trim().min(1).default("30 0 * * *"),
+  /** Receivable older than this many days opens a finance case. */
+  COMMISSION_RECEIVABLE_AGING_DAYS: z.coerce.number().int().positive().default(30),
+  /** Net the receivable at cash-out time, before a cash-out is paid (decision D8). */
+  COMMISSION_NETTING_AT_CASHOUT: booleanFromEnvironment.default(true),
+  /**
+   * Refund inquiry (AUTO-20): a refund stuck in EXECUTING is asked about again with backoff. In dry run a definitive
+   * answer is audited and handed to an operator case instead of booking or rejecting the refund.
+   */
+  REFUND_INQUIRY_DRY_RUN: booleanFromEnvironment.default(true),
+  /** How long the gateway is asked about a refund before an operator takes over (seconds). */
+  REFUND_INQUIRY_WINDOW_SECONDS: z.coerce.number().int().positive().default(86_400),
+  /** SLA of the operator case opened for an UNKNOWN attempt whose polling window elapsed (AUTO-19), in hours. */
+  UNKNOWN_ATTEMPT_CASE_SLA_HOURS: z.coerce.number().positive().default(24),
   /**
    * The endpoint of the SMS / email aggregator of the deployment.
    *
@@ -362,6 +527,42 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_RESCREEN_INTERVAL_MS: 86_400_000,
     WORKER_KYB_EXPIRY_INTERVAL_MS: 21_600_000,
     WORKER_KYB_EXPIRY_BATCH_SIZE: 200,
+    WORKER_KYB_SCAN_ENABLED: true,
+    WORKER_KYB_SCAN_INTERVAL_MS: 60_000,
+    WORKER_KYB_SCAN_BATCH_SIZE: 20,
+    WORKER_STATEMENT_SCHEDULE_ENABLED: true,
+    WORKER_STATEMENT_SCHEDULE_INTERVAL_MS: 300_000,
+    STATEMENT_SCHEDULE_GRACE_MINUTES: 120,
+    STATEMENT_SCHEDULE_LOOKBACK_SLOTS: 7,
+    WORKER_CONSISTENCY_AUDIT_ENABLED: true,
+    WORKER_CONSISTENCY_AUDIT_INTERVAL_MS: 3_600_000,
+    CONSISTENCY_AUDIT_REPAIR: false,
+    WORKER_MERCHANT_WEBHOOK_ENABLED: true,
+    WORKER_MERCHANT_WEBHOOK_INTERVAL_MS: 2000,
+    WORKER_MERCHANT_WEBHOOK_BATCH_SIZE: 50,
+    MERCHANT_WEBHOOK_TIMEOUT_MS: 10_000,
+    MERCHANT_WEBHOOK_CONCURRENCY: 8,
+    MERCHANT_WEBHOOK_ALLOW_INSECURE: false,
+    MERCHANT_WEBHOOK_DISABLE_AFTER_DAYS: 5,
+    MERCHANT_WEBHOOK_ROTATION_OVERLAP_HOURS: 24,
+    WORKER_REGULATORY_REPORT_ENABLED: true,
+    WORKER_REGULATORY_REPORT_INTERVAL_MS: 3_600_000,
+    REGULATORY_REPORT_MAX_PERIODS: 2,
+    REGULATORY_REPORT_MAX_BATCH_LINES: 5000,
+    REGULATORY_REPORT_REMINDER_BUSINESS_DAYS: 3,
+    WORKER_AUDIT_ANCHOR_ENABLED: true,
+    WORKER_AUDIT_ANCHOR_INTERVAL_MS: 86_400_000,
+    AUDIT_ANCHOR_SEGMENT_ROWS: 5000,
+    AUDIT_ANCHOR_MAX_SEGMENTS_PER_TICK: 40,
+    AUDIT_ANCHOR_KEY_ID: "audit-anchor-v1",
+    PLATFORM_MONITOR_BACKUP_MAX_FULL_AGE_MS: 129_600_000,
+    PLATFORM_MONITOR_BACKUP_DRILL_MAX_AGE_MS: 691_200_000,
+    KYB_SCANNER_MODE: undefined,
+    KYB_CLAMD_ADDRESS: undefined,
+    KYB_CLAMD_TIMEOUT_MS: 30_000,
+    KYB_RESCAN_DAYS: 30,
+    KYB_SCAN_MAX_ATTEMPTS: 8,
+    PLATFORM_MONITOR_KYB_SCAN_MAX_AGE_MS: 7_200_000,
     WORKER_RETENTION_ENABLED: false,
     WORKER_RETENTION_INTERVAL_MS: 3_600_000,
     WORKER_RETENTION_BATCH_SIZE: 500,
@@ -385,6 +586,54 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_BACKGROUND_JOBS_BATCH_SIZE: 10,
     WORKER_BACKGROUND_JOBS_LEASE_SECONDS: 300,
     WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS: 300_000,
+    WORKER_PLATFORM_MONITOR_ENABLED: true,
+    WORKER_PLATFORM_MONITOR_INTERVAL_MS: 60_000,
+    PLATFORM_MONITOR_WORKER_STALE_MULTIPLIER: 3,
+    PLATFORM_MONITOR_OUTBOX_MAX_AGE_MS: 300_000,
+    PLATFORM_MONITOR_AUDIT_OUTBOX_MAX_AGE_MS: 300_000,
+    PLATFORM_MONITOR_CERT_FILES: "",
+    PLATFORM_MONITOR_CERT_WARN_DAYS: 30,
+    OUTBOX_MAX_ATTEMPTS: 10,
+    WORKER_JOURNAL_PARTITION_ENABLED: true,
+    WORKER_JOURNAL_PARTITION_INTERVAL_MS: 21_600_000,
+    LEDGER_PARTITION_MONTHS_AHEAD: 6,
+    WORKER_EXPIRY_HOUSEKEEPING_ENABLED: true,
+    WORKER_EXPIRY_HOUSEKEEPING_INTERVAL_MS: 900_000,
+    WORKER_EXPIRY_HOUSEKEEPING_BATCH_SIZE: 200,
+    MFA_CHALLENGE_RETENTION_HOURS: 24,
+    NOTIFICATION_SECRET_SCRUB_AFTER_MINUTES: 60,
+    WORKER_DEADLINE_ENABLED: true,
+    WORKER_DEADLINE_INTERVAL_MS: 300_000,
+    WORKER_DEADLINE_BATCH_SIZE: 100,
+    DEADLINE_CASE_REMINDER_LEAD_MINUTES: 60,
+    DEADLINE_JOIN_REMINDER_LEAD_HOURS: 24,
+    DEADLINE_CATCHUP_HOURS: 72,
+    DEADLINE_CASE_SLA_HOURS: 24,
+    DISPUTE_REMINDER_HOURS: "72,24",
+    DISPUTE_RULING_SLA_DAYS: 30,
+    DISPUTE_EVIDENCE_WINDOW_DAYS: 14,
+    CASHOUT_SLA_BUSINESS_HOURS: 24,
+    CASHOUT_SLA_REMINDER_RATIO: 0.75,
+    EMERGENCY_RATIFICATION_GRACE_HOURS: 48,
+    EMERGENCY_ESCALATE_EVERY_HOURS: 4,
+    EMERGENCY_REMINDER_HOURS: "4,1",
+    WORKER_EXPIRY_NOTICE_ENABLED: true,
+    WORKER_EXPIRY_NOTICE_INTERVAL_MS: 3_600_000,
+    TOKEN_EXPIRY_NOTICE_DAYS: "30,7,1",
+    CREDENTIAL_EXPIRY_NOTICE_DAYS: "30,7,1",
+    CREDENTIAL_EXPIRY_CASE_DAYS: 7,
+    CREDENTIAL_REVERIFY_AFTER_HOURS: 24,
+    CREDENTIAL_REVERIFY_BATCH_SIZE: 5,
+    CREDENTIAL_REVERIFY_DRY_RUN: true,
+    WORKER_COMMISSION_NETTING_ENABLED: true,
+    WORKER_COMMISSION_NETTING_INTERVAL_MS: 60_000,
+    COMMISSION_NETTING_DRY_RUN: true,
+    COMMISSION_NETTING_CRON: "30 0 * * *",
+    COMMISSION_RECEIVABLE_AGING_DAYS: 30,
+    COMMISSION_NETTING_AT_CASHOUT: true,
+    REFUND_INQUIRY_DRY_RUN: true,
+    REFUND_INQUIRY_WINDOW_SECONDS: 86_400,
+    UNKNOWN_ATTEMPT_CASE_SLA_HOURS: 24,
     NOTIFICATION_WEBHOOK_URL: undefined,
     NOTIFICATION_WEBHOOK_TIMEOUT_MS: 5000,
     FAKE_RAILS_ENABLED: false,

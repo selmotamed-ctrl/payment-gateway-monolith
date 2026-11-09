@@ -340,7 +340,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 ## Core API Surface
 
-> Status: `partial` · Last verified: 2026-11-06
+> Status: `partial` · Last verified: 2026-11-08
 
 ## 1. Purpose and scope
 
@@ -449,7 +449,7 @@ Sensitive merchant changes create `MERCHANT` approvals. Suspension has an emerge
 | `GET /approvals`, `GET /approvals/export`, `GET /approvals/summary`, `GET /approvals/summary/export`, `GET /approvals/:id` | `approval:read` |
 | `POST /approvals/:id/approve`, `POST /approvals/:id/reject` | `approval:check` or `approval:write` + checker authority |
 
-The approve/reject routes call `actorFromRequest`, `assertCheckerAuthority` and `assertCheckerIsNotMaker`. The approve route also handles `BACKUP_POLICY` out of band and dispatches every other subject to `executeApprovalSubject`.
+The approve/reject routes call `actorFromRequest`, `assertCheckerAuthority` and `assertCheckerIsNotMaker`. The approve route also handles `BACKUP_POLICY` out of band (through `executeBackupPolicyApproval`, which claims the request before it calls the backup daemon) and dispatches every other subject to `executeApprovalSubject`.
 
 #### AML and compliance
 
@@ -559,7 +559,7 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `GET /overview` | `security:read` or `gateway:read` |
 | `POST /trigger` | `security:write` |
 | `POST /drill` | `security:write` |
-| `PUT /policy` | `security:write`; creates or executes a `BACKUP_POLICY` approval |
+| `PUT /policy` | `security:write`; creates a `BACKUP_POLICY` approval, or (with `approvalRequestId`) executes one and then additionally requires checker authority (`approval:check`), maker ≠ checker, a pending unexpired request and an atomic claim |
 | `GET /catalog` | `security:read` or `gateway:read` |
 
 ### 3.3 Merchant namespace
@@ -589,7 +589,10 @@ Authentication behavior:
 - The principal must have a `merchantId`; `merchantIdOf` rejects otherwise with `403 MERCHANT_CONTEXT_REQUIRED`.
 - Queries are scoped by `merchantId`; a merchant cannot read another merchant's wallet/application/link.
 - API tokens are bound to a merchant and optionally an application; the token hash, revocation and CIDR checks happen in core.
-- There is no per-route `requireAuthorities` call. API-token scopes and session authorities do not gate individual merchant endpoints.
+- Merchant authorities are enforced per route in core with `assertMerchantAuthority` (the closed catalogue in `lib/auth/merchantAuthorities.ts`); the portal and the edges only project them. Reads: wallets, `/wallets/:id`, `/balance`, `/statements` and `GET /applications*` need `merchant:read` or `merchant:write`; the statement export needs `merchant:write` (the portal's `statements.export`); `GET /links*` needs `link:read`; `GET /payments` and `GET /stats/overview` need `payment:read`; `GET /disputes*` needs `payment:read` or `dispute:respond`. `merchant:read`/`merchant:write` imply `payment:read` and `link:read`, so a payment-only user can read payments but never balances or statements. Before 2026-11-08 these read routes only checked the merchant, so any merchant user could read balances and the 50,000-row export. Writes keep their fine-grained authorities. API tokens only reach `/external/*`.
+- **Application scope (`users.app_scope_ids`).** A session principal carries `appScopeIds`, read from the user row on every request (a change takes effect without a new login). Empty means unscoped. For a scoped user the application, link, payment, dispute and statement lists are narrowed to those applications, by-id reads/cancels/evidence of another application answer `403 APP_SCOPE_VIOLATION`, `POST /links` refuses another application and defaults to the oldest application inside the scope, and the merchant-wide `GET /stats/overview` (it mixes merchant-wide wallet and cash-out figures) answers `403 APP_SCOPE_RESTRICTED`. Not scoped yet: POS terminals, wallets themselves, cash-outs and tokens.
+- Audit rows added 2026-11-08 (before this, these state changes left no trail): merchant `PUT /tokens/:id/ips` (`ACCESS_TOKEN_IP_ALLOWLIST_CHANGED`, with before/after CIDRs, in the same transaction as the change) and `DELETE /tokens/:id` (`ACCESS_TOKEN_REVOKED`); merchant and admin credential sets `POST` (`CREDENTIAL_SET_CREATED`), `PUT` rotate (`CREDENTIAL_SET_ROTATED`) and `POST .../verify` (`CREDENTIAL_SET_VERIFIED`), recording entry KEY names and versions only, never a secret value or ciphertext; admin `POST /assets` (`ASSET_REGISTERED`); backup `POST /trigger` (`BACKUP_TRIGGERED`) and `POST /drill` (`BACKUP_DRILL_TRIGGERED`, written best effort after the daemon accepted the job: a failed audit write never turns an already-started job into an error).
+- `POST /onboarding/kyb-documents` reports `duplicateDocuments` for the uploader's OWN earlier copies only; matches in other merchants are kept in the staff-only audit row (`KYB_DOCUMENT_UPLOADED.afterJson.duplicateDocuments`) and in the join-request duplicate flags, never returned to the merchant (tipping-off).
 - Sensitive application changes (`assignedWalletId`, `railWhitelist`, `redirectDomainAllowlist`) create an `APPLICATION` approval instead of applying directly.
 
 ### 3.4 Checkout namespace
@@ -959,6 +962,11 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 - `PATCH /rails/:id` accepts `logoAssetId` (uuid, or `null` to clear). A uuid must reference a registered `Asset` (`404 ASSET_NOT_FOUND`); the audit row records the before/after logo. The edge schema and `toCoreRailUpdate` forward it. `POST /assets` still registers metadata only (name, type, size, SHA-256, storage key): it does not store image bytes, which remains a gap.
 - `PATCH /routes/:id` accepts `mismatchPolicy` (object; only `tolerance_amount`/`toleranceAmount` is read by the settlement engine, other keys are kept as stored; a malformed tolerance is `400 MISMATCH_TOLERANCE_INVALID`) and `maintenanceWindows` (`[{ start, end }]`, max 50, absolute instants; `end <= start` or an unparsable instant is `400 MAINTENANCE_WINDOW_INVALID`; `[]` clears). Omitted fields are left untouched; the edge forwards empty values so an operator can clear them.
 - **Commission tiers were broken end to end and are fixed.** The admin edge persisted UI tiers as an index-keyed object (`{"0": {...}}`) and core's create schema (`z.record`) could not take an array, while the fee calculator (`commissionForProfile`, `checkout.ts`) only reads `tiersJson` when it is an array: a TIERED profile created through the UI silently priced at its minimum fee. Now `POST /commission-profiles` accepts an ordered array (or the legacy object), the edge forwards the array, and `commissionTiers()` normalises both shapes (object keys ordered numerically), which also reprices already-stored legacy rows correctly. Tier keys are `upTo`, `flat`, `percent` (a fraction). **Behaviour change for existing data:** a legacy TIERED profile now prices by its tiers instead of the minimum fee. The edge also forwards `minFee`, `maxFee`, `feeBearerDefault`, `roundingMode`, `merchantId`, `applicationId` (core already accepted them; the strict edge schema dropped them). Note `percentageRate` is a **fraction** (`0.0300` = 3%), as the seed data stores it; the form now says so.
+
+## Remediation round 2 (2026-11-08): routes
+
+- `POST /internal/admin/users` accepts no password or phone and creates an `INVITED` user; `POST /internal/admin/users/:id/invite` re-issues an invitation; `POST /internal/admin/auth/accept-invitation` (public, token-bound) sets the password and phone and marks the invitation complete. The maker-checker activation of a staff user requires a completed invitation.
+- `GET|POST /internal/checkout/return/:attemptToken` accepts only the attempt `reference`, and runs the gateway inquiry at most once per `RETURN_INQUIRY_COOLDOWN_MS` (10 s) per attempt across core instances (a shared flag in the auth-state store); calls inside the window answer with the current status (GAP-055).
 
 ## Core Engine
 
@@ -1595,7 +1603,7 @@ No build or test was run for this documentation change. Tests that require Postg
 
 ## Double-Entry Ledger
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-09
 
 ## 1. Purpose and scope
 
@@ -1631,7 +1639,7 @@ The design requires an append-only, double-entry ledger with a fixed chart of ac
 | :--- | :--- | :--- |
 | `PLATFORM_CLEARING` | the gateway owes the platform until settlement | debit `GATEWAY_CLEARING`, book provider or gateway fees, credit wallet and income |
 | `INTERNAL` | first-party rail (NeomPay); no external clearing account | `INTERNAL_CONFIRMATION`: debit `TREASURY`, credit wallet and income |
-| `MERCHANT_DIRECT` | merchant owns the gateway account and receives the money directly | commission only: debit `COMMISSION_RECEIVABLE`, credit `PLATFORM_INCOME`; netting later moves wallet against receivable |
+| `MERCHANT_DIRECT` | merchant owns the gateway account and receives the money directly | commission only: debit `COMMISSION_RECEIVABLE`, credit `PLATFORM_INCOME`; netting later moves wallet against receivable. A refund reverses only that commission (`MERCHANT_DIRECT_CONFIRMATION`, stage `REFUND`); it never touches the wallet or treasury |
 
 `PROVIDER_HELD` is a valid `settlementTarget` in the schema but is treated as `PLATFORM_CLEARING` by the ownership-mode projection (`core-back/engine/runtime/attemptRepository.ts:56`).
 
@@ -1651,7 +1659,9 @@ The implemented verifier applies this equation to natural balances, where debit-
 
 ### The 17 scenarios (design said 15 worked entries)
 
-The historical design listed 15 worked entries. The code now defines 17 `LedgerScenario` values: the original 15 plus `SPLIT_SURCHARGE_CONFIRMATION` and `SUSPENSE_SETTLEMENT`. Three scenarios have multiple stages (merchant-direct netting, AML release, chargeback lost), so the exhaustive matrix contains 20 labels rather than 17.
+The historical design listed 15 worked entries. The code now defines 17 `LedgerScenario` values: the original 15 plus `SPLIT_SURCHARGE_CONFIRMATION` and `SUSPENSE_SETTLEMENT`. Three scenarios have multiple stages (merchant-direct netting and refund, AML release, chargeback lost), so the exhaustive matrix contains 21 labels rather than 17.
+
+**Refund template selection (2026-11-08).** Every refund path (the governance executor `finalizeRefundAdjustment`, `DynamicRailEngine.refund` and the synthetic seeder) picks its template through `refundScenarioFor(ownershipMode)` in `LedgerPoster.ts`, so they cannot diverge: `INTERNAL` -> `INTERNAL_REFUND`; `MERCHANT_DIRECT` -> `MERCHANT_DIRECT_CONFIRMATION` stage `REFUND` (label `MERCHANT_DIRECT_REFUND`); everything else -> `FULL_REFUND`. Before this fix a merchant-direct refund reused `FULL_REFUND`, which debits the merchant wallet for the net amount and credits treasury for the full amount although the platform never held the cash and never credited the wallet; the entry balanced, so the invariant verifier could not see it. A merchant-direct refund with nothing to reverse (`reverseCommission = false`, or a zero commission) posts no journal: the adjustment still becomes `EXECUTED` with a null `journalEntryId` (the chargeback path already behaves this way), the seeder skips such a refund because its verifier requires a journal on every executed adjustment, and the rail engine skips the posting.
 
 ## 3. As-built architecture
 
@@ -1715,6 +1725,7 @@ All examples use `amount = 100.0000`, `commission = 3.0000`, `providerFee = 1.00
 | 6 | `SPLIT_SURCHARGE_CONFIRMATION` | confirm, `PAYMENT_ATTEMPT` | `Dr GATEWAY_CLEARING 101.5000`; `Dr GATEWAY_FEE_EXPENSE 0.8000`; `Cr MERCHANT_WALLET 98.5000`; `Cr PLATFORM_INCOME 3.0000`; `Cr GATEWAY_FEE_ACCRUAL 0.8000` |
 | 7 | `MERCHANT_DIRECT_CONFIRMATION` | confirm, `PAYMENT_ATTEMPT` | `Dr COMMISSION_RECEIVABLE 3.0000`; `Cr PLATFORM_INCOME 3.0000` |
 | 7b | `MERCHANT_DIRECT_CONFIRMATION` | netting, `COMMISSION_NETTING` | `Dr MERCHANT_WALLET 3.0000`; `Cr COMMISSION_RECEIVABLE 3.0000` |
+| 7c | `MERCHANT_DIRECT_CONFIRMATION` | refund, `ADJUSTMENT` (keyed by the adjustment id) | `Dr PLATFORM_INCOME 3.0000`; `Cr COMMISSION_RECEIVABLE 3.0000` |
 | 8 | `AML_HOLD_AND_RELEASE` | hold, `PAYMENT_ATTEMPT` | `Dr GATEWAY_CLEARING 100.0000`; `Cr AML_HOLD 100.0000` |
 | 8b | `AML_HOLD_AND_RELEASE` | release, `AML_RELEASE` | `Dr AML_HOLD 100.0000`; `Cr MERCHANT_WALLET 97.0000`; `Cr PLATFORM_INCOME 3.0000` |
 | 9 | `CASHOUT` | execution, `ADJUSTMENT` | `Dr MERCHANT_WALLET 100.0000`; `Cr TREASURY 100.0000` |
@@ -1811,6 +1822,15 @@ The automatic repair (`LedgerCheckpointWorker`, `LEDGER_SHARD_AUTO_REPAIR_*`, on
 - **`LedgerShardScalerWorker`** (`engine/workers/LedgerShardScalerWorker.ts`, leader-elected, **live by default**): it samples every shard's `line_seq`, turns the delta into lines per second per shard and asks the pure policy `decideShardWidth` (`engine/ledger/ShardScaler.ts`). A shard row serializes its postings, so the hottest shard's rate is the bottleneck signal; the account is widened when its EWMA stays above `LEDGER_SHARD_UP_LINES_PER_SEC` for two samples and the cooldown (`LEDGER_SHARD_COOLDOWN_MS`, persisted as `gl_accounts.shard_scaled_at`) has passed. The new width aims at half the threshold per shard, grows at most 4x per step and stops at `LEDGER_SHARD_MAX_WIDTH`. A wallet whose shard 0 is the only hot shard (debit-bound) is not widened. By default it widens the account through `applyShardWidth` and audits `GL_ACCOUNT_SHARDS_SCALED`; with `LEDGER_SHARD_SCALER_DRY_RUN=true` it only audits `GL_ACCOUNT_SHARDS_SCALE_PROPOSED` once per proposed width and changes nothing. Calibrate `LEDGER_SHARD_UP_LINES_PER_SEC` on the target hardware.
 - **`applyShardWidth`** (`engine/ledger/shardScaling.ts`) is the one operation both the worker and `POST /finance/gl-accounts/:id/shards/scale` (`finance:write`, reason) use: in one transaction it takes `FOR NO KEY UPDATE` on the account row (which does not conflict with the FK `KEY SHARE` of postings), updates `shard_count`/`shard_scaled_at`, creates missing shard rows and writes the audit row `GL_ACCOUNT_SHARDS_SCALED`. Narrowing only changes where new lines go; existing shards keep their balances, sequences and checkpoints.
 
+### 3.11 Query and indexing rules for the ledger tables
+
+Every new query that touches the ledger must obey four rules, so its cost stays independent of the historical table size (the query/index optimisation plan `design/02-storage-and-performance/ledger_scaling_partition_pruning_and_archive_anchor_plan.md`; regression suite `test/storage-engine/performance/ledger-query-pruning-and-accuracy.test.ts`):
+
+1. **Always bound `created_at` when querying `journal_lines` by `entry_id`.** `journal_lines` is monthly range-partitioned by `created_at`, so `WHERE entry_id = $1` alone probes every monthly partition. A line is inserted in the same transaction as its parent `JournalEntry`, so bound the lookup with the parent entry's timestamp (`createdAt: { gte: entry.createdAt - 5m, lte: entry.createdAt + 5m }`). Bound by the ENTRY, never by an older business object: a `COMMISSION_NETTING` entry or a delayed AML capture entry can be posted days after its `PaymentAttempt`.
+2. **Never scan `journal_lines` for a live account balance.** Live balances are the `gl_account_shards` sum, read in O(shards) by `loadLiveAccountBalances()` or `lockWalletLedgerBalance()`. The full-history scans in `CheckpointService`, `ShardRepair` and the restore drill are deliberate proofs of the journal, not balance reads.
+3. **Compute filtered statement counts and sums in one covering `groupBy`.** Use `groupBy({ by: ["direction"], where, _count: { _all: true }, _sum: { amount: true } })` over the exact `where` of the page query, so PostgreSQL satisfies the count and both side sums in one Index-Only Scan of `journal_lines_account_id_cov_idx`. Do not add a separate `count()` for the same predicate.
+4. **Preserve the covering payloads and the Visibility Map autovacuum settings.** Any migration that recreates the `journal_lines` indexes must keep `INCLUDE ("gl_account_id", "direction", "amount", "id")` on `journal_lines_entry_id_created_at_idx` and `INCLUDE ("direction", "amount", "entry_id", "id")` on `journal_lines_account_id_cov_idx`. Every monthly partition must keep `autovacuum_vacuum_insert_scale_factor = 0.01` (and `autovacuum_vacuum_insert_threshold = 1000`), because an append-only table is never vacuumed by the update/delete thresholds and PostgreSQL 18 needs the insert autovacuum to set the Visibility Map bits that Index-Only Scans require. `journal_entries` carries `journal_entries_created_at_idx` (INCLUDE `id, ref_type, ref_id`) for pagination/summary and `journal_entries_trgm_search_idx` for the admin search.
+
 ## 4. Contracts and invariants
 
 1. Every journal entry must have at least one debit and one credit, debit total must equal credit total, and every line amount must be strictly positive. `validateTemplate` enforces this before insertion (`LedgerPoster.ts:740`).
@@ -1828,10 +1848,10 @@ The automatic repair (`LedgerCheckpointWorker`, `LEDGER_SHARD_AUTO_REPAIR_*`, on
 
 ### Schema
 
-- `GlAccount`: `accountType`, `ownerId`, `gatewayId`, `credentialSetId`, `env`, `currency`, `lastCheckpointId`, `checkpointBalance`, `checkpointAt`, `seedKey`.
-- `GlAccountShard`: composite primary key `(glAccountId, shardId)`, `currentBalance`, `updatedAt`.
-- `JournalEntry`: unique `(refType, refId)`; `JournalRefType` values are `PAYMENT_ATTEMPT`, `ADJUSTMENT`, `AML_RELEASE`, `AML_VOID`, `SETTLEMENT_SWEEP`, `FEE_VARIANCE`, `COMMISSION_NETTING`, `DISPUTE_OUTCOME`.
-- `JournalLine`: `entryId`, `glAccountId`, `direction`, `amount`; primary key `(id, createdAt)` because the table is monthly range-partitioned; indexes on `(entryId, createdAt)` and `(glAccountId, createdAt)`.
+- `GlAccount`: `accountType`, `ownerId`, `gatewayId`, `credentialSetId`, `env`, `currency`, `shardCount`, `shardScaledAt`, `seedKey`. The account stores no checkpoint; its checkpoint fields are derived from its shard checkpoints.
+- `GlAccountShard`: composite primary key `(glAccountId, shardId)`, `currentBalance`, `lineSeq` (the shard's gapless high-water), `updatedAt`.
+- `JournalEntry`: unique `(refType, refId)`; `JournalRefType` values are `PAYMENT_ATTEMPT`, `ADJUSTMENT`, `AML_RELEASE`, `AML_VOID`, `SETTLEMENT_SWEEP`, `FEE_VARIANCE`, `COMMISSION_NETTING`, `DISPUTE_OUTCOME`. `journal_entries_created_at_idx` (INCLUDE `id, ref_type, ref_id`) serves the admin list/summary; `journal_entries_trgm_search_idx` (GIN on `ref_id`, `description`) serves the admin search.
+- `JournalLine`: `entryId`, `glAccountId`, `direction`, `amount`, `shardId`, `shardSeq`; primary key `(id, createdAt)` because the table is monthly range-partitioned; covering indexes `(entryId, createdAt) INCLUDE (glAccountId, direction, amount, id)` and `(glAccountId, createdAt) INCLUDE (direction, amount, entryId, id)`. The physical column order is UUIDs, timestamps, NUMERIC, the enum and the shard columns, so rows carry no alignment padding.
 - Database checks: `journal_lines_amount_positive`; no balance trigger.
 
 ### Configuration
@@ -1916,7 +1936,7 @@ Use `postScenario` for settlement sweeps, fee variance, suspense, AML, and adjus
 
 - **Code gap:** idempotent replay of the same `(refType, refId)` with a different template silently returns the first entry; it does not compare the line set or amounts. A caller that reuses a reference for a different economic event loses the second posting.
 - **Risk:** the single-hot-shard write path is about 25-30% slower than before the sequence was added (benchmark 2026-11-07: p50 1.4 ms to 1.8 ms single-threaded; about 1,000 to 750 postings/s on one shard) because the sequence is reserved under the shard lock before the lines are inserted and a fifth index exists on `journal_lines`. That is the case the shard scaler relieves.
-- **Documentation gap:** `core-back/test/engine/ledger.test.ts` describes “all 16 journal entry templates”; the exhaustive matrix header says “15” and asserts 20 labels. The canonical count is 17 scenarios / 20 staged variants.
+- **Documentation gap:** `core-back/test/engine/ledger.test.ts` describes “all 16 journal entry templates”; the exhaustive matrix header says “15” and asserts 20 labels. The canonical count is 17 scenarios / 21 staged variants.
 - **Risk:** the raw scenario builder defaults commission/provider/gateway fee. A production caller that forgets a fee will silently book the default rather than fail. Use `postPaymentConfirmation` or pass every amount explicitly.
 
 ## 8. Verification and tests
@@ -1933,7 +1953,8 @@ cd core-back && bun test test/storage-engine/ledger-shards.test.ts
 Coverage:
 
 - `test/engine/ledger.test.ts` — template balance, scenario semantics, strict fee resolution, idempotency, unbalanced rejection, checkpoint service, invariant provider.
-- `test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` — 20 labels × 3 currencies × 5 amount tiers × 4 fee configurations = 1,200 template constructions.
+- `test/refund-merchant-direct.test.ts` — a merchant-direct refund reverses only commission (no wallet debit, no treasury credit), posts nothing without a commission, keeps `FULL_REFUND` for platform-cleared payments, `refundScenarioFor`, the rail-engine refund path, and the per-merchant commission-receivable balance after a reversal.
+- `test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` — 21 labels × 3 currencies × 5 amount tiers × 4 fee configurations = 1,260 template constructions.
 - `test/exhaustive/02-ledger/checkpoints-and-invariant.test.ts` — checkpoint snapshot, no double count, 500-entry fuzz drift, deliberate drift detection; requires PostgreSQL and skips otherwise.
 - `test/exhaustive/02-ledger/commission-hierarchy-and-bearers.test.ts` / `property-fuzzer-10k.test.ts` — commission precedence, fee-bearer matrices, 10,000 deterministic monetary iterations.
 - `test/storage-engine/ledger-shards.test.ts` / `uow.test.ts` / `write-path.integration.test.ts` — 16-shard distribution, merchant one-shard rule, parity after concurrent postings, `ensureAccountShards`, atomic ledger/outbox/shard write path; live PostgreSQL required.
@@ -1972,6 +1993,7 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 
 ## 10. Change history
 
+- 2026-11-09 — Ledger query/index optimisation: `journal_entries(created_at)` and trigram search indexes, covering `journal_lines` entry/account indexes, insert-autovacuum tuning for append-only partitions, partition-pruned entry/AML lookups, single-pass statement totals, and the checkout commission-receivable short-circuit plus a `je.created_at`-bounded aggregation. See `TRACKER.md` and section 3.11.
 - 2026-11-03 — Baseline verification against `5a24f6f+working-tree`: documented the 17 scenarios, 11 account types, shard writer, checkpoint and verifier behavior, balance-read differences, and the missing database balance enforcement.
 
 ## 11. Security hardening (2026-11-05)
@@ -1982,9 +2004,21 @@ The unit suites run without PostgreSQL. The checkpoint, shard, UoW, and write-pa
 - **Append-only ledger and audit trail (GAP-013, RESOLVED 2026-11-05).** Migration `20261105090000_append_only_ledger_guards` installs `BEFORE UPDATE OR DELETE` row triggers and `BEFORE TRUNCATE` statement triggers on `journal_entries`, `journal_lines` (the parent and every partition; row triggers are cloned to future partitions, TRUNCATE triggers are installed on each existing partition) and `audit_log`. They raise `55000` for any caller, including the table owner. Two narrow bypasses exist: (1) maintenance, a transaction that sets `pgw.ledger_maintenance = 'on'` AND whose session user is a superuser or a member of the role `pgw_ledger_maintenance` (the application role is not a member); (2) retention, `DELETE` on `audit_log` only, in a transaction that sets `pgw.audit_retention = 'on'` (the `RetentionWorker` purge; the journal is never purged by retention). The migration also creates, best effort (a managed PostgreSQL may forbid `CREATE ROLE`; it then emits a notice and the roles must be provisioned manually), the NOLOGIN roles `pgw_ledger_maintenance` and the non-owner application role `pgw_app`, grants `pgw_app` the DML it needs and revokes `UPDATE`/`DELETE`/`TRUNCATE` on the journal tables and `UPDATE`/`TRUNCATE` on `audit_log` from it (`audit_log` keeps `DELETE` for the retention purge, still gated by the trigger). REVOKE alone does nothing against the table owner, which is why the triggers exist. **Production must connect as `pgw_app` (or another non-owner member of it), never as the owner that ran the migrations**; migrations still run as the owner. Test fixtures open the maintenance bypass through `core-back/test/helpers/ledgerMaintenance.ts`.
 - **Tests.** `core-back/test/security-regressions/{h7-rounding,h4-cashout}` and `core-back/test/hardening-gap-regressions.test.ts` (checkpoint, parity, append-only guards). True concurrency needs PostgreSQL 18 and is not covered.
 
+## Remediation round 2 (2026-11-08): raw-SQL posting path and throughput measurements
+
+`LedgerPoster` has an opt-in raw-SQL write path (`LedgerPosterOptions.rawSql`), on in production through `createLedgerPoster` (`LEDGER_RAW_SQL=false` is the kill switch). It produces the same rows as the ORM path:
+
+- the entry is inserted with `INSERT ... ON CONFLICT (ref_type, ref_id) DO NOTHING RETURNING` (an idempotent replay reads the existing entry back and moves nothing);
+- accounts are resolved with one typed `SELECT`, and the lines are inserted with application-generated UUIDv7 ids by one `INSERT ... SELECT ... FROM unnest(...)`, together with the per-shard `shard_seq` bookkeeping from the shard writer, all inside the one transaction;
+- a most-specific (scoped) account resolution is cached per poster for 60 s (max 20,000 entries): a more specific account can never appear later and ties resolve to the lowest id. A platform-wide fallback resolution is never cached, so a wallet created afterwards takes over at once; `clearAccountCache()` and `accountCacheTtlMs: 0` disable it.
+
+Measured on the test host (single Bun process, local PostgreSQL 18, 16 shards): sequential posting 255 -> 628 posts/s (p50 3.83 -> 1.50 ms, about 4.2 statements per posting); eight concurrent workers 582-641 -> about 2,085 posts/s. Widening shards did not help: the limit is client-side ORM/CPU work in one process. **15,000 TPS is therefore not reachable on one core process; it needs horizontal scale (several core instances over the same database) and further hot-row work (treasury/income shard locks held through commit, a faster shard scaler), which remain open (GAP-063).**
+
+Tests: `core-back/test/ledger-raw-sql-parity.test.ts` (same entries, lines, balances and gapless shard sequences as the ORM path for five templates; returned records match storage; idempotent replay in both modes; whole-posting rollback when the shard writer fails; cache semantics).
+
 ## Governance and Compliance
 
-> Status: `partial` · Last verified: 2026-11-06
+> Status: `partial` · Last verified: 2026-11-08
 
 ## 1. Purpose and scope
 
@@ -2041,10 +2075,10 @@ The actual admin approve route (`core-back/api/internal/admin.ts:6014`) is more 
 
 - requires `approval:check` (via `assertCheckerAuthority`) and either `approval:check` or `approval:write` in the route guard;
 - permits `PENDING_REVIEW` or `DRAFT`;
-- rejects expired requests;
+- rejects expired requests; since AUTO-05 an approval nobody decided before `expires_at` is also CLOSED by `ExpiryHousekeepingWorker` into the final state `EXPIRED` (reason `EXPIRED: not decided before <time>`, audit `APPROVAL_REQUEST_EXPIRED`, maker notified), which releases its subject exactly like a rejection (a join request back to `IN_REVIEW`, an operator case back to `IN_PROGRESS`) so a stale approval no longer locks the subject; the approve and reject routes refuse an `EXPIRED` request through the pending-state claim (`APPROVAL_NOT_PENDING`), not only through the expiry clock;
 - enforces maker ≠ checker;
 - adds a join-request admin-assisted maker check and a merchant payload checker-domain check;
-- special-cases `BACKUP_POLICY` through the backup daemon;
+- special-cases `BACKUP_POLICY` through `executeBackupPolicyApproval` (claim first, then the backup daemon; shared with `PUT /system/backups/policy`);
 - queues `ADJUSTMENT` execution as a background job and executes everything else through `executeApprovalSubject` in one transaction;
 - records a decision checklist audit row.
 
@@ -2135,7 +2169,7 @@ Dispute intake is exposed as `POST /admin/disputes`; the route queues an `ADJUST
 
 There is no webhook or statement dispute-intake wiring in `DynamicRailEngine` or reconciliation; the admin manual route is the implemented intake path.
 
-Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` holds the adjustment and opens an operator case. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id.
+Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` holds the adjustment and opens an operator case. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id. The refund template follows the ownership mode of the payment (`refundScenarioFor`, see `core.ledger`): a `MERCHANT_DIRECT` refund only reverses the commission recognition (`Dr PLATFORM_INCOME` / `Cr COMMISSION_RECEIVABLE`) and never debits the wallet or credits treasury; with nothing to reverse the adjustment is `EXECUTED` with no journal entry.
 
 ### 3.8 Cash-outs
 
@@ -2417,12 +2451,24 @@ The loop is not a distributed lock by itself. Cross-node safety comes from `FOR 
 | `LedgerInvariantWorker` | every 60 s | Single verifier pass (O(shards)) | Verifies the system-wide invariant from the shard balances; logs drift and opens one `MISMATCH`/`P1` operator case keyed `ledger.invariant`. | Implemented |
 | `LedgerCheckpointWorker` | `WORKER_LEDGER_CHECKPOINT_INTERVAL_MS` (30 s), leader-elected | Shards with the most pending lines, bounded by the batch size | Captures each shard with the verified O(delta) proof of `CheckpointService` (no locks); a failed proof opens a per-shard P1 case and an audit row; hourly `LEDGER_CHECKPOINT_SWEEP` audit summary. | Implemented |
 | `LedgerShardScalerWorker` | `WORKER_LEDGER_SHARD_SCALER_INTERVAL_MS` (30 s), leader-elected | One statement over all shard sequences | Measures lines/s per shard, widens a hot account through `applyShardWidth` (live by default, audited `GL_ACCOUNT_SHARDS_SCALED`; `LEDGER_SHARD_SCALER_DRY_RUN=true` only audits `GL_ACCOUNT_SHARDS_SCALE_PROPOSED`). | Implemented |
-| `JoinRequestExpiryWorker` | every poll interval | Raw updates, batch on overdue reviews | Expires `DRAFT` older than 30 days; expires overdue `SUBMITTED`/`IN_REVIEW`/`INFO_REQUESTED` reviews; excludes `PENDING_CHECKER`. | Partial |
+| `JoinRequestExpiryWorker` | every poll interval, leader-elected | One `UPDATE ... RETURNING` per batch (`FOR UPDATE SKIP LOCKED`), same transaction as its audit rows and notices | Expires `DRAFT` older than 30 days and overdue `SUBMITTED`/`IN_REVIEW`/`INFO_REQUESTED` reviews; never touches `PENDING_CHECKER`; writes `JOIN_REQUEST_EXPIRED` per request (previous status in `before`) and queues a neutral merchant notice (AUTO-13). | Implemented |
 | `PeriodicScreeningWorker` | every poll interval; 24 h rescreen interval | `FOR UPDATE SKIP LOCKED` on due merchants, then merchant row lock | Refreshes watch-list versions, screens merchant and owners, applies owner statuses, raises one confirmed-match case and suspends the merchant. | Implemented (L2 only) |
 | `KybExpiryWorker` | every 6 h (`WORKER_KYB_EXPIRY_INTERVAL_MS`), batch 200 | Query + per-merchant transaction | Marks expired documents, queues 30/7-day notices, suspends after grace, starts periodic revalidations, expires overdue revalidations. | Implemented |
+| `KybScanWorker` | every 60 s (`WORKER_KYB_SCAN_INTERVAL_MS`), batch 20 (`WORKER_KYB_SCAN_BATCH_SIZE`) | `SKIP LOCKED` claim with a 5-minute lease (not a singleton) | Scans `PENDING` KYB documents and re-scans `CLEAN` ones after `KYB_RESCAN_DAYS` with the configured engine (ClamAV `clamd`); fail closed with backoff; quarantines `INFECTED` (REJECTED, P1 case, audit, notice). Idle without a scanner. | Implemented (AUTO-06) |
+| `StatementScheduleWorker` | every 5 min (`WORKER_STATEMENT_SCHEDULE_INTERVAL_MS`) | Advisory-lock singleton | Keyed missing-statement cases per scheduled slot, resolved when the statement arrives. | Implemented (AUTO-07) |
+| `ConsistencyAuditWorker` | every 1 h (`WORKER_CONSISTENCY_AUDIT_INTERVAL_MS`) | Advisory-lock singleton | Reports (and, behind `CONSISTENCY_AUDIT_REPAIR`, repairs) payment-link slot counter drift. | Implemented (AUTO-12, report only by default) |
+| `MerchantWebhookWorker` | every 2 s (`WORKER_MERCHANT_WEBHOOK_INTERVAL_MS`), batch 50 | `SKIP LOCKED` claim with a 2-minute lease (not a singleton) | Signs and sends merchant webhooks to the pinned public address of each endpoint, retries with exponential backoff and jitter, parks after 8 attempts, disables an endpoint after 5 days of failure. The `OutboxRelayWorker` fan-out creates the deliveries. | Implemented (AUTO-34) |
+| `RegulatoryReportWorker` | every 1 h (`WORKER_REGULATORY_REPORT_INTERVAL_MS`) | Advisory-lock singleton | Drafts the scheduled returns (PSP-M, AML-Q, AML-A) per closed period and the business-day large-transaction batch; draft only, a person files. | Implemented (AUTO-16) |
+| `AuditChainAnchorWorker` | every 24 h (`WORKER_AUDIT_ANCHOR_INTERVAL_MS`) | Advisory-lock singleton | Verifies the live audit hash chain since the last anchor and stores a signed anchor; incidents become keyed P1 cases. Registered only with the dedicated audit database. | Implemented (AUTO-27) |
 | `RetentionWorker` | every hour when enabled; batch 500 | Bounded transactions per table | Purges notifications, inbound events, step logs, audit logs, detail logs, terminal attempts and dependents; never purges the ledger. | Partial / opt-in |
-| `BackgroundJobWorker` | every 2 s when enabled, batch 10 | `FOR UPDATE SKIP LOCKED` claim + ONE batch `RUNNING` update + lease | Drains `RECONCILIATION_RUN` and `ADJUSTMENT_EXECUTION` jobs, retries with backoff, recovers expired leases. | Implemented |
-| `OutboxRelayWorker` | every 250 ms (idle back-off to 2 s), batch >= 100 | `FOR UPDATE SKIP LOCKED`, one batch ack | Projects `attempt.transitioned` into `rm_merchant_daily_stats` and `rm_route_daily_volumes`; marks `processed_at`. Other declared topics are no-ops. | Partial |
+| `JournalPartitionWorker` | every 6 h (`WORKER_JOURNAL_PARTITION_INTERVAL_MS`), leader-elected | Two small catalogue reads, one DDL call only when a month is missing | Keeps the next `LEDGER_PARTITION_MONTHS_AHEAD` (6) monthly `journal_lines` partitions in existence through the same database function the deploy cron calls; raises the most-urgent cases `ledger.partition.default_rows` and `ledger.partition.ensure_failed`. | Implemented (AUTO-01) |
+| `ExpiryNoticeWorker` | hourly (`WORKER_EXPIRY_NOTICE_INTERVAL_MS`), leader-elected | Staged passes, each stage exactly-once through `deadline_stages` | API token and gateway credential expiry notices at 30/7/1 days, the P1 case close to a credential expiry, expired credential sets taken out of use, scheduled credential re-verification (dry run) (section 3.16). | Implemented (AUTO-08, AUTO-26) |
+| `DeadlineWorker` | every 5 min (`WORKER_DEADLINE_INTERVAL_MS`), batch 100, leader-elected | Six isolated rules, each action guarded by an exactly-once `deadline_stages` row claimed in its own transaction | Reminders, escalations and deadline outcomes for operator cases, AML cases, join requests, disputes (D1), cash-outs in Libyan business hours (D2) and unratified emergency actions (D7); section 3.16. | Implemented (AUTO-04, AUTO-22) |
+| `ExpiryHousekeepingWorker` | every 15 min (`WORKER_EXPIRY_HOUSEKEEPING_INTERVAL_MS`), batch 200, leader-elected | Six bounded, index-backed, isolated passes | Closes undecided approvals, revokes expired staff invitations, expires payment links (`link.expired`), deletes old MFA challenges and session revocations, scrubs sealed secrets of finished notifications (section 3.16). | Implemented (AUTO-05, AUTO-11) |
+| `PlatformMonitorWorker` | every 60 s (`WORKER_PLATFORM_MONITOR_INTERVAL_MS`), leader-elected | One pass over the configured checks | Evaluates the platform checks (section 3.16) and opens ONE keyed operator case per tripped condition (`platform.<check>[:<key>]`), recording the clearing on the case; a check that fails 3 times in a row raises `platform.monitor_check_failed:<id>`. | Implemented (AUTO-03) |
+| `CommissionNettingWorker` | daily at `COMMISSION_NETTING_CRON` (00:30 Africa/Tripoli), polled every 60 s, leader-elected | One grouped receivable read, then a batch per tick within a time budget | Nets the merchant-direct commission receivable against the merchant wallet (section 3.16); dry run by default. | Implemented (AUTO-21), dry run |
+| `BackgroundJobWorker` | every 2 s when enabled, batch 10 | `FOR UPDATE SKIP LOCKED` claim + ONE batch `RUNNING` update + lease | Drains `RECONCILIATION_RUN`, `ADJUSTMENT_EXECUTION` and `REFUND_INQUIRY` jobs, retries with backoff, recovers expired leases. | Implemented |
+| `OutboxRelayWorker` | every 250 ms (idle back-off to 2 s), batch >= 100 | `FOR UPDATE SKIP LOCKED`, one batch ack | Projects `attempt.transitioned` into `rm_merchant_daily_stats` and `rm_route_daily_volumes`; marks `processed_at`. Other declared topics are no-ops (counted, not silent). A failing event is retried alone in a savepoint, counted in `attempts`, and PARKED after `OUTBOX_MAX_ATTEMPTS` with one operator case per topic (AUTO-02). | Partial |
 | `AuditShipperWorker` | every 500 ms, batch >= 100 | Lease-claim batch then append to dedicated audit DB | Appends to the audit hash chain, then marks `audit_outbox.shipped_at`; prunes shipped rows after the retention window. | Partial / conditional |
 
 ### 3.4 Expiry sweeper
@@ -2554,7 +2600,54 @@ The engine publishes attempt transition events on the invalidation bus, and the 
 - threshold (`WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS`, default 300 s);
 - degraded flag.
 
-It degrades when workers are disabled, the queue cannot be read, or the oldest queued job exceeds the threshold. It does not report per-worker liveness, tick age, notification backlog, inbound backlog, outbox lag, or audit-chain status. `readBackgroundJobQueueHealth` only reads `background_jobs`.
+It degrades when workers are disabled, the queue cannot be read, or the oldest queued job exceeds the threshold. Since AUTO-03 it also serves `workers`: one record per registered worker from the process-wide `WorkerHealthRegistry` (`lastTickAt`, `lastSuccessAt`, `lastError` as a bounded message, `lastDurationMs`, `processed`, `backlog`, `consecutiveFailures`, `leader`), informational only (it never changes `status`). The registry is filled by `BaseWorker` and by the storage-engine relay and audit shipper; the platform monitor reads it. It does not report notification backlog, inbound backlog or audit-chain status. `readBackgroundJobQueueHealth` only reads `background_jobs`.
+
+### 3.16 Background automations, phase 1 (AUTO plan, 2026-11)
+
+Source: `design/11-automation/background_automation_and_workers_plan.md`. Every automation below follows the plan's rules: `BaseWorker` + leader election or `SKIP LOCKED`, keyed operator cases (a repeated tick never opens a second case), system-actor audit rows, env switches, a dry run for state-changing work, and tests against live PostgreSQL.
+
+**Worker health (AUTO-03).** `WorkerHealthRegistry` (`engine/workers/workerRuntime.ts`) is filled by `BaseWorker` on every tick (start, success, error, duration, processed count) and by `OutboxRelayWorker` / `AuditShipperWorker`, which are not `BaseWorker`s and report under their class names with the idle back-off as their cadence. `PlatformMonitorWorker` runs pluggable `PlatformMonitorCheck`s every minute and turns each finding into ONE operator case `platform.<check>[:<key>]` (kind `MANUAL_REVIEW`, SLA by priority); a condition that stops is recorded on the case (`[CLEARED ...]`, audit `PLATFORM_MONITOR_CLEARED`), never auto-resolved, and a re-trip appends `[RETRIPPED ...]`. State is rebuilt from the cases after a restart. Standard checks (`platformMonitorChecks.ts`): `worker_stale`, `checkpoint_stale`, `outbox_age`, `audit_outbox_age`, `background_job_age`, `journal_default_rows`, `cert_expiry`, `redis_unreachable`; money path (`moneyPathMonitorChecks.ts`): `stale_unknown`, `refund_unscheduled`. A check that throws or times out (15 s) three times in a row raises `platform.monitor_check_failed:<id>`.
+
+**Outbox dead-lettering (AUTO-02).** A failing batch is retried row by row in savepoints; the failing row's `attempts` grows and `last_error` is kept; at `OUTBOX_MAX_ATTEMPTS` it is parked (`parked_at`, still `processed_at IS NULL`, so it keeps its partial-index slot and the relay no longer selects it) and one operator case `outbox.parked:<topic>` is raised with a `OUTBOX_EVENT_PARKED` audit row per event. A topic without a handler is acknowledged but marked `UNKNOWN_TOPIC` in `last_error` and counted.
+
+**Stale UNKNOWN attempts (AUTO-19).** When the polling window of an UNKNOWN attempt elapses, `PollWorker` opens one keyed case `attempt.unknown:<attemptId>` (kind `UNKNOWN`, P1, `UNKNOWN_ATTEMPT_CASE_SLA_HOURS`) before the attempt leaves polling; if the case cannot be opened the attempt stays due and is retried after 300 s. An UNKNOWN attempt is never failed without a definitive gateway or statement answer. The monitor check `stale_unknown` alerts on UNKNOWN older than the SLA.
+
+**Refund inquiry (AUTO-20).** `createRefundInquiryScheduler` is the production `ReconciliationScheduler`, built once in `createPlatformRuntime` and passed to the engine, every governance context and the adjustment job handler. A refund whose gateway answer is UNKNOWN stays EXECUTING and a chain of `REFUND_INQUIRY` jobs (backoff 60 s to 1 h, 24 h window) asks again by replaying the refund with the same adjustment id, only on rails that declare `capabilities.refund_idempotent`; any other rail opens the case `refund.inquiry:<adjustmentId>` at once. A definitive answer books (`finalizeReconciledRefundAdjustment`) or rejects (`failReconciledRefundAdjustment`) the adjustment; in dry run (`REFUND_INQUIRY_DRY_RUN`, default true) it audits `REFUND_INQUIRY_DRY_RUN` and opens the case instead. `refund_unscheduled` flags an EXECUTING refund with neither a job nor a case.
+
+**Commission netting (AUTO-21, decision D8).** `engine/ledger/commissionNetting.ts` nets `min(receivable, max(0, wallet balance - open cash-outs))`, never below zero, partial, carried forward, through the existing `NETTING` stage of `MERCHANT_DIRECT_CONFIRMATION` (`Dr MERCHANT_WALLET / Cr COMMISSION_RECEIVABLE`, ref type `COMMISSION_NETTING`, ref `netting:<merchantId>:<runKey>:<receivableAccountId>`, so a repeated run never nets twice). The wallet is read under its debit lock after the posting's shard rows are locked in the global order. `CommissionNettingWorker` runs once per Tripoli day after `COMMISSION_NETTING_CRON`, opens one finance case `commission.receivable.aged:<merchantId>` for receivable older than `COMMISSION_RECEIVABLE_AGING_DAYS` that cannot be netted, audits `COMMISSION_RECEIVABLE_OVER_CEILING` and (live only) queues the merchant notice `COMMISSION_RECEIVABLE_SETTLEMENT_DUE` once per merchant and day when the remaining receivable exceeds `commissionReceivableCeiling` (the attempt guard's PAUSE decision, which now accounts for what netting could still collect, resumes traffic by itself). `executeCashout` nets first with the same arithmetic, locking the cash-out and the netting postings together (`lockShardsForMany`); the cash-out being approved is already PROCESSING, so netting can never take its money. Both start in dry run (`COMMISSION_NETTING_PROPOSED`).
+
+**Reconciliation follow-up and the dispute deadline (AUTO-23, AUTO-04).** After a `RECONCILIATION_RUN` job ingests a statement (and again on a retried job: everything below is idempotent), `ReconciliationFollowUp` opens ONE keyed operator case per exception item (`AMOUNT_MISMATCH` kind MISMATCH P2, `MISSING_AT_GATEWAY` kind UNMATCHED_STATEMENT P2, `MISSING_LOCALLY` kind MISMATCH P3), linked both ways (`operator_cases.reconciliation_item_id`, `reconciliation_items.operator_case_id`), keyed `recon.item:<itemId>`, capped at 500 per run with one `recon.overflow:<runId>` summary. A statement CHARGEBACK row (the ingestor now stores `reconciliation_items.row_type`, schema v20) that matched one of our attempts queues the existing `DISPUTE_INTAKE` job (source STATEMENT, deduped on the live job and on (gateway, external reference)), so the dispute, the drafted chargeback adjustment and its finance approval are the same as for a webhook. A statement line proving an UNKNOWN attempt was settled is appended as `[STATEMENT EVIDENCE run <id>]` to the attempt's UNKNOWN case (`attempt.unknown:<id>`, opened if absent). DEVIATION FROM THE PLAN: the UNKNOWN attempt is NOT finalised automatically (moving money for an unresolved payment stays the operator's decision through the existing UNKNOWN resolution; the evidence and the case make it one click). Disputes had NO evidence deadline before this work (`disputes.evidence_due_at` was never set), so the dispute rules of the deadline worker had nothing to act on: the intake now sets it to the open date plus the rail's own `capabilities.dispute_evidence_days` or `DISPUTE_EVIDENCE_WINDOW_DAYS` (14), and the drafted chargeback's approval now lives until `evidence_due_at + DISPUTE_RULING_SLA_DAYS + 14 days` instead of 3 days (it would otherwise have stranded the chargeback and its escrowed reserve). `ExpiryHousekeepingWorker` also never expires approvals of subjects with their own lifecycle (adjustment, cash-out, AML case, regulatory report, dispute, KYB document, shard repair).
+
+**Event-driven AML re-screening (AUTO-24).** `PeriodicScreeningWorker` keeps the 24 h periodic pass and adds two triggers (the merchant is never told, as before). LIST_UPDATE: the fingerprint of the published list versions is persisted in `worker_cursors` (`aml.list_fingerprint`); when it changes, including across a restart or leader change, a sweep walks the ACTIVE merchants in id order, `screenBatchSize` per tick, with the trigger `LIST_UPDATE`, its cursor persisted in `aml.list_sweep` so it resumes where it stopped; a further list change restarts it; the first fingerprint ever seen only seeds the baseline; the sweep is audited (`AML_LIST_UPDATE_SWEEP_STARTED` / `_FINISHED`). A confirmed match opens the usual case and suspends the merchant. OWNER_CHANGE: an active beneficial owner of an ACTIVE merchant that is still `NOT_SCREENED` makes the merchant and all its owners be screened with the trigger `OWNER_CHANGE` on the next tick (which sets the owner's status, so each new owner is screened once). Not detected: an EDIT of an existing owner's details (only additions are).
+
+**Token and credential expiry (AUTO-08, AUTO-26).** `ExpiryNoticeWorker`: the merchant is told 30, 7 and 1 days before an API token expires (`API_TOKEN_EXPIRING`, once per stage; a token created with a short life skips the higher stages silently, so it gets one notice, not three); staff (GATEWAY_ADMIN, SECURITY_ADMIN) are told the same for a gateway credential set, a P1 case `credential.expiring:<id>` opens inside `CREDENTIAL_EXPIRY_CASE_DAYS`, and at `expires_at` the set is taken out of use (status FAILING, audit `CREDENTIAL_SET_EXPIRED`, case `credential.expired:<id>`, staff told; a set that expired long ago is taken out of use silently). DEVIATION FROM THE PLAN: no route is moved to OPEN_BREAKER, because the visible-rails resolver only offers a route that has a VERIFIED credential set, so a rail without one is already hidden from payers before payment and comes back by itself when a verified set exists; an OPEN_BREAKER written here would never be reset by anything. Re-verification (AUTO-26) verifies VERIFIED sets not verified for `CREDENTIAL_REVERIFY_AFTER_HOURS` through `CredentialCheckService.verify` (a real gateway call, a few per tick); a FAILING verdict opens `credential.failing:<id>` and tells staff, an unreachable verifier changes nothing; dry run by default. Not built: counting failed proactive token refreshes inside `ApiConsumer` (it still only logs).
+
+**Deadlines (AUTO-04, AUTO-22).** `DeadlineWorker` runs six isolated rules (a failing rule is reported at the end of the tick, never stops the others). Every action is guarded by a STAGE: one `deadline_stages (subject_type, subject_id, stage)` row claimed with `INSERT ... ON CONFLICT DO NOTHING` in the SAME transaction as the action, so a restart, a repeated tick or a second node never repeats a reminder, escalation or revert (proved with three concurrent workers), and a failed action rolls its claim back so the next tick retries it. Only deadlines inside the catch-up window (`DEADLINE_CATCHUP_HOURS`, 72) are acted on, so the first run on a database full of old items does not flood staff. Staff recipients are the assignee when there is one, otherwise the ACTIVE users of a role queue (oldest first, at most 20): OPERATOR, COMPLIANCE/MLRO, FINANCE.
+
+- **Operator cases:** a reminder `DEADLINE_REMINDER` before `sla_due_at`; at the breach the priority goes up one level (P3 to P2 to P1), the case is annotated `[SLA BREACHED ...]`, audit `OPERATOR_CASE_SLA_BREACHED`, assignee and the OPERATOR queue told. **AML cases:** a reminder to the reviewer (or MLRO/COMPLIANCE) and, at the breach, ONE keyed P1 case `aml.sla_breached:<id>`; only the case id travels in notices and the case (confidentiality). **Join requests:** a reminder only (the breach is the expiry of AUTO-13).
+- **Disputes (D1):** reminders to the merchant and finance at T-72 h and T-24 h; at `evidence_due_at` with no evidence the dispute becomes `EXPIRED` (the chargeback execution already reads an EXPIRED dispute as LOST), the merchant is told, and one keyed finance case `dispute.expired:<id>` asks for the chargeback approval. DEVIATION FROM THE PLAN: the plan says the reserve loss is booked automatically; `executeAdjustment` deliberately refuses any non-human authoriser of a chargeback (design section 19.3), so the booking stays a finance decision and this worker does not bypass it (owner confirmation requested). With evidence submitted nothing is decided; a ruling overdue by `DISPUTE_RULING_SLA_DAYS` opens `dispute.ruling_overdue:<id>`.
+- **Cash-outs (D2):** the operator window in Libyan business hours (`businessTime.ts`: Sunday to Thursday in Africa/Tripoli, holidays from the platform setting `calendar.holidays`, an array of `YYYY-MM-DD`); 75 % reminds finance, 100 % opens a P2 case `cashout.sla:<id>:1`, 200 % a P1 case `...:2` and tells compliance. A merchant that is not ACTIVE is in a documented hold and is not measured. When several stages are reached at once only the highest acts. P50/P90/P95 on the dashboard is not built.
+- **Emergency actions (D7):** an unratified emergency approval (`mode EMERGENCY_RATIFICATION`, `PENDING_REVIEW`, no checker) gets reminders at 4 h and 1 h before `ratify_due_at` (ratifiers = MLRO and COMPLIANCE, never the actor); at the deadline a suspension STAYS in force and a P1 case `emergency.unratified:<id>` opens (audit `EMERGENCY_ACTION_UNRATIFIED`); the escalation repeats every 4 h (`EMERGENCY_ACTION_ESCALATED`); at `ratify_due_at + 48 h` a still-unratified suspension is LIFTED (the merchant returns to the status recorded in the approval's change log, the approval becomes `EXPIRED`, audit `EMERGENCY_ACTION_LIFTED`, case `emergency.lifted:<id>`, and the merchant gets only `MERCHANT_SUSPENSION_ENDED`: nothing about why or that it lapsed). The emergency suspension route now sets `expires_at = ratify_due_at + grace`, so it can still be ratified during the grace. One independent COMPLIANCE or MLRO officer may extend once by 1 to 7 days with a written reason (`POST /approvals/:id/extend-emergency`, also proxied by admin-back; never the actor; a single step by an independent officer, not a second maker-checker round); the extension clears the approval's stages so they run again. Emergency VELOCITY changes are reverted through a registered `EmergencyReverter`, but no emergency velocity flow exists yet, so none is registered: such an approval raises the P1 case saying a manual revert is needed. `ExpiryHousekeepingWorker` never touches `EMERGENCY_RATIFICATION` approvals.
+
+**Journal partitions (AUTO-01).** `JournalPartitionWorker` calls `ensure_journal_line_partitions` (now SECURITY DEFINER, bounded 1..60, `EXECUTE` for the application role) only when a month is missing, audits `JOURNAL_PARTITIONS_ENSURED`, and raises ONE P1 case with a 2 h SLA (the plan's "P0": the most urgent priority the case model has) while rows sit in `journal_lines_default` (`ledger.partition.default_rows`) or while creating the months fails (`ledger.partition.ensure_failed`, with the database error). Moving the stranded rows edits ledger rows, which the append-only guard allows only for a superuser or a `pgw_ledger_maintenance` member, so it is an operator action: `bun run repair-journal-default-partition [--apply]` with a privileged `DATABASE_URL` (dry run by default; one transaction: copy, delete from default, create and guard the month, insert back, verify counts; ids, `created_at`, shards and sequences are unchanged; the default partition is locked ACCESS EXCLUSIVE for seconds with a 5 s lock timeout). The platform monitor's `journal_default_rows` check is the second alarm.
+
+**Join request expiry (AUTO-13).** Each batch is one `UPDATE ... RETURNING` in the same transaction as its audit rows (`JOIN_REQUEST_EXPIRED`, previous status in `before`) and its merchant notices (`JOIN_REQUEST_DRAFT_EXPIRED` / `JOIN_REQUEST_REVIEW_EXPIRED`, EN and AR, in-app and e-mail, event id `notice:join-request-expired:<id>:<channel>` so a repeat never sends twice). The notices say nothing about screening or review findings. Notices of all automations go through `lib/automationNotices.ts` (`bilingualNotice`, `queueNotice`), which uses `INSERT ... ON CONFLICT DO NOTHING` so it is safe inside a transaction.
+
+**Expiry housekeeping (AUTO-05, AUTO-11).** `ExpiryHousekeepingWorker` runs six isolated passes (a failing pass is reported at the end of the tick, never stops the others): (1) approvals past `expires_at` become `EXPIRED` and release their subject like a rejection; (2) a staff invitation past `invitation_expires_at` loses its token hash, its still-queued mail is suppressed and unsealed, and the inviter is told; (3) PENDING payment links past `expires_at` become `EXPIRED` with one `link.expired` outbox event per link in the same transaction (the relay acknowledges the topic; the merchant webhook, AUTO-34, will consume it); (4) MFA challenges consumed or expired for more than `MFA_CHALLENGE_RETENTION_HOURS` are deleted; (5) `codeCiphertext` / `tokenCiphertext` are removed from the payload of notifications that are no longer QUEUED after `NOTIFICATION_SECRET_SCRUB_AFTER_MINUTES`; (6) expired `session_revocations` rows are deleted. Slots reserved by a link that expired with live attempts are left to the consistency audit (AUTO-12): the attempts keep their own slots and release them when they finish. All times are compared as parameters, never `now()`, so the result does not depend on the database session time zone.
+
+**KYB document scanning (AUTO-06, decision D5).** `KybScanWorker` (not a singleton: nodes claim with `FOR UPDATE SKIP LOCKED` and a 5-minute lease in `av_next_scan_at`, so a crashed node's claim is retried and a live one is not stolen) sends the bytes of every `PENDING` document, and of `CLEAN` documents whose last scan is older than `KYB_RESCAN_DAYS` (or never recorded), to the scanner `KYB_SCANNER_MODE` selects (`lib/kybScanner.ts`: `clamd` = ClamAV over `zINSTREAM` on a Unix socket or `host:port`, `eicar` = the built-in content gate, anything else = no scanner and every document stays `PENDING`). It is fail closed: a connection error, timeout, engine `ERROR`, size-limit reply or oversized reply rejects, the document stays `PENDING`, the error is kept in `av_last_error` and the retry backs off (`1 min * 2^(attempt-1)`, capped at 6 h); after `KYB_SCAN_MAX_ATTEMPTS` failures ONE keyed P2 case `kyb-scan-failed:<id>` is opened and the retries continue. A verdict is applied with a guarded `UPDATE ... WHERE av_status = <claimed value>`, so a document decided or replaced during the scan is never overwritten; it stores the engine and the signature set version (`av_engine`, `av_signature`, from `zVERSION`). `INFECTED` quarantines: an `UPLOADED` document becomes `REJECTED` (reason `OTHER`, system note), one audit row `KYB_DOCUMENT_QUARANTINED`, a keyed P1 case `kyb-infected:<id>`, and a neutral merchant notice (`KYB_DOCUMENT_QUARANTINED`, never names the detection). An `ACCEPTED` document that turns infected on a re-scan keeps its review status (a person decides about the merchant's KYB; the case says so), but `av_status = INFECTED` already blocks download and review. A failed RE-scan never downgrades `CLEAN`. A clean first scan writes `KYB_DOCUMENT_SCANNED`. The platform monitor adds `kyb_scan_backlog` (P2): uploaded documents `PENDING` longer than `PLATFORM_MONITOR_KYB_SCAN_MAX_AGE_MS` (only when a scanner is configured, so a dead scanner is seen). Upload-time content sniffing (active content, executables, EICAR) is unchanged and still rejects immediately.
+
+**Backup failures and the audit-chain anchor (AUTO-27).** (1) `createBackupMonitorCheck` (`engine/workers/backupMonitorChecks.ts`, check id `backup`, registered only when `BACKUP_DAEMON_URL` is set) polls the overview `BackupControlClient` already reads and turns the daemon's own catalog into keyed operator cases `platform.backup:<key>`: `daemon` (unreachable, P1), `unhealthy` (P1), `wal-lag` (archive lag above the policy's `alertLagSeconds`, P1), `backup-failed:<target>` (the latest finished run of that target FAILED, P1; a later PASSED run clears it), `backup-stale` (no PASSED full backup within `PLATFORM_MONITOR_BACKUP_MAX_FULL_AGE_MS`, 36 h, P1), `drill-failed` (latest restore drill FAILED, carrying the double-entry, balance-parity and audit-chain numbers, P1) and `drill-stale` (no drill within `PLATFORM_MONITOR_BACKUP_DRILL_MAX_AGE_MS`, 8 days, P2). The daemon needs no push channel. (2) `AuditChainAnchorWorker` (cluster singleton, daily, only with the dedicated audit database) verifies the LIVE hash chain incrementally and stores a signed anchor in the core table `audit_chain_anchors` (append-only trigger): it checks the latest anchor's HMAC (`Vault.sign`, key `AUDIT_ANCHOR_KEY_ID`), checks that the audit database still holds the anchored row with the anchored hash (the chain alone cannot show a removed tail), verifies the rows added since the anchor in segments of `AUDIT_ANCHOR_SEGMENT_ROWS` (at most `AUDIT_ANCHOR_MAX_SEGMENTS_PER_TICK` per tick, so a long history is verified over several ticks) with `DedicatedAuditDatabaseDriver.verifyChainSegment`, then anchors the end of the verified range and writes `AUDIT_CHAIN_ANCHORED`. Failures open ONE keyed P1 case each and never move the anchor over unverified rows: `audit.anchor_invalid` (forged or edited anchor), `audit.chain_rewritten` (anchored row missing or with another hash), `audit.chain_broken` (a row does not chain; the rows before it are still anchored so the break stays located). Cases are not auto-resolved. Not built: the anchor is not yet copied outside the core database (for example to the backup store), so someone who controls both databases AND the vault key can still rewrite history consistently.
+
+**Scheduled regulatory returns (AUTO-16, decision D3).** The provisional CBL catalogue (plan section 6.2) is DATA: migration `20261109190000_regulatory_report_automation` seeds `reporting_rules` rows (status `PROVISIONAL`, source "provisional default, pending CBL confirmation") whose `conditions` carries a `returnCode`: `PSP-M` (monthly, `dueDays` 10), `AML-Q` (quarterly, 15), `AML-A` (annual, 31) and `LTR` (`batch: BUSINESS_DAY`, LYD 50,000). `RegulatoryReportWorker` (cluster singleton, hourly) drafts them: one `DRAFT` per closed period and rule (boundaries are local midnights in `Africa/Tripoli`, `engine/workers/regulatory/periods.ts`), idempotent per `(report_code, period_key)` through a partial unique index and `ON CONFLICT DO NOTHING` (concurrent nodes draft once), `due_at` = period end + `dueDays`, payload stored encrypted (vault key `reporting-payload`, the same as the per-attempt reports) with its SHA-256, `confidential`, subject `REPORTING_RULE`, audit `REGULATORY_REPORT_DRAFTED`, MLRO and compliance told (`REGULATORY_REPORT_DRAFTED`). Only the `REGULATORY_REPORT_MAX_PERIODS` (2) most recent closed periods are considered, so enabling the worker on old data does not draft years of returns; a period that starts before the rule's effective LOCAL date is skipped. The payload sections come from read-only aggregates (`regulatory/payloads.ts`): payments by rail with success, failure and UNKNOWN rates and succeeded value, refunds, disputes opened and decided, cash-outs, merchants by status and onboarded, a funds-position reading (point in time at generation), and for AML returns screening, case and KYB counts (the number of STRs is a count only); what the platform cannot know is listed in the payload's `pending` (service availability and incidents, staff training completion, narratives). `LTR` drafts one report per business-day batch (the batch of a Thursday also holds the weekend; a holiday extends it) with every successful attempt at or above the threshold (lines capped at `REGULATORY_REPORT_MAX_BATCH_LINES`, marked `truncated`), due the end of the next business day; a batch without a breach produces no report. The per-attempt `ReportingRuleEvaluator` now skips any rule that names a `returnCode`, so a scheduled rule never fires once per payment. The `DeadlineWorker` rule `reports` watches unfiled reports (`DRAFT`, `PENDING_CHECKER`, `APPROVED`) with a `due_at`: a reminder to MLRO and compliance `REGULATORY_REPORT_REMINDER_BUSINESS_DAYS` (3) business days before, and at the due date ONE keyed P1 case `report.overdue:<id>`, audit `REGULATORY_REPORT_OVERDUE`; its catch-up window is at least 30 days so a missed filing is not forgotten. Nothing is filed: the MLRO reviews, completes the pending sections, approves and files, then records the reference. NOT BUILT: goAML XML (needs the FIU's XSD), the XLSX output through the shared export pipeline, the `INC` incident return, due dates and a draft deadline for suspicious-activity reports created by the AML flow, and a "regenerate draft" action (a correction today means a new draft by hand).
+
+**Outbound merchant webhooks (AUTO-34, decision D9).** A merchant registers up to five HTTPS endpoints per application (`merchant_webhook_endpoints`, migration `20261109200000_merchant_webhooks`, v24) through `/internal/merchant/webhooks/*` (proxied by merchant-back, `/portal/developers/webhooks`): reading needs a merchant read authority, changing needs `application:manage`, an application-scoped user only reaches their applications, another merchant's endpoint or delivery looks nonexistent. The `whsec_` signing secret (32 random bytes) is stored vault-encrypted (key `webhook-secret`), returned exactly once by create and rotate, never listed or logged; a rotation keeps the previous secret verifying for `MERCHANT_WEBHOOK_ROTATION_OVERLAP_HOURS` (24), during which every request carries two signatures. Events: `payment.succeeded|failed|expired|refunded` (from the terminal `attempt.transitioned` outbox event; cancelled and blocked attempts are not sent), `link.expired`, `dispute.opened|closed` and `cashout.paid|failed`, each written to the transactional outbox in the same transaction as the state change (`GovernanceExecution` at the dispute intake, the ruling, the cash-out payout and rejection; the `DeadlineWorker` at a dispute expiry). The `OutboxRelayWorker` gained a `fanout` option: `createWebhookFanout` runs in the relay's own transaction and writes one `merchant_webhook_deliveries` row per matching ACTIVE endpoint (application-scoped events by application, dispute and cash-out events by merchant), idempotent through the unique `(endpoint_id, event_id)` (`evt_<outbox id>`), with the exact signed body stored as text. `MerchantWebhookWorker` (not a singleton: `FOR UPDATE SKIP LOCKED` with a 2-minute lease that already counts the attempt) signs each request with the Standard Webhooks scheme (`webhook-id`, `webhook-timestamp` per attempt, `webhook-signature: v1,<base64 HMAC-SHA256 of id.timestamp.body>`) and sends it through `lib/webhooks/egress.ts`: HTTPS only (HTTP and private hosts only with `MERCHANT_WEBHOOK_ALLOW_INSECURE`), no URL credentials or fragments, every resolved address must be public, DNS is resolved once and the connection is PINNED to that address (a name that re-resolves to a private address cannot redirect the request; SNI and certificate validation keep the real host name), redirects are never followed, the response is read to at most 4 KiB and never stored. 2xx = delivered; network errors, timeouts, 408, 429 and 5xx retry after 5 s, 5 min, 30 min, 2 h, 5 h, 10 h and 10 h with +-20 % jitter (8 attempts, about 27 h); any other 4xx, a redirect or an unsafe URL parks the delivery at once, as does the 8th failure (`PARKED`, with `park_reason`). An endpoint that fails continuously for `MERCHANT_WEBHOOK_DISABLE_AFTER_DAYS` (5) is DISABLED (`failing_since` is cleared by any success), its pending deliveries are parked, one audit row `MERCHANT_WEBHOOK_ENDPOINT_DISABLED` is written and the merchant gets a notice (`MERCHANT_WEBHOOK_DISABLED`, host only). The merchant can send a `webhook.test` event (delivered whatever the filter), disable and enable an endpoint (enabling clears the failure streak), and redeliver a parked or delivered event as a fresh attempt cycle (the endpoint must be active); every management action is audited without the secret. Payloads carry identifiers, status and amounts only (payment: `paymentId`, `reference`, `status`, `currency`, `amount`, `netAmount`, `linkId`), never card, customer or AML data; ordering is not guaranteed. NOT BUILT: a delivery attempt history (only the last attempt is kept), `payment.refunded` for partial refunds (only the terminal `REFUNDED` status is sent), per-event retry-policy settings, and the portal has no payload viewer.
+
+**Statement schedules and slot counter audit (AUTO-07, AUTO-12).** `StatementScheduleWorker` (cluster singleton, 5 min) reads `statement_sources.schedule_cron` (a five-field cron evaluated in `Africa/Tripoli` time by `lib/cron.ts`: lists, ranges, steps, Sunday as 0 or 7, day-of-month OR weekday when both are set) and, per source, looks at the last `STATEMENT_SCHEDULE_LOOKBACK_SLOTS` (7) slots that are more than `STATEMENT_SCHEDULE_GRACE_MINUTES` (120) old: a slot is satisfied when a `reconciliation_runs` row of the source was created at or after it and before the next slot (plus grace); an unsatisfied slot opens ONE keyed P2 case `statement.missing:<source>:<slot>` (kind `UNMATCHED_STATEMENT`, audit `STATEMENT_MISSING`), so a daily source that misses three days has three cases, and the case resolves itself with a note when the statement arrives. A source created after a slot never owes it; an invalid cron raises one P3 case `statement.schedule_invalid:<source>`. NOT BUILT: the `STATEMENT_FETCH` pull job (no connector exists) and the AUTO-15 settlement-sweep scheduling after a successful run; a statement that arrives after the NEXT slot's grace is attributed to that later slot, so the older case stays open for a person. `ConsistencyAuditWorker` (cluster singleton, hourly, REPORT ONLY) compares `payment_links.active_locked_count` with the live (non-terminal) attempts of finite-use links that have not changed for 15 minutes (an in-flight reservation would look like drift) and opens ONE P3 case `link.slot_drift:<link>` with both numbers; with `CONSISTENCY_AUDIT_REPAIR=true` it corrects the counter under the row lock (re-counting inside the lock) and audits `PAYMENT_LINK_SLOTS_REPAIRED`. The daily cap counters against the read models are not audited.
+
+**KYB grace pass cursor (AUTO-25).** `KybExpiryWorker` walks merchants by a keyset cursor persisted in `worker_cursors`, so merchants beyond the first batch are evaluated.
+
+**Shard repair lock time (AUTO-10).** `applyShardRepair` plans outside the shard lock and re-checks only `line_seq`, balance and `max(shard_seq)` under it, so a repair no longer holds the row for the whole-history read.
 
 ## 4. Contracts and invariants
 
@@ -2579,6 +2672,7 @@ It degrades when workers are disabled, the queue cannot be read, or the oldest q
 - Queues and delivery: `notifications` (template, channel, language, payload, status, attempts, next attempt), `background_jobs` (type, reference, payload, state, attempts, availability, lease, error, completion), `outbox_events`, and `audit_outbox`.
 - Lifecycle: `join_requests` (SLA fields), `merchants` (status, review date, suspension reason), `kyb_documents`, `kyb_revalidation_requests`, `aml_screenings`, `aml_cases`, `gateway_inquiry_schedules`.
 - Read models: `rm_merchant_daily_stats`, `rm_route_daily_volumes`.
+- Automation state (2026-11): `worker_cursors` (keyset cursors persisted by singleton workers), `outbox_events.attempts/last_error/parked_at`, `background_jobs` type `REFUND_INQUIRY`, keyed operator cases (`operator_cases.subject_key`).
 
 ### Environment keys
 
@@ -2589,6 +2683,19 @@ It degrades when workers are disabled, the queue cannot be read, or the oldest q
 | `WORKER_CONCURRENCY`, `WORKER_MAX_ATTEMPTS` | 4, 3 | Concurrency is validated but unused; max attempts is passed to the inbound worker. |
 | `WORKER_RESCREEN_INTERVAL_MS` | 86,400,000 | Periodic screening interval. |
 | `WORKER_KYB_EXPIRY_INTERVAL_MS`, `WORKER_KYB_EXPIRY_BATCH_SIZE` | 21,600,000, 200 | KYB cadence and batch. |
+| `WORKER_KYB_SCAN_ENABLED`, `WORKER_KYB_SCAN_INTERVAL_MS`, `WORKER_KYB_SCAN_BATCH_SIZE` | `true`, 60,000, 20 | KYB scan worker switch, cadence, batch (AUTO-06). |
+| `WORKER_AUDIT_ANCHOR_ENABLED`, `WORKER_AUDIT_ANCHOR_INTERVAL_MS` | `true`, 86,400,000 | Audit-chain anchor worker switch and cadence (AUTO-27). |
+| `WORKER_REGULATORY_REPORT_ENABLED`, `WORKER_REGULATORY_REPORT_INTERVAL_MS` | `true`, 3,600,000 | Regulatory report drafting switch and cadence (AUTO-16). |
+| `WORKER_MERCHANT_WEBHOOK_ENABLED`, `WORKER_MERCHANT_WEBHOOK_INTERVAL_MS`, `WORKER_MERCHANT_WEBHOOK_BATCH_SIZE` | `true`, 2000, 50 | Merchant webhook delivery switch (also switches the relay fan-out), cadence, batch (AUTO-34). |
+| `WORKER_STATEMENT_SCHEDULE_ENABLED`, `WORKER_STATEMENT_SCHEDULE_INTERVAL_MS`, `STATEMENT_SCHEDULE_GRACE_MINUTES`, `STATEMENT_SCHEDULE_LOOKBACK_SLOTS` | `true`, 300,000, 120, 7 | Statement schedule alerts (AUTO-07). |
+| `WORKER_CONSISTENCY_AUDIT_ENABLED`, `WORKER_CONSISTENCY_AUDIT_INTERVAL_MS`, `CONSISTENCY_AUDIT_REPAIR` | `true`, 3,600,000, `false` | Slot counter audit switch, cadence, and the repair flag (AUTO-12). |
+| `MERCHANT_WEBHOOK_TIMEOUT_MS`, `MERCHANT_WEBHOOK_CONCURRENCY`, `MERCHANT_WEBHOOK_ALLOW_INSECURE`, `MERCHANT_WEBHOOK_DISABLE_AFTER_DAYS`, `MERCHANT_WEBHOOK_ROTATION_OVERLAP_HOURS` | 10,000, 8, `false`, 5, 24 | Request timeout, parallel sends per tick, development egress relaxation (HTTP and private hosts), continuous-failure days before disabling an endpoint, previous-secret overlap. |
+| `REGULATORY_REPORT_MAX_PERIODS`, `REGULATORY_REPORT_MAX_BATCH_LINES`, `REGULATORY_REPORT_REMINDER_BUSINESS_DAYS` | 2, 5000, 3 | Catch-up depth, large-transaction batch cap, business days before the due date at which filers are reminded. |
+| `AUDIT_ANCHOR_SEGMENT_ROWS`, `AUDIT_ANCHOR_MAX_SEGMENTS_PER_TICK`, `AUDIT_ANCHOR_KEY_ID` | 5000, 40, `audit-anchor-v1` | Rows per verification query, segments per tick, vault key that signs anchors. |
+| `PLATFORM_MONITOR_BACKUP_MAX_FULL_AGE_MS`, `PLATFORM_MONITOR_BACKUP_DRILL_MAX_AGE_MS` | 129,600,000, 691,200,000 | Backup freshness limits for the `backup` monitor check (AUTO-27). |
+| `KYB_SCANNER_MODE`, `KYB_CLAMD_ADDRESS`, `KYB_CLAMD_TIMEOUT_MS` | unset (= no scanner, documents stay `PENDING`), unset, 30,000 | Engine selection: `clamd` (needs the address: socket path or `host:port`), `eicar` (built-in gate, dev/tests). |
+| `KYB_RESCAN_DAYS`, `KYB_SCAN_MAX_ATTEMPTS` | 30, 8 | Re-scan age of `CLEAN` documents (0 = never); failures before the P2 case. |
+| `PLATFORM_MONITOR_KYB_SCAN_MAX_AGE_MS` | 7,200,000 | Age of an uploaded `PENDING` document that raises `kyb_scan_backlog`. |
 | `WORKER_RETENTION_ENABLED`, `WORKER_RETENTION_INTERVAL_MS`, `WORKER_RETENTION_BATCH_SIZE` | `false`, 3,600,000, 500 | Retention enablement, cadence, batch. |
 | `RETENTION_DRY_RUN` | `false` | Counts without deleting. |
 | `WORKER_LEDGER_CHECKPOINT_ENABLED`, `WORKER_LEDGER_CHECKPOINT_INTERVAL_MS`, `WORKER_LEDGER_CHECKPOINT_BATCH_SIZE` | `true`, 30,000, 50 | Per-shard checkpoint worker enablement, cadence, shards per pass. |
@@ -2599,6 +2706,27 @@ It degrades when workers are disabled, the queue cannot be read, or the oldest q
 | `LEDGER_SHARD_UP_LINES_PER_SEC`, `LEDGER_SHARD_MAX_WIDTH`, `LEDGER_SHARD_COOLDOWN_MS` | 150, 64, 600,000 | Hot threshold per shard, widest routing width, minimum time between two scalings of an account. |
 | `WORKER_BACKGROUND_JOBS_ENABLED`, `WORKER_BACKGROUND_JOBS_INTERVAL_MS`, `WORKER_BACKGROUND_JOBS_BATCH_SIZE` | `true`, 2000, 10 | Durable queue enablement, cadence, batch. |
 | `WORKER_BACKGROUND_JOBS_LEASE_SECONDS`, `WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS` | 300, 300000 | Crash-recovery lease and health degradation threshold. |
+| `WORKER_PLATFORM_MONITOR_ENABLED`, `WORKER_PLATFORM_MONITOR_INTERVAL_MS` | `true`, 60,000 | Platform monitor (AUTO-03) enablement and cadence. |
+| `PLATFORM_MONITOR_WORKER_STALE_MULTIPLIER` | 3 | A worker with no successful tick for this many intervals is reported (P1). |
+| `PLATFORM_MONITOR_OUTBOX_MAX_AGE_MS`, `PLATFORM_MONITOR_AUDIT_OUTBOX_MAX_AGE_MS` | 300,000 each | Oldest unprocessed outbox row / unshipped audit row tolerated. |
+| `PLATFORM_MONITOR_CERT_FILES`, `PLATFORM_MONITOR_CERT_WARN_DAYS` | empty (the mTLS CA, server and backup-client paths), 30 | PEM files whose expiry is watched as `label=path` pairs, and the warning window. |
+| `OUTBOX_MAX_ATTEMPTS` | 10 | Failed deliveries after which an outbox event is parked (AUTO-02). |
+| `WORKER_EXPIRY_NOTICE_ENABLED`, `WORKER_EXPIRY_NOTICE_INTERVAL_MS` | `true`, 3,600,000 | Expiry notice worker (AUTO-08, AUTO-26). |
+| `TOKEN_EXPIRY_NOTICE_DAYS`, `CREDENTIAL_EXPIRY_NOTICE_DAYS`, `CREDENTIAL_EXPIRY_CASE_DAYS` | `30,7,1`, `30,7,1`, 7 | Notice stages (days before expiry) and the window in which an expiring credential set opens a P1 case. |
+| `CREDENTIAL_REVERIFY_AFTER_HOURS`, `CREDENTIAL_REVERIFY_BATCH_SIZE`, `CREDENTIAL_REVERIFY_DRY_RUN` | 24, 5, `true` | Re-verify VERIFIED credential sets not verified for this long (0 = off), sets per tick, and the dry run (audits `CREDENTIAL_REVERIFY_PROPOSED`, calls no gateway). |
+| `WORKER_DEADLINE_ENABLED`, `WORKER_DEADLINE_INTERVAL_MS`, `WORKER_DEADLINE_BATCH_SIZE` | `true`, 300,000, 100 | Deadline worker (AUTO-04, AUTO-22). |
+| `DEADLINE_CASE_REMINDER_LEAD_MINUTES`, `DEADLINE_JOIN_REMINDER_LEAD_HOURS`, `DEADLINE_CATCHUP_HOURS`, `DEADLINE_CASE_SLA_HOURS` | 60, 24, 72, 24 | Reminder leads, the catch-up window (only deadlines of the last N hours are acted on) and the SLA of the cases the rules open. |
+| `DISPUTE_REMINDER_HOURS`, `DISPUTE_RULING_SLA_DAYS`, `DISPUTE_EVIDENCE_WINDOW_DAYS` | `72,24`, 30, 14 | Dispute evidence reminders (hours before `evidence_due_at`), the provider ruling SLA, and the default days a merchant has to answer a dispute when the rail declares none. |
+| `CASHOUT_SLA_BUSINESS_HOURS`, `CASHOUT_SLA_REMINDER_RATIO` | 24, 0.75 | Cash-out operator window (business hours, Sunday to Thursday, `calendar.holidays` platform setting) and the reminder fraction. |
+| `EMERGENCY_RATIFICATION_GRACE_HOURS`, `EMERGENCY_ESCALATE_EVERY_HOURS`, `EMERGENCY_REMINDER_HOURS` | 48, 4, `4,1` | Emergency ratification policy (D7): grace after the deadline before an unratified suspension is lifted, escalation period, reminders before the deadline. |
+| `WORKER_JOURNAL_PARTITION_ENABLED`, `WORKER_JOURNAL_PARTITION_INTERVAL_MS`, `LEDGER_PARTITION_MONTHS_AHEAD` | `true`, 21,600,000, 6 | Journal partition worker (AUTO-01); months ahead is 1..60. |
+| `WORKER_EXPIRY_HOUSEKEEPING_ENABLED`, `WORKER_EXPIRY_HOUSEKEEPING_INTERVAL_MS`, `WORKER_EXPIRY_HOUSEKEEPING_BATCH_SIZE` | `true`, 900,000, 200 | Expiry housekeeping worker (AUTO-05, AUTO-11). |
+| `MFA_CHALLENGE_RETENTION_HOURS`, `NOTIFICATION_SECRET_SCRUB_AFTER_MINUTES` | 24, 60 | How long a finished MFA challenge is kept, and how long a finished notification keeps its sealed code or token. |
+| `WORKER_COMMISSION_NETTING_ENABLED`, `WORKER_COMMISSION_NETTING_INTERVAL_MS` | `true`, 60,000 | Commission netting worker (AUTO-21) enablement and polling cadence. |
+| `COMMISSION_NETTING_DRY_RUN` | `true` | State-changing, so it starts as a dry run (`COMMISSION_NETTING_PROPOSED` audit rows only); set `false` to net for real. |
+| `COMMISSION_NETTING_CRON`, `COMMISSION_RECEIVABLE_AGING_DAYS`, `COMMISSION_NETTING_AT_CASHOUT` | `30 0 * * *`, 30, `true` | Daily run time in Africa/Tripoli, finance-case age, and netting at cash-out time. |
+| `REFUND_INQUIRY_DRY_RUN`, `REFUND_INQUIRY_WINDOW_SECONDS` | `true`, 86,400 | Refund inquiry (AUTO-20): in dry run a definitive answer is audited and handed to a case; how long the gateway is asked before an operator takes over. |
+| `UNKNOWN_ATTEMPT_CASE_SLA_HOURS` | 24 | SLA of the case opened for an UNKNOWN attempt whose polling window elapsed (AUTO-19) and the stale-UNKNOWN alert threshold. |
 
 ### Routes and surfaces
 
@@ -2641,26 +2769,26 @@ It degrades when workers are disabled, the queue cannot be read, or the oldest q
 
 - **Inbound inbox** — the worker is implemented and wired, but the checkout route processes synchronously and marks the event processed; the worker has no producer. The inbox-first asynchronous design is not in force.
 - **Retention** — opt-in, dry-run capable, bounded, and ledger-safe, but the scope excludes AML/KYB/reporting evidence and the default is off.
-- **Join-request expiry** — expires drafts/reviews but writes no audit row and sends no merchant notification.
 - **Outbox relay / audit shipper** — only `attempt.transitioned` has a projection (`ledger.entry_posted` and four other topics are no-ops); the audit shipper only runs with a dedicated audit DB (it now prunes shipped rows after the retention window).
 - **Realtime fan-out** — transition events are published, but checkout/POS clients receive polling SSE, not subscriptions.
 
 ### Missing / deferred
 
+- Background automation plan (2026-11-09): `design/11-automation/background_automation_and_workers_plan.md` lists the missing and defective automations, their design and a phased roadmap (GAP-066).
 - Asynchronous webhook inbox processing on the request path.
 - Transition-bus-backed SSE/WebSocket fan-out.
 - Outbox and audit-outbox retention.
-- Per-worker health, tick latency, backlog, and last-success metrics; separate worker deployment/entrypoint and real `WORKER_CONCURRENCY`.
+- Separate worker deployment/entrypoint and real `WORKER_CONCURRENCY`. (Per-worker health, tick latency and last-success metrics exist since AUTO-03; backlog is reported by the workers that know it.)
 - AML/KYB/report retention passes and batch/deferred AML monitoring worker.
 
 ### Known bugs / risks
 
-- **Code gap:** `PollWorker` releases a link slot for `FAILED` and `CANCELLED` but not for `EXPIRED` or `BLOCKED`, unlike the expiry sweeper's terminal release path. A poll-discovered expiry can leave a slot reserved.
+- FIXED 2026-11-08: `PollWorker` releases the slot for every terminal status (`SUCCEEDED`, `FAILED`, `EXPIRED`, `CANCELLED`, `BLOCKED`).
 - **Code gap:** the synchronous inbound route marks the event processed even when verification fails; the event is not retried by the inbox worker. Verification failure is recorded but there is no asynchronous replay.
 - **Code gap:** `InboundInboxWorker` retries `RetryableInboundError` on the next tick with no delay, so a persistent retryable failure can burn its attempt cap quickly.
-- **Code gap:** merchant fallback balance reads can double count a checkpoint; this is documented in `core.ledger` but affects worker-written ledger balances too.
+- FIXED: balances are read from the shards only (`loadLiveAccountBalances`), so no checkpoint fallback can double count.
 - **Risk:** retention and audit shipping are independent: retention purges `audit_log` and `detail_change_logs` on its own schedule without consulting `audit_outbox.shipped_at`, and the outbox rows are never purged.
-- **Risk:** `OutboxRelayWorker` marks an unknown topic processed without a handler, so a newly added event type can be silently dropped until a handler is deployed.
+- **Risk:** `OutboxRelayWorker` still acknowledges a topic without a consumer (a newer node may emit topics an older relay does not know), but it is now counted and marked `UNKNOWN_TOPIC` in `last_error` instead of silent (AUTO-02).
 - **Documentation gap:** the design describes an event-driven realtime and inbox-first system; the as-built system is synchronous on inbound and polling on SSE.
 
 ## 8. Verification and tests
@@ -2724,7 +2852,7 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 
 ## Storage Engine
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-09
 
 ## 1. Purpose and scope
 
@@ -3180,7 +3308,11 @@ Indexes: see migration `20261104090000_db_read_write_optimisation` in `core.data
 
 ### 12.5 Open work
 
-GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no cursor), GAP-DB-04 (engine re-reads, commission-receivable SUM scanning all receivable lines through a `pa.id::text` join, velocity per-rule queries, uncached flow/step/credential reads), GAP-DB-05 (admin lists/exports/summaries on the primary with wide columns, `reconciliation/runs` loading `file_content`, join-request mutations re-reading KYB `content_ciphertext`, bulk operator-case loops, `PUT /settings` per-entry reads), GAP-DB-06 (dashboards still do not read `rm_*`; merchant overview could use `rm_merchant_daily_stats` once per-rail and commission columns exist), and adoption of keyset pagination for the remaining lists.
+GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no cursor), GAP-DB-04 (engine re-reads, velocity per-rule queries and uncached flow/step/credential reads remain; the commission-receivable SUM is now short-circuited when the ceiling is null and partition-pruned by `je.created_at` when it is not), GAP-DB-05 (admin lists/exports/summaries on the primary with wide columns, `reconciliation/runs` loading `file_content`, join-request mutations re-reading KYB `content_ciphertext`, bulk operator-case loops, `PUT /settings` per-entry reads), GAP-DB-06 (dashboards still do not read `rm_*`; merchant overview could use `rm_merchant_daily_stats` once per-rail and commission columns exist), and adoption of keyset pagination for the remaining lists.
+
+## 13. 2026-11-09 ledger query/index optimisation
+
+`journal_entries` gained `journal_entries_created_at_idx` (INCLUDE `id, ref_type, ref_id`) and a `pg_trgm` GIN search index; the two hot `journal_lines` lookups became covering indexes (`INCLUDE` payloads); append-only insert autovacuum (`autovacuum_vacuum_insert_scale_factor = 0.01`) keeps the Visibility Map current for Index-Only Scans on every monthly partition. The admin journal entry list/detail, the GL/wallet statement totals and the AML hold lookup now bound `journal_lines.created_at` by the parent entry, so PostgreSQL prunes the monthly partitions; the statement totals are one covered `groupBy` instead of a `count()` plus a `groupBy`. The checkout guard passes the merchant row it already loaded and skips the commission-receivable query entirely when `commissionReceivableCeiling` is null; when a ceiling is configured the SQL drives from `payment_attempts(merchant_id)` and bounds `journal_lines.created_at` by the ENTRY it belongs to (a delayed `COMMISSION_NETTING` must still be counted). Schema version 25, migration `20261109210000_ledger_query_and_index_optimization` (applied after the automation migrations); regression suite `test/storage-engine/performance/ledger-query-pruning-and-accuracy.test.ts` (EC-01..EC-18).
 
 ## Gap resolutions (2026-11-05)
 
@@ -3190,7 +3322,7 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 
 ## Data Schema and Migrations
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-09
 
 ## 1. Purpose and scope
 
@@ -3198,9 +3330,9 @@ This part owns the PostgreSQL 18 relational model, the committed migration histo
 
 It covers:
 
-- `core-back/prisma/schema.prisma` — 76 Prisma models and 105 enums;
-- `core-back/prisma/migrations/**` — four committed migrations;
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 14 and the boot guard;
+- `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
+- `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 25 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -3255,27 +3387,27 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 13`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 25`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
 - it connects through the base client;
 - it reads `schema_versions.version` where `id = 1`;
-- it throws when the row is missing or does not equal 9;
+- it throws when the row is missing or does not equal `REQUIRED_SCHEMA_VERSION`;
 - it caches the successful check and resets the cached promise after a failure so a later call can retry.
 
 `core-back/prisma/seed.ts`, `seedFakeRails.ts` and `syntheticSeeder/index.ts` call `ensureSchemaVersion()` before writing. A stale database is therefore rejected by these seeders and by any caller that explicitly asserts the version. The core HTTP start path does not call it.
 
 ### 3.3 Migration history
 
-There are six committed migrations (the original four below, plus `20261104090000_db_read_write_optimisation` which adds indexes and bumps the schema version to 9, and `20261104120000_mfa_challenges`, described in section 11; the generated migration catalog is authoritative):
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261109210000_ledger_query_and_index_optimization`, schema version 25). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
 | `20261103000000_postgres18_init` | Creates 74 tables: all baseline Prisma model tables plus the `schema_versions` support table. Creates enums and the initial indexes/FKs. Inserts schema version 7. |
 | `20261103120000_postgres18_storage_engine` | Adds `pg_trgm` and `btree_gin`; replaces outbox/audit indexes with partial/BRIN indexes; adds covering/BRIN journal indexes; adds worker-claim partial indexes; adds attempt reference indexes and trigram search indexes. |
 | `20261103130000_cqrs_read_models` | Creates `rm_merchant_daily_stats` and `rm_route_daily_volumes` plus their day indexes. |
-| `20261103180000_storage_hardening` | Adds `pg_stat_statements` when available; sets `gl_account_shards.shard_id` default and range check; converts `journal_lines` to monthly range partitions; adds partition maintenance function; adds broader trigram indexes; updates schema version to 8. |
+| `20261103180000_storage_hardening` | Adds `pg_stat_statements` when available; sets `gl_account_shards.shard_id` default and a 0..15 range check (relaxed to 0..255 by `20261107090000_shard_sequenced_checkpoints`); converts `journal_lines` to monthly range partitions; adds partition maintenance function; adds broader trigram indexes; updates schema version to 8. |
 | `20261104090000_db_read_write_optimisation` | Part A (Prisma diff): drops the redundant `payment_attempts(link_id)`, `payment_attempts(merchant_id)`, `attempt_step_logs(attempt_id)`, `reconciliation_items(run_id)` and `audit_log(entity_type, entity_id)` indexes (each is a prefix of a kept or new composite); adds `approval_requests(subject_type, subject_id, state)`, `payment_attempts(link_id, created_at)`, `attempt_step_logs(attempt_id, created_at)`, `inbound_events(attempt_id, received_at)`, `reconciliation_items(run_id, created_at)` and `(created_at)`, `audit_log(created_at)` and `(actor_id, created_at)`; adds `audit_outbox.lease_until` and `rm_merchant_daily_stats.success_amount` / `success_net_amount`. Part B (raw SQL): partial expression index `payment_attempts_succeeded_settled_at_idx` on `COALESCE(terminal_at, created_at)` INCLUDE `(route_id, total_charged_amount)` WHERE `status = 'SUCCEEDED'` (daily route volume), `audit_outbox_unshipped_idx` recreated INCLUDE `lease_until`, `audit_outbox_shipped_idx` (partial btree) replacing the BRIN. Sets schema version 9. |
 
 The baseline creates the tables, not the storage migration. The storage migration is index-only. The hardening migration is the one that rewrites `journal_lines` into a partitioned table:
@@ -3316,7 +3448,9 @@ The database enforces the invariants that must not depend on a caller:
 | `attempt_groups_single_success` | `success_count <= 1` | One success per attempt group |
 | `payment_links_slot_reservation_invariant` | `infinite_use = true OR confirmed_count + active_locked_count <= use_count` | Prevents slot over-reservation |
 | `approval_requests_checker_not_maker_insert` | `checker_user_id IS NULL OR checker_user_id <> maker_user_id` | Maker-checker on insert |
-| `gl_account_shards_shard_id_range` | `shard_id >= 0 AND shard_id < 16` | Shard range |
+| `gl_account_shards_shard_id_range` | `shard_id >= 0 AND shard_id < 256` | Shard id range (0..255) |
+| `gl_accounts_shard_count_range` | `shard_count >= 1 AND shard_count <= 256` | Account routing width (1..256) |
+| `journal_lines_shard_id_range` | `shard_id >= 0 AND shard_id < 256` | Line shard attribution |
 | `journal_lines_entry_id_fkey` | FK to `journal_entries` with `ON DELETE RESTRICT` | No orphan ledger lines |
 | `journal_lines_gl_account_id_fkey` | FK to `gl_accounts` with `ON DELETE RESTRICT` | No orphan account lines |
 
@@ -3392,7 +3526,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 - `journal_lines.amount > 0`; direction carries the sign.
 - `payment_links` slot accounting must satisfy the check invariant at all times.
 - `approval_requests` must have `checker_user_id <> maker_user_id` when a checker is present, on insert and update.
-- `gl_account_shards.shard_id` must be in `0..15`.
+- `gl_account_shards.shard_id` and `journal_lines.shard_id` must be in `0..255`; `gl_accounts.shard_count` is `1..256`.
 - FK actions are deliberate: ledger and shard references use `RESTRICT`; optional relationships use `SET NULL` or `CASCADE` where the dependent row has no independent meaning.
 - UUIDv7 is the preferred identifier for new domain rows. Do not use random UUIDv4 for high-volume insert paths without a measured reason.
 - Seeders must be safe to rerun. Baseline seeders use existence checks; the synthetic seeder uses a completed-run marker and `skipDuplicates`.
@@ -3443,7 +3577,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 14.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 25.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -3457,9 +3591,9 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ### Implemented
 
-- 76 models and 105 enums in the Prisma datamodel.
-- Schema version 11 with an equality check used by the seeders.
-- Four committed migrations with the intended separation: baseline, storage indexes, CQRS read models, hardening.
+- 84 models and 105 enums in the Prisma datamodel.
+- Schema version 25 with an equality check used by the seeders.
+- The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
 - Maker-checker insert check and update trigger, slot invariant, positive journal amount, shard range and reference uniqueness.
@@ -3561,7 +3695,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 14 (`REQUIRED_SCHEMA_VERSION = 14`; model count 78). The schema migrations since version 10 are:
+The current schema version is 25 (`REQUIRED_SCHEMA_VERSION = 25`; model count 84). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -3571,9 +3705,62 @@ The current schema version is 14 (`REQUIRED_SCHEMA_VERSION = 14`; model count 78
 - `20261105130000_statement_unique_source_file_hash`: replaces the global `reconciliation_runs.file_hash` unique index with `(statement_source_id, file_hash)`, sets `timestamp_tolerance_sec = 0` for legacy keyed channels with no signed timestamp source (the verifier now fails closed on a missing signed timestamp), and bumps `schema_versions` to 11.
 - `20261107090000_shard_sequenced_checkpoints` (version 12): per-shard sequenced ledger checkpoints, `journal_lines.shard_id/shard_seq`, the `gl_shard_checkpoints` table, per-account shard width and `operator_cases.subject_key` (see `core.ledger`).
 - `20261107150000_shard_repairs` (version 14): `gl_shard_checkpoints.baseline_seq` (the exemption marker of a re-baselined shard) and the append-only history table `gl_shard_repairs` (see `core.ledger` 3.10).
+- `20261108090000_partition_truncate_guard` (functions and triggers only; `schema_versions` stays at 14): `pgw_guard_journal_line_partition(regclass)` installs the `pgw_journal_lines_no_truncate` statement trigger only when it is missing; `ensure_journal_line_partitions` (run daily by the deploy cron) calls it for every partition it covers, and the migration backfills every existing partition. Statement-level TRUNCATE triggers are not cloned from the partitioned parent, so partitions created after `20261105090000_append_only_ledger_guards` could be truncated by their owner without meeting the guard.
 - `20261107120000_inbound_event_claims` (version 13): adds nullable `inbound_events.claimed_at` and `claimed_by` plus `(processed_at, claimed_at)`, the durable lease the inbound webhook worker uses to prevent duplicate processing across a brief leadership overlap.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
+
+## 12. Runbook: applying `20261107090000_shard_sequenced_checkpoints` to a populated database (2026-11-08)
+
+Fresh databases and test databases need nothing special. A database that already holds `journal_lines` history does, because the migration is one transaction that:
+
+- adds `journal_lines.shard_id/shard_seq` (metadata-only, but each `ALTER TABLE` takes `ACCESS EXCLUSIVE` on the partitioned parent and every partition for its duration);
+- adds `journal_lines_shard_id_range` as a **validated** `CHECK`, which scans every partition under that lock (the `shard_seq > 0` check is `NOT VALID` and costs nothing);
+- builds `journal_lines_shard_seq_idx` with a plain `CREATE INDEX`, which blocks writes to `journal_lines` until it finishes;
+- computes the genesis totals with one aggregate over all of `journal_lines`, then rewrites `gl_account_shards` and `gl_shard_checkpoints` for every account.
+
+The application is not available for the duration, and an old binary posting while it runs would either block or write lines without shard attribution. The applied migration file must not be edited (Prisma checksums it); the safe handling is operational.
+
+1. **Rehearse first.** Restore the latest backup into a scratch PostgreSQL 18 instance and run `bunx prisma migrate deploy` there. Record the elapsed time; it grows with `journal_lines` row count (the scan, the index build and the genesis aggregate are all full passes). Plan the window at about three times the rehearsal.
+2. **Announce a maintenance window** and stop traffic: stop the three edge services (admin/merchant/checkout) and then core's workers, so nothing posts. Confirm no open transactions touch `journal_lines`: `SELECT pid, state, query FROM pg_stat_activity WHERE query ILIKE '%journal_lines%' AND pid <> pg_backend_pid();`.
+3. **Take the pre-migration dump** (the deploy engine does this automatically before `migrate deploy`; keep it until the checkpoint worker has verified at least one full sweep afterwards).
+4. **Deploy the new core binary and run the migration together** (`bun deploy/deploy.ts`, update mode). Do not run the migration alone and leave the old binary serving: the old poster does not write `shard_id/shard_seq`, so every new line would violate `journal_lines_shard_seq_positive` (the migration is not skippable for the new binary either: `REQUIRED_SCHEMA_VERSION` is checked by the seeders).
+5. **Verify before reopening traffic**: `SELECT version FROM schema_versions;` is at least 12; `SELECT count(*) FROM gl_accounts a WHERE NOT EXISTS (SELECT 1 FROM gl_account_shards s WHERE s.gl_account_id = a.id);` is 0; the global ledger invariant check in the admin ledger-health page reports no drift; then start the edges.
+6. **If the window is too long for the lock scan**, the lower-impact variant is a hand-applied pre-step on the production database, run before the deploy and reviewed by two people (maker-checker for operations): `ALTER TABLE journal_lines ADD CONSTRAINT journal_lines_shard_id_range CHECK (shard_id >= 0 AND shard_id < 256) NOT VALID;` then `ALTER TABLE journal_lines VALIDATE CONSTRAINT journal_lines_shard_id_range;` (the validate step takes only `SHARE UPDATE EXCLUSIVE`) and `CREATE INDEX CONCURRENTLY` for each partition's index. The migration's own `ADD CONSTRAINT`/`CREATE INDEX` statements would then fail on the existing names, so this variant requires a reviewed copy of the migration with those statements guarded by `IF NOT EXISTS`/skipped, applied via `prisma migrate resolve`. Do this only with a rehearsal; the default recommendation is the window.
+
+Open: a deploy-time guard that refuses to run this migration on a database with a large `journal_lines` unless the operator passes an explicit acknowledgement is not implemented. The pipeline already takes a pre-migration dump and probes pending migrations (`deploy/deploy.ts` `probeMigrationState`), so the guard would extend that probe.
+
+## Remediation round 2 (2026-11-08): session revocations
+
+## 13. Session revocations (schema version 15)
+
+`20261108100000_session_revocations` adds the `session_revocations` model (`jti`, `expires_at`) and bumps `REQUIRED_SCHEMA_VERSION` to 15. `revokeSession` writes Redis (atomic `SET ... PX`) and the table; `isSessionRevoked` reads Redis first and the table when Redis misses or is down. Expired rows are deleted opportunistically on later revocations. `20261108090000_partition_truncate_guard` was amended (it is unreleased) so `pgw_guard_journal_line_partition` also grants the app role its DML on each partition and revokes UPDATE/DELETE/TRUNCATE, because partitions created by the cron run as `postgres` and do not inherit the owner's default privileges.
+
+## 14. Automation migrations (schema versions 16 to 24, 2026-11-09)
+
+- `20261109110000_refund_inquiry_job_type` adds `BackgroundJobType.REFUND_INQUIRY` (AUTO-20).
+- `20261109120000_outbox_dead_letter_worker_cursors` (version 16, AUTO-02 and AUTO-25): `outbox_events.attempts`, `last_error`, `parked_at` (parked rows keep `processed_at` NULL and stay in the partial index `outbox_events_unprocessed_idx`) and the `worker_cursors` table (`name`, `cursor_value`, `updated_at`). Both are declared in `schema.prisma` (`OutboxEvent`, `WorkerCursor`); the migration had originally been written without them, which the schema-fidelity suite caught.
+- `20261109130000_journal_partition_worker` (version 17, AUTO-01): `ensure_journal_line_partitions(months_ahead)` becomes `SECURITY DEFINER` with a pinned `search_path`, refuses `months_ahead` outside 1..60, and `EXECUTE` is revoked from `PUBLIC` and granted to `pgw_app`, so the application role can call it from `JournalPartitionWorker` while the deploy cron (a superuser) keeps calling the same function. Rows stranded in `journal_lines_default` are moved by the operator script `scripts/repair-journal-default-partition.ts` (maintenance role, one transaction, dry run by default).
+- `20261109140000_expiry_housekeeping` (version 18, AUTO-05 and AUTO-11): `ApprovalState.EXPIRED` (final), and two PARTIAL indexes: `notifications_secret_payload_idx` (finished notifications that still carry a sealed MFA code or invitation token) and `payment_links_pending_expiry_idx` (PENDING links with an expiry). The partial indexes are migration-only (Prisma cannot express them).
+- `20261109150000_deadline_stages` (version 19, AUTO-04 and AUTO-22): the `deadline_stages` table (`subject_type`, `subject_id`, `stage`, `fired_at`, `detail_json`; primary key = the three identifying columns), the exactly-once marker of the deadline worker.
+- `20261109160000_reconciliation_automation` (version 20, AUTO-23): `reconciliation_items.row_type` (nullable text, the parsed statement row type).
+- `20261109170000_kyb_scan_automation` (version 21, AUTO-06): `kyb_documents.av_scanned_at`, `av_engine`, `av_signature`, `av_scan_attempts` (default 0), `av_next_scan_at` (claim lease / retry time), `av_last_error`; partial indexes `kyb_documents_pending_scan_idx` (PENDING) and `kyb_documents_clean_rescan_idx` (CLEAN).
+- `20261109180000_audit_chain_anchors` (version 22, AUTO-27): table `audit_chain_anchors` (`last_seq_no` unique, `last_row_hash`, `rows_verified_total`, `rows_verified_this_run`, `key_id`, HMAC `signature`) with an append-only trigger (UPDATE and DELETE raise).
+- `20261109190000_regulatory_report_automation` (version 23, AUTO-16): `regulatory_reports.due_at`, `report_code`, `period_key` with the partial unique index `regulatory_reports_code_period_key` (one draft per scheduled return and period) and the partial index `regulatory_reports_open_due_idx` (unfiled reports by due date); seeds four PROVISIONAL `reporting_rules` rows (`PSP-M`, `AML-Q`, `AML-A`, `LTR`) with fixed ids, `ON CONFLICT DO NOTHING`.
+- `20261109200000_merchant_webhooks` (version 24, AUTO-34): `merchant_webhook_endpoints` (per application and merchant: `url`, `event_types` (empty = all), `status` ACTIVE or DISABLED with `disabled_reason`, vault-encrypted `secret_ciphertext` plus the previous secret and its expiry, `failing_since`, last success and failure) and `merchant_webhook_deliveries` (unique `(endpoint_id, event_id)`, the signed `body` text, `status` PENDING, DELIVERED or PARKED, attempts, `next_attempt_at`, last status code, latency and error, `park_reason`; partial index on due PENDING rows).
+
+## 15. Ledger query and index optimisation (schema version 25)
+
+`20261109210000_ledger_query_and_index_optimization` bumps `REQUIRED_SCHEMA_VERSION` to 25 and adds the indexes/tuning the admin ledger queries need. It is applied after the automation migrations; its `ensure_journal_line_partitions` keeps the AUTO-01 security hardening (SECURITY DEFINER, bounded 1..60, app-role EXECUTE) and adds the append-only autovacuum settings for future monthly partitions:
+
+- `journal_entries_created_at_idx` (`created_at` INCLUDE `id, ref_type, ref_id`) for the journal list and the 24-hour summary, and `journal_entries_trgm_search_idx` (GIN on `ref_id`, `description`) for the admin search.
+- Covering `journal_lines_entry_id_created_at_idx` (`entry_id, created_at` INCLUDE `gl_account_id, direction, amount, id`) and `journal_lines_account_id_cov_idx` (`gl_account_id, created_at` INCLUDE `direction, amount, entry_id, id`). The key columns are unchanged, so the declared `@@index` parity in the exhaustive schema suite still holds.
+- Insert-triggered autovacuum (`autovacuum_vacuum_insert_scale_factor = 0.01`, threshold 1000) on `journal_entries` and every `journal_lines` partition, because append-only tables never receive the UPDATEs that normally refresh the Visibility Map that Index-Only Scans require. `ensure_journal_line_partitions` applies the same settings to future monthly partitions and keeps the truncate guard and `pgw_app` grants/revokes from `20261108090000_partition_truncate_guard`.
+- The development baseline `20261103180000_storage_hardening` orders the `journal_lines` columns by alignment width (UUIDs, timestamps, NUMERIC, enum); databases created before this change keep their existing physical order (the new migration does not rewrite the table).
+
+Operationally, the migration drops and rebuilds the two `journal_lines` indexes on the partitioned parent, which takes an `ACCESS EXCLUSIVE` lock on every partition for the duration of each build. It is a direct migration because the project has no live production data; on a populated database, run it in a maintenance window (the same operational rule as the shard-checkpoint migration in section 12).
+
+The query rules that depend on these indexes are in `core.ledger` section 3.11 and `core-back/README.md` section 3.1.
 
 ## Global Search
 
@@ -3976,7 +4163,7 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 
 ## Backup Control
 
-> Status: `partial` · Last verified: 2026-11-06
+> Status: `partial` · Last verified: 2026-11-08
 
 ## 1. Purpose and scope
 
@@ -4063,15 +4250,18 @@ The trigger schema defaults `target` to `all` and `kind` to `full`.
 
 It returns HTTP 202 with `checkerRequired: true` and the approval id.
 
-With `approvalRequestId`, core:
+With `approvalRequestId`, core calls `executeBackupPolicyApproval` (`core-back/api/internal/backups.ts`). The same function backs `POST /approvals/:id/approve` for a `BACKUP_POLICY` approval, so the two entry points cannot differ:
 
-1. loads the approval and requires `subjectType = "BACKUP_POLICY"`;
-2. requires state `PENDING_REVIEW` or `APPROVED`;
-3. rejects when `approval.makerUserId === actor.userId` with `MAKER_CHECKER_VIOLATION`;
-4. requires the daemon to be configured;
-5. applies `approval.payloadDiffJson` to the daemon (not the current request body);
-6. marks the approval `EXECUTED`, records `checkerUserId` and increments `baseVersion`;
-7. writes a `BACKUP_POLICY_UPDATED` audit row with before/after JSON and a stable-JSON checksum prefix.
+1. the caller must hold checker authority (`approval:check`); `security:write` alone is refused with `403 APPROVAL_CHECKER_AUTHORITY_REQUIRED`;
+2. it loads the approval and requires `subjectType = "BACKUP_POLICY"` (`404 APPROVAL_NOT_FOUND` otherwise);
+3. it rejects `approval.makerUserId === actor.userId` with `409 APPROVAL_MAKER_EQUALS_CHECKER`;
+4. it requires state `PENDING_REVIEW` or `DRAFT` (`409 APPROVAL_NOT_PENDING`; an `APPROVED`, `EXECUTED` or `REJECTED` request can never be applied again) and an unexpired request (`409 APPROVAL_EXPIRED`);
+5. it requires the daemon to be configured (`503`);
+6. it CLAIMS the approval with a conditional `updateMany` (pending -> `APPROVED`, `checkerUserId` set) BEFORE calling the daemon, so two checkers racing apply the policy exactly once (the loser gets `409 APPROVAL_NOT_PENDING`);
+7. it applies `approval.payloadDiffJson` to the daemon (not the current request body) with `updatedBy` set to the checker; if the daemon call fails the claim is released (back to `PENDING_REVIEW`, `checkerUserId` cleared) so the request can be retried;
+8. in one transaction it marks the approval `EXECUTED`, records `checkerUserId`, increments `baseVersion` and writes a `BACKUP_POLICY_UPDATED` audit row (`entityId` = the approval id) with before/after JSON and a stable-JSON checksum prefix.
+
+Residual: if the process dies after the daemon accepted the policy but before step 8, the approval stays `APPROVED` with the checker recorded and the policy is already live; the daemon call is idempotent, but there is no automatic resume of that state.
 
 There is no maker-checker on `POST /trigger` or `POST /drill`; both are direct `security:write` actions.
 
@@ -4593,7 +4783,7 @@ The seeder writes 49 Prisma models through `createMany`, including merchant/user
 | `FAKE_RAILS_ALLOW_IN_PRODUCTION` | Required when `NODE_ENV=production` |
 | `FAKE_RAILS_ALLOWED_HOSTS` | Comma-separated allowed emulator hosts |
 | `FAKE_RAILS_SEEDER_TOKEN` | Shared handshake/bulk-seed token |
-| `SYNTHETIC_SEED_PROFILE` | `COMPACT`, `STANDARD`, `STRESS` (default `STANDARD` in the seeder; deploy default `COMPACT`) |
+| `SYNTHETIC_SEED_PROFILE` | `COMPACT`, `STANDARD`, `STRESS` (default `STANDARD` in the seeder when unset or empty; deploy default `COMPACT`). Any other value now throws (`Unknown synthetic seed profile`) instead of silently becoming `STANDARD`. A refund of a `MERCHANT_DIRECT` attempt with no commission to reverse is skipped by the generator (see `core.ledger`). |
 | `SYNTHETIC_SEED_KEY` | Completed-run key and PRNG seed |
 | `SYNTHETIC_DATA_NAMESPACE` | Namespace used in emails/references (default `synthv1`) |
 | `SYNTHETIC_YEARS_SPAN` | Timeline span in years |

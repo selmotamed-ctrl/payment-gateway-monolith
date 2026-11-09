@@ -164,4 +164,25 @@ router.post(
   }),
 );
 
+/**
+ * Extends an unratified emergency suspension once, by 1 to 7 days, with a written reason (AUTO-22, decision D7).
+ * Core enforces the rest: an independent COMPLIANCE or MLRO checker, a suspension that is still unratified, one
+ * extension only.
+ */
+export const extendEmergencySchema = z.object({ days: z.number().int().min(1).max(7), reason: zReason }).strict();
+
+router.post(
+  "/:id/extend-emergency",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/approvals/${encodeURIComponent(context.params.id ?? "")}/extend-emergency`,
+    paramsSchema: idParamsSchema,
+    schema: extendEmergencySchema,
+    bodyFrom: (_req, body) => {
+      const parsed = body as z.infer<typeof extendEmergencySchema>;
+      return { days: parsed.days, reason: parsed.reason };
+    },
+  }),
+);
+
 export const approvalsRouter = router;

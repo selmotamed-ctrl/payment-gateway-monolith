@@ -51,7 +51,7 @@ export const CostModelBuilder = defineComponent({
                 return found ? t(COST_ERROR_MESSAGES[found.code]) : "";
             };
             const tiered = form.calcType === "TIERED" || form.calcType === "HYBRID" || form.tiers.length > 0;
-            const preview = errors.length === 0 ? formatCostModel(serializeCostModel(props.modelValue), { currency: props.currency, labels: { min: t("min"), max: t("max"), tiers: t("tiers"), tiered: t("Tiered") } }) : "";
+            const preview = errors.length === 0 ? formatCostModel(serializeCostModel(props.modelValue), { currency: props.currency, labels: { min: t("Min"), max: t("max"), tiers: t("tiers"), tiered: t("Tiered") } }) : "";
             return (
                 <div style={{ display: "flex", flexDirection: "column", gap: "12px", minInlineSize: 0 }}>
                     <div style={GRID}>

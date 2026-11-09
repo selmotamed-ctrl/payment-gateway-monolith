@@ -143,6 +143,38 @@ export const logoutHandler = async (req: Request, res: Response): Promise<void> 
 /** Audience core mints for merchant sessions (GAP-020); the admin audience is refused here. */
 export const MERCHANT_SESSION_AUDIENCE = "payment-gateway-merchant";
 
+const SESSION_ALGORITHM = "HS256";
+const MAX_CLOCK_SKEW_SECONDS = 60;
+
+/**
+ * Cheap, signature-less plausibility check that a credential is shaped like a LIVE merchant session
+ * (HS256 JWT, `typ: session`, merchant audience, unexpired). It runs before an upload is buffered, where
+ * "an Authorization header exists" used to be the only requirement (`Bearer x` passed), so anyone could make
+ * the edge buffer a full-size file before core refused the credential. It is advisory exactly like the other
+ * edge checks: core still verifies the signature, the revoke list and the user.
+ */
+export const assertMerchantSessionShape = (authorization: string | undefined, nowMs = Date.now()): void => {
+  const refuse = () => new ApiError(401, "AUTH_INVALID", "The session is invalid or expired");
+  if (typeof authorization !== "string") throw refuse();
+  const token = authorization.replace(/^Bearer\s+/i, "").trim();
+  const parts = token.split(".");
+  if (token.startsWith("pg_live_") || parts.length !== 3) throw refuse();
+  try {
+    const header = JSON.parse(Buffer.from(parts[0] ?? "", "base64url").toString("utf8")) as { alg?: unknown };
+    const payload = JSON.parse(Buffer.from(parts[1] ?? "", "base64url").toString("utf8")) as {
+      typ?: unknown; aud?: unknown; exp?: unknown; nbf?: unknown;
+    };
+    const audiences = Array.isArray(payload.aud) ? payload.aud.map(String) : typeof payload.aud === "string" ? [payload.aud] : [];
+    const nowSeconds = Math.floor(nowMs / 1000);
+    if (header.alg !== SESSION_ALGORITHM) throw refuse();
+    if (payload.typ !== "session" || !audiences.includes(MERCHANT_SESSION_AUDIENCE)) throw refuse();
+    if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp) || nowSeconds >= payload.exp) throw refuse();
+    if (payload.nbf !== undefined && (typeof payload.nbf !== "number" || payload.nbf > nowSeconds + MAX_CLOCK_SKEW_SECONDS)) throw refuse();
+  } catch (error) {
+    throw error instanceof ApiError ? error : refuse();
+  }
+};
+
 /**
  * Edge audience check: a JWT bearer (not a `pg_live_` API token) must have been issued for the
  * merchant channel. Advisory like the other edge checks (the signature is verified by core,

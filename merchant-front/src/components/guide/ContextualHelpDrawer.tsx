@@ -31,6 +31,7 @@ const ROUTE_HELP: Record<string, string> = {
     Payments: "M-06",
     Disputes: "M-08",
     DeveloperTokens: "D-02",
+    Webhooks: "D-01",
     Credentials: "M-09",
     Team: "M-10",
     MerchantGuide: "M-01",

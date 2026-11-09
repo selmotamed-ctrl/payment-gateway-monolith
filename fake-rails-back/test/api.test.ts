@@ -13,7 +13,8 @@ process.env.FAKE_RAILS_DB_PATH = dbPath;
 process.env.FAKE_RAILS_PUBLIC_BASE_URL = "http://127.0.0.1:8444";
 process.env.FAKE_RAILS_TIMEOUT_HANG_MS = "40";
 process.env.FAKE_RAILS_WEBHOOK_TIMEOUT_MS = "200";
-process.env.CORE_INBOUND_BASE_URL = "http://127.0.0.1:59999/api/v1/inbound";
+process.env.CORE_INBOUND_BASE_URL = "http://core.lab.internal:4103/api/v1/inbound";
+process.env.FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS = "receiver.lab.internal, hook.lab.internal:9443";
 
 let server: import("node:http").Server;
 let baseUrl = "";
@@ -271,8 +272,13 @@ describe("fake-rails-back API", () => {
     const created = (await verify.json()) as { transaction_id: string };
     const session = await request(`/portal-api/hosted/session/${encodeURIComponent(created.transaction_id)}`);
     expect(session.status).toBe(200);
-    const { action_token: actionToken } = (await session.json()) as { action_token: string };
+    const sessionBody = (await session.json()) as { action_token: string; transaction: Record<string, unknown> };
+    const actionToken = sessionBody.action_token;
     expect(typeof actionToken).toBe("string");
+    // The public hosted page must not hand out the OTP the payer is supposed to know, nor the callback URL.
+    expect(sessionBody.transaction.our_reference).toBeDefined();
+    expect("expected_otp" in sessionBody.transaction).toBe(false);
+    expect("webhook_url" in sessionBody.transaction).toBe(false);
     const path = `/portal-api/hosted/session/${encodeURIComponent(created.transaction_id)}/action`;
     // GAP-024: the action POST is no longer anonymous.
     expect((await request(path, { method: "POST", body: { action: "APPROVE" } })).status).toBe(401);
@@ -285,7 +291,9 @@ describe("fake-rails-back API", () => {
       headers: { "x-hosted-action-token": actionToken },
     });
     expect(action.status).toBe(200);
-    const body = (await action.json()) as { transaction: { status: string } };
+    const body = (await action.json()) as { transaction: { status: string } & Record<string, unknown> };
     expect(body.transaction.status).toBe("PAID");
+    expect("expected_otp" in body.transaction).toBe(false);
+    expect("webhook_url" in body.transaction).toBe(false);
   });
 });

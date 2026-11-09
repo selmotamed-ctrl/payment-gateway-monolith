@@ -1,3 +1,4 @@
+import { resetEnvCache } from "../lib/env";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Request } from "express";
 import { resolveLanClientIp } from "../api/middleware/lanGuard";
@@ -407,6 +408,62 @@ describe("admin statement upload", () => {
   });
 });
 
+describe("admin upload guards run before the file is buffered", () => {
+  const statement = (): FormData => {
+    const form = new FormData();
+    form.set("sourceId", "src_1");
+    form.set("periodStart", "2026-01-01");
+    form.set("periodEnd", "2026-01-31");
+    form.set("statement", new Blob([new Uint8Array(Buffer.from("txn_ref,amount\nREF-1,10.0000\n"))], { type: "text/csv" }), "statement.csv");
+    return form;
+  };
+
+  test("a declared length above the limit is refused without reaching core", async () => {
+    const before = core.requests.length;
+    process.env.MAX_UPLOAD_BYTES = "1024";
+    resetEnvCache();
+    try {
+      const response = await fetch(`${edgeUrl}/api/v1/admin/reconciliation/upload`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${fullStaff}`, "content-type": "multipart/form-data; boundary=x", "content-length": String(1024 + 256 * 1024 + 1) },
+        body: "x",
+      });
+      // The oversized declaration is refused by the guard; a client that lies about the length is cut off by the socket.
+      expect([413, 400]).toContain(response.status);
+      expect(core.requests.length).toBe(before);
+    } catch {
+      expect(core.requests.length).toBe(before);
+    } finally {
+      delete process.env.MAX_UPLOAD_BYTES;
+      resetEnvCache();
+    }
+  });
+
+  test("uploads have their own per-address budget on top of the general admin limiter", async () => {
+    process.env.UPLOAD_RATE_LIMIT_MAX = "2";
+    resetEnvCache();
+    try {
+      const statuses: number[] = [];
+      for (let index = 0; index < 4; index += 1) {
+        const response = await fetch(`${edgeUrl}/api/v1/admin/reconciliation/upload`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${fullStaff}`, "x-real-ip": "10.20.30.40" },
+          body: statement(),
+        });
+        statuses.push(response.status);
+      }
+      expect(statuses.slice(0, 2).every((status) => status === 202)).toBe(true);
+      expect(statuses.slice(2)).toEqual([429, 429]);
+      // A cheap read from the same address is not charged to the upload budget.
+      const read = await call("GET", "/api/v1/admin/merchants", { token: operator, realIp: "10.20.30.40" });
+      expect(read.status).not.toBe(429);
+    } finally {
+      delete process.env.UPLOAD_RATE_LIMIT_MAX;
+      resetEnvCache();
+    }
+  });
+});
+
 describe("smart AI onboarding routes", () => {
   test("forwards the transcript request with the rail kind", async () => {
     const response = await call("GET", "/api/v1/admin/gateways/ai-transcript?railKind=OTP_PULL", {
@@ -542,7 +599,6 @@ describe("admin core contract forwarding", () => {
         email: "admin@example.com",
         fullName: "Admin",
         role: "COMPLIANCE",
-        temporaryPassword: "Str0ngPassw0rd",
         authorities: { aml: ["read", "write"] },
       },
     });
@@ -550,9 +606,42 @@ describe("admin core contract forwarding", () => {
     expect(forwardedBody()).toEqual({
       email: "admin@example.com",
       role: "COMPLIANCE",
-      password: "Str0ngPassw0rd",
       authoritiesMap: ["aml:read", "aml:write"],
     });
+  });
+
+  test("user creation refuses a maker-chosen password or phone and never forwards them", async () => {
+    for (const extra of [{ temporaryPassword: "Str0ngPassw0rd" }, { phone: "+218910000000" }, { password: "Str0ngPassw0rd" }]) {
+      const before = core.requests.length;
+      const response = await call("POST", "/api/v1/admin/users", {
+        token: operator,
+        body: { email: "admin@example.com", role: "COMPLIANCE", ...extra },
+      });
+      expect(response.status).toBe(400);
+      expect(core.requests.length).toBe(before);
+    }
+  });
+
+  test("the invitation can be accepted without a session and is strictly validated", async () => {
+    const accepted = await call("POST", "/api/v1/admin/auth/accept-invitation", {
+      body: { token: "t".repeat(32), password: "Str0ngPassw0rd!", phone: "+218910000321" },
+    });
+    expect(accepted.status).toBe(200);
+    expect(forwardedBody()).toEqual({ token: "t".repeat(32), password: "Str0ngPassw0rd!", phone: "+218910000321" });
+    for (const body of [
+      { token: "short", password: "Str0ngPassw0rd!", phone: "+218910000321" },
+      { token: "t".repeat(32), password: "weak", phone: "+218910000321" },
+      { token: "t".repeat(32), password: "Str0ngPassw0rd!", phone: "not a phone" },
+      { token: "t".repeat(32), password: "Str0ngPassw0rd!", phone: "+218910000321", status: "ACTIVE" },
+    ]) {
+      expect((await call("POST", "/api/v1/admin/auth/accept-invitation", { body })).status).toBe(400);
+    }
+  });
+
+  test("re-inviting a user is forwarded to core with the session", async () => {
+    const response = await call("POST", "/api/v1/admin/users/usr_9/invite", { token: operator });
+    expect(response.status).toBe(200);
+    expect(core.requests.at(-1)).toMatchObject({ method: "POST", url: "/internal/admin/users/usr_9/invite" });
   });
 
   test("expands a bulk user patch into one core request per user", async () => {
@@ -797,7 +886,6 @@ describe("admin forwards payloads core accepts", () => {
         email: "admin@example.com",
         fullName: "Admin",
         role: "COMPLIANCE",
-        temporaryPassword: "Str0ngPassw0rd",
         authorities: { aml: ["read", "write"] },
       },
       contract: "POST /users",
@@ -873,6 +961,12 @@ describe("admin forwards payloads core accepts", () => {
       path: "/api/v1/admin/approvals/ap_1/reject",
       body: { reason: "not checked", checklist: ["DIFF_REVIEWED", "SUBJECT_CONTEXT_REVIEWED", "MAKER_CHECKER_SEPARATION_VERIFIED", "RISK_ASSESSED"] },
       contract: "POST /approvals/:id/reject",
+    },
+    {
+      method: "POST",
+      path: "/api/v1/admin/approvals/ap_1/extend-emergency",
+      body: { days: 3, reason: "A second officer needs more time to review the evidence" },
+      contract: "POST /approvals/:id/extend-emergency",
     },
     {
       method: "POST",

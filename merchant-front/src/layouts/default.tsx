@@ -156,7 +156,7 @@ const DefaultLayout = dc(() => {
 
     const openFullGuide = () => {
         helpDrawerOpen.value = false;
-        const developerRoute = route.name === "DeveloperTokens" || route.name === "MerchantDeveloperGuide";
+        const developerRoute = route.name === "DeveloperTokens" || route.name === "Webhooks" || route.name === "MerchantDeveloperGuide";
         void router.push({ name: developerRoute ? "MerchantDeveloperGuide" : "MerchantGuide" });
     };
 

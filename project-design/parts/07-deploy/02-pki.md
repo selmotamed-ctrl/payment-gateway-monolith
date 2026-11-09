@@ -186,6 +186,7 @@ The provisioner creates the directory for `pgbackup` and `deployBackupDaemon()` 
 | :--- | :--- | :--- |
 | `ROTATE_MTLS_CERTS` | `false` | Regenerate CA and all leaves. |
 | `MTLS_VALIDITY_DAYS` | `825` | Leaf validity. |
+| `MTLS_RENEW_WITHIN_DAYS` | `30` (0 = off) | A deploy re-issues leaves expiring within this many days with the same CA (AUTO-28). |
 | `CORE_NODES` / `CORE_PRIVATE_IP` | required | Core SAN IPs. |
 | `BACKUP_NODE` | optional | Backup SAN IP. |
 | `FAKE_RAILS_DOMAIN`, `FAKE_RAILS_PRIVATE_IP` | optional | Fake Rails SAN. |
@@ -252,13 +253,13 @@ Keep `deploy/deploy.env` and `deploy/.certs/` at restrictive permissions. Do not
 
 - Storage client certificates exist but are not consumed by PostgreSQL, PgBouncer, Redis, audit DB or log DB.
 - The backup daemon's cert/key ownership is not aligned with its `pgbackup` user.
-- Expiry is reported but does not force rotation.
+- A CA that nears its end is reported (`--check-certs`, the deploy warning) but never replaced automatically: replacing it is a rotation of every certificate (`--rotate-certs`).
 - The backup daemon does not authorize a client CN per route.
 
 ### Missing / deferred
 
 - end-to-end storage mTLS configuration (`ssl=on` with internal certs, `clientcert=verify-full`, Redis TLS, PgBouncer client TLS).
-- Automatic renewal before expiry.
+- (Done, AUTO-28) Leaf renewal before expiry: a normal deploy re-issues, with the existing CA, every leaf that expires within `MTLS_RENEW_WITHIN_DAYS` (default 30; 0 = off) and leaves the other files byte-identical; `deploy.ts --check-certs` prints the expiry table (`ok`, `RENEW`, `ROTATE-CA`, `EXPIRED`, `MISSING`) and exits 1 when anything needs attention, for cron or an alert hook. Still manual: nothing runs the deploy by itself, so a leaf is only renewed when somebody deploys within the window; the core's `platform.certificate` monitor check (AUTO-03) raises the case that tells them to.
 - A CRL/OCSP or short-lived certificate workflow.
 - Per-service certificate isolation on a co-located edge host.
 - Client-CN authorization on the backup daemon.

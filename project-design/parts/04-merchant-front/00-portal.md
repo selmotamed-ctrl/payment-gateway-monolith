@@ -121,6 +121,7 @@ Rules:
 | 12 | `/portal/disputes` | `Disputes` | `payments.read` | Chargeback list, evidence deadline/status and evidence upload. |
 | 13 | `/portal/cashouts` | `Cashouts` | `cashout.read` or `cashout.request` | Cash-out requests, wallet, amount and bank destination. |
 | 14 | `/portal/developers/tokens` | `DeveloperTokens` | `tokens.read` | API token creation, one-time secret, scopes, IP allowlist and revocation. |
+| 14a | `/portal/developers/webhooks` | `Webhooks` | `applications.read` (changes need `webhooks.manage`, projected from the core authority `application:manage`) | Webhook endpoints per application (HTTPS URL, event filter, status), one-time `whsec_` signing secret on create and rotate, send a test event, enable or disable, and the latest deliveries with a "Redeliver" action for parked or delivered events (AUTO-34). |
 | 15 | `/portal/credentials` | `Credentials` | `credentials.manage` | Merchant-owned gateway credential sets and environments. |
 | 16 | `/portal/team` | `Team` | `users.manage` | Team members, roles, scopes and authority editing. |
 

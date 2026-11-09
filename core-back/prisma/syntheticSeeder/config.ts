@@ -98,6 +98,11 @@ export interface SeederConfig {
 
 export const loadSeederConfig = (now = new Date()): SeederConfig => {
   const rawProfile = (process.env.SYNTHETIC_SEED_PROFILE ?? process.env.SYNTHETIC_DATA_PROFILE ?? "STANDARD").toUpperCase();
+  // An unknown value used to become STANDARD silently, so a typo (`COMPAKT`) loaded ~280k rows
+  // instead of the small profile asked for. Only an unset or empty value defaults.
+  if (rawProfile !== "" && !["COMPACT", "STANDARD", "STRESS"].includes(rawProfile)) {
+    throw new Error(`Unknown synthetic seed profile "${rawProfile}"; expected COMPACT, STANDARD or STRESS`);
+  }
   const profile: SeederProfile = rawProfile === "COMPACT" || rawProfile === "STRESS" ? rawProfile : "STANDARD";
   const volumes = { ...PROFILES[profile] };
   // `deploy/lib/hostPlanner.ts` writes SYNTHETIC_SEED_YEARS_SPAN; the seeder

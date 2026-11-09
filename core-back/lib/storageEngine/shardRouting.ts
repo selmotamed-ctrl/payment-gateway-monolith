@@ -19,6 +19,19 @@ export const MAX_SHARD_WIDTH = 256;
 /** Width of an account that has not been scaled: system accounts are spread, wallets start at one shard. */
 export const INITIAL_SYSTEM_SHARD_WIDTH = 16;
 
+/**
+ * The system accounts every confirmation touches (TREASURY or GATEWAY_CLEARING, and PLATFORM_INCOME): at the
+ * 15,000 TPS target each sees about 15,000 lines/s, far more than a step-wise scaler absorbs in time.
+ */
+export const HOT_SYSTEM_ACCOUNT_TYPES: ReadonlySet<string> = new Set(["TREASURY", "GATEWAY_CLEARING", "PLATFORM_INCOME"]);
+
+/**
+ * Interim provisioning width of the hot system accounts (decision D6, AUTO-10): width = ceil(lines/s x shard lock
+ * hold seconds x 2) gives 90-180 at today's 3-6 ms hold time, so they start at 128 until the load test on target
+ * hardware sets the final value.
+ */
+export const HOT_SYSTEM_SHARD_WIDTH = 128;
+
 /** Account types whose balance is checked against an overdraft by a locking guard (cash-out, chargebacks). */
 export const BALANCE_GUARDED_ACCOUNT_TYPES: ReadonlySet<string> = new Set(["MERCHANT_WALLET"]);
 
@@ -36,9 +49,18 @@ export type LineDirection = "DEBIT" | "CREDIT";
 export const clampShardWidth = (width: number): number =>
   Number.isFinite(width) ? Math.min(MAX_SHARD_WIDTH, Math.max(MIN_SHARD_WIDTH, Math.trunc(width))) : MIN_SHARD_WIDTH;
 
-/** The routing width a new account starts with. */
-export const initialShardWidth = (accountType: string, systemWidth: number = INITIAL_SYSTEM_SHARD_WIDTH): number =>
-  BALANCE_GUARDED_ACCOUNT_TYPES.has(accountType) ? 1 : clampShardWidth(systemWidth);
+/**
+ * The routing width a new account starts with: one shard for a balance-guarded wallet, `hotSystemWidth` for the hot
+ * system accounts (TREASURY, GATEWAY_CLEARING, PLATFORM_INCOME) and `systemWidth` for every other account.
+ */
+export const initialShardWidth = (
+  accountType: string,
+  systemWidth: number = INITIAL_SYSTEM_SHARD_WIDTH,
+  hotSystemWidth: number = HOT_SYSTEM_SHARD_WIDTH,
+): number => {
+  if (BALANCE_GUARDED_ACCOUNT_TYPES.has(accountType)) return 1;
+  return clampShardWidth(HOT_SYSTEM_ACCOUNT_TYPES.has(accountType) ? hotSystemWidth : systemWidth);
+};
 
 /** True when this line lowers the account's natural balance. */
 export const reducesBalance = (accountType: string, direction: LineDirection): boolean =>

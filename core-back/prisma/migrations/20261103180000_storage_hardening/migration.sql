@@ -51,14 +51,17 @@ DROP INDEX IF EXISTS "journal_lines_created_brin_idx";
 DROP INDEX IF EXISTS "journal_lines_entry_id_idx";
 DROP INDEX IF EXISTS "journal_lines_gl_account_id_idx";
 
+-- Column order follows alignment width (16-byte UUIDs, then 8-byte timestamps,
+-- then NUMERIC, then the 4-byte enum) so the row has no internal padding. The
+-- shard columns added later (20261107090000) append after these.
 CREATE TABLE "journal_lines" (
   "id" UUID NOT NULL,
-  "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updated_at" TIMESTAMP(3) NOT NULL,
   "entry_id" UUID NOT NULL,
   "gl_account_id" UUID NOT NULL,
-  "direction" "JournalDirection" NOT NULL,
+  "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" TIMESTAMP(3) NOT NULL,
   "amount" DECIMAL(18,4) NOT NULL,
+  "direction" "JournalDirection" NOT NULL,
   CONSTRAINT "journal_lines_pkey" PRIMARY KEY ("id", "created_at")
 ) PARTITION BY RANGE ("created_at");
 

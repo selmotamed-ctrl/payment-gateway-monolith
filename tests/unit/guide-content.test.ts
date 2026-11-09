@@ -120,13 +120,13 @@ describe("guide content extractor", () => {
         }
     });
 
-    test("every router name except Login/NotFound has a context-map screen", () => {
+    test("every router name except the public ones (Login, AcceptInvitation, NotFound) has a context-map screen", () => {
         const routerSource = readFileSync(ROUTER_FILE, "utf8");
         const routeNames = [...routerSource.matchAll(/name:\s*"([^"]+)"/g)].map(
             (match) => match[1],
         );
         const unique = [...new Set(routeNames)].filter(
-            (name) => name !== "Login" && name !== "NotFound",
+            (name) => !["Login", "AcceptInvitation", "NotFound"].includes(name),
         );
         const map = readJson<{
             fallbackScreenId: string;

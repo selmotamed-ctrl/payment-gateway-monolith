@@ -70,7 +70,9 @@ export const listAccountLines = async (
       : undefined,
   );
 
-  const [lines, total, sums] = await Promise.all([
+  // One covering aggregation computes the filtered line count AND the two side sums. A separate
+  // journalLine.count() would scan the account index a second time for the same predicate.
+  const [lines, sums] = await Promise.all([
     client.journalLine.findMany({
       where: where as never,
       orderBy: built.orderBy as never,
@@ -85,14 +87,15 @@ export const listAccountLines = async (
         entry: { select: { refType: true, refId: true, description: true } },
       },
     }),
-    client.journalLine.count({ where: where as never }),
     client.journalLine.groupBy({
       by: ["direction"],
       where: where as never,
+      _count: { _all: true },
       _sum: { amount: true },
     }),
   ]);
 
+  const total = sums.reduce((acc, row) => acc + (row._count?._all ?? 0), 0);
   const sumOf = (side: "DEBIT" | "CREDIT"): string => {
     const found = sums.find((row) => row.direction === side);
     return found?._sum.amount ? money4(found._sum.amount) : "0.0000";

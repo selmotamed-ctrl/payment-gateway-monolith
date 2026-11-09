@@ -43,6 +43,7 @@ Flags:
 | `--force-restart` | Restart PostgreSQL, PgBouncer, Redis and the backup daemon even if nothing changed. |
 | `--skip-verify` | Skip the end-to-end mTLS health verification. |
 | `--rotate-certs` | Regenerate the internal CA **and** every leaf certificate. |
+| `--check-certs` | Print the certificate expiry table and exit 1 when anything needs attention. |
 | `--keep=<n>` | Releases kept per host (default `KEEP_RELEASES`). |
 | `--rolling-batch=<n>` | Deploy and health-check `n` compute nodes per batch (default `ROLLING_BATCH_SIZE`, or `1`). |
 | `--nodes=<id,...>` | Limit the run to the named compute nodes (for example `--nodes=core-1,chk-2`). |
@@ -293,10 +294,11 @@ what you meant.
 
 | Variable | Default | Meaning |
 | :--- | :--- | :--- |
-| `DEPLOY_MODE` | `auto` | `auto` (fresh when the remote dir is absent), `fresh`, `update`. |
+| `DEPLOY_MODE` | `auto` | `auto` probes each host read-only (rsync, curl, nginx on edge hosts, Bun, PM2) and bootstraps only the hosts with gaps, so a bare host is prepared instead of failing late; `fresh` bootstraps every host; `update` assumes every host is ready. |
 | `KEEP_RELEASES` | `5` | Releases kept per host; older ones are pruned in step 11. |
 | `ROTATE_MTLS_CERTS` | `false` | Force a CA + leaf regeneration. |
 | `MTLS_VALIDITY_DAYS` | `825` | Leaf certificate validity. |
+| `MTLS_RENEW_WITHIN_DAYS` | `30` | A deploy re-issues leaves that expire within this many days (same CA); `0` disables. `--check-certs` reports expiry. |
 | `LAN_ALLOWED_CIDRS` | `127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Nginx allowlist and `ADMIN_LAN_CIDRS` for the admin host. |
 
 ### Database (`DB_*`, legacy single-host compatibility path)
@@ -471,12 +473,12 @@ can never lock itself out.
 8. Deploy `admin-back` + `admin-front` on the LAN vhost.
 9. Deploy `merchant-back` + `merchant-front` (unbuffered POS SSE).
 10. Deploy `checkout-back` + `checkout-front` (unbuffered payer SSE, strict CSP).
-11. Seed Fake Rails blueprints and optional synthetic operational history.
-12. Verify: every core node `/health` over mTLS, each edge backend `/health`,
+11. Verify (before the seed, so a release that fails its checks is not followed by a long seed): every core node `/health` over mTLS, each edge backend `/health`,
     each edge host completing an mTLS handshake to a healthy core node, the
     public vhosts, PostgreSQL primary/replicas with `pg_isready` + `SELECT 1`,
     PgBouncer, Redis `PING`, audit/log `SELECT 1`, and the backup-daemon
     `/health` over mTLS when configured.
+12. Seed Fake Rails blueprints and optional synthetic operational history.
 13. Prune old releases.
 14. Print the audit summary (commit, release timestamp, hosts, certificate
     expiry).
@@ -606,6 +608,7 @@ After the OS bootstrap the orchestrator runs the modular provisioners:
 | :--- | :--- |
 | `postgres18Provisioner` | PostgreSQL 18 install, the exact `zz-pg-switch.conf` tuning (`io_method='io_uring'`, `synchronous_commit=on`, `wal_level=replica`, ...), application/replication roles, SCRAM `pg_hba`, physical replication slots, `pg_basebackup -R` on every replica and PgBouncer transaction pooling (`6432`, `max_prepared_statements=256`). |
 | `redisProvisioner` | Redis bound to the node's private IP, `requirepass`, `save 3600 1`, `maxmemory`, and UFW `6379` only from the core + backup nodes. |
+| `clamavProvisioner` | With `KYB_SCANNER_MODE="clamd"` and no `KYB_CLAMD_ADDRESS`: ClamAV (`clamav-daemon` + `clamav-freshclam`, Arch `clamav`) on every core host, loopback-only `clamd` on `127.0.0.1:3310` (`StreamMaxLength` 32M, above the 25 MB KYB upload limit), first signature download, restart only when the configuration changed, waits for `zPING`. Needs about 1.5 GB RAM per core host (a warning below 2 GB). An explicit address means your own daemon: nothing is installed. |
 | `auditAndLogDbProvisioner` | `pg_audit_db` with the hash-chain table, immutable trigger, least-privilege `SELECT, INSERT` grants and `REVOKE UPDATE, DELETE, TRUNCATE`; `pg_logs_db` with monthly `attempt_step_logs` / `http_access_logs` partitions, six months ahead, the `ensure_log_partitions` retention function and its cron. |
 | `backupEngineProvisioner` | WAL-G/Barman, `zstd`, `rclone`, backup-daemon environment + systemd unit (`:4090` mTLS), `archive_command` on the primary and audit DB, S3/secondary-SSH verification, full/delta/drill cron and the scratch-restore invariant verifier. |
 

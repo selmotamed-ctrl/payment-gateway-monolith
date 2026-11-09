@@ -86,10 +86,13 @@ import {
 import { scanKybBytes } from "../../lib/kybScan";
 import { postgresPlaceholders } from "../../engine/db/rawRows";
 import { hashPassword, signSession, verifyPasswordOrDummy } from "../../lib/auth";
+import { hashInvitationToken, issueStaffInvitation } from "../../lib/staffInvitation";
 import { revokePrincipalSession } from "../middleware/authDoubleCheck";
 import { issueMfaChallenge, verifyMfaChallenge } from "../../lib/auth/mfaChallenges";
 import {
   assertLoginAllowed,
+  assertNotThrottled,
+  recordFailure,
   assertMfaAllowed,
   recordLoginFailure,
   recordLoginSuccess,
@@ -99,8 +102,7 @@ import { buildAdminUserInfo } from "../../lib/auth/uiAuthorities";
 import { hasConfidentialAmlAccess } from "../../lib/auth/confidentialAccess";
 import { executeGlobalSearch } from "../../lib/globalSearch";
 import { getConfiguredAuditStore, readThroughReplicaOrPrimary } from "../../lib/storageEngine";
-import { getBackupControlClient, isBackupDaemonConfigured } from "../../lib/storageEngine/backupControlClient";
-import { backupPolicySchema } from "./backups";
+import { executeBackupPolicyApproval } from "./backups";
 import { loadAccountCheckpointSummary, loadLiveAccountBalances, naturalShardBalance } from "../../lib/storageEngine/shardBalances";
 import type { Decimal } from "decimal.js";
 import { decimal } from "../../engine/ledger/LedgerPoster";
@@ -148,6 +150,7 @@ import {
   requireStaffPrincipal,
 } from "../middleware/authDoubleCheck";
 import { actorFromRequest, assertCheckerAuthority, assertCheckerIsNotMaker, SYSTEM_AUTOMATION_PRINCIPAL } from "../middleware/makerCheckerGuard";
+import { env } from "../../lib/env";
 import { writeAudit } from "../../lib/audit/writeAudit";
 
 const router = express.Router();
@@ -171,6 +174,8 @@ const governanceContext = (platform: ReturnType<typeof getPlatformRuntime>): Gov
   engine: platform.engine,
   transitionBus: invalidationBus,
   slots: platform.slots,
+  reconciliationScheduler: platform.refundScheduler,
+  commissionNetting: platform.commissionNetting,
 });
 
 /**
@@ -607,7 +612,7 @@ router.post("/auth/login", async (request: Request, response: Response) => {
   if (staffUser.status !== "ACTIVE") {
     throw new ApiError(403, "ACCOUNT_NOT_ACTIVE", "The account is not active");
   }
-  await recordLoginSuccess(identifier);
+  await recordLoginSuccess(identifier, ip);
   if (staffUser.mfaRequired) {
     const { challengeId } = await client.$transaction((tx) =>
       issueMfaChallenge(tx as never, {
@@ -690,6 +695,61 @@ router.get("/auth/me", (_request: Request, response: Response) => {
   });
 });
 
+
+const STAFF_INVITE_IP_POLICY = { maxFailures: 10, windowMs: 15 * 60_000, lockMs: 15 * 60_000 };
+
+/**
+ * Public: the invitee accepts the invitation mailed to them and chooses their own password and the phone
+ * that receives their sign-in codes. The user stays INVITED: activation is still a maker-checker approval.
+ */
+router.post("/auth/accept-invitation", async (request: Request, response: Response) => {
+  const body = parseOrThrow(
+    z.object({
+      token: z.string().min(16).max(256),
+      password: z.string().min(12).max(128),
+      phone: z.string().trim().regex(/^\+?[0-9 ()-]{6,20}$/),
+    }).strict(),
+    request.body,
+  );
+  const ip = clientIp(request) ?? "unknown";
+  await assertNotThrottled("staff-invite-ip", ip);
+  const tokenHash = hashInvitationToken(body.token);
+  const user = await client.user.findFirst({
+    where: { invitationTokenHash: tokenHash, status: "INVITED", invitationExpiresAt: { gt: new Date() }, merchantId: null },
+  });
+  if (!user || String(user.role).startsWith("MERCHANT_")) {
+    await recordFailure("staff-invite-ip", ip, STAFF_INVITE_IP_POLICY);
+    throw new ApiError(400, "INVITATION_INVALID", "The invitation is invalid or has expired");
+  }
+  const phone = body.phone.replace(/[\s()-]/g, "");
+  const phoneTaken = await client.user.findFirst({ where: { phone, NOT: { id: user.id } }, select: { id: true } });
+  if (phoneTaken) {
+    throw new ApiError(409, "PHONE_UNAVAILABLE", "This phone number cannot be used for sign-in codes");
+  }
+  const passwordHash = await hashPassword(body.password);
+  await client.$transaction(async (tx) => {
+    // Single use: the conditional update consumes the token, so two concurrent accepts cannot both win.
+    const consumed = await tx.user.updateMany({
+      where: { id: user.id, invitationTokenHash: tokenHash, status: "INVITED" },
+      data: { passwordHash, phone, invitationTokenHash: null, invitationExpiresAt: null },
+    });
+    if (consumed.count !== 1) {
+      throw new ApiError(400, "INVITATION_INVALID", "The invitation is invalid or has expired");
+    }
+    await writeAudit(tx, {
+      data: {
+        actorId: user.id,
+        role: user.role,
+        action: "INTERNAL_USER_INVITATION_ACCEPTED",
+        entityType: "USER",
+        entityId: user.id,
+        beforeJson: { credentialsSet: false },
+        afterJson: { credentialsSet: true, phoneLast4: phone.slice(-4) },
+      },
+    });
+  });
+  response.json({ status: "INVITED", activationPending: true });
+});
 
 router.use(requireAuthentication);
 // Principal-type separation: merchant users and API tokens never reach an admin route,
@@ -1365,8 +1425,8 @@ router.post("/users", async (request: Request, response: Response) => {
     z
       .object({
         email: z.string().email(),
-        phone: z.string().min(6).max(20).optional(),
-        password: z.string().min(10).max(128).optional(),
+        // No `phone` and no `password`: the invitee chooses both when accepting the invitation, so the
+        // maker never knows the credentials or receives the MFA codes of the user they propose.
         role: z.enum(STAFF_ROLES),
         authoritiesMap: z.array(z.string().min(1).max(64)).max(60).default([]),
         isMaker: z.boolean().default(false),
@@ -1392,8 +1452,8 @@ router.post("/users", async (request: Request, response: Response) => {
     const created = await tx.user.create({
       data: {
         email: body.email.trim().toLowerCase(),
-        phone: body.phone ?? null,
-        passwordHash: body.password ? await hashPassword(body.password) : null,
+        phone: null,
+        passwordHash: null,
         role: body.role,
         authoritiesMap: body.authoritiesMap,
         isMaker: false,
@@ -1403,6 +1463,8 @@ router.post("/users", async (request: Request, response: Response) => {
         invitedById: actor.userId,
       },
     });
+    // The invitation token is mailed to the invitee and returned to nobody.
+    await issueStaffInvitation(tx as never, { userId: created.id, email: created.email });
     let approvalId: string | null = null;
     if (wantsFlags) {
       const approval = await tx.approvalRequest.create({
@@ -1436,8 +1498,40 @@ router.post("/users", async (request: Request, response: Response) => {
     email: user.email,
     role: user.role,
     status: user.status,
+    invitationSent: true,
     ...(flagsApprovalId ? { approvalRequestId: flagsApprovalId, approvalStatus: "PENDING_REVIEW" } : {}),
   });
+});
+
+/**
+ * Re-issues the invitation of a staff user that has not been activated yet (an expired or lost email, or a
+ * user created before invitations existed with a password chosen by the maker). Any credential already on
+ * the record is discarded: the invitee sets their own.
+ */
+router.post("/users/:id/invite", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["user:write", "security:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const user = await loadManagedStaffUser(request, id);
+  if (user.status !== "INVITED") {
+    throw new ApiError(409, "USER_NOT_INVITED", "Only a user that has not been activated can be invited again");
+  }
+  const actor = actorFromRequest(request);
+  const { expiresAt } = await client.$transaction(async (tx) => {
+    const issued = await issueStaffInvitation(tx as never, { userId: user.id, email: user.email });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "UNKNOWN",
+        action: "INTERNAL_USER_REINVITED",
+        entityType: "USER",
+        entityId: user.id,
+        beforeJson: { credentialsSet: Boolean(user.passwordHash) },
+        afterJson: { invitationExpiresAt: issued.expiresAt.toISOString() },
+      },
+    });
+    return issued;
+  });
+  response.json({ id: user.id, status: user.status, invitationSent: true, invitationExpiresAt: expiresAt.toISOString() });
 });
 
 /**
@@ -1457,6 +1551,17 @@ const requiresUserApproval = (body: {
   || body.isMaker !== undefined
   || body.isChecker !== undefined
   || body.status === "ACTIVE";
+
+/** Activation needs the invitee's own password and MFA phone (set by accepting the invitation). */
+const assertStaffInvitationCompleted = (user: { passwordHash?: string | null; phone?: string | null; mfaRequired?: boolean }): void => {
+  if (!user.passwordHash || (user.mfaRequired !== false && !user.phone)) {
+    throw new ApiError(
+      409,
+      "USER_INVITATION_PENDING",
+      "The invitee has not accepted the invitation yet (no password or MFA phone set by the user)",
+    );
+  }
+};
 
 const loadManagedStaffUser = async (request: Request, id: string) => {
   const user = await client.user.findUnique({ where: { id } });
@@ -1558,6 +1663,9 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
   const user = await loadManagedStaffUser(request, id);
   if (body.authoritiesMap) {
     assertGrantableAuthorities(principalOf(request), body.authoritiesMap);
+  }
+  if (body.status === "ACTIVE") {
+    assertStaffInvitationCompleted(user);
   }
   if (requiresUserApproval(body)) {
     const actor = actorFromRequest(request);
@@ -4335,9 +4443,20 @@ const approvalSubjectContext = async (subjectType: string, subjectId: string): P
     case "USER": {
       const row = await client.user.findUnique({
         where: { id: subjectId },
-        select: { id: true, email: true, role: true, status: true, isMaker: true, isChecker: true },
+        select: {
+          id: true, email: true, role: true, status: true, isMaker: true, isChecker: true,
+          passwordHash: true, phone: true, invitedById: true,
+        },
       });
-      return row ? { contextType: "USER", ...row } : null;
+      if (!row) return null;
+      // The checker sees WHO set up the credentials (never the credentials): the invitee, not the maker.
+      const { passwordHash, phone, ...visible } = row;
+      return {
+        contextType: "USER",
+        ...visible,
+        invitationAccepted: Boolean(passwordHash),
+        phoneMasked: phone ? `*******${phone.slice(-4)}` : null,
+      };
     }
     case "PLATFORM_SETTING": {
       const row = await client.platformSetting.findUnique({
@@ -5667,7 +5786,9 @@ router.post("/merchants/:id/suspend", async (request: Request, response: Respons
           makerUserId: actor.userId,
           state: "PENDING_REVIEW",
           ratifyDueAt,
-          expiresAt: ratifyDueAt,
+          // An unratified suspension stays in force and can still be ratified during the grace period after the
+          // deadline (decision D7); the deadline worker lifts it when the grace ends.
+          expiresAt: new Date(ratifyDueAt.getTime() + env.EMERGENCY_RATIFICATION_GRACE_HOURS * 3_600_000),
         },
       });
       for (const [field, oldValue] of [
@@ -6249,58 +6370,17 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
     );
   }
   if (subjectType === "BACKUP_POLICY") {
-    if (!isBackupDaemonConfigured()) {
-      throw new ApiError(
-        503,
-        "BACKUP_DAEMON_NOT_CONFIGURED",
-        "The backup daemon is not configured for this deployment",
-      );
-    }
-    const payload = backupPolicySchema
-      .omit({ approvalRequestId: true })
-      .parse(approval.payloadDiffJson ?? {});
-    const updated = await getBackupControlClient().updatePolicy({
-      fullCron: payload.fullCron,
-      deltaCron: payload.deltaCron,
-      drillCron: payload.drillCron,
-      fullRetentionDays: payload.fullRetentionDays,
-      walRetentionDays: payload.walRetentionDays,
-      alertLagSeconds: payload.alertLagSeconds,
-      updatedBy: actor.userId ?? undefined,
-    });
-    const executed = await client.$transaction(async (tx) => {
-      await claimPendingApproval(tx as never, id, actor.userId);
-      const row = await tx.approvalRequest.update({
-        where: { id },
-        data: {
-          checkerUserId: actor.userId,
-          state: "EXECUTED",
-          riskAcceptanceNote: body.riskAcceptanceNote,
-          baseVersion: (approval.baseVersion ?? 0) + 1,
-        },
-      });
-      await writeAudit(tx, {
-        data: {
-          actorId: actor.userId,
-          role: actor.role ?? "UNKNOWN",
-          action: "BACKUP_POLICY_UPDATED",
-          entityType: "BACKUP_POLICY",
-          entityId: approval.id,
-          approvalRequestId: approval.id,
-          beforeJson: (approval.payloadDiffJson ?? {}) as Record<string, unknown>,
-          afterJson: {
-            policy: updated.policy,
-            approvalRequestId: approval.id,
-          },
-        },
-      });
-      return row;
+    // Shared with PUT /system/backups/policy, so both entry points enforce the same checks.
+    const executed = await executeBackupPolicyApproval({
+      approvalId: id,
+      actor,
+      riskAcceptanceNote: body.riskAcceptanceNote,
     });
     response.json({
-      id: executed.id,
+      id: executed.approvalId,
       state: executed.state,
       checkerUserId: executed.checkerUserId,
-      policy: updated.policy,
+      policy: executed.policy,
       status: "EXECUTED",
     });
     return;
@@ -6546,6 +6626,83 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
     },
   });
   response.json({ id: updated.id, state: updated.state });
+});
+
+/**
+ * Extends an unratified emergency suspension (AUTO-22, decision D7): ONE independent compliance officer (never the actor
+ * who suspended) may extend the ratification deadline ONCE, by 1 to 7 days, with a written reason. The deadline worker's
+ * stages for the approval are cleared so its reminders, escalations and lift run again against the new deadline.
+ */
+router.post("/approvals/:id/extend-emergency", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["approval:check", "approval:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({ days: z.number().int().min(1).max(7), reason: z.string().trim().min(10).max(2000) }).strict(),
+    request.body,
+  );
+  const actor = actorFromRequest(request);
+  assertCheckerAuthority(actor);
+  const approval = await client.approvalRequest.findUnique({ where: { id } });
+  if (!approval) throw new ApiError(404, "APPROVAL_REQUEST_NOT_FOUND", "The approval request does not exist");
+  if (approval.mode !== "EMERGENCY_RATIFICATION" || normalizeApprovalSubjectType(approval.subjectType) !== "MERCHANT") {
+    throw new ApiError(409, "EMERGENCY_EXTENSION_NOT_SUPPORTED", "Only an emergency merchant suspension can be extended");
+  }
+  assertCheckerIsNotMaker(approval.makerUserId, actor.userId);
+  if (!merchantApprovalCheckerAllowed(actor.role ?? null, approval.payloadDiffJson)) {
+    throw new ApiError(403, "MERCHANT_CHECKER_DOMAIN_FORBIDDEN", "The principal's role cannot check this merchant change");
+  }
+  if (approval.state !== "PENDING_REVIEW" || approval.checkerUserId) {
+    throw new ApiError(409, "APPROVAL_NOT_PENDING", "The emergency action is already ratified or closed");
+  }
+  const payload = approval.payloadDiffJson && typeof approval.payloadDiffJson === "object" && !Array.isArray(approval.payloadDiffJson)
+    ? (approval.payloadDiffJson as Record<string, unknown>)
+    : {};
+  if (payload.extension) {
+    throw new ApiError(409, "EMERGENCY_ALREADY_EXTENDED", "An emergency suspension can be extended only once");
+  }
+  const now = new Date();
+  const previousDueAt = approval.ratifyDueAt ?? now;
+  const base = Math.max(previousDueAt.getTime(), now.getTime());
+  const ratifyDueAt = new Date(base + body.days * 86_400_000);
+  const expiresAt = new Date(ratifyDueAt.getTime() + env.EMERGENCY_RATIFICATION_GRACE_HOURS * 3_600_000);
+  await client.$transaction(async (tx) => {
+    // Optimistic: only the request that still sees the deadline it read wins (two officers cannot both extend).
+    const changed = await tx.approvalRequest.updateMany({
+      where: { id, state: "PENDING_REVIEW", checkerUserId: null, ratifyDueAt: approval.ratifyDueAt },
+      data: {
+        ratifyDueAt,
+        expiresAt,
+        payloadDiffJson: {
+          ...payload,
+          extension: {
+            byUserId: actor.userId,
+            byRole: actor.role ?? null,
+            at: now.toISOString(),
+            days: body.days,
+            reason: body.reason,
+            previousRatifyDueAt: previousDueAt.toISOString(),
+          },
+        } as Prisma.InputJsonValue,
+      },
+    });
+    if (changed.count !== 1) {
+      throw new ApiError(409, "EMERGENCY_EXTENSION_CONFLICT", "The emergency action changed while it was being extended");
+    }
+    await tx.$executeRawUnsafe("DELETE FROM deadline_stages WHERE subject_type = 'EMERGENCY_APPROVAL' AND subject_id = $1", id);
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "UNKNOWN",
+        action: "EMERGENCY_ACTION_EXTENDED",
+        entityType: "MERCHANT",
+        entityId: approval.subjectId,
+        beforeJson: { ratifyDueAt: previousDueAt.toISOString() },
+        afterJson: { ratifyDueAt: ratifyDueAt.toISOString(), days: body.days, reason: body.reason },
+        approvalRequestId: id,
+      },
+    });
+  });
+  response.json({ id, ratifyDueAt, expiresAt, extended: true });
 });
 
 const amlScreeningRow = (
@@ -10427,6 +10584,26 @@ router.post("/credential-sets", async (request: Request, response: Response) => 
     },
   });
   await invalidationBus.invalidateCredential(credentialSet.id, "credential-set-created");
+  const creator = actorFromRequest(request);
+  // Key names only: a secret value (or its ciphertext) never enters the audit trail.
+  await writeAudit(client, {
+    data: {
+      actorId: creator.userId,
+      role: creator.role,
+      action: "CREDENTIAL_SET_CREATED",
+      entityType: "CREDENTIAL_SET",
+      entityId: credentialSet.id,
+      beforeJson: {},
+      afterJson: {
+        gatewayCode: body.gatewayCode,
+        env: body.env,
+        ownerType: body.ownerType,
+        ownerMerchantId: body.ownerType === "MERCHANT" ? body.ownerMerchantId : null,
+        settlementTarget: body.settlementTarget,
+        entryKeys: body.entries.map((entry) => entry.key),
+      },
+    },
+  });
   response.status(201).json({ id: credentialSet.id, status: credentialSet.status });
 });
 
@@ -10456,6 +10633,18 @@ router.put("/credential-sets/:id", async (request: Request, response: Response) 
     data: { entriesCiphertext: encryptedEntries, status: "UNTESTED", lastVerifiedAt: null },
   });
   await invalidationBus.invalidateCredential(updated.id, "credential-set-rotated");
+  const rotator = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: rotator.userId,
+      role: rotator.role,
+      action: "CREDENTIAL_SET_ROTATED",
+      entityType: "CREDENTIAL_SET",
+      entityId: updated.id,
+      beforeJson: { status: credentialSet.status },
+      afterJson: { status: updated.status, entryKeys: body.entries.map((entry) => entry.key), secretVersion: 2 },
+    },
+  });
   response.json({ id: updated.id, status: updated.status });
 });
 
@@ -10484,6 +10673,18 @@ router.post("/credential-sets/:id/verify", async (request: Request, response: Re
     ...(body.gatewayVersionId ? { gatewayVersionId: body.gatewayVersionId } : {}),
   });
   await invalidationBus.invalidateCredential(id, "credential-set-verified");
+  const verifier = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: verifier.userId,
+      role: verifier.role,
+      action: "CREDENTIAL_SET_VERIFIED",
+      entityType: "CREDENTIAL_SET",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { status: result.status, method: result.method },
+    },
+  });
   if (result.status !== "VERIFIED") {
     throw new ApiError(
       502,
@@ -13036,6 +13237,18 @@ router.post("/assets", async (request: Request, response: Response) => {
       sizeBytes: body.sizeBytes,
       storageKey: body.storageKey,
       sha256: body.sha256,
+    },
+  });
+  const uploader = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: uploader.userId,
+      role: uploader.role,
+      action: "ASSET_REGISTERED",
+      entityType: "ASSET",
+      entityId: asset.id,
+      beforeJson: {},
+      afterJson: { name: asset.name, mime: body.mime, sizeBytes: body.sizeBytes, sha256: body.sha256 },
     },
   });
   response.status(201).json({ id: asset.id, name: asset.name });

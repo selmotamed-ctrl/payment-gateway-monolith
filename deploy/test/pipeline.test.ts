@@ -92,3 +92,32 @@ describe("14-step deploy pipeline", () => {
     expect(source.indexOf("deployBackupDaemon")).toBeLessThan(source.indexOf("End-to-end cross-host"));
   });
 });
+
+describe("pipeline ordering and auto mode (source-level guards)", () => {
+  const deploySource = readFileSync(join(import.meta.dir, "..", "deploy.ts"), "utf8");
+
+  test("verification runs BEFORE the long seed, and the numbering follows", () => {
+    const verify = deploySource.indexOf('step(11, "End-to-end cross-host');
+    const seed = deploySource.indexOf('step(12, "Seed Fake Rails');
+    expect(verify).toBeGreaterThan(-1);
+    expect(seed).toBeGreaterThan(verify);
+    // The seed must be the last thing before pruning: nothing verifies after it.
+    expect(deploySource.indexOf('step(13, "Prune old releases")')).toBeGreaterThan(seed);
+  });
+
+  test("frontend builds are awaited before the first service is deployed", () => {
+    const awaited = deploySource.indexOf("if (builds) await builds.waitAll();");
+    expect(awaited).toBeGreaterThan(-1);
+    expect(awaited).toBeLessThan(deploySource.indexOf("for (const target of deployTargets)"));
+  });
+
+  test("auto mode probes each host (read-only) and bootstraps only hosts with gaps", () => {
+    expect(deploySource).toContain('config.DEPLOY_MODE === "auto"');
+    expect(deploySource).toContain("hostProbeScript({ nginx: host.nginx.length > 0 })");
+    expect(deploySource).toContain("bootstrapGaps(");
+    // The probe runs before anything is provisioned or migrated (step 5 onwards).
+    expect(deploySource.indexOf("bootstrapGaps(")).toBeLessThan(deploySource.indexOf('step(5, "Provision storage engines'));
+    // A host that needed no bootstrap is skipped unless the firewall was asked for.
+    expect(deploySource).toContain("if (autoProbe && !options.enforceFirewall && !bootstrapThisHost) continue;");
+  });
+});

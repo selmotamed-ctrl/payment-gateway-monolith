@@ -67,6 +67,21 @@ const verifySignature = async (manifest: UpdateManifest): Promise<void> => {
 const resolveBundleUrl = (manifest: UpdateManifest): string =>
     new URL(manifest.bundleUrl, manifestUrl()).toString();
 
+/**
+ * Rollback protection on AUTHENTICATED data. The manifest dates are not signed (the signature covers
+ * only the bundle checksum), so an attacker could replay an old genuine bundle with its old signature
+ * under a manifest whose `publishedAt` was edited. The bundle's own `meta.generatedAt` is inside the
+ * checksummed bytes and cannot be forged, so it is the value compared with the installed content.
+ */
+export const assertBundleNotOlderThanInstalled = (installedGeneratedAt: string, bundleGeneratedAt: string): void => {
+    const installed = Date.parse(installedGeneratedAt);
+    const next = Date.parse(bundleGeneratedAt);
+    if (!Number.isFinite(next)) throw new Error("the downloaded content has no valid generation date");
+    if (Number.isFinite(installed) && next < installed) {
+        throw new Error("the downloaded content is older than the installed content");
+    }
+};
+
 export const checkForUpdate = async (download = true): Promise<UpdateManifest | null> => {
     updateState.checking = true;
     updateState.error = "";
@@ -122,6 +137,7 @@ export const installUpdate = async (manifest = updateState.available): Promise<C
         if (bundle.meta.contentHash !== manifest.contentHash) {
             throw new Error("downloaded content does not match the signed manifest");
         }
+        assertBundleNotOlderThanInstalled((await ensureContent()).meta.generatedAt, bundle.meta.generatedAt);
         await writeActiveBundle(text, manifest);
         setBundleForTests(bundle);
         updateState.available = manifest;

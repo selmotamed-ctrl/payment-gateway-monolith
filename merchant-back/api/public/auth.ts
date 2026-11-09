@@ -1,7 +1,8 @@
 import express, { type Request, type Response } from "express";
 import rateLimiter from "express-rate-limit";
 import { z } from "zod";
-import { digestKeyPart, lazyLimiter, rateLimitKey } from "../../lib/clientIp";
+import { lazyLimiter, rateLimitKey } from "../../lib/clientIp";
+import { createAccountLimiters, type AccountKey } from "../../lib/authLimiters";
 import { env } from "../../lib/env";
 import { ApiError } from "../../lib/error";
 import { zEmail, zMfaCode, zPassword, zPhone } from "../../lib/zReady";
@@ -37,33 +38,25 @@ const authLimiter = lazyLimiter(() =>
   }),
 );
 
-const accountOf = (req: Request): string | undefined => {
+const accountOf = (req: Request): AccountKey | undefined => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   for (const field of ["identifier", "email", "phone", "challengeId"]) {
     const value = body[field];
-    if (typeof value === "string" && value.length > 0) return (field === "challengeId" ? "challenge:" : "account:") + value.toLowerCase().trim();
+    if (typeof value === "string" && value.length > 0) {
+      return { kind: field === "challengeId" ? "challenge" : "account", value: value.toLowerCase().trim() };
+    }
   }
   return undefined;
 };
 
-/** Per account / mfa challenge regardless of the client ip, so distributed guessing is throttled too. */
-const accountLimiter = lazyLimiter(() =>
-  rateLimiter({
-    windowMs: env.AUTH_RATE_LIMIT_WINDOW_MS,
-    max: () => env.AUTH_RATE_LIMIT_MAX,
-    skip: (req) => req.method !== "POST" || accountOf(req) === undefined,
-    keyGenerator: (req) => digestKeyPart(accountOf(req) ?? ""),
-    standardHeaders: false,
-    legacyHeaders: false,
-    handler: limited,
-  }),
-);
+/** Per account and address (and an account-wide ceiling), counting failures only: see `lib/authLimiters.ts`. */
+const accountLimiters = createAccountLimiters(accountOf);
 
 // Logout is deliberately outside the login limiter (see admin-back).
 router.post("/logout", logoutHandler);
 
 router.use(authLimiter);
-router.use(accountLimiter);
+router.use(accountLimiters.perAddress, accountLimiters.ceiling);
 
 const registerSchema = z
   .object({

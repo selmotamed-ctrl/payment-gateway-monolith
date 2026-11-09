@@ -12,6 +12,7 @@ Every historical design file must map to a canonical part or be explicitly marke
 | `design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md` | Authoritative intent for storage/backup/scaling; correct DDL/LSN/read-model drift | `parts/01-core-back/06-storage-engine.md`, `09-backup-control.md`, `parts/07-deploy/**` |
 | `design/02-storage-and-performance/backup_engine_reliability_architecture_and_test_plan.md` | Active backup-engine reliability and test design | `parts/07-deploy/06-backup-daemon.md`, `parts/01-core-back/09-backup-control.md`, `parts/08-testing/01-suite-catalog.md` |
 | `design/06-ui/admin_front_complete_feature_and_missing_pages_plan.md` | Implemented admin-front completion plan (fields re-grounded against the real schema) | `parts/03-admin-front/00-ui-system.md`, `01-route-and-page-catalog.md`, `02-tables-filters-exports.md` |
+| `design/02-storage-and-performance/ledger_scaling_partition_pruning_and_archive_anchor_plan.md` | Implemented 2026-11-09 (OPT-1..OPT-7): journal_entries indexes, covering journal_lines indexes, insert-autovacuum, partition pruning, single-pass totals, checkout receivable short-circuit, query rules | `parts/01-core-back/03-ledger.md`, `06-storage-engine.md`, `07-data-schema-and-migrations.md`, `parts/08-testing/01-suite-catalog.md` |
 | `design/02-storage-and-performance/deep_search_plugin_architecture_plan.md` | Design source; document actual 20-provider implementation and gaps | `parts/01-core-back/08-search.md`, `parts/03-admin-front/**` |
 | `design/04-fake-rails-and-seeder/synthetic_operational_data_seeder_architecture.md` | Design source; correct to 55 collections / 9 generators / actual safety gate | `parts/01-core-back/10-synthetic-seeder.md` |
 | `design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md` | Design source; document protocol/chaos/portal and current gaps | `parts/06-fake-rails/**` |
@@ -37,6 +38,7 @@ Every historical design file must map to a canonical part or be explicitly marke
 | `design/06-ui/merchant_landing_page_redesign.md` | Active design for the merchant public landing page | `parts/04-merchant-front/00-portal.md` |
 | `design/90-archive/legacy-deploy-configs/**` | SUPERSEDED hand-written nginx/systemd files; replaced by `deploy/templates/*.tpl` + PM2 | `parts/07-deploy/04-pipeline.md` |
 | `design/10-fixes/_0001_operator_cases.md` | Implemented operator-case feature spec | `parts/01-core-back/01-api-surface.md`, `04-governance-compliance.md`, `parts/03-admin-front/01-route-and-page-catalog.md` |
+| `design/11-automation/background_automation_and_workers_plan.md` | FUTURE: background automation plan (not implemented); verified against master 2026-11-09 | `parts/01-core-back/05-workers.md`, `TRACKER.md` GAP-066 |
 | `design/90-archive/delivery-logs/session-ses_e8c2.md` | Raw session transcript; not authoritative | `TRACKER.md` historical note only |
 
 ## Unmapped headings

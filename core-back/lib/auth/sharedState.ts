@@ -93,12 +93,26 @@ export class MemoryAuthStateStore implements AuthStateStore {
 export interface RedisLike {
   isOpen: boolean;
   connect(): Promise<unknown>;
-  incr(key: string): Promise<number>;
-  pExpire(key: string, ms: number): Promise<unknown>;
-  set(key: string, value: string): Promise<unknown>;
+  /** Atomic increment-with-window (see `INCR_WINDOW_LUA`). */
+  eval(script: string, options: { keys: string[]; arguments: string[] }): Promise<unknown>;
+  /** `SET key value PX ttl`: value and expiry are written in ONE command. */
+  set(key: string, value: string, options: { PX: number }): Promise<unknown>;
   pTTL(key: string): Promise<number>;
   del(keys: string | string[]): Promise<unknown>;
 }
+
+/**
+ * INCR and the window expiry in one atomic step. The previous `INCR` then `PEXPIRE` could be interrupted between
+ * the two (a crash, a dropped connection), leaving a counter with no expiry that kept an account throttled forever.
+ * The expiry is also re-applied when a key is found without one.
+ */
+export const INCR_WINDOW_LUA = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 or redis.call('PTTL', KEYS[1]) < 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return count
+`;
 
 export class RedisAuthStateStore implements AuthStateStore {
   private clientPromise: Promise<RedisLike> | null = null;
@@ -128,16 +142,14 @@ export class RedisAuthStateStore implements AuthStateStore {
   async incrWindow(key: string, windowMs: number): Promise<number> {
     const client = await this.client();
     const full = this.keyPrefix + key;
-    const count = await client.incr(full);
-    if (count === 1) await client.pExpire(full, windowMs);
-    return count;
+    return Number(await client.eval(INCR_WINDOW_LUA, { keys: [full], arguments: [String(Math.max(1, windowMs))] }));
   }
 
   async setFlag(key: string, ttlMs: number): Promise<void> {
     const client = await this.client();
     const full = this.keyPrefix + key;
-    await client.set(full, "1");
-    await client.pExpire(full, Math.max(1, ttlMs));
+    // One command: a flag written without its expiry (a lockout or a revocation that never ends) cannot exist.
+    await client.set(full, "1", { PX: Math.max(1, Math.round(ttlMs)) });
   }
 
   async flagRemainingMs(key: string): Promise<number> {

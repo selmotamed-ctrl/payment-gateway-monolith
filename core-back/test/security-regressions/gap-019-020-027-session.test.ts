@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { sign } from "jsonwebtoken";
 import { SESSION_AUDIENCES, signSession, verifySessionToken } from "../../lib/auth";
 import { isSessionRevoked, revokeSession } from "../../lib/auth/revocation";
+import { INCR_WINDOW_LUA } from "../../lib/auth/sharedState";
 import {
   FallbackAuthStateStore,
   MemoryAuthStateStore,
@@ -86,19 +87,17 @@ describe("GAP-027 shared throttle state", () => {
       data,
       isOpen: true,
       connect: async () => undefined,
-      incr: async (key) => {
-        const entry = data.get(key) ?? { v: "0", exp: Infinity };
+      eval: async (script, { keys, arguments: args }) => {
+        // Emulates INCR_WINDOW_LUA: INCR, and PEXPIRE when the key is new or has no expiry.
+        expect(script).toBe(INCR_WINDOW_LUA);
+        const entry = data.get(keys[0]!) ?? { v: "0", exp: Infinity };
         entry.v = String(Number(entry.v) + 1);
-        data.set(key, entry);
+        if (Number(entry.v) === 1 || entry.exp === Infinity) entry.exp = Date.now() + Number(args[0]);
+        data.set(keys[0]!, entry);
         return Number(entry.v);
       },
-      pExpire: async (key, ms) => {
-        const entry = data.get(key);
-        if (entry) entry.exp = Date.now() + ms;
-        return 1;
-      },
-      set: async (key, value) => {
-        data.set(key, { v: value, exp: Infinity });
+      set: async (key, value, options) => {
+        data.set(key, { v: value, exp: Date.now() + options.PX });
         return "OK";
       },
       pTTL: async (key) => {
@@ -124,14 +123,22 @@ describe("GAP-027 shared throttle state", () => {
     expect([...redis.data.keys()].some((key) => key.includes("dave"))).toBe(false);
   });
 
+  test("no throttle counter or lock flag can exist in Redis without an expiry", async () => {
+    const redis = fakeRedis();
+    setAuthStateStore(new RedisAuthStateStore("redis://x", "t:", () => redis));
+    for (let i = 0; i < 6; i += 1) await recordLoginFailure("grace@example.com", "203.0.113.5");
+    await revokeSession("jti-atomic", Math.floor(Date.now() / 1000) + 3600);
+    expect(redis.data.size).toBeGreaterThan(3);
+    for (const [key, entry] of redis.data) {
+      expect([key, Number.isFinite(entry.exp)]).toEqual([key, true]);
+    }
+  });
+
   test("a Redis outage degrades to in-memory counters instead of failing login", async () => {
     const broken: RedisLike = {
       isOpen: true,
       connect: async () => undefined,
-      incr: async () => {
-        throw new Error("down");
-      },
-      pExpire: async () => {
+      eval: async () => {
         throw new Error("down");
       },
       set: async () => {

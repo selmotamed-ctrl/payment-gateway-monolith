@@ -2,7 +2,7 @@ import { ApiError } from "../../lib/error";
 
 export const SYSTEM_AUTOMATION = "SYSTEM_AUTOMATION";
 
-export type ApprovalState = "DRAFT" | "PENDING_REVIEW" | "APPROVED" | "EXECUTED" | "REJECTED";
+export type ApprovalState = "DRAFT" | "PENDING_REVIEW" | "APPROVED" | "EXECUTED" | "REJECTED" | "EXPIRED";
 export type ApprovalMode = "STANDARD" | "EMERGENCY_RATIFICATION";
 export type JsonPatchOperation =
   | { op: "add" | "remove" | "replace" | "test"; path: string; value?: unknown; from?: string }

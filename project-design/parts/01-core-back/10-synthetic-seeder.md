@@ -287,7 +287,7 @@ The seeder writes 49 Prisma models through `createMany`, including merchant/user
 | `FAKE_RAILS_ALLOW_IN_PRODUCTION` | Required when `NODE_ENV=production` |
 | `FAKE_RAILS_ALLOWED_HOSTS` | Comma-separated allowed emulator hosts |
 | `FAKE_RAILS_SEEDER_TOKEN` | Shared handshake/bulk-seed token |
-| `SYNTHETIC_SEED_PROFILE` | `COMPACT`, `STANDARD`, `STRESS` (default `STANDARD` in the seeder; deploy default `COMPACT`) |
+| `SYNTHETIC_SEED_PROFILE` | `COMPACT`, `STANDARD`, `STRESS` (default `STANDARD` in the seeder when unset or empty; deploy default `COMPACT`). Any other value now throws (`Unknown synthetic seed profile`) instead of silently becoming `STANDARD`. A refund of a `MERCHANT_DIRECT` attempt with no commission to reverse is skipped by the generator (see `core.ledger`). |
 | `SYNTHETIC_SEED_KEY` | Completed-run key and PRNG seed |
 | `SYNTHETIC_DATA_NAMESPACE` | Namespace used in emails/references (default `synthv1`) |
 | `SYNTHETIC_YEARS_SPAN` | Timeline span in years |

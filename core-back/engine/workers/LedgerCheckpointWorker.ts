@@ -1,6 +1,6 @@
 import { CheckpointService } from "../ledger/CheckpointService";
 import { LEDGER_SUBJECT_KEYS, ensureLedgerSystemActor, raiseLedgerCase, writeSystemAudit } from "../ledger/ledgerAlerts";
-import { applyShardRepair, planShardRepair, shouldAutoRepair, type AutoRepairPolicy } from "../ledger/ShardRepair";
+import { applyShardRepair, planShardRepair, repairSizeAllowed, shouldAutoRepair, type AutoRepairPolicy } from "../ledger/ShardRepair";
 import { BaseWorker, type WorkerOptions } from "./workerRuntime";
 
 export interface LedgerCheckpointWorkerDeps extends WorkerOptions {
@@ -19,7 +19,18 @@ export interface LedgerCheckpointWorkerDeps extends WorkerOptions {
   autoRepair?: AutoRepairPolicy;
   /** How many failed shards one tick may repair. */
   autoRepairPerTick?: number;
+  /**
+   * A shard with more lines than this above its baseline is repaired automatically only inside the maintenance
+   * window (AUTO-10). Applied when `autoRepair.maxLinesOutsideWindow` is not set. Default 500,000.
+   */
+  autoRepairMaxLinesOutsideWindow?: number;
+  /** The maintenance window in UTC hours `[startHour, endHour)`. Applied when the policy has none. Default: none. */
+  autoRepairMaintenanceWindowUtc?: { startHour: number; endHour: number };
+  /** The most lines a repair may read while it holds the shard lock. Default 5,000. */
+  autoRepairMaxTailLines?: number;
 }
+
+export const DEFAULT_AUTO_REPAIR_MAX_LINES_OUTSIDE_WINDOW = 500_000;
 
 /**
  * Keeps every shard's checkpoint close to its head.
@@ -45,6 +56,7 @@ export class LedgerCheckpointWorker extends BaseWorker {
   private readonly sweepAuditEveryMs: number;
   private readonly autoRepair: AutoRepairPolicy | undefined;
   private readonly autoRepairPerTick: number;
+  private readonly autoRepairMaxTailLines: number | undefined;
   private readonly declined = new Set<string>();
   private lastSweepAt = 0;
   private sweep = { shards: 0, lines: 0n, failures: 0 };
@@ -55,8 +67,16 @@ export class LedgerCheckpointWorker extends BaseWorker {
     this.maxAgeMs = deps.maxAgeMs ?? 15 * 60 * 1000;
     this.retryFailedMs = deps.retryFailedMs ?? 10 * 60 * 1000;
     this.sweepAuditEveryMs = deps.sweepAuditEveryMs ?? 60 * 60 * 1000;
-    this.autoRepair = deps.autoRepair;
+    this.autoRepair = deps.autoRepair
+      ? {
+          ...deps.autoRepair,
+          maxLinesOutsideWindow:
+            deps.autoRepair.maxLinesOutsideWindow ?? deps.autoRepairMaxLinesOutsideWindow ?? DEFAULT_AUTO_REPAIR_MAX_LINES_OUTSIDE_WINDOW,
+          maintenanceWindowUtc: deps.autoRepair.maintenanceWindowUtc ?? deps.autoRepairMaintenanceWindowUtc,
+        }
+      : undefined;
     this.autoRepairPerTick = deps.autoRepairPerTick ?? 5;
+    this.autoRepairMaxTailLines = deps.autoRepairMaxTailLines;
   }
 
   protected async tick(): Promise<void> {
@@ -112,23 +132,44 @@ export class LedgerCheckpointWorker extends BaseWorker {
 
   /**
    * A shard that has failed its proof `minConsecutiveFailures` times in a row (the retry interval makes that about 30
-   * minutes) is repaired when the policy allows it. The plan is re-evaluated UNDER the shard lock, so the decision is
-   * made on the journal as it is at that instant. A declined shard is logged once per distinct plan, never repaired.
+   * minutes) is repaired when the policy allows it. The deep read runs WITHOUT the shard lock; under the lock only the
+   * lines posted since are read and the plan is re-evaluated, so the decision is made on the journal as it is at that
+   * instant while payments to the shard wait at most a few milliseconds (AUTO-10). A shard larger than the size limit
+   * is not even read outside the maintenance window. A declined shard is logged once per distinct plan.
    */
   private async repairPersistentFailures(service: CheckpointService): Promise<void> {
     const policy = this.autoRepair;
     if (!policy?.enabled) return;
-    const failing = (await (this.db as never as { $queryRawUnsafe: (q: string, ...v: unknown[]) => Promise<Array<{ id: string; shard_id: number }>> }).$queryRawUnsafe(
-      `SELECT gl_account_id::text AS id, shard_id FROM gl_shard_checkpoints
-       WHERE status = 'PARITY' AND consecutive_failures >= $1::int
-       ORDER BY last_failure_at ASC NULLS FIRST LIMIT $2::int`,
+    const failing = (await (this.db as never as { $queryRawUnsafe: (q: string, ...v: unknown[]) => Promise<Array<{ id: string; shard_id: number; approx_lines?: string | null }>> }).$queryRawUnsafe(
+      `SELECT c.gl_account_id::text AS id, c.shard_id,
+              GREATEST(COALESCE(sh.line_seq, 0) - COALESCE(c.baseline_seq, 0), 0)::text AS approx_lines
+       FROM gl_shard_checkpoints c
+       LEFT JOIN gl_account_shards sh ON sh.gl_account_id = c.gl_account_id AND sh.shard_id = c.shard_id
+       WHERE c.status = 'PARITY' AND c.consecutive_failures >= $1::int
+       ORDER BY c.last_failure_at ASC NULLS FIRST LIMIT $2::int`,
       policy.minConsecutiveFailures,
       this.autoRepairPerTick,
-    )) as Array<{ id: string; shard_id: number }>;
+    )) as Array<{ id: string; shard_id: number; approx_lines?: string | null }>;
     for (const row of failing) {
       const shardId = Number(row.shard_id);
+      const now = this.clock();
+      // The deep read itself is the heavy part: skip a large shard outside the maintenance window before reading it.
+      const approxLines = row.approx_lines === undefined || row.approx_lines === null ? 0n : BigInt(row.approx_lines);
+      if (!repairSizeAllowed(approxLines, policy, now)) {
+        const key = `${row.id}:${shardId}:size`;
+        if (!this.declined.has(key)) {
+          this.declined.add(key);
+          this.logger.warn("Ledger shard repair deferred to the maintenance window", {
+            glAccountId: row.id,
+            shardId,
+            lines: approxLines.toString(),
+            limit: policy.maxLinesOutsideWindow,
+          });
+        }
+        continue;
+      }
       const plan = await planShardRepair(this.db as never, row.id, shardId);
-      const verdict = shouldAutoRepair(plan, policy);
+      const verdict = shouldAutoRepair(plan, policy, now);
       if (!verdict.allowed) {
         const key = `${row.id}:${shardId}:${plan.planHash}`;
         if (!this.declined.has(key)) {
@@ -144,11 +185,21 @@ export class LedgerCheckpointWorker extends BaseWorker {
           shardId,
           mode: "AUTO",
           allowedKinds: ["RECOMPUTE"],
-          guard: (current) => shouldAutoRepair(current, policy),
+          guard: (current) => shouldAutoRepair(current, policy, now),
           reason: `Automatic repair: ${verdict.reason}`,
           actor: { actorId, role: "SYSTEM" },
+          // Reuse the deep read made above (outside the lock): under the lock only the newer lines are read.
+          basePlan: plan,
+          ...(this.autoRepairMaxTailLines !== undefined ? { maxTailLines: this.autoRepairMaxTailLines } : {}),
         });
       });
+      if (result.stale) {
+        this.logger.info("Ledger shard repair postponed: the shard moved while it was planned", {
+          glAccountId: row.id,
+          shardId,
+          reason: result.stale,
+        });
+      }
       if (result.repaired) {
         this.logger.warn("Ledger shard repaired automatically from the journal", {
           glAccountId: row.id,

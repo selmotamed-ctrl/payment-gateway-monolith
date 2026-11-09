@@ -148,7 +148,7 @@ export const generateLedger = (ctx: SeederContext): void => {
  * every generator, so the sequence is final.
  *
  *  1. Every line is routed with the engine's own `routeLine(accountType, direction, refId, width)` using the
- *     account's routing width (`shardCount`; wallets are 1 wide, system accounts 16).
+ *     account's routing width (`shardCount`; wallets are 1 wide, TREASURY/GATEWAY_CLEARING/PLATFORM_INCOME 128, other system accounts 16).
  *  2. Lines are put in POSTING ORDER: ascending `createdAt`, ties broken by their position in
  *     `dataset.journalLines` (generation order). That order is deterministic because the seeder is.
  *     Within a shard the j-th line in that order gets `shardSeq = j` (gapless, from 1), and the shard's

@@ -16,6 +16,7 @@ import {
   type FeeVariancePoster,
 } from "../reconciliation/StatementIngestor";
 import type { BackgroundJobHandler } from "./BackgroundJobWorker";
+import { runReconciliationFollowUp } from "./ReconciliationFollowUp";
 import { createLedgerPoster } from "../../lib/storageEngine/ledgerPosterFactory";
 
 /**
@@ -170,6 +171,8 @@ const postSettlementSweeps = async (
 export interface ReconciliationJobHandlerDeps {
   db: PrismaLike;
   repositories: Repositories;
+  /** Opens cases, disputes and statement evidence after the run (AUTO-23). Default on; `false` turns it off. */
+  followUp?: false | { maxCases?: number };
   feeVariancePoster?: FeeVariancePoster;
   ledgerPoster?: LedgerPoster;
   clock?: () => Date;
@@ -204,6 +207,17 @@ const toBuffer = (value: unknown): Buffer => {
   return Buffer.alloc(0);
 };
 
+const followUpOf = async (
+  deps: ReconciliationJobHandlerDeps,
+  run: { id: string; statementSourceId: string },
+): Promise<void> => {
+  if (deps.followUp === false) return;
+  await runReconciliationFollowUp(
+    { db: deps.db, repositories: deps.repositories, clock: deps.clock, maxCases: deps.followUp?.maxCases, logger: deps.logger },
+    run,
+  );
+};
+
 /**
  * The handler of a `RECONCILIATION_RUN` job.
  *
@@ -226,6 +240,8 @@ export const createReconciliationJobHandler = (
       // sweep, which the ledger dedupes, so a failure after ingestion is not
       // lost.
       await postSettlementSweeps(deps, run);
+      // The follow-up is idempotent (keyed cases, intake dedupe), so a job retried after a crash completes it.
+      await followUpOf(deps, run);
       deps.logger?.info("BackgroundJobWorker: reconciliation run was already ingested", {
         runId: run.id,
       });
@@ -249,6 +265,7 @@ export const createReconciliationJobHandler = (
       runId: run.id,
     });
     const settlementSweeps = await postSettlementSweeps(deps, run);
+    await followUpOf(deps, run);
     deps.logger?.info("BackgroundJobWorker: reconciliation run finished", {
       runId: result.runId,
       totalRows: result.totalRows,
@@ -447,3 +464,16 @@ const isDisputeAlreadyExists = (error: unknown): boolean => {
   const code = (error as { code?: unknown }).code;
   return code === "DISPUTE_ALREADY_EXISTS";
 };
+
+// AUTO-20: the REFUND_INQUIRY job type and the production ReconciliationScheduler.
+export {
+  createEngineRefundInquiryPort,
+  createRefundInquiryJobHandler,
+  createRefundInquiryScheduler,
+  findExecutingRefundsWithoutInquiry,
+  REFUND_INQUIRY_JOB_TYPE,
+  type RefundInquiryJobHandlerDeps,
+  type RefundInquiryJobPayload,
+  type RefundInquiryOutcome,
+  type RefundInquiryPort,
+} from "./RefundInquiry";

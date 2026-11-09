@@ -420,6 +420,7 @@ export class StatementIngestor {
           batchReference: row.batchReference,
           statementAmount: moneyToString(row.amount),
           statementFee: moneyToString(row.fee),
+          rowType: row.type,
           result: "DUPLICATE",
         });
         items.push({
@@ -443,6 +444,7 @@ export class StatementIngestor {
           batchReference: row.batchReference,
           statementAmount: moneyToString(row.amount),
           statementFee: moneyToString(row.fee),
+          rowType: row.type,
           result: "MISSING_AT_GATEWAY",
         });
         items.push({
@@ -466,6 +468,7 @@ export class StatementIngestor {
         batchReference: row.batchReference,
         statementAmount: moneyToString(row.amount),
         statementFee: moneyToString(row.fee),
+        rowType: row.type,
         result,
       });
       items.push({

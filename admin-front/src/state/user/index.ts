@@ -27,12 +27,17 @@ export type UserState = {
 export const userStorageKey = "PAYMENT_GATEWAY:ADMIN:USER";
 
 export const setUserState = (userData: UserState | null) => {
+    const previousId = user.value?.userInfo?.id ?? null;
     user.value = userData;
 
     if (userData) {
         localStorage.setItem(userStorageKey, JSON.stringify(userData));
     } else {
         localStorage.removeItem(userStorageKey);
+    }
+    // Per-user client state (the Academy progress and its queue of unsent patches) resets on any change of user.
+    if ((userData?.userInfo?.id ?? null) !== previousId && typeof window !== "undefined") {
+        window.dispatchEvent(new Event("pg:user-changed"));
     }
 };
 

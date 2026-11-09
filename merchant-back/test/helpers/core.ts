@@ -178,6 +178,15 @@ export const startTestCore = async (pki: TestPki): Promise<TestCore> => {
         response.end();
         return;
       }
+      // Like core, reject a login whose password is wrong (the tests mark those with a `wrong` prefix).
+      if (request.method === "POST" && (request.url ?? "").endsWith("/auth/login")) {
+        const login = parseJsonBody(body) as { password?: unknown } | undefined;
+        if (typeof login?.password === "string" && login.password.startsWith("wrong")) {
+          response.writeHead(401, { "content-type": "application/json" });
+          response.end(JSON.stringify({ code: "INVALID_CREDENTIALS", message: "The credentials are not valid" }));
+          return;
+        }
+      }
       const accepted = isAcceptedMerchantResponse(
         request.method ?? "GET",
         request.url ?? "/",

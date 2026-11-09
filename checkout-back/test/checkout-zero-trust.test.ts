@@ -316,7 +316,6 @@ describe("edge to core contract alignment", () => {
     expect(forwarded).toEqual({
       "content-type": "application/json",
       "user-agent": "gateway-agent/1.0",
-      "content-length": "12",
       "x-signature": "sig-1",
       "x-gateway-signature": "sig-2",
       "x-hub-signature-256": "sha256=sig-3",
