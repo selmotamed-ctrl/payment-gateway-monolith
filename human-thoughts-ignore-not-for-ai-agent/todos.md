@@ -15,8 +15,8 @@ Not built or partial
 
 - sandbox environment
 - resolve broken 3 tests -- 
-- ai transcript report engine
-- auto system theme detection even on login page
+- ai transcript report engine --
+- auto system theme detection even on login page --
 - make sure that there is no conflicts on the max width of shards for accounts --
 - check ayoub report -- 
 - missing automations --
