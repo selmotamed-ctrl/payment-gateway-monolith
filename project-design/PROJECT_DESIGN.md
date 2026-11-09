@@ -4412,7 +4412,7 @@ The loop is not a distributed lock by itself. Cross-node safety comes from `FOR 
 
 | Worker | Trigger and default cadence | Claim / concurrency | Behavior | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| `ExpirySweeperWorker` | `expires_at <= now`, every `WORKER_POLL_INTERVAL_MS` (5 s) | `FOR UPDATE SKIP LOCKED`, batch `WORKER_BATCH_SIZE` (50) | Inquires inquiry-capable routes first; applies definitive outcome; expires otherwise; excludes `AML_HOLD`; releases slot on terminal failure/expiry/cancel. | Implemented |
+| `ExpirySweeperWorker` | `expires_at <= now`, every `WORKER_POLL_INTERVAL_MS` (5 s) | `FOR UPDATE SKIP LOCKED`, batch `WORKER_BATCH_SIZE` (50) | Inquires inquiry-capable routes first; applies definitive outcome; expires otherwise, except past the point of no return (held as `UNKNOWN` for the `PollWorker`, slot kept); excludes `AML_HOLD`; releases slot on terminal failure/expiry/cancel. | Implemented |
 | `PollWorker` | `next_check_at <= now`, every poll interval | `FOR UPDATE SKIP LOCKED`, batch | Reconciles inquiry schedules, applies route backoff `[5,15,30,60,120,300]` seconds with a 900 s default window, transitions terminal states once, updates schedule metadata. | Implemented |
 | `InboundInboxWorker` | `processed_at IS NULL`, every poll interval | `FOR UPDATE SKIP LOCKED`, batch | Calls the engine callback verifier, retries `RETRYABLE` errors up to `maxAttempts` (production default 3; class default 5), opens an operator case on terminal failure. | Partial / idle |
 | `OutboxNotificationWorker` | `status = QUEUED` and `next_attempt_at <= now`, every poll interval | `FOR UPDATE SKIP LOCKED`, batch | Finds template, treats missing/tipping-off templates as delivery failures, redacts AML payload, renders, sends; retries with exponential backoff up to 8 attempts. | Implemented |
@@ -4447,6 +4447,7 @@ For each attempt:
 
 - if the route supports inquiry and an inquiry port exists, it calls `inquire`; a definitive terminal outcome (`SUCCEEDED`, `FAILED`, `EXPIRED`, `CANCELLED`) is applied with a conditional update; non-terminal outcomes update status/substatus and continue;
 - an inquiry error moves the attempt to `UNKNOWN` with `nextCheckAt = now + 60 s`;
+- with no definitive answer (no inquiry support, or a non-definitive outcome), an attempt with `point_of_no_return = true` is NOT expired: a money-moving step was already sent, so the gateway may have charged the payer. It moves to `UNKNOWN` with `next_check_at = now` (conditional on `terminal_at IS NULL` and the observed status), keeps its link slot and writes `ATTEMPT_EXPIRY_HELD_UNKNOWN`. The `PollWorker` then inquires while the route's window is open and otherwise opens one keyed `UNKNOWN` operator case (AUTO-19). Fixed 2026-11-10: before, a crash after the confirm claim left such an attempt in `AUTHORIZING`, and the sweeper expired it, released the slot and dropped it from polling;
 - otherwise it transitions to `EXPIRED` with a conditional `WHERE terminal_at IS NULL`, releases the link slot, and writes an audit row.
 
 The production inquiry port calls `DynamicRailEngine.inquire`, which performs the VERIFY phase and posts the confirmation ledger when the inquiry returns a trusted success. The sweeper itself does not post a ledger entry.
@@ -4764,7 +4765,7 @@ Source: `design/11-automation/background_automation_and_workers_plan.md`. Every 
 Run:
 
 ```bash
-cd core-back && bun test test/expiry-sweeper-aml.test.ts
+cd core-back && bun test test/expiry-sweeper-aml.test.ts test/expiry-sweeper-point-of-no-return.test.ts
 cd core-back && bun test test/gateway-inquiry-schedules.test.ts
 cd core-back && bun test test/retention-worker.test.ts
 cd core-back && bun test test/background-jobs.test.ts
@@ -4779,6 +4780,7 @@ cd core-back && bun test test/storage-engine/write-path.integration.test.ts
 Coverage:
 
 - `expiry-sweeper-aml.test.ts` / `gateway-inquiry-schedules.test.ts` — AML-held exclusion, normal expiry slot release, schedule running/complete/expire helpers.
+- `expiry-sweeper-point-of-no-return.test.ts` — an expired `AUTHORIZING`/`VERIFYING` attempt past the point of no return becomes `UNKNOWN` (conditional update, slot kept, audit row), also after a non-definitive inquiry; a definitive answer still wins; a lost race writes nothing; an attempt before the point of no return still expires.
 - `retention-worker.test.ts` — cutoff boundaries, terminal attempt purge while retaining the journal, invariant preservation, dry run, platform-setting period, bounded batches, runtime registration.
 - `background-jobs.test.ts` / `worker-runtime-health.test.ts` — single claim, second-node skip, backoff/failure, lease recovery, reconciliation, dispute intake, adjustment idempotency, no invented checker, startup guard, queue health.
 - `notifications-and-gl-accounts.test.ts` / `screening-and-caps.test.ts` — transport selection, tipping-off rejection, delivery states, L2 screening, watch-list invalidation.

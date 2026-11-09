@@ -154,7 +154,7 @@ Actual behavior to keep in mind:
 
 | Worker | Default cadence | Purpose |
 | :--- | :--- | :--- |
-| `ExpirySweeperWorker` | `WORKER_POLL_INTERVAL_MS` | Inquires inquiry-capable attempts before expiring; excludes `AML_HOLD`; releases link slots on terminal failure/expiry/cancel. |
+| `ExpirySweeperWorker` | `WORKER_POLL_INTERVAL_MS` | Inquires inquiry-capable attempts before expiring; holds attempts past the point of no return as `UNKNOWN` for the `PollWorker` instead of expiring them; excludes `AML_HOLD`; releases link slots on terminal failure/expiry/cancel. |
 | `PollWorker` | `WORKER_POLL_INTERVAL_MS` | Reconciles inquiry schedules, applies route backoff and terminal transitions. |
 | `InboundInboxWorker` | `WORKER_POLL_INTERVAL_MS` | Drains unprocessed inbound events with a durable `claimed_at`/`claimed_by` lease (at-most-once even across a brief leadership overlap); the live webhook route currently verifies synchronously, so this worker is effectively idle. |
 | `OutboxNotificationWorker` | `WORKER_POLL_INTERVAL_MS` | Drains `notifications`, applies the AML tipping-off guard, redacts, renders, sends and retries with backoff. |

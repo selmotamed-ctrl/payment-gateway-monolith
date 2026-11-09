@@ -114,7 +114,48 @@ export class ExpirySweeperWorker extends BaseWorker {
       }
     }
 
+    // Past the point of no return a money-moving step was already sent, so the gateway may have
+    // charged the payer. With no definitive answer the outcome is unknown, not expired: expiring
+    // would make the attempt terminal, release its slot and drop it from polling, leaving a real
+    // charge visible only to a callback or reconciliation.
+    if (attempt.pointOfNoReturn === true) {
+      await this.holdAsUnknown(attempt, now);
+      return;
+    }
+
     await this.expireAttempt(attempt, now);
+  }
+
+  /**
+   * Moves an expired attempt past the point of no return to UNKNOWN and makes it due for the
+   * PollWorker, which inquires while the route's polling window is open and otherwise hands it to
+   * an operator through one keyed UNKNOWN case (AUTO-19). The slot stays reserved. The update is
+   * conditional on the status the sweeper observed, so it never overwrites a concurrent finalize.
+   */
+  private async holdAsUnknown(attempt: PaymentAttemptRow, now: Date): Promise<void> {
+    const result = await this.db.$executeRawUnsafe(
+      "UPDATE payment_attempts SET status = 'UNKNOWN', next_check_at = $1, updated_at = now()" +
+        " WHERE id = $2::uuid AND terminal_at IS NULL AND status = $3",
+      now,
+      attempt.id,
+      attempt.status,
+    );
+    if (Number(result ?? 0) === 0) {
+      return;
+    }
+    this.logger.warn("ExpirySweeperWorker: expired attempt past the point of no return held as UNKNOWN", {
+      attemptId: attempt.id,
+      previousStatus: attempt.status,
+    });
+    await this.repositories.governance.writeAuditLog(this.db as Tx, {
+      actorId: null,
+      role: "SYSTEM",
+      action: "ATTEMPT_EXPIRY_HELD_UNKNOWN",
+      entityType: "PAYMENT_ATTEMPT",
+      entityId: attempt.id,
+      beforeJson: { status: attempt.status },
+      afterJson: { status: "UNKNOWN", reason: "EXPIRED_PAST_POINT_OF_NO_RETURN" },
+    });
   }
 
   private async applyInquiryOutcome(attempt: PaymentAttemptRow, outcome: InquiryOutcome, now: Date): Promise<void> {

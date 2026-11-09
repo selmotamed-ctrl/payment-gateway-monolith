@@ -338,6 +338,8 @@ export interface PaymentAttemptRow {
   customerFieldsMasked: unknown;
   contextCiphertext?: string;
   otpAttempts: number;
+  /** True once a money-moving step was sent: the gateway may have charged the payer. */
+  pointOfNoReturn?: boolean;
   lastOtpSentAt?: Date | null;
   clientIp: string | null;
   userAgent?: string | null;
