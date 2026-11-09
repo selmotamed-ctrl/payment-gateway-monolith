@@ -19,7 +19,7 @@ import type {
 } from "../db/ports";
 import { evaluateCommissionReceivableCeiling } from "../governance/GovernanceExecution";
 import { buildLedgerTemplate, LedgerPoster } from "../ledger/LedgerPoster";
-import { AmlRuleEngine, slaHoursForSeverity, type AmlRuleHit } from "./AmlRuleEngine";
+import { AmlRuleEngine, slaHoursForSeverity, structuringBands, type AmlRuleHit } from "./AmlRuleEngine";
 import { createLedgerPoster } from "../../lib/storageEngine/ledgerPosterFactory";
 import type { CachePort } from "../../lib/storageEngine/ports";
 import {
@@ -666,12 +666,16 @@ export class AttemptGuardPipeline {
 
       // The AML window is the merchant window: an attempt of another
       // merchant never contributes to the cumulative counters of this one.
+      // The rules are loaded first so the window query only returns the individual amounts a
+      // STRUCTURING rule can count; count and total come from a SQL aggregate.
+      const engine = new AmlRuleEngine({ risk: this.repositories.risk, tx });
+      const amlRules = await engine.loadRules();
       const windowStats = await this.repositories.payments.collectWindowStats(tx, {
         merchantId: merchant.id,
         applicationId: link.applicationId,
         since: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+        amountBands: structuringBands(amlRules, now),
       });
-      const engine = new AmlRuleEngine({ risk: this.repositories.risk, tx });
       const amlResult = await engine.evaluate({
         subjectType: "PAYMENT_ATTEMPT",
         subjectId: link.id,
@@ -689,7 +693,7 @@ export class AttemptGuardPipeline {
         screeningResult: (screening?.result ?? null) as ScreeningResultCode | null,
         screeningListType: screening?.matches[0]?.listType ?? null,
         now,
-      });
+      }, amlRules);
 
       const amlAction: AmlAction | null = amlResult.effectiveAction;
       if (amlAction === "BLOCK") {

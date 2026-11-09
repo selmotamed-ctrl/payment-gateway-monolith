@@ -1,4 +1,4 @@
-import { moneyFromDecimal, type Money } from "./money";
+import { moneyFromDecimal, moneyToString, type Money } from "./money";
 import type {
   AdjustmentRow,
   AmlCaseRow,
@@ -46,6 +46,15 @@ import { enqueueOutboxEvent } from "../../lib/storageEngine/outbox";
 import { writeAudit } from "../../lib/audit/writeAudit";
 
 type Any = Record<string, any>;
+
+/** Attempts that count towards the AML window: live or settled, not failed, expired or blocked. */
+const WINDOW_STATS_STATUSES = ["CREATED", "INITIATING", "AWAITING_CUSTOMER", "AUTHORIZING", "VERIFYING", "SUCCEEDED", "UNKNOWN"];
+/**
+ * Upper bound on the individual amounts the AML window returns. Only STRUCTURING rules read them,
+ * and they only compare the in-band count with `min_count` (2 by default), so a few thousand rows
+ * of a single attacker cannot be made to flow on every payment creation.
+ */
+export const WINDOW_AMOUNTS_IN_BAND_CAP = 1000;
 
 const pascalCase = (name: string): string => `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
 
@@ -582,26 +591,54 @@ export class PrismaRepositories implements Repositories {
       return row;
     },
     collectWindowStats: async (tx, filter) => {
-      const or: Any[] = [{ merchantId: filter.merchantId }];
-      if (filter.applicationId) or.push({ applicationId: filter.applicationId });
-      if (filter.linkId) or.push({ linkId: filter.linkId });
-      if (filter.clientIp) or.push({ clientIp: filter.clientIp });
-      const result = await model(tx, "paymentAttempt").findMany({
-        where: {
-          createdAt: { gte: filter.since },
-          OR: or,
-          status: { in: ["CREATED", "INITIATING", "AWAITING_CUSTOMER", "AUTHORIZING", "VERIFYING", "SUCCEEDED", "UNKNOWN"] },
-        },
-        select: { requestedAmount: true, totalChargedAmount: true },
-      });
+      // Runs on every payment creation (the AML guard). Count and total are one SQL aggregate,
+      // and individual amounts are loaded only inside the STRUCTURING bands the caller asks for,
+      // capped. It used to load every attempt of the window and sum them in JavaScript, so a busy
+      // merchant made each new payment read and transfer the whole day.
+      const params: unknown[] = [filter.since, ...WINDOW_STATS_STATUSES];
+      const placeholder = (value: unknown, cast = ""): string => {
+        params.push(value);
+        return `$${params.length}${cast}`;
+      };
+      const statusList = WINDOW_STATS_STATUSES.map((_, index) => `$${index + 2}`).join(", ");
+      const subject = [`merchant_id = ${placeholder(filter.merchantId, "::uuid")}`];
+      if (filter.applicationId) subject.push(`application_id = ${placeholder(filter.applicationId, "::uuid")}`);
+      if (filter.linkId) subject.push(`link_id = ${placeholder(filter.linkId, "::uuid")}`);
+      if (filter.clientIp) subject.push(`client_ip = ${placeholder(filter.clientIp)}`);
+      const where =
+        `created_at >= $1 AND status::text IN (${statusList}) AND (${subject.join(" OR ")})`;
+      const amountSql = "COALESCE(total_charged_amount, requested_amount, 0)";
+
+      const aggregate = rows<Any>(await tx.$queryRawUnsafe(
+        `SELECT count(*)::int AS count, COALESCE(SUM(${amountSql}), 0)::text AS total FROM payment_attempts WHERE ${where}`,
+        ...params,
+      ))[0] ?? {};
+
       const amounts: Money[] = [];
-      let total = 0n;
-      for (const attempt of rows<Any>(result)) {
-        const value = moneyFromDecimal(attempt.totalChargedAmount ?? attempt.requestedAmount ?? 0);
-        amounts.push(value);
-        total += value;
+      const bands = filter.amountBands ?? [];
+      if (bands.length > 0) {
+        const bandParams = [...params];
+        const bandPlaceholder = (value: unknown): string => {
+          bandParams.push(value);
+          return `$${bandParams.length}::numeric`;
+        };
+        const bandSql = bands
+          .map((band) => `(${amountSql} >= ${bandPlaceholder(moneyToString(band.lower))} AND ${amountSql} < ${bandPlaceholder(moneyToString(band.upper))})`)
+          .join(" OR ");
+        const inBand = await tx.$queryRawUnsafe(
+          `SELECT ${amountSql}::text AS amount FROM payment_attempts WHERE ${where} AND (${bandSql}) LIMIT ${WINDOW_AMOUNTS_IN_BAND_CAP}`,
+          ...bandParams,
+        );
+        for (const row of rows<Any>(inBand)) {
+          amounts.push(moneyFromDecimal(row.amount ?? 0));
+        }
       }
-      const stats: AttemptWindowStats = { count: amounts.length, totalAmount: total, amounts };
+
+      const stats: AttemptWindowStats = {
+        count: Number(aggregate.count ?? 0),
+        totalAmount: moneyFromDecimal(aggregate.total ?? 0),
+        amounts,
+      };
       return stats;
     },
     sumSucceededAmountByRouteInWindow: async (tx, window) => {

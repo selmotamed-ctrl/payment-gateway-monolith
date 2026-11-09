@@ -513,11 +513,19 @@ export interface AttemptWindowFilter {
   clientPhone?: string | null;
   cardAlias?: string | null;
   since: Date;
+  /**
+   * Amount bands `[lower, upper)` whose individual amounts the caller needs (the STRUCTURING AML
+   * rules). `amounts` only carries attempts inside one of them; none means no amounts are loaded.
+   */
+  amountBands?: Array<{ lower: Money; upper: Money }>;
 }
 
 export interface AttemptWindowStats {
+  /** Every matching attempt in the window (SQL aggregate). */
   count: number;
+  /** Sum over every matching attempt in the window (SQL aggregate). */
   totalAmount: Money;
+  /** Only the amounts inside `amountBands`, capped (see `WINDOW_AMOUNTS_IN_BAND_CAP`). */
   amounts: Money[];
 }
 

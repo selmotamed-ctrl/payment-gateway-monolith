@@ -157,6 +157,33 @@ export const toAmlRuleDefinition = (row: AmlRuleRow): AmlRuleDefinition => ({
   effectiveTo: row.effectiveTo,
 });
 
+/**
+ * The amount band a STRUCTURING rule watches: `[threshold × (100 − band_percent) / 100, threshold)`.
+ * Shared by the rule and by the window query, so the amounts the query returns are exactly the
+ * ones the rule can count.
+ */
+export const structuringBand = (
+  params: Record<string, unknown>,
+): { lower: Money; upper: Money; bandPercent: number; minCount: number } | null => {
+  const threshold = paramMoney(params, "threshold");
+  if (threshold === null) return null;
+  const bandPercent = paramNumber(params, "band_percent", 10);
+  const minCount = paramNumber(params, "min_count", 2);
+  const lower = (threshold * BigInt(Math.max(0, 100 - Math.floor(bandPercent)))) / 100n;
+  return { lower, upper: threshold, bandPercent, minCount };
+};
+
+/** The bands of every effective STRUCTURING rule (the only rules that read individual amounts). */
+export const structuringBands = (
+  rules: AmlRuleDefinition[],
+  now: Date,
+): Array<{ lower: Money; upper: Money }> =>
+  rules
+    .filter((rule) => rule.ruleType === "STRUCTURING" && isRuleEffective(rule, now))
+    .map((rule) => structuringBand(rule.params))
+    .filter((band): band is NonNullable<typeof band> => band !== null && band.lower < band.upper)
+    .map(({ lower, upper }) => ({ lower, upper }));
+
 const evaluateRule = (
   rule: AmlRuleDefinition,
   context: AmlEvaluationContext,
@@ -203,11 +230,9 @@ const evaluateRule = (
       };
     }
     case "STRUCTURING": {
-      const threshold = paramMoney(params, "threshold");
-      if (threshold === null) return null;
-      const bandPercent = paramNumber(params, "band_percent", 10);
-      const minCount = paramNumber(params, "min_count", 2);
-      const lowerBound = (threshold * BigInt(Math.max(0, 100 - Math.floor(bandPercent)))) / 100n;
+      const band = structuringBand(params);
+      if (band === null) return null;
+      const { lower: lowerBound, upper: threshold, bandPercent, minCount } = band;
       const clustered = context.windowStats.amounts.filter((amount) => amount >= lowerBound && amount < threshold);
       if (clustered.length < minCount) return null;
       return {
@@ -420,8 +445,9 @@ export class AmlRuleEngine {
     return rows.map(toAmlRuleDefinition);
   }
 
-  async evaluate(context: AmlEvaluationContext): Promise<AmlEvaluationResult> {
-    const rules = await this.loadRules();
-    return evaluateAmlRules(rules, { ...context, now: context.now ?? this.clock() });
+  /** `rules` lets a caller that already loaded them (to size the window query) avoid a reload. */
+  async evaluate(context: AmlEvaluationContext, rules?: AmlRuleDefinition[]): Promise<AmlEvaluationResult> {
+    const effective = rules ?? await this.loadRules();
+    return evaluateAmlRules(effective, { ...context, now: context.now ?? this.clock() });
   }
 }

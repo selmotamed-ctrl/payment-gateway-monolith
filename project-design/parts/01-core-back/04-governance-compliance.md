@@ -43,6 +43,7 @@ design_sources:
   - design/10-fixes/_0001_operator_cases.md
 tests:
   - core-back/test/gaps/gap-015-018-regressions.test.ts
+  - core-back/test/aml-window-stats-query.test.ts
   - core-back/test/engine/governance.test.ts
   - core-back/test/governance-execution.test.ts
   - core-back/test/approval-queue.test.ts
@@ -207,6 +208,8 @@ The seven design layers map to code as follows:
 Screening is a provider interface (`ScreeningProvider`) with Arabic normalization, name similarity, internal watch-list provider, mock provider, and a cached provider. `MerchantScreeningService` persists `aml_screenings` and `aml_screening_matches` with list versions and input hashes, applies owner screening status, and raises a confirmed-match case only. Potential matches remain in the screening queue for disposition.
 
 The AML rule engine (`core-back/engine/guards/AmlRuleEngine.ts`) supports `SINGLE_AMOUNT`, `CUMULATIVE_WINDOW`, `STRUCTURING`, `RISK_TIER`, `COUNTERPARTY_COUNTRY`, `RAIL`, and `MERCHANT_DIRECT_AMOUNT`; actions are `HOLD`, `FLAG`, `BLOCK`, `CASE_ONLY`. Severity starts at the rule base, correlates with velocity, raises for high merchant tier, volume multiple, another open case, confirmed sanctions, and potential PEP. On a `HOLD`, the guard only records the decision (`AML_HOLD_PENDING_CAPTURE`) and the `AML_HOLD` substatus; it does NOT post anything, because no money has been captured yet. The escrow is booked by the engine after a verified gateway capture (see `core.engine`).
+
+**AML window query (2026-11-10).** On every payment creation the guard pipeline loads the active AML rules once, then calls `payments.collectWindowStats` for the merchant's 24-hour window with the bands of the effective `STRUCTURING` rules (`structuringBands`, built by the same `structuringBand` helper the rule uses: `[threshold × (100 − band_percent) / 100, threshold)`). `count` and `totalAmount` come from one SQL aggregate (`count(*)`, `SUM(COALESCE(total_charged_amount, requested_amount, 0))`, every subject value bound); individual `amounts` are loaded only inside those bands, capped at `WINDOW_AMOUNTS_IN_BAND_CAP` (1,000) rows, because `STRUCTURING` is the only rule type that reads them and it only compares the in-band count with `min_count`. The preloaded rules are passed to `AmlRuleEngine.evaluate`, so they are not loaded twice. Before, the window was an unbounded `findMany` of every matching attempt, summed in JavaScript, so a busy merchant made each new payment read and transfer its whole day.
 
 AML case resolution (`GovernanceExecution.ts:1470`):
 
