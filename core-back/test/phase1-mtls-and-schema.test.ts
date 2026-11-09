@@ -163,22 +163,25 @@ describe("prisma schema", () => {
     // shard-sequenced checkpoint redesign raised the version to 12.
     expect(ordered).toContain("20261107090000_shard_sequenced_checkpoints");
     expect(ordered).toContain("20261107120000_inbound_event_claims");
-    // The newest migration adds the durable session revoke list (schema version 15). The one before it only
-    // installs the TRUNCATE guard on every journal_lines partition (functions and triggers, no table change).
-    expect(ordered.at(-1)).toBe("20261108100000_session_revocations");
+    // The newest migration adds outbox dead-lettering and the persisted worker cursors (schema version 16,
+    // AUTO-02 / AUTO-25). Before it: the durable session revoke list (15) and the TRUNCATE guard on every
+    // journal_lines partition (functions and triggers, no table change).
+    expect(ordered.at(-1)).toBe("20261109120000_outbox_dead_letter_worker_cursors");
+    expect(ordered).toContain("20261108100000_session_revocations");
     expect(ordered).toContain("20261108090000_partition_truncate_guard");
     const guard = fs.readFileSync(path.join(migrationsDirectory, "20261108090000_partition_truncate_guard", "migration.sql"), "utf8");
     expect(guard).toContain("pgw_guard_journal_line_partition");
     expect(guard).not.toContain("schema_versions");
     const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
-    expect(newest).toMatch(/UPDATE "schema_versions"\s+SET "version" = 15\b/);
-    expect(REQUIRED_SCHEMA_VERSION).toBe(15);
+    expect(newest).toMatch(/UPDATE "schema_versions"\s+SET "version" = 16\b/);
+    expect(REQUIRED_SCHEMA_VERSION).toBe(16);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),
         "utf8",
       );
-      expect(sql).toContain("CREATE");
+      // Every migration changes the schema; an ALTER-only migration (e.g. a new enum value) is valid too.
+      expect(sql).toMatch(/\b(CREATE|ALTER)\b/);
       expect(sql.toLowerCase()).not.toContain("engine=innodb");
       // MySQL identifier quoting is forbidden in executable SQL; a backtick inside a `--` comment is just prose.
       const executable = sql.split("\n").filter((line) => !line.trimStart().startsWith("--")).join("\n");

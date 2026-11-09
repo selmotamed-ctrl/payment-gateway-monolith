@@ -201,6 +201,15 @@ export class PrismaRepositories implements Repositories {
             INNER JOIN payment_attempts pa ON pa.id = adj.source_attempt_id
             WHERE a.account_type = 'COMMISSION_RECEIVABLE'
               AND pa.merchant_id = ${merchantId}::uuid
+            UNION ALL
+            -- Merchant-level netting (AUTO-21, CommissionNettingWorker / cash-out): keyed 'netting:<merchantId>:...'.
+            SELECT CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END AS delta
+            FROM journal_entries je
+            INNER JOIN journal_lines jl ON jl.entry_id = je.id
+            INNER JOIN gl_accounts a ON a.id = jl.gl_account_id
+            WHERE je.ref_type = 'COMMISSION_NETTING'
+              AND starts_with(je.ref_id, ${`netting:${merchantId}:`})
+              AND a.account_type = 'COMMISSION_RECEIVABLE'
           ) movement
         `;
         const first = rows<Any>(result)[0];
@@ -229,7 +238,9 @@ export class PrismaRepositories implements Repositories {
       );
       const entries = rows<Any>(await model(tx, "journalEntry").findMany({
         where: { refType: { in: ["PAYMENT_ATTEMPT", "COMMISSION_NETTING", "ADJUSTMENT"] } },
-      })).filter((entry) => (entry.refType === "ADJUSTMENT" ? adjustmentIds : attemptIds).has(String(entry.refId)));
+      })).filter((entry) =>
+        (entry.refType === "COMMISSION_NETTING" && String(entry.refId).startsWith(`netting:${merchantId}:`)) ||
+        (entry.refType === "ADJUSTMENT" ? adjustmentIds : attemptIds).has(String(entry.refId)));
       const entryIds = entries.map((entry) => String(entry.id));
       if (entryIds.length === 0) {
         return 0n;

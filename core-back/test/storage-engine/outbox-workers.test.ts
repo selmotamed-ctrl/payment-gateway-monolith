@@ -274,7 +274,7 @@ describeDatabase("OutboxRelayWorker (live PostgreSQL)", () => {
     }
   });
 
-  test("a throwing handler rolls the transaction back and leaves the event unprocessed", async () => {
+  test("a throwing handler rolls its savepoint back and leaves the event unprocessed with one attempt", async () => {
     const sandbox = await createWorkerSandbox("outbox-handler");
     const prefix = uniqueId("outbox-handler-failure");
     const aggregateId = `${prefix}-event`;
@@ -290,8 +290,16 @@ describeDatabase("OutboxRelayWorker (live PostgreSQL)", () => {
           },
         },
       });
-      await expect(failing.drain()).rejects.toThrow("HANDLER_FAILED");
+      // AUTO-02: a consumer error no longer aborts the drain; the event is
+      // retried alone, its attempt is counted and it stays pending.
+      expect(await failing.drain()).toBe(0);
       expect(await processedAtFor(sandbox, aggregateId)).toBeNull();
+      const [state] = await sandbox.client.$queryRawUnsafe<Array<{ attempts: number; last_error: string | null }>>(
+        "SELECT attempts, last_error FROM outbox_events WHERE aggregate_id = $1",
+        aggregateId,
+      );
+      expect(Number(state?.attempts)).toBe(1);
+      expect(state?.last_error).toBe("HANDLER_FAILED");
 
       const succeeding = new OutboxRelayWorker(sandbox.client, { batchSize: 10 });
       expect(await succeeding.drain()).toBe(1);

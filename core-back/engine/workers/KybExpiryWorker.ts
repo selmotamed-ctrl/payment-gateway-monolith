@@ -8,8 +8,20 @@ import {
   startOfUtcDay,
 } from "../../lib/kybReview";
 import { queueKybNotification } from "../../lib/kybNotifications";
-import { BaseWorker } from "./workerRuntime";
+import { BaseWorker, type WorkerOptions } from "./workerRuntime";
+import { SqlWorkerCursorStore, type WorkerCursorStore } from "./workerCursorStore";
 import { writeAudit } from "../../lib/audit/writeAudit";
+
+/** `worker_cursors` key of the grace-suspension pass (AUTO-25). */
+export const KYB_SUSPENSION_CURSOR = "kyb_expiry.suspension";
+
+export interface KybExpiryWorkerOptions extends WorkerOptions {
+  /**
+   * Where the grace-suspension pass keeps its keyset cursor between ticks.
+   * Defaults to the `worker_cursors` table on the worker database.
+   */
+  cursorStore?: WorkerCursorStore;
+}
 
 /**
  * The KYB lifecycle worker (design §16.4 and §16.10).
@@ -26,8 +38,18 @@ import { writeAudit } from "../../lib/audit/writeAudit";
  *
  * Every pass is row-bounded by the worker batch size and every notification
  * uses the unique outbox event id, so a retried tick never spams a merchant.
+ * Pass 3 walks the ACTIVE merchants with a keyset cursor persisted between
+ * ticks (AUTO-25), so every merchant is evaluated over successive ticks, not
+ * only the first `batchSize`.
  */
 export class KybExpiryWorker extends BaseWorker {
+  private readonly cursorStore: WorkerCursorStore;
+
+  constructor(options: KybExpiryWorkerOptions) {
+    super(options);
+    this.cursorStore = options.cursorStore ?? new SqlWorkerCursorStore(options.db, this.logger);
+  }
+
   /** Cluster singleton: only the advisory-lock leader ticks (GAP-012). */
   protected override get singleton(): boolean {
     return true;
@@ -144,8 +166,11 @@ export class KybExpiryWorker extends BaseWorker {
     graceDays: number,
   ): Promise<void> {
     const cutoff = new Date(startOfUtcDay(now).getTime() - graceDays * 86_400_000);
+    // Keyset page after the cursor of the previous tick. A short page means
+    // the end of the table was reached: the cursor wraps to the start.
+    const after = await this.cursorStore.read(KYB_SUSPENSION_CURSOR);
     const merchants = await db.merchant.findMany({
-      where: { status: "ACTIVE" },
+      where: { status: "ACTIVE", ...(after ? { id: { gt: after } } : {}) },
       select: {
         id: true,
         legalName: true,
@@ -157,79 +182,117 @@ export class KybExpiryWorker extends BaseWorker {
       take: this.batchSize,
       orderBy: { id: "asc" },
     });
+    const requiredByCategory = new Map<string, Promise<string[]>>();
+    const requiredFor = (category: string | null): Promise<string[]> => {
+      const key = category ?? "";
+      let required = requiredByCategory.get(key);
+      if (!required) {
+        required = readRequiredDocuments(db, category);
+        requiredByCategory.set(key, required);
+      }
+      return required;
+    };
     for (const merchant of merchants) {
-      const [requiredDocuments, documents] = await Promise.all([
-        readRequiredDocuments(db, merchant.businessCategory),
-        db.kybDocument.findMany({
-          where: { merchantId: merchant.id },
-          select: { id: true, docType: true, status: true, expiresOn: true },
-        }),
-      ]);
-      const today = startOfUtcDay(now);
-      const validAcceptedTypes = new Set(
-        documents
-          .filter(
-            (document) =>
-              document.status === "ACCEPTED"
-              && (!document.expiresOn || startOfUtcDay(document.expiresOn).getTime() >= today.getTime()),
-          )
-          .map((document) => String(document.docType)),
-      );
-      const expiredBeyondGrace = documents.filter(
-        (document) =>
-          ["ACCEPTED", "EXPIRED"].includes(String(document.status))
-          && document.expiresOn
-          && startOfUtcDay(document.expiresOn).getTime() < cutoff.getTime()
-          && requiredDocuments.includes(String(document.docType)),
-      );
-      const blocking = expiredBeyondGrace.filter((document) => !validAcceptedTypes.has(String(document.docType)));
-      if (blocking.length === 0) continue;
-      const changed = await db.$transaction(async (tx) => {
-        const updated = await tx.merchant.updateMany({
-          where: { id: merchant.id, status: "ACTIVE" },
-          data: {
-            status: "SUSPENDED",
-            kybStatus: "PENDING",
-            suspendedAt: now,
-            suspensionReasonCode: "KYB_EXPIRED",
-            version: { increment: 1 },
-          },
-        });
-        if (updated.count === 0) return false;
-        const actorId = await ensureSystemAutomationUser(tx as never);
-        await writeAudit(tx, {
-          data: {
-            actorId,
-            role: "SYSTEM",
-            action: "MERCHANT_SUSPENDED_KYB_EXPIRED",
-            entityType: "MERCHANT",
-            entityId: merchant.id,
-            beforeJson: { status: "ACTIVE", kybStatus: merchant.kybStatus },
-            afterJson: {
-              status: "SUSPENDED",
-              kybStatus: "PENDING",
-              reasonCode: "KYB_EXPIRED",
-              expiredDocumentIds: blocking.map((document) => document.id),
-            },
-          },
-        });
-        return true;
-      });
-      if (changed) {
-        await queueKybNotification(db, {
+      try {
+        await this.evaluateMerchantForSuspension(db, merchant, now, cutoff, requiredFor);
+      } catch (error) {
+        // One failing merchant must not stall the pass for the others: it is
+        // logged and evaluated again when the cursor comes round.
+        this.logger.error("KybExpiryWorker: suspension evaluation failed", {
           merchantId: merchant.id,
-          code: "KYB_EXPIRED_SUSPENSION",
-          payload: {
-            merchantName: merchant.tradeName || merchant.legalName,
-            documentTypes: [...new Set(blocking.map((document) => document.docType))],
-          },
-          eventKey: `expired-suspension:${merchant.id}:${startOfUtcDay(now).toISOString().slice(0, 10)}`,
-        });
-        this.logger.info("KybExpiryWorker: suspended merchant for expired KYB", {
-          merchantId: merchant.id,
-          documents: blocking.map((document) => document.id),
+          error: (error as Error).message,
         });
       }
+    }
+    const next = merchants.length < this.batchSize ? null : merchants[merchants.length - 1]!.id;
+    await this.cursorStore.write(KYB_SUSPENSION_CURSOR, next);
+  }
+
+  private async evaluateMerchantForSuspension(
+    db: PrismaClient,
+    merchant: {
+      id: string;
+      legalName: string;
+      tradeName: string | null;
+      businessCategory: string | null;
+      riskTier: string | null;
+      kybStatus: string | null;
+    },
+    now: Date,
+    cutoff: Date,
+    requiredFor: (category: string | null) => Promise<string[]>,
+  ): Promise<void> {
+    const [requiredDocuments, documents] = await Promise.all([
+      requiredFor(merchant.businessCategory),
+      db.kybDocument.findMany({
+        where: { merchantId: merchant.id },
+        select: { id: true, docType: true, status: true, expiresOn: true },
+      }),
+    ]);
+    const today = startOfUtcDay(now);
+    const validAcceptedTypes = new Set(
+      documents
+        .filter(
+          (document) =>
+            document.status === "ACCEPTED"
+            && (!document.expiresOn || startOfUtcDay(document.expiresOn).getTime() >= today.getTime()),
+        )
+        .map((document) => String(document.docType)),
+    );
+    const expiredBeyondGrace = documents.filter(
+      (document) =>
+        ["ACCEPTED", "EXPIRED"].includes(String(document.status))
+        && document.expiresOn
+        && startOfUtcDay(document.expiresOn).getTime() < cutoff.getTime()
+        && requiredDocuments.includes(String(document.docType)),
+    );
+    const blocking = expiredBeyondGrace.filter((document) => !validAcceptedTypes.has(String(document.docType)));
+    if (blocking.length === 0) return;
+    const changed = await db.$transaction(async (tx) => {
+      const updated = await tx.merchant.updateMany({
+        where: { id: merchant.id, status: "ACTIVE" },
+        data: {
+          status: "SUSPENDED",
+          kybStatus: "PENDING",
+          suspendedAt: now,
+          suspensionReasonCode: "KYB_EXPIRED",
+          version: { increment: 1 },
+        },
+      });
+      if (updated.count === 0) return false;
+      const actorId = await ensureSystemAutomationUser(tx as never);
+      await writeAudit(tx, {
+        data: {
+          actorId,
+          role: "SYSTEM",
+          action: "MERCHANT_SUSPENDED_KYB_EXPIRED",
+          entityType: "MERCHANT",
+          entityId: merchant.id,
+          beforeJson: { status: "ACTIVE", kybStatus: merchant.kybStatus },
+          afterJson: {
+            status: "SUSPENDED",
+            kybStatus: "PENDING",
+            reasonCode: "KYB_EXPIRED",
+            expiredDocumentIds: blocking.map((document) => document.id),
+          },
+        },
+      });
+      return true;
+    });
+    if (changed) {
+      await queueKybNotification(db, {
+        merchantId: merchant.id,
+        code: "KYB_EXPIRED_SUSPENSION",
+        payload: {
+          merchantName: merchant.tradeName || merchant.legalName,
+          documentTypes: [...new Set(blocking.map((document) => document.docType))],
+        },
+        eventKey: `expired-suspension:${merchant.id}:${startOfUtcDay(now).toISOString().slice(0, 10)}`,
+      });
+      this.logger.info("KybExpiryWorker: suspended merchant for expired KYB", {
+        merchantId: merchant.id,
+        documents: blocking.map((document) => document.id),
+      });
     }
   }
 

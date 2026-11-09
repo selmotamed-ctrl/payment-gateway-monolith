@@ -443,7 +443,10 @@ CREATE TABLE ${schema}.outbox_events (
   merchant_id    UUID         NULL,
   payload_json   JSONB        NOT NULL,
   created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  processed_at   TIMESTAMPTZ  NULL
+  processed_at   TIMESTAMPTZ  NULL,
+  attempts       INTEGER      NOT NULL DEFAULT 0,
+  last_error     VARCHAR(1000) NULL,
+  parked_at      TIMESTAMPTZ  NULL
 );
 
 CREATE TABLE ${schema}.audit_outbox (

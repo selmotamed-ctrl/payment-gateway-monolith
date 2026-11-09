@@ -1,4 +1,4 @@
-import { initialShardWidth } from "../lib/storageEngine/shardRouting";
+import { HOT_SYSTEM_SHARD_WIDTH, initialShardWidth } from "../lib/storageEngine/shardRouting";
 import { GlAccountType, Prisma } from "../generated/prisma/client";
 
 /**
@@ -72,6 +72,11 @@ export interface GlAccountSeedClient {
         seedKey: string;
       };
     }): Promise<unknown>;
+    /** Widens an existing seeded account that is narrower than its provisioning width (never narrows). */
+    updateMany?(args: {
+      where: { seedKey: string; shardCount: { lt: number } };
+      data: { shardCount: number; shardScaledAt: Date };
+    }): Promise<unknown>;
     findMany?(args: {
       where: { seedKey: { not: null } };
       select: { id: true; accountType: true };
@@ -87,13 +92,23 @@ export interface GlAccountSeedClient {
 
 export const GL_ACCOUNT_SHARD_COUNT = 16;
 
+/** Provisioning width of the hot system accounts (TREASURY, GATEWAY_CLEARING, PLATFORM_INCOME), decision D6. */
+export const HOT_GL_ACCOUNT_SHARD_COUNT = HOT_SYSTEM_SHARD_WIDTH;
+
+/** The width a seeded system account is provisioned with. */
+export const seededShardWidth = (accountType: string): number =>
+  initialShardWidth(accountType, GL_ACCOUNT_SHARD_COUNT, HOT_GL_ACCOUNT_SHARD_COUNT);
+
 /**
  * Seeds the system GL accounts of every supported currency.
  *
  * The balances stay at zero: the balance of an account is the sum of its
- * shards. System accounts start 16 shards wide and merchant wallets one shard
- * wide (the `gl_accounts_create_shards` trigger creates the shard rows); the
- * shard scaler widens an account that gets hot.
+ * shards. TREASURY, GATEWAY_CLEARING and PLATFORM_INCOME start 128 shards wide
+ * (every confirmation touches them; decision D6), the other system accounts 16
+ * and merchant wallets one shard wide (the `gl_accounts_create_shards` trigger
+ * creates the shard rows); the shard scaler widens an account that gets hot.
+ * A re-run widens an existing seeded account that is narrower than that
+ * (never narrows it: widening never remaps history, every line keeps its shard).
  */
 export const seedSystemGlAccounts = async (
   client: GlAccountSeedClient,
@@ -102,16 +117,23 @@ export const seedSystemGlAccounts = async (
   for (const accountType of CURRENCY_SCOPED_GL_ACCOUNT_TYPES) {
     for (const currency of currencies) {
       const seedKey = systemGlAccountSeedKey(accountType, currency);
+      const shardCount = seededShardWidth(accountType);
       await client.glAccount.upsert({
         where: { seedKey },
         update: {},
         create: {
           accountType,
           currency,
-          shardCount: initialShardWidth(accountType, GL_ACCOUNT_SHARD_COUNT),
+          shardCount,
           seedKey,
         },
       });
+      if (shardCount > 1 && typeof client.glAccount.updateMany === "function") {
+        await client.glAccount.updateMany({
+          where: { seedKey, shardCount: { lt: shardCount } },
+          data: { shardCount, shardScaledAt: new Date() },
+        });
+      }
     }
   }
 
@@ -127,7 +149,7 @@ export const seedSystemGlAccounts = async (
     const data = accounts.flatMap((account) =>
       account.accountType === GlAccountType.MERCHANT_WALLET
         ? [{ glAccountId: account.id, shardId: 0 }]
-        : Array.from({ length: GL_ACCOUNT_SHARD_COUNT }, (_value, shardId) => ({
+        : Array.from({ length: seededShardWidth(account.accountType) }, (_value, shardId) => ({
             glAccountId: account.id,
             shardId,
           })),

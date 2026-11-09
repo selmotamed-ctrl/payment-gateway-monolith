@@ -30,7 +30,8 @@ export interface ScalerConfig {
 
 export const DEFAULT_SCALER_CONFIG: ScalerConfig = {
   upLinesPerSec: 150,
-  maxWidth: 64,
+  // Decision D6 (AUTO-10): the hot system accounts are provisioned at 128 and may grow to the schema maximum.
+  maxWidth: 256,
   cooldownMs: 10 * 60 * 1000,
   consecutive: 2,
   maxStep: 4,

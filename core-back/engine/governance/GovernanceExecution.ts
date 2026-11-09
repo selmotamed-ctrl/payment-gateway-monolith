@@ -113,6 +113,11 @@ export interface GovernanceExecutionContext {
   transitionBus?: Pick<InvalidationBus, "publish">;
   /** The slot store used by a manual operator-case outcome. */
   slots?: Pick<SlotReservationStore, "commitSlot" | "releaseSlot">;
+  /**
+   * Merchant-direct commission netting at cash-out time (AUTO-21, decision D8): before a cash-out is paid, the
+   * merchant's commission receivable is netted from the wallet balance that no open cash-out reserves.
+   */
+  commissionNetting?: CashoutCommissionNetting;
 }
 
 export interface ApprovalSubjectLike {
@@ -467,6 +472,12 @@ export const decideCommissionReceivableCeiling = (input: {
   receivable: Decimal;
   ceiling: Decimal | null;
   settlementTarget?: string | null;
+  /**
+   * What netting could still collect from the merchant's wallets now (balance - open cash-outs, never below zero).
+   * When given for a merchant-direct attempt, a receivable that netting cannot bring back under the ceiling is a PAUSE
+   * (decision D8): netting is only a way out when there is money to net. Unknown (omitted): NETTING, as before.
+   */
+  nettable?: Decimal | null;
 }): CommissionReceivableCeilingEvaluation => {
   const exceeded = input.ceiling !== null && input.receivable.gt(input.ceiling);
   if (!exceeded) {
@@ -479,7 +490,11 @@ export const decideCommissionReceivableCeiling = (input: {
       reason: input.ceiling === null ? "NO_CEILING" : "WITHIN_CEILING",
     };
   }
-  const netting = input.settlementTarget === "MERCHANT_DIRECT";
+  let netting = input.settlementTarget === "MERCHANT_DIRECT";
+  if (netting && input.nettable !== undefined && input.nettable !== null && input.ceiling !== null) {
+    const collectable = Decimal.min(input.receivable, Decimal.max(0, input.nettable));
+    netting = !input.receivable.minus(collectable).gt(input.ceiling);
+  }
   return {
     merchantId: input.merchantId,
     receivable: input.receivable,
@@ -488,6 +503,17 @@ export const decideCommissionReceivableCeiling = (input: {
     decision: netting ? "NETTING" : "PAUSE",
     reason: netting ? "CEILING_EXCEEDED_NETTING" : "CEILING_EXCEEDED_PAUSE",
   };
+};
+
+/** The merchant's open cash-out requests (they already reserve wallet balance). Zero without the model (fakes). */
+const merchantOpenCashoutTotal = async (tx: Tx, merchantId: string): Promise<Decimal> => {
+  const cashouts = (tx as any)?.cashoutRequest;
+  if (!cashouts || typeof cashouts.findMany !== "function") return new Decimal(0);
+  const rows = (await cashouts.findMany({
+    where: { merchantId, state: { in: ["PENDING", "PROCESSING"] } },
+    select: { amount: true },
+  })) as Array<{ amount: unknown }>;
+  return rows.reduce<Decimal>((total, row) => total.plus(toDecimal(row.amount)), new Decimal(0));
 };
 
 export const evaluateCommissionReceivableCeiling = async (
@@ -503,11 +529,18 @@ export const evaluateCommissionReceivableCeiling = async (
   const receivable = receivableQuery
     ? moneyToDecimal(await receivableQuery(tx, merchantId))
     : new Decimal(0);
+  // Only a merchant-direct attempt over the ceiling needs to know whether netting can still collect (decision D8).
+  let nettable: Decimal | null = null;
+  if (settlementTarget === "MERCHANT_DIRECT" && ceiling !== null && receivable.gt(ceiling)) {
+    const wallet = moneyToDecimal(await ctx.repositories.merchants.getWalletBalance(tx, merchantId));
+    nettable = Decimal.max(0, wallet.minus(await merchantOpenCashoutTotal(tx, merchantId)));
+  }
   return decideCommissionReceivableCeiling({
     merchantId,
     receivable,
     ceiling,
     settlementTarget: settlementTarget ?? null,
+    nettable,
   });
 };
 
@@ -2480,6 +2513,77 @@ const executeRefundAdjustment = async (
   }
   return finalizeRefundAdjustment(ctx, fallbackTx, input, gatewayResult);
 };
+
+/**
+ * AUTO-20: books an EXECUTING refund whose gateway outcome a reconciliation
+ * inquiry has since confirmed. Only an EXECUTING refund is finalised here; the
+ * booking itself is the ordinary phase 3 (`finalizeRefundAdjustment`).
+ */
+export async function finalizeReconciledRefundAdjustment(
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: { adjustmentId: string; actorUserId: string; actorRole: string; approvalRequestId?: string | null },
+  gatewayResult: { status: string; attempt?: { ownershipMode?: string | null } | null },
+): Promise<GovernanceExecutionResult> {
+  const adjustment = await modelOf(tx, "adjustment").findUnique({ where: { id: input.adjustmentId } });
+  if (!adjustment) {
+    throw new ApiError(404, "ADJUSTMENT_NOT_FOUND", "The adjustment does not exist");
+  }
+  if (String(adjustment.type) !== "REFUND") {
+    throw new ApiError(409, "ADJUSTMENT_NOT_REFUND", "The adjustment is not a refund");
+  }
+  if (adjustment.state !== "EXECUTING") {
+    return refundSkippedResult(adjustment, `ADJUSTMENT_NOT_EXECUTING:${String(adjustment.state)}`);
+  }
+  return finalizeRefundAdjustment(
+    ctx,
+    tx,
+    {
+      adjustmentId: input.adjustmentId,
+      checkerUserId: input.actorUserId,
+      checkerRole: input.actorRole,
+      approvalRequestId: input.approvalRequestId ?? null,
+    },
+    gatewayResult,
+  );
+}
+
+/**
+ * AUTO-20: closes an EXECUTING refund that the gateway definitively did not
+ * perform. The adjustment becomes REJECTED (so it no longer counts against the
+ * refundable amount); nothing is posted, because nothing was booked.
+ */
+export async function failReconciledRefundAdjustment(
+  ctx: GovernanceExecutionContext,
+  fallbackTx: Tx,
+  input: { adjustmentId: string; actorUserId: string; actorRole: string; reason: string; approvalRequestId?: string | null },
+): Promise<GovernanceExecutionResult> {
+  return runIsolatedTransaction(ctx, fallbackTx, async (tx) => {
+    const adjustments = modelOf(tx, "adjustment");
+    const claimed = await adjustments.updateMany({
+      where: { id: input.adjustmentId, type: "REFUND", state: "EXECUTING" },
+      data: { state: "REJECTED" },
+    });
+    if (!claimed || Number(claimed.count ?? 0) === 0) {
+      const current = await adjustments.findUnique({ where: { id: input.adjustmentId } });
+      if (!current) {
+        throw new ApiError(404, "ADJUSTMENT_NOT_FOUND", "The adjustment does not exist");
+      }
+      return refundSkippedResult(current, `ADJUSTMENT_NOT_EXECUTING:${String(current.state)}`);
+    }
+    await writeAudit(ctx, tx, {
+      actorId: input.actorUserId,
+      role: input.actorRole,
+      action: "ADJUSTMENT_REFUND_FAILED",
+      entityType: "ADJUSTMENT",
+      entityId: input.adjustmentId,
+      beforeJson: { state: "EXECUTING", type: "REFUND" },
+      afterJson: { state: "REJECTED", type: "REFUND", reason: input.reason },
+      approvalRequestId: input.approvalRequestId ?? null,
+    });
+    return { status: "EXECUTED" as const, entityId: input.adjustmentId, template: "REFUND_FAILED" };
+  });
+}
 
 /**
  * Executes an adjustment and posts the matching journal entry.

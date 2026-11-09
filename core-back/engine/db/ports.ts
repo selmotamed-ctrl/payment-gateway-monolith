@@ -465,7 +465,7 @@ export interface ReconciliationRunRow {
 /**
  * The kind of work a durable background job carries.
  */
-export type BackgroundJobType = "RECONCILIATION_RUN" | "ADJUSTMENT_EXECUTION";
+export type BackgroundJobType = "RECONCILIATION_RUN" | "ADJUSTMENT_EXECUTION" | "REFUND_INQUIRY";
 
 /**
  * The lifecycle of a durable background job.

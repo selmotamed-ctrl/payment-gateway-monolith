@@ -447,3 +447,16 @@ const isDisputeAlreadyExists = (error: unknown): boolean => {
   const code = (error as { code?: unknown }).code;
   return code === "DISPUTE_ALREADY_EXISTS";
 };
+
+// AUTO-20: the REFUND_INQUIRY job type and the production ReconciliationScheduler.
+export {
+  createEngineRefundInquiryPort,
+  createRefundInquiryJobHandler,
+  createRefundInquiryScheduler,
+  findExecutingRefundsWithoutInquiry,
+  REFUND_INQUIRY_JOB_TYPE,
+  type RefundInquiryJobHandlerDeps,
+  type RefundInquiryJobPayload,
+  type RefundInquiryOutcome,
+  type RefundInquiryPort,
+} from "./RefundInquiry";

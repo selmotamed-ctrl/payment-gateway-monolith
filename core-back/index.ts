@@ -10,6 +10,7 @@ import {
   readBackgroundJobQueueHealth,
   type QueueHealthDatabase,
 } from "./engine/workers/productionRuntime";
+import { defaultWorkerHealthRegistry, type WorkerHealthRegistry } from "./engine/workers/workerRuntime";
 import { env } from "./lib/env";
 import { isApiError, toErrorEnvelope } from "./lib/error";
 import { requestLoggerMiddleware, setAccessLogSink } from "./lib/requestLogger";
@@ -60,6 +61,8 @@ export interface CreateAppOptions {
    */
   db?: QueueHealthDatabase;
   now?: () => Date;
+  /** The worker health registry served under `workers` (default: the process-wide registry). */
+  workerHealth?: WorkerHealthRegistry;
 }
 
 export const createApp = (options: CreateAppOptions = {}) => {
@@ -77,6 +80,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
 
   const healthDb = options.db ?? (client as unknown as QueueHealthDatabase);
   const healthClock = options.now ?? (() => new Date());
+  const workerHealth = options.workerHealth ?? defaultWorkerHealthRegistry;
   app.get("/health", async (_request, response) => {
     const thresholdMs = env.WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS;
     const workersEnabled = env.WORKER_ENABLED && env.WORKER_BACKGROUND_JOBS_ENABLED;
@@ -114,6 +118,8 @@ export const createApp = (options: CreateAppOptions = {}) => {
         degraded: degraded,
         ...(queueReachable ? {} : { error: "QUEUE_HEALTH_UNAVAILABLE" }),
       },
+      // AUTO-03: per-worker health (informational; does not change `status`).
+      workers: workerHealth.snapshot(healthClock()).workers,
     });
   });
 
