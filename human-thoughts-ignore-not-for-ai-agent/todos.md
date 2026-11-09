@@ -3,14 +3,15 @@
 - ai transcript report engine
 - automated + manual journal archive 
 - sandbox environment
-- make sure that there is no conflicts on the max width of shards for accounts
-- check ayoub report 
 - build an ai assisted environment generator and update the deploy guide 
-- missing automations
-- backup engine full check and understanding
+
+- make sure that there is no conflicts on the max width of shards for accounts --
+- check ayoub report -- 
+- missing automations --
+- backup engine full check and understanding --
 
 
-- incomplete work:
+- incomplete work on automation design:
 ```md
 Not built or partial
 - Deploy: the deploy engine does not install clamav-daemon or freshclam; you provision the daemon. Nothing runs the deploy on a schedule, so a certificate is only renewed when someone deploys inside the window.
