@@ -23,3 +23,5 @@ Not built or partial
 - Untouched: AUTO-09, 15, 29, 30, 31 and 32, the AUTO-10 scaling calibration and scale-down, AUTO-14, 17, 18 and 33, the emergency-extension UI button, and the cash-out P50/P90/P95 dashboard.
 - From earlier: the dispute-loss booking stays a human step (the D1 deviation), and AUTO-26 refresh-failure counting is not built. The seeded MLRO and compliance users lack approval:check, which may be a seed gap.
 ```
+
+- resolve broken 3 tests
