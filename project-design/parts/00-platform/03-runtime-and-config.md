@@ -248,7 +248,7 @@ and throws if the version is not 25. The check is invoked by `prisma/seed.ts`, `
 
 - `ExpirySweeperWorker` with an inquiry port backed by `platform.engine.inquire`.
 - `PollWorker` with the same inquiry port.
-- `InboundInboxWorker` with a handler that resolves the channel and calls `platform.engine.verifyCallback`.
+- `InboundInboxWorker` with a handler (`createCallbackInboundHandler`) that resolves the channel and calls `platform.engine.verifyCallback`; transient failures are retried, everything else is skipped as before.
 - `OutboxNotificationWorker` with a notification transport (webhook or log).
 - `LedgerInvariantWorker`.
 - `JoinRequestExpiryWorker`.

@@ -1235,7 +1235,7 @@ and throws if the version is not 25. The check is invoked by `prisma/seed.ts`, `
 
 - `ExpirySweeperWorker` with an inquiry port backed by `platform.engine.inquire`.
 - `PollWorker` with the same inquiry port.
-- `InboundInboxWorker` with a handler that resolves the channel and calls `platform.engine.verifyCallback`.
+- `InboundInboxWorker` with a handler (`createCallbackInboundHandler`) that resolves the channel and calls `platform.engine.verifyCallback`; transient failures are retried, everything else is skipped as before.
 - `OutboxNotificationWorker` with a notification transport (webhook or log).
 - `LedgerInvariantWorker`.
 - `JoinRequestExpiryWorker`.
@@ -4466,9 +4466,9 @@ The schedule metadata (`GatewayInquirySchedule`) records source, status, window 
 
 ### 3.6 Inbound inbox
 
-`InboundInboxWorker` (`core-back/engine/workers/InboundInboxWorker.ts`) is a complete inbox drainer: it selects unprocessed events, calls the handler, marks processed/skipped/failed, retries only `RetryableInboundError`, and opens an `UNKNOWN` operator case on a terminal failure. It also exposes `persistInboundEvent` with a dedupe lookup and raw insert.
+`InboundInboxWorker` (`core-back/engine/workers/InboundInboxWorker.ts`) is a complete inbox drainer: it selects unprocessed events, calls the handler, marks processed/skipped/failed, retries only `RetryableInboundError`, and opens an `UNKNOWN` operator case on a terminal failure. Its production handler (`engine/workers/callbackInboundHandler.ts`) raises a TRANSIENT failure (`isTransientCallbackFailure`: Prisma/driver errors, network errno codes, PostgreSQL connection/lock/timeout/resource SQLSTATEs, our own 5xx, including through `cause`) as `RetryableInboundError`, also for a failed channel lookup; every other failure stays a skipped rejection as before (coded 4xx verdicts, and unexpected errors, so a malformed body cannot drive retries and operator cases). Fixed 2026-11-10: it used to swallow every error as SKIPPED, so a database blip during a "payment succeeded" webhook dropped the confirmation for good. It also exposes `persistInboundEvent` with a dedupe lookup and raw insert.
 
-The actual checkout inbound route does **not** use the worker. `POST /internal/checkout/inbound/:gateway/:env/:pathToken` (`core-back/api/internal/checkout.ts:1477`) validates the channel, gateway, environment, and dedupe key, inserts the `inbound_events` row, correlates the attempt, calls `engine.verifyCallback` synchronously, and marks the event processed in the same request before returning the configured acknowledgement. The worker's handler is wired, but no producer enqueues unprocessed rows for it. This is the main design deviation for this part.
+The actual checkout inbound route does **not** use the worker. `POST /internal/checkout/inbound/:gateway/:env/:pathToken` (`core-back/api/internal/checkout.ts:1477`) validates the channel, gateway, environment, and dedupe key, inserts the `inbound_events` row, correlates the attempt, calls `engine.verifyCallback` synchronously, and marks the event processed in the same request before returning the configured acknowledgement. The worker's handler is wired, and since 2026-11-10 the route is its producer for transient failures: when `verifyCallback` fails transiently (`inboundRouteFailureOutcome`, same classification as the worker), the route records `RETRY_PENDING` / `RETRYABLE:<code>`, leaves `processed_at` NULL so the worker claims and retries the event, and answers `503` with `Retry-After: 30` instead of the acknowledgement, so the gateway redelivers as well (finalization is idempotent per attempt, so the two paths can overlap safely). Before, the route recorded `REJECTED` and acknowledged, and the gateway never redelivered. Any other failure is still `REJECTED` and acknowledged. Synchronous verification in the route remains the main design deviation for this part.
 
 The synchronous route stores the raw body and a redacted header subset, not the full header set. It marks `verificationError = VERIFICATION_PENDING` initially and records the final verification result. The separate `persistInboundEvent` helper is not called by the route.
 
@@ -4755,6 +4755,7 @@ Source: `design/11-automation/background_automation_and_workers_plan.md`. Every 
 - FIXED 2026-11-08: `PollWorker` releases the slot for every terminal status (`SUCCEEDED`, `FAILED`, `EXPIRED`, `CANCELLED`, `BLOCKED`).
 - **Code gap:** the synchronous inbound route marks the event processed even when verification fails; the event is not retried by the inbox worker. Verification failure is recorded but there is no asynchronous replay.
 - **Code gap:** `InboundInboxWorker` retries `RetryableInboundError` on the next tick with no delay, so a persistent retryable failure can burn its attempt cap quickly.
+- **Code gap:** the inbox claim takes any row with `processed_at IS NULL`, including a webhook the synchronous route is still verifying, so the two can verify the same event concurrently (money-safe: finalization is claimed once per attempt; the work is duplicated). Bound the claim by `received_at` age or a route-owned claim.
 - FIXED: balances are read from the shards only (`loadLiveAccountBalances`), so no checkpoint fallback can double count.
 - **Risk:** retention and audit shipping are independent: retention purges `audit_log` and `detail_change_logs` on its own schedule without consulting `audit_outbox.shipped_at`, and the outbox rows are never purged.
 - **Risk:** `OutboxRelayWorker` still acknowledges a topic without a consumer (a newer node may emit topics an older relay does not know), but it is now counted and marked `UNKNOWN_TOPIC` in `last_error` instead of silent (AUTO-02).
@@ -4780,6 +4781,7 @@ cd core-back && bun test test/storage-engine/write-path.integration.test.ts
 Coverage:
 
 - `expiry-sweeper-aml.test.ts` / `gateway-inquiry-schedules.test.ts` — AML-held exclusion, normal expiry slot release, schedule running/complete/expire helpers.
+- `callback-inbound-handler.test.ts` — the inbox callback handler retries transient failures (database, driver, network, SQLSTATE, our 5xx, wrapped causes, a failed channel lookup) and keeps verdicts and unexpected errors as rejections; the inbox retries a webhook after a database blip and then processes it; the synchronous route's `inboundRouteFailureOutcome` (REJECTED and acknowledged vs `RETRY_PENDING`, `processed_at` NULL, 503).
 - `expiry-sweeper-point-of-no-return.test.ts` — an expired `AUTHORIZING`/`VERIFYING` attempt past the point of no return becomes `UNKNOWN` (conditional update, slot kept, audit row), also after a non-definitive inquiry; a definitive answer still wins; a lost race writes nothing; an attempt before the point of no return still expires.
 - `retention-worker.test.ts` — cutoff boundaries, terminal attempt purge while retaining the journal, invariant preservation, dry run, platform-setting period, bounded batches, runtime registration.
 - `background-jobs.test.ts` / `worker-runtime-health.test.ts` — single claim, second-node skip, backoff/failure, lease recovery, reconciliation, dispute intake, adjustment idempotency, no invented checker, startup guard, queue health.

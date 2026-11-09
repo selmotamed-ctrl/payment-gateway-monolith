@@ -8,6 +8,7 @@ import type { NotificationSender } from "./OutboxNotificationWorker";
 import { ExpirySweeperWorker } from "./ExpirySweeperWorker";
 import { PollWorker } from "./PollWorker";
 import { InboundInboxWorker } from "./InboundInboxWorker";
+import { createCallbackInboundHandler } from "./callbackInboundHandler";
 import { OutboxNotificationWorker } from "./OutboxNotificationWorker";
 import { LedgerCheckpointWorker } from "./LedgerCheckpointWorker";
 import { LedgerShardScalerWorker } from "./LedgerShardScalerWorker";
@@ -333,31 +334,16 @@ export const createProductionWorkerRuntime = (
     },
   };
 
-  const handler: InboundEventHandler = {
-    handle: async (event) => {
-      const rawBody = toBuffer(event.rawBodyBytes);
-      const channel = await options.db.confirmationChannel.findUnique({
-        where: { id: event.channelId },
-      });
-      if (!channel) {
-        return { processed: false, result: "CHANNEL_UNKNOWN" };
-      }
-      const headers = ((event.redactedHeadersJson ?? {}) as Record<string, string>);
-      try {
-        const result = await platform.engine.verifyCallback(channel.pathToken, {
-          rawBody,
-          headers,
-          sourceIp: event.sourceIp,
-        });
-        return { processed: true, result: result.status };
-      } catch (error) {
-        return {
-          processed: false,
-          result: String((error as { code?: string })?.code ?? "CALLBACK_VERIFICATION_FAILED"),
-        };
-      }
+  // Definitive rejections are skipped; database and other transient errors are retried by the
+  // inbox (see callbackInboundHandler.ts).
+  const handler: InboundEventHandler = createCallbackInboundHandler({
+    findChannelPathToken: async (channelId) => {
+      const channel = await options.db.confirmationChannel.findUnique({ where: { id: channelId } });
+      return channel ? String(channel.pathToken) : null;
     },
-  };
+    verifyCallback: (pathToken, request) => platform.engine.verifyCallback(pathToken, request),
+    toBuffer,
+  });
 
   const transport = resolveNotificationTransport(options);
 
