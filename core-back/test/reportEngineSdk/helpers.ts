@@ -268,7 +268,7 @@ export function createTestHostConfig(overrides: Partial<ReportEngineHostConfig> 
       getAssetBuffer: async () => null,
     },
     globalLimits: {
-      maxDatasetsPerReport: 10,
+      maxDatasetsPerReport: 64,
       maxJoinsPerDataset: 6,
       maxRowsPerDataset: 10_000,
       maxQueryTimeoutMs: 15_000,

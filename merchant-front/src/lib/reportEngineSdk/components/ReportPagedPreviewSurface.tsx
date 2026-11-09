@@ -79,8 +79,11 @@ export const ReportPagedPreviewSurface = defineComponent({
 
     return () => (
       <div class="report-paged-preview-wrapper d-flex flex-column ga-3">
-        <div class="d-flex align-center justify-space-between px-4 py-2 bg-grey-lighten-4 rounded border">
-          <div class="d-flex align-center ga-3">
+        <div
+          class="d-flex align-center justify-space-between flex-wrap ga-2 px-4 py-2 rounded"
+          style={{ backgroundColor: "var(--pg-bg-surface-subtle)", border: "1px solid var(--pg-border-subtle)" }}
+        >
+          <div class="d-flex align-center ga-3 flex-wrap">
             <span class="text-subtitle-2 font-weight-bold">
               Pages: {totalPages.value} ({props.bundle.spec.page_layout.paper_size}{" "}
               {props.bundle.spec.page_layout.orientation})
@@ -89,7 +92,7 @@ export const ReportPagedPreviewSurface = defineComponent({
               SHA-256: {props.bundle.verificationSha256.slice(0, 12)}…
             </span>
           </div>
-          <div class="d-flex align-center ga-2">
+          <div class="d-flex align-center ga-2 flex-wrap">
             {Object.keys(props.bundle.spec.i18n.locales).map((loc) => (
               <VBtn
                 key={loc}
@@ -115,7 +118,7 @@ export const ReportPagedPreviewSurface = defineComponent({
           ref={iframeRef}
           title="Report Paginated Vector Preview"
           sandbox="allow-same-origin allow-modals"
-          style="width: 100%; min-height: 820px; border: 1px solid #CBD5E1; border-radius: 8px; background: #475569;"
+          style="width: 100%; min-height: min(820px, 72vh); border: 1px solid var(--pg-border-subtle); border-radius: 8px; background: var(--pg-bg-canvas);"
         />
       </div>
     );

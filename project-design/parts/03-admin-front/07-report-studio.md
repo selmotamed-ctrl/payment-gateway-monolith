@@ -84,3 +84,9 @@ The Catalog has All / Backoffice Internal / Merchant Reports tabs. Chrome select
 The Studio reports the domain filter using catalog domains (`LEDGER`, `PAYMENTS`, ...), can download the Chrome transcript, supports clearing an override, and can request a confidential AML bypass. An MLRO or Security Admin sees the pending bypass list and can approve/reject it; maker and checker must differ.
 
 The Studio loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type.
+
+## 8. Layout and action polish (2026-11-09)
+
+All three pages use the shared `ScreenContainer`/`ThemedView` page shell, so they inherit the desktop/mobile screen padding and the 18px section rhythm. Catalog and Studio tables use `pg-unified-table` plus the shared `Table/styling.css`; the Catalog row actions use `TableRowActions` (Run primary, Copy code/Download spec/Open Studio overflow).
+
+Actions added: Catalog Refresh/Open Studio/Headers & Footers, row copy/download/open, Reset inputs, Clear selection, Regenerate; Studio Open Catalog/Headers, Refresh pending, Format/Copy/Download/Clear editor, verification badge and disabled Save/Publish until verification passes; Chrome Refresh/Open Catalog/Studio, Format/Copy/Download/Clear editor, publish/make-default switches, empty/loading states and per-row Edit/Copy code/Download spec/Preview/default actions. The Paged.js preview toolbar now uses theme tokens, wraps on small screens and uses a responsive height.

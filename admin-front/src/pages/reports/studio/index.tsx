@@ -1,6 +1,9 @@
 import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
+import { useRouter } from "vue-router";
+import ScreenContainer from "@/components/ScreenContainer";
+import { ThemedView } from "@/components/ThemedView";
 import {
   VAlert,
   VBtn,
@@ -10,8 +13,9 @@ import {
   VTextarea,
   VTextField,
 } from "vuetify/components";
-import { DescriptionList, PageHeader, StatusBadge, SurfaceCard } from "@/components/ui";
+import { DescriptionList, EmptyState, PageHeader, StatusBadge, SurfaceCard } from "@/components/ui";
 import { api } from "@/state/api";
+import "@/components/Table/styling.css";
 import { urlsMap } from "@/constants/urlsMap";
 import { hasOneOfAuthorities, user } from "@/state/user";
 
@@ -117,6 +121,7 @@ const downloadText = (filename: string, content: string, mime: string) => {
 
 const ReportsStudioPage = dc(() => {
   const { t } = useLocale();
+  const router = useRouter();
   const domains = ref<string[]>([]);
   const specJson = ref("");
   const specFile = ref<File | null>(null);
@@ -134,6 +139,11 @@ const ReportsStudioPage = dc(() => {
   const pendingAml = ref<PendingAmlBypass[]>([]);
   const historyRows = ref<VersionRow[]>([]);
   const savedSpecCode = ref<string | null>(null);
+  const canVerify = computed(() => specJson.value.trim().length > 0);
+  const canSave = computed(() => verification.value?.valid === true);
+  const canChrome = computed(() => hasOneOfAuthorities(["reports.studio", "security:write"]));
+  const verificationBadge = computed(() => (verification.value?.valid ? "VERIFIED" : "DRAFT"));
+  const verificationTone = computed(() => (verification.value?.valid ? "success" : "neutral"));
 
   const canApproveAml = computed(
     () => ["MLRO", "SECURITY_ADMIN"].includes(String(user.value?.userInfo?.role ?? "")),
@@ -326,6 +336,38 @@ const ReportsStudioPage = dc(() => {
     }
   };
 
+  const formatJson = () => {
+    try {
+      specJson.value = JSON.stringify(JSON.parse(specJson.value), null, 2);
+      error.value = null;
+    } catch (caught) {
+      error.value = caught instanceof Error ? caught.message : String(caught);
+    }
+  };
+
+  const copyJson = async () => {
+    if (!specJson.value.trim()) return;
+    await navigator.clipboard.writeText(specJson.value);
+    notice.value = t("Spec JSON copied");
+  };
+
+  const downloadJson = () => {
+    if (!specJson.value.trim()) return;
+    downloadText("report-spec.json", specJson.value, "application/json");
+  };
+
+  const clearEditor = () => {
+    specJson.value = "";
+    specFile.value = null;
+    zipFile.value = null;
+    verification.value = null;
+    savedSpecId.value = null;
+    savedSpecCode.value = null;
+    historyRows.value = [];
+    error.value = null;
+    notice.value = null;
+  };
+
   const copyRepairPrompt = async () => {
     if (!verification.value?.aiRepairPrompt) return;
     await navigator.clipboard.writeText(verification.value.aiRepairPrompt);
@@ -339,15 +381,35 @@ const ReportsStudioPage = dc(() => {
   });
 
   return () => (
-    <div>
+    <ScreenContainer>
+      <ThemedView style={{ gap: "18px" }}>
       <PageHeader
         title={t("Report Studio")}
         subtitle={t("Download the AI transcript, verify a spec, infer authorities and publish")}
+        badge={verificationBadge.value}
+        badgeTone={verificationTone.value as never}
         breadcrumbs={[{ label: t("Reporting"), to: "/reports/catalog" }, { label: t("Studio") }]}
+        end={() => (
+          <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+            <VBtn variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsCatalog" })}>
+              {t("Open Catalog")}
+            </VBtn>
+            {canChrome.value && (
+              <VBtn variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChrome" })}>
+                {t("Headers & Footers")}
+              </VBtn>
+            )}
+            {canApproveAml.value && (
+              <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadPendingAml()}>
+                {t("Refresh pending")}
+              </VBtn>
+            )}
+          </ThemedView>
+        )}
       />
 
-      {error.value && <VAlert type="error" variant="tonal" density="compact" class="mb-4">{error.value}</VAlert>}
-      {notice.value && <VAlert type="success" variant="tonal" density="compact" class="mb-4">{notice.value}</VAlert>}
+      {error.value && <VAlert type="error" variant="tonal" density="compact">{error.value}</VAlert>}
+      {notice.value && <VAlert type="success" variant="tonal" density="compact">{notice.value}</VAlert>}
 
       <SurfaceCard title={t("Step 1 — AI Authoring Transcript")} subtitle={t("The transcript contains the live schema, optimization rules and bilingual contract")}>
         <div class="d-flex flex-wrap ga-3 align-end">
@@ -372,7 +434,28 @@ const ReportsStudioPage = dc(() => {
         </div>
       </SurfaceCard>
 
-      <SurfaceCard class="mt-4" title={t("Step 2 — Upload Spec and Optional Asset Bundle")} subtitle={t("Standalone JSON or JSON paired with an assets .zip")}>
+      <SurfaceCard
+        title={t("Step 2 — Upload Spec and Optional Asset Bundle")}
+        subtitle={t("Standalone JSON or JSON paired with an assets .zip")}
+        v-slots={{
+          headerActions: () => (
+            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+              <VBtn size="small" variant="text" prependIcon="mdi-format-align-left" disabled={!specJson.value.trim()} onClick={formatJson}>
+                {t("Format JSON")}
+              </VBtn>
+              <VBtn size="small" variant="text" prependIcon="mdi-content-copy" disabled={!specJson.value.trim()} onClick={() => void copyJson()}>
+                {t("Copy JSON")}
+              </VBtn>
+              <VBtn size="small" variant="text" prependIcon="mdi-download" disabled={!specJson.value.trim()} onClick={downloadJson}>
+                {t("Download JSON")}
+              </VBtn>
+              <VBtn size="small" variant="text" prependIcon="mdi-eraser" onClick={clearEditor}>
+                {t("Clear editor")}
+              </VBtn>
+            </ThemedView>
+          ),
+        }}
+      >
         <div class="d-flex flex-column ga-3">
           <VFileInput
             label={t("Report spec (.json)")}
@@ -394,20 +477,20 @@ const ReportsStudioPage = dc(() => {
             label={t("Spec JSON")}
             modelValue={specJson.value}
             onUpdate:modelValue={(value: string) => (specJson.value = value)}
-            rows={10}
+            rows={12}
             density="compact"
             variant="outlined"
             hideDetails="auto"
             style={{ fontFamily: "monospace" }}
           />
           <div class="d-flex flex-wrap ga-2">
-            <VBtn color="primary" loading={busy.value} prependIcon="mdi-shield-check-outline" onClick={() => void verify()}>
+            <VBtn color="primary" loading={busy.value} disabled={!canVerify.value} prependIcon="mdi-shield-check-outline" onClick={() => void verify()}>
               {t("Verify Spec (5 Layers)")}
             </VBtn>
-            <VBtn variant="tonal" loading={busy.value} onClick={() => void save(false)}>
+            <VBtn variant="tonal" loading={busy.value} disabled={!canSave.value} onClick={() => void save(false)}>
               {t("Save as Verified")}
             </VBtn>
-            <VBtn variant="tonal" color="success" loading={busy.value} onClick={() => void save(true)}>
+            <VBtn variant="tonal" color="success" loading={busy.value} disabled={!canSave.value} onClick={() => void save(true)}>
               {t("Publish")}
             </VBtn>
           </div>
@@ -415,7 +498,7 @@ const ReportsStudioPage = dc(() => {
       </SurfaceCard>
 
       {verification.value && (
-        <SurfaceCard class="mt-4" title={t("Step 3 — Verification Scorecard")} subtitle={t("Layers 1-5, diagnostics and the one-click AI repair prompt")}>
+        <SurfaceCard title={t("Step 3 — Verification Scorecard")} subtitle={t("Layers 1-5, diagnostics and the one-click AI repair prompt")}>
           <div class="d-flex flex-wrap ga-2 mb-4">
             {verification.value.layers.map((layer) => (
               <StatusBadge
@@ -460,7 +543,7 @@ const ReportsStudioPage = dc(() => {
       )}
 
       {verification.value?.authorityInference && (
-        <SurfaceCard class="mt-4" title={t("Step 4 — Authority Inference")} subtitle={t("Computed from the queried models and columns")}>
+        <SurfaceCard title={t("Step 4 — Authority Inference")} subtitle={t("Computed from the queried models and columns")}>
           <DescriptionList
             items={[
               { label: t("Queried models"), value: verification.value.authorityInference.queriedModels.join(", ") },
@@ -540,24 +623,24 @@ const ReportsStudioPage = dc(() => {
       )}
 
       {savedSpecCode.value && (
-        <SurfaceCard class="mt-4" title={t("Version history")} subtitle={t("Published and verified versions of this report")}>
+        <SurfaceCard title={t("Version history")} subtitle={t("Published and verified versions of this report")}>
           <div class="d-flex justify-end mb-2">
             <VBtn size="small" variant="tonal" onClick={() => void loadHistory(savedSpecCode.value)}>
               {t("Refresh history")}
             </VBtn>
           </div>
           {historyRows.value.length === 0 ? (
-            <div class="text-medium-emphasis">{t("No versions found")}</div>
+            <EmptyState title={t("No versions found")} description={t("Save or publish this spec to see its versions.")} icon="mdi-history" />
           ) : (
             <div class="table-wrapper">
-              <table class="modern-table">
+              <table class="modern-table pg-unified-table">
                 <thead>
                   <tr>
                     <th>{t("Version")}</th>
                     <th>{t("Status")}</th>
                     <th>{t("Created At")}</th>
                     <th>{t("Published At")}</th>
-                    <th />
+                    <th class="pg-col-actions">{t("Actions")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -567,7 +650,7 @@ const ReportsStudioPage = dc(() => {
                       <td><StatusBadge status={row.status} label={row.status} /></td>
                       <td>{String(row.createdAt).slice(0, 19).replace("T", " ")}</td>
                       <td>{row.publishedAt ? String(row.publishedAt).slice(0, 19).replace("T", " ") : "—"}</td>
-                      <td class="text-end">
+                      <td class="pg-col-actions">
                         {row.status !== "ARCHIVED" && (
                           <VBtn size="small" variant="tonal" onClick={() => void archiveVersion(row.id)}>
                             {t("Archive")}
@@ -584,7 +667,7 @@ const ReportsStudioPage = dc(() => {
       )}
 
       {canApproveAml.value && pendingAml.value.length > 0 && (
-        <SurfaceCard class="mt-4" title={t("Pending confidential AML bypasses")} subtitle={t("A different MLRO or Security Admin must decide")}>
+        <SurfaceCard title={t("Pending confidential AML bypasses")} subtitle={t("A different MLRO or Security Admin must decide")}>
           <div class="d-flex flex-column ga-3">
             {pendingAml.value.map((approval) => (
               <div key={approval.id} class="pa-3" style={{ border: "1px solid var(--pg-border-subtle)", borderRadius: "8px" }}>
@@ -606,7 +689,8 @@ const ReportsStudioPage = dc(() => {
           </div>
         </SurfaceCard>
       )}
-    </div>
+      </ThemedView>
+    </ScreenContainer>
   );
 });
 

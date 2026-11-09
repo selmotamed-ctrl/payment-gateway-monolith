@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ReportChromeSpecSchema } from "./chromeSpec";
+import { normalizeReportSpec } from "./normalizeReportSpec";
 
 export const REPORT_SPEC_VERSION = "1.0" as const;
 
@@ -58,6 +59,15 @@ export const ReportInputFieldSpecSchema = z.object({
           "LAST_30_DAYS",
           "CURRENT_MONTH",
           "PREVIOUS_MONTH",
+        ]),
+      }),
+      z.object({
+        literal: z.union([
+          z.string(),
+          z.number(),
+          z.boolean(),
+          z.array(z.string()),
+          z.record(z.string(), z.unknown()),
         ]),
       }),
     ])
@@ -191,6 +201,7 @@ export const DatasetSelectFieldSchema = z.object({
       "DATE_ISO",
       "DATETIME_ISO",
       "ENUM_TRANSLATED",
+      "INTEGER",
     ])
     .default("RAW"),
 });
@@ -268,7 +279,7 @@ export const DatasetTransformSpecSchema = z.discriminatedUnion("operation", [
     ]),
     left_operand: z.string(),
     right_operand: z.union([z.string(), z.number()]),
-    format_hint: z.enum(["RAW", "CURRENCY_MINOR", "DECIMAL_2", "PERCENT_RATIO"]).default("DECIMAL_2"),
+    format_hint: z.enum(["RAW", "CURRENCY_MINOR", "DECIMAL_2", "PERCENT_RATIO", "INTEGER"]).default("DECIMAL_2"),
   }),
   z.object({
     operation: z.literal("JOIN_DATASETS"),
@@ -366,6 +377,7 @@ export const DataTableSectionSchema = z.object({
             "DATE_ISO",
             "DATETIME_ISO",
             "ENUM_TRANSLATED",
+            "INTEGER",
             "BADGE",
           ])
           .default("RAW"),
@@ -422,6 +434,8 @@ export const VectorDrawSectionSchema = z.object({
   draw_kind: z.enum(["FLOW_DIAGRAM", "SETTLEMENT_WATERFALL_DIAGRAM", "DECLARATIVE_SVG_CANVAS"]),
   height_mm: z.number().min(25).max(180).default(65),
   view_box: z.object({
+    x: z.number().optional(),
+    y: z.number().optional(),
     width: z.number().min(100).max(2000).default(800),
     height: z.number().min(60).max(1200).default(260),
   }),
@@ -430,7 +444,7 @@ export const VectorDrawSectionSchema = z.object({
     .array(
       z.object({
         node_id: z.string(),
-        shape: z.enum(["RECT", "ROUNDED_RECT", "PILL", "DIAMOND", "CIRCLE"]),
+        shape: z.enum(["RECT", "BAR", "ROUNDED_RECT", "PILL", "DIAMOND", "CIRCLE"]),
         x: z.number(),
         y: z.number(),
         width: z.number().default(150),
@@ -511,7 +525,7 @@ export const ReportSectionSpecSchema = z
 // ---------------------------------------------------------------------------
 // 5. TOP-LEVEL REPORT DESCRIPTOR SPEC SCHEMA
 // ---------------------------------------------------------------------------
-export const ReportDescriptorSpecSchema = z.object({
+const ReportDescriptorSpecObjectSchema = z.object({
   spec_kind: z.literal("REPORT_DESCRIPTOR"),
   spec_version: z.literal(REPORT_SPEC_VERSION),
   report: z.object({
@@ -591,10 +605,15 @@ export const ReportDescriptorSpecSchema = z.object({
     })
     .optional(),
   inputs: z.array(ReportInputFieldSpecSchema).max(20).default([]),
-  datasets: z.array(DatasetQuerySpecSchema).min(1).max(10),
-  transforms: z.array(DatasetTransformSpecSchema).max(15).default([]),
-  sections: z.array(ReportSectionSpecSchema).min(1).max(30),
+  datasets: z.array(DatasetQuerySpecSchema).min(1).max(64),
+  transforms: z.array(DatasetTransformSpecSchema).max(64).default([]),
+  sections: z.array(ReportSectionSpecSchema).min(1).max(128),
 });
+
+export const ReportDescriptorSpecSchema = z.preprocess(
+  normalizeReportSpec,
+  ReportDescriptorSpecObjectSchema,
+);
 
 export type ReportDescriptorSpec = z.infer<typeof ReportDescriptorSpecSchema>;
 export type ReportInputFieldSpec = z.infer<typeof ReportInputFieldSpecSchema>;

@@ -4565,3 +4565,9 @@ The original blueprint described the admin Report Catalog as the place where sta
 - Inline chrome, `global_scoped_css`, custom SVG and HTML templates reject `<style>`, external URLs, `@import`, event handlers and executable URI schemes.
 - The report asset store uses `REPORT_ASSET_STORAGE_DIR`, preserves MIME/assetKey/uploader, and deduplicates identical bundles by SHA-256.
 - `SERVER_PDF` remains an explicit deferred option and returns `501 SERVER_PDF_NOT_CONFIGURED`.
+
+### 14.3 Authoring caps and aliases
+
+The delivered schema raises the report caps to 64 datasets, 64 transforms and 128 sections (20 inputs, 6 joins per dataset, 40 select fields, 5 window fields remain). The AI transcript documents these limits.
+
+The schema normalises common authoring aliases before validation: transform `kind` → `operation`; COMPUTE_COLUMN `compute`/`compute_op`/`operator` → `formula`; `{ literal: value }` → the raw default value; SVG-style `view_box` strings → `{ width, height }`. `INTEGER` is accepted in dataset/table format hints and `BAR` is a valid vector node shape (a rectangle).

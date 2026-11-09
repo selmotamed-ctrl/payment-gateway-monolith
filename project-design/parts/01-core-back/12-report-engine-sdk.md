@@ -171,3 +171,12 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - The AI transcript now includes the complete report field reference, dataset/query operators, transforms, sections, inputs, assets, merchant-scope rules, suggested access and chrome fields. The chrome transcript documents height, first-page, border, asset dimensions and every allowed variable.
 - `suggested_access` is validated and surfaced as a warning when it grants a role/authority the queried models do not naturally allow.
 - Chrome `max_width_mm`/`max_height_mm` are applied to `asset://` images when the template does not already set an inline style.
+
+## 12. Authoring compatibility and limits
+
+- The report schema accepts up to 64 datasets, 64 transforms, 128 sections, 20 inputs, 6 joins per dataset, 40 select fields and 5 window fields.
+- Transform `operation` also accepts the authoring alias `kind`; COMPUTE_COLUMN accepts `compute`, `compute_op` or `operator` as aliases for `formula`. The persisted canonical form is always `operation` + `formula`.
+- `default_value` accepts a raw literal, a preset object, or `{ literal: <value> }` (normalised to the raw value).
+- `view_box` accepts `{ width, height }` or an SVG-style `"x y width height"` string.
+- `format_hint` supports `INTEGER` in dataset selects and table columns, matching KPI cards; `BAR` is a valid vector node shape and maps to a rectangle.
+- These limits, aliases and shapes are documented in the AI authoring transcript.

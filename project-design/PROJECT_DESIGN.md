@@ -7456,6 +7456,15 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - `suggested_access` is validated and surfaced as a warning when it grants a role/authority the queried models do not naturally allow.
 - Chrome `max_width_mm`/`max_height_mm` are applied to `asset://` images when the template does not already set an inline style.
 
+## 12. Authoring compatibility and limits
+
+- The report schema accepts up to 64 datasets, 64 transforms, 128 sections, 20 inputs, 6 joins per dataset, 40 select fields and 5 window fields.
+- Transform `operation` also accepts the authoring alias `kind`; COMPUTE_COLUMN accepts `compute`, `compute_op` or `operator` as aliases for `formula`. The persisted canonical form is always `operation` + `formula`.
+- `default_value` accepts a raw literal, a preset object, or `{ literal: <value> }` (normalised to the raw value).
+- `view_box` accepts `{ width, height }` or an SVG-style `"x y width height"` string.
+- `format_hint` supports `INTEGER` in dataset selects and table columns, matching KPI cards; `BAR` is a valid vector node shape and maps to a rectangle.
+- These limits, aliases and shapes are documented in the AI authoring transcript.
+
 ---
 
 <a id="edgeshared"></a>
@@ -8950,8 +8959,8 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 31 | `/rails` | `Rails` | `gateways.edit` | 3 / 3.2 | Rail catalog, collection modes and customer fields. |
 | 32 | `/routes` | `GatewayRoutes` | `gateways.edit` | 3 / 3.2 | Route priority, limits, credential policy and circuit-breaker health. |
 | 33 | `/guide` | `AdminGuide` | none (intentional) | 1 / 1.1 | Interactive admin system guide, glossary, simulators and checklists. |
-| 38 | `/reports/catalog` | `ReportsCatalog` | `reports.run` (projected from `report_engine:run`) | none | Published report catalog, language prompt, typed inputs, preview and print. |
-| 39 | `/reports/studio` | `ReportsStudio` | `reports.studio` (projected from `report_engine:author`) | none | AI transcript, JSON spec editor, five-layer verification, authority override and publish. |
+| 38 | `/reports/catalog` | `ReportsCatalog` | `reports.run`/`reports.draft`/`report_engine:run`/`report_engine:author`/`report:review`/`report:approve`/`security:write` | none | Published report catalog, language prompt, typed inputs, preview and print. |
+| 39 | `/reports/studio` | `ReportsStudio` | `reports.studio`/`reports.draft`/`report_engine:author`/`report:review`/`report:approve`/`security:write` | none | AI transcript, JSON spec editor, five-layer verification, authority override and publish. |
 | 40 | `/reports/chrome` | `ReportsChrome` | `reports.studio` (projected from `report_engine:author`) | none | Reusable header/footer registry and single global default per type. |
 | 34 | `/academy` | `AdminAcademy` | none (intentional learning) | 1 / 1.1 | Employee Academy home (full-width hero with the single Continue action and progress rings, tracks, certificates list, Guide reading). Sub-routes `AdminAcademyTracks`, `AdminAcademyTrack`, `AdminAcademyModule`, `AdminAcademyLesson`, `AdminAcademyLab`, `AdminAcademyExam`, `AdminAcademyCertificate`, `AdminAcademyHelp` (none gated) and `AdminAcademyTeam` (role `SECURITY_ADMIN`); see `03-guide-and-academy.md` §7. |
 | 35 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
@@ -10171,6 +10180,12 @@ The Catalog has All / Backoffice Internal / Merchant Reports tabs. Chrome select
 The Studio reports the domain filter using catalog domains (`LEDGER`, `PAYMENTS`, ...), can download the Chrome transcript, supports clearing an override, and can request a confidential AML bypass. An MLRO or Security Admin sees the pending bypass list and can approve/reject it; maker and checker must differ.
 
 The Studio loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type.
+
+## 8. Layout and action polish (2026-11-09)
+
+All three pages use the shared `ScreenContainer`/`ThemedView` page shell, so they inherit the desktop/mobile screen padding and the 18px section rhythm. Catalog and Studio tables use `pg-unified-table` plus the shared `Table/styling.css`; the Catalog row actions use `TableRowActions` (Run primary, Copy code/Download spec/Open Studio overflow).
+
+Actions added: Catalog Refresh/Open Studio/Headers & Footers, row copy/download/open, Reset inputs, Clear selection, Regenerate; Studio Open Catalog/Headers, Refresh pending, Format/Copy/Download/Clear editor, verification badge and disabled Save/Publish until verification passes; Chrome Refresh/Open Catalog/Studio, Format/Copy/Download/Clear editor, publish/make-default switches, empty/loading states and per-row Edit/Copy code/Download spec/Preview/default actions. The Paged.js preview toolbar now uses theme tokens, wraps on small screens and uses a responsive height.
 
 ---
 

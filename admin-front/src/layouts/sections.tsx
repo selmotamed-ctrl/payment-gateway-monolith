@@ -61,13 +61,13 @@ export const useSections = () => {
                     label: t("Report Catalog"),
                     name: "ReportsCatalog",
                     icon: "mdi-file-chart-outline",
-                    if: () => hasOneOfAuthorities(["reports.draft", "report_engine:run", "report_engine:author"]),
+                    if: () => hasOneOfAuthorities(["reports.draft", "report_engine:run", "report_engine:author", "report:review", "report:approve", "security:write"]),
                 },
                 {
                     label: t("Report Studio"),
                     name: "ReportsStudio",
                     icon: "mdi-robot-outline",
-                    if: () => hasOneOfAuthorities(["reports.studio", "report_engine:author"]),
+                    if: () => hasOneOfAuthorities(["reports.studio", "reports.draft", "report_engine:author", "report:review", "report:approve", "security:write"]),
                 },
                 {
                     label: t("Report Headers & Footers"),

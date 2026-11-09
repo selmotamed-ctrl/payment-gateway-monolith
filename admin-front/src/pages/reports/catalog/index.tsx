@@ -1,11 +1,18 @@
 import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
+import { useRouter } from "vue-router";
 import { VAlert, VBtn, VSelect } from "vuetify/components";
+import ScreenContainer from "@/components/ScreenContainer";
+import { ThemedView } from "@/components/ThemedView";
+import { StateView } from "@/components/StateView";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import { EmptyState, PageHeader, SegmentedTabs, StatusBadge, SurfaceCard } from "@/components/ui";
 import { api } from "@/state/api";
+import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
+import "@/components/Table/styling.css";
 import {
   ReportInputForm,
   ReportLanguagePromptDialog,
@@ -43,6 +50,7 @@ type ChromeRow = {
 
 const ReportsCatalogPage = dc(() => {
   const { t } = useLocale();
+  const router = useRouter();
   const reports = ref<CatalogReport[]>([]);
   const chromeSpecs = ref<ChromeRow[]>([]);
   const loading = ref(true);
@@ -59,6 +67,13 @@ const ReportsCatalogPage = dc(() => {
   const bundle = ref<ReportExecutionBundle | null>(null);
   const languagePrompt = ref(false);
   const previewRef = ref<{ printClientSideVectorPdf?: () => void } | null>(null);
+  const canStudio = computed(() =>
+    hasOneOfAuthorities(["reports.studio", "reports.draft", "report_engine:author", "report:review", "report:approve", "security:write"]),
+  );
+  const canChrome = computed(() => hasOneOfAuthorities(["reports.studio", "security:write"]));
+  const hasRows = computed(() =>
+    bundle.value ? Object.values(bundle.value.datasets).some((rows) => rows.length > 0) : false,
+  );
 
   const filteredReports = computed(() => {
     if (audienceTab.value === "BACKOFFICE_INTERNAL") {
@@ -72,9 +87,17 @@ const ReportsCatalogPage = dc(() => {
     return reports.value;
   });
   const audienceTabs = computed(() => [
-    { label: t("All Authorized Reports"), value: "ALL" },
-    { label: t("Backoffice Internal"), value: "BACKOFFICE_INTERNAL" },
-    { label: t("Merchant Reports"), value: "MERCHANT_FACING" },
+    { label: t("All Authorized Reports"), value: "ALL", count: reports.value.length },
+    {
+      label: t("Backoffice Internal"),
+      value: "BACKOFFICE_INTERNAL",
+      count: reports.value.filter((report) => report.audienceScope === "BACKOFFICE_INTERNAL").length,
+    },
+    {
+      label: t("Merchant Reports"),
+      value: "MERCHANT_FACING",
+      count: reports.value.filter((report) => report.audienceScope === "MERCHANT_FACING" || report.audienceScope === "BOTH").length,
+    },
   ]);
   const availableLocales = computed(() =>
     selected.value ? Object.keys(selected.value.spec.i18n.locales) : ["en"],
@@ -131,6 +154,40 @@ const ReportsCatalogPage = dc(() => {
     footerCode.value = report.spec.page_layout.footer_chrome_code ?? null;
     bundle.value = null;
     error.value = null;
+  };
+
+  const resetInputs = () => {
+    if (!selected.value) return;
+    inputs.value = resolveInputDefaults(selected.value.spec);
+  };
+
+  const clearSelection = () => {
+    selected.value = null;
+    bundle.value = null;
+    inputs.value = {};
+    error.value = null;
+  };
+
+  const downloadText = (filename: string, content: string, mime: string) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadSpec = (report: CatalogReport) => {
+    downloadText(
+      `${report.code}-v${report.version}.json`,
+      JSON.stringify(report.spec, null, 2),
+      "application/json",
+    );
+  };
+
+  const copyCode = async (code: string) => {
+    await navigator.clipboard.writeText(code);
   };
 
   const autocomplete = async (
@@ -254,33 +311,63 @@ const ReportsCatalogPage = dc(() => {
   onMounted(load);
 
   return () => (
-    <div>
+    <ScreenContainer>
+      <ThemedView style={{ gap: "18px" }}>
       <PageHeader
         title={t("Report Catalog")}
         subtitle={t("Run and export published backoffice and merchant reports")}
         breadcrumbs={[{ label: t("Reporting"), to: "/reports/catalog" }, { label: t("Catalog") }]}
+        end={() => (
+          <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
+              {t("Refresh")}
+            </VBtn>
+            {canStudio.value && (
+              <VBtn variant="tonal" prependIcon="mdi-robot-outline" onClick={() => void router.push({ name: "ReportsStudio" })}>
+                {t("Open Studio")}
+              </VBtn>
+            )}
+            {canChrome.value && (
+              <VBtn variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChrome" })}>
+                {t("Headers & Footers")}
+              </VBtn>
+            )}
+          </ThemedView>
+        )}
       />
 
       {error.value && (
-        <VAlert type="error" variant="tonal" density="compact" class="mb-4">
-          {error.value}
+        <VAlert type="error" variant="tonal" density="compact">
+          <div class="d-flex align-center justify-space-between ga-3 flex-wrap">
+            <span>{error.value}</span>
+            <VBtn size="small" variant="tonal" onClick={() => void load()}>{t("Retry")}</VBtn>
+          </div>
         </VAlert>
       )}
 
-      <SurfaceCard title={t("Published Reports")} subtitle={t("Only reports your role can access are shown")}>
-        <SegmentedTabs
-          modelValue={audienceTab.value}
-          onUpdate:modelValue={(value: string) => (audienceTab.value = value)}
-          tabs={audienceTabs.value}
-          ariaLabel={t("Audience")}
-        />
+      <SurfaceCard title={t("Published Reports")} subtitle={t("Only reports your role can access are shown")} noPadding>
+        <div style={{ padding: "16px 20px 0" }}>
+          <SegmentedTabs
+            modelValue={audienceTab.value}
+            onUpdate:modelValue={(value: string) => (audienceTab.value = value)}
+            tabs={audienceTabs.value}
+            ariaLabel={t("Audience")}
+          />
+        </div>
         {loading.value ? (
-          <div class="py-6 text-center text-medium-emphasis">{t("Loading…")}</div>
+          <StateView loading minHeight="220px" />
         ) : filteredReports.value.length === 0 ? (
-          <EmptyState title={t("No reports available")} icon="mdi-file-chart-outline" />
+          <EmptyState
+            title={t("No reports available")}
+            description={t("Published reports appear here after an author publishes them from Report Studio.")}
+            icon="mdi-file-chart-outline"
+            actionLabel={canStudio.value ? t("Open Studio") : ""}
+            actionIcon="mdi-robot-outline"
+            onAction={() => void router.push({ name: "ReportsStudio" })}
+          />
         ) : (
           <div class="table-wrapper">
-            <table class="modern-table">
+            <table class="modern-table pg-unified-table">
               <thead>
                 <tr>
                   <th>{t("Report")}</th>
@@ -288,7 +375,7 @@ const ReportsCatalogPage = dc(() => {
                   <th>{t("Audience")}</th>
                   <th>{t("Languages")}</th>
                   <th>{t("Version")}</th>
-                  <th />
+                  <th class="pg-col-actions">{t("Actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -304,10 +391,21 @@ const ReportsCatalogPage = dc(() => {
                     </td>
                     <td>{report.supportedLocales.join(", ")}</td>
                     <td>{report.version}</td>
-                    <td class="text-end">
-                      <VBtn size="small" variant="tonal" onClick={() => selectReport(report)}>
-                        {t("Run")}
-                      </VBtn>
+                    <td class="pg-col-actions">
+                      <TableRowActions
+                        primaryAction={{
+                          label: t("Run"),
+                          icon: "mdi-play",
+                          onClick: () => selectReport(report),
+                        }}
+                        items={[
+                          { key: "copy", label: t("Copy code"), icon: "mdi-content-copy", onClick: () => void copyCode(report.code) },
+                          { key: "download", label: t("Download spec"), icon: "mdi-download", onClick: () => downloadSpec(report) },
+                          ...(canStudio.value
+                            ? [{ key: "studio", label: t("Open Studio"), icon: "mdi-robot-outline", onClick: () => void router.push({ name: "ReportsStudio" }) }]
+                            : []),
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -319,9 +417,16 @@ const ReportsCatalogPage = dc(() => {
 
       {selected.value && (
         <SurfaceCard
-          class="mt-4"
           title={selected.value.spec.i18n.locales.en?.["report.title"] ?? selected.value.code}
           subtitle={t("Fill the parameters, choose the output language and generate the report")}
+          v-slots={{
+            headerActions: () => (
+              <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
+                <VBtn size="small" variant="text" onClick={resetInputs}>{t("Reset inputs")}</VBtn>
+                <VBtn size="small" variant="text" onClick={clearSelection}>{t("Clear selection")}</VBtn>
+              </ThemedView>
+            ),
+          }}
         >
           <div class="d-flex flex-column ga-4">
             <ReportInputForm
@@ -371,18 +476,35 @@ const ReportsCatalogPage = dc(() => {
       )}
 
       {bundle.value && (
-        <SurfaceCard class="mt-4" title={t("Paginated Vector Preview")} subtitle={t("Client-side rendering; no server CPU used")}>
+        <SurfaceCard
+          title={t("Paginated Vector Preview")}
+          subtitle={t("Client-side rendering; no server CPU used")}
+          v-slots={{
+            headerActions: () => (
+              <VBtn
+                size="small"
+                variant="tonal"
+                prependIcon="mdi-refresh"
+                loading={generating.value}
+                onClick={() => void runGenerate(locale.value)}
+              >
+                {t("Regenerate")}
+              </VBtn>
+            ),
+          }}
+        >
           <div class="d-flex flex-wrap ga-2 mb-3">
-            <VBtn size="small" variant="tonal" prependIcon="mdi-file-delimited-outline" onClick={exportCsv}>
+            <VBtn size="small" variant="tonal" prependIcon="mdi-file-delimited-outline" disabled={!hasRows.value} onClick={exportCsv}>
               {t("Export CSV")}
             </VBtn>
-            <VBtn size="small" variant="tonal" prependIcon="mdi-microsoft-excel" onClick={() => void exportXlsx()}>
+            <VBtn size="small" variant="tonal" prependIcon="mdi-microsoft-excel" disabled={!hasRows.value} onClick={() => void exportXlsx()}>
               {t("Export XLSX")}
             </VBtn>
             <VBtn
               size="small"
               variant="tonal"
               prependIcon="mdi-printer-outline"
+              disabled={!hasRows.value}
               onClick={() => previewRef.value?.printClientSideVectorPdf?.()}
             >
               {t("Print")}
@@ -412,7 +534,8 @@ const ReportsCatalogPage = dc(() => {
           onConfirmLocale={onLanguageConfirmed}
         />
       )}
-    </div>
+      </ThemedView>
+    </ScreenContainer>
   );
 });
 

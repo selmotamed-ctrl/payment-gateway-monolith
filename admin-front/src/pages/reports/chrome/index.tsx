@@ -1,10 +1,16 @@
 import { dc } from "kt-dc";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VFileInput, VSelect, VTextarea } from "vuetify/components";
-import { DescriptionList, PageHeader, StatusBadge, SurfaceCard } from "@/components/ui";
+import { useRouter } from "vue-router";
+import { VAlert, VBtn, VFileInput, VSelect, VSwitch, VTextarea } from "vuetify/components";
+import ScreenContainer from "@/components/ScreenContainer";
+import { ThemedView } from "@/components/ThemedView";
+import { StateView } from "@/components/StateView";
+import { DescriptionList, EmptyState, PageHeader, StatusBadge, SurfaceCard } from "@/components/ui";
 import { api } from "@/state/api";
+import { hasOneOfAuthorities } from "@/state/user";
 import { urlsMap } from "@/constants/urlsMap";
+import "@/components/Table/styling.css";
 import { renderChromeHtml, type ReportChromeSpec, type ReportExecutionBundle } from "@/lib/reportEngineSdk";
 
 type ChromeRow = {
@@ -41,6 +47,7 @@ const downloadText = (filename: string, content: string, mime: string) => {
 
 const ReportsChromePage = dc(() => {
   const { t } = useLocale();
+  const router = useRouter();
   const rows = ref<ChromeRow[]>([]);
   const loading = ref(true);
   const busy = ref(false);
@@ -53,6 +60,8 @@ const ReportsChromePage = dc(() => {
   const makeDefault = ref(false);
   const previewLocale = ref("en");
   const selected = ref<ChromeRow | null>(null);
+  const canAuthor = computed(() => hasOneOfAuthorities(["reports.studio", "report_engine:author"]));
+  const canSave = computed(() => specJson.value.trim().length > 0);
 
   const load = async () => {
     loading.value = true;
@@ -83,6 +92,51 @@ const ReportsChromePage = dc(() => {
   const readSpecFile = async (file: File | null) => {
     specFile.value = file;
     if (file) specJson.value = await file.text();
+  };
+
+  const formatJson = () => {
+    try {
+      specJson.value = JSON.stringify(JSON.parse(specJson.value), null, 2);
+      error.value = null;
+    } catch (caught) {
+      error.value = caught instanceof Error ? caught.message : String(caught);
+    }
+  };
+
+  const copyJson = async () => {
+    if (!specJson.value.trim()) return;
+    await navigator.clipboard.writeText(specJson.value);
+    notice.value = t("Chrome JSON copied");
+  };
+
+  const downloadJson = () => {
+    if (!specJson.value.trim()) return;
+    downloadText("chrome-spec.json", specJson.value, "application/json");
+  };
+
+  const clearEditor = () => {
+    specJson.value = "";
+    specFile.value = null;
+    zipFile.value = null;
+    error.value = null;
+    notice.value = null;
+  };
+
+  const editRow = (row: ChromeRow) => {
+    specJson.value = JSON.stringify(row.spec, null, 2);
+    specFile.value = null;
+    zipFile.value = null;
+    publish.value = false;
+    makeDefault.value = row.isDefaultGlobal;
+    notice.value = t("Loaded {name} into the editor").replace("{name}", row.name);
+  };
+
+  const copyCode = async (code: string) => {
+    await navigator.clipboard.writeText(code);
+  };
+
+  const downloadSpec = (row: ChromeRow) => {
+    downloadText(`${row.code}-v${row.version}.json`, JSON.stringify(row.spec, null, 2), "application/json");
   };
 
   const saveChrome = async () => {
@@ -155,15 +209,38 @@ const ReportsChromePage = dc(() => {
   onMounted(load);
 
   return () => (
-    <div>
+    <ScreenContainer>
+      <ThemedView style={{ gap: "18px" }}>
       <PageHeader
         title={t("Report Headers & Footers")}
         subtitle={t("Upload reusable bilingual chrome specs and assign the global default")}
         breadcrumbs={[{ label: t("Reporting"), to: "/reports/catalog" }, { label: t("Headers & Footers") }]}
+        end={() => (
+          <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
+              {t("Refresh")}
+            </VBtn>
+            <VBtn variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsCatalog" })}>
+              {t("Open Catalog")}
+            </VBtn>
+            {canAuthor.value && (
+              <VBtn variant="tonal" prependIcon="mdi-robot-outline" onClick={() => void router.push({ name: "ReportsStudio" })}>
+                {t("Open Studio")}
+              </VBtn>
+            )}
+          </ThemedView>
+        )}
       />
 
-      {error.value && <VAlert type="error" variant="tonal" density="compact" class="mb-4">{error.value}</VAlert>}
-      {notice.value && <VAlert type="success" variant="tonal" density="compact" class="mb-4">{notice.value}</VAlert>}
+      {error.value && (
+        <VAlert type="error" variant="tonal" density="compact">
+          <div class="d-flex align-center justify-space-between ga-3 flex-wrap">
+            <span>{error.value}</span>
+            <VBtn size="small" variant="tonal" onClick={() => void load()}>{t("Retry")}</VBtn>
+          </div>
+        </VAlert>
+      )}
+      {notice.value && <VAlert type="success" variant="tonal" density="compact">{notice.value}</VAlert>}
 
       <SurfaceCard title={t("Chrome AI Transcript")} subtitle={t("Author headers and footers with the same closed contract")}>
         <VBtn color="primary" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript()}>
@@ -171,7 +248,28 @@ const ReportsChromePage = dc(() => {
         </VBtn>
       </SurfaceCard>
 
-      <SurfaceCard class="mt-4" title={t("Upload Chrome Spec")} subtitle={t("JSON + optional logo/seal .zip bundle")}>
+      <SurfaceCard
+        title={t("Upload Chrome Spec")}
+        subtitle={t("JSON + optional logo/seal .zip bundle")}
+        v-slots={{
+          headerActions: () => (
+            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
+              <VBtn size="small" variant="text" prependIcon="mdi-format-align-left" disabled={!canSave.value} onClick={formatJson}>
+                {t("Format JSON")}
+              </VBtn>
+              <VBtn size="small" variant="text" prependIcon="mdi-content-copy" disabled={!canSave.value} onClick={() => void copyJson()}>
+                {t("Copy JSON")}
+              </VBtn>
+              <VBtn size="small" variant="text" prependIcon="mdi-download" disabled={!canSave.value} onClick={downloadJson}>
+                {t("Download JSON")}
+              </VBtn>
+              <VBtn size="small" variant="text" prependIcon="mdi-eraser" onClick={clearEditor}>
+                {t("Clear editor")}
+              </VBtn>
+            </ThemedView>
+          ),
+        }}
+      >
         <div class="d-flex flex-column ga-3">
           <VFileInput
             label={t("Chrome spec (.json)")}
@@ -193,39 +291,63 @@ const ReportsChromePage = dc(() => {
             label={t("Chrome spec JSON")}
             modelValue={specJson.value}
             onUpdate:modelValue={(value: string) => (specJson.value = value)}
-            rows={10}
+            rows={12}
             density="compact"
             variant="outlined"
             hideDetails="auto"
             style={{ fontFamily: "monospace" }}
           />
           <div class="d-flex flex-wrap ga-3 align-center">
-            <VBtn color="primary" loading={busy.value} onClick={() => void saveChrome()}>
+            <VBtn color="primary" loading={busy.value} disabled={!canSave.value} onClick={() => void saveChrome()}>
               {t("Verify & Save")}
             </VBtn>
-            <VBtn variant="tonal" onClick={() => (publish.value = !publish.value)}>
-              {publish.value ? t("Publish: On") : t("Publish: Off")}
-            </VBtn>
-            <VBtn variant="tonal" onClick={() => (makeDefault.value = !makeDefault.value)}>
-              {makeDefault.value ? t("Make default: On") : t("Make default: Off")}
-            </VBtn>
+            <VSwitch
+              label={t("Publish")}
+              modelValue={publish.value}
+              onUpdate:modelValue={(value: boolean | null) => (publish.value = Boolean(value))}
+              density="compact"
+              hideDetails="auto"
+            />
+            <VSwitch
+              label={t("Make default")}
+              modelValue={makeDefault.value}
+              onUpdate:modelValue={(value: boolean | null) => (makeDefault.value = Boolean(value))}
+              density="compact"
+              hideDetails="auto"
+            />
           </div>
         </div>
       </SurfaceCard>
 
-      <SurfaceCard class="mt-4" title={t("Registered Headers & Footers")} subtitle={t("At most one published global default per type")}>
+      <SurfaceCard
+        title={t("Registered Headers & Footers")}
+        subtitle={t("At most one published global default per type")}
+        v-slots={{
+          headerActions: () => (
+            <VBtn size="small" variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
+              {t("Refresh")}
+            </VBtn>
+          ),
+        }}
+      >
         {loading.value ? (
-          <div class="py-6 text-center text-medium-emphasis">{t("Loading…")}</div>
+          <StateView loading minHeight="220px" />
+        ) : rows.value.length === 0 ? (
+          <EmptyState
+            title={t("No headers or footers registered")}
+            description={t("Upload a chrome spec above to make it available to reports.")}
+            icon="mdi-page-layout-header-footer"
+          />
         ) : (
           <div class="d-flex flex-column ga-3">
             {rows.value.map((row) => (
-              <div key={row.id} class="pa-3" style={{ border: "1px solid var(--pg-border-subtle)", borderRadius: "8px" }}>
+              <div key={row.id} class="pg-section-fields pa-4" style={{ marginBottom: 0 }}>
                 <div class="d-flex flex-wrap align-center justify-space-between ga-2">
                   <div>
                     <div class="font-weight-medium">
                       {row.name} <span class="text-caption text-medium-emphasis">({row.code} v{row.version})</span>
                     </div>
-                    <div class="d-flex align-center ga-2 mt-1">
+                    <div class="d-flex align-center ga-2 mt-1 flex-wrap">
                       <StatusBadge status={row.chromeType} label={row.chromeType} toneOverride="info" />
                       <StatusBadge status={row.status} label={row.status} toneOverride={row.status === "PUBLISHED" ? "success" : "neutral"} />
                       {row.isDefaultGlobal && <StatusBadge status="DEFAULT" label={t("Global Default")} toneOverride="success" />}
@@ -234,6 +356,15 @@ const ReportsChromePage = dc(() => {
                   <div class="d-flex flex-wrap ga-2">
                     <VBtn size="small" variant="text" onClick={() => (selected.value = selected.value?.id === row.id ? null : row)}>
                       {t("Preview")}
+                    </VBtn>
+                    <VBtn size="small" variant="text" prependIcon="mdi-pencil-outline" onClick={() => editRow(row)}>
+                      {t("Edit")}
+                    </VBtn>
+                    <VBtn size="small" variant="text" prependIcon="mdi-content-copy" onClick={() => void copyCode(row.code)}>
+                      {t("Copy code")}
+                    </VBtn>
+                    <VBtn size="small" variant="text" prependIcon="mdi-download" onClick={() => downloadSpec(row)}>
+                      {t("Download spec")}
                     </VBtn>
                     <VBtn
                       size="small"
@@ -259,7 +390,8 @@ const ReportsChromePage = dc(() => {
                       />
                     </div>
                     <div
-                      style={{ border: "1px dashed var(--pg-border-strong)", padding: "12px", borderRadius: "6px", background: "var(--pg-bg-surface-subtle)" }}
+                      class="pg-section-fields pa-3"
+                      style={{ marginBottom: 0, borderStyle: "dashed" }}
                       innerHTML={previewHtml(row)}
                     />
                     <DescriptionList
@@ -276,7 +408,8 @@ const ReportsChromePage = dc(() => {
           </div>
         )}
       </SurfaceCard>
-    </div>
+      </ThemedView>
+    </ScreenContainer>
   );
 });
 

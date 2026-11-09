@@ -165,6 +165,7 @@
 | `core-back/test/reportEngineSdk/ReportRepairPrompt.test.ts` | 19 | 1 |
 | `core-back/test/reportEngineSdk/ReportTranscriptBuilder.test.ts` | 37 | 2 |
 | `core-back/test/reportEngineSdk/SdkDecoupling.test.ts` | 37 | 2 |
+| `core-back/test/reportEngineSdk/SpecNormalization.test.ts` | 96 | 4 |
 | `core-back/test/reportEngineSdk/SpecStructuralValidator.test.ts` | 32 | 3 |
 | `core-back/test/reportEngineSdk/TransformPipelineExecutor.test.ts` | 95 | 3 |
 | `core-back/test/reportEngineSdk/helpers.ts` | 538 | 0 |
@@ -382,5 +383,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **377**
-- Total literal test declarations: **3899**
+- Total files: **378**
+- Total literal test declarations: **3903**
