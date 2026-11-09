@@ -2,11 +2,30 @@ import "@mdi/font/css/materialdesignicons.css";
 import "vuetify/styles";
 import { createVuetify } from "vuetify";
 import { mdi, aliases } from "vuetify/iconsets/mdi";
+import { initialTheme } from "@/utils/theme";
 
 export default createVuetify({
   theme: {
-    defaultTheme: "dark",
+    defaultTheme: initialTheme(),
     themes: {
+      light: {
+        dark: false,
+        colors: {
+          primary: "#2563eb",
+          secondary: "#64748b",
+          accent: "#3b82f6",
+          error: "#dc2626",
+          info: "#2563eb",
+          success: "#16a34a",
+          warning: "#d97706",
+          background: "#f8fafc",
+          surface: "#ffffff",
+          "surface-variant": "#f1f5f9",
+          "on-surface": "#0f172a",
+          "on-surface-variant": "#64748b",
+          "on-background": "#0f172a",
+        },
+      },
       dark: {
         dark: true,
         colors: {

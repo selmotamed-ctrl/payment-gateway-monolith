@@ -8410,7 +8410,7 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 
 <a id="admin-uisystem"></a>
 
-> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `d695518+working-tree`
 
 # Admin UI System
 
@@ -8489,6 +8489,8 @@ No external font request is required. `tests/e2e/admin/a11y.spec.ts` and the she
 - Component defaults: flat cards with `rounded: "lg"`; 36 px, `rounded: "md"`, no-transform buttons; outlined compact text fields/selects/autocompletes/textareas/comboboxes with `hideDetails: "auto"`; small rounded chips; a `rgba(15, 23, 42, 0.45)` dialog scrim.
 - `VDateInput` receives an outlined default through the blueprint defaults block.
 
+Theme mode is `system | light | dark`. `utils/theme` resolves the persisted mode (localStorage `theme`; absent means `system`) against `prefers-color-scheme`; `state/theme` applies it to Vuetify, listens to `matchMedia` changes while in `system` mode, and syncs across tabs. `plugins/vuetify.ts` uses `initialTheme()` for `defaultTheme` and `main.ts` calls `initTheme()` before mount, so every route (including the login page) starts in the operating-system theme with no light flash. `ThemeMenu` is the explicit three-option menu (System, Light, Dark) used by the shell, the auth layout and the merchant landing header; the old `toggleTheme` remains as a compatibility cycle (system -> light -> dark).
+
 ### 3.4 Primitives and extras
 
 `admin-front/src/components/ui/index.ts` is the primitive barrel. The compliance test requires these 13 named exports:
@@ -8519,7 +8521,7 @@ Additional exported primitives/extras are `SurfaceCardText`, `MetaPill`, `FormCh
 `admin-front/src/layouts/default.tsx` implements the authenticated shell:
 
 - A skip link targeting `#pg-main-content`.
-- A 56 px flat app bar with menu toggle, brand, breadcrumbs, live ledger invariant pill (for `profit.read` or `liquidity.read`), global search trigger (`Ctrl+K`/`Cmd+K`), help button, theme toggle, language menu, and user menu.
+- A 56 px flat app bar with menu toggle, brand, breadcrumbs, live ledger invariant pill (for `profit.read` or `liquidity.read`), global search trigger (`Ctrl+K`/`Cmd+K`), help button, theme mode menu (System/Light/Dark), language menu, and user menu.
 - A 248 px `VNavigationDrawer`, permanent on desktop and temporary below the compact breakpoint. It contains brand/environment badge, guide search pill, collapsible navigation sections, and an operator card with role and maker/checker dots.
 - Route progress bar, focused `VMain`, global search palette, guide search modal, and contextual help drawer.
 - The `?` key opens help when the user is not typing in an input; `Escape` closes the topmost overlay.
@@ -8537,6 +8539,8 @@ Additional exported primitives/extras are `SurfaceCardText`, `MetaPill`, `FormCh
 - Three posture badges: TLS 1.3 mTLS Verified, AES-256-GCM Hardware Vault, Four-Eyes Governance.
 - A live status line.
 - A main panel slot for the login form.
+
+The auth shell also carries the three-mode theme menu in its top-right corner. `initTheme()` runs before mount and `plugins/vuetify.ts` uses `initialTheme()`, so the login page follows the OS theme on first paint and tracks OS changes while in System mode.
 
 The auth shell is presentation only. Authentication, MFA, and session authority enforcement live in the edge and core services.
 
@@ -8676,6 +8680,7 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 ## 10. Change history
 
+- 2026-11-09 — Added system/light/dark theme modes across all four portals: `utils/theme` + `state/theme` resolve the persisted mode against `prefers-color-scheme`, `initialTheme()`/`initTheme()` apply it before mount (login included), a live `matchMedia` listener follows OS changes in System mode, and the explicit `ThemeMenu` replaces the light/dark toggle in the shell, auth layout and merchant landing. See `TRACKER.md`.
 - 2026-11-03 — Initial canonical part created from the v1/v2 UI designs and working-tree code. Records the 13-primitive contract, 248/56 shell, Fake Rails partial rollout, removed app scaling, and the still-present stale files.
 
 ## Security hardening (2026-11-05)
@@ -9941,7 +9946,7 @@ cd ../tests && bunx playwright test --project=admin e2e/admin/guide-reader.spec.
 
 <a id="merchant-uiportal"></a>
 
-> **Part ID:** `merchant-ui.portal` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `merchant-ui.portal` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `d695518+working-tree`
 
 # Merchant Portal
 
@@ -9984,7 +9989,7 @@ The merchant portal is the self-service business workspace:
 
 | Section | Content | Implementation |
 | :--- | :--- | :--- |
-| Sticky header | Brand, anchor nav (How it works / Product / Developers / Security, hidden < 960 px), AR/EN toggle, theme toggle, Login, Get started | `index.tsx`; theme/locale switches run inside a View Transition when supported and motion is allowed. |
+| Sticky header | Brand, anchor nav (How it works / Product / Developers / Security, hidden < 960 px), AR/EN toggle, theme menu (System/Light/Dark), Login, Get started | `index.tsx`; theme/locale switches run inside a View Transition when supported and motion is allowed. |
 | Hero | Two-tone h1 "Collect on any rail. Reconcile every dinar.", lede, CTAs to `Register` and `Login`, three proof points | h1 is the LCP element and is never opacity-hidden. |
 | Hero simulator | Interactive payment-link checkout: five checkout experiences (OTP, QR, push approval, bank redirect, card form = the five `RENDER` client actions), real statuses `AWAITING_CUSTOMER → VERIFYING → SUCCEEDED`, then an illustrative `PLATFORM_CLEARING` journal (Dr gateway clearing / Cr wallet / Cr platform commission) that balances, and a wallet count-up | `HeroDemo.tsx` + `content/landing/landingModel.ts` (decimal.js). Autoplay pauses off-screen, when the tab is hidden and on user pause; play/pause and next-step buttons; rail buttons are `aria-pressed` toggles. |
 | How money moves | Link → hosted checkout → trusted confirmation → double-entry ledger → wallet & cash-out | Responsive horizontal/vertical track that fills on reveal; mirrors in RTL. |
@@ -10030,7 +10035,7 @@ Rules:
 
 `merchant-front/src/layouts/default.tsx` mirrors the admin 248/56 shell:
 
-- 56 px app bar with menu toggle, brand, breadcrumbs, guide search, help, theme, AR/EN language controls and account menu.
+- 56 px app bar with menu toggle, brand, breadcrumbs, guide search, help, theme mode menu (System/Light/Dark), AR/EN language controls and account menu.
 - 248 px drawer permanent on desktop and temporary on compact screens.
 - Drawer sections: Overview, Money, Commerce, Developer.
 - Active navigation uses `meta.parentName` or the longest matching path.
@@ -10040,7 +10045,7 @@ Rules:
 - Route loading bar and focused main content.
 - Skip link and RTL-aware layout.
 
-Public auth pages use `layouts/auth.tsx`. The POS screen page is still under the `/portal` layout but renders a focused full-height status surface.
+Public auth pages use `layouts/auth.tsx`, which carries the same three-mode theme menu in its top-right corner. The theme mode is persisted (`system` by default) and resolved against `prefers-color-scheme`; `initialTheme()`/`initTheme()` apply it before mount, so the login page follows the OS theme on first paint and tracks OS changes live in System mode. The POS screen page is still under the `/portal` layout but renders a focused full-height status surface.
 
 ### 3.4 Onboarding
 
@@ -10307,6 +10312,7 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 
 - 2026-11-03 — Initial canonical merchant portal part. Confirms 16 portal routes, the 248/56 shell, onboarding and money/commerce/developer pages, guide surfaces, and the Statements/route authority and Google OIDC gaps.
 - 2026-11-04 — Public landing page redesigned (§3.1a): hero payment simulator, money-flow track, product bento with fee preview, stats, lazy developer section with a schema-accurate snippet, security, onboarding, FAQ; EN/AR landing catalogue; motion/reduced-motion/RTL rules; new landing unit and e2e tests. Removed unverifiable claims from the old page (fixed "3.00%" commission, "LYD · USD · EUR", "Live"/"All systems operational" badges) and nested `<a><button>` CTAs. `SegmentedTabs` arrow keys now follow the rendered direction in RTL.
+- 2026-11-09 — Added system/light/dark theme modes: persisted mode resolved against `prefers-color-scheme`, applied before mount so the login and landing pages follow the OS theme, live OS tracking in System mode, and an explicit three-option `ThemeMenu` in the shell, auth layout and landing header. See `TRACKER.md`.
 - 2026-11-04 — Landing visual system v2 "Aurora Ledger" (design note §9): new type system (Inter/Geist/Instrument Serif/Readex Pro, self-hosted), aurora/grid/grain backdrop, glass header with scroll progress and active section, word-by-word headline, tilting product stage, rail ticker with pause control, spotlight bento, live BigInt ledger ticker, gradient CTA. Fixed: cramped word spacing (all four portals), dark theme painting only one screen, tiled backgrounds not repeating, RTL chip placement, light-theme contrast. axe-core 0 violations (6 configurations), Playwright merchant 17/17.
 
 ## Security hardening (2026-11-05)
@@ -10604,7 +10610,7 @@ The content test is a Bun test; the Playwright suites require the live stack.
 
 <a id="checkout-uiflow"></a>
 
-> **Part ID:** `checkout-ui.flow` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `checkout-ui.flow` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `5a24f6f+working-tree`
 
 # Checkout Payer Flow
 
@@ -10641,7 +10647,7 @@ The checkout is deliberately narrow and zero-trust:
 - `/` (`Home`) redirects to `NotFound`.
 - `/:pathMatch(.*)*` (`NotFound`) renders the token-styled 404 page.
 - `layouts/checkout.tsx` is a single `<main class="pg-checkout">` with an optional title.
-- The page adds a max-width 560 px column with the merchant name, help button, language toggle, summary card, phase content and footer.
+- The page adds a max-width 560 px column with the merchant name, help button, three-mode theme menu (System/Light/Dark), language toggle, summary card, phase content and footer. The theme mode is persisted and resolved against `prefers-color-scheme`; `initialTheme()`/`initTheme()` apply it before mount, so the payer surface follows the OS theme and tracks OS changes live in System mode.
 
 ### 3.2 Phase machine
 
@@ -10904,6 +10910,7 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 
 ## 10. Change history
 
+- 2026-11-09 — Added system/light/dark theme modes: persisted mode resolved against `prefers-color-scheme`, applied before mount, live OS tracking in System mode, and an explicit three-option `ThemeMenu` in the payer header. See `TRACKER.md`.
 - 2026-11-03 — Initial canonical payer-flow part. Confirms the phase machine, five client-action renderers, SSE status stream, amount breakdown, receipt/return allowlist and the checkout 404 recovery bug.
 
 ## Security hardening (2026-11-05)
@@ -11798,7 +11805,7 @@ Only the outbound webhook path computes signatures (`FakeCryptoSigner` plus six 
 
 <a id="fake-railschaos"></a>
 
-> **Part ID:** `fake-rails.chaos` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `fake-rails.chaos` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `5a24f6f+working-tree`
 
 # Fake Rails Chaos Engine and Tester Portal
 
@@ -12020,7 +12027,7 @@ The router guard redirects unauthenticated non-hosted routes to `/login` and kee
 
 The portal layout has four navigation links and an environment badge. `LiveTransactionFeed` opens the SSE stream with the query token and listens for a subset of event names. `WireInspectorDrawer` shows transaction fields, step events and webhook deliveries. `WebhookComposerModal` fires or disputes a webhook. `RailChaosCard` edits failure chance, latency, primary failure mode, duplicates, out-of-order and corruption.
 
-The SPA is fixed to the portal shell's language and theme; it does not have the admin/merchant i18n catalogue. `tests/e2e/exhaustive/exhaustive-fake-rails-surface.spec.ts` only visits `/login` across three viewports, two locales and two themes while mocking every portal API; it asserts shell geometry, no `#app` transform and no horizontal overflow.
+The SPA has light and dark Vuetify themes and an explicit System/Light/Dark theme menu in the portal app bar and the login card. `main.ts` calls `initTheme()` before mount and `plugins/vuetify.ts` uses `initialTheme()`, so the login page follows `prefers-color-scheme` on first paint; System mode tracks OS changes live. The theme mode is persisted in localStorage under `theme`. The SPA does not have the admin/merchant i18n catalogue. `tests/e2e/exhaustive/exhaustive-fake-rails-surface.spec.ts` visits `/login` across three viewports, two locales and two themes while mocking every portal API; it asserts shell geometry, no `#app` transform and no horizontal overflow.
 
 ## 4. Contracts and invariants
 
@@ -12137,6 +12144,7 @@ curl -X POST http://127.0.0.1:4104/portal-api/webhooks/$TX_ID/fire \
 
 ## 10. Change history
 
+- 2026-11-09: added light/dark themes and the System/Light/Dark theme menu to the tester SPA and login card; the theme follows `prefers-color-scheme` on first paint and tracks OS changes in System mode. See `TRACKER.md`.
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
 
 ## Security hardening (2026-11-05)

@@ -63,7 +63,8 @@ test("landing: language and theme toggles work without reload", async ({ page })
   await page.locator(".pgl-lang button[lang='ar']").click();
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await expect(page.locator("h1")).toContainText("وطابِق كل دينار");
-  await page.getByRole("button", { name: "تبديل المظهر" }).click();
+  await page.getByRole("button", { name: "المظهر" }).click();
+  await page.getByText("داكن", { exact: true }).click();
   await expect(page.locator(".v-theme--dark").first()).toBeVisible();
 });
 

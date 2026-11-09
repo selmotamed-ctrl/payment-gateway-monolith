@@ -312,7 +312,7 @@
 | `tests/e2e/admin/guide-safeguard.spec.ts` | 104 | 1 |
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/operator-cases.spec.ts` | 187 | 2 |
-| `tests/e2e/admin/shell.spec.ts` | 238 | 17 |
+| `tests/e2e/admin/shell.spec.ts` | 254 | 17 |
 | `tests/e2e/admin/table-and-padding-geometry.spec.ts` | 235 | 3 |
 | `tests/e2e/admin/table-row-context-menu.spec.ts` | 217 | 8 |
 | `tests/e2e/admin/wallet-details.spec.ts` | 302 | 12 |
@@ -326,7 +326,7 @@
 | `tests/e2e/fixtures.ts` | 145 | 0 |
 | `tests/e2e/merchant/a11y.spec.ts` | 28 | 1 |
 | `tests/e2e/merchant/auth.spec.ts` | 47 | 2 |
-| `tests/e2e/merchant/landing.spec.ts` | 104 | 5 |
+| `tests/e2e/merchant/landing.spec.ts` | 105 | 5 |
 | `tests/e2e/merchant/shell.spec.ts` | 121 | 9 |
 | `tests/e2e/merchant/table-row-context-menu.spec.ts` | 124 | 3 |
 | `tests/e2e-live/live.spec.ts` | 153 | 6 |

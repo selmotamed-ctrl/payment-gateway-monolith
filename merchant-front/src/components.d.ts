@@ -90,6 +90,7 @@ declare module 'vue' {
     ThemeAndLanguageControls: typeof import('./components/ThemeAndLanguageControls/index.tsx')['default']
     ThemedText: typeof import('./components/ThemedText/index.tsx')['default']
     ThemedView: typeof import('./components/ThemedView/index.tsx')['default']
+    ThemeMenu: typeof import('./components/ThemeMenu/index.tsx')['default']
   }
 }
 
@@ -173,4 +174,5 @@ declare global {
   const ThemeAndLanguageControls: typeof import('./components/ThemeAndLanguageControls/index.tsx')['default']
   const ThemedText: typeof import('./components/ThemedText/index.tsx')['default']
   const ThemedView: typeof import('./components/ThemedView/index.tsx')['default']
+  const ThemeMenu: typeof import('./components/ThemeMenu/index.tsx')['default']
 }

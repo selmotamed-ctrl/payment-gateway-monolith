@@ -6,7 +6,7 @@ Generated from: `merchant-ui.portal`, `merchant-ui.guide`.
 
 ## Merchant Portal
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-09
 
 ## 1. Purpose and scope
 
@@ -47,7 +47,7 @@ The merchant portal is the self-service business workspace:
 
 | Section | Content | Implementation |
 | :--- | :--- | :--- |
-| Sticky header | Brand, anchor nav (How it works / Product / Developers / Security, hidden < 960 px), AR/EN toggle, theme toggle, Login, Get started | `index.tsx`; theme/locale switches run inside a View Transition when supported and motion is allowed. |
+| Sticky header | Brand, anchor nav (How it works / Product / Developers / Security, hidden < 960 px), AR/EN toggle, theme menu (System/Light/Dark), Login, Get started | `index.tsx`; theme/locale switches run inside a View Transition when supported and motion is allowed. |
 | Hero | Two-tone h1 "Collect on any rail. Reconcile every dinar.", lede, CTAs to `Register` and `Login`, three proof points | h1 is the LCP element and is never opacity-hidden. |
 | Hero simulator | Interactive payment-link checkout: five checkout experiences (OTP, QR, push approval, bank redirect, card form = the five `RENDER` client actions), real statuses `AWAITING_CUSTOMER → VERIFYING → SUCCEEDED`, then an illustrative `PLATFORM_CLEARING` journal (Dr gateway clearing / Cr wallet / Cr platform commission) that balances, and a wallet count-up | `HeroDemo.tsx` + `content/landing/landingModel.ts` (decimal.js). Autoplay pauses off-screen, when the tab is hidden and on user pause; play/pause and next-step buttons; rail buttons are `aria-pressed` toggles. |
 | How money moves | Link → hosted checkout → trusted confirmation → double-entry ledger → wallet & cash-out | Responsive horizontal/vertical track that fills on reveal; mirrors in RTL. |
@@ -93,7 +93,7 @@ Rules:
 
 `merchant-front/src/layouts/default.tsx` mirrors the admin 248/56 shell:
 
-- 56 px app bar with menu toggle, brand, breadcrumbs, guide search, help, theme, AR/EN language controls and account menu.
+- 56 px app bar with menu toggle, brand, breadcrumbs, guide search, help, theme mode menu (System/Light/Dark), AR/EN language controls and account menu.
 - 248 px drawer permanent on desktop and temporary on compact screens.
 - Drawer sections: Overview, Money, Commerce, Developer.
 - Active navigation uses `meta.parentName` or the longest matching path.
@@ -103,7 +103,7 @@ Rules:
 - Route loading bar and focused main content.
 - Skip link and RTL-aware layout.
 
-Public auth pages use `layouts/auth.tsx`. The POS screen page is still under the `/portal` layout but renders a focused full-height status surface.
+Public auth pages use `layouts/auth.tsx`, which carries the same three-mode theme menu in its top-right corner. The theme mode is persisted (`system` by default) and resolved against `prefers-color-scheme`; `initialTheme()`/`initTheme()` apply it before mount, so the login page follows the OS theme on first paint and tracks OS changes live in System mode. The POS screen page is still under the `/portal` layout but renders a focused full-height status surface.
 
 ### 3.4 Onboarding
 
@@ -370,6 +370,7 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 
 - 2026-11-03 — Initial canonical merchant portal part. Confirms 16 portal routes, the 248/56 shell, onboarding and money/commerce/developer pages, guide surfaces, and the Statements/route authority and Google OIDC gaps.
 - 2026-11-04 — Public landing page redesigned (§3.1a): hero payment simulator, money-flow track, product bento with fee preview, stats, lazy developer section with a schema-accurate snippet, security, onboarding, FAQ; EN/AR landing catalogue; motion/reduced-motion/RTL rules; new landing unit and e2e tests. Removed unverifiable claims from the old page (fixed "3.00%" commission, "LYD · USD · EUR", "Live"/"All systems operational" badges) and nested `<a><button>` CTAs. `SegmentedTabs` arrow keys now follow the rendered direction in RTL.
+- 2026-11-09 — Added system/light/dark theme modes: persisted mode resolved against `prefers-color-scheme`, applied before mount so the login and landing pages follow the OS theme, live OS tracking in System mode, and an explicit three-option `ThemeMenu` in the shell, auth layout and landing header. See `TRACKER.md`.
 - 2026-11-04 — Landing visual system v2 "Aurora Ledger" (design note §9): new type system (Inter/Geist/Instrument Serif/Readex Pro, self-hosted), aurora/grid/grain backdrop, glass header with scroll progress and active section, word-by-word headline, tilting product stage, rail ticker with pause control, spotlight bento, live BigInt ledger ticker, gradient CTA. Fixed: cramped word spacing (all four portals), dark theme painting only one screen, tiled backgrounds not repeating, RTL chip placement, light-theme contrast. axe-core 0 violations (6 configurations), Playwright merchant 17/17.
 
 ## Security hardening (2026-11-05)

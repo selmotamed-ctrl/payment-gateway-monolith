@@ -15,6 +15,7 @@ import { QrOrCodeRenderer } from "@/components/renderers/QrOrCodeRenderer";
 import { PushOrTransferRenderer } from "@/components/renderers/PushOrTransferRenderer";
 import { PerRailInstructionsBanner } from "@/components/help/PerRailInstructionsBanner";
 import { CheckoutHelpDrawer } from "@/components/help/CheckoutHelpDrawer";
+import ThemeMenu from "@/components/ThemeMenu";
 import type {
     AttemptSnapshot,
     AttemptStatus,
@@ -562,6 +563,7 @@ const PayPage = dc(() => {
                         {summary.value?.merchantTradeName ?? ""}
                     </span>
                     <div style={{ display: "flex", alignItems: "center", gap: "2px", flexShrink: 0 }}>
+                        <ThemeMenu />
                         <VBtn
                             icon
                             variant="text"
