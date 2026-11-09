@@ -175,7 +175,20 @@ describe("prisma schema", () => {
     // The automation plan adds one migration per item; the ledger query/index optimisation is applied after them
     // (schema version 25) so its partition function carries both the automation security hardening and the
     // append-only autovacuum settings. The newest migration must be well-formed and set the required version.
-    expect(ordered.at(-1)).toBe("20261109210000_ledger_query_and_index_optimization");
+    // 20261110090000 (v26) redefines ensure_journal_line_partitions for databases that applied v25
+    // before it was revised: `prisma migrate deploy` never re-runs an applied migration.
+    expect(ordered.at(-1)).toBe("20261110090000_resilient_journal_partitions");
+    expect(ordered).toContain("20261109210000_ledger_query_and_index_optimization");
+    const resilient = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
+    const v25 = fs.readFileSync(path.join(migrationsDirectory, "20261109210000_ledger_query_and_index_optimization", "migration.sql"), "utf8");
+    const fnOf = (sql: string) => sql.slice(sql.indexOf("CREATE OR REPLACE FUNCTION ensure_journal_line_partitions"), sql.indexOf("$$;", sql.indexOf("CREATE OR REPLACE FUNCTION ensure_journal_line_partitions")));
+    // Both define the same body, so a fresh database and an upgraded one end up identical.
+    expect(fnOf(resilient).replace(/\r\n/g, "\n")).toBe(fnOf(v25).replace(/\r\n/g, "\n"));
+    expect(fnOf(resilient)).toContain("WHEN check_violation THEN");
+    expect(fnOf(resilient)).toContain("SET lock_timeout = '5s'");
+    // The blocking index rebuild is skipped when the index already has its target definition.
+    expect(v25).toContain("right(pg_get_indexdef(c.oid), length(spec.target_tail)) = spec.target_tail");
+    expect(v25).toContain("SET lock_timeout = '10s';");
     expect(ordered).toContain("20261109200000_merchant_webhooks");
     expect(ordered).toContain("20261109130000_journal_partition_worker");
     expect(ordered).toContain("20261109120000_outbox_dead_letter_worker_cursors");
@@ -186,7 +199,7 @@ describe("prisma schema", () => {
     expect(guard).not.toContain("schema_versions");
     const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
     expect(newest).toMatch(new RegExp(`UPDATE "schema_versions"\\s+SET "version" = ${REQUIRED_SCHEMA_VERSION}\\b`));
-    expect(REQUIRED_SCHEMA_VERSION).toBe(25);
+    expect(REQUIRED_SCHEMA_VERSION).toBe(26);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),

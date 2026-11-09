@@ -1221,7 +1221,7 @@ The storage engine is constructed before `listen`, but after the server object i
 
 ### 3.5 Schema version check
 
-`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 25`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
+`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 26`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
 
 ```sql
 SELECT "version" FROM "schema_versions" WHERE "id" = 1
@@ -5314,7 +5314,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 25 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 26 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -5369,7 +5369,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 25`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 26`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5382,7 +5382,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261109210000_ledger_query_and_index_optimization`, schema version 25). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261110090000_resilient_journal_partitions`, schema version 26). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -5574,7 +5574,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 84 models and 105 enums in the Prisma datamodel.
-- Schema version 25 with an equality check used by the seeders.
+- Schema version 26 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -5677,7 +5677,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 25 (`REQUIRED_SCHEMA_VERSION = 25`; model count 84). The schema migrations since version 10 are:
+The current schema version is 26 (`REQUIRED_SCHEMA_VERSION = 26`; model count 84). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -5689,6 +5689,8 @@ The current schema version is 25 (`REQUIRED_SCHEMA_VERSION = 25`; model count 84
 - `20261107150000_shard_repairs` (version 14): `gl_shard_checkpoints.baseline_seq` (the exemption marker of a re-baselined shard) and the append-only history table `gl_shard_repairs` (see `core.ledger` 3.10).
 - `20261108090000_partition_truncate_guard` (functions and triggers only; `schema_versions` stays at 14): `pgw_guard_journal_line_partition(regclass)` installs the `pgw_journal_lines_no_truncate` statement trigger only when it is missing; `ensure_journal_line_partitions` (run daily by the deploy cron) calls it for every partition it covers, and the migration backfills every existing partition. Statement-level TRUNCATE triggers are not cloned from the partitioned parent, so partitions created after `20261105090000_append_only_ledger_guards` could be truncated by their owner without meeting the guard.
 - `20261107120000_inbound_event_claims` (version 13): adds nullable `inbound_events.claimed_at` and `claimed_by` plus `(processed_at, claimed_at)`, the durable lease the inbound webhook worker uses to prevent duplicate processing across a brief leadership overlap.
+- `20261109210000_ledger_query_and_index_optimization` (version 25): covering indexes and append-only autovacuum (see `core.ledger`). Revised 2026-11-10 before any production use: `SET lock_timeout = '10s'`, each `journal_lines` covering index is rebuilt only when `pg_get_indexdef` differs from its target (so an index pre-built online is never rebuilt, see section 13), and the resilient `ensure_journal_line_partitions`.
+- `20261110090000_resilient_journal_partitions` (version 26): redefines `ensure_journal_line_partitions` for databases that applied version 25 before that revision (`prisma migrate deploy` never re-runs an applied migration: verified 2026-11-10). A month that cannot be created (rows already in `journal_lines_default`: `check_violation`; a lock wait over 5 s: `lock_not_available`) is skipped with a WARNING instead of aborting the call; storage parameters are set only on a partition the call creates; `lock_timeout = 5s`, `timezone = UTC`.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -5711,6 +5713,35 @@ The application is not available for the duration, and an old binary posting whi
 6. **If the window is too long for the lock scan**, the lower-impact variant is a hand-applied pre-step on the production database, run before the deploy and reviewed by two people (maker-checker for operations): `ALTER TABLE journal_lines ADD CONSTRAINT journal_lines_shard_id_range CHECK (shard_id >= 0 AND shard_id < 256) NOT VALID;` then `ALTER TABLE journal_lines VALIDATE CONSTRAINT journal_lines_shard_id_range;` (the validate step takes only `SHARE UPDATE EXCLUSIVE`) and `CREATE INDEX CONCURRENTLY` for each partition's index. The migration's own `ADD CONSTRAINT`/`CREATE INDEX` statements would then fail on the existing names, so this variant requires a reviewed copy of the migration with those statements guarded by `IF NOT EXISTS`/skipped, applied via `prisma migrate resolve`. Do this only with a rehearsal; the default recommendation is the window.
 
 Open: a deploy-time guard that refuses to run this migration on a database with a large `journal_lines` unless the operator passes an explicit acknowledgement is not implemented. The pipeline already takes a pre-migration dump and probes pending migrations (`deploy/deploy.ts` `probeMigrationState`), so the guard would extend that probe.
+
+## 13. Runbook: applying `20261109210000_ledger_query_and_index_optimization` to a populated database (2026-11-10)
+
+Fresh and small databases need nothing special. On a populated ledger the migration's index builds are plain `CREATE INDEX`: a migration runs as one transaction, and `CONCURRENTLY` is refused both inside a transaction and on a partitioned parent, so a build blocks ledger writes for its whole duration. Since 2026-11-10 every build is skipped when the index already has its target definition, so build them online first, then deploy.
+
+1. `journal_entries` (not partitioned), with `psql` outside a transaction:
+
+   ```sql
+   CREATE INDEX CONCURRENTLY IF NOT EXISTS "journal_entries_created_at_idx" ON "journal_entries" ("created_at") INCLUDE ("id", "ref_type", "ref_id");
+   CREATE INDEX CONCURRENTLY IF NOT EXISTS "journal_entries_trgm_search_idx" ON "journal_entries" USING gin ("ref_id" gin_trgm_ops, "description" gin_trgm_ops);
+   ```
+
+2. `journal_lines` (partitioned): for each of the two indexes, create the parent index `ON ONLY` (instant, invalid), build every partition's index `CONCURRENTLY` and attach it (the parent becomes valid once every partition is attached), then swap the names. For `journal_lines_entry_id_created_at_idx`:
+
+   ```sql
+   CREATE INDEX journal_lines_entry_cov_new ON ONLY journal_lines (entry_id, created_at) INCLUDE (gl_account_id, direction, amount, id);
+   -- for every partition P: SELECT inhrelid::regclass FROM pg_inherits WHERE inhparent = 'journal_lines'::regclass;
+   CREATE INDEX CONCURRENTLY <P>_entry_cov_new ON <P> (entry_id, created_at) INCLUDE (gl_account_id, direction, amount, id);
+   ALTER INDEX journal_lines_entry_cov_new ATTACH PARTITION <P>_entry_cov_new;
+   -- once indisvalid is true for journal_lines_entry_cov_new (a brief ACCESS EXCLUSIVE, no scan):
+   DROP INDEX journal_lines_entry_id_created_at_idx;
+   ALTER INDEX journal_lines_entry_cov_new RENAME TO journal_lines_entry_id_created_at_idx;
+   ```
+
+   Repeat for `journal_lines_account_id_cov_idx` with `(gl_account_id, created_at) INCLUDE (direction, amount, entry_id, id)`. A partition created while this runs needs its own build and attach before the parent is valid.
+
+3. Deploy. The migration finds the target definitions (`NOTICE ... already has its target definition; not rebuilt`) and only applies the autovacuum settings, redefines `ensure_journal_line_partitions` and ensures the partitions. `lock_timeout = 10s` makes it fail fast instead of queueing postings behind its locks; rerun the deploy if it times out. A month whose rows already sit in `journal_lines_default` is skipped with a WARNING: move those rows out of the default partition, then the next `JournalPartitionWorker` run creates it.
+
+These steps, the guard and the resilient function were rehearsed on embedded PostgreSQL 17 (PGlite) through the real `prisma migrate deploy`; rehearse on a restored PostgreSQL 18 backup before a production run.
 
 ## Remediation round 2 (2026-11-08): session revocations
 
