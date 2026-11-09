@@ -290,6 +290,8 @@ export const urlsMap = {
     reportEngineTranscript: "v1/admin/report-engine/transcript",
     reportEngineVerify: "v1/admin/report-engine/specs/verify",
     reportEngineSpecs: "v1/admin/report-engine/specs",
+    reportEngineSpecDetail: (id: string) => `v1/admin/report-engine/specs/${encodeURIComponent(id)}`,
+    reportEngineArchive: (id: string) => `v1/admin/report-engine/specs/${encodeURIComponent(id)}/archive`,
     reportEngineOverride: (id: string) => `v1/admin/report-engine/specs/${encodeURIComponent(id)}/authority-override`,
     reportEngineCatalog: "v1/admin/report-engine/catalog",
     reportEngineAutocomplete: (sourceKey: string) => `v1/admin/report-engine/autocomplete/${encodeURIComponent(sourceKey)}`,

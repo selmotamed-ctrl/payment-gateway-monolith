@@ -36,6 +36,16 @@ type PendingAmlBypass = {
   canDecide: boolean;
 };
 
+type VersionRow = {
+  id: string;
+  code: string;
+  version: number;
+  status: string;
+  isLatestPublished: boolean;
+  createdAt: string;
+  publishedAt: string | null;
+};
+
 type VerificationReport = {
   valid: boolean;
   specVersion: string | null;
@@ -122,6 +132,8 @@ const ReportsStudioPage = dc(() => {
   const allowConfidentialAmlBypass = ref(false);
   const amlApprovalId = ref<string | null>(null);
   const pendingAml = ref<PendingAmlBypass[]>([]);
+  const historyRows = ref<VersionRow[]>([]);
+  const savedSpecCode = ref<string | null>(null);
 
   const canApproveAml = computed(
     () => ["MLRO", "SECURITY_ADMIN"].includes(String(user.value?.userInfo?.role ?? "")),
@@ -213,7 +225,9 @@ const ReportsStudioPage = dc(() => {
         publish,
       });
       savedSpecId.value = String(response.data?.id ?? "");
+      savedSpecCode.value = String(response.data?.code ?? "");
       notice.value = publish ? t("Report published") : t("Report saved as verified");
+      await loadHistory(savedSpecCode.value);
     } catch (caught) {
       error.value = caught instanceof Error ? caught.message : String(caught);
     } finally {
@@ -281,6 +295,30 @@ const ReportsStudioPage = dc(() => {
       );
       notice.value = approve ? t("AML bypass approved") : t("AML bypass rejected");
       amlApprovalId.value = null;
+    } catch (caught) {
+      error.value = caught instanceof Error ? caught.message : String(caught);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  const loadHistory = async (code?: string | null) => {
+    if (!code) return;
+    try {
+      const response = await api.get(urlsMap.reportEngineSpecs, { params: { code } });
+      historyRows.value = (response.data?.specs ?? []) as VersionRow[];
+    } catch {
+      historyRows.value = [];
+    }
+  };
+
+  const archiveVersion = async (id: string) => {
+    busy.value = true;
+    error.value = null;
+    try {
+      await api.post(urlsMap.reportEngineArchive(id), {});
+      notice.value = t("Report version archived");
+      await loadHistory(savedSpecCode.value);
     } catch (caught) {
       error.value = caught instanceof Error ? caught.message : String(caught);
     } finally {
@@ -496,6 +534,50 @@ const ReportsStudioPage = dc(() => {
                   </>
                 )}
               </div>
+            </div>
+          )}
+        </SurfaceCard>
+      )}
+
+      {savedSpecCode.value && (
+        <SurfaceCard class="mt-4" title={t("Version history")} subtitle={t("Published and verified versions of this report")}>
+          <div class="d-flex justify-end mb-2">
+            <VBtn size="small" variant="tonal" onClick={() => void loadHistory(savedSpecCode.value)}>
+              {t("Refresh history")}
+            </VBtn>
+          </div>
+          {historyRows.value.length === 0 ? (
+            <div class="text-medium-emphasis">{t("No versions found")}</div>
+          ) : (
+            <div class="table-wrapper">
+              <table class="modern-table">
+                <thead>
+                  <tr>
+                    <th>{t("Version")}</th>
+                    <th>{t("Status")}</th>
+                    <th>{t("Created At")}</th>
+                    <th>{t("Published At")}</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyRows.value.map((row) => (
+                    <tr key={row.id}>
+                      <td>v{row.version}{row.isLatestPublished ? ` · ${t("latest")}` : ""}</td>
+                      <td><StatusBadge status={row.status} label={row.status} /></td>
+                      <td>{String(row.createdAt).slice(0, 19).replace("T", " ")}</td>
+                      <td>{row.publishedAt ? String(row.publishedAt).slice(0, 19).replace("T", " ") : "—"}</td>
+                      <td class="text-end">
+                        {row.status !== "ARCHIVED" && (
+                          <VBtn size="small" variant="tonal" onClick={() => void archiveVersion(row.id)}>
+                            {t("Archive")}
+                          </VBtn>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </SurfaceCard>

@@ -38,7 +38,6 @@ gaps:
   - `REPORT_READONLY_DATABASE_URL` may point at a replica, but replica routing is not verified in the report executor on a live multi-host deployment.
   - Report execution audits record the actor, scope and verification hash but do not yet copy the audit row into the dedicated audit database.
   - The merchant portal runs merchant-safe reports; it does not author reports or manage chrome.
-  - Archive/list APIs exist but the admin Studio has no version-history page yet.
 ---
 
 # Dynamic Report Engine SDK and Report Studio Host
@@ -164,3 +163,11 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - Chrome templates, inline chrome, `global_scoped_css` and custom SVG templates are sanitized. `<style>`, external `src`/`href`, `@import`, event handlers and executable URI schemes are rejected.
 - Chrome `required_assets` are loaded during execution and during the Chrome preview.
 - Schema version 27 adds the AML bypass flag, latest-published uniqueness and append-only execution audit.
+
+## 11. Performance, transcript and DSL completeness
+
+- Datasets execute with bounded concurrency (4) on the read-only pool; each dataset still runs in its own read-only transaction, and transforms run after all datasets complete.
+- Window functions are evaluated over the full filtered/grouped result, then the dataset `ORDER BY`/`LIMIT` is applied. Base columns referenced only by window/order clauses are added to the inner projection so the window query remains valid.
+- The AI transcript now includes the complete report field reference, dataset/query operators, transforms, sections, inputs, assets, merchant-scope rules, suggested access and chrome fields. The chrome transcript documents height, first-page, border, asset dimensions and every allowed variable.
+- `suggested_access` is validated and surfaced as a warning when it grants a role/authority the queried models do not naturally allow.
+- Chrome `max_width_mm`/`max_height_mm` are applied to `asset://` images when the template does not already set an inline style.

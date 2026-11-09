@@ -383,7 +383,7 @@ async function executeReport(
   const datasets: DatasetMap = {};
   let rowCountTotal = 0;
   let servedByNode = "readonly-pool";
-  for (const ds of spec.datasets) {
+  const datasetResults = await mapWithConcurrency(spec.datasets, 4, async (ds) => {
     const compiled = compileDatasetQueryToSql(ds, host, inputsUsed, {
       userId: input.actor.userId,
       nowUtcIso: nowIso,
@@ -395,9 +395,15 @@ async function executeReport(
       maxRows: Math.min(ds.limit, host.globalLimits.maxRowsPerDataset),
       queryLabel: `report_${spec.report.code}_${ds.dataset_id}`,
     });
-    datasets[ds.dataset_id] = result.rows.map((row) =>
-      redactPiiRow(ds, row, host, input.actor),
-    );
+    return {
+      datasetId: ds.dataset_id,
+      rows: result.rows.map((row) => redactPiiRow(ds, row, host, input.actor)),
+      rowCount: result.rowCount,
+      servedBy: result.servedBy,
+    };
+  });
+  for (const result of datasetResults) {
+    datasets[result.datasetId] = result.rows;
     rowCountTotal += result.rowCount;
     servedByNode = result.servedBy;
   }
@@ -501,4 +507,23 @@ async function executeReport(
     durationMs: Math.round(performance.now() - startedAt),
     servedByNode,
   };
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const runners = Array.from({ length: Math.min(Math.max(limit, 1), items.length) }, async () => {
+    while (true) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index]!, index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
 }

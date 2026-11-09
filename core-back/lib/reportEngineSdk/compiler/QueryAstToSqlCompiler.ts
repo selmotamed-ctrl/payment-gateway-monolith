@@ -240,6 +240,26 @@ export function compileDatasetQueryToSql(
 
   const selectAliases = new Map<string, DatasetSelectField>(ds.select.map((s) => [s.alias, s]));
   const baseSelectSql = ds.select.map((s) => compileSelectField(s)).join(", ");
+  const windowExtraFields = new Set<string>();
+  if (ds.window_fields.length > 0) {
+    for (const window of ds.window_fields) {
+      for (const field of [
+        window.target_field,
+        ...window.partition_by,
+        ...window.order_by.map((order) => order.field),
+      ]) {
+        if (!selectAliases.has(field) && baseModel.columns[field]) windowExtraFields.add(field);
+      }
+    }
+    for (const order of ds.order_by) {
+      if (!selectAliases.has(order.field) && baseModel.columns[order.field]) {
+        windowExtraFields.add(order.field);
+      }
+    }
+  }
+  const windowExtraSelectSql = [...windowExtraFields]
+    .map((field) => `${resolveColumnSql(undefined, field)} AS ${quoteIdent(field)}`)
+    .join(", ");
   const fromSql = `FROM ${quoteIdent(baseModel.tableName)} AS ${quoteIdent(ds.from_alias)}`;
   const whereClause = ds.where ? compileWhereNode(ds.where) : null;
   const whereSql = whereClause ? `WHERE ${whereClause}` : "";
@@ -305,7 +325,7 @@ export function compileDatasetQueryToSql(
   // already-limited page. Build the base query without ORDER BY/LIMIT, apply
   // the window functions, then order and limit the windowed rows.
   const windowBaseSql = [
-    `SELECT ${baseSelectSql}`,
+    `SELECT ${baseSelectSql}${windowExtraSelectSql ? `, ${windowExtraSelectSql}` : ""}`,
     fromSql,
     ...joinClauses,
     whereSql,

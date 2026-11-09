@@ -7448,6 +7448,14 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - Chrome `required_assets` are loaded during execution and during the Chrome preview.
 - Schema version 27 adds the AML bypass flag, latest-published uniqueness and append-only execution audit.
 
+## 11. Performance, transcript and DSL completeness
+
+- Datasets execute with bounded concurrency (4) on the read-only pool; each dataset still runs in its own read-only transaction, and transforms run after all datasets complete.
+- Window functions are evaluated over the full filtered/grouped result, then the dataset `ORDER BY`/`LIMIT` is applied. Base columns referenced only by window/order clauses are added to the inner projection so the window query remains valid.
+- The AI transcript now includes the complete report field reference, dataset/query operators, transforms, sections, inputs, assets, merchant-scope rules, suggested access and chrome fields. The chrome transcript documents height, first-page, border, asset dimensions and every allowed variable.
+- `suggested_access` is validated and surfaced as a warning when it grants a role/authority the queried models do not naturally allow.
+- Chrome `max_width_mm`/`max_height_mm` are applied to `asset://` images when the template does not already set an inline style.
+
 ---
 
 <a id="edgeshared"></a>
@@ -10162,7 +10170,7 @@ The Catalog has All / Backoffice Internal / Merchant Reports tabs. Chrome select
 
 The Studio reports the domain filter using catalog domains (`LEDGER`, `PAYMENTS`, ...), can download the Chrome transcript, supports clearing an override, and can request a confidential AML bypass. An MLRO or Security Admin sees the pending bypass list and can approve/reject it; maker and checker must differ.
 
-The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type.
+The Studio loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type.
 
 ---
 

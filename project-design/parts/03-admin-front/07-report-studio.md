@@ -23,7 +23,6 @@ gaps:
   - The catalog has no archive/restore action beyond the spec status.
   - The Studio does not yet expose a visual drag-and-drop section builder; sections are edited as structured JSON with a live preview.
   - The `.zip` upload stores assets locally on the core host; there is no object-store picker.
-  - Archive/list APIs exist, but there is no dedicated version-history page yet.
 ---
 
 # Report Catalog, Studio and Chrome
@@ -84,4 +83,4 @@ The Catalog has All / Backoffice Internal / Merchant Reports tabs. Chrome select
 
 The Studio reports the domain filter using catalog domains (`LEDGER`, `PAYMENTS`, ...), can download the Chrome transcript, supports clearing an override, and can request a confidential AML bypass. An MLRO or Security Admin sees the pending bypass list and can approve/reject it; maker and checker must differ.
 
-The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type.
+The Studio loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type.

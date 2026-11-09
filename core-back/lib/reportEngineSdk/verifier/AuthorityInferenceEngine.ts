@@ -104,6 +104,26 @@ export function inferReportAuthorities(
     }
   }
 
+  for (const role of spec.suggested_access?.roles ?? []) {
+    if (!inferredNaturalRoles.includes(role)) {
+      conflictDetails.push({
+        code: "SUGGESTED_ACCESS_CONFLICT",
+        message: `suggested_access grants role "${role}", but the queried models do not naturally allow that role.`,
+        resolutionHint:
+          "Remove the suggestion or use a Security Admin authority override with a written justification.",
+      });
+    }
+  }
+  for (const authority of spec.suggested_access?.authorities ?? []) {
+    if (!inferredRequiredAuthorities.includes(authority)) {
+      conflictDetails.push({
+        code: "SUGGESTED_AUTHORITY_NOT_REQUIRED",
+        message: `suggested_access grants authority "${authority}", but the queried models do not require it.`,
+        resolutionHint: "Keep only authorities the queried models actually require.",
+      });
+    }
+  }
+
   let conflictStatus: AuthorityInferenceResult["conflictStatus"] = "NONE";
   if (
     requiresConfidentialAmlAccess &&

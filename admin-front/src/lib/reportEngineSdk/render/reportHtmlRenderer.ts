@@ -252,6 +252,19 @@ export function renderChromeHtml(params: {
   for (const [key, value] of Object.entries(variables)) {
     html = html.replace(new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "g"), escapeHtml(value));
   }
+  for (const asset of chrome.required_assets) {
+    if (!asset.max_width_mm && !asset.max_height_mm) continue;
+    const escapedKey = asset.asset_key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const imagePattern = new RegExp(`(<img[^>]*src=["']asset://${escapedKey}["'][^>]*)>`, "gi");
+    html = html.replace(imagePattern, (match, attrs: string) => {
+      if (/\bstyle=/i.test(attrs)) return match;
+      const styles = [
+        asset.max_width_mm ? `max-width:${asset.max_width_mm}mm` : "",
+        asset.max_height_mm ? `max-height:${asset.max_height_mm}mm` : "",
+      ].filter(Boolean).join(";");
+      return `${attrs} style="${styles}" />`;
+    });
+  }
   html = html.replace(/asset:\/\/([a-zA-Z0-9_-]+)/g, (_m, key: string) => bundle.assetDataUrls[key] ?? "");
   const borderClass = chrome.chrome.border_style === "NONE"
     ? ""

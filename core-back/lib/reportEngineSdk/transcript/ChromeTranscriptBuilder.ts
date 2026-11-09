@@ -34,7 +34,14 @@ export function buildChromeAuthoringTranscript(
     JSON.stringify(exampleChromeSpec, null, 2),
     "```",
     ``,
-    `## 4. Page Layout Integration`,
+    `## 4. Chrome Field Reference`,
+    `- \`chrome\`: \`code\` (kebab-case), \`name\`, \`chrome_type\` (HEADER | FOOTER), optional \`description\`, \`height_mm\` (8-45), \`show_on_first_page\`, \`border_style\` (NONE, THIN_RULE, DOUBLE_BANK_RULE, ACCENT_BAND).`,
+    `- \`required_assets[]\`: \`asset_key\`, flat \`file_name\`, \`mime_type\` (image/png, image/jpeg, image/webp, image/svg+xml), \`alt_i18n_key\`, optional \`max_width_mm\`/\`max_height_mm\`. Reference as \`asset://asset_key\`.`,
+    `- \`i18n\`: \`default_locale\` and complete \`locales.en\` + \`locales.ar\` dictionaries. Every \`{{$t.key}}\` and every \`alt_i18n_key\` must exist in every locale.`,
+    `- \`template\`: sanitized \`html\`, \`scoped_css\`, and \`used_variables\`. Allowed variables are listed in section 2. Use page counters exactly as described in section 1.`,
+    `- \`show_on_first_page=false\` suppresses this header/footer on page 1. \`height_mm\` is the chrome slot height; \`border_style\` draws the rule.`,
+    ``,
+    `## 5. Page Layout Integration`,
     `A report selects this chrome with \`page_layout.header_mode/footer_mode\` = \`GLOBAL_DEFAULT\`, \`SPECIFIC_CHROME_CODE\` (with \`header_chrome_code\`/\`footer_chrome_code\`), \`INLINE_SPEC\`, or \`NONE\`. Only one published HEADER and one published FOOTER can be the global default at a time.`,
   ].join("\n");
 
