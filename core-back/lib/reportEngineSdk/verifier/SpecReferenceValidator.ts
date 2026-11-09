@@ -3,6 +3,43 @@ import type { ReportDescriptorSpec } from "../types/reportSpec";
 import type { ReportDiagnostic } from "../types/diagnostics";
 import { validateSafeHtmlAndScopedCss } from "./CssAndHtmlSanitizer";
 
+const levenshtein = (left: string, right: string): number => {
+  const a = left.toLowerCase();
+  const b = right.toLowerCase();
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    let diagonal = previous[0]!;
+    previous[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const above = previous[j]!;
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      previous[j] = Math.min(previous[j]! + 1, previous[j - 1]! + 1, diagonal + cost);
+      diagonal = above;
+    }
+  }
+  return previous[b.length]!;
+};
+
+const closestMatch = (value: string, candidates: Iterable<string>): string | null => {
+  let best: string | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    if (candidate === "*" || candidate === value) continue;
+    const distance = levenshtein(value, candidate);
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+  return best && bestDistance <= Math.max(2, Math.floor(value.length / 3)) ? best : null;
+};
+
+const formatAvailable = (values: Iterable<string>, limit = 30): string => {
+  const list = [...values].filter((value) => value !== "*").sort();
+  if (list.length === 0) return "(none)";
+  return list.length > limit ? `${list.slice(0, limit).join(", ")} … (${list.length} total)` : list.join(", ");
+};
+
 export function validateSpecReferences(
   spec: ReportDescriptorSpec,
   host: ReportEngineHostConfig,
@@ -85,7 +122,14 @@ export function validateSpecReferences(
     }
   }
 
-  const transformOutputs = new Set<string>();
+  // Layer 1 field registry: select aliases, window aliases and transform outputs.
+  const datasetFields = new Map<string, Set<string>>();
+  for (const ds of spec.datasets) {
+    const fields = new Set<string>(ds.select.map((select) => select.alias));
+    for (const window of ds.window_fields) fields.add(window.alias);
+    datasetFields.set(ds.dataset_id, fields);
+  }
+
   for (let i = 0; i < spec.transforms.length; i++) {
     const transform = spec.transforms[i]!;
     const sourceIds = "source_dataset_id" in transform
@@ -94,14 +138,14 @@ export function validateSpecReferences(
         ? [transform.left_dataset_id, transform.right_dataset_id]
         : [transform.target_dataset_id];
     for (const source of sourceIds) {
-      if (!datasetIds.has(source) && !transformOutputs.has(source)) {
+      if (!datasetFields.has(source)) {
         diagnostics.push({
           layer: 1,
           severity: "error",
           path: `transforms[${i}]`,
           code: "UNKNOWN_TRANSFORM_DATASET",
-          message: `Transform references unknown dataset "${source}".`,
-          aiFixHint: "Reference a dataset declared in datasets[] or an earlier transform output.",
+          message: `Transform references unknown dataset "${source}". Available datasets and transform outputs: ${formatAvailable(datasetFields.keys())}.`,
+          aiFixHint: `Reference a dataset declared in datasets[] or an earlier transform output.${closestMatch(source, datasetFields.keys()) ? ` Did you mean "${closestMatch(source, datasetFields.keys())}"?` : ""}`,
         });
       }
     }
@@ -115,7 +159,42 @@ export function validateSpecReferences(
         aiFixHint: "Declare the comparison asset in required_assets[].",
       });
     }
-    if ("output_dataset_id" in transform) transformOutputs.add(transform.output_dataset_id);
+
+    switch (transform.operation) {
+      case "COMPUTE_COLUMN": {
+        const fields = datasetFields.get(transform.target_dataset_id) ?? new Set<string>();
+        fields.add(transform.output_column);
+        datasetFields.set(transform.target_dataset_id, fields);
+        break;
+      }
+      case "JOIN_DATASETS": {
+        const fields = new Set<string>([
+          ...(datasetFields.get(transform.left_dataset_id) ?? []),
+          ...(datasetFields.get(transform.right_dataset_id) ?? []),
+        ]);
+        datasetFields.set(transform.output_dataset_id, fields);
+        break;
+      }
+      case "PIVOT_DATASET": {
+        // Pivot column names are data-dependent, so the output is a wildcard
+        // registry; the row key is always addressable.
+        datasetFields.set(transform.output_dataset_id, new Set([transform.row_key, "*"]));
+        break;
+      }
+      case "COMPARE_WITH_ASSET": {
+        const fields = new Set<string>(datasetFields.get(transform.source_dataset_id) ?? []);
+        fields.add("_asset_matched");
+        fields.add("_has_discrepancy");
+        for (const compare of transform.compare_fields) {
+          fields.add(compare.asset_field);
+          if (compare.output_field) fields.add(compare.output_field);
+          fields.add(`${compare.dataset_field}_expected`);
+          fields.add(`${compare.dataset_field}_variance`);
+        }
+        datasetFields.set(transform.output_dataset_id, fields);
+        break;
+      }
+    }
   }
 
   const sectionIds = new Set<string>();
@@ -133,44 +212,48 @@ export function validateSpecReferences(
       });
     }
     sectionIds.add(section.section_id);
-    if (section.visibility?.dataset_id && !datasetIds.has(section.visibility.dataset_id)) {
+    if (section.visibility?.dataset_id && !datasetFields.has(section.visibility.dataset_id)) {
       diagnostics.push({
         layer: 1,
         severity: "error",
         path: `${path}.visibility.dataset_id`,
         code: "UNKNOWN_VISIBILITY_DATASET",
-        message: `Visibility references unknown dataset "${section.visibility.dataset_id}".`,
-        aiFixHint: "Use a declared dataset_id.",
+        message: `Visibility references unknown dataset "${section.visibility.dataset_id}". Available datasets and transform outputs: ${formatAvailable(datasetFields.keys())}.`,
+        aiFixHint: `Use a declared dataset_id or a transform output dataset.${closestMatch(section.visibility.dataset_id, datasetFields.keys()) ? ` Did you mean "${closestMatch(section.visibility.dataset_id, datasetFields.keys())}"?` : ""}`,
       });
     }
     const checkField = (dataset: string, field: string, fieldPath: string) => {
-      if (!datasetIds.has(dataset)) {
+      const fields = datasetFields.get(dataset);
+      if (!fields) {
         diagnostics.push({
           layer: 1,
           severity: "error",
           path: fieldPath,
           code: "UNKNOWN_SECTION_DATASET",
-          message: `Section references unknown dataset "${dataset}".`,
-          aiFixHint: "Use a declared dataset_id.",
+          message: `Section references unknown dataset "${dataset}". Available datasets and transform outputs: ${formatAvailable(datasetFields.keys())}.`,
+          aiFixHint: `Use a declared dataset_id or a transform output dataset.${closestMatch(dataset, datasetFields.keys()) ? ` Did you mean "${closestMatch(dataset, datasetFields.keys())}"?` : ""}`,
         });
         return;
       }
-      const ds = spec.datasets.find((candidate) => candidate.dataset_id === dataset);
-      if (ds && !ds.select.some((select) => select.alias === field || (select.column === "*" && field === select.alias))) {
+      if (!fields.has(field) && !fields.has("*")) {
+        const suggestion = closestMatch(field, fields);
         diagnostics.push({
           layer: 1,
           severity: "error",
           path: fieldPath,
           code: "UNKNOWN_SECTION_FIELD",
-          message: `Section field "${field}" is not selected by dataset "${dataset}".`,
-          aiFixHint: "Use a select alias from the dataset.",
+          message: `Section field "${field}" is not selected or produced by dataset "${dataset}". Available fields: ${formatAvailable(fields)}.`,
+          aiFixHint: `Use a select alias, window alias or transform output field from the dataset.${suggestion ? ` Did you mean "${suggestion}"?` : ""}`,
         });
       }
     };
     if (section.section_type === "KPI_GRID") {
-      section.cards.forEach((card, cardIndex) =>
-        checkField(card.dataset_id, card.value_field, `${path}.cards[${cardIndex}].value_field`),
-      );
+      section.cards.forEach((card, cardIndex) => {
+        checkField(card.dataset_id, card.value_field, `${path}.cards[${cardIndex}].value_field`);
+        if (card.delta_field) {
+          checkField(card.dataset_id, card.delta_field, `${path}.cards[${cardIndex}].delta_field`);
+        }
+      });
     } else if (section.section_type === "DATA_TABLE") {
       section.columns.forEach((column, columnIndex) =>
         checkField(section.dataset_id, column.field, `${path}.columns[${columnIndex}].field`),

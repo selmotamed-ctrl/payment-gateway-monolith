@@ -37,6 +37,23 @@ export function compileDatasetQueryToSql(
   const aliasToModel = new Map<string, CatalogModelDef>();
   aliasToModel.set(ds.from_alias, baseModel);
 
+  const resolveColumnSql = (tableAlias: string | undefined, colName: string): string => {
+    const alias = tableAlias ?? ds.from_alias;
+    const model = aliasToModel.get(alias);
+    if (!model) throw new Error(`UNKNOWN_TABLE_ALIAS: "${alias}"`);
+    const col = model.columns[colName];
+    if (!col) throw new Error(`UNKNOWN_COLUMN: "${alias}.${colName}"`);
+    if (col.sensitivity === "FORBIDDEN_SECRET") {
+      throw new Error(`FORBIDDEN_SECRET_COLUMN: "${alias}.${colName}"`);
+    }
+    const raw = `${quoteIdent(alias)}.${quoteIdent(col.dbColumnName)}`;
+    if (col.minorUnitScale && col.minorUnitScale !== 1) {
+      return `ROUND((${raw}::numeric * ${col.minorUnitScale}))`;
+    }
+    return raw;
+  };
+
+
   const joinClauses: string[] = [];
   for (const j of ds.joins) {
     const rel = baseModel.relations[j.relation_name];
@@ -57,21 +74,6 @@ export function compileDatasetQueryToSql(
     );
   }
 
-  const resolveColumnSql = (tableAlias: string | undefined, colName: string): string => {
-    const alias = tableAlias ?? ds.from_alias;
-    const model = aliasToModel.get(alias);
-    if (!model) throw new Error(`UNKNOWN_TABLE_ALIAS: "${alias}"`);
-    const col = model.columns[colName];
-    if (!col) throw new Error(`UNKNOWN_COLUMN: "${alias}.${colName}"`);
-    if (col.sensitivity === "FORBIDDEN_SECRET") {
-      throw new Error(`FORBIDDEN_SECRET_COLUMN: "${alias}.${colName}"`);
-    }
-    const raw = `${quoteIdent(alias)}.${quoteIdent(col.dbColumnName)}`;
-    if (col.minorUnitScale && col.minorUnitScale !== 1) {
-      return `ROUND((${raw}::numeric * ${col.minorUnitScale}))`;
-    }
-    return raw;
-  };
 
   const compileScalarExpr = (sel: DatasetSelectField): string => {
     const colSql = resolveColumnSql(sel.table_alias, sel.column);
@@ -269,7 +271,12 @@ export function compileDatasetQueryToSql(
       ? `GROUP BY ${ds.group_by
           .map((g) => {
             const sel = selectAliases.get(g);
-            return sel ? compileScalarExpr(sel) : resolveColumnSql(undefined, g);
+            if (!sel) return resolveColumnSql(undefined, g);
+            // CASE_WHEN_ENUM is a presentation mapping; grouping must use the
+            // underlying column so the database groups the real enum values.
+            return sel.expression === "CASE_WHEN_ENUM"
+              ? resolveColumnSql(sel.table_alias, sel.column)
+              : compileScalarExpr(sel);
           })
           .join(", ")}`
       : "";

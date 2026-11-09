@@ -93,3 +93,35 @@ describe("report spec authoring aliases and limits", () => {
     expect(normalizeReportSpec({ transforms: [canonical] })).toEqual({ transforms: [canonical] });
   });
 });
+
+  test("unary PERCENTAGE_SHARE accepts only left_operand and PERCENT_BPS is valid", () => {
+    const spec = baseReportSpec();
+    spec.transforms = [
+      {
+        operation: "COMPUTE_COLUMN",
+        target_dataset_id: "totals",
+        output_column: "share",
+        formula: "PERCENTAGE_SHARE",
+        left_operand: "total",
+        format_hint: "PERCENT_BPS",
+      },
+    ];
+    expect(ReportDescriptorSpecSchema.safeParse(spec).success).toBe(true);
+  });
+
+  test("COMPARE_WITH_ASSET accepts an optional output_field", () => {
+    const spec = baseReportSpec();
+    spec.transforms = [
+      {
+        operation: "COMPARE_WITH_ASSET",
+        source_dataset_id: "totals",
+        asset_key: "baseline",
+        output_dataset_id: "comparison",
+        match_keys: ["currency"],
+        compare_fields: [
+          { dataset_field: "total", asset_field: "target_total", output_field: "total_vs_target", tolerance_minor: 1 },
+        ],
+      },
+    ];
+    expect(ReportDescriptorSpecSchema.safeParse(spec).success).toBe(true);
+  });

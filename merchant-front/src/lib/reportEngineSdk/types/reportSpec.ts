@@ -278,8 +278,16 @@ export const DatasetTransformSpecSchema = z.discriminatedUnion("operation", [
       "VARIANCE_BPS",
     ]),
     left_operand: z.string(),
-    right_operand: z.union([z.string(), z.number()]),
-    format_hint: z.enum(["RAW", "CURRENCY_MINOR", "DECIMAL_2", "PERCENT_RATIO", "INTEGER"]).default("DECIMAL_2"),
+    right_operand: z.union([z.string(), z.number()]).optional(),
+    format_hint: z.enum(["RAW", "CURRENCY_MINOR", "DECIMAL_2", "PERCENT_RATIO", "PERCENT_BPS", "INTEGER"]).default("DECIMAL_2"),
+  }).superRefine((value, ctx) => {
+    if (value.formula !== "PERCENTAGE_SHARE" && value.right_operand === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["right_operand"],
+        message: "right_operand is required unless formula is PERCENTAGE_SHARE",
+      });
+    }
   }),
   z.object({
     operation: z.literal("JOIN_DATASETS"),
@@ -309,6 +317,7 @@ export const DatasetTransformSpecSchema = z.discriminatedUnion("operation", [
       z.object({
         dataset_field: z.string(),
         asset_field: z.string(),
+        output_field: z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]*$/).optional(),
         tolerance_minor: z.number().min(0).default(0),
       }),
     ),

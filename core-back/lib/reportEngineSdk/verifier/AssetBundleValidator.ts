@@ -16,7 +16,7 @@ export interface ExtractedAssetFile {
 const MAX_FILES = 50;
 const MAX_COMPRESSION_RATIO = 25;
 
-/** Extracts a zip into a flat file-name map, rejecting traversal and zip bombs. */
+/** Extracts a zip into a flat basename map, rejecting traversal, duplicate basenames and zip bombs. */
 export async function extractZipAssetFiles(params: {
   zipBuffer: Buffer;
   maxZipBytes: number;
@@ -65,18 +65,20 @@ export async function extractZipAssetFiles(params: {
 
   let totalUncompressed = 0;
   for (const entry of entries) {
-    const name = entry.name;
-    if (name.includes("..") || name.startsWith("/") || name.includes("\\")) {
+    const originalName = entry.name;
+    const name = originalName.replace(/^\.\/+/, "");
+    if (!name || name.includes("..") || name.startsWith("/") || name.includes("\\")) {
       diagnostics.push({
         layer: 4,
         severity: "error",
-        path: `assets.zip/${name}`,
+        path: `assets.zip/${originalName}`,
         code: "ASSET_PATH_TRAVERSAL_DETECTED",
-        message: `Asset archive entry "${name}" contains forbidden path traversal characters.`,
+        message: `Asset archive entry "${originalName}" contains forbidden path traversal characters.`,
         aiFixHint: "Use flat file names such as 'logo.svg' or 'fee-schedule.json'.",
       });
       continue;
     }
+    const baseName = name.split("/").pop() ?? name;
     const internal = (entry as unknown as { _data?: { compressedSize?: number; uncompressedSize?: number } })._data;
     const compressed = internal?.compressedSize ?? 0;
     const uncompressed = internal?.uncompressedSize ?? 0;
@@ -112,7 +114,18 @@ export async function extractZipAssetFiles(params: {
       });
       break;
     }
-    filesByName.set(name, buffer);
+    if (filesByName.has(baseName)) {
+      diagnostics.push({
+        layer: 4,
+        severity: "error",
+        path: `assets.zip/${originalName}`,
+        code: "ASSET_DUPLICATE_BASENAME",
+        message: `Asset archive contains more than one file named "${baseName}"; flat asset names must be unique.`,
+        aiFixHint: "Rename one of the files or place only one copy in the archive.",
+      });
+      continue;
+    }
+    filesByName.set(baseName, buffer);
   }
 
   return { filesByName, diagnostics };
@@ -150,15 +163,28 @@ export function verifyExtractedAssetsAgainstSpec(params: {
       continue;
     }
 
-    const buf = params.extractedFilesByName.get(req.file_name);
+    const lookup = findExtractedAsset(params.extractedFilesByName, req.file_name);
+    if (lookup.ambiguous) {
+      diagnostics.push({
+        layer: 4,
+        severity: "error",
+        path,
+        code: "ASSET_AMBIGUOUS_FILE_NAME",
+        message: `Required asset "${req.file_name}" matches more than one archive file by case-insensitive name.`,
+        aiFixHint: "Use one exact file name in the archive, or rename the duplicate files.",
+      });
+      continue;
+    }
+    const buf = lookup.buffer;
     if (!buf) {
+      const available = [...params.extractedFilesByName.keys()].sort();
       diagnostics.push({
         layer: 4,
         severity: "error",
         path,
         code: "REQUIRED_ASSET_MISSING_FROM_ZIP",
-        message: `Required asset "${req.file_name}" (key "${req.asset_key}") was not found in the uploaded .zip bundle.`,
-        aiFixHint: `Include "${req.file_name}" in the partnered .zip archive or remove "${req.asset_key}" from required_assets.`,
+        message: `Required asset "${req.file_name}" (key "${req.asset_key}") was not found in the uploaded .zip bundle. ${available.length > 0 ? `Archive entries found: ${available.join(", ")}.` : "No readable zip entries were attached."}`,
+        aiFixHint: `Include "${req.file_name}" in the partnered .zip archive, attach the .zip to the Studio, or remove "${req.asset_key}" from required_assets.`,
       });
       continue;
     }
@@ -243,6 +269,19 @@ export function verifyExtractedAssetsAgainstSpec(params: {
   }
 
   return { validAssets, diagnostics };
+}
+
+function findExtractedAsset(
+  files: Map<string, Buffer>,
+  fileName: string,
+): { buffer: Buffer | null; ambiguous: boolean } {
+  const exact = files.get(fileName);
+  if (exact) return { buffer: exact, ambiguous: false };
+  const lower = fileName.toLowerCase();
+  const matches = [...files.entries()].filter(([name]) => name.toLowerCase() === lower);
+  if (matches.length === 1) return { buffer: matches[0]![1], ambiguous: false };
+  if (matches.length > 1) return { buffer: null, ambiguous: true };
+  return { buffer: null, ambiguous: false };
 }
 
 export function parseCsvRows(text: string): Array<Record<string, unknown>> {

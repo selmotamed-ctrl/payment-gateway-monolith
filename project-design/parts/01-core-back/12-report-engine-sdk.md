@@ -180,3 +180,17 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - `view_box` accepts `{ width, height }` or an SVG-style `"x y width height"` string.
 - `format_hint` supports `INTEGER` in dataset selects and table columns, matching KPI cards; `BAR` is a valid vector node shape and maps to a rectangle.
 - These limits, aliases and shapes are documented in the AI authoring transcript.
+
+## 13. Reference resolution and compiler edge cases
+
+- Layer 1 now builds a field registry from every dataset's `select[].alias` and `window_fields[].alias`, then processes transforms in order: COMPUTE_COLUMN adds its output, JOIN_DATASETS unions left/right fields, PIVOT_DATASET exposes the row key plus a wildcard for data-dependent columns, and COMPARE_WITH_ASSET exposes the source fields plus `_asset_matched`, `_has_discrepancy`, `<field>_expected` and `<field>_variance`. Sections and visibility conditions are validated against this final registry.
+- GROUP BY on a select alias backed by `CASE_WHEN_ENUM` expands to the underlying column, while other expressions still compile normally.
+- `resolveColumnSql` is initialized before join processing, so `additional_on` predicates compile safely; a regression test covers an `additional_on` join plus an aggregate from the joined alias.
+- ZIP assets are flattened to unique basenames, `./` prefixes are removed, duplicate basenames are rejected, and required-asset lookup is case-insensitive when there is exactly one match. The stored relative path uses the required canonical `file_name`, so later execution can retrieve the asset.
+
+## 14. Transform output contract and diagnostics
+
+- COMPARE_WITH_ASSET accepts an optional `output_field` per compare field. The output dataset always contains the source fields, the `asset_field` target value, `_asset_matched`, `_has_discrepancy`, `<dataset_field>_expected` and `<dataset_field>_variance`. When `output_field` is set it is an additional alias for the asset_field target value; when omitted, the asset_field name is addressable.
+- COMPUTE_COLUMN `right_operand` is optional only for unary `PERCENTAGE_SHARE`; other formulas require it. `PERCENT_BPS` is accepted as a transform output format.
+- Section-field diagnostics list available fields/datasets, add a closest-match suggestion, and distinguish unknown datasets from unknown fields.
+- ZERO_NATURAL_ROLE_INTERSECTION remains a non-blocking warning and points to the Security Admin override; SUGGESTED_ACCESS_CONFLICT is emitted only when `suggested_access` is present.

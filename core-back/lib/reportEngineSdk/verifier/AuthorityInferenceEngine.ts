@@ -134,9 +134,9 @@ export function inferReportAuthorities(
     conflictStatus = "OVER_CONFLICTING_ZERO_NATURAL_ROLES";
     conflictDetails.push({
       code: "ZERO_NATURAL_ROLE_INTERSECTION",
-      message: `Queries span [${queriedDomains.join(", ")}], leaving no single default role holding all required authorities (${inferredRequiredAuthorities.join(", ")}).`,
+      message: `Queries span [${queriedDomains.join(", ")}], leaving no single default role holding all required authorities (${inferredRequiredAuthorities.join(", ")}). This is a non-blocking warning; the report needs an explicit access policy.`,
       resolutionHint:
-        "A Security Admin (SECURITY_ADMIN / security:write) can configure an Authority Override to specify which roles or authorities are permitted to view and run this report.",
+        "A Security Admin (SECURITY_ADMIN / security:write) can configure an Authority Override with the roles or authorities allowed to view and run this report.",
     });
   } else if (queriedDomains.length > 2) {
     conflictStatus = "CROSS_DOMAIN_INTERSECTION_NARROW";

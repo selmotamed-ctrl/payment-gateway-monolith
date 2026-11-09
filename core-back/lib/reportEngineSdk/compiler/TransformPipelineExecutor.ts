@@ -21,9 +21,11 @@ export function executeTransformPipeline(
         working[step.target_dataset_id] = rows.map((row) => {
           const left = Number(row[step.left_operand] ?? 0);
           const right =
-            typeof step.right_operand === "number"
-              ? step.right_operand
-              : Number(row[step.right_operand] ?? 0);
+            step.right_operand === undefined
+              ? 0
+              : typeof step.right_operand === "number"
+                ? step.right_operand
+                : Number(row[step.right_operand] ?? 0);
 
           let computed = 0;
           switch (step.formula) {
@@ -126,9 +128,14 @@ export function executeTransformPipeline(
           };
           for (const cf of step.compare_fields) {
             const actualVal = Number(sRow[cf.dataset_field] ?? 0);
+            const expectedRaw = aRow ? aRow[cf.asset_field] ?? null : null;
             const expectedVal = aRow ? Number(aRow[cf.asset_field] ?? 0) : 0;
             const delta = actualVal - expectedVal;
             const outOfTolerance = !aRow || Math.abs(delta) > cf.tolerance_minor;
+            // The target/expected value is always addressable by its asset
+            // field name; output_field is an optional alias for the same value.
+            diffs[cf.asset_field] = expectedRaw;
+            if (cf.output_field) diffs[cf.output_field] = expectedRaw;
             diffs[`${cf.dataset_field}_expected`] = aRow ? expectedVal : null;
             diffs[`${cf.dataset_field}_variance`] = delta;
             if (outOfTolerance) {

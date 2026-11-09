@@ -21,7 +21,6 @@ describe("RE-T16: transform pipeline", () => {
           output_column: "share",
           formula: "PERCENTAGE_SHARE",
           left_operand: "total",
-          right_operand: 0,
           format_hint: "PERCENT_RATIO",
         },
       ],
@@ -90,5 +89,41 @@ describe("RE-T16: transform pipeline", () => {
       {},
     );
     expect(pivoted.pivot?.[0]).toEqual({ day: "2026-01-01", DEBIT: 10, CREDIT: 3 });
+  });
+});
+
+describe("COMPARE_WITH_ASSET output contract", () => {
+  test("emits asset_field, optional output_field, expected and variance", () => {
+    const result = executeTransformPipeline(
+      { source: [{ rail_code: "LYD", volume: 100 }] },
+      [
+        {
+          operation: "COMPARE_WITH_ASSET",
+          source_dataset_id: "source",
+          asset_key: "targets",
+          output_dataset_id: "comparison",
+          match_keys: ["rail_code"],
+          compare_fields: [
+            {
+              dataset_field: "volume",
+              asset_field: "target_volume",
+              output_field: "volume_vs_target",
+              tolerance_minor: 0,
+            },
+          ],
+        },
+      ],
+      { targets: [{ rail_code: "LYD", target_volume: 90 }] },
+    );
+    const row = result.comparison?.[0];
+    expect(row).toMatchObject({
+      volume: 100,
+      target_volume: 90,
+      volume_vs_target: 90,
+      volume_expected: 90,
+      volume_variance: 10,
+      _asset_matched: true,
+      _has_discrepancy: true,
+    });
   });
 });

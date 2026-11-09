@@ -4571,3 +4571,11 @@ The original blueprint described the admin Report Catalog as the place where sta
 The delivered schema raises the report caps to 64 datasets, 64 transforms and 128 sections (20 inputs, 6 joins per dataset, 40 select fields, 5 window fields remain). The AI transcript documents these limits.
 
 The schema normalises common authoring aliases before validation: transform `kind` → `operation`; COMPUTE_COLUMN `compute`/`compute_op`/`operator` → `formula`; `{ literal: value }` → the raw default value; SVG-style `view_box` strings → `{ width, height }`. `INTEGER` is accepted in dataset/table format hints and `BAR` is a valid vector node shape (a rectangle).
+
+### 14.4 Reference and compiler corrections
+
+The delivered Layer 1 registry includes window aliases and transform outputs. GROUP BY on a CASE_WHEN_ENUM alias expands to the underlying column. `additional_on` join predicates compile after `resolveColumnSql` is initialized. ZIP assets are flattened to unique basenames, accept `./` prefixes and case-insensitive unique matches, reject duplicate basenames, and store the canonical required file name.
+
+### 14.5 COMPARE_WITH_ASSET and diagnostics
+
+`COMPARE_WITH_ASSET` compare fields accept an optional `output_field`; the output always includes the asset target field, expected and variance columns, and the source fields. `PERCENTAGE_SHARE` is unary and `PERCENT_BPS` is a transform output hint. Layer 1 diagnostics list available datasets/fields and nearest matches; cross-domain ZERO_NATURAL_ROLE_INTERSECTION is a non-blocking warning that points to the Security Admin override.

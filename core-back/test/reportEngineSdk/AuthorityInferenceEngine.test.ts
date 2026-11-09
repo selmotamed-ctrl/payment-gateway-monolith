@@ -72,3 +72,18 @@ describe("RE-T08..RE-T11: authority inference and Security Admin override", () =
     expect(isActorAllowedByPolicy(record, { ...financeActor, role: "SUPPORT", authorities: [] })).toBe(false);
   });
 });
+
+describe("suggested access warnings", () => {
+  test("no SUGGESTED_ACCESS_CONFLICT is emitted when suggested_access is absent", () => {
+    const result = inferReportAuthorities(addGatewayDataset(baseReportSpec()), createTestHostConfig());
+    expect(result.conflictDetails.some((detail) => detail.code === "SUGGESTED_ACCESS_CONFLICT")).toBe(false);
+    expect(result.conflictDetails.some((detail) => detail.code === "ZERO_NATURAL_ROLE_INTERSECTION")).toBe(true);
+  });
+
+  test("a suggested role outside the natural intersection is warned", () => {
+    const spec = baseReportSpec();
+    spec.suggested_access = { roles: ["SUPPORT"], authorities: [] };
+    const result = inferReportAuthorities(spec, createTestHostConfig());
+    expect(result.conflictDetails.some((detail) => detail.code === "SUGGESTED_ACCESS_CONFLICT")).toBe(true);
+  });
+});

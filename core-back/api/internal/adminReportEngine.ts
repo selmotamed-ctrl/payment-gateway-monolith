@@ -184,11 +184,11 @@ async function storeAssets(
     });
   }
   const bundleSha256 = createHash("sha256").update(zipBuffer).digest("hex");
-  const requiredByFile = new Map(requiredAssets.map((asset) => [asset.file_name, asset]));
+  const requiredByFile = new Map(requiredAssets.map((asset) => [asset.file_name.toLowerCase(), asset]));
   const files = [...extraction.filesByName.entries()].map(([relativePath, buffer]) => {
-    const required = requiredByFile.get(relativePath);
+    const required = requiredByFile.get(relativePath.toLowerCase());
     return {
-      relativePath,
+      relativePath: required?.file_name ?? relativePath,
       buffer,
       sha256: createHash("sha256").update(buffer).digest("hex"),
       mimeType: required?.mime_type ?? mimeForFileName(relativePath),
@@ -196,7 +196,7 @@ async function storeAssets(
   });
   const totalBytes = files.reduce((sum, file) => sum + file.buffer.byteLength, 0);
   const manifest = files.map((file) => ({
-    assetKey: requiredByFile.get(file.relativePath)?.asset_key ?? null,
+    assetKey: requiredByFile.get(file.relativePath.toLowerCase())?.asset_key ?? null,
     fileName: file.relativePath,
     mimeType: file.mimeType,
     sha256: file.sha256,
