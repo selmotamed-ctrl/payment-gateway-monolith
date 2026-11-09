@@ -106,6 +106,11 @@ const router = createRouter({
                     component: () => import("@/pages/developers/tokens/index"),
                 },
                 {
+                    path: "developers/webhooks",
+                    name: "Webhooks",
+                    component: () => import("@/pages/developers/webhooks/index"),
+                },
+                {
                     path: "credentials",
                     name: "Credentials",
                     component: () => import("@/pages/credentials/index"),

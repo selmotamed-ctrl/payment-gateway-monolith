@@ -48,6 +48,8 @@ export interface PkiBundle {
   clients: CertMaterial[];
   /** Optional client certificates for storage/backup mTLS links. */
   storageClients: CertMaterial[];
+  /** Leaf certificates this call re-issued because they were about to expire (AUTO-28). */
+  renewed?: string[];
 }
 
 export interface PkiOptions {
@@ -210,10 +212,23 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
       "IP:127.0.0.1",
     ],
   };
-  const bundle: PkiBundle = { directory, ca: caMaterial, server, fakeRails, backup, clients, storageClients };
+  const bundle: PkiBundle = { directory, ca: caMaterial, server, fakeRails, backup, clients, storageClients, renewed: [] };
   const everythingExists = [caCert, caKey, server.certPath, server.keyPath, fakeRails.certPath, fakeRails.keyPath, backup.certPath, backup.keyPath, ...[...clients, ...storageClients].flatMap((client) => [client.certPath, client.keyPath])]
     .every((path) => existsSync(path));
 
+  // AUTO-28: leaves that expire within the renewal window are re-issued by the CA that is already trusted, so a
+  // routine deploy keeps the certificates alive without the disruption of a CA rotation.
+  const renewNames = new Set<string>();
+  const renewWithin = config.MTLS_RENEW_WITHIN_DAYS;
+  if (everythingExists && !rotate && renewWithin > 0) {
+    for (const leaf of [server, backup, fakeRails, ...clients, ...storageClients]) {
+      if (inspectCertificate(leaf.certPath, leaf.name).expiresInDays < renewWithin) renewNames.add(leaf.name);
+    }
+  }
+
+  // The three server leaves are all re-signed on a fresh/partial PKI, a rotation, or when a SAN drifted (a staging box
+  // that moves to another LAN); otherwise only the ones that are about to expire.
+  let sanDrift = false;
   if (everythingExists && !rotate) {
     // The private IP is part of the server certificate SAN. A staging box that
     // moves to a different LAN must get new server certificates for the core,
@@ -225,13 +240,15 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
         .map((san) => san.replace(/^(IP|DNS|URI):/i, ""))
         .every((san) => current.sans.includes(san));
     };
-    if ([server, backup, fakeRails].every(certificateCoversSans)) {
+    sanDrift = ![server, backup, fakeRails].every(certificateCoversSans);
+    if (!sanDrift && renewNames.size === 0) {
       verifyPki(bundle);
       return bundle;
     }
   }
 
   if (dryRun) {
+    bundle.renewed = [...renewNames];
     return bundle;
   }
 
@@ -250,8 +267,11 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     chmodSync(caKey, 0o600);
   }
 
+  const signAllServers = !everythingExists || rotate || regenerateCa || sanDrift;
+  const signServer = (material: CertMaterial): boolean => signAllServers || renewNames.has(material.name);
+
   // ---- 2. The core server certificate (SAN bound to the private IP) ------
-  signLeaf({
+  if (signServer(server)) signLeaf({
     run,
     directory,
     material: server,
@@ -263,7 +283,7 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
   });
 
   // ---- 2a. The backup daemon server certificate --------------------------
-  signLeaf({
+  if (signServer(backup)) signLeaf({
     run,
     directory,
     material: backup,
@@ -274,7 +294,7 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
   });
 
   // ---- 2b. The Fake Rails Nginx server certificate -----------------------
-  signLeaf({
+  if (signServer(fakeRails)) signLeaf({
     run,
     directory,
     material: fakeRails,
@@ -288,7 +308,7 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
   // Existing client leaves are kept (unless the CA or a rotation says
   // otherwise) so adding one new client certificate does not re-issue the rest.
   for (const client of storageClients) {
-    if (!regenerateCa && existsSync(client.certPath) && existsSync(client.keyPath)) continue;
+    if (!regenerateCa && !renewNames.has(client.name) && existsSync(client.certPath) && existsSync(client.keyPath)) continue;
     signLeaf({
       run,
       directory,
@@ -302,7 +322,7 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
 
   // ---- 4. The three edge client certificates ----------------------------
   for (const client of clients) {
-    if (!regenerateCa && existsSync(client.certPath) && existsSync(client.keyPath)) continue;
+    if (!regenerateCa && !renewNames.has(client.name) && existsSync(client.certPath) && existsSync(client.keyPath)) continue;
     const role = client.cn.split("-back")[0] ?? client.cn;
     signLeaf({
       run,
@@ -315,9 +335,28 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     });
   }
 
+  bundle.renewed = [...renewNames];
   verifyPki(bundle);
   return bundle;
 };
+
+/**
+ * The certificates of the bundle that expire within `withinDays` days (AUTO-28), with what to do about each: a leaf is
+ * re-issued by the next deploy (`MTLS_RENEW_WITHIN_DAYS`); the CA is not, because replacing it is a rotation of every
+ * certificate (`--rotate-certs`).
+ */
+export const pkiRenewalReport = (
+  bundle: PkiBundle,
+  withinDays: number,
+  now = new Date(),
+): Array<{ name: string; expiresInDays: number; action: "renew-on-deploy" | "rotate-ca" | "expired" }> =>
+  verifyPki(bundle, now)
+    .filter((certificate) => certificate.expiresInDays < withinDays)
+    .map((certificate) => ({
+      name: certificate.name,
+      expiresInDays: certificate.expiresInDays,
+      action: certificate.expiresInDays <= 0 ? "expired" : certificate.name === bundle.ca.name ? "rotate-ca" : "renew-on-deploy",
+    }));
 
 const signLeaf = (input: {
   run: (command: string, args: string[], cwd: string) => void;
@@ -467,3 +506,37 @@ export const readMaterial = (material: CertMaterial): { cert: Buffer; key?: Buff
 });
 
 export { DEFAULT_PKI_DIR };
+
+
+/**
+ * `deploy.ts --check-certs`: the certificate expiry table for cron or an alert hook (AUTO-28). Reads only; a missing
+ * file is reported, not thrown. `ok` is false when anything is missing, expired or inside the renewal window.
+ */
+export const checkPkiExpiry = (
+  bundle: PkiBundle,
+  withinDays: number,
+  now = new Date(),
+): { ok: boolean; lines: string[] } => {
+  const lines: string[] = [];
+  let ok = true;
+  const materials = [bundle.ca, bundle.server, bundle.fakeRails, bundle.backup, ...bundle.clients, ...bundle.storageClients];
+  for (const material of materials) {
+    if (!existsSync(material.certPath)) {
+      ok = false;
+      lines.push(`MISSING   ${material.name}  (${material.certPath})`);
+      continue;
+    }
+    const certificate = inspectCertificate(material.certPath, material.name, now);
+    const state =
+      certificate.expiresInDays <= 0
+        ? "EXPIRED"
+        : certificate.expiresInDays < withinDays
+          ? material.name === bundle.ca.name
+            ? "ROTATE-CA"
+            : "RENEW"
+          : "ok";
+    if (state !== "ok") ok = false;
+    lines.push(`${state.padEnd(9)} ${material.name}  expires ${certificate.notAfter} (${certificate.expiresInDays} day(s))`);
+  }
+  return { ok, lines };
+};

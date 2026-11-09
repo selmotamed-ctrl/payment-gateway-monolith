@@ -127,6 +127,12 @@ const conditionsMatch = (
   return true;
 };
 
+/** True for a catalogue rule that a worker drafts on a schedule (it names its `returnCode`). */
+export const isScheduledReturnRule = (conditions: unknown): boolean => {
+  const record = asRecord(conditions);
+  return typeof record?.returnCode === "string" && record.returnCode.length > 0;
+};
+
 export class ReportingRuleEvaluator {
   private readonly source: ReportingRuleSource;
   private readonly codec: ReportingPayloadCodec;
@@ -155,6 +161,11 @@ export class ReportingRuleEvaluator {
 
     for (const rule of rules) {
       if (!this.isEffective(rule, now) || rule.currency.toUpperCase() !== attempt.currency.toUpperCase()) {
+        continue;
+      }
+      // A scheduled return (AUTO-16: `conditions.returnCode`) is drafted per period or per business day by the
+      // RegulatoryReportWorker, never once per payment attempt.
+      if (isScheduledReturnRule(rule.conditions)) {
         continue;
       }
       if (rule.thresholdAmount !== null && rule.thresholdAmount !== undefined) {

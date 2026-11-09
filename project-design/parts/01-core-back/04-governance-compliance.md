@@ -135,7 +135,7 @@ The actual admin approve route (`core-back/api/internal/admin.ts:6014`) is more 
 
 - requires `approval:check` (via `assertCheckerAuthority`) and either `approval:check` or `approval:write` in the route guard;
 - permits `PENDING_REVIEW` or `DRAFT`;
-- rejects expired requests;
+- rejects expired requests; since AUTO-05 an approval nobody decided before `expires_at` is also CLOSED by `ExpiryHousekeepingWorker` into the final state `EXPIRED` (reason `EXPIRED: not decided before <time>`, audit `APPROVAL_REQUEST_EXPIRED`, maker notified), which releases its subject exactly like a rejection (a join request back to `IN_REVIEW`, an operator case back to `IN_PROGRESS`) so a stale approval no longer locks the subject; the approve and reject routes refuse an `EXPIRED` request through the pending-state claim (`APPROVAL_NOT_PENDING`), not only through the expiry clock;
 - enforces maker ≠ checker;
 - adds a join-request admin-assisted maker check and a merchant payload checker-domain check;
 - special-cases `BACKUP_POLICY` through `executeBackupPolicyApproval` (claim first, then the backup daemon; shared with `PUT /system/backups/policy`);

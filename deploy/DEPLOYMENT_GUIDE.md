@@ -43,6 +43,7 @@ Flags:
 | `--force-restart` | Restart PostgreSQL, PgBouncer, Redis and the backup daemon even if nothing changed. |
 | `--skip-verify` | Skip the end-to-end mTLS health verification. |
 | `--rotate-certs` | Regenerate the internal CA **and** every leaf certificate. |
+| `--check-certs` | Print the certificate expiry table and exit 1 when anything needs attention. |
 | `--keep=<n>` | Releases kept per host (default `KEEP_RELEASES`). |
 | `--rolling-batch=<n>` | Deploy and health-check `n` compute nodes per batch (default `ROLLING_BATCH_SIZE`, or `1`). |
 | `--nodes=<id,...>` | Limit the run to the named compute nodes (for example `--nodes=core-1,chk-2`). |
@@ -297,6 +298,7 @@ what you meant.
 | `KEEP_RELEASES` | `5` | Releases kept per host; older ones are pruned in step 11. |
 | `ROTATE_MTLS_CERTS` | `false` | Force a CA + leaf regeneration. |
 | `MTLS_VALIDITY_DAYS` | `825` | Leaf certificate validity. |
+| `MTLS_RENEW_WITHIN_DAYS` | `30` | A deploy re-issues leaves that expire within this many days (same CA); `0` disables. `--check-certs` reports expiry. |
 | `LAN_ALLOWED_CIDRS` | `127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Nginx allowlist and `ADMIN_LAN_CIDRS` for the admin host. |
 
 ### Database (`DB_*`, legacy single-host compatibility path)
@@ -606,6 +608,7 @@ After the OS bootstrap the orchestrator runs the modular provisioners:
 | :--- | :--- |
 | `postgres18Provisioner` | PostgreSQL 18 install, the exact `zz-pg-switch.conf` tuning (`io_method='io_uring'`, `synchronous_commit=on`, `wal_level=replica`, ...), application/replication roles, SCRAM `pg_hba`, physical replication slots, `pg_basebackup -R` on every replica and PgBouncer transaction pooling (`6432`, `max_prepared_statements=256`). |
 | `redisProvisioner` | Redis bound to the node's private IP, `requirepass`, `save 3600 1`, `maxmemory`, and UFW `6379` only from the core + backup nodes. |
+| `clamavProvisioner` | With `KYB_SCANNER_MODE="clamd"` and no `KYB_CLAMD_ADDRESS`: ClamAV (`clamav-daemon` + `clamav-freshclam`, Arch `clamav`) on every core host, loopback-only `clamd` on `127.0.0.1:3310` (`StreamMaxLength` 32M, above the 25 MB KYB upload limit), first signature download, restart only when the configuration changed, waits for `zPING`. Needs about 1.5 GB RAM per core host (a warning below 2 GB). An explicit address means your own daemon: nothing is installed. |
 | `auditAndLogDbProvisioner` | `pg_audit_db` with the hash-chain table, immutable trigger, least-privilege `SELECT, INSERT` grants and `REVOKE UPDATE, DELETE, TRUNCATE`; `pg_logs_db` with monthly `attempt_step_logs` / `http_access_logs` partitions, six months ahead, the `ensure_log_partitions` retention function and its cron. |
 | `backupEngineProvisioner` | WAL-G/Barman, `zstd`, `rclone`, backup-daemon environment + systemd unit (`:4090` mTLS), `archive_command` on the primary and audit DB, S3/secondary-SSH verification, full/delta/drill cron and the scratch-restore invariant verifier. |
 

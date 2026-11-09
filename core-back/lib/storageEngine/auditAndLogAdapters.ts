@@ -310,6 +310,56 @@ export class DedicatedAuditDatabaseDriver implements AuditStorePort {
     return result.rows[0] ? auditRowToRecord(result.rows[0]) : null;
   }
 
+  /**
+   * Verifies one segment of the chain: the rows after `afterSeqNo` (null = from the first row), in order, each linked to
+   * `previousHash` and recomputed. Lets a daily job verify only what is new since its last anchor instead of the whole
+   * history (AUTO-27). `lastSeqNo` / `lastRowHash` are the end of the verified range.
+   */
+  public async verifyChainSegment(input: { afterSeqNo: string | null; previousHash: string; limit: number }): Promise<{
+    valid: boolean;
+    verifiedCount: number;
+    lastSeqNo: string | null;
+    lastRowHash: string | null;
+    firstBrokenId?: string;
+  }> {
+    const limit = Math.max(1, Math.floor(input.limit));
+    const result = await this.pool.query<AuditDbRow>(
+      `SELECT *, before_json::text AS before_json_text, after_json::text AS after_json_text
+       FROM ${this.tableName} WHERE seq_no > $1::bigint ORDER BY seq_no ASC LIMIT ${limit}`,
+      [input.afterSeqNo ?? "0"],
+    );
+    let previous = input.previousHash;
+    let verified = 0;
+    let lastSeqNo: string | null = null;
+    for (const row of result.rows) {
+      const base = {
+        id: row.id,
+        createdAt: new Date(row.created_at),
+        actorId: row.actor_id,
+        action: row.action,
+        entityType: row.entity_type,
+        entityId: row.entity_id,
+      };
+      const computed = computeAuditRowHashFromText(previous, base, row.before_json_text ?? "{}", row.after_json_text ?? "{}");
+      if (row.prev_hash !== previous || row.row_hash !== computed) {
+        return { valid: false, verifiedCount: verified, lastSeqNo, lastRowHash: verified > 0 ? previous : null, firstBrokenId: row.id };
+      }
+      previous = row.row_hash;
+      lastSeqNo = String(row.seq_no);
+      verified += 1;
+    }
+    return { valid: true, verifiedCount: verified, lastSeqNo, lastRowHash: verified > 0 ? previous : null };
+  }
+
+  /** The stored row hash at `seqNo`, or null when no such row exists any more (a truncated or rewritten tail). */
+  public async rowHashAt(seqNo: string): Promise<string | null> {
+    const result = await this.pool.query<{ row_hash: string }>(
+      `SELECT row_hash FROM ${this.tableName} WHERE seq_no = $1::bigint LIMIT 1`,
+      [seqNo],
+    );
+    return result.rows[0]?.row_hash ?? null;
+  }
+
   public async verifyHashChainIntegrity(limit?: number): Promise<{
     verifiedCount: number;
     valid: boolean;

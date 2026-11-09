@@ -150,6 +150,7 @@ import {
   requireStaffPrincipal,
 } from "../middleware/authDoubleCheck";
 import { actorFromRequest, assertCheckerAuthority, assertCheckerIsNotMaker, SYSTEM_AUTOMATION_PRINCIPAL } from "../middleware/makerCheckerGuard";
+import { env } from "../../lib/env";
 import { writeAudit } from "../../lib/audit/writeAudit";
 
 const router = express.Router();
@@ -173,6 +174,8 @@ const governanceContext = (platform: ReturnType<typeof getPlatformRuntime>): Gov
   engine: platform.engine,
   transitionBus: invalidationBus,
   slots: platform.slots,
+  reconciliationScheduler: platform.refundScheduler,
+  commissionNetting: platform.commissionNetting,
 });
 
 /**
@@ -5783,7 +5786,9 @@ router.post("/merchants/:id/suspend", async (request: Request, response: Respons
           makerUserId: actor.userId,
           state: "PENDING_REVIEW",
           ratifyDueAt,
-          expiresAt: ratifyDueAt,
+          // An unratified suspension stays in force and can still be ratified during the grace period after the
+          // deadline (decision D7); the deadline worker lifts it when the grace ends.
+          expiresAt: new Date(ratifyDueAt.getTime() + env.EMERGENCY_RATIFICATION_GRACE_HOURS * 3_600_000),
         },
       });
       for (const [field, oldValue] of [
@@ -6621,6 +6626,83 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
     },
   });
   response.json({ id: updated.id, state: updated.state });
+});
+
+/**
+ * Extends an unratified emergency suspension (AUTO-22, decision D7): ONE independent compliance officer (never the actor
+ * who suspended) may extend the ratification deadline ONCE, by 1 to 7 days, with a written reason. The deadline worker's
+ * stages for the approval are cleared so its reminders, escalations and lift run again against the new deadline.
+ */
+router.post("/approvals/:id/extend-emergency", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["approval:check", "approval:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({ days: z.number().int().min(1).max(7), reason: z.string().trim().min(10).max(2000) }).strict(),
+    request.body,
+  );
+  const actor = actorFromRequest(request);
+  assertCheckerAuthority(actor);
+  const approval = await client.approvalRequest.findUnique({ where: { id } });
+  if (!approval) throw new ApiError(404, "APPROVAL_REQUEST_NOT_FOUND", "The approval request does not exist");
+  if (approval.mode !== "EMERGENCY_RATIFICATION" || normalizeApprovalSubjectType(approval.subjectType) !== "MERCHANT") {
+    throw new ApiError(409, "EMERGENCY_EXTENSION_NOT_SUPPORTED", "Only an emergency merchant suspension can be extended");
+  }
+  assertCheckerIsNotMaker(approval.makerUserId, actor.userId);
+  if (!merchantApprovalCheckerAllowed(actor.role ?? null, approval.payloadDiffJson)) {
+    throw new ApiError(403, "MERCHANT_CHECKER_DOMAIN_FORBIDDEN", "The principal's role cannot check this merchant change");
+  }
+  if (approval.state !== "PENDING_REVIEW" || approval.checkerUserId) {
+    throw new ApiError(409, "APPROVAL_NOT_PENDING", "The emergency action is already ratified or closed");
+  }
+  const payload = approval.payloadDiffJson && typeof approval.payloadDiffJson === "object" && !Array.isArray(approval.payloadDiffJson)
+    ? (approval.payloadDiffJson as Record<string, unknown>)
+    : {};
+  if (payload.extension) {
+    throw new ApiError(409, "EMERGENCY_ALREADY_EXTENDED", "An emergency suspension can be extended only once");
+  }
+  const now = new Date();
+  const previousDueAt = approval.ratifyDueAt ?? now;
+  const base = Math.max(previousDueAt.getTime(), now.getTime());
+  const ratifyDueAt = new Date(base + body.days * 86_400_000);
+  const expiresAt = new Date(ratifyDueAt.getTime() + env.EMERGENCY_RATIFICATION_GRACE_HOURS * 3_600_000);
+  await client.$transaction(async (tx) => {
+    // Optimistic: only the request that still sees the deadline it read wins (two officers cannot both extend).
+    const changed = await tx.approvalRequest.updateMany({
+      where: { id, state: "PENDING_REVIEW", checkerUserId: null, ratifyDueAt: approval.ratifyDueAt },
+      data: {
+        ratifyDueAt,
+        expiresAt,
+        payloadDiffJson: {
+          ...payload,
+          extension: {
+            byUserId: actor.userId,
+            byRole: actor.role ?? null,
+            at: now.toISOString(),
+            days: body.days,
+            reason: body.reason,
+            previousRatifyDueAt: previousDueAt.toISOString(),
+          },
+        } as Prisma.InputJsonValue,
+      },
+    });
+    if (changed.count !== 1) {
+      throw new ApiError(409, "EMERGENCY_EXTENSION_CONFLICT", "The emergency action changed while it was being extended");
+    }
+    await tx.$executeRawUnsafe("DELETE FROM deadline_stages WHERE subject_type = 'EMERGENCY_APPROVAL' AND subject_id = $1", id);
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "UNKNOWN",
+        action: "EMERGENCY_ACTION_EXTENDED",
+        entityType: "MERCHANT",
+        entityId: approval.subjectId,
+        beforeJson: { ratifyDueAt: previousDueAt.toISOString() },
+        afterJson: { ratifyDueAt: ratifyDueAt.toISOString(), days: body.days, reason: body.reason },
+        approvalRequestId: id,
+      },
+    });
+  });
+  response.json({ id, ratifyDueAt, expiresAt, extended: true });
 });
 
 const amlScreeningRow = (

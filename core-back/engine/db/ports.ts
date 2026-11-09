@@ -498,6 +498,8 @@ export interface ReconciliationItemRow {
   statementFee: unknown;
   result: "MATCHED" | "AMOUNT_MISMATCH" | "MISSING_AT_GATEWAY" | "MISSING_LOCALLY" | "DUPLICATE";
   operatorCaseId: string | null;
+  /** The statement row type, when the item came from a statement row (AUTO-23). */
+  rowType?: string | null;
 }
 
 export interface AttemptWindowFilter {

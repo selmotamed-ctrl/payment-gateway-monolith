@@ -2,7 +2,9 @@ import { Decimal } from "decimal.js";
 import { Prisma } from "../../generated/prisma/client";
 import { ApiError } from "../../lib/error";
 import { lockWalletLedgerBalance } from "../../lib/cashoutBalance";
+import { env } from "../../lib/env";
 import { applyShardRepair } from "../ledger/ShardRepair";
+import type { CashoutCommissionNetting } from "../ledger/commissionNetting";
 import { payoutAccountHash } from "../../lib/joinRequestOnboarding";
 import { nextKybReviewAt, parseKybRefreshPolicy } from "../../lib/kybReview";
 import {
@@ -40,6 +42,7 @@ import {
 import { ATTEMPT_TRANSITION_TOPIC, type SlotReservationStore } from "../flow/DynamicRailEngine";
 import { attemptRowToDynamicAttempt, type AttemptRow } from "../runtime/attemptRepository";
 import type { InvalidationBus } from "../../lib/invalidationBus";
+import { enqueueOutboxEvent } from "../../lib/storageEngine/outbox";
 
 /**
  * Executable governance.
@@ -1978,7 +1981,22 @@ export interface DisputeIntakeInput {
   currency: string;
   actorUserId: string | null;
   actorRole: string | null;
+  /**
+   * When the merchant must have answered (AUTO-04, decision D1). Default: now plus the rail's own
+   * `capabilities.dispute_evidence_days` when it declares one, otherwise `DISPUTE_EVIDENCE_WINDOW_DAYS`. The binding rule
+   * is always the provider's, so a rail with its own window should declare it.
+   */
+  evidenceDueAt?: Date | null;
 }
+
+/** The days a merchant has to answer a dispute: the rail's declared window, else the platform default. */
+export const disputeEvidenceWindowDays = (railCapabilities: unknown): number => {
+  const declared =
+    railCapabilities && typeof railCapabilities === "object" && !Array.isArray(railCapabilities)
+      ? Number((railCapabilities as Record<string, unknown>).dispute_evidence_days)
+      : Number.NaN;
+  return Number.isFinite(declared) && declared > 0 ? declared : env.DISPUTE_EVIDENCE_WINDOW_DAYS;
+};
 
 export interface DisputeIntakeResult {
   disputeId: string;
@@ -2028,6 +2046,17 @@ export async function openDisputeWithDraftedAdjustment(
   const requestedAmount = toDecimal(input.amount);
   const chargebackAmount = Decimal.min(requestedAmount, unrefundedAmount);
 
+  const openedAt = new Date();
+  // The evidence deadline drives the reminders and the automatic outcome of the deadline worker; without it a dispute
+  // never expires (it had none before AUTO-04).
+  let evidenceDueAt = input.evidenceDueAt ?? null;
+  if (!evidenceDueAt) {
+    const railModel = (tx as any)?.rail;
+    const rail = railModel && typeof railModel.findUnique === "function"
+      ? await railModel.findUnique({ where: { id: input.railId }, select: { capabilities: true } })
+      : null;
+    evidenceDueAt = new Date(openedAt.getTime() + disputeEvidenceWindowDays(rail?.capabilities) * 86_400_000);
+  }
   const dispute = await disputes.create({
     data: {
       attemptId: input.attemptId,
@@ -2039,7 +2068,25 @@ export async function openDisputeWithDraftedAdjustment(
       amount: input.amount,
       currency,
       status: "OPENED",
-      openedAt: new Date(),
+      openedAt,
+      evidenceDueAt,
+    },
+  });
+  // The merchant webhook (AUTO-34), in the same transaction as the dispute.
+  await enqueueOutboxEvent(tx as never, {
+    topic: "dispute.opened",
+    aggregateType: "DISPUTE",
+    aggregateId: String(dispute.id),
+    merchantId: merchantId ? String(merchantId) : null,
+    payload: {
+      disputeId: String(dispute.id),
+      paymentId: input.attemptId,
+      externalReference: input.externalDisputeRef,
+      amount: input.amount.toFixed(4),
+      currency,
+      reasonCode: input.reasonCode ?? null,
+      evidenceDueAt: evidenceDueAt ? evidenceDueAt.toISOString() : null,
+      occurredAt: openedAt.toISOString(),
     },
   });
 
@@ -2100,7 +2147,9 @@ export async function openDisputeWithDraftedAdjustment(
       mode: "STANDARD",
       makerUserId: systemUserId,
       state: "PENDING_REVIEW",
-      expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      // The approval must outlive the dispute: the evidence window, the provider's ruling and a margin. It used to expire
+      // after 3 days, which would strand the drafted chargeback (and its reserve) long before the evidence deadline.
+      expiresAt: new Date(evidenceDueAt.getTime() + (env.DISPUTE_RULING_SLA_DAYS + 14) * 86_400_000),
     },
   });
 
@@ -2810,6 +2859,19 @@ export async function executeAdjustment(
         adjustmentId: String(adjustment.id),
       },
     });
+    // The merchant webhook (AUTO-34), in the same transaction as the ruling.
+    await enqueueOutboxEvent(tx as never, {
+      topic: "dispute.closed",
+      aggregateType: "DISPUTE",
+      aggregateId: String(adjustment.disputeId),
+      merchantId: merchantId ? String(merchantId) : null,
+      payload: {
+        disputeId: String(adjustment.disputeId),
+        outcome: disputeOutcome === "WON" ? "WON" : "LOST",
+        amount: amount.toFixed(4),
+        occurredAt: new Date().toISOString(),
+      },
+    });
   }
 
   await writeAudit(ctx, tx, {
@@ -2921,6 +2983,14 @@ export async function executeCashout(
       where: { id: String(cashout.id) },
       data: { adjustmentId: String(adjustment.id) },
     });
+    // The merchant webhook (AUTO-34); the rejection reason is internal and is not sent.
+    await enqueueOutboxEvent(tx as never, {
+      topic: "cashout.failed",
+      aggregateType: "CASHOUT_REQUEST",
+      aggregateId: String(cashout.id),
+      merchantId: String(cashout.merchantId),
+      payload: { cashoutId: String(cashout.id), amount: amount.toFixed(4), currency: String(wallet.currency ?? "LYD").trim(), occurredAt: new Date().toISOString() },
+    });
     await writeAudit(ctx, tx, {
       actorId: input.actorUserId,
       role: input.actorRole,
@@ -2983,9 +3053,26 @@ export async function executeCashout(
   journal.refId = String(cashout.id);
   const journalContext = { accounts: { MERCHANT_WALLET: String(wallet.glAccountId) } };
 
+  // Merchant-direct commission netting (AUTO-21, decision D8): before the cash-out is paid, the merchant's commission
+  // receivable is netted from the wallet balance that no open cash-out reserves. This cash-out is already PROCESSING,
+  // so its own amount is reserved and netting can never take it. The netting postings and the cash-out are locked
+  // together, in one statement and the global shard order, so a concurrent posting cannot deadlock with them.
+  const netting = ctx.commissionNetting
+    ? await ctx.commissionNetting.prepare(tx, {
+        merchantId: String(cashout.merchantId),
+        walletId: String(wallet.id),
+        walletGlAccountId: String(wallet.glAccountId),
+        currency: String(wallet.currency ?? "LYD").trim(),
+        cashoutId: String(cashout.id),
+      })
+    : null;
+
   // Available-balance check under the wallet debit lock and the posting's shard locks.
   const balance = await lockWalletLedgerBalance(tx, String(wallet.glAccountId), {
-    lockShards: () => ctx.ledgerPoster.lockShardsFor(journal, journalContext, tx as never),
+    lockShards: () =>
+      netting
+        ? ctx.ledgerPoster.lockShardsForMany([{ template: journal, context: journalContext }, ...netting.lockTemplates], tx as never)
+        : ctx.ledgerPoster.lockShardsFor(journal, journalContext, tx as never),
   });
   if (balance.lt(amount)) {
     throw new ApiError(409, "CASHOUT_INSUFFICIENT_BALANCE", "The wallet balance does not cover this cash-out", {
@@ -2993,6 +3080,17 @@ export async function executeCashout(
       balance: balance.toFixed(4),
       amount: amount.toFixed(4),
     });
+  }
+  if (netting) {
+    const netted = await netting.apply(tx, balance);
+    // Netting leaves at least the open cash-outs (this one included) in the wallet; refuse if that ever stops holding.
+    if (balance.minus(netted).lt(amount)) {
+      throw new ApiError(409, "CASHOUT_INSUFFICIENT_BALANCE", "The wallet balance does not cover this cash-out after commission netting", {
+        cashoutId: String(cashout.id),
+        balance: balance.minus(netted).toFixed(4),
+        amount: amount.toFixed(4),
+      });
+    }
   }
 
   const adjustment = await modelOf(tx, "adjustment").create({
@@ -3015,6 +3113,14 @@ export async function executeCashout(
   const updated = await cashouts.update({
     where: { id: String(cashout.id) },
     data: { state: "COMPLETE", adjustmentId: String(adjustment.id) },
+  });
+  // The merchant webhook (AUTO-34), in the same transaction as the payout.
+  await enqueueOutboxEvent(tx as never, {
+    topic: "cashout.paid",
+    aggregateType: "CASHOUT_REQUEST",
+    aggregateId: String(cashout.id),
+    merchantId: String(cashout.merchantId),
+    payload: { cashoutId: String(cashout.id), amount: amount.toFixed(4), currency: String(wallet.currency ?? "LYD").trim(), occurredAt: new Date().toISOString() },
   });
 
   await writeAudit(ctx, tx, {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { edgeCoreUrls, effectiveDatabase, loadDeployConfig, parseNodeList } from "../lib/configSchema";
+import { clamdManaged, edgeCoreUrls, effectiveDatabase, loadDeployConfig, parseNodeList } from "../lib/configSchema";
 
 const BASE = `
 DB_MANAGE_VIA_SSH="true"
@@ -187,5 +187,28 @@ BACKUP_SSH_KEY_PATH="~/.ssh/backup"
     expect(example.PG_VERSION).toBe("18");
     expect(example.PGBOUNCER_PORT).toBe(6432);
     expect(example.BACKUP_DAEMON_PORT).toBe(4090);
+  });
+});
+
+describe("KYB scanner configuration (AUTO-06)", () => {
+  test("clamd without an address is managed by the deploy engine; a given address must be a socket path or host:port; eicar and disabled need nothing", () => {
+    expect(loadDeployConfig(withOverrides('KYB_SCANNER_MODE="clamd"')).problems).toEqual([]);
+    expect(clamdManaged(requireConfig(withOverrides('KYB_SCANNER_MODE="clamd"')))).toBe(true);
+    expect(clamdManaged(requireConfig(withOverrides('KYB_SCANNER_MODE="clamd"\nKYB_CLAMD_ADDRESS="10.10.0.60:3310"')))).toBe(false);
+    expect(clamdManaged(requireConfig(withOverrides('KYB_SCANNER_MODE="eicar"')))).toBe(false);
+    expect(loadDeployConfig(withOverrides('KYB_SCANNER_MODE="clamd"\nKYB_CLAMD_ADDRESS="scan.internal"')).problems.join(";")).toMatch(/socket path or host:port/);
+    expect(loadDeployConfig(withOverrides('KYB_SCANNER_MODE="clamd"\nKYB_CLAMD_ADDRESS="scan.internal:99999"')).problems.join(";")).toMatch(/socket path or host:port/);
+    for (const good of ["/run/clamav/clamd.ctl", "unix:/run/clamav/clamd.ctl", "10.10.0.60:3310", "scan.internal:3310", "[::1]:3310"]) {
+      expect(loadDeployConfig(withOverrides(`KYB_SCANNER_MODE="clamd"\nKYB_CLAMD_ADDRESS="${good}"`)).problems).toEqual([]);
+    }
+    expect(loadDeployConfig(withOverrides('KYB_SCANNER_MODE="eicar"')).problems).toEqual([]);
+    expect(loadDeployConfig(withOverrides('KYB_SCANNER_MODE="disabled"')).problems).toEqual([]);
+    expect(loadDeployConfig(withOverrides('KYB_SCANNER_MODE="virustotal"')).ok).toBe(false);
+  });
+
+  test("the rescan window is bounded and defaults to 30 days", () => {
+    expect(requireConfig(withOverrides("")).KYB_RESCAN_DAYS).toBe(30);
+    expect(requireConfig(withOverrides('KYB_RESCAN_DAYS="0"')).KYB_RESCAN_DAYS).toBe(0);
+    expect(loadDeployConfig(withOverrides('KYB_RESCAN_DAYS="-1"')).ok).toBe(false);
   });
 });

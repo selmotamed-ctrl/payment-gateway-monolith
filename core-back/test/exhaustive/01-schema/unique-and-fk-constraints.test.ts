@@ -68,6 +68,12 @@ for (const model of schema.models) {
   if (model.tableName === "outbox_events") {
     continue;
   }
+  // The signed audit-chain anchors are append-only (a trigger refuses DELETE), so the harness cannot clean up the rows
+  // it inserts and a second run would collide with the first; the unique index is covered by the index inventory
+  // and by the anchor worker's own suite.
+  if (model.tableName === "audit_chain_anchors") {
+    continue;
+  }
   for (const fields of model.idBlocks) {
     uniqueConstraints.push({
       model: model.name,

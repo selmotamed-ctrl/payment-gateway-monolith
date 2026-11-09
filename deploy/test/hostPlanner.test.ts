@@ -225,6 +225,23 @@ CHECKOUT_PRIVATE_IP="127.0.0.1"
     expect(core?.services[0]?.env.MTLS_SERVER_CERT_PATH).toBe("shared/certs/core-back.crt");
   });
 
+  test("the KYB scanner settings reach the core env only (clamd address only in clamd mode)", () => {
+    const coreEnv = (extra: string) =>
+      planHosts(requireConfig(`${base}\n${extra}\n`)).hosts.find((host) => host.roles.includes("core"))?.services[0]?.env ?? {};
+    const eicar = coreEnv("");
+    expect(eicar.KYB_SCANNER_MODE).toBe("eicar");
+    expect(eicar.KYB_RESCAN_DAYS).toBe("30");
+    expect(Object.keys(eicar)).not.toContain("KYB_CLAMD_ADDRESS");
+    // managed by the deploy engine: every core host scans against its own loopback clamd
+    expect(coreEnv('KYB_SCANNER_MODE="clamd"').KYB_CLAMD_ADDRESS).toBe("127.0.0.1:3310");
+    const clamd = coreEnv('KYB_SCANNER_MODE="clamd"\nKYB_CLAMD_ADDRESS="10.10.0.60:3310"\nKYB_RESCAN_DAYS="14"');
+    expect(clamd.KYB_SCANNER_MODE).toBe("clamd");
+    expect(clamd.KYB_CLAMD_ADDRESS).toBe("10.10.0.60:3310");
+    expect(clamd.KYB_RESCAN_DAYS).toBe("14");
+    const edgeEnvKeys = planHosts(requireConfig(base)).hosts.filter((host) => !host.roles.includes("core")).flatMap((host) => host.services.flatMap((service) => Object.keys(service.env)));
+    expect(edgeEnvKeys).not.toContain("KYB_SCANNER_MODE");
+  });
+
   test("each edge trusts its own nginx: loopback plus the node's private address", () => {
     const plan = planHosts(requireConfig(base));
     const edgeServices = plan.hosts.flatMap((host) => host.services).filter((service) => service.role !== "core");

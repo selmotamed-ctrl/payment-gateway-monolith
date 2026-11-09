@@ -85,6 +85,7 @@ Rules:
 | 12 | `/portal/disputes` | `Disputes` | `payments.read` | Chargeback list, evidence deadline/status and evidence upload. |
 | 13 | `/portal/cashouts` | `Cashouts` | `cashout.read` or `cashout.request` | Cash-out requests, wallet, amount and bank destination. |
 | 14 | `/portal/developers/tokens` | `DeveloperTokens` | `tokens.read` | API token creation, one-time secret, scopes, IP allowlist and revocation. |
+| 14a | `/portal/developers/webhooks` | `Webhooks` | `applications.read` (changes need `webhooks.manage`, projected from the core authority `application:manage`) | Webhook endpoints per application (HTTPS URL, event filter, status), one-time `whsec_` signing secret on create and rotate, send a test event, enable or disable, and the latest deliveries with a "Redeliver" action for parked or delivered events (AUTO-34). |
 | 15 | `/portal/credentials` | `Credentials` | `credentials.manage` | Merchant-owned gateway credential sets and environments. |
 | 16 | `/portal/team` | `Team` | `users.manage` | Team members, roles, scopes and authority editing. |
 
@@ -516,19 +517,20 @@ The operations guide includes a generator with:
   - `POST /api/v1/external/links` with `title`, decimal amount, `currency: "LYD"`, `feeBearer` (`MERCHANT_ABSORBS | PAYER_SURCHARGE | SPLIT`), `maxUses`. The edge schema is strict: `applicationId`, `infiniteUse`, `useCount`, `redirectUrl` and `railWhitelist` are rejected. The `201` body is `key`, `amount`, `currency`, `feeBearer`, `state`, `visibleRails`, `excludedRails`; the checkout page is `/pay/<key>`.
   - `GET /api/v1/external/links/:key` to check `state` and `confirmedCount`.
   - `GET /api/v1/external/payments/:reference`.
-- A sample webhook request with `X-PG-Signature` and a JSON payload.
+- A sample webhook request with the Standard Webhooks headers (`webhook-id`, `webhook-timestamp`, `webhook-signature`) and the event envelope (`id`, `type`, `created`, `data`), plus a receiver snippet per language that verifies it (HMAC-SHA256 over `id.timestamp.body`, five-minute replay tolerance, constant-time compare, any of the listed signatures).
 
 The generated token is a placeholder/sample and is displayed in the browser. A real token must be created in `/portal/developers/tokens`, scoped, stored server-side, and never committed or shared.
 
 ### 3.7 Webhook checks
 
-The guide lists five checks:
+The guide lists six checks:
 
-1. Reject any webhook without a valid `X-PG-Signature` header.
-2. Recompute the signature over the raw request body and compare in constant time.
-3. Compare amount and currency with the payment you created before fulfilling the order.
-4. Deduplicate by event id so a retried delivery cannot post twice.
-5. Return a 2xx quickly and move slow work to a queue.
+1. Reject any webhook without the `webhook-id`, `webhook-timestamp` and `webhook-signature` headers.
+2. Recompute HMAC-SHA256 over `webhook-id.webhook-timestamp.raw body` with the signing secret (the base64 part after `whsec_`) and compare in constant time; accept either signature while a secret is being rotated.
+3. Reject a timestamp more than five minutes away from the receiver's clock (replay protection).
+4. Compare amount and currency with the payment you created, and fetch the payment when in doubt: ordering is not guaranteed.
+5. Deduplicate by `webhook-id`: a failed delivery is retried for about 27 hours.
+6. Return a 2xx within 10 seconds and move slow work to a queue; other 4xx answers (except 408 and 429) stop the retries.
 
 The guide also demonstrates the raw-body signing concern: a parsed/re-serialized JSON body can change bytes and break signature verification.
 

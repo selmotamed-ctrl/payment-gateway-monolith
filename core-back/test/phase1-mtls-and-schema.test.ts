@@ -98,6 +98,15 @@ const designModelNames = [
   // Append-only history of every ledger shard repair.
   "GlShardRepair",
   "SessionRevocation",
+  // Keyset cursors persisted by singleton workers (AUTO-25).
+  "WorkerCursor",
+  // Exactly-once markers of the deadline worker (AUTO-04, AUTO-22).
+  "DeadlineStage",
+  // Signed anchors of the verified audit hash chain (AUTO-27).
+  "AuditChainAnchor",
+  // Outbound merchant webhooks (AUTO-34).
+  "MerchantWebhookEndpoint",
+  "MerchantWebhookDelivery",
   "OutboxEvent",
   "AuditOutbox",
   "BackupCatalogRun",
@@ -166,15 +175,19 @@ describe("prisma schema", () => {
     // The newest migration adds outbox dead-lettering and the persisted worker cursors (schema version 16,
     // AUTO-02 / AUTO-25). Before it: the durable session revoke list (15) and the TRUNCATE guard on every
     // journal_lines partition (functions and triggers, no table change).
-    expect(ordered.at(-1)).toBe("20261109120000_outbox_dead_letter_worker_cursors");
+    // Later migrations (the automation plan adds one per item) must not require touching this test: the newest one
+    // only has to be a well-formed, later-than-known migration that sets the required schema version.
+    expect(ordered.at(-1)! >= "20261109130000_journal_partition_worker").toBe(true);
+    expect(ordered).toContain("20261109130000_journal_partition_worker");
+    expect(ordered).toContain("20261109120000_outbox_dead_letter_worker_cursors");
     expect(ordered).toContain("20261108100000_session_revocations");
     expect(ordered).toContain("20261108090000_partition_truncate_guard");
     const guard = fs.readFileSync(path.join(migrationsDirectory, "20261108090000_partition_truncate_guard", "migration.sql"), "utf8");
     expect(guard).toContain("pgw_guard_journal_line_partition");
     expect(guard).not.toContain("schema_versions");
     const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
-    expect(newest).toMatch(/UPDATE "schema_versions"\s+SET "version" = 16\b/);
-    expect(REQUIRED_SCHEMA_VERSION).toBe(16);
+    expect(newest).toMatch(new RegExp(`UPDATE "schema_versions"\\s+SET "version" = ${REQUIRED_SCHEMA_VERSION}\\b`));
+    expect(REQUIRED_SCHEMA_VERSION).toBeGreaterThanOrEqual(17);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),

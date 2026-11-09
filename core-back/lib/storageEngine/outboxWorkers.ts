@@ -3,6 +3,7 @@ import type { PrismaClient } from "../../generated/prisma/client";
 import { computeAuditRowHash, DedicatedAuditDatabaseDriver } from "./auditAndLogAdapters";
 import type { AuditHashInput } from "./auditAndLogAdapters";
 import type { OutboxEnvelope } from "./ports";
+import { defaultWorkerHealthRegistry, type WorkerHealthRegistry } from "../../engine/workers/workerRuntime";
 
 export interface WorkerLoggerLike {
   info?: (message: string, meta?: Record<string, unknown>) => void;
@@ -386,6 +387,10 @@ export const nextPollDelayMs = (
   return Math.min(Math.max(baseMs, maxIdleMs), Math.max(baseMs, grown));
 };
 
+/** Names under which the storage-engine workers report to the worker health registry (AUTO-03). */
+export const RELAY_HEALTH_NAME = "OutboxRelayWorker";
+export const AUDIT_SHIPPER_HEALTH_NAME = "AuditShipperWorker";
+
 /** Default number of failed deliveries after which an outbox event is parked (AUTO-02). */
 export const DEFAULT_OUTBOX_MAX_ATTEMPTS = 10;
 
@@ -460,8 +465,10 @@ export class OutboxRelayWorker {
   private readonly handlers: Record<string, OutboxHandler>;
   private readonly batchHandlers: Record<string, OutboxBatchHandler>;
   private readonly maxAttempts: number;
+  private readonly health: WorkerHealthRegistry | null;
   /** Topics whose case could not be raised yet (retried on the next drain). */
   private readonly pendingCases = new Map<string, OutboxParkedEvent[]>();
+  private readonly fanout: Record<string, OutboxBatchHandler>;
   private readonly counterState: OutboxRelayCounters = {
     processed: 0,
     failedDeliveries: 0,
@@ -477,11 +484,21 @@ export class OutboxRelayWorker {
       batchSize?: number;
       handlers?: Record<string, OutboxHandler>;
       batchHandlers?: Record<string, OutboxBatchHandler>;
+      /**
+       * Consumers that run IN ADDITION to the topic's own handler, in the same transaction (the merchant webhook
+       * fan-out, AUTO-34). A failing fan-out fails the batch like any consumer: the relay retries it and parks it.
+       */
+      fanout?: Record<string, OutboxBatchHandler>;
       retention?: OutboxRetentionOptions;
       deadLetter?: OutboxDeadLetterOptions;
       logger?: WorkerLoggerLike;
+      /** Where the relay reports its health (AUTO-03). Default: the process-wide registry; `null` turns it off. */
+      healthRegistry?: WorkerHealthRegistry | null;
     } = {},
   ) {
+    this.health = options.healthRegistry === undefined ? defaultWorkerHealthRegistry : options.healthRegistry;
+    // The relay idles with a back-off up to `maxIdleIntervalMs`: that is its real cadence for the staleness check.
+    this.health?.register(RELAY_HEALTH_NAME, { intervalMs: Math.max(options.intervalMs ?? 250, options.maxIdleIntervalMs ?? 2_000) });
     // Topics without a consumer yet are acknowledged without work. A per-event
     // handler registered by the caller overrides the batch handler of the
     // same topic. A topic that is in neither map is UNKNOWN: it is still
@@ -493,8 +510,16 @@ export class OutboxRelayWorker {
       "kyb.document_uploaded": async () => undefined,
       "reconciliation.completed": async () => undefined,
       "config.invalidated": async () => undefined,
+      // Written by the expiry housekeeping worker (AUTO-11); the merchant webhook (AUTO-34) registers the real consumer.
+      "link.expired": async () => undefined,
+      // Written by the governance paths (AUTO-34); only the merchant webhook fan-out consumes them.
+      "dispute.opened": async () => undefined,
+      "dispute.closed": async () => undefined,
+      "cashout.paid": async () => undefined,
+      "cashout.failed": async () => undefined,
       ...options.handlers,
     };
+    this.fanout = options.fanout ?? {};
     this.batchHandlers = {
       "attempt.transitioned": projectAttemptTransitions,
       ...options.batchHandlers,
@@ -520,12 +545,14 @@ export class OutboxRelayWorker {
     }
     this.running = true;
     this.stopped = false;
+    this.health?.markStarted(RELAY_HEALTH_NAME);
     this.schedule(0);
   }
 
   public stop(): void {
     this.stopped = true;
     this.running = false;
+    this.health?.markStopped(RELAY_HEALTH_NAME);
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -560,10 +587,14 @@ export class OutboxRelayWorker {
   private async tick(): Promise<void> {
     const baseMs = this.options.intervalMs ?? 250;
     let drained = 0;
+    const startedAt = performance.now();
+    this.health?.recordTickStart(RELAY_HEALTH_NAME);
     try {
       drained = await this.drain();
       await this.pruneIfDue();
+      this.health?.recordSuccess(RELAY_HEALTH_NAME, new Date(), performance.now() - startedAt, { processed: drained });
     } catch (error) {
+      this.health?.recordFailure(RELAY_HEALTH_NAME, new Date(), performance.now() - startedAt, error);
       this.options.logger?.error?.("outbox relay failed", {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -589,14 +620,21 @@ export class OutboxRelayWorker {
    */
   private async dispatch(rows: readonly OutboxRow[], tx: PrismaClient): Promise<void> {
     const batched = new Map<string, OutboxEnvelope[]>();
+    const fannedOut = new Map<string, OutboxEnvelope[]>();
     for (const row of rows) {
       const event: OutboxEnvelope = {
+        id: String(row.id),
         topic: row.topic as OutboxEnvelope["topic"],
         aggregateType: row.aggregate_type,
         aggregateId: row.aggregate_id,
         merchantId: row.merchant_id,
         payload: asRecord(row.payload_json),
       };
+      if (this.fanout[event.topic]) {
+        const list = fannedOut.get(event.topic) ?? [];
+        list.push(event);
+        fannedOut.set(event.topic, list);
+      }
       if (this.batchHandlers[event.topic]) {
         const list = batched.get(event.topic) ?? [];
         list.push(event);
@@ -610,6 +648,9 @@ export class OutboxRelayWorker {
     }
     for (const [topic, events] of batched) {
       await this.batchHandlers[topic]!(events, tx);
+    }
+    for (const [topic, events] of fannedOut) {
+      await this.fanout[topic]!(events, tx);
     }
   }
 
@@ -946,8 +987,15 @@ export class AuditShipperWorker {
       leaseMs?: number;
       retention?: OutboxRetentionOptions;
       logger?: WorkerLoggerLike;
+      /** Where the shipper reports its health (AUTO-03). Default: the process-wide registry; `null` turns it off. */
+      healthRegistry?: WorkerHealthRegistry | null;
     } = {},
-  ) {}
+  ) {
+    this.health = options.healthRegistry === undefined ? defaultWorkerHealthRegistry : options.healthRegistry;
+    this.health?.register(AUDIT_SHIPPER_HEALTH_NAME, { intervalMs: Math.max(options.intervalMs ?? 500, options.maxIdleIntervalMs ?? 5_000) });
+  }
+
+  private readonly health: WorkerHealthRegistry | null;
 
   public get isRunning(): boolean {
     return this.running;
@@ -959,12 +1007,14 @@ export class AuditShipperWorker {
     }
     this.running = true;
     this.stopped = false;
+    this.health?.markStarted(AUDIT_SHIPPER_HEALTH_NAME);
     this.schedule(0);
   }
 
   public stop(): void {
     this.stopped = true;
     this.running = false;
+    this.health?.markStopped(AUDIT_SHIPPER_HEALTH_NAME);
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -991,10 +1041,14 @@ export class AuditShipperWorker {
   private async tick(): Promise<void> {
     const baseMs = this.options.intervalMs ?? 500;
     let drained = 0;
+    const startedAt = performance.now();
+    this.health?.recordTickStart(AUDIT_SHIPPER_HEALTH_NAME);
     try {
       drained = await this.drain();
       await this.pruneIfDue();
+      this.health?.recordSuccess(AUDIT_SHIPPER_HEALTH_NAME, new Date(), performance.now() - startedAt, { processed: drained });
     } catch (error) {
+      this.health?.recordFailure(AUDIT_SHIPPER_HEALTH_NAME, new Date(), performance.now() - startedAt, error);
       this.options.logger?.error?.("audit shipper failed", {
         error: error instanceof Error ? error.message : String(error),
       });

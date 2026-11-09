@@ -2727,9 +2727,26 @@ const checks: Record<string, Check> = {
         slaDueAt: new Date(now.getTime() + 86_400_000),
       },
     ];
+    const audits: Array<{ action: string; entityId: string; reason: unknown }> = [];
+    const notices: Array<{ id: string; reason: string }> = [];
     const { db, calls } = createRecordingDb({
-      onQuery: (sql) => {
-        if (sql.includes("FROM join_requests") && /sla_due_at <= \$\d+/.test(sql)) {
+      onQuery: (sql, args) => {
+        // AUTO-13: each batch is ONE `UPDATE ... RETURNING` statement (bounded, with the previous status).
+        if (sql.includes("UPDATE join_requests") && sql.includes("status = 'DRAFT'")) {
+          const cutoff = args[1] as Date;
+          return rows
+            .filter(
+              (row) =>
+                row.status === "DRAFT"
+                && row.createdAt.getTime() < cutoff.getTime()
+                && row.updatedAt.getTime() < cutoff.getTime(),
+            )
+            .map((row) => {
+              row.status = "EXPIRED";
+              return { id: row.id, merchant_id: "merchant-1", submitted_by_user_id: "user-1", previous_status: "DRAFT" };
+            });
+        }
+        if (sql.includes("UPDATE join_requests") && /sla_due_at <= \$\d+/.test(sql)) {
           return rows
             .filter(
               (row) =>
@@ -2737,35 +2754,13 @@ const checks: Record<string, Check> = {
                 && row.slaDueAt !== undefined
                 && row.slaDueAt.getTime() <= now.getTime(),
             )
-            .map((row) => ({ id: row.id }));
+            .map((row) => {
+              const previous = row.status;
+              row.status = "EXPIRED";
+              return { id: row.id, merchant_id: "merchant-1", submitted_by_user_id: "user-1", previous_status: previous };
+            });
         }
         return [];
-      },
-      onExecute: (sql, args) => {
-        if (sql.includes("status = 'DRAFT'") && sql.includes("status = 'EXPIRED'")) {
-          const cutoff = args[1] as Date;
-          let expired = 0;
-          for (const row of rows) {
-            if (
-              row.status === "DRAFT"
-              && row.createdAt.getTime() < cutoff.getTime()
-              && row.updatedAt.getTime() < cutoff.getTime()
-            ) {
-              row.status = "EXPIRED";
-              expired += 1;
-            }
-          }
-          return expired;
-        }
-        if (sql.includes("WHERE id = $2::uuid")) {
-          const id = args[1] as string;
-          const row = rows.find((entry) => entry.id === id);
-          if (row && ["SUBMITTED", "IN_REVIEW", "INFO_REQUESTED"].includes(row.status)) {
-            row.status = "EXPIRED";
-            return 1;
-          }
-        }
-        return 0;
       },
     });
     const worker = new JoinRequestExpiryWorker({
@@ -2773,6 +2768,12 @@ const checks: Record<string, Check> = {
       repositories: createFakeRepositories({}),
       clock: () => now,
       draftTtlMs: ttl,
+      audit: async (_db, input) => {
+        audits.push({ action: input.action, entityId: input.entityId, reason: (input.after as { reason?: unknown })?.reason });
+      },
+      notify: async (_db, request, reason) => {
+        notices.push({ id: request.id, reason });
+      },
     });
     await worker.runOnce();
 
@@ -2780,16 +2781,23 @@ const checks: Record<string, Check> = {
     expect(rows.find((row) => row.id === "review-overdue")?.status).toBe("EXPIRED");
     expect(rows.find((row) => row.id === "draft-recent")?.status).toBe("DRAFT");
     expect(rows.find((row) => row.id === "review-on-time")?.status).toBe("IN_REVIEW");
+    // every expiry has its audit row and its merchant notice
+    expect(audits).toEqual([
+      { action: "JOIN_REQUEST_EXPIRED", entityId: "draft-old", reason: "DRAFT_ABANDONED" },
+      { action: "JOIN_REQUEST_EXPIRED", entityId: "review-overdue", reason: "REVIEW_OVERDUE" },
+    ]);
+    expect(notices).toEqual([
+      { id: "draft-old", reason: "DRAFT_ABANDONED" },
+      { id: "review-overdue", reason: "REVIEW_OVERDUE" },
+    ]);
 
-    const draftUpdate = calls.find(
-      (call) => call.kind === "execute" && call.sql.includes("status = 'DRAFT'"),
-    );
-    expect(draftUpdate?.sql).toContain("UPDATE join_requests SET status = 'EXPIRED'");
+    const draftUpdate = calls.find((call) => call.kind === "query" && call.sql.includes("status = 'DRAFT'"));
+    expect(draftUpdate?.sql).toContain("UPDATE join_requests j SET status = 'EXPIRED'");
+    expect(draftUpdate?.sql).toContain("FOR UPDATE SKIP LOCKED");
     expect((draftUpdate?.args[1] as Date).getTime()).toBe(now.getTime() - ttl);
-    const overdueUpdate = calls.find(
-      (call) => call.kind === "execute" && call.sql.includes("WHERE id = $2::uuid") && call.args[1] === "review-overdue",
-    );
-    expect(overdueUpdate).toBeDefined();
+    const overdueUpdate = calls.find((call) => call.kind === "query" && /sla_due_at <= \$\d+/.test(call.sql));
+    expect(overdueUpdate?.sql).not.toContain("PENDING_CHECKER"); // a decision waiting for its checker is never selected
+    expect(overdueUpdate?.sql).toContain("IN ('SUBMITTED', 'IN_REVIEW', 'INFO_REQUESTED')");
     expect(readMigrationSql()).toContain("'EXPIRED'");
   },
 

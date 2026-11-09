@@ -89,18 +89,30 @@ export const createPool = (options: PoolOptions = {}): Pool => {
 };
 
 /** A Prisma client whose entire connection pool uses the supplied schema. */
+/**
+ * The URL of a client that works in `schema`: UTC pinned AND `search_path` set. Both are startup `options`, and the
+ * `options` parameter of the connection URL overrides the `options` of the pool config (node-postgres parses the URL
+ * last), so the search path MUST be merged into the URL's own `options`; passing it separately silently left every
+ * "sandbox" client on `public` and made the worker suites read and write the shared tables.
+ */
+export const schemaConnectionUrl = (schema: string, url: string = DATABASE_URL): string => {
+  const pinned = new URL(pinUtcInConnectionUrl(url));
+  const existing = pinned.searchParams.get("options") ?? "";
+  pinned.searchParams.set("options", `${existing} -c search_path=${schema}`.trim());
+  return pinned.toString();
+};
+
 export const createPrismaForSchema = (
   schema: string,
   options: PrismaOptions = {},
 ): PrismaClient =>
   new PrismaClient({
-    adapter: new PrismaPg({
-      ...buildPostgresPoolConfig(pinUtcInConnectionUrl(options.url ?? DATABASE_URL), {
+    adapter: new PrismaPg(
+      buildPostgresPoolConfig(schemaConnectionUrl(schema, options.url ?? DATABASE_URL), {
         max: options.max ?? 10,
         applicationName: `pg-storage-test-${RUN_ID}`,
       }),
-      options: `-c search_path=${schema}`,
-    }),
+    ),
     log: [],
   });
 

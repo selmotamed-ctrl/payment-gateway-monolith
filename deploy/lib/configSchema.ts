@@ -188,6 +188,11 @@ const base = z.strictObject({
   KEEP_RELEASES: z.coerce.number().int().min(1).max(100).default(5),
   ROTATE_MTLS_CERTS: booleanish.default(false),
   MTLS_VALIDITY_DAYS: z.coerce.number().int().min(1).max(3650).default(825),
+  /**
+   * A normal deploy re-issues, with the SAME CA, every leaf certificate that expires within this many days
+   * (AUTO-28). 0 turns it off. The CA is never replaced by this: that is `--rotate-certs`.
+   */
+  MTLS_RENEW_WITHIN_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
   LAN_ALLOWED_CIDRS: cidrList.default("127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"),
   ROLLING_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(1),
 
@@ -308,8 +313,14 @@ const base = z.strictObject({
    * KYB document scanner mode. `eicar` is the built-in content gate (EICAR +
    * active-content sniffing) for deployments without a real malware engine;
    * `disabled` leaves every document PENDING (reviewers cannot preview it).
+   * `clamd` (AUTO-06) scans with ClamAV. With KYB_CLAMD_ADDRESS empty the deploy engine installs and configures
+   * clamd + freshclam on every core host (loopback 127.0.0.1:3310); with an address (a Unix socket path or
+   * host:port) it uses the operator's own daemon and installs nothing.
    */
-  KYB_SCANNER_MODE: z.enum(["eicar", "disabled"]).default("eicar"),
+  KYB_SCANNER_MODE: z.enum(["eicar", "disabled", "clamd"]).default("eicar"),
+  KYB_CLAMD_ADDRESS: z.string().trim().max(200).default(""),
+  /** CLEAN KYB documents are re-scanned after this many days (0 = never). */
+  KYB_RESCAN_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
   BASE_CURRENCY: z.string().trim().length(3).default("LYD"),
   GATEWAY_TIMEZONE: z.string().trim().min(1).max(64).default("Africa/Tripoli"),
   REDIS_URL: z.string().trim().max(500).optional(),
@@ -808,11 +819,26 @@ export const productionGuardProblems = (config: DeployConfig): string[] => {
  * topology impossible (the database URL not matching the engine, a certbot
  * domain with no certificate path, a database host with no SSH target, …).
  */
+/** The address the deploy engine configures when it manages clamd itself (loopback on each core host). */
+export const CLAMD_LOCAL_ADDRESS = "127.0.0.1:3310";
+
+/** True when the deploy engine installs and configures ClamAV: the scanner is `clamd` and no external address was given. */
+export const clamdManaged = (config: Pick<DeployConfig, "KYB_SCANNER_MODE" | "KYB_CLAMD_ADDRESS">): boolean =>
+  config.KYB_SCANNER_MODE === "clamd" && config.KYB_CLAMD_ADDRESS.trim() === "";
+
 export const validateDeployConfig = (config: DeployConfig): string[] => {
   const problems: string[] = [];
   const pgConfigured = pgStorageConfigured(config);
   problems.push(...weakSecretProblems(config));
   problems.push(...productionGuardProblems(config));
+
+  if (config.KYB_SCANNER_MODE === "clamd") {
+    const address = config.KYB_CLAMD_ADDRESS;
+    const isSocket = /^(unix:)?\/[A-Za-z0-9._+@/-]+$/.test(address);
+    const hostPort = /^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9._-]+):([0-9]{1,5})$/.exec(address);
+    const portOk = hostPort ? Number(hostPort[2]) >= 1 && Number(hostPort[2]) <= 65_535 : false;
+    if (address && !isSocket && !portOk) problems.push("KYB_CLAMD_ADDRESS must be an absolute Unix socket path or host:port");
+  }
 
   if (pgConfigured && config.DB_ENGINE !== "postgresql") {
     problems.push("DB_ENGINE must be 'postgresql' when PostgreSQL 18 storage fields are configured");

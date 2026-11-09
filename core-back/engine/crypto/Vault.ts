@@ -2,6 +2,7 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
+  createHmac,
   hkdfSync,
   randomBytes,
   timingSafeEqual as nodeTimingSafeEqual,
@@ -315,6 +316,22 @@ export class Vault {
     } catch {
       throw vaultError("VAULT_AUTHENTICATION_FAILED", "Vault payload authentication failed", 400);
     }
+  }
+
+  /**
+   * HMAC-SHA256 (hex) of `data` under the vault key `keyId`. The key never leaves the vault; a value signed here can
+   * only be reproduced by a holder of the same key material (AUTO-27 audit-chain anchors).
+   */
+  async sign(data: string, keyId: string): Promise<string> {
+    assertValidVaultKeyId(keyId);
+    const key = await this.keyResolver.resolveKey(keyId);
+    return createHmac("sha256", key).update(data, "utf8").digest("hex");
+  }
+
+  /** Constant-time check of a signature made by {@link sign}. */
+  async verifySignature(data: string, signature: string, keyId: string): Promise<boolean> {
+    if (typeof signature !== "string" || !/^[0-9a-f]{64}$/.test(signature)) return false;
+    return timingSafeStringEqual(await this.sign(data, keyId), signature);
   }
 
   redactPayload<T>(payload: T, literalSecrets: readonly string[] = []): T {

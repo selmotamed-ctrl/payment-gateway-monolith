@@ -16,6 +16,8 @@ export interface KeyedOperatorCaseInput {
   notes: string;
   slaHours: number;
   now?: Date;
+  /** Links the case to a reconciliation item (`operator_cases.reconciliation_item_id` is unique). */
+  reconciliationItemId?: string | null;
   /**
    * Also treat any unresolved case of the same kind on the same attempt as the
    * case of this subject (the engine's `PrismaOperatorCaseSink` dedupes on
@@ -66,6 +68,7 @@ export const openKeyedOperatorCase = async (
         state: "OPEN",
         subjectKey: input.subjectKey,
         ...(input.attemptId ? { attemptId: input.attemptId } : {}),
+        ...(input.reconciliationItemId ? { reconciliationItemId: input.reconciliationItemId } : {}),
         resolutionNotes: input.notes.slice(0, 1000),
         slaDueAt: new Date(now.getTime() + input.slaHours * 60 * 60 * 1000),
       },

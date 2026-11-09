@@ -10,6 +10,7 @@ code:
   - deploy/lib/converge.ts
   - deploy/provisioners/postgres18Provisioner.ts
   - deploy/provisioners/redisProvisioner.ts
+  - deploy/provisioners/clamavProvisioner.ts
   - deploy/provisioners/auditAndLogDbProvisioner.ts
   - deploy/provisioners/backupEngineProvisioner.ts
   - deploy/lib/configSchema.ts
@@ -49,6 +50,7 @@ This part documents the four modular storage provisioners invoked by the deploym
 
 - `postgres18Provisioner.ts`: PostgreSQL 18 primary, replicas, replication slots, `pg_hba`, PgBouncer, tuning and journal partition cron;
 - `redisProvisioner.ts`: Redis cache/velocity nodes;
+- `clamavProvisioner.ts` (AUTO-06): ClamAV for the KYB document scan on every core host when `KYB_SCANNER_MODE=clamd` and no external `KYB_CLAMD_ADDRESS` is set. Installs `clamav-daemon` + `clamav-freshclam` (Arch: `clamav`) only when missing; writes a managed `/etc/clamav/clamd.conf` (TCP on `127.0.0.1:3310` only, local socket kept, `StreamMaxLength` and `MaxFileSize` 32M); downloads the first signature set (clamd will not start without one); disables Debian's `clamav-daemon.socket` (socket activation would own the sockets); starts clamd, or restarts it only when the configuration changed or on `--force-restart`; waits for `zPING`. The core env gets `KYB_CLAMD_ADDRESS=127.0.0.1:3310`. A host below 2 GB RAM or a failed first download (offline lab) is a warning, never a failed deploy: documents stay `PENDING` and the core's `kyb_scan_backlog` monitor check reports it. Not built: an offline signature mirror (`DatabaseMirror` is the ClamAV default) and a separate scanning host shared by several core nodes.
 - `auditAndLogDbProvisioner.ts`: append-only audit database and partitioned log database;
 - `backupEngineProvisioner.ts`: WAL-G/Barman archive engine, daemon environment/unit, schedules and S3/secondary target checks.
 
@@ -358,6 +360,7 @@ Not covered:
 
 - `deploy/provisioners/postgres18Provisioner.ts`
 - `deploy/provisioners/redisProvisioner.ts`
+- `deploy/provisioners/clamavProvisioner.ts`
 - `deploy/provisioners/auditAndLogDbProvisioner.ts`
 - `deploy/provisioners/backupEngineProvisioner.ts`
 - `deploy/lib/hostPlanner.ts`: storage env, URLs and node plans.

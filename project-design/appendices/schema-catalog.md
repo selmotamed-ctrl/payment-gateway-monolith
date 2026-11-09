@@ -2,10 +2,10 @@
 
 <!-- GENERATED FILE. Edit core-back/prisma/schema.prisma instead. Do not hand-edit this file. -->
 
-- Models: **79**
+- Models: **84**
 - Enums: **105**
-- Schema version: **15**
-- Migrations: **13**
+- Schema version: **24**
+- Migrations: **23**
 
 ## Models
 
@@ -13,6 +13,8 @@
 - `User`
 - `MfaChallenge`
 - `Application`
+- `MerchantWebhookEndpoint`
+- `MerchantWebhookDelivery`
 - `Wallet`
 - `AccessToken`
 - `AccessTokenIp`
@@ -64,6 +66,7 @@
 - `GatewayHealthSample`
 - `DetailChangeLog`
 - `AuditLog`
+- `AuditChainAnchor`
 - `UserIdentity`
 - `JoinRequest`
 - `KybDocument`
@@ -78,6 +81,8 @@
 - `NotificationTemplate`
 - `Notification`
 - `SessionRevocation`
+- `DeadlineStage`
+- `WorkerCursor`
 - `PlatformSetting`
 - `GlAccountShard`
 - `GlShardRepair`
@@ -212,3 +217,13 @@
 - `20261107150000_shard_repairs`
 - `20261108090000_partition_truncate_guard`
 - `20261108100000_session_revocations`
+- `20261109110000_refund_inquiry_job_type`
+- `20261109120000_outbox_dead_letter_worker_cursors`
+- `20261109130000_journal_partition_worker`
+- `20261109140000_expiry_housekeeping`
+- `20261109150000_deadline_stages`
+- `20261109160000_reconciliation_automation`
+- `20261109170000_kyb_scan_automation`
+- `20261109180000_audit_chain_anchors`
+- `20261109190000_regulatory_report_automation`
+- `20261109200000_merchant_webhooks`

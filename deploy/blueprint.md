@@ -66,7 +66,7 @@ The node spec carries only host, SSH port, private IP and service port. SSH user
 
 | Group | Keys | Purpose |
 | :--- | :--- | :--- |
-| Global | `DEPLOY_MODE`, `DEPLOY_ENV`, `KEEP_RELEASES`, `ROTATE_MTLS_CERTS`, `MTLS_VALIDITY_DAYS`, `LAN_ALLOWED_CIDRS`, `ROLLING_BATCH_SIZE` | Pipeline mode, release retention, certificate rotation and LAN policy. |
+| Global | `DEPLOY_MODE`, `DEPLOY_ENV`, `KEEP_RELEASES`, `ROTATE_MTLS_CERTS`, `MTLS_VALIDITY_DAYS`, `MTLS_RENEW_WITHIN_DAYS`, `LAN_ALLOWED_CIDRS`, `ROLLING_BATCH_SIZE` | Pipeline mode, release retention, certificate rotation and LAN policy. |
 | Legacy database | `DB_MANAGE_VIA_SSH`, `DB_SSH_HOST`, `DB_SSH_PORT`, `DB_SSH_USER`, `DB_SSH_KEY_PATH`, `DB_SUDO_PASSWORD`, `DB_PRIVATE_IP`, `DB_ENGINE`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DATABASE_URL` | Compatibility path for one externally managed PostgreSQL 18 database. |
 | Compute node arrays | `CORE_NODES`, `ADMIN_NODES`, `MERCHANT_NODES`, `CHECKOUT_NODES`, `CORE_BACK_URLS` | Horizontal compute tiers and an optional explicit edge upstream list. |
 | Core | `CORE_SSH_HOST`, `CORE_SSH_PORT`, `CORE_SSH_USER`, `CORE_SSH_KEY_PATH`, `CORE_SUDO_PASSWORD`, `CORE_PRIVATE_IP`, `CORE_PORT`, `CORE_REMOTE_DIR`, `RUN_PRISMA_SEED` | Core host, listener, release directory and optional seed. |
@@ -183,6 +183,7 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | `--enforce-firewall` | Re-apply UFW without a full bootstrap. |
 | `--skip-build`, `--skip-verify` | Skip local SPA builds or end-to-end verification. |
 | `--rotate-certs` | Rotate the CA and every leaf. |
+| `--check-certs` | Print the certificate expiry table and exit 1 when a certificate is missing, expired or inside `MTLS_RENEW_WITHIN_DAYS` (AUTO-28). |
 | `--dry-run` | Print commands; execute nothing. |
 
 ### Files
@@ -750,6 +751,7 @@ The provisioner creates the directory for `pgbackup` and `deployBackupDaemon()` 
 | :--- | :--- | :--- |
 | `ROTATE_MTLS_CERTS` | `false` | Regenerate CA and all leaves. |
 | `MTLS_VALIDITY_DAYS` | `825` | Leaf validity. |
+| `MTLS_RENEW_WITHIN_DAYS` | `30` (0 = off) | A deploy re-issues leaves expiring within this many days with the same CA (AUTO-28). |
 | `CORE_NODES` / `CORE_PRIVATE_IP` | required | Core SAN IPs. |
 | `BACKUP_NODE` | optional | Backup SAN IP. |
 | `FAKE_RAILS_DOMAIN`, `FAKE_RAILS_PRIVATE_IP` | optional | Fake Rails SAN. |
@@ -816,13 +818,13 @@ Keep `deploy/deploy.env` and `deploy/.certs/` at restrictive permissions. Do not
 
 - Storage client certificates exist but are not consumed by PostgreSQL, PgBouncer, Redis, audit DB or log DB.
 - The backup daemon's cert/key ownership is not aligned with its `pgbackup` user.
-- Expiry is reported but does not force rotation.
+- A CA that nears its end is reported (`--check-certs`, the deploy warning) but never replaced automatically: replacing it is a rotation of every certificate (`--rotate-certs`).
 - The backup daemon does not authorize a client CN per route.
 
 ### Missing / deferred
 
 - end-to-end storage mTLS configuration (`ssl=on` with internal certs, `clientcert=verify-full`, Redis TLS, PgBouncer client TLS).
-- Automatic renewal before expiry.
+- (Done, AUTO-28) Leaf renewal before expiry: a normal deploy re-issues, with the existing CA, every leaf that expires within `MTLS_RENEW_WITHIN_DAYS` (default 30; 0 = off) and leaves the other files byte-identical; `deploy.ts --check-certs` prints the expiry table (`ok`, `RENEW`, `ROTATE-CA`, `EXPIRED`, `MISSING`) and exits 1 when anything needs attention, for cron or an alert hook. Still manual: nothing runs the deploy by itself, so a leaf is only renewed when somebody deploys within the window; the core's `platform.certificate` monitor check (AUTO-03) raises the case that tells them to.
 - A CRL/OCSP or short-lived certificate workflow.
 - Per-service certificate isolation on a co-located edge host.
 - Client-CN authorization on the backup daemon.
@@ -1518,6 +1520,7 @@ This part documents the four modular storage provisioners invoked by the deploym
 
 - `postgres18Provisioner.ts`: PostgreSQL 18 primary, replicas, replication slots, `pg_hba`, PgBouncer, tuning and journal partition cron;
 - `redisProvisioner.ts`: Redis cache/velocity nodes;
+- `clamavProvisioner.ts` (AUTO-06): ClamAV for the KYB document scan on every core host when `KYB_SCANNER_MODE=clamd` and no external `KYB_CLAMD_ADDRESS` is set. Installs `clamav-daemon` + `clamav-freshclam` (Arch: `clamav`) only when missing; writes a managed `/etc/clamav/clamd.conf` (TCP on `127.0.0.1:3310` only, local socket kept, `StreamMaxLength` and `MaxFileSize` 32M); downloads the first signature set (clamd will not start without one); disables Debian's `clamav-daemon.socket` (socket activation would own the sockets); starts clamd, or restarts it only when the configuration changed or on `--force-restart`; waits for `zPING`. The core env gets `KYB_CLAMD_ADDRESS=127.0.0.1:3310`. A host below 2 GB RAM or a failed first download (offline lab) is a warning, never a failed deploy: documents stay `PENDING` and the core's `kyb_scan_backlog` monitor check reports it. Not built: an offline signature mirror (`DatabaseMirror` is the ClamAV default) and a separate scanning host shared by several core nodes.
 - `auditAndLogDbProvisioner.ts`: append-only audit database and partitioned log database;
 - `backupEngineProvisioner.ts`: WAL-G/Barman archive engine, daemon environment/unit, schedules and S3/secondary target checks.
 
@@ -1827,6 +1830,7 @@ Not covered:
 
 - `deploy/provisioners/postgres18Provisioner.ts`
 - `deploy/provisioners/redisProvisioner.ts`
+- `deploy/provisioners/clamavProvisioner.ts`
 - `deploy/provisioners/auditAndLogDbProvisioner.ts`
 - `deploy/provisioners/backupEngineProvisioner.ts`
 - `deploy/lib/hostPlanner.ts`: storage env, URLs and node plans.

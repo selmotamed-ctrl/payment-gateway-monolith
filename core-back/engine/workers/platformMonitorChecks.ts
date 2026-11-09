@@ -195,6 +195,33 @@ export const backgroundJobQueueAgeCheck = (options: { maxAgeMs: number; priority
 });
 
 /**
+ * AUTO-06: KYB documents that sit in PENDING for longer than `maxAgeMs`. Reviewers cannot open a PENDING document, so a
+ * dead or unreachable scanner shows up here (the scan worker itself fails closed and keeps retrying).
+ */
+export const kybScanBacklogCheck = (options: { maxAgeMs: number; priority?: MonitorPriority }): PlatformMonitorCheck => ({
+  id: "kyb_scan_backlog",
+  run: async ({ now, db }) => {
+    const cutoff = new Date(now.getTime() - options.maxAgeMs);
+    const rows = await queryRows<{ n: unknown; oldest_at: unknown }>(
+      db,
+      `SELECT count(*)::int AS n, min(created_at) AS oldest_at FROM kyb_documents
+       WHERE av_status = 'PENDING' AND status = 'UPLOADED' AND created_at < $1`,
+      cutoff,
+    );
+    const count = Number(rows[0]?.n ?? 0);
+    if (count === 0) return [];
+    const oldest = toDate(rows[0]?.oldest_at);
+    return [{
+      title: "KYB documents are waiting for a malware scan",
+      detail:
+        `${count} uploaded KYB document(s) have been PENDING for more than ${formatAge(options.maxAgeMs)}`
+        + `${oldest ? ` (oldest ${formatAge(now.getTime() - oldest.getTime())})` : ""}. Reviewers cannot open them until a scan succeeds: check the scanner (clamd) and the KybScanWorker.`,
+      priority: options.priority ?? "P2",
+    }];
+  },
+});
+
+/**
  * Rows in `journal_lines_default` (the catch-all partition): a missing monthly
  * partition. Counts at most `cap` rows so the probe stays cheap. A database
  * without the partition (not partitioned) reports nothing.
@@ -347,6 +374,8 @@ export interface StandardPlatformChecksConfig {
   auditOutboxMaxAgeMs?: number;
   /** Omit to skip. */
   backgroundJobMaxAgeMs?: number;
+  /** Omit to skip (no scanner configured). */
+  kybScanBacklogMaxAgeMs?: number;
   /** Default true. */
   journalDefaultPartition?: boolean;
   /** PEM files to watch; empty or omitted skips the check. */
@@ -370,6 +399,7 @@ export const createStandardPlatformChecks = (config: StandardPlatformChecksConfi
   if (config.backgroundJobMaxAgeMs !== undefined) {
     checks.push(backgroundJobQueueAgeCheck({ maxAgeMs: config.backgroundJobMaxAgeMs }));
   }
+  if (config.kybScanBacklogMaxAgeMs !== undefined) checks.push(kybScanBacklogCheck({ maxAgeMs: config.kybScanBacklogMaxAgeMs }));
   if (config.journalDefaultPartition !== false) checks.push(journalDefaultPartitionCheck());
   if (config.certificateFiles && config.certificateFiles.length > 0) {
     checks.push(certificateExpiryCheck({ files: config.certificateFiles, warnWithinMs: config.certificateWarnWithinMs }));
