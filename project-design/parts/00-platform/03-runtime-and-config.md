@@ -43,7 +43,7 @@ tests:
   - merchant-back/test/security-regressions.test.ts
   - checkout-back/test/security-regressions.test.ts
 gaps:
-  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 11.
+  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 25.
   - LOG_LEVEL is declared but not used by the console or access logger.
   - WORKER_CONCURRENCY and WORKER_REQUEST_TIMEOUT_MS are accepted but not passed to the production worker runtime.
   - Console request-log correlation uses a separate short id from x-request-id.
@@ -148,6 +148,16 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `WORKER_RESCREEN_INTERVAL_MS` | `86400000` | periodic screening |
 | `WORKER_KYB_EXPIRY_INTERVAL_MS` | `21600000` | KYB expiry worker |
 | `WORKER_KYB_EXPIRY_BATCH_SIZE` | `200` (max 10000) | KYB expiry batch |
+| `WORKER_KYB_SCAN_ENABLED` / `WORKER_KYB_SCAN_INTERVAL_MS` / `WORKER_KYB_SCAN_BATCH_SIZE` | `true` / `60000` / `20` | KYB scan worker (AUTO-06) |
+| `WORKER_STATEMENT_SCHEDULE_ENABLED` / `WORKER_STATEMENT_SCHEDULE_INTERVAL_MS` / `STATEMENT_SCHEDULE_GRACE_MINUTES` / `STATEMENT_SCHEDULE_LOOKBACK_SLOTS` | `true` / `300000` / `120` / `7` | statement schedule alerts (AUTO-07) |
+| `WORKER_CONSISTENCY_AUDIT_ENABLED` / `WORKER_CONSISTENCY_AUDIT_INTERVAL_MS` / `CONSISTENCY_AUDIT_REPAIR` | `true` / `3600000` / `false` | slot counter audit (AUTO-12) |
+| `WORKER_MERCHANT_WEBHOOK_ENABLED` / `WORKER_MERCHANT_WEBHOOK_INTERVAL_MS` / `WORKER_MERCHANT_WEBHOOK_BATCH_SIZE` | `true` / `2000` / `50` | merchant webhook delivery and relay fan-out (AUTO-34) |
+| `MERCHANT_WEBHOOK_TIMEOUT_MS` / `MERCHANT_WEBHOOK_CONCURRENCY` / `MERCHANT_WEBHOOK_ALLOW_INSECURE` / `MERCHANT_WEBHOOK_DISABLE_AFTER_DAYS` / `MERCHANT_WEBHOOK_ROTATION_OVERLAP_HOURS` | `10000` / `8` / `false` / `5` / `24` | webhook egress and failure policy |
+| `WORKER_REGULATORY_REPORT_ENABLED` / `WORKER_REGULATORY_REPORT_INTERVAL_MS` | `true` / `3600000` | regulatory report drafting (AUTO-16) |
+| `REGULATORY_REPORT_MAX_PERIODS` / `REGULATORY_REPORT_MAX_BATCH_LINES` / `REGULATORY_REPORT_REMINDER_BUSINESS_DAYS` | `2` / `5000` / `3` | catch-up depth, batch cap, filing reminder lead |
+| `WORKER_AUDIT_ANCHOR_ENABLED` / `WORKER_AUDIT_ANCHOR_INTERVAL_MS` | `true` / `86400000` | audit-chain anchor worker (AUTO-27; needs the dedicated audit database) |
+| `AUDIT_ANCHOR_SEGMENT_ROWS` / `AUDIT_ANCHOR_MAX_SEGMENTS_PER_TICK` / `AUDIT_ANCHOR_KEY_ID` | `5000` / `40` / `audit-anchor-v1` | anchor verification bounds and vault signing key |
+| `PLATFORM_MONITOR_BACKUP_MAX_FULL_AGE_MS` / `PLATFORM_MONITOR_BACKUP_DRILL_MAX_AGE_MS` | `129600000` / `691200000` | backup freshness limits (AUTO-27) |
 | `WORKER_RETENTION_ENABLED` | `false` | retention worker |
 | `WORKER_RETENTION_INTERVAL_MS` | `3600000` | retention cadence |
 | `WORKER_RETENTION_BATCH_SIZE` | `500` (max 10000) | retention batch |
@@ -194,7 +204,7 @@ Without a webhook URL the notification transport logs the delivery and reports `
 | `FAKE_RAILS_SEEDER_TOKEN` | unset (min 16) | bulk seed handshake |
 | `FAKE_RAILS_ALLOWED_CIDRS` | empty | Declared; not consumed by the engine SSRF guard |
 
-The synthetic seeder and Fake Rails seed script read several of these directly from `process.env`, not through the `env` proxy. `KYB_SCANNER_MODE` is also read directly by `core-back/lib/kybScan.ts` (default `eicar`) and is not part of `envSchema`.
+The synthetic seeder and Fake Rails seed script read several of these directly from `process.env`, not through the `env` proxy. `KYB_SCANNER_MODE` is also read directly by `core-back/lib/kybScan.ts` at upload time (the upload path only ever sets `CLEAN` for `eicar`; `clamd` leaves the document `PENDING` for the `KybScanWorker`). It is part of `envSchema` too (with `KYB_CLAMD_ADDRESS`, `KYB_CLAMD_TIMEOUT_MS`, `KYB_RESCAN_DAYS`, `KYB_SCAN_MAX_ATTEMPTS`, `WORKER_KYB_SCAN_*`, `PLATFORM_MONITOR_KYB_SCAN_MAX_AGE_MS`) for the worker (AUTO-06).
 
 ### 3.3 Edge environment groups
 
@@ -224,13 +234,13 @@ The storage engine is constructed before `listen`, but after the server object i
 
 ### 3.5 Schema version check
 
-`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 16`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
+`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 25`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
 
 ```sql
 SELECT "version" FROM "schema_versions" WHERE "id" = 1
 ```
 
-and throws if the version is not 16. The check is invoked by `prisma/seed.ts`, `prisma/seedFakeRails.ts` and `prisma/syntheticSeeder/index.ts`. It is **not** invoked by `core-back/index.ts`, so the API can boot against a stale schema and fail later at query time. Migration deployment is an external deploy step (`bunx prisma migrate deploy`).
+and throws if the version is not 25. The check is invoked by `prisma/seed.ts`, `prisma/seedFakeRails.ts` and `prisma/syntheticSeeder/index.ts`. It is **not** invoked by `core-back/index.ts`, so the API can boot against a stale schema and fail later at query time. Migration deployment is an external deploy step (`bunx prisma migrate deploy`).
 
 ### 3.6 Worker composition
 
@@ -494,7 +504,7 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 
 ## 11. Security hardening config changes (2026-11-05)
 
-- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING); `REQUIRED_SCHEMA_VERSION = 11`.
+- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 11`.
 - Edges: `TRUSTED_PROXY_CIDRS` default loopback only; `MAX_INBOUND_BODY_BYTES` default 1 MiB; `CORS_ALLOWED_ORIGINS` (no CORS headers on admin/merchant when unset); newly wired rate-limit window envs `AUTH_/ADMIN_/API_/EXTERNAL_/PAY_/INBOUND_RATE_LIMIT_WINDOW_MS`; `CORE_MAX_RESPONSE_BYTES` (64 MiB), `CORE_TOTAL_DEADLINE_MS` (300000), `MAX_STREAMS_PER_IP` (5), `ADMIN_AUTHORITY_HINTS` (default empty, restrict-only), merchant `TOKEN_MAX_SCOPES`, `TOKEN_MAX_TTL_DAYS`, `TOKEN_DEFAULT_TTL_DAYS`, `UPLOAD_RATE_LIMIT_MAX`, admin `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
 - Frontends: `VITE_CHECKOUT_BASE_URL`, `VITE_IDENTITY_HOSTS` (merchant), `VITE_CHECKOUT_ORIGIN` (fake-rails). Real `.env` files in the frontends are no longer tracked; copy `.env.example` to `.env` on a fresh clone.
 - Deploy and daemon keys are listed in the deploy parts.

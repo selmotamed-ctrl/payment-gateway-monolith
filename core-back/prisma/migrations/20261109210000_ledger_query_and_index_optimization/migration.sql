@@ -1,6 +1,11 @@
 -- ============================================================================
--- Schema version 16: ledger index-only scan coverage, journal_entries indexing,
+-- Schema version 25: ledger index-only scan coverage, journal_entries indexing,
 -- and PostgreSQL 18 visibility-map autovacuum tuning for append-only partitions.
+--
+-- Applied after the automation migrations (2026110911..2026110920): its
+-- ensure_journal_line_partitions keeps the AUTO-01 security hardening
+-- (SECURITY DEFINER, bounded, app-role EXECUTE) and adds the append-only
+-- autovacuum settings for future monthly partitions.
 --
 -- journal_lines is monthly range-partitioned by created_at. Every query that
 -- addresses it must bound created_at (see the ledger part, "Query & Indexing
@@ -70,7 +75,11 @@ END $$;
 --    because statement triggers are not cloned from the partitioned parent and
 --    partitions created by the daily cron run as the superuser.
 CREATE OR REPLACE FUNCTION ensure_journal_line_partitions(months_ahead INT DEFAULT 18)
-RETURNS void AS $$
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 DECLARE
   v_offset INT;
   start_date DATE;
@@ -78,6 +87,12 @@ DECLARE
   suffix TEXT;
   part_name TEXT;
 BEGIN
+  -- The application role may call this function from JournalPartitionWorker; keep the bound so a
+  -- compromised caller cannot create thousands of tables (AUTO-01).
+  IF months_ahead IS NULL OR months_ahead < 1 OR months_ahead > 60 THEN
+    RAISE EXCEPTION 'ensure_journal_line_partitions: months_ahead must be between 1 and 60 (got %)', months_ahead
+      USING ERRCODE = '22023';
+  END IF;
   FOR v_offset IN 0..months_ahead - 1 LOOP
     start_date := (date_trunc('month', now())::date + (v_offset || ' months')::interval)::date;
     end_date := (start_date + interval '1 month')::date;
@@ -97,13 +112,22 @@ BEGIN
     PERFORM pgw_guard_journal_line_partition(format('"journal_lines_%s"', suffix)::regclass);
   END LOOP;
 END;
-$$ LANGUAGE plpgsql;
+$$;
+
+REVOKE ALL ON FUNCTION ensure_journal_line_partitions(INT) FROM PUBLIC;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pgw_app') THEN
+    GRANT EXECUTE ON FUNCTION ensure_journal_line_partitions(INT) TO pgw_app;
+  END IF;
+END $$;
 
 SELECT ensure_journal_line_partitions(24);
 
 -- ---------------------------------------------------------------------------
--- Schema version 16
+-- Schema version 25
 -- ---------------------------------------------------------------------------
 UPDATE "schema_versions"
-SET "version" = 16, "updated_at" = now()
+SET "version" = 25, "updated_at" = now()
 WHERE "id" = 1;

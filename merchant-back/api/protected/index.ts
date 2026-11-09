@@ -13,6 +13,7 @@ import { statsRouter } from "./stats";
 import { tokensRouter } from "./tokens";
 import { usersRouter } from "./users";
 import { walletsRouter } from "./wallets";
+import { webhooksRouter } from "./webhooks";
 
 const router = express.Router();
 
@@ -43,5 +44,6 @@ router.use("/tokens", tokensRouter);
 router.use("/credential-sets", credentialSetsRouter);
 router.use("/users", usersRouter);
 router.use("/stats", statsRouter);
+router.use("/webhooks", webhooksRouter);
 
 export const protectedRouter = router;

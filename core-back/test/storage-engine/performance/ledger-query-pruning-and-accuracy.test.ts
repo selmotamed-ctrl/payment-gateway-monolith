@@ -504,6 +504,30 @@ describeDb("Ledger query pruning, index-only scans & edge-case accuracy", () => 
     expect(pause.decision).toBe("PAUSE");
     expect(pause.reason).toBe("CEILING_EXCEEDED_PAUSE");
 
+    // Decision D8 (automation branch): merchant-direct traffic may net only when the wallets can actually
+    // collect enough. Without a funded wallet the receivable stays over the ceiling, so it is a PAUSE.
+    const unfundedNetting = await evaluateCommissionReceivableCeiling(
+      { repositories },
+      client as never,
+      merchant.id,
+      "MERCHANT_DIRECT",
+      loadedMerchant,
+    );
+    expect(unfundedNetting.decision).toBe("PAUSE");
+    expect(unfundedNetting.reason).toBe("CEILING_EXCEEDED_PAUSE");
+
+    // Fund the merchant wallet with 50 (a real posting, so the shard parity stays intact): netting can
+    // now collect 50, leaving 80 <= 100, so the merchant-direct attempt switches to NETTING.
+    const wallet = await makeAccount("MERCHANT_WALLET", merchant.id);
+    const treasury = await makeAccount("TREASURY");
+    await postEntry(
+      [
+        { glAccountId: wallet, direction: "CREDIT", amount: "50.0000" },
+        { glAccountId: treasury, direction: "DEBIT", amount: "50.0000" },
+      ],
+      "ADJUSTMENT",
+      "EC-12 merchant wallet funding",
+    );
     const nettingDecision = await evaluateCommissionReceivableCeiling(
       { repositories },
       client as never,

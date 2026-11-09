@@ -2,9 +2,18 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { backupS3Configured, effectiveDatabase, loadDeployConfig, pgAppRoleEnabled, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
+import { backupS3Configured, clamdManaged, effectiveDatabase, loadDeployConfig, pgAppRoleEnabled, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
-import { buildPki, certFilesForHost, readMaterial, verifyPki, WAL_ARCHIVE_CLIENT } from "./lib/pkiManager";
+import { buildPki, certFilesForHost, checkPkiExpiry, pkiRenewalReport, readMaterial, verifyPki, WAL_ARCHIVE_CLIENT } from "./lib/pkiManager";
+import {
+  CERTBOT_DEPLOY_HOOK_PATH,
+  CERTBOT_SERVICE_PATH,
+  CERTBOT_TIMER_PATH,
+  certbotDeployHook,
+  certbotRenewalEnableScript,
+  certbotRenewalService,
+  certbotRenewalTimer,
+} from "./lib/certRenewal";
 import { collectSecretValues, effectiveTargetHome, effectiveTargetUser, SshRunner, shellQuote } from "./lib/sshRunner";
 import { dollarTag, pgpassField, sqlIdent, sqlLiteral } from "./lib/quoting";
 import { applyFirewall, readFirewallStatus } from "./lib/firewallConfigurator";
@@ -15,6 +24,7 @@ import { parseApplyOutcome } from "./lib/converge";
 import { startFrontendBuilds, type FrontendBuildHandle } from "./lib/frontendBuild";
 import { provisionPostgres18 } from "./provisioners/postgres18Provisioner";
 import { provisionRedis } from "./provisioners/redisProvisioner";
+import { provisionClamav } from "./provisioners/clamavProvisioner";
 import { provisionAuditAndLogDb } from "./provisioners/auditAndLogDbProvisioner";
 import { backupDaemonUser, provisionBackupEngine, STORAGE_CERT_DIR } from "./provisioners/backupEngineProvisioner";
 
@@ -48,6 +58,8 @@ interface CliOptions {
   skipBuild: boolean;
   skipVerify: boolean;
   rotateCerts: boolean;
+  /** Print the certificate expiry table and exit non-zero when anything expires within MTLS_RENEW_WITHIN_DAYS (AUTO-28). */
+  checkCerts: boolean;
   /** Restart PostgreSQL/PgBouncer/Redis/the backup daemon even when nothing changed. */
   forceRestart: boolean;
   /** Ignore the frontend build cache and rebuild every SPA. */
@@ -82,6 +94,7 @@ const parseArgs = (argv: string[]): CliOptions => {
     skipBuild: false,
     skipVerify: false,
     rotateCerts: false,
+    checkCerts: false,
     forceRestart: false,
     rebuild: false,
   };
@@ -94,6 +107,7 @@ const parseArgs = (argv: string[]): CliOptions => {
     else if (raw === "--skip-build") options.skipBuild = true;
     else if (raw === "--skip-verify") options.skipVerify = true;
     else if (raw === "--rotate-certs") options.rotateCerts = true;
+    else if (raw === "--check-certs") options.checkCerts = true;
     else if (raw === "--force-restart") options.forceRestart = true;
     else if (raw === "--rebuild") options.rebuild = true;
     else if (raw.startsWith("--env=")) options.envPath = resolve(REPO_ROOT, raw.slice(6));
@@ -244,6 +258,21 @@ const FRONTENDS: Record<"admin" | "merchant" | "checkout" | "fake-rails", string
 
 const nginxTemplatePath = (template: string): string => join(REPO_ROOT, "deploy", "templates", template);
 
+const certbotRenewalHosts = new Set<string>();
+
+/**
+ * AUTO-28: schedules certbot renewal (twice a day) and an Nginx reload after a renewal, once per host per run. Both
+ * files are rewritten only when they changed; a host without certbot or systemd only gets a warning.
+ */
+const ensureCertbotRenewal = (runner: SshRunner, host: HostPlan): void => {
+  if (certbotRenewalHosts.has(host.ssh.host)) return;
+  certbotRenewalHosts.add(host.ssh.host);
+  runner.writeRemoteFile({ target: host.ssh, path: CERTBOT_DEPLOY_HOOK_PATH, content: certbotDeployHook(), mode: 0o755, sudo: true });
+  runner.writeRemoteFile({ target: host.ssh, path: CERTBOT_SERVICE_PATH, content: certbotRenewalService(), mode: 0o644, sudo: true });
+  runner.writeRemoteFile({ target: host.ssh, path: CERTBOT_TIMER_PATH, content: certbotRenewalTimer(), mode: 0o644, sudo: true });
+  runner.run(host.ssh, certbotRenewalEnableScript(), { sudo: true });
+};
+
 /**
  * Resolves the TLS certificate of a public vhost.
  *
@@ -273,6 +302,7 @@ const resolvePublicCertificate = (
       `test -f ${certPath} || echo "!! missing certificate ${certPath}; run: certbot --nginx -d ${domain} --agree-tos -m ops@${domain}"`,
       { sudo: true },
     );
+    ensureCertbotRenewal(runner, host);
   }
   return { certPath, keyPath };
 };
@@ -990,6 +1020,14 @@ const main = async (): Promise<void> => {
   if (conflicts.length > 0) {
     throw new Error(`Invalid host topology:\n- ${conflicts.join("\n- ")}`);
   }
+  if (options.checkCerts) {
+    // AUTO-28: read-only expiry report for cron / an alert hook; exit 1 when anything needs attention.
+    const window = config.MTLS_RENEW_WITHIN_DAYS > 0 ? config.MTLS_RENEW_WITHIN_DAYS : 30;
+    const report = checkPkiExpiry(buildPki({ config, dryRun: true }), window);
+    log(report.lines.join("\n"));
+    log(report.ok ? `\nAll certificates are valid for at least ${window} days.` : `\nAttention: leaves are re-issued by the next deploy; a CA near expiry needs --rotate-certs.`);
+    process.exit(report.ok ? 0 : 1);
+  }
   const plan = planHosts(config);
   log(renderTopology(plan));
   if (options.dryRun) {
@@ -1033,8 +1071,14 @@ const main = async (): Promise<void> => {
     log(`  would ensure: ${[pki.ca, pki.server, pki.backup, ...pki.clients, ...pki.storageClients].map((material) => material.name).join(", ")}`);
     log(`  core SAN: ${(pki.server.sans ?? []).join(",")}`);
   } else {
+    if ((pki.renewed ?? []).length > 0) {
+      log(`  renewed (expiring within ${config.MTLS_RENEW_WITHIN_DAYS} days, same CA): ${(pki.renewed ?? []).join(", ")}`);
+    }
     for (const certificate of verifyPki(pki)) {
       log(`  ${certificate.name}: valid ${certificate.expiresInDays} day(s)${certificate.sans.length > 0 ? ` SAN=${certificate.sans.join(",")}` : ""}`);
+    }
+    for (const row of pkiRenewalReport(pki, config.MTLS_RENEW_WITHIN_DAYS > 0 ? config.MTLS_RENEW_WITHIN_DAYS : 30)) {
+      if (row.action !== "renew-on-deploy") warn(`${row.name}: ${row.action === "expired" ? "EXPIRED" : `expires in ${row.expiresInDays} day(s); replacing the CA is a rotation: run deploy with --rotate-certs`}`);
     }
   }
   uploadStorageCertificates(runner, plan, pki, config, options.dryRun);
@@ -1099,6 +1143,14 @@ const main = async (): Promise<void> => {
   if (config.REDIS_MANAGE_VIA_SSH && shouldRunStorage(options, ["redis"])) {
     const report = provisionRedis({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });
     log(`  Redis nodes: ${report.nodes.join(", ") || "none"}`);
+    logOutcomes(report.outcomes);
+  }
+  if (clamdManaged(config) && shouldRun(options, "core")) {
+    // AUTO-06: ClamAV (clamd + freshclam) on every core host, loopback only; the core env points at it.
+    const coreHosts = plan.hosts.filter((host) => host.roles.includes("core"));
+    const report = provisionClamav({ runner, config, hosts: coreHosts, dryRun: options.dryRun, forceRestart: options.forceRestart });
+    log(`  ClamAV (clamd ${options.dryRun ? "planned" : "converged"}) on: ${report.nodes.join(", ") || "none"}`);
+    for (const note of report.notes ?? []) warn(note);
     logOutcomes(report.outcomes);
   }
   if ((config.AUDIT_DB_MANAGE_VIA_SSH || config.LOG_DB_MANAGE_VIA_SSH) && shouldRunStorage(options, ["audit-db", "log-db"])) {

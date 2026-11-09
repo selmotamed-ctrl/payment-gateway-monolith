@@ -464,6 +464,10 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
         .optional(),
     })
     .strict(),
+  // Transcribed from core-back/api/internal/admin.ts (AUTO-22, decision D7).
+  "POST /approvals/:id/extend-emergency": z
+    .object({ days: z.number().int().min(1).max(7), reason: z.string().trim().min(10).max(2000) })
+    .strict(),
   "POST /approvals/:id/reject": z
     .object({
       reason: z.string().min(2).max(2000),

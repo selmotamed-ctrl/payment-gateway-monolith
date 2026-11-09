@@ -461,11 +461,15 @@ router.post("/finance/gl-accounts/:id/shards/:shardId/repair", async (request: R
   const id = requireUuidParam(request.params.id, "GL_ACCOUNT_NOT_FOUND", "The GL account does not exist");
   const shardId = shardIdParam(request.params.shardId);
   const body = parseOrThrow(repairBodySchema, request.body ?? {});
+  // The deep read runs here, outside the repair transaction and without the shard lock (AUTO-10); the apply only
+  // reads the lines posted since, under the lock.
+  const basePlan = await planShardRepair(client, id, shardId);
   const result = await applyShardRepair(client, {
     glAccountId: id,
     shardId,
     mode: "MANUAL",
     allowedKinds: ["RECOMPUTE"],
+    basePlan,
     expectedPlanHash: body.planHash,
     reason: body.reason,
     actor: { actorId: actor.actorId, role: actor.role },

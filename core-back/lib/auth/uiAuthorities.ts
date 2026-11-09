@@ -98,6 +98,8 @@ export const buildAdminUserInfo = (user: {
  * authorities; the merchant sidebar gates screens with `resource.action` keys.
  */
 const MERCHANT_UI_PROJECTION: Record<string, readonly string[]> = {
+  // Webhook endpoint management (AUTO-34); the screen itself also needs `applications.read`.
+  "application:manage": ["applications.read", "webhooks.manage"],
   "merchant:read": [
     "stats.read",
     "wallets.read",

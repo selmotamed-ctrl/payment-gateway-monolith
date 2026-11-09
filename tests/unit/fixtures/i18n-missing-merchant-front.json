@@ -36,7 +36,6 @@
   "Currency Alphabetic Code Must be a string",
   "Currency Name Must be a string",
   "Currency Numeric Code Must be a string",
-  "Description",
   "Download Current Data as Excel Sheet",
   "Due",
   "Edit Credential",

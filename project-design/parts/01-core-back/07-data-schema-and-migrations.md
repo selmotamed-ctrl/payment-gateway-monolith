@@ -21,7 +21,7 @@ code:
   - core-back/prisma/migrations/20261107090000_shard_sequenced_checkpoints/migration.sql
   - core-back/prisma/migrations/20261107150000_shard_repairs/migration.sql
   - core-back/prisma/migrations/20261108090000_partition_truncate_guard/migration.sql
-  - core-back/prisma/migrations/20261108150000_ledger_query_and_index_optimization/migration.sql
+  - core-back/prisma/migrations/20261109210000_ledger_query_and_index_optimization/migration.sql
 tests:
   - core-back/test/exhaustive/01-schema/**
   - core-back/test/phase1-mtls-and-schema.test.ts
@@ -32,7 +32,7 @@ tests:
 gaps:
   - Core tables use `TIMESTAMP(3)` while storage-engine tables use `TIMESTAMPTZ(3)`.
   - The migration history is forward-only; there are no down migrations.
-  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 16.
+  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 25.
   - `journal_lines` partition maintenance depends on an external deploy cron.
   - The generated schema catalog appendix is produced by the project-design generator and is not hand-maintained.
 ---
@@ -47,7 +47,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 16 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 25 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -102,7 +102,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 16`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 25`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -115,7 +115,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261108150000_ledger_query_and_index_optimization`, schema version 16). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261109210000_ledger_query_and_index_optimization`, schema version 25). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -290,7 +290,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 16.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 25.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -304,8 +304,8 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ### Implemented
 
-- 79 models and 105 enums in the Prisma datamodel.
-- Schema version 16 with an equality check used by the seeders.
+- 84 models and 105 enums in the Prisma datamodel.
+- Schema version 25 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -408,7 +408,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 16 (`REQUIRED_SCHEMA_VERSION = 16`; model count 79). The schema migrations since version 10 are:
+The current schema version is 25 (`REQUIRED_SCHEMA_VERSION = 25`; model count 84). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -449,9 +449,22 @@ Open: a deploy-time guard that refuses to run this migration on a database with 
 
 `20261108100000_session_revocations` adds the `session_revocations` model (`jti`, `expires_at`) and bumps `REQUIRED_SCHEMA_VERSION` to 15. `revokeSession` writes Redis (atomic `SET ... PX`) and the table; `isSessionRevoked` reads Redis first and the table when Redis misses or is down. Expired rows are deleted opportunistically on later revocations. `20261108090000_partition_truncate_guard` was amended (it is unreleased) so `pgw_guard_journal_line_partition` also grants the app role its DML on each partition and revokes UPDATE/DELETE/TRUNCATE, because partitions created by the cron run as `postgres` and do not inherit the owner's default privileges.
 
-## 14. Ledger query and index optimisation (schema version 16)
+## 14. Automation migrations (schema versions 16 to 24, 2026-11-09)
 
-`20261108150000_ledger_query_and_index_optimization` bumps `REQUIRED_SCHEMA_VERSION` to 16 and adds the indexes/tuning the admin ledger queries need:
+- `20261109110000_refund_inquiry_job_type` adds `BackgroundJobType.REFUND_INQUIRY` (AUTO-20).
+- `20261109120000_outbox_dead_letter_worker_cursors` (version 16, AUTO-02 and AUTO-25): `outbox_events.attempts`, `last_error`, `parked_at` (parked rows keep `processed_at` NULL and stay in the partial index `outbox_events_unprocessed_idx`) and the `worker_cursors` table (`name`, `cursor_value`, `updated_at`). Both are declared in `schema.prisma` (`OutboxEvent`, `WorkerCursor`); the migration had originally been written without them, which the schema-fidelity suite caught.
+- `20261109130000_journal_partition_worker` (version 17, AUTO-01): `ensure_journal_line_partitions(months_ahead)` becomes `SECURITY DEFINER` with a pinned `search_path`, refuses `months_ahead` outside 1..60, and `EXECUTE` is revoked from `PUBLIC` and granted to `pgw_app`, so the application role can call it from `JournalPartitionWorker` while the deploy cron (a superuser) keeps calling the same function. Rows stranded in `journal_lines_default` are moved by the operator script `scripts/repair-journal-default-partition.ts` (maintenance role, one transaction, dry run by default).
+- `20261109140000_expiry_housekeeping` (version 18, AUTO-05 and AUTO-11): `ApprovalState.EXPIRED` (final), and two PARTIAL indexes: `notifications_secret_payload_idx` (finished notifications that still carry a sealed MFA code or invitation token) and `payment_links_pending_expiry_idx` (PENDING links with an expiry). The partial indexes are migration-only (Prisma cannot express them).
+- `20261109150000_deadline_stages` (version 19, AUTO-04 and AUTO-22): the `deadline_stages` table (`subject_type`, `subject_id`, `stage`, `fired_at`, `detail_json`; primary key = the three identifying columns), the exactly-once marker of the deadline worker.
+- `20261109160000_reconciliation_automation` (version 20, AUTO-23): `reconciliation_items.row_type` (nullable text, the parsed statement row type).
+- `20261109170000_kyb_scan_automation` (version 21, AUTO-06): `kyb_documents.av_scanned_at`, `av_engine`, `av_signature`, `av_scan_attempts` (default 0), `av_next_scan_at` (claim lease / retry time), `av_last_error`; partial indexes `kyb_documents_pending_scan_idx` (PENDING) and `kyb_documents_clean_rescan_idx` (CLEAN).
+- `20261109180000_audit_chain_anchors` (version 22, AUTO-27): table `audit_chain_anchors` (`last_seq_no` unique, `last_row_hash`, `rows_verified_total`, `rows_verified_this_run`, `key_id`, HMAC `signature`) with an append-only trigger (UPDATE and DELETE raise).
+- `20261109190000_regulatory_report_automation` (version 23, AUTO-16): `regulatory_reports.due_at`, `report_code`, `period_key` with the partial unique index `regulatory_reports_code_period_key` (one draft per scheduled return and period) and the partial index `regulatory_reports_open_due_idx` (unfiled reports by due date); seeds four PROVISIONAL `reporting_rules` rows (`PSP-M`, `AML-Q`, `AML-A`, `LTR`) with fixed ids, `ON CONFLICT DO NOTHING`.
+- `20261109200000_merchant_webhooks` (version 24, AUTO-34): `merchant_webhook_endpoints` (per application and merchant: `url`, `event_types` (empty = all), `status` ACTIVE or DISABLED with `disabled_reason`, vault-encrypted `secret_ciphertext` plus the previous secret and its expiry, `failing_since`, last success and failure) and `merchant_webhook_deliveries` (unique `(endpoint_id, event_id)`, the signed `body` text, `status` PENDING, DELIVERED or PARKED, attempts, `next_attempt_at`, last status code, latency and error, `park_reason`; partial index on due PENDING rows).
+
+## 15. Ledger query and index optimisation (schema version 25)
+
+`20261109210000_ledger_query_and_index_optimization` bumps `REQUIRED_SCHEMA_VERSION` to 25 and adds the indexes/tuning the admin ledger queries need. It is applied after the automation migrations; its `ensure_journal_line_partitions` keeps the AUTO-01 security hardening (SECURITY DEFINER, bounded 1..60, app-role EXECUTE) and adds the append-only autovacuum settings for future monthly partitions:
 
 - `journal_entries_created_at_idx` (`created_at` INCLUDE `id, ref_type, ref_id`) for the journal list and the 24-hour summary, and `journal_entries_trgm_search_idx` (GIN on `ref_id`, `description`) for the admin search.
 - Covering `journal_lines_entry_id_created_at_idx` (`entry_id, created_at` INCLUDE `gl_account_id, direction, amount, id`) and `journal_lines_account_id_cov_idx` (`gl_account_id, created_at` INCLUDE `direction, amount, entry_id, id`). The key columns are unchanged, so the declared `@@index` parity in the exhaustive schema suite still holds.

@@ -115,12 +115,69 @@ const CHECKLIST_STEPS: ChecklistStep[] = [
 ];
 
 const WEBHOOK_CHECKS = [
-    "Reject any webhook without a valid X-PG-Signature header.",
-    "Recompute the signature over the raw request body and compare it in constant time.",
-    "Compare amount and currency with the payment you created before fulfilling the order.",
-    "Deduplicate by event id so a retried delivery cannot post twice.",
-    "Return a 2xx response quickly and move slow work to a queue.",
+    "Reject any webhook without the webhook-id, webhook-timestamp and webhook-signature headers.",
+    "Recompute HMAC-SHA256 over \"webhook-id.webhook-timestamp.raw body\" with your signing secret (the base64 part after whsec_) and compare it in constant time. The header can carry two signatures while you rotate the secret: accept either.",
+    "Reject a webhook whose timestamp is more than five minutes away from your clock (replay protection).",
+    "Compare amount and currency with the payment you created before fulfilling the order, and fetch the payment when in doubt: ordering is not guaranteed.",
+    "Deduplicate by webhook-id: a failed delivery is retried for about 27 hours, so the same event can arrive more than once.",
+    "Return a 2xx response within 10 seconds and move slow work to a queue. Other 4xx answers (except 408 and 429) stop the retries.",
 ];
+
+/** Receiver code for the Standard Webhooks scheme (what the portal's webhooks send). The secret is the whsec_ value shown once. */
+const webhookVerifySnippets: Record<DeveloperCodeLanguage, string> = {
+    typescript: `import { createHmac, timingSafeEqual } from "node:crypto";
+
+// secret = "whsec_..." (shown once when you create or rotate the endpoint)
+export function verifyWebhook(headers: Record<string, string>, rawBody: string, secret: string): boolean {
+  const id = headers["webhook-id"];
+  const timestamp = headers["webhook-timestamp"];
+  const signatures = headers["webhook-signature"];
+  if (!id || !timestamp || !signatures) return false;
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false; // replay protection
+  const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
+  const expected = createHmac("sha256", key).update(\`\${id}.\${timestamp}.\${rawBody}\`).digest("base64");
+  return signatures.split(" ").some((entry) => {
+    const [version, value] = entry.split(",");
+    return version === "v1" && value !== undefined && value.length === expected.length && timingSafeEqual(Buffer.from(value), Buffer.from(expected));
+  });
+}`,
+    php: `<?php
+// $secret = "whsec_..." (shown once when you create or rotate the endpoint)
+function verifyWebhook(array $headers, string $rawBody, string $secret): bool {
+    $id = $headers['webhook-id'] ?? null;
+    $timestamp = $headers['webhook-timestamp'] ?? null;
+    $signatures = $headers['webhook-signature'] ?? null;
+    if (!$id || !$timestamp || !$signatures) return false;
+    if (abs(time() - (int) $timestamp) > 300) return false; // replay protection
+    $key = base64_decode(preg_replace('/^whsec_/', '', $secret));
+    $expected = base64_encode(hash_hmac('sha256', "$id.$timestamp.$rawBody", $key, true));
+    foreach (explode(' ', $signatures) as $entry) {
+        [$version, $value] = array_pad(explode(',', $entry, 2), 2, '');
+        if ($version === 'v1' && hash_equals($expected, $value)) return true;
+    }
+    return false;
+}`,
+    python: `import base64, hashlib, hmac, time
+
+# secret = "whsec_..." (shown once when you create or rotate the endpoint)
+def verify_webhook(headers: dict, raw_body: str, secret: str) -> bool:
+    id_, timestamp, signatures = headers.get("webhook-id"), headers.get("webhook-timestamp"), headers.get("webhook-signature")
+    if not (id_ and timestamp and signatures):
+        return False
+    if abs(time.time() - int(timestamp)) > 300:  # replay protection
+        return False
+    key = base64.b64decode(secret.removeprefix("whsec_"))
+    expected = base64.b64encode(hmac.new(key, f"{id_}.{timestamp}.{raw_body}".encode(), hashlib.sha256).digest()).decode()
+    return any(
+        entry.startswith("v1,") and hmac.compare_digest(entry[3:], expected)
+        for entry in signatures.split(" ")
+    )`,
+    curl: `# Compute the signature by hand to compare with the webhook-signature header
+printf '%s' "$WEBHOOK_ID.$WEBHOOK_TIMESTAMP.$RAW_BODY" \\
+  | openssl dgst -sha256 -hmac "$(printf '%s' "\${SECRET#whsec_}" | base64 -d | xxd -p -c 256)" -binary \\
+  | base64
+# The header value is "v1,<that base64>" (two entries separated by a space while a secret is being rotated).`,
+};
 
 const readChecklist = (): Record<string, boolean> => {
     if (typeof localStorage === "undefined") return {};
@@ -427,13 +484,18 @@ curl ${shellQuote(paymentEndpoint.value)} \\
     const webhookPayload = computed(() =>
         JSON.stringify(
             {
-                event: "payment.succeeded",
                 id: "evt_01J9Z8K4M2",
-                reference: sandbox.value.reference || "PAY-REF-1001",
-                status: "SUCCEEDED",
-                amount: calc.value.amount || "250",
-                currency: "LYD",
-                feeBearer: calc.value.feeBearer,
+                type: "payment.succeeded",
+                created: "2026-11-09T10:00:00.000Z",
+                data: {
+                    paymentId: "0191f6c2-7d3a-7a55-9e0c-3b1f5c6e8a10",
+                    reference: sandbox.value.reference || "PAY-REF-1001",
+                    status: "SUCCEEDED",
+                    amount: calc.value.amount || "250",
+                    netAmount: calc.value.amount || "250",
+                    currency: "LYD",
+                    linkId: null,
+                },
             },
             null,
             2,
@@ -606,7 +668,9 @@ curl ${shellQuote(paymentEndpoint.value)} \\
                                 <GuideCodeBlock
                                     copyable={false}
                                     code={`POST https://merchant.example/webhooks/payments
-X-PG-Signature: t=1730000000,v1=9f2c...
+webhook-id: evt_01J9Z8K4M2
+webhook-timestamp: 1730000000
+webhook-signature: v1,K5oZfzN0mYz8...=
 Content-Type: application/json
 
 ${webhookPayload.value}`}
@@ -614,6 +678,7 @@ ${webhookPayload.value}`}
                             </ThemedView>
                             <ThemedView style={{ flex: "1 1 320px", gap: "8px" }}>
                                 <ThemedText type="defaultSemiBold">{isArabic.value ? "تحقق من كل استدعاء" : "Verify every callback"}</ThemedText>
+                                <GuideCodeBlock code={webhookVerifySnippets[snippetTab.value]} />
                                 {WEBHOOK_CHECKS.map((check) => (
                                     <ThemedView key={check} style={{ flexDirection: "row", gap: "8px", alignItems: "flex-start" }}>
                                         <VIcon icon="mdi-check-circle-outline" color="success" size="18px" style={{ marginTop: "2px" }} />

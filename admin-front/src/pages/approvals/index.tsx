@@ -68,7 +68,7 @@ const APPROVAL_CHECKS = [
 ] as const;
 
 const PENDING_STATES = ["PENDING_REVIEW"];
-const HISTORY_STATES = ["APPROVED", "EXECUTED", "REJECTED"];
+const HISTORY_STATES = ["APPROVED", "EXECUTED", "REJECTED", "EXPIRED"];
 
 /** `POS_TERMINAL` -> `POS Terminal`, `AML_CASE` -> `AML Case` (translated at the call site). */
 const subjectTypeLabel = (value: string): string => humanizeKey(value);

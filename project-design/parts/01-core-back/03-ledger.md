@@ -25,7 +25,7 @@ code:
   - core-back/api/internal/adminLedger.ts
   - core-back/api/internal/ledgerLines.ts
   - core-back/engine/db/repositories.ts
-  - core-back/prisma/migrations/20261108150000_ledger_query_and_index_optimization/migration.sql
+  - core-back/prisma/migrations/20261109210000_ledger_query_and_index_optimization/migration.sql
   - core-back/prisma/seedGlAccounts.ts
   - core-back/prisma/schema.prisma
   - core-back/prisma/migrations/20261105090000_append_only_ledger_guards/migration.sql

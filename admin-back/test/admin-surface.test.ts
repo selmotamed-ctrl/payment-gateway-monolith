@@ -964,6 +964,12 @@ describe("admin forwards payloads core accepts", () => {
     },
     {
       method: "POST",
+      path: "/api/v1/admin/approvals/ap_1/extend-emergency",
+      body: { days: 3, reason: "A second officer needs more time to review the evidence" },
+      contract: "POST /approvals/:id/extend-emergency",
+    },
+    {
+      method: "POST",
       path: "/api/v1/admin/aml/matches/m_1/disposition",
       body: { disposition: "CONFIRMED_MATCH", notes: "real match" },
       contract: "POST /aml/matches/:id/disposition",

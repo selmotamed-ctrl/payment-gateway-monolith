@@ -1,0 +1,9 @@
+process.env.NODE_ENV = "test";
+process.env.FAKE_RAILS_ADMIN_USER = "tester_admin";
+process.env.FAKE_RAILS_ADMIN_PASSWORD = "Strong-Tester-Pass-2026!";
+process.env.FAKE_RAILS_JWT_SECRET = "jwt-Rk7Qm2Xv9Lp4Zn8Bc3Wd6Th1Yg5Js0Af";
+process.env.FAKE_RAILS_SEEDER_TOKEN = "seed-Hv3Tn8Yq1Dz6Mk4Pw9Xc2Lb7Rg5Fj0Ua";
+process.env.FAKE_RAILS_PUBLIC_BASE_URL = "http://127.0.0.1:8444";
+process.env.FAKE_RAILS_WEBHOOK_TIMEOUT_MS = "500";
+process.env.CORE_INBOUND_BASE_URL = "http://core.lab.internal:4103/api/v1/inbound";
+process.env.FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS = "receiver.lab.internal, hook.lab.internal:9443";

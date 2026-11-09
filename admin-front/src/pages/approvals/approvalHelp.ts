@@ -6,6 +6,7 @@ export const APPROVAL_STATE_HELP: Record<string, { label: string; meaning: strin
     APPROVED: { label: "Approved", meaning: "The checker approved the request and execution is in progress or complete.", tone: "info" },
     EXECUTED: { label: "Executed", meaning: "The approved change was executed atomically and the subject is updated.", tone: "success" },
     REJECTED: { label: "Rejected", meaning: "The checker rejected the request. The maker must submit a clean draft.", tone: "error" },
+    EXPIRED: { label: "Expired", meaning: "Nobody decided the request before its deadline, so it was closed automatically and can no longer be approved. The maker submits it again if the change is still needed.", tone: "warning" },
 };
 
 export const APPROVAL_DOMAIN_HELP: Record<string, string> = {

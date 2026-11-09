@@ -970,6 +970,35 @@ export class LedgerPoster {
     );
   }
 
+  /**
+   * `lockShardsFor` for SEVERAL postings one transaction is about to make (a cash-out and the commission netting
+   * before it): the union of their shard rows is locked in ONE statement in the global order. Locking them posting by
+   * posting would take a later posting's lower-ordered row after a higher one, the opposite order to a concurrent
+   * posting that needs both.
+   */
+  async lockShardsForMany(
+    postings: ReadonlyArray<{ template: JournalTemplate; context: LedgerPostContext }>,
+    transaction: LedgerPrismaClient,
+  ): Promise<void> {
+    const lines: LedgerShardLine[] = [];
+    for (const { template, context } of postings) {
+      this.validateTemplate(template);
+      const accountIds = await this.resolveAccountIds(transaction, template.lines, context);
+      template.lines.forEach((line, index) => {
+        lines.push({
+          entryId: "",
+          refType: template.refType,
+          refId: template.refId,
+          glAccountId: accountIds[index]!,
+          accountType: line.account.accountType,
+          direction: line.direction,
+          amount: line.amount,
+        });
+      });
+    }
+    await lockShardsForLines(transaction, lines);
+  }
+
   async postScenario(
     scenario: LedgerScenario,
     refId: string,

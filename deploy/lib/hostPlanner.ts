@@ -1,4 +1,5 @@
 import {
+  CLAMD_LOCAL_ADDRESS,
   edgeCoreUrls,
   applicationCredentials,
   effectiveDatabase,
@@ -332,6 +333,8 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
     STORAGE_SHARD_COUNT: String(config.STORAGE_SHARD_COUNT),
     READ_REPLICA_MAX_LAG_MS: String(config.READ_REPLICA_MAX_LAG_MS),
     KYB_SCANNER_MODE: config.KYB_SCANNER_MODE,
+    ...(config.KYB_SCANNER_MODE === "clamd" ? { KYB_CLAMD_ADDRESS: config.KYB_CLAMD_ADDRESS || CLAMD_LOCAL_ADDRESS } : {}),
+    KYB_RESCAN_DAYS: String(config.KYB_RESCAN_DAYS),
     TRUST_PROXY: "false",
     LOG_LEVEL: "info",
     WORKER_ENABLED: "true",

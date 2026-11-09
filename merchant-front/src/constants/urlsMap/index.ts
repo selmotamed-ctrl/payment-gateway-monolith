@@ -48,6 +48,14 @@ export const urlsMap = {
     tokenDetail: (id: string) => `v1/merchant/tokens/${id}`,
     tokenIps: (id: string) => `v1/merchant/tokens/${id}/ips`,
 
+    webhookEventTypes: "v1/merchant/webhooks/event-types",
+    webhookEndpoints: "v1/merchant/webhooks/endpoints",
+    webhookEndpoint: (id: string) => `v1/merchant/webhooks/endpoints/${id}`,
+    webhookRotateSecret: (id: string) => `v1/merchant/webhooks/endpoints/${id}/rotate-secret`,
+    webhookTest: (id: string) => `v1/merchant/webhooks/endpoints/${id}/test`,
+    webhookDeliveries: "v1/merchant/webhooks/deliveries",
+    webhookRedeliver: (id: string) => `v1/merchant/webhooks/deliveries/${id}/redeliver`,
+
     credentialSetsList: "v1/merchant/credential-sets",
     credentialSetDetail: (id: string) => `v1/merchant/credential-sets/${id}`,
 

@@ -13,6 +13,7 @@ import {
   type ScalerState,
 } from "../../engine/ledger/ShardScaler";
 import {
+  HOT_SYSTEM_SHARD_WIDTH,
   INITIAL_SYSTEM_SHARD_WIDTH,
   MAX_SHARD_WIDTH,
   MIN_SHARD_WIDTH,
@@ -71,7 +72,7 @@ const run = (input: ScalerInput, times: number, cfg: ScalerConfig, from: ScalerS
 
 describe("decideShardWidth: threshold and sustained overload", () => {
   test("the shipped defaults", () => {
-    expect(DEFAULT_SCALER_CONFIG).toEqual({ upLinesPerSec: 150, maxWidth: 64, cooldownMs: 600_000, consecutive: 2, maxStep: 4, alpha: 0.5 });
+    expect(DEFAULT_SCALER_CONFIG).toEqual({ upLinesPerSec: 150, maxWidth: 256, cooldownMs: 600_000, consecutive: 2, maxStep: 4, alpha: 0.5 });
     expect(INITIAL_SCALER_STATE).toEqual({ hotRate: 0, totalRate: 0, over: 0 });
   });
 
@@ -337,13 +338,26 @@ describe("shard routing: clampShardWidth / initialShardWidth", () => {
     expect(INITIAL_SYSTEM_SHARD_WIDTH).toBe(16);
     expect(initialShardWidth("MERCHANT_WALLET")).toBe(1);
     expect(initialShardWidth("MERCHANT_WALLET", 64)).toBe(1);
-    for (const type of ["TREASURY", "GATEWAY_CLEARING", "PLATFORM_INCOME", "PROVIDER_FEE_EXPENSE", "AML_HOLD", "SUSPENSE"]) {
+    for (const type of ["PROVIDER_FEE_EXPENSE", "AML_HOLD", "SUSPENSE", "COMMISSION_RECEIVABLE"]) {
       expect(initialShardWidth(type)).toBe(16);
       expect(initialShardWidth(type, 32)).toBe(32);
     }
-    expect(initialShardWidth("TREASURY", 0)).toBe(1);
-    expect(initialShardWidth("TREASURY", 9_999)).toBe(256);
-    expect(initialShardWidth("TREASURY", Number.NaN)).toBe(1);
+    expect(initialShardWidth("SUSPENSE", 0)).toBe(1);
+    expect(initialShardWidth("SUSPENSE", 9_999)).toBe(256);
+    expect(initialShardWidth("SUSPENSE", Number.NaN)).toBe(1);
+  });
+
+  test("initialShardWidth: the hot system accounts start at 128 shards (decision D6)", () => {
+    expect(HOT_SYSTEM_SHARD_WIDTH).toBe(128);
+    for (const type of ["TREASURY", "GATEWAY_CLEARING", "PLATFORM_INCOME"]) {
+      expect(initialShardWidth(type)).toBe(128);
+      // the ordinary system width does not apply to them; their own does
+      expect(initialShardWidth(type, 32)).toBe(128);
+      expect(initialShardWidth(type, 16, 64)).toBe(64);
+      expect(initialShardWidth(type, 16, 0)).toBe(1);
+      expect(initialShardWidth(type, 16, 9_999)).toBe(256);
+    }
+    expect(initialShardWidth("MERCHANT_WALLET", 16, 128)).toBe(1);
   });
 });
 

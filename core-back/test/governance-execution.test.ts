@@ -6,6 +6,7 @@ import {
   SYSTEM_AUTOMATION_USER_ID,
   executeApprovalSubject,
   executeCashout,
+  disputeEvidenceWindowDays,
   openDisputeWithDraftedAdjustment,
   type GovernanceExecutionContext,
 } from "../engine/governance/GovernanceExecution";
@@ -354,6 +355,21 @@ describe("governance execution", () => {
     expect(operatorCase?.priority).toBe("P1");
   });
 
+  test("an explicit evidence deadline wins, and a rail that declares its own window sets it", async () => {
+    const explicit = new Date("2031-01-01T00:00:00.000Z");
+    const first = await fixture.client.$transaction(async (tx) =>
+      openDisputeWithDraftedAdjustment(fixture.context, tx as never, {
+        attemptId: "attempt-1", gatewayId: "gateway-1", railId: "rail-1", externalDisputeRef: "DSP-EXPLICIT",
+        source: "MANUAL", amount: new Decimal(10), currency: "LYD", actorUserId: "user-finance", actorRole: "FINANCE", evidenceDueAt: explicit,
+      }),
+    );
+    expect(new Date(rowsOf("dispute").find((row) => row.id === first.disputeId)?.evidenceDueAt as never).toISOString()).toBe(explicit.toISOString());
+    expect(disputeEvidenceWindowDays({ dispute_evidence_days: 7 })).toBe(7);
+    expect(disputeEvidenceWindowDays({ dispute_evidence_days: "soon" })).toBe(14);
+    expect(disputeEvidenceWindowDays(null)).toBe(14);
+    expect(disputeEvidenceWindowDays({ dispute_evidence_days: -3 })).toBe(14);
+  });
+
   test("opening a dispute drafts a system adjustment and escrows the money", async () => {
     const result = await fixture.client.$transaction(async (tx) =>
       openDisputeWithDraftedAdjustment(fixture.context, tx as never, {
@@ -380,6 +396,14 @@ describe("governance execution", () => {
     expect(approval?.subjectType).toBe("ADJUSTMENT");
     expect(approval?.makerUserId).toBe(SYSTEM_AUTOMATION_USER_ID);
     expect(approval?.state).toBe("PENDING_REVIEW");
+
+    // AUTO-04: the dispute has an evidence deadline (the platform default of 14 days), and the drafted chargeback's
+    // approval outlives the dispute (evidence window + ruling SLA + margin) instead of expiring after 3 days.
+    const dispute = rowsOf("dispute").find((row) => row.id === result.disputeId);
+    const dueAt = new Date(dispute?.evidenceDueAt as never).getTime();
+    const openedAt = new Date(dispute?.openedAt as never).getTime();
+    expect(Math.round((dueAt - openedAt) / 86_400_000)).toBe(14);
+    expect(new Date(approval?.expiresAt as never).getTime() - dueAt).toBe((30 + 14) * 86_400_000);
 
     const reserve = entryOf("DISPUTE_OUTCOME", result.disputeId);
     expect(reserve).toBeDefined();

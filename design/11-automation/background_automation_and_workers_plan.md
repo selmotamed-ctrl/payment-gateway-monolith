@@ -354,3 +354,35 @@ Rules that apply to every report: the payload is stored encrypted with its SHA-2
 4. A search of the schema for time-driven fields (`expiresAt`, `slaDueAt`, `evidenceDueAt`, `ratifyDueAt`, `scheduleCron`, effective dates) and of the code for anything that acts on them.
 
 When an item is picked up, re-run its evidence check first: the code moves quickly, and several review findings were fixed by the 2026-11-08 remediation before this plan was written.
+
+## 9. Implementation status (kept current while the plan is built)
+
+Canonical status lives in `project-design/TRACKER.md` and `project-design/parts/01-core-back/05-workers.md` section 3.16; this table is the quick view. "Dry run" means it ships audited-only until the owner switches it live (plan rule 2).
+
+| Item | Status | Notes |
+| :--- | :--- | :--- |
+| AUTO-02 outbox dead-lettering | Done | Migration 16; parked events, one case per topic; relay and shipper report health. |
+| AUTO-03 worker health and monitoring | Done | Registry, `PlatformMonitorWorker`, 8 standard checks + 2 money-path checks; backup freshness arrives with AUTO-27. |
+| AUTO-10 repair lock time | Done | Plan outside the lock. Scaling (pre-sized system accounts, calibration) and scale-down are open. |
+| AUTO-19 stale UNKNOWN | Done | Keyed case from `PollWorker`, monitor check. |
+| AUTO-20 refund inquiry | Done, dry run | `REFUND_INQUIRY` jobs; production scheduler wired. |
+| AUTO-21 commission netting | Done, dry run | Daily worker and cash-out hook, notification, aged case. |
+| AUTO-25 KYB 200-merchant cap | Done | Persisted keyset cursor. |
+| AUTO-01 journal partitions | Done | Function hardened (v17), worker, operator repair script. The plan's "guarded repair job" is an operator script because the maintenance flag is not available to the application role. |
+| AUTO-13 join request follow-through | Done | Audit row and neutral merchant notice in the expiry transaction. |
+| AUTO-05 expiry housekeeping | Done | `ApprovalState.EXPIRED` (v18), invitations, MFA/session purges, sealed-secret scrub. |
+| AUTO-11 payment link expiry | Done | `link.expired` outbox event; slot self-healing stays with AUTO-12. |
+| AUTO-04 SLA and deadline escalation | Done (D1 deviation) | Operator/AML/join/dispute/cash-out rules; dispute loss BOOKING stays human (design 19.3), owner to confirm. P50/P90/P95 dashboard not built. |
+| AUTO-22 emergency ratification | Done | Policy D7 for suspensions; velocity reverter interface only (no emergency velocity flow exists); extension route + admin-back proxy, no UI button yet. |
+| AUTO-08 token and credential expiry | Done (deviation) | Staged notices, P1 case, expired set taken out of use. No OPEN_BREAKER: routing already hides routes without a VERIFIED credential set. |
+| AUTO-26 re-verification | Partly | Scheduled re-verification (dry run) and failing-verdict case. Refresh-failure counting in `ApiConsumer` not built. |
+| AUTO-24 event-driven AML re-screening | Done | List-update sweep (resumable) and new-owner trigger; owner edits are not detected. |
+| AUTO-23 reconciliation follow-up | Done (deviation) | Exception cases, chargeback rows to disputes, statement evidence on UNKNOWN cases; the UNKNOWN attempt is not finalised automatically. Also fixed: disputes had no evidence deadline and their approval expired in 3 days. |
+| AUTO-06 KYB scanning | Done | `KybScanWorker` with a ClamAV `clamd` INSTREAM client, fail-closed retry/backoff, quarantine case and notice, re-scan after `KYB_RESCAN_DAYS`, backlog monitor check; `KYB_SCANNER_MODE=clamd` makes the deploy engine install and converge `clamav-daemon` + `freshclam` on every core host (loopback `127.0.0.1:3310`, `StreamMaxLength` 32M, restart only on change); an explicit `KYB_CLAMD_ADDRESS` means an external daemon and nothing is installed. |
+| AUTO-27 backup alerts and audit anchor | Done (deviation) | `backup` monitor check polls the daemon overview (no push channel): unreachable, unhealthy, WAL lag, failed run per target, stale full backup, failed/stale drill, each its own keyed case. `AuditChainAnchorWorker` verifies the live chain incrementally and stores HMAC-signed anchors (`audit_chain_anchors`, v22); rewrite, truncation, break and forged anchor open P1 cases. The anchor is stored only in the core database (not yet copied to the backup store). |
+| AUTO-28 certificate renewal | Done (deviation) | Deploy installs a certbot renewal timer (twice daily) and an Nginx reload deploy hook for `certbot` vhosts; a deploy re-issues internal mTLS leaves expiring within `MTLS_RENEW_WITHIN_DAYS` with the same CA; `deploy.ts --check-certs` reports expiry for cron/alerts. Nothing runs the deploy automatically, and a near-expiry CA still needs `--rotate-certs`. |
+| AUTO-16 regulatory reports | Partly | `RegulatoryReportWorker` drafts PSP-M, AML-Q, AML-A per closed Tripoli period and the business-day LTR batch from PROVISIONAL `reporting_rules` rows (v23, `due_at`, idempotent per code and period); the `reports` deadline rule reminds and opens a P1 case. NOT built: goAML XML, XLSX output, the INC return, STR due dates, regenerate action. |
+| AUTO-34 merchant webhooks | Done (partial scope) | Endpoints per application, vault-encrypted `whsec_` secret shown once with a 24 h rotation overlap, Standard Webhooks signing, outbox fan-out in the relay transaction, `MerchantWebhookWorker` (pinned public egress, no redirects, 8 attempts over ~27 h, park, disable after 5 days with a notice), `webhook.test`, redeliver, core API + merchant-back proxy + portal page, guide updated. Events: payment succeeded/failed/expired/refunded (terminal status), link expired, dispute opened/closed, cash-out paid/failed. NOT built: attempt history, payload viewer, partial-refund event. |
+| AUTO-07 statement schedules | Partly | `StatementScheduleWorker` + `lib/cron.ts` (Tripoli time): one keyed case per missed slot, resolved when the statement arrives. No `STATEMENT_FETCH` pull job (no connector) and no AUTO-15 sweep scheduling. |
+| AUTO-12 slot self-healing | Partly | `ConsistencyAuditWorker` reports `active_locked_count` drift (repair behind a flag, off by default). Daily cap counters are not audited. |
+| All other items | Open | See the roadmap in section 5. |

@@ -13,7 +13,8 @@ process.env.FAKE_RAILS_DB_PATH = dbPath;
 process.env.FAKE_RAILS_PUBLIC_BASE_URL = "http://127.0.0.1:8444";
 process.env.FAKE_RAILS_TIMEOUT_HANG_MS = "40";
 process.env.FAKE_RAILS_WEBHOOK_TIMEOUT_MS = "200";
-process.env.CORE_INBOUND_BASE_URL = "http://127.0.0.1:59999/api/v1/inbound";
+process.env.CORE_INBOUND_BASE_URL = "http://core.lab.internal:4103/api/v1/inbound";
+process.env.FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS = "receiver.lab.internal, hook.lab.internal:9443";
 
 let server: import("node:http").Server;
 let baseUrl = "";

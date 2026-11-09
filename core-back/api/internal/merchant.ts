@@ -56,6 +56,9 @@ import {
 } from "../middleware/authDoubleCheck";
 import { publishRealtimePos, subscribeRealtimeAttempt, subscribeRealtimePos } from "../../lib/realtimeBus";
 import { writeAudit } from "../../lib/audit/writeAudit";
+import { env } from "../../lib/env";
+import { WebhookEndpointService } from "../../engine/webhooks/WebhookEndpointService";
+import { WEBHOOK_EVENT_TYPES, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_MS } from "../../engine/webhooks/events";
 
 const router = express.Router();
 
@@ -3165,6 +3168,133 @@ router.get("/external/payments/:reference", async (request: Request, response: R
     currency: attempt.currency,
     createdAt: attempt.createdAt.toISOString(),
   });
+});
+
+// ---- Outbound webhooks (AUTO-34) -----------------------------------------------------------------------------------
+// The merchant manages its endpoints here (portal contract, proxied by merchant-back). Reading needs a merchant read
+// authority, changing anything needs `application:manage`; a scoped user only reaches endpoints of their applications.
+// The signing secret is returned exactly once, by create and rotate, and never read back.
+
+const webhookService = new WebhookEndpointService({
+  db: client as never,
+  vault,
+  allowInsecure: env.MERCHANT_WEBHOOK_ALLOW_INSECURE,
+  rotationOverlapMs: env.MERCHANT_WEBHOOK_ROTATION_OVERLAP_HOURS * 3_600_000,
+});
+
+const webhookActor = (request: Request) => {
+  const principal = principalOf(request);
+  return { userId: principal.userId ?? null, role: principal.role ?? "MERCHANT_ADMIN" };
+};
+
+const assertWebhookRead = (request: Request): void => assertMerchantAuthority(principalOf(request), ["merchant:read", "merchant:write", "application:manage"]);
+const assertWebhookWrite = (request: Request): void => assertMerchantAuthority(principalOf(request), ["application:manage"]);
+
+/** 404 when the endpoint is not the merchant's, 403 when a scoped user may not touch its application. */
+const scopedEndpoint = async (request: Request, endpointId: string) => {
+  const found = (await webhookService.list(merchantIdOf(request))).find((endpoint) => endpoint.id === endpointId);
+  if (!found) throw new ApiError(404, "WEBHOOK_ENDPOINT_NOT_FOUND", "The webhook endpoint does not exist");
+  assertApplicationInScope(request, found.applicationId);
+  return found;
+};
+
+const webhookEndpointBody = z
+  .object({
+    url: z.string().min(1).max(2000),
+    eventTypes: z.array(z.string().min(1).max(64)).max(32).optional(),
+    description: z.string().max(200).nullable().optional(),
+  })
+  .strict();
+
+router.get("/webhooks/event-types", async (request: Request, response: Response) => {
+  assertWebhookRead(request);
+  response.json({
+    eventTypes: WEBHOOK_EVENT_TYPES,
+    signature: { scheme: "standard-webhooks", headers: ["webhook-id", "webhook-timestamp", "webhook-signature"], algorithm: "HMAC-SHA256 (base64) over `id.timestamp.body`" },
+    retry: { maxAttempts: WEBHOOK_MAX_ATTEMPTS, delaysSeconds: WEBHOOK_RETRY_DELAYS_MS.map((ms) => Math.round(ms / 1000)), disableAfterDays: env.MERCHANT_WEBHOOK_DISABLE_AFTER_DAYS },
+  });
+});
+
+router.get("/webhooks/endpoints", async (request: Request, response: Response) => {
+  assertWebhookRead(request);
+  const { applicationId } = parseOrThrow(z.object({ applicationId: z.string().uuid().optional() }).passthrough(), request.query);
+  if (applicationId) assertApplicationInScope(request, applicationId);
+  const scope = appScopeOf(request);
+  const endpoints = (await webhookService.list(merchantIdOf(request), applicationId)).filter((endpoint) => !scope || scope.includes(endpoint.applicationId));
+  response.json({ endpoints });
+});
+
+router.post("/webhooks/endpoints", async (request: Request, response: Response) => {
+  assertWebhookWrite(request);
+  const body = parseOrThrow(webhookEndpointBody.extend({ applicationId: z.string().uuid() }).strict(), request.body);
+  assertApplicationInScope(request, body.applicationId);
+  const created = await webhookService.create({
+    merchantId: merchantIdOf(request),
+    applicationId: body.applicationId,
+    url: body.url,
+    eventTypes: body.eventTypes,
+    description: body.description ?? null,
+    actor: webhookActor(request),
+  });
+  response.setHeader("Cache-Control", "no-store");
+  response.status(201).json(created);
+});
+
+router.patch("/webhooks/endpoints/:id", async (request: Request, response: Response) => {
+  assertWebhookWrite(request);
+  const { id } = parseOrThrow(z.object({ id: z.string().uuid() }), request.params);
+  const body = parseOrThrow(webhookEndpointBody.partial().extend({ enabled: z.boolean().optional() }).strict(), request.body);
+  await scopedEndpoint(request, id);
+  response.json(await webhookService.update({ merchantId: merchantIdOf(request), endpointId: id, ...body, actor: webhookActor(request) }));
+});
+
+router.post("/webhooks/endpoints/:id/rotate-secret", async (request: Request, response: Response) => {
+  assertWebhookWrite(request);
+  const { id } = parseOrThrow(z.object({ id: z.string().uuid() }), request.params);
+  await scopedEndpoint(request, id);
+  response.setHeader("Cache-Control", "no-store");
+  response.json(await webhookService.rotateSecret({ merchantId: merchantIdOf(request), endpointId: id, actor: webhookActor(request) }));
+});
+
+router.post("/webhooks/endpoints/:id/test", async (request: Request, response: Response) => {
+  assertWebhookWrite(request);
+  const { id } = parseOrThrow(z.object({ id: z.string().uuid() }), request.params);
+  await scopedEndpoint(request, id);
+  response.status(202).json(await webhookService.sendTest({ merchantId: merchantIdOf(request), endpointId: id, actor: webhookActor(request) }));
+});
+
+router.get("/webhooks/deliveries", async (request: Request, response: Response) => {
+  assertWebhookRead(request);
+  const query = parseOrThrow(
+    z
+      .object({
+        endpointId: z.string().uuid().optional(),
+        status: z.enum(["PENDING", "DELIVERED", "PARKED"]).optional(),
+        limit: z.coerce.number().int().min(1).max(200).optional(),
+        before: z.string().datetime().optional(),
+      })
+      .passthrough(),
+    request.query,
+  );
+  if (query.endpointId) await scopedEndpoint(request, query.endpointId);
+  const scope = appScopeOf(request);
+  let deliveries = await webhookService.listDeliveries({ merchantId: merchantIdOf(request), ...query });
+  if (scope) {
+    const allowed = new Set((await webhookService.list(merchantIdOf(request))).filter((endpoint) => scope.includes(endpoint.applicationId)).map((endpoint) => endpoint.id));
+    deliveries = deliveries.filter((delivery) => allowed.has(String(delivery.endpointId)));
+  }
+  response.json({ deliveries });
+});
+
+router.post("/webhooks/deliveries/:id/redeliver", async (request: Request, response: Response) => {
+  assertWebhookWrite(request);
+  const { id } = parseOrThrow(z.object({ id: z.string().uuid() }), request.params);
+  if (appScopeOf(request)) {
+    const deliveries = await webhookService.listDeliveries({ merchantId: merchantIdOf(request), limit: 200 });
+    const row = deliveries.find((delivery) => delivery.id === id);
+    if (row) await scopedEndpoint(request, String(row.endpointId));
+  }
+  response.status(202).json(await webhookService.redeliver({ merchantId: merchantIdOf(request), deliveryId: id, actor: webhookActor(request) }));
 });
 
 export const merchantInternalRouter = router;

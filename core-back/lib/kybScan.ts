@@ -8,7 +8,10 @@
  *  - unset / `disabled` / any unknown value: nothing is scanned, so every file
  *    stays `PENDING` and reviewers cannot preview it (production default);
  *  - `eicar`: the built-in content gate for dev and tests. It marks files
- *    `CLEAN` after the checks below pass. It is NOT a malware engine.
+ *    `CLEAN` after the checks below pass. It is NOT a malware engine;
+ *  - `clamd` (AUTO-06): a ClamAV daemon. The upload path only applies the
+ *    content checks below and leaves the file `PENDING`; the `KybScanWorker`
+ *    (`lib/kybScanner.ts`) streams it to the daemon and stores the verdict.
  *
  * Whatever the mode, active content is refused by content sniffing: HTML and
  * SVG with script, PDFs carrying `/JS`, `/JavaScript`, `/OpenAction`,

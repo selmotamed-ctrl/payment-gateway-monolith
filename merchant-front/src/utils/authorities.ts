@@ -131,6 +131,7 @@ export const MERCHANT_AUTHORITY_GROUPS: AuthorityGroup[] = [
             { authorityKey: "tokens.create", title: "Create Tokens", description: "Create API access tokens" },
             { authorityKey: "tokens.revoke", title: "Revoke Tokens", description: "Revoke API access tokens" },
             { authorityKey: "tokens.read", title: "Read Tokens", description: "View API access tokens" },
+            { authorityKey: "webhooks.manage", title: "Manage Webhooks", description: "Create, change and test webhook endpoints" },
             { authorityKey: "credentials.manage", title: "Manage Credentials", description: "Manage merchant-owned gateway credentials" },
             { authorityKey: "users.manage", title: "Manage Team", description: "Manage merchant team members" },
             { authorityKey: "stats.read", title: "Read Statistics", description: "View dashboard statistics" },
