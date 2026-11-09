@@ -77,7 +77,7 @@
 | `core-back/test/engine/suspense-settlement.test.ts` | 554 | 9 |
 | `core-back/test/engine/transform-pipeline.test.ts` | 225 | 33 |
 | `core-back/test/engine/visible-rails.test.ts` | 307 | 15 |
-| `core-back/test/exhaustive/01-schema/check-constraints-and-triggers.test.ts` | 456 | 24 |
+| `core-back/test/exhaustive/01-schema/check-constraints-and-triggers.test.ts` | 466 | 25 |
 | `core-back/test/exhaustive/01-schema/indexes-and-query-plans.test.ts` | 166 | 6 |
 | `core-back/test/exhaustive/01-schema/models-and-columns.test.ts` | 302 | 23 |
 | `core-back/test/exhaustive/01-schema/unique-and-fk-constraints.test.ts` | 327 | 15 |
@@ -367,4 +367,4 @@
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **361**
-- Total literal test declarations: **3851**
+- Total literal test declarations: **3852**

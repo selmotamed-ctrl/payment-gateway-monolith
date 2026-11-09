@@ -152,6 +152,16 @@ describeDb("Suite 01 · CHECK constraint metadata", () => {
     });
   }
 
+  test("the shard range checks match the code's 256-shard limit (0..255 / 1..256)", () => {
+    const shardId = checks.find((check) => check.constraintName === "gl_account_shards_shard_id_range");
+    const lineShardId = checks.find((check) => check.constraintName === "journal_lines_shard_id_range");
+    const shardCount = checks.find((check) => check.constraintName === "gl_accounts_shard_count_range");
+    expect(shardId?.checkClause).toMatch(/shard_id\s*<\s*256/);
+    expect(shardId?.checkClause).not.toMatch(/shard_id\s*<\s*16/);
+    expect(lineShardId?.checkClause).toMatch(/shard_id\s*<\s*256/);
+    expect(shardCount?.checkClause).toMatch(/shard_count\s*<=\s*256/);
+  });
+
   test("the approval_requests Maker != Checker INSERT check and UPDATE trigger exist", () => {
     const insertCheck = checks.find(
       (check) =>

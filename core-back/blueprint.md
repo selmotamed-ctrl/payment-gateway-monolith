@@ -3407,7 +3407,7 @@ The committed migration history is generated in `project-design/appendices/migra
 | `20261103000000_postgres18_init` | Creates 74 tables: all baseline Prisma model tables plus the `schema_versions` support table. Creates enums and the initial indexes/FKs. Inserts schema version 7. |
 | `20261103120000_postgres18_storage_engine` | Adds `pg_trgm` and `btree_gin`; replaces outbox/audit indexes with partial/BRIN indexes; adds covering/BRIN journal indexes; adds worker-claim partial indexes; adds attempt reference indexes and trigram search indexes. |
 | `20261103130000_cqrs_read_models` | Creates `rm_merchant_daily_stats` and `rm_route_daily_volumes` plus their day indexes. |
-| `20261103180000_storage_hardening` | Adds `pg_stat_statements` when available; sets `gl_account_shards.shard_id` default and range check; converts `journal_lines` to monthly range partitions; adds partition maintenance function; adds broader trigram indexes; updates schema version to 8. |
+| `20261103180000_storage_hardening` | Adds `pg_stat_statements` when available; sets `gl_account_shards.shard_id` default and a 0..15 range check (relaxed to 0..255 by `20261107090000_shard_sequenced_checkpoints`); converts `journal_lines` to monthly range partitions; adds partition maintenance function; adds broader trigram indexes; updates schema version to 8. |
 | `20261104090000_db_read_write_optimisation` | Part A (Prisma diff): drops the redundant `payment_attempts(link_id)`, `payment_attempts(merchant_id)`, `attempt_step_logs(attempt_id)`, `reconciliation_items(run_id)` and `audit_log(entity_type, entity_id)` indexes (each is a prefix of a kept or new composite); adds `approval_requests(subject_type, subject_id, state)`, `payment_attempts(link_id, created_at)`, `attempt_step_logs(attempt_id, created_at)`, `inbound_events(attempt_id, received_at)`, `reconciliation_items(run_id, created_at)` and `(created_at)`, `audit_log(created_at)` and `(actor_id, created_at)`; adds `audit_outbox.lease_until` and `rm_merchant_daily_stats.success_amount` / `success_net_amount`. Part B (raw SQL): partial expression index `payment_attempts_succeeded_settled_at_idx` on `COALESCE(terminal_at, created_at)` INCLUDE `(route_id, total_charged_amount)` WHERE `status = 'SUCCEEDED'` (daily route volume), `audit_outbox_unshipped_idx` recreated INCLUDE `lease_until`, `audit_outbox_shipped_idx` (partial btree) replacing the BRIN. Sets schema version 9. |
 
 The baseline creates the tables, not the storage migration. The storage migration is index-only. The hardening migration is the one that rewrites `journal_lines` into a partitioned table:
@@ -3448,7 +3448,9 @@ The database enforces the invariants that must not depend on a caller:
 | `attempt_groups_single_success` | `success_count <= 1` | One success per attempt group |
 | `payment_links_slot_reservation_invariant` | `infinite_use = true OR confirmed_count + active_locked_count <= use_count` | Prevents slot over-reservation |
 | `approval_requests_checker_not_maker_insert` | `checker_user_id IS NULL OR checker_user_id <> maker_user_id` | Maker-checker on insert |
-| `gl_account_shards_shard_id_range` | `shard_id >= 0 AND shard_id < 16` | Shard range |
+| `gl_account_shards_shard_id_range` | `shard_id >= 0 AND shard_id < 256` | Shard id range (0..255) |
+| `gl_accounts_shard_count_range` | `shard_count >= 1 AND shard_count <= 256` | Account routing width (1..256) |
+| `journal_lines_shard_id_range` | `shard_id >= 0 AND shard_id < 256` | Line shard attribution |
 | `journal_lines_entry_id_fkey` | FK to `journal_entries` with `ON DELETE RESTRICT` | No orphan ledger lines |
 | `journal_lines_gl_account_id_fkey` | FK to `gl_accounts` with `ON DELETE RESTRICT` | No orphan account lines |
 
@@ -3524,7 +3526,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 - `journal_lines.amount > 0`; direction carries the sign.
 - `payment_links` slot accounting must satisfy the check invariant at all times.
 - `approval_requests` must have `checker_user_id <> maker_user_id` when a checker is present, on insert and update.
-- `gl_account_shards.shard_id` must be in `0..15`.
+- `gl_account_shards.shard_id` and `journal_lines.shard_id` must be in `0..255`; `gl_accounts.shard_count` is `1..256`.
 - FK actions are deliberate: ledger and shard references use `RESTRICT`; optional relationships use `SET NULL` or `CASCADE` where the dependent row has no independent meaning.
 - UUIDv7 is the preferred identifier for new domain rows. Do not use random UUIDv4 for high-volume insert paths without a measured reason.
 - Seeders must be safe to rerun. Baseline seeders use existence checks; the synthetic seeder uses a completed-run marker and `skipDuplicates`.
