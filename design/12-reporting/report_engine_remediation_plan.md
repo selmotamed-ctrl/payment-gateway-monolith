@@ -132,6 +132,75 @@ Requirement: merchant report authoring, transcript and execution are **completel
 - **Merchant Studio (owner, 2026-11-11):** approved on the condition that abuse and resource exhaustion are prevented — hence E05's hard limits, separate pool, per-merchant concurrency/rate/DB-time budget, quotas and the kill switch. The merchant identity predicate is engine-injected and verified three times (compile, post-compile AST, returned rows); the spec is never trusted for scoping.
 - **Not in scope (stay gaps):** `SERVER_PDF`, object-store assets, live replica routing verification (A19), visual drag-and-drop builder, combined `.reportpkg.zip`.
 
-## 4. Execution record
+## 4. Execution record (2026-11-10)
 
-Filled in when each workstream lands (see `project-design/TRACKER.md`, 2026-11-10 report-engine remediation entry).
+All four workstreams landed in one change set on `optomizations-plan`.
+
+### WS-A — SDK and catalog
+
+- A01 authority/PII inference now scans select, WHERE, GROUP BY, ORDER BY, window fields and `additional_on`; a PII column used only by a window ORDER BY is detected.
+- A02/A13 classification extended to KYB/people file names and JSON payloads; catalog tests cover secrets, PII, integrity-hash overrides and the whole `COMPLIANCE_AML` domain.
+- A03 named/composite/1:1 relations are tested against the real `schema.prisma` catalog and a composite join compiles with every key pair.
+- A04 `executeReport` loads `COMPARISON_BASELINE_DATA` assets from the stored bundle; an execution test proves comparison rows match.
+- A05/A06/A07 tests cover no-overwrite/missing/duplicate asset keys, cross-product joins with null keys, decimal `0.1 + 0.2`, `> 2^53` and leading zeros.
+- A08/A09/A14 mandatory filters now forbid `omit_if_empty`, non-range operators, single-sided bounds and ungrouped ORDER BY/window refs; `allowedOperators`, `requireIndexedFilter` and per-model date limits are enforced.
+- A10 real `journal_lines_YYYY_MM`/`_default` partition detection and large-table sequential scans are errors; plan-parsing tests added.
+- A11 the transcript example now uses `payment_attempts` from the live catalog and is proven through Layers 1-3; enum values, the `gte+lte` pair rule and minor-unit scale are documented.
+- A12 sanitizer bypass corpus tests added (style breakout, unquoted URL, inline style, srcset, SVG data href/use, entity schemes, CSS escapes, image-set).
+- A15 Layer 1 compiles input definitions, vets regexes, validates defaults and enum literals against `host.enums`, and rejects range presets on non-range inputs.
+- A16 layer scorecards carry `PASSED`/`FAILED`/`SKIPPED`; skipped layers are no longer reported as passed.
+- A17 zip-bomb/compression-ratio and symlink tests added.
+- A18 multi-autocomplete UUID items, aggregate PII-masking skip, `IMAGE_BANNER.caption_i18n_key` validation and the `datasetTruncated` flag are implemented.
+- A19 `REPORT_READONLY_SERVED_BY` labels the serving node honestly; a test pins both labels.
+
+### WS-B — API, edges, schema and seed
+
+- B02 core and admin-back parse the report-engine prefix with a 24 MB limit; an edge test forwards a >5 MB body.
+- B03 the admin edge allows `report_engine:run` principals to list and execute reports; a test proves both.
+- B08 core publish-existing-version route is proxied by admin-back (edge test).
+- B01/B04/B05/B06/B07/B09/B10/B11/B12/B13/B14/B16 were completed earlier in the tree and now have route/unit coverage where the environment allows: a DB-gated admin report route suite covers version persistence, publish supersede, archive promotion, BOTH audience tabs and merchant mount/authority; a chrome seed idempotence suite covers B14.
+- B17/C07 the catalog now sends `SPECIFIC_CHROME_CODE` with `headerChromeCode`/`footerChromeCode`.
+- B15 was already satisfied (`String[] @default([])`).
+
+### WS-C — client SDK
+
+- C01/C02/C05/C09/C11 are enforced in the admin renderer and byte-identically mirrored to `merchant-front`.
+- C03 the preview is an opaque-origin `sandbox="allow-scripts allow-modals"` iframe with a nonce CSP, inlined Paged.js polyfill, `postMessage` page counts/print and render tokens; it can no longer touch the portal origin or inject styles into the portal head.
+- C04 input labels/help/enum labels use the spec dictionary via a `translate` prop.
+- C06 required booleans default to `false`; C07 sends the chrome mode and code separately; C08 exports one XLSX sheet per dataset with translated headers/formatted values and drops CSV.
+- C10 adds the client validation mirror, `static_filter`, dependent clearing, local→ISO datetime conversion, YESTERDAY and type-aware presets.
+- C12 resets the language choice on open and uses the portal dictionary.
+- A Vitest mirror test asserts `diff -r` equality (excluding `__tests__`).
+
+### WS-D — pages, style and i18n
+
+- D01 report document CSS now covers KPI cards, tones, badges, zebra rows and paper-sheet styling; Plus Jakarta Sans, Cairo and JetBrains Mono are inlined and `avoid_row_split=false` works.
+- D02/D06 Catalog uses the shared card/table/drawer conventions: no breadcrumbs, localized titles, `MonoRef`/`StatusBadge`, tabs outside the table, run in `SlideOverDrawer`, snackbars, friendly errors, Excel via the shared pipeline and the preview toolbar in the card header.
+- D03/D04 language dialog is `FormModal`; the input form uses `DateInput multiple="range"`, chips, primary switches and the responsive grid.
+- D05 was already implemented; D07 adds the Studio draft preview; D08 previews chrome through the sandboxed surface with scoped CSS; D09 mirrors the catalog fixes to the merchant runner.
+- D10 adds the missing EN/AR keys and removed them from the baseline.
+
+### WS-E — separate merchant reporting line
+
+- E01 schema version 33 adds merchant-owned spec/asset/audit/rate/suspension tables.
+- E02 `merchantHostConfig.ts` is an explicit model and column allow-list; forbidden models are absent.
+- E03 the merchant transcript excludes staff authority/override sections and documents merchant limits and the identity rule.
+- E04 the compiler injects the merchant predicate on every alias, the SDK verifies the alias set and every returned row (hidden `__scope_merchant_id`), and violations abort, audit and open a P1 case.
+- E05 tier limits, dedicated pool setting, staff-managed `merchant_reports.policy` (`enabled` runner/Studio switch and `assetsEnabled` asset-bundle switch), per-merchant suspension, hourly limits, daily DB-time budget, quotas, per-merchant/global concurrency and a 60 s cache are enforced; the merchant transcript states the current asset policy.
+- E06 core and merchant-back routes cover the Studio; `report_engine:author` is a merchant authority for `MERCHANT_ADMIN`.
+- E07 templates run through the merchant engine and can be cloned; templates with assets must be re-authored with the merchant's own bundle.
+- E08 `/portal/reports/studio` provides transcript, editor, zip, verification, save/publish/archive, versions and usage.
+- E09 admin `/reports/merchant-reports` lists merchant-authored reports, executions and suspend/resume.
+- E10 tests cover the allow-list, injection, row-scope abort/hidden column and every tier limit; DB-backed route coverage is in the admin route suite.
+
+### Second sweep (2026-11-10)
+
+- The merchant kill switch moved from env to the staff-managed `merchant_reports.policy` Platform Setting (`enabled`); merchant asset bundles are controlled by `assetsEnabled` and the generated merchant transcript states the current policy. The setting is seeded, has a typed Platform Settings editor, is read through a short cache and is invalidated after settings writes.
+- Fixed grouped/aggregate merchant scope SQL, merchant Studio body parsing, the report input grid CSS, gte/lte date ranges, template-clone UI, newer-version publish guard and P2002 mappings.
+- Merchant transcript/validator/host autocomplete now agree on `applications`, `currencies`, `payment_links` and `pos_terminals`; the merchant example no longer carries `suggested_access`.
+- Chrome preview CSS is sanitized client-side; admin oversight lost its doubled card and gained refresh/pagination/read-only action handling; the Studio draft preview accepts `report:review`.
+- Tests were added for the policy, grouped SQL, body parser, transcript policy, settings editor, route forwarding and shared CSS. Playwright remains skipped by decision; DB-gated suites run where PostgreSQL is available.
+
+### Gates run
+
+`core-back` typecheck + `test/reportEngineSdk` (124 pass, 1 skip) + DB-gated admin route suite (7 skipped without PostgreSQL); `admin-back` typecheck + 777 tests; `merchant-back` typecheck + 141 tests; `admin-front` type-check + 22 unit tests + build; `merchant-front` type-check + 23 content tests + build; root Vitest 517 pass; companion content sync/check; project-design build/check and `git diff --check` (recorded in `project-design/TRACKER.md`).

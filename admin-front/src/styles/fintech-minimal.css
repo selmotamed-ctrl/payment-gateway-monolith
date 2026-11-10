@@ -1250,3 +1250,25 @@ div[title]:has(> .pg-status-badge) {
   display: inline-flex;
   align-items: center;
 }
+
+/* Report Engine authoring/preview surfaces (admin) */
+.report-input-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 16px 20px;
+  align-items: start;
+}
+.report-input-grid > * {
+  min-inline-size: 0;
+}
+.report-paged-preview-frame,
+.report-sandboxed-surface {
+  display: block;
+  inline-size: 100%;
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+  background: var(--pg-bg-canvas);
+}
+.report-paged-preview-frame {
+  min-block-size: min(860px, 74vh);
+}

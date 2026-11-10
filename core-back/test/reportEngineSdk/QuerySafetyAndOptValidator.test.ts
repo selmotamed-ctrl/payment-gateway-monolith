@@ -106,3 +106,173 @@ describe("semantic AST diagnostics", () => {
     expect(diagnostics.some((diagnostic) => diagnostic.code === "INVALID_JOIN_RELATION")).toBe(true);
   });
 });
+
+describe("remediation A08/A09/A10/A14: mandatory-filter bypasses and grouped queries", () => {
+  const withCreatedAt = (
+    op: "is_not_null" | "eq" | "gte" | "lte" | "between" | "gt",
+    binding?: Record<string, unknown>,
+  ) => {
+    const spec = baseReportSpec();
+    spec.datasets[0]!.where = {
+      kind: "GROUP",
+      logic: "AND",
+      conditions: [
+        {
+          kind: "PREDICATE",
+          column: "merchant_id",
+          op: "eq",
+          binding: { source: "INPUT", input_key: "merchantId", omit_if_empty: false },
+        },
+        {
+          kind: "PREDICATE",
+          column: "created_at",
+          op,
+          binding: binding as never,
+        },
+      ],
+    };
+    return spec;
+  };
+
+  test("A08: MINOR_TO_MAJOR_DECIMAL on a major-unit column is rejected at Layer 2", async () => {
+    const spec = baseReportSpec();
+    spec.datasets[0]!.select = [
+      {
+        alias: "total",
+        column: "amount_minor",
+        expression: "MINOR_TO_MAJOR_DECIMAL",
+        format_hint: "DECIMAL_4",
+      },
+    ];
+    const host = createTestHostConfig();
+    host.models.journal_lines!.columns.amount = {
+      name: "amount",
+      dbColumnName: "amount",
+      type: "decimal",
+      nullable: false,
+      indexed: false,
+      sensitivity: "INTERNAL",
+      description: "Major amount",
+    };
+    spec.datasets[0]!.select[0]!.column = "amount";
+    const diagnostics = await validateQueriesAndOptimizations(spec, host);
+    expect(diagnostics.some((d) => d.code === "MINOR_TO_MAJOR_REQUIRES_MINOR_COLUMN")).toBe(true);
+  });
+
+  test("A09: is_not_null or eq on the mandatory partition column is rejected", async () => {
+    for (const op of ["is_not_null", "eq"] as const) {
+      const spec = withCreatedAt(
+        op,
+        op === "eq" ? { source: "LITERAL", value: "2026-01-01T00:00:00Z" } : undefined,
+      );
+      const diagnostics = await validateQueriesAndOptimizations(spec, createTestHostConfig());
+      expect(
+        diagnostics.some(
+          (d) =>
+            d.code === "MANDATORY_FILTER_OPERATOR_NOT_ALLOWED" ||
+            d.code === "MANDATORY_PARTITION_FILTER_UNBOUNDED",
+        ),
+        op,
+      ).toBe(true);
+    }
+  });
+
+  test("A09: omit_if_empty on the mandatory predicate is rejected", async () => {
+    const spec = withCreatedAt("between", {
+      source: "INPUT",
+      input_key: "periodRange",
+      range_bound: "BOTH",
+      omit_if_empty: true,
+    });
+    const diagnostics = await validateQueriesAndOptimizations(spec, createTestHostConfig());
+    expect(diagnostics.some((d) => d.code === "MANDATORY_FILTER_OPTIONAL_BINDING")).toBe(true);
+  });
+
+  test("A09: a single-sided gte bound is not a bounded filter", async () => {
+    const spec = withCreatedAt("gte", {
+      source: "INPUT",
+      input_key: "periodRange",
+      range_bound: "START",
+    });
+    const diagnostics = await validateQueriesAndOptimizations(spec, createTestHostConfig());
+    expect(diagnostics.some((d) => d.code === "MANDATORY_PARTITION_FILTER_UNBOUNDED")).toBe(true);
+  });
+
+  test("A09: a gte + lte pair bound to the same input is accepted", async () => {
+    const spec = baseReportSpec();
+    spec.datasets[0]!.where = {
+      kind: "GROUP",
+      logic: "AND",
+      conditions: [
+        {
+          kind: "PREDICATE",
+          column: "merchant_id",
+          op: "eq",
+          binding: { source: "INPUT", input_key: "merchantId", omit_if_empty: false },
+        },
+        {
+          kind: "PREDICATE",
+          column: "created_at",
+          op: "gte",
+          binding: { source: "INPUT", input_key: "periodRange", range_bound: "START", omit_if_empty: false },
+        },
+        {
+          kind: "PREDICATE",
+          column: "created_at",
+          op: "lte",
+          binding: { source: "INPUT", input_key: "periodRange", range_bound: "END", omit_if_empty: false },
+        },
+      ],
+    };
+    const diagnostics = await validateQueriesAndOptimizations(spec, createTestHostConfig());
+    expect(diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+  });
+
+  test("A09: requireIndexedFilter demands an indexed predicate", async () => {
+    const host = createTestHostConfig();
+    host.models.journal_lines!.columns.merchant_id!.indexed = false;
+    host.models.journal_lines!.columns.created_at!.indexed = false;
+    const diagnostics = await validateQueriesAndOptimizations(baseReportSpec(), host);
+    expect(diagnostics.some((d) => d.code === "INDEXED_FILTER_REQUIRED")).toBe(true);
+  });
+
+  test("A10: a large-table sequential scan is an error", async () => {
+    const fake = new FakeReadOnlyPort();
+    fake.explain = {
+      totalCost: 100,
+      planRows: 10,
+      hasSeqScanOnLargeTable: true,
+      seqScanTables: ["journal_lines_2026_01"],
+      partitionsScanned: 1,
+      rawPlanJson: {},
+    };
+    const diagnostics = await validateQueriesAndOptimizations(
+      baseReportSpec(),
+      createTestHostConfig({ dbReadOnlyPort: fake }),
+    );
+    const finding = diagnostics.find((d) => d.code === "SEQUENTIAL_SCAN_DETECTED");
+    expect(finding?.severity).toBe("error");
+  });
+
+  test("A14: grouped ORDER BY on an ungrouped base column is rejected", async () => {
+    const spec = baseReportSpec();
+    spec.datasets[0]!.order_by = [{ field: "merchant_id", direction: "ASC" }];
+    const diagnostics = await validateQueriesAndOptimizations(spec, createTestHostConfig());
+    expect(diagnostics.some((d) => d.code === "GROUPED_ORDER_BY_REQUIRES_ALIAS")).toBe(true);
+  });
+
+  test("A14: grouped window reference on an ungrouped base column is rejected", async () => {
+    const spec = baseReportSpec();
+    spec.datasets[0]!.window_fields = [
+      {
+        alias: "rank",
+        window_fn: "RANK",
+        target_field: "merchant_id",
+        partition_by: [],
+        order_by: [],
+      },
+    ];
+    const diagnostics = await validateQueriesAndOptimizations(spec, createTestHostConfig());
+    expect(diagnostics.some((d) => d.code === "GROUPED_WINDOW_REQUIRES_ALIAS")).toBe(true);
+  });
+});

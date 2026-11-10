@@ -140,6 +140,7 @@ const MERCHANT_UI_PROJECTION: Record<string, readonly string[]> = {
   "link:write": ["links.read", "links.create", "links.cancel"],
   "payment:read": ["payments.read", "payments.export", "stats.read"],
   "report_engine:run": ["reports.run"],
+  "report_engine:author": ["reports.studio", "reports.run", "reports.draft"],
 };
 
 export const buildMerchantUiAuthoritiesMap = (authorities: readonly string[]): Record<string, boolean> => {

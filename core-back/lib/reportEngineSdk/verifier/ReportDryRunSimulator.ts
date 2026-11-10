@@ -24,6 +24,7 @@ export interface ReportVerificationReport {
     layer: 1 | 2 | 3 | 4 | 5;
     name: string;
     passed: boolean;
+    status: "PASSED" | "FAILED" | "SKIPPED";
     errorCount: number;
     warningCount: number;
   }>;
@@ -55,7 +56,7 @@ export async function verifyAndSimulateReportSpec(params: {
     return {
       valid: false,
       specVersion: null,
-      layers: [{ layer: 1, name: "Structural & i18n Schema", passed: false, errorCount: 1, warningCount: 0 }],
+      layers: buildLayerScorecard([diag], true),
       authorityInference: null,
       verifiedAssets: [],
       diagnostics: [diag],
@@ -63,7 +64,7 @@ export async function verifyAndSimulateReportSpec(params: {
     };
   }
 
-  const { spec, diagnostics: l1Diags } = validateSpecStructureAndI18n(parsedRaw);
+  const { spec, diagnostics: l1Diags } = validateSpecStructureAndI18n(parsedRaw, params.host);
   allDiagnostics.push(...l1Diags);
   if (!spec) {
     return buildFinalReport(params.rawSpecJson, null, null, [], allDiagnostics);
@@ -164,6 +165,46 @@ export async function verifyAndSimulateReportSpec(params: {
   );
 }
 
+const REPORT_LAYER_NAMES: Array<{ layer: 1 | 2 | 3 | 4 | 5; name: string }> = [
+  { layer: 1, name: "Layer 1: Zod Schema & Bilingual (en+ar) i18n Completeness" },
+  { layer: 2, name: "Layer 2: Read-Only AST Safety, Partition Pruning & EXPLAIN Cost" },
+  { layer: 3, name: "Layer 3: Automatic Authority Inference & Conflict Detection" },
+  { layer: 4, name: "Layer 4: HTML/CSS/SVG Sanitizer & .zip Asset Bundle Verification" },
+  { layer: 5, name: "Layer 5: Read-Only Dry-Run Simulation" },
+];
+
+/**
+ * Layer scorecard with an explicit SKIPPED status: a layer that never ran
+ * (because an earlier layer failed) must not be reported as passed (A16).
+ */
+function buildLayerScorecard(
+  diagnostics: ReportDiagnostic[],
+  specMissing: boolean,
+): ReportVerificationReport["layers"] {
+  const firstErrorLayer = diagnostics.find((d) => d.severity === "error")?.layer ?? null;
+  return REPORT_LAYER_NAMES.map((entry) => {
+    const layerDiagnostics = diagnostics.filter((d) => d.layer === entry.layer);
+    const errorCount = layerDiagnostics.filter((d) => d.severity === "error").length;
+    const warningCount = layerDiagnostics.filter((d) => d.severity === "warning").length;
+    let status: "PASSED" | "FAILED" | "SKIPPED";
+    if (specMissing && entry.layer > 1) {
+      status = "SKIPPED";
+    } else if (entry.layer === 5 && firstErrorLayer !== null && firstErrorLayer < 5) {
+      status = "SKIPPED";
+    } else {
+      status = errorCount > 0 ? "FAILED" : "PASSED";
+    }
+    return {
+      layer: entry.layer,
+      name: entry.name,
+      passed: status === "PASSED",
+      status,
+      errorCount,
+      warningCount,
+    };
+  });
+}
+
 function buildFinalReport(
   rawSpecJson: string,
   specVersion: string | null,
@@ -171,26 +212,7 @@ function buildFinalReport(
   verifiedAssets: Array<Omit<ExtractedAssetFile, "buffer">>,
   diagnostics: ReportDiagnostic[],
 ): ReportVerificationReport {
-  const layerNames: Array<{ layer: 1 | 2 | 3 | 4 | 5; name: string }> = [
-    { layer: 1, name: "Layer 1: Zod Schema & Bilingual (en+ar) i18n Completeness" },
-    { layer: 2, name: "Layer 2: Read-Only AST Safety, Partition Pruning & EXPLAIN Cost" },
-    { layer: 3, name: "Layer 3: Automatic Authority Inference & Conflict Detection" },
-    { layer: 4, name: "Layer 4: HTML/CSS/SVG Sanitizer & .zip Asset Bundle Verification" },
-    { layer: 5, name: "Layer 5: Read-Only Dry-Run Simulation" },
-  ];
-
-  const layers = layerNames.map((ln) => {
-    const lDiags = diagnostics.filter((d) => d.layer === ln.layer);
-    const errorCount = lDiags.filter((d) => d.severity === "error").length;
-    const warningCount = lDiags.filter((d) => d.severity === "warning").length;
-    return {
-      layer: ln.layer,
-      name: ln.name,
-      passed: errorCount === 0,
-      errorCount,
-      warningCount,
-    };
-  });
+  const layers = buildLayerScorecard(diagnostics, specVersion === null);
 
   const valid = diagnostics.every((d) => d.severity !== "error");
   return {

@@ -43,7 +43,8 @@ tests:
   - merchant-back/test/security-regressions.test.ts
   - checkout-back/test/security-regressions.test.ts
 gaps:
-  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 32.
+  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 33.
+- `merchant_reports.policy` (Platform Settings, `settings:write`) is the staff-managed merchant reporting switch. `enabled` controls the runner/Studio; `assetsEnabled` controls merchant asset bundles. Missing values fall back to enabled/allowed.
   - LOG_LEVEL is declared but not used by the console or access logger.
   - WORKER_CONCURRENCY and WORKER_REQUEST_TIMEOUT_MS are accepted but not passed to the production worker runtime.
   - Console request-log correlation uses a separate short id from x-request-id.
@@ -112,7 +113,12 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `PGBOUNCER_ENABLED` | `false` | deploy sets it when the pooler fronts PostgreSQL; enforces the session endpoint |
 | `DATABASE_REPLICA_URLS` | empty | read replicas |
 | `AUDIT_DATABASE_URL` | unset | dedicated audit store |
-| `REPORT_READONLY_DATABASE_URL` | unset | dedicated report read-only pool; falls back to a replica or `DATABASE_URL` |
+| `REPORT_READONLY_DATABASE_URL` | unset | dedicated staff report read-only pool; falls back to a replica or `DATABASE_URL` |
+| `REPORT_READONLY_SERVED_BY` | `primary-readonly-tx` | honest serving label for the report executor (`replica` only after confirming a physical replica) |
+| `REPORT_MERCHANT_READONLY_DATABASE_URL` | unset | optional dedicated merchant report read-only pool; falls back to the report pool/`DATABASE_URL` |
+| `MERCHANT_REPORT_EXECUTE_PER_HOUR` / `MERCHANT_REPORT_VERIFY_PER_HOUR` | `60` / `30` | per-merchant hourly limits |
+| `MERCHANT_REPORT_DAILY_DB_TIME_MS` | `600000` | per-merchant daily execution-time budget |
+| `MERCHANT_REPORT_MAX_CODES` / `MERCHANT_REPORT_MAX_VERSIONS_PER_CODE` | `50` / `20` | merchant Studio storage quotas |
 | `REPORT_ASSET_STORAGE_DIR` | `.report-assets` | persistent report asset directory; set outside the release tree |
 | `LOG_DATABASE_URL` | unset | dedicated log sink |
 | `REDIS_URL` | unset | cache/velocity and invalidation |

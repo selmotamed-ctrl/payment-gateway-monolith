@@ -87,6 +87,14 @@ const platformSettings = [
     },
   },
   {
+    key: "merchant_reports.policy",
+    valueJson: {
+      enabled: true,
+      assetsEnabled: true,
+      description: "Merchant report authoring and execution are enabled; merchant asset bundles are allowed up to the 2 MB limit.",
+    },
+  },
+  {
     key: "OD-11",
     valueJson: {
       checkerRoles: ["MLRO", "COMPLIANCE", "FINANCE"],

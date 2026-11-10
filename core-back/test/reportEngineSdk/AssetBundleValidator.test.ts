@@ -152,3 +152,30 @@ describe("full report bundle integration", () => {
     expect(verified.validAssets).toHaveLength(4);
   });
 });
+
+describe("remediation A17: zip-bomb and symlink guards", () => {
+  test("a highly compressible entry is rejected as a zip bomb", async () => {
+    const bombZip = new JSZip();
+    bombZip.file("bomb.json", Buffer.alloc(2 * 1024 * 1024, 0x30));
+    const zipBuffer = await bombZip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    const extracted = await extractZipAssetFiles({
+      zipBuffer,
+      maxZipBytes: 5 * 1024 * 1024,
+      maxSingleAssetBytes: 5 * 1024 * 1024,
+    });
+    expect(extracted.diagnostics.some((d) => d.code === "ASSET_ZIP_BOMB_DETECTED")).toBe(true);
+    expect(extracted.filesByName.has("bomb.json")).toBe(false);
+  });
+
+  test("a symbolic-link entry is rejected", async () => {
+    const zip = new JSZip();
+    zip.file("link.png", "target", { unixPermissions: 0o120777 });
+    const zipBuffer = await zip.generateAsync({ type: "nodebuffer", platform: "UNIX" });
+    const extracted = await extractZipAssetFiles({
+      zipBuffer,
+      maxZipBytes: 5 * 1024 * 1024,
+      maxSingleAssetBytes: 1024 * 1024,
+    });
+    expect(extracted.diagnostics.some((d) => d.code === "ASSET_SYMLINK_FORBIDDEN")).toBe(true);
+  });
+});

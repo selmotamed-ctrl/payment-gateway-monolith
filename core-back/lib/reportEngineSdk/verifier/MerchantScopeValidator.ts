@@ -1,8 +1,9 @@
 import type { CatalogModelDef, ReportEngineHostConfig } from "../types/hostConfig";
 import type { ReportDescriptorSpec, WhereFilterNode } from "../types/reportSpec";
 import type { ReportDiagnostic } from "../types/diagnostics";
+import { MERCHANT_REPORT_AUTOCOMPLETE_SOURCE_KEYS } from "../types/reportSpec";
 
-const MERCHANT_SAFE_AUTOCOMPLETE = new Set(["merchants", "applications", "currencies"]);
+const MERCHANT_SAFE_AUTOCOMPLETE = new Set(["merchants", ...MERCHANT_REPORT_AUTOCOMPLETE_SOURCE_KEYS]);
 
 function aliasOf(alias: string | undefined, fallback: string): string {
   return alias ?? fallback;
@@ -89,7 +90,7 @@ export function validateMerchantReportScope(
         path: `inputs[${i}].autocomplete.source`,
         code: "MERCHANT_AUTOCOMPLETE_SOURCE_NOT_ALLOWED",
         message: `Autocomplete source "${input.autocomplete.source}" is not available to a merchant-facing report.`,
-        aiFixHint: "Use merchants, applications or currencies, or make the report back-office only.",
+        aiFixHint: "Use the merchant scope input or one of the merchant autocomplete sources listed in the transcript.",
       });
     }
   }

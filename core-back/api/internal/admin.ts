@@ -13,6 +13,7 @@ import { adminLedgerRouter } from "./adminLedger";
 import { adminOperationsRouter } from "./adminOperations";
 import { adminSystemRouter } from "./adminSystem";
 import { adminReportEngineRouter } from "./adminReportEngine";
+import { invalidateMerchantReportPolicyCache } from "../../engine/reportStudio/merchantReportEngine";
 import { publicProgress } from "../../engine/academy/progress";
 import { loadCatalog } from "../../engine/academy/catalog";
 import { getPlatformRuntime } from "../../engine/runtime";
@@ -18021,6 +18022,7 @@ router.post("/settings/restore-apply", async (request: Request, response: Respon
     });
     return written;
   });
+  invalidateMerchantReportPolicyCache();
   response.json({ applied: applied.length, settings: applied });
 });
 
@@ -18182,6 +18184,7 @@ router.put("/settings", async (request: Request, response: Response) => {
       afterJson: { settings: written, checklist: body.checklist ?? [] },
     },
   });
+  invalidateMerchantReportPolicyCache();
   response.json({ settings: written });
 });
 

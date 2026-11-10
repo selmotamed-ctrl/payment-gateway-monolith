@@ -3572,3 +3572,96 @@ model ReportExecutionAuditRecord {
   @@index([reportSpecId, createdAt(sort: Desc)], map: "report_execution_audit_spec_created_idx")
   @@map("report_execution_audit")
 }
+
+// ---------------------------------------------------------------------------
+// Merchant report authoring line (separate from the staff registry)
+// ---------------------------------------------------------------------------
+
+model MerchantReportSpecRecord {
+  id                     String              @id @default(uuid(7)) @db.Uuid
+  merchantId             String              @map("merchant_id") @db.Uuid
+  code                   String              @db.VarChar(64)
+  version                Int                 @default(1)
+  category               String              @db.VarChar(48)
+  status                 ReportSpecStatus    @default(DRAFT)
+  isLatestPublished      Boolean             @default(false) @map("is_latest_published")
+  supportedLocales       String[]            @default([]) @map("supported_locales")
+  defaultLocale          String              @default("en") @map("default_locale") @db.VarChar(16)
+  specJson               Json                @map("spec_json")
+  specSha256             String              @map("spec_sha256") @db.VarChar(64)
+  verificationReportJson Json?               @map("verification_report_json")
+  assetBundleId          String?             @map("asset_bundle_id") @db.Uuid
+  assetBundle            MerchantReportAssetBundle? @relation(fields: [assetBundleId], references: [id], onDelete: SetNull)
+  createdByUserId        String              @map("created_by_user_id") @db.Uuid
+  publishedByUserId      String?             @map("published_by_user_id") @db.Uuid
+  publishedAt            DateTime?           @map("published_at") @db.Timestamptz(3)
+  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  executions MerchantReportExecutionAudit[]
+
+  @@unique([merchantId, code, version], map: "merchant_report_specs_merchant_code_version_key")
+  @@index([merchantId, status, isLatestPublished], map: "merchant_report_specs_merchant_published_idx")
+  @@map("merchant_report_specs")
+}
+
+model MerchantReportAssetBundle {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  merchantId       String   @map("merchant_id") @db.Uuid
+  bundleSha256     String   @map("bundle_sha256") @db.Char(64)
+  storageKey       String   @map("storage_key") @db.Text
+  totalBytes       Int      @map("total_bytes")
+  fileCount        Int      @map("file_count")
+  manifestJson     Json     @map("manifest_json")
+  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  specRecords MerchantReportSpecRecord[]
+
+  @@unique([merchantId, bundleSha256], map: "merchant_report_asset_bundles_merchant_sha_key")
+  @@index([merchantId, createdAt(sort: Desc)], map: "merchant_report_asset_bundles_merchant_created_idx")
+  @@map("merchant_report_asset_bundles")
+}
+
+model MerchantReportExecutionAudit {
+  id                   String   @id @default(uuid(7)) @db.Uuid
+  merchantSpecId       String?  @map("merchant_spec_id") @db.Uuid
+  merchantSpec         MerchantReportSpecRecord? @relation(fields: [merchantSpecId], references: [id], onDelete: SetNull)
+  merchantId           String   @map("merchant_id") @db.Uuid
+  reportCode           String   @map("report_code") @db.VarChar(64)
+  reportVersion        Int      @map("report_version")
+  actorUserId          String   @map("actor_user_id") @db.Uuid
+  actorRole            String   @map("actor_role") @db.VarChar(48)
+  selectedLocale       String   @map("selected_locale") @db.VarChar(16)
+  inputsRedactedJson   Json     @map("inputs_redacted_json")
+  rowCountTotal        Int      @map("row_count_total")
+  durationMs           Int      @map("duration_ms")
+  servedByNode         String   @map("served_by_node") @db.VarChar(64)
+  verificationSha256   String   @map("verification_sha256") @db.VarChar(64)
+  renderTarget         String   @default("CLIENT_PAGED_VECTOR") @map("render_target") @db.VarChar(32)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([merchantId, createdAt(sort: Desc)], map: "merchant_report_execution_audit_merchant_created_idx")
+  @@index([merchantSpecId, createdAt(sort: Desc)], map: "merchant_report_execution_audit_spec_created_idx")
+  @@map("merchant_report_execution_audit")
+}
+
+model MerchantReportRateEvent {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  merchantId String   @map("merchant_id") @db.Uuid
+  action     String   @db.VarChar(16)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([merchantId, action, createdAt(sort: Desc)], map: "merchant_report_rate_events_merchant_action_created_idx")
+  @@map("merchant_report_rate_events")
+}
+
+model MerchantReportStudioStatus {
+  merchantId         String    @id @map("merchant_id") @db.Uuid
+  suspendedAt        DateTime? @map("suspended_at") @db.Timestamptz(3)
+  suspendedByUserId  String?   @map("suspended_by_user_id") @db.Uuid
+  reason             String?   @db.Text
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("merchant_report_studio_status")
+}

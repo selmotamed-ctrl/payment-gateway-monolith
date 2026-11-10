@@ -67,7 +67,11 @@ export function compileInputFieldToZod(field: ReportInputFieldSpec): z.ZodTypeAn
       break;
     }
     case "entity_multi_autocomplete": {
-      schema = z.array(z.string().trim().min(1).max(64)).min(field.required ? 1 : 0).max(50);
+      const itemSchema =
+        field.autocomplete?.source === "currencies"
+          ? z.string().trim().min(1).max(64)
+          : z.string().trim().regex(UUID_REGEX, `Field "${field.key}" items must be valid UUIDs`);
+      schema = z.array(itemSchema).min(field.required ? 1 : 0).max(50);
       break;
     }
     case "number": {

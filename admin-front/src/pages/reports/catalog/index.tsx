@@ -2,24 +2,35 @@ import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VSelect } from "vuetify/components";
+import { VBtn, VSelect } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { ApiTable } from "@/components/Table/ApiTable";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
-import { PageHeader, SegmentedTabs, StatusBadge, SurfaceCard } from "@/components/ui";
+import {
+  MetaPill,
+  MonoRef,
+  PageHeader,
+  SegmentedTabs,
+  SlideOverDrawer,
+  StatusBadge,
+  SurfaceCard,
+} from "@/components/ui";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { extractApiError } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import {
   ReportInputForm,
   ReportLanguagePromptDialog,
   ReportPagedPreviewSurface,
+  formatReportValue,
   renderChromeHtml,
   renderReportSectionsToHtml,
+  specTranslator,
   type ReportDescriptorSpec,
   type ReportExecutionBundle,
 } from "@/lib/reportEngineSdk";
@@ -44,6 +55,7 @@ type ChromeRow = {
   id: string;
   code: string;
   name: string;
+  version: number;
   chromeType: "HEADER" | "FOOTER";
   status: string;
   isDefaultGlobal: boolean;
@@ -54,12 +66,17 @@ type CatalogRefreshHook = {
   refreshAsIs: () => void;
 };
 
+const AUDIENCE_LABEL_KEYS: Record<string, string> = {
+  BACKOFFICE_INTERNAL: "Backoffice",
+  MERCHANT_FACING: "Merchant",
+  BOTH: "Merchant & Backoffice",
+};
+
 const ReportsCatalogPage = dc(() => {
   const { t } = useLocale();
   const router = useRouter();
   const chromeSpecs = ref<ChromeRow[]>([]);
   const chromeLoading = ref(false);
-  const error = ref<string | null>(null);
   const selected = ref<CatalogReport | null>(null);
   const audienceTab = ref("ALL");
   const catalogSearch = ref<string | null>(null);
@@ -73,8 +90,15 @@ const ReportsCatalogPage = dc(() => {
   const generating = ref(false);
   const bundle = ref<ReportExecutionBundle | null>(null);
   const languagePrompt = ref(false);
-  const previewRef = ref<{ printClientSideVectorPdf?: () => void } | null>(null);
+  const drawerOpen = ref(false);
+  const previewRef = ref<{
+    printClientSideVectorPdf?: () => void;
+    renderPaginatedPreview?: () => Promise<void>;
+    pageCount?: number;
+  } | null>(null);
+  const inputFormRef = ref<{ validate?: () => boolean } | null>(null);
   const catalogRefresh = ref<CatalogRefreshHook | null>(null);
+  const previewPages = ref(1);
   const canStudio = computed(() =>
     hasOneOfAuthorities(["reports.studio", "reports.draft", "report_engine:author", "report:review", "report:approve", "security:write"]),
   );
@@ -90,6 +114,15 @@ const ReportsCatalogPage = dc(() => {
   ]);
   const availableLocales = computed(() =>
     selected.value ? Object.keys(selected.value.spec.i18n.locales) : ["en"],
+  );
+
+  const localizedTitle = (report: CatalogReport): string =>
+    report.spec.i18n.locales[locale.value]?.["report.title"] ??
+    report.spec.i18n.locales[report.defaultLocale]?.["report.title"] ??
+    report.code;
+
+  const specT = computed(() =>
+    selected.value ? specTranslator(selected.value.spec, locale.value) : (key: string) => key,
   );
 
   const renderedSectionsHtml = computed(() =>
@@ -112,9 +145,9 @@ const ReportsCatalogPage = dc(() => {
       label: t("Report"),
       sortKey: "report",
       Value: ({ row }) => (
-        <div>
-          <div class="font-weight-medium">{row.spec.i18n.locales.en?.["report.title"] ?? row.code}</div>
-          <div class="text-caption text-medium-emphasis">{row.code}</div>
+        <div class="d-flex flex-column">
+          <span class="font-weight-medium">{localizedTitle(row)}</span>
+          <MonoRef value={row.code} copyable={false} />
         </div>
       ),
     },
@@ -122,7 +155,13 @@ const ReportsCatalogPage = dc(() => {
     {
       key: "audience",
       label: t("Audience"),
-      Value: ({ row }) => <StatusBadge status={row.audienceScope} label={row.audienceScope} toneOverride="info" />,
+      Value: ({ row }) => (
+        <StatusBadge
+          status={row.audienceScope}
+          label={t(AUDIENCE_LABEL_KEYS[row.audienceScope] ?? row.audienceScope)}
+          toneOverride="info"
+        />
+      ),
     },
     { key: "languages", label: t("Languages"), value: (row) => row.supportedLocales.join(", ") },
     { key: "version", label: t("Version"), sortKey: "version", value: (row) => String(row.version) },
@@ -151,10 +190,24 @@ const ReportsCatalogPage = dc(() => {
       const response = await api.get(urlsMap.reportEngineChrome);
       chromeSpecs.value = (response.data?.specs ?? []) as ChromeRow[];
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
+      showSnackBar({ message: friendlyError(caught), type: "error" });
     } finally {
       chromeLoading.value = false;
     }
+  };
+
+  const friendlyError = (caught: unknown): string => {
+    const extracted = extractApiError(caught);
+    if (extracted?.code === "REPORT_NOT_PUBLISHED") {
+      return t("This report is saved but not published. Open Report Studio, publish it, then run it again.");
+    }
+    if (extracted?.code === "REPORT_NOT_FOUND") {
+      return t("This report could not be found. Refresh the catalog or open Report Studio to publish it.");
+    }
+    if (extracted?.status === 403) {
+      return t("You do not have permission to run this report. Ask a Security Admin to grant the report access policy.");
+    }
+    return extracted?.error ?? (caught instanceof Error ? caught.message : String(caught));
   };
 
   const refresh = async () => {
@@ -184,7 +237,8 @@ const ReportsCatalogPage = dc(() => {
     footerMode.value = report.spec.page_layout.footer_mode ?? "GLOBAL_DEFAULT";
     footerCode.value = report.spec.page_layout.footer_chrome_code ?? null;
     bundle.value = null;
-    error.value = null;
+    previewPages.value = 1;
+    drawerOpen.value = true;
   };
 
   const resetInputs = () => {
@@ -193,10 +247,10 @@ const ReportsCatalogPage = dc(() => {
   };
 
   const clearSelection = () => {
+    drawerOpen.value = false;
     selected.value = null;
     bundle.value = null;
     inputs.value = {};
-    error.value = null;
   };
 
   const downloadText = (filename: string, content: string, mime: string) => {
@@ -214,7 +268,12 @@ const ReportsCatalogPage = dc(() => {
   };
 
   const copyCode = async (code: string) => {
-    await navigator.clipboard.writeText(code);
+    try {
+      await navigator.clipboard.writeText(code);
+      showSnackBar({ message: t("Code copied"), type: "success" });
+    } catch {
+      showSnackBar({ message: t("Copy failed"), type: "error" });
+    }
   };
 
   const autocomplete = async (
@@ -231,38 +290,42 @@ const ReportsCatalogPage = dc(() => {
     return (response.data?.items ?? []) as Array<{ value: string; label: string; sublabel?: string; badge?: string }>;
   };
 
+  const effectiveChromeMode = (mode: string, code: string | null, type: "HEADER" | "FOOTER") => {
+    if (mode !== "SPECIFIC_CHROME_CODE") return { mode, code: null };
+    const fallback = latestChromeCode(type);
+    return { mode: code || fallback ? "SPECIFIC_CHROME_CODE" : "GLOBAL_DEFAULT", code: code ?? fallback };
+  };
+
   const runGenerate = async (chosenLocale: string) => {
     if (!selected.value) return;
+    if (inputFormRef.value?.validate && !inputFormRef.value.validate()) {
+      showSnackBar({ message: t("Fix the highlighted inputs before generating"), type: "warning" });
+      return;
+    }
     generating.value = true;
-    error.value = null;
     try {
+      const header = effectiveChromeMode(headerMode.value, headerCode.value, "HEADER");
+      const footer = effectiveChromeMode(footerMode.value, footerCode.value, "FOOTER");
       const response = await api.post(urlsMap.reportEngineExecute(selected.value.code), {
         inputs: inputs.value,
         locale: chosenLocale,
         ...(selected.value.spec.page_layout.allow_runtime_chrome_selection
           ? {
               chromeOverride: {
-                headerMode: headerMode.value,
-                headerChromeCode: headerCode.value,
-                footerMode: footerMode.value,
-                footerChromeCode: footerCode.value,
+                headerMode: header.mode,
+                headerChromeCode: header.code,
+                footerMode: footer.mode,
+                footerChromeCode: footer.code,
               },
             }
           : {}),
       });
       bundle.value = response.data as ReportExecutionBundle;
       locale.value = chosenLocale;
+      drawerOpen.value = false;
+      showSnackBar({ message: t("Report generated"), type: "success" });
     } catch (caught) {
-      const extracted = extractApiError(caught);
-      if (extracted?.code === "REPORT_NOT_PUBLISHED") {
-        error.value = t("This report is saved but not published. Open Report Studio, publish it, then run it again.");
-      } else if (extracted?.code === "REPORT_NOT_FOUND") {
-        error.value = t("This report could not be found. Refresh the catalog or open Report Studio to publish it.");
-      } else if (extracted?.status === 403) {
-        error.value = t("You do not have permission to run this report. Ask a Security Admin to grant the report access policy.");
-      } else {
-        error.value = extracted?.error ?? (caught instanceof Error ? caught.message : String(caught));
-      }
+      showSnackBar({ message: friendlyError(caught), type: "error" });
     } finally {
       generating.value = false;
     }
@@ -282,63 +345,73 @@ const ReportsCatalogPage = dc(() => {
     void runGenerate(chosen);
   };
 
-  const allDatasetRows = (): Array<Record<string, unknown>> => {
-    if (!bundle.value) return [];
-    return Object.entries(bundle.value.datasets).flatMap(([datasetId, rows]) =>
-      rows.map((row) => ({ dataset: datasetId, ...row })),
-    );
-  };
-
-  const exportCsv = () => {
-    if (!selected.value) return;
-    const rows = allDatasetRows();
-    if (rows.length === 0) return;
-    const headers = Object.keys(rows[0]!);
-    const csv = [
-      headers.join(","),
-      ...rows.map((row) =>
-        headers
-          .map((header) => {
-            const text = String(row[header] ?? "").replace(/"/g, '""');
-            return /[",\n]/.test(text) ? `"${text}"` : text;
-          })
-          .join(","),
-      ),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${selected.value.code}-${locale.value}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportXlsx = async () => {
-    if (!selected.value) return;
-    const rows = allDatasetRows();
-    if (rows.length === 0) return;
-    const headers = Object.keys(rows[0]!).map((key) => ({ text: key, key, type: "string" as const }));
-    await xlsxUIPipeline.downloadXlsxFromHeadersAndData({
-      headers,
-      data: rows,
+  const exportExcel = async () => {
+    if (!selected.value || !bundle.value) return;
+    const sheets = Object.entries(bundle.value.datasets)
+      .filter(([, rows]) => rows.length > 0)
+      .map(([datasetId, rows]) => {
+        const section = selected.value!.spec.sections.find(
+          (entry) => entry.section_type === "DATA_TABLE" && entry.dataset_id === datasetId,
+        );
+        const columnDefs =
+          section && section.section_type === "DATA_TABLE"
+            ? section.columns
+            : Object.keys(rows[0] ?? {}).map((field) => ({
+                field,
+                header_i18n_key: "",
+                format_hint: "RAW" as const,
+              }));
+        const headers = columnDefs.map((column) => ({
+          text:
+            column.header_i18n_key && specT.value(column.header_i18n_key) !== column.header_i18n_key
+              ? specT.value(column.header_i18n_key)
+              : column.field,
+          key: column.field,
+          type: "string" as const,
+        }));
+        const data = rows.map((row) => {
+          const record: Record<string, string> = {};
+          for (const column of columnDefs) {
+            const raw = formatReportValue(
+              row[column.field],
+              column.format_hint ?? "RAW",
+              undefined,
+              specT.value,
+            );
+            record[column.field] = excelSafe(raw);
+          }
+          return record;
+        });
+        return { name: datasetId, headers, data };
+      });
+    if (sheets.length === 0) return;
+    await xlsxUIPipeline.downloadXlsxWorkbook({
+      sheets,
       title: `${selected.value.code}-${locale.value}`,
-      color: "#2563EB",
     });
   };
 
-  const chromeOptions = (type: "HEADER" | "FOOTER") => {
-    if (!selected.value?.spec.page_layout.allow_runtime_chrome_selection) {
-      return [{ title: t("Report default"), value: "GLOBAL_DEFAULT" }];
+  const latestChromeByCode = (type: "HEADER" | "FOOTER"): ChromeRow[] => {
+    const byCode = new Map<string, ChromeRow>();
+    for (const row of chromeSpecs.value) {
+      if (row.chromeType !== type || row.status !== "PUBLISHED") continue;
+      const current = byCode.get(row.code);
+      if (!current || row.version > current.version) byCode.set(row.code, row);
     }
-    return [
-      { title: t("Global Default"), value: "GLOBAL_DEFAULT" },
-      { title: t("None"), value: "NONE" },
-      ...chromeSpecs.value
-        .filter((row) => row.chromeType === type && row.status === "PUBLISHED")
-        .map((row) => ({ title: `${row.name} (${row.code})`, value: row.code })),
-    ];
+    return [...byCode.values()];
   };
+
+  const latestChromeCode = (type: "HEADER" | "FOOTER"): string | null =>
+    latestChromeByCode(type)[0]?.code ?? null;
+
+  const chromeModeOptions = () => [
+    { title: t("Global Default"), value: "GLOBAL_DEFAULT" },
+    { title: t("Specific header/footer"), value: "SPECIFIC_CHROME_CODE" },
+    { title: t("None"), value: "NONE" },
+  ];
+
+  const chromeCodeOptions = (type: "HEADER" | "FOOTER") =>
+    latestChromeByCode(type).map((row) => ({ title: `${row.name} (${row.code})`, value: row.code }));
 
   onMounted(() => {
     void loadChrome();
@@ -350,7 +423,6 @@ const ReportsCatalogPage = dc(() => {
         <PageHeader
           title={t("Report Catalog")}
           subtitle={t("Run and export published backoffice and merchant reports")}
-          breadcrumbs={[{ label: t("Reporting"), to: "/reports/catalog" }, { label: t("Catalog") }]}
           end={() => (
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <VBtn variant="tonal" prependIcon="mdi-refresh" loading={chromeLoading.value} onClick={() => void refresh()}>
@@ -370,14 +442,60 @@ const ReportsCatalogPage = dc(() => {
           )}
         />
 
-        {error.value && (
-          <VAlert type="error" variant="tonal" density="compact">
-            <div class="d-flex align-center justify-space-between ga-3 flex-wrap">
-              <span>{error.value}</span>
-              <VBtn size="small" variant="tonal" onClick={() => void refresh()}>{t("Retry")}</VBtn>
-            </div>
-          </VAlert>
+        {bundle.value && selected.value && (
+          <SurfaceCard
+            title={t("Paginated Vector Preview")}
+            subtitle={t("Client-side rendering; no server CPU used")}
+            v-slots={{
+              headerActions: () => (
+                <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                  <MetaPill color="info">{`${previewPages.value} ${t("pages")}`}</MetaPill>
+                  <MonoRef value={bundle.value?.verificationSha256 ?? ""} truncate={12} />
+                  <SegmentedTabs
+                    modelValue={locale.value}
+                    onUpdate:modelValue={(next: string) => (locale.value = next)}
+                    tabs={availableLocales.value.map((entry) => ({ label: entry.toUpperCase(), value: entry }))}
+                    ariaLabel={t("Output language")}
+                  />
+                  <VBtn size="small" variant="tonal" prependIcon="mdi-refresh" loading={generating.value} onClick={() => void runGenerate(locale.value)}>
+                    {t("Regenerate")}
+                  </VBtn>
+                  <VBtn size="small" variant="tonal" prependIcon="mdi-microsoft-excel" disabled={!hasRows.value} onClick={() => void exportExcel()}>
+                    {t("Export Excel")}
+                  </VBtn>
+                  <VBtn
+                    size="small"
+                    variant="tonal"
+                    prependIcon="mdi-printer-outline"
+                    disabled={!hasRows.value}
+                    onClick={() => previewRef.value?.printClientSideVectorPdf?.()}
+                  >
+                    {t("Print")}
+                  </VBtn>
+                </ThemedView>
+              ),
+            }}
+          >
+            <ReportPagedPreviewSurface
+              ref={previewRef}
+              bundle={bundle.value}
+              selectedLocale={locale.value}
+              renderedSectionsHtml={renderedSectionsHtml.value}
+              renderedHeaderHtml={renderedHeaderHtml.value}
+              renderedFooterHtml={renderedFooterHtml.value}
+              onPageCountChanged={(pages: number) => (previewPages.value = pages)}
+            />
+          </SurfaceCard>
         )}
+
+        <div>
+          <SegmentedTabs
+            modelValue={audienceTab.value}
+            onUpdate:modelValue={changeAudience}
+            tabs={audienceTabs.value}
+            ariaLabel={t("Audience")}
+          />
+        </div>
 
         <ApiTable<CatalogReport>
           title={t("Published Reports")}
@@ -411,36 +529,23 @@ const ReportsCatalogPage = dc(() => {
               },
             });
           }}
-          TopSlot={() => (
-            <div style={{ padding: "0 20px 12px" }}>
-              <SegmentedTabs
-                modelValue={audienceTab.value}
-                onUpdate:modelValue={changeAudience}
-                tabs={audienceTabs.value}
-                ariaLabel={t("Audience")}
-              />
-            </div>
-          )}
         />
 
-        {selected.value && (
-          <SurfaceCard
-            title={selected.value.spec.i18n.locales.en?.["report.title"] ?? selected.value.code}
-            subtitle={t("Fill the parameters, choose the output language and generate the report")}
-            v-slots={{
-              headerActions: () => (
-                <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                  <VBtn size="small" variant="text" onClick={resetInputs}>{t("Reset inputs")}</VBtn>
-                  <VBtn size="small" variant="text" onClick={clearSelection}>{t("Clear selection")}</VBtn>
-                </ThemedView>
-              ),
-            }}
-          >
+        <SlideOverDrawer
+          modelValue={drawerOpen.value}
+          onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)}
+          title={selected.value ? localizedTitle(selected.value) : t("Run report")}
+          subtitle={t("Fill the parameters, choose the output language and generate the report")}
+          width={620}
+        >
+          {selected.value && (
             <div class="d-flex flex-column ga-4">
               <ReportInputForm
+                ref={inputFormRef}
                 spec={selected.value.spec}
                 modelValue={inputs.value}
                 autocomplete={autocomplete}
+                translate={specT.value}
                 onUpdate:modelValue={(value: Record<string, unknown>) => (inputs.value = value)}
               />
               <div class="d-flex flex-wrap ga-3 align-end">
@@ -448,7 +553,6 @@ const ReportsCatalogPage = dc(() => {
                   v-model={locale.value}
                   label={t("Output language")}
                   items={availableLocales.value}
-                  density="comfortable"
                   variant="outlined"
                   hideDetails="auto"
                   style={{ maxWidth: "180px" }}
@@ -458,77 +562,54 @@ const ReportsCatalogPage = dc(() => {
                     <VSelect
                       v-model={headerMode.value}
                       label={t("Header")}
-                      items={chromeOptions("HEADER")}
-                      density="comfortable"
+                      items={chromeModeOptions()}
                       variant="outlined"
                       hideDetails="auto"
-                      style={{ maxWidth: "260px" }}
+                      style={{ maxWidth: "240px" }}
                     />
+                    {headerMode.value === "SPECIFIC_CHROME_CODE" && (
+                      <VSelect
+                        v-model={headerCode.value}
+                        label={t("Header template")}
+                        items={chromeCodeOptions("HEADER")}
+                        variant="outlined"
+                        hideDetails="auto"
+                        style={{ maxWidth: "260px" }}
+                      />
+                    )}
                     <VSelect
                       v-model={footerMode.value}
                       label={t("Footer")}
-                      items={chromeOptions("FOOTER")}
-                      density="comfortable"
+                      items={chromeModeOptions()}
                       variant="outlined"
                       hideDetails="auto"
-                      style={{ maxWidth: "260px" }}
+                      style={{ maxWidth: "240px" }}
                     />
+                    {footerMode.value === "SPECIFIC_CHROME_CODE" && (
+                      <VSelect
+                        v-model={footerCode.value}
+                        label={t("Footer template")}
+                        items={chromeCodeOptions("FOOTER")}
+                        variant="outlined"
+                        hideDetails="auto"
+                        style={{ maxWidth: "260px" }}
+                      />
+                    )}
                   </>
                 )}
-                <VBtn color="primary" loading={generating.value} onClick={requestGenerate}>
+              </div>
+              <div class="d-flex justify-space-between align-center flex-wrap ga-2">
+                <div class="d-flex ga-2">
+                  <VBtn variant="text" onClick={resetInputs}>{t("Reset inputs")}</VBtn>
+                  <VBtn variant="text" onClick={clearSelection}>{t("Clear selection")}</VBtn>
+                </div>
+                <VBtn color="primary" prependIcon="mdi-file-chart" loading={generating.value} onClick={requestGenerate}>
                   {t("Generate Report")}
                 </VBtn>
               </div>
             </div>
-          </SurfaceCard>
-        )}
-
-        {bundle.value && (
-          <SurfaceCard
-            title={t("Paginated Vector Preview")}
-            subtitle={t("Client-side rendering; no server CPU used")}
-            v-slots={{
-              headerActions: () => (
-                <VBtn
-                  size="small"
-                  variant="tonal"
-                  prependIcon="mdi-refresh"
-                  loading={generating.value}
-                  onClick={() => void runGenerate(locale.value)}
-                >
-                  {t("Regenerate")}
-                </VBtn>
-              ),
-            }}
-          >
-            <div class="d-flex flex-wrap ga-2 mb-3">
-              <VBtn size="small" variant="tonal" prependIcon="mdi-file-delimited-outline" disabled={!hasRows.value} onClick={exportCsv}>
-                {t("Export CSV")}
-              </VBtn>
-              <VBtn size="small" variant="tonal" prependIcon="mdi-microsoft-excel" disabled={!hasRows.value} onClick={() => void exportXlsx()}>
-                {t("Export XLSX")}
-              </VBtn>
-              <VBtn
-                size="small"
-                variant="tonal"
-                prependIcon="mdi-printer-outline"
-                disabled={!hasRows.value}
-                onClick={() => previewRef.value?.printClientSideVectorPdf?.()}
-              >
-                {t("Print")}
-              </VBtn>
-            </div>
-            <ReportPagedPreviewSurface
-              ref={previewRef}
-              bundle={bundle.value}
-              selectedLocale={locale.value}
-              renderedSectionsHtml={renderedSectionsHtml.value}
-              renderedHeaderHtml={renderedHeaderHtml.value}
-              renderedFooterHtml={renderedFooterHtml.value}
-              onChangeLocale={(next: string) => (locale.value = next)}
-            />
-          </SurfaceCard>
-        )}
+          )}
+        </SlideOverDrawer>
 
         {selected.value && (
           <ReportLanguagePromptDialog
@@ -546,5 +627,9 @@ const ReportsCatalogPage = dc(() => {
     </ScreenContainer>
   );
 });
+
+function excelSafe(value: string): string {
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
 
 export default ReportsCatalogPage;

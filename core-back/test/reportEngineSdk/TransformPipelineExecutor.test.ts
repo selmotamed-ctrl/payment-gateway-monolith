@@ -145,3 +145,111 @@ describe("COMPARE_WITH_ASSET output contract", () => {
     );
     expect(result.comparison?.[0]).toMatchObject({ target_volume: 90, volume_expected: "90", volume_variance: "10" });
   });
+
+describe("remediation A05/A06/A07: comparison, joins and exact decimal arithmetic", () => {
+  test("A05: source fields are never overwritten; missing and duplicate asset keys are flagged", () => {
+    const result = executeTransformPipeline(
+      { source: [{ code: "LYD", volume: "100.1" }, { code: "USD", volume: "50" }] },
+      [
+        {
+          operation: "COMPARE_WITH_ASSET",
+          source_dataset_id: "source",
+          asset_key: "baseline",
+          output_dataset_id: "comparison",
+          match_keys: ["code"],
+          compare_fields: [{ dataset_field: "volume", asset_field: "volume", tolerance_minor: 0 }],
+        },
+      ],
+      {
+        baseline: [
+          { code: "LYD", volume: "100.1" },
+          { code: "EUR", volume: "7" },
+          { code: "EUR", volume: "8" },
+        ],
+      },
+    );
+    const rows = result.comparison ?? [];
+    const lyd = rows.find((row) => row.code === "LYD")!;
+    expect(lyd.volume).toBe("100.1");
+    expect(lyd.volume_expected).toBe("100.1");
+    expect(lyd._has_discrepancy).toBe(false);
+    const missing = rows.find((row) => row.code === "EUR" && row._missing_in_live === true)!;
+    expect(missing).toBeDefined();
+    expect(missing._duplicate_asset_key).toBe(true);
+    expect(missing._has_discrepancy).toBe(true);
+  });
+
+  test("A06: duplicate keys cross-product, null keys never match", () => {
+    const result = executeTransformPipeline(
+      {
+        left: [{ id: "1", name: "A" }, { id: null, name: "N" }],
+        right: [{ id: "1", amount: 10 }, { id: "1", amount: 20 }, { id: null, amount: 99 }],
+      },
+      [
+        {
+          operation: "JOIN_DATASETS",
+          output_dataset_id: "joined",
+          left_dataset_id: "left",
+          right_dataset_id: "right",
+          join_type: "INNER",
+          on_left_key: "id",
+          on_right_key: "id",
+        },
+      ],
+      {},
+    );
+    expect(result.joined).toHaveLength(2);
+    expect(result.joined?.map((row) => row.amount).sort()).toEqual([10, 20]);
+  });
+
+  test("A07: decimal.js keeps 0.1+0.2, values above 2^53 and leading zeros exact", () => {
+    const result = executeTransformPipeline(
+      {
+        rows: [
+          { a: "0.1", b: "0.2", big: "9007199254740993" },
+        ],
+      },
+      [
+        {
+          operation: "COMPUTE_COLUMN",
+          target_dataset_id: "rows",
+          output_column: "sum",
+          formula: "ADD",
+          left_operand: "a",
+          right_operand: "b",
+          format_hint: "RAW",
+        },
+        {
+          operation: "COMPUTE_COLUMN",
+          target_dataset_id: "rows",
+          output_column: "big_plus_one",
+          formula: "ADD",
+          left_operand: "big",
+          right_operand: 1,
+          format_hint: "RAW",
+        },
+      ],
+      {},
+    );
+    expect(result.rows?.[0]?.sum).toBe("0.3");
+    expect(result.rows?.[0]?.big_plus_one).toBe("9007199254740994");
+  });
+
+  test("A07: CSV cells keep leading zeros and are not coerced before comparison", () => {
+    const result = executeTransformPipeline(
+      { source: [{ code: "0012", amount: "1" }] },
+      [
+        {
+          operation: "COMPARE_WITH_ASSET",
+          source_dataset_id: "source",
+          asset_key: "baseline",
+          output_dataset_id: "comparison",
+          match_keys: ["code"],
+          compare_fields: [{ dataset_field: "amount", asset_field: "amount", tolerance_minor: 0 }],
+        },
+      ],
+      { baseline: [{ code: "0012", amount: "1" }] },
+    );
+    expect(result.comparison?.[0]?._asset_matched).toBe(true);
+  });
+});

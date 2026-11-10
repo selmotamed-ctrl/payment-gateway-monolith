@@ -35,6 +35,7 @@ export const routesAuthorities: {
     Credentials: ["credentials.manage"],
     Team: ["users.manage"],
     MerchantReports: ["reports.run"],
+    MerchantReportsStudio: ["reports.studio"],
 };
 
 export const useSections = () => {
@@ -152,6 +153,12 @@ export const useSections = () => {
                     name: "MerchantReports",
                     icon: "mdi-file-chart-outline",
                     if: () => hasOneOfAuthorities(["reports.run"]),
+                },
+                {
+                    label: t("Report Studio"),
+                    name: "MerchantReportsStudio",
+                    icon: "mdi-robot-outline",
+                    if: () => hasOneOfAuthorities(["reports.studio"]),
                 },
                 {
                     label: t("Merchant Credentials"),

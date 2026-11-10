@@ -1578,20 +1578,23 @@ A job that failed may fail again for the same reason. Read the **Last error** fi
 
 @@article id=b03-15 book=3 order=15 title="Reports: the catalog, the studio and shared headers and footers" roles=SECURITY_ADMIN,FINANCE,COMPLIANCE,OPERATOR minutes=4 ui=AVAILABLE related=b03-13,b03-14,b12-08
 :::summary Big picture in 20 seconds
-The Reporting section has three screens. **Report Catalog** runs a published report and prints or exports it. **Report Studio** verifies a report definition written by an AI and publishes it. **Headers & Footers** stores the reusable page chrome. A report is declarative: it never contains raw SQL, and every query runs read-only.
+The Reporting section has four screens. **Report Catalog** runs a published report and prints or exports it. **Report Studio** verifies a report definition written by an AI, previews a draft and publishes it. **Headers & Footers** stores the reusable page chrome. **Merchant Reports** lets staff review merchant-authored reports, their execution history and suspend a merchant's Studio. A report is declarative: it never contains raw SQL, and every query runs read-only.
 :::
 
 ### Why reports are separate from dashboards
 A dashboard shows a live summary. A report is a document: it has a title, a period, a language, a page header and footer, and a verification hash. You can print it as a vector PDF or export its data. The report engine executes only the declarative query definition that was verified and published. It cannot write to the database.
 
 ### Report Catalog
-Open **Reporting → Catalog**. Only reports your role can run are listed. Choose a report, fill its inputs, choose the output language when more than one is available, and click **Generate Report**. The preview shows the exact paginated pages; **Print** opens the browser's vector PDF dialog, and **Export CSV** / **Export XLSX** download the report data. If the report has a merchant input, the merchant is chosen there; a merchant report generated for a merchant is limited to that merchant's data.
+Open **Reporting → Catalog**. Only reports your role can run are listed. Choose a report, fill its inputs in the side panel, choose the output language and any header/footer, then click **Generate Report**. The preview shows the exact paginated pages; **Print** opens the browser's vector PDF dialog and **Export Excel** downloads one sheet per dataset. If the report has a merchant input, the merchant is chosen there; a merchant report generated for a merchant is limited to that merchant's data.
 
 ### Report Studio
-Open **Reporting → Studio**. First download the AI transcript. It contains the live schema, the allowed query vocabulary and the bilingual rules. Give it to the external AI, then paste the JSON it returns and verify it. The scorecard shows five layers: schema and translations, query safety and partition pruning, authority inference, asset and HTML safety, and a read-only dry run. If a layer fails, copy the repair prompt back to the AI. When everything passes, save it as verified or publish it. A conflict between domains is shown as a warning; a Security Admin can attach an authority override with a written justification.
+Open **Reporting → Studio**. First download the AI transcript. It contains the live schema, the allowed query vocabulary and the bilingual rules. Give it to the external AI, then paste the JSON it returns and verify it. The scorecard shows five layers: schema and translations, query safety and partition pruning, authority inference, asset and HTML safety, and a read-only dry run. If a layer fails, copy the repair prompt back to the AI. When everything passes, generate a draft preview, then save it as verified or publish it. A conflict between domains is shown as a warning; a Security Admin can attach an authority override with a written justification.
 
 ### Headers & Footers
 Open **Reporting → Headers & Footers**. A header or footer is its own reusable spec with a bilingual template and optional logo assets. Only one published header and one published footer can be the global default. A report can use the global default, a specific registered chrome, an inline template, or none.
+
+### Merchant Reports
+Open **Reporting → Merchant Reports** to review the reports merchants authored in their own Studio. Each row names the merchant and report, and **Executions** shows that merchant's run history. With `security:write`, **Suspend Studio** immediately blocks that merchant's runner and Studio until **Resume Studio** is used. The platform-wide switch and whether merchants may attach asset bundles are the `merchant_reports.policy` setting in **Platform Settings**.
 
 ### Safety rules
 * A report spec never contains raw SQL; the engine compiles the declarative query.
@@ -5557,7 +5560,7 @@ A **backup** is a saved copy of the database that you can restore after a disast
 For more, read [[a:b12-09|Backups from zero]], [[a:b12-10|The Backups screen]] and [[a:b12-11|Operating backups safely]].
 
 ### Platform settings
-**Platform Settings** lists every setting key with its versions and effective date. `SECURITY_ADMIN` can create or edit a setting, export a settings backup and preview a restore. Sensitive changes go through approval. Payer-facing checkout copy stays on **Checkout Help**. It is explained in [[a:b07-10|the Checkout Help article]].
+**Platform Settings** lists every setting key with its versions and effective date. `SECURITY_ADMIN` can create or edit a setting, export a settings backup and preview a restore. Sensitive changes go through approval. Payer-facing checkout copy stays on **Checkout Help**. `merchant_reports.policy` controls whether the merchant report runner/Studio is enabled and whether merchants may attach asset bundles; the merchant AI transcript always states the current asset policy. It is explained in [[a:b07-10|the Checkout Help article]].
 
 ### Health checks
 A **health check** asks a service "are you working?". The tool checks:
@@ -7505,10 +7508,11 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
    "routeNames": [
     "ReportsCatalog",
     "ReportsStudio",
-    "ReportsChrome"
+    "ReportsChrome",
+    "ReportsMerchantReports"
    ],
    "pageDir": "pages/reports",
-   "summary": "The reporting workspace: run a published report with its inputs and language, verify and publish a declarative report definition, and manage reusable bilingual headers and footers.",
+   "summary": "The reporting workspace: run a published report with its inputs and language, verify and publish a declarative report definition, manage reusable bilingual headers and footers, and oversee merchant-authored reports and their execution history.",
    "articles": [
     "b03-15",
     "b03-13",

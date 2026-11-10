@@ -70,4 +70,31 @@ describe("merchant report scope validation", () => {
       ),
     ).toBe(true);
   });
+
+  test("merchant-owned payment links and POS terminals are allowed autocomplete sources", () => {
+    const spec = baseReportSpec();
+    spec.inputs.push(
+      {
+        key: "linkId",
+        label_i18n_key: "input.merchant",
+        type: "entity_autocomplete",
+        required: false,
+        autocomplete: { source: "payment_links" },
+        layout_col_span: 6,
+      },
+      {
+        key: "terminalId",
+        label_i18n_key: "input.merchant",
+        type: "entity_autocomplete",
+        required: false,
+        autocomplete: { source: "pos_terminals" },
+        layout_col_span: 6,
+      },
+    );
+    expect(
+      validateMerchantReportScope(spec, createTestHostConfig()).some(
+        (diagnostic) => diagnostic.code === "MERCHANT_AUTOCOMPLETE_SOURCE_NOT_ALLOWED",
+      ),
+    ).toBe(false);
+  });
 });

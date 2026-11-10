@@ -24,6 +24,8 @@ export const xlsxUIPipeline = {
         (await load()).downloadXlsxFromCsvText(...args),
     downloadXlsxFromHeadersAndData: async (...args: Parameters<Pipeline["downloadXlsxFromHeadersAndData"]>) =>
         (await load()).downloadXlsxFromHeadersAndData(...args),
+    downloadXlsxWorkbook: async (...args: Parameters<Pipeline["downloadXlsxWorkbook"]>) =>
+        (await load()).downloadXlsxWorkbook(...args),
     uploadXlsxFromHeadersAndData: async <T extends { [key: string]: any }>(input: { headers: XlsxHeader[]; file: File }) =>
         (await load()).uploadXlsxFromHeadersAndData<T>(input),
 };

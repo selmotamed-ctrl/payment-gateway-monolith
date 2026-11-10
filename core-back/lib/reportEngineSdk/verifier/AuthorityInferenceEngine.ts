@@ -1,5 +1,69 @@
-import type { ReportEngineHostConfig } from "../types/hostConfig";
-import type { ReportDescriptorSpec } from "../types/reportSpec";
+import type { CatalogModelDef, ReportEngineHostConfig } from "../types/hostConfig";
+import type {
+  DatasetQuerySpec,
+  ReportDescriptorSpec,
+  WhereFilterNode,
+} from "../types/reportSpec";
+
+interface ReferencedColumn {
+  model: CatalogModelDef | undefined;
+  column: string;
+}
+
+/**
+ * Every column a dataset references, not only the select list. Window/order
+ * base columns are hidden from the output by the compiler, but they are still
+ * read by PostgreSQL, so authority/PII inference must see them (A01).
+ */
+export function collectReferencedColumns(
+  ds: DatasetQuerySpec,
+  host: ReportEngineHostConfig,
+): ReferencedColumn[] {
+  const out: ReferencedColumn[] = [];
+  const modelForAlias = (alias: string | undefined): CatalogModelDef | undefined => {
+    const resolved = alias ?? ds.from_alias;
+    if (resolved === ds.from_alias) return host.models[ds.from_model];
+    const join = ds.joins.find((entry) => entry.alias === resolved);
+    return join ? host.models[join.target_model] : undefined;
+  };
+  const selectByAlias = new Map(ds.select.map((sel) => [sel.alias, sel]));
+  const push = (model: CatalogModelDef | undefined, column: string): void => {
+    if (model?.columns[column]) out.push({ model, column });
+  };
+  const visitWhere = (node: WhereFilterNode | undefined): void => {
+    if (!node) return;
+    if (node.kind === "GROUP") {
+      node.conditions.forEach(visitWhere);
+      return;
+    }
+    push(modelForAlias(node.table_alias), node.column);
+  };
+
+  for (const sel of ds.select) push(modelForAlias(sel.table_alias), sel.column);
+  visitWhere(ds.where);
+  for (const join of ds.joins) visitWhere(join.additional_on);
+  for (const group of ds.group_by) {
+    const selected = selectByAlias.get(group);
+    if (selected) push(modelForAlias(selected.table_alias), selected.column);
+    else push(modelForAlias(undefined), group);
+  }
+  for (const order of ds.order_by) {
+    const selected = selectByAlias.get(order.field);
+    if (selected) push(modelForAlias(selected.table_alias), selected.column);
+    else push(modelForAlias(undefined), order.field);
+  }
+  for (const window of ds.window_fields) {
+    const selectedTarget = selectByAlias.get(window.target_field);
+    if (selectedTarget) push(modelForAlias(selectedTarget.table_alias), selectedTarget.column);
+    else push(modelForAlias(undefined), window.target_field);
+    for (const field of [...window.partition_by, ...window.order_by.map((order) => order.field)]) {
+      const selected = selectByAlias.get(field);
+      if (selected) push(modelForAlias(selected.table_alias), selected.column);
+      else push(modelForAlias(undefined), field);
+    }
+  }
+  return out;
+}
 
 export interface AuthorityInferenceResult {
   queriedModels: string[];
@@ -74,12 +138,8 @@ export function inferReportAuthorities(
   }
 
   for (const ds of spec.datasets) {
-    for (const sel of ds.select) {
-      const alias = sel.table_alias ?? ds.from_alias;
-      const model = alias === ds.from_alias
-        ? host.models[ds.from_model]
-        : host.models[ds.joins.find((join) => join.alias === alias)?.target_model ?? ""];
-      const col = model?.columns[sel.column];
+    for (const ref of collectReferencedColumns(ds, host)) {
+      const col = ref.model?.columns[ref.column];
       if (col?.sensitivity === "PII_MASKED") {
         containsMaskedPiiColumns = true;
       }

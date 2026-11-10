@@ -8,5 +8,11 @@ export { ReportPagedPreviewSurface } from "./components/ReportPagedPreviewSurfac
 export { renderChartSectionToSvg } from "./components/ReportChartRenderer";
 export { renderVectorDrawSectionToSvg } from "./components/ReportVectorDrawRenderer";
 export { buildPagedMediaHtmlDocument, renderChartSectionToSvgString } from "./print/ClientVectorPdfExporter";
-export { renderReportSectionsToHtml, renderChromeHtml, formatReportValue } from "./render/reportHtmlRenderer";
-export { sanitizeReportHtml } from "./sanitizer/ClientDomSanitizer";
+export {
+  renderReportSectionsToHtml,
+  renderChromeHtml,
+  formatReportValue,
+  specTranslator,
+} from "./render/reportHtmlRenderer";
+export { sanitizeReportHtml, sanitizeReportCss } from "./sanitizer/ClientDomSanitizer";
+export { ReportSandboxedHtmlSurface } from "./components/ReportSandboxedHtmlSurface";

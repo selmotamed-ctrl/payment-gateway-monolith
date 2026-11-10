@@ -12,15 +12,22 @@ export function createPaymentGatewayReportHostConfig(deps: {
   assetStoragePort?: ReportEngineHostConfig["assetStoragePort"];
 } = {}): ReportEngineHostConfig {
   const replicaUrl = env.DATABASE_REPLICA_URLS.split(",").map((v) => v.trim()).filter(Boolean)[0];
+  const connectionString =
+    deps.readOnlyConnectionString ??
+    process.env.REPORT_READONLY_DATABASE_URL ??
+    replicaUrl ??
+    env.DATABASE_URL;
+  // The serving label is explicit because a configured read-only URL is not
+  // provably a replica (A19). Operators set REPORT_READONLY_SERVED_BY=replica
+  // only after confirming the endpoint is a physical replica.
+  const servedBy =
+    process.env.REPORT_READONLY_SERVED_BY === "replica" ? "replica" : "primary-readonly-tx";
   const dbReadOnlyPort = new PostgresReadOnlyReportExecutor({
-    connectionString:
-      deps.readOnlyConnectionString ??
-      process.env.REPORT_READONLY_DATABASE_URL ??
-      replicaUrl ??
-      env.DATABASE_URL,
+    connectionString,
     maxPoolConnections: 8,
     defaultStatementTimeoutMs: 15_000,
     workMemMb: 32,
+    servedBy,
   });
   const catalog = buildSchemaCatalog();
   const assetStoragePort = deps.assetStoragePort ?? new LocalReportAssetStorage();

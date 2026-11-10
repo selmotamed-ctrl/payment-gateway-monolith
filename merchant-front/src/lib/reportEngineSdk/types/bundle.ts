@@ -13,6 +13,8 @@ export interface ReportExecutionBundle {
   actor: { name: string; email: string; role: string };
   institutionName?: string;
   chromeVariables?: Record<string, string>;
+  /** ISO 4217 code used for CURRENCY_MINOR values when a row carries no currency column. */
+  currency?: string;
   inputsUsed: Record<string, unknown>;
   rowCountTotal: number;
   durationMs: number;

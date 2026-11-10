@@ -121,6 +121,7 @@ The router has 40 protected children under `/`, a visitor-only `/login`, and a c
 | `/reports/catalog` | `ReportsCatalog` | `reports.run` | Published report catalog, language prompt, typed inputs, preview and print. |
 | `/reports/studio` | `ReportsStudio` | `reports.studio` | AI transcript, JSON spec editor, five-layer verification, authority override and publish. |
 | `/reports/chrome` | `ReportsChrome` | `reports.studio` | Reusable header/footer registry and global default selection. |
+| `/reports/merchant-reports` | `ReportsMerchantReports` | `report:review` / `report:approve` / `security:read` / `security:write` | Merchant-authored reports, execution history and Studio suspension (suspend/resume needs `security:write`). |
 | `/guide` | `AdminGuide` | none (intentional learning surface) | Interactive admin guide, glossary, simulators and checklists. |
 | `/academy`, `/academy/tracks`, `/academy/track/:trackId`, `/academy/module/:moduleId`, `/academy/lesson/:lessonId`, `/academy/lab/:labId`, `/academy/exam/:examId`, `/academy/certificate/:badgeId`, `/academy/help` | `AdminAcademy*` | none (intentional learning surface) | Employee Academy: tracks, lessons, labs, server-graded exams, certificates. |
 | `/academy/team` | `AdminAcademyTeam` | role `SECURITY_ADMIN` | Team certification view with CSV export. |

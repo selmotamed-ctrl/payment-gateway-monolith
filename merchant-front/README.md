@@ -93,7 +93,8 @@ Protected `/portal` routes (17 children; `/portal` redirects to the dashboard):
 | `/portal/cashouts` | `Cashouts` | `cashout.read` or `cashout.request` | Cash-out requests, wallet, amount and bank destination. |
 | `/portal/developers/tokens` | `DeveloperTokens` | `tokens.read` | API token creation, one-time secret, scopes, IP allowlist and revocation. |
 | `/portal/credentials` | `Credentials` | `credentials.manage` | Merchant-owned gateway credential sets and environments. |
-| `/portal/reports` | `MerchantReports` | `reports.run` | Merchant-safe report catalog, language prompt, print and CSV/XLSX export. |
+| `/portal/reports` | `MerchantReports` | `reports.run` | Merchant-safe template/own report catalog, language prompt, print, Excel export and template clone. |
+| `/portal/reports/studio` | `MerchantReportsStudio` | `reports.studio` | Merchant AI transcript, spec verification, save/publish/archive, versions and usage. |
 | `/portal/team` | `Team` | `users.manage` | Team members, roles, scopes and authorities. |
 
 ### Authority-gating gaps

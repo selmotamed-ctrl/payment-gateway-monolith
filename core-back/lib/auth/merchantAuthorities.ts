@@ -28,6 +28,7 @@ export const MERCHANT_AUTHORITY_CATALOGUE = [
   "token:manage",
   "credential:manage",
   "report_engine:run",
+  "report_engine:author",
 ] as const;
 
 export type MerchantAuthority = (typeof MERCHANT_AUTHORITY_CATALOGUE)[number];
@@ -96,6 +97,7 @@ export const effectiveMerchantAuthorities = (
     for (const implied of IMPLIED_BY_MERCHANT_WRITE) held.add(implied);
     if (principal.role === "MERCHANT_ADMIN") {
       for (const privileged of PRIVILEGED_MERCHANT_AUTHORITIES) held.add(privileged);
+      held.add("report_engine:author");
     }
   }
   if (held.has("merchant:read") || held.has("link:write")) {

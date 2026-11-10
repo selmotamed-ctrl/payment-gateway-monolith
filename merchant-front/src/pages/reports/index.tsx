@@ -1,21 +1,35 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VAlert, VBtn, VSelect } from "vuetify/components";
+import { useRouter } from "vue-router";
+import { VBtn, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { ApiTable } from "@/components/Table/ApiTable";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
-import { PageHeader, SurfaceCard } from "@/components/ui";
+import {
+  FormModal,
+  MetaPill,
+  MonoRef,
+  PageHeader,
+  SegmentedTabs,
+  SlideOverDrawer,
+  SurfaceCard,
+} from "@/components/ui";
 import { api } from "@/state/api";
+import { extractApiError, extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import {
   ReportInputForm,
   ReportLanguagePromptDialog,
   ReportPagedPreviewSurface,
+  formatReportValue,
   renderChromeHtml,
   renderReportSectionsToHtml,
+  specTranslator,
   type ReportDescriptorSpec,
   type ReportExecutionBundle,
 } from "@/lib/reportEngineSdk";
@@ -30,11 +44,12 @@ type MerchantReport = {
   supportedLocales: string[];
   defaultLocale: string;
   spec: ReportDescriptorSpec;
+  source?: "OWN" | "TEMPLATE";
 };
 
 const MerchantReportsPage = dc(() => {
   const { t } = useLocale();
-  const error = ref<string | null>(null);
+  const router = useRouter();
   const search = ref<string | null>(null);
   const pageSize = ref(20);
   const selected = ref<MerchantReport | null>(null);
@@ -43,13 +58,51 @@ const MerchantReportsPage = dc(() => {
   const generating = ref(false);
   const bundle = ref<ReportExecutionBundle | null>(null);
   const languagePrompt = ref(false);
+  const drawerOpen = ref(false);
   const previewRef = ref<{ printClientSideVectorPdf?: () => void } | null>(null);
+  const inputFormRef = ref<{ validate?: () => boolean } | null>(null);
+  const previewPages = ref(1);
+  const cloneTarget = ref<MerchantReport | null>(null);
+  const cloneCode = ref("");
+  const cloning = ref(false);
 
   const availableLocales = computed(() =>
     selected.value ? Object.keys(selected.value.spec.i18n.locales) : ["en"],
   );
   const scopeKey = computed(() => selected.value?.spec.report.merchant_scope_input_key);
   const hiddenInputKeys = computed(() => (scopeKey.value ? [scopeKey.value] : []));
+  const startClone = (report: MerchantReport) => {
+    cloneTarget.value = report;
+    cloneCode.value = `${report.code}-mine`.slice(0, 64);
+  };
+
+  const cloneTemplate = async () => {
+    if (!cloneTarget.value || cloneCode.value.trim().length === 0) return;
+    cloning.value = true;
+    try {
+      const response = await api.post(urlsMap.reportEngineStudioClone(cloneTarget.value.code), {
+        code: cloneCode.value.trim(),
+      });
+      const id = String(response.data?.id ?? "");
+      cloneTarget.value = null;
+      showSnackBar({ message: t("Template cloned into your Studio"), type: "success" });
+      if (id) {
+        await router.push({ name: "MerchantReportsStudio", query: { open: id } });
+      }
+    } catch (caught) {
+      showSnackBar({ message: extractApiErrorMessage(caught), type: "error" });
+    } finally {
+      cloning.value = false;
+    }
+  };
+
+  const localizedTitle = (report: MerchantReport): string =>
+    report.spec.i18n.locales[locale.value]?.["report.title"] ??
+    report.spec.i18n.locales[report.defaultLocale]?.["report.title"] ??
+    report.code;
+  const specT = computed(() =>
+    selected.value ? specTranslator(selected.value.spec, locale.value) : (key: string) => key,
+  );
   const renderedSectionsHtml = computed(() =>
     bundle.value ? renderReportSectionsToHtml({ bundle: bundle.value, locale: locale.value, t }) : "",
   );
@@ -63,13 +116,28 @@ const MerchantReportsPage = dc(() => {
       ? renderChromeHtml({ chrome: bundle.value.resolvedFooterChrome, bundle: bundle.value, locale: locale.value, t })
       : "",
   );
+  const hasRows = computed(() =>
+    bundle.value ? Object.values(bundle.value.datasets).some((rows) => rows.length > 0) : false,
+  );
 
   const selectReport = (report: MerchantReport) => {
     selected.value = report;
     inputs.value = resolveInputDefaults(report.spec);
     locale.value = report.defaultLocale || "en";
     bundle.value = null;
-    error.value = null;
+    previewPages.value = 1;
+    drawerOpen.value = true;
+  };
+
+  const friendlyError = (caught: unknown): string => {
+    const extracted = extractApiError(caught);
+    if (extracted?.code === "REPORT_NOT_PUBLISHED" || extracted?.code === "REPORT_NOT_FOUND") {
+      return t("This report is not available right now. Refresh the list or contact the operator.");
+    }
+    if (extracted?.status === 403) {
+      return t("You do not have permission to run this report.");
+    }
+    return extractApiErrorMessage(caught) || (caught instanceof Error ? caught.message : String(caught));
   };
 
   const autocomplete = async (
@@ -88,8 +156,11 @@ const MerchantReportsPage = dc(() => {
 
   const runGenerate = async (chosenLocale: string) => {
     if (!selected.value) return;
+    if (inputFormRef.value?.validate && !inputFormRef.value.validate()) {
+      showSnackBar({ message: t("Fix the highlighted inputs before generating"), type: "warning" });
+      return;
+    }
     generating.value = true;
-    error.value = null;
     try {
       const response = await api.post(urlsMap.reportEngineExecute(selected.value.code), {
         inputs: inputs.value,
@@ -97,8 +168,10 @@ const MerchantReportsPage = dc(() => {
       });
       bundle.value = response.data as ReportExecutionBundle;
       locale.value = chosenLocale;
+      drawerOpen.value = false;
+      showSnackBar({ message: t("Report generated"), type: "success" });
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
+      showSnackBar({ message: friendlyError(caught), type: "error" });
     } finally {
       generating.value = false;
     }
@@ -113,48 +186,49 @@ const MerchantReportsPage = dc(() => {
     void runGenerate(locale.value);
   };
 
-  const allDatasetRows = (): Array<Record<string, unknown>> => {
-    if (!bundle.value) return [];
-    return Object.entries(bundle.value.datasets).flatMap(([datasetId, rows]) =>
-      rows.map((row) => ({ dataset: datasetId, ...row })),
-    );
-  };
-
-  const exportCsv = () => {
-    if (!selected.value) return;
-    const rows = allDatasetRows();
-    if (rows.length === 0) return;
-    const headers = Object.keys(rows[0]!);
-    const csv = [
-      headers.join(","),
-      ...rows.map((row) =>
-        headers
-          .map((header) => {
-            const text = String(row[header] ?? "").replace(/"/g, '""');
-            return /[",\n]/.test(text) ? `"${text}"` : text;
-          })
-          .join(","),
-      ),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${selected.value.code}-${locale.value}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportXlsx = async () => {
-    if (!selected.value) return;
-    const rows = allDatasetRows();
-    if (rows.length === 0) return;
-    const headers = Object.keys(rows[0]!).map((key) => ({ text: key, key, type: "string" as const }));
-    await xlsxUIPipeline.downloadXlsxFromHeadersAndData({
-      headers,
-      data: rows,
+  const exportExcel = async () => {
+    if (!selected.value || !bundle.value) return;
+    const sheets = Object.entries(bundle.value.datasets)
+      .filter(([, rows]) => rows.length > 0)
+      .map(([datasetId, rows]) => {
+        const section = selected.value!.spec.sections.find(
+          (entry) => entry.section_type === "DATA_TABLE" && entry.dataset_id === datasetId,
+        );
+        const columnDefs =
+          section && section.section_type === "DATA_TABLE"
+            ? section.columns
+            : Object.keys(rows[0] ?? {}).map((field) => ({
+                field,
+                header_i18n_key: "",
+                format_hint: "RAW" as const,
+              }));
+        const headers = columnDefs.map((column) => ({
+          text:
+            column.header_i18n_key && specT.value(column.header_i18n_key) !== column.header_i18n_key
+              ? specT.value(column.header_i18n_key)
+              : column.field,
+          key: column.field,
+          type: "string" as const,
+        }));
+        const data = rows.map((row) => {
+          const record: Record<string, string> = {};
+          for (const column of columnDefs) {
+            const raw = formatReportValue(
+              row[column.field],
+              column.format_hint ?? "RAW",
+              undefined,
+              specT.value,
+            );
+            record[column.field] = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+          }
+          return record;
+        });
+        return { name: datasetId, headers, data };
+      });
+    if (sheets.length === 0) return;
+    await xlsxUIPipeline.downloadXlsxWorkbook({
+      sheets,
       title: `${selected.value.code}-${locale.value}`,
-      color: "#2563EB",
     });
   };
 
@@ -164,9 +238,14 @@ const MerchantReportsPage = dc(() => {
       label: t("Report"),
       sortKey: "report",
       Value: ({ row }) => (
-        <div>
-          <div class="font-weight-medium">{row.spec.i18n.locales.en?.["report.title"] ?? row.code}</div>
-          <div class="text-caption text-medium-emphasis">{row.code}</div>
+        <div class="d-flex flex-column">
+          <span class="font-weight-medium">{localizedTitle(row)}</span>
+          <div class="d-flex align-center ga-2">
+            <MonoRef value={row.code} copyable={false} />
+            <MetaPill size="x-small" color={row.source === "OWN" ? "success" : "info"}>
+              {row.source === "OWN" ? t("Mine") : t("Template")}
+            </MetaPill>
+          </div>
         </div>
       ),
     },
@@ -178,9 +257,32 @@ const MerchantReportsPage = dc(() => {
       label: t("Actions"),
       minWidth: true,
       Value: ({ row }) => (
-        <VBtn size="small" variant="tonal" onClick={() => selectReport(row)}>
-          {t("Run")}
-        </VBtn>
+        <TableRowActions
+          primaryAction={{ label: t("Run"), icon: "mdi-play", onClick: () => selectReport(row) }}
+          items={[
+            {
+              key: "copy",
+              label: t("Copy code"),
+              icon: "mdi-content-copy",
+              onClick: () => {
+                void navigator.clipboard.writeText(row.code).then(
+                  () => showSnackBar({ message: t("Code copied"), type: "success" }),
+                  () => showSnackBar({ message: t("Copy failed"), type: "error" }),
+                );
+              },
+            },
+            ...(row.source === "TEMPLATE"
+              ? [
+                  {
+                    key: "clone",
+                    label: t("Clone template"),
+                    icon: "mdi-content-duplicate",
+                    onClick: () => startClone(row),
+                  },
+                ]
+              : []),
+          ]}
+        />
       ),
     },
   ]);
@@ -188,116 +290,155 @@ const MerchantReportsPage = dc(() => {
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
-      <PageHeader
-        title={t("Reports")}
-        subtitle={t("Generate the reports available to your merchant account")}
-        breadcrumbs={[{ label: t("Reports"), to: "/portal/reports" }]}
-      />
-      {error.value && <VAlert type="error" variant="tonal" density="compact">{error.value}</VAlert>}
-      <ApiTable<MerchantReport>
-        title={t("Available reports")}
-        url={urlsMap.reportEngineCatalog}
-        headers={reportHeaders.value}
-        localSearch={false}
-        xlsx={false}
-        showNumber={true}
-        numberOfItemsPerPage={pageSize.value}
-        setNumberOfItemsPerPage={(value) => (pageSize.value = value)}
-        searchValue={search.value}
-        setSearchValue={(value) => (search.value = value)}
-        apiDataExtractor={(data) => (data as { reports?: MerchantReport[] }).reports ?? []}
-        apiTotalExtractor={(data) => Number((data as { total?: number }).total ?? 0)}
-        onRefresh={(table, refresh) => {
-          void refresh({
-            queryParams: {
-              page: table.page,
-              pageSize: pageSize.value,
-              ...(search.value ? { search: search.value } : {}),
-              ...(table.sortKey
-                ? { sortKey: table.sortKey, sortDirection: table.sortDirection }
-                : {}),
-            },
-          });
-        }}
-      />
+        <PageHeader
+          title={t("Reports")}
+          subtitle={t("Generate the reports available to your merchant account")}
+        />
 
-      {selected.value && (
-        <SurfaceCard
-          class="mt-4"
-          title={selected.value.spec.i18n.locales.en?.["report.title"] ?? selected.value.code}
-          subtitle={t("Fill the parameters and generate the report")}
-        >
-          <div class="d-flex flex-column ga-4">
-            <ReportInputForm
-              spec={selected.value.spec}
-              modelValue={inputs.value}
-              autocomplete={autocomplete}
-              hiddenInputKeys={hiddenInputKeys.value}
-              onUpdate:modelValue={(value: Record<string, unknown>) => (inputs.value = value)}
+        {bundle.value && selected.value && (
+          <SurfaceCard
+            title={t("Paginated Vector Preview")}
+            subtitle={t("Client-side rendering; no server CPU used")}
+            v-slots={{
+              headerActions: () => (
+                <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                  <MetaPill color="info">{`${previewPages.value} ${t("pages")}`}</MetaPill>
+                  <MonoRef value={bundle.value?.verificationSha256 ?? ""} truncate={12} />
+                  <SegmentedTabs
+                    modelValue={locale.value}
+                    onUpdate:modelValue={(next: string) => (locale.value = next)}
+                    tabs={availableLocales.value.map((entry) => ({ label: entry.toUpperCase(), value: entry }))}
+                    ariaLabel={t("Output language")}
+                  />
+                  <VBtn size="small" variant="tonal" prependIcon="mdi-refresh" loading={generating.value} onClick={() => void runGenerate(locale.value)}>
+                    {t("Regenerate")}
+                  </VBtn>
+                  <VBtn size="small" variant="tonal" prependIcon="mdi-microsoft-excel" disabled={!hasRows.value} onClick={() => void exportExcel()}>
+                    {t("Export Excel")}
+                  </VBtn>
+                  <VBtn
+                    size="small"
+                    variant="tonal"
+                    prependIcon="mdi-printer-outline"
+                    disabled={!hasRows.value}
+                    onClick={() => previewRef.value?.printClientSideVectorPdf?.()}
+                  >
+                    {t("Print")}
+                  </VBtn>
+                </ThemedView>
+              ),
+            }}
+          >
+            <ReportPagedPreviewSurface
+              ref={previewRef}
+              bundle={bundle.value}
+              selectedLocale={locale.value}
+              renderedSectionsHtml={renderedSectionsHtml.value}
+              renderedHeaderHtml={renderedHeaderHtml.value}
+              renderedFooterHtml={renderedFooterHtml.value}
+              onPageCountChanged={(pages: number) => (previewPages.value = pages)}
             />
-            <div class="d-flex flex-wrap ga-3 align-end">
-              <VSelect
-                v-model={locale.value}
-                label={t("Output language")}
-                items={availableLocales.value}
-                density="compact"
-                variant="outlined"
-                hideDetails="auto"
-                style={{ maxWidth: "180px" }}
-              />
-              <VBtn color="primary" loading={generating.value} onClick={requestGenerate}>
-                {t("Generate Report")}
-              </VBtn>
-            </div>
-          </div>
-        </SurfaceCard>
-      )}
+          </SurfaceCard>
+        )}
 
-      {bundle.value && (
-        <SurfaceCard title={t("Paginated Vector Preview")} subtitle={t("Client-side rendering; no server CPU used")}>
-          <div class="d-flex flex-wrap ga-2 mb-3">
-            <VBtn size="small" variant="tonal" prependIcon="mdi-file-delimited-outline" onClick={exportCsv}>
-              {t("Export CSV")}
-            </VBtn>
-            <VBtn size="small" variant="tonal" prependIcon="mdi-microsoft-excel" onClick={() => void exportXlsx()}>
-              {t("Export XLSX")}
-            </VBtn>
-            <VBtn
-              size="small"
-              variant="tonal"
-              prependIcon="mdi-printer-outline"
-              onClick={() => previewRef.value?.printClientSideVectorPdf?.()}
-            >
-              {t("Print")}
-            </VBtn>
-          </div>
-          <ReportPagedPreviewSurface
-            ref={previewRef}
-            bundle={bundle.value}
-            selectedLocale={locale.value}
-            renderedSectionsHtml={renderedSectionsHtml.value}
-            renderedHeaderHtml={renderedHeaderHtml.value}
-            renderedFooterHtml={renderedFooterHtml.value}
-            onChangeLocale={(next: string) => (locale.value = next)}
-          />
-        </SurfaceCard>
-      )}
-
-      {selected.value && (
-        <ReportLanguagePromptDialog
-          modelValue={languagePrompt.value}
-          availableLocales={availableLocales.value}
-          defaultLocale={selected.value.defaultLocale}
-          reportTitleMap={Object.fromEntries(
-            availableLocales.value.map((loc) => [loc, selected.value?.spec.i18n.locales[loc]?.["report.title"] ?? ""]),
-          )}
-          onUpdate:modelValue={(value: boolean) => (languagePrompt.value = value)}
-          onConfirmLocale={(chosen: string) => {
-            locale.value = chosen;
-            void runGenerate(chosen);
+        <ApiTable<MerchantReport>
+          title={t("Available reports")}
+          url={urlsMap.reportEngineCatalog}
+          headers={reportHeaders.value}
+          localSearch={false}
+          xlsx={false}
+          showNumber={true}
+          numberOfItemsPerPage={pageSize.value}
+          setNumberOfItemsPerPage={(value) => (pageSize.value = value)}
+          searchValue={search.value}
+          setSearchValue={(value) => (search.value = value)}
+          apiDataExtractor={(data) => (data as { reports?: MerchantReport[] }).reports ?? []}
+          apiTotalExtractor={(data) => Number((data as { total?: number }).total ?? 0)}
+          onRefresh={(table, refresh) => {
+            void refresh({
+              queryParams: {
+                page: table.page,
+                pageSize: pageSize.value,
+                ...(search.value ? { search: search.value } : {}),
+                ...(table.sortKey
+                  ? { sortKey: table.sortKey, sortDirection: table.sortDirection }
+                  : {}),
+              },
+            });
           }}
         />
-      )}
+
+        <SlideOverDrawer
+          modelValue={drawerOpen.value}
+          onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)}
+          title={selected.value ? localizedTitle(selected.value) : t("Run report")}
+          subtitle={t("Fill the parameters and generate the report")}
+          width={620}
+        >
+          {selected.value && (
+            <div class="d-flex flex-column ga-4">
+              <ReportInputForm
+                ref={inputFormRef}
+                spec={selected.value.spec}
+                modelValue={inputs.value}
+                autocomplete={autocomplete}
+                hiddenInputKeys={hiddenInputKeys.value}
+                translate={specT.value}
+                onUpdate:modelValue={(value: Record<string, unknown>) => (inputs.value = value)}
+              />
+              <div class="d-flex flex-wrap ga-3 align-end justify-space-between">
+                <VSelect
+                  v-model={locale.value}
+                  label={t("Output language")}
+                  items={availableLocales.value}
+                  variant="outlined"
+                  hideDetails="auto"
+                  style={{ maxWidth: "180px" }}
+                />
+                <VBtn color="primary" prependIcon="mdi-file-chart" loading={generating.value} onClick={requestGenerate}>
+                  {t("Generate Report")}
+                </VBtn>
+              </div>
+            </div>
+          )}
+        </SlideOverDrawer>
+
+        <FormModal
+          modelValue={Boolean(cloneTarget.value)}
+          onUpdate:modelValue={(value: boolean) => {
+            if (!value) cloneTarget.value = null;
+          }}
+          title={t("Clone this template into your Studio?")}
+          subtitle={cloneTarget.value ? localizedTitle(cloneTarget.value) : ""}
+          size="sm"
+          submitLabel={t("Clone template")}
+          loading={cloning.value}
+          onSubmit={() => void cloneTemplate()}
+        >
+          <VTextField
+            modelValue={cloneCode.value}
+            onUpdate:modelValue={(value: string) => (cloneCode.value = value.slice(0, 64))}
+            label={t("New report code")}
+            hint={t("Lower-case letters, digits and dashes; up to 64 characters")}
+            variant="outlined"
+          />
+        </FormModal>
+
+        {selected.value && (
+          <ReportLanguagePromptDialog
+            modelValue={languagePrompt.value}
+            availableLocales={availableLocales.value}
+            defaultLocale={selected.value.defaultLocale}
+            reportTitleMap={Object.fromEntries(
+              availableLocales.value.map((loc) => [loc, selected.value?.spec.i18n.locales[loc]?.["report.title"] ?? ""]),
+            )}
+            onUpdate:modelValue={(value: boolean) => (languagePrompt.value = value)}
+            onConfirmLocale={(chosen: string) => {
+              locale.value = chosen;
+              void runGenerate(chosen);
+            }}
+          />
+        )}
       </ThemedView>
     </ScreenContainer>
   );

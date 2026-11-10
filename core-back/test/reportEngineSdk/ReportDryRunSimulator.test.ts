@@ -48,3 +48,30 @@ describe("RE-T19b: five-layer verification and dry-run", () => {
     expect(report.aiRepairPrompt).toContain("INVALID_JSON_SYNTAX");
   });
 });
+
+describe("remediation A16: skipped layers are not reported as passed", () => {
+  test("layer 5 is SKIPPED when an earlier layer has an error", async () => {
+    const spec = baseReportSpec();
+    spec.required_assets = [
+      { asset_key: "logo", file_name: "logo.png", mime_type: "image/png", purpose: "VISUAL_IMAGE" },
+    ];
+    const report = await verifyAndSimulateReportSpec({
+      rawSpecJson: JSON.stringify(spec),
+      extractedZipFiles: new Map(),
+      host: createTestHostConfig(),
+    });
+    const layer5 = report.layers.find((layer) => layer.layer === 5);
+    expect(layer5?.status).toBe("SKIPPED");
+    expect(layer5?.passed).toBe(false);
+  });
+
+  test("invalid JSON marks layers 2-5 SKIPPED", async () => {
+    const report = await verifyAndSimulateReportSpec({
+      rawSpecJson: "{ not json",
+      extractedZipFiles: new Map(),
+      host: createTestHostConfig(),
+    });
+    expect(report.layers[0]?.status).toBe("FAILED");
+    expect(report.layers.slice(1).every((layer) => layer.status === "SKIPPED")).toBe(true);
+  });
+});

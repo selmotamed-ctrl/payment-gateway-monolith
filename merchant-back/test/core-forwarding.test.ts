@@ -356,3 +356,40 @@ describe("merchant report-engine forwarding", () => {
     expect(forwarded()?.url).toBe("/internal/merchant/report-engine/autocomplete/applications?q=shop");
   });
 });
+
+describe("merchant report Studio forwarding", () => {
+  test("GET /report-engine/studio/transcript forwards to core", async () => {
+    const response = await fetch(`${edgeUrl}/api/v1/merchant/report-engine/studio/transcript`, { headers: auth });
+    expect(response.status).toBe(200);
+    expect(forwarded()?.url).toBe("/internal/merchant/report-engine/studio/transcript");
+  });
+
+  test("POST /report-engine/studio/verify forwards the spec and zip", async () => {
+    const response = await postJson("/api/v1/merchant/report-engine/studio/verify", {
+      specJson: "{}",
+      assetsZipBase64: "UEsDBA==",
+    });
+    expect(response.status).toBe(200);
+    expect(forwarded()?.url).toBe("/internal/merchant/report-engine/studio/verify");
+    expect(forwardedBody()).toMatchObject({ specJson: "{}", assetsZipBase64: "UEsDBA==" });
+  });
+
+  test("Studio spec, publish, archive, usage and clone routes forward", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const cases: Array<[string, string, unknown, string]> = [
+      ["GET", "/api/v1/merchant/report-engine/studio/specs", undefined, "/internal/merchant/report-engine/studio/specs"],
+      ["GET", `/api/v1/merchant/report-engine/studio/specs/${id}`, undefined, `/internal/merchant/report-engine/studio/specs/${id}`],
+      ["POST", `/api/v1/merchant/report-engine/studio/specs/${id}/publish`, {}, `/internal/merchant/report-engine/studio/specs/${id}/publish`],
+      ["POST", `/api/v1/merchant/report-engine/studio/specs/${id}/archive`, {}, `/internal/merchant/report-engine/studio/specs/${id}/archive`],
+      ["GET", "/api/v1/merchant/report-engine/studio/usage", undefined, "/internal/merchant/report-engine/studio/usage"],
+      ["POST", "/api/v1/merchant/report-engine/studio/templates/merchant-daily/clone", { code: "my-daily" }, "/internal/merchant/report-engine/studio/templates/merchant-daily/clone"],
+    ];
+    for (const [method, route, body, expected] of cases) {
+      const response = method === "GET"
+        ? await fetch(`${edgeUrl}${route}`, { headers: auth })
+        : await postJson(route, body ?? {});
+      expect(response.status, `${method} ${route}`).toBeLessThan(400);
+      expect(forwarded()?.url, `${method} ${route}`).toBe(expected);
+    }
+  });
+});

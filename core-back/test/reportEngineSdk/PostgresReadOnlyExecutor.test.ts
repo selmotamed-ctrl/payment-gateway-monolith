@@ -64,3 +64,55 @@ describe("RE-T12 / RE-T13: read-only executor safety", () => {
     await executor.close();
   });
 });
+
+import { partitionParentOf, summarizeExplainPlan } from "../../lib/reportEngineSdk/runtime/PostgresReadOnlyExecutor";
+
+describe("remediation A10/A19: real partition names and honest serving labels", () => {
+  test("A10: journal_lines_YYYY_MM and _default are recognised as journal_lines partitions", () => {
+    expect(partitionParentOf("journal_lines_2026_01", ["journal_lines"])).toBe("journal_lines");
+    expect(partitionParentOf("journal_lines_2026_12", ["journal_lines"])).toBe("journal_lines");
+    expect(partitionParentOf("journal_lines_default", ["journal_lines"])).toBe("journal_lines");
+    expect(partitionParentOf("journal_lines_archive", ["journal_lines"])).toBeNull();
+  });
+
+  test("A10: EXPLAIN summaries count partitions and flag a large-table seq scan", () => {
+    const summary = summarizeExplainPlan([
+      {
+        Plan: {
+          "Node Type": "Append",
+          "Total Cost": 1200,
+          "Plan Rows": 100,
+          Plans: [
+            {
+              "Node Type": "Seq Scan",
+              "Relation Name": "journal_lines_2026_01",
+              "Total Cost": 600,
+              "Plan Rows": 50,
+            },
+            {
+              "Node Type": "Seq Scan",
+              "Relation Name": "journal_lines_2026_02",
+              "Total Cost": 600,
+              "Plan Rows": 50,
+            },
+          ],
+        },
+      },
+    ]);
+    expect(summary.partitionsScanned).toBe(2);
+    expect(summary.hasSeqScanOnLargeTable).toBe(true);
+    expect(summary.seqScans?.every((scan) => scan.parentTable === "journal_lines")).toBe(true);
+  });
+
+  test("A19: the executor labels its serving node exactly as configured", async () => {
+    const primary = new PostgresReadOnlyReportExecutor({ connectionString: "postgresql://invalid:1/never" });
+    const replica = new PostgresReadOnlyReportExecutor({
+      connectionString: "postgresql://invalid:1/never",
+      servedBy: "replica",
+    });
+    expect((primary as unknown as { servedBy: string }).servedBy).toBe("primary-readonly-tx");
+    expect((replica as unknown as { servedBy: string }).servedBy).toBe("replica");
+    await primary.close();
+    await replica.close();
+  });
+});

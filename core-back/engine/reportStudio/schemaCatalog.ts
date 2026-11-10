@@ -82,11 +82,15 @@ const PII_PATTERNS: readonly RegExp[] = [
   /(^|_)address(_|$)/,
 ];
 
-/** People / KYB / payout tables where names and JSON payloads carry PII. */
+/** People / KYB / payout tables where names, file names and JSON payloads carry PII. */
 const PEOPLE_TABLES = new Set([
   "beneficial_owners",
   "users",
   "aml_screening_matches",
+  "join_requests",
+  "kyb_documents",
+  "kyb_revalidation_requests",
+  "cashout_requests",
 ]);
 const PII_JSON_TABLES = new Set([
   "beneficial_owners",
@@ -113,8 +117,15 @@ export function classifyColumnSensitivity(
   }
   if (KEY_MATERIAL_TABLE.test(tableName) && /_ref$/.test(name)) return "FORBIDDEN_SECRET";
   if (PII_PATTERNS.some((pattern) => pattern.test(name))) return "PII_MASKED";
-  if (PEOPLE_TABLES.has(tableName) && /^((full|first|last|middle|display)_)?name(_ar|_en)?$|nationality/.test(name)) return "PII_MASKED";
-  if (PII_JSON_TABLES.has(tableName) && type === "json") return "PII_MASKED";
+  if (
+    PEOPLE_TABLES.has(tableName) &&
+    /^((full|first|last|middle|display|original|legal|trade)_)?(file_)?name(_ar|_en)?$|nationality/.test(name)
+  ) {
+    return "PII_MASKED";
+  }
+  if ((PII_JSON_TABLES.has(tableName) || PEOPLE_TABLES.has(tableName)) && type === "json") {
+    return "PII_MASKED";
+  }
   if (/(payout|destination|beneficiary).*_json$/.test(name)) return "PII_MASKED";
   return type === "decimal" || type === "bigint" || type === "uuid" ? "INTERNAL" : "PUBLIC";
 }

@@ -52,6 +52,6 @@ describe("RE-T19: paged media document builder", () => {
     expect(html).toContain("report-page-number::after { content: counter(page); }");
     expect(html).toContain('<header class="report-running-header">');
     expect(html).toContain('<footer class="report-running-footer">');
-    expect(html).toContain("Tajawal");
+    expect(html).toContain("Report Arabic");
   });
 });

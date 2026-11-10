@@ -8,6 +8,8 @@ import type {
 export interface CompiledSqlQuery {
   sql: string;
   values: unknown[];
+  /** Aliases that received the engine-injected merchant predicate (E04). */
+  scopeAliases?: string[];
 }
 
 const quoteIdent = (ident: string): string => {
@@ -22,6 +24,7 @@ export function compileDatasetQueryToSql(
   host: ReportEngineHostConfig,
   resolvedInputs: Record<string, unknown>,
   actorContext?: { userId: string; nowUtcIso: string },
+  options?: { merchantScope?: { merchantId: string } },
 ): CompiledSqlQuery {
   const values: unknown[] = [];
   const pushParam = (val: unknown): string => {
@@ -83,6 +86,29 @@ export function compileDatasetQueryToSql(
     );
   }
 
+
+  // Merchant identity is engine-injected, never trusted from the spec (E04):
+  // a top-level AND on the base alias and every joined alias. A spec-supplied
+  // OR tree can never remove this predicate.
+  const scopeAliases: string[] = [];
+  let scopeSql: string | null = null;
+  if (options?.merchantScope) {
+    const aliases = [
+      { alias: ds.from_alias, model: baseModel },
+      ...ds.joins.map((join) => ({ alias: join.alias, model: host.models[join.target_model] })),
+    ];
+    const conditions: string[] = [];
+    for (const entry of aliases) {
+      if (!entry.model?.merchantScopable) {
+        throw new Error(`MERCHANT_SCOPE_MODEL_NOT_ALLOWED: "${entry.model?.modelName ?? entry.alias}"`);
+      }
+      const column = entry.model.columns[entry.model.merchantScopable.merchantIdColumn];
+      if (!column) throw new Error(`MERCHANT_SCOPE_COLUMN_MISSING: "${entry.alias}"`);
+      conditions.push(`${quoteIdent(entry.alias)}.${quoteIdent(column.dbColumnName)} = ${pushParam(options.merchantScope.merchantId)}`);
+      scopeAliases.push(entry.alias);
+    }
+    scopeSql = conditions.join(" AND ");
+  }
 
   const compileScalarExpr = (sel: DatasetSelectField): string => {
     const colSql = resolveColumnSql(sel.table_alias, sel.column);
@@ -252,7 +278,22 @@ export function compileDatasetQueryToSql(
   }
 
   const selectAliases = new Map<string, DatasetSelectField>(ds.select.map((s) => [s.alias, s]));
-  const baseSelectSql = ds.select.map((s) => compileSelectField(s)).join(", ");
+  // Aggregated/grouped queries cannot project the scope column directly; the
+  // injected predicate guarantees one merchant per row, so MAX is exact and
+  // keeps PostgreSQL's GROUP BY rules satisfied (E04).
+  const scopeAggregated =
+    ds.group_by.length > 0 || ds.having.length > 0 || ds.select.some((field) => Boolean(field.aggregate));
+  const scopeColumnSql = options?.merchantScope
+    ? `${quoteIdent(ds.from_alias)}.${quoteIdent(
+        baseModel.columns[baseModel.merchantScopable!.merchantIdColumn]!.dbColumnName,
+      )}`
+    : null;
+  const scopeSelectSql = scopeColumnSql
+    ? `${scopeAggregated ? `MAX(${scopeColumnSql})` : scopeColumnSql} AS ${quoteIdent("__scope_merchant_id")}`
+    : null;
+  const baseSelectSql = [...ds.select.map((s) => compileSelectField(s)), scopeSelectSql]
+    .filter((part): part is string => Boolean(part))
+    .join(", ");
   // Base-model columns referenced by window/order clauses but not selected are
   // carried by the inner query under a private alias and NEVER projected by
   // the outer query, so they cannot leak into the result rows (A01).
@@ -281,7 +322,8 @@ export function compileDatasetQueryToSql(
     selectAliases.has(field) ? `"_base".${quoteIdent(field)}` : `"_base".${quoteIdent(hiddenAlias(field))}`;
   const fromSql = `FROM ${quoteIdent(baseModel.tableName)} AS ${quoteIdent(ds.from_alias)}`;
   const whereClause = ds.where ? compileWhereNode(ds.where) : null;
-  const whereSql = whereClause ? `WHERE ${whereClause}` : "";
+  const combinedWhere = [whereClause, scopeSql].filter((part): part is string => Boolean(part));
+  const whereSql = combinedWhere.length > 0 ? `WHERE ${combinedWhere.map((part) => `(${part})`).join(" AND ")}` : "";
 
   const groupBySql =
     ds.group_by.length > 0
@@ -342,7 +384,7 @@ export function compileDatasetQueryToSql(
     .join(" ");
 
   if (ds.window_fields.length === 0) {
-    return { sql: coreSql, values };
+    return { sql: coreSql, values, scopeAliases };
   }
 
   // Window functions must see the full filtered/grouped result, not the
@@ -392,12 +434,14 @@ export function compileDatasetQueryToSql(
   });
   const outerSelectSql = [
     ...ds.select.map((sel) => `"_base".${quoteIdent(sel.alias)}`),
+    ...(scopeSelectSql ? [`"_base".${quoteIdent("__scope_merchant_id")}`] : []),
     ...windowSelects,
   ].join(", ");
 
   return {
     sql: `SELECT ${outerSelectSql} FROM (${windowBaseSql}) AS "_base" ${windowOrderSql} LIMIT ${boundedLimit}`,
     values,
+    scopeAliases,
   };
 }
 

@@ -257,3 +257,46 @@ export async function uploadXlsxFromHeadersAndData<
     }
     return response;
 }
+
+/** One worksheet per report dataset, with translated headers and formatted values. */
+export async function downloadXlsxWorkbook({
+    sheets,
+    title,
+    color = "#2563EB",
+}: {
+    sheets: Array<{ name: string; headers: XlsxHeader[]; data?: any[] }>;
+    title: string;
+    color?: string;
+}) {
+    const primaryColor = color.slice(1);
+    const filename = ensureXlsxTitle(title);
+    const wb = new ExcelJS.Workbook();
+    for (const sheet of sheets) {
+        const worksheet = wb.addWorksheet((sheet.name || "Sheet").slice(0, 31), {
+            properties: { tabColor: { argb: `FF${primaryColor}` } },
+        });
+        worksheet.columns = sheet.headers.map((header) => ({
+            key: header.key || header.text,
+            header: header.text,
+        }));
+        const headerRow = worksheet.getRow(1);
+        headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${primaryColor}` } };
+        headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        worksheet.views = [{ state: "frozen", ySplit: 1 }];
+        if (sheet.data) worksheet.addRows(sheet.data);
+        worksheet.eachColumnKey((col) => {
+            let width = String(col.header ?? "").length + 4;
+            col.eachCell({ includeEmpty: true }, (cell) => {
+                width = Math.max(width, String(cell.text ?? "").length + 4);
+            });
+            col.width = Math.min(width, 60);
+        });
+    }
+    const buffer = await wb.xlsx.writeBuffer({ filename });
+    saveAs(
+        new Blob([buffer], {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
+        filename
+    );
+}

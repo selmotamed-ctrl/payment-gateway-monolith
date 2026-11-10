@@ -18,7 +18,12 @@ import { hasOneOfAuthorities } from "@/state/user";
 import { showConfirm } from "@/utils/confirm";
 import { showSnackBar } from "@/utils/snackBar";
 import { urlsMap } from "@/constants/urlsMap";
-import { renderChromeHtml, type ReportChromeSpec, type ReportExecutionBundle } from "@/lib/reportEngineSdk";
+import {
+  ReportSandboxedHtmlSurface,
+  renderChromeHtml,
+  type ReportChromeSpec,
+  type ReportExecutionBundle,
+} from "@/lib/reportEngineSdk";
 import "@/components/reports/reports.css";
 
 type ChromeRow = {
@@ -354,11 +359,11 @@ const ReportsChromePage = dc(() => {
       {previewLoading.value ? (
         <div class="text-caption text-medium-emphasis">{t("Loading assets…")}</div>
       ) : (
-        <div
-          class="pg-report-chrome-preview"
-          dir={previewLocale.value === "ar" ? "rtl" : "ltr"}
-          lang={previewLocale.value}
-          innerHTML={previewHtml(row)}
+        <ReportSandboxedHtmlSurface
+          html={previewHtml(row)}
+          css={row.spec.template.scoped_css}
+          locale={previewLocale.value}
+          minHeight={260}
         />
       )}
       <DescriptionList

@@ -2,14 +2,16 @@ import { defineComponent, onMounted, reactive, watch, type PropType } from "vue"
 import { useDisplay, useLocale } from "vuetify";
 import {
   VAutocomplete,
-  VBtn,
+  VChip,
   VSelect,
   VSwitch,
   VTextField,
 } from "vuetify/components";
 import { FormField } from "@/components/ui/FormField";
+import DateInput from "@/components/DateInput";
 import type { ReportDescriptorSpec, ReportInputFieldSpec } from "../types/reportSpec";
 import { resolvePreset } from "../utils/inputDefaults";
+import { validateReportInputs } from "../utils/inputValidation";
 
 export type AutocompleteLoader = (
   source: string,
@@ -19,6 +21,24 @@ export type AutocompleteLoader = (
 
 type Item = { title: string; value: string; subtitle?: string; badge?: string };
 
+const toIsoDate = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
+const startOfDayIso = (date: Date): string => {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy.toISOString();
+};
+const endOfDayIso = (date: Date): string => {
+  const copy = new Date(date);
+  copy.setHours(23, 59, 59, 999);
+  return copy.toISOString();
+};
+
 export const ReportInputForm = defineComponent({
   name: "ReportInputForm",
   props: {
@@ -27,11 +47,14 @@ export const ReportInputForm = defineComponent({
     autocomplete: { type: Function as PropType<AutocompleteLoader>, required: false },
     disabled: { type: Boolean, default: false },
     hiddenInputKeys: { type: Array as PropType<string[]>, default: () => [] },
+    /** Report dictionary for report-defined labels; the portal dictionary is only the fallback. */
+    translate: { type: Function as PropType<(key: string) => string>, required: false },
   },
-  emits: ["update:modelValue"],
-  setup(props, { emit }) {
+  emits: ["update:modelValue", "validityChanged"],
+  setup(props, { emit, expose }) {
     const { t } = useLocale();
     const { mobile } = useDisplay();
+    const tr = (key: string): string => (props.translate ? props.translate(key) : t(key));
     const items = reactive<Record<string, Item[]>>({});
     const loading = reactive<Record<string, boolean>>({});
     const errors = reactive<Record<string, string>>({});
@@ -45,9 +68,13 @@ export const ReportInputForm = defineComponent({
 
     const dependentValuesFor = (field: ReportInputFieldSpec): Record<string, unknown> | undefined => {
       const dependency = field.autocomplete?.depends_on_input;
-      if (!dependency) return undefined;
-      const value = valueOf(dependency);
-      return value === undefined || value === null || value === "" ? undefined : { [dependency]: value };
+      const staticFilter = field.autocomplete?.static_filter;
+      const dependent: Record<string, unknown> = { ...(staticFilter ?? {}) };
+      if (dependency) {
+        const value = valueOf(dependency);
+        if (value !== undefined && value !== null && value !== "") dependent[dependency] = value;
+      }
+      return Object.keys(dependent).length > 0 ? dependent : undefined;
     };
 
     const loadItems = async (field: ReportInputFieldSpec, query: string) => {
@@ -85,37 +112,45 @@ export const ReportInputForm = defineComponent({
       );
     };
 
-    const dateRange = (field: ReportInputFieldSpec): { start: string; end: string } => {
+    const rangeDates = (field: ReportInputFieldSpec): Date[] => {
       const raw = valueOf(field.key);
       if (raw && typeof raw === "object" && "start" in raw && "end" in raw) {
-        return {
-          start: String((raw as { start: unknown }).start).slice(0, 10),
-          end: String((raw as { end: unknown }).end).slice(0, 10),
-        };
+        const start = new Date(String((raw as { start: unknown }).start));
+        const end = new Date(String((raw as { end: unknown }).end));
+        const dates = [start, end].filter((date) => !Number.isNaN(date.getTime()));
+        return dates.length === 2 ? dates : [];
       }
-      return { start: "", end: "" };
+      return [];
     };
 
-    const setDateRange = (field: ReportInputFieldSpec, part: "start" | "end", value: string) => {
-      const current = dateRange(field);
-      const next = { ...current, [part]: value };
-      setValue(field.key, {
-        start: next.start ? `${next.start}T00:00:00.000Z` : "",
-        end: next.end ? `${next.end}T23:59:59.999Z` : "",
-      });
+    const setRangeDates = (field: ReportInputFieldSpec, value: unknown) => {
+      const dates = (Array.isArray(value) ? value : value ? [value] : []).filter(
+        (date): date is Date => date instanceof Date && !Number.isNaN(date.getTime()),
+      );
+      if (dates.length === 0) {
+        setValue(field.key, undefined);
+        return;
+      }
+      const first = dates[0]!;
+      const last = dates[dates.length - 1]!;
+      setValue(field.key, { start: startOfDayIso(first), end: endOfDayIso(last) });
     };
 
     const applyPreset = (field: ReportInputFieldSpec, preset: string) => {
       setValue(field.key, resolvePreset({ ...field, default_value: { preset: preset as never } }));
     };
 
-    const presetLabels: Array<{ value: string; label: string }> = [
+    const rangePresets: Array<{ value: string; label: string }> = [
       { value: "TODAY", label: t("Today") },
+      { value: "YESTERDAY", label: t("Yesterday") },
       { value: "LAST_7_DAYS", label: t("Last 7 days") },
       { value: "LAST_30_DAYS", label: t("Last 30 days") },
       { value: "CURRENT_MONTH", label: t("Current month") },
       { value: "PREVIOUS_MONTH", label: t("Previous month") },
     ];
+    const singleDatePresets = rangePresets.filter((preset) =>
+      preset.value === "TODAY" || preset.value === "YESTERDAY",
+    );
 
     const visibleInputs = (): ReportInputFieldSpec[] =>
       props.spec.inputs.filter((field) => !(props.hiddenInputKeys ?? []).includes(field.key));
@@ -124,12 +159,12 @@ export const ReportInputForm = defineComponent({
       (field.validation?.enum_values ?? []).map((value) => ({
         value,
         title: field.validation?.enum_labels_i18n_prefix
-          ? t(`${field.validation.enum_labels_i18n_prefix}.${value}`)
+          ? tr(`${field.validation.enum_labels_i18n_prefix}.${value}`)
           : value,
       }));
 
     const defaultHint = (field: ReportInputFieldSpec): string | undefined => {
-      const help = field.help_i18n_key ? t(field.help_i18n_key) : undefined;
+      const help = field.help_i18n_key ? tr(field.help_i18n_key) : undefined;
       if (field.validation?.max_range_days) {
         return [help, `${t("Maximum range")}: ${field.validation.max_range_days} ${t("days")}`]
           .filter(Boolean)
@@ -143,12 +178,21 @@ export const ReportInputForm = defineComponent({
 
     const common = (field: ReportInputFieldSpec) => ({
       disabled: props.disabled,
-      density: "comfortable" as const,
       variant: "outlined" as const,
       hideDetails: "auto" as const,
-      placeholder: field.placeholder_i18n_key ? t(field.placeholder_i18n_key) : undefined,
+      placeholder: field.placeholder_i18n_key ? tr(field.placeholder_i18n_key) : undefined,
       error: Boolean(errors[field.key]),
     });
+
+    const validate = (): boolean => {
+      const result = validateReportInputs(props.spec, props.modelValue, t);
+      for (const key of Object.keys(errors)) {
+        if (!(key in result.errors)) delete errors[key];
+      }
+      Object.assign(errors, result.errors);
+      emit("validityChanged", result.valid);
+      return result.valid;
+    };
 
     onMounted(() => {
       for (const field of props.spec.inputs) {
@@ -162,23 +206,46 @@ export const ReportInputForm = defineComponent({
       () => props.modelValue,
       (next, previous) => {
         if (!previous) return;
+        const patch: Record<string, unknown> = {};
         for (const field of props.spec.inputs) {
           const dependency = field.autocomplete?.depends_on_input;
           if (dependency && next[dependency] !== previous[dependency]) {
+            // A changed parent selection makes the old child selection stale.
+            patch[field.key] = Array.isArray(valueOf(field.key)) ? [] : undefined;
             void loadItems(field, "");
           }
+        }
+        if (Object.keys(patch).length > 0) {
+          emit("update:modelValue", { ...props.modelValue, ...patch });
         }
       },
     );
 
+    expose({ validate, errors });
+
+    const renderPresetChips = (field: ReportInputFieldSpec, presets: Array<{ value: string; label: string }>) => (
+      <div class="d-flex flex-wrap ga-1">
+        {presets.map((preset) => (
+          <VChip
+            key={preset.value}
+            size="small"
+            color="primary"
+            variant="tonal"
+            onClick={() => applyPreset(field, preset.value)}
+          >
+            {preset.label}
+          </VChip>
+        ))}
+      </div>
+    );
+
     const renderField = (field: ReportInputFieldSpec) => {
-      const label = t(field.label_i18n_key);
+      const label = tr(field.label_i18n_key);
       const hint = defaultHint(field);
       const value = valueOf(field.key);
       const inputProps = common(field);
 
       if (field.type === "daterange") {
-        const range = dateRange(field);
         return (
           <FormField
             label={label}
@@ -188,36 +255,56 @@ export const ReportInputForm = defineComponent({
             id={`report-input-${field.key}`}
           >
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }}>
-                <VTextField
-                  {...inputProps}
-                  type="date"
-                  aria-label={`${label} ${t("Start")}`}
-                  placeholder={t("Start")}
-                  modelValue={range.start}
-                  onUpdate:modelValue={(next: string) => setDateRange(field, "start", next)}
-                />
-                <VTextField
-                  {...inputProps}
-                  type="date"
-                  aria-label={`${label} ${t("End")}`}
-                  placeholder={t("End")}
-                  modelValue={range.end}
-                  onUpdate:modelValue={(next: string) => setDateRange(field, "end", next)}
-                />
-              </div>
-              <div class="d-flex flex-wrap ga-1">
-                {presetLabels.map((preset) => (
-                  <VBtn
-                    key={preset.value}
-                    size="x-small"
-                    variant="tonal"
-                    onClick={() => applyPreset(field, preset.value)}
-                  >
-                    {preset.label}
-                  </VBtn>
-                ))}
-              </div>
+              <DateInput
+                multiple="range"
+                aria-label={label}
+                placeholder={t("Select date range")}
+                prependInnerIcon="mdi-calendar-range"
+                variant="outlined"
+                hideDetails="auto"
+                clearable
+                disabled={props.disabled}
+                modelValue={rangeDates(field)}
+                onUpdate:modelValue={(next: unknown) => setRangeDates(field, next)}
+              />
+              {renderPresetChips(field, rangePresets)}
+            </div>
+          </FormField>
+        );
+      }
+
+      if (field.type === "date" || field.type === "datetime") {
+        return (
+          <FormField
+            label={label}
+            hint={hint}
+            error={errors[field.key] || ""}
+            required={field.required}
+            id={`report-input-${field.key}`}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <VTextField
+                {...inputProps}
+                type={field.type === "date" ? "date" : "datetime-local"}
+                modelValue={
+                  value === undefined || value === null
+                    ? ""
+                    : field.type === "datetime"
+                      ? toLocalDateTimeInput(String(value))
+                      : String(value)
+                }
+                onUpdate:modelValue={(next: string) =>
+                  setValue(
+                    field.key,
+                    next === ""
+                      ? null
+                      : field.type === "datetime"
+                        ? new Date(next).toISOString()
+                        : next,
+                  )
+                }
+              />
+              {renderPresetChips(field, singleDatePresets)}
             </div>
           </FormField>
         );
@@ -286,8 +373,6 @@ export const ReportInputForm = defineComponent({
           >
             <VSwitch
               color="primary"
-              baseColor="grey"
-              inset
               hideDetails="auto"
               disabled={props.disabled}
               modelValue={Boolean(value)}
@@ -300,11 +385,7 @@ export const ReportInputForm = defineComponent({
       const inputType =
         field.type === "number" || field.type === "integer" || field.type === "amount_minor"
           ? "number"
-          : field.type === "date"
-            ? "date"
-            : field.type === "datetime"
-              ? "datetime-local"
-              : "text";
+          : "text";
       return (
         <FormField
           label={label}
@@ -316,21 +397,11 @@ export const ReportInputForm = defineComponent({
           <VTextField
             {...inputProps}
             type={inputType}
-            modelValue={
-              value === undefined || value === null
-                ? ""
-                : field.type === "datetime"
-                  ? String(value).slice(0, 16)
-                  : String(value)
-            }
+            modelValue={value === undefined || value === null ? "" : String(value)}
             onUpdate:modelValue={(next: string) =>
               setValue(
                 field.key,
-                inputType === "number"
-                  ? (next === "" ? null : Number(next))
-                  : field.type === "datetime"
-                    ? (next === "" ? null : `${next}:00.000Z`)
-                    : next,
+                inputType === "number" ? (next === "" ? null : Number(next)) : next,
               )
             }
           />
@@ -339,14 +410,7 @@ export const ReportInputForm = defineComponent({
     };
 
     return () => (
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
-          gap: "16px 20px",
-          alignItems: "start",
-        }}
-      >
+      <div class="report-input-grid">
         {visibleInputs().map((field) => (
           <div key={field.key} style={{ gridColumn: `span ${columns(field)}`, minWidth: 0 }}>
             {renderField(field)}
@@ -356,5 +420,14 @@ export const ReportInputForm = defineComponent({
     );
   },
 });
+
+function toLocalDateTimeInput(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(
+    date.getMinutes(),
+  )}`;
+}
 
 export default ReportInputForm;

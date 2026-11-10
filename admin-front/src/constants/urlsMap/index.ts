@@ -328,6 +328,11 @@ export const urlsMap = {
 
     reportEngineTranscript: "v1/admin/report-engine/transcript",
     reportEngineVerify: "v1/admin/report-engine/specs/verify",
+    reportEnginePreview: "v1/admin/report-engine/specs/preview",
+    reportEngineMerchantReports: "v1/admin/report-engine/merchant-reports",
+    reportEngineMerchantExecutions: "v1/admin/report-engine/merchant-executions",
+    reportEngineMerchantSuspend: (merchantId: string) => `v1/admin/report-engine/merchant-reports/${encodeURIComponent(merchantId)}/suspend`,
+    reportEngineMerchantResume: (merchantId: string) => `v1/admin/report-engine/merchant-reports/${encodeURIComponent(merchantId)}/resume`,
     reportEngineSpecs: "v1/admin/report-engine/specs",
     reportEngineSpecDetail: (id: string) => `v1/admin/report-engine/specs/${encodeURIComponent(id)}`,
     reportEngineArchive: (id: string) => `v1/admin/report-engine/specs/${encodeURIComponent(id)}/archive`,

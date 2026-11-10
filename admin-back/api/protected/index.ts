@@ -145,6 +145,9 @@ router.use(
       "reports.draft",
     ],
     write: ["report:approve", "report_engine:author", "report:review", "security:write", "reports.draft"],
+    // Executing a report is a read-only operation sent as POST; any caller
+    // that may list the catalog may also run it (core still applies policy).
+    readPaths: [/^\/catalog\/[^/]+\/execute\/?$/],
   }),
   reportEngineRouter,
 );

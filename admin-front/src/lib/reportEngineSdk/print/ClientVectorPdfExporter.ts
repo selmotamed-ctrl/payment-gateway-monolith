@@ -1,4 +1,7 @@
 import * as echarts from "echarts";
+import jakartaSans from "@/assets/fonts/plus-jakarta-sans-400-normal.ttf?inline";
+import cairo from "@/assets/fonts/cairo-400-normal.ttf?inline";
+import jetbrainsMono from "@/assets/fonts/jetbrains-mono-latin-600-normal.woff2?inline";
 import type { ReportExecutionBundle } from "../types/bundle";
 
 export type { ReportExecutionBundle };
@@ -44,6 +47,24 @@ export function buildPagedMediaHtmlDocument(params: {
   <meta charset="utf-8" />
   <title>${escapeHtml(bundle.spec.i18n.locales[locale]?.["report.title"] ?? bundle.spec.report.code)}</title>
   <style>
+    @font-face {
+      font-family: "Report Sans";
+      src: url("${jakartaSans}") format("truetype");
+      font-weight: 200 800;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: "Report Arabic";
+      src: url("${cairo}") format("truetype");
+      font-weight: 200 900;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: "Report Mono";
+      src: url("${jetbrainsMono}") format("woff2");
+      font-weight: 600;
+      font-style: normal;
+    }
     @page {
       size: ${pageSizeCss};
       margin: ${m.top}mm ${m.right}mm ${m.bottom}mm ${m.left}mm;
@@ -53,9 +74,34 @@ export function buildPagedMediaHtmlDocument(params: {
     * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     body {
       margin: 0; padding: 0;
-      font-family: ${isRtl ? "'Tajawal', 'Cairo', 'Amiri', sans-serif" : "'Inter', -apple-system, BlinkMacSystemFont, sans-serif"};
+      font-family: ${isRtl ? "'Report Arabic', 'Cairo', 'Amiri', sans-serif" : "'Report Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif"};
       font-size: 9.5pt; line-height: 1.45; color: #0F172A; direction: ${dir};
     }
+    code, pre, .report-mono { font-family: "Report Mono", ui-monospace, SFMono-Regular, monospace; }
+    .pagedjs_pages { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 18px; background: #E2E8F0; }
+    .pagedjs_page { background: #FFFFFF; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16); }
+    @media print { .pagedjs_pages { padding: 0; gap: 0; background: transparent; } .pagedjs_page { box-shadow: none; } }
+    .report-kpi-grid { display: grid; gap: 8pt; margin: 6pt 0 10pt; }
+    .report-kpi-card {
+      padding: 9pt 11pt; border: 0.75pt solid #E2E8F0; border-radius: 6pt;
+      background: #F8FAFC; border-inline-start: 3pt solid #64748B;
+    }
+    .report-kpi-label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.04em; color: #475569; }
+    .report-kpi-value { font-size: 15pt; font-weight: 700; color: #0F172A; margin-top: 2pt; font-variant-numeric: tabular-nums; }
+    .report-kpi-delta { font-size: 8pt; color: #475569; margin-top: 1pt; }
+    .report-tone-primary { border-inline-start-color: #2563EB; background: #EFF6FF; }
+    .report-tone-success { border-inline-start-color: #059669; background: #ECFDF5; }
+    .report-tone-warning { border-inline-start-color: #D97706; background: #FFFBEB; }
+    .report-tone-danger { border-inline-start-color: #DC2626; background: #FEF2F2; }
+    .report-tone-neutral { border-inline-start-color: #64748B; background: #F8FAFC; }
+    .report-badge { display: inline-block; padding: 1pt 5pt; border-radius: 999px; font-size: 7.5pt; font-weight: 700; border: 0.75pt solid transparent; }
+    .report-badge-success { background: #D1FAE5; color: #065F46; border-color: #A7F3D0; }
+    .report-badge-warning { background: #FEF3C7; color: #92400E; border-color: #FDE68A; }
+    .report-badge-danger { background: #FEE2E2; color: #991B1B; border-color: #FECACA; }
+    .report-badge-info { background: #DBEAFE; color: #1E40AF; border-color: #BFDBFE; }
+    .report-badge-neutral { background: #F1F5F9; color: #334155; border-color: #E2E8F0; }
+    .report-zebra tbody tr:nth-child(even) { background: #F8FAFC; }
+    .report-empty-cell { color: #64748B; text-align: center; padding: 10pt 6pt; }
     .report-running-header { position: running(report-running-header); width: 100%; }
     .report-running-footer { position: running(report-running-footer); width: 100%; }
     .report-page-number::after { content: counter(page); }
@@ -67,7 +113,7 @@ export function buildPagedMediaHtmlDocument(params: {
     table.report-data-table { width: 100%; border-collapse: collapse; margin-bottom: 12pt; font-variant-numeric: tabular-nums; }
     table.report-data-table thead { display: table-header-group; }
     table.report-data-table tfoot { display: table-footer-group; }
-    table.report-data-table tr { break-inside: avoid; page-break-inside: avoid; }
+    table.report-data-table.report-avoid-row-split tr { break-inside: avoid; page-break-inside: avoid; }
     table.report-data-table th, table.report-data-table td { padding: 5pt 7pt; border-bottom: 0.75pt solid #E2E8F0; }
     table.report-data-table th { background-color: #F1F5F9; font-weight: 700; color: #1E293B; border-top: 1pt solid #CBD5E1; border-bottom: 1.25pt solid #94A3B8; }
     .report-section { margin-bottom: 14pt; }

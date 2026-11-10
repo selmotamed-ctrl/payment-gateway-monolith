@@ -34,7 +34,7 @@ gaps:
   - The external merchant API validates the `pg_live_` token format and applies per-token/IP limits; the token hash, revocation, expiry and IP allowlist are enforced by core-back.
   - POST /merchant/auth/google always returns 501 because core has no configured OIDC provider.
   - The options router is implemented but not mounted anywhere.
-  - Merchant report routes are read-only catalog/execute proxies; report authoring and chrome management remain admin-only.
+  - Merchant report routes proxy the runner and the merchant Studio (transcript, verify, save, publish, archive, versions, usage, template clone); chrome management remains admin-only.
   - The POS SSE stream has a fixed configured timeout and no resume, replay or polling fallback at the edge.
 ---
 

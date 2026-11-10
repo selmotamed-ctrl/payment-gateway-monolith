@@ -58,6 +58,7 @@ export const routesAuthorities: Record<string, string[]> = {
     ReportsCatalog: ["reports.draft", "report_engine:run", "report_engine:author", "report:review", "report:approve", "security:write"],
     ReportsStudio: ["reports.studio", "reports.draft", "report_engine:author", "report:review", "report:approve", "security:write"],
     ReportsChrome: ["reports.studio", "report:approve", "security:write"],
+    ReportsMerchantReports: ["report:review", "report:approve", "security:read", "security:write"],
 };
 
 /** Authenticated routes that intentionally need login only (content has its own role checks). */

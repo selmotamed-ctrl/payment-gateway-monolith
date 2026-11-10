@@ -233,6 +233,13 @@
 | `core-back/lib/env/index.ts` | `LEADER_ELECTION_DATABASE_URL` |
 | `core-back/lib/env/index.ts` | `PGBOUNCER_ENABLED` |
 | `core-back/lib/env/index.ts` | `DATABASE_REPLICA_URLS` |
+| `core-back/lib/env/index.ts` | `REPORT_READONLY_SERVED_BY` |
+| `core-back/lib/env/index.ts` | `REPORT_MERCHANT_READONLY_DATABASE_URL` |
+| `core-back/lib/env/index.ts` | `MERCHANT_REPORT_EXECUTE_PER_HOUR` |
+| `core-back/lib/env/index.ts` | `MERCHANT_REPORT_VERIFY_PER_HOUR` |
+| `core-back/lib/env/index.ts` | `MERCHANT_REPORT_DAILY_DB_TIME_MS` |
+| `core-back/lib/env/index.ts` | `MERCHANT_REPORT_MAX_CODES` |
+| `core-back/lib/env/index.ts` | `MERCHANT_REPORT_MAX_VERSIONS_PER_CODE` |
 | `core-back/lib/env/index.ts` | `AUDIT_DATABASE_URL` |
 | `core-back/lib/env/index.ts` | `LOG_DATABASE_URL` |
 | `core-back/lib/env/index.ts` | `REDIS_URL` |

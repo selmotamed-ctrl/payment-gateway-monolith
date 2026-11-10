@@ -81,6 +81,80 @@ export function buildPaymentGatewayAutocompleteProviders(
       },
     },
 
+    payment_links: {
+      sourceKey: "payment_links",
+      description: "Search payment links by key",
+      valueType: "uuid",
+      requiredAuthority: "merchant:read",
+      search: async ({ query, limit, dependentValues }) => {
+        const merchantId = typeof dependentValues?.merchantId === "string" ? dependentValues.merchantId : null;
+        const values: unknown[] = [like(query)];
+        let sql = `SELECT pl.id, pl.key, a.merchant_id, pl.state FROM payment_links pl
+                   JOIN applications a ON a.id = pl.application_id WHERE pl.key ILIKE $1`;
+        if (merchantId) {
+          values.push(merchantId);
+          sql += ` AND a.merchant_id = $${values.length}::uuid`;
+        }
+        values.push(Math.min(limit, 50));
+        sql += ` ORDER BY pl.created_at DESC LIMIT $${values.length}`;
+        const res = await dbReadOnly.executeReadOnlyQuery<{
+          id: string;
+          key: string;
+          merchant_id: string;
+          state: string;
+        }>({
+          sql,
+          values,
+          timeoutMs: 3_000,
+          maxRows: 50,
+          queryLabel: "autocomplete_payment_links",
+        });
+        return res.rows.map((row) => ({
+          value: row.id,
+          label: row.key,
+          sublabel: row.merchant_id,
+          badge: row.state,
+        }));
+      },
+    },
+
+    pos_terminals: {
+      sourceKey: "pos_terminals",
+      description: "Search POS terminals by name",
+      valueType: "uuid",
+      requiredAuthority: "merchant:read",
+      search: async ({ query, limit, dependentValues }) => {
+        const merchantId = typeof dependentValues?.merchantId === "string" ? dependentValues.merchantId : null;
+        const values: unknown[] = [like(query)];
+        let sql = `SELECT pt.id, pt.name, a.merchant_id, pt.status FROM pos_terminals pt
+                   JOIN applications a ON a.id = pt.application_id WHERE pt.name ILIKE $1`;
+        if (merchantId) {
+          values.push(merchantId);
+          sql += ` AND a.merchant_id = $${values.length}::uuid`;
+        }
+        values.push(Math.min(limit, 50));
+        sql += ` ORDER BY pt.name ASC LIMIT $${values.length}`;
+        const res = await dbReadOnly.executeReadOnlyQuery<{
+          id: string;
+          name: string;
+          merchant_id: string;
+          status: string;
+        }>({
+          sql,
+          values,
+          timeoutMs: 3_000,
+          maxRows: 50,
+          queryLabel: "autocomplete_pos_terminals",
+        });
+        return res.rows.map((row) => ({
+          value: row.id,
+          label: row.name,
+          sublabel: row.merchant_id,
+          badge: row.status,
+        }));
+      },
+    },
+
     gateways: {
       sourceKey: "gateways",
       description: "Search configured payment gateways by code or name",

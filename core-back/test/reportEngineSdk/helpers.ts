@@ -135,7 +135,8 @@ export function createTestHostConfig(overrides: Partial<ReportEngineHostConfig> 
       columns: {
         id: { name: "id", dbColumnName: "id", type: "uuid", nullable: false, indexed: true, sensitivity: "INTERNAL", description: "Attempt id" },
         merchant_id: { name: "merchant_id", dbColumnName: "merchant_id", type: "uuid", nullable: false, indexed: true, sensitivity: "INTERNAL", description: "Merchant id" },
-        status: { name: "status", dbColumnName: "status", type: "enum", nullable: false, indexed: true, sensitivity: "PUBLIC", description: "Status" },
+        status: { name: "status", dbColumnName: "status", type: "enum", enumName: "AttemptStatus", nullable: false, indexed: true, sensitivity: "PUBLIC", description: "Status" },
+        currency: { name: "currency", dbColumnName: "currency", type: "string", nullable: false, indexed: true, sensitivity: "PUBLIC", description: "Currency" },
         total_charged_amount_minor: { name: "total_charged_amount_minor", dbColumnName: "total_charged_amount_minor", type: "bigint", nullable: false, indexed: false, sensitivity: "INTERNAL", description: "Amount" },
         created_at: { name: "created_at", dbColumnName: "created_at", type: "datetime", nullable: false, indexed: true, sensitivity: "PUBLIC", description: "Created at" },
       },
@@ -225,7 +226,10 @@ export function createTestHostConfig(overrides: Partial<ReportEngineHostConfig> 
     supportedLocales: ["en", "ar", "fr"],
     mandatoryDefaultLocales: ["en", "ar"],
     models,
-    enums: { JournalDirection: ["DEBIT", "CREDIT"] },
+    enums: {
+      JournalDirection: ["DEBIT", "CREDIT"],
+      AttemptStatus: ["SUCCEEDED", "FAILED", "EXPIRED"],
+    },
     rolesCatalog: ["SECURITY_ADMIN", "FINANCE", "OPERATOR", "COMPLIANCE", "MLRO", "SUPPORT", "GATEWAY_ADMIN"],
     authoritiesCatalog: ["finance:read", "merchant:read", "aml:read", "compliance:read", "gateway:read", "security:read", "security:write", "report:review", "report:approve"],
     authorityConflictMatrix: [

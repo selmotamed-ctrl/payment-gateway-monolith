@@ -32,6 +32,16 @@ export const AUTOCOMPLETE_SOURCE_KEYS = [
   "currencies",
   "staff_users",
   "aml_cases",
+  "payment_links",
+  "pos_terminals",
+] as const;
+
+/** Autocomplete sources a merchant-authored report may declare (besides the scope merchants input). */
+export const MERCHANT_REPORT_AUTOCOMPLETE_SOURCE_KEYS = [
+  "applications",
+  "currencies",
+  "payment_links",
+  "pos_terminals",
 ] as const;
 
 export const ReportInputFieldSpecSchema = z.object({

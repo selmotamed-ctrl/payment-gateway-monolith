@@ -60,6 +60,18 @@ export const envSchema = z.strictObject({
   PGBOUNCER_ENABLED: booleanFromEnvironment.default(false),
   /** Comma-separated streaming replica URLs used by ReadStore routing. */
   DATABASE_REPLICA_URLS: z.string().default(""),
+  /**
+   * Honest label for the report-engine read-only pool. Set to `replica` only
+   * when REPORT_READONLY_DATABASE_URL really points at a physical replica.
+   */
+  REPORT_READONLY_SERVED_BY: z.enum(["replica", "primary-readonly-tx"]).default("primary-readonly-tx"),
+  /** Optional dedicated read-only pool for the merchant reporting line (E05). */
+  REPORT_MERCHANT_READONLY_DATABASE_URL: optionalPostgresUrl("REPORT_MERCHANT_READONLY_DATABASE_URL"),
+  MERCHANT_REPORT_EXECUTE_PER_HOUR: z.coerce.number().int().positive().default(60),
+  MERCHANT_REPORT_VERIFY_PER_HOUR: z.coerce.number().int().positive().default(30),
+  MERCHANT_REPORT_DAILY_DB_TIME_MS: z.coerce.number().int().positive().default(600_000),
+  MERCHANT_REPORT_MAX_CODES: z.coerce.number().int().positive().default(50),
+  MERCHANT_REPORT_MAX_VERSIONS_PER_CODE: z.coerce.number().int().positive().default(20),
   /** Dedicated tamper-evident audit database (pg_audit_db). */
   AUDIT_DATABASE_URL: optionalPostgresUrl("AUDIT_DATABASE_URL"),
   /** Dedicated high-volume operational/step log database (pg_logs_db). */
@@ -496,6 +508,13 @@ const resolveEnvironment = (): CoreEnv => {
     LEADER_ELECTION_DATABASE_URL: undefined,
     PGBOUNCER_ENABLED: false,
     DATABASE_REPLICA_URLS: "",
+    REPORT_READONLY_SERVED_BY: "primary-readonly-tx",
+    REPORT_MERCHANT_READONLY_DATABASE_URL: undefined,
+    MERCHANT_REPORT_EXECUTE_PER_HOUR: 60,
+    MERCHANT_REPORT_VERIFY_PER_HOUR: 30,
+    MERCHANT_REPORT_DAILY_DB_TIME_MS: 600_000,
+    MERCHANT_REPORT_MAX_CODES: 50,
+    MERCHANT_REPORT_MAX_VERSIONS_PER_CODE: 20,
     AUDIT_DATABASE_URL: undefined,
     LOG_DATABASE_URL: undefined,
     REDIS_URL: undefined,

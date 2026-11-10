@@ -2,6 +2,7 @@ import type { CatalogModelDef, ReportEngineHostConfig } from "../types/hostConfi
 import type { ReportDiagnostic } from "../types/diagnostics";
 import {
   AUTOCOMPLETE_SOURCE_KEYS,
+  MERCHANT_REPORT_AUTOCOMPLETE_SOURCE_KEYS,
   REPORT_INPUT_TYPES,
   REPORT_SPEC_VERSION,
   SQL_AGGREGATE_OPS,
@@ -13,6 +14,10 @@ export interface ReportTranscriptOptions {
   domains?: Array<CatalogModelDef["domain"]>;
   includeChromeAuthoringGuide?: boolean;
   generatedAt?: Date;
+  /** Merchant line: only merchant-safe models and merchant identity rules. */
+  merchantMode?: boolean;
+  /** Current staff-managed merchant asset policy (defaults to allowed). */
+  merchantAssetsEnabled?: boolean;
 }
 
 export function buildReportAuthoringTranscript(
@@ -20,6 +25,8 @@ export function buildReportAuthoringTranscript(
   options: ReportTranscriptOptions = {},
 ): { filename: string; contentType: "text/markdown"; markdown: string; specVersion: string } {
   const generatedAtIso = (options.generatedAt ?? new Date()).toISOString();
+  const merchantMode = options.merchantMode === true;
+  const merchantAssetsEnabled = options.merchantAssetsEnabled !== false;
   const domainFilter =
     options.domains && options.domains.length > 0 ? new Set(options.domains) : null;
 
@@ -28,12 +35,15 @@ export function buildReportAuthoringTranscript(
     if (domainFilter && !domainFilter.has(model.domain)) continue;
     const cols = Object.values(model.columns)
       .filter((c) => c.sensitivity !== "FORBIDDEN_SECRET")
-      .map(
-        (c) =>
-          `  - \`${c.name}\` (${c.type}${c.enumName ? `:${c.enumName}` : ""}${c.indexed ? ", INDEXED" : ""}${
-            c.sensitivity !== "PUBLIC" && c.sensitivity !== "INTERNAL" ? `, ${c.sensitivity}` : ""
-          }${c.minorUnitScale ? `, minor scale ${c.minorUnitScale}` : ""}) — ${c.description}`,
-      )
+      .map((c) => {
+        const enumValues = c.enumName ? host.enums[c.enumName] : undefined;
+        const enumText = c.enumName
+          ? `:${c.enumName}${enumValues?.length ? ` {${enumValues.join(" | ")}}` : ""}`
+          : "";
+        return `  - \`${c.name}\` (${c.type}${enumText}${c.indexed ? ", INDEXED" : ""}${
+          c.sensitivity !== "PUBLIC" && c.sensitivity !== "INTERNAL" ? `, ${c.sensitivity}` : ""
+        }${c.minorUnitScale ? `, minor units at scale ${c.minorUnitScale}` : ""}) — ${c.description}`;
+      })
       .join("\n");
 
     const rels = Object.values(model.relations)
@@ -46,9 +56,9 @@ export function buildReportAuthoringTranscript(
     const mandatoryFilters = (model.optimizationRule.mandatoryFilterColumns ?? [])
       .map(
         (mf) =>
-          `  - **MANDATORY FILTER:** Column \`${mf.column}\` with op in [${mf.allowedOperators.join(", ")}]${
-            mf.maxDateRangeDays ? ` (max range: ${mf.maxDateRangeDays} days)` : ""
-          } — ${mf.rationale}`,
+          `  - **MANDATORY FILTER:** Column \`${mf.column}\` with op in [${mf.allowedOperators
+            .map((operator) => (operator === "gte_lte" ? "gte+lte pair" : operator))
+            .join(", ")}]${mf.maxDateRangeDays ? ` (max range: ${mf.maxDateRangeDays} days)` : ""} — ${mf.rationale}`,
       )
       .join("\n");
 
@@ -56,8 +66,8 @@ export function buildReportAuthoringTranscript(
       [
         `### Model \`${model.modelName}\` (Domain: \`${model.domain}\`)`,
         `${model.description}`,
-        `- **Natural Roles:** ${model.naturalRoles.map((r) => `\`${r}\``).join(", ")}`,
-        `- **Required Authorities:** ${model.requiredAuthorities.map((a) => `\`${a}\``).join(", ")}`,
+        merchantMode ? "" : `- **Natural Roles:** ${model.naturalRoles.map((r) => `\`${r}\``).join(", ")}`,
+        merchantMode ? "" : `- **Required Authorities:** ${model.requiredAuthorities.map((a) => `\`${a}\``).join(", ")}`,
         model.merchantScopable
           ? `- **Merchant Scopable:** Yes (filter \`${model.merchantScopable.merchantIdColumn}\` by \`report.merchant_scope_input_key\`)`
           : `- **Merchant Scopable:** No (Backoffice internal only)`,
@@ -71,8 +81,18 @@ export function buildReportAuthoringTranscript(
     );
   }
 
+  const merchantExample = (() => {
+    if (!merchantMode) return exampleDescriptorSpec;
+    const { suggested_access: _suggestedAccess, ...rest } = exampleDescriptorSpec as typeof exampleDescriptorSpec & {
+      suggested_access?: unknown;
+    };
+    return rest;
+  })();
+
   const markdown = [
-    `# ${host.institutionName} — Dynamic Report Engine AI Authoring Transcript (v${REPORT_SPEC_VERSION})`,
+    merchantMode
+      ? `# ${host.institutionName} — Merchant Report Authoring Transcript (v${REPORT_SPEC_VERSION})`
+      : `# ${host.institutionName} — Dynamic Report Engine AI Authoring Transcript (v${REPORT_SPEC_VERSION})`,
     `Generated: \`${generatedAtIso}\` | Default Currency: \`${host.defaultCurrency}\` | Default Timezone: \`${host.defaultTimezone}\``,
     ``,
     `## 1. Your Role & Output Instructions`,
@@ -83,26 +103,38 @@ export function buildReportAuthoringTranscript(
     ``,
     `## 2. Closed Vocabulary Reference`,
     `- **Input Types (\`inputs[].type\`):** ${REPORT_INPUT_TYPES.map((v) => `\`${v}\``).join(", ")}`,
-    `- **Autocomplete Sources (\`inputs[].autocomplete.source\`):** ${AUTOCOMPLETE_SOURCE_KEYS.map((v) => `\`${v}\``).join(", ")}`,
+    merchantMode
+      ? `- **Autocomplete Sources (\`inputs[].autocomplete.source\`):** ${MERCHANT_REPORT_AUTOCOMPLETE_SOURCE_KEYS.map((v) => `\`${v}\``).join(", ")}; \`merchants\` is allowed only on the merchant scope input.`
+      : `- **Autocomplete Sources (\`inputs[].autocomplete.source\`):** ${AUTOCOMPLETE_SOURCE_KEYS.map((v) => `\`${v}\``).join(", ")}`,
     `- **Where Operators (\`op\`):** ${WHERE_OPERATORS.map((v) => `\`${v}\``).join(", ")}`,
     `- **Scalar Expressions (\`select[].expression\`):** ${SQL_SCALAR_EXPRESSIONS.map((v) => `\`${v}\``).join(", ")}`,
     `- **Aggregate Functions (\`select[].aggregate\`):** ${SQL_AGGREGATE_OPS.map((v) => `\`${v}\``).join(", ")}`,
     `- **Format hints:** RAW, CURRENCY_MINOR, DECIMAL_2, DECIMAL_4, PERCENT_BPS, PERCENT_RATIO, DATE_ISO, DATETIME_ISO, ENUM_TRANSLATED, INTEGER, BADGE (table cells). Dataset selects, transform outputs and table columns accept INTEGER; PERCENT_BPS is valid on transform outputs and table columns.`,
-    `- **Hard limits:** inputs <= 20, datasets <= 64, transforms <= 64, sections <= 128, joins per dataset <= 6, select fields per dataset <= 40, window fields <= 5.`,
+    merchantMode
+      ? `- **Merchant limits:** datasets <= 6, joins per dataset <= 2, select fields per dataset <= 20, window fields <= 2, sections <= 24, rows per dataset <= 10,000, spec JSON <= 256 KB, and a bounded date range of at most 92 days on every dataset. **Merchant assets are ${merchantAssetsEnabled ? "ENABLED" : "DISABLED"} by platform policy**${merchantAssetsEnabled ? " (one flat .zip, at most 2 MB)" : " (required_assets MUST be empty and no .zip may be uploaded)"}.`
+      : `- **Hard limits:** inputs <= 20, datasets <= 64, transforms <= 64, sections <= 128, joins per dataset <= 6, select fields per dataset <= 40, window fields <= 5.`,
+    merchantMode
+      ? `- **MERCHANT IDENTITY RULE:** The engine injects the authenticated merchant predicate into every base model and every joined alias. A spec-supplied merchant predicate is never trusted. Do not try to read another merchant's rows; execution aborts and is audited if a row escapes the scope.`
+      : ``,
     ``,
     `## 3. Queryable Database Models, Columns & Optimization Rules`,
     modelSections.join("\n\n"),
     ``,
     `## 4. Report Descriptor Field Reference`,
-    `- Top level: \`spec_kind\`, \`spec_version\`, \`report\`, \`page_layout\`, \`required_assets\`, \`i18n\`, \`suggested_access\`, \`inputs\`, \`datasets\`, \`transforms\`, \`sections\`.`,
+    merchantMode
+      ? `- Top level: \`spec_kind\`, \`spec_version\`, \`report\`, \`page_layout\`, \`required_assets\`, \`i18n\`, \`inputs\`, \`datasets\`, \`transforms\`, \`sections\`. Merchant specs do not carry authority overrides.`
+      : `- Top level: \`spec_kind\`, \`spec_version\`, \`report\`, \`page_layout\`, \`required_assets\`, \`i18n\`, \`suggested_access\`, \`inputs\`, \`datasets\`, \`transforms\`, \`sections\`.`,
     `- \`report\`: \`code\` (kebab-case), \`version\`, \`category\`, \`audience_scope\` (\`BACKOFFICE_INTERNAL\` | \`MERCHANT_FACING\` | \`BOTH\`), optional \`merchant_scope_input_key\`, \`classification\` (\`INTERNAL\` | \`MERCHANT_CONFIDENTIAL\` | \`REGULATORY_RESTRICTED\`).`,
     `- \`page_layout\`: \`paper_size\` (A4/LETTER/LEGAL), \`orientation\`, \`margins_mm\`, \`header_mode\`/\`footer_mode\` (\`GLOBAL_DEFAULT\` | \`SPECIFIC_CHROME_CODE\` | \`INLINE_SPEC\` | \`NONE\`), optional \`header_chrome_code\`/\`footer_chrome_code\`, optional inline template objects, \`allow_runtime_chrome_selection\`, \`global_scoped_css\`.`,
-    `- \`suggested_access\`: optional \`{ roles: string[], authorities: string[] }\`; this is only a suggestion and is checked against inferred authority.`,
+    merchantMode
+      ? ``
+      : `- \`suggested_access\`: optional \`{ roles: string[], authorities: string[] }\`; this is only a suggestion and is checked against inferred authority.`,
     ``,
     `## 5. Dataset Query Reference`,
     `- A dataset has \`dataset_id\`, \`description\`, \`from_model\`, \`from_alias\`, \`joins\`, \`select\`, optional \`where\`, \`group_by\`, \`having\`, \`window_fields\`, \`order_by\` and \`limit\`.`,
     `- \`select[]\`: \`alias\`, optional \`table_alias\`, \`column\`, \`expression\` (COLUMN, COALESCE_ZERO, DATE_TRUNC_HOUR/DAY/WEEK/MONTH, MINOR_TO_MAJOR_DECIMAL, SIGNED_JOURNAL_AMOUNT, CASE_WHEN_ENUM), optional \`aggregate\` (COUNT, COUNT_DISTINCT, SUM, AVG, MIN, MAX, SUM_DEBIT_MINOR, SUM_CREDIT_MINOR), optional \`case_map\`, \`format_hint\`.`,
-    `- \`where\`: recursive \`PREDICATE\` / \`GROUP\` tree. Predicate operators: eq, neq, gt, gte, lt, lte, between, in, not_in, is_null, is_not_null, ilike_prefix. Bind with \`INPUT\`, \`LITERAL\` or \`CONTEXT\`; use \`range_bound: START|END|BOTH\` for daterange inputs.`,
+    `- \`where\`: recursive \`PREDICATE\` / \`GROUP\` tree. Predicate operators: eq, neq, gt, gte, lt, lte, between, in, not_in, is_null, is_not_null, ilike_prefix. There is no \`gte_lte\` operator: write two predicates (gte + lte) bound to the same daterange input with \`range_bound: START\` / \`END\`, or use \`between\` with \`range_bound: BOTH\`. Bind with \`INPUT\`, \`LITERAL\` or \`CONTEXT\`; mandatory partition filters must not use \`omit_if_empty\`.`,
+    `- Minor-unit columns (\`*_minor\`) are returned as bigint values at the documented scale (normally 1000). Use \`format_hint: CURRENCY_MINOR\` and do not divide them again in the spec.`,
     `- \`joins[]\`: \`join_type\` (INNER/LEFT), \`relation_name\`, \`target_model\`, unique \`alias\`, optional \`additional_on\`.`,
     `- \`group_by\` and \`order_by\` reference select aliases (preferred) or base-model columns.`,
     `- \`having[]\`: \`select_alias\`, comparison op and numeric \`value\`; the alias must be an aggregate.`,
@@ -128,7 +160,9 @@ export function buildReportAuthoringTranscript(
     `- \`default_value\` accepts a raw literal (string/number/boolean/string[]) or \`{ "preset": "TODAY" | "YESTERDAY" | "LAST_7_DAYS" | "LAST_30_DAYS" | "CURRENT_MONTH" | "PREVIOUS_MONTH" }\`. The wrapper \`{ "literal": <value> }\` is also accepted and normalised to the raw value.`,
     `- Presets: TODAY, YESTERDAY, LAST_7_DAYS, LAST_30_DAYS, CURRENT_MONTH, PREVIOUS_MONTH.`,
     `- A \`MERCHANT_FACING\` or \`BOTH\` report MUST declare \`report.merchant_scope_input_key\`; that input must be an entity_autocomplete bound to \`merchants\`, and every merchant-scopable model in every dataset/join must be filtered by it. Do not use other merchant autocomplete inputs.`,
-    `- Assets: \`asset_key\`, flat \`file_name\`, \`mime_type\` (image/png, image/jpeg, image/webp, image/svg+xml, application/json, text/csv), \`purpose\` (VISUAL_IMAGE or COMPARISON_BASELINE_DATA), optional description. Reference visual assets as \`asset://asset_key\`; compare with \`COMPARE_WITH_ASSET\`.`,
+    merchantMode && !merchantAssetsEnabled
+      ? `- Assets: DISABLED by platform policy. Do not declare \`required_assets\` and do not upload a .zip.`
+      : `- Assets: \`asset_key\`, flat \`file_name\`, \`mime_type\` (image/png, image/jpeg, image/webp, image/svg+xml, application/json, text/csv), \`purpose\` (VISUAL_IMAGE or COMPARISON_BASELINE_DATA), optional description. Reference visual assets as \`asset://asset_key\`; compare with \`COMPARE_WITH_ASSET\`.${merchantMode ? " Merchant asset bundles are enabled by platform policy; one flat .zip at most 2 MB." : ""}`,
     ``,
     `## 8. Visual Sections & Page Layout`,
     `Use only the closed section vocabulary: \`KPI_GRID\`, \`DATA_TABLE\`, \`CHART\` (ECharts vector), \`VECTOR_DRAW\` (flow diagram, settlement waterfall, declarative SVG canvas), \`HTML_TEMPLATE\` (logic-less Mustache with \`{{$t.key}}\` tokens), \`IMAGE_BANNER\` (asset:// references) and \`PAGE_BREAK\`.`,
@@ -138,11 +172,13 @@ export function buildReportAuthoringTranscript(
     `Report headers and footers are authored as \`ReportChromeSpec\` documents (\`spec_kind: "REPORT_CHROME"\`, \`chrome.chrome_type: "HEADER" | "FOOTER"\`) with their own \`required_assets\`, bilingual \`i18n\`, \`template.html\` and \`template.scoped_css\`. A report selects them with \`page_layout.header_mode/footer_mode\` = \`GLOBAL_DEFAULT\`, \`SPECIFIC_CHROME_CODE\`, \`INLINE_SPEC\` or \`NONE\`.`,
     ``,
     `## 10. Asset Bundles`,
-    `If the report needs logos, seals or comparison baselines, declare them in \`required_assets[]\` with a flat \`file_name\` and \`purpose\`: \`VISUAL_IMAGE\` or \`COMPARISON_BASELINE_DATA\` (\`.json\`/\`.csv\`). Reference visual assets with \`asset://asset_key\` and compare datasets with the \`COMPARE_WITH_ASSET\` transform.`,
+    merchantMode && !merchantAssetsEnabled
+      ? `Merchant report asset bundles are **DISABLED by platform policy**. A merchant-authored spec must keep \`required_assets\` empty and must not upload a .zip. Remove any logo, seal or comparison-baseline asset from the design.`
+      : `If the report needs logos, seals or comparison baselines, declare them in \`required_assets[]\` with a flat \`file_name\` and \`purpose\`: \`VISUAL_IMAGE\` or \`COMPARISON_BASELINE_DATA\` (\`.json\`/\`.csv\`). Reference visual assets with \`asset://asset_key\` and compare datasets with the \`COMPARE_WITH_ASSET\` transform.${merchantMode ? " Merchant asset bundles are **ENABLED by platform policy**; upload one flat .zip at most 2 MB. Platform templates that already use staff-owned assets must be re-authored with your own bundle." : ""}`,
     ``,
     `## 11. Complete Bilingual Example`,
     "```json",
-    JSON.stringify(exampleDescriptorSpec, null, 2),
+    JSON.stringify(merchantExample, null, 2),
     "```",
     ``,
     `## 12. Chrome Example`,
@@ -157,6 +193,14 @@ export function buildReportAuthoringTranscript(
     markdown,
     specVersion: REPORT_SPEC_VERSION,
   };
+}
+
+/** Merchant-only transcript (E03): merchant-safe catalog, no staff authority sections. */
+export function buildMerchantReportAuthoringTranscript(
+  host: ReportEngineHostConfig,
+  options: Omit<ReportTranscriptOptions, "merchantMode"> = {},
+): { filename: string; contentType: "text/markdown"; markdown: string; specVersion: string } {
+  return buildReportAuthoringTranscript(host, { ...options, merchantMode: true });
 }
 
 export function buildReportRepairPrompt(
@@ -196,7 +240,7 @@ export function buildReportRepairPrompt(
   return lines.join("\n");
 }
 
-const exampleDescriptorSpec = {
+export const exampleDescriptorSpec = {
   spec_kind: "REPORT_DESCRIPTOR",
   spec_version: REPORT_SPEC_VERSION,
   report: {
@@ -215,8 +259,8 @@ const exampleDescriptorSpec = {
   },
   required_assets: [],
   suggested_access: {
-    roles: ["FINANCE"],
-    authorities: ["finance:read"],
+    roles: ["OPERATOR", "FINANCE", "SUPPORT"],
+    authorities: ["merchant:read"],
   },
   i18n: {
     default_locale: "en",
@@ -257,19 +301,24 @@ const exampleDescriptorSpec = {
       label_i18n_key: "input.period",
       type: "daterange",
       required: true,
-      validation: { max_range_days: 366 },
+      validation: { max_range_days: 180 },
       default_value: { preset: "CURRENT_MONTH" },
     },
   ],
   datasets: [
     {
       dataset_id: "totals",
-      description: "Period totals",
-      from_model: "journal_lines",
-      from_alias: "jl",
+      description: "Merchant payment totals by currency for the selected period",
+      from_model: "payment_attempts",
+      from_alias: "pa",
       select: [
         { alias: "currency", column: "currency" },
-        { alias: "total", column: "amount_minor", aggregate: "SUM", format_hint: "CURRENCY_MINOR" },
+        {
+          alias: "total",
+          column: "total_charged_amount_minor",
+          aggregate: "SUM",
+          format_hint: "CURRENCY_MINOR",
+        },
       ],
       where: {
         kind: "GROUP",
@@ -313,7 +362,7 @@ const exampleDescriptorSpec = {
   ],
 };
 
-const exampleChromeSpec = {
+export const exampleChromeSpec = {
   spec_kind: "REPORT_CHROME",
   spec_version: "1.0",
   chrome: {

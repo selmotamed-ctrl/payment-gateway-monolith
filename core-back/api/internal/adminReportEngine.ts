@@ -9,6 +9,7 @@ import { auditActor, auditBase } from "./adminSliceHelpers";
 import { writeAudit } from "../../lib/audit/writeAudit";
 import {
   extractZipAssetFiles,
+  synthesizeDefaultInputs,
   ReportDescriptorSpecSchema,
   ReportChromeSpecSchema,
   type ReportChromeSpec,
@@ -550,6 +551,84 @@ router.post("/report-engine/specs/verify", async (request: Request, response: Re
 });
 
 const SPEC_AUTHOR_AUTHORITIES = ["report:approve", "report_engine:author"];
+
+const previewBodySchema = z
+  .object({
+    specJson: z.union([z.string(), z.record(z.string(), z.unknown())]),
+    assetsZipBase64: z.string().optional(),
+    inputs: z.record(z.string(), z.unknown()).optional(),
+    locale: z.string().max(16).optional(),
+  })
+  .strict();
+
+/**
+ * Read-only draft preview for the Studio: verifies the spec, executes it with
+ * the caller-supplied or synthesized sample inputs, and returns the bundle the
+ * client renders. Nothing is persisted.
+ */
+router.post("/report-engine/specs/preview", async (request: Request, response: Response) => {
+  requireAuthorities(request, [...SPEC_AUTHOR_AUTHORITIES, "report:review"]);
+  const body = parseOrThrow(previewBodySchema, request.body ?? {});
+  const rawSpecJson =
+    typeof body.specJson === "string" ? body.specJson : JSON.stringify(body.specJson);
+  let parsedSpec: ReportDescriptorSpec;
+  try {
+    parsedSpec = ReportDescriptorSpecSchema.parse(
+      typeof body.specJson === "string" ? JSON.parse(body.specJson) : body.specJson,
+    );
+  } catch (error) {
+    throw new ApiError(400, "SCHEMA_VALIDATION_ERROR", "The report spec is not valid", {
+      reason: (error as Error).message,
+    });
+  }
+  const zipBuffer = body.assetsZipBase64 ? Buffer.from(body.assetsZipBase64, "base64") : null;
+  const extraction = await extractZip(zipBuffer);
+  if (extraction.diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    throw new ApiError(400, "REPORT_ASSET_BUNDLE_INVALID", "The asset archive is invalid", {
+      diagnostics: extraction.diagnostics,
+    });
+  }
+  const verification = await engine.verifyDescriptor({
+    rawSpecJson,
+    extractedZipFiles: extraction.filesByName,
+  });
+  if (verification.diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    throw new ApiError(400, "REPORT_SPEC_VERIFICATION_FAILED", "The report spec failed verification", {
+      verification,
+    });
+  }
+  const assets: Record<string, { mimeType: string; buffer: Buffer; sha256: string }> = {};
+  for (const required of parsedSpec.required_assets) {
+    const buffer =
+      extraction.filesByName.get(required.file_name) ??
+      [...extraction.filesByName.entries()].find(
+        ([name]) => name.toLowerCase() === required.file_name.toLowerCase(),
+      )?.[1];
+    if (buffer) {
+      assets[required.asset_key] = {
+        mimeType: required.mime_type,
+        buffer,
+        sha256: createHash("sha256").update(buffer).digest("hex"),
+      };
+    }
+  }
+  const inputs = body.inputs ?? synthesizeDefaultInputs(parsedSpec);
+  const actor = await actorOf(request);
+  try {
+    const bundle = await engine.executeReport({
+      spec: parsedSpec,
+      inputs,
+      actor,
+      chromeRegistry: await loadChromeRegistry(),
+      chromeOverride: null,
+      assets,
+      allowConfidentialAmlBypass: false,
+    });
+    response.json({ verification, bundle });
+  } catch (error) {
+    throw toReportExecutionError(error);
+  }
+});
 
 router.post("/report-engine/specs", async (request: Request, response: Response) => {
   requireAuthorities(request, SPEC_AUTHOR_AUTHORITIES);
@@ -1670,4 +1749,151 @@ router.post("/report-engine/chrome/:id/set-default", async (request: Request, re
     });
   });
   response.json({ id, isDefaultGlobal: body.isDefault });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Merchant reporting line oversight (E09)                                   */
+/* ------------------------------------------------------------------------ */
+
+router.get("/report-engine/merchant-reports", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["report:review", "report:approve", "security:read", "security:write"]);
+  const merchantId = typeof request.query.merchantId === "string" ? request.query.merchantId : undefined;
+  const search = typeof request.query.search === "string" ? request.query.search.trim() : "";
+  const page = Math.max(1, Number(request.query.page ?? 1) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(request.query.pageSize ?? 20) || 20));
+  const sortKey = typeof request.query.sortKey === "string" ? request.query.sortKey : "";
+  const sortDirection: "asc" | "desc" = request.query.sortDirection === "asc" ? "asc" : "desc";
+  const where: Prisma.MerchantReportSpecRecordWhereInput = {
+    ...(merchantId ? { merchantId } : {}),
+    ...(search
+      ? {
+          OR: [
+            { code: { contains: search, mode: "insensitive" as const } },
+            { category: { contains: search, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
+  const orderBy: Prisma.MerchantReportSpecRecordOrderByWithRelationInput =
+    sortKey === "code" ? { code: sortDirection } : sortKey === "category" ? { category: sortDirection } : { updatedAt: sortDirection };
+  const [total, rows] = await Promise.all([
+    client.merchantReportSpecRecord.count({ where }),
+    client.merchantReportSpecRecord.findMany({
+      where,
+      orderBy,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+  const merchantIds = [...new Set(rows.map((row) => row.merchantId))];
+  const merchants = await client.merchant.findMany({
+    where: { id: { in: merchantIds } },
+    select: { id: true, tradeName: true, legalName: true },
+  });
+  const merchantById = new Map(merchants.map((merchant) => [merchant.id, merchant]));
+  const suspensions = await client.merchantReportStudioStatus.findMany({
+    where: { merchantId: { in: merchantIds } },
+  });
+  const suspensionByMerchant = new Map(suspensions.map((entry) => [entry.merchantId, entry]));
+  response.json({
+    total,
+    reports: rows.map((row) => ({
+      id: row.id,
+      merchantId: row.merchantId,
+      merchantName: merchantById.get(row.merchantId)?.tradeName ?? merchantById.get(row.merchantId)?.legalName ?? row.merchantId,
+      code: row.code,
+      version: row.version,
+      category: row.category,
+      status: row.status,
+      isLatestPublished: row.isLatestPublished,
+      createdAt: row.createdAt,
+      publishedAt: row.publishedAt,
+      studioSuspended: Boolean(suspensionByMerchant.get(row.merchantId)?.suspendedAt),
+    })),
+  });
+});
+
+router.get("/report-engine/merchant-executions", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["report:review", "report:approve", "security:read", "security:write"]);
+  const merchantId = typeof request.query.merchantId === "string" ? request.query.merchantId : undefined;
+  const limit = Math.min(Math.max(Number(request.query.limit ?? 100) || 100, 1), 500);
+  const rows = await client.merchantReportExecutionAudit.findMany({
+    where: merchantId ? { merchantId } : {},
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+  response.json({
+    executions: rows.map((row) => ({
+      id: row.id,
+      merchantId: row.merchantId,
+      merchantSpecId: row.merchantSpecId,
+      reportCode: row.reportCode,
+      reportVersion: row.reportVersion,
+      actorUserId: row.actorUserId,
+      actorRole: row.actorRole,
+      selectedLocale: row.selectedLocale,
+      rowCountTotal: row.rowCountTotal,
+      durationMs: row.durationMs,
+      verificationSha256: row.verificationSha256,
+      createdAt: row.createdAt,
+    })),
+  });
+});
+
+const merchantStudioDecisionSchema = z.object({ reason: z.string().trim().min(5).max(500) }).strict();
+
+router.post("/report-engine/merchant-reports/:merchantId/suspend", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["security:write"]);
+  const merchantId = String(request.params.merchantId);
+  const body = parseOrThrow(merchantStudioDecisionSchema, request.body ?? {});
+  const actor = await actorOf(request);
+  const audit = auditBase(auditActor(request));
+  const row = await client.merchantReportStudioStatus.upsert({
+    where: { merchantId },
+    create: {
+      merchantId,
+      suspendedAt: new Date(),
+      suspendedByUserId: actor.userId,
+      reason: body.reason,
+    },
+    update: { suspendedAt: new Date(), suspendedByUserId: actor.userId, reason: body.reason },
+  });
+  await client.$transaction(async (tx) => {
+    await writeAudit(tx, {
+      data: {
+        ...audit,
+        action: "MERCHANT_REPORT_STUDIO_SUSPENDED",
+        entityType: "MERCHANT",
+        entityId: merchantId,
+        beforeJson: null,
+        afterJson: { reason: body.reason },
+      } as never,
+    });
+  });
+  response.json({ merchantId, suspended: true, reason: row.reason });
+});
+
+router.post("/report-engine/merchant-reports/:merchantId/resume", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["security:write"]);
+  const merchantId = String(request.params.merchantId);
+  const actor = await actorOf(request);
+  const audit = auditBase(auditActor(request));
+  await client.merchantReportStudioStatus.upsert({
+    where: { merchantId },
+    create: { merchantId, suspendedAt: null, suspendedByUserId: null, reason: null },
+    update: { suspendedAt: null, suspendedByUserId: null, reason: null },
+  });
+  await client.$transaction(async (tx) => {
+    await writeAudit(tx, {
+      data: {
+        ...audit,
+        action: "MERCHANT_REPORT_STUDIO_RESUMED",
+        entityType: "MERCHANT",
+        entityId: merchantId,
+        beforeJson: null,
+        afterJson: { resumedBy: actor.userId },
+      } as never,
+    });
+  });
+  response.json({ merchantId, suspended: false });
 });

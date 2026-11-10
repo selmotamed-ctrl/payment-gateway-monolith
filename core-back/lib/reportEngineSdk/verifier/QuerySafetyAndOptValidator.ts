@@ -7,7 +7,7 @@ import type {
   WhereFilterNode,
 } from "../types/reportSpec";
 import type { ReportDiagnostic } from "../types/diagnostics";
-import { compileDatasetQueryToSql } from "../compiler/QueryAstToSqlCompiler";
+import { compileDatasetQueryToSql, isMinorUnitColumn } from "../compiler/QueryAstToSqlCompiler";
 import { resolveInputPresetValue } from "../compiler/InputFormZodCompiler";
 
 export function synthesizeDefaultInputs(
@@ -76,19 +76,6 @@ function aliasOf(ds: DatasetQuerySpec, tableAlias: string | undefined): string {
   return tableAlias ?? ds.from_alias;
 }
 
-function findColumnPredicates(
-  where: WhereFilterNode | undefined,
-  column: string,
-  ds: DatasetQuerySpec,
-  alias: string,
-): Array<Extract<WhereFilterNode, { kind: "PREDICATE" }>> {
-  if (!where) return [];
-  if (where.kind === "PREDICATE") {
-    return where.column === column && aliasOf(ds, where.table_alias) === alias ? [where] : [];
-  }
-  return where.conditions.flatMap((child) => findColumnPredicates(child, column, ds, alias));
-}
-
 function hasMerchantScopePredicate(
   ds: DatasetQuerySpec,
   model: CatalogModelDef,
@@ -119,21 +106,6 @@ function hasPredicateInAnd(
   return where.logic === "AND"
     ? where.conditions.some((child) => hasPredicateInAnd(child, column, ds, alias, inputKey))
     : where.conditions.every((child) => hasPredicateInAnd(child, column, ds, alias, inputKey));
-}
-
-function hasAnyColumnPredicateInAnd(
-  where: WhereFilterNode | undefined,
-  column: string,
-  ds: DatasetQuerySpec,
-  alias: string,
-): boolean {
-  if (!where) return false;
-  if (where.kind === "PREDICATE") {
-    return where.column === column && aliasOf(ds, where.table_alias) === alias;
-  }
-  return where.logic === "AND"
-    ? where.conditions.some((child) => hasAnyColumnPredicateInAnd(child, column, ds, alias))
-    : where.conditions.every((child) => hasAnyColumnPredicateInAnd(child, column, ds, alias));
 }
 
 function daysBetween(start: unknown, end: unknown): number | null {
@@ -221,16 +193,19 @@ function validateWhereNode(
       : value && typeof value === "object" && "start" in value && "end" in value
         ? [(value as { start: unknown }).start, (value as { end: unknown }).end]
         : null;
-    if (pair) {
+    const maxDays = model.optimizationRule.mandatoryFilterColumns?.find(
+      (mandatory) => mandatory.column === node.column,
+    )?.maxDateRangeDays;
+    if (pair && maxDays) {
       const days = daysBetween(pair[0], pair[1]);
-      if (days !== null && days > 366) {
+      if (days !== null && days > maxDays) {
         diagnostics.push({
           layer: 2,
           severity: "error",
           path: `${path}.binding`,
           code: "PARTITION_DATE_RANGE_UNBOUNDED",
-          message: `Literal BETWEEN range on "${node.column}" spans ${Math.round(days)} days; the maximum is 366.`,
-          aiFixHint: "Use a bounded daterange input with validation.max_range_days <= 366.",
+          message: `Literal BETWEEN range on "${node.column}" spans ${Math.round(days)} days; the maximum is ${maxDays}.`,
+          aiFixHint: `Use a bounded daterange input with validation.max_range_days <= ${maxDays}.`,
         });
       }
     }
@@ -324,6 +299,45 @@ function validateDatasetReferences(
       });
     }
   }
+  if (ds.group_by.length > 0) {
+    // With GROUP BY, ORDER BY and window references must be select aliases or
+    // grouped expressions; referencing an ungrouped base column compiles to
+    // invalid SQL that must be rejected at verification time (A14).
+    const grouped = new Set(ds.group_by);
+    for (let i = 0; i < ds.order_by.length; i++) {
+      const field = ds.order_by[i]!.field;
+      if (!selectAliases.has(field) && !grouped.has(field)) {
+        diagnostics.push({
+          layer: 2,
+          severity: "error",
+          path: `${path}.order_by[${i}]`,
+          code: "GROUPED_ORDER_BY_REQUIRES_ALIAS",
+          message: `ORDER BY "${field}" is not a select alias or grouped column, so the grouped query would be invalid.`,
+          aiFixHint: "Order by a select alias or add the column to group_by.",
+        });
+      }
+    }
+    for (let i = 0; i < ds.window_fields.length; i++) {
+      const window = ds.window_fields[i]!;
+      for (const field of [
+        window.target_field,
+        ...window.partition_by,
+        ...window.order_by.map((o) => o.field),
+      ]) {
+        if (!selectAliases.has(field) && !grouped.has(field)) {
+          diagnostics.push({
+            layer: 2,
+            severity: "error",
+            path: `${path}.window_fields[${i}]`,
+            code: "GROUPED_WINDOW_REQUIRES_ALIAS",
+            message: `Window field "${field}" is not a select alias or grouped column, so the grouped query would be invalid.`,
+            aiFixHint: "Use a select alias or a grouped column in the window definition.",
+          });
+        }
+      }
+    }
+  }
+
   for (let i = 0; i < ds.window_fields.length; i++) {
     const window = ds.window_fields[i]!;
     const fields = [
@@ -343,6 +357,63 @@ function validateDatasetReferences(
         });
       }
     }
+  }
+}
+
+/** Predicates on `column` under the top-level AND chain (OR branches do not count). */
+function predicatesInAnd(
+  where: WhereFilterNode | undefined,
+  column: string,
+  ds: DatasetQuerySpec,
+  alias: string,
+): Array<Extract<WhereFilterNode, { kind: "PREDICATE" }>> {
+  if (!where) return [];
+  if (where.kind === "PREDICATE") {
+    return where.column === column && aliasOf(ds, where.table_alias) === alias ? [where] : [];
+  }
+  return where.logic === "AND"
+    ? where.conditions.flatMap((child) => predicatesInAnd(child, column, ds, alias))
+    : [];
+}
+
+/** Every predicate under the top-level AND chain, regardless of column. */
+function collectPredicatesInAnd(
+  where: WhereFilterNode | undefined,
+): Array<Extract<WhereFilterNode, { kind: "PREDICATE" }>> {
+  if (!where) return [];
+  if (where.kind === "PREDICATE") return [where];
+  return where.logic === "AND"
+    ? where.conditions.flatMap((child) => collectPredicatesInAnd(child))
+    : [];
+}
+
+function validateMandatoryInputBounds(
+  inputKey: string,
+  column: string,
+  maxDays: number,
+  inputByKey: Map<string, ReportInputFieldSpec>,
+  diagnostics: ReportDiagnostic[],
+): void {
+  const input = inputByKey.get(inputKey);
+  if (input && !input.required && input.default_value === undefined) {
+    diagnostics.push({
+      layer: 2,
+      severity: "error",
+      path: `inputs(${inputKey})`,
+      code: "MANDATORY_FILTER_INPUT_NOT_REQUIRED",
+      message: `Input "${inputKey}" bounds mandatory column "${column}" but is optional with no default.`,
+      aiFixHint: "Make the input required or give it a default value.",
+    });
+  }
+  if (!input?.validation?.max_range_days || input.validation.max_range_days > maxDays) {
+    diagnostics.push({
+      layer: 2,
+      severity: "error",
+      path: `inputs(${inputKey}).validation.max_range_days`,
+      code: "PARTITION_DATE_RANGE_UNBOUNDED",
+      message: `Input "${inputKey}" filters partitioned column "${column}" and must set validation.max_range_days <= ${maxDays}.`,
+      aiFixHint: `Set "validation": { "max_range_days": ${maxDays} } on input "${inputKey}".`,
+    });
   }
 }
 
@@ -445,6 +516,16 @@ export async function validateQueriesAndOptimizations(
           aiFixHint: `Remove "${sel.column}" from the query select list.`,
         });
       }
+      if (sel.expression === "MINOR_TO_MAJOR_DECIMAL" && !isMinorUnitColumn(col)) {
+        diagnostics.push({
+          layer: 2,
+          severity: "error",
+          path: `${basePath}.select.${sel.alias}`,
+          code: "MINOR_TO_MAJOR_REQUIRES_MINOR_COLUMN",
+          message: `MINOR_TO_MAJOR_DECIMAL is only valid on a minor-unit column; "${sel.column}" is a major-unit column.`,
+          aiFixHint: "Remove the conversion (the column is already in major units) or select its synthetic _minor column.",
+        });
+      }
     }
 
     if (spec.report.audience_scope === "MERCHANT_FACING" || spec.report.audience_scope === "BOTH") {
@@ -479,23 +560,47 @@ export async function validateQueriesAndOptimizations(
         }
         for (let i = 0; i < spec.inputs.length; i++) {
           const input = spec.inputs[i]!;
-          if (input.autocomplete && !["merchants", "applications", "currencies"].includes(input.autocomplete.source)) {
+          if (
+            input.autocomplete &&
+            !["merchants", "applications", "currencies", "payment_links", "pos_terminals"].includes(
+              input.autocomplete.source,
+            )
+          ) {
             diagnostics.push({
               layer: 2,
               severity: "error",
               path: `inputs[${i}].autocomplete.source`,
               code: "MERCHANT_AUTOCOMPLETE_SOURCE_NOT_ALLOWED",
               message: `Autocomplete source "${input.autocomplete.source}" is not available to a merchant-facing report.`,
-              aiFixHint: "Use merchants, applications or currencies, or make the report back-office only.",
+              aiFixHint: "Use the merchant scope input or one of the merchant autocomplete sources listed in the transcript.",
             });
           }
         }
       }
     }
 
+    if (model.optimizationRule.requireIndexedFilter) {
+      const predicates = collectPredicatesInAnd(ds.where);
+      const indexed = predicates.some((pred) => {
+        const target = resolveAliasModel(ds, pred.table_alias, host);
+        return Boolean(target?.columns[pred.column]?.indexed);
+      });
+      if (!indexed) {
+        diagnostics.push({
+          layer: 2,
+          severity: "error",
+          path: `${basePath}.where`,
+          code: "INDEXED_FILTER_REQUIRED",
+          message: `Query on "${ds.from_model}" must include at least one indexed-column predicate.`,
+          aiFixHint: "Filter on an indexed column such as an id, status, merchant_id or created_at.",
+        });
+      }
+    }
+
     for (const mandatory of model.optimizationRule.mandatoryFilterColumns ?? []) {
-      const foundPredicates = findColumnPredicates(ds.where, mandatory.column, ds, ds.from_alias);
-      if (!hasAnyColumnPredicateInAnd(ds.where, mandatory.column, ds, ds.from_alias)) {
+      const foundPredicates = predicatesInAnd(ds.where, mandatory.column, ds, ds.from_alias);
+      const allowedOps = mandatory.allowedOperators ?? ["between", "gte_lte"];
+      if (foundPredicates.length === 0) {
         diagnostics.push({
           layer: 2,
           severity: "error",
@@ -504,21 +609,84 @@ export async function validateQueriesAndOptimizations(
           message: `Query on "${ds.from_model}" MUST filter on "${mandatory.column}" (${mandatory.rationale}).`,
           aiFixHint: mandatory.aiFixHint,
         });
-      } else if (mandatory.maxDateRangeDays) {
-        for (const pred of foundPredicates) {
-          if (pred.binding?.source === "INPUT") {
-            const inp = inputByKey.get(pred.binding.input_key);
-            if (!inp?.validation?.max_range_days || inp.validation.max_range_days > mandatory.maxDateRangeDays) {
-              diagnostics.push({
-                layer: 2,
-                severity: "error",
-                path: `inputs(${pred.binding.input_key}).validation.max_range_days`,
-                code: "PARTITION_DATE_RANGE_UNBOUNDED",
-                message: `Input "${pred.binding.input_key}" filters partitioned column "${ds.from_model}.${mandatory.column}" and must set validation.max_range_days <= ${mandatory.maxDateRangeDays}.`,
-                aiFixHint: `Set "validation": { "max_range_days": ${mandatory.maxDateRangeDays} } on input "${pred.binding.input_key}".`,
-              });
-            }
+        continue;
+      }
+
+      for (const pred of foundPredicates) {
+        if (pred.binding?.source === "INPUT" && pred.binding.omit_if_empty) {
+          diagnostics.push({
+            layer: 2,
+            severity: "error",
+            path: `${basePath}.where`,
+            code: "MANDATORY_FILTER_OPTIONAL_BINDING",
+            message: `The mandatory filter on "${mandatory.column}" uses binding.omit_if_empty, so the predicate can disappear at runtime.`,
+            aiFixHint: "Remove omit_if_empty from a mandatory partition filter.",
+          });
+        }
+        const operatorKey: string = pred.op === "between"
+          ? "between"
+          : ["gte", "gt", "lte", "lt"].includes(pred.op)
+            ? "gte_lte"
+            : pred.op;
+        if (!(allowedOps as readonly string[]).includes(operatorKey)) {
+          diagnostics.push({
+            layer: 2,
+            severity: "error",
+            path: `${basePath}.where`,
+            code: "MANDATORY_FILTER_OPERATOR_NOT_ALLOWED",
+            message: `Operator "${pred.op}" on mandatory column "${mandatory.column}" is not allowed (${allowedOps.join(", ")}).`,
+            aiFixHint: mandatory.aiFixHint,
+          });
+        }
+      }
+
+      const between = foundPredicates.find((pred) => pred.op === "between");
+      const lower = foundPredicates.find((pred) => pred.op === "gte" || pred.op === "gt");
+      const upper = foundPredicates.find((pred) => pred.op === "lte" || pred.op === "lt");
+      const pairUsesSameInput =
+        lower?.binding?.source === "INPUT" &&
+        upper?.binding?.source === "INPUT" &&
+        lower.binding.input_key === upper.binding.input_key &&
+        lower.binding.range_bound === "START" &&
+        upper.binding.range_bound === "END";
+      const pairUsesLiterals =
+        lower?.binding?.source === "LITERAL" && upper?.binding?.source === "LITERAL";
+      if (!between && !pairUsesSameInput && !pairUsesLiterals) {
+        diagnostics.push({
+          layer: 2,
+          severity: "error",
+          path: `${basePath}.where`,
+          code: "MANDATORY_PARTITION_FILTER_UNBOUNDED",
+          message: `The filter on "${mandatory.column}" is not a bounded range. Use op="between" or a gte+lt(e) pair bound to the same required daterange input.`,
+          aiFixHint: mandatory.aiFixHint,
+        });
+        continue;
+      }
+
+      const maxDays = mandatory.maxDateRangeDays;
+      if (maxDays) {
+        if (between?.binding?.source === "INPUT") {
+          validateMandatoryInputBounds(between.binding.input_key, mandatory.column, maxDays, inputByKey, diagnostics);
+        } else if (between?.binding?.source === "LITERAL") {
+          const value = between.binding.value;
+          const pair = Array.isArray(value) && value.length === 2
+            ? value
+            : value && typeof value === "object" && "start" in value && "end" in value
+              ? [(value as { start: unknown }).start, (value as { end: unknown }).end]
+              : null;
+          const days = pair ? daysBetween(pair[0], pair[1]) : null;
+          if (days !== null && days > maxDays) {
+            diagnostics.push({
+              layer: 2,
+              severity: "error",
+              path: `${basePath}.where`,
+              code: "PARTITION_DATE_RANGE_UNBOUNDED",
+              message: `Literal range on "${mandatory.column}" spans ${Math.round(days)} days; the maximum is ${maxDays}.`,
+              aiFixHint: mandatory.aiFixHint,
+            });
           }
+        } else if (pairUsesSameInput && lower?.binding?.source === "INPUT") {
+          validateMandatoryInputBounds(lower.binding.input_key, mandatory.column, maxDays, inputByKey, diagnostics);
         }
       }
     }
@@ -548,10 +716,10 @@ export async function validateQueriesAndOptimizations(
         if (explain.hasSeqScanOnLargeTable) {
           diagnostics.push({
             layer: 2,
-            severity: "warning",
+            severity: "error",
             path: basePath,
             code: "SEQUENTIAL_SCAN_DETECTED",
-            message: `EXPLAIN detected sequential scan on table(s): ${explain.seqScanTables.join(", ")}.`,
+            message: `EXPLAIN detected a sequential scan on large table(s): ${explain.seqScanTables.join(", ")}.`,
             aiFixHint: "Ensure WHERE predicates reference indexed columns listed in the transcript catalog.",
           });
         }

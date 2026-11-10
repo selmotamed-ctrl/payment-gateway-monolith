@@ -7,6 +7,7 @@ export const reportEngineRouter = router;
 
 const codeParams = z.object({ code: z.string().min(1).max(64) }).strict();
 const sourceParams = z.object({ sourceKey: z.string().min(1).max(64) }).strict();
+const idParams = z.object({ id: z.string().uuid() }).strict();
 
 const executeBody = z
   .object({
@@ -56,5 +57,96 @@ router.post(
     path: ({ params }) => `/internal/merchant/report-engine/catalog/${params.code}/execute`,
     paramsSchema: codeParams,
     schema: executeBody,
+  }),
+);
+
+const studioBody = z
+  .object({
+    specJson: z.union([z.string(), z.record(z.string(), z.unknown())]),
+    assetsZipBase64: z.string().optional(),
+  })
+  .strict();
+
+router.get(
+  "/studio/transcript",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/merchant/report-engine/studio/transcript",
+  }),
+);
+
+router.post(
+  "/studio/verify",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/report-engine/studio/verify",
+    schema: studioBody,
+  }),
+);
+
+router.post(
+  "/studio/specs",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/report-engine/studio/specs",
+    schema: studioBody.extend({ publish: z.boolean().optional() }).strict(),
+    status: 201,
+  }),
+);
+
+router.get(
+  "/studio/specs",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/merchant/report-engine/studio/specs",
+    querySchema: z.object({ code: z.string().max(64).optional() }).passthrough(),
+  }),
+);
+
+router.get(
+  "/studio/specs/:id",
+  coreForward({
+    method: "GET",
+    path: ({ params }) => `/internal/merchant/report-engine/studio/specs/${params.id}`,
+    paramsSchema: idParams,
+  }),
+);
+
+router.post(
+  "/studio/specs/:id/publish",
+  coreForward({
+    method: "POST",
+    path: ({ params }) => `/internal/merchant/report-engine/studio/specs/${params.id}/publish`,
+    paramsSchema: idParams,
+    schema: z.object({}).strict(),
+  }),
+);
+
+router.post(
+  "/studio/specs/:id/archive",
+  coreForward({
+    method: "POST",
+    path: ({ params }) => `/internal/merchant/report-engine/studio/specs/${params.id}/archive`,
+    paramsSchema: idParams,
+    schema: z.object({}).strict(),
+  }),
+);
+
+router.get(
+  "/studio/usage",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/merchant/report-engine/studio/usage",
+  }),
+);
+
+router.post(
+  "/studio/templates/:code/clone",
+  coreForward({
+    method: "POST",
+    path: ({ params }) => `/internal/merchant/report-engine/studio/templates/${params.code}/clone`,
+    paramsSchema: codeParams,
+    schema: z.object({ code: z.string().min(1).max(64).optional() }).strict(),
+    status: 201,
   }),
 );

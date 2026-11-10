@@ -2,10 +2,10 @@
 
 <!-- GENERATED FILE. Edit core-back/prisma/schema.prisma instead. Do not hand-edit this file. -->
 
-- Models: **100**
+- Models: **105**
 - Enums: **123**
-- Schema version: **32**
-- Migrations: **31**
+- Schema version: **33**
+- Migrations: **32**
 
 ## Models
 
@@ -109,6 +109,11 @@
 - `ReportChromeSpecRecord`
 - `ReportDefinitionSpecRecord`
 - `ReportExecutionAuditRecord`
+- `MerchantReportSpecRecord`
+- `MerchantReportAssetBundle`
+- `MerchantReportExecutionAudit`
+- `MerchantReportRateEvent`
+- `MerchantReportStudioStatus`
 
 ## Enums
 
@@ -269,3 +274,4 @@
 - `20261110160000_incident_management`
 - `20261110170000_docx_report_output`
 - `20261110180000_external_filing_adapters`
+- `20261110190000_merchant_report_engine`

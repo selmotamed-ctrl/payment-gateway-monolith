@@ -16,19 +16,31 @@ code:
   - core-back/prisma/schema.prisma
   - core-back/prisma/migrations/20261110120000_dynamic_report_engine_sdk/migration.sql
   - core-back/prisma/migrations/20261110130000_report_engine_merchant_and_aml/migration.sql
+  - core-back/prisma/migrations/20261110190000_merchant_report_engine/migration.sql
   - core-back/api/internal/merchantReportEngine.ts
   - core-back/api/internal/merchant.ts
   - merchant-back/api/protected/reportEngine.ts
   - merchant-front/src/pages/reports/index.tsx
+  - merchant-front/src/pages/reports/studio/index.tsx
+  - core-back/engine/reportStudio/merchantHostConfig.ts
+  - core-back/engine/reportStudio/merchantReportEngine.ts
+  - admin-front/src/pages/reports/merchant-reports/index.tsx
   - merchant-front/src/lib/reportEngineSdk/**
   - core-back/prisma/seed.ts
 design_sources:
   - design/12-reporting/dynamic_ai_transcript_report_engine_sdk_plan.md
 tests:
   - core-back/test/reportEngineSdk/**
+  - core-back/test/admin-slice/admin-report-engine.test.ts
   - merchant-back/test/core-forwarding.test.ts
+  - admin-back/test/report-engine-edge.test.ts
+  - tests/unit/report-engine-sdk-mirror.test.ts
   - admin-front/src/lib/reportEngineSdk/__tests__/**
   - merchant-front/src/pages/reports/index.tsx
+  - merchant-front/src/pages/reports/studio/index.tsx
+  - core-back/engine/reportStudio/merchantHostConfig.ts
+  - core-back/engine/reportStudio/merchantReportEngine.ts
+  - admin-front/src/pages/reports/merchant-reports/index.tsx
   - core-back/test/exhaustive/01-schema/**
   - core-back/test/phase1-mtls-and-schema.test.ts
   - admin-back/test/**
@@ -37,7 +49,8 @@ gaps:
   - The report asset store is local filesystem (`REPORT_ASSET_STORAGE_DIR`, default `.report-assets`); object storage and signed asset delivery are not implemented.
   - `REPORT_READONLY_DATABASE_URL` may point at a replica, but replica routing is not verified in the report executor on a live multi-host deployment.
   - Report execution audits record the actor, scope and verification hash but do not yet copy the audit row into the dedicated audit database.
-  - The merchant portal runs merchant-safe reports; it does not author reports or manage chrome.
+  - The merchant line uses an in-process concurrency semaphore and 60 s cache per core node; a multi-node deployment needs a shared semaphore for a strict global cap.
+  - Chrome authoring remains staff-only; merchants run platform chrome.
 ---
 
 # Dynamic Report Engine SDK and Report Studio Host
@@ -120,7 +133,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 
 `admin-back/api/protected/reportEngine.ts` forwards the same routes under `/api/v1/admin/report-engine/*` with the admin authority guard.
 
-## 6. Schema versions 26 and 27
+## 6. Schema versions 26, 27 and 33
 
 `20261110120000_dynamic_report_engine_sdk` adds:
 
@@ -130,7 +143,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - `report_definition_specs` (code/version, category, audience, status, latest-published flag, supported/default locales, spec JSON/SHA-256, verification report, inferred roles/authorities, conflict status, confidential AML flag, override fields, publisher);
 - `report_execution_audit` (spec, code/version, actor, locale, scoped merchant, redacted inputs, row count, duration, node, verification hash, render target).
 
-`REQUIRED_SCHEMA_VERSION` is 27; version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
+`REQUIRED_SCHEMA_VERSION` is 33. Version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. Version 33 adds the separate merchant authoring line: `merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` and `merchant_report_studio_status`, with unique `(merchant_id, code, version)` and one latest-published row per merchant/code. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
 
 ## 7. Security invariants
 
@@ -145,27 +158,53 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 
 `core-back/test/reportEngineSdk/**` implements the RE-T01..RE-T22 matrix (plus extra dry-run/transcript cases). `admin-front/src/lib/reportEngineSdk/__tests__/**` covers formatting, RTL vector mirroring, chrome binding, the language prompt options, the paged-media document and the client sanitizer. The exhaustive schema suite and `phase1-mtls-and-schema.test.ts` verify schema version 27 and the four new models.
 
-## 9. Merchant report runner
+## 9. Merchant reporting line (schema version 33)
 
-`core-back/api/internal/merchantReportEngine.ts` is mounted under `/internal/merchant/report-engine` after merchant authentication. It exposes a catalog, autocomplete and execute route. The catalog accepts `page`, `pageSize`, `search`, `sortKey` and `sortDirection`, applies the merchant scope validation before slicing and returns the filtered total. Every merchant execution:
+The merchant line is physically separate from the staff registry. It has its own tables (`merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit`), its own host catalog (`engine/reportStudio/merchantHostConfig.ts`) and its own transcript.
 
-- requires `report_engine:run`;
-- accepts only `MERCHANT_FACING`/`BOTH` reports;
-- runs `validateMerchantReportScope` (every base/join model must be merchant-scopable, every model must be filtered by the scope input, and no OR branch may escape it);
-- overwrites `inputs[report.merchant_scope_input_key]` with `principal.merchantId`;
-- records the forced merchant ID in `report_execution_audit`.
+### 9.1 Merchant host catalog
 
-`merchant-back/api/protected/reportEngine.ts` proxies the routes, and `merchant-front/src/pages/reports/index.tsx` is the portal page. The merchant SDK is a mirrored copy of the admin frontend SDK because this repository has no shared frontend workspace package.
+The merchant host is built from an explicit allow-list of directly merchant-scoped models only: `merchants`, `applications`, `wallets`, `payment_attempts`, `cashout_requests` and `rm_merchant_daily_stats`. Each model has an explicit column allow-list. Ledger, credentials, audit, AML, users, payment links, POS terminals, disputes, adjustments, reconciliation rows, webhooks and outbox tables are absent from the catalog. Models without a direct `merchant_id` are not admitted because the engine cannot inject a scope predicate on them.
 
-## 9.1 API error handling
+### 9.2 Engine-injected identity
 
-Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `400 SCHEMA_VALIDATION_ERROR` with the Zod issues. Admin execute returns `404 REPORT_NOT_FOUND` only when the code has no versions and `409 REPORT_NOT_PUBLISHED` with the latest status when versions exist but none is the published latest. Chrome save maps `P2002` to `409 REPORT_CHROME_DUPLICATE`, `P2003` to `409 REPORT_CHROME_REFERENCE_CONFLICT`, asset storage failures to `500 REPORT_CHROME_ASSET_SAVE_FAILED` and database failures to `500 REPORT_CHROME_SAVE_FAILED`, each with a reason. The admin portal renders returned diagnostics through `ReportDiagnosticsPanel`.
+`compileDatasetQueryToSql` accepts `options.merchantScope`. It rejects any alias whose model is not merchant-scopable, adds `<alias>.<merchant_column> = $merchant` as a top-level AND for the base alias and every joined alias, and selects a hidden `__scope_merchant_id` column. `executeReport` verifies the injected alias set, asserts every returned row equals the principal's merchant, strips the hidden column, and on mismatch invokes the merchant callback before throwing `ReportMerchantScopeViolationError`; the API audits the event and opens a P1 `MANUAL_REVIEW` operator case.
+
+### 9.3 Routes
+
+Core merchant routes (mounted without a prefix behind merchant authentication):
+
+| Method | Path | Purpose |
+| :--- | :--- | :--- |
+| GET | `/report-engine/catalog` | Platform templates plus the merchant's own published reports; strips the query AST. |
+| GET | `/report-engine/autocomplete/:sourceKey` | Own applications, payment links, POS terminals and currencies. |
+| POST | `/report-engine/catalog/:code/execute` | Scoped execution with the merchant identity injected. |
+| GET | `/report-engine/studio/transcript` | Merchant-only AI transcript. |
+| POST | `/report-engine/studio/verify` | Five layers plus merchant-tier limits. |
+| POST | `/report-engine/studio/specs` | Save verified or publish. |
+| GET | `/report-engine/studio/specs` | Own versions. |
+| GET | `/report-engine/studio/specs/:id` | Own spec detail. |
+| POST | `/report-engine/studio/specs/:id/publish` | Publish an own verified version. |
+| POST | `/report-engine/studio/specs/:id/archive` | Archive and promote the previous published version. |
+| GET | `/report-engine/studio/usage` | Codes, runs, DB time, hourly limits and suspension. |
+| POST | `/report-engine/studio/templates/:code/clone` | Clone a platform template into the merchant registry. |
+
+`merchant-back/api/protected/reportEngine.ts` proxies the same paths. Staff oversight lives in the admin router: `/report-engine/merchant-reports`, `/report-engine/merchant-executions` and the suspend/resume actions, proxied by `admin-back` and shown at `/reports/merchant-reports`.
+
+### 9.4 Limits and abuse controls
+
+Merchant tier limits are re-checked on verify, save and execute: ≤ 6 datasets, ≤ 2 joins, ≤ 20 select fields, ≤ 2 window fields, ≤ 24 sections, ≤ 10,000 rows, a bounded date range ≤ 92 days, spec ≤ 256 KB, zip ≤ 2 MB, a 5 s statement timeout, a lower EXPLAIN cost cap and no large-table sequential scans. Runtime controls: the `merchant_reports.policy` Platform Setting (`enabled` runner/Studio switch, `assetsEnabled` asset-bundle switch, read through a 5 s cache and invalidated after settings writes), per-merchant Studio suspension, 30 verifications/hour and 60 executions/hour, a daily DB-time budget (default 10 minutes), 50 codes with 20 versions each, one running execution per merchant plus a global semaphore (4), and a 60 s result cache keyed by `(merchant, spec, inputs)`. The merchant transcript prints the current asset policy; when assets are disabled, `required_assets` must be empty and `.zip` uploads are rejected.
+
+## 9.5 API error handling
+
+Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `400 SCHEMA_VALIDATION_ERROR` with the Zod issues. Admin execute returns `404 REPORT_NOT_FOUND` only when the code has no versions and `409 REPORT_NOT_PUBLISHED` with the latest status when versions exist but none is the published latest. Chrome save maps `P2002` to `409 REPORT_CHROME_DUPLICATE`, `P2003` to `409 REPORT_CHROME_REFERENCE_CONFLICT`, asset storage failures to `500 REPORT_CHROME_ASSET_SAVE_FAILED` and database failures to `500 REPORT_CHROME_SAVE_FAILED`, each with a reason. The admin portal renders returned diagnostics through `ReportDiagnosticsPanel`. The Studio also calls `POST /report-engine/specs/preview` to execute a verified draft with sample inputs and render the sandboxed paginated preview; nothing is persisted.
 
 ## 10. Security additions
 
 - `PII_MASKED` values are redacted after query execution unless the actor holds `piiUnmaskAuthorities` (default `security:write`).
 - Confidential AML reports require MLRO/Compliance access. A Security Admin may request `allowConfidentialAmlBypass`, but it applies only after a different MLRO/Security Admin approves the `REPORT_AML_BYPASS` request.
 - Chrome templates, inline chrome, `global_scoped_css` and custom SVG templates are sanitized. `<style>`, external `src`/`href`, `@import`, event handlers and executable URI schemes are rejected.
+- The client Paged.js preview runs in an opaque-origin iframe (`sandbox="allow-scripts allow-modals"`, no `allow-same-origin`) with a strict nonce CSP; the Paged.js polyfill is inlined and the parent/iframe protocol uses `postMessage` with render tokens. Report/chrome previews cannot enter the portal DOM or CSS.
 - Chrome `required_assets` are loaded during execution and during the Chrome preview.
 - Schema version 27 adds the AML bypass flag, latest-published uniqueness and append-only execution audit.
 

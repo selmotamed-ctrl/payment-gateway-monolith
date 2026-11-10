@@ -51,6 +51,7 @@ export { buildReportRepairPrompt } from "./transcript/ReportTranscriptBuilder";
 export { executeReport };
 export { inferReportAuthorities, canApplySecurityOverride, isActorAllowedByPolicy } from "./verifier/AuthorityInferenceEngine";
 export { validateMerchantReportScope } from "./verifier/MerchantScopeValidator";
+export { synthesizeDefaultInputs } from "./verifier/QuerySafetyAndOptValidator";
 export { PostgresReadOnlyReportExecutor } from "./runtime/PostgresReadOnlyExecutor";
 export { executeTransformPipeline } from "./compiler/TransformPipelineExecutor";
 export { compileDatasetQueryToSql } from "./compiler/QueryAstToSqlCompiler";
@@ -84,6 +85,8 @@ export interface ReportExecutionBundle {
   resolvedHeaderChrome: ReportChromeSpec | null;
   resolvedFooterChrome: ReportChromeSpec | null;
   datasets: Record<string, Array<Record<string, unknown>>>;
+  /** True when a dataset hit its row cap, so the caller can warn the user. */
+  datasetTruncated: Record<string, boolean>;
   assetDataUrls: Record<string, string>;
   actor: {
     name: string;
@@ -109,6 +112,14 @@ export interface ExecuteReportInput {
   assetBundleId?: string | null;
   /** Only set when a second MLRO/Security Admin approved the AML bypass. */
   allowConfidentialAmlBypass?: boolean;
+  /**
+   * Merchant line (E04): the engine injects this identity into every dataset
+   * alias, verifies the compiled aliases, and asserts every returned row.
+   */
+  merchantScope?: {
+    merchantId: string;
+    onViolation?: (info: { datasetId: string; expected: string; received: string | null }) => void | Promise<void>;
+  };
 }
 
 export interface ReportEngine {
@@ -223,6 +234,13 @@ export class ReportInputValidationError extends Error {
   }
 }
 
+export class ReportMerchantScopeViolationError extends Error {
+  readonly code = "MERCHANT_SCOPE_VIOLATION";
+  constructor(message: string) {
+    super(message);
+  }
+}
+
 export class ReportAccessDeniedError extends Error {
   readonly code: "CONFIDENTIAL_AML_ACCESS_REQUIRED" | "REPORT_ACCESS_DENIED";
   constructor(code: "CONFIDENTIAL_AML_ACCESS_REQUIRED" | "REPORT_ACCESS_DENIED", message: string) {
@@ -274,6 +292,9 @@ function redactPiiRow(
   if (canUnmaskPii(actor, host)) return row;
   const output = { ...row };
   for (const select of ds.select) {
+    // Aggregates never reveal row-level PII (COUNT(email) is a number), so
+    // masking them would corrupt totals (A18).
+    if (select.aggregate) continue;
     const alias = select.table_alias ?? ds.from_alias;
     const model = alias === ds.from_alias
       ? host.models[ds.from_model]
@@ -381,35 +402,97 @@ async function executeReport(
   }
 
   const datasets: DatasetMap = {};
+  const datasetTruncated: Record<string, boolean> = {};
   let rowCountTotal = 0;
   let servedByNode = "readonly-pool";
   const datasetResults = await mapWithConcurrency(spec.datasets, 4, async (ds) => {
-    const compiled = compileDatasetQueryToSql(ds, host, inputsUsed, {
-      userId: input.actor.userId,
-      nowUtcIso: nowIso,
-    });
+    const compiled = compileDatasetQueryToSql(
+      ds,
+      host,
+      inputsUsed,
+      {
+        userId: input.actor.userId,
+        nowUtcIso: nowIso,
+      },
+      input.merchantScope ? { merchantScope: { merchantId: input.merchantScope.merchantId } } : undefined,
+    );
+    const rowCap = Math.min(ds.limit, host.globalLimits.maxRowsPerDataset);
     const result = await host.dbReadOnlyPort.executeReadOnlyQuery({
       sql: compiled.sql,
       values: compiled.values,
       timeoutMs: host.globalLimits.maxQueryTimeoutMs,
-      maxRows: Math.min(ds.limit, host.globalLimits.maxRowsPerDataset),
+      maxRows: rowCap,
       queryLabel: `report_${spec.report.code}_${ds.dataset_id}`,
     });
+    let rows: Array<Record<string, unknown>> = result.rows;
+    if (input.merchantScope) {
+      const expectedAliases = [ds.from_alias, ...ds.joins.map((join) => join.alias)];
+      const injected = new Set(compiled.scopeAliases ?? []);
+      if (expectedAliases.some((alias) => !injected.has(alias))) {
+        throw new ReportMerchantScopeViolationError(
+          `The merchant scope predicate was not injected on every alias of dataset "${ds.dataset_id}"`,
+        );
+      }
+      for (const row of rows) {
+        const received = row.__scope_merchant_id;
+        if (received !== input.merchantScope.merchantId) {
+          await input.merchantScope.onViolation?.({
+            datasetId: ds.dataset_id,
+            expected: input.merchantScope.merchantId,
+            received: received === null || received === undefined ? null : String(received),
+          });
+          throw new ReportMerchantScopeViolationError(
+            `Dataset "${ds.dataset_id}" returned a row outside the merchant scope`,
+          );
+        }
+      }
+      rows = rows.map((row) => {
+        const { __scope_merchant_id: _scope, ...rest } = row;
+        return rest;
+      });
+    }
     return {
       datasetId: ds.dataset_id,
-      rows: result.rows.map((row) => redactPiiRow(ds, row, host, input.actor)),
+      rows: rows.map((row) => redactPiiRow(ds, row, host, input.actor)),
       rowCount: result.rowCount,
+      truncated: result.rowCount >= rowCap,
       servedBy: result.servedBy,
     };
   });
   for (const result of datasetResults) {
     datasets[result.datasetId] = result.rows;
+    datasetTruncated[result.datasetId] = result.truncated;
     rowCountTotal += result.rowCount;
     servedByNode = result.servedBy;
   }
 
+  // Comparison baselines are part of the stored verification bundle. When the
+  // caller carries the bundle id but not the asset buffers, load the
+  // COMPARISON_BASELINE_DATA assets from the asset store (A04); otherwise a
+  // matching report would mark every live row as discrepant.
+  const resolvedAssets: Record<string, { mimeType: string; buffer: Buffer; sha256: string }> = {
+    ...(input.assets ?? {}),
+  };
+  if (input.assetBundleId) {
+    for (const required of spec.required_assets) {
+      if (required.purpose !== "COMPARISON_BASELINE_DATA") continue;
+      if (resolvedAssets[required.asset_key]) continue;
+      const stored = await host.assetStoragePort.getAssetBuffer({
+        bundleId: input.assetBundleId,
+        relativePath: required.file_name,
+      });
+      if (stored) {
+        resolvedAssets[required.asset_key] = {
+          mimeType: stored.mimeType,
+          buffer: stored.buffer,
+          sha256: stored.sha256,
+        };
+      }
+    }
+  }
+
   const comparisonAssets: Record<string, Array<Record<string, unknown>>> = {};
-  for (const [assetKey, asset] of Object.entries(input.assets ?? {})) {
+  for (const [assetKey, asset] of Object.entries(resolvedAssets)) {
     if (asset.mimeType === "application/json") {
       try {
         const parsedAsset = JSON.parse(asset.buffer.toString("utf-8"));
@@ -444,7 +527,7 @@ async function executeReport(
     }
   }
   for (const required of spec.required_assets) {
-    let asset = input.assets?.[required.asset_key];
+    let asset = resolvedAssets[required.asset_key];
     if (!asset && input.assetBundleId) {
       const stored = await host.assetStoragePort.getAssetBuffer({
         bundleId: input.assetBundleId,
@@ -494,6 +577,7 @@ async function executeReport(
     resolvedHeaderChrome: chrome.header,
     resolvedFooterChrome: chrome.footer,
     datasets: finalDatasets,
+    datasetTruncated,
     assetDataUrls,
     actor: {
       name: input.actor.email ?? input.actor.userId,

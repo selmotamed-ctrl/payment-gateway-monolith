@@ -16,7 +16,7 @@ import { ApiError, isApiError, toErrorEnvelope } from "./lib/error";
 import { REPORT_ENGINE_JSON_LIMIT } from "./api/internal/adminReportEngine";
 
 /** Admin report-engine routes: authoring bodies carry the asset zip. */
-export const REPORT_ENGINE_BODY_PATH = /^\/internal\/admin\/report-engine(\/|$)/;
+export const REPORT_ENGINE_BODY_PATH = /^\/internal\/(admin|merchant)\/report-engine(\/|$)/;
 import { requestLoggerMiddleware, setAccessLogSink } from "./lib/requestLogger";
 import { rawBodyMiddleware } from "./lib/rawBody";
 import { client } from "./prisma/client";

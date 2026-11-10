@@ -22,7 +22,15 @@ import {
 } from "@/components/ui";
 import { formatDateTime } from "@/components/ledger/format";
 import { api } from "@/state/api";
-import type { ReportDiagnostic } from "@/lib/reportEngineSdk";
+import {
+  ReportPagedPreviewSurface,
+  renderChromeHtml,
+  renderReportSectionsToHtml,
+  specTranslator,
+  type ReportDescriptorSpec,
+  type ReportDiagnostic,
+  type ReportExecutionBundle,
+} from "@/lib/reportEngineSdk";
 import {
   ASSET_ZIP_TOO_LARGE_MESSAGE,
   diagnosticsFromApiError,
@@ -154,6 +162,11 @@ const ReportsStudioPage = dc(() => {
   const zipFile = ref<File | null>(null);
   const zipError = ref("");
   const verification = ref<VerificationReport | null>(null);
+  const previewBundle = ref<ReportExecutionBundle | null>(null);
+  const previewLocale = ref("en");
+  const previewPages = ref(1);
+  const previewLoading = ref(false);
+  const previewRef = ref<{ printClientSideVectorPdf?: () => void } | null>(null);
   /** Editor JSON and zip the current `verification` was produced from; any edit invalidates it. */
   const verifiedInput = ref<{ json: string; zip: File | null } | null>(null);
   const savedSpecId = ref<string | null>(null);
@@ -183,6 +196,12 @@ const ReportsStudioPage = dc(() => {
   );
   const verificationStale = computed(() => Boolean(verification.value) && !verificationCurrent.value);
   const canSave = computed(() => verificationCurrent.value && verification.value?.valid === true && !zipError.value);
+  watch(
+    () => [specJson.value, zipFile.value],
+    () => {
+      previewBundle.value = null;
+    },
+  );
   const canChrome = computed(() => hasOneOfAuthorities(["reports.studio", "security:write"]));
   const canApproveAml = computed(() => ["MLRO", "SECURITY_ADMIN"].includes(String(user.value?.userInfo?.role ?? "")));
   const canOverride = computed(
@@ -191,6 +210,31 @@ const ReportsStudioPage = dc(() => {
       String(user.value?.userInfo?.role ?? "") === "SECURITY_ADMIN",
   );
   const isVerified = computed(() => verificationCurrent.value && verification.value?.valid === true);
+  const previewSectionsHtml = computed(() =>
+    previewBundle.value
+      ? renderReportSectionsToHtml({ bundle: previewBundle.value, locale: previewLocale.value, t })
+      : "",
+  );
+  const previewHeaderHtml = computed(() =>
+    previewBundle.value
+      ? renderChromeHtml({
+          chrome: previewBundle.value.resolvedHeaderChrome,
+          bundle: previewBundle.value,
+          locale: previewLocale.value,
+          t,
+        })
+      : "",
+  );
+  const previewFooterHtml = computed(() =>
+    previewBundle.value
+      ? renderChromeHtml({
+          chrome: previewBundle.value.resolvedFooterChrome,
+          bundle: previewBundle.value,
+          locale: previewLocale.value,
+          t,
+        })
+      : "",
+  );
 
   const fail = (caught: unknown, withDiagnostics = true) => {
     if (withDiagnostics) actionDiagnostics.value = diagnosticsFromApiError(caught);
@@ -285,6 +329,7 @@ const ReportsStudioPage = dc(() => {
 
   const clearEditor = () => {
     specJson.value = "";
+    previewBundle.value = null;
     specFile.value = null;
     zipFile.value = null;
     verification.value = null;
@@ -300,6 +345,7 @@ const ReportsStudioPage = dc(() => {
 
   const verify = async () => {
     if (zipError.value) return;
+    previewBundle.value = null;
     busy.value = true;
     resetFeedback();
     verification.value = null;
@@ -315,6 +361,29 @@ const ReportsStudioPage = dc(() => {
       fail(caught);
     } finally {
       busy.value = false;
+    }
+  };
+
+  const runPreview = async () => {
+    if (!canSave.value) return;
+    previewLoading.value = true;
+    resetFeedback();
+    try {
+      const assetsZipBase64 = zipFile.value ? await fileToBase64(zipFile.value) : undefined;
+      const response = await api.post(urlsMap.reportEnginePreview, {
+        specJson: specJson.value,
+        assetsZipBase64,
+      });
+      const bundle = response.data?.bundle as ReportExecutionBundle | undefined;
+      previewBundle.value = bundle ?? null;
+      previewLocale.value = bundle?.spec.i18n.default_locale ?? "en";
+      previewPages.value = 1;
+      if (bundle) showSnackBar({ message: t("Preview generated"), type: "success" });
+    } catch (caught) {
+      previewBundle.value = null;
+      fail(caught);
+    } finally {
+      previewLoading.value = false;
     }
   };
 
@@ -863,6 +932,70 @@ const ReportsStudioPage = dc(() => {
 
         {verification.value && renderScorecard(verification.value)}
         {verification.value && renderAuthority(verification.value)}
+
+        {verification.value?.valid && (
+          <SurfaceCard
+            title={t("Step 5 — Draft preview")}
+            subtitle={t("Renders the verified draft with sample inputs; nothing is saved or published")}
+            v-slots={{
+              headerActions: () => (
+                <div class="d-flex flex-wrap align-center ga-2">
+                  <VBtn
+                    size="small"
+                    variant="tonal"
+                    prependIcon="mdi-eye-outline"
+                    loading={previewLoading.value}
+                    disabled={!canSave.value}
+                    onClick={() => void runPreview()}
+                  >
+                    {t("Generate preview")}
+                  </VBtn>
+                  {previewBundle.value && (
+                    <>
+                      <MetaPill color="info">{`${previewPages.value} ${t("pages")}`}</MetaPill>
+                      <MonoRef value={previewBundle.value.verificationSha256} truncate={12} />
+                      <VBtn
+                        size="small"
+                        variant="tonal"
+                        prependIcon="mdi-printer-outline"
+                        onClick={() => previewRef.value?.printClientSideVectorPdf?.()}
+                      >
+                        {t("Print")}
+                      </VBtn>
+                    </>
+                  )}
+                </div>
+              ),
+            }}
+          >
+            {previewBundle.value ? (
+              <div class="d-flex flex-column ga-3">
+                <SegmentedTabs
+                  modelValue={previewLocale.value}
+                  onUpdate:modelValue={(next: string) => (previewLocale.value = next)}
+                  tabs={Object.keys(previewBundle.value.spec.i18n.locales).map((entry) => ({
+                    label: entry.toUpperCase(),
+                    value: entry,
+                  }))}
+                  ariaLabel={t("Output language")}
+                />
+                <ReportPagedPreviewSurface
+                  ref={previewRef}
+                  bundle={previewBundle.value}
+                  selectedLocale={previewLocale.value}
+                  renderedSectionsHtml={previewSectionsHtml.value}
+                  renderedHeaderHtml={previewHeaderHtml.value}
+                  renderedFooterHtml={previewFooterHtml.value}
+                  onPageCountChanged={(pages: number) => (previewPages.value = pages)}
+                />
+              </div>
+            ) : (
+              <p class="text-body-2 text-medium-emphasis mb-0">
+                {t("Generate a preview to see the exact paginated pages before saving or publishing.")}
+              </p>
+            )}
+          </SurfaceCard>
+        )}
 
         {savedSpecCode.value && (
           <div class="d-flex flex-column ga-3">

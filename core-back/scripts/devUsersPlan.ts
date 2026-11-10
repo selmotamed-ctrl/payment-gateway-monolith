@@ -57,6 +57,8 @@ export const ADMIN_ALL_AUTHORITIES = [
   "reconciliation:write",
   "report:approve",
   "report:review",
+  "report_engine:author",
+  "report_engine:run",
   "security:read",
   "security:write",
   "settings:read",

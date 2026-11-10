@@ -1,39 +1,55 @@
+import Decimal from "decimal.js";
 import type { ReportChromeSpec } from "../types/chromeSpec";
 import type { ReportDescriptorSpec, ReportSectionSpec } from "../types/reportSpec";
 import type { ReportExecutionBundle } from "../types/bundle";
 import { renderChartSectionToSvg } from "../components/ReportChartRenderer";
 import { renderVectorDrawSectionToSvg } from "../components/ReportVectorDrawRenderer";
-import { sanitizeReportHtml } from "../sanitizer/ClientDomSanitizer";
+import { sanitizeReportCss, sanitizeReportHtml } from "../sanitizer/ClientDomSanitizer";
+import {
+  DEFAULT_MINOR_UNIT_DECIMALS,
+  DEFAULT_REPORT_CURRENCY,
+  formatDecimal,
+  minorToMajor,
+  toDecimal,
+} from "../utils/decimalFormat";
 
+type Row = Record<string, unknown>;
+type Translate = (key: string) => string;
+
+/**
+ * Formats one report value. Money never goes through a JS float: CURRENCY_MINOR values are scaled from minor
+ * units with decimal.js and printed with the host's 3 decimals and thousands separators.
+ */
 export function formatReportValue(
   value: unknown,
   hint: string,
-  currency = "LYD",
-  t?: (key: string) => string,
+  currency: string = DEFAULT_REPORT_CURRENCY,
+  t?: Translate,
 ): string {
   if (value === null || value === undefined || value === "") return "—";
-  const numeric = Number(value);
+  const decimal = toDecimal(value);
   switch (hint) {
     case "CURRENCY_MINOR":
-      return Number.isFinite(numeric)
-        ? `${(numeric / 1000).toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ${currency}`
-        : String(value);
+      return decimal ? `${formatDecimal(minorToMajor(decimal), DEFAULT_MINOR_UNIT_DECIMALS)} ${currency}` : String(value);
     case "DECIMAL_2":
-      return Number.isFinite(numeric) ? numeric.toFixed(2) : String(value);
+      return decimal ? formatDecimal(decimal, 2) : String(value);
     case "DECIMAL_4":
-      return Number.isFinite(numeric) ? numeric.toFixed(4) : String(value);
+      return decimal ? formatDecimal(decimal, 4) : String(value);
     case "PERCENT_BPS":
-      return Number.isFinite(numeric) ? `${(numeric / 100).toFixed(2)}%` : String(value);
+      return decimal ? `${formatDecimal(decimal.div(100), 2)}%` : String(value);
     case "PERCENT_RATIO":
-      return Number.isFinite(numeric) ? `${numeric.toFixed(2)}%` : String(value);
+      return decimal ? `${formatDecimal(decimal, 2)}%` : String(value);
     case "INTEGER":
-      return Number.isFinite(numeric) ? String(Math.round(numeric)) : String(value);
+      return decimal ? formatDecimal(decimal, 0) : String(value);
     case "DATE_ISO":
       return String(value).slice(0, 10);
     case "DATETIME_ISO":
       return String(value).replace("T", " ").slice(0, 19);
-    case "ENUM_TRANSLATED":
-      return t?.(`enum.${String(value)}`) ?? String(value);
+    case "ENUM_TRANSLATED": {
+      const key = `enum.${String(value)}`;
+      const translated = t?.(key);
+      return translated && translated !== key ? translated : String(value);
+    }
     default:
       return String(value);
   }
@@ -44,235 +60,407 @@ const escapeHtml = (value: unknown): string =>
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 
-const tFor = (spec: ReportDescriptorSpec, locale: string) => (key: string): string =>
-  spec.i18n.locales[locale]?.[key] ?? spec.i18n.locales[spec.i18n.default_locale]?.[key] ?? key;
+/** Engine labels printed inside the report, keyed by the REPORT locale (not the portal UI locale). */
+const ENGINE_LABELS: Record<string, Record<string, string>> = {
+  en: { total: "Total", noData: "No data" },
+  ar: { total: "الإجمالي", noData: "لا توجد بيانات" },
+};
 
-const isVisible = (
-  section: ReportSectionSpec,
-  spec: ReportDescriptorSpec,
-  datasets: Record<string, Array<Record<string, unknown>>>,
-  inputs: Record<string, unknown>,
-): boolean => {
-  const visibility = (section as { visibility?: { dataset_id?: string; when?: string; input_key?: string; equals_value?: unknown } }).visibility;
+const engineLabel = (locale: string, key: "total" | "noData"): string =>
+  ENGINE_LABELS[locale]?.[key] ?? ENGINE_LABELS[locale.split("-")[0] ?? ""]?.[key] ?? ENGINE_LABELS.en![key]!;
+
+/** Looks a key up in the spec dictionary for the selected locale, then the default locale. */
+export function specLookup(spec: Pick<ReportDescriptorSpec, "i18n">, locale: string, key: string): string | undefined {
+  return spec.i18n.locales[locale]?.[key] ?? spec.i18n.locales[spec.i18n.default_locale]?.[key];
+}
+
+/** The report translator: the spec's own dictionary, never the portal catalogue (which would print raw keys). */
+export const specTranslator = (spec: Pick<ReportDescriptorSpec, "i18n">, locale: string): Translate => (key) =>
+  specLookup(spec, locale, key) ?? key;
+
+export const isRtlLocale = (locale: string): boolean => /^(ar|he|fa|ur)(-|$)/i.test(locale);
+
+const logicalAlign = (align: string | undefined): string =>
+  align === "END" ? "end" : align === "CENTER" ? "center" : "start";
+
+const isVisible = (section: ReportSectionSpec, datasets: Record<string, Row[]>, inputs: Record<string, unknown>): boolean => {
+  const visibility = (section as { visibility?: { dataset_id?: string; when?: string; input_key?: string; equals_value?: unknown } })
+    .visibility;
   if (!visibility || visibility.when === "ALWAYS" || !visibility.when) return true;
-  if (visibility.when === "DATASET_NOT_EMPTY") {
-    return (datasets[visibility.dataset_id ?? ""] ?? []).length > 0;
-  }
-  if (visibility.when === "DATASET_EMPTY") {
-    return (datasets[visibility.dataset_id ?? ""] ?? []).length === 0;
-  }
-  if (visibility.when === "INPUT_EQUALS") {
-    return String(inputs[visibility.input_key ?? ""]) === String(visibility.equals_value);
-  }
+  if (visibility.when === "DATASET_NOT_EMPTY") return (datasets[visibility.dataset_id ?? ""] ?? []).length > 0;
+  if (visibility.when === "DATASET_EMPTY") return (datasets[visibility.dataset_id ?? ""] ?? []).length === 0;
+  if (visibility.when === "INPUT_EQUALS") return String(inputs[visibility.input_key ?? ""]) === String(visibility.equals_value);
   return true;
 };
 
-const summaryValue = (
-  rows: Array<Record<string, unknown>>,
-  field: string,
-  kind: string,
-): string | null => {
-  if (kind === "NONE" || kind === "LABEL_TOTAL") return kind === "LABEL_TOTAL" ? "Total" : null;
-  const values = rows.map((row) => Number(row[field] ?? 0)).filter((value) => Number.isFinite(value));
-  if (values.length === 0) return "0";
+const CURRENCY_FIELDS = ["currency", "currency_code", "currencyCode"];
+const isCurrencyCode = (value: unknown): value is string => typeof value === "string" && /^[A-Z]{3}$/.test(value);
+
+/** Resolves the currency for a value: the row's own currency column, then a currency input, then bundle meta. */
+export function resolveCurrency(bundle: Pick<ReportExecutionBundle, "inputsUsed"> & { currency?: string }, row?: Row): string {
+  for (const field of CURRENCY_FIELDS) {
+    if (row && isCurrencyCode(row[field])) return row[field] as string;
+  }
+  for (const field of CURRENCY_FIELDS) {
+    const input = bundle.inputsUsed?.[field];
+    if (isCurrencyCode(input)) return input;
+  }
+  if (isCurrencyCode(bundle.currency)) return bundle.currency;
+  return DEFAULT_REPORT_CURRENCY;
+}
+
+type SummaryKind = "NONE" | "SUM" | "AVG" | "COUNT" | "MIN" | "MAX" | "LABEL_TOTAL";
+
+/**
+ * Footer summary for a table column, computed with decimal.js. Null/empty cells are skipped; COUNT counts
+ * non-empty cells of any type. The result is formatted with the column's format hint.
+ */
+export function computeFooterSummary(params: {
+  rows: Row[];
+  field: string;
+  kind: SummaryKind | string;
+  formatHint: string;
+  currency: string;
+  totalLabel: string;
+}): string | null {
+  const { rows, field, kind, formatHint, currency, totalLabel } = params;
+  if (kind === "NONE") return null;
+  if (kind === "LABEL_TOTAL") return totalLabel;
+  const present = rows.map((row) => row[field]).filter((value) => value !== null && value !== undefined && value !== "");
+  if (kind === "COUNT") return formatDecimal(new Decimal(present.length), 0);
+  const numbers = present.map(toDecimal).filter((value): value is Decimal => value !== null);
+  const numericHint = ["CURRENCY_MINOR", "DECIMAL_2", "DECIMAL_4", "PERCENT_BPS", "PERCENT_RATIO", "INTEGER"].includes(formatHint)
+    ? formatHint
+    : "DECIMAL_2";
+  if (numbers.length === 0) return kind === "SUM" ? formatReportValue("0", numericHint, currency) : "—";
+  let result: Decimal;
   switch (kind) {
     case "SUM":
-      return String(values.reduce((sum, value) => sum + value, 0));
+      result = Decimal.sum(...numbers);
+      break;
     case "AVG":
-      return String(values.reduce((sum, value) => sum + value, 0) / values.length);
-    case "COUNT":
-      return String(values.length);
+      result = Decimal.sum(...numbers).div(numbers.length);
+      break;
     case "MIN":
-      return String(Math.min(...values));
+      result = Decimal.min(...numbers);
+      break;
     case "MAX":
-      return String(Math.max(...values));
+      result = Decimal.max(...numbers);
+      break;
     default:
       return null;
   }
+  const hint = kind === "AVG" && (numericHint === "INTEGER" || formatHint === "RAW") ? "DECIMAL_2" : numericHint;
+  return formatReportValue(result.toFixed(), hint, currency);
+}
+
+const BADGE_TONES: Record<string, string> = {
+  ACTIVE: "SUCCESS", APPROVED: "SUCCESS", COMPLETED: "SUCCESS", SETTLED: "SUCCESS", SUCCEEDED: "SUCCESS",
+  MATCHED: "SUCCESS", PAID: "SUCCESS", POSTED: "SUCCESS", VERIFIED: "SUCCESS",
+  PENDING: "WARNING", PENDING_REVIEW: "WARNING", PROCESSING: "INFO", DRAFT: "WARNING", PARTIAL: "WARNING",
+  FAILED: "DANGER", REJECTED: "DANGER", DECLINED: "DANGER", CANCELLED: "DANGER", REVERSED: "DANGER",
+  SUSPENDED: "DANGER", BLOCKED: "DANGER", DISCREPANT: "DANGER", MISMATCH: "DANGER",
 };
+
+type TableColumn = Extract<ReportSectionSpec, { section_type: "DATA_TABLE" }>["columns"][number];
+
+/** Expands pivot wildcard columns (`field: "*"`) into one column per data key not used by an explicit column. */
+export function expandTableColumns(
+  columns: TableColumn[],
+  rows: Row[],
+  lookup: (key: string) => string | undefined,
+): Array<TableColumn & { header: string }> {
+  const explicit = new Set(columns.filter((col) => col.field !== "*").map((col) => col.field));
+  const result: Array<TableColumn & { header: string }> = [];
+  for (const col of columns) {
+    if (col.field !== "*") {
+      result.push({ ...col, header: lookup(col.header_i18n_key) ?? col.header_i18n_key });
+      continue;
+    }
+    const keys: string[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      for (const key of Object.keys(row)) {
+        if (explicit.has(key) || seen.has(key) || key.startsWith("_")) continue;
+        seen.add(key);
+        keys.push(key);
+      }
+    }
+    const share = col.width_percent && keys.length > 0 ? Math.max(1, col.width_percent / keys.length) : undefined;
+    for (const key of keys) {
+      result.push({
+        ...col,
+        field: key,
+        width_percent: share,
+        header: lookup(`${col.header_i18n_key}.${key}`) ?? key,
+      });
+    }
+  }
+  return result;
+}
+
+const PAPER_MM: Record<string, { width: number; height: number }> = {
+  A4: { width: 210, height: 297 },
+  LETTER: { width: 215.9, height: 279.4 },
+  LEGAL: { width: 215.9, height: 355.6 },
+};
+
+/** Width of the page content box in CSS px for the paper size, orientation and side margins. */
+export function pageContentWidthPx(spec: ReportDescriptorSpec, orientation: "PORTRAIT" | "LANDSCAPE"): number {
+  const paper = PAPER_MM[spec.page_layout.paper_size] ?? PAPER_MM.A4!;
+  const widthMm = orientation === "LANDSCAPE" ? paper.height : paper.width;
+  const margins = spec.page_layout.margins_mm ?? { left: 14, right: 14 };
+  return Math.round(((widthMm - (margins.left ?? 14) - (margins.right ?? 14)) * 96) / 25.4);
+}
 
 export function renderReportSectionsToHtml(params: {
   bundle: ReportExecutionBundle;
   locale: string;
-  t?: (key: string) => string;
+  /** @deprecated Ignored for report content: labels always come from the spec dictionary of `locale`. */
+  t?: Translate;
 }): string {
   const { bundle, locale } = params;
   const spec = bundle.spec;
-  const t = params.t ?? tFor(spec, locale);
-  const isRtl = locale === "ar" || locale.startsWith("ar-");
-  const currency = hostCurrency(spec);
+  const t = specTranslator(spec, locale);
+  const lookup = (key: string) => specLookup(spec, locale, key);
+  const isRtl = isRtlLocale(locale);
+  const totalLabel = lookup("report.total") ?? engineLabel(locale, "total");
+  const noDataLabel = lookup("report.no_data") ?? engineLabel(locale, "noData");
+  const heading = (key: string | undefined, tag = "h3") => (key ? `<${tag} class="report-section-title">${escapeHtml(t(key))}</${tag}>` : "");
+  const subtitle = (key: string | undefined) => (key ? `<p class="report-section-subtitle">${escapeHtml(t(key))}</p>` : "");
+  let orientation: "PORTRAIT" | "LANDSCAPE" = spec.page_layout.orientation ?? "PORTRAIT";
 
-  return spec.sections
-    .filter((section) => isVisible(section, spec, bundle.datasets, bundle.inputsUsed))
-    .map((section) => {
-      switch (section.section_type) {
-        case "KPI_GRID": {
-          const cards = section.cards
-            .map((card) => {
-              const row = (bundle.datasets[card.dataset_id] ?? [])[card.row_index] ?? {};
-              const value = formatReportValue(row[card.value_field], card.format_hint, currency, t);
-              const delta = card.delta_field
-                ? formatReportValue(row[card.delta_field], card.format_hint, currency, t)
-                : null;
-              return `<div class="report-kpi-card report-tone-${card.tone.toLowerCase()}">
+  const renderSection = (section: ReportSectionSpec): string => {
+    switch (section.section_type) {
+      case "KPI_GRID": {
+        const cards = section.cards
+          .map((card) => {
+            const row = (bundle.datasets[card.dataset_id] ?? [])[card.row_index] ?? {};
+            const currency = resolveCurrency(bundle, row);
+            const value = formatReportValue(row[card.value_field], card.format_hint, currency, t);
+            const delta = card.delta_field ? formatReportValue(row[card.delta_field], card.format_hint, currency, t) : null;
+            return `<div class="report-kpi-card report-tone-${card.tone.toLowerCase()}">
                 <div class="report-kpi-label">${escapeHtml(t(card.label_i18n_key))}</div>
                 <div class="report-kpi-value">${escapeHtml(value)}</div>
                 ${delta ? `<div class="report-kpi-delta">${escapeHtml(delta)}</div>` : ""}
               </div>`;
-            })
-            .join("");
-          return `<section class="report-section report-kpi-section">
-            ${section.title_i18n_key ? `<h3>${escapeHtml(t(section.title_i18n_key))}</h3>` : ""}
-            <div class="report-kpi-grid" style="grid-template-columns:repeat(${section.columns},minmax(0,1fr))">${cards}</div>
+          })
+          .join("");
+        return `<section class="report-section report-kpi-section">
+            ${heading(section.title_i18n_key)}
+            <div class="report-kpi-grid" style="grid-template-columns:repeat(${Math.max(1, Math.min(6, section.columns))},minmax(0,1fr))">${cards}</div>
           </section>`;
-        }
+      }
 
-        case "DATA_TABLE": {
-          const rows = bundle.datasets[section.dataset_id] ?? [];
-          const head = section.columns
-            .map((col) => `<th style="text-align:${col.align.toLowerCase()}">${escapeHtml(t(col.header_i18n_key))}</th>`)
-            .join("");
-          const body = rows
-            .map(
-              (row) =>
-                `<tr>${section.columns
-                  .map((col) => {
-                    const raw = row[col.field];
-                    const value =
-                      col.format_hint === "BADGE"
-                        ? `<span class="report-badge report-badge-${escapeHtml(String(raw).toLowerCase())}">${escapeHtml(raw)}</span>`
-                        : escapeHtml(formatReportValue(raw, col.format_hint, currency));
-                    return `<td style="text-align:${col.align.toLowerCase()}">${value}</td>`;
-                  })
-                  .join("")}</tr>`,
-            )
-            .join("");
-          const foot = section.columns
-            .map((col) => {
-              const summary = summaryValue(rows, col.field, col.summary_footer);
-              return `<td style="text-align:${col.align.toLowerCase()}">${escapeHtml(summary ?? "")}</td>`;
-            })
-            .join("");
-          return `<section class="report-section">
-            ${section.title_i18n_key ? `<h3>${escapeHtml(t(section.title_i18n_key))}</h3>` : ""}
-            ${section.subtitle_i18n_key ? `<p class="report-section-subtitle">${escapeHtml(t(section.subtitle_i18n_key))}</p>` : ""}
-            <table class="report-data-table${section.zebra_striping ? " report-zebra" : ""}${section.repeat_header_on_page_break ? "" : " report-no-repeat-header"}">
+      case "DATA_TABLE": {
+        const rows = bundle.datasets[section.dataset_id] ?? [];
+        const columns = expandTableColumns(section.columns, rows, lookup);
+        const colgroup = columns.some((col) => col.width_percent)
+          ? `<colgroup>${columns.map((col) => (col.width_percent ? `<col style="width:${col.width_percent}%" />` : "<col />")).join("")}</colgroup>`
+          : "";
+        const head = columns
+          .map((col) => `<th style="text-align:${logicalAlign(col.align)}">${escapeHtml(col.header)}</th>`)
+          .join("");
+        const cell = (row: Row, col: (typeof columns)[number]): string => {
+          const raw = row[col.field];
+          if (col.format_hint === "BADGE") {
+            if (raw === null || raw === undefined || raw === "") return "—";
+            const key = String(raw);
+            const tone = (col.badge_tone_map?.[key] ?? BADGE_TONES[key.toUpperCase()] ?? "NEUTRAL").toLowerCase();
+            return `<span class="report-badge report-badge-${tone}">${escapeHtml(formatReportValue(raw, "ENUM_TRANSLATED", undefined, t))}</span>`;
+          }
+          return escapeHtml(formatReportValue(raw, col.format_hint, resolveCurrency(bundle, row), t));
+        };
+        const body = rows
+          .map((row) => `<tr>${columns.map((col) => `<td style="text-align:${logicalAlign(col.align)}">${cell(row, col)}</td>`).join("")}</tr>`)
+          .join("");
+        const summaries = columns.map((col) =>
+          computeFooterSummary({
+            rows,
+            field: col.field,
+            kind: col.summary_footer,
+            formatHint: col.format_hint,
+            currency: resolveCurrency(bundle, rows[0]),
+            totalLabel,
+          }),
+        );
+        const foot = summaries.some((value) => value !== null)
+          ? `<tfoot><tr>${columns
+              .map((col, index) => `<td style="text-align:${logicalAlign(col.align)}">${escapeHtml(summaries[index] ?? "")}</td>`)
+              .join("")}</tr></tfoot>`
+          : "";
+        const classes = [
+          "report-data-table",
+          section.zebra_striping ? "report-zebra" : "",
+          section.repeat_header_on_page_break === false ? "report-no-repeat-header" : "",
+          section.avoid_row_split === false ? "" : "report-avoid-row-split",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return `<section class="report-section report-table-section">
+            ${heading(section.title_i18n_key)}
+            ${subtitle(section.subtitle_i18n_key)}
+            <table class="${classes}">
+              ${colgroup}
               <thead><tr>${head}</tr></thead>
-              <tbody>${body || `<tr><td colspan="${section.columns.length}">—</td></tr>`}</tbody>
-              <tfoot><tr>${foot}</tr></tfoot>
+              <tbody>${body || `<tr><td class="report-empty-cell" colspan="${Math.max(1, columns.length)}">${escapeHtml(noDataLabel)}</td></tr>`}</tbody>
+              ${foot}
             </table>
           </section>`;
-        }
+      }
 
-        case "CHART": {
-          const svg = renderChartSectionToSvg({ section, datasets: bundle.datasets, t, isRtl });
-          return `<section class="report-section report-chart-box">
-            ${section.title_i18n_key ? `<h3>${escapeHtml(t(section.title_i18n_key))}</h3>` : ""}
-            ${section.subtitle_i18n_key ? `<p class="report-section-subtitle">${escapeHtml(t(section.subtitle_i18n_key))}</p>` : ""}
-            <div style="width:${section.width_percent}%">${svg}</div>
+      case "CHART": {
+        const svg = renderChartSectionToSvg({
+          section,
+          datasets: bundle.datasets,
+          t,
+          isRtl,
+          contentWidthPx: pageContentWidthPx(spec, orientation),
+        });
+        return `<section class="report-section report-chart-box">
+            ${heading(section.title_i18n_key)}
+            ${subtitle(section.subtitle_i18n_key)}
+            <div class="report-chart-frame" style="width:${section.width_percent}%">${svg}</div>
           </section>`;
-        }
+      }
 
-        case "VECTOR_DRAW": {
-          const svg = renderVectorDrawSectionToSvg({
-            section,
-            datasets: bundle.datasets,
-            t,
-            formatValue: (value, hint) => formatReportValue(value, hint, currency, t),
-            isRtl,
-          });
-          return `<section class="report-section report-draw-box">
-            ${section.title_i18n_key ? `<h3>${escapeHtml(t(section.title_i18n_key))}</h3>` : ""}
+      case "VECTOR_DRAW": {
+        const svg = renderVectorDrawSectionToSvg({
+          section,
+          datasets: bundle.datasets,
+          t,
+          formatValue: (value, hint) => formatReportValue(value, hint, resolveCurrency(bundle), t),
+          isRtl,
+        });
+        return `<section class="report-section report-draw-box">
+            ${heading(section.title_i18n_key)}
             ${svg}
           </section>`;
-        }
-
-        case "HTML_TEMPLATE": {
-          const html = section.html_template
-            .replace(/\{\{\s*\$t\.([a-zA-Z0-9_.-]+)\s*\}\}/g, (_m, key: string) => escapeHtml(t(key)))
-            .replace(/asset:\/\/([a-zA-Z0-9_-]+)/g, (_m, key: string) => bundle.assetDataUrls[key] ?? "");
-          return `<section class="report-section">
-            ${section.title_i18n_key ? `<h3>${escapeHtml(t(section.title_i18n_key))}</h3>` : ""}
-            ${sanitizeReportHtml(html)}
-            ${section.scoped_css ? `<style>${section.scoped_css}</style>` : ""}
-          </section>`;
-        }
-
-        case "IMAGE_BANNER": {
-          const src = bundle.assetDataUrls[section.asset_key];
-          return `<section class="report-section" style="text-align:${section.align.toLowerCase()}">
-            ${section.caption_i18n_key ? `<h3>${escapeHtml(t(section.caption_i18n_key))}</h3>` : ""}
-            ${src ? `<img src="${src}" alt="${escapeHtml(section.asset_key)}" style="max-height:${section.max_height_mm}mm;max-width:100%" />` : ""}
-          </section>`;
-        }
-
-        case "PAGE_BREAK":
-          return `<div class="report-page-break${section.orientation_after ? ` report-orientation-${section.orientation_after.toLowerCase()}` : ""}"></div>`;
       }
+
+      case "HTML_TEMPLATE": {
+        const html = section.html_template
+          .replace(/\{\{\s*\$t\.([a-zA-Z0-9_.-]+)\s*\}\}/g, (_m, key: string) => escapeHtml(t(key)))
+          .replace(/asset:\/\/([a-zA-Z0-9_-]+)/g, (_m, key: string) => bundle.assetDataUrls?.[key] ?? "");
+        return `<section class="report-section report-html-section" data-section-id="${escapeHtml(section.section_id)}">
+            ${heading(section.title_i18n_key)}
+            ${sanitizeReportHtml(html)}
+            ${section.scoped_css ? `<style>${sanitizeReportCss(section.scoped_css)}</style>` : ""}
+          </section>`;
+      }
+
+      case "IMAGE_BANNER": {
+        const src = bundle.assetDataUrls?.[section.asset_key];
+        const safeSrc = src && /^data:image\//i.test(src) ? src : "";
+        return `<section class="report-section report-image-section" style="text-align:${logicalAlign(section.align)}">
+            ${safeSrc ? `<img src="${escapeHtml(safeSrc)}" alt="${escapeHtml(section.caption_i18n_key ? t(section.caption_i18n_key) : section.asset_key)}" style="max-height:${section.max_height_mm}mm;max-width:100%" />` : ""}
+            ${section.caption_i18n_key ? `<p class="report-image-caption">${escapeHtml(t(section.caption_i18n_key))}</p>` : ""}
+          </section>`;
+      }
+
+      case "PAGE_BREAK":
+        return "";
+    }
+    return "";
+  };
+
+  // Content is grouped between page breaks; a PAGE_BREAK's orientation applies to the group that FOLLOWS it
+  // through a named page on the wrapper.
+  const groups: Array<{ orientation: string | null; breakBefore: boolean; html: string[] }> = [
+    { orientation: null, breakBefore: false, html: [] },
+  ];
+  for (const section of spec.sections) {
+    if (!isVisible(section, bundle.datasets, bundle.inputsUsed ?? {})) continue;
+    if (section.section_type === "PAGE_BREAK") {
+      const previous = groups[groups.length - 1]!;
+      if (section.orientation_after) orientation = section.orientation_after;
+      groups.push({
+        orientation: section.orientation_after ? section.orientation_after.toLowerCase() : previous.orientation,
+        breakBefore: true,
+        html: [],
+      });
+      continue;
+    }
+    groups[groups.length - 1]!.html.push(renderSection(section));
+  }
+  if (groups.length > 1 && groups[0]!.html.length === 0) {
+    groups.shift();
+    groups[0]!.breakBefore = false;
+  }
+  return groups
+    .map((group) => {
+      const classes = [
+        "report-page-group",
+        group.breakBefore ? "report-page-break" : "",
+        group.orientation ? `report-orientation-${group.orientation}` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return `<div class="${classes}">\n${group.html.join("\n")}\n</div>`;
     })
     .join("\n");
 }
 
+/** Renders a header/footer chrome with its variables bound; labels come from the chrome dictionary. */
 export function renderChromeHtml(params: {
   chrome: ReportChromeSpec | null;
   bundle: ReportExecutionBundle;
   locale: string;
-  t?: (key: string) => string;
+  /** @deprecated Ignored: chrome labels come from the chrome dictionary, then the report dictionary. */
+  t?: Translate;
 }): string {
   const { chrome, bundle, locale } = params;
   if (!chrome) return "";
   const spec = bundle.spec;
-  const t = params.t ?? ((key: string) => chrome.i18n.locales[locale]?.[key] ?? chrome.i18n.locales[chrome.i18n.default_locale]?.[key] ?? spec.i18n.locales[locale]?.[key] ?? key);
-  const specT = (key: string): string =>
-    spec.i18n.locales[locale]?.[key] ??
-    spec.i18n.locales[spec.i18n.default_locale]?.[key] ??
+  const t: Translate = (key) =>
+    chrome.i18n.locales[locale]?.[key] ??
+    chrome.i18n.locales[chrome.i18n.default_locale]?.[key] ??
+    (spec ? specLookup(spec, locale, key) : undefined) ??
     key;
+  const specT = (key: string): string => (spec ? specLookup(spec, locale, key) ?? "" : "");
   const variables: Record<string, string> = {
     institutionName: bundle.institutionName ?? "Libyan National Payment Gateway",
-    reportTitle: specT("report.title"),
+    reportTitle: specT("report.title") || spec?.report.code || "",
     reportSubtitle: specT("report.subtitle"),
-    reportCode: spec.report.code,
-    reportVersion: String(spec.report.version),
-    generatedAtIso: bundle.executedAtIso,
-    generatedAtFormatted: bundle.executedAtIso.replace("T", " ").slice(0, 19),
-    actorName: bundle.actor.name,
-    actorEmail: bundle.actor.email,
-    actorRole: bundle.actor.role,
+    reportCode: spec?.report.code ?? "",
+    reportVersion: String(spec?.report.version ?? ""),
+    generatedAtIso: bundle.executedAtIso ?? "",
+    generatedAtFormatted: String(bundle.executedAtIso ?? "").replace("T", " ").slice(0, 19),
+    actorName: bundle.actor?.name ?? "",
+    actorEmail: bundle.actor?.email ?? "",
+    actorRole: bundle.actor?.role ?? "",
     selectedLocale: locale,
-    classificationBadge: spec.report.classification,
-    verificationHashShort: bundle.verificationSha256.slice(0, 12),
+    classificationBadge: spec?.report.classification ?? "",
+    verificationHashShort: String(bundle.verificationSha256 ?? "").slice(0, 12),
     ...(bundle.chromeVariables ?? {}),
   };
   let html = chrome.template.html;
   html = html.replace(/\{\{\s*\$t\.([a-zA-Z0-9_.-]+)\s*\}\}/g, (_m, key: string) => escapeHtml(t(key)));
   html = html.replace(/\{\{\s*pageNumber\s*\}\}/g, '<span class="report-page-number"></span>');
   html = html.replace(/\{\{\s*totalPages\s*\}\}/g, '<span class="report-total-pages"></span>');
-  for (const [key, value] of Object.entries(variables)) {
-    html = html.replace(new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "g"), escapeHtml(value));
-  }
-  for (const asset of chrome.required_assets) {
+  html = html.replace(/\{\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\}\}/g, (match, key: string) =>
+    Object.prototype.hasOwnProperty.call(variables, key) ? escapeHtml(variables[key]) : match,
+  );
+  for (const asset of chrome.required_assets ?? []) {
     if (!asset.max_width_mm && !asset.max_height_mm) continue;
     const escapedKey = asset.asset_key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const imagePattern = new RegExp(`(<img[^>]*src=["']asset://${escapedKey}["'][^>]*)>`, "gi");
+    const imagePattern = new RegExp(`(<img[^>]*src=["']asset://${escapedKey}["'][^>]*?)\\s*/?>`, "gi");
     html = html.replace(imagePattern, (match, attrs: string) => {
       if (/\bstyle=/i.test(attrs)) return match;
       const styles = [
         asset.max_width_mm ? `max-width:${asset.max_width_mm}mm` : "",
         asset.max_height_mm ? `max-height:${asset.max_height_mm}mm` : "",
-      ].filter(Boolean).join(";");
+      ]
+        .filter(Boolean)
+        .join(";");
       return `${attrs} style="${styles}" />`;
     });
   }
-  html = html.replace(/asset:\/\/([a-zA-Z0-9_-]+)/g, (_m, key: string) => bundle.assetDataUrls[key] ?? "");
-  const borderClass = chrome.chrome.border_style === "NONE"
-    ? ""
-    : ` report-chrome-border-${chrome.chrome.border_style.toLowerCase().replaceAll("_", "-")}`;
+  html = html.replace(/asset:\/\/([a-zA-Z0-9_-]+)/g, (_m, key: string) => bundle.assetDataUrls?.[key] ?? "");
+  const borderClass =
+    chrome.chrome.border_style === "NONE" ? "" : ` report-chrome-border-${chrome.chrome.border_style.toLowerCase().replaceAll("_", "-")}`;
   return `<div class="report-chrome report-chrome-${chrome.chrome.chrome_type.toLowerCase()}${borderClass}" style="min-height:${chrome.chrome.height_mm}mm">${sanitizeReportHtml(html)}</div>`;
-}
-
-function hostCurrency(spec: ReportDescriptorSpec): string {
-  void spec;
-  return "LYD";
 }

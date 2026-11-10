@@ -23,7 +23,7 @@ tests:
 gaps:
   - `SERVER_PDF` is not available from the UI; the print path uses Paged.js in the browser and ECharts SVG.
   - The catalog has no archive/restore action for report versions; Chrome headers/footers can be archived.
-  - The Studio does not yet expose a visual drag-and-drop section builder; sections are edited as structured JSON with a live preview.
+  - The Studio does not yet expose a visual drag-and-drop section builder; sections are edited as structured JSON with a draft preview.
   - The `.zip` upload stores assets locally on the core host; there is no object-store picker.
 ---
 
@@ -86,7 +86,7 @@ The Catalog has All / Backoffice Internal / Merchant Reports tabs. Chrome select
 
 The Studio reports the domain filter using catalog domains (`LEDGER`, `PAYMENTS`, ...), can download the Chrome transcript, supports clearing an override, and can request a confidential AML bypass. An MLRO or Security Admin sees the pending bypass list and can approve/reject it; maker and checker must differ.
 
-The Studio loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type. Report execution returns `404 REPORT_NOT_FOUND` only when the code does not exist and `409 REPORT_NOT_PUBLISHED` when a non-published version exists.
+The Studio renders a read-only draft preview through `POST /report-engine/specs/preview` (sample inputs, no persistence) inside the same opaque-origin sandboxed Paged.js surface as the Catalog. It loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type. Report execution returns `404 REPORT_NOT_FOUND` only when the code does not exist and `409 REPORT_NOT_PUBLISHED` when a non-published version exists.
 
 ## 8. Layout and action polish (2026-11-09)
 

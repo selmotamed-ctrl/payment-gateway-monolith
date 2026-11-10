@@ -78,6 +78,12 @@ export const useSections = () => {
                     icon: "mdi-page-layout-header-footer",
                     if: () => hasOneOfAuthorities(["reports.studio", "security:write"]),
                 },
+                {
+                    label: t("Merchant Reports"),
+                    name: "ReportsMerchantReports",
+                    icon: "mdi-account-file-text-outline",
+                    if: () => hasOneOfAuthorities(["report:review", "report:approve", "security:read", "security:write"]),
+                },
             ],
         },
         {

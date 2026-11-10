@@ -78,6 +78,22 @@ router.post(
 );
 
 router.post(
+  "/specs/preview",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/report-engine/specs/preview",
+    schema: z
+      .object({
+        specJson: z.union([z.string(), z.record(z.string(), z.unknown())]),
+        assetsZipBase64: z.string().optional(),
+        inputs: z.record(z.string(), z.unknown()).optional(),
+        locale: z.string().max(16).optional(),
+      })
+      .strict(),
+  }),
+);
+
+router.post(
   "/specs",
   coreForward({
     method: "POST",
@@ -112,6 +128,19 @@ router.post(
   coreForward({
     method: "POST",
     path: ({ params }) => `/internal/admin/report-engine/specs/${params.id}/archive`,
+    paramsSchema: idParams,
+    schema: z.object({}).strict(),
+  }),
+);
+
+// Publishing an already-verified version carries the Security Admin override
+// (B08): the admin-back proxy must expose the core route or the Studio's
+// "Publish" row action 404s at the edge.
+router.post(
+  "/specs/:id/publish",
+  coreForward({
+    method: "POST",
+    path: ({ params }) => `/internal/admin/report-engine/specs/${params.id}/publish`,
     paramsSchema: idParams,
     schema: z.object({}).strict(),
   }),
@@ -254,5 +283,59 @@ router.post(
     path: ({ params }) => `/internal/admin/report-engine/chrome/${params.id}/set-default`,
     paramsSchema: idParams,
     schema: z.object({ isDefault: z.boolean() }).strict(),
+  }),
+);
+
+const merchantIdParams = z.object({ merchantId: z.string().uuid() }).strict();
+
+router.get(
+  "/merchant-reports",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/report-engine/merchant-reports",
+    querySchema: z
+      .object({
+        merchantId: z.string().uuid().optional(),
+        search: z.string().max(200).optional(),
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(200).optional(),
+        sortKey: z.string().max(64).optional(),
+        sortDirection: z.enum(["asc", "desc"]).optional(),
+      })
+      .passthrough(),
+  }),
+);
+
+router.get(
+  "/merchant-executions",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/report-engine/merchant-executions",
+    querySchema: z
+      .object({
+        merchantId: z.string().uuid().optional(),
+        limit: z.coerce.number().int().min(1).max(500).optional(),
+      })
+      .passthrough(),
+  }),
+);
+
+router.post(
+  "/merchant-reports/:merchantId/suspend",
+  coreForward({
+    method: "POST",
+    path: ({ params }) => `/internal/admin/report-engine/merchant-reports/${params.merchantId}/suspend`,
+    paramsSchema: merchantIdParams,
+    schema: z.object({ reason: z.string().trim().min(5).max(500) }).strict(),
+  }),
+);
+
+router.post(
+  "/merchant-reports/:merchantId/resume",
+  coreForward({
+    method: "POST",
+    path: ({ params }) => `/internal/admin/report-engine/merchant-reports/${params.merchantId}/resume`,
+    paramsSchema: merchantIdParams,
+    schema: z.object({}).strict(),
   }),
 );
