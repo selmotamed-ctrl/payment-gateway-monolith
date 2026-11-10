@@ -381,6 +381,7 @@
 | `tests/unit/commerce-i18n.test.ts` | 127 | 7 |
 | `tests/unit/commerce-owners-revalidation.test.ts` | 103 | 12 |
 | `tests/unit/commission-tiers.test.ts` | 67 | 5 |
+| `tests/unit/dark-overlay-colors.test.ts` | 16 | 1 |
 | `tests/unit/dispute-evidence.test.ts` | 101 | 7 |
 | `tests/unit/frontend-security-admin.test.ts` | 188 | 21 |
 | `tests/unit/frontend-security-checkout.test.ts` | 335 | 42 |
@@ -400,5 +401,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **395**
-- Total literal test declarations: **4039**
+- Total files: **396**
+- Total literal test declarations: **4040**

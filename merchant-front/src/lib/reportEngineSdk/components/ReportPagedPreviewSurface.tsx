@@ -1,16 +1,15 @@
 import { defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue";
-import pagedPolyfill from "../print/paged.polyfill.min.js?raw";
 import {
   buildPagedMediaHtmlDocument,
   type ReportExecutionBundle,
 } from "../print/ClientVectorPdfExporter";
 
 /**
- * Paged.js runs inside an opaque-origin sandboxed iframe (no allow-same-origin):
- * the report can never touch the portal origin, its styles cannot leak into the
- * app, and communication only happens through postMessage. A strict nonce CSP
- * allows the inlined Paged.js polyfill and the report's own inline styles, and
- * nothing else.
+ * Paged.js runs inside a sandboxed same-origin iframe. The strict meta CSP
+ * allows only same-origin scripts and the report's inline styles; the report
+ * cannot execute inline scripts or reach the portal DOM. Keeping the iframe
+ * same-origin lets the parent print the paginated document directly and lets
+ * the portal CSP (`script-src 'self'`) load the external Paged.js polyfill.
  */
 export const ReportPagedPreviewSurface = defineComponent({
   name: "ReportPagedPreviewSurface",
@@ -28,8 +27,6 @@ export const ReportPagedPreviewSurface = defineComponent({
     const rendering = ref<boolean>(false);
     let renderToken = 0;
 
-    const nonceFor = (token: number): string => `report-${token}-${Math.random().toString(36).slice(2)}`;
-
     const buildSrcdoc = (token: number): string => {
       const base = buildPagedMediaHtmlDocument({
         bundle: props.bundle,
@@ -38,45 +35,24 @@ export const ReportPagedPreviewSurface = defineComponent({
         renderedHeaderHtml: props.renderedHeaderHtml,
         renderedFooterHtml: props.renderedFooterHtml,
       });
-      const nonce = nonceFor(token);
       const csp = [
         "default-src 'none'",
         "style-src 'unsafe-inline'",
         "img-src data: asset:",
-        "font-src data:",
-        `script-src 'nonce-${nonce}'`,
+        "font-src 'self' data:",
+        "script-src 'self'",
         "connect-src 'none'",
         "frame-src 'none'",
         "object-src 'none'",
         "base-uri 'none'",
         "form-action 'none'",
       ].join("; ");
-      const bridge = `
-(function(){
-  var token = ${JSON.stringify(String(token))};
-  function send(pages){
-    try { parent.postMessage({ type: "report:pageCount", token: token, pages: pages }, "*"); } catch (_) {}
-  }
-  function count(){
-    var pages = document.querySelectorAll(".pagedjs_page").length;
-    if (pages > 0) send(pages);
-    return pages;
-  }
-  document.addEventListener("pagedjs:rendered", count);
-  window.addEventListener("load", function(){
-    setTimeout(count, 50);
-    setTimeout(count, 400);
-    setTimeout(count, 1200);
-  });
-  window.addEventListener("message", function(event){
-    if (event && event.data && event.data.type === "report:print") {
-      try { window.print(); } catch (_) {}
-    }
-  });
-})();`;
+      // External same-origin scripts are allowed by the portal CSP
+      // (`script-src 'self'`) and by the meta policy above; no inline script
+      // needs a nonce or a matching header hash.
       const head = `<meta http-equiv="Content-Security-Policy" content="${csp}" />` +
-        `<script nonce="${nonce}">${pagedPolyfill}<\/script>` +
-        `<script nonce="${nonce}">${bridge}<\/script>`;
+        `<script src="/report-engine/paged.polyfill.min.js"></script>` +
+        `<script src="/report-engine/paged-preview-bridge.js" data-report-token="${token}"></script>`;
       return base.replace("</head>", `${head}</head>`);
     };
 
@@ -96,8 +72,9 @@ export const ReportPagedPreviewSurface = defineComponent({
       const iframe = iframeRef.value;
       if (!iframe || event.source !== iframe.contentWindow) return;
       const data = event.data as { type?: string; token?: string; pages?: number } | null;
-      if (!data || data.type !== "report:pageCount") return;
+      if (!data) return;
       if (data.token !== String(renderToken)) return;
+      if (data.type !== "report:pageCount") return;
       const pages = Number(data.pages ?? 0);
       if (Number.isFinite(pages) && pages > 0 && pages !== totalPages.value) {
         totalPages.value = pages;
@@ -106,7 +83,43 @@ export const ReportPagedPreviewSurface = defineComponent({
     };
 
     const printClientSideVectorPdf = () => {
-      iframeRef.value?.contentWindow?.postMessage({ type: "report:print" }, "*");
+      const iframe = iframeRef.value;
+      const win = iframe?.contentWindow;
+      if (!iframe || !win) return;
+      // Print a copy of the already-paginated report document in a fresh
+      // same-origin window. Printing the preview iframe directly is unreliable
+      // in Chrome (it can print the portal shell or a blank page).
+      const doc = iframe.contentDocument;
+      if (doc) {
+        const html = doc.documentElement.outerHTML.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+        const printWindow = window.open("", "_blank");
+        if (printWindow) {
+          try {
+            printWindow.document.open();
+            printWindow.document.write(`<!DOCTYPE html>${html}`);
+            printWindow.document.close();
+            const printCopy = () => {
+              try {
+                printWindow.focus();
+                printWindow.print();
+              } catch {
+                // The bridge below remains the fallback.
+              }
+            };
+            printWindow.onafterprint = () => printWindow.close();
+            if (printWindow.document.fonts?.ready) {
+              printWindow.document.fonts.ready.then(printCopy).catch(printCopy);
+            } else {
+              setTimeout(printCopy, 300);
+            }
+            return;
+          } catch {
+            printWindow.close();
+          }
+        }
+      }
+      // Fallback: ask the bridge to call window.print() inside the iframe.
+      win.postMessage({ type: "report:print" }, "*");
     };
 
     watch(
@@ -138,7 +151,7 @@ export const ReportPagedPreviewSurface = defineComponent({
         <iframe
           ref={iframeRef}
           title="Report Paginated Vector Preview"
-          sandbox="allow-scripts allow-modals"
+          sandbox="allow-same-origin allow-scripts allow-modals"
           class="report-paged-preview-frame"
           style="width: 100%; min-height: min(860px, 74vh); border: 1px solid var(--pg-border-subtle); border-radius: 8px; background: var(--pg-bg-canvas);"
         />

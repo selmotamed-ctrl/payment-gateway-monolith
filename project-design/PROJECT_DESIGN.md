@@ -7547,7 +7547,7 @@ Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `4
 - `PII_MASKED` values are redacted after query execution unless the actor holds `piiUnmaskAuthorities` (default `security:write`).
 - Confidential AML reports require MLRO/Compliance access. A Security Admin may request `allowConfidentialAmlBypass`, but it applies only after a different MLRO/Security Admin approves the `REPORT_AML_BYPASS` request.
 - Chrome templates, inline chrome, `global_scoped_css` and custom SVG templates are sanitized. `<style>`, external `src`/`href`, `@import`, event handlers and executable URI schemes are rejected.
-- The client Paged.js preview runs in an opaque-origin iframe (`sandbox="allow-scripts allow-modals"`, no `allow-same-origin`) with a strict nonce CSP; the Paged.js polyfill is inlined and the parent/iframe protocol uses `postMessage` with render tokens. Report/chrome previews cannot enter the portal DOM or CSS.
+- The client Paged.js preview runs in a sandboxed same-origin iframe (`sandbox="allow-same-origin allow-scripts allow-modals"`) with a strict meta CSP (`script-src 'self'`, no inline scripts or executable URLs), external same-origin Paged.js scripts, and `postMessage` page counts with render tokens. The report cannot execute scripts or inject styles into the portal head; printing copies the paginated DOM into a fresh same-origin print window (scripts stripped), with a bridge `window.print()` fallback. Report font URLs are absolute same-origin URLs because Paged.js resolves CSS `url()` values against the `about:srcdoc` document URL; relative font paths make its CSS parser throw and leave a blank preview. The chrome preview uses a separate script-free sandboxed surface.
 - Chrome `required_assets` are loaded during execution and during the Chrome preview.
 - Schema version 27 adds the AML bypass flag, latest-published uniqueness and append-only execution audit.
 
@@ -9017,6 +9017,10 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 - **Lazy heavy chunks (GAP-060).** `utils/xlsx` is a lazy facade (the exceljs/xlsx chunk loads on the first export click) and charts load through `components/EChart/lazy.tsx` (`defineAsyncComponent`); `tests/unit/admin-bundle-lazy.test.ts` fails if the dashboard, profitability page, gateway health drawer or table header import the heavy libraries statically.
 - **Translation gate (GAP-061).** `tests/unit/i18n-catalogue.test.ts` (scanner `tests/unit/helpers/i18nScan.ts`) fails on a literal `t()` key with no catalogue entry that is not in the shrink-only baselines `tests/unit/fixtures/i18n-missing-*.json`, and on a key whose Arabic value conflicts across catalogue files (the last spread silently won). The 18 conflicts were resolved; the existing missing keys stay in the baselines and are filled over time (`UPDATE_I18N_BASELINE=1` rewrites a baseline after a fix).
 
+## Dark teleported overlays (2026-11-10)
+
+Vuetify teleports dialogs, menus and drawers under a `.v-overlay__content` / `.v-navigation-drawer` element that receives the theme class and CSS variables but not a base text color. Custom surface components (`FormModal`, `SlideOverDrawer`, SafeguardDialog, the guide search surface, and any raw dialog content) therefore inherited the body's black text while sitting on the dark surface. `fintech-minimal.css` now sets `color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`; component-specific text colors and status tones still override it. The same rule is mirrored in the merchant, checkout and Fake Rails portals, and `tests/unit/dark-overlay-colors.test.ts` guards all four stylesheets.
+
 ---
 
 <a id="admin-uiroutes"></a>
@@ -10334,7 +10338,7 @@ The Catalog has All / Backoffice Internal / Merchant Reports tabs. Chrome select
 
 The Studio reports the domain filter using catalog domains (`LEDGER`, `PAYMENTS`, ...), can download the Chrome transcript, supports clearing an override, and can request a confidential AML bypass. An MLRO or Security Admin sees the pending bypass list and can approve/reject it; maker and checker must differ.
 
-The Studio renders a read-only draft preview through `POST /report-engine/specs/preview` (sample inputs, no persistence) inside the same opaque-origin sandboxed Paged.js surface as the Catalog. It loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type. Report execution returns `404 REPORT_NOT_FOUND` only when the code does not exist and `409 REPORT_NOT_PUBLISHED` when a non-published version exists.
+The Studio renders a read-only draft preview through `POST /report-engine/specs/preview` (sample inputs, no persistence) inside the same sandboxed Paged.js surface as the Catalog. It loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type. Report execution returns `404 REPORT_NOT_FOUND` only when the code does not exist and `409 REPORT_NOT_PUBLISHED` when a non-published version exists.
 
 ## 8. Layout and action polish (2026-11-09)
 
@@ -10731,6 +10735,10 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 
 - **Logout and cookie sessions (GAP-019).** Logout calls the merchant-back logout route (server-side revoke, cookie cleared) and clears the local session; `utils/security/sessionToken.ts` supports the `cookie-session` sentinel and the `x-pg-csrf` header used when `SESSION_COOKIE_MODE=true`. The POS stream (`sseFetch`) and the API client use the same header helper.
 - **XLSX 0.20.3 (GAP-029).** `xlsx` comes from `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` and `@types/xlsx` was dropped.
+
+## Dark teleported overlays (2026-11-10)
+
+Merchant dialogs, menus and drawers share the admin shell rule: `.v-overlay__content` and `.v-navigation-drawer__content` inherit `color: rgb(var(--v-theme-on-surface))`, so custom `FormModal`/`SlideOverDrawer` content is readable in dark mode. See `admin-ui.system` and `tests/unit/dark-overlay-colors.test.ts`.
 
 ---
 
@@ -11366,6 +11374,10 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 ## Gap resolutions (2026-11-05)
 
 - **XLSX and dependencies (GAP-029, RESOLVED).** `xlsx` is pinned to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`, `@types/xlsx` was dropped and the unused `@prisma/client` dependency was removed from `checkout-front/package.json`.
+
+## Dark teleported overlays (2026-11-10)
+
+Checkout dialogs/drawers use the shared overlay text-color rule (`color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`), keeping custom modal content readable in dark mode.
 
 ---
 
@@ -12589,6 +12601,10 @@ curl -X POST http://127.0.0.1:4104/portal-api/webhooks/$TX_ID/fire \
 ## Security hardening (2026-11-05)
 
 fake-rails-front: the postMessage target is `VITE_CHECKOUT_ORIGIN`, otherwise the embedding parent's origin, never `*`; `redirect_url` is validated as http(s) without credentials. The live feed opens its EventSource with a 30-second single-use ticket obtained from `POST /portal-api/transactions/stream-ticket` (`streamUrl()` is now async), never the session token, and the hosted redirect page and widget frame post approve/decline with the session-bound `X-Hosted-Action-Token` (`postHostedAction`) (GAP-024, resolved 2026-11-05). The tester token itself remains in localStorage. New env: `VITE_CHECKOUT_ORIGIN`.
+
+## Dark teleported overlays (2026-11-10)
+
+The Fake Rails tester portal applies the same overlay text-color rule as the other portals, fixing black-on-dark custom dialog/drawer content in dark mode.
 
 ---
 

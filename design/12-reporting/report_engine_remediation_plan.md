@@ -70,7 +70,7 @@ Severity: **P0** wrong data or security, **P1** broken feature, **P2** missing p
 | :--- | :--- | :--- | :--- |
 | C01 | P0 | Footer totals computed in float, unscaled, unformatted; COUNT counts numerics only; "Total" hard-coded. | decimal.js aggregation, null-skipping, formatted with the column hint, translated label. |
 | C02 | P0 | `Number(value)/1000` for money; currency always LYD. | decimal.js scaling; currency from row field (`currency`), input, or bundle meta. |
-| C03 | P1 | Paged.js preview: stylesheets passed as `[]`, Polisher styles injected into the portal `<head>`, unpaginated body left in place, no cancel/cleanup → no pagination, running chrome, page counts; CSS leaks into the app. | Render inside an opaque-origin sandboxed iframe (`sandbox="allow-scripts allow-modals"`, no `allow-same-origin`) whose `srcdoc` carries a strict CSP (nonce script only, `img-src data:`), the inlined Paged.js polyfill and the sanitized report; parent ↔ iframe via `postMessage` (page count, print request). Render tokens cancel stale renders. |
+| C03 | P1 | Paged.js preview: stylesheets passed as `[]`, Polisher styles injected into the portal `<head>`, unpaginated body left in place, no cancel/cleanup → no pagination, running chrome, page counts; CSS leaks into the app. | Render inside a sandboxed same-origin iframe (`sandbox="allow-same-origin allow-scripts allow-modals"`) whose `srcdoc` carries a strict CSP (`script-src 'self'`, `img-src data:`) and loads the external same-origin Paged.js polyfill (report fonts use absolute same-origin URLs because Paged.js resolves CSS `url()` against `about:srcdoc`); the sanitized report cannot execute inline scripts. Parent ↔ iframe via `postMessage` (page count); printing copies the already-paginated DOM into a fresh same-origin print window (scripts stripped), which avoids Chrome printing the portal shell or a blank frame. Render tokens cancel stale renders. |
 | C04 | P1 | App `t` passed into renderer → report labels render as raw keys. | Renderer always uses the spec dictionary for the selected locale; app `t` only for engine chrome labels. |
 | C05 | P1 | `ENUM_TRANSLATED` never translates. | Pass spec `t`, key convention `enum.<VALUE>` (documented in transcript). |
 | C06 | P1 | Required booleans never seeded → 400. | `resolveInputDefaults` seeds `false`. |
@@ -126,7 +126,7 @@ Requirement: merchant report authoring, transcript and execution are **completel
 ## 3. Decisions and deviations
 
 - **Upload transport:** route-scoped 24 MB JSON/base64 limits instead of plan §9.2 multipart; keeps the strict zod edge contract. Zip cap stays 15 MB, checked in the client.
-- **Paged.js isolation:** opaque-origin iframe with scripts allowed and a nonce CSP, not `allow-same-origin`; the parent never touches the iframe DOM, so the report cannot reach the portal origin even if sanitization failed.
+- **Paged.js isolation:** sandboxed same-origin iframe with a strict meta CSP (`script-src 'self'`, no inline scripts) and an external same-origin Paged.js polyfill; the report cannot execute scripts, and printing uses a fresh same-origin copy of the paginated DOM.
 - **Exports:** Excel via the shared pipeline is the only primary export (portal standard); CSV is dropped from report pages.
 - **Merchant SDK** remains a mirrored copy (no shared frontend package); a test asserts the mirror is identical.
 - **Merchant Studio (owner, 2026-11-11):** approved on the condition that abuse and resource exhaustion are prevented — hence E05's hard limits, separate pool, per-merchant concurrency/rate/DB-time budget, quotas and the kill switch. The merchant identity predicate is engine-injected and verified three times (compile, post-compile AST, returned rows); the spec is never trusted for scoping.
@@ -165,7 +165,7 @@ All four workstreams landed in one change set on `optomizations-plan`.
 ### WS-C — client SDK
 
 - C01/C02/C05/C09/C11 are enforced in the admin renderer and byte-identically mirrored to `merchant-front`.
-- C03 the preview is an opaque-origin `sandbox="allow-scripts allow-modals"` iframe with a nonce CSP, inlined Paged.js polyfill, `postMessage` page counts/print and render tokens; it can no longer touch the portal origin or inject styles into the portal head.
+- C03 the preview is a sandboxed same-origin iframe with a strict meta CSP, external same-origin Paged.js polyfill, `postMessage` page counts and render tokens; it cannot execute inline scripts or inject styles into the portal head.
 - C04 input labels/help/enum labels use the spec dictionary via a `translate` prop.
 - C06 required booleans default to `false`; C07 sends the chrome mode and code separately; C08 exports one XLSX sheet per dataset with translated headers/formatted values and drops CSV.
 - C10 adds the client validation mirror, `static_filter`, dependent clearing, local→ISO datetime conversion, YESTERDAY and type-aware presets.

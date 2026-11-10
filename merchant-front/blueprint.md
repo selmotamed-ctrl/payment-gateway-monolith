@@ -390,6 +390,10 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 - **Logout and cookie sessions (GAP-019).** Logout calls the merchant-back logout route (server-side revoke, cookie cleared) and clears the local session; `utils/security/sessionToken.ts` supports the `cookie-session` sentinel and the `x-pg-csrf` header used when `SESSION_COOKIE_MODE=true`. The POS stream (`sseFetch`) and the API client use the same header helper.
 - **XLSX 0.20.3 (GAP-029).** `xlsx` comes from `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` and `@types/xlsx` was dropped.
 
+## Dark teleported overlays (2026-11-10)
+
+Merchant dialogs, menus and drawers share the admin shell rule: `.v-overlay__content` and `.v-navigation-drawer__content` inherit `color: rgb(var(--v-theme-on-surface))`, so custom `FormModal`/`SlideOverDrawer` content is readable in dark mode. See `admin-ui.system` and `tests/unit/dark-overlay-colors.test.ts`.
+
 ## Merchant Guide and Developer API
 
 > Status: `partial` · Last verified: 2026-11-04

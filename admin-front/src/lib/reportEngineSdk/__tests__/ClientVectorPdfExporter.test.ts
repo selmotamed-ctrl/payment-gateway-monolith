@@ -43,6 +43,7 @@ describe("RE-T19: paged media document builder", () => {
       renderedSectionsHtml: '<table class="report-data-table"><thead><tr><th>اليوم</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table>',
       renderedHeaderHtml: "<div>header</div>",
       renderedFooterHtml: "<div>footer</div>",
+      assetOrigin: "https://admin.test",
     });
     expect(html).toContain('<html lang="ar" dir="rtl">');
     expect(html).toContain("@page");
@@ -53,5 +54,9 @@ describe("RE-T19: paged media document builder", () => {
     expect(html).toContain('<header class="report-running-header">');
     expect(html).toContain('<footer class="report-running-footer">');
     expect(html).toContain("Report Arabic");
+    // Paged.js resolves CSS url() values against about:srcdoc; report fonts
+    // must therefore be absolute same-origin URLs.
+    expect(html).toMatch(/src: url\("https?:\/\/[^"]+\/report-engine\/fonts\/plus-jakarta-sans-400-normal\.ttf"\)/);
+    expect(html).not.toContain('url("/report-engine/fonts/');
   });
 });

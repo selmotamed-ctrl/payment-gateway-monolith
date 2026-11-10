@@ -1,7 +1,7 @@
 /**
  * Allow-list sanitizer for report HTML/SVG and scoped CSS.
  *
- * Defense in depth only: the report is rendered inside an opaque-origin sandboxed iframe with a strict CSP, so even
+ * Defense in depth only: the report is rendered inside a sandboxed iframe with a strict CSP, so even
  * markup that slipped through could not reach the portal origin. The sanitizer is a deterministic string tokenizer
  * (same output in the browser and in unit tests): every tag is re-serialised from its parsed parts, unknown tags are
  * dropped, active containers are dropped with their content, attributes are allow-listed, URL attributes are

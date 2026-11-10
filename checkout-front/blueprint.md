@@ -322,6 +322,10 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 
 - **XLSX and dependencies (GAP-029, RESOLVED).** `xlsx` is pinned to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`, `@types/xlsx` was dropped and the unused `@prisma/client` dependency was removed from `checkout-front/package.json`.
 
+## Dark teleported overlays (2026-11-10)
+
+Checkout dialogs/drawers use the shared overlay text-color rule (`color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`), keeping custom modal content readable in dark mode.
+
 ## Checkout Help Center
 
 > Status: `partial` · Last verified: 2026-11-03

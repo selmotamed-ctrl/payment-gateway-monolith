@@ -1,7 +1,4 @@
 import * as echarts from "echarts";
-import jakartaSans from "@/assets/fonts/plus-jakarta-sans-400-normal.ttf?inline";
-import cairo from "@/assets/fonts/cairo-400-normal.ttf?inline";
-import jetbrainsMono from "@/assets/fonts/jetbrains-mono-latin-600-normal.woff2?inline";
 import type { ReportExecutionBundle } from "../types/bundle";
 
 export type { ReportExecutionBundle };
@@ -33,6 +30,8 @@ export function buildPagedMediaHtmlDocument(params: {
   renderedSectionsHtml: string;
   renderedHeaderHtml: string;
   renderedFooterHtml: string;
+  /** Override the same-origin base used for report font URLs (tests/SSR). */
+  assetOrigin?: string;
 }): string {
   const { bundle, locale, renderedSectionsHtml, renderedHeaderHtml, renderedFooterHtml } = params;
   const { page_layout } = bundle.spec;
@@ -40,6 +39,11 @@ export function buildPagedMediaHtmlDocument(params: {
   const dir = isRtl ? "rtl" : "ltr";
   const pageSizeCss = `${page_layout.paper_size} ${page_layout.orientation.toLowerCase()}`;
   const m = page_layout.margins_mm;
+  // Paged.js resolves CSS url() values against the srcdoc document URL
+  // (`about:srcdoc`), so relative paths are invalid. Use absolute same-origin
+  // URLs for the report fonts.
+  const assetOrigin =
+    params.assetOrigin ?? (typeof window !== "undefined" ? window.location.origin : "");
 
   return `<!DOCTYPE html>
 <html lang="${locale}" dir="${dir}">
@@ -49,19 +53,19 @@ export function buildPagedMediaHtmlDocument(params: {
   <style>
     @font-face {
       font-family: "Report Sans";
-      src: url("${jakartaSans}") format("truetype");
+      src: url("${assetOrigin}/report-engine/fonts/plus-jakarta-sans-400-normal.ttf") format("truetype");
       font-weight: 200 800;
       font-style: normal;
     }
     @font-face {
       font-family: "Report Arabic";
-      src: url("${cairo}") format("truetype");
+      src: url("${assetOrigin}/report-engine/fonts/cairo-400-normal.ttf") format("truetype");
       font-weight: 200 900;
       font-style: normal;
     }
     @font-face {
       font-family: "Report Mono";
-      src: url("${jetbrainsMono}") format("woff2");
+      src: url("${assetOrigin}/report-engine/fonts/jetbrains-mono-latin-600-normal.woff2") format("woff2");
       font-weight: 600;
       font-style: normal;
     }

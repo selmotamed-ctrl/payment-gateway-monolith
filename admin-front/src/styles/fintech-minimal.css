@@ -311,6 +311,19 @@ html[dir="rtl"] .pg-heading {
   -webkit-backdrop-filter: blur(4px);
 }
 
+
+/*
+ * Teleported overlays (dialogs, menus, drawers) get the Vuetify theme class and
+ * CSS variables, but Vuetify does not set a base `color` on the overlay
+ * content. Custom modal surfaces such as FormModal therefore inherited the
+ * black body color while sitting on a dark surface. Set the on-surface color
+ * once for every overlay; component-specific colors still override it.
+ */
+.v-overlay__content,
+.v-navigation-drawer__content {
+  color: rgb(var(--v-theme-on-surface));
+}
+
 .v-dialog > .v-overlay__content > .v-card,
 .pg-form-modal {
   border-radius: var(--pg-radius-lg) !important;
