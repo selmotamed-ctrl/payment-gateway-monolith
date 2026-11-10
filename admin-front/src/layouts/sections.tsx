@@ -57,6 +57,30 @@ export const useSections = () => {
             ],
         },
         {
+            title: t("Reporting"),
+            icon: "mdi-file-chart-outline",
+            routes: [
+                {
+                    label: t("Report Catalog"),
+                    name: "ReportsCatalog",
+                    icon: "mdi-file-chart-outline",
+                    if: () => hasOneOfAuthorities(["reports.draft", "report_engine:run", "report_engine:author", "report:review", "report:approve", "security:write"]),
+                },
+                {
+                    label: t("Report Studio"),
+                    name: "ReportsStudio",
+                    icon: "mdi-robot-outline",
+                    if: () => hasOneOfAuthorities(["reports.studio", "reports.draft", "report_engine:author", "report:review", "report:approve", "security:write"]),
+                },
+                {
+                    label: t("Report Headers & Footers"),
+                    name: "ReportsChrome",
+                    icon: "mdi-page-layout-header-footer",
+                    if: () => hasOneOfAuthorities(["reports.studio", "security:write"]),
+                },
+            ],
+        },
+        {
             title: t("Onboarding"),
             icon: "mdi-account-convert-outline",
             routes: [

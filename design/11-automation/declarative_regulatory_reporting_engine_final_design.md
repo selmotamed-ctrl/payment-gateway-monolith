@@ -90,7 +90,7 @@ Build one declarative regulatory reporting engine that can generate, validate, v
 
 ## 6. Data model
 
-Schema version 26+ (current version 25). The final model generalizes section 2.1 of the XSD plan.
+Schema versions 28+ (the report-engine SDK owns versions 26 and 27; the first version of this design was drafted against version 25). The final model generalizes section 2.1 of the XSD plan.
 
 ### 6.1 Enums
 

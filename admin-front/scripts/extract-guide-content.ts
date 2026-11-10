@@ -861,7 +861,7 @@ const main = (): void => {
 
     const expectedCounts: Record<keyof typeof counts, number> = {
         books: 14,
-        articles: 134,
+        articles: 135,
         glossaryTerms: 151,
         safeguardCards: 25,
         safeguardChecklistItems: 112,
@@ -869,7 +869,7 @@ const main = (): void => {
         readingPaths: 8,
         quickAnswers: 58,
         dataBlocks: 3,
-        contextMapScreens: 28,
+        contextMapScreens: 29,
         errorCodes: 19,
         edgeCases: 140,
     };

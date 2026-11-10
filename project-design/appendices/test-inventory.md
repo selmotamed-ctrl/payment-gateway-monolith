@@ -79,7 +79,7 @@
 | `core-back/test/engine/visible-rails.test.ts` | 307 | 15 |
 | `core-back/test/exhaustive/01-schema/check-constraints-and-triggers.test.ts` | 466 | 25 |
 | `core-back/test/exhaustive/01-schema/indexes-and-query-plans.test.ts` | 166 | 6 |
-| `core-back/test/exhaustive/01-schema/models-and-columns.test.ts` | 302 | 23 |
+| `core-back/test/exhaustive/01-schema/models-and-columns.test.ts` | 304 | 23 |
 | `core-back/test/exhaustive/01-schema/unique-and-fk-constraints.test.ts` | 327 | 15 |
 | `core-back/test/exhaustive/02-ledger/all-15-templates-matrix.test.ts` | 240 | 8 |
 | `core-back/test/exhaustive/02-ledger/checkpoints-and-invariant.test.ts` | 319 | 9 |
@@ -146,7 +146,7 @@
 | `core-back/test/onboarding-four-eyes.test.ts` | 200 | 18 |
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/partition-truncate-guard.test.ts` | 86 | 5 |
-| `core-back/test/phase1-mtls-and-schema.test.ts` | 419 | 14 |
+| `core-back/test/phase1-mtls-and-schema.test.ts` | 425 | 14 |
 | `core-back/test/phase2-ledger-and-governance.test.ts` | 281 | 11 |
 | `core-back/test/phase3-dynamic-engine-and-blueprints.test.ts` | 273 | 12 |
 | `core-back/test/phase4-onboarding-aml-disputes-recon.test.ts` | 237 | 16 |
@@ -154,6 +154,24 @@
 | `core-back/test/refund-three-phase.test.ts` | 129 | 3 |
 | `core-back/test/regulatory-report-lifecycle.test.ts` | 249 | 6 |
 | `core-back/test/remediation-high.test.ts` | 975 | 18 |
+| `core-back/test/reportEngineSdk/AssetBundleValidator.test.ts` | 155 | 7 |
+| `core-back/test/reportEngineSdk/AuthorityInferenceEngine.test.ts` | 90 | 6 |
+| `core-back/test/reportEngineSdk/ChromeResolution.test.ts` | 52 | 3 |
+| `core-back/test/reportEngineSdk/CompilerAndReferenceRegression.test.ts` | 276 | 7 |
+| `core-back/test/reportEngineSdk/CssAndHtmlSanitizer.test.ts` | 40 | 3 |
+| `core-back/test/reportEngineSdk/InputFormZodCompiler.test.ts` | 66 | 2 |
+| `core-back/test/reportEngineSdk/MerchantScopeValidator.test.ts` | 74 | 4 |
+| `core-back/test/reportEngineSdk/PiiAndAccess.test.ts` | 121 | 2 |
+| `core-back/test/reportEngineSdk/PostgresReadOnlyExecutor.test.ts` | 67 | 1 |
+| `core-back/test/reportEngineSdk/QuerySafetyAndOptValidator.test.ts` | 109 | 8 |
+| `core-back/test/reportEngineSdk/ReportDryRunSimulator.test.ts` | 51 | 3 |
+| `core-back/test/reportEngineSdk/ReportRepairPrompt.test.ts` | 19 | 1 |
+| `core-back/test/reportEngineSdk/ReportTranscriptBuilder.test.ts` | 37 | 2 |
+| `core-back/test/reportEngineSdk/SdkDecoupling.test.ts` | 37 | 2 |
+| `core-back/test/reportEngineSdk/SpecNormalization.test.ts` | 128 | 6 |
+| `core-back/test/reportEngineSdk/SpecStructuralValidator.test.ts` | 32 | 3 |
+| `core-back/test/reportEngineSdk/TransformPipelineExecutor.test.ts` | 148 | 5 |
+| `core-back/test/reportEngineSdk/helpers.ts` | 538 | 0 |
 | `core-back/test/reporting-docx.test.ts` | 42 | 3 |
 | `core-back/test/reporting-generation.test.ts` | 68 | 1 |
 | `core-back/test/reporting-rule-evaluator.test.ts` | 209 | 5 |
@@ -185,7 +203,7 @@
 | `core-back/test/storage-engine/cache-velocity.test.ts` | 274 | 10 |
 | `core-back/test/storage-engine/db-optimisation.test.ts` | 342 | 17 |
 | `core-back/test/storage-engine/engine-factory.test.ts` | 107 | 3 |
-| `core-back/test/storage-engine/helpers/db.ts` | 545 | 0 |
+| `core-back/test/storage-engine/helpers/db.ts` | 563 | 0 |
 | `core-back/test/storage-engine/leader-election-pgbouncer.test.ts` | 220 | 3 |
 | `core-back/test/storage-engine/ledger-shards.test.ts` | 275 | 3 |
 | `core-back/test/storage-engine/log-sink.test.ts` | 233 | 8 |
@@ -222,7 +240,7 @@
 | `admin-back/test/setup.ts` | 3 | 0 |
 | `merchant-back/test/auth-account-limiters.test.ts` | 94 | 3 |
 | `merchant-back/test/core-contract.test.ts` | 569 | 29 |
-| `merchant-back/test/core-forwarding.test.ts` | 332 | 15 |
+| `merchant-back/test/core-forwarding.test.ts` | 359 | 18 |
 | `merchant-back/test/core-internal-client.test.ts` | 662 | 23 |
 | `merchant-back/test/env-isolation.test.ts` | 24 | 1 |
 | `merchant-back/test/helpers/core.ts` | 224 | 1 |
@@ -318,7 +336,7 @@
 | `tests/e2e/admin/guide-safeguard.spec.ts` | 104 | 1 |
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/operator-cases.spec.ts` | 187 | 2 |
-| `tests/e2e/admin/shell.spec.ts` | 238 | 17 |
+| `tests/e2e/admin/shell.spec.ts` | 254 | 17 |
 | `tests/e2e/admin/table-and-padding-geometry.spec.ts` | 235 | 3 |
 | `tests/e2e/admin/table-row-context-menu.spec.ts` | 217 | 8 |
 | `tests/e2e/admin/wallet-details.spec.ts` | 302 | 12 |
@@ -332,7 +350,7 @@
 | `tests/e2e/fixtures.ts` | 145 | 0 |
 | `tests/e2e/merchant/a11y.spec.ts` | 28 | 1 |
 | `tests/e2e/merchant/auth.spec.ts` | 47 | 2 |
-| `tests/e2e/merchant/landing.spec.ts` | 104 | 5 |
+| `tests/e2e/merchant/landing.spec.ts` | 105 | 5 |
 | `tests/e2e/merchant/shell.spec.ts` | 121 | 9 |
 | `tests/e2e/merchant/table-row-context-menu.spec.ts` | 124 | 3 |
 | `tests/e2e-live/live.spec.ts` | 153 | 6 |
@@ -365,12 +383,12 @@
 | `tests/unit/guide-search.test.ts` | 80 | 9 |
 | `tests/unit/guide-widgets.test.ts` | 221 | 25 |
 | `tests/unit/helpers/i18nScan.ts` | 47 | 2 |
-| `tests/unit/i18n-catalogue.test.ts` | 74 | 2 |
+| `tests/unit/i18n-catalogue.test.ts` | 78 | 2 |
 | `tests/unit/json-diff-model.test.ts` | 182 | 20 |
 | `tests/unit/ledger-ops-ledger.test.ts` | 154 | 15 |
 | `tests/unit/ledger-ops-operations.test.ts` | 313 | 25 |
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **367**
-- Total literal test declarations: **3882**
+- Total files: **385**
+- Total literal test declarations: **3950**

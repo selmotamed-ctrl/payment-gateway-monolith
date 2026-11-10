@@ -24,6 +24,8 @@ const UI_PROJECTION: Record<string, readonly string[]> = {
   "aml:write": ["aml.review", "aml.propose"],
   "report:review": ["reports.draft"],
   "report:approve": ["reports.draft"],
+  "report_engine:author": ["reports.draft", "reports.studio"],
+  "report_engine:run": ["reports.draft", "reports.run"],
   "approval:check": ["approvals.approve", "approvals.reject", "users_admin.propose"],
   "approval:write": ["approvals.approve", "approvals.reject", "users_admin.propose"],
   "finance:read": ["profit.read", "liquidity.read"],
@@ -137,6 +139,7 @@ const MERCHANT_UI_PROJECTION: Record<string, readonly string[]> = {
   ],
   "link:write": ["links.read", "links.create", "links.cancel"],
   "payment:read": ["payments.read", "payments.export", "stats.read"],
+  "report_engine:run": ["reports.run"],
 };
 
 export const buildMerchantUiAuthoritiesMap = (authorities: readonly string[]): Record<string, boolean> => {

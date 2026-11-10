@@ -12,11 +12,11 @@ import {
     watch,
     type Component,
 } from "vue";
-import { useLocale, useTheme } from "vuetify";
+import { useLocale } from "vuetify";
 import { VBtn, VIcon } from "vuetify/components";
 import LogoSvg from "@/assets/images/logo.svg";
 import { setLocale } from "@/plugins/localization";
-import { toggleTheme } from "@/state/app";
+import ThemeMenu from "@/components/ThemeMenu";
 import { HeroDemo } from "./HeroDemo";
 import { FeePreview } from "./FeePreview";
 import { LedgerTicker } from "./LedgerTicker";
@@ -172,12 +172,10 @@ const LandingPage = defineComponent({
     name: "LandingPage",
     setup() {
         const { t, current: locale } = useLocale();
-        const theme = useTheme();
         const reduced = useReducedMotion();
         const root = ref<HTMLElement | null>(null);
         const scrolled = ref(false);
         const reveal = useReveal(root, reduced);
-        const isDark = computed(() => theme.global.current.value.dark);
         const isRtl = computed(() => locale.value === "ar");
         const year = new Date().getFullYear();
 
@@ -217,7 +215,6 @@ const LandingPage = defineComponent({
             if (locale.value === next) return;
             withViewTransition(() => setLocale(next), reduced.value);
         };
-        const switchTheme = () => withViewTransition(() => toggleTheme(), reduced.value);
 
         const jumpTo = (event: MouseEvent, id: string) => {
             const target = document.getElementById(id);
@@ -344,15 +341,7 @@ const LandingPage = defineComponent({
                                     <span class="pgl-sr-only">English</span>
                                 </button>
                             </div>
-                            <button
-                                type="button"
-                                class="pgl-icon-btn"
-                                aria-label={t("Toggle theme")}
-                                aria-pressed={isDark.value ? "true" : "false"}
-                                onClick={switchTheme}
-                            >
-                                <VIcon icon={isDark.value ? "mdi-weather-sunny" : "mdi-weather-night"} size={17} aria-hidden="true" />
-                            </button>
+                            <ThemeMenu buttonClass="pgl-icon-btn" iconSize={17} />
                             <VBtn to={{ name: "Login" }} variant="text" class="pgl-header__login">
                                 {t("Login")}
                             </VBtn>

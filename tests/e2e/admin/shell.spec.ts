@@ -115,11 +115,27 @@ test.describe("admin shell", () => {
     expect(await noHorizontalOverflow(page)).toBe(true);
   });
 
-  test("the theme toggle switches the application to dark", async ({ page }) => {
+  test("the theme menu selects system, light and dark and system follows the OS", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("theme", "light"));
+    await page.emulateMedia({ colorScheme: "light" });
     await page.goto("/dashboard");
-    await expect(page.locator(".v-application")).not.toHaveClass(/v-theme--dark/);
-    await page.getByRole("button", { name: "Toggle theme" }).click();
-    await expect(page.locator(".v-application")).toHaveClass(/v-theme--dark/);
+    const application = page.locator(".v-application");
+    await expect(application).not.toHaveClass(/v-theme--dark/);
+
+    await page.getByRole("button", { name: "Theme" }).click();
+    await page.getByText("Dark", { exact: true }).click();
+    await expect(application).toHaveClass(/v-theme--dark/);
+
+    await page.getByRole("button", { name: "Theme" }).click();
+    await page.getByText("System", { exact: true }).click();
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect(application).toHaveClass(/v-theme--dark/);
+    await page.emulateMedia({ colorScheme: "light" });
+    await expect(application).not.toHaveClass(/v-theme--dark/);
+
+    await page.getByRole("button", { name: "Theme" }).click();
+    await page.getByText("Light", { exact: true }).click();
+    await expect(application).not.toHaveClass(/v-theme--dark/);
   });
 
   test("every navigation destination renders a page below the bar", async ({ page }) => {

@@ -2,6 +2,7 @@ import { defineComponent } from "vue";
 import { useLocale } from "vuetify";
 import LogoSvg from "@/assets/images/logo.svg";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import ThemeMenu from "@/components/ThemeMenu";
 
 export const AuthLayout = defineComponent({
     name: "AuthLayout",
@@ -40,7 +41,10 @@ export const AuthLayout = defineComponent({
                     </div>
                 </aside>
 
-                <main class="pg-auth-main">
+                <main class="pg-auth-main" style={{ position: "relative" }}>
+                    <div style={{ position: "absolute", top: "16px", insetInlineEnd: "16px", zIndex: 2 }}>
+                        <ThemeMenu />
+                    </div>
                     <div class="pg-auth-panel">{slots.default?.()}</div>
                 </main>
             </div>

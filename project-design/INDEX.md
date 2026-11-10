@@ -36,6 +36,7 @@ This is the canonical entrypoint for the payment-gateway project design.
 - [Backup Control](parts/01-core-back/09-backup-control.md) — `core.backup` · `partial`
 - [Synthetic Seeder](parts/01-core-back/10-synthetic-seeder.md) — `core.seeder` · `partial`
 - [Tests and Benchmarks](parts/01-core-back/11-tests-and-benchmarks.md) — `core.tests` · `partial`
+- [Dynamic Report Engine SDK and Report Studio Host](parts/01-core-back/12-report-engine-sdk.md) — `core.report-engine` · `implemented`
 
 ### 02-edge-services
 
@@ -53,11 +54,13 @@ This is the canonical entrypoint for the payment-gateway project design.
 - [Contextual Help](parts/03-admin-front/04-contextual-help.md) — `admin-ui.help` · `implemented`
 - [Backups Settings and Operations](parts/03-admin-front/05-backups-settings-and-operations.md) — `admin-ui.operations` · `partial`
 - [Admin Guide v2](parts/03-admin-front/06-guide-v2.md) — `admin-ui.guide-v2` · `implemented`
+- [Report Catalog, Studio and Chrome](parts/03-admin-front/07-report-studio.md) — `admin-ui.report-studio` · `implemented`
 
 ### 04-merchant-front
 
 - [Merchant Portal](parts/04-merchant-front/00-portal.md) — `merchant-ui.portal` · `partial`
 - [Merchant Guide and Developer API](parts/04-merchant-front/01-guide-and-developer-api.md) — `merchant-ui.guide` · `partial`
+- [Merchant Reports](parts/04-merchant-front/02-reports.md) — `merchant-ui.reports` · `implemented`
 
 ### 05-checkout-front
 

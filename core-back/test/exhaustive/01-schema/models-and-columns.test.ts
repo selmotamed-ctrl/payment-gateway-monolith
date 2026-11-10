@@ -57,7 +57,9 @@ describeDb("Suite 01 · model & column fidelity", () => {
   for (const model of schema.models) {
     const actual = columnsByTable(model.tableName);
     const scalarFields = model.fields.filter((field) => !field.isRelation && !field.isList);
-    const expectedColumns = new Set(scalarFields.map(schemaColumnName));
+    const expectedColumns = new Set(
+      model.fields.filter((field) => !field.isRelation).map(schemaColumnName),
+    );
 
     test(`${model.tableName} [1/15] table exists in the live database`, () => {
       expect(actual.size).toBeGreaterThan(0);

@@ -1,18 +1,14 @@
 import { setLocale } from "@/plugins/localization";
-import { toggleTheme } from "@/state/app";
 import { dc } from "kt-dc";
 import { useLocale, useTheme } from "vuetify";
 import { VBtn, VIcon, VList, VListItem, VMenu } from "vuetify/components";
+import ThemeMenu from "@/components/ThemeMenu";
 
 const ThemedAndLanguageControls = dc(() => {
     const languageMenu = ref(false);
     const theme = useTheme();
     const local = useLocale();
     const currentTheme = theme.current;
-
-    const handleThemeToggle = () => {
-        toggleTheme();
-    };
 
     const handleLanguageChange = (locale: string) => {
         local.current.value = locale;
@@ -101,25 +97,8 @@ const ThemedAndLanguageControls = dc(() => {
                         }}
                     </VMenu>
 
-                    {/* Theme Toggle */}
-                    <VBtn
-                        icon
-                        size="large"
-                        variant="tonal"
-                        // @ts-ignore - VBtn onClick type issue
-                        onClick={handleThemeToggle}
-                        color="primary"
-                        style={{
-                            width: "56px !important",
-                            height: "56px !important",
-                            borderRadius: "50% !important",
-                            backdropFilter: "blur(10px)",
-                            // color: currentTheme.value.dark ? "#81a1c1" : "#667eea",
-                            transition: "all 0.3s ease",
-                        }}
-                    >
-                        <VIcon>{currentTheme.value.dark ? "mdi-weather-sunny" : "mdi-weather-night"}</VIcon>
-                    </VBtn>
+                    {/* Theme mode: System / Light / Dark */}
+                    <ThemeMenu />
                 </ThemedView>
             </>
         );

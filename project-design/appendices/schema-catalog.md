@@ -2,10 +2,10 @@
 
 <!-- GENERATED FILE. Edit core-back/prisma/schema.prisma instead. Do not hand-edit this file. -->
 
-- Models: **96**
-- Enums: **119**
-- Schema version: **30**
-- Migrations: **29**
+- Models: **100**
+- Enums: **123**
+- Schema version: **32**
+- Migrations: **31**
 
 ## Models
 
@@ -105,6 +105,10 @@
 - `BackupRestoreDrill`
 - `RmMerchantDailyStat`
 - `RmRouteDailyVolume`
+- `ReportAssetBundle`
+- `ReportChromeSpecRecord`
+- `ReportDefinitionSpecRecord`
+- `ReportExecutionAuditRecord`
 
 ## Enums
 
@@ -227,6 +231,10 @@
 - `FilingAdapterKind`
 - `FilingAdapterStatus`
 - `ExternalSubmissionStatus`
+- `ReportSpecStatus`
+- `ReportChromeType`
+- `ReportAudienceScope`
+- `ReportAuthorityMode`
 
 ## Migrations
 
@@ -254,8 +262,10 @@
 - `20261109190000_regulatory_report_automation`
 - `20261109200000_merchant_webhooks`
 - `20261109210000_ledger_query_and_index_optimization`
-- `20261110120000_declarative_regulatory_reporting`
-- `20261110130000_report_template_binding`
-- `20261110140000_incident_management`
-- `20261110150000_docx_report_output`
-- `20261110160000_external_filing_adapters`
+- `20261110120000_dynamic_report_engine_sdk`
+- `20261110130000_report_engine_merchant_and_aml`
+- `20261110140000_declarative_regulatory_reporting`
+- `20261110150000_report_template_binding`
+- `20261110160000_incident_management`
+- `20261110170000_docx_report_output`
+- `20261110180000_external_filing_adapters`

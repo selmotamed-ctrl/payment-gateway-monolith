@@ -22,6 +22,8 @@ code:
   - core-back/prisma/migrations/20261107150000_shard_repairs/migration.sql
   - core-back/prisma/migrations/20261108090000_partition_truncate_guard/migration.sql
   - core-back/prisma/migrations/20261109210000_ledger_query_and_index_optimization/migration.sql
+  - core-back/prisma/migrations/20261110120000_dynamic_report_engine_sdk/migration.sql
+  - core-back/prisma/migrations/20261110130000_report_engine_merchant_and_aml/migration.sql
 tests:
   - core-back/test/exhaustive/01-schema/**
   - core-back/test/phase1-mtls-and-schema.test.ts
@@ -29,10 +31,11 @@ tests:
   - core-back/test/synthetic-seeder.test.ts
   - core-back/test/security-regressions/c2-mfa.test.ts
   - core-back/test/security-regressions/h4-cashout.test.ts
+  - core-back/test/reportEngineSdk/**
 gaps:
   - Core tables use `TIMESTAMP(3)` while storage-engine tables use `TIMESTAMPTZ(3)`.
   - The migration history is forward-only; there are no down migrations.
-  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 30.
+  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 32.
   - `journal_lines` partition maintenance depends on an external deploy cron.
   - The generated schema catalog appendix is produced by the project-design generator and is not hand-maintained.
 ---
@@ -47,7 +50,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 30 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 32 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -102,7 +105,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 30`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 32`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -115,7 +118,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261110160000_external_filing_adapters`, schema version 30). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261110180000_external_filing_adapters`, schema version 32). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -292,7 +295,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 25.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 27.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -307,7 +310,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 84 models and 105 enums in the Prisma datamodel.
-- Schema version 30 with an equality check used by the seeders.
+- Schema version 32 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -410,7 +413,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 30 (`REQUIRED_SCHEMA_VERSION = 30`; model count 96). The schema migrations since version 10 are:
+The current schema version is 32 (`REQUIRED_SCHEMA_VERSION = 32`; model count 100). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -477,10 +480,17 @@ Operationally, the migration drops and rebuilds the two `journal_lines` indexes 
 
 The query rules that depend on these indexes are in `core.ledger` section 3.11 and `core-back/README.md` section 3.1.
 
+## 16. Report engine schema (schema version 26, 2026-11-09)
 
-## 16. Declarative regulatory reporting (schema version 26)
+`20261110120000_dynamic_report_engine_sdk` adds the report-engine registry and bumps `REQUIRED_SCHEMA_VERSION` to 26. It defines `ReportSpecStatus`, `ReportChromeType`, `ReportAudienceScope`, `ReportAuthorityMode`, `report_asset_bundles`, `report_chrome_specs`, `report_definition_specs` and `report_execution_audit`. The partial unique index `report_chrome_specs_one_default_per_type_idx` permits only one published global default header and one footer. The four models are listed in `core.report-engine` section 6.
 
-`20261110120000_declarative_regulatory_reporting` adds the format-aware reporting engine:
+## 17. Report engine hardening and merchant execution (schema version 27, 2026-11-09)
+
+`20261110130000_report_engine_merchant_and_aml` adds `report_definition_specs.allow_confidential_aml_bypass` (default false), a partial unique index on `report_definition_specs(code) WHERE is_latest_published = true`, and append-only triggers on `report_execution_audit`. The AML bypass is only applied after a different MLRO or Security Admin approves a `REPORT_AML_BYPASS` approval request. The merchant report API forces `merchant_scope_input_key` from the authenticated merchant and rejects any non-merchant-scopable model.
+
+## 18. Declarative regulatory reporting (schema version 28, 2026-11-10)
+
+`20261110140000_declarative_regulatory_reporting` adds the format-aware reporting engine:
 
 - Enums `ReportOutputFormat` (`XML`, `XLSX`), `RegulatorySchemaStatus` (`DRAFT`, `PROVISIONAL`, `PENDING_APPROVAL`, `CONFIRMED`, `SUPERSEDED`, `ARCHIVED`) and `ReportOutputValidationStatus` (`NOT_GENERATED`, `PROVISIONAL_SCHEMA`, `VALIDATED`, `INVALID`).
 - `regulatory_report_schemas` (authority, report type, format, schema code/name/version, lifecycle status, XSD text or workbook JSON, optional encrypted uploaded template, compiled AST/workbook, mapping blueprint, sample context, approval link, seed key; unique `(authority, schema_code, version)`).
@@ -488,11 +498,11 @@ The query rules that depend on these indexes are in `core.ledger` section 3.11 a
 - `reporting_rules.required_output_formats` and `primary_output_format`; `regulatory_reports.required_output_formats`, `filing_channel`, `acknowledged_at`, `rejection_reason`, `supersedes_id`; and a full `due_at` index. `regulatory_report_schemas.revision`, `cloned_from_schema_id`, `mapping_sha256`, `compiled_from_sha256`; `regulatory_report_outputs.payload_sha256`; `regulatory_reports.aml_case_id` is no longer unique and has a normal index. A database trigger blocks definition/mapping/compiled/template changes once a schema leaves `DRAFT`. Existing scheduled rules/reports are backfilled by `returnCode`/`reportCode`.
 - The baseline provisional schemas/templates are inserted lazily by `ensureBaselineReportingSchemas` (`cbl-goaml-str-v1`, `cbl-goaml-ltr-v1`, `cbl-psp-m-v1`, `cbl-aml-q-v1`, `cbl-aml-a-v1`, `cbl-goaml-ltr-xlsx-v1`) and their default bindings. They are `PROVISIONAL`; a confirmed FIU XSD/CBL workbook must be uploaded and promoted before XML filing.
 
-## 17. Reporting Studio phases 2-5 (schema versions 27 to 30, 2026-11-10)
+## 19. Reporting Studio phases 2-5 (schema versions 29 to 32, 2026-11-10)
 
-- `20261110130000_report_template_binding` (version 27): `regulatory_report_schemas.template_binding_json` stores the visual named-range mapping for an uploaded XLSX template. The column is separate from `template_ciphertext` so the encrypted workbook and its mapping can be rotated independently; the template upload route validates the zip, rejects macros/external links/OLE/zip bombs and audits the SHA-256.
-- `20261110140000_incident_management` (version 28): `ReportingType.INCIDENT`; enums `IncidentSeverity`, `IncidentStatus`, `IncidentCategory`, `IncidentImpactScope`, `IncidentTimelineType`, `IncidentActionStatus`, `IncidentCommunicationChannel`, `IncidentLinkType`; tables `incidents`, `incident_timeline_entries`, `incident_responders`, `incident_action_items`, `incident_links`, `incident_communications`. The lifecycle is DETECTED -> TRIAGED/DECLARED -> CONTAINED -> MONITORING -> RESOLVED -> POSTMORTEM -> CLOSED, with timestamp columns and postmortem due dates for SEV1/SEV2, security and data-integrity incidents.
-- `20261110150000_docx_report_output` (version 29): adds `ReportOutputFormat.DOCX`. `DocxNarrativeSchema` sections are rendered by the pure-JS OOXML builder; the output is stored encrypted under the `reporting-docx` context and downloaded as `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
-- `20261110160000_external_filing_adapters` (version 30): `FilingAdapterKind`, `FilingAdapterStatus`, `ExternalSubmissionStatus`; `external_filing_adapters` (name, authority, MANUAL/HTTP, status, HTTPS endpoint, encrypted auth secret, timeout, config) and `external_submissions` (report, adapter, status, request SHA-256, external reference, response code/body, error). The HTTP adapter rejects non-HTTPS, private/loopback/link-local endpoints, embedded credentials and redirects; the manual adapter remains the default.
+- `20261110150000_report_template_binding` (version 29): `regulatory_report_schemas.template_binding_json` stores the visual named-range mapping for an uploaded XLSX template. The column is separate from `template_ciphertext` so the encrypted workbook and its mapping can be rotated independently; the template upload route validates the zip, rejects macros/external links/OLE/zip bombs and audits the SHA-256.
+- `20261110160000_incident_management` (version 30): `ReportingType.INCIDENT`; enums `IncidentSeverity`, `IncidentStatus`, `IncidentCategory`, `IncidentImpactScope`, `IncidentTimelineType`, `IncidentActionStatus`, `IncidentCommunicationChannel`, `IncidentLinkType`; tables `incidents`, `incident_timeline_entries`, `incident_responders`, `incident_action_items`, `incident_links`, `incident_communications`. The lifecycle is DETECTED -> TRIAGED/DECLARED -> CONTAINED -> MONITORING -> RESOLVED -> POSTMORTEM -> CLOSED, with timestamp columns and postmortem due dates for SEV1/SEV2, security and data-integrity incidents.
+- `20261110170000_docx_report_output` (version 31): adds `ReportOutputFormat.DOCX`. `DocxNarrativeSchema` sections are rendered by the pure-JS OOXML builder; the output is stored encrypted under the `reporting-docx` context and downloaded as `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
+- `20261110180000_external_filing_adapters` (version 32): `FilingAdapterKind`, `FilingAdapterStatus`, `ExternalSubmissionStatus`; `external_filing_adapters` (name, authority, MANUAL/HTTP, status, HTTPS endpoint, encrypted auth secret, timeout, config) and `external_submissions` (report, adapter, status, request SHA-256, external reference, response code/body, error). The HTTP adapter rejects non-HTTPS, private/loopback/link-local endpoints, embedded credentials and redirects; the manual adapter remains the default.
 
 The reporting baseline set now includes a PROVISIONAL `cbl-incident-docx-v1` default binding for `CBL / INCIDENT / INC / DOCX`. As with the other provisional baselines, the incident output cannot be filed until the schema is reviewed and confirmed.

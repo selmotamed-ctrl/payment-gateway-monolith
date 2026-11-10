@@ -40,6 +40,7 @@ declare module 'vue' {
     SurfaceCard: typeof import('./components/ui/SurfaceCard.tsx')['default']
     TableFilters: typeof import('./components/Table/TableFilters.tsx')['default']
     TableRowActions: typeof import('./components/Table/TableRowActions.tsx')['default']
+    ThemeMenu: typeof import('./components/ThemeMenu/index.tsx')['default']
     WebhookComposerModal: typeof import('./components/WebhookComposerModal.tsx')['default']
     WireInspectorDrawer: typeof import('./components/WireInspectorDrawer.tsx')['default']
   }
@@ -75,6 +76,7 @@ declare global {
   const SurfaceCard: typeof import('./components/ui/SurfaceCard.tsx')['default']
   const TableFilters: typeof import('./components/Table/TableFilters.tsx')['default']
   const TableRowActions: typeof import('./components/Table/TableRowActions.tsx')['default']
+  const ThemeMenu: typeof import('./components/ThemeMenu/index.tsx')['default']
   const WebhookComposerModal: typeof import('./components/WebhookComposerModal.tsx')['default']
   const WireInspectorDrawer: typeof import('./components/WireInspectorDrawer.tsx')['default']
 }

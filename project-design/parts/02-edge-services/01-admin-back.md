@@ -313,6 +313,10 @@ Contracts enforced at the edge: bodies are `.strict()` zod; `reason` is `z.strin
 
 `api/public/auth.ts` wires `createAccountLimiters` (per `identifier|ip` and an identifier ceiling, failures only) and the public `POST /auth/accept-invitation` route; `api/upload.ts` exports `uploadGuards` (limiter, `Content-Length` pre-check, session-shape check before multer) and is used by the reconciliation and join-request uploads; `api/protected/users.ts` and `api/contract.ts` carry the invitation-based create and re-invite contracts (no password or phone in the create body).
 
+## Report engine forwards (2026-11-10)
+
+`/api/v1/admin/report-engine/*` forwards the core report-engine routes. The catalog forwards `audience`, `page`, `pageSize`, `search`, `sortKey` and `sortDirection`; the chrome registry forwards `type`, `includeArchived`, `page`, `pageSize`, `search`, `sortKey` and `sortDirection`; and `POST /chrome/:id/archive` is proxied. The edge authority guard accepts `report:review`, `report:approve`, `report_engine:author`, `report_engine:run`, `gateway:write`, `security:read`, `security:write` and `reports.draft` for reads, and `report:approve`, `report_engine:author`, `report:review`, `security:write` and `reports.draft` for writes.
+
 ## Reporting Studio, incidents and filing adapters (2026-11-10)
 
 `admin-back/api/protected/aml.ts` forwards the new reporting surface to core; every route remains behind `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` and core re-checks the authority:

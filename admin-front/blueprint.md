@@ -6,7 +6,7 @@ Generated from: `admin-ui.system`, `admin-ui.routes`, `admin-ui.tables`, `admin-
 
 ## Admin UI System
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-09
 
 ## 1. Purpose and scope
 
@@ -83,6 +83,8 @@ No external font request is required. `tests/e2e/admin/a11y.spec.ts` and the she
 - Component defaults: flat cards with `rounded: "lg"`; 36 px, `rounded: "md"`, no-transform buttons; outlined compact text fields/selects/autocompletes/textareas/comboboxes with `hideDetails: "auto"`; small rounded chips; a `rgba(15, 23, 42, 0.45)` dialog scrim.
 - `VDateInput` receives an outlined default through the blueprint defaults block.
 
+Theme mode is `system | light | dark`. `utils/theme` resolves the persisted mode (localStorage `theme`; absent means `system`) against `prefers-color-scheme`; `state/theme` applies it to Vuetify, listens to `matchMedia` changes while in `system` mode, and syncs across tabs. `plugins/vuetify.ts` uses `initialTheme()` for `defaultTheme` and `main.ts` calls `initTheme()` before mount, so every route (including the login page) starts in the operating-system theme with no light flash. `ThemeMenu` is the explicit three-option menu (System, Light, Dark) used by the shell, the auth layout and the merchant landing header; the old `toggleTheme` remains as a compatibility cycle (system -> light -> dark).
+
 ### 3.4 Primitives and extras
 
 `admin-front/src/components/ui/index.ts` is the primitive barrel. The compliance test requires these 13 named exports:
@@ -113,7 +115,7 @@ Additional exported primitives/extras are `SurfaceCardText`, `MetaPill`, `FormCh
 `admin-front/src/layouts/default.tsx` implements the authenticated shell:
 
 - A skip link targeting `#pg-main-content`.
-- A 56 px flat app bar with menu toggle, brand, breadcrumbs, live ledger invariant pill (for `profit.read` or `liquidity.read`), global search trigger (`Ctrl+K`/`Cmd+K`), help button, theme toggle, language menu, and user menu.
+- A 56 px flat app bar with menu toggle, brand, breadcrumbs, live ledger invariant pill (for `profit.read` or `liquidity.read`), global search trigger (`Ctrl+K`/`Cmd+K`), help button, theme mode menu (System/Light/Dark), language menu, and user menu.
 - A 248 px `VNavigationDrawer`, permanent on desktop and temporary below the compact breakpoint. It contains brand/environment badge, guide search pill, collapsible navigation sections, and an operator card with role and maker/checker dots.
 - Route progress bar, focused `VMain`, global search palette, guide search modal, and contextual help drawer.
 - The `?` key opens help when the user is not typing in an input; `Escape` closes the topmost overlay.
@@ -131,6 +133,8 @@ Additional exported primitives/extras are `SurfaceCardText`, `MetaPill`, `FormCh
 - Three posture badges: TLS 1.3 mTLS Verified, AES-256-GCM Hardware Vault, Four-Eyes Governance.
 - A live status line.
 - A main panel slot for the login form.
+
+The auth shell also carries the three-mode theme menu in its top-right corner. `initTheme()` runs before mount and `plugins/vuetify.ts` uses `initialTheme()`, so the login page follows the OS theme on first paint and tracks OS changes while in System mode.
 
 The auth shell is presentation only. Authentication, MFA, and session authority enforcement live in the edge and core services.
 
@@ -270,6 +274,7 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 ## 10. Change history
 
+- 2026-11-09 — Added system/light/dark theme modes across all four portals: `utils/theme` + `state/theme` resolve the persisted mode against `prefers-color-scheme`, `initialTheme()`/`initTheme()` apply it before mount (login included), a live `matchMedia` listener follows OS changes in System mode, and the explicit `ThemeMenu` replaces the light/dark toggle in the shell, auth layout and merchant landing. See `TRACKER.md`.
 - 2026-11-03 — Initial canonical part created from the v1/v2 UI designs and working-tree code. Records the 13-primitive contract, 248/56 shell, Fake Rails partial rollout, removed app scaling, and the still-present stale files.
 
 ## Security hardening (2026-11-05)
@@ -335,7 +340,7 @@ The historical operator-case design also expects a dedicated operator-case inqui
 
 `admin-front/src/layouts/sections.tsx` groups visible navigation into Overview, Onboarding, Governance, Operations, Finance, Gateways, and Learning. Sections and route items are filtered by their `if` callbacks. Empty sections are removed.
 
-### 3.2 Admin protected routes (38)
+### 3.2 Admin protected routes (48)
 
 The authority column is the UI gate. "None" means no effective `routesAuthorities` entry; the backend may still require an authority. Help shows the guide screen used by the generated context map; "none" means no mapping resolves.
 
@@ -357,35 +362,38 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 14 | `/aml/screenings` | `AmlScreenings` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Sanctions/PEP screening queue and match disposition. |
 | 15 | `/aml/rules` | `AmlRules` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | AML rule versions, thresholds and maker-checker drafts. |
 | 16 | `/aml/reports` | `AmlReports` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Regulatory report drafting, payload/output review, generation, submission and acknowledgement. |
-| 16a | `/aml/reporting-studio` | `AmlReportingStudio` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Declarative XML/XLSX schema registry, compile/simulate, promotion and default bindings. |
-| 17 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | UNKNOWN/conflict/reconciliation operator queue. |
-| 18 | `/operator-cases/inquiries` | `GatewayInquirySchedules` | `case:read` or `operator:read` | 7 / 7.2 | Gateway inquiry schedule monitoring, run/retry/cancel. |
-| 19 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case evidence, step logs, inbound events, maker-checker resolution. |
-| 20 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage. |
-| 21 | `/adjustments` | `Adjustments` | `adjustments.propose` | 11 / 11.2 | Refund/manual adjustment drafting and review. |
-| 22 | `/cashouts` | `CashOuts` | `cashout.process` | 12 / 12.1 | Cash-out processing with wallet, destination and AML checks. |
-| 23 | `/reconciliation` | `Reconciliation` | `reconciliation.run` or `reconciliation.resolve` | 8 / 8.2 | Statement upload, run monitoring and variance resolution. |
-| 24 | `/finance/pricing` | `PricingControls` | none (nav hides without `profit.read`/`liquidity.read`) | none | Commission profiles and velocity controls under governance. |
-| 25 | `/finance/profitability` | `Profitability` | `profit.read` | 12 / 12.1 | Gross commission, gateway cost and net contribution. |
-| 26 | `/finance/liquidity` | `Liquidity` | `liquidity.read` | 12 / 12.1 | Treasury cover, clearing ageing, cash-out demand and holds. |
-| 27 | `/finance/invariant` | `Invariant` | `profit.read` or `liquidity.read` | 12 / 12.1 | Double-entry invariant, treasury cover and account balances. |
-| 28 | `/gateways` | `Gateways` | `gateways.edit` | 6 / 6.1 | Gateway portfolio, version state, rollback and creation. |
-| 29 | `/gateways/ai-import` | `GatewayAiImport` | none (direct URL; not in nav) | 6 / 6.2 | External-AI integration spec import with local/backend verification. |
-| 30 | `/gateways/wizard/:id` | `GatewayWizard` | `gateways.edit` | 6 / 6.1 | Eight-step gateway version wizard. |
-| 31 | `/rails` | `Rails` | `gateways.edit` | 3 / 3.2 | Rail catalog, collection modes and customer fields. |
-| 32 | `/routes` | `GatewayRoutes` | `gateways.edit` | 3 / 3.2 | Route priority, limits, credential policy and circuit-breaker health. |
-| 33 | `/guide` | `AdminGuide` | none (intentional) | 1 / 1.1 | Interactive admin system guide, glossary, simulators and checklists. |
-| 34 | `/academy` | `AdminAcademy` | none (intentional learning) | 1 / 1.1 | Employee Academy home (full-width hero with the single Continue action and progress rings, tracks, certificates list, Guide reading). Sub-routes `AdminAcademyTracks`, `AdminAcademyTrack`, `AdminAcademyModule`, `AdminAcademyLesson`, `AdminAcademyLab`, `AdminAcademyExam`, `AdminAcademyCertificate`, `AdminAcademyHelp` (none gated) and `AdminAcademyTeam` (role `SECURITY_ADMIN`); see `03-guide-and-academy.md` §7. |
-| 35 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
-| 36 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | 4 / 4.2 | Checkout support config, preview, version history and diff. |
-| 37 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | none | WAL/daemon/target health, backup history, drills and policy. |
-| 38 | `/guide/book/:bookId` | `AdminGuideBook` | none (learning surface) | 1 / 1.1 | One guide book with ordered articles and progress. |
-| 39 | `/guide/a/:articleId` | `AdminGuideArticle` | none (learning surface) | 1 / 1.1 | Guide article reader with glossary, TOC, widgets and read tracking. |
-| 40 | `/guide/glossary/:slug?` | `AdminGuideGlossary` | none (learning surface) | 13 / 13.1 | A–Z glossary and deep-linkable term detail. |
-| 41 | `/guide/tools/:tool?` | `AdminGuideTools` | none (learning surface) | 1 / 1.1 | Five client-only teaching simulators. |
-| 42 | `/guide/playbook/:id?` | `AdminGuidePlaybook` | none (learning surface) | 10 / 10.1 | Symptom-to-action situation playbook. |
-| 43 | `/guide/cards/:id?` | `AdminGuideCards` | none (learning surface) | 1 / 1.1 | Safeguard checklist card catalog. |
-| 44 | `/guide/edge-cases` | `AdminGuideEdgeCases` | none (learning surface) | 13 / 13.5 | Filterable 140-case edge-case catalog. |
+| 17 | `/aml/reporting-studio` | `AmlReportingStudio` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Declarative XML/XLSX schema registry, compile/simulate, promotion and default bindings. |
+| 18 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | UNKNOWN/conflict/reconciliation operator queue. |
+| 19 | `/operator-cases/inquiries` | `GatewayInquirySchedules` | `case:read` or `operator:read` | 7 / 7.2 | Gateway inquiry schedule monitoring, run/retry/cancel. |
+| 20 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case evidence, step logs, inbound events, maker-checker resolution. |
+| 21 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage. |
+| 22 | `/adjustments` | `Adjustments` | `adjustments.propose` | 11 / 11.2 | Refund/manual adjustment drafting and review. |
+| 23 | `/cashouts` | `CashOuts` | `cashout.process` | 12 / 12.1 | Cash-out processing with wallet, destination and AML checks. |
+| 24 | `/reconciliation` | `Reconciliation` | `reconciliation.run` or `reconciliation.resolve` | 8 / 8.2 | Statement upload, run monitoring and variance resolution. |
+| 25 | `/finance/pricing` | `PricingControls` | none (nav hides without `profit.read`/`liquidity.read`) | none | Commission profiles and velocity controls under governance. |
+| 26 | `/finance/profitability` | `Profitability` | `profit.read` | 12 / 12.1 | Gross commission, gateway cost and net contribution. |
+| 27 | `/finance/liquidity` | `Liquidity` | `liquidity.read` | 12 / 12.1 | Treasury cover, clearing ageing, cash-out demand and holds. |
+| 28 | `/finance/invariant` | `Invariant` | `profit.read` or `liquidity.read` | 12 / 12.1 | Double-entry invariant, treasury cover and account balances. |
+| 29 | `/gateways` | `Gateways` | `gateways.edit` | 6 / 6.1 | Gateway portfolio, version state, rollback and creation. |
+| 30 | `/gateways/ai-import` | `GatewayAiImport` | none (direct URL; not in nav) | 6 / 6.2 | External-AI integration spec import with local/backend verification. |
+| 31 | `/gateways/wizard/:id` | `GatewayWizard` | `gateways.edit` | 6 / 6.1 | Eight-step gateway version wizard. |
+| 32 | `/rails` | `Rails` | `gateways.edit` | 3 / 3.2 | Rail catalog, collection modes and customer fields. |
+| 33 | `/routes` | `GatewayRoutes` | `gateways.edit` | 3 / 3.2 | Route priority, limits, credential policy and circuit-breaker health. |
+| 34 | `/guide` | `AdminGuide` | none (intentional) | 1 / 1.1 | Interactive admin system guide, glossary, simulators and checklists. |
+| 35 | `/reports/catalog` | `ReportsCatalog` | `reports.run`/`reports.draft`/`report_engine:run`/`report_engine:author`/`report:review`/`report:approve`/`security:write` | none | Published report catalog, language prompt, typed inputs, preview and print. |
+| 36 | `/reports/studio` | `ReportsStudio` | `reports.studio`/`reports.draft`/`report_engine:author`/`report:review`/`report:approve`/`security:write` | none | AI transcript, JSON spec editor, five-layer verification, authority override and publish. |
+| 37 | `/reports/chrome` | `ReportsChrome` | `reports.studio` (projected from `report_engine:author`) | none | Reusable header/footer registry and single global default per type. |
+| 38 | `/academy` | `AdminAcademy` | none (intentional learning) | 1 / 1.1 | Employee Academy home (full-width hero with the single Continue action and progress rings, tracks, certificates list, Guide reading). Sub-routes `AdminAcademyTracks`, `AdminAcademyTrack`, `AdminAcademyModule`, `AdminAcademyLesson`, `AdminAcademyLab`, `AdminAcademyExam`, `AdminAcademyCertificate`, `AdminAcademyHelp` (none gated) and `AdminAcademyTeam` (role `SECURITY_ADMIN`); see `03-guide-and-academy.md` §7. |
+| 39 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
+| 40 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | 4 / 4.2 | Checkout support config, preview, version history and diff. |
+| 41 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | none | WAL/daemon/target health, backup history, drills and policy. |
+| 42 | `/guide/book/:bookId` | `AdminGuideBook` | none (learning surface) | 1 / 1.1 | One guide book with ordered articles and progress. |
+| 43 | `/guide/a/:articleId` | `AdminGuideArticle` | none (learning surface) | 1 / 1.1 | Guide article reader with glossary, TOC, widgets and read tracking. |
+| 44 | `/guide/glossary/:slug?` | `AdminGuideGlossary` | none (learning surface) | 13 / 13.1 | A–Z glossary and deep-linkable term detail. |
+| 45 | `/guide/tools/:tool?` | `AdminGuideTools` | none (learning surface) | 1 / 1.1 | Five client-only teaching simulators. |
+| 46 | `/guide/playbook/:id?` | `AdminGuidePlaybook` | none (learning surface) | 10 / 10.1 | Symptom-to-action situation playbook. |
+| 47 | `/guide/cards/:id?` | `AdminGuideCards` | none (learning surface) | 1 / 1.1 | Safeguard checklist card catalog. |
+| 48 | `/guide/edge-cases` | `AdminGuideEdgeCases` | none (learning surface) | 13 / 13.5 | Filterable 140-case edge-case catalog. |
 
 Public admin routes are `/login` (`Login`, visitor-only) and the catch-all `NotFound`. The root `/` redirects to `Dashboard`.
 
@@ -866,7 +874,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 This part owns two employee learning products in `admin-front`:
 
-- The Admin Interactive Guide at `/guide/**`: 14 books, 134 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
+- The Admin Interactive Guide at `/guide/**`: 14 books, 135 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
 - The Employee Academy under `/academy/**`: eight tracks, lessons with practice checks, simulated labs, server-graded certification exams, 12-month badges, certificates and a `SECURITY_ADMIN` team view.
 
 It does not own the merchant guide or the checkout help center. The future-guide design is now implemented; its detailed implementation notes live in `06-guide-v2.md`.
@@ -880,14 +888,14 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | Artifact | Count / notes |
 | :--- | :--- |
 | `books.json` | 14 books |
-| `articles.en.json` | 134 articles with headings, plain text, roles, UI status and related ids |
+| `articles.en.json` | 135 articles with headings, plain text, roles, UI status and related ids |
 | `glossary.en.json` | 151 terms with aliases, Arabic term and related slugs |
 | `cards.en.json` | 25 cards and 112 required checklist items |
 | `playbook.en.json` | 32 situations with screens, cases and articles |
 | `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
 | `faq.en.json` | 58 quick answers |
 | `data.json` | `ledger-events`, `visible-rails`, `attempt-transitions` |
-| `context-map.json` | 28 screens (including `Wallets`, `SystemBackups`, `AmlReportingStudio`, `Incidents` and `FilingAdapters`), the last being the `General` fallback |
+| `context-map.json` | 29 screens (including `Wallets`, `SystemBackups`, `AmlReportingStudio`, `Incidents`, `FilingAdapters` and `Reports`), the last being the `General` fallback |
 | `error-codes.en.json` | 19 codes parsed from `b13-01` |
 | `edge-cases.en.json` | 140 rows parsed from the v4.1 design |
 | `meta.json` | `contentVersion`, deterministic `generatedAt`, counts and source SHA-256 |

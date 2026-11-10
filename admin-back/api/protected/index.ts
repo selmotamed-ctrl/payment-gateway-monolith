@@ -27,6 +27,7 @@ import { searchRouter } from "./search";
 import { systemRouter } from "./system";
 import { inboundEventsRouter, transactionsRouter } from "./transactions";
 import { walletsRouter } from "./wallets";
+import { reportEngineRouter } from "./reportEngine";
 
 const router = express.Router();
 
@@ -130,6 +131,23 @@ router.use("/audit-logs", guard({ read: ["security:read"], write: ["security:rea
 router.use("/kyb-documents", kybGuard, kybReviewRouter);
 router.use("/system/backups", backupsRouter);
 router.use("/system", guard({ read: ["security:read"], write: ["security:write"] }), systemRouter);
+router.use(
+  "/report-engine",
+  guard({
+    read: [
+      "report:review",
+      "report:approve",
+      "report_engine:author",
+      "report_engine:run",
+      "gateway:write",
+      "security:read",
+      "security:write",
+      "reports.draft",
+    ],
+    write: ["report:approve", "report_engine:author", "report:review", "security:write", "reports.draft"],
+  }),
+  reportEngineRouter,
+);
 router.use(
   ["/operator-cases", "/gateway-inquiries"],
   guard({

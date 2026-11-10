@@ -12,7 +12,11 @@ import {
 } from "./engine/workers/productionRuntime";
 import { defaultWorkerHealthRegistry, type WorkerHealthRegistry } from "./engine/workers/workerRuntime";
 import { env } from "./lib/env";
-import { isApiError, toErrorEnvelope } from "./lib/error";
+import { ApiError, isApiError, toErrorEnvelope } from "./lib/error";
+import { REPORT_ENGINE_JSON_LIMIT } from "./api/internal/adminReportEngine";
+
+/** Admin report-engine routes: authoring bodies carry the asset zip. */
+export const REPORT_ENGINE_BODY_PATH = /^\/internal\/admin\/report-engine(\/|$)/;
 import { requestLoggerMiddleware, setAccessLogSink } from "./lib/requestLogger";
 import { rawBodyMiddleware } from "./lib/rawBody";
 import { client } from "./prisma/client";
@@ -75,7 +79,26 @@ export const createApp = (options: CreateAppOptions = {}) => {
   });
   app.use(requestLoggerMiddleware);
   app.use(rawBodyMiddleware);
-  app.use(express.json({ limit: "1mb" }));
+  // Report-engine authoring bodies carry a base64 asset zip (≤ 15 MB binary):
+  // that prefix is parsed with a larger, route-scoped limit and skips the
+  // global 1 MB parser. An oversized body is a 413 with a stable code.
+  const reportEngineJson = express.json({ limit: REPORT_ENGINE_JSON_LIMIT });
+  const defaultJson = express.json({ limit: "1mb" });
+  app.use((request, response, next) => {
+    if (!REPORT_ENGINE_BODY_PATH.test(request.path)) {
+      defaultJson(request, response, next);
+      return;
+    }
+    reportEngineJson(request, response, (error?: unknown) => {
+      if ((error as { type?: unknown } | undefined)?.type === "entity.too.large") {
+        next(new ApiError(413, "PAYLOAD_TOO_LARGE", "The request body exceeds the report-engine size limit", {
+          limit: REPORT_ENGINE_JSON_LIMIT,
+        }));
+        return;
+      }
+      next(error as Error | undefined);
+    });
+  });
   app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
   const healthDb = options.db ?? (client as unknown as QueueHealthDatabase);

@@ -4,6 +4,7 @@
 
 
 import { registerPlugins } from "@/plugins";
+import { initTheme } from "@/state/theme";
 
 import { createApp } from "vue";
 import App from "./App";
@@ -19,6 +20,7 @@ import { VueDatePicker } from '@vuepic/vue-datepicker';
 const app = createApp(App);
 
 registerPlugins(app);
+initTheme();
 
 app.component('VueDatePicker',VueDatePicker)
 

@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { VAlert, VBtn, VTextField } from "vuetify/components";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import ThemeMenu from "@/components/ThemeMenu";
 import { api, setToken, setUser, type TesterUser } from "@/utils/api";
 
 const LoginPage = dc(() => {
@@ -41,7 +42,10 @@ const LoginPage = dc(() => {
         style={{ width: "420px", maxWidth: "96vw" }}
         v-slots={{
           headerActions: () => (
-            <StatusBadge status="SANDBOX" label="Single tester portal" toneOverride="info" showDot={false} />
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <StatusBadge status="SANDBOX" label="Single tester portal" toneOverride="info" showDot={false} />
+              <ThemeMenu />
+            </div>
           ),
         }}
       >

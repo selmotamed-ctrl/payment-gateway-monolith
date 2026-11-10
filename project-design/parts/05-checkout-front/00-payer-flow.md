@@ -3,11 +3,14 @@ id: checkout-ui.flow
 title: Checkout Payer Flow
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-09
 verified_against: 5a24f6f+working-tree
 code:
   - checkout-front/src/router/index.ts
   - checkout-front/src/layouts/checkout.tsx
+  - checkout-front/src/utils/theme/index.ts
+  - checkout-front/src/state/theme.ts
+  - checkout-front/src/components/ThemeMenu/index.tsx
   - checkout-front/src/pages/pay/[linkKey]/index.tsx
   - checkout-front/src/components/rail-cards/index.tsx
   - checkout-front/src/components/rail-fields/index.tsx
@@ -69,7 +72,7 @@ The checkout is deliberately narrow and zero-trust:
 - `/` (`Home`) redirects to `NotFound`.
 - `/:pathMatch(.*)*` (`NotFound`) renders the token-styled 404 page.
 - `layouts/checkout.tsx` is a single `<main class="pg-checkout">` with an optional title.
-- The page adds a max-width 560 px column with the merchant name, help button, language toggle, summary card, phase content and footer.
+- The page adds a max-width 560 px column with the merchant name, help button, three-mode theme menu (System/Light/Dark), language toggle, summary card, phase content and footer. The theme mode is persisted and resolved against `prefers-color-scheme`; `initialTheme()`/`initTheme()` apply it before mount, so the payer surface follows the OS theme and tracks OS changes live in System mode.
 
 ### 3.2 Phase machine
 
@@ -332,6 +335,7 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 
 ## 10. Change history
 
+- 2026-11-09 — Added system/light/dark theme modes: persisted mode resolved against `prefers-color-scheme`, applied before mount, live OS tracking in System mode, and an explicit three-option `ThemeMenu` in the payer header. See `TRACKER.md`.
 - 2026-11-03 — Initial canonical payer-flow part. Confirms the phase machine, five client-action renderers, SSE status stream, amount breakdown, receipt/return allowlist and the checkout 404 recovery bug.
 
 ## Security hardening (2026-11-05)

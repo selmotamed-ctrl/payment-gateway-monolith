@@ -6,11 +6,12 @@ import { commerceCatalogue } from "@/constants/i18n/commerce";
 import { ledgerOpsCatalogue } from "@/constants/i18n/ledgerOps";
 import { formsCatalogue } from "@/constants/i18n/forms";
 import { buildersCatalogue } from "@/constants/i18n/builders";
+import { reportsCatalogue } from "@/constants/i18n/reports";
 
 const buildAppMessages = () => {
     const en: Record<string, string> = {};
     const ar: Record<string, string> = {};
-    for (const [key, pair] of Object.entries({ ...appCatalogue, ...academyCatalogue, ...commerceCatalogue, ...ledgerOpsCatalogue, ...formsCatalogue, ...buildersCatalogue })) {
+    for (const [key, pair] of Object.entries({ ...appCatalogue, ...academyCatalogue, ...commerceCatalogue, ...ledgerOpsCatalogue, ...formsCatalogue, ...buildersCatalogue, ...reportsCatalogue })) {
         en[key] = pair[0];
         ar[key] = pair[1];
     }

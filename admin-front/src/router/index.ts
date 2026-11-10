@@ -230,6 +230,21 @@ const router = createRouter({
                     component: () => import("@/pages/routes/index"),
                 },
                 {
+                    path: "reports/catalog",
+                    name: "ReportsCatalog",
+                    component: () => import("@/pages/reports/catalog/index"),
+                },
+                {
+                    path: "reports/studio",
+                    name: "ReportsStudio",
+                    component: () => import("@/pages/reports/studio/index"),
+                },
+                {
+                    path: "reports/chrome",
+                    name: "ReportsChrome",
+                    component: () => import("@/pages/reports/chrome/index"),
+                },
+                {
                     path: "guide",
                     name: "AdminGuide",
                     component: () => import("@/pages/guide/index"),
