@@ -32,9 +32,9 @@ function sampleValueForField(field: ReportInputFieldSpec, now: Date): unknown {
     case "entity_autocomplete":
       return field.autocomplete?.source === "currencies"
         ? "LYD"
-        : "00000000-0000-0000-0000-000000000000";
+        : "00000000-0000-4000-8000-000000000000";
     case "entity_multi_autocomplete":
-      return ["00000000-0000-0000-0000-000000000000"];
+      return ["00000000-0000-4000-8000-000000000000"];
     case "date":
       return now.toISOString().slice(0, 10);
     case "datetime":

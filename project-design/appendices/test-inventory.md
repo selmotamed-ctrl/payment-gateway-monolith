@@ -162,7 +162,7 @@
 | `core-back/test/reportEngineSdk/ChromeResolution.test.ts` | 52 | 3 |
 | `core-back/test/reportEngineSdk/CompilerAndReferenceRegression.test.ts` | 276 | 7 |
 | `core-back/test/reportEngineSdk/CssAndHtmlSanitizer.test.ts` | 63 | 4 |
-| `core-back/test/reportEngineSdk/ExecuteAndRedaction.test.ts` | 120 | 3 |
+| `core-back/test/reportEngineSdk/ExecuteAndRedaction.test.ts` | 140 | 4 |
 | `core-back/test/reportEngineSdk/InputFormZodCompiler.test.ts` | 93 | 4 |
 | `core-back/test/reportEngineSdk/MerchantReportLine.test.ts` | 313 | 11 |
 | `core-back/test/reportEngineSdk/MerchantReportPolicy.test.ts` | 46 | 4 |
@@ -401,4 +401,4 @@
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **395**
-- Total literal test declarations: **4038**
+- Total literal test declarations: **4039**

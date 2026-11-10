@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { executeReport } from "../../lib/reportEngineSdk";
+import { synthesizeDefaultInputs } from "../../lib/reportEngineSdk/verifier/QuerySafetyAndOptValidator";
+import { ReportDescriptorSpecSchema } from "../../lib/reportEngineSdk/types/reportSpec";
+import { exampleDescriptorSpec } from "../../lib/reportEngineSdk/transcript/ReportTranscriptBuilder";
 import { createTestHostConfig, baseReportSpec, financeActor, FakeReadOnlyPort } from "./helpers";
 import type { ReportDescriptorSpec } from "../../lib/reportEngineSdk/types/reportSpec";
 
@@ -115,5 +118,22 @@ describe("remediation A04/A18: execution, bundle assets, aggregates and truncati
       chromeRegistry: [],
     });
     expect(bundle.datasetTruncated.totals).toBe(true);
+  });
+});
+
+describe("Studio draft preview regression", () => {
+  test("synthesized sample inputs satisfy the compiled input schema", async () => {
+    const fake = new FakeReadOnlyPort();
+    fake.rows = [{ currency: "LYD", total: "1000" }];
+    const host = createTestHostConfig({ dbReadOnlyPort: fake });
+    const spec = ReportDescriptorSpecSchema.parse(exampleDescriptorSpec);
+    const bundle = await executeReport(host, {
+      spec,
+      inputs: synthesizeDefaultInputs(spec),
+      actor: financeActor,
+      chromeRegistry: [],
+    });
+    expect(bundle.spec.report.code).toBe("merchant-settlement-summary");
+    expect(bundle.datasets.totals).toBeDefined();
   });
 });
