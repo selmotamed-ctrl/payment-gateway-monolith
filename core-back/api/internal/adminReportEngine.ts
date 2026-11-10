@@ -819,16 +819,8 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
         : sortKey === "report"
           ? { code: sortDirection }
           : { updatedAt: sortDirection };
-  const [total, rows] = await Promise.all([
-    client.reportDefinitionSpecRecord.count({ where }),
-    client.reportDefinitionSpecRecord.findMany({
-      where,
-      orderBy,
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-  ]);
-  const items = rows
+  const rows = await client.reportDefinitionSpecRecord.findMany({ where, orderBy });
+  const allowed = rows
     .filter((row) => isAllowed(row, actor))
     .map((row) => ({
       id: row.id,
@@ -847,6 +839,8 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
       spec: row.specJson,
       updatedAt: row.updatedAt,
     }));
+  const total = allowed.length;
+  const items = allowed.slice((page - 1) * pageSize, page * pageSize);
   response.json({ reports: items, total });
 });
 
