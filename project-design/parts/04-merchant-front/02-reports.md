@@ -65,3 +65,7 @@ Every execution:
 ## 5. Staff oversight
 
 `admin-front` `/reports/merchant-reports` lists merchant-authored reports per merchant with their execution history and a `SUSPEND`/`RESUME` Studio action (`security:write`, audited). The merchant registry, usage rows and execution audit are separate tables (schema version 33).
+
+## Run form layout (2026-11-10)
+
+The merchant run drawer mirrors the admin filter-style form: sectioned, one field per row, labels and descriptions on every field, and a dedicated output-language section when multiple locales exist. Reset and Generate live in the drawer footer; the merchant scope input remains hidden.

@@ -9,6 +9,7 @@ import { ApiTable } from "@/components/Table/ApiTable";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
 import {
+  FormField,
   MetaPill,
   MonoRef,
   PageHeader,
@@ -105,6 +106,11 @@ const ReportsCatalogPage = dc(() => {
   const canChrome = computed(() => hasOneOfAuthorities(["reports.studio", "security:write"]));
   const hasRows = computed(() =>
     bundle.value ? Object.values(bundle.value.datasets).some((rows) => rows.length > 0) : false,
+  );
+  const showOutputSection = computed(
+    () =>
+      availableLocales.value.length > 1 ||
+      Boolean(selected.value?.spec.page_layout.allow_runtime_chrome_selection),
   );
 
   const audienceTabs = computed(() => [
@@ -536,7 +542,21 @@ const ReportsCatalogPage = dc(() => {
           onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)}
           title={selected.value ? localizedTitle(selected.value) : t("Run report")}
           subtitle={t("Fill the parameters, choose the output language and generate the report")}
-          width={620}
+          width={720}
+          v-slots={{
+            footer: () =>
+              selected.value ? (
+                <div class="pg-report-actions">
+                  <div class="pg-report-actions__secondary">
+                    <VBtn variant="text" onClick={resetInputs}>{t("Reset inputs")}</VBtn>
+                    <VBtn variant="text" onClick={clearSelection}>{t("Clear selection")}</VBtn>
+                  </div>
+                  <VBtn color="primary" prependIcon="mdi-file-chart" loading={generating.value} onClick={requestGenerate}>
+                    {t("Generate Report")}
+                  </VBtn>
+                </div>
+              ) : null,
+          }}
         >
           {selected.value && (
             <div class="d-flex flex-column ga-4">
@@ -548,65 +568,94 @@ const ReportsCatalogPage = dc(() => {
                 translate={specT.value}
                 onUpdate:modelValue={(value: Record<string, unknown>) => (inputs.value = value)}
               />
-              <div class="d-flex flex-wrap ga-3 align-end">
-                <VSelect
-                  v-model={locale.value}
-                  label={t("Output language")}
-                  items={availableLocales.value}
-                  variant="outlined"
-                  hideDetails="auto"
-                  style={{ maxWidth: "180px" }}
-                />
-                {selected.value.spec.page_layout.allow_runtime_chrome_selection && (
-                  <>
-                    <VSelect
-                      v-model={headerMode.value}
-                      label={t("Header")}
-                      items={chromeModeOptions()}
-                      variant="outlined"
-                      hideDetails="auto"
-                      style={{ maxWidth: "240px" }}
-                    />
-                    {headerMode.value === "SPECIFIC_CHROME_CODE" && (
-                      <VSelect
-                        v-model={headerCode.value}
-                        label={t("Header template")}
-                        items={chromeCodeOptions("HEADER")}
-                        variant="outlined"
-                        hideDetails="auto"
-                        style={{ maxWidth: "260px" }}
-                      />
+
+              {showOutputSection.value && (
+                <section class="pg-report-section">
+                  <header class="pg-report-section__header">
+                    <h3 class="pg-report-section__title">{t("Output options")}</h3>
+                    <p class="pg-report-section__description">
+                      {t("Choose the language and page header/footer for the generated report.")}
+                    </p>
+                  </header>
+                  <div class="pg-report-section__fields">
+                    {availableLocales.value.length > 1 && (
+                      <FormField
+                        variant="filter"
+                        label={t("Output language")}
+                        hint={t("Choose the language used for the report text, headings and labels.")}
+                      >
+                        <VSelect
+                          v-model={locale.value}
+                          items={availableLocales.value}
+                          density="compact"
+                          variant="outlined"
+                          hideDetails="auto"
+                        />
+                      </FormField>
                     )}
-                    <VSelect
-                      v-model={footerMode.value}
-                      label={t("Footer")}
-                      items={chromeModeOptions()}
-                      variant="outlined"
-                      hideDetails="auto"
-                      style={{ maxWidth: "240px" }}
-                    />
-                    {footerMode.value === "SPECIFIC_CHROME_CODE" && (
-                      <VSelect
-                        v-model={footerCode.value}
-                        label={t("Footer template")}
-                        items={chromeCodeOptions("FOOTER")}
-                        variant="outlined"
-                        hideDetails="auto"
-                        style={{ maxWidth: "260px" }}
-                      />
+                    {selected.value.spec.page_layout.allow_runtime_chrome_selection && (
+                      <>
+                        <FormField
+                          variant="filter"
+                          label={t("Page header")}
+                          hint={t("Choose the header used in the printed report.")}
+                        >
+                          <VSelect
+                            v-model={headerMode.value}
+                            items={chromeModeOptions()}
+                            density="compact"
+                            variant="outlined"
+                            hideDetails="auto"
+                          />
+                        </FormField>
+                        {headerMode.value === "SPECIFIC_CHROME_CODE" && (
+                          <FormField
+                            variant="filter"
+                            label={t("Header template")}
+                            hint={t("Choose the registered header template.")}
+                          >
+                            <VSelect
+                              v-model={headerCode.value}
+                              items={chromeCodeOptions("HEADER")}
+                              density="compact"
+                              variant="outlined"
+                              hideDetails="auto"
+                            />
+                          </FormField>
+                        )}
+                        <FormField
+                          variant="filter"
+                          label={t("Page footer")}
+                          hint={t("Choose the footer used in the printed report.")}
+                        >
+                          <VSelect
+                            v-model={footerMode.value}
+                            items={chromeModeOptions()}
+                            density="compact"
+                            variant="outlined"
+                            hideDetails="auto"
+                          />
+                        </FormField>
+                        {footerMode.value === "SPECIFIC_CHROME_CODE" && (
+                          <FormField
+                            variant="filter"
+                            label={t("Footer template")}
+                            hint={t("Choose the registered footer template.")}
+                          >
+                            <VSelect
+                              v-model={footerCode.value}
+                              items={chromeCodeOptions("FOOTER")}
+                              density="compact"
+                              variant="outlined"
+                              hideDetails="auto"
+                            />
+                          </FormField>
+                        )}
+                      </>
                     )}
-                  </>
-                )}
-              </div>
-              <div class="d-flex justify-space-between align-center flex-wrap ga-2">
-                <div class="d-flex ga-2">
-                  <VBtn variant="text" onClick={resetInputs}>{t("Reset inputs")}</VBtn>
-                  <VBtn variant="text" onClick={clearSelection}>{t("Clear selection")}</VBtn>
-                </div>
-                <VBtn color="primary" prependIcon="mdi-file-chart" loading={generating.value} onClick={requestGenerate}>
-                  {t("Generate Report")}
-                </VBtn>
-              </div>
+                  </div>
+                </section>
+              )}
             </div>
           )}
         </SlideOverDrawer>

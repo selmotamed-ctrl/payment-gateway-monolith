@@ -9,6 +9,7 @@ import { ApiTable } from "@/components/Table/ApiTable";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
 import {
+  FormField,
   FormModal,
   MetaPill,
   MonoRef,
@@ -127,6 +128,11 @@ const MerchantReportsPage = dc(() => {
     bundle.value = null;
     previewPages.value = 1;
     drawerOpen.value = true;
+  };
+
+  const resetInputs = () => {
+    if (!selected.value) return;
+    inputs.value = resolveInputDefaults(selected.value.spec);
   };
 
   const friendlyError = (caught: unknown): string => {
@@ -373,7 +379,20 @@ const MerchantReportsPage = dc(() => {
           onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)}
           title={selected.value ? localizedTitle(selected.value) : t("Run report")}
           subtitle={t("Fill the parameters and generate the report")}
-          width={620}
+          width={720}
+          v-slots={{
+            footer: () =>
+              selected.value ? (
+                <div class="pg-report-actions">
+                  <div class="pg-report-actions__secondary">
+                    <VBtn variant="text" onClick={resetInputs}>{t("Reset inputs")}</VBtn>
+                  </div>
+                  <VBtn color="primary" prependIcon="mdi-file-chart" loading={generating.value} onClick={requestGenerate}>
+                    {t("Generate Report")}
+                  </VBtn>
+                </div>
+              ) : null,
+          }}
         >
           {selected.value && (
             <div class="d-flex flex-column ga-4">
@@ -386,19 +405,31 @@ const MerchantReportsPage = dc(() => {
                 translate={specT.value}
                 onUpdate:modelValue={(value: Record<string, unknown>) => (inputs.value = value)}
               />
-              <div class="d-flex flex-wrap ga-3 align-end justify-space-between">
-                <VSelect
-                  v-model={locale.value}
-                  label={t("Output language")}
-                  items={availableLocales.value}
-                  variant="outlined"
-                  hideDetails="auto"
-                  style={{ maxWidth: "180px" }}
-                />
-                <VBtn color="primary" prependIcon="mdi-file-chart" loading={generating.value} onClick={requestGenerate}>
-                  {t("Generate Report")}
-                </VBtn>
-              </div>
+              {availableLocales.value.length > 1 && (
+                <section class="pg-report-section">
+                  <header class="pg-report-section__header">
+                    <h3 class="pg-report-section__title">{t("Output options")}</h3>
+                    <p class="pg-report-section__description">
+                      {t("Choose the language used for the report text, headings and labels.")}
+                    </p>
+                  </header>
+                  <div class="pg-report-section__fields">
+                    <FormField
+                      variant="filter"
+                      label={t("Output language")}
+                      hint={t("Choose the language used for the report text, headings and labels.")}
+                    >
+                      <VSelect
+                        v-model={locale.value}
+                        items={availableLocales.value}
+                        density="compact"
+                        variant="outlined"
+                        hideDetails="auto"
+                      />
+                    </FormField>
+                  </div>
+                </section>
+              )}
             </div>
           )}
         </SlideOverDrawer>

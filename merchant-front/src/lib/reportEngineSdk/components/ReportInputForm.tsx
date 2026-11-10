@@ -1,5 +1,5 @@
-import { defineComponent, onMounted, reactive, watch, type PropType } from "vue";
-import { useDisplay, useLocale } from "vuetify";
+import { computed, defineComponent, onMounted, reactive, watch, type PropType } from "vue";
+import { useLocale } from "vuetify";
 import {
   VAutocomplete,
   VChip,
@@ -11,6 +11,7 @@ import { FormField } from "@/components/ui/FormField";
 import DateInput from "@/components/DateInput";
 import type { ReportDescriptorSpec, ReportInputFieldSpec } from "../types/reportSpec";
 import { resolvePreset } from "../utils/inputDefaults";
+import { groupReportInputs } from "../utils/inputSections";
 import { validateReportInputs } from "../utils/inputValidation";
 
 export type AutocompleteLoader = (
@@ -53,7 +54,6 @@ export const ReportInputForm = defineComponent({
   emits: ["update:modelValue", "validityChanged"],
   setup(props, { emit, expose }) {
     const { t } = useLocale();
-    const { mobile } = useDisplay();
     const tr = (key: string): string => (props.translate ? props.translate(key) : t(key));
     const items = reactive<Record<string, Item[]>>({});
     const loading = reactive<Record<string, boolean>>({});
@@ -152,9 +152,6 @@ export const ReportInputForm = defineComponent({
       preset.value === "TODAY" || preset.value === "YESTERDAY",
     );
 
-    const visibleInputs = (): ReportInputFieldSpec[] =>
-      props.spec.inputs.filter((field) => !(props.hiddenInputKeys ?? []).includes(field.key));
-
     const enumItems = (field: ReportInputFieldSpec): Array<{ title: string; value: string }> =>
       (field.validation?.enum_values ?? []).map((value) => ({
         value,
@@ -163,8 +160,40 @@ export const ReportInputForm = defineComponent({
           : value,
       }));
 
-    const defaultHint = (field: ReportInputFieldSpec): string | undefined => {
-      const help = field.help_i18n_key ? tr(field.help_i18n_key) : undefined;
+    const humanizeKey = (key: string): string =>
+      key
+        .replace(/[_-]+/g, " ")
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/^./, (character) => character.toUpperCase());
+
+    const fieldLabel = (field: ReportInputFieldSpec): string => {
+      const translated = tr(field.label_i18n_key);
+      return translated && translated !== field.label_i18n_key ? translated : humanizeKey(field.key);
+    };
+
+    const FIELD_DESCRIPTION_KEYS: Record<ReportInputFieldSpec["type"], string> = {
+      string: "Enter a value.",
+      uuid: "Enter a valid identifier.",
+      number: "Enter a number.",
+      integer: "Enter a whole number.",
+      amount_minor: "Enter an amount.",
+      boolean: "Turn this option on or off.",
+      date: "Select a date.",
+      datetime: "Select a date and time.",
+      daterange: "Select the start and end of the period.",
+      enum: "Choose from the available values.",
+      multi_enum: "Choose one or more values.",
+      entity_autocomplete: "Search and select a record.",
+      entity_multi_autocomplete: "Search and select one or more records.",
+    };
+
+    const fieldDescription = (field: ReportInputFieldSpec): string => {
+      const translated = field.help_i18n_key ? tr(field.help_i18n_key) : "";
+      const help = translated && translated !== field.help_i18n_key
+        ? translated
+        : t(FIELD_DESCRIPTION_KEYS[field.type] ?? "Enter a value.");
       if (field.validation?.max_range_days) {
         return [help, `${t("Maximum range")}: ${field.validation.max_range_days} ${t("days")}`]
           .filter(Boolean)
@@ -173,11 +202,11 @@ export const ReportInputForm = defineComponent({
       return help;
     };
 
-    const columns = (field: ReportInputFieldSpec): number =>
-      mobile.value ? 12 : Math.max(3, Math.min(12, field.layout_col_span));
+    const sections = computed(() => groupReportInputs(props.spec, props.hiddenInputKeys));
 
     const common = (field: ReportInputFieldSpec) => ({
       disabled: props.disabled,
+      density: "compact" as const,
       variant: "outlined" as const,
       hideDetails: "auto" as const,
       placeholder: field.placeholder_i18n_key ? tr(field.placeholder_i18n_key) : undefined,
@@ -240,14 +269,15 @@ export const ReportInputForm = defineComponent({
     );
 
     const renderField = (field: ReportInputFieldSpec) => {
-      const label = tr(field.label_i18n_key);
-      const hint = defaultHint(field);
+      const label = fieldLabel(field);
+      const hint = fieldDescription(field);
       const value = valueOf(field.key);
       const inputProps = common(field);
 
       if (field.type === "daterange") {
         return (
           <FormField
+            variant="filter"
             label={label}
             hint={hint}
             error={errors[field.key] || ""}
@@ -260,6 +290,7 @@ export const ReportInputForm = defineComponent({
                 aria-label={label}
                 placeholder={t("Select date range")}
                 prependInnerIcon="mdi-calendar-range"
+                density="compact"
                 variant="outlined"
                 hideDetails="auto"
                 clearable
@@ -276,6 +307,7 @@ export const ReportInputForm = defineComponent({
       if (field.type === "date" || field.type === "datetime") {
         return (
           <FormField
+            variant="filter"
             label={label}
             hint={hint}
             error={errors[field.key] || ""}
@@ -314,6 +346,7 @@ export const ReportInputForm = defineComponent({
         const multiple = field.type === "entity_multi_autocomplete";
         return (
           <FormField
+            variant="filter"
             label={label}
             hint={hint}
             error={errors[field.key] || ""}
@@ -342,6 +375,7 @@ export const ReportInputForm = defineComponent({
         const multiple = field.type === "multi_enum";
         return (
           <FormField
+            variant="filter"
             label={label}
             hint={hint}
             error={errors[field.key] || ""}
@@ -365,6 +399,7 @@ export const ReportInputForm = defineComponent({
       if (field.type === "boolean") {
         return (
           <FormField
+            variant="filter"
             label={label}
             hint={hint}
             error={errors[field.key] || ""}
@@ -373,6 +408,7 @@ export const ReportInputForm = defineComponent({
           >
             <VSwitch
               color="primary"
+              density="compact"
               hideDetails="auto"
               disabled={props.disabled}
               modelValue={Boolean(value)}
@@ -388,6 +424,7 @@ export const ReportInputForm = defineComponent({
           : "text";
       return (
         <FormField
+          variant="filter"
           label={label}
           hint={hint}
           error={errors[field.key] || ""}
@@ -409,15 +446,33 @@ export const ReportInputForm = defineComponent({
       );
     };
 
-    return () => (
-      <div class="report-input-grid">
-        {visibleInputs().map((field) => (
-          <div key={field.key} style={{ gridColumn: `span ${columns(field)}`, minWidth: 0 }}>
-            {renderField(field)}
+    return () => {
+      const grouped = sections.value;
+      if (grouped.length === 0) {
+        return (
+          <div class="pg-report-form">
+            <div class="pg-report-empty">{t("This report has no parameters.")}</div>
           </div>
-        ))}
-      </div>
-    );
+        );
+      }
+      return (
+        <div class="pg-report-form">
+          {grouped.map((section) => (
+            <section class="pg-report-section" key={section.id}>
+              <header class="pg-report-section__header">
+                <h3 class="pg-report-section__title">{t(section.titleKey)}</h3>
+                <p class="pg-report-section__description">{t(section.descriptionKey)}</p>
+              </header>
+              <div class="pg-report-section__fields">
+                {section.fields.map((field) => (
+                  <div key={field.key}>{renderField(field)}</div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      );
+    };
   },
 });
 

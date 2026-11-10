@@ -397,9 +397,9 @@
 | `tests/unit/ledger-ops-ledger.test.ts` | 154 | 15 |
 | `tests/unit/ledger-ops-operations.test.ts` | 313 | 25 |
 | `tests/unit/report-engine-sdk-mirror.test.ts` | 32 | 1 |
-| `tests/unit/report-ui-styles.test.ts` | 20 | 1 |
+| `tests/unit/report-ui-styles.test.ts` | 41 | 2 |
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **396**
-- Total literal test declarations: **4040**
+- Total literal test declarations: **4041**

@@ -10346,6 +10346,10 @@ All three pages use the shared `ScreenContainer`/`ThemedView` page shell, so the
 
 Actions added: Catalog Refresh/Open Studio/Headers & Footers, row copy/download/open, Reset inputs, Clear selection, Regenerate; Studio Open Catalog/Headers, Refresh pending, Format/Copy/Download/Clear editor, verification badge and disabled Save/Publish until verification passes; Chrome Refresh/Open Catalog/Studio, Format/Copy/Download/Clear editor, publish/make-default switches, empty/loading states and per-row Edit/Copy code/Download spec/Preview/default actions. The Paged.js preview toolbar now uses theme tokens, wraps on small screens and uses a responsive height.
 
+## Report run form (2026-11-10)
+
+The Catalog run drawer is built as a filter-style form rather than a dense grid. `ReportInputForm` groups visible inputs into **Report scope**, **Reporting period** and **Filters and options** sections, with an uppercase muted section title and a short description. Fields are stacked one per row; `FormField` gained a `filter` variant that uses the same label/control anatomy as `TableFilters` (`pg-filter-label`, 36 px compact outlined controls, 13 px inputs). Every field has a label (spec translation or a humanised fallback key) and a description (the spec's `help_i18n_key` or a type fallback such as “Search and select a record.”). The output language, page header/footer and template selectors live in an **Output options** section, and Reset/Clear/Generate are pinned in the `SlideOverDrawer` footer. The drawer is 720 px wide and capped at `100vw` on narrow screens.
+
 ---
 
 <a id="merchant-uiportal"></a>
@@ -11052,6 +11056,10 @@ Every execution:
 ## 5. Staff oversight
 
 `admin-front` `/reports/merchant-reports` lists merchant-authored reports per merchant with their execution history and a `SUSPEND`/`RESUME` Studio action (`security:write`, audited). The merchant registry, usage rows and execution audit are separate tables (schema version 33).
+
+## Run form layout (2026-11-10)
+
+The merchant run drawer mirrors the admin filter-style form: sectioned, one field per row, labels and descriptions on every field, and a dedicated output-language section when multiple locales exist. Reset and Generate live in the drawer footer; the merchant scope input remains hidden.
 
 ---
 

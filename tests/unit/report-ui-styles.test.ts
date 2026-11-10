@@ -17,3 +17,24 @@ describe("report engine UI styles", () => {
     });
   }
 });
+
+describe("report run form styling", () => {
+  for (const portal of ["admin-front", "merchant-front"]) {
+    test(`${portal} uses the table-filter anatomy for report run sections`, () => {
+      const css = readFileSync(path.join(root, portal, "src/styles/fintech-minimal.css"), "utf8");
+      for (const rule of [
+        ".pg-report-form",
+        ".pg-report-section",
+        ".pg-report-section__title",
+        ".pg-report-section__description",
+        ".pg-report-section__fields",
+        ".pg-report-field",
+        ".pg-report-field__hint",
+        ".pg-report-actions",
+      ]) {
+        expect(css, rule).toContain(`${rule} {`);
+      }
+      expect(css).toContain(".pg-slide-over {\n  max-width: 100vw;\n}");
+    });
+  }
+});

@@ -1285,3 +1285,109 @@ div[title]:has(> .pg-status-badge) {
 .report-paged-preview-frame {
   min-block-size: min(860px, 74vh);
 }
+
+/* --------------------------------------------------------------------------
+ * Report run form
+ * Mirrors the table-filter anatomy (uppercase muted labels, 36px compact
+ * outlined controls, subtle filter surface) but stacks one field per row with
+ * author/section descriptions and comfortable section padding.
+ * -------------------------------------------------------------------------- */
+.pg-report-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pg-report-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--pg-bg-surface-subtle);
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-md);
+}
+.pg-report-section__header {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.pg-report-section__title {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 16px;
+  text-transform: uppercase;
+  color: var(--pg-ink-muted);
+}
+html[dir="rtl"] .pg-report-section__title {
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.pg-report-section__description {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--pg-ink-muted);
+}
+.pg-report-section__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pg-report-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.pg-report-field .v-field {
+  min-height: 36px;
+}
+.pg-report-field .v-field__input {
+  min-height: 34px;
+  font-size: 13px;
+}
+.pg-report-field .v-selection-control {
+  min-height: 28px;
+}
+.pg-report-field__hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--pg-ink-muted);
+}
+.pg-report-empty {
+  padding: 18px;
+  border: 1px dashed var(--pg-border-strong);
+  border-radius: var(--pg-radius-md);
+  color: var(--pg-ink-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  background: var(--pg-bg-surface-subtle);
+}
+.pg-report-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+.pg-report-actions__secondary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pg-slide-over {
+  max-width: 100vw;
+}
+@media (max-width: 600px) {
+  .pg-report-section {
+    padding: 14px;
+  }
+  .pg-report-form {
+    gap: 14px;
+  }
+}
