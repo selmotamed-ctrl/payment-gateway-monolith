@@ -32,6 +32,9 @@ export const routesRoles: {
     AmlScreenings: ["COMPLIANCE", "MLRO"],
     AmlRules: ["COMPLIANCE", "MLRO"],
     AmlReports: ["COMPLIANCE", "MLRO"],
+    AmlReportingStudio: ["COMPLIANCE", "MLRO"],
+    Incidents: ["COMPLIANCE", "MLRO"],
+    FilingAdapters: ["COMPLIANCE", "MLRO"],
     AdminAcademyTeam: ["SECURITY_ADMIN"],
 };
 
@@ -133,6 +136,24 @@ export const useSections = () => {
                     label: t("AML Reports"),
                     name: "AmlReports",
                     icon: "mdi-file-report-outline",
+                    if: () => hasOneOfAuthorities(["aml.read_confidential"]),
+                },
+                {
+                    label: t("Reporting Studio"),
+                    name: "AmlReportingStudio",
+                    icon: "mdi-xml",
+                    if: () => hasOneOfAuthorities(["aml.read_confidential"]),
+                },
+                {
+                    label: t("Incidents"),
+                    name: "Incidents",
+                    icon: "mdi-alert-decagram-outline",
+                    if: () => hasOneOfAuthorities(["aml.read_confidential"]),
+                },
+                {
+                    label: t("Filing Adapters"),
+                    name: "FilingAdapters",
+                    icon: "mdi-send-check-outline",
                     if: () => hasOneOfAuthorities(["aml.read_confidential"]),
                 },
             ],

@@ -700,3 +700,20 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 
 - `POST /internal/admin/users` accepts no password or phone and creates an `INVITED` user; `POST /internal/admin/users/:id/invite` re-issues an invitation; `POST /internal/admin/auth/accept-invitation` (public, token-bound) sets the password and phone and marks the invitation complete. The maker-checker activation of a staff user requires a completed invitation.
 - `GET|POST /internal/checkout/return/:attemptToken` accepts only the attempt `reference`, and runs the gateway inquiry at most once per `RETURN_INQUIRY_COOLDOWN_MS` (10 s) per attempt across core instances (a shared flag in the auth-state store); calls inside the window answer with the current status (GAP-055).
+
+## Reporting Studio completion, incidents and filing adapters (2026-11-10)
+
+Core adds these internal admin routes under `/internal/admin` (all confidential AML/reporting routes; writes require the reporting authority and maker-checker where noted):
+
+- Reporting Studio: `POST /aml/report-schemas/:id/template/analyze`, `POST /aml/report-schemas/:id/template/upload`, `DELETE /aml/report-schemas/:id/template`; `GET|PUT /aml/report-schemas/:id/template` now include `templateBinding`; `POST /aml/report-schemas/:id/workbook/preview` renders XML/XLSX/DOCX. `PUT /aml/reporting-rules/:id/schema-bindings` returns 202 with `approvalRequestId` and requires a `REPORTING_RULE_SCHEMA_BINDING` checker.
+- Incidents: `GET|POST /aml/incidents`, `GET|PATCH /aml/incidents/:id`, `POST /aml/incidents/:id/transition|timeline|responders|actions|links|communications|report` and `PATCH /aml/incidents/:id/responders/:responderId|actions/:actionId`, `DELETE /aml/incidents/:id/links/:linkId`. Writes require the reporting authority; the incident report uses the normal REGULATORY_REPORT approval.
+- Filing: `GET|POST /aml/filing-adapters`, `PATCH|DELETE /aml/filing-adapters/:id`, `GET /aml/reports/:id/submissions`, `POST /aml/reports/:id/file`. The file route returns 502 with a submission id on adapter failure and never returns the decrypted secret.
+- Formats: reporting schema/default/binding/output enums now accept `XML`, `XLSX` and `DOCX`; report output download returns the Matching content type and SHA-256 header.
+
+### Final AML API sweep (2026-11-10)
+
+- `GET /internal/admin/incidents` returns server-filtered rows plus `summary` counts and resolved user names; `page/pageSize/status/severity/category/search` are the supported filters.
+- `PATCH /incidents/:id`, `POST /incidents/:id/transition` and `POST /incidents/:id/report` serialize on the incident row; child timeline/responder/action/link/communication writes are audited. Incident report drafting is allowed from any lifecycle status by owner decision.
+- Filing adapter `POST`, `PATCH` and `DELETE` now return 202 with `approvalRequestId`; the checker executes `FILING_ADAPTER` through `GovernanceExecution`. `GET` responses redact secret-looking `configJson` keys.
+- `POST /aml/reports/:id/file` creates a PENDING `ExternalSubmission` before dispatch, blocks duplicate PENDING/SUBMITTED attempts, records failure details, and passes the authoritative status change through the normal submission gate. Manual submissions create a MANUAL adapter and submission history.
+- Template upload/update URLs reject non-XLSX schemas and any unsafe/invalid workbook; DOCX validation/simulation uses the narrative schema renderer; clone copies the XLSX template binding.

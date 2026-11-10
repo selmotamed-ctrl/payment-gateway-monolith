@@ -33,7 +33,7 @@ export const buildMonthlyPaymentReturn = async (db: Any, range: PeriodRange): Pr
     db,
     `SELECT r.code AS rail, a.currency, a.status::text AS status, count(*)::int AS n, coalesce(sum(a.requested_amount), 0)::text AS amount
      FROM payment_attempts a JOIN rails r ON r.id = a.rail_id
-     WHERE a.created_at >= $1 AND a.created_at < $2
+     WHERE a.created_at >= $1 AND a.created_at < $2 AND a.env = 'LIVE'
      GROUP BY r.code, a.currency, a.status ORDER BY r.code, a.currency, a.status`,
     range.start,
     range.end,
@@ -172,7 +172,8 @@ export const buildLargeTransactionBatch = async (
     db,
     `SELECT a.reference, a.created_at AS date, a.requested_amount::text AS amount, a.currency, r.code AS rail, a.merchant_id::text AS merchant_id, a.status::text AS status
      FROM payment_attempts a JOIN rails r ON r.id = a.rail_id
-     WHERE a.created_at >= $1 AND a.created_at < $2 AND a.currency = $3 AND a.requested_amount >= $4::numeric
+     WHERE a.created_at >= $1 AND a.created_at < $2 AND a.env = 'LIVE'
+       AND a.currency = $3 AND a.requested_amount >= $4::numeric
        AND a.status IN ('SUCCEEDED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'DISPUTED')
      ORDER BY a.created_at ASC, a.id ASC LIMIT $5`,
     range.start,

@@ -47,6 +47,7 @@ export const GUIDE_ROUTE_HELP: Record<string, { bookNumber: number; chapterNumbe
     AmlScreenings: { bookNumber: 10, chapterNumber: "10.1", titleEn: "Screening dispositions" },
     AmlRules: { bookNumber: 10, chapterNumber: "10.1", titleEn: "AML rules" },
     AmlReports: { bookNumber: 10, chapterNumber: "10.1", titleEn: "Regulatory reporting" },
+    AmlReportingStudio: { bookNumber: 10, chapterNumber: "10.1", titleEn: "Regulatory reporting" },
     OperatorCases: { bookNumber: 7, chapterNumber: "7.2", titleEn: "Operator cases and runbooks" },
     OperatorCaseDetail: { bookNumber: 7, chapterNumber: "7.2", titleEn: "Operator cases and runbooks" },
     GatewayInquirySchedules: { bookNumber: 7, chapterNumber: "7.2", titleEn: "Operator cases and runbooks" },

@@ -24,6 +24,7 @@ export const ADMIN_ALL_AUTHORITIES = [
   "aml:release",
   "aml:review",
   "aml:write",
+  "aml.read_confidential",
   "approval:check",
   "approval:read",
   "approval:write",

@@ -21,6 +21,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { showConfirm } from "@/utils/confirm";
 import { useSafeguard } from "@/components/guide/useSafeguard";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
@@ -49,6 +50,14 @@ type RegulatoryReport = {
     periodStart: string | null;
     periodEnd: string | null;
     submissionRef: string | null;
+    reportCode?: string | null;
+    periodKey?: string | null;
+    dueAt?: string | null;
+    requiredOutputFormats?: string[];
+    filingChannel?: string | null;
+    acknowledgedAt?: string | null;
+    rejectionReason?: string | null;
+    outputs?: ReportOutput[];
     payloadSha256: string;
     confidential: boolean;
     approvalRequestId: string | null;
@@ -75,6 +84,46 @@ type RegulatoryReportDetail = RegulatoryReport & {
         subjectId: string;
         triggerReason: string;
     } | null;
+};
+type ReportOutput = {
+    id: string;
+    format: "XML" | "XLSX" | "DOCX";
+    revision: number;
+    schemaId?: string | null;
+    schemaVersion: number | null;
+    schemaCode?: string | null;
+    schemaName?: string | null;
+    schemaStatus?: string | null;
+    validationStatus: string;
+    validationErrors?: unknown;
+    contentSha256: string;
+    generatedAt: string | null;
+    submittedAt: string | null;
+};
+type ReportRequirement = {
+    format: "XML" | "XLSX" | "DOCX";
+    schema: { id: string; schemaCode: string; name: string; version: number; status: string } | null;
+    narrativeSections: Array<{ key: string; title: string; required?: boolean; maxLength?: number }>;
+    paths: number;
+    codeLists: number;
+    editable: boolean;
+};
+type ReportPayload = {
+    payload: Record<string, unknown>;
+    payloadSha256: string;
+    requiredOutputFormats: string[];
+    narrative: Record<string, unknown>;
+    outputs: ReportOutput[];
+};
+type ExternalSubmission = {
+    id: string;
+    status: string;
+    externalRef: string | null;
+    responseCode: number | null;
+    errorMessage: string | null;
+    submittedAt: string | null;
+    createdAt: string;
+    adapter: { id: string; name: string; kind: string } | null;
 };
 type ReportSummary = {
     total: number;
@@ -162,6 +211,10 @@ const AmlReportsPage = dc(() => {
     const selected = ref<RegulatoryReportDetail | null>(null);
     const detailLoading = ref(false);
     const submitOpen = ref(false);
+    const filingAdapters = ref<Array<{ id: string; name: string; kind: string; status: string; authority: string }>>([]);
+    const filingAdapterId = ref<string | null>(null);
+    const filingLoading = ref(false);
+    const submissions = ref<ExternalSubmission[]>([]);
     const submissionRef = ref("");
     const submissionError = ref("");
     const submissionChecklist = ref<Record<string, boolean>>({});
@@ -172,6 +225,11 @@ const AmlReportsPage = dc(() => {
     const ackError = ref("");
     const ackChecklist = ref<Record<string, boolean>>({});
     const ackLoading = ref(false);
+    const reportPayload = ref<ReportPayload | null>(null);
+    const reportRequirements = ref<ReportRequirement[]>([]);
+    const payloadLoading = ref(false);
+    const outputLoading = ref<string | null>(null);
+    const narrativeDraft = ref<Record<string, string>>({});
     const filterDefinitions = computed(() => tableRegistry.AmlReports?.filters ?? []);
     const loadSummary = async () => {
         try {
@@ -349,13 +407,26 @@ const AmlReportsPage = dc(() => {
         ackStatus.value = "ACKNOWLEDGED";
         ackReason.value = "";
         ackChecklist.value = {};
+        filingAdapterId.value = null;
+        submissions.value = [];
     };
 
+    const loadSubmissions = async (id: string) => {
+        try {
+            const response = await api.get(urlsMap.amlReportSubmissions(id));
+            const payload = response.data?.data ?? response.data ?? {};
+            submissions.value = (payload.submissions ?? []) as ExternalSubmission[];
+        } catch {
+            submissions.value = [];
+        }
+    };
     const presentReportDetail = (detail: RegulatoryReportDetail) => {
         selected.value = detail;
         resetReportActionState();
         detailsOpen.value = true;
         detailLoading.value = false;
+        void loadFilingAdapters();
+        void loadSubmissions(detail.id);
     };
 
     const fetchAmlReportDetail = async (id: string): Promise<RegulatoryReportDetail | null> => {
@@ -364,6 +435,122 @@ const AmlReportsPage = dc(() => {
         return (payload.report ?? payload) as RegulatoryReportDetail;
     };
 
+    const loadReportPayload = async (id: string) => {
+        payloadLoading.value = true;
+        try {
+            const [payloadResponse, requirementResponse] = await Promise.all([
+                api.get(urlsMap.amlReportPayload(id)),
+                api.get(urlsMap.amlReportRequirements(id)),
+            ]);
+            const payload = payloadResponse.data?.data ?? payloadResponse.data ?? {};
+            reportPayload.value = payload as ReportPayload;
+            reportRequirements.value = (requirementResponse.data?.data ?? requirementResponse.data ?? {}).requirements ?? [];
+            const narrative = (payload.narrative ?? {}) as Record<string, unknown>;
+            const sectionKeys = new Set(reportRequirements.value.flatMap((requirement) => requirement.narrativeSections.map((section) => section.key)));
+            for (const key of Object.keys(narrative)) sectionKeys.add(key);
+            narrativeDraft.value = Object.fromEntries([...sectionKeys].map((key) => [key, String(narrative[key] ?? "")]));
+        } catch {
+            reportPayload.value = null;
+            reportRequirements.value = [];
+            narrativeDraft.value = {};
+        } finally {
+            payloadLoading.value = false;
+        }
+    };
+    const refreshReportAfterOutput = async (id: string) => {
+        const detail = await fetchAmlReportDetail(id);
+        if (detail) selected.value = detail;
+        await loadReportPayload(id);
+        refreshAll();
+    };
+    const generateOutput = async (format: "XML" | "XLSX" | "DOCX") => {
+        if (!selected.value || outputLoading.value) return;
+        outputLoading.value = format;
+        try {
+            await api.post(urlsMap.amlReportGenerateOutput(selected.value.id), { formats: [format], allowRegenerate: true });
+            await refreshReportAfterOutput(selected.value.id);
+            showSnackBar({ type: "success", message: `${format} ${t("output generated")}` });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            outputLoading.value = null;
+        }
+    };
+    const downloadOutput = async (format: "XML" | "XLSX" | "DOCX") => {
+        if (!selected.value) return;
+        try {
+            const response = await api.get(urlsMap.amlReportOutputDownload(selected.value.id, format), { responseType: "blob" });
+            const blob = new Blob([response.data], {
+                type: format === "XML"
+                    ? "application/xml"
+                    : format === "DOCX" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = `${selected.value.reportRef}.${format === "XML" ? "xml" : "xlsx"}`;
+            anchor.click();
+            URL.revokeObjectURL(url);
+            showSnackBar({ type: "success", message: `${format} ${t("downloaded")}` });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        }
+    };
+    const saveNarrative = async () => {
+        if (!selected.value) return;
+        actionLoading.value = true;
+        try {
+            await api.patch(urlsMap.amlReportPayload(selected.value.id), {
+                narrative: narrativeDraft.value,
+                basePayloadSha256: selected.value.payloadSha256,
+            });
+            await loadReportPayload(selected.value.id);
+            showSnackBar({ type: "success", message: t("Narrative saved") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            actionLoading.value = false;
+        }
+    };
+    const requestReportApproval = async () => {
+        if (!selected.value) return;
+        actionLoading.value = true;
+        try {
+            await api.post(urlsMap.amlReportRequestApproval(selected.value.id), {});
+            await refreshReportAfterOutput(selected.value.id);
+            showSnackBar({ type: "success", message: t("Report submitted for approval") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            actionLoading.value = false;
+        }
+    };
+    const loadFilingAdapters = async () => {
+        try {
+            const response = await api.get(urlsMap.filingAdapters);
+            const payload = response.data?.data ?? response.data ?? {};
+            filingAdapters.value = (payload.adapters ?? []).filter((adapter: { kind: string; status: string }) => adapter.kind === "HTTP" && adapter.status === "ACTIVE");
+        } catch {
+            filingAdapters.value = [];
+        }
+    };
+    const fileViaAdapter = async () => {
+        if (!selected.value || !filingAdapterId.value) return;
+        const adapter = filingAdapters.value.find((entry) => entry.id === filingAdapterId.value);
+        if (!(await showConfirm({ title: t("File regulatory report"), message: `${t("File this report through")} ${adapter?.name ?? t("the selected adapter")}? ${t("This sends the report to the authority and cannot be undone.")}`, type: "error" }))) return;
+        filingLoading.value = true;
+        try {
+            await api.post(urlsMap.amlReportFile(selected.value.id), { adapterId: filingAdapterId.value });
+            showSnackBar({ type: "success", message: t("Report filed through the adapter") });
+            const detail = await fetchAmlReportDetail(selected.value.id);
+            if (detail) presentReportDetail(detail);
+            refreshAll();
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            filingLoading.value = false;
+        }
+    };
     const openDetails = async (row: RegulatoryReport) => {
         resetReportActionState();
         selected.value = { ...row, approval: null, amlCase: null };
@@ -371,7 +558,10 @@ const AmlReportsPage = dc(() => {
         detailLoading.value = true;
         try {
             const detail = await fetchAmlReportDetail(row.id);
-            if (detail) presentReportDetail(detail);
+            if (detail) {
+                presentReportDetail(detail);
+                void loadReportPayload(row.id);
+            }
         } catch (error) {
             detailsOpen.value = false;
             selected.value = null;
@@ -680,6 +870,20 @@ const AmlReportsPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
+                            {selected.value?.status === "APPROVED" && filingAdapters.value.length > 0 && (
+                                <VSelect
+                                    items={filingAdapters.value.map((adapter) => ({ title: adapter.name, value: adapter.id }))}
+                                    modelValue={filingAdapterId.value}
+                                    onUpdate:modelValue={(value: string | null) => (filingAdapterId.value = value)}
+                                    label={t("Filing adapter")}
+                                    hideDetails
+                                    density="compact"
+                                    style={{ maxWidth: "230px", alignSelf: "center" }}
+                                />
+                            )}
+                            {selected.value?.status === "APPROVED" && filingAdapterId.value && (
+                                <VBtn variant="tonal" loading={filingLoading.value} onClick={() => void fileViaAdapter()}>{t("File via adapter")}</VBtn>
+                            )}
                             {canSubmitReport.value && (
                                 <VBtn color="primary" onClick={() => { submissionError.value = ""; submitOpen.value = true; }}>{t("Submit report")}</VBtn>
                             )}
@@ -713,9 +917,13 @@ const AmlReportsPage = dc(() => {
                                     { label: t("AML case"), value: <MonoRef value={selected.value.amlCaseId ?? ""} /> },
                                     { label: t("Case status"), value: selected.value.amlCase?.status || selected.value.amlCaseStatus || "—" },
                                     { label: t("Case severity"), value: selected.value.amlCase?.severity || selected.value.amlCaseSeverity || "—" },
+                                    { label: t("Return code"), value: selected.value.reportCode || "—" },
+                                    { label: t("Period key"), value: selected.value.periodKey || "—" },
+                                    { label: t("Due"), value: formatDateTime(selected.value.dueAt) },
                                     { label: t("Period start"), value: formatDateTime(selected.value.periodStart) },
                                     { label: t("Period end"), value: formatDateTime(selected.value.periodEnd) },
                                     { label: t("Submission ref"), value: <MonoRef value={selected.value.submissionRef ?? ""} /> },
+                                    { label: t("Filing channel"), value: selected.value.filingChannel || "—" },
                                 ]} />
                             </ThemedView>
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -734,6 +942,82 @@ const AmlReportsPage = dc(() => {
                                 )}
                             </ThemedView>
                         </ThemedView>
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "16px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("External submissions")}</ThemedText>
+                            {submissions.value.length === 0 ? <ThemedText style={{ fontSize: "12px", opacity: 0.6 }}>{t("No external submissions recorded")}</ThemedText> : submissions.value.map((submission) => (
+                                <ThemedView key={submission.id} style={{ display: "flex", flexDirection: "column", gap: "2px", padding: "8px 0", borderTop: "1px solid var(--pg-border-subtle)" }}>
+                                    <ThemedView style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                        <StatusBadge status={submission.status} toneOverride={submission.status === "SUBMITTED" ? "success" : submission.status === "FAILED" ? "danger" : "warning"} />
+                                        <ThemedText style={{ fontSize: "12px" }}>{submission.adapter?.name ?? "—"}</ThemedText>
+                                        {submission.externalRef && <MonoRef value={submission.externalRef} />}
+                                    </ThemedView>
+                                    <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{formatDateTime(submission.submittedAt ?? submission.createdAt)}{submission.errorMessage ? ` · ${submission.errorMessage}` : ""}</ThemedText>
+                                </ThemedView>
+                            ))}
+                        </ThemedView>
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "16px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Generated outputs")}</ThemedText>
+                            {payloadLoading.value && <VProgressCircular indeterminate size={22} color="primary" />}
+                            {(selected.value.outputs ?? reportPayload.value?.outputs ?? []).length === 0 && (
+                                <VAlert type="warning" variant="tonal">{t("No output has been generated yet.")}</VAlert>
+                            )}
+                            {(selected.value.outputs ?? reportPayload.value?.outputs ?? []).map((output) => (
+                                <ThemedView key={`${output.format}-${output.revision}`} style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap", border: "1px solid var(--pg-border-subtle)", borderRadius: "8px", padding: "10px" }}>
+                                    <StatusBadge status={output.format} toneOverride="info" />
+                                    <StatusBadge status={output.validationStatus} toneOverride={output.validationStatus === "VALIDATED" ? "success" : output.validationStatus === "INVALID" ? "danger" : "warning"} />
+                                    <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
+                                        {t("Revision")} {output.revision}
+                                        {output.schemaVersion ? ` · v${output.schemaVersion}` : ""}
+                                    </ThemedText>
+                                    <MonoRef value={output.contentSha256} />
+                                    {output.schemaCode && <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>{output.schemaCode} v{output.schemaVersion ?? "?"} {output.schemaStatus ?? ""}</ThemedText>}
+                                    {output.schemaId && (
+                                        <VBtn size="small" variant="text" onClick={() => void router.push({ name: "AmlReportingStudio", query: { open: output.schemaId } })}>{t("Open in Studio")}</VBtn>
+                                    )}
+                                    {output.validationErrors != null && (
+                                        <VAlert type="warning" variant="tonal" density="compact" style={{ width: "100%" }}>
+                                            {String(JSON.stringify(output.validationErrors).slice(0, 600))}
+                                        </VAlert>
+                                    )}
+                                    {output.validationStatus === "VALIDATED" && (
+                                        <VBtn size="small" variant="tonal" onClick={() => void downloadOutput(output.format)}>{t("Download")}</VBtn>
+                                    )}
+                                    {(selected.value?.status === "DRAFT" || selected.value?.status === "PENDING_CHECKER") && (
+                                        <VBtn size="small" variant="text" loading={outputLoading.value === output.format} onClick={() => void generateOutput(output.format)}>{t("Regenerate")}</VBtn>
+                                    )}
+                                </ThemedView>
+                            ))}
+                            {selected.value.requiredOutputFormats?.filter((format) => !(selected.value?.outputs ?? reportPayload.value?.outputs ?? []).some((output) => output.format === format)).map((format) => (
+                                <ThemedView key={`missing-${format}`} style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                                    <StatusBadge status={format} toneOverride="warning" />
+                                    <ThemedText style={{ fontSize: "11px" }}>{t("Not generated")}</ThemedText>
+                                    <VBtn size="small" variant="tonal" loading={outputLoading.value === format} onClick={() => void generateOutput(format as "XML" | "XLSX" | "DOCX")}>{t("Generate")}</VBtn>
+                                </ThemedView>
+                            ))}
+                            {selected.value.requiredOutputFormats && selected.value.requiredOutputFormats.length > 0 && (
+                                <ThemedText style={{ fontSize: "11px", opacity: 0.65 }}>
+                                    {t("Filing requires every required output to be validated against a confirmed schema.")}
+                                </ThemedText>
+                            )}
+                            {selected.value.status === "DRAFT" && (
+                                <VBtn size="small" color="primary" loading={actionLoading.value} onClick={() => void requestReportApproval()}>{t("Submit for approval")}</VBtn>
+                            )}
+                        </ThemedView>
+                        {Object.keys(narrativeDraft.value).length > 0 && (
+                            <ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "16px" }}>
+                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Narrative sections")}</ThemedText>
+                                {Object.keys(narrativeDraft.value).map((key) => {
+                                    const section = reportRequirements.value.flatMap((requirement) => requirement.narrativeSections).find((entry) => entry.key === key);
+                                    const value = narrativeDraft.value[key] ?? "";
+                                    return (
+                                    <FormField key={key} label={section?.title ?? key}>
+                                        <VTextarea modelValue={value} onUpdate:modelValue={(next: string) => (narrativeDraft.value = { ...narrativeDraft.value, [key]: next })} rows={3} hideDetails />
+                                    </FormField>
+                                    );
+                                })}
+                                <VBtn size="small" variant="tonal" loading={actionLoading.value} onClick={() => void saveNarrative()}>{t("Save narrative")}</VBtn>
+                            </ThemedView>
+                        )}
                         <VAlert type="info" variant="tonal">
                             {t("The report payload is frozen and encrypted. Its SHA-256 digest proves the submitted content was not changed.")}
                         </VAlert>

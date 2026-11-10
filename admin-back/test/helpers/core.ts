@@ -144,6 +144,7 @@ const isAcceptedAdminResponse = (
 ): boolean => {
   const path = rawPath.split("?")[0] ?? rawPath;
   if (path === "/internal/admin/disputes") return true;
+  if (path.startsWith("/internal/admin/aml/filing-adapters") && method !== "GET") return true;
   if (path === "/internal/admin/reconciliation/upload") return true;
   if (path.endsWith("/approve")) return true;
   if (

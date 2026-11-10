@@ -2,10 +2,10 @@
 
 <!-- GENERATED FILE. Edit core-back/prisma/schema.prisma instead. Do not hand-edit this file. -->
 
-- Models: **84**
-- Enums: **105**
-- Schema version: **25**
-- Migrations: **24**
+- Models: **96**
+- Enums: **119**
+- Schema version: **30**
+- Migrations: **29**
 
 ## Models
 
@@ -77,6 +77,18 @@
 - `AmlRule`
 - `ReportingRule`
 - `RegulatoryReport`
+- `RegulatoryReportSchema`
+- `RegulatorySchemaDefaultBinding`
+- `RegulatoryRuleSchemaBinding`
+- `RegulatoryReportOutput`
+- `Incident`
+- `IncidentTimelineEntry`
+- `IncidentResponder`
+- `IncidentActionItem`
+- `IncidentLink`
+- `IncidentCommunication`
+- `ExternalFilingAdapter`
+- `ExternalSubmission`
 - `Dispute`
 - `NotificationTemplate`
 - `Notification`
@@ -195,12 +207,26 @@
 - `ReportingType`
 - `ReportingRuleStatus`
 - `RegulatoryReportStatus`
+- `ReportOutputFormat`
+- `RegulatorySchemaStatus`
+- `ReportOutputValidationStatus`
+- `IncidentSeverity`
+- `IncidentStatus`
+- `IncidentCategory`
+- `IncidentImpactScope`
+- `IncidentTimelineType`
+- `IncidentActionStatus`
+- `IncidentCommunicationChannel`
+- `IncidentLinkType`
 - `DisputeSource`
 - `DisputeStatus`
 - `NotificationChannel`
 - `NotificationLang`
 - `ConfidentialityClass`
 - `NotificationStatus`
+- `FilingAdapterKind`
+- `FilingAdapterStatus`
+- `ExternalSubmissionStatus`
 
 ## Migrations
 
@@ -228,3 +254,8 @@
 - `20261109190000_regulatory_report_automation`
 - `20261109200000_merchant_webhooks`
 - `20261109210000_ledger_query_and_index_optimization`
+- `20261110120000_declarative_regulatory_reporting`
+- `20261110130000_report_template_binding`
+- `20261110140000_incident_management`
+- `20261110150000_docx_report_output`
+- `20261110160000_external_filing_adapters`

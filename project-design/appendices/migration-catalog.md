@@ -28,3 +28,8 @@
 | `20261109190000_regulatory_report_automation` | 47 | ============================================================================ |
 | `20261109200000_merchant_webhooks` | 74 | ============================================================================ |
 | `20261109210000_ledger_query_and_index_optimization` | 134 | ============================================================================ |
+| `20261110120000_declarative_regulatory_reporting` | 188 |  |
+| `20261110130000_report_template_binding` | 4 |  |
+| `20261110140000_incident_management` | 129 | Incident management (expanded): lifecycle, timeline, responders, actions, links and communications. |
+| `20261110150000_docx_report_output` | 4 |  |
+| `20261110160000_external_filing_adapters` | 47 |  |

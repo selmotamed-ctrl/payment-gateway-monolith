@@ -534,7 +534,8 @@ const cases: ContractCase[] = [
       "currency",
       "conditions",
       "sourceReference",
-      "status",
+      "requiredOutputFormats",
+      "primaryOutputFormat",
     ],
     requiredKeys: ["reportType", "sourceReference"],
   },
@@ -1233,7 +1234,8 @@ describe("core contract field mapping", () => {
     expect(mapped.thresholdAmount).toBe("1000.0000");
     expect(mapped.windowSeconds).toBe(2592000);
     expect(mapped.sourceReference).toBe("CBL_LARGE");
-    expect(mapped.status).toBe("CONFIRMED");
+    expect(mapped.requiredOutputFormats).toEqual(["XML"]);
+    expect(mapped.primaryOutputFormat).toBe("XML");
   });
 
   test("aml report derives the subject from the referenced case", () => {
@@ -1250,6 +1252,7 @@ describe("core contract field mapping", () => {
       reportingRuleId: "rr_1",
       periodStart: "2026-01-01",
       periodEnd: "2026-01-31",
+      requiredOutputFormats: ["XML"],
     });
   });
 

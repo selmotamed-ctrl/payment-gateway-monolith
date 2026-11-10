@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { env } from "../lib/env";
 import { ApiError, parseOrThrow } from "../lib/error";
-import { callCoreResponse, type CoreHttpMethod } from "../lib/mtlsClient";
+import { callCoreResponse, callCoreRaw, mapCoreHttpError, parseJsonBuffer, type CoreHttpMethod } from "../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../lib/net";
 import { resolveRequestId } from "../lib/requestLogger";
 
@@ -69,6 +69,41 @@ const scalarQuery = (query: Record<string, unknown> | undefined) => {
   }
   return Object.keys(result).length > 0 ? result : undefined;
 };
+
+export const coreForwardRaw =
+  (options: Omit<ForwardOptions, "status" | "relayStatus" | "splitBodyFrom">) =>
+  async (req: Request, res: Response): Promise<void> => {
+    const authorization = req.headers.authorization;
+    const params = options.paramsSchema
+      ? (parseOrThrow(options.paramsSchema, req.params) as Record<string, string>)
+      : (req.params as Record<string, string>);
+    const query = options.querySchema
+      ? (parseOrThrow(options.querySchema, req.query) as Record<string, unknown>)
+      : undefined;
+    const rawBody = req.method === "GET" || req.method === "HEAD" ? undefined : (req.body ?? {});
+    const publicBody = options.schema && rawBody !== undefined ? parseOrThrow(options.schema, rawBody) : rawBody;
+    const body = options.bodyFrom ? options.bodyFrom(req, publicBody) : publicBody;
+    const response = await callCoreRaw({
+      method: options.method,
+      path: options.path({ params, body, query: query ?? {} }),
+      body,
+      query: scalarQuery(query),
+      headers: withIdempotencyKey(req, options.headers),
+      requestId: resolveRequestId(req),
+      clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
+      userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
+      authorization,
+      minLsn: minLsnOf(req),
+    });
+    if (response.statusCode >= 400) {
+      throw mapCoreHttpError(response.statusCode, parseJsonBuffer(response.body));
+    }
+    for (const header of ["content-type", "content-disposition", "x-content-sha256", "x-pg-served-by", "x-pg-min-lsn"]) {
+      const value = response.headers[header];
+      if (typeof value === "string" && value.length > 0) res.setHeader(header, value);
+    }
+    res.status(response.statusCode).send(response.body);
+  };
 
 export const coreForward =
   (options: ForwardOptions) =>

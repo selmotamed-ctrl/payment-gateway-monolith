@@ -83,6 +83,18 @@ const designModelNames = [
   "AmlRule",
   "ReportingRule",
   "RegulatoryReport",
+  "RegulatoryReportSchema",
+  "RegulatorySchemaDefaultBinding",
+  "RegulatoryRuleSchemaBinding",
+  "RegulatoryReportOutput",
+  "Incident",
+  "IncidentTimelineEntry",
+  "IncidentResponder",
+  "IncidentActionItem",
+  "IncidentLink",
+  "IncidentCommunication",
+  "ExternalFilingAdapter",
+  "ExternalSubmission",
   "Dispute",
   "NotificationTemplate",
   "Notification",
@@ -175,7 +187,7 @@ describe("prisma schema", () => {
     // The automation plan adds one migration per item; the ledger query/index optimisation is applied after them
     // (schema version 25) so its partition function carries both the automation security hardening and the
     // append-only autovacuum settings. The newest migration must be well-formed and set the required version.
-    expect(ordered.at(-1)).toBe("20261109210000_ledger_query_and_index_optimization");
+    expect(ordered.at(-1)).toBe("20261110160000_external_filing_adapters");
     expect(ordered).toContain("20261109200000_merchant_webhooks");
     expect(ordered).toContain("20261109130000_journal_partition_worker");
     expect(ordered).toContain("20261109120000_outbox_dead_letter_worker_cursors");
@@ -186,7 +198,7 @@ describe("prisma schema", () => {
     expect(guard).not.toContain("schema_versions");
     const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
     expect(newest).toMatch(new RegExp(`UPDATE "schema_versions"\\s+SET "version" = ${REQUIRED_SCHEMA_VERSION}\\b`));
-    expect(REQUIRED_SCHEMA_VERSION).toBe(25);
+    expect(REQUIRED_SCHEMA_VERSION).toBe(30);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),

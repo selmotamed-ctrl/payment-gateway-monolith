@@ -70,6 +70,25 @@ const createReport = async (fixture: Fixture) =>
     { userId: MAKER, role: "COMPLIANCE" },
   );
 
+const markOutputReady = (reportId: string): void => {
+  const row = fakeTable("regulatoryReport").find((entry) => entry.id === reportId);
+  if (row) {
+    row.outputs = ["XML", "XLSX"].map((format) => ({
+      id: `output-${reportId}-${format}`,
+      reportId,
+      format,
+      revision: 1,
+      schemaId: `schema-${format}`,
+      schemaVersion: 1,
+      validationStatus: "VALIDATED",
+      validationErrorsJson: null,
+      contentSha256: "a".repeat(64),
+      supersededAt: null,
+      schema: { id: `schema-${format}`, status: "CONFIRMED" },
+    }));
+  }
+};
+
 const submit = (fixture: Fixture, reportId: string, actorUserId = CHECKER) =>
   submitRegulatoryReport(fixture.client as never, {
     reportId,
@@ -153,6 +172,7 @@ describe("F-D: regulatory report lifecycle and rule promotion", () => {
     expect(fakeTable("reportingRule").find((row) => row.id === RULE_ID)?.status).toBe("CONFIRMED");
     expect(fakeTable("auditLog").some((row) => row.action === "REPORTING_RULE_CONFIRMED")).toBe(true);
 
+    markOutputReady(created.reportId);
     const submitted = await submit(fixture, created.reportId);
     expect(submitted.status).toBe("SUBMITTED");
     expect(submitted.submissionRef).toBe("CBL-STR-2026-0001");
@@ -182,6 +202,7 @@ describe("F-D: regulatory report lifecycle and rule promotion", () => {
       throw new Error("promotion approval not found");
     }
     await approve(fixture, String(promotion.id));
+    markOutputReady(created.reportId);
     await submit(fixture, created.reportId);
 
     await expect(
@@ -203,4 +224,25 @@ describe("F-D: regulatory report lifecycle and rule promotion", () => {
     expect(rejected.status).toBe("REJECTED_BY_AUTHORITY");
     expect(rejected.reason).toBe("Missing source reference");
   });
+  test("a stale output blocks submission", async () => {
+    const created = await createReport(fixture);
+    await approve(fixture, created.approvalRequestId);
+    await proposeReportingRulePromotion(fixture.client as never, {
+      ruleId: RULE_ID,
+      actorUserId: MAKER,
+      actorRole: "COMPLIANCE",
+    });
+    const promotion = fakeTable("approvalRequest").find((row) => row.subjectType === "REPORTING_RULE");
+    if (!promotion) throw new Error("promotion approval not found");
+    await approve(fixture, String(promotion.id));
+    markOutputReady(created.reportId);
+    const report = fakeTable("regulatoryReport").find((row) => row.id === created.reportId);
+    if (report?.outputs && Array.isArray(report.outputs)) {
+      for (const output of report.outputs) output.payloadSha256 = "b".repeat(64);
+    }
+    await expect(submit(fixture, created.reportId)).rejects.toMatchObject({
+      code: "REPORT_OUTPUT_NOT_READY",
+    });
+  });
+
 });

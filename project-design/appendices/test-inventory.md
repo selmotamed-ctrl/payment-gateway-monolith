@@ -106,6 +106,7 @@
 | `core-back/test/exhaustive/_harness.ts` | 951 | 4 |
 | `core-back/test/expiry-sweeper-aml.test.ts` | 91 | 3 |
 | `core-back/test/fake-rails-allowlist.test.ts` | 33 | 3 |
+| `core-back/test/filing-adapters.test.ts` | 39 | 3 |
 | `core-back/test/fixtures/otpSpec.ts` | 270 | 0 |
 | `core-back/test/gaps/gap-015-018-regressions.test.ts` | 185 | 11 |
 | `core-back/test/gateway-inquiry-schedules.test.ts` | 91 | 4 |
@@ -125,6 +126,7 @@
 | `core-back/test/helpers/retentionFake.ts` | 619 | 3 |
 | `core-back/test/helpers/seederFixture.ts` | 100 | 0 |
 | `core-back/test/inbound-inbox-claim-pg.test.ts` | 34 | 1 |
+| `core-back/test/incident-lifecycle.test.ts` | 38 | 3 |
 | `core-back/test/internal-routes.test.ts` | 127 | 9 |
 | `core-back/test/kyb-review.test.ts` | 83 | 7 |
 | `core-back/test/ledger-checkpoint-worker.test.ts` | 359 | 6 |
@@ -144,15 +146,19 @@
 | `core-back/test/onboarding-four-eyes.test.ts` | 200 | 18 |
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/partition-truncate-guard.test.ts` | 86 | 5 |
-| `core-back/test/phase1-mtls-and-schema.test.ts` | 407 | 14 |
+| `core-back/test/phase1-mtls-and-schema.test.ts` | 419 | 14 |
 | `core-back/test/phase2-ledger-and-governance.test.ts` | 281 | 11 |
 | `core-back/test/phase3-dynamic-engine-and-blueprints.test.ts` | 273 | 12 |
 | `core-back/test/phase4-onboarding-aml-disputes-recon.test.ts` | 237 | 16 |
 | `core-back/test/refund-merchant-direct.test.ts` | 245 | 10 |
 | `core-back/test/refund-three-phase.test.ts` | 129 | 3 |
-| `core-back/test/regulatory-report-lifecycle.test.ts` | 207 | 5 |
+| `core-back/test/regulatory-report-lifecycle.test.ts` | 249 | 6 |
 | `core-back/test/remediation-high.test.ts` | 975 | 18 |
+| `core-back/test/reporting-docx.test.ts` | 42 | 3 |
+| `core-back/test/reporting-generation.test.ts` | 68 | 1 |
 | `core-back/test/reporting-rule-evaluator.test.ts` | 209 | 5 |
+| `core-back/test/reporting-template.test.ts` | 113 | 5 |
+| `core-back/test/reporting-xsd-xlsx.test.ts` | 289 | 11 |
 | `core-back/test/retention-worker.test.ts` | 504 | 17 |
 | `core-back/test/runtime/production-adapters.test.ts` | 569 | 16 |
 | `core-back/test/runtime/raw-body.test.ts` | 88 | 4 |
@@ -199,14 +205,14 @@
 | `core-back/test/worker-runtime-health.test.ts` | 134 | 7 |
 | `admin-back/test/academy-progress.test.ts` | 240 | 13 |
 | `admin-back/test/admin-surface.test.ts` | 1423 | 58 |
-| `admin-back/test/admin-ui-completion.test.ts` | 405 | 26 |
+| `admin-back/test/admin-ui-completion.test.ts` | 443 | 29 |
 | `admin-back/test/auth-account-limiters.test.ts` | 94 | 3 |
 | `admin-back/test/backups.test.ts` | 457 | 21 |
-| `admin-back/test/core-contract.test.ts` | 1647 | 58 |
+| `admin-back/test/core-contract.test.ts` | 1650 | 58 |
 | `admin-back/test/core-internal-client.test.ts` | 663 | 23 |
 | `admin-back/test/env-isolation.test.ts` | 24 | 1 |
-| `admin-back/test/helpers/core-schema.ts` | 908 | 0 |
-| `admin-back/test/helpers/core.ts` | 252 | 8 |
+| `admin-back/test/helpers/core-schema.ts` | 910 | 0 |
+| `admin-back/test/helpers/core.ts` | 253 | 8 |
 | `admin-back/test/helpers/session.ts` | 135 | 0 |
 | `admin-back/test/helpers/upstream.ts` | 106 | 0 |
 | `admin-back/test/mtls-client.test.ts` | 83 | 8 |
@@ -318,7 +324,7 @@
 | `tests/e2e/admin/wallet-details.spec.ts` | 302 | 12 |
 | `tests/e2e/checkout/a11y.spec.ts` | 13 | 1 |
 | `tests/e2e/checkout/pay.spec.ts` | 46 | 3 |
-| `tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts` | 116 | 1 |
+| `tests/e2e/exhaustive/exhaustive-admin-surface.spec.ts` | 117 | 1 |
 | `tests/e2e/exhaustive/exhaustive-checkout-surface.spec.ts` | 73 | 1 |
 | `tests/e2e/exhaustive/exhaustive-fake-rails-surface.spec.ts` | 66 | 1 |
 | `tests/e2e/exhaustive/exhaustive-merchant-surface.spec.ts` | 93 | 1 |
@@ -366,5 +372,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **361**
-- Total literal test declarations: **3852**
+- Total files: **367**
+- Total literal test declarations: **3882**

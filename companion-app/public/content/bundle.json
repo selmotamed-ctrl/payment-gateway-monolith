@@ -5,7 +5,7 @@
     "appId": "ly.paymentgateway.companion",
     "contentVersion": "1.0.0",
     "contentHash": "86c90e2ee9d378803baa32c663d6d4dd1f4ad83e5659c8ef2a7639ed59a84d49",
-    "guideSourceSha256": "4a2dbbf28d2fe9fefe4a7b9e437f68416fe3d97b0af2d37e358ffff7cc94f7f9",
+    "guideSourceSha256": "e7c91b418047afd3c8ceb403958dc6c11d4c906e221dbeb9228193efe065e265",
     "academyContentHash": "5702a80cc0cae8650606fa2f6d670d973c851c11f73478a06388e7823cde4043",
     "generatedAt": "1970-01-01T00:00:00.000Z",
     "counts": {
@@ -18,7 +18,7 @@
       "readingPaths": 8,
       "quickAnswers": 58,
       "dataBlocks": 3,
-      "contextMapScreens": 25,
+      "contextMapScreens": 28,
       "errorCodes": 19,
       "edgeCases": 140,
       "tracks": 8,

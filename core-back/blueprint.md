@@ -968,6 +968,23 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 - `POST /internal/admin/users` accepts no password or phone and creates an `INVITED` user; `POST /internal/admin/users/:id/invite` re-issues an invitation; `POST /internal/admin/auth/accept-invitation` (public, token-bound) sets the password and phone and marks the invitation complete. The maker-checker activation of a staff user requires a completed invitation.
 - `GET|POST /internal/checkout/return/:attemptToken` accepts only the attempt `reference`, and runs the gateway inquiry at most once per `RETURN_INQUIRY_COOLDOWN_MS` (10 s) per attempt across core instances (a shared flag in the auth-state store); calls inside the window answer with the current status (GAP-055).
 
+## Reporting Studio completion, incidents and filing adapters (2026-11-10)
+
+Core adds these internal admin routes under `/internal/admin` (all confidential AML/reporting routes; writes require the reporting authority and maker-checker where noted):
+
+- Reporting Studio: `POST /aml/report-schemas/:id/template/analyze`, `POST /aml/report-schemas/:id/template/upload`, `DELETE /aml/report-schemas/:id/template`; `GET|PUT /aml/report-schemas/:id/template` now include `templateBinding`; `POST /aml/report-schemas/:id/workbook/preview` renders XML/XLSX/DOCX. `PUT /aml/reporting-rules/:id/schema-bindings` returns 202 with `approvalRequestId` and requires a `REPORTING_RULE_SCHEMA_BINDING` checker.
+- Incidents: `GET|POST /aml/incidents`, `GET|PATCH /aml/incidents/:id`, `POST /aml/incidents/:id/transition|timeline|responders|actions|links|communications|report` and `PATCH /aml/incidents/:id/responders/:responderId|actions/:actionId`, `DELETE /aml/incidents/:id/links/:linkId`. Writes require the reporting authority; the incident report uses the normal REGULATORY_REPORT approval.
+- Filing: `GET|POST /aml/filing-adapters`, `PATCH|DELETE /aml/filing-adapters/:id`, `GET /aml/reports/:id/submissions`, `POST /aml/reports/:id/file`. The file route returns 502 with a submission id on adapter failure and never returns the decrypted secret.
+- Formats: reporting schema/default/binding/output enums now accept `XML`, `XLSX` and `DOCX`; report output download returns the Matching content type and SHA-256 header.
+
+### Final AML API sweep (2026-11-10)
+
+- `GET /internal/admin/incidents` returns server-filtered rows plus `summary` counts and resolved user names; `page/pageSize/status/severity/category/search` are the supported filters.
+- `PATCH /incidents/:id`, `POST /incidents/:id/transition` and `POST /incidents/:id/report` serialize on the incident row; child timeline/responder/action/link/communication writes are audited. Incident report drafting is allowed from any lifecycle status by owner decision.
+- Filing adapter `POST`, `PATCH` and `DELETE` now return 202 with `approvalRequestId`; the checker executes `FILING_ADAPTER` through `GovernanceExecution`. `GET` responses redact secret-looking `configJson` keys.
+- `POST /aml/reports/:id/file` creates a PENDING `ExternalSubmission` before dispatch, blocks duplicate PENDING/SUBMITTED attempts, records failure details, and passes the authoritative status change through the normal submission gate. Manual submissions create a MANUAL adapter and submission history.
+- Template upload/update URLs reject non-XLSX schemas and any unsafe/invalid workbook; DOCX validation/simulation uses the narrative schema renderer; clone copies the XLSX template binding.
+
 ## Core Engine
 
 > Status: `partial` · Last verified: 2026-11-05
@@ -2018,7 +2035,7 @@ Tests: `core-back/test/ledger-raw-sql-parity.test.ts` (same entries, lines, bala
 
 ## Governance and Compliance
 
-> Status: `partial` · Last verified: 2026-11-08
+> Status: `partial` · Last verified: 2026-11-10
 
 ## 1. Purpose and scope
 
@@ -2141,7 +2158,7 @@ The seven design layers map to code as follows:
 | L3 transaction-time posture | `AttemptGuardPipeline` checks merchant status, velocity, local watch-list, and AML rules inside the attempt-creation transaction; a confirmed sanctions match or a `BLOCK` rule creates a terminal blocked attempt. |
 | L4 transaction monitoring | AML rules are evaluated at attempt initiation. There is no deferred confirmation pass and no daily batch analytics for structuring/fan-in/fan-out. |
 | L5 case management | `aml_cases` with severity, SLA, reviewer, confidential flag; resolution is proposed by a confidential reviewer and approved by a different checker; release/void post the ledger and finalise the attempt. |
-| L6 regulatory reporting | `ReportingRuleEvaluator` creates reports on settlement; manual report drafting, approval, submit, and acknowledge routes exist. Submission is not integrated with an authority adapter. |
+| L6 regulatory reporting | `ReportingRuleEvaluator` creates DRAFT reports on settlement; `RegulatoryReportWorker` drafts scheduled returns; the schema registry and `ReportGenerationService` generate validated XML/XLSX outputs. Manual drafting, request-approval, payload/narrative editing, submit and acknowledge routes exist. Confirmed FIU/CBL schemas and an external authority adapter are still missing. |
 | L7 record keeping | Audit rows, rule versions, detail changes, and the retention worker. Retention is opt-in and incomplete for AML evidence. |
 
 Screening is a provider interface (`ScreeningProvider`) with Arabic normalization, name similarity, internal watch-list provider, mock provider, and a cached provider. `MerchantScreeningService` persists `aml_screenings` and `aml_screening_matches` with list versions and input hashes, applies owner screening status, and raises a confirmed-match case only. Potential matches remain in the screening queue for disposition.
@@ -2179,11 +2196,18 @@ No `CASHOUT_REQUEST` approval row is created and there is no `PENDING -> PROCESS
 
 ### 3.9 Regulatory reporting
 
-`ReportingRuleEvaluator` (`core-back/engine/compliance/ReportingRuleEvaluator.ts:130`) evaluates a settled attempt against effective rules. A `CONFIRMED` rule creates a `PENDING_CHECKER` report; a `PROVISIONAL` rule creates a `DRAFT` internal-only report. Evaluation is idempotent per rule and attempt, and the confirmation path calls it after a successful settlement.
+The reporting engine is now format-aware (`design/11-automation/declarative_regulatory_reporting_engine_final_design.md`). A report has a canonical encrypted JSON payload and zero or more derived outputs: XML validated against a compiled XSD, and XLSX generated from a declarative workbook/template. One schema registry (`RegulatoryReportSchema`) and per-(authority, report type, report code, format) default bindings resolve the contract; rules can pin a schema per format. Every schema has a lifecycle (`DRAFT`, `PROVISIONAL`, `PENDING_APPROVAL`, `CONFIRMED`, `SUPERSEDED`, `ARCHIVED`) and is promoted through a `REGULATORY_REPORT_SCHEMA` maker-checker approval.
 
-Manual report creation (`createRegulatoryReportViaApproval`) creates a `PENDING_CHECKER` report and a `REGULATORY_REPORT` approval in one transaction. Approval sets `APPROVED`; submission is a separate reporting-authority route that requires an `APPROVED` report, enforces maker ≠ submitter when the approval has a maker, and rejects a report linked to a non-`CONFIRMED` rule. Acknowledgement records `ACKNOWLEDGED` or `REJECTED_BY_AUTHORITY` with a reason.
+`ReportingRuleEvaluator` evaluates a settled attempt against effective rules. It now creates every report as `DRAFT` (with `reportCode` and `requiredOutputFormats`) and calls the generation service; it never creates a `PENDING_CHECKER` report without an approval. `RegulatoryReportWorker` drafts the scheduled returns as `DRAFT`, stores the encrypted payload and its SHA-256, then generates every required output. The regulatory aggregates filter `payment_attempts.env = 'LIVE'`, so sandbox traffic cannot enter a filing. The output generator:
 
-Report payloads generated by the evaluator are encrypted with `VaultContextCipher("reporting-payload")`. Manual report creation stores `JSON.stringify(payload)` directly in `payload_ciphertext` (despite the column name), and the admin read path parses it as plaintext JSON. This is a code gap against the confidentiality intent.
+- builds a format-neutral `CanonicalReportContext` (institution, report, merchant, wallet, transactions, AML case, indicators, aggregates, narrative, pending sections);
+- for XML, compiles the uploaded `.xsd` into a safe AST, walks it in `xs:sequence` order, applies the mapping blueprint and `TransformPipeline`, escapes values, and validates cardinality, types, facets, enums and cross-field assertions;
+- for XLSX, loads an uploaded workbook or generates the declared workbook server-side with `exceljs`, fills mapped rows/totals/narrative sections, guards formula injection, and validates required columns, totals and narrative sections;
+- encrypts and hashes the result in `RegulatoryReportOutput` (revision, schema version, validation status `NOT_GENERATED`/`PROVISIONAL_SCHEMA`/`VALIDATED`/`INVALID`, errors).
+
+Manual report creation (`createRegulatoryReportViaApproval`) now encrypts the payload with `VaultContextCipher("reporting-payload")`; the read path understands both the Vault envelope and legacy plaintext. Existing DRAFT reports can be sent for approval through `POST /aml/reports/:id/request-approval`; rejection/expiry returns them to `DRAFT`. Submission enforces the format-aware gate: every `requiredOutputFormats` entry must have a current `VALIDATED` output backed by a `CONFIRMED` schema/template, and a `PROVISIONAL_SCHEMA`/`INVALID`/missing output blocks filing. XLSX-only returns such as PSP-M and AML-Q have no XSD requirement; XML returns such as STR/LTR still require a confirmed XSD. Acknowledgement records the authority decision and timestamp/reason.
+
+The admin surface includes the report payload/output endpoints, output download (hash verified), schema registry/compile/simulate/promote/default-binding routes, schema detail/update/clone/validate, context catalog and sample context, code-list preview, template download/upload, workbook preview, per-rule schema bindings, report requirements, and the Reporting Studio page at `/aml/reporting-studio` with an XML element mapper, code-list translator, XLSX workbook builder, draft save with revision conflict, clone-as-new-version and read-only lifecycle states. Outputs are bound to the payload SHA-256; changing the payload marks current outputs stale, and filing refuses stale/missing/provisional/invalid outputs. The baseline seeds are provisional: `cbl-goaml-str-v1`, `cbl-goaml-ltr-v1`, `cbl-psp-m-v1`, `cbl-aml-q-v1`, `cbl-aml-a-v1`, and `cbl-goaml-ltr-xlsx-v1`. No FIU XSD or CBL workbook is present in the repository, so they remain `PROVISIONAL` and cannot be filed. INC and separate narrative DOCX/PDF rendering are deferred.
 
 ### 3.10 Operator cases and inquiry schedules
 
@@ -2219,14 +2243,14 @@ AML reads are gated by `hasConfidentialAmlAccess`: `COMPLIANCE`/`MLRO` roles pas
 - `JoinRequest`, `KybDocument`, `KybRevalidationRequest`, `BeneficialOwner`: onboarding state, documents, owners, screening status, revalidation.
 - `AmlScreening`, `AmlScreeningMatch`, `AmlRule`, `AmlCase`: screening results, match dispositions, rule versions, severity/SLA, hold journal entry.
 - `Dispute`, `Adjustment`, `CashoutRequest`: intake, drafted/executed adjustments, cash-out state.
-- `ReportingRule`, `RegulatoryReport`: thresholds, status, encrypted payload, submission reference, approval.
+- `ReportingRule`, `RegulatoryReport`, `RegulatoryReportSchema`, `RegulatorySchemaDefaultBinding`, `RegulatoryRuleSchemaBinding`, `RegulatoryReportOutput`: thresholds, status, encrypted payload, required formats, schema/template versions, derived XML/XLSX outputs, submission reference, approval.
 - `OperatorCase`, `GatewayInquirySchedule`, `DetailChangeLog`, `AuditLog`, and `PlatformSetting` (with approval link and version).
 
 ### Admin routes (representative)
 
 - Approvals: `GET /admin/approvals`, `/summary`, `/export`, `/:id`, `POST /:id/approve`, `/:id/reject`.
 - Onboarding: `/join-requests` including `submit`, `decide`, `assign`, `request-info`, `checklist`, `screening/retry`, and `/kyb-documents/:id/review`, `request-replacement`, `request-revalidation`.
-- AML: `/aml/screenings`, `/aml/matches/:id/disposition`, `/aml/cases`, `/:id/propose`, `/aml/rules`, `/aml/reporting-rules`, `/:id/promote`, `/aml/reports`, `/:id/submit`, `/:id/acknowledge`.
+- AML: `/aml/screenings`, `/aml/matches/:id/disposition`, `/aml/cases`, `/:id/propose`, `/aml/rules`, `/aml/reporting-rules`, `/:id/promote`, `/aml/reports`, `/:id/payload`, `/:id/generate-output`, `/:id/outputs/:format/download`, `/:id/request-approval`, `/:id/submit`, `/:id/acknowledge`, `/aml/report-schemas`, `/:id/compile`, `/:id/simulate`, `/:id/promote`, `/aml/report-schema-defaults`.
 - Money, cases, and merchant changes: `/adjustments`, `/cashouts/:id/process`, `/disputes`, `/operator-cases/:id/resolve`, `/gateway-inquiries/:id/*`, `/merchants/:id/propose-edit|suspend|reinstate|close`, `/pending-changes`, `/detail-changes`.
 
 ### Platform settings and environment
@@ -2259,9 +2283,10 @@ Settings consumed: `join_request.four_eyes_policy` (policy, owner threshold, vol
 
 ### Regulatory report
 
-1. Let `ReportingRuleEvaluator` create a report on settlement, or draft one manually through `/aml/reports`.
-2. Approve the `REGULATORY_REPORT` request.
-3. Submit through `/aml/reports/:id/submit` with a submission reference, then acknowledge.
+1. Let `ReportingRuleEvaluator`/`RegulatoryReportWorker` draft the report, or draft one manually through `/aml/reports`.
+2. Review the canonical payload and generated outputs; generate/regenerate any missing XML/XLSX output and complete the narrative sections.
+3. Submit the DRAFT for approval, approve the `REGULATORY_REPORT` request as a different checker, then file.
+4. Submit through `/aml/reports/:id/submit` with the authority reference and filing channel; the route refuses any required output that is not `VALIDATED` against a `CONFIRMED` schema/template. Then acknowledge.
 
 ## 7. Status and deviations
 
@@ -2272,6 +2297,7 @@ Settings consumed: `join_request.four_eyes_policy` (policy, owner threshold, vol
 - Onboarding readiness, KYB review/revalidation, duplicate detection, four-eyes policy, screening provider abstraction, Arabic normalization, L1/L2/L3 screening, AML rule engine, cases, hold escrow, release/void.
 - Dispute drafting with system maker and human checker, chargeback outcomes, negative-balance ceiling, regulatory report approval/submission/acknowledgement, operator cases, persisted inquiry schedules.
 - Tipping-off template guard, AML payload redaction, and the confidential AML route gate.
+- Format-aware regulatory reporting: schema registry/default/rule bindings, encrypted payloads, DRAFT evaluator reports, request-approval/reject/expiry lifecycle, safe XSD compiler and XML validator, server-side XLSX renderer, provisional baseline schemas, output revisions/download hash verification, narrative editing, and per-format filing gates.
 
 ### Partial
 
@@ -2298,7 +2324,8 @@ Settings consumed: `join_request.four_eyes_policy` (policy, owner threshold, vol
 
 - **Security gap:** the generic approval route is not confidential-gated. A principal with `approval:check` can approve an `AML_CASE` even without `aml:read`/`aml:write`; the seeded `FINANCE` role holds `approval:check`.
 - **Security gap:** emergency suspension takes effect immediately by one actor and leaves an approval in `PENDING_REVIEW`; rejecting it records `MERCHANT_EMERGENCY_SUSPENSION_NOT_RATIFIED` but does not undo the suspension. The `ApprovalService` emergency path also executes without a checker, and `ratifyEmergencyRequest` only records a note.
-- **Data gap:** manual regulatory report payloads are written as plaintext JSON in `payload_ciphertext`.
+- **Coverage gap:** no FIU-confirmed XSD or CBL XLSX template has been uploaded, so the baseline reporting schemas/templates remain `PROVISIONAL` and filing is blocked by design.
+- **Coverage gap:** INC, DOCX/PDF narrative export and external authority filing adapters are deferred.
 - **Coverage gap:** an `APPLICATION` approval can be created and listed but cannot be approved; the checker receives `NO_EXECUTABLE_SUBJECT`.
 - **Configuration gap:** `PUT /admin/settings` requires `settings:write` and writes directly, despite the design's maker-checker requirement for compliance settings.
 - **Seed gap:** the seeded `COMPLIANCE` and `MLRO` users lack `approval:check`, so the documented maker-checker role matrix is not exercised by the default deployment seed.
@@ -2391,9 +2418,26 @@ Some governance tests use fake clients; database-backed suites require PostgreSQ
 
 **Known limits.** A merchant can still move its own INACTIVE terminal back to ACTIVE (INACTIVE cannot be told apart from a staff-set INACTIVE; only BLOCKED is staff-only). `approvalSubjectContext` (admin.ts) has no case for the three new subjects, so the approvals detail shows the generic payload diff.
 
+## Reporting Studio phases 2-5, incident management and filing adapters (2026-11-10)
+
+The Reporting Studio now covers the full authoring and filing lane in addition to the v26 engine:
+
+- **XLSX template workflow.** A DRAFT schema can upload an `.xlsx` template. `lib/xlsx/template.ts` inspects the zip (20 MB compressed / 100 MB uncompressed / 1,000,000 cells / 100 sheets), rejects `vbaProject.bin`, external links, OLE/embedded objects and `customUI`, and reports sheets and defined names. The visual mapping (`template_binding_json`) binds each workbook-schema column and narrative section to a named range, a data start row, a prototype row and optional total anchors. `renderRegulatoryWorkbook` copies the prototype row style, writes the rows, totals and narrative, and reports `template-range` / `template-binding` / `REQUIRED_SECTION` issues. The generation service decrypts the template with the `reporting-xlsx` context and passes the saved binding, so a preview and a filed output use the same mapping.
+- **Rule-schema bindings are maker-checker.** `PUT /aml/reporting-rules/:id/schema-bindings` no longer writes directly: it creates a `REPORTING_RULE_SCHEMA_BINDING` approval (payload contains the bindings and every schema's version/revision/definition/mapping hash), rejects a second pending change, and returns 202. `GovernanceExecution` re-validates the confirmed status, format, authority and report type at execution, replaces the rule bindings in one transaction and audits `REPORTING_RULE_SCHEMA_BINDINGS_UPDATED`. The studio shows the bound schema per rule and submits the change for approval.
+- **DOCX narrative output.** `ReportOutputFormat.DOCX` plus the `DocxNarrativeSchema` compiler validate title, sections, required sections and optional tables; `lib/docx/regulatoryDocx.ts` writes a minimal OOXML package (document, styles, content types and relationships) with escaped text and tables. Outputs are encrypted with the `reporting-docx` context and downloaded with the Word content type. The provisional `cbl-incident-docx-v1` baseline is the default for `CBL / INCIDENT / INC / DOCX`.
+- **Expanded incidents.** `Incident` is the operational record: severity, category, impact scope, lifecycle timestamps, commander/reporter, affected services/merchants/attempts, regulator notification, postmortem requirement/due date and root cause. Child tables hold the timeline, responders (paging/acknowledgement/release), corrective actions, links to attempts/merchants/rails/gateways/reports/cases and communications. Transitions are forward-only (`DETECTED -> TRIAGED/DECLARED -> CONTAINED -> MONITORING -> RESOLVED -> POSTMORTEM -> CLOSED`); closing requires the postmortem when the incident is SEV1/SEV2, security or data-integrity. `POST /aml/incidents/:id/report` builds the narrative and timeline, then drafts a `REGULATORY_REPORT` through the standard maker-checker path. The admin portal has `/incidents` with Overview, Timeline, Responders, Actions, Communications and Postmortem tabs.
+- **External filing adapters.** `external_filing_adapters` stores a name, authority, MANUAL/HTTP kind, status, HTTPS endpoint, an encrypted auth secret, timeout and config; `external_submissions` records each attempt with the request SHA-256, external reference, response code/body and error. `POST /aml/reports/:id/file` re-checks the approval submitter, every required output (generated, VALIDATED, confirmed schema, matching payload hash), dispatches the encrypted artifacts, records the submission and then calls the normal submission gate. The HTTP adapter enforces public HTTPS, no redirect and a timeout; MANUAL remains the default and the existing submit route is unchanged. The admin portal has `/filing-adapters` and the report drawer can file through an active adapter.
+
+## Final reporting/compliance sweep (2026-11-10)
+
+- **Template writes are uniformly validated.** `POST /report-schemas`, schema `PUT`, `POST /template/upload`, `PUT /template` and the template branch of schema updates now all run `analyzeWorkbookTemplate`, reject every reported issue (malformed zip/workbook, macros, external links, OLE, oversized packs, too many sheets/cells) and accept templates only for XLSX schemas. `fflate` filtering aborts decompression as soon as the uncompressed budget would be exceeded instead of allocating the whole archive first. Replacing a template clears the old `template_binding_json` unless the caller supplies a new binding.
+- **DOCX is a first-class schema format.** `buildSchemaValidation`, DRAFT schema `PUT`, `simulate` and `clone` now use `parseDocxNarrativeSchema` and `renderRegulatoryDocx`; cloning copies the XLSX template binding. Simulation of a template-backed XLSX schema decrypts the template instead of silently rendering generated mode.
+- **Incidents are operationally complete.** List/detail responses resolve commander, reporter, timeline actor, action owner and communication sender names from the referenced users. The list returns server-side summary counts and filters/pagination are forwarded by the edge. Child writes are audited; transitions and postmortem edits lock the incident row; report drafting takes an advisory lock so concurrent requests cannot create two reports. Incident reporting is intentionally allowed from any lifecycle state (the owner decision), with the UI confirmation.
+- **Filing adapters are maker-checker.** Create, update and disable produce `FILING_ADAPTER` approvals; the adapter row stays `DISABLED` until a checker applies the encrypted secret/endpoint/status changes. `configJson` rejects secret-looking keys and is redacted on output; HTTP endpoints remain public-HTTPS-only. `POST /reports/:id/file` creates a PENDING submission before dispatch, records failure, blocks duplicate PENDING/SUBMITTED attempts and audits a reconciliation case if the report state cannot be advanced after a successful external send. Manual submissions now record a `MANUAL` `ExternalSubmission` and appear in the same history.
+
 ## Background Workers and Outboxes
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-10
 
 ## 1. Purpose and scope
 
@@ -2458,7 +2502,7 @@ The loop is not a distributed lock by itself. Cross-node safety comes from `FOR 
 | `StatementScheduleWorker` | every 5 min (`WORKER_STATEMENT_SCHEDULE_INTERVAL_MS`) | Advisory-lock singleton | Keyed missing-statement cases per scheduled slot, resolved when the statement arrives. | Implemented (AUTO-07) |
 | `ConsistencyAuditWorker` | every 1 h (`WORKER_CONSISTENCY_AUDIT_INTERVAL_MS`) | Advisory-lock singleton | Reports (and, behind `CONSISTENCY_AUDIT_REPAIR`, repairs) payment-link slot counter drift. | Implemented (AUTO-12, report only by default) |
 | `MerchantWebhookWorker` | every 2 s (`WORKER_MERCHANT_WEBHOOK_INTERVAL_MS`), batch 50 | `SKIP LOCKED` claim with a 2-minute lease (not a singleton) | Signs and sends merchant webhooks to the pinned public address of each endpoint, retries with exponential backoff and jitter, parks after 8 attempts, disables an endpoint after 5 days of failure. The `OutboxRelayWorker` fan-out creates the deliveries. | Implemented (AUTO-34) |
-| `RegulatoryReportWorker` | every 1 h (`WORKER_REGULATORY_REPORT_INTERVAL_MS`) | Advisory-lock singleton | Drafts the scheduled returns (PSP-M, AML-Q, AML-A) per closed period and the business-day large-transaction batch; draft only, a person files. | Implemented (AUTO-16) |
+| `RegulatoryReportWorker` | every 1 h (`WORKER_REGULATORY_REPORT_INTERVAL_MS`) | Advisory-lock singleton | Drafts the scheduled returns (PSP-M, AML-Q, AML-A) per closed period and the business-day large-transaction batch, then generates every required XML/XLSX output; draft only, a person files. | Implemented (AUTO-16; format-aware outputs) |
 | `AuditChainAnchorWorker` | every 24 h (`WORKER_AUDIT_ANCHOR_INTERVAL_MS`) | Advisory-lock singleton | Verifies the live audit hash chain since the last anchor and stores a signed anchor; incidents become keyed P1 cases. Registered only with the dedicated audit database. | Implemented (AUTO-27) |
 | `RetentionWorker` | every hour when enabled; batch 500 | Bounded transactions per table | Purges notifications, inbound events, step logs, audit logs, detail logs, terminal attempts and dependents; never purges the ledger. | Partial / opt-in |
 | `JournalPartitionWorker` | every 6 h (`WORKER_JOURNAL_PARTITION_INTERVAL_MS`), leader-elected | Two small catalogue reads, one DDL call only when a month is missing | Keeps the next `LEDGER_PARTITION_MONTHS_AHEAD` (6) monthly `journal_lines` partitions in existence through the same database function the deploy cron calls; raises the most-urgent cases `ledger.partition.default_rows` and `ledger.partition.ensure_failed`. | Implemented (AUTO-01) |
@@ -2639,7 +2683,7 @@ Source: `design/11-automation/background_automation_and_workers_plan.md`. Every 
 
 **Backup failures and the audit-chain anchor (AUTO-27).** (1) `createBackupMonitorCheck` (`engine/workers/backupMonitorChecks.ts`, check id `backup`, registered only when `BACKUP_DAEMON_URL` is set) polls the overview `BackupControlClient` already reads and turns the daemon's own catalog into keyed operator cases `platform.backup:<key>`: `daemon` (unreachable, P1), `unhealthy` (P1), `wal-lag` (archive lag above the policy's `alertLagSeconds`, P1), `backup-failed:<target>` (the latest finished run of that target FAILED, P1; a later PASSED run clears it), `backup-stale` (no PASSED full backup within `PLATFORM_MONITOR_BACKUP_MAX_FULL_AGE_MS`, 36 h, P1), `drill-failed` (latest restore drill FAILED, carrying the double-entry, balance-parity and audit-chain numbers, P1) and `drill-stale` (no drill within `PLATFORM_MONITOR_BACKUP_DRILL_MAX_AGE_MS`, 8 days, P2). The daemon needs no push channel. (2) `AuditChainAnchorWorker` (cluster singleton, daily, only with the dedicated audit database) verifies the LIVE hash chain incrementally and stores a signed anchor in the core table `audit_chain_anchors` (append-only trigger): it checks the latest anchor's HMAC (`Vault.sign`, key `AUDIT_ANCHOR_KEY_ID`), checks that the audit database still holds the anchored row with the anchored hash (the chain alone cannot show a removed tail), verifies the rows added since the anchor in segments of `AUDIT_ANCHOR_SEGMENT_ROWS` (at most `AUDIT_ANCHOR_MAX_SEGMENTS_PER_TICK` per tick, so a long history is verified over several ticks) with `DedicatedAuditDatabaseDriver.verifyChainSegment`, then anchors the end of the verified range and writes `AUDIT_CHAIN_ANCHORED`. Failures open ONE keyed P1 case each and never move the anchor over unverified rows: `audit.anchor_invalid` (forged or edited anchor), `audit.chain_rewritten` (anchored row missing or with another hash), `audit.chain_broken` (a row does not chain; the rows before it are still anchored so the break stays located). Cases are not auto-resolved. Not built: the anchor is not yet copied outside the core database (for example to the backup store), so someone who controls both databases AND the vault key can still rewrite history consistently.
 
-**Scheduled regulatory returns (AUTO-16, decision D3).** The provisional CBL catalogue (plan section 6.2) is DATA: migration `20261109190000_regulatory_report_automation` seeds `reporting_rules` rows (status `PROVISIONAL`, source "provisional default, pending CBL confirmation") whose `conditions` carries a `returnCode`: `PSP-M` (monthly, `dueDays` 10), `AML-Q` (quarterly, 15), `AML-A` (annual, 31) and `LTR` (`batch: BUSINESS_DAY`, LYD 50,000). `RegulatoryReportWorker` (cluster singleton, hourly) drafts them: one `DRAFT` per closed period and rule (boundaries are local midnights in `Africa/Tripoli`, `engine/workers/regulatory/periods.ts`), idempotent per `(report_code, period_key)` through a partial unique index and `ON CONFLICT DO NOTHING` (concurrent nodes draft once), `due_at` = period end + `dueDays`, payload stored encrypted (vault key `reporting-payload`, the same as the per-attempt reports) with its SHA-256, `confidential`, subject `REPORTING_RULE`, audit `REGULATORY_REPORT_DRAFTED`, MLRO and compliance told (`REGULATORY_REPORT_DRAFTED`). Only the `REGULATORY_REPORT_MAX_PERIODS` (2) most recent closed periods are considered, so enabling the worker on old data does not draft years of returns; a period that starts before the rule's effective LOCAL date is skipped. The payload sections come from read-only aggregates (`regulatory/payloads.ts`): payments by rail with success, failure and UNKNOWN rates and succeeded value, refunds, disputes opened and decided, cash-outs, merchants by status and onboarded, a funds-position reading (point in time at generation), and for AML returns screening, case and KYB counts (the number of STRs is a count only); what the platform cannot know is listed in the payload's `pending` (service availability and incidents, staff training completion, narratives). `LTR` drafts one report per business-day batch (the batch of a Thursday also holds the weekend; a holiday extends it) with every successful attempt at or above the threshold (lines capped at `REGULATORY_REPORT_MAX_BATCH_LINES`, marked `truncated`), due the end of the next business day; a batch without a breach produces no report. The per-attempt `ReportingRuleEvaluator` now skips any rule that names a `returnCode`, so a scheduled rule never fires once per payment. The `DeadlineWorker` rule `reports` watches unfiled reports (`DRAFT`, `PENDING_CHECKER`, `APPROVED`) with a `due_at`: a reminder to MLRO and compliance `REGULATORY_REPORT_REMINDER_BUSINESS_DAYS` (3) business days before, and at the due date ONE keyed P1 case `report.overdue:<id>`, audit `REGULATORY_REPORT_OVERDUE`; its catch-up window is at least 30 days so a missed filing is not forgotten. Nothing is filed: the MLRO reviews, completes the pending sections, approves and files, then records the reference. NOT BUILT: goAML XML (needs the FIU's XSD), the XLSX output through the shared export pipeline, the `INC` incident return, due dates and a draft deadline for suspicious-activity reports created by the AML flow, and a "regenerate draft" action (a correction today means a new draft by hand).
+**Scheduled regulatory returns (AUTO-16, decision D3).** The provisional CBL catalogue (plan section 6.2) is DATA: migration `20261109190000_regulatory_report_automation` seeds `reporting_rules` rows (status `PROVISIONAL`, source "provisional default, pending CBL confirmation") whose `conditions` carries a `returnCode`: `PSP-M` (monthly, `dueDays` 10), `AML-Q` (quarterly, 15), `AML-A` (annual, 31) and `LTR` (`batch: BUSINESS_DAY`, LYD 50,000). `RegulatoryReportWorker` (cluster singleton, hourly) drafts them: one `DRAFT` per closed period and rule (boundaries are local midnights in `Africa/Tripoli`, `engine/workers/regulatory/periods.ts`), idempotent per `(report_code, period_key)` through a partial unique index and `ON CONFLICT DO NOTHING` (concurrent nodes draft once), `due_at` = period end + `dueDays`, payload stored encrypted (vault key `reporting-payload`, the same as the per-attempt reports) with its SHA-256, `confidential`, subject `REPORTING_RULE`, audit `REGULATORY_REPORT_DRAFTED`, MLRO and compliance told (`REGULATORY_REPORT_DRAFTED`). Only the `REGULATORY_REPORT_MAX_PERIODS` (2) most recent closed periods are considered, so enabling the worker on old data does not draft years of returns; a period that starts before the rule's effective LOCAL date is skipped. The payload sections come from read-only aggregates (`regulatory/payloads.ts`): payments by rail with success, failure and UNKNOWN rates and succeeded value, refunds, disputes opened and decided, cash-outs, merchants by status and onboarded, a funds-position reading (point in time at generation), and for AML returns screening, case and KYB counts (the number of STRs is a count only); what the platform cannot know is listed in the payload's `pending` (service availability and incidents, staff training completion, narratives). `LTR` drafts one report per business-day batch (the batch of a Thursday also holds the weekend; a holiday extends it) with every successful attempt at or above the threshold (lines capped at `REGULATORY_REPORT_MAX_BATCH_LINES`, marked `truncated`), due the end of the next business day; a batch without a breach produces no report. The per-attempt `ReportingRuleEvaluator` now skips any rule that names a `returnCode`, so a scheduled rule never fires once per payment. The `DeadlineWorker` rule `reports` watches unfiled reports (`DRAFT`, `PENDING_CHECKER`, `APPROVED`) with a `due_at`: a reminder to MLRO and compliance `REGULATORY_REPORT_REMINDER_BUSINESS_DAYS` (3) business days before, and at the due date ONE keyed P1 case `report.overdue:<id>`, audit `REGULATORY_REPORT_OVERDUE`; its catch-up window is at least 30 days so a missed filing is not forgotten. Nothing is filed: the MLRO reviews, completes the pending sections, approves and files, then records the reference. The worker now calls `ReportGenerationService` and writes `RegulatoryReportOutput` rows for every required format (XML against a compiled XSD, XLSX against a declarative workbook/template). The baseline schemas are provisional, so the filing gate blocks them until a confirmed FIU/CBL schema is promoted. NOT BUILT: `INC`, DOCX/PDF narrative export, external authority filing adapters and a full visual mapper.
 
 **Outbound merchant webhooks (AUTO-34, decision D9).** A merchant registers up to five HTTPS endpoints per application (`merchant_webhook_endpoints`, migration `20261109200000_merchant_webhooks`, v24) through `/internal/merchant/webhooks/*` (proxied by merchant-back, `/portal/developers/webhooks`): reading needs a merchant read authority, changing needs `application:manage`, an application-scoped user only reaches their applications, another merchant's endpoint or delivery looks nonexistent. The `whsec_` signing secret (32 random bytes) is stored vault-encrypted (key `webhook-secret`), returned exactly once by create and rotate, never listed or logged; a rotation keeps the previous secret verifying for `MERCHANT_WEBHOOK_ROTATION_OVERLAP_HOURS` (24), during which every request carries two signatures. Events: `payment.succeeded|failed|expired|refunded` (from the terminal `attempt.transitioned` outbox event; cancelled and blocked attempts are not sent), `link.expired`, `dispute.opened|closed` and `cashout.paid|failed`, each written to the transactional outbox in the same transaction as the state change (`GovernanceExecution` at the dispute intake, the ruling, the cash-out payout and rejection; the `DeadlineWorker` at a dispute expiry). The `OutboxRelayWorker` gained a `fanout` option: `createWebhookFanout` runs in the relay's own transaction and writes one `merchant_webhook_deliveries` row per matching ACTIVE endpoint (application-scoped events by application, dispute and cash-out events by merchant), idempotent through the unique `(endpoint_id, event_id)` (`evt_<outbox id>`), with the exact signed body stored as text. `MerchantWebhookWorker` (not a singleton: `FOR UPDATE SKIP LOCKED` with a 2-minute lease that already counts the attempt) signs each request with the Standard Webhooks scheme (`webhook-id`, `webhook-timestamp` per attempt, `webhook-signature: v1,<base64 HMAC-SHA256 of id.timestamp.body>`) and sends it through `lib/webhooks/egress.ts`: HTTPS only (HTTP and private hosts only with `MERCHANT_WEBHOOK_ALLOW_INSECURE`), no URL credentials or fragments, every resolved address must be public, DNS is resolved once and the connection is PINNED to that address (a name that re-resolves to a private address cannot redirect the request; SNI and certificate validation keep the real host name), redirects are never followed, the response is read to at most 4 KiB and never stored. 2xx = delivered; network errors, timeouts, 408, 429 and 5xx retry after 5 s, 5 min, 30 min, 2 h, 5 h, 10 h and 10 h with +-20 % jitter (8 attempts, about 27 h); any other 4xx, a redirect or an unsafe URL parks the delivery at once, as does the 8th failure (`PARKED`, with `park_reason`). An endpoint that fails continuously for `MERCHANT_WEBHOOK_DISABLE_AFTER_DAYS` (5) is DISABLED (`failing_since` is cleared by any success), its pending deliveries are parked, one audit row `MERCHANT_WEBHOOK_ENDPOINT_DISABLED` is written and the merchant gets a notice (`MERCHANT_WEBHOOK_DISABLED`, host only). The merchant can send a `webhook.test` event (delivered whatever the filter), disable and enable an endpoint (enabling clears the failure streak), and redeliver a parked or delivered event as a fresh attempt cycle (the endpoint must be active); every management action is audited without the secret. Payloads carry identifiers, status and amounts only (payment: `paymentId`, `reference`, `status`, `currency`, `amount`, `netAmount`, `linkId`), never card, customer or AML data; ordering is not guaranteed. NOT BUILT: a delivery attempt history (only the last attempt is kept), `payment.refunded` for partial refunds (only the terminal `REFUNDED` status is sent), per-event retry-policy settings, and the portal has no payload viewer.
 
@@ -3322,7 +3366,7 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 
 ## Data Schema and Migrations
 
-> Status: `partial` · Last verified: 2026-11-09
+> Status: `partial` · Last verified: 2026-11-10
 
 ## 1. Purpose and scope
 
@@ -3332,7 +3376,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 25 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 30 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -3387,7 +3431,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 25`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 30`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -3400,7 +3444,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261109210000_ledger_query_and_index_optimization`, schema version 25). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261110160000_external_filing_adapters`, schema version 30). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -3592,7 +3636,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 84 models and 105 enums in the Prisma datamodel.
-- Schema version 25 with an equality check used by the seeders.
+- Schema version 30 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -3695,7 +3739,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 25 (`REQUIRED_SCHEMA_VERSION = 25`; model count 84). The schema migrations since version 10 are:
+The current schema version is 30 (`REQUIRED_SCHEMA_VERSION = 30`; model count 96). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -3761,6 +3805,26 @@ Open: a deploy-time guard that refuses to run this migration on a database with 
 Operationally, the migration drops and rebuilds the two `journal_lines` indexes on the partitioned parent, which takes an `ACCESS EXCLUSIVE` lock on every partition for the duration of each build. It is a direct migration because the project has no live production data; on a populated database, run it in a maintenance window (the same operational rule as the shard-checkpoint migration in section 12).
 
 The query rules that depend on these indexes are in `core.ledger` section 3.11 and `core-back/README.md` section 3.1.
+
+
+## 16. Declarative regulatory reporting (schema version 26)
+
+`20261110120000_declarative_regulatory_reporting` adds the format-aware reporting engine:
+
+- Enums `ReportOutputFormat` (`XML`, `XLSX`), `RegulatorySchemaStatus` (`DRAFT`, `PROVISIONAL`, `PENDING_APPROVAL`, `CONFIRMED`, `SUPERSEDED`, `ARCHIVED`) and `ReportOutputValidationStatus` (`NOT_GENERATED`, `PROVISIONAL_SCHEMA`, `VALIDATED`, `INVALID`).
+- `regulatory_report_schemas` (authority, report type, format, schema code/name/version, lifecycle status, XSD text or workbook JSON, optional encrypted uploaded template, compiled AST/workbook, mapping blueprint, sample context, approval link, seed key; unique `(authority, schema_code, version)`).
+- `regulatory_schema_default_bindings` (authority, report type, report code, format -> schema; unique together), `regulatory_rule_schema_bindings` (rule + format -> schema), and `regulatory_report_outputs` (report, format, revision, schema id/version, encrypted content, SHA-256, validation status/errors, generated/submitted times, superseded time; unique `(report_id, format, revision)` and a partial unique current-output index).
+- `reporting_rules.required_output_formats` and `primary_output_format`; `regulatory_reports.required_output_formats`, `filing_channel`, `acknowledged_at`, `rejection_reason`, `supersedes_id`; and a full `due_at` index. `regulatory_report_schemas.revision`, `cloned_from_schema_id`, `mapping_sha256`, `compiled_from_sha256`; `regulatory_report_outputs.payload_sha256`; `regulatory_reports.aml_case_id` is no longer unique and has a normal index. A database trigger blocks definition/mapping/compiled/template changes once a schema leaves `DRAFT`. Existing scheduled rules/reports are backfilled by `returnCode`/`reportCode`.
+- The baseline provisional schemas/templates are inserted lazily by `ensureBaselineReportingSchemas` (`cbl-goaml-str-v1`, `cbl-goaml-ltr-v1`, `cbl-psp-m-v1`, `cbl-aml-q-v1`, `cbl-aml-a-v1`, `cbl-goaml-ltr-xlsx-v1`) and their default bindings. They are `PROVISIONAL`; a confirmed FIU XSD/CBL workbook must be uploaded and promoted before XML filing.
+
+## 17. Reporting Studio phases 2-5 (schema versions 27 to 30, 2026-11-10)
+
+- `20261110130000_report_template_binding` (version 27): `regulatory_report_schemas.template_binding_json` stores the visual named-range mapping for an uploaded XLSX template. The column is separate from `template_ciphertext` so the encrypted workbook and its mapping can be rotated independently; the template upload route validates the zip, rejects macros/external links/OLE/zip bombs and audits the SHA-256.
+- `20261110140000_incident_management` (version 28): `ReportingType.INCIDENT`; enums `IncidentSeverity`, `IncidentStatus`, `IncidentCategory`, `IncidentImpactScope`, `IncidentTimelineType`, `IncidentActionStatus`, `IncidentCommunicationChannel`, `IncidentLinkType`; tables `incidents`, `incident_timeline_entries`, `incident_responders`, `incident_action_items`, `incident_links`, `incident_communications`. The lifecycle is DETECTED -> TRIAGED/DECLARED -> CONTAINED -> MONITORING -> RESOLVED -> POSTMORTEM -> CLOSED, with timestamp columns and postmortem due dates for SEV1/SEV2, security and data-integrity incidents.
+- `20261110150000_docx_report_output` (version 29): adds `ReportOutputFormat.DOCX`. `DocxNarrativeSchema` sections are rendered by the pure-JS OOXML builder; the output is stored encrypted under the `reporting-docx` context and downloaded as `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
+- `20261110160000_external_filing_adapters` (version 30): `FilingAdapterKind`, `FilingAdapterStatus`, `ExternalSubmissionStatus`; `external_filing_adapters` (name, authority, MANUAL/HTTP, status, HTTPS endpoint, encrypted auth secret, timeout, config) and `external_submissions` (report, adapter, status, request SHA-256, external reference, response code/body, error). The HTTP adapter rejects non-HTTPS, private/loopback/link-local endpoints, embedded credentials and redirects; the manual adapter remains the default.
+
+The reporting baseline set now includes a PROVISIONAL `cbl-incident-docx-v1` default binding for `CBL / INCIDENT / INC / DOCX`. As with the other provisional baselines, the incident output cannot be filed until the schema is reviewed and confirmed.
 
 ## Global Search
 

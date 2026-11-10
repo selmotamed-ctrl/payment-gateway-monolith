@@ -10,7 +10,7 @@ import {
   toCoreAmlReportingRule,
   toCoreAmlRule,
 } from "../contract";
-import { coreForward } from "../forward";
+import { coreForward, coreForwardRaw } from "../forward";
 
 const router = express.Router();
 
@@ -104,7 +104,7 @@ export const reportingRuleSchema = z
     currency: z.string().regex(/^[A-Z]{3}$/),
     windowDays: z.number().int().min(1).max(365),
     active: z.boolean().optional(),
-    reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN"]).optional(),
+    reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN", "INCIDENT"]).optional(),
   })
   .strict();
 
@@ -115,7 +115,7 @@ export const reportSchema = z
     periodStart: z.string().max(64),
     periodEnd: z.string().max(64),
     notes: z.string().max(2000).optional(),
-    reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN"]).optional(),
+    reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN", "INCIDENT"]).optional(),
     authority: z.string().min(2).max(64).optional(),
     checklist: z
       .array(
@@ -373,6 +373,7 @@ const reportSubmitSchema = z
   .object({
     submissionRef: z.string().min(1).max(200),
     submittedAt: z.string().max(64).optional(),
+    filingChannel: z.string().min(2).max(80).optional(),
     checklist: z
       .array(
         z.enum([
@@ -444,5 +445,411 @@ router.post(
     status: 201,
   }),
 );
+
+
+const reportSchemaUploadSchema = z
+  .object({
+    authority: z.string().min(2).max(64).default("CBL"),
+    reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN", "INCIDENT"]),
+    reportCode: z.string().max(40).default(""),
+    format: z.enum(["XML", "XLSX", "DOCX"]),
+    schemaCode: z.string().min(2).max(120),
+    name: z.string().min(2).max(200),
+    version: z.number().int().min(1).max(10000).optional(),
+    definitionText: z.string().min(1).max(2_000_000),
+    mappingBlueprint: zJsonObject.default({}),
+    sampleContext: zJsonObject.optional(),
+    templateBase64: z.string().max(20_000_000).optional(),
+    notes: z.string().max(4000).optional(),
+  })
+  .strict();
+
+const reportSchemaPromoteSchema = z.object({ setAsDefault: z.boolean().default(true) }).strict();
+const reportSchemaDefaultSchema = z
+  .object({
+    authority: z.string().min(2).max(64).default("CBL"),
+    reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN", "INCIDENT"]),
+    reportCode: z.string().max(40).default(""),
+    format: z.enum(["XML", "XLSX", "DOCX"]),
+    schemaId: zIdentifier,
+  })
+  .strict();
+const reportSimulateSchema = z.object({ context: zJsonObject }).strict();
+const reportGenerateSchema = z
+  .object({
+    formats: z.array(z.enum(["XML", "XLSX", "DOCX"])).min(1).max(3).optional(),
+    allowRegenerate: z.boolean().default(false),
+  })
+  .strict();
+const reportIdFormatParams = z.object({ id: zIdentifier, format: z.enum(["XML", "XLSX", "DOCX"]) });
+
+router.get("/report-context-catalog", coreForward({ method: "GET", path: () => "/internal/admin/aml/report-context-catalog" }));
+router.get("/report-schemas", coreForward({ method: "GET", path: () => "/internal/admin/aml/report-schemas" }));
+router.get(
+  "/report-schemas/:id",
+  coreForward({ method: "GET", path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}`, paramsSchema: idParamsSchema }),
+);
+router.post(
+  "/report-schemas",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/aml/report-schemas",
+    schema: reportSchemaUploadSchema,
+    relayStatus: true,
+  }),
+);
+router.post(
+  "/report-schemas/:id/compile",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/compile`,
+    paramsSchema: idParamsSchema,
+    schema: z.object({}).strict(),
+  }),
+);
+router.post(
+  "/report-schemas/:id/simulate",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/simulate`,
+    paramsSchema: idParamsSchema,
+    schema: reportSimulateSchema,
+  }),
+);
+router.post(
+  "/report-schemas/:id/promote",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/promote`,
+    paramsSchema: idParamsSchema,
+    schema: reportSchemaPromoteSchema,
+    relayStatus: true,
+  }),
+);
+const schemaDraftSchema = z
+  .object({
+    name: z.string().min(2).max(200).optional(),
+    definitionText: z.string().min(1).max(2_000_000).optional(),
+    mappingBlueprint: zJsonObject.optional(),
+    sampleContext: zJsonObject.optional(),
+    templateBase64: z.string().max(20_000_000).optional(),
+    notes: z.string().max(4000).optional(),
+    baseRevision: z.number().int().min(1).optional(),
+  })
+  .strict();
+const schemaValidateSchema = z
+  .object({
+    definitionText: z.string().min(1).max(2_000_000).optional(),
+    mappingBlueprint: zJsonObject.optional(),
+    sampleContext: zJsonObject.optional(),
+    context: zJsonObject.optional(),
+    format: z.enum(["XML", "XLSX", "DOCX"]).optional(),
+  })
+  .strict();
+const sampleContextSchema = z
+  .object({
+    sourceType: z.enum(["SCHEMA", "PAYMENT_ATTEMPT", "AML_CASE", "REGULATORY_REPORT"]).default("SCHEMA"),
+    sourceId: zIdentifier.optional(),
+    includePii: z.boolean().default(false),
+  })
+  .strict();
+const codeListPreviewSchema = z
+  .object({
+    mappingBlueprint: zJsonObject.optional(),
+    codeMapKey: z.string().max(120).optional(),
+    values: z.array(z.string()).max(500).optional(),
+  })
+  .strict();
+const templateSchema = z.object({ templateBase64: z.string().max(20_000_000), templateBinding: zJsonObject.optional() }).strict();
+const ruleBindingsSchema = z
+  .object({ bindings: z.array(z.object({ format: z.enum(["XML", "XLSX", "DOCX"]), schemaId: zIdentifier })).max(3) })
+  .strict();
+
+router.put(
+  "/report-schemas/:id",
+  coreForward({
+    method: "PUT",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}`,
+    paramsSchema: idParamsSchema,
+    schema: schemaDraftSchema,
+  }),
+);
+router.post(
+  "/report-schemas/:id/clone",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/clone`,
+    paramsSchema: idParamsSchema,
+    schema: z.object({
+      version: z.number().int().min(1).max(10000).optional(),
+      name: z.string().min(2).max(200).optional(),
+      notes: z.string().max(4000).optional(),
+      copySample: z.boolean().default(false),
+    }).strict(),
+    relayStatus: true,
+  }),
+);
+router.post(
+  "/report-schemas/validate",
+  coreForward({ method: "POST", path: () => "/internal/admin/aml/report-schemas/validate", schema: schemaValidateSchema }),
+);
+router.post(
+  "/report-schemas/:id/validate",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/validate`,
+    paramsSchema: idParamsSchema,
+    schema: schemaValidateSchema,
+  }),
+);
+router.post(
+  "/report-schemas/:id/sample-context",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/sample-context`,
+    paramsSchema: idParamsSchema,
+    schema: sampleContextSchema,
+  }),
+);
+router.post(
+  "/report-schemas/:id/code-lists/preview",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/code-lists/preview`,
+    paramsSchema: idParamsSchema,
+    schema: codeListPreviewSchema,
+  }),
+);
+router.post(
+  "/report-schemas/:id/template/analyze",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/template/analyze`,
+    paramsSchema: idParamsSchema,
+    schema: z.object({ templateBase64: z.string().max(20_000_000).optional() }).strict(),
+  }),
+);
+router.post(
+  "/report-schemas/:id/template/upload",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/template/upload`,
+    paramsSchema: idParamsSchema,
+    schema: templateSchema,
+    relayStatus: true,
+  }),
+);
+router.delete(
+  "/report-schemas/:id/template",
+  coreForward({
+    method: "DELETE",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/template`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+router.get(
+  "/report-schemas/:id/template",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/template`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+router.put(
+  "/report-schemas/:id/template",
+  coreForward({
+    method: "PUT",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/template`,
+    paramsSchema: idParamsSchema,
+    schema: templateSchema,
+  }),
+);
+router.post(
+  "/report-schemas/:id/workbook/preview",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/report-schemas/${encodeURIComponent(context.params.id ?? "")}/workbook/preview`,
+    paramsSchema: idParamsSchema,
+    schema: reportSimulateSchema,
+  }),
+);
+router.get(
+  "/reporting-rules/:id/schema-bindings",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/aml/reporting-rules/${encodeURIComponent(context.params.id ?? "")}/schema-bindings`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+router.put(
+  "/reporting-rules/:id/schema-bindings",
+  coreForward({
+    method: "PUT",
+    path: (context) => `/internal/admin/aml/reporting-rules/${encodeURIComponent(context.params.id ?? "")}/schema-bindings`,
+    paramsSchema: idParamsSchema,
+    schema: ruleBindingsSchema,
+    relayStatus: true,
+  }),
+);
+router.get(
+  "/reports/:id/requirements",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/aml/reports/${encodeURIComponent(context.params.id ?? "")}/requirements`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+router.get("/report-schema-defaults", coreForward({ method: "GET", path: () => "/internal/admin/aml/report-schema-defaults" }));
+router.put(
+  "/report-schema-defaults",
+  coreForward({
+    method: "PUT",
+    path: () => "/internal/admin/aml/report-schema-defaults",
+    schema: reportSchemaDefaultSchema,
+    relayStatus: true,
+  }),
+);
+router.get(
+  "/reports/:id/payload",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/aml/reports/${encodeURIComponent(context.params.id ?? "")}/payload`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+const reportNarrativeSchema = z.object({ narrative: z.record(z.string().max(80), z.string().max(20_000)), basePayloadSha256: z.string().length(64).optional() }).strict();
+router.patch(
+  "/reports/:id/payload",
+  coreForward({
+    method: "PATCH",
+    path: (context) => `/internal/admin/aml/reports/${encodeURIComponent(context.params.id ?? "")}/payload`,
+    paramsSchema: idParamsSchema,
+    schema: reportNarrativeSchema,
+  }),
+);
+router.post(
+  "/reports/:id/generate-output",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/reports/${encodeURIComponent(context.params.id ?? "")}/generate-output`,
+    paramsSchema: idParamsSchema,
+    schema: reportGenerateSchema,
+  }),
+);
+router.post(
+  "/reports/:id/request-approval",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/aml/reports/${encodeURIComponent(context.params.id ?? "")}/request-approval`,
+    paramsSchema: idParamsSchema,
+    schema: z.object({}).strict(),
+    relayStatus: true,
+  }),
+);
+router.get(
+  "/reports/:id/outputs/:format/download",
+  coreForwardRaw({
+    method: "GET",
+    path: (context) => `/internal/admin/aml/reports/${encodeURIComponent(context.params.id ?? "")}/outputs/${encodeURIComponent(context.params.format ?? "")}/download`,
+    paramsSchema: reportIdFormatParams,
+  }),
+);
+
+
+const incidentSeveritySchema = z.enum(["SEV1", "SEV2", "SEV3", "SEV4"]);
+const incidentStatusSchema = z.enum(["DETECTED", "TRIAGED", "DECLARED", "CONTAINED", "MONITORING", "RESOLVED", "POSTMORTEM", "CLOSED"]);
+const incidentCategorySchema = z.enum(["AVAILABILITY", "DATA_INTEGRITY", "SECURITY", "FRAUD", "COMPLIANCE", "THIRD_PARTY", "PAYMENT_PROCESSING", "OTHER"]);
+const incidentImpactSchema = z.enum(["PLATFORM", "MERCHANT", "CHECKOUT", "ADMIN", "MULTI_TENANT"]);
+const incidentLinkTypeSchema = z.enum(["ATTEMPT", "MERCHANT", "RAIL", "GATEWAY", "REPORT", "CASE", "OTHER"]);
+const incidentIdParams = z.object({ id: zIdentifier });
+const incidentQuerySchema = z.object({
+  search: z.string().max(200).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(200).optional(),
+  status: incidentStatusSchema.optional(),
+  severity: incidentSeveritySchema.optional(),
+  category: incidentCategorySchema.optional(),
+}).strict();
+const incidentChildParams = z.object({ id: zIdentifier, childId: zIdentifier });
+
+const incidentCreateSchema = z.object({
+  title: z.string().min(3).max(300),
+  summary: z.string().max(20_000).optional(),
+  category: incidentCategorySchema.default("OTHER"),
+  severity: incidentSeveritySchema.default("SEV3"),
+  impactScope: incidentImpactSchema.default("PLATFORM"),
+  detectedAt: z.string().max(64).optional(),
+  commanderUserId: zIdentifier.optional(),
+  affectedServices: z.array(z.string().min(1).max(120)).max(100).default([]),
+  affectedMerchantIds: z.array(zIdentifier).max(500).default([]),
+  affectedAttemptIds: z.array(zIdentifier).max(500).default([]),
+  regulatorsNotified: z.boolean().default(false),
+}).strict();
+
+const incidentPatchSchema = z.object({
+  title: z.string().min(3).max(300).optional(),
+  summary: z.string().max(20_000).nullable().optional(),
+  category: incidentCategorySchema.optional(),
+  severity: incidentSeveritySchema.optional(),
+  impactScope: incidentImpactSchema.optional(),
+  commanderUserId: zIdentifier.nullable().optional(),
+  affectedServices: z.array(z.string().min(1).max(120)).max(100).optional(),
+  affectedMerchantIds: z.array(zIdentifier).max(500).optional(),
+  affectedAttemptIds: z.array(zIdentifier).max(500).optional(),
+  regulatorsNotified: z.boolean().optional(),
+  rootCause: z.string().max(20_000).nullable().optional(),
+  postmortemSummary: z.string().max(50_000).nullable().optional(),
+  postmortemJson: zJsonObject.nullable().optional(),
+}).strict();
+
+const incidentTimelineSchema = z.object({
+  type: z.enum(["DETECTED", "DECLARED", "STATUS_CHANGE", "NOTE", "ESCALATION", "COMMUNICATION", "ACTION", "REGULATORY"]).default("NOTE"),
+  summary: z.string().min(1).max(5000),
+  detailJson: zJsonObject.optional(),
+  occurredAt: z.string().max(64).optional(),
+}).strict();
+
+const incidentResponderSchema = z.object({ userId: zIdentifier.optional(), name: z.string().min(1).max(200), role: z.string().min(1).max(120), isCommander: z.boolean().default(false) }).strict();
+const incidentActionSchema = z.object({ title: z.string().min(1).max(500), ownerUserId: zIdentifier.optional(), priority: z.number().int().min(1).max(4).default(3), dueAt: z.string().max(64).optional(), notes: z.string().max(5000).optional() }).strict();
+const incidentActionPatchSchema = z.object({ title: z.string().min(1).max(500).optional(), ownerUserId: zIdentifier.nullable().optional(), priority: z.number().int().min(1).max(4).optional(), status: z.enum(["OPEN", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"]).optional(), dueAt: z.string().max(64).nullable().optional(), notes: z.string().max(5000).nullable().optional() }).strict();
+const incidentLinkSchema = z.object({ linkType: incidentLinkTypeSchema, targetId: z.string().min(1).max(200), label: z.string().max(300).optional() }).strict();
+const incidentCommunicationSchema = z.object({ channel: z.enum(["STATUS_PAGE", "EMAIL", "SMS", "REGULATOR", "INTERNAL"]), audience: z.string().min(1).max(500), subject: z.string().min(1).max(500), body: z.string().min(1).max(50_000) }).strict();
+
+router.get("/incidents", coreForward({ method: "GET", path: () => "/internal/admin/incidents", querySchema: incidentQuerySchema }));
+router.post("/incidents", coreForward({ method: "POST", path: () => "/internal/admin/incidents", schema: incidentCreateSchema, relayStatus: true }));
+router.get("/incidents/:id", coreForward({ method: "GET", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}`, paramsSchema: incidentIdParams }));
+router.patch("/incidents/:id", coreForward({ method: "PATCH", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}`, paramsSchema: incidentIdParams, schema: incidentPatchSchema, relayStatus: true }));
+router.post("/incidents/:id/transition", coreForward({ method: "POST", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/transition`, paramsSchema: incidentIdParams, schema: z.object({ status: incidentStatusSchema, note: z.string().max(5000).optional() }).strict(), relayStatus: true }));
+router.post("/incidents/:id/timeline", coreForward({ method: "POST", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/timeline`, paramsSchema: incidentIdParams, schema: incidentTimelineSchema, relayStatus: true }));
+router.post("/incidents/:id/responders", coreForward({ method: "POST", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/responders`, paramsSchema: incidentIdParams, schema: incidentResponderSchema, relayStatus: true }));
+router.patch("/incidents/:id/responders/:childId", coreForward({ method: "PATCH", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/responders/${encodeURIComponent(context.params.childId ?? "")}`, paramsSchema: incidentChildParams, schema: z.object({ acknowledged: z.boolean().optional(), released: z.boolean().optional() }).strict(), relayStatus: true }));
+router.post("/incidents/:id/actions", coreForward({ method: "POST", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/actions`, paramsSchema: incidentIdParams, schema: incidentActionSchema, relayStatus: true }));
+router.patch("/incidents/:id/actions/:childId", coreForward({ method: "PATCH", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/actions/${encodeURIComponent(context.params.childId ?? "")}`, paramsSchema: incidentChildParams, schema: incidentActionPatchSchema, relayStatus: true }));
+router.post("/incidents/:id/links", coreForward({ method: "POST", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/links`, paramsSchema: incidentIdParams, schema: incidentLinkSchema, relayStatus: true }));
+router.delete("/incidents/:id/links/:childId", coreForward({ method: "DELETE", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/links/${encodeURIComponent(context.params.childId ?? "")}`, paramsSchema: incidentChildParams, relayStatus: true }));
+router.post("/incidents/:id/communications", coreForward({ method: "POST", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/communications`, paramsSchema: incidentIdParams, schema: incidentCommunicationSchema, relayStatus: true }));
+router.post("/incidents/:id/report", coreForward({ method: "POST", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/report`, paramsSchema: incidentIdParams, schema: z.object({}).strict(), relayStatus: true }));
+
+
+
+const filingAdapterSchema = z.object({
+  name: z.string().min(2).max(120),
+  authority: z.string().min(2).max(64).optional(),
+  kind: z.enum(["MANUAL", "HTTP"]).optional(),
+  status: z.enum(["ACTIVE", "DISABLED"]).optional(),
+  endpointUrl: z.string().url().max(500).nullable().optional(),
+  authHeaderName: z.string().min(2).max(80).nullable().optional(),
+  authSecret: z.string().min(4).max(4000).nullable().optional(),
+  timeoutSeconds: z.number().int().min(5).max(120).optional(),
+  configJson: zJsonObject.nullable().optional(),
+}).strict();
+
+router.get("/filing-adapters", coreForward({ method: "GET", path: () => "/internal/admin/aml/filing-adapters" }));
+router.post("/filing-adapters", coreForward({ method: "POST", path: () => "/internal/admin/aml/filing-adapters", schema: filingAdapterSchema, relayStatus: true }));
+router.patch("/filing-adapters/:id", coreForward({ method: "PATCH", path: (context) => `/internal/admin/aml/filing-adapters/${encodeURIComponent(context.params.id ?? "")}`, paramsSchema: incidentIdParams, schema: filingAdapterSchema.partial(), relayStatus: true }));
+router.delete("/filing-adapters/:id", coreForward({ method: "DELETE", path: (context) => `/internal/admin/aml/filing-adapters/${encodeURIComponent(context.params.id ?? "")}`, paramsSchema: incidentIdParams, relayStatus: true }));
+router.get("/reports/:id/submissions", coreForward({ method: "GET", path: (context) => `/internal/admin/aml/reports/${encodeURIComponent(context.params.id ?? "")}/submissions`, paramsSchema: incidentIdParams }));
+router.post("/reports/:id/file", coreForward({ method: "POST", path: (context) => `/internal/admin/aml/reports/${encodeURIComponent(context.params.id ?? "")}/file`, paramsSchema: incidentIdParams, schema: z.object({ adapterId: zIdentifier, checklist: z.array(z.enum(["REPORT_APPROVED_VERIFIED", "AUTHORITY_REFERENCE_VERIFIED", "DEADLINE_VERIFIED", "PAYLOAD_DIGEST_VERIFIED"])).max(10).optional() }).strict(), relayStatus: true }));
+
 
 export const amlRouter = router;

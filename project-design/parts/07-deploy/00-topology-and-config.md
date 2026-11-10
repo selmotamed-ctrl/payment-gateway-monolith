@@ -151,7 +151,7 @@ Zod field validation:
 - `PG_VERSION` is one or two digits (default `18`).
 - `BACKUP_ENCRYPTION_KEY_HEX` must be exactly 64 hex characters, or empty; it is required when backups are enabled.
 - `BACKUP_PRIMARY_S3_ENDPOINT` must be an absolute HTTP(S) URL when backups are enabled.
-- SSL mode is `certbot`, `custom` or `self_signed`.
+- SSL mode is `certbot`, `custom` or `self_signed` for the merchant/checkout public vhosts. The admin vhost has no SSL-mode setting: `ADMIN_SSL` only toggles TLS on the LAN vhost and the deploy mints a self-signed certificate; see `02-pki.md` section 3.8 for the operator-managed public admin front.
 
 Cross-field validation:
 

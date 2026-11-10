@@ -123,6 +123,21 @@ const router = createRouter({
                     component: () => import("@/pages/aml/reports/index"),
                 },
                 {
+                    path: "aml/reporting-studio",
+                    name: "AmlReportingStudio",
+                    component: () => import("@/pages/aml/reporting-studio/index"),
+                },
+                {
+                    path: "incidents",
+                    name: "Incidents",
+                    component: () => import("@/pages/incidents/index"),
+                },
+                {
+                    path: "filing-adapters",
+                    name: "FilingAdapters",
+                    component: () => import("@/pages/filing-adapters/index"),
+                },
+                {
                     path: "operator-cases",
                     name: "OperatorCases",
                     component: () => import("@/pages/operator-cases/index"),

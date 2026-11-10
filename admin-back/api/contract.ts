@@ -1089,10 +1089,13 @@ const inferReportType = (explicit: unknown, hints: unknown[]): string => {
 
 export const toCoreAmlReportingRule = (body: unknown): JsonRecord => {
   const source = asRecord(body);
+  const reportType = inferReportType(source.reportType, [source.code, source.name]);
+  const requiredOutputFormats = reportType === "INCIDENT" ? ["DOCX"] : reportType === "PERIODIC_RETURN" ? ["XLSX"] : ["XML"];
   const result: JsonRecord = {
-    reportType: inferReportType(source.reportType, [source.code, source.name]),
+    reportType,
     sourceReference: asString(source.code) ?? asString(source.name) ?? "",
-    status: pickEnum(source.mode, ["PROVISIONAL", "CONFIRMED"]) ?? "PROVISIONAL",
+    requiredOutputFormats,
+    primaryOutputFormat: requiredOutputFormats[0],
   };
   const threshold = asString(source.threshold);
   if (threshold && DECIMAL_PATTERN.test(threshold)) result.thresholdAmount = threshold;
@@ -1116,8 +1119,11 @@ export const toCoreAmlReport = (body: unknown): JsonRecord => {
   };
   const notes = asString(source.notes);
   if (notes) payload.notes = notes;
+  const reportType = inferReportType(source.reportType, [reportingRuleId, caseId]);
+  const requiredOutputFormats = reportType === "INCIDENT" ? ["DOCX"] : reportType === "PERIODIC_RETURN" ? ["XLSX"] : ["XML"];
+  payload.requiredOutputFormats = requiredOutputFormats;
   const result: JsonRecord = {
-    reportType: inferReportType(source.reportType, [reportingRuleId, caseId]),
+    reportType,
     subjectType: caseId ? "AML_CASE" : "REPORTING_RULE",
     subjectId: caseId ?? reportingRuleId,
     payload,

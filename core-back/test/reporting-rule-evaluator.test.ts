@@ -67,7 +67,7 @@ const settledAttempt = {
 };
 
 describe("reporting rule evaluator", () => {
-  test("a CONFIRMED rule above its threshold creates a PENDING_CHECKER report", async () => {
+  test("a CONFIRMED rule above its threshold creates a DRAFT report for review", async () => {
     const harness = createSource([rule()]);
     const evaluator = new ReportingRuleEvaluator(harness.source, { now: () => NOW });
 
@@ -75,7 +75,7 @@ describe("reporting rule evaluator", () => {
 
     expect(result.created).toEqual(["report-1"]);
     expect(harness.reports).toHaveLength(1);
-    expect(harness.reports[0]?.status).toBe("PENDING_CHECKER");
+    expect(harness.reports[0]?.status).toBe("DRAFT");
     expect(harness.reports[0]?.reportType).toBe("LARGE_TRANSACTION");
     const payload = JSON.parse(harness.reports[0]?.payloadCiphertext ?? "{}") as Record<string, unknown>;
     expect(payload.ruleId).toBe("rule-large-transaction");

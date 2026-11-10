@@ -3,7 +3,7 @@ id: edge.admin
 title: Admin Edge BFF
 status: partial
 confidence: high
-last_verified: 2026-11-06
+last_verified: 2026-11-10
 verified_against: 5a24f6f+working-tree
 code:
   - admin-back/index.ts
@@ -128,7 +128,7 @@ All routes are prefixed with `/api/v1/admin`. The auth routes are inside the LAN
 | KYB documents | `GET /kyb-documents`, `GET /kyb-documents/:id`, `GET /kyb-documents/:id/content`, `POST /kyb-documents/:id/review`, `POST /kyb-documents/:id/request-replacement`, `POST /kyb-documents/:id/request-revalidation`, plus export/summary variants |
 | Merchants | `GET /merchants`, `GET /merchants/:id`, `GET /merchants/:id/stats`, `PATCH /merchants/:id/descriptive`, `POST /merchants/:id/suspend`, `POST /merchants/:id/reinstate`, `POST /merchants/:id/close`, `GET /merchants/:id/pending-changes`, `POST /merchants/:id/pending-changes/:approvalId/withdraw`, `POST /merchants/:id/propose-edit`, `GET /merchants/:id/detail-changes`, plus export/summary variants |
 | Approvals | `GET /approvals`, `GET /approvals/:id`, `POST /approvals/:id/approve`, `POST /approvals/:id/reject`, `POST /approvals/bulk-reject`, plus export/summary variants |
-| AML (confidential) | `GET /aml/screenings`, `GET /aml/screenings/:id`, `POST /aml/matches/:id/disposition`, `GET /aml/cases`, `GET /aml/cases/:id`, `POST /aml/cases/:id/propose`, `GET, POST /aml/rules`, `GET, POST /aml/reporting-rules`, `GET, POST /aml/reports`, `POST /aml/reports/:id/submit`, `POST /aml/reports/:id/acknowledge`, plus export/summary variants |
+| AML (confidential) | `GET /aml/screenings`, `GET /aml/screenings/:id`, `POST /aml/matches/:id/disposition`, `GET /aml/cases`, `GET /aml/cases/:id`, `POST /aml/cases/:id/propose`, `GET, POST /aml/rules`, `GET, POST /aml/reporting-rules`, `GET, POST /aml/reports`, `GET /aml/reports/:id/payload`, `PATCH /aml/reports/:id/payload`, `POST /aml/reports/:id/generate-output`, `GET /aml/reports/:id/outputs/:format/download`, `POST /aml/reports/:id/request-approval`, `POST /aml/reports/:id/submit`, `POST /aml/reports/:id/acknowledge`, `GET, POST /aml/report-schemas`, `GET, PUT /aml/report-schemas/:id`, `GET /aml/report-schemas/:id/definition`, `GET /aml/report-context-catalog`, `POST /aml/report-schemas/:id/compile`, `POST /aml/report-schemas/:id/validate`, `POST /aml/report-schemas/:id/simulate`, `POST /aml/report-schemas/:id/clone`, `POST /aml/report-schemas/:id/sample-context`, `POST /aml/report-schemas/:id/code-lists/preview`, `GET, PUT /aml/report-schemas/:id/template`, `POST /aml/report-schemas/:id/workbook/preview`, `POST /aml/report-schemas/:id/promote`, `GET, PUT /aml/report-schema-defaults`, `GET, PUT /aml/reporting-rules/:id/schema-bindings`, `GET /aml/reports/:id/requirements`, plus export/summary variants |
 | Gateways | `GET /gateways/ai-transcript`, `POST /gateways/spec-verify`, `POST /gateways/spec-import`, `GET, POST /gateways`, `GET, PATCH /gateways/:id`, `POST /gateways/:id/rollback`, `GET, POST /gateways/:id/versions`, plus export/summary variants |
 | Gateway versions | `POST /gateway-versions/:vid/clone`, `GET /gateway-versions/:vid`, `PUT /gateway-versions/:vid/environments`, `/auth`, `/settings`, `/crypto-profiles`, `/flows`, `/channels`, `/status-rules`, `/error-maps`, `POST /gateway-versions/:vid/dry-run`, `/run-suite`, `/submit-approval` |
 | Credential sets | `GET, POST /credential-sets`, `GET, PUT /credential-sets/:id`, `POST /credential-sets/:id/verify`, `POST /credential-sets/:id/revoke` |
@@ -312,3 +312,20 @@ Contracts enforced at the edge: bodies are `.strict()` zod; `reason` is `z.strin
 ## Remediation round 2 (2026-11-08): limiters, uploads, invitation routes
 
 `api/public/auth.ts` wires `createAccountLimiters` (per `identifier|ip` and an identifier ceiling, failures only) and the public `POST /auth/accept-invitation` route; `api/upload.ts` exports `uploadGuards` (limiter, `Content-Length` pre-check, session-shape check before multer) and is used by the reconciliation and join-request uploads; `api/protected/users.ts` and `api/contract.ts` carry the invitation-based create and re-invite contracts (no password or phone in the create body).
+
+## Reporting Studio, incidents and filing adapters (2026-11-10)
+
+`admin-back/api/protected/aml.ts` forwards the new reporting surface to core; every route remains behind `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` and core re-checks the authority:
+
+- template/studio: `POST /report-schemas/:id/template/analyze`, `POST /report-schemas/:id/template/upload`, `DELETE /report-schemas/:id/template`, `GET|PUT /report-schemas/:id/template`, `POST /report-schemas/:id/workbook/preview`; the XML/XLSX/DOCX schema enums accept `DOCX`.
+- rule bindings: `PUT /reporting-rules/:id/schema-bindings` relays the core 202 (approval request), not 200.
+- incidents: list/create/detail/update and transition, timeline, responders and responder acknowledgement/release, actions, links, communications and `POST /incidents/:id/report`.
+- filing: `GET|POST|PATCH|DELETE /filing-adapters`, `GET /reports/:id/submissions` and `POST /reports/:id/file`; file relays core's 202/502 status and never exposes the adapter secret.
+
+The edge validates identifiers, enums and body shapes, but keeps the core as the authority for maker-checker, schema lifecycle, output readiness and adapter authority matching.
+
+## Final AML forwarding sweep (2026-11-10)
+
+- `GET /aml/incidents` now has an explicit query schema and forwards `search`, `page`, `pageSize`, `status`, `severity` and `category`; without it `coreForward` dropped every filter.
+- Incident writes, filing-adapter create/update/disable and `POST /reports/:id/file` relay core's 202 instead of returning a false 200.
+- The new AML routes remain behind the shared `amlConfidential` guard; the edge only validates shapes while core remains the authority for maker-checker, submission readiness and adapter matching.

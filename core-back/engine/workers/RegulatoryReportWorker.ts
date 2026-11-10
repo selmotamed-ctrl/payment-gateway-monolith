@@ -5,6 +5,9 @@ import { writeSystemAudit } from "../ledger/ledgerAlerts";
 import { bilingualNotice, queueNotice, type NoticeDefinition } from "../../lib/automationNotices";
 import { DEFAULT_BUSINESS_TIME_ZONE, type BusinessCalendar } from "./deadlines/businessTime";
 import { staffByRole } from "./deadlines/common";
+import { ReportGenerationService } from "../compliance/reporting/ReportGenerationService";
+import { ensureBaselineReportingSchemas } from "../compliance/reporting/baselineSchemas";
+import type { ReportOutputFormat } from "../compliance/reporting/types";
 import { loadPlatformHolidays } from "./DeadlineWorker";
 import {
   buildAnnualAmlReturn,
@@ -44,6 +47,8 @@ export interface RegulatoryReportWorkerDeps extends WorkerOptions {
   maxBatchLines?: number;
   /** Restricts the worker to these rules. Production leaves it unset; tests that share a database use it. */
   ruleIds?: readonly string[];
+  /** Generates the XML/XLSX outputs after the draft is written. */
+  generation?: ReportGenerationService;
   timeZone?: string;
   loadHolidays?: (db: Any) => Promise<Set<string>>;
   audit?: (db: Any, input: { action: string; entityType: string; entityId: string; before?: unknown; after?: unknown }) => Promise<void>;
@@ -52,13 +57,14 @@ export interface RegulatoryReportWorkerDeps extends WorkerOptions {
 interface ScheduledRule {
   id: string;
   authority: string;
-  reportType: "PERIODIC_RETURN" | "LARGE_TRANSACTION" | "SUSPICIOUS_ACTIVITY";
+  reportType: "PERIODIC_RETURN" | "LARGE_TRANSACTION" | "SUSPICIOUS_ACTIVITY" | "INCIDENT";
   thresholdAmount: string | null;
   currency: string;
   conditions: Any;
   sourceReference: string | null;
   status: string;
   effectiveFrom: Date;
+  requiredOutputFormats: ReportOutputFormat[];
 }
 
 /**
@@ -87,15 +93,26 @@ export class RegulatoryReportWorker extends BaseWorker {
 
   private readonly deps: RegulatoryReportWorkerDeps;
   private readonly audit: NonNullable<RegulatoryReportWorkerDeps["audit"]>;
+  private readonly generation: ReportGenerationService;
+  private baselineReady = false;
 
   constructor(deps: RegulatoryReportWorkerDeps) {
     super({ ...deps, intervalMs: deps.intervalMs ?? 60 * 60 * 1000 });
     this.deps = deps;
     this.audit = deps.audit ?? writeSystemAudit;
+    this.generation = deps.generation ?? new ReportGenerationService();
   }
 
   protected async tick(): Promise<WorkerTickResult> {
     const now = this.clock();
+    if (!this.baselineReady && typeof (this.db as Any).regulatoryReportSchema?.findUnique === "function") {
+      try {
+        await ensureBaselineReportingSchemas(this.db as Any);
+        this.baselineReady = true;
+      } catch (error) {
+        this.logger.warn("RegulatoryReportWorker: baseline schemas unavailable", { error: sanitizeWorkerError(error) });
+      }
+    }
     const rules = await this.loadRules(now);
     const calendar: BusinessCalendar = {
       timeZone: this.deps.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE,
@@ -128,7 +145,7 @@ export class RegulatoryReportWorker extends BaseWorker {
     const rows = toCamelRows<Any>(
       await this.db.$queryRawUnsafe(
         `SELECT id::text AS id, authority, report_type::text AS report_type, threshold_amount::text AS threshold_amount, currency, conditions,
-                source_reference, status::text AS status, effective_from
+                source_reference, status::text AS status, effective_from, required_output_formats
          FROM reporting_rules
          WHERE conditions ? 'returnCode' AND effective_from <= $1 AND (effective_to IS NULL OR effective_to >= $1)${scoped ? " AND id::text = ANY($2::text[])" : ""}
          ORDER BY effective_from ASC, id ASC`,
@@ -146,6 +163,8 @@ export class RegulatoryReportWorker extends BaseWorker {
       sourceReference: row.sourceReference ? String(row.sourceReference) : null,
       status: String(row.status),
       effectiveFrom: row.effectiveFrom instanceof Date ? row.effectiveFrom : new Date(String(row.effectiveFrom)),
+      requiredOutputFormats: (Array.isArray(row.requiredOutputFormats) ? row.requiredOutputFormats : [])
+        .filter((format: unknown): format is ReportOutputFormat => format === "XML" || format === "XLSX" || format === "DOCX"),
     }));
   }
 
@@ -199,12 +218,24 @@ export class RegulatoryReportWorker extends BaseWorker {
     const payloadSha256 = createHash("sha256").update(plaintext).digest("hex");
     const payloadCiphertext = await this.deps.encode(plaintext);
 
-    return this.inTransaction(async (tx) => {
+    const fallbackFormats = code === "STR"
+      ? ["XML"]
+      : code === "LTR"
+        ? ["XML", "XLSX"]
+        : code === "INC"
+          ? ["DOCX"]
+          : code === "PSP-M" || code === "AML-Q" || code === "AML-A"
+            ? ["XLSX"]
+            : [];
+    const requiredOutputFormats = rule.requiredOutputFormats.length > 0
+      ? rule.requiredOutputFormats
+      : fallbackFormats as ReportOutputFormat[];
+    const reportId = await this.inTransaction(async (tx) => {
       const inserted = toCamelRows<Any>(
         await tx.$queryRawUnsafe(
           `INSERT INTO regulatory_reports (id, created_at, updated_at, report_type, authority, subject_type, subject_id, period_start, period_end, status,
-                                           payload_ciphertext, payload_sha256, confidential, due_at, report_code, period_key)
-           VALUES (gen_random_uuid(), $1, $1, $2::"ReportingType", $3, 'REPORTING_RULE', $4, $5, $6, 'DRAFT', $7, $8, true, $9, $10, $11)
+                                           payload_ciphertext, payload_sha256, confidential, due_at, report_code, period_key, required_output_formats)
+           VALUES (gen_random_uuid(), $1, $1, $2::"ReportingType", $3, 'REPORTING_RULE', $4, $5, $6, 'DRAFT', $7, $8, true, $9, $10, $11, $12::"ReportOutputFormat"[])
            ON CONFLICT (report_code, period_key) WHERE report_code IS NOT NULL AND period_key IS NOT NULL DO NOTHING
            RETURNING id::text AS id`,
           now,
@@ -218,25 +249,67 @@ export class RegulatoryReportWorker extends BaseWorker {
           dueAt,
           code,
           period.key,
+          requiredOutputFormats,
         ),
       );
-      if (inserted.length === 0) return 0; // another node drafted it first
-      const reportId = String(inserted[0]!.id);
+      if (inserted.length === 0) return null; // another node drafted it first
+      const createdId = String(inserted[0]!.id);
       await this.audit(tx as Any, {
         action: "REGULATORY_REPORT_DRAFTED",
         entityType: "REGULATORY_REPORT",
-        entityId: reportId,
-        after: { returnCode: code, periodKey: period.key, dueAt: dueAt.toISOString(), payloadSha256, provisionalRule: rule.status !== "CONFIRMED" },
+        entityId: createdId,
+        after: {
+          returnCode: code,
+          periodKey: period.key,
+          dueAt: dueAt.toISOString(),
+          payloadSha256,
+          requiredOutputFormats,
+          provisionalRule: rule.status !== "CONFIRMED",
+        },
       });
       for (const userId of await staffByRole(tx as Any, REPORT_DRAFT_ROLES)) {
         await queueNotice(tx as Any, {
           definition: REGULATORY_REPORT_DRAFTED_NOTICE,
-          eventKey: `report-drafted:${reportId}:${userId}`,
+          eventKey: `report-drafted:${createdId}:${userId}`,
           payload: { returnCode: code, periodKey: period.key, dueAt: dueAt.toISOString().slice(0, 10) },
           userId,
         });
       }
-      return 1;
+      return createdId;
     });
+    if (!reportId) return 0;
+    try {
+      await this.generation.generate(this.db as Any, {
+        report: {
+          id: reportId,
+          reportType: rule.reportType,
+          reportCode: code,
+          authority: rule.authority,
+          subjectType: "REPORTING_RULE",
+          subjectId: rule.id,
+          amlCaseId: null,
+          periodStart: period.start,
+          periodEnd: period.end,
+          periodKey: period.key,
+          dueAt,
+          requiredOutputFormats,
+        },
+        payload,
+        ruleId: rule.id,
+        formats: requiredOutputFormats,
+      });
+    } catch (error) {
+      this.logger.error("RegulatoryReportWorker: output generation failed", {
+        reportId,
+        error: sanitizeWorkerError(error),
+      });
+      await this.audit(this.db as Any, {
+        action: "REGULATORY_REPORT_OUTPUT_GENERATION_FAILED",
+        entityType: "REGULATORY_REPORT",
+        entityId: reportId,
+        after: { returnCode: code, error: sanitizeWorkerError(error) },
+      });
+    }
+    return 1;
   }
 }

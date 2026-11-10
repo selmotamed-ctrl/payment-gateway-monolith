@@ -3,7 +3,7 @@ id: admin-ui.routes
 title: Admin Route and Page Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-06
+last_verified: 2026-11-10
 verified_against: 5a24f6f+working-tree
 code:
   - admin-front/src/router/index.ts
@@ -79,7 +79,7 @@ The historical operator-case design also expects a dedicated operator-case inqui
 
 `admin-front/src/layouts/sections.tsx` groups visible navigation into Overview, Onboarding, Governance, Operations, Finance, Gateways, and Learning. Sections and route items are filtered by their `if` callbacks. Empty sections are removed.
 
-### 3.2 Admin protected routes (37)
+### 3.2 Admin protected routes (38)
 
 The authority column is the UI gate. "None" means no effective `routesAuthorities` entry; the backend may still require an authority. Help shows the guide screen used by the generated context map; "none" means no mapping resolves.
 
@@ -100,7 +100,8 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 13 | `/aml/cases` | `AmlCases` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | AML case investigation, proposal and escalation. |
 | 14 | `/aml/screenings` | `AmlScreenings` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Sanctions/PEP screening queue and match disposition. |
 | 15 | `/aml/rules` | `AmlRules` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | AML rule versions, thresholds and maker-checker drafts. |
-| 16 | `/aml/reports` | `AmlReports` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Regulatory report drafting, submission and acknowledgement. |
+| 16 | `/aml/reports` | `AmlReports` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Regulatory report drafting, payload/output review, generation, submission and acknowledgement. |
+| 16a | `/aml/reporting-studio` | `AmlReportingStudio` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Declarative XML/XLSX schema registry, compile/simulate, promotion and default bindings. |
 | 17 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | UNKNOWN/conflict/reconciliation operator queue. |
 | 18 | `/operator-cases/inquiries` | `GatewayInquirySchedules` | `case:read` or `operator:read` | 7 / 7.2 | Gateway inquiry schedule monitoring, run/retry/cancel. |
 | 19 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case evidence, step logs, inbound events, maker-checker resolution. |
@@ -167,7 +168,7 @@ Public admin routes are `/login` (`Login`, visitor-only) and the catch-all `NotF
 
 ## 4. Contracts and invariants
 
-1. **Protected route count is 37.** The generated catalog and tests must treat the 37 children under `/` as the protected admin surface; `/login` and `NotFound` are excluded.
+1. **Protected route count is 38.** The generated catalog and tests must treat the 38 children under `/` as the protected admin surface; `/login` and `NotFound` are excluded.
 2. **Merchant protected route count is 16.** Public landing/login/register/not-found are excluded.
 3. **A UI gate exists only when the authority array is non-empty.** `[]`, `undefined`, and a missing key all behave as "no UI gate".
 4. **Authority checks use OR semantics.** `hasOneOfAuthorities` accepts any listed authority.
@@ -304,3 +305,17 @@ Gaps: the dashboards/global search still route `payment_attempt` hits to Merchan
 ## Remediation round 2 (2026-11-08): invitation route
 
 `/accept-invitation` (`pages/public/auth/accept-invitation`) is a public route reached from the invitation message; the Users page creates users without a password and shows invitation state with a re-invite action; the login page links to nothing new.
+
+## Reporting Studio completion, incidents and filing adapters (2026-11-10)
+
+- `/reporting-studio` (`AmlReportingStudio`) now includes a workbook-template card on XLSX schemas: upload, analysis summary, named-range/sheet/column mapping and save; a rule-schema override panel that submits each rule's XML/XLSX/DOCX binding for approval; DOCX as a schema format with a narrative-JSON definition; and a "Filing adapters" route is available from the Compliance menu.
+- `/incidents` (`Incidents`) is the expanded incident workspace: filters, severity/status metrics, create dialog and a detail drawer with Overview (timeline timestamps, impacted services, links), Timeline, Responders, Actions, Communications and Postmortem. Status transitions are offered only when the core lifecycle allows them; a regulatory report can be drafted from the incident.
+- `/filing-adapters` (`FilingAdapters`) lists manual/HTTP adapters, shows authority/kind/status/endpoint/last use, creates an adapter with an HTTPS endpoint and optional encrypted auth secret, and disables an adapter. The AML report drawer offers an active HTTP adapter and a "File via adapter" action for an APPROVED report.
+
+All three routes are gated by `aml.read_confidential` at the edge/UI; writes are re-checked by core.
+
+## Final compliance UI sweep (2026-11-10)
+
+- `Incidents` now uses the shared `ApiTable`/`TableRowActions` surface with server pagination, search, status/severity/category filters, correct server summary metrics, row actions, refresh and confidential badge. The detail drawer resets transient state, preserves the active tab on refresh, supports editing incident facts, commander/reporter names, affected merchant/attempt IDs, regulator notification, link removal, responder acknowledgement/release, full action status changes, communication bodies, postmortem due date and a link to the drafted report.
+- `FilingAdapters` uses the shared table surface and exposes edit, re-enable/disable approval requests, secret-present state, endpoint display, confirmation and maker-checker messaging. The create/edit form never sends a blank secret (so an existing secret is kept).
+- `AmlReports` filters include INCIDENT, the generic draft dialog no longer offers INCIDENT, and the drawer shows `filingChannel`, external submission history, adapter filing confirmation and reset-safe adapter selection. `AmlReportingStudio` labels DOCX correctly, preserves template analysis after upload, and offers analyze/download/remove plus narrative, total and prototype-row mappings.

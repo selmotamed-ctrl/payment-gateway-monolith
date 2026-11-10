@@ -213,7 +213,7 @@ export const loadArticles: (lang:"en"|"ar") => Promise<Article[]>; // dynamic im
 | Reading paths | 8 | `@@path` lines (`ALL` plus the 7 staff roles) |
 | Quick answers (FAQ) | 58 | `@@faq` blocks |
 | Data blocks | 3 | `ledger-events` (16 events), `visible-rails` (7 vectors), `attempt-transitions` |
-| Context map screens | 25 | `screens` array of `context-map` |
+| Context map screens | 26 | `screens` array of `context-map` |
 | Error codes (from b13-01) | 19 | first-column backticked tokens |
 | Edge cases | 140 | parsed from the repository's v4 design file |
 
@@ -7109,6 +7109,50 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
    "cards": [
     "sg-aml-report"
    ],
+   "situations": []
+  },
+  {
+   "screenId": "AmlReportingStudio",
+   "routeNames": [
+    "AmlReportingStudio"
+   ],
+   "pageDir": "pages/aml/reporting-studio",
+   "summary": "Upload and version the XML XSD and XLSX workbook contracts, map report fields, simulate output and submit schema changes for four-eyes approval.",
+   "articles": [
+    "b09-07",
+    "b09-08"
+   ],
+   "cards": [
+    "sg-aml-report"
+   ],
+   "situations": []
+  },
+  {
+   "screenId": "Incidents",
+   "routeNames": [
+    "Incidents"
+   ],
+   "pageDir": "pages/incidents",
+   "summary": "Operational incidents with a response timeline, responders, corrective actions, communications and the regulatory report. High-severity and security incidents need a postmortem before close.",
+   "articles": [
+    "b09-07",
+    "b09-08"
+   ],
+   "cards": [],
+   "situations": []
+  },
+  {
+   "screenId": "FilingAdapters",
+   "routeNames": [
+    "FilingAdapters"
+   ],
+   "pageDir": "pages/filing-adapters",
+   "summary": "The manual or HTTPS channel used to file an approved regulatory report. Manual remains the default; an HTTP adapter stores only an encrypted auth secret.",
+   "articles": [
+    "b09-07",
+    "b09-08"
+   ],
+   "cards": [],
    "situations": []
   },
   {

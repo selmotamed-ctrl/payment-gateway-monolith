@@ -178,14 +178,14 @@ const adminUsers = [
   {
     email: "compliance@payment-gateway.internal",
     role: "COMPLIANCE",
-    authorities: ["compliance:read", "compliance:write", "aml:review", "report:review"],
+    authorities: ["compliance:read", "compliance:write", "aml:review", "report:review", "aml.read_confidential", "approval:read", "approval:check", "approval:write"],
     isMaker: false,
     isChecker: true,
   },
   {
     email: "mlro@payment-gateway.internal",
     role: "MLRO",
-    authorities: ["aml:read", "aml:write", "aml:release", "report:approve"],
+    authorities: ["aml:read", "aml:write", "aml:release", "report:approve", "aml.read_confidential", "approval:read", "approval:check", "approval:write"],
     isMaker: false,
     isChecker: true,
   },
@@ -435,18 +435,13 @@ const seed = async () => {
   // generates a live filing; a PROVISIONAL rule only drafts an internal one.
   const reportingRuleSeeds = [
     {
-      reportType: "LARGE_TRANSACTION" as const,
-      thresholdAmount: "50000.0000",
-      windowSeconds: null as number | null,
-      sourceReference: "CBL-LARGE-TRANSACTION-CONFIRMED-001",
-      status: "CONFIRMED" as const,
-    },
-    {
       reportType: "SUSPICIOUS_ACTIVITY" as const,
       thresholdAmount: "50000.0000",
       windowSeconds: 86400,
       sourceReference: "CBL-SUSPICIOUS-ACTIVITY-PROVISIONAL-001",
       status: "PROVISIONAL" as const,
+      requiredOutputFormats: ["XML"] as const,
+      primaryOutputFormat: "XML" as const,
     },
   ];
   let seededReportingRules = 0;
@@ -467,6 +462,8 @@ const seed = async () => {
         conditions: {},
         sourceReference: rule.sourceReference,
         status: rule.status,
+        requiredOutputFormats: [...rule.requiredOutputFormats] as never,
+        primaryOutputFormat: rule.primaryOutputFormat as never,
         effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
       },
     });

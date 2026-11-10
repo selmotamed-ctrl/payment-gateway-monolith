@@ -3,7 +3,7 @@ id: admin-ui.guide
 title: Admin Guide and Academy
 status: partial
 confidence: high
-last_verified: 2026-11-07
+last_verified: 2026-11-10
 verified_against: working-tree
 code:
   - admin-front/scripts/extract-guide-content.ts
@@ -87,7 +87,7 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
 | `faq.en.json` | 58 quick answers |
 | `data.json` | `ledger-events`, `visible-rails`, `attempt-transitions` |
-| `context-map.json` | 25 screens (including `Wallets` and `SystemBackups`), the last being the `General` fallback |
+| `context-map.json` | 28 screens (including `Wallets`, `SystemBackups`, `AmlReportingStudio`, `Incidents` and `FilingAdapters`), the last being the `General` fallback |
 | `error-codes.en.json` | 19 codes parsed from `b13-01` |
 | `edge-cases.en.json` | 140 rows parsed from the v4.1 design |
 | `meta.json` | `contentVersion`, deterministic `generatedAt`, counts and source SHA-256 |

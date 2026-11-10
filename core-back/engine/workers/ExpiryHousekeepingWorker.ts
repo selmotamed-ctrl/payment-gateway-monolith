@@ -41,7 +41,6 @@ export const APPROVAL_SUBJECTS_WITH_OWN_LIFECYCLE: readonly string[] = [
   "CASHOUT",
   "CASHOUTREQUEST",
   "AMLCASE",
-  "REGULATORYREPORT",
   "DISPUTE",
   "KYBDOCUMENT",
   "GLSHARDREPAIR",
@@ -238,6 +237,51 @@ export class ExpiryHousekeepingWorker extends BaseWorker {
           entityId: input.subjectId,
           before: { state: "PENDING_CHECKER" },
           after: { state: "IN_REVIEW", approvalRequestId: input.approvalId, reason: "APPROVAL_EXPIRED" },
+        });
+      }
+    } else if (input.subjectType === "REGULATORY_REPORT") {
+      const changed = await tx.$executeRawUnsafe(
+        "UPDATE regulatory_reports SET status = 'DRAFT', approval_request_id = NULL, updated_at = $1 WHERE id = $2::uuid AND status = 'PENDING_CHECKER'",
+        input.now,
+        input.subjectId,
+      );
+      if (Number(changed) > 0) {
+        await this.audit(tx, {
+          action: "REGULATORY_REPORT_APPROVAL_EXPIRED",
+          entityType: "REGULATORY_REPORT",
+          entityId: input.subjectId,
+          before: { status: "PENDING_CHECKER" },
+          after: { status: "DRAFT", approvalRequestId: input.approvalId, reason: "APPROVAL_EXPIRED" },
+        });
+      }
+    } else if (input.subjectType === "REPORTING_RULE") {
+      const changed = await tx.$executeRawUnsafe(
+        "UPDATE reporting_rules SET status = 'PROVISIONAL', approval_request_id = NULL, updated_at = $1 WHERE id = $2::uuid",
+        input.now,
+        input.subjectId,
+      );
+      if (Number(changed) > 0) {
+        await this.audit(tx, {
+          action: "REPORTING_RULE_APPROVAL_EXPIRED",
+          entityType: "REPORTING_RULE",
+          entityId: input.subjectId,
+          before: { status: "PROVISIONAL" },
+          after: { status: "PROVISIONAL", approvalRequestId: input.approvalId, reason: "APPROVAL_EXPIRED" },
+        });
+      }
+    } else if (input.subjectType === "REGULATORY_REPORT_SCHEMA") {
+      const changed = await tx.$executeRawUnsafe(
+        "UPDATE regulatory_report_schemas SET status = 'DRAFT', approval_request_id = NULL, updated_at = $1 WHERE id = $2::uuid AND status = 'PENDING_APPROVAL'",
+        input.now,
+        input.subjectId,
+      );
+      if (Number(changed) > 0) {
+        await this.audit(tx, {
+          action: "REGULATORY_REPORT_SCHEMA_APPROVAL_EXPIRED",
+          entityType: "REGULATORY_REPORT_SCHEMA",
+          entityId: input.subjectId,
+          before: { status: "PENDING_APPROVAL" },
+          after: { status: "DRAFT", approvalRequestId: input.approvalId, reason: "APPROVAL_EXPIRED" },
         });
       }
     } else if (input.subjectType === "MERCHANT") {

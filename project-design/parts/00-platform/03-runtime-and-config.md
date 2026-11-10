@@ -3,7 +3,7 @@ id: platform.runtime
 title: Runtime and Configuration
 status: partial
 confidence: high
-last_verified: 2026-11-09
+last_verified: 2026-11-10
 verified_against: d695518+working-tree
 code:
   - core-back/index.ts
@@ -43,7 +43,7 @@ tests:
   - merchant-back/test/security-regressions.test.ts
   - checkout-back/test/security-regressions.test.ts
 gaps:
-  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 25.
+  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 30.
   - LOG_LEVEL is declared but not used by the console or access logger.
   - WORKER_CONCURRENCY and WORKER_REQUEST_TIMEOUT_MS are accepted but not passed to the production worker runtime.
   - Console request-log correlation uses a separate short id from x-request-id.
@@ -234,7 +234,7 @@ The storage engine is constructed before `listen`, but after the server object i
 
 ### 3.5 Schema version check
 
-`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 25`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
+`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 30`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
 
 ```sql
 SELECT "version" FROM "schema_versions" WHERE "id" = 1
@@ -504,7 +504,7 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 
 ## 11. Security hardening config changes (2026-11-05)
 
-- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 11`.
+- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 30`.
 - Edges: `TRUSTED_PROXY_CIDRS` default loopback only; `MAX_INBOUND_BODY_BYTES` default 1 MiB; `CORS_ALLOWED_ORIGINS` (no CORS headers on admin/merchant when unset); newly wired rate-limit window envs `AUTH_/ADMIN_/API_/EXTERNAL_/PAY_/INBOUND_RATE_LIMIT_WINDOW_MS`; `CORE_MAX_RESPONSE_BYTES` (64 MiB), `CORE_TOTAL_DEADLINE_MS` (300000), `MAX_STREAMS_PER_IP` (5), `ADMIN_AUTHORITY_HINTS` (default empty, restrict-only), merchant `TOKEN_MAX_SCOPES`, `TOKEN_MAX_TTL_DAYS`, `TOKEN_DEFAULT_TTL_DAYS`, `UPLOAD_RATE_LIMIT_MAX`, admin `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
 - Frontends: `VITE_CHECKOUT_BASE_URL`, `VITE_IDENTITY_HOSTS` (merchant), `VITE_CHECKOUT_ORIGIN` (fake-rails). Real `.env` files in the frontends are no longer tracked; copy `.env.example` to `.env` on a fresh clone.
 - Deploy and daemon keys are listed in the deploy parts.

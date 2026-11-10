@@ -113,7 +113,7 @@ Request logging writes console lines with a separate short id and an `http_acces
 - The migration order and files are generated in [`../project-design/appendices/migration-catalog.md`](../project-design/appendices/migration-catalog.md).
 - The committed history is forward-only: baseline schema, storage-engine indexes, CQRS read models and storage hardening. There are no down migrations. Recovery is restore/PITR or a new forward migration.
 - `journal_lines` is monthly range-partitioned by `created_at`; the primary key includes `created_at`. The deploy engine installs a daily partition-maintenance cron. Elsewhere, run `SELECT ensure_journal_line_partitions(18)` on a schedule.
-- Schema version 25 is required (latest migration `20261109210000_ledger_query_and_index_optimization`; the automation plan migrations `20261109110000`..`20261109200000` are applied before it). `ensureSchemaVersion()` is called by the baseline seeder, the Fake Rails seeder and the synthetic seeder, but not by the HTTP start path. A stale database can boot and fail later at query time.
+- Schema version 30 is required (latest migration `20261110160000_external_filing_adapters`; the reporting migrations `20261110120000`..`20261110160000` add template bindings, incident management, DOCX output and external filing adapters). `ensureSchemaVersion()` is called by the baseline seeder, the Fake Rails seeder and the synthetic seeder, but not by the HTTP start path. A stale database can boot and fail later at query time.
 
 #### Query and indexing rules for the ledger tables
 

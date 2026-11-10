@@ -402,3 +402,41 @@ describe("authority any-of lists mirror core", () => {
     expect(response.status).toBe(401);
   });
 });
+
+
+describe("AML completion forwarding", () => {
+  test("forwards incident list filters instead of dropping the query", async () => {
+    const response = await call("GET", "/aml/incidents?search=INC-1&status=DETECTED&severity=SEV1&page=2&pageSize=50", tokenWith("aml:read"));
+    expect(response.status).toBe(200);
+    const forwarded = lastCore().url;
+    expect(forwarded).toContain("/internal/admin/incidents");
+    expect(forwarded).toContain("search=INC-1");
+    expect(forwarded).toContain("status=DETECTED");
+    expect(forwarded).toContain("severity=SEV1");
+    expect(forwarded).toContain("page=2");
+    expect(forwarded).toContain("pageSize=50");
+  });
+
+  test("filing adapter writes relay core 202 instead of pretending success", async () => {
+    const token = tokenWith("aml:write");
+    const created = await call("POST", "/aml/filing-adapters", token, {
+      name: "Test filing adapter",
+      authority: "CBL",
+      kind: "HTTP",
+      endpointUrl: "https://fiu.example.gov/reports",
+      timeoutSeconds: 30,
+    });
+    expect(created.status).toBe(202);
+    const changed = await call("PATCH", `/aml/filing-adapters/${ID}`, token, { status: "DISABLED" });
+    expect(changed.status).toBe(202);
+    const disabled = await call("DELETE", `/aml/filing-adapters/${ID}`, token);
+    expect(disabled.status).toBe(202);
+  });
+
+  test("incident and filing-adapter reads stay confidential", async () => {
+    const before = core.requests.length;
+    expect((await call("GET", "/aml/incidents", nobody)).status).toBe(403);
+    expect((await call("GET", "/aml/filing-adapters", nobody)).status).toBe(403);
+    expect(core.requests.length).toBe(before);
+  });
+});
