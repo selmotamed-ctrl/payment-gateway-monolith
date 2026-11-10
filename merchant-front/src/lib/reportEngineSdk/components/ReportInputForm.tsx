@@ -1,14 +1,13 @@
 import { defineComponent, onMounted, reactive, watch, type PropType } from "vue";
-import { useLocale } from "vuetify";
+import { useDisplay, useLocale } from "vuetify";
 import {
   VAutocomplete,
   VBtn,
-  VCol,
-  VRow,
   VSelect,
   VSwitch,
   VTextField,
 } from "vuetify/components";
+import { FormField } from "@/components/ui/FormField";
 import type { ReportDescriptorSpec, ReportInputFieldSpec } from "../types/reportSpec";
 import { resolvePreset } from "../utils/inputDefaults";
 
@@ -32,8 +31,10 @@ export const ReportInputForm = defineComponent({
   emits: ["update:modelValue"],
   setup(props, { emit }) {
     const { t } = useLocale();
+    const { mobile } = useDisplay();
     const items = reactive<Record<string, Item[]>>({});
     const loading = reactive<Record<string, boolean>>({});
+    const errors = reactive<Record<string, string>>({});
     const searchTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
     const valueOf = (key: string): unknown => props.modelValue[key];
@@ -51,16 +52,23 @@ export const ReportInputForm = defineComponent({
 
     const loadItems = async (field: ReportInputFieldSpec, query: string) => {
       if (!props.autocomplete || !field.autocomplete) return;
-      const source = field.autocomplete.source;
       loading[field.key] = true;
+      errors[field.key] = "";
       try {
-        const result = await props.autocomplete(source, query, dependentValuesFor(field));
+        const result = await props.autocomplete(
+          field.autocomplete.source,
+          query,
+          dependentValuesFor(field),
+        );
         items[field.key] = result.map((item) => ({
           title: item.label,
           value: item.value,
           subtitle: item.sublabel,
           badge: item.badge,
         }));
+      } catch (caught) {
+        items[field.key] = [];
+        errors[field.key] = caught instanceof Error ? caught.message : String(caught);
       } finally {
         loading[field.key] = false;
       }
@@ -80,7 +88,10 @@ export const ReportInputForm = defineComponent({
     const dateRange = (field: ReportInputFieldSpec): { start: string; end: string } => {
       const raw = valueOf(field.key);
       if (raw && typeof raw === "object" && "start" in raw && "end" in raw) {
-        return { start: String((raw as { start: unknown }).start).slice(0, 10), end: String((raw as { end: unknown }).end).slice(0, 10) };
+        return {
+          start: String((raw as { start: unknown }).start).slice(0, 10),
+          end: String((raw as { end: unknown }).end).slice(0, 10),
+        };
       }
       return { start: "", end: "" };
     };
@@ -127,7 +138,17 @@ export const ReportInputForm = defineComponent({
       return help;
     };
 
-    const columns = (field: ReportInputFieldSpec): number => Math.max(3, Math.min(12, field.layout_col_span));
+    const columns = (field: ReportInputFieldSpec): number =>
+      mobile.value ? 12 : Math.max(3, Math.min(12, field.layout_col_span));
+
+    const common = (field: ReportInputFieldSpec) => ({
+      disabled: props.disabled,
+      density: "comfortable" as const,
+      variant: "outlined" as const,
+      hideDetails: "auto" as const,
+      placeholder: field.placeholder_i18n_key ? t(field.placeholder_i18n_key) : undefined,
+      error: Boolean(errors[field.key]),
+    });
 
     onMounted(() => {
       for (const field of props.spec.inputs) {
@@ -154,97 +175,125 @@ export const ReportInputForm = defineComponent({
       const label = t(field.label_i18n_key);
       const hint = defaultHint(field);
       const value = valueOf(field.key);
-      const common = {
-        label,
-        hint,
-        placeholder: field.placeholder_i18n_key ? t(field.placeholder_i18n_key) : undefined,
-        disabled: props.disabled,
-        density: "compact" as const,
-        variant: "outlined" as const,
-        hideDetails: "auto" as const,
-      };
+      const inputProps = common(field);
 
       if (field.type === "daterange") {
         const range = dateRange(field);
         return (
-          <div>
-            <VRow dense>
-              <VCol cols={6}>
+          <FormField
+            label={label}
+            hint={hint}
+            error={errors[field.key] || ""}
+            required={field.required}
+            id={`report-input-${field.key}`}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }}>
                 <VTextField
-                  {...common}
+                  {...inputProps}
                   type="date"
+                  aria-label={`${label} ${t("Start")}`}
+                  placeholder={t("Start")}
                   modelValue={range.start}
                   onUpdate:modelValue={(next: string) => setDateRange(field, "start", next)}
                 />
-              </VCol>
-              <VCol cols={6}>
                 <VTextField
-                  {...common}
+                  {...inputProps}
                   type="date"
+                  aria-label={`${label} ${t("End")}`}
+                  placeholder={t("End")}
                   modelValue={range.end}
                   onUpdate:modelValue={(next: string) => setDateRange(field, "end", next)}
                 />
-              </VCol>
-            </VRow>
-            <div class="d-flex flex-wrap ga-1 mt-1">
-              {presetLabels.map((preset) => (
-                <VBtn
-                  key={preset.value}
-                  size="x-small"
-                  variant="tonal"
-                  onClick={() => applyPreset(field, preset.value)}
-                >
-                  {preset.label}
-                </VBtn>
-              ))}
+              </div>
+              <div class="d-flex flex-wrap ga-1">
+                {presetLabels.map((preset) => (
+                  <VBtn
+                    key={preset.value}
+                    size="x-small"
+                    variant="tonal"
+                    onClick={() => applyPreset(field, preset.value)}
+                  >
+                    {preset.label}
+                  </VBtn>
+                ))}
+              </div>
             </div>
-          </div>
+          </FormField>
         );
       }
 
       if (field.type === "entity_autocomplete" || field.type === "entity_multi_autocomplete") {
         const multiple = field.type === "entity_multi_autocomplete";
         return (
-          <VAutocomplete
-            {...common}
-            multiple={multiple}
-            chips={multiple}
-            items={items[field.key] ?? []}
-            itemTitle="title"
-            itemValue="value"
-            loading={loading[field.key]}
-            modelValue={multiple ? (Array.isArray(value) ? (value as string[]) : []) : ((value as string | null | undefined) ?? null)}
-            onUpdate:modelValue={(next: unknown) => setValue(field.key, next)}
-            onUpdate:search={(next: string) => onSearch(field, next)}
-          />
+          <FormField
+            label={label}
+            hint={hint}
+            error={errors[field.key] || ""}
+            required={field.required}
+            id={`report-input-${field.key}`}
+          >
+            <VAutocomplete
+              {...inputProps}
+              multiple={multiple}
+              chips={multiple}
+              clearable
+              items={items[field.key] ?? []}
+              itemTitle="title"
+              itemValue="value"
+              loading={loading[field.key]}
+              noDataText={t("No matches")}
+              modelValue={multiple ? (Array.isArray(value) ? (value as string[]) : []) : ((value as string | null | undefined) ?? null)}
+              onUpdate:modelValue={(next: unknown) => setValue(field.key, next)}
+              onUpdate:search={(next: string) => onSearch(field, next)}
+            />
+          </FormField>
         );
       }
 
       if (field.type === "enum" || field.type === "multi_enum") {
         const multiple = field.type === "multi_enum";
         return (
-          <VSelect
-            {...common}
-            multiple={multiple}
-            items={enumItems(field)}
-            itemTitle="title"
-            itemValue="value"
-            modelValue={multiple ? (Array.isArray(value) ? (value as string[]) : []) : ((value as string | null | undefined) ?? null)}
-            onUpdate:modelValue={(next: unknown) => setValue(field.key, next)}
-          />
+          <FormField
+            label={label}
+            hint={hint}
+            error={errors[field.key] || ""}
+            required={field.required}
+            id={`report-input-${field.key}`}
+          >
+            <VSelect
+              {...inputProps}
+              multiple={multiple}
+              clearable
+              items={enumItems(field)}
+              itemTitle="title"
+              itemValue="value"
+              modelValue={multiple ? (Array.isArray(value) ? (value as string[]) : []) : ((value as string | null | undefined) ?? null)}
+              onUpdate:modelValue={(next: unknown) => setValue(field.key, next)}
+            />
+          </FormField>
         );
       }
 
       if (field.type === "boolean") {
         return (
-          <VSwitch
+          <FormField
             label={label}
             hint={hint}
-            disabled={props.disabled}
-            hideDetails="auto"
-            modelValue={Boolean(value)}
-            onUpdate:modelValue={(next: boolean | null) => setValue(field.key, Boolean(next))}
-          />
+            error={errors[field.key] || ""}
+            required={field.required}
+            id={`report-input-${field.key}`}
+          >
+            <VSwitch
+              color="primary"
+              baseColor="grey"
+              inset
+              hideDetails="auto"
+              disabled={props.disabled}
+              modelValue={Boolean(value)}
+              onUpdate:modelValue={(next: boolean | null) => setValue(field.key, Boolean(next))}
+            />
+          </FormField>
         );
       }
 
@@ -257,38 +306,53 @@ export const ReportInputForm = defineComponent({
               ? "datetime-local"
               : "text";
       return (
-        <VTextField
-          {...common}
-          type={inputType}
-          modelValue={
-            value === undefined || value === null
-              ? ""
-              : field.type === "datetime"
-                ? String(value).slice(0, 16)
-                : String(value)
-          }
-          onUpdate:modelValue={(next: string) =>
-            setValue(
-              field.key,
-              inputType === "number"
-                ? (next === "" ? null : Number(next))
+        <FormField
+          label={label}
+          hint={hint}
+          error={errors[field.key] || ""}
+          required={field.required}
+          id={`report-input-${field.key}`}
+        >
+          <VTextField
+            {...inputProps}
+            type={inputType}
+            modelValue={
+              value === undefined || value === null
+                ? ""
                 : field.type === "datetime"
-                  ? (next === "" ? null : `${next}:00.000Z`)
-                  : next,
-            )
-          }
-        />
+                  ? String(value).slice(0, 16)
+                  : String(value)
+            }
+            onUpdate:modelValue={(next: string) =>
+              setValue(
+                field.key,
+                inputType === "number"
+                  ? (next === "" ? null : Number(next))
+                  : field.type === "datetime"
+                    ? (next === "" ? null : `${next}:00.000Z`)
+                    : next,
+              )
+            }
+          />
+        </FormField>
       );
     };
 
     return () => (
-      <VRow dense>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
+          gap: "16px 20px",
+          alignItems: "start",
+        }}
+      >
         {visibleInputs().map((field) => (
-          <VCol key={field.key} cols={12} md={columns(field)}>
+          <div key={field.key} style={{ gridColumn: `span ${columns(field)}`, minWidth: 0 }}>
             {renderField(field)}
-          </VCol>
+          </div>
         ))}
-      </VRow>
+      </div>
     );
   },
 });

@@ -141,6 +141,16 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/report-engine/catalog",
+    querySchema: z
+      .object({
+        audience: z.string().max(32).optional(),
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(200).optional(),
+        search: z.string().max(200).optional(),
+        sortKey: z.string().max(64).optional(),
+        sortDirection: z.enum(["asc", "desc"]).optional(),
+      })
+      .passthrough(),
   }),
 );
 
@@ -203,7 +213,17 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/report-engine/chrome",
-    querySchema: z.object({ type: z.string().optional() }).passthrough(),
+    querySchema: z
+      .object({
+        type: z.string().optional(),
+        includeArchived: z.string().optional(),
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(200).optional(),
+        search: z.string().max(200).optional(),
+        sortKey: z.string().max(64).optional(),
+        sortDirection: z.enum(["asc", "desc"]).optional(),
+      })
+      .passthrough(),
   }),
 );
 
@@ -214,6 +234,16 @@ router.post(
     path: () => "/internal/admin/report-engine/chrome",
     schema: chromeBody,
     status: 201,
+  }),
+);
+
+router.post(
+  "/chrome/:id/archive",
+  coreForward({
+    method: "POST",
+    path: ({ params }) => `/internal/admin/report-engine/chrome/${params.id}/archive`,
+    paramsSchema: idParams,
+    schema: z.object({}).strict(),
   }),
 );
 

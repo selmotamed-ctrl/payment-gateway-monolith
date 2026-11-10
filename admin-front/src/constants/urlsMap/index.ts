@@ -297,6 +297,7 @@ export const urlsMap = {
     reportEngineAutocomplete: (sourceKey: string) => `v1/admin/report-engine/autocomplete/${encodeURIComponent(sourceKey)}`,
     reportEngineExecute: (code: string) => `v1/admin/report-engine/catalog/${encodeURIComponent(code)}/execute`,
     reportEngineChrome: "v1/admin/report-engine/chrome",
+    reportEngineChromeArchive: (id: string) => `v1/admin/report-engine/chrome/${encodeURIComponent(id)}/archive`,
     reportEngineChromeDefault: (id: string) => `v1/admin/report-engine/chrome/${encodeURIComponent(id)}/set-default`,
     reportEngineAmlBypassPending: "v1/admin/report-engine/aml-bypass/pending",
     reportEngineAmlBypassApprove: (id: string) => `v1/admin/report-engine/aml-bypass/${encodeURIComponent(id)}/approve`,

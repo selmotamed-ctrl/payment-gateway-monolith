@@ -3,7 +3,7 @@ id: core.report-engine
 title: Dynamic Report Engine SDK and Report Studio Host
 status: implemented
 confidence: high
-last_verified: 2026-11-09
+last_verified: 2026-11-10
 verified_against: working-tree
 code:
   - core-back/lib/reportEngineSdk/**
@@ -110,12 +110,13 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 | POST | `/report-engine/specs/verify` | Parse and run all five verification layers; returns diagnostics and the repair prompt. |
 | POST | `/report-engine/specs` | Persist a verified draft; optionally publish. |
 | POST | `/report-engine/specs/:id/authority-override` | Security Admin override with justification; requires `security:write`. |
-| GET | `/report-engine/catalog` | Published catalog filtered by the actor's authority policy. |
+| GET | `/report-engine/catalog` | Published catalog filtered by the actor's authority policy; accepts `audience`, `page`, `pageSize`, `search`, `sortKey`, `sortDirection` and returns `total`. |
 | GET | `/report-engine/autocomplete` | Autocomplete provider query. |
 | POST | `/report-engine/execute` | Read-only execution; returns datasets, resolved chrome, asset data URLs and verification hash. |
-| GET | `/report-engine/chrome` | Chrome registry. |
+| GET | `/report-engine/chrome` | Chrome registry; accepts `type`, `includeArchived`, `page`, `pageSize`, `search`, `sortKey`, `sortDirection` and returns `total`. |
 | POST | `/report-engine/chrome` | Create/update a chrome spec. |
 | POST | `/report-engine/chrome/:id/set-default` | Set the single published global default per type. |
+| POST | `/report-engine/chrome/:id/archive` | Archive a header/footer; archived rows are hidden from the registry by default. |
 
 `admin-back/api/protected/reportEngine.ts` forwards the same routes under `/api/v1/admin/report-engine/*` with the admin authority guard.
 
@@ -146,7 +147,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 
 ## 9. Merchant report runner
 
-`core-back/api/internal/merchantReportEngine.ts` is mounted under `/internal/merchant/report-engine` after merchant authentication. It exposes a catalog, autocomplete and execute route. Every merchant execution:
+`core-back/api/internal/merchantReportEngine.ts` is mounted under `/internal/merchant/report-engine` after merchant authentication. It exposes a catalog, autocomplete and execute route. The catalog accepts `page`, `pageSize`, `search`, `sortKey` and `sortDirection`, applies the merchant scope validation before slicing and returns the filtered total. Every merchant execution:
 
 - requires `report_engine:run`;
 - accepts only `MERCHANT_FACING`/`BOTH` reports;
@@ -155,6 +156,10 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - records the forced merchant ID in `report_execution_audit`.
 
 `merchant-back/api/protected/reportEngine.ts` proxies the routes, and `merchant-front/src/pages/reports/index.tsx` is the portal page. The merchant SDK is a mirrored copy of the admin frontend SDK because this repository has no shared frontend workspace package.
+
+## 9.1 API error handling
+
+Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `400 SCHEMA_VALIDATION_ERROR` with the Zod issues. Admin execute returns `404 REPORT_NOT_FOUND` only when the code has no versions and `409 REPORT_NOT_PUBLISHED` with the latest status when versions exist but none is the published latest. Chrome save maps `P2002` to `409 REPORT_CHROME_DUPLICATE`, `P2003` to `409 REPORT_CHROME_REFERENCE_CONFLICT`, asset storage failures to `500 REPORT_CHROME_ASSET_SAVE_FAILED` and database failures to `500 REPORT_CHROME_SAVE_FAILED`, each with a reason. The admin portal renders returned diagnostics through `ReportDiagnosticsPanel`.
 
 ## 10. Security additions
 

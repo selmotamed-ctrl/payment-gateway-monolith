@@ -127,3 +127,21 @@ describe("COMPARE_WITH_ASSET output contract", () => {
     });
   });
 });
+
+  test("without output_field the asset_field name is the target column", () => {
+    const result = executeTransformPipeline(
+      { source: [{ rail_code: "LYD", volume: 100 }] },
+      [
+        {
+          operation: "COMPARE_WITH_ASSET",
+          source_dataset_id: "source",
+          asset_key: "targets",
+          output_dataset_id: "comparison",
+          match_keys: ["rail_code"],
+          compare_fields: [{ dataset_field: "volume", asset_field: "target_volume", tolerance_minor: 0 }],
+        },
+      ],
+      { targets: [{ rail_code: "LYD", target_volume: 90 }] },
+    );
+    expect(result.comparison?.[0]).toMatchObject({ target_volume: 90, volume_expected: 90, volume_variance: 10 });
+  });

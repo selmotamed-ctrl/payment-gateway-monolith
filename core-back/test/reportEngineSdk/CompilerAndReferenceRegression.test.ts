@@ -34,6 +34,15 @@ describe("section field registry and compiler regressions", () => {
         value_key: "total",
         aggregation: "SUM",
       },
+      {
+        operation: "JOIN_DATASETS",
+        output_dataset_id: "joined",
+        left_dataset_id: "totals",
+        right_dataset_id: "totals",
+        join_type: "LEFT",
+        on_left_key: "currency",
+        on_right_key: "currency",
+      },
     ];
     spec.sections = [
       {
@@ -44,6 +53,27 @@ describe("section field registry and compiler regressions", () => {
           { label_i18n_key: "report.title", dataset_id: "totals", value_field: "share", row_index: 0, format_hint: "PERCENT_RATIO", tone: "NEUTRAL" },
           { label_i18n_key: "report.title", dataset_id: "totals", value_field: "merchant_rank", row_index: 0, format_hint: "INTEGER", tone: "NEUTRAL" },
         ],
+      },
+      {
+        section_type: "CHART",
+        section_id: "rank_chart",
+        title_i18n_key: "report.title",
+        dataset_id: "totals",
+        chart_kind: "BAR",
+        height_mm: 70,
+        width_percent: 100,
+        x_field: "currency",
+        y_axis_format: "INTEGER",
+        series: [{ label_i18n_key: "report.title", field: "merchant_rank", show_value_labels: false }],
+      },
+      {
+        section_type: "DATA_TABLE",
+        section_id: "joined_table",
+        dataset_id: "joined",
+        repeat_header_on_page_break: true,
+        avoid_row_split: true,
+        zebra_striping: true,
+        columns: [{ field: "currency", header_i18n_key: "report.title", align: "START", format_hint: "RAW", summary_footer: "NONE" }],
       },
       {
         section_type: "DATA_TABLE",

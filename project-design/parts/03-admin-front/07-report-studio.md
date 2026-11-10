@@ -3,7 +3,7 @@ id: admin-ui.report-studio
 title: Report Catalog, Studio and Chrome
 status: implemented
 confidence: high
-last_verified: 2026-11-09
+last_verified: 2026-11-10
 verified_against: working-tree
 code:
   - admin-front/src/pages/reports/**
@@ -13,6 +13,8 @@ code:
   - admin-front/src/utils/routeAuthorities.ts
   - admin-front/src/layouts/sections.tsx
   - admin-front/src/constants/urlsMap/index.ts
+  - admin-front/src/components/reports/**
+  - admin-front/src/utils/reports/**
   - admin-back/api/protected/reportEngine.ts
 design_sources:
   - design/12-reporting/dynamic_ai_transcript_report_engine_sdk_plan.md
@@ -20,7 +22,7 @@ tests:
   - admin-front/src/lib/reportEngineSdk/__tests__/**
 gaps:
   - `SERVER_PDF` is not available from the UI; the print path uses Paged.js in the browser and ECharts SVG.
-  - The catalog has no archive/restore action beyond the spec status.
+  - The catalog has no archive/restore action for report versions; Chrome headers/footers can be archived.
   - The Studio does not yet expose a visual drag-and-drop section builder; sections are edited as structured JSON with a live preview.
   - The `.zip` upload stores assets locally on the core host; there is no object-store picker.
 ---
@@ -41,7 +43,8 @@ The routes are registered in `admin-front/src/router/index.ts`, projected from `
 
 The catalog page:
 
-- loads the authority-filtered published catalog from the edge;
+- loads the authority-filtered published catalog from the edge with server-side page, page size, search and sort through the shared `ApiTable` (the same pagination pattern as the Merchants page);
+- keeps the audience tabs server-filtered (`ALL`, `BACKOFFICE_INTERNAL`, `MERCHANT_FACING`);
 - prompts for a locale when the report supports more than one (`ReportLanguagePromptDialog`);
 - renders the typed input form (`ReportInputForm`) with entity autocomplete and date-range validation;
 - executes the report, shows KPI/table/chart/vector sections, and prints through the isolated Paged.js surface;
@@ -53,14 +56,14 @@ The Studio page:
 
 - downloads the report authoring transcript from the API;
 - accepts a `ReportDescriptorSpec` JSON and an optional `.zip` asset bundle;
-- runs the five verification layers and renders every diagnostic with path, code, severity and `aiFixHint`;
+- runs the five verification layers and renders every diagnostic with a human-readable title, path, code, severity and `aiFixHint` through `ReportDiagnosticsPanel`; API failures also show extracted diagnostics and a friendly message;
 - shows the AI repair prompt for a rejected spec;
 - saves a draft and publishes a verified version;
 - shows the inferred roles/authorities and, for a Security Admin, the override form with a mandatory justification.
 
 ## 4. Chrome registry
 
-The Chrome page lists header/footer specs, their type/status/supported locales and the single global default per type. It creates a new version from an edited spec and sets the global default. The default seed creates `cbl-institutional-header-v1` and `cbl-institutional-footer-v1`.
+The Chrome page lists header/footer specs with server-side pagination, search and sort through `ApiTable`, shows their type/status/supported locales and the single global default per type, and archives a header/footer instead of hard-deleting it. It creates a new version from an edited spec and sets the global default. Save/publish failures map duplicate, reference and storage/database errors to explicit API codes, render `ReportDiagnosticsPanel` when the server returns diagnostics, and invalid JSON/schema input returns 400 rather than 500. The default seed creates `cbl-institutional-header-v1` and `cbl-institutional-footer-v1`.
 
 ## 5. Client rendering SDK
 
@@ -83,7 +86,7 @@ The Catalog has All / Backoffice Internal / Merchant Reports tabs. Chrome select
 
 The Studio reports the domain filter using catalog domains (`LEDGER`, `PAYMENTS`, ...), can download the Chrome transcript, supports clearing an override, and can request a confidential AML bypass. An MLRO or Security Admin sees the pending bypass list and can approve/reject it; maker and checker must differ.
 
-The Studio loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type.
+The Studio loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type. Report execution returns `404 REPORT_NOT_FOUND` only when the code does not exist and `409 REPORT_NOT_PUBLISHED` when a non-published version exists.
 
 ## 8. Layout and action polish (2026-11-09)
 

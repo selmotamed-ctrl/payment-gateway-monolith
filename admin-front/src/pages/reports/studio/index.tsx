@@ -13,8 +13,13 @@ import {
   VTextarea,
   VTextField,
 } from "vuetify/components";
-import { DescriptionList, EmptyState, PageHeader, StatusBadge, SurfaceCard } from "@/components/ui";
+import { DataTable } from "@/components/Table/DataTable";
+import { ReportDiagnosticsPanel } from "@/components/reports/ReportDiagnosticsPanel";
+import type { TableHeader } from "@/components/Table/types";
+import { DescriptionList, PageHeader, StatusBadge, SurfaceCard } from "@/components/ui";
 import { api } from "@/state/api";
+import type { ReportDiagnostic } from "@/lib/reportEngineSdk";
+import { diagnosticsFromApiError, friendlyApiErrorMessage } from "@/utils/reports/diagnostics";
 import "@/components/Table/styling.css";
 import { urlsMap } from "@/constants/urlsMap";
 import { hasOneOfAuthorities, user } from "@/state/user";
@@ -137,11 +142,47 @@ const ReportsStudioPage = dc(() => {
   const allowConfidentialAmlBypass = ref(false);
   const amlApprovalId = ref<string | null>(null);
   const pendingAml = ref<PendingAmlBypass[]>([]);
+  const actionDiagnostics = ref<ReportDiagnostic[]>([]);
   const historyRows = ref<VersionRow[]>([]);
   const savedSpecCode = ref<string | null>(null);
   const canVerify = computed(() => specJson.value.trim().length > 0);
   const canSave = computed(() => verification.value?.valid === true);
   const canChrome = computed(() => hasOneOfAuthorities(["reports.studio", "security:write"]));
+  const historyHeaders = computed<TableHeader<VersionRow>[]>(() => [
+    {
+      key: "version",
+      label: t("Version"),
+      Value: ({ row }) => <span>v{row.version}{row.isLatestPublished ? ` · ${t("latest")}` : ""}</span>,
+    },
+    {
+      key: "status",
+      label: t("Status"),
+      Value: ({ row }) => <StatusBadge status={row.status} label={row.status} />,
+    },
+    {
+      key: "createdAt",
+      label: t("Created At"),
+      value: (row) => String(row.createdAt).slice(0, 19).replace("T", " "),
+    },
+    {
+      key: "publishedAt",
+      label: t("Published At"),
+      value: (row) => (row.publishedAt ? String(row.publishedAt).slice(0, 19).replace("T", " ") : "—"),
+    },
+    {
+      key: "actions",
+      label: t("Actions"),
+      minWidth: true,
+      Value: ({ row }) =>
+        row.status !== "ARCHIVED" ? (
+          <VBtn size="small" variant="tonal" onClick={() => void archiveVersion(row.id)}>
+            {t("Archive")}
+          </VBtn>
+        ) : (
+          <span />
+        ),
+    },
+  ]);
   const verificationBadge = computed(() => (verification.value?.valid ? "VERIFIED" : "DRAFT"));
   const verificationTone = computed(() => (verification.value?.valid ? "success" : "neutral"));
 
@@ -205,6 +246,7 @@ const ReportsStudioPage = dc(() => {
     error.value = null;
     notice.value = null;
     verification.value = null;
+    actionDiagnostics.value = [];
     try {
       const assetsZipBase64 = zipFile.value ? await fileToBase64(zipFile.value) : undefined;
       const response = await api.post(urlsMap.reportEngineVerify, {
@@ -217,7 +259,8 @@ const ReportsStudioPage = dc(() => {
         overrideAuthorities.value = verification.value.authorityInference.inferredRequiredAuthorities;
       }
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
+      actionDiagnostics.value = diagnosticsFromApiError(caught);
+      error.value = friendlyApiErrorMessage(caught);
     } finally {
       busy.value = false;
     }
@@ -239,7 +282,8 @@ const ReportsStudioPage = dc(() => {
       notice.value = publish ? t("Report published") : t("Report saved as verified");
       await loadHistory(savedSpecCode.value);
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
+      actionDiagnostics.value = diagnosticsFromApiError(caught);
+      error.value = friendlyApiErrorMessage(caught);
     } finally {
       busy.value = false;
     }
@@ -410,6 +454,9 @@ const ReportsStudioPage = dc(() => {
 
       {error.value && <VAlert type="error" variant="tonal" density="compact">{error.value}</VAlert>}
       {notice.value && <VAlert type="success" variant="tonal" density="compact">{notice.value}</VAlert>}
+      {actionDiagnostics.value.length > 0 && (
+        <ReportDiagnosticsPanel diagnostics={actionDiagnostics.value} title={t("Action diagnostics")} />
+      )}
 
       <SurfaceCard title={t("Step 1 — AI Authoring Transcript")} subtitle={t("The transcript contains the live schema, optimization rules and bilingual contract")}>
         <div class="d-flex flex-wrap ga-3 align-end">
@@ -510,19 +557,10 @@ const ReportsStudioPage = dc(() => {
             ))}
           </div>
           {verification.value.diagnostics.length > 0 && (
-            <div class="d-flex flex-column ga-2 mb-3">
-              {verification.value.diagnostics.map((diagnostic, index) => (
-                <VAlert
-                  key={`${diagnostic.code}-${index}`}
-                  type={diagnostic.severity === "error" ? "error" : "warning"}
-                  variant="tonal"
-                  density="compact"
-                >
-                  <strong>L{diagnostic.layer} {diagnostic.code}</strong> — {diagnostic.path}: {diagnostic.message}
-                  {diagnostic.aiFixHint ? <div class="text-caption">{diagnostic.aiFixHint}</div> : null}
-                </VAlert>
-              ))}
-            </div>
+            <ReportDiagnosticsPanel
+              diagnostics={verification.value.diagnostics as ReportDiagnostic[]}
+              title={t("Verification diagnostics")}
+            />
           )}
           {verification.value.aiRepairPrompt && (
             <div class="d-flex ga-2 mb-3">
@@ -623,47 +661,23 @@ const ReportsStudioPage = dc(() => {
       )}
 
       {savedSpecCode.value && (
-        <SurfaceCard title={t("Version history")} subtitle={t("Published and verified versions of this report")}>
-          <div class="d-flex justify-end mb-2">
-            <VBtn size="small" variant="tonal" onClick={() => void loadHistory(savedSpecCode.value)}>
-              {t("Refresh history")}
-            </VBtn>
-          </div>
-          {historyRows.value.length === 0 ? (
-            <EmptyState title={t("No versions found")} description={t("Save or publish this spec to see its versions.")} icon="mdi-history" />
-          ) : (
-            <div class="table-wrapper">
-              <table class="modern-table pg-unified-table">
-                <thead>
-                  <tr>
-                    <th>{t("Version")}</th>
-                    <th>{t("Status")}</th>
-                    <th>{t("Created At")}</th>
-                    <th>{t("Published At")}</th>
-                    <th class="pg-col-actions">{t("Actions")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {historyRows.value.map((row) => (
-                    <tr key={row.id}>
-                      <td>v{row.version}{row.isLatestPublished ? ` · ${t("latest")}` : ""}</td>
-                      <td><StatusBadge status={row.status} label={row.status} /></td>
-                      <td>{String(row.createdAt).slice(0, 19).replace("T", " ")}</td>
-                      <td>{row.publishedAt ? String(row.publishedAt).slice(0, 19).replace("T", " ") : "—"}</td>
-                      <td class="pg-col-actions">
-                        {row.status !== "ARCHIVED" && (
-                          <VBtn size="small" variant="tonal" onClick={() => void archiveVersion(row.id)}>
-                            {t("Archive")}
-                          </VBtn>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        <DataTable<VersionRow>
+          title={t("Version history")}
+          data={historyRows.value}
+          headers={historyHeaders.value}
+          loading={busy.value}
+          showNumber={false}
+          xlsx={false}
+          numberOfItemsPerPage={1000}
+          numberOfItemsPerPageChoices={false}
+          TopSlot={() => (
+            <div style={{ padding: "0 20px 12px" }}>
+              <VBtn size="small" variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadHistory(savedSpecCode.value)}>
+                {t("Refresh history")}
+              </VBtn>
             </div>
           )}
-        </SurfaceCard>
+        />
       )}
 
       {canApproveAml.value && pendingAml.value.length > 0 && (

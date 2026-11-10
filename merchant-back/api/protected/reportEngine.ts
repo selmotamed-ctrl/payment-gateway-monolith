@@ -21,6 +21,15 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/merchant/report-engine/catalog",
+    querySchema: z
+      .object({
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(200).optional(),
+        search: z.string().max(200).optional(),
+        sortKey: z.string().max(64).optional(),
+        sortDirection: z.enum(["asc", "desc"]).optional(),
+      })
+      .passthrough(),
   }),
 );
 

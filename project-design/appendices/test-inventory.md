@@ -155,7 +155,7 @@
 | `core-back/test/reportEngineSdk/AssetBundleValidator.test.ts` | 155 | 7 |
 | `core-back/test/reportEngineSdk/AuthorityInferenceEngine.test.ts` | 90 | 6 |
 | `core-back/test/reportEngineSdk/ChromeResolution.test.ts` | 52 | 3 |
-| `core-back/test/reportEngineSdk/CompilerAndReferenceRegression.test.ts` | 246 | 7 |
+| `core-back/test/reportEngineSdk/CompilerAndReferenceRegression.test.ts` | 276 | 7 |
 | `core-back/test/reportEngineSdk/CssAndHtmlSanitizer.test.ts` | 40 | 3 |
 | `core-back/test/reportEngineSdk/InputFormZodCompiler.test.ts` | 66 | 2 |
 | `core-back/test/reportEngineSdk/MerchantScopeValidator.test.ts` | 74 | 4 |
@@ -168,7 +168,7 @@
 | `core-back/test/reportEngineSdk/SdkDecoupling.test.ts` | 37 | 2 |
 | `core-back/test/reportEngineSdk/SpecNormalization.test.ts` | 128 | 6 |
 | `core-back/test/reportEngineSdk/SpecStructuralValidator.test.ts` | 32 | 3 |
-| `core-back/test/reportEngineSdk/TransformPipelineExecutor.test.ts` | 130 | 4 |
+| `core-back/test/reportEngineSdk/TransformPipelineExecutor.test.ts` | 148 | 5 |
 | `core-back/test/reportEngineSdk/helpers.ts` | 538 | 0 |
 | `core-back/test/reporting-rule-evaluator.test.ts` | 209 | 5 |
 | `core-back/test/retention-worker.test.ts` | 504 | 17 |
@@ -385,4 +385,4 @@
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **379**
-- Total literal test declarations: **3919**
+- Total literal test declarations: **3920**

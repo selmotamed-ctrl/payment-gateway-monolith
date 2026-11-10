@@ -331,12 +331,12 @@ The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` an
 
 `lib/authLimiters.ts` mirrors the admin account limiters; `lib/security/sessionCookie.ts` exports `assertMerchantSessionShape`, which `api/upload.ts` applies (with the existing limiter and size cap) before any body is buffered.
 
-## 8. Merchant report proxy (2026-11-09)
+## 8. Merchant report proxy (2026-11-10)
 
 `merchant-back/api/protected/reportEngine.ts` is mounted at `/report-engine` and forwards:
 
-- `GET /catalog` to `/internal/merchant/report-engine/catalog`;
+- `GET /catalog` to `/internal/merchant/report-engine/catalog`, forwarding `page`, `pageSize`, `search`, `sortKey` and `sortDirection`;
 - `GET /autocomplete/:sourceKey` to the merchant autocomplete route;
 - `POST /catalog/:code/execute` to the merchant execute route.
 
-The edge validates only the public shape (`inputs`, `locale`, `renderMode`). Core enforces the merchant authority, audience scope, forced merchant ID and report safety. A client-supplied merchant ID is rejected by the strict edge schema and would be overwritten by core even if it reached it.
+The edge validates the catalog query shape and the public execute shape (`inputs`, `locale`, `renderMode`). Core enforces the merchant authority, audience scope, forced merchant ID and report safety. A client-supplied merchant ID is rejected by the strict edge schema and would be overwritten by core even if it reached it.

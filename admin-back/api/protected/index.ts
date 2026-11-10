@@ -134,8 +134,17 @@ router.use("/system", guard({ read: ["security:read"], write: ["security:write"]
 router.use(
   "/report-engine",
   guard({
-    read: ["report:review", "report_engine:author", "report_engine:run", "gateway:write", "security:read"],
-    write: ["report:approve", "report_engine:author", "report:review", "security:write"],
+    read: [
+      "report:review",
+      "report:approve",
+      "report_engine:author",
+      "report_engine:run",
+      "gateway:write",
+      "security:read",
+      "security:write",
+      "reports.draft",
+    ],
+    write: ["report:approve", "report_engine:author", "report:review", "security:write", "reports.draft"],
   }),
   reportEngineRouter,
 );

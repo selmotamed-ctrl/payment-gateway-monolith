@@ -1,6 +1,7 @@
 import express, { type Request, type Response } from "express";
 import { z } from "zod";
 import { client } from "../../prisma/client";
+import type { Prisma } from "../../generated/prisma/client";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { principalOf } from "../middleware/authDoubleCheck";
 import { assertMerchantAuthority, effectiveMerchantAuthorities } from "../../lib/auth/merchantAuthorities";
@@ -78,16 +79,39 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
   const principal = principalOf(request);
   assertMerchantAuthority(principal, ["report_engine:run"]);
   const merchantId = merchantIdOf(request);
-  const rows = await client.reportDefinitionSpecRecord.findMany({
-    where: { status: "PUBLISHED", isLatestPublished: true },
-    orderBy: { updatedAt: "desc" },
-  });
-  const items = [];
+  const page = Math.max(1, Number(request.query.page ?? 1) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(request.query.pageSize ?? 20) || 20));
+  const search = typeof request.query.search === "string" ? request.query.search.trim() : "";
+  const sortKey = typeof request.query.sortKey === "string" ? request.query.sortKey : "";
+  const sortDirection: "asc" | "desc" = request.query.sortDirection === "asc" ? "asc" : "desc";
+  const where: Prisma.ReportDefinitionSpecRecordWhereInput = {
+    status: "PUBLISHED",
+    isLatestPublished: true,
+    audienceScope: { in: ["MERCHANT_FACING", "BOTH"] },
+    ...(search
+      ? {
+          OR: [
+            { code: { contains: search, mode: "insensitive" as const } },
+            { category: { contains: search, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
+  const orderBy: Prisma.ReportDefinitionSpecRecordOrderByWithRelationInput =
+    sortKey === "version"
+      ? { version: sortDirection }
+      : sortKey === "category"
+        ? { category: sortDirection }
+        : sortKey === "report"
+          ? { code: sortDirection }
+          : { updatedAt: sortDirection };
+  const rows = await client.reportDefinitionSpecRecord.findMany({ where, orderBy });
+  const allowed = [];
   for (const row of rows) {
     if (row.audienceScope !== "MERCHANT_FACING" && row.audienceScope !== "BOTH") continue;
     const spec = ReportDescriptorSpecSchema.parse(row.specJson);
     if (validateMerchantReportScope(spec, host).some((diagnostic) => diagnostic.severity === "error")) continue;
-    items.push({
+    allowed.push({
       id: row.id,
       code: row.code,
       version: row.version,
@@ -100,7 +124,9 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
       merchantId,
     });
   }
-  response.json({ reports: items, total: items.length });
+  const total = allowed.length;
+  const items = allowed.slice((page - 1) * pageSize, page * pageSize);
+  response.json({ reports: items, total });
 });
 
 router.get("/report-engine/autocomplete/:sourceKey", async (request: Request, response: Response) => {

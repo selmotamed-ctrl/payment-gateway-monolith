@@ -3,7 +3,7 @@ id: merchant-ui.reports
 title: Merchant Reports
 status: implemented
 confidence: high
-last_verified: 2026-11-09
+last_verified: 2026-11-10
 verified_against: working-tree
 code:
   - merchant-front/src/pages/reports/index.tsx
@@ -33,8 +33,8 @@ gaps:
 
 ## 2. Behavior
 
-The page lists only published `MERCHANT_FACING`/`BOTH` reports whose scope passes `validateMerchantReportScope`. The merchant scope input is hidden; the server overwrites it with the authenticated merchant ID, so a client cannot request another merchant's data. The page provides the language prompt, Paged.js vector preview, print and CSV/XLSX export. It never shows Studio or Chrome management.
+The page lists only published `MERCHANT_FACING`/`BOTH` reports whose scope passes `validateMerchantReportScope`, using the shared `ApiTable` with server-side page, page size, search and sort. The merchant scope input is hidden; the server overwrites it with the authenticated merchant ID, so a client cannot request another merchant's data. The page provides the language prompt, Paged.js vector preview, print and CSV/XLSX export. It never shows Studio or Chrome management.
 
 ## 3. Server enforcement
 
-`core-back/api/internal/merchantReportEngine.ts` enforces the scope, audience, locale, read-only execution and audit. `merchant-back` proxies only the catalog, autocomplete and execute routes; authoring remains admin-only.
+`core-back/api/internal/merchantReportEngine.ts` enforces the scope, audience, locale, read-only execution and audit. The catalog accepts `page`, `pageSize`, `search`, `sortKey` and `sortDirection`, filters out reports that fail the merchant scope check before paginating, and returns the filtered total. `merchant-back` proxies only the catalog, autocomplete and execute routes; authoring remains admin-only.

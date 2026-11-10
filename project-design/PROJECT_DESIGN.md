@@ -7322,7 +7322,7 @@ To run them against a private, throwaway cluster (never the live databases): `in
 
 <a id="corereport-engine"></a>
 
-> **Part ID:** `core.report-engine` · **Status:** `implemented` · **Last verified:** 2026-11-09 · **Verified against:** `working-tree`
+> **Part ID:** `core.report-engine` · **Status:** `implemented` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree`
 
 # Dynamic Report Engine SDK and Report Studio Host
 
@@ -7394,12 +7394,13 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 | POST | `/report-engine/specs/verify` | Parse and run all five verification layers; returns diagnostics and the repair prompt. |
 | POST | `/report-engine/specs` | Persist a verified draft; optionally publish. |
 | POST | `/report-engine/specs/:id/authority-override` | Security Admin override with justification; requires `security:write`. |
-| GET | `/report-engine/catalog` | Published catalog filtered by the actor's authority policy. |
+| GET | `/report-engine/catalog` | Published catalog filtered by the actor's authority policy; accepts `audience`, `page`, `pageSize`, `search`, `sortKey`, `sortDirection` and returns `total`. |
 | GET | `/report-engine/autocomplete` | Autocomplete provider query. |
 | POST | `/report-engine/execute` | Read-only execution; returns datasets, resolved chrome, asset data URLs and verification hash. |
-| GET | `/report-engine/chrome` | Chrome registry. |
+| GET | `/report-engine/chrome` | Chrome registry; accepts `type`, `includeArchived`, `page`, `pageSize`, `search`, `sortKey`, `sortDirection` and returns `total`. |
 | POST | `/report-engine/chrome` | Create/update a chrome spec. |
 | POST | `/report-engine/chrome/:id/set-default` | Set the single published global default per type. |
+| POST | `/report-engine/chrome/:id/archive` | Archive a header/footer; archived rows are hidden from the registry by default. |
 
 `admin-back/api/protected/reportEngine.ts` forwards the same routes under `/api/v1/admin/report-engine/*` with the admin authority guard.
 
@@ -7430,7 +7431,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 
 ## 9. Merchant report runner
 
-`core-back/api/internal/merchantReportEngine.ts` is mounted under `/internal/merchant/report-engine` after merchant authentication. It exposes a catalog, autocomplete and execute route. Every merchant execution:
+`core-back/api/internal/merchantReportEngine.ts` is mounted under `/internal/merchant/report-engine` after merchant authentication. It exposes a catalog, autocomplete and execute route. The catalog accepts `page`, `pageSize`, `search`, `sortKey` and `sortDirection`, applies the merchant scope validation before slicing and returns the filtered total. Every merchant execution:
 
 - requires `report_engine:run`;
 - accepts only `MERCHANT_FACING`/`BOTH` reports;
@@ -7439,6 +7440,10 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - records the forced merchant ID in `report_execution_audit`.
 
 `merchant-back/api/protected/reportEngine.ts` proxies the routes, and `merchant-front/src/pages/reports/index.tsx` is the portal page. The merchant SDK is a mirrored copy of the admin frontend SDK because this repository has no shared frontend workspace package.
+
+## 9.1 API error handling
+
+Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `400 SCHEMA_VALIDATION_ERROR` with the Zod issues. Admin execute returns `404 REPORT_NOT_FOUND` only when the code has no versions and `409 REPORT_NOT_PUBLISHED` with the latest status when versions exist but none is the published latest. Chrome save maps `P2002` to `409 REPORT_CHROME_DUPLICATE`, `P2003` to `409 REPORT_CHROME_REFERENCE_CONFLICT`, asset storage failures to `500 REPORT_CHROME_ASSET_SAVE_FAILED` and database failures to `500 REPORT_CHROME_SAVE_FAILED`, each with a reason. The admin portal renders returned diagnostics through `ReportDiagnosticsPanel`.
 
 ## 10. Security additions
 
@@ -8032,6 +8037,10 @@ Contracts enforced at the edge: bodies are `.strict()` zod; `reason` is `z.strin
 
 `api/public/auth.ts` wires `createAccountLimiters` (per `identifier|ip` and an identifier ceiling, failures only) and the public `POST /auth/accept-invitation` route; `api/upload.ts` exports `uploadGuards` (limiter, `Content-Length` pre-check, session-shape check before multer) and is used by the reconciliation and join-request uploads; `api/protected/users.ts` and `api/contract.ts` carry the invitation-based create and re-invite contracts (no password or phone in the create body).
 
+## Report engine forwards (2026-11-10)
+
+`/api/v1/admin/report-engine/*` forwards the core report-engine routes. The catalog forwards `audience`, `page`, `pageSize`, `search`, `sortKey` and `sortDirection`; the chrome registry forwards `type`, `includeArchived`, `page`, `pageSize`, `search`, `sortKey` and `sortDirection`; and `POST /chrome/:id/archive` is proxied. The edge authority guard accepts `report:review`, `report:approve`, `report_engine:author`, `report_engine:run`, `gateway:write`, `security:read`, `security:write` and `reports.draft` for reads, and `report:approve`, `report_engine:author`, `report:review`, `security:write` and `reports.draft` for writes.
+
 ---
 
 <a id="edgemerchant"></a>
@@ -8331,15 +8340,15 @@ The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` an
 
 `lib/authLimiters.ts` mirrors the admin account limiters; `lib/security/sessionCookie.ts` exports `assertMerchantSessionShape`, which `api/upload.ts` applies (with the existing limiter and size cap) before any body is buffered.
 
-## 8. Merchant report proxy (2026-11-09)
+## 8. Merchant report proxy (2026-11-10)
 
 `merchant-back/api/protected/reportEngine.ts` is mounted at `/report-engine` and forwards:
 
-- `GET /catalog` to `/internal/merchant/report-engine/catalog`;
+- `GET /catalog` to `/internal/merchant/report-engine/catalog`, forwarding `page`, `pageSize`, `search`, `sortKey` and `sortDirection`;
 - `GET /autocomplete/:sourceKey` to the merchant autocomplete route;
 - `POST /catalog/:code/execute` to the merchant execute route.
 
-The edge validates only the public shape (`inputs`, `locale`, `renderMode`). Core enforces the merchant authority, audience scope, forced merchant ID and report safety. A client-supplied merchant ID is rejected by the strict edge schema and would be overwritten by core even if it reached it.
+The edge validates the catalog query shape and the public execute shape (`inputs`, `locale`, `renderMode`). Core enforces the merchant authority, audience scope, forced merchant ID and report safety. A client-supplied merchant ID is rejected by the strict edge schema and would be overwritten by core even if it reached it.
 
 ---
 
@@ -10133,7 +10142,7 @@ cd ../tests && bunx playwright test --project=admin e2e/admin/guide-reader.spec.
 
 <a id="admin-uireport-studio"></a>
 
-> **Part ID:** `admin-ui.report-studio` · **Status:** `implemented` · **Last verified:** 2026-11-09 · **Verified against:** `working-tree`
+> **Part ID:** `admin-ui.report-studio` · **Status:** `implemented` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree`
 
 # Report Catalog, Studio and Chrome
 
@@ -10151,7 +10160,8 @@ The routes are registered in `admin-front/src/router/index.ts`, projected from `
 
 The catalog page:
 
-- loads the authority-filtered published catalog from the edge;
+- loads the authority-filtered published catalog from the edge with server-side page, page size, search and sort through the shared `ApiTable` (the same pagination pattern as the Merchants page);
+- keeps the audience tabs server-filtered (`ALL`, `BACKOFFICE_INTERNAL`, `MERCHANT_FACING`);
 - prompts for a locale when the report supports more than one (`ReportLanguagePromptDialog`);
 - renders the typed input form (`ReportInputForm`) with entity autocomplete and date-range validation;
 - executes the report, shows KPI/table/chart/vector sections, and prints through the isolated Paged.js surface;
@@ -10163,14 +10173,14 @@ The Studio page:
 
 - downloads the report authoring transcript from the API;
 - accepts a `ReportDescriptorSpec` JSON and an optional `.zip` asset bundle;
-- runs the five verification layers and renders every diagnostic with path, code, severity and `aiFixHint`;
+- runs the five verification layers and renders every diagnostic with a human-readable title, path, code, severity and `aiFixHint` through `ReportDiagnosticsPanel`; API failures also show extracted diagnostics and a friendly message;
 - shows the AI repair prompt for a rejected spec;
 - saves a draft and publishes a verified version;
 - shows the inferred roles/authorities and, for a Security Admin, the override form with a mandatory justification.
 
 ## 4. Chrome registry
 
-The Chrome page lists header/footer specs, their type/status/supported locales and the single global default per type. It creates a new version from an edited spec and sets the global default. The default seed creates `cbl-institutional-header-v1` and `cbl-institutional-footer-v1`.
+The Chrome page lists header/footer specs with server-side pagination, search and sort through `ApiTable`, shows their type/status/supported locales and the single global default per type, and archives a header/footer instead of hard-deleting it. It creates a new version from an edited spec and sets the global default. Save/publish failures map duplicate, reference and storage/database errors to explicit API codes, render `ReportDiagnosticsPanel` when the server returns diagnostics, and invalid JSON/schema input returns 400 rather than 500. The default seed creates `cbl-institutional-header-v1` and `cbl-institutional-footer-v1`.
 
 ## 5. Client rendering SDK
 
@@ -10193,7 +10203,7 @@ The Catalog has All / Backoffice Internal / Merchant Reports tabs. Chrome select
 
 The Studio reports the domain filter using catalog domains (`LEDGER`, `PAYMENTS`, ...), can download the Chrome transcript, supports clearing an override, and can request a confidential AML bypass. An MLRO or Security Admin sees the pending bypass list and can approve/reject it; maker and checker must differ.
 
-The Studio loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type.
+The Studio loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type. Report execution returns `404 REPORT_NOT_FOUND` only when the code does not exist and `409 REPORT_NOT_PUBLISHED` when a non-published version exists.
 
 ## 8. Layout and action polish (2026-11-09)
 
@@ -10869,7 +10879,7 @@ The content test is a Bun test; the Playwright suites require the live stack.
 
 <a id="merchant-uireports"></a>
 
-> **Part ID:** `merchant-ui.reports` · **Status:** `implemented` · **Last verified:** 2026-11-09 · **Verified against:** `working-tree`
+> **Part ID:** `merchant-ui.reports` · **Status:** `implemented` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree`
 
 # Merchant Reports
 
@@ -10879,11 +10889,11 @@ The content test is a Bun test; the Playwright suites require the live stack.
 
 ## 2. Behavior
 
-The page lists only published `MERCHANT_FACING`/`BOTH` reports whose scope passes `validateMerchantReportScope`. The merchant scope input is hidden; the server overwrites it with the authenticated merchant ID, so a client cannot request another merchant's data. The page provides the language prompt, Paged.js vector preview, print and CSV/XLSX export. It never shows Studio or Chrome management.
+The page lists only published `MERCHANT_FACING`/`BOTH` reports whose scope passes `validateMerchantReportScope`, using the shared `ApiTable` with server-side page, page size, search and sort. The merchant scope input is hidden; the server overwrites it with the authenticated merchant ID, so a client cannot request another merchant's data. The page provides the language prompt, Paged.js vector preview, print and CSV/XLSX export. It never shows Studio or Chrome management.
 
 ## 3. Server enforcement
 
-`core-back/api/internal/merchantReportEngine.ts` enforces the scope, audience, locale, read-only execution and audit. `merchant-back` proxies only the catalog, autocomplete and execute routes; authoring remains admin-only.
+`core-back/api/internal/merchantReportEngine.ts` enforces the scope, audience, locale, read-only execution and audit. The catalog accepts `page`, `pageSize`, `search`, `sortKey` and `sortDirection`, filters out reports that fail the merchant scope check before paginating, and returns the filtered total. `merchant-back` proxies only the catalog, autocomplete and execute routes; authoring remains admin-only.
 
 ---
 

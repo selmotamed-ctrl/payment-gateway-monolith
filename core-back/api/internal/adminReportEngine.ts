@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import express, { type Request, type Response } from "express";
 import { z } from "zod";
 import { client } from "../../prisma/client";
+import type { Prisma } from "../../generated/prisma/client";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { requireAuthorities, principalOf } from "../middleware/authDoubleCheck";
 import { auditActor, auditBase } from "./adminSliceHelpers";
@@ -95,8 +96,22 @@ function actorOf(request: Request): ReportActorContext {
 }
 
 function parseJson<T>(value: string | Record<string, unknown>, schema: z.ZodType<T>): T {
-  const raw = typeof value === "string" ? JSON.parse(value) : value;
-  return schema.parse(raw);
+  let raw: unknown;
+  try {
+    raw = typeof value === "string" ? JSON.parse(value) : value;
+  } catch {
+    throw new ApiError(400, "INVALID_JSON_SYNTAX", "The spec is not valid JSON");
+  }
+  try {
+    return schema.parse(raw);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new ApiError(400, "SCHEMA_VALIDATION_ERROR", "The spec does not match the required schema", {
+        issues: error.issues,
+      });
+    }
+    throw error;
+  }
 }
 
 function decodeZip(base64: string | undefined): Buffer | null {
@@ -238,6 +253,25 @@ async function storeAssets(
     totalBytes,
     manifest,
   };
+}
+
+function chromeSaveError(error: unknown, stage: "ASSET" | "DATABASE"): ApiError {
+  if (error instanceof ApiError) return error;
+  const code = (error as { code?: string } | null)?.code;
+  if (code === "P2002") {
+    return new ApiError(409, "REPORT_CHROME_DUPLICATE", "A header/footer with this code and version already exists");
+  }
+  if (code === "P2003") {
+    return new ApiError(409, "REPORT_CHROME_REFERENCE_CONFLICT", "The header/footer references a missing asset bundle");
+  }
+  return new ApiError(
+    500,
+    stage === "ASSET" ? "REPORT_CHROME_ASSET_SAVE_FAILED" : "REPORT_CHROME_SAVE_FAILED",
+    stage === "ASSET"
+      ? "The header/footer asset bundle could not be stored"
+      : "The header/footer could not be saved",
+    { reason: code ?? "storage/database error" },
+  );
 }
 
 router.get("/report-engine/transcript", async (request: Request, response: Response) => {
@@ -754,10 +788,46 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
     role: principal.role ?? "UNKNOWN",
     authorities: principal.authorities,
   };
-  const rows = await client.reportDefinitionSpecRecord.findMany({
-    where: { status: "PUBLISHED", isLatestPublished: true },
-    orderBy: { updatedAt: "desc" },
-  });
+  const audience = typeof request.query.audience === "string" ? request.query.audience : "ALL";
+  const page = Math.max(1, Number(request.query.page ?? 1) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(request.query.pageSize ?? 20) || 20));
+  const search = typeof request.query.search === "string" ? request.query.search.trim() : "";
+  const sortKey = typeof request.query.sortKey === "string" ? request.query.sortKey : "";
+  const sortDirection: "asc" | "desc" = request.query.sortDirection === "asc" ? "asc" : "desc";
+  const where: Prisma.ReportDefinitionSpecRecordWhereInput = {
+    status: "PUBLISHED" as const,
+    isLatestPublished: true,
+    ...(audience === "BACKOFFICE_INTERNAL"
+      ? { audienceScope: "BACKOFFICE_INTERNAL" as const }
+      : audience === "MERCHANT_FACING"
+        ? { audienceScope: { in: ["MERCHANT_FACING", "BOTH"] } }
+        : {}),
+    ...(search
+      ? {
+          OR: [
+            { code: { contains: search, mode: "insensitive" as const } },
+            { category: { contains: search, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
+  const orderBy: Prisma.ReportDefinitionSpecRecordOrderByWithRelationInput =
+    sortKey === "version"
+      ? { version: sortDirection }
+      : sortKey === "category"
+        ? { category: sortDirection }
+        : sortKey === "report"
+          ? { code: sortDirection }
+          : { updatedAt: sortDirection };
+  const [total, rows] = await Promise.all([
+    client.reportDefinitionSpecRecord.count({ where }),
+    client.reportDefinitionSpecRecord.findMany({
+      where,
+      orderBy,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
   const items = rows
     .filter((row) => isAllowed(row, actor))
     .map((row) => ({
@@ -777,7 +847,7 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
       spec: row.specJson,
       updatedAt: row.updatedAt,
     }));
-  response.json({ reports: items, total: items.length });
+  response.json({ reports: items, total });
 });
 
 router.get("/report-engine/autocomplete/:sourceKey", async (request: Request, response: Response) => {
@@ -814,7 +884,21 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
     where: { code, status: "PUBLISHED", isLatestPublished: true },
     orderBy: { version: "desc" },
   });
-  if (!row) throw new ApiError(404, "REPORT_NOT_FOUND", "The published report does not exist");
+  if (!row) {
+    const existing = await client.reportDefinitionSpecRecord.findFirst({
+      where: { code },
+      orderBy: { version: "desc" },
+      select: { status: true, version: true, isLatestPublished: true },
+    });
+    if (!existing) {
+      throw new ApiError(404, "REPORT_NOT_FOUND", `The report "${code}" does not exist`);
+    }
+    throw new ApiError(409, "REPORT_NOT_PUBLISHED", `The report "${code}" exists but is not the published latest version`, {
+      status: existing.status,
+      version: existing.version,
+      isLatestPublished: existing.isLatestPublished,
+    });
+  }
   if (!isAllowed(row, actor)) {
     throw new ApiError(403, "REPORT_ACCESS_DENIED", "You are not authorized to run this report");
   }
@@ -903,10 +987,43 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
 
 router.get("/report-engine/chrome", async (request: Request, response: Response) => {
   const type = typeof request.query.type === "string" ? request.query.type : undefined;
-  const rows = await client.reportChromeSpecRecord.findMany({
-    where: type ? { chromeType: type as never } : undefined,
-    orderBy: [{ chromeType: "asc" }, { code: "asc" }, { version: "desc" }],
-  });
+  const includeArchived = request.query.includeArchived === "true";
+  const page = Math.max(1, Number(request.query.page ?? 1) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(request.query.pageSize ?? 200) || 200));
+  const search = typeof request.query.search === "string" ? request.query.search.trim() : "";
+  const sortKey = typeof request.query.sortKey === "string" ? request.query.sortKey : "";
+  const sortDirection: "asc" | "desc" = request.query.sortDirection === "asc" ? "asc" : "desc";
+  const where: Prisma.ReportChromeSpecRecordWhereInput = {
+    ...(type ? { chromeType: type as never } : {}),
+    ...(includeArchived ? {} : { status: { not: "ARCHIVED" } }),
+    ...(search
+      ? {
+          OR: [
+            { code: { contains: search, mode: "insensitive" as const } },
+            { name: { contains: search, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
+  const orderBy: Prisma.ReportChromeSpecRecordOrderByWithRelationInput[] =
+    sortKey === "name"
+      ? [{ name: sortDirection }, { code: "asc" }]
+      : sortKey === "type"
+        ? [{ chromeType: sortDirection }, { code: "asc" }]
+        : sortKey === "status"
+          ? [{ status: sortDirection }, { code: "asc" }]
+          : sortKey === "version"
+            ? [{ version: sortDirection }]
+            : [{ chromeType: "asc" }, { code: "asc" }, { version: "desc" }];
+  const [total, rows] = await Promise.all([
+    client.reportChromeSpecRecord.count({ where }),
+    client.reportChromeSpecRecord.findMany({
+      where,
+      orderBy,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
   const specs = [];
   for (const row of rows) {
     const spec = ReportChromeSpecSchema.parse(row.specJson);
@@ -936,7 +1053,7 @@ router.get("/report-engine/chrome", async (request: Request, response: Response)
       spec,
     });
   }
-  response.json({ specs });
+  response.json({ specs, total });
 });
 
 router.post("/report-engine/chrome", async (request: Request, response: Response) => {
@@ -967,40 +1084,52 @@ router.post("/report-engine/chrome", async (request: Request, response: Response
     });
   }
   const actor = actorOf(request);
-  const assetBundle = await storeAssets(zipBuffer, spec.required_assets, actor);
+  let assetBundle;
+  try {
+    assetBundle = await storeAssets(zipBuffer, spec.required_assets, actor);
+  } catch (error) {
+    console.error(`[${request.requestId}] report chrome asset storage failed: ${(error as Error)?.message ?? "unknown"}`);
+    throw chromeSaveError(error, "ASSET");
+  }
   const specSha256 = createHash("sha256").update(rawSpecJson).digest("hex");
   const publish = Boolean(body.publish);
-  const created = await client.$transaction(async (tx) => {
-    const previous = await tx.reportChromeSpecRecord.findFirst({
-      where: { code: spec.chrome.code },
-      orderBy: { version: "desc" },
-      select: { version: true },
-    });
-    const version = Math.max(1, (previous?.version ?? 0) + 1);
-    if (body.makeDefault && publish) {
-      await tx.reportChromeSpecRecord.updateMany({
-        where: { chromeType: spec.chrome.chrome_type, isDefaultGlobal: true },
-        data: { isDefaultGlobal: false },
+  let created;
+  try {
+    created = await client.$transaction(async (tx) => {
+      const previous = await tx.reportChromeSpecRecord.findFirst({
+        where: { code: spec.chrome.code },
+        orderBy: { version: "desc" },
+        select: { version: true },
       });
-    }
-    return tx.reportChromeSpecRecord.create({
-      data: {
-        code: spec.chrome.code,
-        version,
-        name: spec.chrome.name,
-        chromeType: spec.chrome.chrome_type,
-        status: publish ? "PUBLISHED" : "VERIFIED",
-        isDefaultGlobal: Boolean(body.makeDefault) && publish,
-        supportedLocales: Object.keys(spec.i18n.locales),
-        specJson: spec as never,
-        specSha256,
-        assetBundleId: assetBundle.assetBundleId,
-        createdByUserId: actor.userId,
-        publishedByUserId: publish ? actor.userId : null,
-        publishedAt: publish ? new Date() : null,
-      },
+      const version = Math.max(1, (previous?.version ?? 0) + 1);
+      if (body.makeDefault && publish) {
+        await tx.reportChromeSpecRecord.updateMany({
+          where: { chromeType: spec.chrome.chrome_type, isDefaultGlobal: true },
+          data: { isDefaultGlobal: false },
+        });
+      }
+      return tx.reportChromeSpecRecord.create({
+        data: {
+          code: spec.chrome.code,
+          version,
+          name: spec.chrome.name,
+          chromeType: spec.chrome.chrome_type,
+          status: publish ? "PUBLISHED" : "VERIFIED",
+          isDefaultGlobal: Boolean(body.makeDefault) && publish,
+          supportedLocales: Object.keys(spec.i18n.locales),
+          specJson: spec as never,
+          specSha256,
+          assetBundleId: assetBundle.assetBundleId,
+          createdByUserId: actor.userId,
+          publishedByUserId: publish ? actor.userId : null,
+          publishedAt: publish ? new Date() : null,
+        },
+      });
     });
-  });
+  } catch (error) {
+    console.error(`[${request.requestId}] report chrome database save failed: ${(error as Error)?.message ?? "unknown"}`);
+    throw chromeSaveError(error, "DATABASE");
+  }
   await writeAudit(client, {
     data: {
       ...auditBase(auditActor(request)),
@@ -1026,6 +1155,32 @@ router.post("/report-engine/chrome", async (request: Request, response: Response
     isDefaultGlobal: created.isDefaultGlobal,
     verification,
   });
+});
+
+router.post("/report-engine/chrome/:id/archive", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["report:approve", "security:write"]);
+  const id = String(request.params.id);
+  const existing = await client.reportChromeSpecRecord.findUnique({ where: { id } });
+  if (!existing) throw new ApiError(404, "REPORT_CHROME_SPEC_NOT_FOUND", "The chrome spec does not exist");
+  if (existing.status === "ARCHIVED") {
+    response.json({ id, status: "ARCHIVED", archived: true });
+    return;
+  }
+  const updated = await client.reportChromeSpecRecord.update({
+    where: { id },
+    data: { status: "ARCHIVED", isDefaultGlobal: false },
+  });
+  await writeAudit(client, {
+    data: {
+      ...auditBase(auditActor(request)),
+      action: "REPORT_CHROME_SPEC_ARCHIVED",
+      entityType: "REPORT_CHROME_SPEC",
+      entityId: id,
+      beforeJson: { status: existing.status, isDefaultGlobal: existing.isDefaultGlobal },
+      afterJson: { status: "ARCHIVED", isDefaultGlobal: false },
+    } as never,
+  });
+  response.json({ id: updated.id, status: updated.status, isDefaultGlobal: updated.isDefaultGlobal, archived: true });
 });
 
 router.post("/report-engine/chrome/:id/set-default", async (request: Request, response: Response) => {

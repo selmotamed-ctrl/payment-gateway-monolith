@@ -1,8 +1,12 @@
 import { dc } from "kt-dc";
-import { computed, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn, VSelect } from "vuetify/components";
-import { EmptyState, PageHeader, SurfaceCard } from "@/components/ui";
+import ScreenContainer from "@/components/ScreenContainer";
+import { ThemedView } from "@/components/ThemedView";
+import { ApiTable } from "@/components/Table/ApiTable";
+import type { TableHeader } from "@/components/Table/types";
+import { PageHeader, SurfaceCard } from "@/components/ui";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { xlsxUIPipeline } from "@/utils/xlsx";
@@ -30,9 +34,9 @@ type MerchantReport = {
 
 const MerchantReportsPage = dc(() => {
   const { t } = useLocale();
-  const reports = ref<MerchantReport[]>([]);
-  const loading = ref(true);
   const error = ref<string | null>(null);
+  const search = ref<string | null>(null);
+  const pageSize = ref(20);
   const selected = ref<MerchantReport | null>(null);
   const inputs = ref<Record<string, unknown>>({});
   const locale = ref("en");
@@ -59,19 +63,6 @@ const MerchantReportsPage = dc(() => {
       ? renderChromeHtml({ chrome: bundle.value.resolvedFooterChrome, bundle: bundle.value, locale: locale.value, t })
       : "",
   );
-
-  const load = async () => {
-    loading.value = true;
-    error.value = null;
-    try {
-      const response = await api.get(urlsMap.reportEngineCatalog);
-      reports.value = (response.data?.reports ?? []) as MerchantReport[];
-    } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
-    } finally {
-      loading.value = false;
-    }
-  };
 
   const selectReport = (report: MerchantReport) => {
     selected.value = report;
@@ -167,55 +158,68 @@ const MerchantReportsPage = dc(() => {
     });
   };
 
-  onMounted(load);
+  const reportHeaders = computed<TableHeader<MerchantReport>[]>(() => [
+    {
+      key: "report",
+      label: t("Report"),
+      sortKey: "report",
+      Value: ({ row }) => (
+        <div>
+          <div class="font-weight-medium">{row.spec.i18n.locales.en?.["report.title"] ?? row.code}</div>
+          <div class="text-caption text-medium-emphasis">{row.code}</div>
+        </div>
+      ),
+    },
+    { key: "category", label: t("Category"), sortKey: "category", value: (row) => row.category },
+    { key: "languages", label: t("Languages"), value: (row) => row.supportedLocales.join(", ") },
+    { key: "version", label: t("Version"), sortKey: "version", value: (row) => String(row.version) },
+    {
+      key: "actions",
+      label: t("Actions"),
+      minWidth: true,
+      Value: ({ row }) => (
+        <VBtn size="small" variant="tonal" onClick={() => selectReport(row)}>
+          {t("Run")}
+        </VBtn>
+      ),
+    },
+  ]);
 
   return () => (
-    <div>
+    <ScreenContainer>
+      <ThemedView style={{ gap: "18px" }}>
       <PageHeader
         title={t("Reports")}
         subtitle={t("Generate the reports available to your merchant account")}
         breadcrumbs={[{ label: t("Reports"), to: "/portal/reports" }]}
       />
-      {error.value && <VAlert type="error" variant="tonal" density="compact" class="mb-4">{error.value}</VAlert>}
-      <SurfaceCard title={t("Available reports")} subtitle={t("Only your merchant's data is included")}>
-        {loading.value ? (
-          <div class="py-6 text-center text-medium-emphasis">{t("Loading…")}</div>
-        ) : reports.value.length === 0 ? (
-          <EmptyState title={t("No reports available")} icon="mdi-file-chart-outline" />
-        ) : (
-          <div class="table-wrapper">
-            <table class="modern-table">
-              <thead>
-                <tr>
-                  <th>{t("Report")}</th>
-                  <th>{t("Category")}</th>
-                  <th>{t("Languages")}</th>
-                  <th>{t("Version")}</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {reports.value.map((report) => (
-                  <tr key={report.id}>
-                    <td>
-                      <div class="font-weight-medium">{report.spec.i18n.locales.en?.["report.title"] ?? report.code}</div>
-                      <div class="text-caption text-medium-emphasis">{report.code}</div>
-                    </td>
-                    <td>{report.category}</td>
-                    <td>{report.supportedLocales.join(", ")}</td>
-                    <td>{report.version}</td>
-                    <td class="text-end">
-                      <VBtn size="small" variant="tonal" onClick={() => selectReport(report)}>
-                        {t("Run")}
-                      </VBtn>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SurfaceCard>
+      {error.value && <VAlert type="error" variant="tonal" density="compact">{error.value}</VAlert>}
+      <ApiTable<MerchantReport>
+        title={t("Available reports")}
+        url={urlsMap.reportEngineCatalog}
+        headers={reportHeaders.value}
+        localSearch={false}
+        xlsx={false}
+        showNumber={true}
+        numberOfItemsPerPage={pageSize.value}
+        setNumberOfItemsPerPage={(value) => (pageSize.value = value)}
+        searchValue={search.value}
+        setSearchValue={(value) => (search.value = value)}
+        apiDataExtractor={(data) => (data as { reports?: MerchantReport[] }).reports ?? []}
+        apiTotalExtractor={(data) => Number((data as { total?: number }).total ?? 0)}
+        onRefresh={(table, refresh) => {
+          void refresh({
+            queryParams: {
+              page: table.page,
+              pageSize: pageSize.value,
+              ...(search.value ? { search: search.value } : {}),
+              ...(table.sortKey
+                ? { sortKey: table.sortKey, sortDirection: table.sortDirection }
+                : {}),
+            },
+          });
+        }}
+      />
 
       {selected.value && (
         <SurfaceCard
@@ -250,7 +254,7 @@ const MerchantReportsPage = dc(() => {
       )}
 
       {bundle.value && (
-        <SurfaceCard class="mt-4" title={t("Paginated Vector Preview")} subtitle={t("Client-side rendering; no server CPU used")}>
+        <SurfaceCard title={t("Paginated Vector Preview")} subtitle={t("Client-side rendering; no server CPU used")}>
           <div class="d-flex flex-wrap ga-2 mb-3">
             <VBtn size="small" variant="tonal" prependIcon="mdi-file-delimited-outline" onClick={exportCsv}>
               {t("Export CSV")}
@@ -294,7 +298,8 @@ const MerchantReportsPage = dc(() => {
           }}
         />
       )}
-    </div>
+      </ThemedView>
+    </ScreenContainer>
   );
 });
 
