@@ -1,37 +1,45 @@
 import { dc } from "kt-dc";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
-import {
-  VAlert,
-  VBtn,
-  VCheckbox,
-  VFileInput,
-  VSelect,
-  VTextarea,
-  VTextField,
-} from "vuetify/components";
+import { VAlert, VBtn, VCol, VFileInput, VRow, VSelect } from "vuetify/components";
 import { DataTable } from "@/components/Table/DataTable";
-import { ReportDiagnosticsPanel } from "@/components/reports/ReportDiagnosticsPanel";
+import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
-import { DescriptionList, PageHeader, StatusBadge, SurfaceCard } from "@/components/ui";
+import { ReportDiagnosticsPanel } from "@/components/reports/ReportDiagnosticsPanel";
+import { JsonSpecEditor } from "@/components/reports/JsonSpecEditor";
+import { AuthorityOverrideModal, type AuthorityOverridePayload } from "@/components/reports/AuthorityOverrideModal";
+import {
+  DescriptionList,
+  MetaPill,
+  MonoRef,
+  PageHeader,
+  SegmentedTabs,
+  StatusBadge,
+  SurfaceCard,
+} from "@/components/ui";
+import { formatDateTime } from "@/components/ledger/format";
 import { api } from "@/state/api";
 import type { ReportDiagnostic } from "@/lib/reportEngineSdk";
-import { diagnosticsFromApiError, friendlyApiErrorMessage } from "@/utils/reports/diagnostics";
-import "@/components/Table/styling.css";
+import {
+  ASSET_ZIP_TOO_LARGE_MESSAGE,
+  diagnosticsFromApiError,
+  friendlyApiErrorMessage,
+} from "@/utils/reports/diagnostics";
+import {
+  downloadText,
+  fileToBase64,
+  formatBytes,
+  isAssetZipTooLarge,
+  layerStatus,
+  type LayerScore,
+} from "@/utils/reports/jsonSpec";
+import { showSnackBar } from "@/utils/snackBar";
+import { showConfirm } from "@/utils/confirm";
 import { urlsMap } from "@/constants/urlsMap";
 import { hasOneOfAuthorities, user } from "@/state/user";
-
-type Diagnostic = {
-  layer: number;
-  severity: "error" | "warning";
-  path: string;
-  code: string;
-  message: string;
-  aiFixHint?: string;
-};
 
 type PendingAmlBypass = {
   id: string;
@@ -41,6 +49,7 @@ type PendingAmlBypass = {
   allowedAuthorities: string[];
   justification: string;
   makerEmail: string;
+  makerUserId?: string;
   createdAt: string;
   canDecide: boolean;
 };
@@ -55,10 +64,27 @@ type VersionRow = {
   publishedAt: string | null;
 };
 
+type ExecutionRow = {
+  id: string;
+  reportSpecId: string;
+  reportCode: string;
+  reportVersion: number;
+  actorUserId: string;
+  actorRole: string;
+  actorEmail?: string | null;
+  actorName?: string | null;
+  selectedLocale: string;
+  rowCountTotal: number;
+  durationMs: number;
+  verificationSha256: string;
+  renderTarget?: string | null;
+  createdAt: string;
+};
+
 type VerificationReport = {
   valid: boolean;
   specVersion: string | null;
-  layers: Array<{ layer: number; name: string; passed: boolean; errorCount: number; warningCount: number }>;
+  layers: LayerScore[];
   authorityInference: {
     queriedModels: string[];
     queriedDomains: string[];
@@ -71,7 +97,7 @@ type VerificationReport = {
     effectiveAccessPolicy: { mode: string; allowedRoles: string[]; requiredAnyAuthorities: string[]; requiredAllAuthorities: string[] };
   } | null;
   verifiedAssets: Array<{ assetKey: string; fileName: string; mimeType: string; sha256: string; bytes: number }>;
-  diagnostics: Diagnostic[];
+  diagnostics: ReportDiagnostic[];
   aiRepairPrompt?: string;
 };
 
@@ -106,22 +132,17 @@ const AUTHORITIES = [
   "report_engine:run",
 ];
 
-const fileToBase64 = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
+const LAYER_TONE = { PASSED: "success", FAILED: "danger", SKIPPED: "neutral" } as const;
 
-const downloadText = (filename: string, content: string, mime: string) => {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
+const pickFile = (files: File | File[] | null): File | null => (Array.isArray(files) ? (files[0] ?? null) : files);
+
+const specHasRequiredAssets = (json: string): boolean => {
+  try {
+    const parsed = JSON.parse(json) as { required_assets?: unknown[] };
+    return Array.isArray(parsed.required_assets) && parsed.required_assets.length > 0;
+  } catch {
+    return false;
+  }
 };
 
 const ReportsStudioPage = dc(() => {
@@ -131,64 +152,65 @@ const ReportsStudioPage = dc(() => {
   const specJson = ref("");
   const specFile = ref<File | null>(null);
   const zipFile = ref<File | null>(null);
+  const zipError = ref("");
   const verification = ref<VerificationReport | null>(null);
+  /** Editor JSON and zip the current `verification` was produced from; any edit invalidates it. */
+  const verifiedInput = ref<{ json: string; zip: File | null } | null>(null);
   const savedSpecId = ref<string | null>(null);
+  const savedSpecCode = ref<string | null>(null);
+  const savedSpecVersion = ref<number | null>(null);
+  const loadedNeedsAssets = ref(false);
   const busy = ref(false);
   const error = ref<string | null>(null);
-  const notice = ref<string | null>(null);
-  const overrideRoles = ref<string[]>([]);
-  const overrideAuthorities = ref<string[]>([]);
-  const overrideJustification = ref("");
-  const allowConfidentialAmlBypass = ref(false);
-  const amlApprovalId = ref<string | null>(null);
-  const pendingAml = ref<PendingAmlBypass[]>([]);
   const actionDiagnostics = ref<ReportDiagnostic[]>([]);
+  const pendingAml = ref<PendingAmlBypass[]>([]);
   const historyRows = ref<VersionRow[]>([]);
-  const savedSpecCode = ref<string | null>(null);
-  const canVerify = computed(() => specJson.value.trim().length > 0);
-  const canSave = computed(() => verification.value?.valid === true);
-  const canChrome = computed(() => hasOneOfAuthorities(["reports.studio", "security:write"]));
-  const historyHeaders = computed<TableHeader<VersionRow>[]>(() => [
-    {
-      key: "version",
-      label: t("Version"),
-      Value: ({ row }) => <span>v{row.version}{row.isLatestPublished ? ` · ${t("latest")}` : ""}</span>,
-    },
-    {
-      key: "status",
-      label: t("Status"),
-      Value: ({ row }) => <StatusBadge status={row.status} label={row.status} />,
-    },
-    {
-      key: "createdAt",
-      label: t("Created At"),
-      value: (row) => String(row.createdAt).slice(0, 19).replace("T", " "),
-    },
-    {
-      key: "publishedAt",
-      label: t("Published At"),
-      value: (row) => (row.publishedAt ? String(row.publishedAt).slice(0, 19).replace("T", " ") : "—"),
-    },
-    {
-      key: "actions",
-      label: t("Actions"),
-      minWidth: true,
-      Value: ({ row }) =>
-        row.status !== "ARCHIVED" ? (
-          <VBtn size="small" variant="tonal" onClick={() => void archiveVersion(row.id)}>
-            {t("Archive")}
-          </VBtn>
-        ) : (
-          <span />
-        ),
-    },
-  ]);
-  const verificationBadge = computed(() => (verification.value?.valid ? "VERIFIED" : "DRAFT"));
-  const verificationTone = computed(() => (verification.value?.valid ? "success" : "neutral"));
+  const historyLoading = ref(false);
+  const executions = ref<ExecutionRow[]>([]);
+  const executionsLoading = ref(false);
+  const historyTab = ref<"versions" | "executions">("versions");
+  const overrideOpen = ref(false);
+  const overrideError = ref("");
 
-  const canApproveAml = computed(
-    () => ["MLRO", "SECURITY_ADMIN"].includes(String(user.value?.userInfo?.role ?? "")),
+  const currentUserId = computed(() => String(user.value?.userInfo?.id ?? ""));
+  const currentUserEmail = computed(() => String(user.value?.userInfo?.email ?? "").toLowerCase());
+  const canVerify = computed(() => specJson.value.trim().length > 0 && !zipError.value);
+  const verificationCurrent = computed(
+    () =>
+      Boolean(verification.value) &&
+      verifiedInput.value?.json === specJson.value &&
+      verifiedInput.value?.zip === zipFile.value,
   );
+  const verificationStale = computed(() => Boolean(verification.value) && !verificationCurrent.value);
+  const canSave = computed(() => verificationCurrent.value && verification.value?.valid === true && !zipError.value);
+  const canChrome = computed(() => hasOneOfAuthorities(["reports.studio", "security:write"]));
+  const canApproveAml = computed(() => ["MLRO", "SECURITY_ADMIN"].includes(String(user.value?.userInfo?.role ?? "")));
+  const canOverride = computed(
+    () =>
+      hasOneOfAuthorities(["security:write", "security.write"]) ||
+      String(user.value?.userInfo?.role ?? "") === "SECURITY_ADMIN",
+  );
+  const isVerified = computed(() => verificationCurrent.value && verification.value?.valid === true);
+
+  const fail = (caught: unknown, withDiagnostics = true) => {
+    if (withDiagnostics) actionDiagnostics.value = diagnosticsFromApiError(caught);
+    error.value = friendlyApiErrorMessage(caught, t);
+  };
+  const resetFeedback = () => {
+    error.value = null;
+    actionDiagnostics.value = [];
+  };
+
+  watch(zipFile, (file) => {
+    zipError.value = isAssetZipTooLarge(file) ? t(ASSET_ZIP_TOO_LARGE_MESSAGE) : "";
+  });
+
+  const isMakerOf = (approval: PendingAmlBypass) =>
+    approval.canDecide === false ||
+    (Boolean(approval.makerUserId) && approval.makerUserId === currentUserId.value) ||
+    (Boolean(approval.makerEmail) && approval.makerEmail.toLowerCase() === currentUserEmail.value);
+
+  // ---------- data loading ----------
   const loadPendingAml = async () => {
     if (!canApproveAml.value) return;
     try {
@@ -198,206 +220,67 @@ const ReportsStudioPage = dc(() => {
       pendingAml.value = [];
     }
   };
-  const canOverride = computed(
-    () =>
-      hasOneOfAuthorities(["security:write", "security.write"]) ||
-      String(user.value?.userInfo?.role ?? "") === "SECURITY_ADMIN",
-  );
 
-  const downloadTranscript = async () => {
+  const loadHistory = async (code?: string | null) => {
+    if (!code) return;
+    historyLoading.value = true;
+    try {
+      const response = await api.get(urlsMap.reportEngineSpecs, { params: { code } });
+      historyRows.value = (response.data?.specs ?? []) as VersionRow[];
+    } catch (caught) {
+      historyRows.value = [];
+      fail(caught, false);
+    } finally {
+      historyLoading.value = false;
+    }
+  };
+
+  const loadExecutions = async (code?: string | null) => {
+    if (!code) return;
+    executionsLoading.value = true;
+    try {
+      // `code` is forwarded for servers that filter; the list is filtered client-side either way.
+      const response = await api.get(urlsMap.reportEngineExecutions, { params: { limit: 200, code } });
+      const rows = (response.data?.executions ?? []) as ExecutionRow[];
+      executions.value = rows.filter((row) => row.reportCode === code);
+    } catch (caught) {
+      executions.value = [];
+      fail(caught, false);
+    } finally {
+      executionsLoading.value = false;
+    }
+  };
+
+  const refreshHistoryTab = () =>
+    historyTab.value === "versions" ? loadHistory(savedSpecCode.value) : loadExecutions(savedSpecCode.value);
+
+  watch(historyTab, () => void refreshHistoryTab());
+
+  // ---------- transcript ----------
+  const downloadTranscript = async (kind: "REPORT" | "CHROME") => {
     busy.value = true;
-    error.value = null;
+    resetFeedback();
     try {
       const response = await api.get(urlsMap.reportEngineTranscript, {
-        params: { kind: "REPORT", domains: domains.value.join(",") },
+        params: kind === "REPORT" ? { kind, domains: domains.value.join(",") } : { kind },
       });
       const data = response.data ?? {};
-      downloadText(data.filename ?? "report-engine-ai-transcript-v1.0.md", data.markdown ?? "", "text/markdown");
+      const fallback = kind === "REPORT" ? "report-engine-ai-transcript-v1.0.md" : "chrome-engine-ai-transcript-v1.0.md";
+      downloadText(data.filename ?? fallback, data.markdown ?? "", "text/markdown");
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
+      fail(caught, false);
     } finally {
       busy.value = false;
     }
   };
 
-  const downloadChromeTranscript = async () => {
-    busy.value = true;
-    error.value = null;
-    try {
-      const response = await api.get(urlsMap.reportEngineTranscript, { params: { kind: "CHROME" } });
-      const data = response.data ?? {};
-      downloadText(data.filename ?? "chrome-engine-ai-transcript-v1.0.md", data.markdown ?? "", "text/markdown");
-    } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
-    } finally {
-      busy.value = false;
-    }
-  };
-
+  // ---------- editor ----------
   const readSpecFile = async (file: File | null) => {
     specFile.value = file;
     if (file) {
       specJson.value = await file.text();
+      loadedNeedsAssets.value = false;
     }
-  };
-
-  const verify = async () => {
-    busy.value = true;
-    error.value = null;
-    notice.value = null;
-    verification.value = null;
-    actionDiagnostics.value = [];
-    try {
-      const assetsZipBase64 = zipFile.value ? await fileToBase64(zipFile.value) : undefined;
-      const response = await api.post(urlsMap.reportEngineVerify, {
-        specJson: specJson.value,
-        assetsZipBase64,
-      });
-      verification.value = response.data as VerificationReport;
-      if (verification.value.authorityInference) {
-        overrideRoles.value = verification.value.authorityInference.inferredNaturalRoles;
-        overrideAuthorities.value = verification.value.authorityInference.inferredRequiredAuthorities;
-      }
-    } catch (caught) {
-      actionDiagnostics.value = diagnosticsFromApiError(caught);
-      error.value = friendlyApiErrorMessage(caught);
-    } finally {
-      busy.value = false;
-    }
-  };
-
-  const save = async (publish: boolean) => {
-    busy.value = true;
-    error.value = null;
-    notice.value = null;
-    try {
-      const assetsZipBase64 = zipFile.value ? await fileToBase64(zipFile.value) : undefined;
-      const response = await api.post(urlsMap.reportEngineSpecs, {
-        specJson: specJson.value,
-        assetsZipBase64,
-        publish,
-      });
-      savedSpecId.value = String(response.data?.id ?? "");
-      savedSpecCode.value = String(response.data?.code ?? "");
-      notice.value = publish ? t("Report published") : t("Report saved as verified");
-      await loadHistory(savedSpecCode.value);
-    } catch (caught) {
-      actionDiagnostics.value = diagnosticsFromApiError(caught);
-      error.value = friendlyApiErrorMessage(caught);
-    } finally {
-      busy.value = false;
-    }
-  };
-
-  const applyOverride = async () => {
-    if (!savedSpecId.value) {
-      error.value = t("Save the spec as verified first so the override can be attached");
-      return;
-    }
-    busy.value = true;
-    error.value = null;
-    notice.value = null;
-    try {
-      const response = await api.post(urlsMap.reportEngineOverride(savedSpecId.value), {
-        allowedRoles: overrideRoles.value,
-        allowedAuthorities: overrideAuthorities.value,
-        justification: overrideJustification.value,
-        allowConfidentialAmlBypass: allowConfidentialAmlBypass.value,
-      });
-      if (response.data?.status === "PENDING_REVIEW") {
-        amlApprovalId.value = String(response.data.approvalRequestId ?? "");
-        notice.value = t("AML bypass requested; a different MLRO or Security Admin must approve it");
-      } else {
-        notice.value = t("Authority override saved and audited");
-      }
-    } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
-    } finally {
-      busy.value = false;
-    }
-  };
-
-  const clearOverride = async () => {
-    if (!savedSpecId.value) return;
-    busy.value = true;
-    error.value = null;
-    try {
-      await api.post(urlsMap.reportEngineOverride(savedSpecId.value), {
-        clear: true,
-        allowedRoles: [],
-        allowedAuthorities: [],
-        justification: "Override cleared by a Security Admin",
-      });
-      notice.value = t("Authority override cleared");
-    } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
-    } finally {
-      busy.value = false;
-    }
-  };
-
-  const decideAmlBypass = async (approve: boolean) => {
-    if (!amlApprovalId.value) return;
-    busy.value = true;
-    error.value = null;
-    try {
-      await api.post(
-        approve
-          ? urlsMap.reportEngineAmlBypassApprove(amlApprovalId.value)
-          : urlsMap.reportEngineAmlBypassReject(amlApprovalId.value),
-        approve ? {} : { notes: t("Rejected by MLRO/Security Admin") },
-      );
-      notice.value = approve ? t("AML bypass approved") : t("AML bypass rejected");
-      amlApprovalId.value = null;
-    } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
-    } finally {
-      busy.value = false;
-    }
-  };
-
-  const loadHistory = async (code?: string | null) => {
-    if (!code) return;
-    try {
-      const response = await api.get(urlsMap.reportEngineSpecs, { params: { code } });
-      historyRows.value = (response.data?.specs ?? []) as VersionRow[];
-    } catch {
-      historyRows.value = [];
-    }
-  };
-
-  const archiveVersion = async (id: string) => {
-    busy.value = true;
-    error.value = null;
-    try {
-      await api.post(urlsMap.reportEngineArchive(id), {});
-      notice.value = t("Report version archived");
-      await loadHistory(savedSpecCode.value);
-    } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
-    } finally {
-      busy.value = false;
-    }
-  };
-
-  const formatJson = () => {
-    try {
-      specJson.value = JSON.stringify(JSON.parse(specJson.value), null, 2);
-      error.value = null;
-    } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
-    }
-  };
-
-  const copyJson = async () => {
-    if (!specJson.value.trim()) return;
-    await navigator.clipboard.writeText(specJson.value);
-    notice.value = t("Spec JSON copied");
-  };
-
-  const downloadJson = () => {
-    if (!specJson.value.trim()) return;
-    downloadText("report-spec.json", specJson.value, "application/json");
   };
 
   const clearEditor = () => {
@@ -405,304 +288,660 @@ const ReportsStudioPage = dc(() => {
     specFile.value = null;
     zipFile.value = null;
     verification.value = null;
+    verifiedInput.value = null;
     savedSpecId.value = null;
     savedSpecCode.value = null;
+    savedSpecVersion.value = null;
+    loadedNeedsAssets.value = false;
     historyRows.value = [];
-    error.value = null;
-    notice.value = null;
+    executions.value = [];
+    resetFeedback();
+  };
+
+  const verify = async () => {
+    if (zipError.value) return;
+    busy.value = true;
+    resetFeedback();
+    verification.value = null;
+    verifiedInput.value = null;
+    const json = specJson.value;
+    const zip = zipFile.value;
+    try {
+      const assetsZipBase64 = zip ? await fileToBase64(zip) : undefined;
+      const response = await api.post(urlsMap.reportEngineVerify, { specJson: json, assetsZipBase64 });
+      verification.value = response.data as VerificationReport;
+      verifiedInput.value = { json, zip };
+    } catch (caught) {
+      fail(caught);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  const applySaveResponse = async (data: { id?: unknown; code?: unknown; version?: unknown }) => {
+    savedSpecId.value = String(data?.id ?? "") || null;
+    savedSpecCode.value = String(data?.code ?? "") || null;
+    savedSpecVersion.value = Number(data?.version ?? 0) || null;
+    await loadHistory(savedSpecCode.value);
+  };
+
+  const save = async (publish: boolean) => {
+    if (!canSave.value) return;
+    busy.value = true;
+    resetFeedback();
+    try {
+      const assetsZipBase64 = zipFile.value ? await fileToBase64(zipFile.value) : undefined;
+      const response = await api.post(urlsMap.reportEngineSpecs, {
+        specJson: specJson.value,
+        assetsZipBase64,
+        publish,
+      });
+      showSnackBar({ message: publish ? t("Report published") : t("Report saved as verified"), type: "success" });
+      await applySaveResponse(response.data ?? {});
+    } catch (caught) {
+      fail(caught);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  // ---------- version history ----------
+  const openInEditor = async (row: VersionRow) => {
+    busy.value = true;
+    resetFeedback();
+    try {
+      const response = await api.get(urlsMap.reportEngineSpecDetail(row.id));
+      const json = JSON.stringify(response.data?.spec ?? {}, null, 2);
+      specJson.value = json;
+      specFile.value = null;
+      zipFile.value = null;
+      verification.value = null;
+      verifiedInput.value = null;
+      savedSpecId.value = row.id;
+      savedSpecCode.value = row.code;
+      savedSpecVersion.value = row.version;
+      loadedNeedsAssets.value = specHasRequiredAssets(json);
+      showSnackBar({ message: t("Loaded {name} into the editor", { name: `${row.code} v${row.version}` }), type: "success" });
+    } catch (caught) {
+      fail(caught, false);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  const publishVersion = async (row: VersionRow) => {
+    const confirmed = await showConfirm({
+      title: t("Publish this version?"),
+      message: t("{name} becomes the published version that report runners see.", { name: `${row.code} v${row.version}` }),
+      submitButtonLabel: t("Publish"),
+      type: "primary",
+    });
+    if (!confirmed) return;
+    busy.value = true;
+    resetFeedback();
+    try {
+      await api.post(urlsMap.reportEnginePublish(row.id), {});
+      showSnackBar({ message: t("Report published"), type: "success" });
+      await loadHistory(row.code);
+    } catch (caught) {
+      fail(caught);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  const archiveVersion = async (row: VersionRow) => {
+    const confirmed = await showConfirm({
+      title: t("Archive report version"),
+      message: t("Archive {name}? It can no longer be run or published.", { name: `${row.code} v${row.version}` }),
+      submitButtonLabel: t("Archive"),
+      type: "error",
+    });
+    if (!confirmed) return;
+    busy.value = true;
+    resetFeedback();
+    try {
+      await api.post(urlsMap.reportEngineArchive(row.id), {});
+      showSnackBar({ message: t("Report version archived"), type: "success" });
+      await loadHistory(row.code);
+    } catch (caught) {
+      fail(caught, false);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  // ---------- authority override ----------
+  const applyOverride = async (payload: AuthorityOverridePayload) => {
+    if (!savedSpecId.value) return;
+    busy.value = true;
+    overrideError.value = "";
+    try {
+      const response = await api.post(urlsMap.reportEngineOverride(savedSpecId.value), payload);
+      overrideOpen.value = false;
+      if (response.data?.status === "PENDING_REVIEW") {
+        showSnackBar({ message: t("AML bypass requested; a different MLRO or Security Admin must approve it"), type: "success" });
+        await loadPendingAml();
+      } else {
+        showSnackBar({ message: t("Authority override saved and audited"), type: "success" });
+      }
+    } catch (caught) {
+      overrideError.value = friendlyApiErrorMessage(caught, t);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  const clearOverride = async () => {
+    if (!savedSpecId.value) return;
+    const confirmed = await showConfirm({
+      title: t("Clear override"),
+      message: t("Clear the authority override? The inferred access policy applies again."),
+      submitButtonLabel: t("Clear override"),
+      type: "error",
+    });
+    if (!confirmed) return;
+    busy.value = true;
+    resetFeedback();
+    try {
+      await api.post(urlsMap.reportEngineOverride(savedSpecId.value), {
+        clear: true,
+        allowedRoles: [],
+        allowedAuthorities: [],
+        justification: "Override cleared by a Security Admin",
+      });
+      showSnackBar({ message: t("Authority override cleared"), type: "success" });
+    } catch (caught) {
+      fail(caught, false);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  // ---------- AML bypass checker ----------
+  const decideAmlBypass = async (approval: PendingAmlBypass, approve: boolean) => {
+    const confirmed = await showConfirm({
+      title: approve ? t("Approve AML bypass") : t("Reject AML bypass"),
+      message: approve
+        ? t("Approve the confidential AML bypass for {name}? Its allowed roles will see AML-confidential data.", { name: approval.reportCode })
+        : t("Reject the confidential AML bypass for {name}?", { name: approval.reportCode }),
+      submitButtonLabel: approve ? t("Approve") : t("Reject"),
+      type: approve ? "primary" : "error",
+    });
+    if (!confirmed) return;
+    busy.value = true;
+    resetFeedback();
+    try {
+      await api.post(
+        approve ? urlsMap.reportEngineAmlBypassApprove(approval.id) : urlsMap.reportEngineAmlBypassReject(approval.id),
+        approve ? {} : { notes: t("Rejected by MLRO/Security Admin") },
+      );
+      showSnackBar({ message: approve ? t("AML bypass approved") : t("AML bypass rejected"), type: "success" });
+      await loadPendingAml();
+    } catch (caught) {
+      fail(caught, false);
+    } finally {
+      busy.value = false;
+    }
   };
 
   const copyRepairPrompt = async () => {
     if (!verification.value?.aiRepairPrompt) return;
-    await navigator.clipboard.writeText(verification.value.aiRepairPrompt);
-    notice.value = t("AI repair prompt copied");
+    try {
+      await navigator.clipboard.writeText(verification.value.aiRepairPrompt);
+      showSnackBar({ message: t("AI repair prompt copied"), type: "success" });
+    } catch {
+      showSnackBar({ message: t("Could not copy to the clipboard"), type: "error" });
+    }
   };
 
-  const layerTone = (passed: boolean) => (passed ? "success" : "danger");
+  // ---------- tables ----------
+  const historyHeaders = computed<TableHeader<VersionRow>[]>(() => [
+    {
+      key: "version",
+      label: t("Version"),
+      Value: ({ row }) => (
+        <div class="d-flex align-center ga-2">
+          <span class="pg-mono">v{row.version}</span>
+          {row.isLatestPublished && <MetaPill size="x-small" color="success">{t("latest")}</MetaPill>}
+          {row.id === savedSpecId.value && <MetaPill size="x-small" color="info">{t("In editor")}</MetaPill>}
+        </div>
+      ),
+    },
+    { key: "status", label: t("Status"), Value: ({ row }) => <StatusBadge status={row.status} /> },
+    { key: "createdAt", label: t("Created At"), value: (row) => formatDateTime(row.createdAt) },
+    { key: "publishedAt", label: t("Published At"), value: (row) => formatDateTime(row.publishedAt) },
+    {
+      key: "actions",
+      label: t("Actions"),
+      minWidth: true,
+      Value: ({ row }) => (
+        <TableRowActions
+          primaryAction={{
+            label: t("Open in editor"),
+            icon: "mdi-code-json",
+            disabled: busy.value,
+            onClick: () => void openInEditor(row),
+          }}
+          items={[
+            {
+              key: "publish",
+              label: t("Publish"),
+              icon: "mdi-publish",
+              hidden: row.status !== "VERIFIED",
+              onClick: () => void publishVersion(row),
+            },
+            {
+              key: "archive",
+              label: t("Archive"),
+              icon: "mdi-archive-outline",
+              danger: true,
+              dividerBefore: row.status === "VERIFIED",
+              hidden: row.status === "ARCHIVED",
+              onClick: () => void archiveVersion(row),
+            },
+          ]}
+        />
+      ),
+    },
+  ]);
+
+  const executionHeaders = computed<TableHeader<ExecutionRow>[]>(() => [
+    { key: "createdAt", label: t("Time"), value: (row) => formatDateTime(row.createdAt) },
+    { key: "reportVersion", label: t("Version"), Value: ({ row }) => <span class="pg-mono">v{row.reportVersion}</span> },
+    {
+      key: "actor",
+      label: t("Actor"),
+      Value: ({ row }) => (
+        <div class="d-flex flex-column">
+          <span>{row.actorName || row.actorEmail || <MonoRef value={row.actorUserId} truncate={8} />}</span>
+          {row.actorRole && <span class="text-caption text-medium-emphasis">{row.actorRole}</span>}
+        </div>
+      ),
+    },
+    { key: "selectedLocale", label: t("Locale"), value: (row) => String(row.selectedLocale ?? "").toUpperCase() },
+    { key: "rowCountTotal", label: t("Rows"), value: (row) => Number(row.rowCountTotal ?? 0).toLocaleString() },
+    { key: "durationMs", label: t("Duration"), value: (row) => `${Number(row.durationMs ?? 0).toLocaleString()} ms` },
+    {
+      key: "verificationSha256",
+      label: t("Verification hash"),
+      Value: ({ row }) => <MonoRef value={row.verificationSha256} truncate={12} />,
+    },
+  ]);
+
+  const amlHeaders = computed<TableHeader<PendingAmlBypass>[]>(() => [
+    { key: "reportCode", label: t("Report"), Value: ({ row }) => <MonoRef value={row.reportCode} /> },
+    { key: "makerEmail", label: t("Requested by"), value: (row) => row.makerEmail || "—" },
+    { key: "allowedRoles", label: t("Allowed roles"), value: (row) => row.allowedRoles.join(", ") || "—" },
+    { key: "justification", label: t("Justification"), value: (row) => row.justification || "—" },
+    { key: "createdAt", label: t("Created At"), value: (row) => formatDateTime(row.createdAt) },
+    {
+      key: "actions",
+      label: t("Actions"),
+      minWidth: true,
+      Value: ({ row }) =>
+        isMakerOf(row) ? (
+          <span class="text-caption text-medium-emphasis">{t("Your request")}</span>
+        ) : (
+          <TableRowActions
+            primaryAction={{
+              label: t("Approve"),
+              icon: "mdi-check",
+              disabled: busy.value,
+              onClick: () => void decideAmlBypass(row, true),
+            }}
+            items={[
+              {
+                key: "reject",
+                label: t("Reject"),
+                icon: "mdi-close",
+                danger: true,
+                onClick: () => void decideAmlBypass(row, false),
+              },
+            ]}
+          />
+        ),
+    },
+  ]);
 
   onMounted(() => {
     void loadPendingAml();
   });
 
+  const renderScorecard = (report: VerificationReport) => (
+    <SurfaceCard
+      title={t("Step 3 — Verification Scorecard")}
+      subtitle={t("Layers 1-5, diagnostics and the one-click AI repair prompt")}
+      v-slots={
+        report.aiRepairPrompt
+          ? {
+              headerActions: () => (
+                <VBtn size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyRepairPrompt()}>
+                  {t("Copy AI Repair Prompt")}
+                </VBtn>
+              ),
+            }
+          : undefined
+      }
+    >
+      <div class="d-flex flex-column ga-4">
+        {verificationStale.value && (
+          <VAlert type="warning" variant="tonal">
+            {t("The spec or asset bundle changed after verification. Verify again before saving or publishing.")}
+          </VAlert>
+        )}
+        <div class="d-flex flex-wrap ga-2">
+          {report.layers.map((layer) => {
+            const status = layerStatus(layer);
+            const outcome =
+              status === "PASSED"
+                ? t("Passed")
+                : status === "SKIPPED"
+                  ? t("Skipped")
+                  : `${layer.errorCount} ${t("errors")}`;
+            return (
+              <StatusBadge
+                key={layer.layer}
+                status={status}
+                label={`${t("Layer")} ${layer.layer} · ${layer.name} — ${outcome}`}
+                toneOverride={LAYER_TONE[status]}
+              />
+            );
+          })}
+        </div>
+        {report.diagnostics.length > 0 && (
+          <ReportDiagnosticsPanel diagnostics={report.diagnostics} title={t("Verification diagnostics")} />
+        )}
+        {report.verifiedAssets.length > 0 && (
+          <DescriptionList
+            items={report.verifiedAssets.map((asset) => ({
+              label: asset.assetKey,
+              value: (
+                <span class="d-inline-flex flex-wrap align-center ga-2">
+                  <span>{asset.fileName}</span>
+                  <MetaPill size="x-small">{formatBytes(asset.bytes)}</MetaPill>
+                  <MonoRef value={asset.sha256} truncate={12} />
+                </span>
+              ),
+            }))}
+          />
+        )}
+      </div>
+    </SurfaceCard>
+  );
+
+  const renderAuthority = (report: VerificationReport) => {
+    const inference = report.authorityInference;
+    if (!inference) return null;
+    return (
+      <SurfaceCard
+        title={t("Step 4 — Authority Inference")}
+        subtitle={t("Computed from the queried models and columns")}
+        v-slots={
+          canOverride.value
+            ? {
+                headerActions: () => (
+                  <div class="d-flex flex-wrap ga-2">
+                    <VBtn
+                      size="small"
+                      variant="tonal"
+                      prependIcon="mdi-shield-account-outline"
+                      disabled={!savedSpecId.value || busy.value}
+                      onClick={() => {
+                        overrideError.value = "";
+                        overrideOpen.value = true;
+                      }}
+                    >
+                      {t("Security Admin Authority Override")}
+                    </VBtn>
+                    <VBtn
+                      size="small"
+                      variant="tonal"
+                      prependIcon="mdi-shield-off-outline"
+                      disabled={!savedSpecId.value || busy.value}
+                      onClick={() => void clearOverride()}
+                    >
+                      {t("Clear override")}
+                    </VBtn>
+                  </div>
+                ),
+              }
+            : undefined
+        }
+      >
+        <div class="d-flex flex-column ga-3">
+          <DescriptionList
+            items={[
+              { label: t("Queried models"), value: inference.queriedModels.join(", ") || "—" },
+              { label: t("Queried domains"), value: inference.queriedDomains.join(", ") || "—" },
+              { label: t("Inferred roles"), value: inference.inferredNaturalRoles.join(", ") || "—" },
+              { label: t("Required authorities"), value: inference.inferredRequiredAuthorities.join(", ") || "—" },
+              { label: t("Conflict status"), value: <StatusBadge status={inference.conflictStatus} /> },
+              { label: t("Confidential AML"), value: inference.requiresConfidentialAmlAccess ? t("Yes") : t("No") },
+              { label: t("Masked PII"), value: inference.containsMaskedPiiColumns ? t("Yes") : t("No") },
+            ]}
+          />
+          {inference.conflictDetails.map((conflict) => (
+            <VAlert key={conflict.code} type="warning" variant="tonal">
+              <div class="d-flex flex-wrap align-center ga-2">
+                <MonoRef value={conflict.code} />
+                <span>{conflict.message}</span>
+              </div>
+              <div class="text-caption mt-1">{conflict.resolutionHint}</div>
+            </VAlert>
+          ))}
+          {canOverride.value && !savedSpecId.value && (
+            <div class="text-caption text-medium-emphasis">{t("Save the spec as verified first so the override can be attached")}</div>
+          )}
+        </div>
+      </SurfaceCard>
+    );
+  };
+
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
-      <PageHeader
-        title={t("Report Studio")}
-        subtitle={t("Download the AI transcript, verify a spec, infer authorities and publish")}
-        badge={verificationBadge.value}
-        badgeTone={verificationTone.value as never}
-        breadcrumbs={[{ label: t("Reporting"), to: "/reports/catalog" }, { label: t("Studio") }]}
-        end={() => (
-          <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-            <VBtn variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsCatalog" })}>
-              {t("Open Catalog")}
-            </VBtn>
-            {canChrome.value && (
-              <VBtn variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChrome" })}>
-                {t("Headers & Footers")}
+        <PageHeader
+          title={t("Report Studio")}
+          subtitle={t("Download the AI transcript, verify a spec, infer authorities and publish")}
+          badge={isVerified.value ? "VERIFIED" : "DRAFT"}
+          badgeLabel={isVerified.value ? t("Verified") : t("Draft")}
+          badgeTone={isVerified.value ? "success" : "neutral"}
+          end={() => (
+            <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+              <VBtn variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsCatalog" })}>
+                {t("Open Catalog")}
               </VBtn>
-            )}
-            {canApproveAml.value && (
-              <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadPendingAml()}>
-                {t("Refresh pending")}
-              </VBtn>
-            )}
-          </ThemedView>
-        )}
-      />
-
-      {error.value && <VAlert type="error" variant="tonal" density="compact">{error.value}</VAlert>}
-      {notice.value && <VAlert type="success" variant="tonal" density="compact">{notice.value}</VAlert>}
-      {actionDiagnostics.value.length > 0 && (
-        <ReportDiagnosticsPanel diagnostics={actionDiagnostics.value} title={t("Action diagnostics")} />
-      )}
-
-      <SurfaceCard title={t("Step 1 — AI Authoring Transcript")} subtitle={t("The transcript contains the live schema, optimization rules and bilingual contract")}>
-        <div class="d-flex flex-wrap ga-3 align-end">
-          <VSelect
-            modelValue={domains.value}
-            onUpdate:modelValue={(value: string[]) => (domains.value = value)}
-            label={t("Domains")}
-            items={DOMAINS}
-            multiple
-            chips
-            density="compact"
-            variant="outlined"
-            hideDetails="auto"
-            style={{ minWidth: "280px", maxWidth: "520px" }}
-          />
-          <VBtn color="primary" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript()}>
-            {t("Download Report AI Transcript")}
-          </VBtn>
-          <VBtn variant="tonal" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadChromeTranscript()}>
-            {t("Download Header/Footer AI Transcript")}
-          </VBtn>
-        </div>
-      </SurfaceCard>
-
-      <SurfaceCard
-        title={t("Step 2 — Upload Spec and Optional Asset Bundle")}
-        subtitle={t("Standalone JSON or JSON paired with an assets .zip")}
-        v-slots={{
-          headerActions: () => (
-            <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-              <VBtn size="small" variant="text" prependIcon="mdi-format-align-left" disabled={!specJson.value.trim()} onClick={formatJson}>
-                {t("Format JSON")}
-              </VBtn>
-              <VBtn size="small" variant="text" prependIcon="mdi-content-copy" disabled={!specJson.value.trim()} onClick={() => void copyJson()}>
-                {t("Copy JSON")}
-              </VBtn>
-              <VBtn size="small" variant="text" prependIcon="mdi-download" disabled={!specJson.value.trim()} onClick={downloadJson}>
-                {t("Download JSON")}
-              </VBtn>
-              <VBtn size="small" variant="text" prependIcon="mdi-eraser" onClick={clearEditor}>
-                {t("Clear editor")}
-              </VBtn>
+              {canChrome.value && (
+                <VBtn variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChrome" })}>
+                  {t("Headers & Footers")}
+                </VBtn>
+              )}
+              {canApproveAml.value && (
+                <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadPendingAml()}>
+                  {t("Refresh pending")}
+                </VBtn>
+              )}
             </ThemedView>
-          ),
-        }}
-      >
-        <div class="d-flex flex-column ga-3">
-          <VFileInput
-            label={t("Report spec (.json)")}
-            density="compact"
-            variant="outlined"
-            hideDetails="auto"
-            modelValue={specFile.value}
-            onUpdate:modelValue={(files: File | File[] | null) => void readSpecFile(Array.isArray(files) ? (files[0] ?? null) : files)}
-          />
-          <VFileInput
-            label={t("Asset bundle (.zip, optional)")}
-            density="compact"
-            variant="outlined"
-            hideDetails="auto"
-            modelValue={zipFile.value}
-            onUpdate:modelValue={(files: File | File[] | null) => (zipFile.value = Array.isArray(files) ? (files[0] ?? null) : files)}
-          />
-          <VTextarea
-            label={t("Spec JSON")}
-            modelValue={specJson.value}
-            onUpdate:modelValue={(value: string) => (specJson.value = value)}
-            rows={12}
-            density="compact"
-            variant="outlined"
-            hideDetails="auto"
-            style={{ fontFamily: "monospace" }}
-          />
-          <div class="d-flex flex-wrap ga-2">
-            <VBtn color="primary" loading={busy.value} disabled={!canVerify.value} prependIcon="mdi-shield-check-outline" onClick={() => void verify()}>
-              {t("Verify Spec (5 Layers)")}
-            </VBtn>
-            <VBtn variant="tonal" loading={busy.value} disabled={!canSave.value} onClick={() => void save(false)}>
-              {t("Save as Verified")}
-            </VBtn>
-            <VBtn variant="tonal" color="success" loading={busy.value} disabled={!canSave.value} onClick={() => void save(true)}>
-              {t("Publish")}
-            </VBtn>
-          </div>
-        </div>
-      </SurfaceCard>
-
-      {verification.value && (
-        <SurfaceCard title={t("Step 3 — Verification Scorecard")} subtitle={t("Layers 1-5, diagnostics and the one-click AI repair prompt")}>
-          <div class="d-flex flex-wrap ga-2 mb-4">
-            {verification.value.layers.map((layer) => (
-              <StatusBadge
-                key={layer.layer}
-                status={`L${layer.layer}`}
-                label={`${layer.name} — ${layer.passed ? t("Passed") : `${layer.errorCount} ${t("errors")}`}`}
-                toneOverride={layerTone(layer.passed) as never}
-              />
-            ))}
-          </div>
-          {verification.value.diagnostics.length > 0 && (
-            <ReportDiagnosticsPanel
-              diagnostics={verification.value.diagnostics as ReportDiagnostic[]}
-              title={t("Verification diagnostics")}
-            />
-          )}
-          {verification.value.aiRepairPrompt && (
-            <div class="d-flex ga-2 mb-3">
-              <VBtn size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyRepairPrompt()}>
-                {t("Copy AI Repair Prompt")}
-              </VBtn>
-            </div>
-          )}
-          {verification.value.verifiedAssets.length > 0 && (
-            <DescriptionList
-              items={verification.value.verifiedAssets.map((asset) => ({
-                label: asset.assetKey,
-                value: `${asset.fileName} · ${asset.bytes} B · ${asset.sha256.slice(0, 12)}…`,
-              }))}
-            />
-          )}
-        </SurfaceCard>
-      )}
-
-      {verification.value?.authorityInference && (
-        <SurfaceCard title={t("Step 4 — Authority Inference")} subtitle={t("Computed from the queried models and columns")}>
-          <DescriptionList
-            items={[
-              { label: t("Queried models"), value: verification.value.authorityInference.queriedModels.join(", ") },
-              { label: t("Queried domains"), value: verification.value.authorityInference.queriedDomains.join(", ") },
-              { label: t("Inferred roles"), value: verification.value.authorityInference.inferredNaturalRoles.join(", ") || "—" },
-              { label: t("Required authorities"), value: verification.value.authorityInference.inferredRequiredAuthorities.join(", ") || "—" },
-              { label: t("Conflict status"), value: verification.value.authorityInference.conflictStatus },
-              { label: t("Confidential AML"), value: verification.value.authorityInference.requiresConfidentialAmlAccess ? t("Yes") : t("No") },
-              { label: t("Masked PII"), value: verification.value.authorityInference.containsMaskedPiiColumns ? t("Yes") : t("No") },
-            ]}
-          />
-          {verification.value.authorityInference.conflictDetails.map((conflict) => (
-            <VAlert key={conflict.code} type="warning" variant="tonal" density="compact" class="mt-3">
-              <strong>{conflict.code}</strong> — {conflict.message}
-              <div class="text-caption">{conflict.resolutionHint}</div>
-            </VAlert>
-          ))}
-          {canOverride.value && (
-            <div class="d-flex flex-column ga-3 mt-4">
-              <div class="text-subtitle-2 font-weight-bold">{t("Security Admin Authority Override")}</div>
-              <VSelect
-                modelValue={overrideRoles.value}
-                onUpdate:modelValue={(value: string[]) => (overrideRoles.value = value)}
-                label={t("Allowed roles")}
-                items={ROLES}
-                multiple
-                chips
-                density="compact"
-                variant="outlined"
-                hideDetails="auto"
-              />
-              <VSelect
-                modelValue={overrideAuthorities.value}
-                onUpdate:modelValue={(value: string[]) => (overrideAuthorities.value = value)}
-                label={t("Allowed authorities")}
-                items={AUTHORITIES}
-                multiple
-                chips
-                density="compact"
-                variant="outlined"
-                hideDetails="auto"
-              />
-              <VCheckbox
-                label={t("Allow confidential AML bypass (requires MLRO/Security sign-off)")}
-                modelValue={allowConfidentialAmlBypass.value}
-                onUpdate:modelValue={(value: boolean | null) => (allowConfidentialAmlBypass.value = Boolean(value))}
-              />
-              <VTextField
-                label={t("Justification (minimum 15 characters)")}
-                modelValue={overrideJustification.value}
-                onUpdate:modelValue={(value: string) => (overrideJustification.value = value)}
-                density="compact"
-                variant="outlined"
-                hideDetails="auto"
-              />
-              <div class="d-flex flex-wrap ga-2">
-                <VBtn color="warning" loading={busy.value} onClick={() => void applyOverride()}>
-                  {t("Apply Security Admin Override")}
-                </VBtn>
-                <VBtn variant="tonal" loading={busy.value} onClick={() => void clearOverride()}>
-                  {t("Clear override")}
-                </VBtn>
-                {amlApprovalId.value && (
-                  <>
-                    <VBtn color="success" loading={busy.value} onClick={() => void decideAmlBypass(true)}>
-                      {t("Approve AML bypass")}
-                    </VBtn>
-                    <VBtn color="error" variant="tonal" loading={busy.value} onClick={() => void decideAmlBypass(false)}>
-                      {t("Reject AML bypass")}
-                    </VBtn>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-        </SurfaceCard>
-      )}
-
-      {savedSpecCode.value && (
-        <DataTable<VersionRow>
-          title={t("Version history")}
-          data={historyRows.value}
-          headers={historyHeaders.value}
-          loading={busy.value}
-          showNumber={false}
-          xlsx={false}
-          numberOfItemsPerPage={1000}
-          numberOfItemsPerPageChoices={false}
-          TopSlot={() => (
-            <div style={{ padding: "0 20px 12px" }}>
-              <VBtn size="small" variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadHistory(savedSpecCode.value)}>
-                {t("Refresh history")}
-              </VBtn>
-            </div>
           )}
         />
-      )}
 
-      {canApproveAml.value && pendingAml.value.length > 0 && (
-        <SurfaceCard title={t("Pending confidential AML bypasses")} subtitle={t("A different MLRO or Security Admin must decide")}>
+        {error.value && (
+          <VAlert type="error" variant="tonal" closable onClick:close={() => (error.value = null)}>
+            {error.value}
+          </VAlert>
+        )}
+        {actionDiagnostics.value.length > 0 && (
+          <ReportDiagnosticsPanel diagnostics={actionDiagnostics.value} title={t("Action diagnostics")} />
+        )}
+
+        <SurfaceCard title={t("Step 1 — AI Authoring Transcript")} subtitle={t("The transcript contains the live schema, optimization rules and bilingual contract")}>
+          <VRow dense align="center">
+            <VCol cols={12} md={5}>
+              <VSelect
+                modelValue={domains.value}
+                onUpdate:modelValue={(value: string[]) => (domains.value = value)}
+                label={t("Domains")}
+                items={DOMAINS}
+                multiple
+                chips
+              />
+            </VCol>
+            <VCol cols={12} md={7} class="d-flex flex-wrap ga-2">
+              <VBtn color="primary" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript("REPORT")}>
+                {t("Download Report AI Transcript")}
+              </VBtn>
+              <VBtn variant="tonal" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript("CHROME")}>
+                {t("Download Header/Footer AI Transcript")}
+              </VBtn>
+            </VCol>
+          </VRow>
+        </SurfaceCard>
+
+        <SurfaceCard
+          title={t("Step 2 — Upload Spec and Optional Asset Bundle")}
+          subtitle={t("Standalone JSON or JSON paired with an assets .zip")}
+          v-slots={
+            savedSpecCode.value
+              ? {
+                  headerActions: () => (
+                    <MetaPill prependIcon="mdi-code-json">{`${savedSpecCode.value}${savedSpecVersion.value ? ` v${savedSpecVersion.value}` : ""}`}</MetaPill>
+                  ),
+                }
+              : undefined
+          }
+        >
           <div class="d-flex flex-column ga-3">
-            {pendingAml.value.map((approval) => (
-              <div key={approval.id} class="pa-3" style={{ border: "1px solid var(--pg-border-subtle)", borderRadius: "8px" }}>
-                <div class="font-weight-medium">{approval.reportCode}</div>
-                <div class="text-caption text-medium-emphasis">
-                  {t("Requested by")} {approval.makerEmail || "—"}
-                </div>
-                <div class="text-caption">{approval.justification}</div>
-                <div class="d-flex flex-wrap ga-2 mt-2">
-                  <VBtn size="small" color="success" disabled={!approval.canDecide} onClick={() => { amlApprovalId.value = approval.id; void decideAmlBypass(true).then(loadPendingAml); }}>
-                    {t("Approve AML bypass")}
-                  </VBtn>
-                  <VBtn size="small" color="error" variant="tonal" disabled={!approval.canDecide} onClick={() => { amlApprovalId.value = approval.id; void decideAmlBypass(false).then(loadPendingAml); }}>
-                    {t("Reject AML bypass")}
-                  </VBtn>
-                </div>
-              </div>
-            ))}
+            <VRow dense>
+              <VCol cols={12} md={6}>
+                <VFileInput
+                  label={t("Report spec (.json)")}
+                  {...{ accept: "application/json,.json" }}
+                  modelValue={specFile.value}
+                  onUpdate:modelValue={(files: File | File[] | null) => void readSpecFile(pickFile(files))}
+                />
+              </VCol>
+              <VCol cols={12} md={6}>
+                <VFileInput
+                  label={t("Asset bundle (.zip, optional)")}
+                  {...{ accept: "application/zip,.zip" }}
+                  modelValue={zipFile.value}
+                  errorMessages={zipError.value ? [zipError.value] : []}
+                  onUpdate:modelValue={(files: File | File[] | null) => (zipFile.value = pickFile(files))}
+                />
+              </VCol>
+            </VRow>
+            {loadedNeedsAssets.value && !zipFile.value && (
+              <VAlert type="info" variant="tonal">
+                {t("This spec declares required assets. Re-attach its asset bundle (.zip) before verifying.")}
+              </VAlert>
+            )}
+            <JsonSpecEditor
+              modelValue={specJson.value}
+              onUpdate:modelValue={(value: string) => (specJson.value = value)}
+              onClear={clearEditor}
+              label={t("Spec JSON")}
+              downloadName={savedSpecCode.value ? `${savedSpecCode.value}.json` : "report-spec.json"}
+              copiedMessage={t("Spec JSON copied")}
+            />
+            <div class="d-flex flex-wrap align-center ga-2">
+              <VBtn color="primary" loading={busy.value} disabled={!canVerify.value} prependIcon="mdi-shield-check-outline" onClick={() => void verify()}>
+                {t("Verify Spec (5 Layers)")}
+              </VBtn>
+              <VBtn variant="tonal" loading={busy.value} disabled={!canSave.value} onClick={() => void save(false)}>
+                {t("Save as Verified")}
+              </VBtn>
+              <VBtn variant="tonal" loading={busy.value} disabled={!canSave.value} prependIcon="mdi-publish" onClick={() => void save(true)}>
+                {t("Publish")}
+              </VBtn>
+              {verificationStale.value && (
+                <MetaPill color="warning" prependIcon="mdi-alert-outline">{t("Verify again after editing")}</MetaPill>
+              )}
+            </div>
           </div>
         </SurfaceCard>
-      )}
+
+        {verification.value && renderScorecard(verification.value)}
+        {verification.value && renderAuthority(verification.value)}
+
+        {savedSpecCode.value && (
+          <div class="d-flex flex-column ga-3">
+            <SegmentedTabs
+              modelValue={historyTab.value}
+              onUpdate:modelValue={(value: string) => (historyTab.value = value as "versions" | "executions")}
+              ariaLabel={t("Version history")}
+              tabs={[
+                { value: "versions", label: t("Version history"), count: historyRows.value.length },
+                { value: "executions", label: t("Executions") },
+              ]}
+            />
+            {historyTab.value === "versions" ? (
+              <DataTable<VersionRow>
+                title={t("Version history")}
+                data={historyRows.value}
+                headers={historyHeaders.value}
+                loading={historyLoading.value}
+                showNumber={false}
+                xlsx={false}
+                numberOfItemsPerPage={1000}
+                numberOfItemsPerPageChoices={false}
+                TopSlot={() => (
+                  <div class="px-5 pb-3">
+                    <VBtn size="small" variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadHistory(savedSpecCode.value)}>
+                      {t("Refresh history")}
+                    </VBtn>
+                  </div>
+                )}
+              />
+            ) : (
+              <DataTable<ExecutionRow>
+                title={t("Executions")}
+                data={executions.value}
+                headers={executionHeaders.value}
+                loading={executionsLoading.value}
+                showNumber={false}
+                xlsx={false}
+                numberOfItemsPerPage={20}
+                TopSlot={() => (
+                  <div class="px-5 pb-3">
+                    <VBtn size="small" variant="tonal" prependIcon="mdi-refresh" onClick={() => void loadExecutions(savedSpecCode.value)}>
+                      {t("Refresh")}
+                    </VBtn>
+                  </div>
+                )}
+              />
+            )}
+          </div>
+        )}
+
+        {canApproveAml.value && pendingAml.value.length > 0 && (
+          <DataTable<PendingAmlBypass>
+            title={t("Pending confidential AML bypasses")}
+            data={pendingAml.value}
+            headers={amlHeaders.value}
+            loading={busy.value}
+            showNumber={false}
+            xlsx={false}
+            numberOfItemsPerPage={1000}
+            numberOfItemsPerPageChoices={false}
+            TopSlot={() => (
+              <div class="px-5 pb-3 text-caption text-medium-emphasis">{t("A different MLRO or Security Admin must decide")}</div>
+            )}
+          />
+        )}
+
+        <AuthorityOverrideModal
+          modelValue={overrideOpen.value}
+          onUpdate:modelValue={(value: boolean) => (overrideOpen.value = value)}
+          roles={ROLES}
+          authorities={AUTHORITIES}
+          initialRoles={verification.value?.authorityInference?.inferredNaturalRoles ?? []}
+          initialAuthorities={verification.value?.authorityInference?.inferredRequiredAuthorities ?? []}
+          target={savedSpecCode.value ? `${savedSpecCode.value}${savedSpecVersion.value ? ` v${savedSpecVersion.value}` : ""}` : ""}
+          loading={busy.value}
+          errorMessage={overrideError.value}
+          onSubmit={(payload: AuthorityOverridePayload) => void applyOverride(payload)}
+        />
       </ThemedView>
     </ScreenContainer>
   );

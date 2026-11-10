@@ -292,6 +292,8 @@ export const urlsMap = {
     reportEngineSpecs: "v1/admin/report-engine/specs",
     reportEngineSpecDetail: (id: string) => `v1/admin/report-engine/specs/${encodeURIComponent(id)}`,
     reportEngineArchive: (id: string) => `v1/admin/report-engine/specs/${encodeURIComponent(id)}/archive`,
+    reportEnginePublish: (id: string) => `v1/admin/report-engine/specs/${encodeURIComponent(id)}/publish`,
+    reportEngineExecutions: "v1/admin/report-engine/executions",
     reportEngineOverride: (id: string) => `v1/admin/report-engine/specs/${encodeURIComponent(id)}/authority-override`,
     reportEngineCatalog: "v1/admin/report-engine/catalog",
     reportEngineAutocomplete: (sourceKey: string) => `v1/admin/report-engine/autocomplete/${encodeURIComponent(sourceKey)}`,

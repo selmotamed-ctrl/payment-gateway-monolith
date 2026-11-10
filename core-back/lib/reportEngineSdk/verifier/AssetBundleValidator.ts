@@ -63,6 +63,7 @@ export async function extractZipAssetFiles(params: {
     return { filesByName, diagnostics };
   }
 
+  const totalCap = params.maxZipBytes * 5;
   let totalUncompressed = 0;
   for (const entry of entries) {
     const originalName = entry.name;
@@ -78,11 +79,24 @@ export async function extractZipAssetFiles(params: {
       });
       continue;
     }
+    if (isSymlinkEntry(entry)) {
+      diagnostics.push({
+        layer: 4,
+        severity: "error",
+        path: `assets.zip/${name}`,
+        code: "ASSET_SYMLINK_FORBIDDEN",
+        message: `Asset archive entry "${name}" is a symbolic link; links are not allowed in asset bundles.`,
+        aiFixHint: "Replace the link with the real file.",
+      });
+      continue;
+    }
     const baseName = name.split("/").pop() ?? name;
+    // Header sizes are attacker-controlled, so they are only an early hint;
+    // the real guard is the streaming byte counter below.
     const internal = (entry as unknown as { _data?: { compressedSize?: number; uncompressedSize?: number } })._data;
     const compressed = internal?.compressedSize ?? 0;
-    const uncompressed = internal?.uncompressedSize ?? 0;
-    if (compressed > 0 && uncompressed / compressed > MAX_COMPRESSION_RATIO) {
+    const declaredUncompressed = internal?.uncompressedSize ?? 0;
+    if (compressed > 0 && declaredUncompressed / compressed > MAX_COMPRESSION_RATIO) {
       diagnostics.push({
         layer: 4,
         severity: "error",
@@ -92,28 +106,51 @@ export async function extractZipAssetFiles(params: {
       });
       continue;
     }
-    const buffer = await entry.async("nodebuffer");
-    if (buffer.byteLength > params.maxSingleAssetBytes) {
+    const entryCap = Math.min(params.maxSingleAssetBytes, totalCap - totalUncompressed);
+    const inflated = await inflateEntryWithCap(entry, entryCap);
+    if (inflated.kind === "error") {
+      diagnostics.push({
+        layer: 4,
+        severity: "error",
+        path: `assets.zip/${name}`,
+        code: "INVALID_ZIP_ARCHIVE",
+        message: `Asset archive entry "${name}" could not be inflated: ${inflated.message}`,
+        aiFixHint: "Upload a valid .zip archive.",
+      });
+      continue;
+    }
+    if (inflated.kind === "over_cap") {
+      if (entryCap < params.maxSingleAssetBytes) {
+        diagnostics.push({
+          layer: 4,
+          severity: "error",
+          path: "assets.zip",
+          code: "ASSET_ZIP_UNCOMPRESSED_LIMIT",
+          message: "Asset archive expands beyond the allowed uncompressed limit.",
+        });
+        break;
+      }
       diagnostics.push({
         layer: 4,
         severity: "error",
         path: `assets.zip/${name}`,
         code: "ASSET_FILE_TOO_LARGE",
-        message: `Asset "${name}" (${buffer.byteLength} bytes) exceeds the maximum allowed single-asset size (${params.maxSingleAssetBytes} bytes).`,
+        message: `Asset "${name}" exceeds the maximum allowed single-asset size (${params.maxSingleAssetBytes} bytes).`,
+      });
+      continue;
+    }
+    const buffer = inflated.buffer;
+    if (compressed > 0 && buffer.byteLength / compressed > MAX_COMPRESSION_RATIO) {
+      diagnostics.push({
+        layer: 4,
+        severity: "error",
+        path: `assets.zip/${name}`,
+        code: "ASSET_ZIP_BOMB_DETECTED",
+        message: `Asset archive entry "${name}" has a compression ratio above ${MAX_COMPRESSION_RATIO}:1.`,
       });
       continue;
     }
     totalUncompressed += buffer.byteLength;
-    if (totalUncompressed > params.maxZipBytes * 5) {
-      diagnostics.push({
-        layer: 4,
-        severity: "error",
-        path: "assets.zip",
-        code: "ASSET_ZIP_UNCOMPRESSED_LIMIT",
-        message: "Asset archive expands beyond the allowed uncompressed limit.",
-      });
-      break;
-    }
     if (filesByName.has(baseName)) {
       diagnostics.push({
         layer: 4,
@@ -129,6 +166,61 @@ export async function extractZipAssetFiles(params: {
   }
 
   return { filesByName, diagnostics };
+}
+
+const S_IFMT = 0o170000;
+const S_IFLNK = 0o120000;
+
+function isSymlinkEntry(entry: JSZip.JSZipObject): boolean {
+  const permissions = entry.unixPermissions;
+  const numeric = typeof permissions === "string" ? Number.parseInt(permissions, 8) : permissions;
+  return typeof numeric === "number" && Number.isFinite(numeric) && (numeric & S_IFMT) === S_IFLNK;
+}
+
+/**
+ * Inflates one entry through JSZip's internal stream with a running byte
+ * counter; the stream is paused and abandoned as soon as the cap is crossed,
+ * so a zip bomb is never fully inflated in memory.
+ */
+function inflateEntryWithCap(
+  entry: JSZip.JSZipObject,
+  capBytes: number,
+): Promise<{ kind: "ok"; buffer: Buffer } | { kind: "over_cap" } | { kind: "error"; message: string }> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let settled = false;
+    const finish = (value: { kind: "ok"; buffer: Buffer } | { kind: "over_cap" } | { kind: "error"; message: string }) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    let stream: JSZip.JSZipStreamHelper<Buffer>;
+    try {
+      // internalStream is public JSZip API (zipObject.js) but missing from its .d.ts.
+      stream = (entry as unknown as {
+        internalStream: (type: "nodebuffer") => JSZip.JSZipStreamHelper<Buffer>;
+      }).internalStream("nodebuffer");
+    } catch (error) {
+      finish({ kind: "error", message: (error as Error).message });
+      return;
+    }
+    stream
+      .on("data", (chunk: Buffer) => {
+        if (settled) return;
+        total += chunk.byteLength;
+        if (total > capBytes) {
+          stream.pause();
+          chunks.length = 0;
+          finish({ kind: "over_cap" });
+          return;
+        }
+        chunks.push(Buffer.from(chunk));
+      })
+      .on("error", (error: Error) => finish({ kind: "error", message: error.message }))
+      .on("end", () => finish({ kind: "ok", buffer: Buffer.concat(chunks, total) }));
+    stream.resume();
+  });
 }
 
 export function verifyExtractedAssetsAgainstSpec(params: {
@@ -284,44 +376,68 @@ function findExtractedAsset(
   return { buffer: null, ambiguous: false };
 }
 
-export function parseCsvRows(text: string): Array<Record<string, unknown>> {
-  const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  if (lines.length === 0) return [];
-  const headers = splitCsvLine(lines[0]!);
-  return lines.slice(1).map((line) => {
-    const cells = splitCsvLine(line);
-    const row: Record<string, unknown> = {};
+/**
+ * Parses an RFC-4180 style CSV (quoted fields may contain commas, quotes and
+ * newlines). Cells stay strings: "0012" is not coerced to 12 and large or
+ * fractional amounts keep their exact text; numeric coercion happens only at
+ * comparison time with decimal.js.
+ */
+export function parseCsvRows(text: string): Array<Record<string, string>> {
+  const records = splitCsvRecords(text.replace(/^\uFEFF/, "")).filter(
+    (record) => !(record.length === 1 && record[0]!.trim() === ""),
+  );
+  if (records.length === 0) return [];
+  const headers = records[0]!.map((header) => header.trim());
+  return records.slice(1).map((cells) => {
+    const row: Record<string, string> = {};
     headers.forEach((header, index) => {
-      const raw = cells[index] ?? "";
-      const numeric = Number(raw);
-      row[header] = raw !== "" && Number.isFinite(numeric) && /^-?\d+(\.\d+)?$/.test(raw) ? numeric : raw;
+      row[header] = cells[index] ?? "";
     });
     return row;
   });
 }
 
-function splitCsvLine(line: string): string[] {
-  const cells: string[] = [];
+function splitCsvRecords(text: string): string[][] {
+  const records: string[][] = [];
+  let record: string[] = [];
   let current = "";
   let quoted = false;
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i]!;
-    if (char === '"') {
-      if (quoted && line[i + 1] === '"') {
-        current += '"';
-        i += 1;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]!;
+    if (quoted) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          current += '"';
+          i += 1;
+        } else {
+          quoted = false;
+        }
       } else {
-        quoted = !quoted;
+        current += char;
       }
-    } else if (char === "," && !quoted) {
-      cells.push(current);
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      record.push(current);
+      current = "";
+    } else if (char === "\n" || char === "\r") {
+      if (char === "\r" && text[i + 1] === "\n") i += 1;
+      record.push(current);
+      records.push(record);
+      record = [];
       current = "";
     } else {
       current += char;
     }
   }
-  cells.push(current);
-  return cells;
+  if (quoted) throw new Error("CSV_UNTERMINATED_QUOTE");
+  if (current !== "" || record.length > 0) {
+    record.push(current);
+    records.push(record);
+  }
+  return records;
 }
 
 function matchesMagicBytes(buf: Buffer, mimeType: string): boolean {

@@ -78,16 +78,46 @@ const FRIENDLY_TITLES: Record<string, string> = {
   REPORT_CHROME_VERIFICATION_FAILED: "The header/footer failed validation",
   REPORT_SPEC_VERIFICATION_FAILED: "The report spec failed validation",
   INVALID_BODY: "The request contains invalid data",
+  REPORT_SPEC_CONFLICT: "Someone saved this report at the same time. Refresh the version history and try again.",
+  REPORT_ASSET_ZIP_TOO_LARGE: "The asset bundle is larger than 15 MB",
+  REPORT_LOCK_TIMEOUT: "The database was busy and the request timed out. Try again in a moment.",
+  REPORT_COMPILE_ERROR: "The report query could not be compiled",
+  REPORT_SPEC_NOT_FOUND: "This report version could not be found",
+  REPORT_ASSET_BUNDLE_INVALID: "The asset bundle is invalid",
 };
 
-export function friendlyDiagnosticTitle(code: string): string {
-  return FRIENDLY_TITLES[code] ?? code.replaceAll("_", " ").toLowerCase();
+/** Message shown when the client-side 15 MB zip check fails (same text as REPORT_ASSET_ZIP_TOO_LARGE). */
+export const ASSET_ZIP_TOO_LARGE_MESSAGE = FRIENDLY_TITLES.REPORT_ASSET_ZIP_TOO_LARGE!;
+
+type Translate = (key: string, ...params: unknown[]) => string;
+const identity: Translate = (key) => key;
+
+/** `true` when the code has a curated, translatable title. */
+export function hasFriendlyTitle(code: string | null | undefined): boolean {
+  return Boolean(code && Object.prototype.hasOwnProperty.call(FRIENDLY_TITLES, code));
 }
 
-export function friendlyApiErrorMessage(error: unknown): string {
+export function friendlyDiagnosticTitle(code: string, t: Translate = identity): string {
+  const curated = FRIENDLY_TITLES[code];
+  if (curated) return t(curated);
+  const humanised = code.replaceAll("_", " ").toLowerCase();
+  return humanised.charAt(0).toUpperCase() + humanised.slice(1);
+}
+
+/**
+ * Friendly, translated message for an API error: a curated title for known report-engine codes, otherwise the
+ * server's own message (unknown codes never get a humanised code instead of the real explanation).
+ */
+export function friendlyApiErrorMessage(error: unknown, t: Translate = identity): string {
   const extracted = extractApiError(error);
-  if (!extracted) return "An unexpected error occurred.";
-  return friendlyDiagnosticTitle(extracted.code) === extracted.code
-    ? extracted.error
-    : friendlyDiagnosticTitle(extracted.code);
+  if (!extracted) {
+    // A proxy/body-parser 413 has no JSON envelope; it is always the upload being too large.
+    if ((error as { response?: { status?: number } } | null)?.response?.status === 413) {
+      return t(ASSET_ZIP_TOO_LARGE_MESSAGE);
+    }
+    if (error instanceof Error && error.message) return error.message;
+    return t("An unexpected error occurred.");
+  }
+  if (hasFriendlyTitle(extracted.code)) return t(FRIENDLY_TITLES[extracted.code]!);
+  return extracted.error || t("An unexpected error occurred.");
 }

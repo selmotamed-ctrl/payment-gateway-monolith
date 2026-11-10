@@ -3097,7 +3097,7 @@ model ReportChromeSpecRecord {
   chromeType        ReportChromeType   @map("chrome_type")
   status            ReportSpecStatus   @default(DRAFT)
   isDefaultGlobal   Boolean            @default(false) @map("is_default_global")
-  supportedLocales  String[]           @map("supported_locales")
+  supportedLocales  String[]           @default([]) @map("supported_locales")
   specJson          Json               @map("spec_json")
   specSha256        String             @map("spec_sha256") @db.VarChar(64)
   assetBundleId     String?            @map("asset_bundle_id") @db.Uuid
@@ -3121,7 +3121,7 @@ model ReportDefinitionSpecRecord {
   audienceScope              ReportAudienceScope @map("audience_scope")
   status                     ReportSpecStatus    @default(DRAFT)
   isLatestPublished          Boolean             @default(false) @map("is_latest_published")
-  supportedLocales           String[]            @map("supported_locales")
+  supportedLocales           String[]            @default([]) @map("supported_locales")
   defaultLocale              String              @default("en") @map("default_locale") @db.VarChar(16)
   specJson                   Json                @map("spec_json")
   specSha256                 String              @map("spec_sha256") @db.VarChar(64)
@@ -3130,12 +3130,12 @@ model ReportDefinitionSpecRecord {
   assetBundle                ReportAssetBundle?  @relation(fields: [assetBundleId], references: [id], onDelete: SetNull)
 
   authorityMode              ReportAuthorityMode @default(INFERRED_STRICT) @map("authority_mode")
-  inferredRoles              String[]            @map("inferred_roles")
-  inferredAuthorities        String[]            @map("inferred_authorities")
+  inferredRoles              String[]            @default([]) @map("inferred_roles")
+  inferredAuthorities        String[]            @default([]) @map("inferred_authorities")
   conflictStatus             String              @default("NONE") @map("conflict_status") @db.VarChar(48)
   requiresConfidentialAml    Boolean             @default(false) @map("requires_confidential_aml")
-  overrideAllowedRoles       String[]            @map("override_allowed_roles")
-  overrideAllowedAuthorities String[]            @map("override_allowed_authorities")
+  overrideAllowedRoles       String[]            @default([]) @map("override_allowed_roles")
+  overrideAllowedAuthorities String[]            @default([]) @map("override_allowed_authorities")
   overrideJustification      String?             @map("override_justification") @db.Text
   allowConfidentialAmlBypass Boolean             @default(false) @map("allow_confidential_aml_bypass")
   overriddenByUserId         String?             @map("overridden_by_user_id") @db.Uuid

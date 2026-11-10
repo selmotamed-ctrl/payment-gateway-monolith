@@ -97,10 +97,19 @@ export async function seedDefaultChromeSpecs(
     for (const spec of [DEFAULT_HEADER_CHROME, DEFAULT_FOOTER_CHROME]) {
       const specJson = JSON.parse(JSON.stringify(spec));
       const specSha256 = createHash("sha256").update(JSON.stringify(specJson)).digest("hex");
-      await tx.reportChromeSpecRecord.updateMany({
-        where: { chromeType: spec.chrome.chrome_type, isDefaultGlobal: true },
-        data: { isDefaultGlobal: false },
+      // Status and the global-default flag are only set when the seeded row is
+      // first created: a re-run must not un-archive the seeded chrome or steal
+      // the default back from a chrome an operator has since made the default.
+      const existing = await tx.reportChromeSpecRecord.findUnique({
+        where: { code_version: { code: spec.chrome.code, version: 1 } },
+        select: { id: true },
       });
+      const otherDefault = existing
+        ? null
+        : await tx.reportChromeSpecRecord.findFirst({
+            where: { chromeType: spec.chrome.chrome_type, isDefaultGlobal: true, status: "PUBLISHED" },
+            select: { id: true },
+          });
       await tx.reportChromeSpecRecord.upsert({
         where: { code_version: { code: spec.chrome.code, version: 1 } },
         create: {
@@ -109,7 +118,7 @@ export async function seedDefaultChromeSpecs(
           name: spec.chrome.name,
           chromeType: spec.chrome.chrome_type,
           status: "PUBLISHED",
-          isDefaultGlobal: true,
+          isDefaultGlobal: !otherDefault,
           supportedLocales: Object.keys(spec.i18n.locales),
           specJson,
           specSha256,
@@ -117,8 +126,6 @@ export async function seedDefaultChromeSpecs(
         },
         update: {
           name: spec.chrome.name,
-          status: "PUBLISHED",
-          isDefaultGlobal: true,
           supportedLocales: Object.keys(spec.i18n.locales),
           specJson,
           specSha256,

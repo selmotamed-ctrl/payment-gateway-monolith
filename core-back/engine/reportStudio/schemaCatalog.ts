@@ -31,40 +31,93 @@ interface RawRelation {
   fieldName: string;
   targetModelName: string;
   isList: boolean;
+  /** `@relation("Name")` / `@relation(name: "Name")`; pairs a back-relation with its FK side. */
+  relationName: string | null;
   fromFields: string[];
   references: string[];
 }
 
-const FORBIDDEN_SECRET_COLUMNS = new Set([
-  "password_hash",
-  "mfa_secret_ciphertext",
-  "entries_ciphertext",
-  "mtls_cert_ciphertext",
-  "token_hash",
-  "invitation_token_hash",
-  "context_ciphertext",
-  "content_ciphertext",
-  "secret_ciphertext",
-  "private_key",
-  "api_secret",
-  "kms_key",
-  "payout_account_hash",
+/**
+ * Column sensitivity is classified by pattern, not by an exact-name list, so a
+ * new ciphertext/hash/token/bank/national-id column is never silently PUBLIC.
+ * Explicit overrides (below) win over the patterns.
+ */
+const FORBIDDEN_SECRET_PATTERNS: readonly RegExp[] = [
+  /ciphertext/,
+  /(^|_)(password|passphrase|passcode)(_|$)/,
+  /_hash$/,
+  /(^|_)token$/,
+  /private_key/,
+  /(^|_)kms_key/,
+  /(^|_)api_(secret|key)$/,
+  /(^|_)salt$/,
+];
+
+/** `secret` anywhere, except timestamps/metadata about a secret (rotated_at, encoding, ...). */
+const isSecretName = (name: string): boolean =>
+  /secret/.test(name) && !/_(at|encoding|seconds|count|version)$/.test(name);
+
+/** Integrity / metadata columns that match a secret pattern but are not secrets. */
+const SENSITIVITY_OVERRIDES: Readonly<Record<string, CatalogColumnDef["sensitivity"]>> = {
+  "gateway_versions.content_hash": "INTERNAL",
+  "reconciliation_runs.file_hash": "INTERNAL",
+  "audit_chain_anchors.last_row_hash": "INTERNAL",
+  "gl_shard_repairs.plan_hash": "INTERNAL",
+  "notifications.address_masked": "INTERNAL",
+  "access_tokens.ip_whitelist_enabled": "INTERNAL",
+};
+
+/** `_ref` columns on credential/crypto tables point at key material. */
+const KEY_MATERIAL_TABLE = /^(crypto_|credential_)/;
+
+/** PII anywhere in the schema. */
+const PII_PATTERNS: readonly RegExp[] = [
+  /e?mail/,
+  /phone|mobile|(^|_)fax(_|$)/,
+  /iban|account_number|bank_account|bank_details|(^|_)bank(_|$)/,
+  /national_id|passport|date_of_birth|(^|_)dob$/,
+  /(^|_)(client|source|remote|caller)_ip$|^ip$|_ip$|ip_address/,
+  /user_agent/,
+  /(^|_)(full|first|last|middle|matched)_name/,
+  /(^|_)address(_|$)/,
+];
+
+/** People / KYB / payout tables where names and JSON payloads carry PII. */
+const PEOPLE_TABLES = new Set([
+  "beneficial_owners",
+  "users",
+  "aml_screening_matches",
+]);
+const PII_JSON_TABLES = new Set([
+  "beneficial_owners",
+  "join_requests",
+  "kyb_documents",
+  "kyb_revalidation_requests",
+  "aml_screening_matches",
+  "cashout_requests",
+  "audit_log",
+  "audit_outbox",
+  "notifications",
 ]);
 
-const PII_COLUMNS = new Set([
-  "phone",
-  "email",
-  "contact_phone",
-  "contact_email",
-  "support_phone",
-  "support_email",
-  "national_id",
-  "date_of_birth",
-  "full_name",
-  "iban",
-  "account_number",
-  "bank_account",
-]);
+export function classifyColumnSensitivity(
+  tableName: string,
+  dbColumnName: string,
+  type: ScalarType,
+): CatalogColumnDef["sensitivity"] {
+  const name = dbColumnName.toLowerCase();
+  const override = SENSITIVITY_OVERRIDES[`${tableName}.${name}`];
+  if (override) return override;
+  if (isSecretName(name) || FORBIDDEN_SECRET_PATTERNS.some((pattern) => pattern.test(name))) {
+    return "FORBIDDEN_SECRET";
+  }
+  if (KEY_MATERIAL_TABLE.test(tableName) && /_ref$/.test(name)) return "FORBIDDEN_SECRET";
+  if (PII_PATTERNS.some((pattern) => pattern.test(name))) return "PII_MASKED";
+  if (PEOPLE_TABLES.has(tableName) && /^((full|first|last|middle|display)_)?name(_ar|_en)?$|nationality/.test(name)) return "PII_MASKED";
+  if (PII_JSON_TABLES.has(tableName) && type === "json") return "PII_MASKED";
+  if (/(payout|destination|beneficiary).*_json$/.test(name)) return "PII_MASKED";
+  return type === "decimal" || type === "bigint" || type === "uuid" ? "INTERNAL" : "PUBLIC";
+}
 
 const MONEY_FIELD = /(amount|balance|fee|commission|volume|total|net|price)$/i;
 
@@ -116,25 +169,52 @@ const parseModels = (source: string): { models: RawModel[]; enums: Record<string
   return { models, enums };
 };
 
+const parseRelationName = (attributes: string): string | null => {
+  const relation = /@relation\(([^)]*)\)/.exec(attributes)?.[1];
+  if (!relation) return null;
+  return /^\s*"([^"]+)"/.exec(relation)?.[1] ?? /name:\s*"([^"]+)"/.exec(relation)?.[1] ?? null;
+};
+
+const parseFieldList = (attributes: string, key: "fields" | "references"): string[] => {
+  const match = new RegExp(`${key}:\\s*\\[([^\\]]+)\\]`).exec(attributes);
+  return match ? match[1]!.split(",").map((v) => v.trim()).filter(Boolean) : [];
+};
+
 const rawRelations = (models: RawModel[]): RawRelation[] => {
   const modelNames = new Set(models.map((m) => m.name));
   const relations: RawRelation[] = [];
   for (const model of models) {
     for (const field of model.fields) {
       if (!modelNames.has(field.typeName)) continue;
-      const fieldsMatch = /fields:\s*\[([^\]]+)\]/.exec(field.attributes);
-      const referencesMatch = /references:\s*\[([^\]]+)\]/.exec(field.attributes);
       relations.push({
         modelName: model.name,
         fieldName: field.name,
         targetModelName: field.typeName,
         isList: field.isList,
-        fromFields: fieldsMatch ? fieldsMatch[1]!.split(",").map((v) => v.trim()) : [],
-        references: referencesMatch ? referencesMatch[1]!.split(",").map((v) => v.trim()) : [],
+        relationName: parseRelationName(field.attributes),
+        fromFields: parseFieldList(field.attributes, "fields"),
+        references: parseFieldList(field.attributes, "references"),
       });
     }
   }
   return relations;
+};
+
+/**
+ * Finds the FK-side relation that a back-relation (list or 1:1 without
+ * `fields`) is the inverse of. Prisma pairs relations by name; unnamed
+ * relations pair only when exactly one FK-side candidate exists.
+ */
+const findInverseRelation = (rel: RawRelation, relations: RawRelation[]): RawRelation | null => {
+  const candidates = relations.filter(
+    (r) =>
+      r.modelName === rel.targetModelName &&
+      r.targetModelName === rel.modelName &&
+      r.fromFields.length > 0 &&
+      !(r.modelName === rel.modelName && r.fieldName === rel.fieldName),
+  );
+  const named = candidates.filter((r) => r.relationName === rel.relationName);
+  return named.length === 1 ? named[0]! : null;
 };
 
 const domainFor = (tableName: string): CatalogDomain => {
@@ -327,14 +407,7 @@ export function buildSchemaCatalog(schemaPath = path.join(import.meta.dir, "../.
       if (byModel.has(field.typeName) || field.isList) continue;
       const dbColumnName = /@map\("([^"]+)"\)/.exec(field.attributes)?.[1] ?? field.name;
       const type = typeFor(field, enums);
-      const sensitivity =
-        FORBIDDEN_SECRET_COLUMNS.has(dbColumnName) || FORBIDDEN_SECRET_COLUMNS.has(field.name)
-          ? "FORBIDDEN_SECRET"
-          : PII_COLUMNS.has(dbColumnName)
-            ? "PII_MASKED"
-            : type === "decimal" || type === "bigint" || type === "uuid"
-              ? "INTERNAL"
-              : "PUBLIC";
+      const sensitivity = classifyColumnSensitivity(raw.tableName, dbColumnName, type);
       const indexed =
         /@id\b/.test(field.attributes) ||
         /@unique\b/.test(field.attributes) ||
@@ -356,7 +429,7 @@ export function buildSchemaCatalog(schemaPath = path.join(import.meta.dir, "../.
         description: `${raw.tableName}.${dbColumnName}`,
         redactionStrategy:
           sensitivity === "PII_MASKED"
-            ? /email|phone|mobile|fax/i.test(dbColumnName)
+            ? /e?mail|phone|mobile|fax/i.test(dbColumnName) && type !== "json"
               ? "MASK_MIDDLE"
               : "OMIT"
             : undefined,
@@ -417,36 +490,41 @@ export function buildSchemaCatalog(schemaPath = path.join(import.meta.dir, "../.
     }
 
     const modelRelations: Record<string, CatalogRelationDef> = {};
+    const dbNameOf = (modelName: string, fieldName: string): string => {
+      const model = byModel.get(modelName);
+      const field = model?.fields.find((f) => f.name === fieldName);
+      return field ? (/@map\("([^"]+)"\)/.exec(field.attributes)?.[1] ?? field.name) : fieldName;
+    };
     for (const rel of relations.filter((r) => r.modelName === raw.name)) {
       const targetTable = tableByModel.get(rel.targetModelName) ?? rel.targetModelName;
-      const dbNameOf = (modelName: string, fieldName: string): string => {
-        const model = byModel.get(modelName);
-        const field = model?.fields.find((f) => f.name === fieldName);
-        return field ? (/@map\("([^"]+)"\)/.exec(field.attributes)?.[1] ?? field.name) : fieldName;
-      };
-      if (rel.isList) {
-        const inverse = relations.find(
-          (r) => r.modelName === rel.targetModelName && r.targetModelName === raw.name && !r.isList,
-        );
-        const targetKey = inverse?.fromFields[0]
-          ? dbNameOf(rel.targetModelName, inverse.fromFields[0])
-          : "id";
-        modelRelations[rel.fieldName] = {
-          name: rel.fieldName,
-          targetModel: targetTable,
-          cardinality: "ONE_TO_MANY",
-          sourceKey: dbNameOf(raw.name, "id"),
-          targetKey,
-        };
+      let keyPairs: Array<{ sourceKey: string; targetKey: string }>;
+      let cardinality: CatalogRelationDef["cardinality"];
+      if (rel.fromFields.length > 0) {
+        // FK side: this model holds `fields`, the target holds `references`.
+        if (rel.fromFields.length !== rel.references.length) continue;
+        keyPairs = rel.fromFields.map((from, index) => ({
+          sourceKey: dbNameOf(raw.name, from),
+          targetKey: dbNameOf(rel.targetModelName, rel.references[index]!),
+        }));
+        cardinality = "MANY_TO_ONE";
       } else {
-        modelRelations[rel.fieldName] = {
-          name: rel.fieldName,
-          targetModel: targetTable,
-          cardinality: "MANY_TO_ONE",
-          sourceKey: rel.fromFields[0] ? dbNameOf(raw.name, rel.fromFields[0]) : "id",
-          targetKey: rel.references[0] ? dbNameOf(rel.targetModelName, rel.references[0]) : "id",
-        };
+        // Back-relation: resolve the join columns from the inverse FK side.
+        const inverse = findInverseRelation(rel, relations);
+        if (!inverse || inverse.fromFields.length !== inverse.references.length) continue;
+        keyPairs = inverse.references.map((reference, index) => ({
+          sourceKey: dbNameOf(raw.name, reference),
+          targetKey: dbNameOf(rel.targetModelName, inverse.fromFields[index]!),
+        }));
+        cardinality = rel.isList ? "ONE_TO_MANY" : "ONE_TO_ONE";
       }
+      modelRelations[rel.fieldName] = {
+        name: rel.fieldName,
+        targetModel: targetTable,
+        cardinality,
+        sourceKey: keyPairs[0]!.sourceKey,
+        targetKey: keyPairs[0]!.targetKey,
+        ...(keyPairs.length > 1 ? { keyPairs } : {}),
+      };
     }
 
     const merchantColumn = columns.merchant_id?.dbColumnName;
@@ -467,7 +545,9 @@ export function buildSchemaCatalog(schemaPath = path.join(import.meta.dir, "../.
       relations: modelRelations,
       requiredAuthorities: authorities,
       naturalRoles: roles,
-      confidentialAmlOnly: raw.tableName === "aml_cases" || raw.tableName === "aml_screenings",
+      // The whole COMPLIANCE_AML domain (cases, screenings, matches, rules,
+      // regulatory reports, reporting rules) is confidential.
+      confidentialAmlOnly: domain === "COMPLIANCE_AML",
       merchantScopable,
       optimizationRule: defaultOptimizationRule(raw.tableName),
     };

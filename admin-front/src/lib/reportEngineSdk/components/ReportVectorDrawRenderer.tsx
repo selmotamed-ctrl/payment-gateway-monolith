@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { VectorDrawSectionSchema } from "../types/reportSpec";
+import { sanitizeReportHtml } from "../sanitizer/ClientDomSanitizer";
 
 export type VectorDrawSection = z.infer<typeof VectorDrawSectionSchema>;
 
@@ -12,8 +13,11 @@ export function renderVectorDrawSectionToSvg(params: {
 }): string {
   const { section, datasets, t, formatValue, isRtl } = params;
   if (section.draw_kind === "DECLARATIVE_SVG_CANVAS" && section.custom_svg_template) {
-    return section.custom_svg_template.replace(/\{\{\s*\$t\.([a-zA-Z0-9_.-]+)\s*\}\}/g, (_m, key: string) =>
-      escapeXml(t(key)),
+    // Author-supplied SVG goes through the same allow-list sanitizer as HTML templates.
+    return sanitizeReportHtml(
+      section.custom_svg_template.replace(/\{\{\s*\$t\.([a-zA-Z0-9_.-]+)\s*\}\}/g, (_m, key: string) =>
+        escapeXml(t(key)),
+      ),
     );
   }
   const vbWidth = section.view_box.width;
@@ -88,5 +92,5 @@ export function renderVectorDrawSectionToSvg(params: {
 }
 
 function escapeXml(str: string): string {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }

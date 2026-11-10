@@ -998,7 +998,8 @@ router.use((request, _response, next) => {
   }
   next();
 });
-router.use("/report-engine", merchantReportEngineRouter);
+// The report-engine router paths already start with `/report-engine`.
+router.use(merchantReportEngineRouter);
 
 const OPTION_LIMIT = 100;
 

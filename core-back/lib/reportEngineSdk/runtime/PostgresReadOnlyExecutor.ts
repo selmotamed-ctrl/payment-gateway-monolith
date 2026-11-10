@@ -10,6 +10,89 @@ export interface PostgresReadOnlyExecutorOptions {
   maxPoolConnections?: number;
   defaultStatementTimeoutMs?: number;
   workMemMb?: number;
+  /**
+   * Honest label for where report queries are served (A19): "replica" only
+   * when the connection string really points at a read replica; otherwise
+   * "primary-readonly-tx" (a READ ONLY transaction on the primary).
+   */
+  servedBy?: "replica" | "primary-readonly-tx" | (string & {});
+  /** Range-partitioned parent tables whose children are counted in EXPLAIN. */
+  partitionedParents?: readonly string[];
+  /** Tables on which a sequential scan is reported as hasSeqScanOnLargeTable. */
+  largeTables?: readonly string[];
+}
+
+export const DEFAULT_LARGE_TABLES = [
+  "journal_lines",
+  "payment_attempts",
+  "journal_entries",
+  "audit_log",
+  "outbox_events",
+] as const;
+export const DEFAULT_PARTITIONED_PARENTS = ["journal_lines"] as const;
+
+/** `journal_lines_2026_01`, `journal_lines_default`, `journal_lines_p3` → parent `journal_lines`. */
+export function partitionParentOf(relName: string, parents: readonly string[]): string | null {
+  for (const parent of parents) {
+    if (relName.startsWith(`${parent}_`) && /_(\d{4}_\d{2}|\d{6}|default|p\d+|\d{4}q\d)$/.test(relName)) {
+      return parent;
+    }
+  }
+  return null;
+}
+
+/** Pure EXPLAIN (FORMAT JSON) summariser; exported for unit tests. */
+export function summarizeExplainPlan(
+  rawPlan: unknown,
+  options: { partitionedParents?: readonly string[]; largeTables?: readonly string[] } = {},
+): ExplainPlanSummary {
+  const parents = options.partitionedParents ?? DEFAULT_PARTITIONED_PARENTS;
+  const largeTables = new Set(options.largeTables ?? DEFAULT_LARGE_TABLES);
+  const explainRoot = (Array.isArray(rawPlan)
+    ? ((rawPlan[0] as { Plan?: unknown } | undefined)?.Plan ?? {})
+    : ((rawPlan as { Plan?: unknown } | undefined)?.Plan ?? {})) as Record<string, unknown>;
+  const totalCost = Number(explainRoot["Total Cost"] ?? 0);
+  const planRows = Number(explainRoot["Plan Rows"] ?? 0);
+  const seqScanTables: string[] = [];
+  const seqScans: NonNullable<ExplainPlanSummary["seqScans"]> = [];
+  const partitions = new Set<string>();
+
+  const walkPlan = (node: Record<string, unknown> | undefined): void => {
+    if (!node) return;
+    const nodeType = String(node["Node Type"] ?? "");
+    const relName = String(node["Relation Name"] ?? "");
+    const parent = relName ? partitionParentOf(relName, parents) : null;
+    if (parent) partitions.add(relName);
+    if ((nodeType === "Seq Scan" || nodeType === "Parallel Seq Scan") && relName) {
+      seqScanTables.push(relName);
+      seqScans.push({
+        table: relName,
+        parentTable: parent,
+        totalCost: Number(node["Total Cost"] ?? 0),
+        planRows: Number(node["Plan Rows"] ?? 0),
+      });
+    }
+    for (const key of ["Plans", "Subplans"]) {
+      const plans = node[key];
+      if (Array.isArray(plans)) {
+        for (const child of plans) walkPlan(child as Record<string, unknown>);
+      }
+    }
+  };
+  walkPlan(explainRoot);
+
+  const hasSeqScanOnLargeTable = seqScans.some(
+    (scan) => largeTables.has(scan.table) || (scan.parentTable !== null && largeTables.has(scan.parentTable)),
+  );
+  return {
+    totalCost,
+    planRows,
+    hasSeqScanOnLargeTable,
+    seqScanTables,
+    seqScans,
+    partitionsScanned: partitions.size,
+    rawPlanJson: explainRoot,
+  };
 }
 
 const FORBIDDEN_SQL_TOKENS =
@@ -18,9 +101,13 @@ const FORBIDDEN_SQL_TOKENS =
 export class PostgresReadOnlyReportExecutor implements ReadOnlyDatabasePort {
   private readonly pool: Pool;
   private readonly workMemMb: number;
+  private readonly servedBy: string;
+  private readonly planOptions: { partitionedParents?: readonly string[]; largeTables?: readonly string[] };
 
   constructor(options: PostgresReadOnlyExecutorOptions) {
     this.workMemMb = options.workMemMb ?? 32;
+    this.servedBy = options.servedBy ?? "primary-readonly-tx";
+    this.planOptions = { partitionedParents: options.partitionedParents, largeTables: options.largeTables };
     this.pool = new Pool({
       connectionString: options.connectionString,
       max: options.maxPoolConnections ?? 8,
@@ -61,6 +148,7 @@ export class PostgresReadOnlyReportExecutor implements ReadOnlyDatabasePort {
 
     const startedAt = performance.now();
     const client = await this.pool.connect();
+    let releaseError: Error | undefined;
     try {
       await client.query("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
       await client.query(`SET LOCAL statement_timeout = '${boundedTimeoutMs}ms'`);
@@ -76,13 +164,17 @@ export class PostgresReadOnlyReportExecutor implements ReadOnlyDatabasePort {
         rows: res.rows as T[],
         rowCount: res.rowCount ?? res.rows.length,
         durationMs: Math.round(performance.now() - startedAt),
-        servedBy: "readonly-pool",
+        servedBy: this.servedBy,
       };
     } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
+      // A connection whose ROLLBACK fails is destroyed instead of being
+      // returned to the pool in an unknown transaction state.
+      await client.query("ROLLBACK").catch((rollbackError: Error) => {
+        releaseError = rollbackError;
+      });
       throw error;
     } finally {
-      client.release();
+      client.release(releaseError);
     }
   }
 
@@ -93,64 +185,20 @@ export class PostgresReadOnlyReportExecutor implements ReadOnlyDatabasePort {
   }): Promise<ExplainPlanSummary> {
     this.assertPureSelectSql(params.sql);
     const client = await this.pool.connect();
+    let releaseError: Error | undefined;
     try {
       await client.query("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
       await client.query(`SET LOCAL statement_timeout = '${Math.min(params.timeoutMs, 5_000)}ms'`);
       const res = await client.query(`EXPLAIN (FORMAT JSON) ${params.sql}`, params.values);
       await client.query("ROLLBACK");
-
-      const rawPlan = res.rows[0]?.["QUERY PLAN"];
-      const explainRoot = Array.isArray(rawPlan)
-        ? (rawPlan[0]?.Plan ?? {})
-        : ((rawPlan as Record<string, unknown> | undefined)?.Plan ?? {});
-      const totalCost = Number(explainRoot["Total Cost"] ?? 0);
-      const planRows = Number(explainRoot["Plan Rows"] ?? 0);
-      const seqScanTables: string[] = [];
-      let partitionsScanned = 0;
-
-      const walkPlan = (node: Record<string, unknown> | undefined): void => {
-        if (!node) return;
-        const nodeType = String(node["Node Type"] ?? "");
-        const relName = String(node["Relation Name"] ?? "");
-        if (nodeType === "Seq Scan" && relName) {
-          seqScanTables.push(relName);
-        }
-        if (relName.startsWith("journal_lines_p")) {
-          partitionsScanned += 1;
-        }
-        const plans = node["Plans"];
-        if (Array.isArray(plans)) {
-          for (const child of plans) {
-            walkPlan(child as Record<string, unknown>);
-          }
-        }
-      };
-      walkPlan(explainRoot);
-
-      const largeTables = new Set([
-        "journal_lines",
-        "payment_attempts",
-        "journal_entries",
-        "audit_log",
-        "outbox_events",
-      ]);
-      const hasSeqScanOnLargeTable = seqScanTables.some(
-        (tbl) => largeTables.has(tbl) || tbl.startsWith("journal_lines_p"),
-      );
-
-      return {
-        totalCost,
-        planRows,
-        hasSeqScanOnLargeTable,
-        seqScanTables,
-        partitionsScanned,
-        rawPlanJson: explainRoot,
-      };
+      return summarizeExplainPlan(res.rows[0]?.["QUERY PLAN"], this.planOptions);
     } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
+      await client.query("ROLLBACK").catch((rollbackError: Error) => {
+        releaseError = rollbackError;
+      });
       throw error;
     } finally {
-      client.release();
+      client.release(releaseError);
     }
   }
 

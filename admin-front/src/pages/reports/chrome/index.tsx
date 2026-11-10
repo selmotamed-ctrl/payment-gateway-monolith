@@ -1,21 +1,25 @@
 import { dc } from "kt-dc";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VFileInput, VSelect, VSwitch, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VCol, VFileInput, VRow, VSwitch } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { ApiTable } from "@/components/Table/ApiTable";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
-import { DescriptionList, PageHeader, StatusBadge, SurfaceCard } from "@/components/ui";
+import { DescriptionList, MetaPill, MonoRef, PageHeader, SegmentedTabs, SlideOverDrawer, StatusBadge, SurfaceCard } from "@/components/ui";
 import { ReportDiagnosticsPanel } from "@/components/reports/ReportDiagnosticsPanel";
-import { diagnosticsFromApiError, friendlyApiErrorMessage } from "@/utils/reports/diagnostics";
+import { JsonSpecEditor } from "@/components/reports/JsonSpecEditor";
+import { ASSET_ZIP_TOO_LARGE_MESSAGE, diagnosticsFromApiError, friendlyApiErrorMessage } from "@/utils/reports/diagnostics";
+import { downloadText, fileToBase64, isAssetZipTooLarge } from "@/utils/reports/jsonSpec";
 import { api } from "@/state/api";
 import { hasOneOfAuthorities } from "@/state/user";
 import { showConfirm } from "@/utils/confirm";
+import { showSnackBar } from "@/utils/snackBar";
 import { urlsMap } from "@/constants/urlsMap";
 import { renderChromeHtml, type ReportChromeSpec, type ReportExecutionBundle } from "@/lib/reportEngineSdk";
+import "@/components/reports/reports.css";
 
 type ChromeRow = {
   id: string;
@@ -27,6 +31,7 @@ type ChromeRow = {
   isDefaultGlobal: boolean;
   supportedLocales: string[];
   assetBundleId?: string | null;
+  /** Inlined only when the list is requested with `includeAssets=1`; keyed by `asset_key`. */
   assetDataUrls?: Record<string, string>;
   spec: ReportChromeSpec;
 };
@@ -36,23 +41,7 @@ type ChromeRefreshHook = {
   refreshAsIs: () => void;
 };
 
-const fileToBase64 = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-
-const downloadText = (filename: string, content: string, mime: string) => {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-};
+const pickFile = (files: File | File[] | null): File | null => (Array.isArray(files) ? (files[0] ?? null) : files);
 
 const ReportsChromePage = dc(() => {
   const { t } = useLocale();
@@ -60,22 +49,44 @@ const ReportsChromePage = dc(() => {
   const busy = ref(false);
   const error = ref<string | null>(null);
   const diagnostics = ref<ReturnType<typeof diagnosticsFromApiError>>([]);
-  const notice = ref<string | null>(null);
   const specJson = ref("");
   const specFile = ref<File | null>(null);
   const zipFile = ref<File | null>(null);
+  const zipError = ref("");
   const publish = ref(true);
   const makeDefault = ref(false);
+  /** Row loaded through "Edit" (drives the re-attach-zip hint). */
+  const editingRow = ref<ChromeRow | null>(null);
+  const previewRow = ref<ChromeRow | null>(null);
+  const previewOpen = ref(false);
   const previewLocale = ref("en");
-  const selected = ref<ChromeRow | null>(null);
+  const previewAssets = ref<Record<string, string>>({});
+  const previewLoading = ref(false);
+  const previewError = ref("");
   const chromeSearch = ref<string | null>(null);
   const chromePageSize = ref(20);
   const chromeRefresh = ref<ChromeRefreshHook | null>(null);
   const canAuthor = computed(() => hasOneOfAuthorities(["reports.studio", "report_engine:author"]));
-  const canSave = computed(() => specJson.value.trim().length > 0);
+  const canSave = computed(() => specJson.value.trim().length > 0 && !zipError.value);
+  const editingNeedsZip = computed(
+    () => Boolean(editingRow.value?.spec?.required_assets?.length) && !zipFile.value,
+  );
+
+  watch(zipFile, (file) => {
+    zipError.value = isAssetZipTooLarge(file) ? t(ASSET_ZIP_TOO_LARGE_MESSAGE) : "";
+  });
 
   const refresh = () => {
     chromeRefresh.value?.refreshAsIs();
+  };
+
+  const fail = (caught: unknown) => {
+    diagnostics.value = diagnosticsFromApiError(caught);
+    error.value = friendlyApiErrorMessage(caught, t);
+  };
+  const resetFeedback = () => {
+    error.value = null;
+    diagnostics.value = [];
   };
 
   const chromeHeaders = computed<TableHeader<ChromeRow>[]>(() => [
@@ -84,9 +95,15 @@ const ReportsChromePage = dc(() => {
       label: t("Name"),
       sortKey: "name",
       Value: ({ row }) => (
-        <div>
-          <div class="font-weight-medium">{row.name}</div>
-          <div class="text-caption text-medium-emphasis">{row.code} · v{row.version}</div>
+        <div class="d-flex flex-column ga-1">
+          <span class="font-weight-medium">{row.name}</span>
+          <span class="d-inline-flex align-center ga-2">
+            <MonoRef
+              value={row.code}
+              onCopied={() => showSnackBar({ message: t("Code copied"), type: "success" })}
+            />
+            <span class="pg-mono text-caption text-medium-emphasis">v{row.version}</span>
+          </span>
         </div>
       ),
     },
@@ -94,7 +111,9 @@ const ReportsChromePage = dc(() => {
       key: "type",
       label: t("Type"),
       sortKey: "type",
-      Value: ({ row }) => <StatusBadge status={row.chromeType} label={row.chromeType} toneOverride="info" />,
+      Value: ({ row }) => (
+        <StatusBadge status={row.chromeType} label={row.chromeType === "HEADER" ? t("Header") : t("Footer")} toneOverride="info" />
+      ),
     },
     {
       key: "status",
@@ -102,7 +121,7 @@ const ReportsChromePage = dc(() => {
       sortKey: "status",
       Value: ({ row }) => (
         <div class="d-flex align-center ga-2 flex-wrap">
-          <StatusBadge status={row.status} label={row.status} toneOverride={row.status === "PUBLISHED" ? "success" : "neutral"} />
+          <StatusBadge status={row.status} toneOverride={row.status === "PUBLISHED" ? "success" : undefined} />
           {row.isDefaultGlobal && <StatusBadge status="DEFAULT" label={t("Global Default")} toneOverride="success" />}
         </div>
       ),
@@ -110,7 +129,7 @@ const ReportsChromePage = dc(() => {
     {
       key: "locales",
       label: t("Languages"),
-      value: (row) => row.supportedLocales.join(", "),
+      value: (row) => row.supportedLocales.map((locale) => locale.toUpperCase()).join(", "),
     },
     {
       key: "actions",
@@ -121,9 +140,7 @@ const ReportsChromePage = dc(() => {
           primaryAction={{
             label: t("Preview"),
             icon: "mdi-eye-outline",
-            onClick: () => {
-              selected.value = selected.value?.id === row.id ? null : row;
-            },
+            onClick: () => void openPreview(row),
           }}
           items={[
             { key: "edit", label: t("Edit"), icon: "mdi-pencil-outline", onClick: () => editRow(row) },
@@ -152,13 +169,13 @@ const ReportsChromePage = dc(() => {
 
   const downloadTranscript = async () => {
     busy.value = true;
-    error.value = null;
+    resetFeedback();
     try {
       const response = await api.get(urlsMap.reportEngineTranscript, { params: { kind: "CHROME" } });
       const data = response.data ?? {};
       downloadText(data.filename ?? "chrome-engine-ai-transcript-v1.0.md", data.markdown ?? "", "text/markdown");
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
+      error.value = friendlyApiErrorMessage(caught, t);
     } finally {
       busy.value = false;
     }
@@ -166,51 +183,41 @@ const ReportsChromePage = dc(() => {
 
   const readSpecFile = async (file: File | null) => {
     specFile.value = file;
-    if (file) specJson.value = await file.text();
-  };
-
-  const formatJson = () => {
-    try {
-      specJson.value = JSON.stringify(JSON.parse(specJson.value), null, 2);
-      error.value = null;
-    } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : String(caught);
+    if (file) {
+      specJson.value = await file.text();
+      editingRow.value = null;
     }
-  };
-
-  const copyJson = async () => {
-    if (!specJson.value.trim()) return;
-    await navigator.clipboard.writeText(specJson.value);
-    notice.value = t("Chrome JSON copied");
-  };
-
-  const downloadJson = () => {
-    if (!specJson.value.trim()) return;
-    downloadText("chrome-spec.json", specJson.value, "application/json");
   };
 
   const clearEditor = () => {
     specJson.value = "";
     specFile.value = null;
     zipFile.value = null;
-    error.value = null;
-    diagnostics.value = [];
-    notice.value = null;
+    editingRow.value = null;
+    publish.value = true;
+    makeDefault.value = false;
+    resetFeedback();
   };
 
   const editRow = (row: ChromeRow) => {
     specJson.value = JSON.stringify(row.spec, null, 2);
     specFile.value = null;
     zipFile.value = null;
-    error.value = null;
-    diagnostics.value = [];
-    publish.value = false;
+    editingRow.value = row;
+    resetFeedback();
+    // Saving creates the next version; editing a published row republishes by default.
+    publish.value = row.status === "PUBLISHED";
     makeDefault.value = row.isDefaultGlobal;
-    notice.value = t("Loaded {name} into the editor", { name: row.name });
+    showSnackBar({ message: t("Loaded {name} into the editor", { name: row.name }), type: "success" });
   };
 
   const copyCode = async (code: string) => {
-    await navigator.clipboard.writeText(code);
+    try {
+      await navigator.clipboard.writeText(code);
+      showSnackBar({ message: t("Code copied"), type: "success" });
+    } catch {
+      showSnackBar({ message: t("Could not copy to the clipboard"), type: "error" });
+    }
   };
 
   const downloadSpec = (row: ChromeRow) => {
@@ -218,10 +225,9 @@ const ReportsChromePage = dc(() => {
   };
 
   const saveChrome = async () => {
+    if (!canSave.value) return;
     busy.value = true;
-    error.value = null;
-    diagnostics.value = [];
-    notice.value = null;
+    resetFeedback();
     try {
       const assetsZipBase64 = zipFile.value ? await fileToBase64(zipFile.value) : undefined;
       const response = await api.post(urlsMap.reportEngineChrome, {
@@ -230,14 +236,16 @@ const ReportsChromePage = dc(() => {
         publish: publish.value,
         makeDefault: makeDefault.value,
       });
-      notice.value = t("Header/footer spec saved");
-      if (response.data?.verification?.diagnostics?.length) {
-        notice.value = `${notice.value} · ${response.data.verification.diagnostics.length} ${t("diagnostics")}`;
-      }
+      const warnings = Array.isArray(response.data?.verification?.diagnostics) ? response.data.verification.diagnostics.length : 0;
+      showSnackBar({
+        message: warnings
+          ? `${t("Header/footer spec saved")} · ${warnings} ${t("diagnostics")}`
+          : t("Header/footer spec saved"),
+        type: "success",
+      });
       refresh();
     } catch (caught) {
-      diagnostics.value = diagnosticsFromApiError(caught);
-      error.value = friendlyApiErrorMessage(caught);
+      fail(caught);
     } finally {
       busy.value = false;
     }
@@ -252,16 +260,14 @@ const ReportsChromePage = dc(() => {
     });
     if (!confirmed) return;
     busy.value = true;
-    error.value = null;
-    diagnostics.value = [];
+    resetFeedback();
     try {
       await api.post(urlsMap.reportEngineChromeArchive(row.id), {});
-      if (selected.value?.id === row.id) selected.value = null;
-      notice.value = t("Header/footer archived");
+      if (previewRow.value?.id === row.id) previewOpen.value = false;
+      showSnackBar({ message: t("Header/footer archived"), type: "success" });
       refresh();
     } catch (caught) {
-      diagnostics.value = diagnosticsFromApiError(caught);
-      error.value = friendlyApiErrorMessage(caught);
+      fail(caught);
     } finally {
       busy.value = false;
     }
@@ -269,16 +275,38 @@ const ReportsChromePage = dc(() => {
 
   const setDefault = async (row: ChromeRow, isDefault: boolean) => {
     busy.value = true;
-    error.value = null;
-    diagnostics.value = [];
+    resetFeedback();
     try {
       await api.post(urlsMap.reportEngineChromeDefault(row.id), { isDefault });
+      showSnackBar({ message: isDefault ? t("Global default updated") : t("Global default cleared"), type: "success" });
       refresh();
     } catch (caught) {
-      diagnostics.value = diagnosticsFromApiError(caught);
-      error.value = friendlyApiErrorMessage(caught);
+      fail(caught);
     } finally {
       busy.value = false;
+    }
+  };
+
+  // ---------- preview drawer ----------
+  const openPreview = async (row: ChromeRow) => {
+    previewRow.value = row;
+    previewLocale.value = row.supportedLocales.includes("en") ? "en" : (row.supportedLocales[0] ?? "en");
+    previewAssets.value = row.assetDataUrls ?? {};
+    previewError.value = "";
+    previewOpen.value = true;
+    if (!row.assetBundleId || !row.spec.required_assets?.length) return;
+    // The list omits asset data URLs unless asked for; fetch them for this row only.
+    previewLoading.value = true;
+    try {
+      const response = await api.get(urlsMap.reportEngineChrome, {
+        params: { includeAssets: 1, includeArchived: "true", search: row.code, pageSize: 200 },
+      });
+      const match = ((response.data?.specs ?? []) as ChromeRow[]).find((candidate) => candidate.id === row.id);
+      if (previewRow.value?.id === row.id && match?.assetDataUrls) previewAssets.value = match.assetDataUrls;
+    } catch (caught) {
+      previewError.value = friendlyApiErrorMessage(caught, t);
+    } finally {
+      previewLoading.value = false;
     }
   };
 
@@ -294,7 +322,7 @@ const ReportsChromePage = dc(() => {
       resolvedHeaderChrome: row.chromeType === "HEADER" ? row.spec : null,
       resolvedFooterChrome: row.chromeType === "FOOTER" ? row.spec : null,
       datasets: {},
-      assetDataUrls: row.assetDataUrls ?? {},
+      assetDataUrls: previewAssets.value,
       actor: { name: "Preview", email: "preview@example", role: "SECURITY_ADMIN" },
       inputsUsed: {},
       rowCountTotal: 0,
@@ -312,13 +340,44 @@ const ReportsChromePage = dc(() => {
     });
   };
 
+  const localeLabel = (locale: string) => (locale === "ar" ? t("Arabic") : locale === "en" ? t("English") : locale.toUpperCase());
+
+  const renderPreview = (row: ChromeRow) => (
+    <div class="d-flex flex-column ga-4">
+      <SegmentedTabs
+        modelValue={previewLocale.value}
+        onUpdate:modelValue={(value: string) => (previewLocale.value = value)}
+        ariaLabel={t("Preview language")}
+        tabs={row.supportedLocales.map((locale) => ({ value: locale, label: localeLabel(locale) }))}
+      />
+      {previewError.value && <VAlert type="error" variant="tonal">{previewError.value}</VAlert>}
+      {previewLoading.value ? (
+        <div class="text-caption text-medium-emphasis">{t("Loading assets…")}</div>
+      ) : (
+        <div
+          class="pg-report-chrome-preview"
+          dir={previewLocale.value === "ar" ? "rtl" : "ltr"}
+          lang={previewLocale.value}
+          innerHTML={previewHtml(row)}
+        />
+      )}
+      <DescriptionList
+        items={[
+          { label: t("Code"), value: <MonoRef value={row.code} /> },
+          { label: t("Version"), value: `v${row.version}` },
+          { label: t("Locales"), value: row.supportedLocales.map((locale) => locale.toUpperCase()).join(", ") },
+          { label: t("Variables"), value: row.spec.template.used_variables.join(", ") || "—" },
+        ]}
+      />
+    </div>
+  );
+
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
         <PageHeader
           title={t("Report Headers & Footers")}
           subtitle={t("Upload reusable bilingual chrome specs and assign the global default")}
-          breadcrumbs={[{ label: t("Reporting"), to: "/reports/catalog" }, { label: t("Headers & Footers") }]}
           end={() => (
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <VBtn variant="tonal" prependIcon="mdi-refresh" loading={busy.value} onClick={refresh}>
@@ -337,18 +396,13 @@ const ReportsChromePage = dc(() => {
         />
 
         {error.value && (
-          <VAlert type="error" variant="tonal" density="compact">
-            <div class="d-flex align-center justify-space-between ga-3 flex-wrap">
-              <span>{error.value}</span>
-              <VBtn size="small" variant="tonal" onClick={refresh}>{t("Retry")}</VBtn>
-            </div>
+          <VAlert type="error" variant="tonal" closable onClick:close={() => (error.value = null)}>
+            {error.value}
           </VAlert>
         )}
-
         {diagnostics.value.length > 0 && (
           <ReportDiagnosticsPanel diagnostics={diagnostics.value} title={t("Action diagnostics")} />
         )}
-        {notice.value && <VAlert type="success" variant="tonal" density="compact">{notice.value}</VAlert>}
 
         <SurfaceCard title={t("Chrome AI Transcript")} subtitle={t("Author headers and footers with the same closed contract")}>
           <VBtn color="primary" loading={busy.value} prependIcon="mdi-download" onClick={() => void downloadTranscript()}>
@@ -357,81 +411,72 @@ const ReportsChromePage = dc(() => {
         </SurfaceCard>
 
         <SurfaceCard
-          title={t("Upload Chrome Spec")}
-          subtitle={t("JSON + optional logo/seal .zip bundle")}
-          v-slots={{
-            headerActions: () => (
-              <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
-                <VBtn size="small" variant="text" prependIcon="mdi-format-align-left" disabled={!canSave.value} onClick={formatJson}>
-                  {t("Format JSON")}
-                </VBtn>
-                <VBtn size="small" variant="text" prependIcon="mdi-content-copy" disabled={!canSave.value} onClick={() => void copyJson()}>
-                  {t("Copy JSON")}
-                </VBtn>
-                <VBtn size="small" variant="text" prependIcon="mdi-download" disabled={!canSave.value} onClick={downloadJson}>
-                  {t("Download JSON")}
-                </VBtn>
-                <VBtn size="small" variant="text" prependIcon="mdi-eraser" onClick={clearEditor}>
-                  {t("Clear editor")}
-                </VBtn>
-              </ThemedView>
-            ),
-          }}
-        >
-          <div class="d-flex flex-column ga-3">
-            <VFileInput
-              label={t("Chrome spec (.json)")}
-              density="comfortable"
-              variant="outlined"
-              hideDetails="auto"
-              modelValue={specFile.value}
-              onUpdate:modelValue={(files: File | File[] | null) => void readSpecFile(Array.isArray(files) ? (files[0] ?? null) : files)}
-            />
-            <VFileInput
-              label={t("Logo/seal bundle (.zip, optional)")}
-              density="comfortable"
-              variant="outlined"
-              hideDetails="auto"
-              modelValue={zipFile.value}
-              onUpdate:modelValue={(files: File | File[] | null) => (zipFile.value = Array.isArray(files) ? (files[0] ?? null) : files)}
-            />
-            <VTextarea
-              label={t("Chrome spec JSON")}
-              modelValue={specJson.value}
-              onUpdate:modelValue={(value: string) => (specJson.value = value)}
-              rows={12}
-              density="comfortable"
-              variant="outlined"
-              hideDetails="auto"
-              style={{ fontFamily: "monospace" }}
-            />
-            <div class="d-flex flex-wrap ga-3 align-center">
-              <VBtn color="primary" loading={busy.value} disabled={!canSave.value} onClick={() => void saveChrome()}>
-                {t("Verify & Save")}
-              </VBtn>
-              <VSwitch
-                label={t("Publish")}
-                color="primary"
-                baseColor="grey"
-                inset
-                modelValue={publish.value}
-                onUpdate:modelValue={(value: boolean | null) => (publish.value = Boolean(value))}
-                density="comfortable"
-                hideDetails="auto"
+            title={t("Upload Chrome Spec")}
+            subtitle={t("JSON + optional logo/seal .zip bundle")}
+            v-slots={
+              editingRow.value
+                ? {
+                    headerActions: () => (
+                      <MetaPill prependIcon="mdi-pencil-outline">{`${editingRow.value?.code} v${editingRow.value?.version}`}</MetaPill>
+                    ),
+                  }
+                : undefined
+            }
+          >
+            <div class="d-flex flex-column ga-3">
+              <VRow dense>
+                <VCol cols={12} md={6}>
+                  <VFileInput
+                    label={t("Chrome spec (.json)")}
+                    {...{ accept: "application/json,.json" }}
+                    modelValue={specFile.value}
+                    onUpdate:modelValue={(files: File | File[] | null) => void readSpecFile(pickFile(files))}
+                  />
+                </VCol>
+                <VCol cols={12} md={6}>
+                  <VFileInput
+                    label={t("Logo/seal bundle (.zip, optional)")}
+                    {...{ accept: "application/zip,.zip" }}
+                    modelValue={zipFile.value}
+                    errorMessages={zipError.value ? [zipError.value] : []}
+                    onUpdate:modelValue={(files: File | File[] | null) => (zipFile.value = pickFile(files))}
+                  />
+                </VCol>
+              </VRow>
+              {editingNeedsZip.value && (
+                <VAlert type="info" variant="tonal">
+                  {t("This header/footer uses assets. Re-attach its logo/seal bundle (.zip); saving creates a new version and assets are not carried over.")}
+                </VAlert>
+              )}
+              <JsonSpecEditor
+                modelValue={specJson.value}
+                onUpdate:modelValue={(value: string) => (specJson.value = value)}
+                onClear={clearEditor}
+                label={t("Chrome spec JSON")}
+                downloadName={editingRow.value ? `${editingRow.value.code}.json` : "chrome-spec.json"}
+                copiedMessage={t("Chrome JSON copied")}
               />
-              <VSwitch
-                label={t("Make default")}
-                color="primary"
-                baseColor="grey"
-                inset
-                modelValue={makeDefault.value}
-                onUpdate:modelValue={(value: boolean | null) => (makeDefault.value = Boolean(value))}
-                density="comfortable"
-                hideDetails="auto"
-              />
+              <div class="d-flex flex-wrap ga-4 align-center">
+                <VBtn color="primary" loading={busy.value} disabled={!canSave.value} onClick={() => void saveChrome()}>
+                  {t("Verify & Save")}
+                </VBtn>
+                <VSwitch
+                  label={t("Publish")}
+                  color="primary"
+                  hideDetails
+                  modelValue={publish.value}
+                  onUpdate:modelValue={(value: boolean | null) => (publish.value = Boolean(value))}
+                />
+                <VSwitch
+                  label={t("Make default")}
+                  color="primary"
+                  hideDetails
+                  modelValue={makeDefault.value}
+                  onUpdate:modelValue={(value: boolean | null) => (makeDefault.value = Boolean(value))}
+                />
+              </div>
             </div>
-          </div>
-        </SurfaceCard>
+          </SurfaceCard>
 
         <ApiTable<ChromeRow>
           title={t("Registered Headers & Footers")}
@@ -466,33 +511,15 @@ const ReportsChromePage = dc(() => {
           }}
         />
 
-        {selected.value && (
-          <SurfaceCard title={t("Chrome preview")} subtitle={t("Preview the selected header or footer")}>
-            <div class="d-flex align-center ga-2 mb-2">
-              <VSelect
-                modelValue={previewLocale.value}
-                onUpdate:modelValue={(value: string) => (previewLocale.value = value)}
-                items={selected.value.supportedLocales}
-                density="comfortable"
-                variant="outlined"
-                hideDetails="auto"
-                style={{ maxWidth: "160px" }}
-              />
-            </div>
-            <div
-              class="pg-section-fields pa-3"
-              style={{ marginBottom: 0, borderStyle: "dashed" }}
-              innerHTML={previewHtml(selected.value)}
-            />
-            <DescriptionList
-              class="mt-3"
-              items={[
-                { label: t("Locales"), value: selected.value.supportedLocales.join(", ") },
-                { label: t("Variables"), value: selected.value.spec.template.used_variables.join(", ") || "—" },
-              ]}
-            />
-          </SurfaceCard>
-        )}
+        <SlideOverDrawer
+          modelValue={previewOpen.value}
+          onUpdate:modelValue={(value: boolean) => (previewOpen.value = value)}
+          title={previewRow.value?.name ?? t("Chrome preview")}
+          subtitle={t("Preview the selected header or footer")}
+          width={760}
+        >
+          {previewRow.value && renderPreview(previewRow.value)}
+        </SlideOverDrawer>
       </ThemedView>
     </ScreenContainer>
   );

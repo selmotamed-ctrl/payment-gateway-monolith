@@ -26,8 +26,8 @@ describe("RE-T16: transform pipeline", () => {
       ],
       {},
     );
-    expect(result.totals?.[0]?.fee).toBe(10);
-    expect(result.totals?.[0]?.share).toBe(100);
+    expect(result.totals?.[0]?.fee).toBe("10");
+    expect(result.totals?.[0]?.share).toBe("100");
   });
 
   test("COMPARE_WITH_ASSET reports matches, variance and discrepancies", () => {
@@ -49,7 +49,7 @@ describe("RE-T16: transform pipeline", () => {
     expect(rows[0]?._asset_matched).toBe(true);
     expect(rows[0]?._has_discrepancy).toBe(false);
     expect(rows[1]?._has_discrepancy).toBe(true);
-    expect(rows[1]?.total_variance).toBe(50);
+    expect(rows[1]?.total_variance).toBe("50");
   });
 
   test("JOIN_DATASETS and PIVOT_DATASET produce the expected shapes", () => {
@@ -88,7 +88,7 @@ describe("RE-T16: transform pipeline", () => {
       ],
       {},
     );
-    expect(pivoted.pivot?.[0]).toEqual({ day: "2026-01-01", DEBIT: 10, CREDIT: 3 });
+    expect(pivoted.pivot?.[0]).toEqual({ day: "2026-01-01", DEBIT: "10", CREDIT: "3" });
   });
 });
 
@@ -119,9 +119,9 @@ describe("COMPARE_WITH_ASSET output contract", () => {
     expect(row).toMatchObject({
       volume: 100,
       target_volume: 90,
-      volume_vs_target: 90,
-      volume_expected: 90,
-      volume_variance: 10,
+      volume_vs_target: "90",
+      volume_expected: "90",
+      volume_variance: "10",
       _asset_matched: true,
       _has_discrepancy: true,
     });
@@ -143,5 +143,5 @@ describe("COMPARE_WITH_ASSET output contract", () => {
       ],
       { targets: [{ rail_code: "LYD", target_volume: 90 }] },
     );
-    expect(result.comparison?.[0]).toMatchObject({ target_volume: 90, volume_expected: 90, volume_variance: 10 });
+    expect(result.comparison?.[0]).toMatchObject({ target_volume: 90, volume_expected: "90", volume_variance: "10" });
   });

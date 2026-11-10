@@ -62,9 +62,18 @@ export function compileDatasetQueryToSql(
       throw new Error(`INVALID_JOIN_RELATION: "${j.relation_name}" -> "${j.target_model}"`);
     }
     aliasToModel.set(j.alias, targetModel);
-    const sourceCol = baseModel.columns[rel.sourceKey]?.dbColumnName ?? rel.sourceKey;
-    const targetCol = targetModel.columns[rel.targetKey]?.dbColumnName ?? rel.targetKey;
-    let onSql = `${quoteIdent(ds.from_alias)}.${quoteIdent(sourceCol)} = ${quoteIdent(j.alias)}.${quoteIdent(targetCol)}`;
+    // Composite relations AND every key pair; single-column relations use the
+    // legacy sourceKey/targetKey pair.
+    const keyPairs = rel.keyPairs && rel.keyPairs.length > 0
+      ? rel.keyPairs
+      : [{ sourceKey: rel.sourceKey, targetKey: rel.targetKey }];
+    let onSql = keyPairs
+      .map((pair) => {
+        const sourceCol = baseModel.columns[pair.sourceKey]?.dbColumnName ?? pair.sourceKey;
+        const targetCol = targetModel.columns[pair.targetKey]?.dbColumnName ?? pair.targetKey;
+        return `${quoteIdent(ds.from_alias)}.${quoteIdent(sourceCol)} = ${quoteIdent(j.alias)}.${quoteIdent(targetCol)}`;
+      })
+      .join(" AND ");
     if (j.additional_on) {
       const extraOn = compileWhereNode(j.additional_on);
       if (extraOn) onSql = `(${onSql}) AND (${extraOn})`;
@@ -91,10 +100,12 @@ export function compileDatasetQueryToSql(
       case "DATE_TRUNC_MONTH":
         return `date_trunc('month', ${colSql})`;
       case "MINOR_TO_MAJOR_DECIMAL": {
-        const scale = sel.table_alias
-          ? aliasToModel.get(sel.table_alias)?.columns[sel.column]?.minorUnitScale
-          : baseModel.columns[sel.column]?.minorUnitScale;
-        return `ROUND((${colSql}::numeric / ${scale ?? 1000}.0), 3)`;
+        const column = aliasToModel.get(sel.table_alias ?? ds.from_alias)?.columns[sel.column];
+        if (!column || !isMinorUnitColumn(column)) {
+          throw new Error(`MINOR_TO_MAJOR_REQUIRES_MINOR_COLUMN: "${sel.column}"`);
+        }
+        const scale = column.minorUnitScale ?? host.defaultCurrencyMinorUnitScale ?? 1000;
+        return `ROUND((${colSql}::numeric / ${Math.trunc(scale)}.0), 3)`;
       }
       case "SIGNED_JOURNAL_AMOUNT": {
         const dirSql = resolveColumnSql(sel.table_alias, "direction");
@@ -213,7 +224,7 @@ export function compileDatasetQueryToSql(
       case "lte":
         return `${colSql} <= ${pushParam(resolved.value)}`;
       case "ilike_prefix":
-        return `${colSql} ILIKE ${pushParam(`${String(resolved.value).replace(/[%_]/g, "")}%`)}`;
+        return `${colSql} ILIKE ${pushParam(`${escapeLikePattern(String(resolved.value))}%`)} ESCAPE '\\'`;
       case "between": {
         const pair =
           Array.isArray(resolved.value) && resolved.value.length === 2
@@ -242,6 +253,9 @@ export function compileDatasetQueryToSql(
 
   const selectAliases = new Map<string, DatasetSelectField>(ds.select.map((s) => [s.alias, s]));
   const baseSelectSql = ds.select.map((s) => compileSelectField(s)).join(", ");
+  // Base-model columns referenced by window/order clauses but not selected are
+  // carried by the inner query under a private alias and NEVER projected by
+  // the outer query, so they cannot leak into the result rows (A01).
   const windowExtraFields = new Set<string>();
   if (ds.window_fields.length > 0) {
     for (const window of ds.window_fields) {
@@ -259,9 +273,12 @@ export function compileDatasetQueryToSql(
       }
     }
   }
+  const hiddenAlias = (field: string): string => `__w_${field}`;
   const windowExtraSelectSql = [...windowExtraFields]
-    .map((field) => `${resolveColumnSql(undefined, field)} AS ${quoteIdent(field)}`)
+    .map((field) => `${resolveColumnSql(undefined, field)} AS ${quoteIdent(hiddenAlias(field))}`)
     .join(", ");
+  const windowRef = (field: string): string =>
+    selectAliases.has(field) ? `"_base".${quoteIdent(field)}` : `"_base".${quoteIdent(hiddenAlias(field))}`;
   const fromSql = `FROM ${quoteIdent(baseModel.tableName)} AS ${quoteIdent(ds.from_alias)}`;
   const whereClause = ds.where ? compileWhereNode(ds.where) : null;
   const whereSql = whereClause ? `WHERE ${whereClause}` : "";
@@ -341,12 +358,11 @@ export function compileDatasetQueryToSql(
   ]
     .filter(Boolean)
     .join(" ");
+  const windowAliases = new Set(ds.window_fields.map((wf) => wf.alias));
   const windowOrderSql = ds.order_by.length > 0
     ? `ORDER BY ${ds.order_by
         .map((o) => {
-          const colRef = selectAliases.has(o.field)
-            ? quoteIdent(o.field)
-            : quoteIdent(o.field);
+          const colRef = windowAliases.has(o.field) ? quoteIdent(o.field) : windowRef(o.field);
           return `${colRef} ${o.direction}`;
         })
         .join(", ")}`
@@ -355,27 +371,43 @@ export function compileDatasetQueryToSql(
   const windowSelects = ds.window_fields.map((wf) => {
     const partSql =
       wf.partition_by.length > 0
-        ? `PARTITION BY ${wf.partition_by.map((p) => quoteIdent(p)).join(", ")}`
+        ? `PARTITION BY ${wf.partition_by.map((p) => windowRef(p)).join(", ")}`
         : "";
     const ordSql =
       wf.order_by.length > 0
-        ? `ORDER BY ${wf.order_by.map((o) => `${quoteIdent(o.field)} ${o.direction}`).join(", ")}`
+        ? `ORDER BY ${wf.order_by.map((o) => `${windowRef(o.field)} ${o.direction}`).join(", ")}`
         : "";
     const overClause = `OVER (${[partSql, ordSql].filter(Boolean).join(" ")})`;
+    const target = windowRef(wf.target_field);
     switch (wf.window_fn) {
       case "RUNNING_SUM":
-        return `SUM(${quoteIdent(wf.target_field)}) ${overClause} AS ${quoteIdent(wf.alias)}`;
+        return `SUM(${target}) ${overClause} AS ${quoteIdent(wf.alias)}`;
       case "ROW_NUMBER":
         return `ROW_NUMBER() ${overClause} AS ${quoteIdent(wf.alias)}`;
       case "RANK":
         return `RANK() ${overClause} AS ${quoteIdent(wf.alias)}`;
       case "PERCENT_OF_TOTAL":
-        return `ROUND((${quoteIdent(wf.target_field)}::numeric * 100.0) / NULLIF(SUM(${quoteIdent(wf.target_field)}) OVER (${partSql}), 0), 2) AS ${quoteIdent(wf.alias)}`;
+        return `ROUND((${target}::numeric * 100.0) / NULLIF(SUM(${target}) OVER (${partSql}), 0), 2) AS ${quoteIdent(wf.alias)}`;
     }
   });
+  const outerSelectSql = [
+    ...ds.select.map((sel) => `"_base".${quoteIdent(sel.alias)}`),
+    ...windowSelects,
+  ].join(", ");
 
   return {
-    sql: `SELECT _base.*, ${windowSelects.join(", ")} FROM (${windowBaseSql}) AS _base ${windowOrderSql} LIMIT ${boundedLimit}`,
+    sql: `SELECT ${outerSelectSql} FROM (${windowBaseSql}) AS "_base" ${windowOrderSql} LIMIT ${boundedLimit}`,
     values,
   };
+}
+
+/** A column that stores (or is exposed in) minor units. */
+export function isMinorUnitColumn(column: { name: string; type: string; minorUnitScale?: number }): boolean {
+  if (column.minorUnitScale && column.minorUnitScale > 1) return true;
+  return /_minor$/.test(column.name) && (column.type === "bigint" || column.type === "int");
+}
+
+/** Escapes LIKE metacharacters (`\\`, `%`, `_`) for use with `ESCAPE '\\'`. */
+export function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
 }

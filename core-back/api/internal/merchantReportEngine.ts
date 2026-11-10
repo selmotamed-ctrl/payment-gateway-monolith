@@ -7,21 +7,31 @@ import { principalOf } from "../middleware/authDoubleCheck";
 import { assertMerchantAuthority, effectiveMerchantAuthorities } from "../../lib/auth/merchantAuthorities";
 import {
   ReportDescriptorSpecSchema,
-  ReportChromeSpecSchema,
-  ReportInputValidationError,
-  ReportAccessDeniedError,
   validateMerchantReportScope,
   type ReportActorContext,
-  type ReportChromeRegistryEntry,
+  type ReportDescriptorSpec,
 } from "../../lib/reportEngineSdk";
 import { getReportEngine } from "../../engine/reportStudio/reportEngineRuntime";
 import { writeAudit } from "../../lib/audit/writeAudit";
+import {
+  actorIdentityOf,
+  loadChromeRegistry,
+  redactInputs,
+  toReportExecutionError,
+} from "./adminReportEngine";
 
+/**
+ * Merchant report-engine routes. The router is mounted on the merchant channel
+ * WITHOUT a prefix (its paths already start with `/report-engine`), behind the
+ * channel's authentication and merchant-principal guards.
+ */
 const router = express.Router();
 export const merchantReportEngineRouter = router;
 
 const engine = getReportEngine();
 const host = engine.host;
+
+const NULL_USER_ID = "00000000-0000-0000-0000-000000000000";
 
 const executeBodySchema = z
   .object({
@@ -44,41 +54,82 @@ function merchantIdOf(request: Request): string {
   return merchantId;
 }
 
-function actorOf(request: Request): ReportActorContext {
+async function actorOf(request: Request): Promise<ReportActorContext> {
   const principal = principalOf(request);
+  const identity = await actorIdentityOf(request);
   return {
-    userId: principal.userId ?? "00000000-0000-0000-0000-000000000000",
-    email: null,
+    userId: principal.userId ?? NULL_USER_ID,
+    email: identity.email,
     role: principal.role ?? "MERCHANT_STAFF",
     authorities: [...effectiveMerchantAuthorities(principal)],
+    isMaker: identity.isMaker,
+    isChecker: identity.isChecker,
   };
 }
 
-function redactInputs(inputs: Record<string, unknown>): Record<string, unknown> {
-  const output: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(inputs)) {
-    output[key] = /secret|password|token|otp|pin|key/i.test(key) ? "[REDACTED]" : value;
+type SpecRecordPolicy = {
+  audienceScope: string;
+  authorityMode: string;
+  requiresConfidentialAml: boolean;
+  overrideAllowedRoles: string[];
+  overrideAllowedAuthorities: string[];
+};
+
+/**
+ * The merchant counterpart of `isActorAllowedByPolicy`. Inferred policies are
+ * expressed in staff roles/authorities, which a merchant never holds, so for a
+ * merchant the inferred policy is "merchant-facing, safely merchant-scoped and
+ * `report_engine:run`" (checked by the callers). A Security Admin override
+ * restricts further: the merchant's role or one of its effective authorities
+ * must be listed. Confidential AML reports are never served to merchants.
+ */
+export function isMerchantActorAllowed(record: SpecRecordPolicy, actor: ReportActorContext): boolean {
+  if (record.audienceScope !== "MERCHANT_FACING" && record.audienceScope !== "BOTH") return false;
+  if (record.requiresConfidentialAml) return false;
+  if (record.authorityMode === "SECURITY_ADMIN_OVERRIDE") {
+    return (
+      record.overrideAllowedRoles.includes(actor.role) ||
+      record.overrideAllowedAuthorities.some((authority) => actor.authorities.includes(authority))
+    );
   }
-  return output;
+  return true;
 }
 
-async function chromeRegistry(): Promise<ReportChromeRegistryEntry[]> {
-  const rows = await client.reportChromeSpecRecord.findMany({
-    where: { status: "PUBLISHED" },
-    orderBy: [{ chromeType: "asc" }, { code: "asc" }],
-  });
-  return rows.map((row) => ({
-    spec: ReportChromeSpecSchema.parse(row.specJson),
-    isDefaultGlobal: row.isDefaultGlobal,
-    status: row.status,
-    assetBundleId: row.assetBundleId,
-  }));
+/**
+ * What a merchant needs to render a report: inputs, sections, i18n, report and
+ * page/chrome settings. The datasets keep only their id and the output column
+ * aliases with their format hints; the query AST (model, joins, filters,
+ * grouping, ordering, limits) never leaves core.
+ */
+export function merchantSafeSpec(spec: ReportDescriptorSpec): Record<string, unknown> {
+  const { datasets, suggested_access: _suggestedAccess, ...rest } = spec as ReportDescriptorSpec & {
+    suggested_access?: unknown;
+  };
+  return {
+    ...rest,
+    datasets: datasets.map((dataset) => ({
+      dataset_id: dataset.dataset_id,
+      select: dataset.select.map((field) => ({
+        alias: field.alias,
+        format_hint: field.format_hint,
+        ...("label_i18n_key" in field && typeof (field as { label_i18n_key?: unknown }).label_i18n_key === "string"
+          ? { label_i18n_key: (field as { label_i18n_key: string }).label_i18n_key }
+          : {}),
+      })),
+      window_fields: (dataset.window_fields ?? []).map((field) => ({
+        alias: field.alias,
+        ...("format_hint" in field ? { format_hint: (field as { format_hint?: unknown }).format_hint } : {}),
+        ...("label_i18n_key" in field ? { label_i18n_key: (field as { label_i18n_key?: unknown }).label_i18n_key } : {}),
+      })),
+    })),
+  };
 }
 
 router.get("/report-engine/catalog", async (request: Request, response: Response) => {
   const principal = principalOf(request);
   assertMerchantAuthority(principal, ["report_engine:run"]);
   const merchantId = merchantIdOf(request);
+  const actor = await actorOf(request);
   const page = Math.max(1, Number(request.query.page ?? 1) || 1);
   const pageSize = Math.min(200, Math.max(1, Number(request.query.pageSize ?? 20) || 20));
   const search = typeof request.query.search === "string" ? request.query.search.trim() : "";
@@ -88,6 +139,7 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
     status: "PUBLISHED",
     isLatestPublished: true,
     audienceScope: { in: ["MERCHANT_FACING", "BOTH"] },
+    requiresConfidentialAml: false,
     ...(search
       ? {
           OR: [
@@ -108,7 +160,7 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
   const rows = await client.reportDefinitionSpecRecord.findMany({ where, orderBy });
   const allowed = [];
   for (const row of rows) {
-    if (row.audienceScope !== "MERCHANT_FACING" && row.audienceScope !== "BOTH") continue;
+    if (!isMerchantActorAllowed(row, actor)) continue;
     const spec = ReportDescriptorSpecSchema.parse(row.specJson);
     if (validateMerchantReportScope(spec, host).some((diagnostic) => diagnostic.severity === "error")) continue;
     allowed.push({
@@ -119,7 +171,7 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
       audienceScope: row.audienceScope,
       supportedLocales: row.supportedLocales,
       defaultLocale: row.defaultLocale,
-      spec,
+      spec: merchantSafeSpec(spec),
       updatedAt: row.updatedAt,
       merchantId,
     });
@@ -151,9 +203,10 @@ router.get("/report-engine/autocomplete/:sourceKey", async (request: Request, re
       : undefined;
   const items = await provider.search({
     query: String(request.query.q ?? ""),
-    limit: Math.min(Number(request.query.limit ?? 20), 50),
-    actor: actorOf(request),
-    dependentValues: sourceKey === "applications" ? { ...(dependentValues ?? {}), merchantId } : dependentValues,
+    limit: Math.min(Number(request.query.limit ?? 20) || 20, 50),
+    actor: await actorOf(request),
+    // The merchant can never widen the provider's merchant filter.
+    dependentValues: { ...(dependentValues ?? {}), merchantId },
   });
   response.json({ items });
 });
@@ -162,6 +215,7 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
   const principal = principalOf(request);
   assertMerchantAuthority(principal, ["report_engine:run"]);
   const merchantId = merchantIdOf(request);
+  const actor = await actorOf(request);
   const { code } = parseOrThrow(codeParams, request.params);
   const body = parseOrThrow(executeBodySchema, request.body ?? {});
   const row = await client.reportDefinitionSpecRecord.findFirst({
@@ -171,6 +225,9 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
   if (!row) throw new ApiError(404, "REPORT_NOT_FOUND", "The published report does not exist");
   if (row.audienceScope !== "MERCHANT_FACING" && row.audienceScope !== "BOTH") {
     throw new ApiError(403, "REPORT_ACCESS_DENIED", "This report is not available to merchants");
+  }
+  if (!isMerchantActorAllowed(row, actor)) {
+    throw new ApiError(403, "REPORT_ACCESS_DENIED", "You are not authorized to run this report");
   }
   const spec = ReportDescriptorSpecSchema.parse(row.specJson);
   const scopeDiagnostics = validateMerchantReportScope(spec, host);
@@ -189,65 +246,60 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
   }
 
   const forcedInputs = { ...body.inputs, [scopeKey]: merchantId };
-  const registry = await chromeRegistry();
+  const registry = await loadChromeRegistry();
   let bundle;
   try {
     bundle = await engine.executeReport({
       spec,
       inputs: forcedInputs,
-      actor: actorOf(request),
+      actor,
       chromeRegistry: registry,
       chromeOverride: null,
       assetBundleId: row.assetBundleId,
       allowConfidentialAmlBypass: false,
     });
   } catch (error) {
-    if (error instanceof ReportInputValidationError) {
-      throw new ApiError(400, error.code, error.message, { issues: error.zodError.issues });
-    }
-    if (error instanceof ReportAccessDeniedError) {
-      throw new ApiError(403, error.code, error.message);
-    }
-    const pgCode = (error as { code?: string } | null)?.code;
-    if (pgCode === "57014" || /statement timeout|canceling statement/i.test(String((error as Error)?.message))) {
-      throw new ApiError(408, "REPORT_QUERY_TIMEOUT", "The report query exceeded its time limit");
-    }
-    throw error;
+    throw toReportExecutionError(error);
   }
 
-  await client.reportExecutionAuditRecord.create({
-    data: {
-      reportSpecId: row.id,
-      reportCode: row.code,
-      reportVersion: row.version,
-      actorUserId: principal.userId ?? "00000000-0000-0000-0000-000000000000",
-      actorRole: principal.role ?? "MERCHANT_STAFF",
-      selectedLocale: body.locale ?? spec.i18n.default_locale,
-      scopedMerchantId: merchantId,
-      inputsRedactedJson: redactInputs(bundle.inputsUsed) as never,
-      rowCountTotal: bundle.rowCountTotal,
-      durationMs: bundle.durationMs,
-      servedByNode: bundle.servedByNode,
-      verificationSha256: bundle.verificationSha256,
-      renderTarget: "CLIENT_PAGED_VECTOR",
-    },
-  });
-  await writeAudit(client, {
-    data: {
-      actorId: principal.userId ?? "00000000-0000-0000-0000-000000000000",
-      role: principal.role ?? "MERCHANT_STAFF",
-      action: "MERCHANT_REPORT_EXECUTED",
-      entityType: "REPORT_SPEC",
-      entityId: row.id,
-      beforeJson: null,
-      afterJson: {
-        code: row.code,
-        version: row.version,
-        merchantId,
-        locale: body.locale ?? spec.i18n.default_locale,
-        verificationSha256: bundle.verificationSha256,
+  const executed = bundle;
+  // The execution record and its audit row commit together.
+  await client.$transaction(async (tx) => {
+    await tx.reportExecutionAuditRecord.create({
+      data: {
+        reportSpecId: row.id,
+        reportCode: row.code,
+        reportVersion: row.version,
+        actorUserId: actor.userId,
+        actorRole: actor.role,
+        selectedLocale: body.locale ?? spec.i18n.default_locale,
+        scopedMerchantId: merchantId,
+        inputsRedactedJson: redactInputs(executed.inputsUsed) as never,
+        rowCountTotal: executed.rowCountTotal,
+        durationMs: executed.durationMs,
+        servedByNode: executed.servedByNode,
+        verificationSha256: executed.verificationSha256,
+        renderTarget: "CLIENT_PAGED_VECTOR",
       },
-    } as never,
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role,
+        action: "MERCHANT_REPORT_EXECUTED",
+        entityType: "REPORT_SPEC",
+        entityId: row.id,
+        beforeJson: null,
+        afterJson: {
+          code: row.code,
+          version: row.version,
+          merchantId,
+          locale: body.locale ?? spec.i18n.default_locale,
+          verificationSha256: executed.verificationSha256,
+        },
+      } as never,
+    });
   });
-  response.json(bundle);
+  // The rendered bundle carries the spec the client renders from; the query AST is stripped.
+  response.json({ ...bundle, spec: merchantSafeSpec(bundle.spec) });
 });

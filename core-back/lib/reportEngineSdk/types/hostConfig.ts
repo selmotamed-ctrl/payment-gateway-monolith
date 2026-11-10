@@ -35,8 +35,11 @@ export interface CatalogRelationDef {
   name: string;
   targetModel: string;
   cardinality: "ONE_TO_ONE" | "MANY_TO_ONE" | "ONE_TO_MANY";
+  /** First (or only) join column pair; kept for single-column consumers. */
   sourceKey: string;
   targetKey: string;
+  /** Composite keys: every pair is ANDed in the join condition (includes the first pair). */
+  keyPairs?: ReadonlyArray<{ sourceKey: string; targetKey: string }>;
 }
 
 export interface ModelOptimizationRule {
@@ -112,7 +115,8 @@ export interface ReadOnlyQueryResult<T = Record<string, unknown>> {
   rows: T[];
   rowCount: number;
   durationMs: number;
-  servedBy: "primary" | string;
+  /** "replica" | "primary-readonly-tx" (READ ONLY tx on the primary) | host-specific label. */
+  servedBy: "replica" | "primary-readonly-tx" | (string & {});
   replicaLagMs?: number;
 }
 
@@ -121,6 +125,8 @@ export interface ExplainPlanSummary {
   planRows: number;
   hasSeqScanOnLargeTable: boolean;
   seqScanTables: string[];
+  /** Per-node sequential scans (table, partition parent, estimated cost/rows). */
+  seqScans?: Array<{ table: string; parentTable: string | null; totalCost: number; planRows: number }>;
   partitionsScanned?: number;
   rawPlanJson: unknown;
 }
@@ -205,5 +211,7 @@ export interface ReportEngineHostConfig {
     maxExplainCost: number;
     maxAssetZipBytes: number;
     maxSingleAssetBytes: number;
+    /** A seq scan on a large table above this estimated cost is a Layer 2 error (default 10_000). */
+    maxSeqScanCost?: number;
   };
 }
