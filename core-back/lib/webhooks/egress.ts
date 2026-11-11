@@ -79,11 +79,19 @@ export interface PinnedPostInput {
   maxResponseBytes?: number;
   allowInsecure?: boolean;
   resolver?: DnsResolver;
+  /** Keep the first `maxResponseBytes` of the answer in `PinnedPostResult.body` (the webhook sender discards it). */
+  captureBody?: boolean;
+  /** Hard deadline for the whole exchange, including a slow response body; `timeoutMs` is only the idle timeout. */
+  deadlineMs?: number;
+  /** Overrides the default `PaymentGateway-Webhooks/1` agent. */
+  userAgent?: string;
 }
 
 export interface PinnedPostResult {
   status: number;
   latencyMs: number;
+  /** The captured answer (UTF-8, at most `maxResponseBytes` bytes), only when `captureBody` was set. */
+  body?: string;
 }
 
 /** POSTs `body` to the pinned address of `url`. Resolves with the status of any HTTP answer; rejects for network failures. */
@@ -113,25 +121,41 @@ export const postPinned = async (input: PinnedPostInput): Promise<PinnedPostResu
           ...input.headers,
           "content-type": "application/json",
           "content-length": String(payload.length),
-          "user-agent": "PaymentGateway-Webhooks/1",
+          "user-agent": input.userAgent ?? "PaymentGateway-Webhooks/1",
         },
         timeout: input.timeoutMs ?? 10_000,
         agent: false,
       } as never,
       (response) => {
         let received = 0;
+        const kept: Buffer[] = [];
         response.on("data", (chunk: Buffer) => {
+          if (input.captureBody && received < maxBytes) kept.push(chunk.subarray(0, maxBytes - received));
           received += chunk.length;
-          if (received > maxBytes) response.destroy(); // the answer is not used: stop reading
+          if (received > maxBytes) response.destroy(); // the cap is reached: stop reading
         });
-        const done = () => resolve({ status: response.statusCode ?? 0, latencyMs: Date.now() - started });
+        const done = () => {
+          if (deadline) clearTimeout(deadline);
+          resolve({
+            status: response.statusCode ?? 0,
+            latencyMs: Date.now() - started,
+            ...(input.captureBody ? { body: Buffer.concat(kept).toString("utf8") } : {}),
+          });
+        };
         response.on("end", done);
         response.on("close", done);
         response.on("error", done);
       },
     );
+    // A slow-drip answer never trips the idle timeout above, so a total deadline bounds the whole exchange.
+    const deadline = input.deadlineMs
+      ? setTimeout(() => request.destroy(new WebhookEgressError("The endpoint did not complete the exchange in time", true, "TIMEOUT")), input.deadlineMs)
+      : undefined;
     request.on("timeout", () => request.destroy(new WebhookEgressError("The endpoint did not answer in time", true, "TIMEOUT")));
-    request.on("error", (error) => reject(error instanceof WebhookEgressError ? error : new WebhookEgressError(`Connection failed: ${error.message}`.slice(0, 300), true, "NETWORK")));
+    request.on("error", (error) => {
+      if (deadline) clearTimeout(deadline);
+      reject(error instanceof WebhookEgressError ? error : new WebhookEgressError(`Connection failed: ${error.message}`.slice(0, 300), true, "NETWORK"));
+    });
     request.write(payload);
     request.end();
   });
