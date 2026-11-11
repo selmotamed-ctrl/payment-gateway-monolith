@@ -248,6 +248,21 @@ export function validateSpecStructureAndI18n(
       for (const m of tokenMatches) {
         if (m[1]) referencedKeys.push({ key: m[1], path: `${sPath}.html_template` });
       }
+      // Report HTML templates bind translations and assets only. Dataset tokens
+      // are a common hallucination and would render literally in the preview.
+      for (const match of sec.html_template.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
+        const token = match[1] ?? "";
+        if (token.startsWith("$t.")) continue;
+        diagnostics.push({
+          layer: 1,
+          severity: "error",
+          path: `${sPath}.html_template`,
+          code: "UNSUPPORTED_TEMPLATE_TOKEN",
+          message: `HTML template token "{{${token}}}" is not supported.`,
+          aiFixHint:
+            "Report HTML templates support only {{$t.<translation_key>}} and asset://<asset_key>. Use KPI_GRID, DATA_TABLE or CHART for dataset values.",
+        });
+      }
     } else if (sec.section_type === "IMAGE_BANNER") {
       if (sec.caption_i18n_key) {
         referencedKeys.push({ key: sec.caption_i18n_key, path: `${sPath}.caption_i18n_key` });

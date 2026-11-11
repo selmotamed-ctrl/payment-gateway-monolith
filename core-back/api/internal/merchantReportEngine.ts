@@ -11,6 +11,7 @@ import {
   ReportDescriptorSpecSchema,
   ReportMerchantScopeViolationError,
   extractZipAssetFiles,
+  synthesizeDefaultInputs,
   validateMerchantReportScope,
   type ReportActorContext,
   type ReportDescriptorSpec,
@@ -71,6 +72,14 @@ const studioVerifySchema = z
 
 const studioSaveSchema = studioVerifySchema
   .extend({ publish: z.boolean().optional() })
+  .strict();
+
+const studioPreviewSchema = studioVerifySchema
+  .extend({
+    inputs: z.record(z.string(), z.unknown()).optional(),
+    locale: z.string().max(16).optional(),
+    mode: z.enum(["MOCK", "LIVE"]).default("MOCK"),
+  })
   .strict();
 
 const cloneSchema = z.object({ code: z.string().min(1).max(64).optional() }).strict();
@@ -468,6 +477,78 @@ router.post("/report-engine/studio/verify", async (request: Request, response: R
     assetsEnabled: policy.assetsEnabled,
   });
   response.json(verification);
+});
+
+router.post("/report-engine/studio/preview", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["report_engine:author"]);
+  const merchantId = merchantIdOf(request);
+  const policy = await assertMerchantEngineAvailable(merchantId);
+  const body = parseOrThrow(studioPreviewSchema, request.body ?? {});
+  const rawSpecJson = typeof body.specJson === "string" ? body.specJson : JSON.stringify(body.specJson);
+  let parsedSpec: ReportDescriptorSpec;
+  try {
+    parsedSpec = ReportDescriptorSpecSchema.parse(
+      typeof body.specJson === "string" ? JSON.parse(body.specJson) : body.specJson,
+    );
+  } catch (error) {
+    throw new ApiError(400, "SCHEMA_VALIDATION_ERROR", "The report spec is not valid", {
+      reason: (error as Error).message,
+    });
+  }
+  const zip = await extractMerchantZip(body.assetsZipBase64);
+  const tierDiagnostics = validateMerchantTierLimits(parsedSpec, {
+    specBytes: Buffer.byteLength(rawSpecJson),
+    zipBytes: zip.zipBytes,
+  });
+  const scopeDiagnostics = validateMerchantReportScope(parsedSpec, host);
+  if ([...tierDiagnostics, ...scopeDiagnostics].some((diagnostic) => diagnostic.severity === "error")) {
+    throw new ApiError(409, "MERCHANT_REPORT_SCOPE_INVALID", "This report is not safely scoped for a merchant", {
+      diagnostics: [...tierDiagnostics, ...scopeDiagnostics],
+    });
+  }
+  const verification = await verifyMerchantSpec({
+    rawSpecJson,
+    filesByName: zip.filesByName,
+    specBytes: Buffer.byteLength(rawSpecJson),
+    zipBytes: zip.zipBytes,
+    assetsEnabled: policy.assetsEnabled,
+  });
+  if (!verification.valid) {
+    throw new ApiError(400, "REPORT_SPEC_VERIFICATION_FAILED", "The report spec failed verification", {
+      verification,
+    });
+  }
+  const chromeRegistry = await loadChromeRegistry();
+  const actor = await actorOf(request);
+  const scopeKey = parsedSpec.report.merchant_scope_input_key;
+  if (body.mode === "MOCK") {
+    const bundle = engine.buildMockPreviewBundle({
+      spec: parsedSpec,
+      locale: body.locale,
+      inputsUsed: body.inputs ?? synthesizeDefaultInputs(parsedSpec),
+      actor,
+      chromeRegistry,
+      chromeOverride: null,
+    });
+    response.json({ verification, bundle, mode: "MOCK" });
+    return;
+  }
+  const inputs = { ...(body.inputs ?? synthesizeDefaultInputs(parsedSpec)), ...(scopeKey ? { [scopeKey]: merchantId } : {}) };
+  try {
+    const bundle = await engine.executeReport({
+      spec: parsedSpec,
+      inputs,
+      actor,
+      chromeRegistry,
+      chromeOverride: null,
+      allowConfidentialAmlBypass: false,
+      merchantScope: { merchantId },
+    });
+    response.json({ verification, bundle, mode: "LIVE" });
+  } catch (error) {
+    throw toReportExecutionError(error);
+  }
 });
 
 router.post("/report-engine/studio/specs", async (request: Request, response: Response) => {

@@ -273,3 +273,52 @@ describe("section field registry and compiler regressions", () => {
     const compiled = compileDatasetQueryToSql(spec.datasets[0]!, createTestHostConfig(), {});
     expect(compiled.sql).toContain("GROUP BY date_trunc('day', \"pa\".\"created_at\")");
   });
+
+describe("CASE_WHEN_ENUM numeric aggregation", () => {
+  test("SUM over a numeric CASE_WHEN_ENUM casts the THEN values to numeric", () => {
+    const spec = baseReportSpec();
+    const ds = spec.datasets[0]!;
+    ds.select = [
+      { alias: "currency", column: "currency", expression: "COLUMN", format_hint: "RAW" },
+      {
+        alias: "failed_attempts",
+        column: "direction",
+        expression: "CASE_WHEN_ENUM",
+        case_map: { DEBIT: 1, CREDIT: 0 },
+        aggregate: "SUM",
+        format_hint: "INTEGER",
+      },
+    ];
+    ds.group_by = ["currency"];
+    const compiled = compileDatasetQueryToSql(ds, createTestHostConfig(), {
+      merchantId: "00000000-0000-4000-8000-000000000001",
+      periodRange: { start: "2026-01-01T00:00:00.000Z", end: "2026-01-31T00:00:00.000Z" },
+    });
+    expect(compiled.sql).toContain("::numeric");
+    expect(compiled.sql).toContain("SUM(");
+  });
+});
+
+describe("AGE_DAYS scalar expression", () => {
+  test("compiles to an epoch-day expression that can be averaged", () => {
+    const spec = baseReportSpec();
+    const ds = spec.datasets[0]!;
+    ds.select = [
+      { alias: "currency", column: "currency", expression: "COLUMN", format_hint: "RAW" },
+      {
+        alias: "avg_age_days",
+        column: "created_at",
+        expression: "AGE_DAYS",
+        aggregate: "AVG",
+        format_hint: "INTEGER",
+      },
+    ];
+    ds.group_by = ["currency"];
+    const compiled = compileDatasetQueryToSql(ds, createTestHostConfig(), {
+      merchantId: "00000000-0000-4000-8000-000000000001",
+      periodRange: { start: "2026-01-01T00:00:00.000Z", end: "2026-01-31T00:00:00.000Z" },
+    });
+    expect(compiled.sql).toContain("EXTRACT(EPOCH FROM");
+    expect(compiled.sql).toContain("AVG(");
+  });
+});

@@ -510,17 +510,36 @@ async function loadStoredAssetFiles(
 router.get("/report-engine/transcript", async (request: Request, response: Response) => {
   requireAuthorities(request, ["report:review", "report_engine:author", "gateway:write"]);
   const kind = String(request.query.kind ?? "REPORT").toUpperCase();
+  const ALLOWED_DOMAINS = new Set([
+    "LEDGER",
+    "PAYMENTS",
+    "MERCHANTS",
+    "COMPLIANCE_AML",
+    "GATEWAYS",
+    "RECONCILIATION",
+    "SECURITY_AUDIT",
+    "OPERATIONS",
+  ]);
   const domains = String(request.query.domains ?? "")
     .split(",")
-    .map((d) => d.trim())
-    .filter(Boolean) as Array<ReportDescriptorSpec["report"]["category"]>;
+    .map((d) => d.trim().toUpperCase())
+    .filter((d) => ALLOWED_DOMAINS.has(d)) as Array<
+    "LEDGER" | "PAYMENTS" | "MERCHANTS" | "COMPLIANCE_AML" | "GATEWAYS" | "RECONCILIATION" | "SECURITY_AUDIT" | "OPERATIONS"
+  >;
+  const modelNames = String(request.query.models ?? "")
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+  const brief = typeof request.query.brief === "string" ? request.query.brief.slice(0, 2000) : undefined;
   if (kind === "CHROME") {
     response.json(engine.buildChromeTranscript());
     return;
   }
   response.json(
     engine.buildTranscript({
-      domains: domains.length > 0 ? (domains as never) : undefined,
+      domains: domains.length > 0 ? domains : undefined,
+      modelNames: modelNames.length > 0 ? modelNames : undefined,
+      brief,
     }),
   );
 });
@@ -558,6 +577,7 @@ const previewBodySchema = z
     assetsZipBase64: z.string().optional(),
     inputs: z.record(z.string(), z.unknown()).optional(),
     locale: z.string().max(16).optional(),
+    mode: z.enum(["MOCK", "LIVE"]).default("MOCK"),
   })
   .strict();
 
@@ -614,17 +634,37 @@ router.post("/report-engine/specs/preview", async (request: Request, response: R
   }
   const inputs = body.inputs ?? synthesizeDefaultInputs(parsedSpec);
   const actor = await actorOf(request);
+  const chromeRegistry = await loadChromeRegistry();
   try {
+    if (body.mode === "MOCK") {
+      const assetDataUrls: Record<string, string> = {};
+      for (const [assetKey, asset] of Object.entries(assets)) {
+        if (asset.mimeType.startsWith("image/")) {
+          assetDataUrls[assetKey] = `data:${asset.mimeType};base64,${asset.buffer.toString("base64")}`;
+        }
+      }
+      const bundle = engine.buildMockPreviewBundle({
+        spec: parsedSpec,
+        locale: body.locale,
+        inputsUsed: inputs,
+        actor,
+        chromeRegistry,
+        chromeOverride: null,
+        assetDataUrls,
+      });
+      response.json({ verification, bundle, mode: "MOCK" });
+      return;
+    }
     const bundle = await engine.executeReport({
       spec: parsedSpec,
       inputs,
       actor,
-      chromeRegistry: await loadChromeRegistry(),
+      chromeRegistry,
       chromeOverride: null,
       assets,
       allowConfidentialAmlBypass: false,
     });
-    response.json({ verification, bundle });
+    response.json({ verification, bundle, mode: "LIVE" });
   } catch (error) {
     throw toReportExecutionError(error);
   }

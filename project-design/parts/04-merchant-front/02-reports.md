@@ -69,3 +69,9 @@ Every execution:
 ## Run form layout (2026-11-10)
 
 The merchant run drawer mirrors the admin filter-style form: sectioned, one field per row, labels and descriptions on every field, and a dedicated output-language section when multiple locales exist. Reset and Generate live in the drawer footer; the merchant scope input remains hidden.
+
+## Merchant Studio mock preview (2026-11-10)
+
+The merchant Studio now has a draft preview after a successful verification. It defaults to **Mock data**, which uses the shared `MockReportBundleBuilder` and renders every section (including visibility-gated ones) without a database query; **Live sample** runs the merchant-scoped executor with the engine-injected merchant identity. The endpoint is `POST /report-engine/studio/preview` (core) and is proxied by `merchant-back`. The shared client renderer/print stylesheet fix applies to both portals, so merchant previews and prints use the same A4 containment rules as the admin Studio.
+
+The merchant transcript example now lowers `periodRange.validation.max_range_days` to 90 so it stays inside the merchant 92-day tier limit, and the merchant host registers a `merchants` autocomplete source for the engine-injected scope input (returning the current merchant only).

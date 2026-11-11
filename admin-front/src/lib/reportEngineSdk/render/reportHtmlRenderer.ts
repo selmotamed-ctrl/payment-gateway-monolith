@@ -221,6 +221,8 @@ export function renderReportSectionsToHtml(params: {
   locale: string;
   /** @deprecated Ignored for report content: labels always come from the spec dictionary of `locale`. */
   t?: Translate;
+  /** Studio mock preview: render every section, including visibility-gated ones. */
+  includeHiddenSections?: boolean;
 }): string {
   const { bundle, locale } = params;
   const spec = bundle.spec;
@@ -323,7 +325,7 @@ export function renderReportSectionsToHtml(params: {
         return `<section class="report-section report-chart-box">
             ${heading(section.title_i18n_key)}
             ${subtitle(section.subtitle_i18n_key)}
-            <div class="report-chart-frame" style="width:${section.width_percent}%">${svg}</div>
+            <div class="report-chart-frame" style="width:${section.width_percent}%;max-width:100%">${svg}</div>
           </section>`;
       }
 
@@ -373,7 +375,7 @@ export function renderReportSectionsToHtml(params: {
     { orientation: null, breakBefore: false, html: [] },
   ];
   for (const section of spec.sections) {
-    if (!isVisible(section, bundle.datasets, bundle.inputsUsed ?? {})) continue;
+    if (!params.includeHiddenSections && !isVisible(section, bundle.datasets, bundle.inputsUsed ?? {})) continue;
     if (section.section_type === "PAGE_BREAK") {
       const previous = groups[groups.length - 1]!;
       if (section.orientation_after) orientation = section.orientation_after;

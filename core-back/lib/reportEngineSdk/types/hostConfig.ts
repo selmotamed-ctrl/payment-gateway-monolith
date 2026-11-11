@@ -126,7 +126,14 @@ export interface ExplainPlanSummary {
   hasSeqScanOnLargeTable: boolean;
   seqScanTables: string[];
   /** Per-node sequential scans (table, partition parent, estimated cost/rows). */
-  seqScans?: Array<{ table: string; parentTable: string | null; totalCost: number; planRows: number }>;
+  seqScans?: Array<{
+    table: string;
+    parentTable: string | null;
+    totalCost: number;
+    planRows: number;
+    /** True when the scanned table (or its partition parent) is a configured large table. */
+    largeTable?: boolean;
+  }>;
   partitionsScanned?: number;
   rawPlanJson: unknown;
 }

@@ -160,19 +160,20 @@
 | `core-back/test/reportEngineSdk/AuthorityAndCatalog.test.ts` | 137 | 9 |
 | `core-back/test/reportEngineSdk/AuthorityInferenceEngine.test.ts` | 90 | 6 |
 | `core-back/test/reportEngineSdk/ChromeResolution.test.ts` | 52 | 3 |
-| `core-back/test/reportEngineSdk/CompilerAndReferenceRegression.test.ts` | 276 | 7 |
+| `core-back/test/reportEngineSdk/CompilerAndReferenceRegression.test.ts` | 325 | 9 |
 | `core-back/test/reportEngineSdk/CssAndHtmlSanitizer.test.ts` | 63 | 4 |
 | `core-back/test/reportEngineSdk/ExecuteAndRedaction.test.ts` | 140 | 4 |
 | `core-back/test/reportEngineSdk/InputFormZodCompiler.test.ts` | 93 | 4 |
 | `core-back/test/reportEngineSdk/MerchantReportLine.test.ts` | 313 | 11 |
 | `core-back/test/reportEngineSdk/MerchantReportPolicy.test.ts` | 46 | 4 |
 | `core-back/test/reportEngineSdk/MerchantScopeValidator.test.ts` | 101 | 5 |
+| `core-back/test/reportEngineSdk/MockPreview.test.ts` | 172 | 5 |
 | `core-back/test/reportEngineSdk/PiiAndAccess.test.ts` | 121 | 2 |
 | `core-back/test/reportEngineSdk/PostgresReadOnlyExecutor.test.ts` | 119 | 4 |
-| `core-back/test/reportEngineSdk/QuerySafetyAndOptValidator.test.ts` | 279 | 17 |
+| `core-back/test/reportEngineSdk/QuerySafetyAndOptValidator.test.ts` | 340 | 20 |
 | `core-back/test/reportEngineSdk/ReportDryRunSimulator.test.ts` | 78 | 5 |
 | `core-back/test/reportEngineSdk/ReportRepairPrompt.test.ts` | 19 | 1 |
-| `core-back/test/reportEngineSdk/ReportTranscriptBuilder.test.ts` | 95 | 6 |
+| `core-back/test/reportEngineSdk/ReportTranscriptBuilder.test.ts` | 96 | 6 |
 | `core-back/test/reportEngineSdk/SdkDecoupling.test.ts` | 37 | 2 |
 | `core-back/test/reportEngineSdk/SeedChrome.test.ts` | 100 | 2 |
 | `core-back/test/reportEngineSdk/SpecNormalization.test.ts` | 128 | 6 |
@@ -344,6 +345,7 @@
 | `tests/e2e/admin/guide-safeguard.spec.ts` | 104 | 1 |
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/operator-cases.spec.ts` | 187 | 2 |
+| `tests/e2e/admin/report-a4-layout.spec.ts` | 138 | 1 |
 | `tests/e2e/admin/shell.spec.ts` | 254 | 17 |
 | `tests/e2e/admin/table-and-padding-geometry.spec.ts` | 235 | 3 |
 | `tests/e2e/admin/table-row-context-menu.spec.ts` | 217 | 8 |
@@ -401,5 +403,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **396**
-- Total literal test declarations: **4041**
+- Total files: **398**
+- Total literal test declarations: **4052**

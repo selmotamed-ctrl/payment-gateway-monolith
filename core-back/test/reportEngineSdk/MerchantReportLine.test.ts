@@ -259,7 +259,7 @@ describe("E04/E05 regression: aggregated scope and gte/lte ranges", () => {
       undefined,
       { merchantScope: { merchantId: MERCHANT_ID } },
     );
-    expect(compiled.sql).toContain('MAX("pa"."merchant_id") AS "__scope_merchant_id"');
+    expect(compiled.sql).toContain('MAX(("pa"."merchant_id")::text) AS "__scope_merchant_id"');
     expect(compiled.sql).toContain('GROUP BY "pa"."currency"');
   });
 
@@ -283,7 +283,7 @@ describe("E04/E05 regression: aggregated scope and gte/lte ranges", () => {
       undefined,
       { merchantScope: { merchantId: MERCHANT_ID } },
     );
-    expect(compiled.sql).toContain('MAX("pa"."merchant_id") AS "__scope_merchant_id"');
+    expect(compiled.sql).toContain('MAX(("pa"."merchant_id")::text) AS "__scope_merchant_id"');
   });
 
   test("a same-input gte/lte pair satisfies the 92-day merchant range", () => {

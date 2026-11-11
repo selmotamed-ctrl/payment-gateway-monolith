@@ -479,3 +479,9 @@ These are development/CI tests only; no production-time test job or test endpoin
 - `core-back/test/reporting-template.test.ts` now proves a malformed workbook is reported rather than accepted, in addition to named-range mapping and range-overflow coverage.
 - Existing core reporting, DOCX, incident, adapter and XLSX tests remain the targeted gate; the full core suite is expected to fail only the four tests that require a reachable PostgreSQL test database.
 - Playwright coverage for the new pages should be added when a browser is available: incident create/filter/detail/close/report, filing-adapter approval flow, Studio template upload/reload/analyze/remove, and report adapter filing/submission history at 360/390/768/1280 px in both themes and RTL.
+
+## Report-engine authoring evaluation (2026-11-10)
+
+`report-spec-generator/scripts/eval/pipeline.ts` is the recursive authoring harness: it downloads the current transcript, spawns an unrelated `opencode run` agent with only the transcript and a brief, verifies/saves/executes/mock-previews the resulting spec through the real admin API, and records diagnostics, coverage and chrome artifacts under `report-spec-generator/runs/`. The brief corpus (`report-spec-generator/briefs/*.md`) covers top-N rankings, settlement, latency, failures, ledger, reconciliation, AML, cashouts, Arabic, landscape wide tables and an explicit no-chrome case. The final 12-brief sweep produced a 100% first-pass verification rate and 100% section coverage with the improved transcript.
+
+`tests/e2e/admin/report-a4-layout.spec.ts` is the A4 regression gate. It fetches a mock preview from the live API, renders it through the real client SDK and Paged.js, and fails when any visible element crosses the page content box. Run it with `PLAYWRIGHT_CHROME_PATH=/opt/google/chrome/chrome REPORT_LAYOUT_SPEC=<spec.json> bunx playwright test e2e/admin/report-a4-layout.spec.ts --project=admin`.

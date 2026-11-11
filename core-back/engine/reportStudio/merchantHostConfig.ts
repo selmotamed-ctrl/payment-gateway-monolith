@@ -163,6 +163,20 @@ function merchantProviders(db: ReportEngineHostConfig["dbReadOnlyPort"]): Record
   });
 
   return {
+    // The merchant scope input is engine-injected and hidden in the run form;
+    // registering the source keeps the spec contract identical to the staff
+    // line without exposing a cross-merchant lookup.
+    merchants: {
+      sourceKey: "merchants",
+      description: "Your merchant (injected by the engine)",
+      valueType: "uuid",
+      requiredAuthority: "report_engine:run",
+      search: async ({ dependentValues }) => {
+        const merchantId =
+          typeof dependentValues?.merchantId === "string" ? dependentValues.merchantId : null;
+        return merchantId ? [{ value: merchantId, label: "Current merchant" }] : [];
+      },
+    },
     applications: provider(
       "applications",
       "Your applications",

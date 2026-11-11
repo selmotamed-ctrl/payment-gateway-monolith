@@ -4,7 +4,7 @@ import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
-import { VAlert, VBtn, VCol, VFileInput, VRow, VSelect } from "vuetify/components";
+import { VAlert, VBtn, VBtnToggle, VCol, VFileInput, VRow, VSelect } from "vuetify/components";
 import { DataTable } from "@/components/Table/DataTable";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
@@ -26,11 +26,10 @@ import {
   ReportPagedPreviewSurface,
   renderChromeHtml,
   renderReportSectionsToHtml,
-  specTranslator,
   type ReportDescriptorSpec,
-  type ReportDiagnostic,
   type ReportExecutionBundle,
 } from "@/lib/reportEngineSdk";
+import {type ReportDiagnostic} from "@/lib/reportEngineSdk/types/diagnostics.ts"
 import {
   ASSET_ZIP_TOO_LARGE_MESSAGE,
   diagnosticsFromApiError,
@@ -166,6 +165,7 @@ const ReportsStudioPage = dc(() => {
   const previewLocale = ref("en");
   const previewPages = ref(1);
   const previewLoading = ref(false);
+  const previewMode = ref<"MOCK" | "LIVE">("MOCK");
   const previewRef = ref<{ printClientSideVectorPdf?: () => void } | null>(null);
   /** Editor JSON and zip the current `verification` was produced from; any edit invalidates it. */
   const verifiedInput = ref<{ json: string; zip: File | null } | null>(null);
@@ -212,7 +212,12 @@ const ReportsStudioPage = dc(() => {
   const isVerified = computed(() => verificationCurrent.value && verification.value?.valid === true);
   const previewSectionsHtml = computed(() =>
     previewBundle.value
-      ? renderReportSectionsToHtml({ bundle: previewBundle.value, locale: previewLocale.value, t })
+      ? renderReportSectionsToHtml({
+          bundle: previewBundle.value,
+          locale: previewLocale.value,
+          t,
+          includeHiddenSections: previewMode.value === "MOCK",
+        })
       : "",
   );
   const previewHeaderHtml = computed(() =>
@@ -373,6 +378,7 @@ const ReportsStudioPage = dc(() => {
       const response = await api.post(urlsMap.reportEnginePreview, {
         specJson: specJson.value,
         assetsZipBase64,
+        mode: previewMode.value,
       });
       const bundle = response.data?.bundle as ReportExecutionBundle | undefined;
       previewBundle.value = bundle ?? null;
@@ -936,10 +942,26 @@ const ReportsStudioPage = dc(() => {
         {verification.value?.valid && (
           <SurfaceCard
             title={t("Step 5 — Draft preview")}
-            subtitle={t("Renders the verified draft with sample inputs; nothing is saved or published")}
+            subtitle={t("Mock data fills every section; switch to live sample data to test real queries. Nothing is saved or published.")}
             v-slots={{
               headerActions: () => (
                 <div class="d-flex flex-wrap align-center ga-2">
+                  <VBtnToggle
+                    modelValue={previewMode.value}
+                    onUpdate:modelValue={(next: unknown) => {
+                      const value = Array.isArray(next) ? next[0] : next;
+                      if (value === "MOCK" || value === "LIVE") {
+                        previewMode.value = value;
+                        previewBundle.value = null;
+                      }
+                    }}
+                    density="compact"
+                    variant="outlined"
+                    divided
+                  >
+                    <VBtn value="MOCK" size="small" prependIcon="mdi-flask-outline">{t("Mock data")}</VBtn>
+                    <VBtn value="LIVE" size="small" prependIcon="mdi-database-outline">{t("Live sample")}</VBtn>
+                  </VBtnToggle>
                   <VBtn
                     size="small"
                     variant="tonal"
@@ -952,6 +974,9 @@ const ReportsStudioPage = dc(() => {
                   </VBtn>
                   {previewBundle.value && (
                     <>
+                      <MetaPill color={previewMode.value === "MOCK" ? "warning" : "info"}>
+                        {previewMode.value === "MOCK" ? t("Mock data") : t("Live sample")}
+                      </MetaPill>
                       <MetaPill color="info">{`${previewPages.value} ${t("pages")}`}</MetaPill>
                       <MonoRef value={previewBundle.value.verificationSha256} truncate={12} />
                       <VBtn

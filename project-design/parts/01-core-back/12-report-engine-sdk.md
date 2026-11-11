@@ -238,3 +238,37 @@ Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `4
 - COMPUTE_COLUMN `right_operand` is optional only for unary `PERCENTAGE_SHARE`; other formulas require it. `PERCENT_BPS` is accepted as a transform output format.
 - Section-field diagnostics list available fields/datasets, add a closest-match suggestion, and distinguish unknown datasets from unknown fields.
 - ZERO_NATURAL_ROLE_INTERSECTION remains a non-blocking warning and points to the Security Admin override; SUGGESTED_ACCESS_CONFLICT is emitted only when `suggested_access` is present.
+
+## 15. Authoring transcript v1.1, mock preview and A4 containment
+
+### 15.1 Transcript v1.1
+
+`ReportTranscriptBuilder` now emits `report-engine-ai-transcript-v1.1.md` with:
+
+- a mandatory self-validation checklist and a diagnostic-code→fix table derived from the verifier contract;
+- the exact zod limits, required fields, identifier regexes and enum vocabularies;
+- the joined-column rule (a select/predicate on a joined model must set `table_alias`) and the missing-column rule (join the related model that owns the field);
+- an explicit COMPUTE_COLUMN contract (it appends `output_column` to `target_dataset_id`; it does not create a dataset and has no `output_dataset_id`);
+- KPI-tone vs badge-tone vocabularies, `badge_tone_map` values, and the `{{$t.*}}`/`asset://`-only HTML template rule;
+- SVG asset hygiene (no C2PA/foreign namespaces/metadata);
+- authoring recipes and a complexity budget;
+- **no chrome authoring** (headers/footers are a separate `kind=CHROME` workflow) unless a brief explicitly asks.
+
+`transcript/reportableModels.ts` excludes engine-internal, authentication, queue, backup, gateway-configuration and report-engine storage tables from the transcript; Layer 2 rejects them with `MODEL_NOT_REPORTABLE`. The `?domains=` filter is fixed to the catalog domains and new `?models=`/`?brief=` parameters support brief-scoped transcripts.
+
+### 15.2 Additional verification and compiler rules
+
+- `AGE_DAYS` is a scalar expression (`EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - column)) / 86400.0`) usable with `AVG`/`MAX`; direct `AVG`/`SUM` on datetime/string/enum columns is rejected with `AGGREGATE_REQUIRES_NUMERIC`.
+- `SUM`/`AVG` over `CASE_WHEN_ENUM` casts numeric `THEN` values to `numeric`, fixing `function sum(text) does not exist`.
+- Report `HTML_TEMPLATE` tokens other than `{{$t.key}}` produce `UNSUPPORTED_TEMPLATE_TOKEN`.
+- A large-table sequential scan is now an error only when its estimated cost is at/above `globalLimits.maxSeqScanCost` (admin: 25 000). A cheap bounded scan of a single partition is allowed, removing a false positive that made valid ledger datasets fail.
+- `UNKNOWN_COLUMN` hints point at the joined model alias, or at the relation to join when the field is not on the base model. `UNKNOWN_TRANSFORM_DATASET`/`UNKNOWN_SECTION_DATASET` recognise a COMPUTE_COLUMN `output_column` and point at its target dataset.
+- The merchant scope column is cast to text when the query is aggregated (`MAX(<scope>::text)`), because PostgreSQL has no `max(uuid)`; an aggregate row with a null scope column (zero matching rows) is skipped instead of raising a false `MERCHANT_SCOPE_VIOLATION`.
+
+### 15.3 Studio mock preview
+
+`lib/reportEngineSdk/preview/MockReportBundleBuilder.ts` builds a database-free, deterministic preview bundle from the spec: typed rows per dataset, window fields, the real transform pipeline (including COMPARE_WITH_ASSET), placeholder image assets and engine-injected merchant inputs. `POST /report-engine/specs/preview` and the merchant `/studio/preview` accept `mode: "MOCK" | "LIVE"` (default `MOCK`); MOCK still runs the five verification layers but never queries the database. The client renderer accepts `includeHiddenSections`, so a mock preview renders visibility-gated sections instead of hiding them.
+
+### 15.4 A4 print containment
+
+The paged-media stylesheet now uses fixed-layout data tables, wraps long values (`overflow-wrap:anywhere`), constrains HTML-template tables, charts, SVGs, images, chrome running elements and Paged.js content wrappers to the page content box. `show_on_first_page=false` still removes the first-page chrome. `tests/e2e/admin/report-a4-layout.spec.ts` renders a mock bundle through the real client SDK + Paged.js and asserts no visible client rect crosses the A4 content box in English and Arabic, portrait and landscape.

@@ -28,3 +28,4 @@ deploy.env
 **/playwright-report/
 **/blob-report/
 **/tsconfig.tsbuildinfo
+**/.report-assets

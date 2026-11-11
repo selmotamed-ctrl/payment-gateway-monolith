@@ -42,6 +42,7 @@ import {
   type ExtractedAssetFile,
 } from "./verifier/AssetBundleValidator";
 import { validateSafeHtmlAndScopedCss } from "./verifier/CssAndHtmlSanitizer";
+import { buildMockReportBundle, type MockReportBundle } from "./preview/MockReportBundleBuilder";
 
 export * from "./types/hostConfig";
 export * from "./types/chromeSpec";
@@ -52,6 +53,8 @@ export { executeReport };
 export { inferReportAuthorities, canApplySecurityOverride, isActorAllowedByPolicy } from "./verifier/AuthorityInferenceEngine";
 export { validateMerchantReportScope } from "./verifier/MerchantScopeValidator";
 export { synthesizeDefaultInputs } from "./verifier/QuerySafetyAndOptValidator";
+export { buildMockReportBundle } from "./preview/MockReportBundleBuilder";
+export type { MockReportBundle } from "./preview/MockReportBundleBuilder";
 export { PostgresReadOnlyReportExecutor } from "./runtime/PostgresReadOnlyExecutor";
 export { executeTransformPipeline } from "./compiler/TransformPipelineExecutor";
 export { compileDatasetQueryToSql } from "./compiler/QueryAstToSqlCompiler";
@@ -139,6 +142,15 @@ export interface ReportEngine {
     override?: Parameters<typeof inferReportAuthorities>[2],
   ): AuthorityInferenceResult;
   validateInputs(spec: ReportDescriptorSpec, inputs: Record<string, unknown>): Record<string, unknown>;
+  buildMockPreviewBundle(params: {
+    spec: ReportDescriptorSpec;
+    locale?: string;
+    inputsUsed?: Record<string, unknown>;
+    actor?: ReportActorContext | null;
+    chromeRegistry: ReportChromeRegistryEntry[];
+    chromeOverride?: ChromeSelectionOverride | null;
+    assetDataUrls?: Record<string, string>;
+  }): MockReportBundle;
   resolveChrome(params: {
     spec: ReportDescriptorSpec;
     chromeRegistry: ReportChromeRegistryEntry[];
@@ -219,6 +231,16 @@ export function createReportEngine(host: ReportEngineHostConfig): ReportEngine {
         throw new ReportInputValidationError(parsed.error);
       }
       return parsed.data as Record<string, unknown>;
+    },
+    buildMockPreviewBundle: ({ spec, chromeRegistry, chromeOverride, ...rest }) => {
+      const { header, footer } = resolveChrome(spec, chromeRegistry, chromeOverride);
+      return buildMockReportBundle({
+        spec,
+        host,
+        resolvedHeaderChrome: header,
+        resolvedFooterChrome: footer,
+        ...rest,
+      });
     },
     resolveChrome: ({ spec, chromeRegistry, override }) =>
       resolveChrome(spec, chromeRegistry, override),
@@ -435,7 +457,10 @@ async function executeReport(
       }
       for (const row of rows) {
         const received = row.__scope_merchant_id;
-        if (received !== input.merchantScope.merchantId) {
+        // An aggregate over zero matching rows returns one row whose scope
+        // column is null; there is no tenant data in that row, so it is safe.
+        if (received === null || received === undefined) continue;
+        if (String(received) !== String(input.merchantScope.merchantId)) {
           await input.merchantScope.onViolation?.({
             datasetId: ds.dataset_id,
             expected: input.merchantScope.merchantId,

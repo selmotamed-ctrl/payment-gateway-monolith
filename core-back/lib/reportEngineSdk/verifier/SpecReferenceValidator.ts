@@ -130,6 +130,16 @@ export function validateSpecReferences(
     datasetFields.set(ds.dataset_id, fields);
   }
 
+  // COMPUTE_COLUMN appends a column to an existing dataset; authors often
+  // mistake output_column for a new dataset id. Remember the owner so the
+  // diagnostic can point at the real target.
+  const computedColumnOwner = new Map<string, string>();
+  for (const transform of spec.transforms) {
+    if (transform.operation === "COMPUTE_COLUMN") {
+      computedColumnOwner.set(transform.output_column, transform.target_dataset_id);
+    }
+  }
+
   for (let i = 0; i < spec.transforms.length; i++) {
     const transform = spec.transforms[i]!;
     const sourceIds = "source_dataset_id" in transform
@@ -145,7 +155,9 @@ export function validateSpecReferences(
           path: `transforms[${i}]`,
           code: "UNKNOWN_TRANSFORM_DATASET",
           message: `Transform references unknown dataset "${source}". Available datasets and transform outputs: ${formatAvailable(datasetFields.keys())}.`,
-          aiFixHint: `Reference a dataset declared in datasets[] or an earlier transform output.${closestMatch(source, datasetFields.keys()) ? ` Did you mean "${closestMatch(source, datasetFields.keys())}"?` : ""}`,
+          aiFixHint: computedColumnOwner.has(source)
+            ? `"${source}" is an output_column on dataset "${computedColumnOwner.get(source)}", not a dataset. Set target_dataset_id to "${computedColumnOwner.get(source)}" (COMPUTE_COLUMN does not create datasets).`
+            : `Reference a dataset declared in datasets[] or an earlier transform output.${closestMatch(source, datasetFields.keys()) ? ` Did you mean "${closestMatch(source, datasetFields.keys())}"?` : ""}`,
         });
       }
     }
@@ -231,7 +243,9 @@ export function validateSpecReferences(
           path: fieldPath,
           code: "UNKNOWN_SECTION_DATASET",
           message: `Section references unknown dataset "${dataset}". Available datasets and transform outputs: ${formatAvailable(datasetFields.keys())}.`,
-          aiFixHint: `Use a declared dataset_id or a transform output dataset.${closestMatch(dataset, datasetFields.keys()) ? ` Did you mean "${closestMatch(dataset, datasetFields.keys())}"?` : ""}`,
+          aiFixHint: computedColumnOwner.has(dataset)
+            ? `"${dataset}" is an output_column on dataset "${computedColumnOwner.get(dataset)}", not a dataset. Reference "${computedColumnOwner.get(dataset)}" in the section.`
+            : `Use a declared dataset_id or a transform output dataset.${closestMatch(dataset, datasetFields.keys()) ? ` Did you mean "${closestMatch(dataset, datasetFields.keys())}"?` : ""}`,
         });
         return;
       }

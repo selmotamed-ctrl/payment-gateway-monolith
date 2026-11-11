@@ -85,6 +85,21 @@ router.post(
 );
 
 router.post(
+  "/studio/preview",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/report-engine/studio/preview",
+    schema: studioBody
+      .extend({
+        inputs: z.record(z.string(), z.unknown()).optional(),
+        locale: z.string().max(16).optional(),
+        mode: z.enum(["MOCK", "LIVE"]).default("MOCK"),
+      })
+      .strict(),
+  }),
+);
+
+router.post(
   "/studio/specs",
   coreForward({
     method: "POST",

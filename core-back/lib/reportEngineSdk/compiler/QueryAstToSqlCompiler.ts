@@ -137,11 +137,23 @@ export function compileDatasetQueryToSql(
         const dirSql = resolveColumnSql(sel.table_alias, "direction");
         return `CASE WHEN ${dirSql} = 'DEBIT' THEN ${colSql} ELSE -(${colSql}) END`;
       }
+      case "AGE_DAYS": {
+        // Fractional age in days; safe to AVG/SUM and independent of the
+        // column's timestamp precision.
+        return `(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - ${colSql})) / 86400.0)`;
+      }
       case "CASE_WHEN_ENUM": {
         const entries = Object.entries(sel.case_map ?? {});
         if (entries.length === 0) return colSql;
         const branches = entries
-          .map(([k, v]) => `WHEN ${colSql} = ${pushParam(k)} THEN ${pushParam(v)}`)
+          .map(([k, v]) => {
+            const value = pushParam(v);
+            // Untyped parameters in a CASE can be inferred as text, which
+            // makes SUM(CASE ...) fail with "function sum(text) does not
+            // exist". Numeric outputs are explicitly numeric.
+            const typed = typeof v === "number" ? `${value}::numeric` : value;
+            return `WHEN ${colSql} = ${pushParam(k)} THEN ${typed}`;
+          })
           .join(" ");
         return `CASE ${branches} ELSE NULL END`;
       }
@@ -289,7 +301,7 @@ export function compileDatasetQueryToSql(
       )}`
     : null;
   const scopeSelectSql = scopeColumnSql
-    ? `${scopeAggregated ? `MAX(${scopeColumnSql})` : scopeColumnSql} AS ${quoteIdent("__scope_merchant_id")}`
+    ? `${scopeAggregated ? `MAX((${scopeColumnSql})::text)` : scopeColumnSql} AS ${quoteIdent("__scope_merchant_id")}`
     : null;
   const baseSelectSql = [...ds.select.map((s) => compileSelectField(s)), scopeSelectSql]
     .filter((part): part is string => Boolean(part))

@@ -106,6 +106,9 @@ export function createPaymentGatewayReportHostConfig(deps: {
       maxRowsPerDataset: 10_000,
       maxQueryTimeoutMs: 15_000,
       maxExplainCost: 150_000,
+      // A bounded query may legitimately seq-scan one small partition. Only
+      // reject large-table scans at or above this estimated cost.
+      maxSeqScanCost: 25_000,
       maxAssetZipBytes: 15 * 1024 * 1024,
       maxSingleAssetBytes: 5 * 1024 * 1024,
     },

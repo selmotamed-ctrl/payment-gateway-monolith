@@ -88,6 +88,7 @@ router.post(
         assetsZipBase64: z.string().optional(),
         inputs: z.record(z.string(), z.unknown()).optional(),
         locale: z.string().max(16).optional(),
+        mode: z.enum(["MOCK", "LIVE"]).default("MOCK"),
       })
       .strict(),
   }),

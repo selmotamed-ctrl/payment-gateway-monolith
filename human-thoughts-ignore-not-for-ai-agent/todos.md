@@ -22,3 +22,5 @@ Not built or partial
 - missing automations --
 - backup engine full check and understanding --
 
+- object store
+- what does merchant tab show in the report catalog

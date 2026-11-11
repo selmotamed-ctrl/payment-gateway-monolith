@@ -19,4 +19,6 @@ export interface ReportExecutionBundle {
   rowCountTotal: number;
   durationMs: number;
   servedByNode: string;
+  /** Present on Studio mock previews; live executions omit it. */
+  previewMode?: "MOCK";
 }

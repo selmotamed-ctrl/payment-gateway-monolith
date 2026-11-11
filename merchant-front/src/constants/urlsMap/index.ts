@@ -67,6 +67,7 @@ export const urlsMap = {
     reportEngineExecute: (code: string) => `v1/merchant/report-engine/catalog/${encodeURIComponent(code)}/execute`,
     reportEngineStudioTranscript: "v1/merchant/report-engine/studio/transcript",
     reportEngineStudioVerify: "v1/merchant/report-engine/studio/verify",
+    reportEngineStudioPreview: "v1/merchant/report-engine/studio/preview",
     reportEngineStudioSpecs: "v1/merchant/report-engine/studio/specs",
     reportEngineStudioSpec: (id: string) => `v1/merchant/report-engine/studio/specs/${encodeURIComponent(id)}`,
     reportEngineStudioPublish: (id: string) => `v1/merchant/report-engine/studio/specs/${encodeURIComponent(id)}/publish`,

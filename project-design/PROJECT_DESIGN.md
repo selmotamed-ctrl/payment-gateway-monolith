@@ -7582,6 +7582,40 @@ Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `4
 - Section-field diagnostics list available fields/datasets, add a closest-match suggestion, and distinguish unknown datasets from unknown fields.
 - ZERO_NATURAL_ROLE_INTERSECTION remains a non-blocking warning and points to the Security Admin override; SUGGESTED_ACCESS_CONFLICT is emitted only when `suggested_access` is present.
 
+## 15. Authoring transcript v1.1, mock preview and A4 containment
+
+### 15.1 Transcript v1.1
+
+`ReportTranscriptBuilder` now emits `report-engine-ai-transcript-v1.1.md` with:
+
+- a mandatory self-validation checklist and a diagnostic-code→fix table derived from the verifier contract;
+- the exact zod limits, required fields, identifier regexes and enum vocabularies;
+- the joined-column rule (a select/predicate on a joined model must set `table_alias`) and the missing-column rule (join the related model that owns the field);
+- an explicit COMPUTE_COLUMN contract (it appends `output_column` to `target_dataset_id`; it does not create a dataset and has no `output_dataset_id`);
+- KPI-tone vs badge-tone vocabularies, `badge_tone_map` values, and the `{{$t.*}}`/`asset://`-only HTML template rule;
+- SVG asset hygiene (no C2PA/foreign namespaces/metadata);
+- authoring recipes and a complexity budget;
+- **no chrome authoring** (headers/footers are a separate `kind=CHROME` workflow) unless a brief explicitly asks.
+
+`transcript/reportableModels.ts` excludes engine-internal, authentication, queue, backup, gateway-configuration and report-engine storage tables from the transcript; Layer 2 rejects them with `MODEL_NOT_REPORTABLE`. The `?domains=` filter is fixed to the catalog domains and new `?models=`/`?brief=` parameters support brief-scoped transcripts.
+
+### 15.2 Additional verification and compiler rules
+
+- `AGE_DAYS` is a scalar expression (`EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - column)) / 86400.0`) usable with `AVG`/`MAX`; direct `AVG`/`SUM` on datetime/string/enum columns is rejected with `AGGREGATE_REQUIRES_NUMERIC`.
+- `SUM`/`AVG` over `CASE_WHEN_ENUM` casts numeric `THEN` values to `numeric`, fixing `function sum(text) does not exist`.
+- Report `HTML_TEMPLATE` tokens other than `{{$t.key}}` produce `UNSUPPORTED_TEMPLATE_TOKEN`.
+- A large-table sequential scan is now an error only when its estimated cost is at/above `globalLimits.maxSeqScanCost` (admin: 25 000). A cheap bounded scan of a single partition is allowed, removing a false positive that made valid ledger datasets fail.
+- `UNKNOWN_COLUMN` hints point at the joined model alias, or at the relation to join when the field is not on the base model. `UNKNOWN_TRANSFORM_DATASET`/`UNKNOWN_SECTION_DATASET` recognise a COMPUTE_COLUMN `output_column` and point at its target dataset.
+- The merchant scope column is cast to text when the query is aggregated (`MAX(<scope>::text)`), because PostgreSQL has no `max(uuid)`; an aggregate row with a null scope column (zero matching rows) is skipped instead of raising a false `MERCHANT_SCOPE_VIOLATION`.
+
+### 15.3 Studio mock preview
+
+`lib/reportEngineSdk/preview/MockReportBundleBuilder.ts` builds a database-free, deterministic preview bundle from the spec: typed rows per dataset, window fields, the real transform pipeline (including COMPARE_WITH_ASSET), placeholder image assets and engine-injected merchant inputs. `POST /report-engine/specs/preview` and the merchant `/studio/preview` accept `mode: "MOCK" | "LIVE"` (default `MOCK`); MOCK still runs the five verification layers but never queries the database. The client renderer accepts `includeHiddenSections`, so a mock preview renders visibility-gated sections instead of hiding them.
+
+### 15.4 A4 print containment
+
+The paged-media stylesheet now uses fixed-layout data tables, wraps long values (`overflow-wrap:anywhere`), constrains HTML-template tables, charts, SVGs, images, chrome running elements and Paged.js content wrappers to the page content box. `show_on_first_page=false` still removes the first-page chrome. `tests/e2e/admin/report-a4-layout.spec.ts` renders a mock bundle through the real client SDK + Paged.js and asserts no visible client rect crosses the A4 content box in English and Arabic, portrait and landscape.
+
 ---
 
 <a id="edgeshared"></a>
@@ -10350,6 +10384,12 @@ Actions added: Catalog Refresh/Open Studio/Headers & Footers, row copy/download/
 
 The Catalog run drawer is built as a filter-style form rather than a dense grid. `ReportInputForm` groups visible inputs into **Report scope**, **Reporting period** and **Filters and options** sections, with an uppercase muted section title and a short description. Fields are stacked one per row; `FormField` gained a `filter` variant that uses the same label/control anatomy as `TableFilters` (`pg-filter-label`, 36 px compact outlined controls, 13 px inputs). Every field has a label (spec translation or a humanised fallback key) and a description (the spec's `help_i18n_key` or a type fallback such as “Search and select a record.”). The output language, page header/footer and template selectors live in an **Output options** section, and Reset/Clear/Generate are pinned in the `SlideOverDrawer` footer. The drawer is 720 px wide and capped at `100vw` on narrow screens.
 
+## Studio mock preview and A4 containment (2026-11-10)
+
+The Studio draft preview now defaults to **Mock data** and offers a **Live sample** toggle. Mock mode still verifies the spec, then renders a deterministic, database-free bundle in which every dataset, transform output, KPI, table, chart, vector node and image asset is populated; `includeHiddenSections` renders visibility-gated sections too, so nothing is silently omitted from a draft. Live mode runs the same preview endpoint with `mode: "LIVE"`, the caller inputs and the real read-only query line. The preview badge shows which mode produced the pages.
+
+The shared paged-media stylesheet now enforces A4 containment: fixed-layout data tables, long-value wrapping, constrained HTML-template tables, `max-width:100%` on SVGs/images/chrome elements and Paged.js content wrappers. `tests/e2e/admin/report-a4-layout.spec.ts` logs into the live admin edge, previews a real spec in mock mode, paginates it through Paged.js and asserts there is no horizontal overflow in English/Arabic and portrait/landscape. This is the regression gate for report width.
+
 ---
 
 <a id="merchant-uiportal"></a>
@@ -11060,6 +11100,12 @@ Every execution:
 ## Run form layout (2026-11-10)
 
 The merchant run drawer mirrors the admin filter-style form: sectioned, one field per row, labels and descriptions on every field, and a dedicated output-language section when multiple locales exist. Reset and Generate live in the drawer footer; the merchant scope input remains hidden.
+
+## Merchant Studio mock preview (2026-11-10)
+
+The merchant Studio now has a draft preview after a successful verification. It defaults to **Mock data**, which uses the shared `MockReportBundleBuilder` and renders every section (including visibility-gated ones) without a database query; **Live sample** runs the merchant-scoped executor with the engine-injected merchant identity. The endpoint is `POST /report-engine/studio/preview` (core) and is proxied by `merchant-back`. The shared client renderer/print stylesheet fix applies to both portals, so merchant previews and prints use the same A4 containment rules as the admin Studio.
+
+The merchant transcript example now lowers `periodRange.validation.max_range_days` to 90 so it stays inside the merchant 92-day tier limit, and the merchant host registers a `merchants` autocomplete source for the engine-injected scope input (returning the current merchant only).
 
 ---
 
@@ -16173,6 +16219,12 @@ These are development/CI tests only; no production-time test job or test endpoin
 - `core-back/test/reporting-template.test.ts` now proves a malformed workbook is reported rather than accepted, in addition to named-range mapping and range-overflow coverage.
 - Existing core reporting, DOCX, incident, adapter and XLSX tests remain the targeted gate; the full core suite is expected to fail only the four tests that require a reachable PostgreSQL test database.
 - Playwright coverage for the new pages should be added when a browser is available: incident create/filter/detail/close/report, filing-adapter approval flow, Studio template upload/reload/analyze/remove, and report adapter filing/submission history at 360/390/768/1280 px in both themes and RTL.
+
+## Report-engine authoring evaluation (2026-11-10)
+
+`report-spec-generator/scripts/eval/pipeline.ts` is the recursive authoring harness: it downloads the current transcript, spawns an unrelated `opencode run` agent with only the transcript and a brief, verifies/saves/executes/mock-previews the resulting spec through the real admin API, and records diagnostics, coverage and chrome artifacts under `report-spec-generator/runs/`. The brief corpus (`report-spec-generator/briefs/*.md`) covers top-N rankings, settlement, latency, failures, ledger, reconciliation, AML, cashouts, Arabic, landscape wide tables and an explicit no-chrome case. The final 12-brief sweep produced a 100% first-pass verification rate and 100% section coverage with the improved transcript.
+
+`tests/e2e/admin/report-a4-layout.spec.ts` is the A4 regression gate. It fetches a mock preview from the live API, renders it through the real client SDK and Paged.js, and fails when any visible element crosses the page content box. Run it with `PLAYWRIGHT_CHROME_PATH=/opt/google/chrome/chrome REPORT_LAYOUT_SPEC=<spec.json> bunx playwright test e2e/admin/report-a4-layout.spec.ts --project=admin`.
 
 ---
 

@@ -128,6 +128,7 @@ export const SQL_SCALAR_EXPRESSIONS = [
   "MINOR_TO_MAJOR_DECIMAL",
   "SIGNED_JOURNAL_AMOUNT",
   "CASE_WHEN_ENUM",
+  "AGE_DAYS",
 ] as const;
 
 export const WHERE_OPERATORS = [

@@ -1,8 +1,8 @@
 import { dc } from "kt-dc";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
-import { VBtn, VFileInput, VSwitch, VTextarea } from "vuetify/components";
+import { VBtn, VBtnToggle, VFileInput, VSwitch, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { DataTable } from "@/components/Table/DataTable";
@@ -14,7 +14,13 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { showConfirm } from "@/utils/confirm";
-import type { ReportDiagnostic } from "@/lib/reportEngineSdk";
+import {
+  ReportPagedPreviewSurface,
+  renderChromeHtml,
+  renderReportSectionsToHtml,
+  type ReportDiagnostic,
+  type ReportExecutionBundle,
+} from "@/lib/reportEngineSdk";
 
 type LayerScore = {
   layer: number;
@@ -78,6 +84,12 @@ const MerchantReportStudioPage = dc(() => {
   const versions = ref<VersionRow[]>([]);
   const usage = ref<Usage | null>(null);
   const editingId = ref<string | null>(null);
+  const previewBundle = ref<ReportExecutionBundle | null>(null);
+  const previewMode = ref<"MOCK" | "LIVE">("MOCK");
+  const previewLocale = ref("en");
+  const previewPages = ref(1);
+  const previewLoading = ref(false);
+  const previewRef = ref<{ printClientSideVectorPdf?: () => void } | null>(null);
 
   const canVerify = computed(() => specJson.value.trim().length > 0);
   const verificationCurrent = computed(
@@ -86,6 +98,31 @@ const MerchantReportStudioPage = dc(() => {
   const canSave = computed(() => verificationCurrent.value && verification.value?.valid === true);
   const assetsEnabled = computed(() => usage.value?.assetsEnabled !== false);
   const engineEnabled = computed(() => usage.value?.engineEnabled !== false);
+  const previewSectionsHtml = computed(() =>
+    previewBundle.value
+      ? renderReportSectionsToHtml({
+          bundle: previewBundle.value,
+          locale: previewLocale.value,
+          includeHiddenSections: previewMode.value === "MOCK",
+        })
+      : "",
+  );
+  const previewHeaderHtml = computed(() =>
+    previewBundle.value
+      ? renderChromeHtml({ chrome: previewBundle.value.resolvedHeaderChrome, bundle: previewBundle.value, locale: previewLocale.value })
+      : "",
+  );
+  const previewFooterHtml = computed(() =>
+    previewBundle.value
+      ? renderChromeHtml({ chrome: previewBundle.value.resolvedFooterChrome, bundle: previewBundle.value, locale: previewLocale.value })
+      : "",
+  );
+  watch(
+    () => [specJson.value, zipFile.value],
+    () => {
+      previewBundle.value = null;
+    },
+  );
 
   const readFile = async (files: File | File[] | null) => {
     const file = Array.isArray(files) ? files[0] : files;
@@ -162,6 +199,29 @@ const MerchantReportStudioPage = dc(() => {
       showSnackBar({ message: extractApiErrorMessage(caught), type: "error" });
     } finally {
       busy.value = false;
+    }
+  };
+
+  const runPreview = async () => {
+    if (!canSave.value) return;
+    previewLoading.value = true;
+    try {
+      const assetsZipBase64 = zipFile.value ? await fileToBase64(zipFile.value) : undefined;
+      const response = await api.post(urlsMap.reportEngineStudioPreview, {
+        specJson: specJson.value,
+        assetsZipBase64,
+        mode: previewMode.value,
+      });
+      const bundle = response.data?.bundle as ReportExecutionBundle | undefined;
+      previewBundle.value = bundle ?? null;
+      previewLocale.value = bundle?.spec.i18n.default_locale ?? "en";
+      previewPages.value = 1;
+      if (bundle) showSnackBar({ message: t("Preview generated"), type: "success" });
+    } catch (caught) {
+      previewBundle.value = null;
+      showSnackBar({ message: extractApiErrorMessage(caught), type: "error" });
+    } finally {
+      previewLoading.value = false;
     }
   };
 
@@ -420,6 +480,79 @@ const MerchantReportStudioPage = dc(() => {
                 </VBtn>
               )}
             </div>
+          </SurfaceCard>
+        )}
+
+        {verification.value?.valid && (
+          <SurfaceCard
+            title={t("Draft preview")}
+            subtitle={t("Mock data fills every section; live sample data tests real merchant-scoped queries.")}
+            v-slots={{
+              headerActions: () => (
+                <div class="d-flex flex-wrap align-center ga-2">
+                  <VBtnToggle
+                    modelValue={previewMode.value}
+                    onUpdate:modelValue={(next: unknown) => {
+                      const value = Array.isArray(next) ? next[0] : next;
+                      if (value === "MOCK" || value === "LIVE") {
+                        previewMode.value = value;
+                        previewBundle.value = null;
+                      }
+                    }}
+                    density="compact"
+                    variant="outlined"
+                    divided
+                  >
+                    <VBtn value="MOCK" size="small" prependIcon="mdi-flask-outline">{t("Mock data")}</VBtn>
+                    <VBtn value="LIVE" size="small" prependIcon="mdi-database-outline">{t("Live sample")}</VBtn>
+                  </VBtnToggle>
+                  <VBtn size="small" variant="tonal" prependIcon="mdi-eye-outline" loading={previewLoading.value} disabled={!canSave.value} onClick={() => void runPreview()}>
+                    {t("Generate preview")}
+                  </VBtn>
+                  {previewBundle.value && (
+                    <>
+                      <MetaPill color={previewMode.value === "MOCK" ? "warning" : "info"}>
+                        {previewMode.value === "MOCK" ? t("Mock data") : t("Live sample")}
+                      </MetaPill>
+                      <MetaPill color="info">{`${previewPages.value} ${t("pages")}`}</MetaPill>
+                      <VBtn size="small" variant="tonal" prependIcon="mdi-printer-outline" onClick={() => previewRef.value?.printClientSideVectorPdf?.()}>
+                        {t("Print")}
+                      </VBtn>
+                    </>
+                  )}
+                </div>
+              ),
+            }}
+          >
+            {previewBundle.value ? (
+              <div class="d-flex flex-column ga-3">
+                <div class="d-flex flex-wrap ga-2">
+                  {Object.keys(previewBundle.value.spec.i18n.locales).map((locale) => (
+                    <VBtn
+                      key={locale}
+                      size="small"
+                      variant={previewLocale.value === locale ? "flat" : "tonal"}
+                      onClick={() => (previewLocale.value = locale)}
+                    >
+                      {locale.toUpperCase()}
+                    </VBtn>
+                  ))}
+                </div>
+                <ReportPagedPreviewSurface
+                  ref={previewRef}
+                  bundle={previewBundle.value}
+                  selectedLocale={previewLocale.value}
+                  renderedSectionsHtml={previewSectionsHtml.value}
+                  renderedHeaderHtml={previewHeaderHtml.value}
+                  renderedFooterHtml={previewFooterHtml.value}
+                  onPageCountChanged={(pages: number) => (previewPages.value = pages)}
+                />
+              </div>
+            ) : (
+              <p class="text-body-2 text-medium-emphasis mb-0">
+                {t("Generate a preview to see the paginated report before saving or publishing.")}
+              </p>
+            )}
           </SurfaceCard>
         )}
 

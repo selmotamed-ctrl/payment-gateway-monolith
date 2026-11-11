@@ -163,6 +163,27 @@ describe("report rendering additions", () => {
     expect(formatReportValue("ACTIVE", "ENUM_TRANSLATED", "LYD", (key) => (key === "enum.ACTIVE" ? "Active" : key))).toBe("Active");
   });
 
+  it("mock preview renders visibility-gated sections", () => {
+    const hiddenSpec = {
+      ...spec,
+      sections: [
+        ...spec.sections,
+        {
+          section_type: "HTML_TEMPLATE",
+          section_id: "hidden_section",
+          html_template: "<div>HIDDEN_MARKER</div>",
+          scoped_css: "",
+          visibility: { when: "DATASET_EMPTY", dataset_id: "rows" },
+        },
+      ],
+    } as unknown as ReportDescriptorSpec;
+    const hiddenBundle = { ...bundle, spec: hiddenSpec } as unknown as ReportExecutionBundle;
+    expect(renderReportSectionsToHtml({ bundle: hiddenBundle, locale: "en" })).not.toContain("HIDDEN_MARKER");
+    expect(
+      renderReportSectionsToHtml({ bundle: hiddenBundle, locale: "en", includeHiddenSections: true }),
+    ).toContain("HIDDEN_MARKER");
+  });
+
   it("renders a declarative SVG canvas template", () => {
     const svg = renderVectorDrawSectionToSvg({
       section: {

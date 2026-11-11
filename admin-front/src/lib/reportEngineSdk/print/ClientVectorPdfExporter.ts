@@ -114,19 +114,43 @@ export function buildPagedMediaHtmlDocument(params: {
     .report-chrome-border-double-bank-rule { border-bottom: 1.5pt double #1E293B; }
     .report-chrome-border-accent-band { border-bottom: 3pt solid #2563EB; }
     table.report-data-table.report-no-repeat-header thead { display: table-row-group; }
-    table.report-data-table { width: 100%; border-collapse: collapse; margin-bottom: 12pt; font-variant-numeric: tabular-nums; }
+    table.report-data-table {
+      width: 100%; max-width: 100%; table-layout: fixed; border-collapse: collapse;
+      margin-bottom: 12pt; font-variant-numeric: tabular-nums;
+    }
     table.report-data-table thead { display: table-header-group; }
     table.report-data-table tfoot { display: table-footer-group; }
     table.report-data-table.report-avoid-row-split tr { break-inside: avoid; page-break-inside: avoid; }
-    table.report-data-table th, table.report-data-table td { padding: 5pt 7pt; border-bottom: 0.75pt solid #E2E8F0; }
+    table.report-data-table th, table.report-data-table td {
+      padding: 5pt 7pt; border-bottom: 0.75pt solid #E2E8F0;
+      overflow-wrap: anywhere; word-break: break-word; vertical-align: top;
+    }
+    table.report-data-table col { min-width: 0; }
     table.report-data-table th { background-color: #F1F5F9; font-weight: 700; color: #1E293B; border-top: 1pt solid #CBD5E1; border-bottom: 1.25pt solid #94A3B8; }
     .report-section { margin-bottom: 14pt; }
-    .report-chart-box, .report-draw-box, .report-kpi-grid { break-inside: avoid; page-break-inside: avoid; }
+    .report-chart-box, .report-draw-box, .report-kpi-grid { break-inside: avoid; page-break-inside: avoid; min-width: 0; }
     .report-page-break { break-before: page; page-break-before: always; }
     .report-orientation-landscape { page: landscape; }
     .report-orientation-portrait { page: portrait; }
     @page landscape { size: ${page_layout.paper_size} landscape; }
     @page portrait { size: ${page_layout.paper_size} portrait; }
+    /* A4 containment: nothing may exceed the page content box. */
+    .report-body-container, .report-page-group, .report-section, .report-html-section,
+    .report-chart-frame, .report-draw-box, .report-image-section, .report-chrome,
+    .report-kpi-grid, .report-kpi-card { max-width: 100%; min-width: 0; }
+    .report-section > *, .report-page-group > * { min-width: 0; }
+    img { max-width: 100%; height: auto; }
+    .report-chart-frame svg, .report-draw-box svg, .report-html-section svg { max-width: 100%; }
+    .report-html-section table { table-layout: fixed; width: 100%; border-collapse: collapse; }
+    .report-html-section th, .report-html-section td { overflow-wrap: anywhere; word-break: break-word; }
+    .report-html-section pre, .report-html-section code, code, pre, .report-mono {
+      white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+    }
+    .report-chrome, .report-chrome * { overflow-wrap: anywhere; max-width: 100%; min-width: 0; }
+    .report-running-header, .report-running-footer { max-width: 100%; min-width: 0; }
+    .report-running-header > div, .report-running-footer > div { max-width: 100%; min-width: 0; flex-wrap: wrap; }
+    /* Paged.js wraps page content in an anonymous block; keep it inside the content box. */
+    .pagedjs_page_content > div { max-width: 100%; min-width: 0; }
     ${bundle.resolvedHeaderChrome && !bundle.resolvedHeaderChrome.chrome.show_on_first_page ? "@page :first { @top-center { content: none; } }" : ""}
     ${bundle.resolvedFooterChrome && !bundle.resolvedFooterChrome.chrome.show_on_first_page ? "@page :first { @bottom-center { content: none; } }" : ""}
     ${bundle.resolvedHeaderChrome?.template.scoped_css ?? ""}
