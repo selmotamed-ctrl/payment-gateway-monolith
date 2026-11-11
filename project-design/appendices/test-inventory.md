@@ -159,6 +159,7 @@
 | `core-back/test/reportEngineSdk/AssetBundleValidator.test.ts` | 182 | 9 |
 | `core-back/test/reportEngineSdk/AuthorityAndCatalog.test.ts` | 137 | 9 |
 | `core-back/test/reportEngineSdk/AuthorityInferenceEngine.test.ts` | 90 | 6 |
+| `core-back/test/reportEngineSdk/ChromeAccentBand.test.ts` | 64 | 3 |
 | `core-back/test/reportEngineSdk/ChromeResolution.test.ts` | 52 | 3 |
 | `core-back/test/reportEngineSdk/CompilerAndReferenceRegression.test.ts` | 325 | 9 |
 | `core-back/test/reportEngineSdk/CssAndHtmlSanitizer.test.ts` | 63 | 4 |
@@ -335,6 +336,8 @@
 | `tests/e2e/admin/academy-team.spec.ts` | 98 | 3 |
 | `tests/e2e/admin/auth.spec.ts` | 50 | 2 |
 | `tests/e2e/admin/backups.spec.ts` | 126 | 2 |
+| `tests/e2e/admin/chrome-layout.spec.ts` | 174 | 1 |
+| `tests/e2e/admin/chrome-preview.spec.ts` | 94 | 1 |
 | `tests/e2e/admin/commerce-governance.spec.ts` | 132 | 4 |
 | `tests/e2e/admin/create.spec.ts` | 155 | 5 |
 | `tests/e2e/admin/finance.spec.ts` | 47 | 1 |
@@ -403,5 +406,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **398**
-- Total literal test declarations: **4055**
+- Total files: **401**
+- Total literal test declarations: **4060**

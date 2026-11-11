@@ -30,6 +30,8 @@ export const ReportSandboxedHtmlSurface = defineComponent({
       return `<!DOCTYPE html><html lang="${props.locale}" dir="${isRtl ? "rtl" : "ltr"}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><style>
         html,body{margin:0;padding:0;background:transparent}
         body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;color:#0F172A;direction:${isRtl ? "rtl" : "ltr"}}
+        .report-chrome{display:flex;flex-direction:column;position:relative;box-sizing:border-box;max-width:100%;min-width:0}
+        .report-chrome > :first-child{flex:1 1 auto;min-height:0}
         ${sanitizeReportCss(props.css)}
       </style></head><body>${props.html}</body></html>`;
     };

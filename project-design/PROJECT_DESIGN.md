@@ -7632,6 +7632,16 @@ The showcase fixture `npg-ops-finance-deep-dive-showcase-v2` exposed structural 
 
 The sample spec was updated as a showcase fixture (KPI columns 3, chart/table subtitles, delta format, compact Methodology CSS). `tests/e2e/admin/report-a4-layout.spec.ts` now asserts sheet containment, vertical overflow, orientation, table header repetition, KPI column/value fit, chart-row centering and orphan titles; it can export the paginated PDF (`REPORT_LAYOUT_PDF`) and the generated `src/output/npg-ops-finance-deep-dive-showcase-v2-fixed-{en,ar}.pdf` are the reference output.
 
+## 17. Chrome layout and multi-color bands (2026-11-11)
+
+The institutional header/footer review exposed a chrome-specific layout defect: `.report-chrome` had a `min-height` slot but the template root (`lnpg-header`/`lnpg-footer`) did not fill it. The header root measured 13.6 mm inside a 22 mm slot, leaving an 8.4 mm internal gap, short teal/orange accent bars and a footer background only 11.4 mm inside a 16 mm slot.
+
+- `.report-chrome` is now a flex column with `position: relative`, and its first child fills the configured height. The wrapper carries an explicit `height`/`min-height` from `chrome.height_mm`. The header/footer roots fill the slot; the left/right accent bars and footer background span the full chrome.
+- `ReportChromeSpec.chrome.accent_band` is a new optional structured field: `position` (`TOP`/`BOTTOM`), `height_mm`, `radius_mm`, and 2-6 `segments` (`color`, `width_percent`). It renders a hard-stop `linear-gradient` band and takes precedence over `border_style`. The old single-color `ACCENT_BAND` rule remains for legacy specs. The chrome transcript documents the field and a reference 58/26/16 example.
+- `ChromeVariableBindingSchema` adds `defaultCurrency`; the core execution bundle now returns `currency`. `renderChromeHtml` localizes `periodSummary` (`01 Jan 2026 – 31 Oct 2026`) and `generatedAtFormatted` (`11 Nov 2026, 14:31`) using the selected report locale.
+- The provided `institutional-header-v1`/`institutional-footer-v1` specs were aligned to the reference HTML values (root `height:100%`, reference font sizes/widths, header period currency and multi-color band). They were published as new versions and set as the global defaults.
+- The Chrome Studio preview now renders a real A4 page frame with sample body content, the selected header/footer and the global default counterpart, using realistic period/currency/title/subtitle/timestamp samples.
+
 ---
 
 <a id="edgeshared"></a>
@@ -10412,6 +10422,12 @@ The Studio preview and print path now enforce the A4 print contract: KPI grids m
 
 The A4 regression spec (`tests/e2e/admin/report-a4-layout.spec.ts`) now measures the sheet, not just the content box, and asserts table headers, KPI limits, chart-row centering, orphan titles, vertical overflow and orientation. It can also export the paginated PDF for visual review.
 
+## Chrome layout and A4 preview (2026-11-11)
+
+The Report Headers & Footers page now previews the selected chrome on a real A4 page frame with sample body content, the global default counterpart, the header top 2 mm/22 mm slot and footer bottom 4 mm/16 mm slot. The preview uses realistic report title/subtitle, period, currency, actor and generated-at values so it matches the reference institutional chrome.
+
+The renderer fills the chrome slot with the template root, supports the structured `accent_band` (multi-color hard-stop gradient) and suppresses the legacy single-color border when a band is present. The transcript documents the band, `defaultCurrency`, locale-formatted period/generated timestamps and the slot-fill rule. The A4 report gate now measures chrome fill, band colors/height, header-to-body and footer-to-page offsets, and formatted variables through `tests/e2e/admin/chrome-layout.spec.ts`; `tests/e2e/admin/chrome-preview.spec.ts` covers the Studio A4 preview.
+
 ---
 
 <a id="merchant-uiportal"></a>
@@ -11132,6 +11148,10 @@ The merchant transcript example now lowers `periodRange.validation.max_range_day
 ## Shared print layout hardening (2026-11-11)
 
 The merchant portal receives the same client SDK mirror as the admin portal, so merchant previews/prints now use the hardened A4 layout: max 3 KPI columns, centered chart rows and wrapping HTML legends, compact table typography and chips, repeated table headers, no-data chart states, and true landscape pages in print. The merchant Studio mock/live preview uses the same renderer and is covered by the SDK mirror test.
+
+## Shared chrome layout and accent bands (2026-11-11)
+
+The merchant portal client SDK mirror receives the same chrome root-fill, `accent_band`, `defaultCurrency` and localized chrome-variable changes as the admin portal. Merchant prints using platform chrome therefore get the same full-height header/footer and multi-color band.
 
 ---
 
@@ -16255,6 +16275,10 @@ These are development/CI tests only; no production-time test job or test endpoin
 ## A4 report print gate (2026-11-11)
 
 `tests/e2e/admin/report-a4-layout.spec.ts` renders a real report preview through the client SDK and Paged.js and asserts: no visible rect crosses the sheet, content never exceeds the sheet width, no page has vertical overflow, every table fragment has a `<thead>`, KPI grids have <= 3 columns and no clipped values, chart rows are centered with <= 2 charts, section titles are on the same page as their first content, and landscape/portrait page dimensions match the named page. Options: `REPORT_LAYOUT_SPEC`, `REPORT_LAYOUT_ZIP`, `REPORT_LAYOUT_MODE=MOCK|LIVE`, `REPORT_LAYOUT_PDF` (exports per-locale PDFs) and `REPORT_LAYOUT_HTML`.
+
+## Chrome layout gate (2026-11-11)
+
+`tests/e2e/admin/chrome-layout.spec.ts` renders the published default header/footer on an A4 frame and asserts root fill, full-height accent bars, footer fill, the 1.4 mm three-segment band, header/footer offsets, and localized period/currency/generated-at values. `tests/e2e/admin/chrome-preview.spec.ts` renders the Studio A4 chrome preview with a mocked registry and checks the header, footer and accent band in the sandboxed surface.
 
 ---
 

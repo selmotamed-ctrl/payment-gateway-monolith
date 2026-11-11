@@ -97,6 +97,8 @@ export interface ReportExecutionBundle {
     role: string;
   };
   institutionName: string;
+  /** Host default currency used for CURRENCY_MINOR values without a row currency. */
+  currency: string;
   chromeVariables: Record<string, string>;
   inputsUsed: Record<string, unknown>;
   rowCountTotal: number;
@@ -610,6 +612,7 @@ async function executeReport(
       role: input.actor.role,
     },
     institutionName: host.institutionName,
+    currency: host.defaultCurrency,
     chromeVariables,
     inputsUsed,
     rowCountTotal,

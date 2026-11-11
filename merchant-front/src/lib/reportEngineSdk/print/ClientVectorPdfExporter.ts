@@ -248,6 +248,12 @@ export function buildPagedMediaHtmlDocument(params: {
     .report-html-section pre, .report-html-section code, code, pre, .report-mono {
       white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
     }
+    .report-chrome {
+      display: flex; flex-direction: column; position: relative; box-sizing: border-box;
+      max-width: 100%; min-width: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    .report-chrome > :first-child { flex: 1 1 auto; min-height: 0; }
+    .report-chrome-accent-band { pointer-events: none; z-index: 2; }
     .report-chrome, .report-chrome * { overflow-wrap: anywhere; max-width: 100%; min-width: 0; }
     .report-running-header, .report-running-footer { max-width: 100%; min-width: 0; }
     .report-running-header > div, .report-running-footer > div { max-width: 100%; min-width: 0; flex-wrap: wrap; }

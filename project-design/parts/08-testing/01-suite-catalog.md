@@ -489,3 +489,7 @@ These are development/CI tests only; no production-time test job or test endpoin
 ## A4 report print gate (2026-11-11)
 
 `tests/e2e/admin/report-a4-layout.spec.ts` renders a real report preview through the client SDK and Paged.js and asserts: no visible rect crosses the sheet, content never exceeds the sheet width, no page has vertical overflow, every table fragment has a `<thead>`, KPI grids have <= 3 columns and no clipped values, chart rows are centered with <= 2 charts, section titles are on the same page as their first content, and landscape/portrait page dimensions match the named page. Options: `REPORT_LAYOUT_SPEC`, `REPORT_LAYOUT_ZIP`, `REPORT_LAYOUT_MODE=MOCK|LIVE`, `REPORT_LAYOUT_PDF` (exports per-locale PDFs) and `REPORT_LAYOUT_HTML`.
+
+## Chrome layout gate (2026-11-11)
+
+`tests/e2e/admin/chrome-layout.spec.ts` renders the published default header/footer on an A4 frame and asserts root fill, full-height accent bars, footer fill, the 1.4 mm three-segment band, header/footer offsets, and localized period/currency/generated-at values. `tests/e2e/admin/chrome-preview.spec.ts` renders the Studio A4 chrome preview with a mocked registry and checks the header, footer and accent band in the sandboxed surface.

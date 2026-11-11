@@ -510,6 +510,30 @@ export function renderReportSectionsToHtml(params: {
     .join("\n");
 }
 
+const formatChromeDate = (iso: string, locale: string, withTime: boolean): string => {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return "";
+  const resolved = locale.startsWith("en") ? "en-GB" : locale;
+  return new Intl.DateTimeFormat(resolved, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    ...(withTime ? { hour: "2-digit", minute: "2-digit", hour12: false } : {}),
+    timeZone: "UTC",
+  }).format(date);
+};
+
+/** Normalises the engine's raw ISO period pair into the reference's localized format. */
+const formatChromePeriod = (raw: string, locale: string): string => {
+  if (!raw) return "";
+  // Split only on a dash separator, never on the hyphens inside ISO dates.
+  const parts = raw.split(/\s*[–—]\s*|\s+-\s+/).filter(Boolean);
+  if (parts.length !== 2) return raw;
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(parts[0]!) ? formatChromeDate(`${parts[0]}T00:00:00.000Z`, locale, false) : parts[0]!;
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(parts[1]!) ? formatChromeDate(`${parts[1]}T00:00:00.000Z`, locale, false) : parts[1]!;
+  return `${start} – ${end}`;
+};
+
 /** Renders a header/footer chrome with its variables bound; labels come from the chrome dictionary. */
 export function renderChromeHtml(params: {
   chrome: ReportChromeSpec | null;
@@ -534,15 +558,19 @@ export function renderChromeHtml(params: {
     reportCode: spec?.report.code ?? "",
     reportVersion: String(spec?.report.version ?? ""),
     generatedAtIso: bundle.executedAtIso ?? "",
-    generatedAtFormatted: String(bundle.executedAtIso ?? "").replace("T", " ").slice(0, 19),
+    generatedAtFormatted: formatChromeDate(bundle.executedAtIso ?? "", locale, true),
     actorName: bundle.actor?.name ?? "",
     actorEmail: bundle.actor?.email ?? "",
     actorRole: bundle.actor?.role ?? "",
     selectedLocale: locale,
+    defaultCurrency: bundle.currency ?? "LYD",
     classificationBadge: spec?.report.classification ?? "",
     verificationHashShort: String(bundle.verificationSha256 ?? "").slice(0, 12),
     ...(bundle.chromeVariables ?? {}),
   };
+  if (bundle.chromeVariables?.periodSummary) {
+    variables.periodSummary = formatChromePeriod(bundle.chromeVariables.periodSummary, locale);
+  }
   let html = chrome.template.html;
   html = html.replace(/\{\{\s*\$t\.([a-zA-Z0-9_.-]+)\s*\}\}/g, (_m, key: string) => escapeHtml(t(key)));
   html = html.replace(/\{\{\s*pageNumber\s*\}\}/g, '<span class="report-page-number"></span>');
@@ -566,7 +594,27 @@ export function renderChromeHtml(params: {
     });
   }
   html = html.replace(/asset:\/\/([a-zA-Z0-9_-]+)/g, (_m, key: string) => bundle.assetDataUrls?.[key] ?? "");
-  const borderClass =
-    chrome.chrome.border_style === "NONE" ? "" : ` report-chrome-border-${chrome.chrome.border_style.toLowerCase().replaceAll("_", "-")}`;
-  return `<div class="report-chrome report-chrome-${chrome.chrome.chrome_type.toLowerCase()}${borderClass}" style="min-height:${chrome.chrome.height_mm}mm">${sanitizeReportHtml(html)}</div>`;
+  const band = chrome.chrome.accent_band;
+  const borderClass = band
+    ? ""
+    : chrome.chrome.border_style === "NONE"
+      ? ""
+      : ` report-chrome-border-${chrome.chrome.border_style.toLowerCase().replaceAll("_", "-")}`;
+  let bandHtml = "";
+  if (band) {
+    const total = band.segments.reduce((sum, segment) => sum + segment.width_percent, 0) || 1;
+    let cursor = 0;
+    const stops = band.segments.map((segment) => {
+      const start = (cursor / total) * 100;
+      cursor += segment.width_percent;
+      const end = (cursor / total) * 100;
+      return `${escapeHtml(segment.color)} ${start}% ${end}%`;
+    });
+    const radius =
+      band.position === "TOP"
+        ? `${band.radius_mm}mm ${band.radius_mm}mm 0 0`
+        : `0 0 ${band.radius_mm}mm ${band.radius_mm}mm`;
+    bandHtml = `<div class="report-chrome-accent-band" style="position:absolute;left:0;right:0;${band.position === "TOP" ? "top" : "bottom"}:0;height:${band.height_mm}mm;border-radius:${radius};background:linear-gradient(90deg,${stops.join(",")});"></div>`;
+  }
+  return `<div class="report-chrome report-chrome-${chrome.chrome.chrome_type.toLowerCase()}${borderClass}" style="height:${chrome.chrome.height_mm}mm;min-height:${chrome.chrome.height_mm}mm;position:relative;">${sanitizeReportHtml(html)}${bandHtml}</div>`;
 }

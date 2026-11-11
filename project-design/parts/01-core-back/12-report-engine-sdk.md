@@ -288,3 +288,13 @@ The showcase fixture `npg-ops-finance-deep-dive-showcase-v2` exposed structural 
 - **HTML templates:** `.report-html-section` keeps small narrative blocks together and uses a compact print base (8.5pt; author CSS can still override with a smaller size).
 
 The sample spec was updated as a showcase fixture (KPI columns 3, chart/table subtitles, delta format, compact Methodology CSS). `tests/e2e/admin/report-a4-layout.spec.ts` now asserts sheet containment, vertical overflow, orientation, table header repetition, KPI column/value fit, chart-row centering and orphan titles; it can export the paginated PDF (`REPORT_LAYOUT_PDF`) and the generated `src/output/npg-ops-finance-deep-dive-showcase-v2-fixed-{en,ar}.pdf` are the reference output.
+
+## 17. Chrome layout and multi-color bands (2026-11-11)
+
+The institutional header/footer review exposed a chrome-specific layout defect: `.report-chrome` had a `min-height` slot but the template root (`lnpg-header`/`lnpg-footer`) did not fill it. The header root measured 13.6 mm inside a 22 mm slot, leaving an 8.4 mm internal gap, short teal/orange accent bars and a footer background only 11.4 mm inside a 16 mm slot.
+
+- `.report-chrome` is now a flex column with `position: relative`, and its first child fills the configured height. The wrapper carries an explicit `height`/`min-height` from `chrome.height_mm`. The header/footer roots fill the slot; the left/right accent bars and footer background span the full chrome.
+- `ReportChromeSpec.chrome.accent_band` is a new optional structured field: `position` (`TOP`/`BOTTOM`), `height_mm`, `radius_mm`, and 2-6 `segments` (`color`, `width_percent`). It renders a hard-stop `linear-gradient` band and takes precedence over `border_style`. The old single-color `ACCENT_BAND` rule remains for legacy specs. The chrome transcript documents the field and a reference 58/26/16 example.
+- `ChromeVariableBindingSchema` adds `defaultCurrency`; the core execution bundle now returns `currency`. `renderChromeHtml` localizes `periodSummary` (`01 Jan 2026 – 31 Oct 2026`) and `generatedAtFormatted` (`11 Nov 2026, 14:31`) using the selected report locale.
+- The provided `institutional-header-v1`/`institutional-footer-v1` specs were aligned to the reference HTML values (root `height:100%`, reference font sizes/widths, header period currency and multi-color band). They were published as new versions and set as the global defaults.
+- The Chrome Studio preview now renders a real A4 page frame with sample body content, the selected header/footer and the global default counterpart, using realistic period/currency/title/subtitle/timestamp samples.

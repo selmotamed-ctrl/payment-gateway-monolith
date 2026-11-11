@@ -233,7 +233,7 @@ function selfValidationMarkdown(merchantMode: boolean): string[] {
     "1. JSON parses; exactly one object; `spec_kind` and `spec_version` correct.",
     "2. `report.code` is kebab-case and <= 64 chars; `version` >= 1; category/audience/classification are allowed values.",
     "3. `audience_scope` is `MERCHANT_FACING`/`BOTH` → `report.merchant_scope_input_key` points to an `entity_autocomplete` input with source `merchants`.",
-    "4. Every translation key used by inputs, section titles/subtitles, KPI labels, table headers, chart labels, vector node/edge labels, image captions and `{{$t.*}}` tokens exists in **every** locale; `report.title` should exist.",
+    "4. Every translation key used by inputs, section titles/subtitles, KPI labels, table headers, chart labels, vector node/edge labels, image captions and `{{$t.*}}` tokens exists in **every** locale; `report.title` should exist. If the platform header/footer shows `reportSubtitle`, also provide a non-empty `report.subtitle` translation in every locale.",
     "5. Input keys are unique and match the identifier regex; enum inputs list `validation.enum_values`; defaults match the type; `daterange` inputs used for partition filters set `validation.max_range_days` within the model limit.",
     "6. Every `from_model` and join `target_model` is in the catalog below; every column exists on the model/alias you reference; no `FORBIDDEN_SECRET` column is referenced. If a requested field is missing from the base model, join the related model that owns it (for example wallet currency for cashout requests) instead of inventing a column.",
     "7. Every join uses a relation listed on the base model and a unique alias. Any select/predicate on a joined model sets `table_alias` to that alias.",

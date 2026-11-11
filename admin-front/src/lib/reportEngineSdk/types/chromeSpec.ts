@@ -17,11 +17,24 @@ export const ChromeVariableBindingSchema = z.enum([
   "merchantTradeName",
   "merchantLegalName",
   "periodSummary",
+  "defaultCurrency",
   "classificationBadge",
   "verificationHashShort",
   "pageNumber",
   "totalPages",
 ]);
+
+export const ChromeAccentBandSegmentSchema = z.object({
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Accent band colors must be #RRGGBB"),
+  width_percent: z.number().min(1).max(100),
+});
+
+export const ChromeAccentBandSchema = z.object({
+  position: z.enum(["TOP", "BOTTOM"]).default("BOTTOM"),
+  height_mm: z.number().min(0.5).max(6).default(1.4),
+  radius_mm: z.number().min(0).max(3).default(0),
+  segments: z.array(ChromeAccentBandSegmentSchema).min(2).max(6),
+});
 
 export const ReportChromeSpecSchema = z.object({
   spec_kind: z.literal("REPORT_CHROME"),
@@ -40,6 +53,8 @@ export const ReportChromeSpecSchema = z.object({
     border_style: z
       .enum(["NONE", "THIN_RULE", "DOUBLE_BANK_RULE", "ACCENT_BAND"])
       .default("THIN_RULE"),
+    /** Structured multi-color band; takes precedence over border_style. */
+    accent_band: ChromeAccentBandSchema.optional(),
   }),
   required_assets: z
     .array(

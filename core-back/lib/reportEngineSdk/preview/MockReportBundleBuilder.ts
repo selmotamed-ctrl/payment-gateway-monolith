@@ -429,6 +429,20 @@ export function buildMockReportBundle(params: {
       }),
     );
 
+  const chromeVariables: Record<string, string> = {};
+  const periodRange = Object.values(inputsUsed).find(
+    (value): value is { start: string; end: string } =>
+      Boolean(value) &&
+      typeof value === "object" &&
+      "start" in (value as Record<string, unknown>) &&
+      "end" in (value as Record<string, unknown>) &&
+      typeof (value as { start?: unknown }).start === "string" &&
+      typeof (value as { end?: unknown }).end === "string",
+  );
+  if (periodRange) {
+    chromeVariables.periodSummary = `${periodRange.start.slice(0, 10)} – ${periodRange.end.slice(0, 10)}`;
+  }
+
   return {
     executionId: `mock-preview-${Date.now().toString(36)}`,
     executedAtIso: now.toISOString(),
@@ -444,7 +458,7 @@ export function buildMockReportBundle(params: {
       role: params.actor?.role ?? "REPORT_AUTHOR",
     },
     institutionName: host.institutionName,
-    chromeVariables: {},
+    chromeVariables,
     currency: host.defaultCurrency,
     inputsUsed,
     rowCountTotal,

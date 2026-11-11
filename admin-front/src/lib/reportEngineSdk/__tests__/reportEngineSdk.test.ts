@@ -329,3 +329,45 @@ describe("print layout contract", () => {
     expect(html).toContain("report-footer-label");
   });
 });
+
+describe("chrome accent band and variables", () => {
+  it("renders a structured multi-color band, suppresses the simple border and formats chrome variables", () => {
+    const chromeWithBand = {
+      ...chrome,
+      chrome: {
+        ...chrome.chrome,
+        border_style: "ACCENT_BAND",
+        accent_band: {
+          position: "BOTTOM",
+          height_mm: 1.4,
+          radius_mm: 0.6,
+          segments: [
+            { color: "#0b5d7a", width_percent: 58 },
+            { color: "#2e8b57", width_percent: 26 },
+            { color: "#e67e22", width_percent: 16 },
+          ],
+        },
+      },
+      template: {
+        ...chrome.template,
+        html: "<div style='height:100%'>{{periodSummary}} · {{defaultCurrency}} · {{generatedAtFormatted}}</div>",
+      },
+    } as unknown as ReportChromeSpec;
+    const bundleWithVars = {
+      ...bundle,
+      currency: "LYD",
+      executedAtIso: "2026-11-11T14:31:00.000Z",
+      chromeVariables: { periodSummary: "2026-01-01 – 2026-10-31" },
+    } as unknown as ReportExecutionBundle;
+    const html = renderChromeHtml({ chrome: chromeWithBand, bundle: bundleWithVars, locale: "en" });
+    expect(html).toContain("report-chrome-accent-band");
+    expect(html).toContain("linear-gradient");
+    expect(html).toContain("#0b5d7a");
+    expect(html).toContain("#2e8b57");
+    expect(html).toContain("#e67e22");
+    expect(html).not.toContain("report-chrome-border-accent-band");
+    expect(html).toContain("01 Jan 2026 – 31 Oct 2026");
+    expect(html).toContain("LYD");
+    expect(html).toContain("11 Nov 2026, 14:31");
+  });
+});
