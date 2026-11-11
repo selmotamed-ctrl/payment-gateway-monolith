@@ -7616,6 +7616,22 @@ Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `4
 
 The paged-media stylesheet now uses fixed-layout data tables, wraps long values (`overflow-wrap:anywhere`), constrains HTML-template tables, charts, SVGs, images, chrome running elements and Paged.js content wrappers to the page content box. `show_on_first_page=false` still removes the first-page chrome. `tests/e2e/admin/report-a4-layout.spec.ts` renders a mock bundle through the real client SDK + Paged.js and asserts no visible client rect crosses the A4 content box in English and Arabic, portrait and landscape.
 
+## 16. Print layout hardening (2026-11-11)
+
+The showcase fixture `npg-ops-finance-deep-dive-showcase-v2` exposed structural print defects that were independent of the DSL. The renderer and transcripts now enforce:
+
+- **KPI grids:** `columns` is capped at 3 (schema and transcript). Cards are flex columns with a reserved title area and a bottom-anchored metric block; values use a content-length font scale and never wrap mid-number; `delta_format_hint` lets a basis-point delta render as `PERCENT_BPS` instead of currency.
+- **Section flow:** titles/subtitles use `break-after: avoid`; KPI, chart, vector, image and HTML sections use `break-inside: avoid`; compact tables (<= 8 rows) keep their title and content together.
+- **Charts:** consecutive sub-100% charts are paired in a centered `.report-chart-row`; alone they are centered. Charts have an HTML legend outside the SVG with wrapping and real spacing; pie/donut slice labels are suppressed; series/category labels are truncated consistently; date axes render `YYYY-MM-DD`; long category labels switch BAR/STACKED_BAR to horizontal bars; value labels use `labelLayout.hideOverlap`; heatmaps keep the ECharts visualMap and omit the series legend; zero-row charts render a localized empty state.
+- **Descriptions:** the transcript requires `subtitle_i18n_key` on every CHART and DATA_TABLE; missing descriptions produce a Layer 1 `MISSING_SECTION_DESCRIPTION` warning. The transcript also warns against `overflow-wrap:anywhere` on `td,th` in `global_scoped_css`, which defeats chip and number wrapping.
+- **Tables:** print tables use a 7.8pt body / 7pt header scale and 3.5pt padding; numeric cells are no-wrap; long chips get `report-badge--long`/`--xlong` and never break words; pivot wildcard headers humanise snake_case; total labels are no-wrap; column widths are normalised to 100%. Long category charts (BAR/STACKED_BAR with long labels) render as horizontal bars so their labels stay readable.
+- **Header repetition:** Paged.js splits tables into fragments without `<thead>`. `paged-preview-bridge.js` re-inserts the header/colgroup by `data-ref`, with a column-count fallback, MutationObserver and delayed passes; the print handler repeats the pass before printing.
+- **Mixed orientation:** page-level named-page classes carry `page: landscape|portrait`; the bridge injects `@page` size rules after Paged.js has consumed the author rules. Chrome's print/PDF output now produces real landscape pages (12–15 in the showcase) instead of portrait sheets with clipped landscape content.
+- **Vector text:** node labels/values wrap, use a length-aware font cap and padding, and are placed with the value bottom-aligned inside the node; short flow edges omit impossible labels; circle/diamond labels centre.
+- **HTML templates:** `.report-html-section` keeps small narrative blocks together and uses a compact print base (8.5pt; author CSS can still override with a smaller size).
+
+The sample spec was updated as a showcase fixture (KPI columns 3, chart/table subtitles, delta format, compact Methodology CSS). `tests/e2e/admin/report-a4-layout.spec.ts` now asserts sheet containment, vertical overflow, orientation, table header repetition, KPI column/value fit, chart-row centering and orphan titles; it can export the paginated PDF (`REPORT_LAYOUT_PDF`) and the generated `src/output/npg-ops-finance-deep-dive-showcase-v2-fixed-{en,ar}.pdf` are the reference output.
+
 ---
 
 <a id="edgeshared"></a>
@@ -10390,6 +10406,12 @@ The Studio draft preview now defaults to **Mock data** and offers a **Live sampl
 
 The shared paged-media stylesheet now enforces A4 containment: fixed-layout data tables, long-value wrapping, constrained HTML-template tables, `max-width:100%` on SVGs/images/chrome elements and Paged.js content wrappers. `tests/e2e/admin/report-a4-layout.spec.ts` logs into the live admin edge, previews a real spec in mock mode, paginates it through Paged.js and asserts there is no horizontal overflow in English/Arabic and portrait/landscape. This is the regression gate for report width.
 
+## Print layout hardening (2026-11-11)
+
+The Studio preview and print path now enforce the A4 print contract: KPI grids max 3 columns with bottom-anchored values and length-aware font scaling, chart rows centered with HTML legends that wrap without hiding entries, pie/donut labels suppressed in favor of the legend, table typography reduced for wide tables, long chips shrunk instead of broken, repeated table headers across Paged.js fragments, compact table sections kept together, and true landscape pages in the exported PDF. The shared bridge injects print page rules after Paged.js rendering because Paged.js removes the author `@page` rules; without this pass Chrome printed all pages portrait.
+
+The A4 regression spec (`tests/e2e/admin/report-a4-layout.spec.ts`) now measures the sheet, not just the content box, and asserts table headers, KPI limits, chart-row centering, orphan titles, vertical overflow and orientation. It can also export the paginated PDF for visual review.
+
 ---
 
 <a id="merchant-uiportal"></a>
@@ -11106,6 +11128,10 @@ The merchant run drawer mirrors the admin filter-style form: sectioned, one fiel
 The merchant Studio now has a draft preview after a successful verification. It defaults to **Mock data**, which uses the shared `MockReportBundleBuilder` and renders every section (including visibility-gated ones) without a database query; **Live sample** runs the merchant-scoped executor with the engine-injected merchant identity. The endpoint is `POST /report-engine/studio/preview` (core) and is proxied by `merchant-back`. The shared client renderer/print stylesheet fix applies to both portals, so merchant previews and prints use the same A4 containment rules as the admin Studio.
 
 The merchant transcript example now lowers `periodRange.validation.max_range_days` to 90 so it stays inside the merchant 92-day tier limit, and the merchant host registers a `merchants` autocomplete source for the engine-injected scope input (returning the current merchant only).
+
+## Shared print layout hardening (2026-11-11)
+
+The merchant portal receives the same client SDK mirror as the admin portal, so merchant previews/prints now use the hardened A4 layout: max 3 KPI columns, centered chart rows and wrapping HTML legends, compact table typography and chips, repeated table headers, no-data chart states, and true landscape pages in print. The merchant Studio mock/live preview uses the same renderer and is covered by the SDK mirror test.
 
 ---
 
@@ -16225,6 +16251,10 @@ These are development/CI tests only; no production-time test job or test endpoin
 `report-spec-generator/scripts/eval/pipeline.ts` is the recursive authoring harness: it downloads the current transcript, spawns an unrelated `opencode run` agent with only the transcript and a brief, verifies/saves/executes/mock-previews the resulting spec through the real admin API, and records diagnostics, coverage and chrome artifacts under `report-spec-generator/runs/`. The brief corpus (`report-spec-generator/briefs/*.md`) covers top-N rankings, settlement, latency, failures, ledger, reconciliation, AML, cashouts, Arabic, landscape wide tables and an explicit no-chrome case. The final 12-brief sweep produced a 100% first-pass verification rate and 100% section coverage with the improved transcript.
 
 `tests/e2e/admin/report-a4-layout.spec.ts` is the A4 regression gate. It fetches a mock preview from the live API, renders it through the real client SDK and Paged.js, and fails when any visible element crosses the page content box. Run it with `PLAYWRIGHT_CHROME_PATH=/opt/google/chrome/chrome REPORT_LAYOUT_SPEC=<spec.json> bunx playwright test e2e/admin/report-a4-layout.spec.ts --project=admin`.
+
+## A4 report print gate (2026-11-11)
+
+`tests/e2e/admin/report-a4-layout.spec.ts` renders a real report preview through the client SDK and Paged.js and asserts: no visible rect crosses the sheet, content never exceeds the sheet width, no page has vertical overflow, every table fragment has a `<thead>`, KPI grids have <= 3 columns and no clipped values, chart rows are centered with <= 2 charts, section titles are on the same page as their first content, and landscape/portrait page dimensions match the named page. Options: `REPORT_LAYOUT_SPEC`, `REPORT_LAYOUT_ZIP`, `REPORT_LAYOUT_MODE=MOCK|LIVE`, `REPORT_LAYOUT_PDF` (exports per-locale PDFs) and `REPORT_LAYOUT_HTML`.
 
 ---
 

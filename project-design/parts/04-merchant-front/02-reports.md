@@ -75,3 +75,7 @@ The merchant run drawer mirrors the admin filter-style form: sectioned, one fiel
 The merchant Studio now has a draft preview after a successful verification. It defaults to **Mock data**, which uses the shared `MockReportBundleBuilder` and renders every section (including visibility-gated ones) without a database query; **Live sample** runs the merchant-scoped executor with the engine-injected merchant identity. The endpoint is `POST /report-engine/studio/preview` (core) and is proxied by `merchant-back`. The shared client renderer/print stylesheet fix applies to both portals, so merchant previews and prints use the same A4 containment rules as the admin Studio.
 
 The merchant transcript example now lowers `periodRange.validation.max_range_days` to 90 so it stays inside the merchant 92-day tier limit, and the merchant host registers a `merchants` autocomplete source for the engine-injected scope input (returning the current merchant only).
+
+## Shared print layout hardening (2026-11-11)
+
+The merchant portal receives the same client SDK mirror as the admin portal, so merchant previews/prints now use the hardened A4 layout: max 3 KPI columns, centered chart rows and wrapping HTML legends, compact table typography and chips, repeated table headers, no-data chart states, and true landscape pages in print. The merchant Studio mock/live preview uses the same renderer and is covered by the SDK mirror test.

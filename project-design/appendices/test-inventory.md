@@ -173,11 +173,11 @@
 | `core-back/test/reportEngineSdk/QuerySafetyAndOptValidator.test.ts` | 340 | 20 |
 | `core-back/test/reportEngineSdk/ReportDryRunSimulator.test.ts` | 78 | 5 |
 | `core-back/test/reportEngineSdk/ReportRepairPrompt.test.ts` | 19 | 1 |
-| `core-back/test/reportEngineSdk/ReportTranscriptBuilder.test.ts` | 96 | 6 |
+| `core-back/test/reportEngineSdk/ReportTranscriptBuilder.test.ts` | 99 | 6 |
 | `core-back/test/reportEngineSdk/SdkDecoupling.test.ts` | 37 | 2 |
 | `core-back/test/reportEngineSdk/SeedChrome.test.ts` | 100 | 2 |
 | `core-back/test/reportEngineSdk/SpecNormalization.test.ts` | 128 | 6 |
-| `core-back/test/reportEngineSdk/SpecStructuralValidator.test.ts` | 132 | 8 |
+| `core-back/test/reportEngineSdk/SpecStructuralValidator.test.ts` | 173 | 11 |
 | `core-back/test/reportEngineSdk/TransformPipelineExecutor.test.ts` | 256 | 9 |
 | `core-back/test/reportEngineSdk/helpers.ts` | 542 | 0 |
 | `core-back/test/reporting-docx.test.ts` | 42 | 3 |
@@ -345,7 +345,7 @@
 | `tests/e2e/admin/guide-safeguard.spec.ts` | 104 | 1 |
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/operator-cases.spec.ts` | 187 | 2 |
-| `tests/e2e/admin/report-a4-layout.spec.ts` | 138 | 1 |
+| `tests/e2e/admin/report-a4-layout.spec.ts` | 280 | 1 |
 | `tests/e2e/admin/shell.spec.ts` | 254 | 17 |
 | `tests/e2e/admin/table-and-padding-geometry.spec.ts` | 235 | 3 |
 | `tests/e2e/admin/table-row-context-menu.spec.ts` | 217 | 8 |
@@ -404,4 +404,4 @@
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **398**
-- Total literal test declarations: **4052**
+- Total literal test declarations: **4055**

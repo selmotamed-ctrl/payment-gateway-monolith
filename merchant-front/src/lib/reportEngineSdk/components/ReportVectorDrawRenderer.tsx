@@ -42,8 +42,10 @@ export function renderVectorDrawSectionToSvg(params: {
           : edge.style === "DOTTED"
             ? 'stroke-dasharray="2,3"'
             : "";
-      const labelMarkup = edge.label_i18n_key
-        ? `<text x="${midX}" y="${Math.min(y1, y2) - 6}" text-anchor="middle" font-size="10" fill="#475569">${escapeXml(t(edge.label_i18n_key))}</text>`
+      const labelX = x1 + (x2 - x1) * 0.45;
+      const hasRoomForLabel = Math.abs(x2 - x1) > 60 || Math.abs(y2 - y1) > 60;
+      const labelMarkup = edge.label_i18n_key && hasRoomForLabel
+        ? `<text x="${labelX}" y="${Math.min(y1, y2) - 12}" text-anchor="middle" font-size="9" fill="#475569" stroke="#FFFFFF" stroke-width="3" paint-order="stroke">${escapeXml(t(edge.label_i18n_key))}</text>`
         : "";
       return `<g class="draw-edge">
         <path d="M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}" fill="none" stroke="${edge.color_hex}" stroke-width="1.75" ${dashAttr} marker-end="url(#report-arrow)" />
@@ -51,6 +53,66 @@ export function renderVectorDrawSectionToSvg(params: {
       </g>`;
     })
     .join("\n");
+
+  const wrapText = (text: string, size: number, maxWidth: number): string[] => {
+    const maxChars = Math.max(1, Math.floor(maxWidth / Math.max(1, size * 0.58)));
+    const words = text.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let current = "";
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length <= maxChars) {
+        current = candidate;
+        continue;
+      }
+      if (current) lines.push(current);
+      if (word.length <= maxChars) current = word;
+      else {
+        for (let index = 0; index < word.length; index += maxChars) {
+          const chunk = word.slice(index, index + maxChars);
+          if (chunk.length === maxChars) lines.push(chunk);
+          else current = chunk;
+        }
+      }
+    }
+    if (current) lines.push(current);
+    return lines.length > 0 ? lines : [text];
+  };
+
+  const layoutNodeText = (label: string, value: string, width: number, height: number, center: boolean) => {
+    const padding = Math.max(4, Math.min(9, width * 0.07));
+    const maxWidth = Math.max(8, width - padding * 2);
+    const longestToken = (text: string): number =>
+      Math.max(1, ...text.split(/\s+/).filter(Boolean).map((token) => token.length));
+    const fitSize = (text: string, preferred: number): number =>
+      Math.max(6, Math.min(preferred, Math.floor(maxWidth / (longestToken(text) * 0.58))));
+    let labelSize = fitSize(label, 11);
+    let valueSize = value ? fitSize(value, 12) : 12;
+    let labelLines: string[] = [];
+    let valueLines: string[] = [];
+    for (let attempt = 0; attempt < 8; attempt++) {
+      labelLines = wrapText(label, labelSize, maxWidth);
+      valueLines = value ? wrapText(value, valueSize, maxWidth) : [];
+      const lineHeight = labelSize * 1.22;
+      const valueLineHeight = valueSize * 1.22;
+      const needed =
+        padding * 2 +
+        labelLines.length * lineHeight +
+        (valueLines.length > 0 ? 4 + valueLines.length * valueLineHeight : 0);
+      if (needed <= height) break;
+      labelSize = Math.max(6, labelSize - 1);
+      valueSize = Math.max(6, valueSize - 1);
+      if (labelSize === 6 && valueSize === 6) break;
+    }
+    const labelLineHeight = labelSize * 1.22;
+    const valueLineHeight = valueSize * 1.22;
+    const labelStartY = center && valueLines.length === 0 ? height / 2 + labelSize * 0.35 : padding + labelSize;
+    const valueStartY = Math.min(
+      height - padding - (valueLines.length > 0 ? (valueLines.length - 1) * valueLineHeight : 0),
+      height - padding,
+    );
+    return { labelLines, labelSize, labelStartY, labelLineHeight, valueLines, valueSize, valueStartY, valueLineHeight };
+  };
 
   const nodesSvg = section.nodes
     .map((node) => {
@@ -63,17 +125,36 @@ export function renderVectorDrawSectionToSvg(params: {
         const rawVal = rows[node.value_binding.row_index]?.[node.value_binding.field];
         boundValueText = formatValue(rawVal, node.value_binding.format_hint);
       }
+      const text = layoutNodeText(
+        t(node.label_i18n_key),
+        boundValueText,
+        node.width,
+        node.height,
+        node.shape === "CIRCLE" || node.shape === "DIAMOND",
+      );
       const shapeMarkup = node.shape === "CIRCLE"
         ? `<ellipse cx="${node.width / 2}" cy="${node.height / 2}" rx="${node.width / 2}" ry="${node.height / 2}" fill="${node.fill_hex}" stroke="${node.stroke_hex}" stroke-width="1.5" />`
         : node.shape === "DIAMOND"
           ? `<polygon points="${node.width / 2},0 ${node.width},${node.height / 2} ${node.width / 2},${node.height} 0,${node.height / 2}" fill="${node.fill_hex}" stroke="${node.stroke_hex}" stroke-width="1.5" />`
           : `<rect width="${node.width}" height="${node.height}" rx="${rx}" fill="${node.fill_hex}" stroke="${node.stroke_hex}" stroke-width="1.5" />`;
+      const labelMarkup = text.labelLines
+        .map(
+          (line, index) =>
+            `<tspan x="${node.width / 2}" y="${text.labelStartY + index * text.labelLineHeight}">${escapeXml(line)}</tspan>`,
+        )
+        .join("");
+      const valueMarkup = text.valueLines
+        .map(
+          (line, index) =>
+            `<tspan x="${node.width / 2}" y="${text.valueStartY + index * text.valueLineHeight}">${escapeXml(line)}</tspan>`,
+        )
+        .join("");
       return `<g class="draw-node" transform="translate(${nx}, ${ny})">
         ${shapeMarkup}
-        <text x="${node.width / 2}" y="${boundValueText ? node.height * 0.42 : node.height * 0.55}" text-anchor="middle" font-size="11" font-weight="600" fill="${node.text_hex}">${escapeXml(t(node.label_i18n_key))}</text>
+        <text x="${node.width / 2}" y="${text.labelStartY}" text-anchor="middle" font-size="${text.labelSize}" font-weight="600" fill="${node.text_hex}">${labelMarkup}</text>
         ${
           boundValueText
-            ? `<text x="${node.width / 2}" y="${node.height * 0.76}" text-anchor="middle" font-size="12" font-weight="700" fill="${node.stroke_hex}">${escapeXml(boundValueText)}</text>`
+            ? `<text x="${node.width / 2}" y="${text.valueStartY}" text-anchor="middle" font-size="${text.valueSize}" font-weight="700" fill="${node.stroke_hex}">${valueMarkup}</text>`
             : ""
         }
       </g>`;

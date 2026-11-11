@@ -270,6 +270,21 @@ export function validateSpecStructureAndI18n(
     }
   }
 
+  for (let i = 0; i < spec.sections.length; i++) {
+    const sec = spec.sections[i]!;
+    if ((sec.section_type === "CHART" || sec.section_type === "DATA_TABLE") && !sec.subtitle_i18n_key) {
+      diagnostics.push({
+        layer: 1,
+        severity: "warning",
+        path: `sections[${i}](${sec.section_id}).subtitle_i18n_key`,
+        code: "MISSING_SECTION_DESCRIPTION",
+        message: `${sec.section_type === "CHART" ? "Chart" : "Table"} "${sec.section_id}" has no subtitle/description.`,
+        aiFixHint:
+          "Add a short subtitle_i18n_key that describes what the section shows; the Studio renders it between the title and the chart/table.",
+      });
+    }
+  }
+
   validateInputDefinitions(spec, host, diagnostics);
 
   for (const ref of referencedKeys) {

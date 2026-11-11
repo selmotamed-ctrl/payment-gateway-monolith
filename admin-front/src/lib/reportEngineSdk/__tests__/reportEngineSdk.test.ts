@@ -204,3 +204,128 @@ describe("report rendering additions", () => {
     expect(svg).toContain("<text>Gross</text>");
   });
 });
+
+describe("print layout contract", () => {
+  it("groups consecutive half-width charts into one centered row", () => {
+    const chartSpec = {
+      ...spec,
+      sections: [
+        {
+          section_type: "CHART",
+          section_id: "first",
+          title_i18n_key: "table.day",
+          dataset_id: "missing",
+          chart_kind: "BAR",
+          height_mm: 60,
+          width_percent: 50,
+          x_field: "day",
+          y_axis_format: "CURRENCY_MINOR",
+          series: [{ field: "amount", label_i18n_key: "table.amount", show_value_labels: false }],
+        },
+        {
+          section_type: "CHART",
+          section_id: "second",
+          title_i18n_key: "table.amount",
+          dataset_id: "missing",
+          chart_kind: "BAR",
+          height_mm: 60,
+          width_percent: 50,
+          x_field: "day",
+          y_axis_format: "CURRENCY_MINOR",
+          series: [{ field: "amount", label_i18n_key: "table.amount", show_value_labels: false }],
+        },
+      ],
+    } as unknown as ReportDescriptorSpec;
+    const html = renderReportSectionsToHtml({
+      bundle: { ...bundle, spec: chartSpec } as ReportExecutionBundle,
+      locale: "en",
+    });
+    expect(html).toContain("report-chart-row");
+    expect((html.match(/report-chart-cell/g) ?? []).length).toBe(2);
+  });
+
+  it("renders a no-data state instead of an empty chart", () => {
+    const chartSpec = {
+      ...spec,
+      sections: [
+        {
+          section_type: "CHART",
+          section_id: "empty",
+          title_i18n_key: "table.day",
+          dataset_id: "missing",
+          chart_kind: "BAR",
+          height_mm: 60,
+          width_percent: 50,
+          x_field: "day",
+          y_axis_format: "INTEGER",
+          series: [{ field: "amount", label_i18n_key: "table.amount", show_value_labels: false }],
+        },
+      ],
+    } as unknown as ReportDescriptorSpec;
+    const html = renderReportSectionsToHtml({
+      bundle: { ...bundle, spec: chartSpec } as ReportExecutionBundle,
+      locale: "en",
+    });
+    expect(html).toContain("report-chart-empty");
+    expect(html).toContain("No data");
+  });
+
+  it("pins KPI values to the bottom and scales long numbers", () => {
+    const kpiSpec = {
+      ...spec,
+      sections: [
+        {
+          section_type: "KPI_GRID",
+          section_id: "kpis",
+          columns: 3,
+          cards: [
+            {
+              label_i18n_key: "kpi.total",
+              dataset_id: "totals",
+              value_field: "big",
+              row_index: 0,
+              format_hint: "CURRENCY_MINOR",
+              tone: "PRIMARY",
+            },
+          ],
+        },
+      ],
+    } as unknown as ReportDescriptorSpec;
+    const bigBundle = {
+      ...bundle,
+      spec: kpiSpec,
+      datasets: { totals: [{ big: 1234567890123 }] },
+    } as unknown as ReportExecutionBundle;
+    const html = renderReportSectionsToHtml({ bundle: bigBundle, locale: "en" });
+    expect(html).toContain("report-kpi-metric");
+    expect(html).toContain("report-kpi-value--long");
+  });
+
+  it("styles numeric, badge and total cells for the print table", () => {
+    const tableSpec = {
+      ...spec,
+      sections: [
+        {
+          section_type: "DATA_TABLE",
+          section_id: "table",
+          title_i18n_key: "table.day",
+          dataset_id: "rows",
+          columns: [
+            { field: "status", header_i18n_key: "table.day", format_hint: "BADGE", summary_footer: "NONE" },
+            { field: "amount", header_i18n_key: "table.amount", align: "END", format_hint: "CURRENCY_MINOR", summary_footer: "LABEL_TOTAL" },
+          ],
+        },
+      ],
+    } as unknown as ReportDescriptorSpec;
+    const tableBundle = {
+      ...bundle,
+      spec: tableSpec,
+      datasets: { rows: [{ status: "PARTIALLY_REFUNDED", amount: 1234567 }] },
+    } as unknown as ReportExecutionBundle;
+    const html = renderReportSectionsToHtml({ bundle: tableBundle, locale: "en" });
+    expect(html).toContain("report-badge--xlong");
+    expect(html).toContain("report-cell-number");
+    expect(html).toContain("report-cell-badge");
+    expect(html).toContain("report-footer-label");
+  });
+});
