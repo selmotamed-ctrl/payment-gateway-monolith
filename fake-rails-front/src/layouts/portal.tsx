@@ -3,6 +3,7 @@ import { useRoute, useRouter } from "vue-router";
 import { VAppBar, VAppBarTitle, VBtn, VMain, VSpacer } from "vuetify/components";
 import { ScreenContainer } from "@/components/ScreenContainer";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import ThemeMenu from "@/components/ThemeMenu";
 import { clearSession, getUser } from "@/utils/api";
 
 export const PortalLayout = dc(
@@ -37,6 +38,7 @@ export const PortalLayout = dc(
             ))}
           </div>
           <VSpacer />
+          <ThemeMenu />
           <StatusBadge
             status={user?.environment ?? "SANDBOX"}
             label={user?.environment ?? "SANDBOX"}

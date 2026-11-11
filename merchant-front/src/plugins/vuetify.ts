@@ -17,10 +17,11 @@ import { getLocaleName } from "@/plugins/i18n";
 import { createVuetify } from "vuetify";
 import { mdi, aliases } from "vuetify/iconsets/mdi";
 import { Icons, IconsSet } from "@/utils/iconSet/index";
+import { initialTheme } from "@/utils/theme";
 
 export default createVuetify({
     theme: {
-        defaultTheme: "light",
+        defaultTheme: initialTheme(),
         themes: {
             light: {
                 dark: false,

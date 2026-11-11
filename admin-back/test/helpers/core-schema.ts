@@ -559,7 +559,9 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       currency: z.string().length(3).default("LYD"),
       conditions: z.record(z.string().max(64), z.unknown()).default({}),
       sourceReference: z.string().min(2).max(200),
-      status: z.enum(["PROVISIONAL", "CONFIRMED"]).default("PROVISIONAL"),
+      status: z.enum(["PROVISIONAL", "CONFIRMED"]).optional(),
+      requiredOutputFormats: z.array(z.enum(["XML", "XLSX", "DOCX"])).max(3).optional(),
+      primaryOutputFormat: z.enum(["XML", "XLSX", "DOCX"]).optional(),
     })
     .strict(),
   "POST /aml/reports": z

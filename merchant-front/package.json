@@ -35,6 +35,7 @@
         "kt-common": "^1.0.1",
         "kt-dc": "^1.0.1",
         "leaflet": "^1.9.4",
+        "pagedjs": "^0.4.3",
         "qrcode": "^1.5.4",
         "v-viewer": "^3.0.22",
         "viewerjs": "^1.11.7",

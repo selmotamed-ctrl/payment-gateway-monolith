@@ -3,7 +3,7 @@ id: fake-rails.chaos
 title: Fake Rails Chaos Engine and Tester Portal
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-09
 verified_against: 5a24f6f+working-tree
 code:
   - fake-rails-back/engine/chaos/**
@@ -11,6 +11,9 @@ code:
   - fake-rails-back/engine/statements/**
   - fake-rails-back/api/portal/**
   - fake-rails-front/src/**
+  - fake-rails-front/src/utils/theme/index.ts
+  - fake-rails-front/src/state/theme.ts
+  - fake-rails-front/src/components/ThemeMenu/index.tsx
 design_sources:
   - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#5-probabilistic-chaos-failure-injection-engine
   - design/04-fake-rails-and-seeder/fake_payment_rails_service_architecture.md#6-single-user-tester-portal-dashboard-architecture-fake-rails-front
@@ -250,7 +253,7 @@ The router guard redirects unauthenticated non-hosted routes to `/login` and kee
 
 The portal layout has four navigation links and an environment badge. `LiveTransactionFeed` opens the SSE stream with the query token and listens for a subset of event names. `WireInspectorDrawer` shows transaction fields, step events and webhook deliveries. `WebhookComposerModal` fires or disputes a webhook. `RailChaosCard` edits failure chance, latency, primary failure mode, duplicates, out-of-order and corruption.
 
-The SPA is fixed to the portal shell's language and theme; it does not have the admin/merchant i18n catalogue. `tests/e2e/exhaustive/exhaustive-fake-rails-surface.spec.ts` only visits `/login` across three viewports, two locales and two themes while mocking every portal API; it asserts shell geometry, no `#app` transform and no horizontal overflow.
+The SPA has light and dark Vuetify themes and an explicit System/Light/Dark theme menu in the portal app bar and the login card. `main.ts` calls `initTheme()` before mount and `plugins/vuetify.ts` uses `initialTheme()`, so the login page follows `prefers-color-scheme` on first paint; System mode tracks OS changes live. The theme mode is persisted in localStorage under `theme`. The SPA does not have the admin/merchant i18n catalogue. `tests/e2e/exhaustive/exhaustive-fake-rails-surface.spec.ts` visits `/login` across three viewports, two locales and two themes while mocking every portal API; it asserts shell geometry, no `#app` transform and no horizontal overflow.
 
 ## 4. Contracts and invariants
 
@@ -367,8 +370,13 @@ curl -X POST http://127.0.0.1:4104/portal-api/webhooks/$TX_ID/fire \
 
 ## 10. Change history
 
+- 2026-11-09: added light/dark themes and the System/Light/Dark theme menu to the tester SPA and login card; the theme follows `prefers-color-scheme` on first paint and tracks OS changes in System mode. See `TRACKER.md`.
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
 
 ## Security hardening (2026-11-05)
 
 fake-rails-front: the postMessage target is `VITE_CHECKOUT_ORIGIN`, otherwise the embedding parent's origin, never `*`; `redirect_url` is validated as http(s) without credentials. The live feed opens its EventSource with a 30-second single-use ticket obtained from `POST /portal-api/transactions/stream-ticket` (`streamUrl()` is now async), never the session token, and the hosted redirect page and widget frame post approve/decline with the session-bound `X-Hosted-Action-Token` (`postHostedAction`) (GAP-024, resolved 2026-11-05). The tester token itself remains in localStorage. New env: `VITE_CHECKOUT_ORIGIN`.
+
+## Dark teleported overlays (2026-11-10)
+
+The Fake Rails tester portal applies the same overlay text-color rule as the other portals, fixing black-on-dark custom dialog/drawer content in dark mode.

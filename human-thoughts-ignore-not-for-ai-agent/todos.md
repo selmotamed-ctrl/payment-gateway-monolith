@@ -1,16 +1,5 @@
-
-
-- ai transcript report engine
-- automated + manual journal archive 
-- sandbox environment
+# in office inshallah 
 - build an ai assisted environment generator and update the deploy guide 
-
-- make sure that there is no conflicts on the max width of shards for accounts --
-- check ayoub report -- 
-- missing automations --
-- backup engine full check and understanding --
-
-
 - incomplete work on automation design:
 ```md
 Not built or partial
@@ -24,4 +13,12 @@ Not built or partial
 - From earlier: the dispute-loss booking stays a human step (the D1 deviation), and AUTO-26 refresh-failure counting is not built. The seeded MLRO and compliance users lack approval:check, which may be a seed gap.
 ```
 
-- resolve broken 3 tests
+- sandbox environment
+- resolve broken 3 tests -- 
+- ai transcript report engine --
+- auto system theme detection even on login page --
+- make sure that there is no conflicts on the max width of shards for accounts --
+- check ayoub report -- 
+- missing automations --
+- backup engine full check and understanding --
+

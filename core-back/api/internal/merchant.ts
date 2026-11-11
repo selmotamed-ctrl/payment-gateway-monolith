@@ -46,6 +46,7 @@ import { WATCHLIST_SETTING_KEY } from "../../engine/guards/AttemptGuardPipeline"
 import { publishWatchlist } from "../../engine/guards/ScreeningProvider";
 import { asStringArray, resolveVisibleRails } from "../../engine/flow/VisibleRailsCatalog";
 import { json, jsonOptional } from "./json";
+import { merchantReportEngineRouter } from "./merchantReportEngine";
 import {
   clientIp,
   principalOf,
@@ -997,6 +998,8 @@ router.use((request, _response, next) => {
   }
   next();
 });
+// The report-engine router paths already start with `/report-engine`.
+router.use(merchantReportEngineRouter);
 
 const OPTION_LIMIT = 100;
 

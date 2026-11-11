@@ -1,4 +1,4 @@
-import { cloneVNode, defineComponent, useId, type VNodeChild } from "vue";
+import { cloneVNode, defineComponent, useId, type PropType, type VNodeChild } from "vue";
 import { useLocale } from "vuetify";
 
 export const FormField = defineComponent({
@@ -9,6 +9,7 @@ export const FormField = defineComponent({
         error: { type: String, default: "" },
         required: { type: Boolean, default: false },
         sensitiveMakerChecker: { type: Boolean, default: false },
+        variant: { type: String as PropType<"default" | "filter">, default: "default" },
         id: { type: String, default: "" },
     },
     setup(props, { slots }) {
@@ -35,10 +36,15 @@ export const FormField = defineComponent({
                       ...children.slice(1),
                   ]
                 : [];
+            const isFilter = props.variant === "filter";
             return (
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <div class={isFilter ? "pg-report-field" : undefined} style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                        <label for={fieldId} style={{ fontSize: "13px", fontWeight: 500, color: "var(--pg-ink-primary)" }}>
+                        <label
+                            for={fieldId}
+                            class={isFilter ? "pg-filter-label" : undefined}
+                            style={isFilter ? undefined : { fontSize: "13px", fontWeight: 500, color: "var(--pg-ink-primary)" }}
+                        >
                             {props.label}
                             {props.required && (
                                 <span aria-hidden="true" style={{ color: "var(--pg-status-danger-dot)", marginInlineStart: "3px" }}>
@@ -64,7 +70,11 @@ export const FormField = defineComponent({
                     </div>
                     {enhanced}
                     {props.hint && (
-                        <span id={hintId} style={{ fontSize: "12px", color: "var(--pg-ink-muted)", lineHeight: 1.4 }}>
+                        <span
+                            id={hintId}
+                            class={isFilter ? "pg-report-field__hint" : undefined}
+                            style={isFilter ? undefined : { fontSize: "12px", color: "var(--pg-ink-muted)", lineHeight: 1.4 }}
+                        >
                             {props.hint}
                         </span>
                     )}

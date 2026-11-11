@@ -3,7 +3,7 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-09
+last_verified: 2026-11-10
 verified_against: d695518+working-tree
 code:
   - core-back/test/exhaustive/**
@@ -267,6 +267,14 @@ The seeder checks live in suite 10, and the deploy matrix lives in `deploy/test/
 
 This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations, so the executed test count is higher, especially in suites 01-04. It is far below the 38,500 claim. The stale-claims register records 1,778; the working tree has about 29 more declarations.
 
+### 3.14 Report engine SDK tests
+
+`core-back/test/reportEngineSdk/**` implements the RE-T01..RE-T22 matrix from `design/12-reporting/dynamic_ai_transcript_report_engine_sdk_plan.md`: structural/bilingual validation, partition and EXPLAIN safety, forbidden secrets, merchant isolation, authority inference/override, read-only executor rejection and timeout recovery, asset bundle traversal/magic bytes, sanitizer, transforms, chrome resolution, input Zod compilation, dry run, transcript/repair prompt and SDK decoupling. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers value formatting, preset defaults, Arabic/RTL rendering, chrome binding, language options, paged-media CSS and the client sanitizer. The frontend Vitest include list was extended for the report SDK tests.
+
+### 3.15 Report engine and merchant report tests
+
+`core-back/test/reportEngineSdk/**` now covers the original RE-T01..RE-T22 matrix plus PII masking, confidential AML denial/bypass, merchant scope (including OR-bypass), semantic AST diagnostics, asset validation, chrome resolution and SDK decoupling, and the remediation suites: AuthorityAndCatalog (referenced-column PII, relation parsing, sensitivity/AML domains), MerchantReportLine (allow-list, identity injection/row assertion, tier limits), SeedChrome (seed idempotence), ExecuteAndRedaction (bundle comparison assets, aggregate/truncation), and the A08/A09/A10/A11/A12/A14/A15/A16/A17 regression cases. `merchant-back/test/core-forwarding.test.ts` covers the merchant catalog/execute/autocomplete proxy and the merchant Studio proxies. `core-back/test/admin-slice/admin-report-engine.test.ts` (DB-gated) covers version persistence, publish supersede, archive promotion, audience tabs and the merchant mount/authority; `admin-back/test/report-engine-edge.test.ts` covers the 24 MB parser, edge execute/list permissions and the publish proxy. `tests/unit/report-engine-sdk-mirror.test.ts` asserts the admin/merchant client SDK copies are identical; `tests/unit/report-ui-styles.test.ts` pins the shared report input grid/preview CSS in both portals; `tests/unit/builders-settings-parser.test.ts` covers the `merchant_reports.policy` Platform Setting editor. Core unit tests `report-engine-body-path.test.ts` and `MerchantReportPolicy.test.ts` cover the merchant body parser prefix and the staff-managed policy defaults/cache/assets gate. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers the client renderer, chrome variables, enum translation, vector canvas and paged-media contract. The Guide content test was updated for the new Reports screen/article.
+
 ## 4. Contracts and invariants
 
 1. **Suite numbering is not the same as directory numbering.** The runner's `T-EX-09b` and `T-EX-10` do not match the design's Suite 10 and 11.
@@ -444,3 +452,30 @@ and real-device performance tests remain open.
 ## Remediation round 2 (2026-11-08): new suites
 
 core-back: `ledger-raw-sql-parity`, `staff-invitation`, `checkout-return-route`, `session-revocation-durability`, `partition-truncate-guard`; admin-back and merchant-back: `auth-account-limiters`; fake-rails-back: `webhook-target`; deploy: `hostProbe`, `pgAppRole`; root `tests/unit`: `admin-bundle-lazy`, `i18n-catalogue`.
+
+## Declarative regulatory reporting suites (2026-11-10)
+
+`core-back/test/reporting-xsd-xlsx.test.ts` (8 tests) covers the safe XSD compiler (paths, facets, enumerations, DOCTYPE/external import rejection), the deterministic XML generator and validator (sequence order, required fields, type and enumeration violations), the XLSX renderer (generated workbook, totals, narrative, required data, formula-injection guard, macro rejection), and the six provisional baseline schemas with a generated STR XML that validates against its compiled XSD. `core-back/test/reporting-rule-evaluator.test.ts` and `test/regulatory-report-lifecycle.test.ts` were updated for DRAFT evaluator reports, encrypted manual payloads, the report approval request and the format-aware submission gate. The report lifecycle suite still uses the governance fake database; the schema/output tables are optional there so the fake remains focused on the lifecycle.
+
+
+## Reporting studio and automation sweep suites (2026-11-10)
+
+`core-back/test/reporting-generation.test.ts` covers the production generation path and payload-hash binding. `reporting-xsd-xlsx.test.ts` now covers attributes, LTR date mapping, list columns and required narrative sections. `reporting-rule-evaluator.test.ts` and `regulatory-report-lifecycle.test.ts` cover DRAFT reports, encrypted payloads, stale-output filing, approval and format gates. New studio suites are specified in `design/11-automation/reporting_studio_and_automation_test_plan.md`: `reporting-schema-studio.test.ts`, `reporting-output-integration.test.ts`, `reporting-lifecycle-pg.test.ts`, `reporting-xsd-edge.test.ts`, `reporting-xlsx-edge.test.ts`, admin-back forwarding, frontend unit models and Playwright studio flows.
+
+## Reporting Studio completion, INC, DOCX and filing adapters (2026-11-10)
+
+- `core-back/test/reporting-template.test.ts`: named-range parsing, safe-template analysis, binding requirement, prototype style/total/narrative writes, range overflow and unbound-template rejection (4 tests).
+- `core-back/test/reporting-docx.test.ts`: DOCX schema parsing, escaped narrative/tables in a valid OOXML package and required-section failure (3 tests).
+- `core-back/test/incident-lifecycle.test.ts`: forward-only transitions, postmortem requirement/due date and the de-identified filing payload shape (3 tests).
+- `core-back/test/filing-adapters.test.ts`: public-HTTPS endpoint rules, manual no-dispatch and HTTP auth-header/reference capture with a stubbed fetch (3 tests).
+- `core-back/test/reporting-xsd-xlsx.test.ts` now expects the seventh (DOCX incident) provisional baseline binding.
+- The admin-back suite covers the inbound forwarding schemas; admin-front `test:unit` covers the UI abstraction gate; the root `tests/unit` suite includes the i18n catalogue gate for every new label.
+
+These are development/CI tests only; no production-time test job or test endpoint is created by this change.
+
+## Final compliance regression tests (2026-11-10)
+
+- `admin-back/test/admin-ui-completion.test.ts` now proves that incident filters are forwarded, filing-adapter writes relay 202, and both incident and adapter reads remain confidential.
+- `core-back/test/reporting-template.test.ts` now proves a malformed workbook is reported rather than accepted, in addition to named-range mapping and range-overflow coverage.
+- Existing core reporting, DOCX, incident, adapter and XLSX tests remain the targeted gate; the full core suite is expected to fail only the four tests that require a reachable PostgreSQL test database.
+- Playwright coverage for the new pages should be added when a browser is available: incident create/filter/detail/close/report, filing-adapter approval flow, Studio template upload/reload/analyze/remove, and report adapter filing/submission history at 360/390/768/1280 px in both themes and RTL.

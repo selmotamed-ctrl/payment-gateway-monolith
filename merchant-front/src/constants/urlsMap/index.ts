@@ -62,6 +62,18 @@ export const urlsMap = {
     usersList: "v1/merchant/users",
     userDetail: (id: string) => `v1/merchant/users/${id}`,
 
+    reportEngineCatalog: "v1/merchant/report-engine/catalog",
+    reportEngineAutocomplete: (sourceKey: string) => `v1/merchant/report-engine/autocomplete/${encodeURIComponent(sourceKey)}`,
+    reportEngineExecute: (code: string) => `v1/merchant/report-engine/catalog/${encodeURIComponent(code)}/execute`,
+    reportEngineStudioTranscript: "v1/merchant/report-engine/studio/transcript",
+    reportEngineStudioVerify: "v1/merchant/report-engine/studio/verify",
+    reportEngineStudioSpecs: "v1/merchant/report-engine/studio/specs",
+    reportEngineStudioSpec: (id: string) => `v1/merchant/report-engine/studio/specs/${encodeURIComponent(id)}`,
+    reportEngineStudioPublish: (id: string) => `v1/merchant/report-engine/studio/specs/${encodeURIComponent(id)}/publish`,
+    reportEngineStudioArchive: (id: string) => `v1/merchant/report-engine/studio/specs/${encodeURIComponent(id)}/archive`,
+    reportEngineStudioUsage: "v1/merchant/report-engine/studio/usage",
+    reportEngineStudioClone: (code: string) => `v1/merchant/report-engine/studio/templates/${encodeURIComponent(code)}/clone`,
+
     statsOverview: "v1/merchant/stats/overview",
     statsMetric: "v1/merchant/stats/metrics/:mk",
 

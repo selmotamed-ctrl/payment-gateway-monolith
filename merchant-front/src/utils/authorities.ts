@@ -125,6 +125,14 @@ export const MERCHANT_AUTHORITY_GROUPS: AuthorityGroup[] = [
         ],
     },
     {
+        group: "Reports",
+        icon: "mdi-file-chart-outline",
+        authorities: [
+            { authorityKey: "reports.run", title: "Run Reports", description: "Generate and export the reports available to your merchant" },
+            { authorityKey: "reports.studio", title: "Report Studio", description: "Author, verify and publish your own merchant reports" },
+        ],
+    },
+    {
         group: "Developer",
         icon: "mdi-code-braces",
         authorities: [

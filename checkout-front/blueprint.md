@@ -6,7 +6,7 @@ Generated from: `checkout-ui.flow`, `checkout-ui.help`.
 
 ## Checkout Payer Flow
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-09
 
 ## 1. Purpose and scope
 
@@ -41,7 +41,7 @@ The checkout is deliberately narrow and zero-trust:
 - `/` (`Home`) redirects to `NotFound`.
 - `/:pathMatch(.*)*` (`NotFound`) renders the token-styled 404 page.
 - `layouts/checkout.tsx` is a single `<main class="pg-checkout">` with an optional title.
-- The page adds a max-width 560 px column with the merchant name, help button, language toggle, summary card, phase content and footer.
+- The page adds a max-width 560 px column with the merchant name, help button, three-mode theme menu (System/Light/Dark), language toggle, summary card, phase content and footer. The theme mode is persisted and resolved against `prefers-color-scheme`; `initialTheme()`/`initTheme()` apply it before mount, so the payer surface follows the OS theme and tracks OS changes live in System mode.
 
 ### 3.2 Phase machine
 
@@ -304,6 +304,7 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 
 ## 10. Change history
 
+- 2026-11-09 — Added system/light/dark theme modes: persisted mode resolved against `prefers-color-scheme`, applied before mount, live OS tracking in System mode, and an explicit three-option `ThemeMenu` in the payer header. See `TRACKER.md`.
 - 2026-11-03 — Initial canonical payer-flow part. Confirms the phase machine, five client-action renderers, SSE status stream, amount breakdown, receipt/return allowlist and the checkout 404 recovery bug.
 
 ## Security hardening (2026-11-05)
@@ -320,6 +321,10 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 ## Gap resolutions (2026-11-05)
 
 - **XLSX and dependencies (GAP-029, RESOLVED).** `xlsx` is pinned to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`, `@types/xlsx` was dropped and the unused `@prisma/client` dependency was removed from `checkout-front/package.json`.
+
+## Dark teleported overlays (2026-11-10)
+
+Checkout dialogs/drawers use the shared overlay text-color rule (`color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`), keeping custom modal content readable in dark mode.
 
 ## Checkout Help Center
 

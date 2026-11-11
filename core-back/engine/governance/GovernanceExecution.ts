@@ -3186,12 +3186,15 @@ export async function executeCashout(
 const executeRegulatoryReportApproval = async (
   ctx: GovernanceExecutionContext,
   tx: Tx,
-  input: { approvalId: string; reportId: string; checkerUserId: string; checkerRole: string },
+  input: { approvalId: string; reportId: string; checkerUserId: string; checkerRole: string; payload?: Record<string, unknown> },
 ): Promise<GovernanceExecutionResult> => {
   const reports = modelOf(tx, "regulatoryReport");
   const report = await reports.findUnique({ where: { id: input.reportId } });
   if (!report) {
     throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+  }
+  if (typeof input.payload?.payloadSha256 === "string" && input.payload.payloadSha256 !== report.payloadSha256) {
+    throw new ApiError(409, "REGULATORY_REPORT_PAYLOAD_STALE", "The report payload changed after the approval was requested");
   }
   if (report.status === "APPROVED") {
     return {
@@ -3275,6 +3278,155 @@ const executeReportingRuleApproval = async (
     entityId: String(rule.id),
     idempotent: false,
   };
+};
+
+const executeRegulatoryReportSchemaApproval = async (
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: { approvalId: string; schemaId: string; checkerUserId: string; checkerRole: string; payload: Record<string, unknown> },
+): Promise<GovernanceExecutionResult> => {
+  const schemas = modelOf(tx, "regulatoryReportSchema");
+  const schema = await schemas.findUnique({ where: { id: input.schemaId } });
+  if (!schema) {
+    throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  }
+  const alreadyConfirmed = schema.status === "CONFIRMED";
+  if (input.payload.definitionSha256 && input.payload.definitionSha256 !== schema.definitionSha256) {
+    throw new ApiError(409, "REPORT_SCHEMA_STALE", "The schema definition changed after the approval was requested");
+  }
+  if (input.payload.mappingSha256 && input.payload.mappingSha256 !== schema.mappingSha256) {
+    throw new ApiError(409, "REPORT_SCHEMA_STALE", "The schema mapping changed after the approval was requested");
+  }
+  if (!alreadyConfirmed && schema.status !== "PENDING_APPROVAL" && schema.status !== "PROVISIONAL" && schema.status !== "DRAFT") {
+    throw new ApiError(409, "REPORT_SCHEMA_NOT_PROMOTABLE", `The reporting schema is '${String(schema.status)}' and cannot be confirmed`);
+  }
+  if (!alreadyConfirmed) await schemas.updateMany({
+    where: {
+      authority: String(schema.authority),
+      schemaCode: String(schema.schemaCode),
+      status: "CONFIRMED",
+      id: { not: schema.id },
+    },
+    data: { status: "SUPERSEDED" },
+  });
+  const updated = alreadyConfirmed
+    ? schema
+    : await schemas.update({
+        where: { id: schema.id },
+        data: {
+          status: "CONFIRMED",
+          approvedByUserId: input.checkerUserId,
+          approvedAt: new Date(),
+          approvalRequestId: input.approvalId,
+        },
+      });
+  const setAsDefault = input.payload.setAsDefault !== false;
+  if (setAsDefault) {
+    const binding = asRecord(input.payload.defaultBinding);
+    const authority = typeof binding.authority === "string" ? binding.authority : String(schema.authority);
+    const reportType = typeof binding.reportType === "string" ? binding.reportType : String(schema.reportType);
+    const reportCode = typeof binding.reportCode === "string"
+      ? binding.reportCode
+      : typeof schema.reportCode === "string" ? schema.reportCode : "";
+    const format = typeof binding.format === "string" ? binding.format : String(schema.format);
+    await modelOf(tx, "regulatorySchemaDefaultBinding").upsert({
+      where: { authority_reportType_reportCode_format: { authority, reportType, reportCode, format } },
+      create: { authority, reportType, reportCode, format, schemaId: schema.id, updatedByUserId: input.checkerUserId, approvalRequestId: input.approvalId },
+      update: { schemaId: schema.id, updatedByUserId: input.checkerUserId, approvalRequestId: input.approvalId },
+    });
+  }
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: alreadyConfirmed ? "REGULATORY_REPORT_SCHEMA_DEFAULT_SET" : "REGULATORY_REPORT_SCHEMA_CONFIRMED",
+    entityType: "REGULATORY_REPORT_SCHEMA",
+    entityId: String(schema.id),
+    beforeJson: { status: String(schema.status) },
+    afterJson: { status: alreadyConfirmed ? "CONFIRMED" : "CONFIRMED", schemaCode: String(schema.schemaCode), version: Number(schema.version), setAsDefault },
+    approvalRequestId: input.approvalId,
+  });
+  return { status: "EXECUTED", entityId: String(updated.id), idempotent: false };
+};
+
+const executeReportingRuleSchemaBindingApproval = async (
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: { approvalId: string; ruleId: string; checkerUserId: string; checkerRole: string; payload: Record<string, unknown> },
+): Promise<GovernanceExecutionResult> => {
+  const rules = modelOf(tx, "reportingRule");
+  const rule = await rules.findUnique({ where: { id: input.ruleId } });
+  if (!rule) throw new ApiError(404, "REPORTING_RULE_NOT_FOUND", "The reporting rule does not exist");
+  const bindings = Array.isArray(input.payload.bindings) ? input.payload.bindings as Array<Record<string, unknown>> : [];
+  const schemas = modelOf(tx, "regulatoryReportSchema");
+  const prepared: Array<{ format: string; schemaId: string }> = [];
+  for (const binding of bindings) {
+    const schemaId = String(binding.schemaId ?? "");
+    const format = String(binding.format ?? "");
+    const schema = await schemas.findUnique({ where: { id: schemaId } });
+    if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", `Schema '${schemaId}' does not exist`);
+    if (schema.status !== "CONFIRMED") throw new ApiError(409, "REPORT_SCHEMA_NOT_CONFIRMED", "Only a confirmed schema can be bound");
+    if (String(schema.format) !== format) throw new ApiError(409, "REPORT_SCHEMA_BINDING_MISMATCH", "The schema format does not match the binding format");
+    if (String(schema.authority) !== String(rule.authority) || String(schema.reportType) !== String(rule.reportType)) {
+      throw new ApiError(409, "REPORT_SCHEMA_BINDING_MISMATCH", "The schema authority/report type does not match the rule");
+    }
+    prepared.push({ format, schemaId });
+  }
+  const table = modelOf(tx, "regulatoryRuleSchemaBinding");
+  await table.deleteMany({ where: { ruleId: rule.id } });
+  for (const binding of prepared) {
+    await table.create({ data: { ruleId: rule.id, format: binding.format, schemaId: binding.schemaId } });
+  }
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "REPORTING_RULE_SCHEMA_BINDINGS_UPDATED",
+    entityType: "REPORTING_RULE",
+    entityId: String(rule.id),
+    beforeJson: {},
+    afterJson: { bindings: prepared },
+    approvalRequestId: input.approvalId,
+  });
+  return { status: "EXECUTED", entityId: String(rule.id), idempotent: false };
+};
+
+const executeFilingAdapterApproval = async (
+  ctx: GovernanceExecutionContext,
+  tx: Tx,
+  input: { approvalId: string; adapterId: string; checkerUserId: string; checkerRole: string; payload: Record<string, unknown> },
+): Promise<GovernanceExecutionResult> => {
+  const adapters = modelOf(tx, "externalFilingAdapter");
+  const adapter = await adapters.findUnique({ where: { id: input.adapterId } });
+  if (!adapter) throw new ApiError(404, "FILING_ADAPTER_NOT_FOUND", "The filing adapter does not exist");
+  const changes = asRecord(input.payload.changes ?? {});
+  const status = input.payload.operation === "DISABLE" ? "DISABLED" : changes.status === undefined ? String(adapter.status) : String(changes.status);
+  if (status !== "ACTIVE" && status !== "DISABLED") throw new ApiError(400, "FILING_ADAPTER_STATUS_INVALID", "The filing adapter status is not valid");
+  const data: Record<string, unknown> = { status };
+  for (const key of ["name", "authority", "endpointUrl", "authHeaderName"] as const) {
+    if (changes[key] !== undefined) data[key] = changes[key] === null ? null : String(changes[key]);
+  }
+  if (changes.kind !== undefined) {
+    if (changes.kind !== "MANUAL" && changes.kind !== "HTTP") throw new ApiError(400, "FILING_ADAPTER_KIND_INVALID", "The filing adapter kind is not valid");
+    data.kind = changes.kind;
+  }
+  if (changes.timeoutSeconds !== undefined) {
+    const timeout = Number(changes.timeoutSeconds);
+    if (!Number.isInteger(timeout) || timeout < 5 || timeout > 120) throw new ApiError(400, "FILING_ADAPTER_TIMEOUT_INVALID", "The filing adapter timeout is not valid");
+    data.timeoutSeconds = timeout;
+  }
+  if (changes.authSecretCiphertext !== undefined) data.authSecretCiphertext = changes.authSecretCiphertext === null ? null : String(changes.authSecretCiphertext);
+  if (changes.configJson !== undefined) data.configJson = changes.configJson === null ? Prisma.JsonNull : changes.configJson as Prisma.InputJsonValue;
+  const updated = await adapters.update({ where: { id: input.adapterId }, data });
+  await writeAudit(ctx, tx, {
+    actorId: input.checkerUserId,
+    role: input.checkerRole,
+    action: "FILING_ADAPTER_APPROVED",
+    entityType: "EXTERNAL_FILING_ADAPTER",
+    entityId: String(updated.id),
+    beforeJson: { name: String(adapter.name), status: String(adapter.status), kind: String(adapter.kind) },
+    afterJson: { name: String(updated.name), status: String(updated.status), kind: String(updated.kind), endpointUrl: updated.endpointUrl, authHeaderName: updated.authHeaderName },
+    approvalRequestId: input.approvalId,
+  });
+  return { status: "EXECUTED", entityId: String(updated.id), idempotent: false };
 };
 
 /**
@@ -3735,6 +3887,25 @@ export async function executeApprovalSubject(
       reportId: input.approval.subjectId,
       checkerUserId: input.checkerUserId,
       checkerRole: input.checkerRole,
+      payload: asRecord(input.approval.payloadDiffJson),
+    });
+  }
+  if (subjectType === "FILING_ADAPTER") {
+    return executeFilingAdapterApproval(ctx, tx, {
+      approvalId: input.approval.id,
+      adapterId: input.approval.subjectId,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+      payload: asRecord(input.approval.payloadDiffJson),
+    });
+  }
+  if (subjectType === "REPORTING_RULE_SCHEMA_BINDING") {
+    return executeReportingRuleSchemaBindingApproval(ctx, tx, {
+      approvalId: input.approval.id,
+      ruleId: input.approval.subjectId,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+      payload: asRecord(input.approval.payloadDiffJson),
     });
   }
   if (subjectType === "REPORTING_RULE") {
@@ -3743,6 +3914,15 @@ export async function executeApprovalSubject(
       ruleId: input.approval.subjectId,
       checkerUserId: input.checkerUserId,
       checkerRole: input.checkerRole,
+    });
+  }
+  if (subjectType === "REGULATORY_REPORT_SCHEMA") {
+    return executeRegulatoryReportSchemaApproval(ctx, tx, {
+      approvalId: input.approval.id,
+      schemaId: input.approval.subjectId,
+      checkerUserId: input.checkerUserId,
+      checkerRole: input.checkerRole,
+      payload: asRecord(input.approval.payloadDiffJson),
     });
   }
   if (subjectType === "AML_RULE") {

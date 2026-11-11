@@ -2,10 +2,10 @@
 
 <!-- GENERATED FILE. Edit core-back/prisma/schema.prisma instead. Do not hand-edit this file. -->
 
-- Models: **84**
-- Enums: **105**
-- Schema version: **25**
-- Migrations: **24**
+- Models: **105**
+- Enums: **123**
+- Schema version: **33**
+- Migrations: **32**
 
 ## Models
 
@@ -77,6 +77,18 @@
 - `AmlRule`
 - `ReportingRule`
 - `RegulatoryReport`
+- `RegulatoryReportSchema`
+- `RegulatorySchemaDefaultBinding`
+- `RegulatoryRuleSchemaBinding`
+- `RegulatoryReportOutput`
+- `Incident`
+- `IncidentTimelineEntry`
+- `IncidentResponder`
+- `IncidentActionItem`
+- `IncidentLink`
+- `IncidentCommunication`
+- `ExternalFilingAdapter`
+- `ExternalSubmission`
 - `Dispute`
 - `NotificationTemplate`
 - `Notification`
@@ -93,6 +105,15 @@
 - `BackupRestoreDrill`
 - `RmMerchantDailyStat`
 - `RmRouteDailyVolume`
+- `ReportAssetBundle`
+- `ReportChromeSpecRecord`
+- `ReportDefinitionSpecRecord`
+- `ReportExecutionAuditRecord`
+- `MerchantReportSpecRecord`
+- `MerchantReportAssetBundle`
+- `MerchantReportExecutionAudit`
+- `MerchantReportRateEvent`
+- `MerchantReportStudioStatus`
 
 ## Enums
 
@@ -195,12 +216,30 @@
 - `ReportingType`
 - `ReportingRuleStatus`
 - `RegulatoryReportStatus`
+- `ReportOutputFormat`
+- `RegulatorySchemaStatus`
+- `ReportOutputValidationStatus`
+- `IncidentSeverity`
+- `IncidentStatus`
+- `IncidentCategory`
+- `IncidentImpactScope`
+- `IncidentTimelineType`
+- `IncidentActionStatus`
+- `IncidentCommunicationChannel`
+- `IncidentLinkType`
 - `DisputeSource`
 - `DisputeStatus`
 - `NotificationChannel`
 - `NotificationLang`
 - `ConfidentialityClass`
 - `NotificationStatus`
+- `FilingAdapterKind`
+- `FilingAdapterStatus`
+- `ExternalSubmissionStatus`
+- `ReportSpecStatus`
+- `ReportChromeType`
+- `ReportAudienceScope`
+- `ReportAuthorityMode`
 
 ## Migrations
 
@@ -228,3 +267,11 @@
 - `20261109190000_regulatory_report_automation`
 - `20261109200000_merchant_webhooks`
 - `20261109210000_ledger_query_and_index_optimization`
+- `20261110120000_dynamic_report_engine_sdk`
+- `20261110130000_report_engine_merchant_and_aml`
+- `20261110140000_declarative_regulatory_reporting`
+- `20261110150000_report_template_binding`
+- `20261110160000_incident_management`
+- `20261110170000_docx_report_output`
+- `20261110180000_external_filing_adapters`
+- `20261110190000_merchant_report_engine`

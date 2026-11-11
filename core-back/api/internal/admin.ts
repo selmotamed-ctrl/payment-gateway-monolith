@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import express, { type Request, type Response } from "express";
 import { z } from "zod";
 import { Prisma, type ContentType } from "../../generated/prisma/client";
+import { canTransitionIncident, incidentPostmortemDueAt, incidentReportPayload, incidentRequiresPostmortem, incidentTimestampField } from "../../engine/compliance/incidents";
 import { client } from "../../prisma/client";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { createReconciliationUploadHandler } from "./reconciliationUpload";
@@ -11,6 +12,8 @@ import { academyInternalRouter } from "./academy";
 import { adminLedgerRouter } from "./adminLedger";
 import { adminOperationsRouter } from "./adminOperations";
 import { adminSystemRouter } from "./adminSystem";
+import { adminReportEngineRouter } from "./adminReportEngine";
+import { invalidateMerchantReportPolicyCache } from "../../engine/reportStudio/merchantReportEngine";
 import { publicProgress } from "../../engine/academy/progress";
 import { loadCatalog } from "../../engine/academy/catalog";
 import { getPlatformRuntime } from "../../engine/runtime";
@@ -113,6 +116,17 @@ import {
 } from "../../engine/flow/GoLiveGateValidator";
 import { Vault } from "../../engine/crypto/Vault";
 import { VaultContextCipher } from "../../engine/runtime/contextCipher";
+import { compileXsd } from "../../engine/compliance/reporting/XsdCompiler";
+import { buildCanonicalReportContext } from "../../engine/compliance/reporting/CanonicalReportContext";
+import { ReportGenerationService } from "../../engine/compliance/reporting/ReportGenerationService";
+import { ensureBaselineReportingSchemas } from "../../engine/compliance/reporting/baselineSchemas";
+import { XsdXmlGenerator } from "../../engine/compliance/reporting/XsdXmlGenerator";
+import { validateXml } from "../../engine/compliance/reporting/XsdXmlValidator";
+import { renderRegulatoryWorkbook } from "../../lib/xlsx/regulatoryWorkbook";
+import { analyzeWorkbookTemplate } from "../../lib/xlsx/template";
+import { parseDocxNarrativeSchema, renderRegulatoryDocx } from "../../lib/docx/regulatoryDocx";
+import { assertFilingEndpoint, dispatchFiling, type FilingArtifact } from "../../lib/filing/adapters";
+import type { GoamlMappingBlueprint, XlsxWorkbookSchema, XsdCompiledAst } from "../../engine/compliance/reporting/types";
 import { ApiConsumerError } from "../../engine/apiConsumer/ApiConsumer";
 import type { AdapterAttempt } from "../../engine/flow/NativeAdapterRegistry";
 import {
@@ -140,7 +154,7 @@ import {
 } from "../../engine/specImporter";
 import { createComputeRegistry } from "../../engine/runtime/computeRegistry";
 import type { Tx } from "../../engine/db/ports";
-import { validateTransformUsage, type TransformPipe, type TransformUsage } from "../../engine/transforms/TransformPipeline";
+import { TRANSFORM_OPERATIONS, validateTransformUsage, type TransformPipe, type TransformUsage } from "../../engine/transforms/TransformPipeline";
 import { json, jsonOptional } from "./json";
 import {
   clientIp,
@@ -232,6 +246,11 @@ const assertConfidential = (request: Request): void => {
 };
 
 const reportingPayloadCipher = new VaultContextCipher(vault, "reporting-payload");
+const reportingXmlCipher = new VaultContextCipher(vault, "reporting-xml");
+const reportingXlsxCipher = new VaultContextCipher(vault, "reporting-xlsx");
+const reportingDocxCipher = new VaultContextCipher(vault, "reporting-docx");
+const filingAdapterCipher = new VaultContextCipher(vault, "filing-adapter-secret");
+const reportGeneration = new ReportGenerationService(vault);
 
 const REPORTING_ROLES = ["MLRO", "COMPLIANCE"];
 const REPORTING_AUTHORITIES = [
@@ -259,26 +278,33 @@ const assertReportingAuthority = (request: Request): void => {
   );
 };
 
+const parsePayloadRecord = (value: unknown): Record<string, unknown> | null => {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === "string") {
+    try {
+      return parsePayloadRecord(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
 const readRegulatoryReportPayload = async (ciphertext: string | null | undefined): Promise<Record<string, unknown>> => {
-  if (!ciphertext) {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(ciphertext) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    // The evaluator stores the reporting payload encrypted. The admin route
-    // stores the draft payload as JSON, so both shapes are understood.
-  }
+  if (!ciphertext) return {};
+  const plain = parsePayloadRecord(ciphertext);
+  if (plain) return plain;
   try {
     const decoded = await reportingPayloadCipher.decrypt(ciphertext);
-    return decoded && typeof decoded === "object" && !Array.isArray(decoded)
-      ? decoded as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
+    const parsed = parsePayloadRecord(decoded);
+    if (!parsed) throw new Error("The decrypted report payload is not a JSON object");
+    return parsed;
+  } catch (error) {
+    throw new ApiError(409, "REPORT_PAYLOAD_UNREADABLE", "The stored report payload cannot be read", {
+      reason: (error as Error).message,
+    });
   }
 };
 
@@ -299,7 +325,7 @@ const assertReportSubmitter = async (
 export const createRegulatoryReportViaApproval = async (
   db: typeof client,
   input: {
-    reportType: "LARGE_TRANSACTION" | "SUSPICIOUS_ACTIVITY" | "PERIODIC_RETURN";
+    reportType: "LARGE_TRANSACTION" | "SUSPICIOUS_ACTIVITY" | "PERIODIC_RETURN" | "INCIDENT";
     authority: string;
     subjectType: string;
     subjectId: string;
@@ -311,6 +337,7 @@ export const createRegulatoryReportViaApproval = async (
 ): Promise<{ reportId: string; approvalRequestId: string; status: string }> => {
   const payloadJson = JSON.stringify(input.payload);
   const payloadSha256 = createHash("sha256").update(payloadJson).digest("hex");
+  const payloadCiphertext = await reportingPayloadCipher.encrypt(payloadJson);
   const parsePeriod = (value: unknown): Date | null => {
     if (typeof value !== "string" || value.trim() === "") return null;
     const parsed = new Date(value);
@@ -318,6 +345,26 @@ export const createRegulatoryReportViaApproval = async (
   };
   const periodStart = parsePeriod(input.payload.periodStart);
   const periodEnd = parsePeriod(input.payload.periodEnd);
+  const reportCode = typeof input.payload.returnCode === "string"
+    ? input.payload.returnCode
+    : typeof input.payload.reportCode === "string"
+      ? input.payload.reportCode
+      : input.reportType === "SUSPICIOUS_ACTIVITY"
+        ? "STR"
+        : input.reportType === "LARGE_TRANSACTION"
+          ? "LTR"
+          : input.reportType === "INCIDENT" ? "INC" : null;
+  const periodKey = typeof input.payload.periodKey === "string"
+    ? input.payload.periodKey
+    : null;
+  const dueAt = parsePeriod(input.payload.dueAt);
+  const requiredOutputFormats = Array.isArray(input.payload.requiredOutputFormats)
+    ? input.payload.requiredOutputFormats.filter((format): format is string => format === "XML" || format === "XLSX" || format === "DOCX")
+    : reportCode === "STR"
+      ? ["XML"]
+      : reportCode === "LTR"
+        ? ["XML", "XLSX"]
+        : input.reportType === "INCIDENT" ? ["DOCX"] : input.reportType === "PERIODIC_RETURN" ? ["XLSX"] : [];
   return db.$transaction(async (tx) => {
     const report = await tx.regulatoryReport.create({
       data: {
@@ -328,10 +375,14 @@ export const createRegulatoryReportViaApproval = async (
         amlCaseId: input.amlCaseId ?? null,
         periodStart,
         periodEnd,
-        payloadCiphertext: payloadJson,
+        payloadCiphertext,
         payloadSha256,
         status: "PENDING_CHECKER",
         confidential: true,
+        reportCode,
+        periodKey,
+        dueAt,
+        requiredOutputFormats: requiredOutputFormats as never,
       },
     });
     const approval = await tx.approvalRequest.create({
@@ -344,6 +395,7 @@ export const createRegulatoryReportViaApproval = async (
           subjectType: input.subjectType,
           subjectId: input.subjectId,
           ruleId: input.payload.ruleId ?? null,
+          payloadSha256,
           checklist: input.checklist ?? [],
         },
         mode: "STANDARD",
@@ -383,11 +435,16 @@ export const submitRegulatoryReport = async (
     reportId: string;
     submissionRef: string;
     submittedAt?: Date | null;
+    filingChannel?: string | null;
+    recordManual?: boolean;
     actorUserId: string;
     actorRole: string | null;
   },
 ): Promise<{ id: string; status: string; submissionRef: string | null; submittedAt: Date | null }> => {
-  const report = await db.regulatoryReport.findUnique({ where: { id: input.reportId } });
+  const report = await db.regulatoryReport.findUnique({
+    where: { id: input.reportId },
+    include: { outputs: { where: { supersededAt: null }, include: { schema: true } } },
+  });
   if (!report) {
     throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
   }
@@ -401,10 +458,11 @@ export const submitRegulatoryReport = async (
   }
   await assertReportSubmitter(db, report, input.actorUserId);
 
-  // OD-1: a PROVISIONAL rule is internal only. The evaluator links the report
-  // to its triggering rule through the persisted payload's `ruleId`.
   const payload = await readRegulatoryReportPayload(report.payloadCiphertext);
-  const ruleId = typeof payload.ruleId === "string" && payload.ruleId.length > 0 ? payload.ruleId : null;
+  const subjectRuleId = report.subjectType === "REPORTING_RULE" ? report.subjectId : null;
+  const ruleId = subjectRuleId
+    ?? (typeof payload.reportingRuleId === "string" ? payload.reportingRuleId : null)
+    ?? (typeof payload.ruleId === "string" ? payload.ruleId : null);
   if (ruleId) {
     const rule = await db.reportingRule.findUnique({ where: { id: ruleId } });
     if (rule && rule.status !== "CONFIRMED") {
@@ -415,6 +473,48 @@ export const submitRegulatoryReport = async (
         { reportId: report.id, ruleId, ruleStatus: rule.status },
       );
     }
+  }
+
+  const requiredFormats = report.requiredOutputFormats ?? [];
+  const outputErrors: Array<Record<string, unknown>> = [];
+  for (const format of requiredFormats) {
+    const output = report.outputs?.find((entry) => entry.format === format);
+    if (!output) {
+      outputErrors.push({ format, reason: "NOT_GENERATED", message: `The ${format} output has not been generated` });
+      continue;
+    }
+    if (output.validationStatus !== "VALIDATED") {
+      outputErrors.push({
+        format,
+        reason: output.validationStatus,
+        message: `The ${format} output is '${output.validationStatus}'`,
+        errors: output.validationErrorsJson ?? [],
+      });
+      continue;
+    }
+    if (!output.schema || output.schema.status !== "CONFIRMED") {
+      outputErrors.push({
+        format,
+        reason: "SCHEMA_NOT_CONFIRMED",
+        message: `The ${format} schema is not CONFIRMED`,
+        schemaId: output.schemaId,
+      });
+    }
+    if (output.payloadSha256 && output.payloadSha256 !== report.payloadSha256) {
+      outputErrors.push({
+        format,
+        reason: "OUTPUT_STALE",
+        message: `The ${format} output was generated from an older report payload`,
+      });
+    }
+  }
+  if (outputErrors.length > 0) {
+    throw new ApiError(
+      409,
+      "REPORT_OUTPUT_NOT_READY",
+      "One or more required report outputs are not ready for filing",
+      { reportId: report.id, errors: outputErrors },
+    );
   }
 
   const submittedAt = input.submittedAt ?? new Date();
@@ -433,8 +533,38 @@ export const submitRegulatoryReport = async (
     }
     const updated = await tx.regulatoryReport.update({
       where: { id: current.id },
-      data: { status: "SUBMITTED", submissionRef: input.submissionRef, submittedAt },
+      data: {
+        status: "SUBMITTED",
+        submissionRef: input.submissionRef,
+        submittedAt,
+        ...(input.filingChannel !== undefined ? { filingChannel: input.filingChannel } : {}),
+      },
     });
+    const outputTable = (tx as unknown as Record<string, any>).regulatoryReportOutput;
+    if (typeof outputTable?.updateMany === "function") {
+      await outputTable.updateMany({
+        where: { reportId: current.id, supersededAt: null },
+        data: { submittedAt },
+      });
+    }
+    const adapterTable = (tx as unknown as Record<string, any>).externalFilingAdapter;
+    if (input.recordManual !== false && typeof adapterTable?.upsert === "function") {
+      const manualAdapter = await adapterTable.upsert({
+        where: { name: `Manual filing (${current.authority})` },
+        create: { name: `Manual filing (${current.authority})`, authority: current.authority, kind: "MANUAL", status: "ACTIVE" },
+        update: {},
+      });
+      await (tx as unknown as Record<string, any>).externalSubmission.create({
+        data: {
+          reportId: current.id,
+          adapterId: manualAdapter.id,
+          status: "SUBMITTED",
+          requestSha256: createHash("sha256").update(input.submissionRef).digest("hex"),
+          externalRef: input.submissionRef,
+          submittedAt,
+        },
+      });
+    }
     await writeAudit(tx, {
       data: {
         actorId: input.actorUserId,
@@ -447,6 +577,7 @@ export const submitRegulatoryReport = async (
           status: "SUBMITTED",
           submissionRef: input.submissionRef,
           submittedAt: submittedAt.toISOString(),
+          filingChannel: input.filingChannel ?? null,
           ruleId,
         },
         approvalRequestId: updated.approvalRequestId,
@@ -506,7 +637,11 @@ export const acknowledgeRegulatoryReport = async (
     }
     const updated = await tx.regulatoryReport.update({
       where: { id: current.id },
-      data: { status: input.status },
+      data: {
+        status: input.status,
+        ...(input.status === "ACKNOWLEDGED" ? { acknowledgedAt: new Date() } : {}),
+        ...(input.status === "REJECTED_BY_AUTHORITY" ? { rejectionReason: reason } : {}),
+      },
     });
     await writeAudit(tx, {
       data: {
@@ -766,6 +901,7 @@ router.use("/", adminCommerceRouter);
 router.use(adminLedgerRouter);
 router.use(adminOperationsRouter);
 router.use(adminSystemRouter);
+router.use(adminReportEngineRouter);
 router.use("/academy", academyInternalRouter);
 
 /** Any staff read authority: the floor for the cross-cutting dashboard, lookup and search routes. */
@@ -4468,16 +4604,75 @@ const approvalSubjectContext = async (subjectType: string, subjectId: string): P
     case "REGULATORY_REPORT": {
       const row = await client.regulatoryReport.findUnique({
         where: { id: subjectId },
-        select: { id: true, reportType: true, status: true, authority: true, periodStart: true, periodEnd: true },
+        select: {
+          id: true,
+          reportType: true,
+          status: true,
+          authority: true,
+          reportCode: true,
+          periodKey: true,
+          dueAt: true,
+          periodStart: true,
+          periodEnd: true,
+          requiredOutputFormats: true,
+          outputs: {
+            where: { supersededAt: null },
+            select: { format: true, validationStatus: true, schemaVersion: true },
+          },
+        },
       });
       return row ? { contextType: "REGULATORY_REPORT", ...row } : null;
+    }
+    case "FILING_ADAPTER": {
+      const row = await client.externalFilingAdapter.findUnique({
+        where: { id: subjectId },
+        select: { id: true, name: true, authority: true, kind: true, status: true, endpointUrl: true, timeoutSeconds: true, lastUsedAt: true },
+      });
+      return row ? { contextType: "FILING_ADAPTER", ...row } : null;
+    }
+    case "REPORTING_RULE_SCHEMA_BINDING": {
+      const row = await client.reportingRule.findUnique({
+        where: { id: subjectId },
+        select: { id: true, sourceReference: true, reportType: true, authority: true, status: true, effectiveFrom: true, effectiveTo: true },
+      });
+      return row ? { contextType: "REPORTING_RULE_SCHEMA_BINDING", ...row } : null;
     }
     case "REPORTING_RULE": {
       const row = await client.reportingRule.findUnique({
         where: { id: subjectId },
-        select: { id: true, code: true, name: true, status: true, reportType: true },
+        select: {
+          id: true,
+          sourceReference: true,
+          status: true,
+          reportType: true,
+          authority: true,
+          thresholdAmount: true,
+          currency: true,
+          conditions: true,
+          effectiveFrom: true,
+          effectiveTo: true,
+        },
       });
       return row ? { contextType: "REPORTING_RULE", ...row } : null;
+    }
+    case "REGULATORY_REPORT_SCHEMA": {
+      const row = await client.regulatoryReportSchema.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          schemaCode: true,
+          reportCode: true,
+          name: true,
+          version: true,
+          status: true,
+          format: true,
+          reportType: true,
+          authority: true,
+          definitionSha256: true,
+          templateSha256: true,
+        },
+      });
+      return row ? { contextType: "REGULATORY_REPORT_SCHEMA", ...row } : null;
     }
     case "AML_RULE": {
       const row = await client.amlRule.findUnique({
@@ -6595,6 +6790,60 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
         });
       }
     }
+    if (subjectType === "REGULATORY_REPORT") {
+      await tx.regulatoryReport.updateMany({
+        where: { id: row.subjectId, status: "PENDING_CHECKER" },
+        data: { status: "DRAFT", approvalRequestId: null },
+      });
+      await writeAudit(tx, {
+        data: {
+          actorId: actor.userId,
+          role: actor.role,
+          action: "REGULATORY_REPORT_APPROVAL_REJECTED",
+          entityType: "REGULATORY_REPORT",
+          entityId: row.subjectId,
+          beforeJson: { status: "PENDING_CHECKER" },
+          afterJson: { status: "DRAFT", rejectionReason: body.reason },
+          approvalRequestId: row.id,
+        },
+      });
+    }
+    if (subjectType === "REPORTING_RULE") {
+      await tx.reportingRule.updateMany({
+        where: { id: row.subjectId },
+        data: { status: "PROVISIONAL", approvalRequestId: null },
+      });
+      await writeAudit(tx, {
+        data: {
+          actorId: actor.userId,
+          role: actor.role,
+          action: "REPORTING_RULE_APPROVAL_REJECTED",
+          entityType: "REPORTING_RULE",
+          entityId: row.subjectId,
+          beforeJson: { status: "PROVISIONAL" },
+          afterJson: { status: "PROVISIONAL", rejectionReason: body.reason },
+          approvalRequestId: row.id,
+        },
+      });
+    }
+    if (subjectType === "REGULATORY_REPORT_SCHEMA") {
+      await tx.regulatoryReportSchema.updateMany({
+        where: { id: row.subjectId, status: "PENDING_APPROVAL" },
+        data: { status: "DRAFT", approvalRequestId: null },
+      });
+      await writeAudit(tx, {
+        data: {
+          actorId: actor.userId,
+          role: actor.role,
+          action: "REGULATORY_REPORT_SCHEMA_APPROVAL_REJECTED",
+          entityType: "REGULATORY_REPORT_SCHEMA",
+          entityId: row.subjectId,
+          beforeJson: { status: "PENDING_APPROVAL" },
+          afterJson: { status: "DRAFT", rejectionReason: body.reason },
+          approvalRequestId: row.id,
+        },
+      });
+    }
     if (subjectType === "MERCHANT") {
       const kind = merchantApprovalKind(row.payloadDiffJson);
       await writeAudit(tx, {
@@ -6785,6 +7034,7 @@ router.get("/aml/screenings/export", async (request: Request, response: Response
     defaultSort: { requestedAt: "desc" },
     defaultPageSize: 20,
   });
+  if (typeof request.query.search === "string") includeIncidentSearch(built, request.query.search, await incidentIdsMatchingSearch(request.query.search));
   const take = 5000;
   const [screenings, total] = await Promise.all([
     client.amlScreening.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { matches: true }, take }),
@@ -7209,7 +7459,7 @@ router.get("/aml/cases/:id", async (request: Request, response: Response) => {
       screening: { include: { matches: true } },
       assignedReviewer: { select: { id: true, email: true } },
       holdJournalEntry: { select: { id: true, refType: true, refId: true, description: true } },
-      regulatoryReport: { select: { id: true, reportType: true, status: true, submittedAt: true } },
+      regulatoryReports: { select: { id: true, reportType: true, status: true, submittedAt: true } },
     },
   });
   if (!entry) throw new ApiError(404, "AML_CASE_NOT_FOUND", "The AML case does not exist");
@@ -7243,7 +7493,8 @@ router.get("/aml/cases/:id", async (request: Request, response: Response) => {
         })),
       } : null,
       holdJournalEntry: entry.holdJournalEntry,
-      regulatoryReport: entry.regulatoryReport,
+      regulatoryReport: entry.regulatoryReports[0] ?? null,
+      regulatoryReports: entry.regulatoryReports,
       approval: approval ? {
         id: approval.id,
         state: approval.state,
@@ -7542,32 +7793,56 @@ router.get("/aml/reporting-rules", async (request: Request, response: Response) 
 });
 
 router.post("/aml/reporting-rules", async (request: Request, response: Response) => {
-  assertConfidential(request);
+  assertReportingAuthority(request);
   const body = parseOrThrow(
     z
       .object({
-        reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN"]),
+        reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN", "INCIDENT"]),
         thresholdAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
         windowSeconds: z.number().int().min(1).max(31_536_000).optional(),
         currency: z.string().length(3).default("LYD"),
         conditions: z.record(z.string().max(64), z.unknown()).default({}),
         sourceReference: z.string().min(2).max(200),
-        status: z.enum(["PROVISIONAL", "CONFIRMED"]).default("PROVISIONAL"),
+        status: z.enum(["PROVISIONAL", "CONFIRMED"]).optional(),
+        requiredOutputFormats: z.array(z.enum(["XML", "XLSX", "DOCX"])).max(3).optional(),
+        primaryOutputFormat: z.enum(["XML", "XLSX", "DOCX"]).optional(),
       })
       .strict(),
     request.body,
   );
-  const rule = await client.reportingRule.create({
-    data: {
-      reportType: body.reportType,
-      thresholdAmount: body.thresholdAmount ? new Prisma.Decimal(body.thresholdAmount) : null,
-      windowSeconds: body.windowSeconds ?? null,
-      currency: body.currency.toUpperCase(),
-      conditions: json(body.conditions),
-      sourceReference: body.sourceReference,
-      status: body.status,
-      effectiveFrom: new Date(),
-    },
+  const actor = actorFromRequest(request);
+  const rule = await client.$transaction(async (tx) => {
+    const created = await tx.reportingRule.create({
+      data: {
+        reportType: body.reportType,
+        thresholdAmount: body.thresholdAmount ? new Prisma.Decimal(body.thresholdAmount) : null,
+        windowSeconds: body.windowSeconds ?? null,
+        currency: body.currency.toUpperCase(),
+        conditions: json(body.conditions),
+        sourceReference: body.sourceReference,
+        status: "PROVISIONAL",
+        requiredOutputFormats: body.requiredOutputFormats as never,
+        primaryOutputFormat: body.primaryOutputFormat as never,
+        effectiveFrom: new Date(),
+      },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "REPORTING_RULE_CREATED",
+        entityType: "REPORTING_RULE",
+        entityId: created.id,
+        beforeJson: {},
+        afterJson: {
+          reportType: created.reportType,
+          sourceReference: created.sourceReference,
+          status: created.status,
+          requiredOutputFormats: body.requiredOutputFormats ?? [],
+        },
+      },
+    });
+    return created;
   });
   response.status(201).json({ id: rule.id, status: rule.status });
 });
@@ -7584,8 +7859,1484 @@ router.post("/aml/reporting-rules/:id/promote", async (request: Request, respons
   response.status(202).json(result);
 });
 
+
+/* ------------------------------------------------------- regulatory report schemas */
+
+const regulatorySchemaUploadSchema = z
+  .object({
+    authority: z.string().min(2).max(64).default("CBL"),
+    reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN", "INCIDENT"]),
+    reportCode: z.string().max(40).default(""),
+    format: z.enum(["XML", "XLSX", "DOCX"]),
+    schemaCode: z.string().min(2).max(120),
+    name: z.string().min(2).max(200),
+    version: z.number().int().min(1).max(10000).optional(),
+    definitionText: z.string().min(1).max(2_000_000),
+    mappingBlueprint: z.record(z.string().max(64), z.unknown()).default({}),
+    sampleContext: z.record(z.string().max(64), z.unknown()).optional(),
+    templateBase64: z.string().max(20_000_000).optional(),
+    notes: z.string().max(4000).optional(),
+  })
+  .strict();
+
+const compileXsdForAdmin = (xsd: string): ReturnType<typeof compileXsd> => {
+  try {
+    return compileXsd(xsd);
+  } catch (error) {
+    const code = typeof (error as { code?: unknown }).code === "string" ? String((error as { code: string }).code) : "REPORT_SCHEMA_INVALID_XSD";
+    throw new ApiError(400, code, (error as Error).message);
+  }
+};
+
+const hashJsonValue = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+const assertXlsxTemplateSafe = (bytes: Buffer): void => {
+  if (bytes.includes(Buffer.from("vbaProject.bin", "utf8")) || bytes.includes(Buffer.from("xl/vbaProject.bin", "utf8"))) {
+    throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_MACRO", "Macro-bearing workbooks are not allowed");
+  }
+  if (bytes.length > 20_000_000) {
+    throw new ApiError(413, "REPORT_SCHEMA_TEMPLATE_TOO_LARGE", "The workbook template exceeds 20 MB");
+  }
+};
+
+const assertWorkbookAnalysisSafe = (analysis: Awaited<ReturnType<typeof analyzeWorkbookTemplate>>): void => {
+  if (analysis.issues.length > 0) {
+    throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_UNSAFE", "The workbook template failed its validation", { issues: analysis.issues });
+  }
+};
+
+const REPORT_CONTEXT_CATALOG = {
+  institution: ["rentityId", "rentityBranch", "submissionCode", "localCurrencyCode", "reportingPersonName", "reportingPersonEmail"],
+  report: ["id", "reportType", "reportCode", "authority", "periodStart", "periodEnd", "periodKey", "dueAt"],
+  merchant: ["id", "legalName", "tradeName", "registrationNo", "taxId", "businessCategory", "country", "status", "kybStatus", "riskTier", "contactPhone", "contactEmail", "payoutBankDetails"],
+  wallet: ["id", "currency", "status"],
+  transaction: ["id", "reference", "providerReference", "gatewayReference", "networkReference", "createdAt", "date", "status", "substatus", "amount", "totalChargedAmount", "settledAmount", "currency", "railCode", "railName", "gatewayCode", "gatewayName", "collectionMode", "payerPhone", "payerName"],
+  amlCase: ["id", "subjectType", "subjectId", "triggerReason", "severity", "status", "resolutionNotes"],
+  indicator: ["id", "code", "description"],
+  aggregate: ["summaryRows", "paymentRails", "refundsRows", "disputesOpenedRows", "disputesDecidedRows", "cashoutsRows", "merchantStatusRows", "fundsRows", "screeningRows", "amlCaseRows", "kybRows", "riskTierRows"],
+  narrative: ["riskAssessment", "policyAndControlChanges", "auditFindings"],
+  arrays: {
+    transactions: "transaction",
+    indicators: "indicator",
+    paymentRails: "aggregate",
+    summaryRows: "aggregate",
+    refundsRows: "aggregate",
+    disputesOpenedRows: "aggregate",
+    disputesDecidedRows: "aggregate",
+    cashoutsRows: "aggregate",
+    merchantStatusRows: "aggregate",
+    fundsRows: "aggregate",
+    screeningRows: "aggregate",
+    amlCaseRows: "aggregate",
+    kybRows: "aggregate",
+    riskTierRows: "aggregate",
+  },
+  sourceKinds: ["CONTEXT_PATH", "CONSTANT", "CODE_MAP", "TEMPLATE"],
+  transformOperations: TRANSFORM_OPERATIONS,
+  conditionOperators: ["EQ", "NEQ", "IN", "NOT_EMPTY", "GT"],
+} as const;
+
+const validateMappingBlueprintForAdmin = (
+  ast: ReturnType<typeof compileXsd>,
+  mapping: GoamlMappingBlueprint,
+): Array<{ severity: "error" | "warning"; path: string; message: string }> => {
+  const issues: Array<{ severity: "error" | "warning"; path: string; message: string }> = [];
+  const seen = new Set<string>();
+  for (const binding of mapping.fieldBindings ?? []) {
+    if (!ast.paths[binding.xsdPath]) {
+      issues.push({ severity: "error", path: binding.xsdPath, message: "The XSD path does not exist" });
+    }
+    if (seen.has(binding.xsdPath)) {
+      issues.push({ severity: "error", path: binding.xsdPath, message: "Duplicate binding for this XSD path" });
+    }
+    seen.add(binding.xsdPath);
+    if (binding.sourceKind === "CODE_MAP" && (!binding.codeMapKey || !mapping.codeMaps?.[binding.codeMapKey])) {
+      issues.push({ severity: "error", path: binding.xsdPath, message: "The referenced code map does not exist" });
+    }
+    if (binding.sourceKind === "CONTEXT_PATH" && !binding.contextPath) {
+      issues.push({ severity: "error", path: binding.xsdPath, message: "A context path is required" });
+    }
+  }
+  for (const repeat of mapping.repeatingNodes ?? []) {
+    const node = ast.paths[repeat.xsdPath];
+    if (!node) issues.push({ severity: "error", path: repeat.xsdPath, message: "The repeating path does not exist" });
+    else if (node.maxOccurs === 1) issues.push({ severity: "warning", path: repeat.xsdPath, message: "This path is not declared repeating in the XSD" });
+  }
+  for (const child of Object.values(ast.paths)) {
+    if (child.kind === "simple" && child.minOccurs > 0 && !seen.has(child.path)) {
+      issues.push({ severity: "warning", path: child.path, message: "Required element has no binding" });
+    }
+  }
+  return issues;
+};
+
+const validateWorkbookDefinitionForAdmin = (workbook: unknown): Array<{ severity: "error" | "warning"; path: string; message: string }> => {
+  const issues: Array<{ severity: "error" | "warning"; path: string; message: string }> = [];
+  if (!workbook || typeof workbook !== "object" || Array.isArray(workbook)) {
+    return [{ severity: "error", path: "/", message: "The workbook definition must be an object" }];
+  }
+  const value = workbook as Record<string, any>;
+  if (value.schemaVersion !== 1) issues.push({ severity: "error", path: "/schemaVersion", message: "Only schemaVersion 1 is supported" });
+  const sheets = Array.isArray(value.sheets) ? value.sheets : [];
+  const names = new Set<string>();
+  for (const [index, sheet] of sheets.entries()) {
+    const path = `/sheets/${index}`;
+    if (!sheet || typeof sheet !== "object") {
+      issues.push({ severity: "error", path, message: "Sheet must be an object" });
+      continue;
+    }
+    if (typeof sheet.name !== "string" || sheet.name.length === 0 || sheet.name.length > 31) {
+      issues.push({ severity: "error", path: `${path}/name`, message: "Sheet name must be 1-31 characters" });
+    } else if (names.has(sheet.name)) {
+      issues.push({ severity: "error", path: `${path}/name`, message: "Duplicate sheet name" });
+    } else names.add(sheet.name);
+    if (typeof sheet.rows?.repeatOver !== "string" || !sheet.rows.repeatOver) {
+      issues.push({ severity: "error", path: `${path}/rows/repeatOver`, message: "rows.repeatOver is required" });
+    }
+    const columns = Array.isArray(sheet.columns) ? sheet.columns : [];
+    const keys = new Set<string>();
+    for (const [columnIndex, column] of columns.entries()) {
+      const columnPath = `${path}/columns/${columnIndex}`;
+      if (!column || typeof column.key !== "string" || !column.key) issues.push({ severity: "error", path: columnPath, message: "Column key is required" });
+      else if (keys.has(column.key)) issues.push({ severity: "error", path: columnPath, message: "Duplicate column key" });
+      else keys.add(column.key);
+      if (!["string", "number", "date", "boolean", "list"].includes(String(column?.type))) {
+        issues.push({ severity: "error", path: `${columnPath}/type`, message: "Unsupported column type" });
+      }
+      if (column?.type === "list" && (!Array.isArray(column.list) || column.list.length === 0)) {
+        issues.push({ severity: "warning", path: `${columnPath}/list`, message: "List column has no allowed values" });
+      }
+    }
+    for (const total of sheet.totals ?? []) {
+      if (!keys.has(String(total.column))) issues.push({ severity: "error", path: `${path}/totals`, message: `Unknown total column '${String(total.column)}'` });
+    }
+  }
+  return issues;
+};
+
+const maskContextPii = (context: Record<string, unknown>): Record<string, unknown> => {
+  const clone = JSON.parse(JSON.stringify(context)) as Record<string, any>;
+  const mask = (value: unknown) => (typeof value === "string" && value.length > 0 ? "***" : value);
+  if (clone.merchant) clone.merchant.payoutBankDetails = clone.merchant.payoutBankDetails ? "***" : null;
+  for (const transaction of Array.isArray(clone.transactions) ? clone.transactions : []) {
+    transaction.payerPhone = mask(transaction.payerPhone);
+    transaction.payerName = mask(transaction.payerName);
+  }
+  return clone;
+};
+
+const regulatorySchemaRow = (schema: Record<string, any>) => ({
+  id: schema.id,
+  authority: schema.authority,
+  reportType: schema.reportType,
+  format: schema.format,
+  schemaCode: schema.schemaCode,
+  reportCode: schema.reportCode ?? "",
+  name: schema.name,
+  version: schema.version,
+  status: schema.status,
+  definitionSha256: schema.definitionSha256,
+  mappingSha256: schema.mappingSha256 ?? null,
+  templateSha256: schema.templateSha256,
+  revision: schema.revision ?? 1,
+  clonedFromSchemaId: schema.clonedFromSchemaId ?? null,
+  rootElement: (schema.compiledDefinitionJson as Record<string, any> | null)?.rootElement?.name ?? null,
+  paths: schema.compiledDefinitionJson && typeof schema.compiledDefinitionJson === "object"
+    ? Object.keys((schema.compiledDefinitionJson as Record<string, any>).paths ?? {}).length
+    : null,
+  codeLists: schema.compiledDefinitionJson && typeof schema.compiledDefinitionJson === "object"
+    ? Object.keys((schema.compiledDefinitionJson as Record<string, any>).codeLists ?? {}).length
+    : null,
+  approvedAt: schema.approvedAt,
+  approvalRequestId: schema.approvalRequestId,
+  createdAt: schema.createdAt,
+  updatedAt: schema.updatedAt,
+});
+
+router.get("/aml/report-schemas", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  await ensureBaselineReportingSchemas(client as never);
+  const rows = await client.regulatoryReportSchema.findMany({
+    orderBy: [{ authority: "asc" }, { reportType: "asc" }, { format: "asc" }, { schemaCode: "asc" }, { version: "desc" }],
+  });
+  response.json({ schemas: rows.map((row) => regulatorySchemaRow(row as never)) });
+});
+
+router.get("/aml/report-schemas/:id", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  const [defaultBindings, ruleBindings, outputs] = await Promise.all([
+    client.regulatorySchemaDefaultBinding.count({ where: { schemaId: schema.id } }),
+    client.regulatoryRuleSchemaBinding.count({ where: { schemaId: schema.id } }),
+    client.regulatoryReportOutput.count({ where: { schemaId: schema.id } }),
+  ]);
+  response.json({
+    schema: regulatorySchemaRow(schema as never),
+    definition: schema.definitionText,
+    sampleContext: schema.sampleContextJson,
+    notes: schema.notes,
+    compiled: schema.compiledDefinitionJson,
+    mapping: schema.mappingBlueprintJson,
+    template: schema.templateCiphertext ? { present: true, sha256: schema.templateSha256, binding: schema.templateBindingJson } : { present: false, sha256: null, binding: schema.templateBindingJson },
+    approval: schema.approvalRequestId ? await client.approvalRequest.findUnique({ where: { id: schema.approvalRequestId }, select: { id: true, state: true, expiresAt: true, makerUserId: true, checkerUserId: true } }) : null,
+    usage: { defaultBindings, ruleBindings, outputs },
+    capabilities: {
+      edit: schema.status === "DRAFT",
+      clone: true,
+      promote: schema.status === "DRAFT" || schema.status === "PROVISIONAL",
+      setDefault: schema.status === "CONFIRMED",
+    },
+  });
+});
+
+
+const schemaDraftBody = z
+  .object({
+    name: z.string().min(2).max(200).optional(),
+    definitionText: z.string().min(1).max(2_000_000).optional(),
+    mappingBlueprint: z.record(z.string().max(64), z.unknown()).optional(),
+    sampleContext: z.record(z.string().max(64), z.unknown()).optional(),
+    templateBase64: z.string().max(20_000_000).optional(),
+    notes: z.string().max(4000).optional(),
+    baseRevision: z.number().int().min(1).optional(),
+  })
+  .strict();
+
+const compileWorkbookForAdmin = (definitionText: string): unknown => {
+  let workbook: unknown;
+  try {
+    workbook = JSON.parse(definitionText);
+  } catch {
+    throw new ApiError(400, "REPORT_SCHEMA_INVALID_JSON", "The XLSX workbook definition is not valid JSON");
+  }
+  if (!workbook || typeof workbook !== "object" || Array.isArray(workbook)) {
+    throw new ApiError(400, "REPORT_SCHEMA_INVALID_JSON", "The XLSX workbook definition must be an object");
+  }
+  return workbook;
+};
+
+const buildSchemaValidation = async (input: {
+  format: "XML" | "XLSX" | "DOCX";
+  definitionText: string;
+  mappingBlueprint: Record<string, unknown>;
+  sampleContext?: Record<string, unknown> | null;
+  context?: Record<string, unknown> | null;
+}) => {
+  if (input.format === "XML") {
+    const ast = compileXsdForAdmin(input.definitionText);
+    const mapping = input.mappingBlueprint as unknown as GoamlMappingBlueprint;
+    const issues = validateMappingBlueprintForAdmin(ast, mapping);
+    let preview: { content: string; validation: ReturnType<typeof validateXml> } | null = null;
+    if (input.context) {
+      const content = await new XsdXmlGenerator().generate(ast, mapping, input.context);
+      preview = { content, validation: validateXml(content, ast, mapping) };
+    }
+    return {
+      valid: !issues.some((issue) => issue.severity === "error") && (!preview || preview.validation.valid),
+      issues: [...issues, ...(preview?.validation.issues ?? []).map((issue) => ({ severity: "error" as const, path: issue.path, message: issue.message }))],
+      compiled: ast,
+      preview,
+      summary: { paths: Object.keys(ast.paths).length, codeLists: Object.keys(ast.codeLists).length },
+    };
+  }
+  if (input.format === "DOCX") {
+    let schema: ReturnType<typeof parseDocxNarrativeSchema>;
+    try {
+      schema = parseDocxNarrativeSchema(JSON.parse(input.definitionText));
+    } catch (error) {
+      throw new ApiError(400, "REPORT_SCHEMA_INVALID_DOCX", (error as Error).message);
+    }
+    let preview: { buffer: Buffer; issues: Array<{ severity: "error" | "warning"; path: string; message: string }> } | null = null;
+    if (input.context) {
+      const rendered = renderRegulatoryDocx(schema, input.context);
+      preview = { buffer: rendered.buffer, issues: rendered.issues.map((issue) => ({ severity: "error" as const, path: issue.path, message: issue.message })) };
+    }
+    return {
+      valid: !preview || preview.issues.length === 0,
+      issues: preview?.issues ?? [],
+      compiled: schema,
+      preview,
+      summary: { sections: schema.sections.length, tables: schema.tables?.length ?? 0 },
+    };
+  }
+  const workbook = compileWorkbookForAdmin(input.definitionText) as XlsxWorkbookSchema;
+  const issues = validateWorkbookDefinitionForAdmin(workbook);
+  let preview: { buffer: Buffer; issues: Array<{ severity: "error" | "warning"; path: string; message: string }> } | null = null;
+  if (input.context) {
+    const rendered = await renderRegulatoryWorkbook(workbook, input.context);
+    preview = {
+      buffer: rendered.buffer,
+      issues: rendered.issues.map((issue) => ({ severity: "error" as const, path: issue.path, message: issue.message })),
+    };
+  }
+  return {
+    valid: !issues.some((issue) => issue.severity === "error") && (!preview || preview.issues.length === 0),
+    issues: [...issues, ...(preview?.issues ?? [])],
+    compiled: workbook,
+    preview,
+    summary: { sheets: workbook.sheets?.length ?? 0 },
+  };
+};
+
+router.put("/aml/report-schemas/:id", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(schemaDraftBody, request.body ?? {});
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  if (schema.status !== "DRAFT") {
+    throw new ApiError(409, "REPORT_SCHEMA_NOT_EDITABLE", "Only a DRAFT schema can be edited; clone it as a new version");
+  }
+  if (body.baseRevision !== undefined && body.baseRevision !== schema.revision) {
+    throw new ApiError(409, "REPORT_SCHEMA_STALE", "The schema changed in another session", {
+      expected: body.baseRevision,
+      actual: schema.revision,
+    });
+  }
+  const definitionText = body.definitionText ?? schema.definitionText ?? "";
+  const mappingBlueprint = body.mappingBlueprint ?? (schema.mappingBlueprintJson as Record<string, unknown>);
+  let compiled: unknown;
+  let definitionSha256: string;
+  let templateCiphertext = schema.templateCiphertext;
+  let templateSha256 = schema.templateSha256;
+  let templateBindingJson: Prisma.InputJsonValue | typeof Prisma.JsonNull | undefined;
+  if (schema.format === "XML") {
+    if (body.templateBase64 !== undefined) throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_NOT_XLSX", "Only an XLSX schema can hold a workbook template");
+    compiled = compileXsdForAdmin(definitionText);
+    definitionSha256 = createHash("sha256").update(definitionText, "utf8").digest("hex");
+  } else if (schema.format === "DOCX") {
+    if (body.templateBase64 !== undefined) throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_NOT_XLSX", "Only an XLSX schema can hold a workbook template");
+    try {
+      compiled = parseDocxNarrativeSchema(JSON.parse(definitionText));
+    } catch (error) {
+      throw new ApiError(400, "REPORT_SCHEMA_INVALID_DOCX", (error as Error).message);
+    }
+    definitionSha256 = createHash("sha256").update(definitionText, "utf8").digest("hex");
+  } else {
+    compiled = compileWorkbookForAdmin(definitionText);
+    definitionSha256 = createHash("sha256").update(definitionText, "utf8").digest("hex");
+    if (body.templateBase64 !== undefined) {
+      if (body.templateBase64) {
+        const bytes = Buffer.from(body.templateBase64, "base64");
+        assertXlsxTemplateSafe(bytes);
+        assertWorkbookAnalysisSafe(await analyzeWorkbookTemplate(bytes));
+        templateSha256 = createHash("sha256").update(bytes).digest("hex");
+        templateCiphertext = await reportingXlsxCipher.encrypt(body.templateBase64);
+      } else {
+        templateCiphertext = null;
+        templateSha256 = null;
+      }
+      templateBindingJson = Prisma.JsonNull;
+    }
+  }
+  const actor = actorFromRequest(request);
+  const updated = await client.$transaction(async (tx) => {
+    const row = await tx.regulatoryReportSchema.update({
+      where: { id },
+      data: {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        definitionText,
+        definitionSha256,
+        mappingSha256: hashJsonValue(mappingBlueprint),
+        mappingBlueprintJson: mappingBlueprint as never,
+        compiledDefinitionJson: compiled as never,
+        compiledFromSha256: definitionSha256,
+        revision: { increment: 1 },
+        ...(body.sampleContext !== undefined ? { sampleContextJson: body.sampleContext as never } : {}),
+        ...(body.notes !== undefined ? { notes: body.notes } : {}),
+        templateCiphertext,
+        templateSha256,
+        ...(templateBindingJson !== undefined ? { templateBindingJson } : {}),
+      },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "REGULATORY_REPORT_SCHEMA_UPDATED",
+        entityType: "REGULATORY_REPORT_SCHEMA",
+        entityId: id,
+        beforeJson: { revision: schema.revision, definitionSha256: schema.definitionSha256, mappingSha256: schema.mappingSha256 },
+        afterJson: { revision: row.revision, definitionSha256, mappingSha256: row.mappingSha256 },
+      },
+    });
+    return row;
+  });
+  response.json({ schema: regulatorySchemaRow(updated as never) });
+});
+
+router.post("/aml/report-schemas/:id/clone", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      version: z.number().int().min(1).max(10000).optional(),
+      name: z.string().min(2).max(200).optional(),
+      notes: z.string().max(4000).optional(),
+      copySample: z.boolean().default(false),
+    }).strict(),
+    request.body ?? {},
+  );
+  const source = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!source) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  const latest = await client.regulatoryReportSchema.findFirst({
+    where: { authority: source.authority, schemaCode: source.schemaCode },
+    orderBy: { version: "desc" },
+  });
+  const version = body.version ?? Number(latest?.version ?? source.version) + 1;
+  const existing = await client.regulatoryReportSchema.findUnique({
+    where: { authority_schemaCode_version: { authority: source.authority, schemaCode: source.schemaCode, version } },
+  });
+  if (existing) throw new ApiError(409, "REPORT_SCHEMA_VERSION_EXISTS", "This schema version already exists");
+  const actor = actorFromRequest(request);
+  const cloned = await client.$transaction(async (tx) => {
+    const created = await tx.regulatoryReportSchema.create({
+      data: {
+        authority: source.authority,
+        reportType: source.reportType,
+        reportCode: source.reportCode,
+        format: source.format,
+        schemaCode: source.schemaCode,
+        name: body.name ?? source.name,
+        version,
+        revision: 1,
+        clonedFromSchemaId: source.id,
+        status: "DRAFT",
+        definitionText: source.definitionText,
+        definitionSha256: source.definitionSha256,
+        mappingSha256: source.mappingSha256,
+        templateCiphertext: source.templateCiphertext,
+        templateSha256: source.templateSha256,
+        templateBindingJson: source.templateBindingJson as never,
+        compiledDefinitionJson: source.compiledDefinitionJson as never,
+        mappingBlueprintJson: source.mappingBlueprintJson as never,
+        sampleContextJson: body.copySample ? source.sampleContextJson as never : Prisma.JsonNull,
+        notes: body.notes ?? source.notes,
+        createdByUserId: actor.userId,
+      },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "REGULATORY_REPORT_SCHEMA_CLONED",
+        entityType: "REGULATORY_REPORT_SCHEMA",
+        entityId: created.id,
+        beforeJson: { sourceId: source.id, sourceVersion: source.version },
+        afterJson: { schemaCode: created.schemaCode, version: created.version, clonedFromSchemaId: source.id },
+      },
+    });
+    return created;
+  });
+  response.status(201).json({ schema: regulatorySchemaRow(cloned as never) });
+});
+
+const schemaValidateBody = z.object({
+  definitionText: z.string().min(1).max(2_000_000).optional(),
+  mappingBlueprint: z.record(z.string().max(64), z.unknown()).optional(),
+  sampleContext: z.record(z.string().max(64), z.unknown()).optional(),
+  context: z.record(z.string().max(64), z.unknown()).optional(),
+  format: z.enum(["XML", "XLSX", "DOCX"]).optional(),
+}).strict();
+
+router.post("/aml/report-schemas/validate", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const body = parseOrThrow(schemaValidateBody, request.body ?? {});
+  if (!body.definitionText || !body.format) {
+    throw new ApiError(400, "REPORT_SCHEMA_VALIDATION_INPUT_REQUIRED", "format and definitionText are required");
+  }
+  const result = await buildSchemaValidation({
+    format: body.format,
+    definitionText: body.definitionText,
+    mappingBlueprint: body.mappingBlueprint ?? {},
+    sampleContext: body.sampleContext,
+    context: body.context,
+  });
+  response.json({
+    valid: result.valid,
+    issues: result.issues,
+    summary: result.summary,
+    compiled: result.compiled,
+    preview: result.preview && "content" in result.preview
+      ? { content: result.preview.content, validation: result.preview.validation }
+      : result.preview && "buffer" in result.preview
+        ? { contentBase64: result.preview.buffer.toString("base64") }
+        : null,
+  });
+});
+
+router.post("/aml/report-schemas/:id/validate", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(schemaValidateBody, request.body ?? {});
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  const result = await buildSchemaValidation({
+    format: (body.format ?? schema.format) as "XML" | "XLSX" | "DOCX",
+    definitionText: body.definitionText ?? schema.definitionText ?? "",
+    mappingBlueprint: body.mappingBlueprint ?? (schema.mappingBlueprintJson as Record<string, unknown>),
+    sampleContext: body.sampleContext ?? (schema.sampleContextJson as Record<string, unknown> | null),
+    context: body.context,
+  });
+  response.json({
+    valid: result.valid,
+    issues: result.issues,
+    summary: result.summary,
+    compiled: result.compiled,
+    preview: result.preview && "content" in result.preview
+      ? { content: result.preview.content, validation: result.preview.validation }
+      : result.preview && "buffer" in result.preview
+        ? { contentBase64: result.preview.buffer.toString("base64") }
+        : null,
+  });
+});
+
+router.get("/aml/report-context-catalog", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  response.json({ catalog: REPORT_CONTEXT_CATALOG });
+});
+
+router.post("/aml/report-schemas/:id/sample-context", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      sourceType: z.enum(["SCHEMA", "PAYMENT_ATTEMPT", "AML_CASE", "REGULATORY_REPORT"]).default("SCHEMA"),
+      sourceId: z.string().min(1).max(64).optional(),
+      includePii: z.boolean().default(false),
+    }).strict(),
+    request.body ?? {},
+  );
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  if (body.sourceType === "SCHEMA" || !body.sourceId) {
+    response.json({ context: schema.sampleContextJson ?? {}, source: { type: "SCHEMA", id: schema.id }, redactedFields: [] });
+    return;
+  }
+  const now = new Date();
+  const report = {
+    id: `sample-${body.sourceId}`,
+    reportType: schema.reportType,
+    reportCode: schema.reportCode,
+    authority: schema.authority,
+    subjectType: body.sourceType,
+    subjectId: body.sourceId,
+    amlCaseId: body.sourceType === "AML_CASE" ? body.sourceId : null,
+    periodStart: now,
+    periodEnd: now,
+    periodKey: now.toISOString().slice(0, 7),
+    dueAt: null,
+    requiredOutputFormats: [],
+  };
+  const payload = body.sourceType === "REGULATORY_REPORT"
+    ? await readRegulatoryReportPayload((await client.regulatoryReport.findUnique({ where: { id: body.sourceId } }))?.payloadCiphertext)
+    : {};
+  const context = await buildCanonicalReportContext(client as never, report as never, payload);
+  const redactedFields: string[] = [];
+  let result = context as unknown as Record<string, unknown>;
+  if (!body.includePii) {
+    result = maskContextPii(result);
+    redactedFields.push("merchant.payoutBankDetails", "transactions[].payerPhone", "transactions[].payerName");
+  }
+  const actor = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "REGULATORY_REPORT_SCHEMA_CONTEXT_SAMPLED",
+      entityType: "REGULATORY_REPORT_SCHEMA",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { sourceType: body.sourceType, sourceId: body.sourceId, includePii: body.includePii, redactedFields },
+    },
+  });
+  response.setHeader("Cache-Control", "no-store");
+  response.json({ context: result, source: { type: body.sourceType, id: body.sourceId }, redactedFields });
+});
+
+router.post("/aml/report-schemas/:id/code-lists/preview", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(z.object({ mappingBlueprint: z.record(z.string().max(64), z.unknown()).optional(), codeMapKey: z.string().max(120).optional(), values: z.array(z.string()).max(500).optional() }).strict(), request.body ?? {});
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  const ast = schema.compiledDefinitionJson as unknown as XsdCompiledAst;
+  const mapping = (body.mappingBlueprint ?? schema.mappingBlueprintJson) as unknown as GoamlMappingBlueprint;
+  const codeLists = Object.entries(ast.codeLists ?? {}).map(([key, list]) => {
+    const map = body.codeMapKey ? mapping.codeMaps?.[body.codeMapKey] : mapping.codeMaps?.[key];
+    const mappings = map?.mappings ?? {};
+    const rows = (body.values ?? Object.keys(mappings)).map((value) => {
+      const mapped = mappings[value];
+      return { input: value, mapped: mapped ?? map?.defaultFallback ?? null, outcome: mapped ? "MAPPED" : map?.defaultFallback ? "FALLBACK" : "UNMAPPED" };
+    });
+    return {
+      key,
+      allowedValues: list.allowedValues,
+      usedByPaths: list.usedByPaths,
+      mappings,
+      defaultFallback: map?.defaultFallback ?? null,
+      coverage: list.allowedValues.length === 0 ? 1 : Object.values(mappings).filter((value) => list.allowedValues.includes(value)).length / list.allowedValues.length,
+      rows,
+    };
+  });
+  response.json({ codeLists });
+});
+
+router.post("/aml/report-schemas/:id/template/analyze", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(z.object({ templateBase64: z.string().max(20_000_000).optional() }).strict(), request.body ?? {});
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  if (schema.format !== "XLSX") throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_NOT_XLSX", "Only an XLSX schema can hold a workbook template");
+  const base64 = body.templateBase64 ?? (schema.templateCiphertext ? String(await reportingXlsxCipher.decrypt(schema.templateCiphertext)) : null);
+  if (!base64) throw new ApiError(404, "REPORT_SCHEMA_TEMPLATE_NOT_FOUND", "This schema has no workbook template");
+  const bytes = Buffer.from(base64, "base64");
+  const analysis = await analyzeWorkbookTemplate(bytes);
+  response.json({ analysis });
+});
+
+router.post("/aml/report-schemas/:id/template/upload", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(z.object({
+    templateBase64: z.string().max(20_000_000),
+    templateBinding: z.record(z.string().max(64), z.unknown()).optional(),
+  }).strict(), request.body ?? {});
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  if (schema.format !== "XLSX") throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_NOT_XLSX", "Only an XLSX schema can hold a workbook template");
+  if (schema.status !== "DRAFT") throw new ApiError(409, "REPORT_SCHEMA_NOT_EDITABLE", "Only a DRAFT schema can change its template");
+  const bytes = Buffer.from(body.templateBase64, "base64");
+  assertXlsxTemplateSafe(bytes);
+  const analysis = await analyzeWorkbookTemplate(bytes);
+  assertWorkbookAnalysisSafe(analysis);
+  const templateSha256 = createHash("sha256").update(bytes).digest("hex");
+  const templateCiphertext = await reportingXlsxCipher.encrypt(body.templateBase64);
+  const updated = await client.regulatoryReportSchema.update({
+    where: { id },
+    data: {
+      templateCiphertext,
+      templateSha256,
+      templateBindingJson: body.templateBinding !== undefined ? body.templateBinding as Prisma.InputJsonValue : Prisma.JsonNull,
+      revision: { increment: 1 },
+    },
+  });
+  const actor = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "REGULATORY_REPORT_SCHEMA_TEMPLATE_UPLOADED",
+      entityType: "REGULATORY_REPORT_SCHEMA",
+      entityId: id,
+      beforeJson: { templateSha256: schema.templateSha256 },
+      afterJson: { templateSha256, analysis: { sheets: analysis.sheets.length, namedRanges: analysis.namedRanges.length, issues: analysis.issues.length } },
+    },
+  });
+  response.json({ schema: regulatorySchemaRow(updated as never), analysis });
+});
+
+router.delete("/aml/report-schemas/:id/template", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  if (schema.format !== "XLSX") throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_NOT_XLSX", "Only an XLSX schema can hold a workbook template");
+  if (schema.status !== "DRAFT") throw new ApiError(409, "REPORT_SCHEMA_NOT_EDITABLE", "Only a DRAFT schema can change its template");
+  const updated = await client.regulatoryReportSchema.update({
+    where: { id },
+    data: { templateCiphertext: null, templateSha256: null, templateBindingJson: Prisma.JsonNull, revision: { increment: 1 } },
+  });
+  const actor = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "REGULATORY_REPORT_SCHEMA_TEMPLATE_REMOVED",
+      entityType: "REGULATORY_REPORT_SCHEMA",
+      entityId: id,
+      beforeJson: { templateSha256: schema.templateSha256 },
+      afterJson: {},
+    },
+  });
+  response.json({ schema: regulatorySchemaRow(updated as never) });
+});
+
+router.get("/aml/report-schemas/:id/template", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  if (!schema.templateCiphertext) throw new ApiError(404, "REPORT_SCHEMA_TEMPLATE_NOT_FOUND", "This schema has no workbook template");
+  const base64 = String(await reportingXlsxCipher.decrypt(schema.templateCiphertext));
+  const actor = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "REGULATORY_REPORT_SCHEMA_TEMPLATE_DOWNLOADED",
+      entityType: "REGULATORY_REPORT_SCHEMA",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { templateSha256: schema.templateSha256 },
+    },
+  });
+  response.setHeader("Content-Type", "text/plain; charset=utf-8");
+  response.json({ templateBase64: base64, templateSha256: schema.templateSha256, templateBinding: schema.templateBindingJson });
+});
+
+router.put("/aml/report-schemas/:id/template", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(z.object({
+    templateBase64: z.string().max(20_000_000),
+    templateBinding: z.record(z.string().max(64), z.unknown()).optional(),
+  }).strict(), request.body ?? {});
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  if (schema.format !== "XLSX") throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_NOT_XLSX", "Only an XLSX schema can hold a workbook template");
+  if (schema.status !== "DRAFT") throw new ApiError(409, "REPORT_SCHEMA_NOT_EDITABLE", "Only a DRAFT schema can change its template");
+  const bytes = Buffer.from(body.templateBase64, "base64");
+  assertXlsxTemplateSafe(bytes);
+  assertWorkbookAnalysisSafe(await analyzeWorkbookTemplate(bytes));
+  const templateSha256 = createHash("sha256").update(bytes).digest("hex");
+  const templateCiphertext = await reportingXlsxCipher.encrypt(body.templateBase64);
+  const updated = await client.regulatoryReportSchema.update({
+    where: { id },
+    data: {
+      templateCiphertext,
+      templateSha256,
+      templateBindingJson: body.templateBinding !== undefined ? body.templateBinding as Prisma.InputJsonValue : Prisma.JsonNull,
+      revision: { increment: 1 },
+    },
+  });
+  const actor = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "REGULATORY_REPORT_SCHEMA_TEMPLATE_UPDATED",
+      entityType: "REGULATORY_REPORT_SCHEMA",
+      entityId: id,
+      beforeJson: { templateSha256: schema.templateSha256 },
+      afterJson: { templateSha256: updated.templateSha256 },
+    },
+  });
+  response.json({ schema: regulatorySchemaRow(updated as never) });
+});
+
+router.post("/aml/report-schemas/:id/workbook/preview", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(z.object({ context: z.record(z.string().max(64), z.unknown()) }).strict(), request.body ?? {});
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  if (schema.format === "DOCX") {
+    const rendered = renderRegulatoryDocx(schema.compiledDefinitionJson as never, body.context);
+    response.json({ contentBase64: rendered.buffer.toString("base64"), validation: { valid: rendered.issues.length === 0, issues: rendered.issues } });
+    return;
+  }
+  if (schema.format !== "XLSX") throw new ApiError(400, "REPORT_SCHEMA_NOT_XLSX", "This schema is not an XLSX workbook");
+  const workbook = schema.compiledDefinitionJson as unknown as XlsxWorkbookSchema;
+  const template = schema.templateCiphertext ? Buffer.from(String(await reportingXlsxCipher.decrypt(schema.templateCiphertext)), "base64") : null;
+  const rendered = await renderRegulatoryWorkbook(workbook, body.context, template, schema.templateBindingJson as never);
+  response.json({ contentBase64: rendered.buffer.toString("base64"), validation: { valid: rendered.issues.length === 0, issues: rendered.issues } });
+});
+
+router.post("/aml/report-schemas", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const body = parseOrThrow(regulatorySchemaUploadSchema, request.body ?? {});
+  const actor = actorFromRequest(request);
+  if (body.templateBase64 && body.format !== "XLSX") throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_NOT_XLSX", "Only an XLSX schema can hold a workbook template");
+  let compiledDefinitionJson: unknown;
+  let templateCiphertext: string | null = null;
+  let templateSha256: string | null = null;
+  let definitionSha256: string;
+  if (body.format === "XML") {
+    const ast = compileXsdForAdmin(body.definitionText);
+    compiledDefinitionJson = ast;
+    definitionSha256 = createHash("sha256").update(body.definitionText, "utf8").digest("hex");
+  } else if (body.format === "DOCX") {
+    try {
+      compiledDefinitionJson = parseDocxNarrativeSchema(JSON.parse(body.definitionText));
+    } catch (error) {
+      throw new ApiError(400, "REPORT_SCHEMA_INVALID_DOCX", (error as Error).message);
+    }
+    definitionSha256 = createHash("sha256").update(body.definitionText, "utf8").digest("hex");
+  } else {
+    let workbook: unknown;
+    try {
+      workbook = JSON.parse(body.definitionText);
+    } catch {
+      throw new ApiError(400, "REPORT_SCHEMA_INVALID_JSON", "The XLSX workbook definition is not valid JSON");
+    }
+    if (!workbook || typeof workbook !== "object" || Array.isArray(workbook)) {
+      throw new ApiError(400, "REPORT_SCHEMA_INVALID_JSON", "The XLSX workbook definition must be an object");
+    }
+    compiledDefinitionJson = workbook;
+    definitionSha256 = createHash("sha256").update(body.definitionText, "utf8").digest("hex");
+    if (body.templateBase64) {
+      const bytes = Buffer.from(body.templateBase64, "base64");
+      assertXlsxTemplateSafe(bytes);
+      const analysis = await analyzeWorkbookTemplate(bytes);
+      assertWorkbookAnalysisSafe(analysis);
+      templateSha256 = createHash("sha256").update(bytes).digest("hex");
+      templateCiphertext = await reportingXlsxCipher.encrypt(body.templateBase64);
+    }
+  }
+  const version = body.version ?? 1;
+  const existing = await client.regulatoryReportSchema.findUnique({
+    where: { authority_schemaCode_version: { authority: body.authority, schemaCode: body.schemaCode, version } },
+  });
+  if (existing) {
+    throw new ApiError(409, "REPORT_SCHEMA_VERSION_EXISTS", "This schema code and version already exist");
+  }
+  const schema = await client.$transaction(async (tx) => {
+    const created = await tx.regulatoryReportSchema.create({
+      data: {
+        authority: body.authority,
+        reportType: body.reportType,
+        reportCode: body.reportCode,
+        format: body.format,
+        schemaCode: body.schemaCode,
+        name: body.name,
+        version,
+        status: "DRAFT",
+        definitionText: body.definitionText,
+        definitionSha256,
+        mappingSha256: hashJsonValue(body.mappingBlueprint),
+        templateCiphertext,
+        templateSha256,
+        compiledDefinitionJson: compiledDefinitionJson as never,
+        mappingBlueprintJson: body.mappingBlueprint as never,
+        sampleContextJson: body.sampleContext as never,
+        notes: body.notes ?? null,
+        createdByUserId: actor.userId,
+      },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "REGULATORY_REPORT_SCHEMA_SAVED",
+        entityType: "REGULATORY_REPORT_SCHEMA",
+        entityId: created.id,
+        beforeJson: {},
+        afterJson: { schemaCode: created.schemaCode, reportCode: created.reportCode, version: created.version, format: created.format, definitionSha256 },
+      },
+    });
+    return created;
+  });
+  response.status(201).json({ schema: regulatorySchemaRow(schema as never) });
+});
+
+router.post("/aml/report-schemas/:id/compile", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  if (schema.status !== "DRAFT") {
+    throw new ApiError(409, "REPORT_SCHEMA_NOT_EDITABLE", "Only a DRAFT schema can be recompiled; clone it as a new version");
+  }
+  if (schema.format !== "XML" || !schema.definitionText) {
+    throw new ApiError(400, "REPORT_SCHEMA_NOT_XML", "Only XML schemas can be compiled as XSD");
+  }
+  const ast = compileXsdForAdmin(schema.definitionText);
+  const updated = await client.regulatoryReportSchema.update({
+    where: { id },
+    data: { compiledDefinitionJson: ast as never, compiledFromSha256: schema.definitionSha256 },
+  });
+  const actor = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "REGULATORY_REPORT_SCHEMA_COMPILED",
+      entityType: "REGULATORY_REPORT_SCHEMA",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { paths: Object.keys(ast.paths).length, codeLists: Object.keys(ast.codeLists).length },
+    },
+  });
+  response.json({ schema: regulatorySchemaRow(updated as never), compiled: ast });
+});
+
+router.post("/aml/report-schemas/:id/simulate", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(z.object({ context: z.record(z.string().max(64), z.unknown()) }).strict(), request.body ?? {});
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  if (schema.format === "XML") {
+    const ast = schema.compiledDefinitionJson as never;
+    const blueprint = schema.mappingBlueprintJson as unknown as GoamlMappingBlueprint;
+    const xml = await new XsdXmlGenerator().generate(ast, blueprint, body.context);
+    const validation = validateXml(xml, ast, blueprint);
+    response.json({ format: "XML", content: xml, validation });
+    return;
+  }
+  if (schema.format === "DOCX") {
+    const rendered = renderRegulatoryDocx(schema.compiledDefinitionJson as never, body.context);
+    response.json({
+      format: "DOCX",
+      contentBase64: rendered.buffer.toString("base64"),
+      validation: { valid: rendered.issues.length === 0, issues: rendered.issues },
+    });
+    return;
+  }
+  const workbook = schema.compiledDefinitionJson as unknown as XlsxWorkbookSchema;
+  const template = schema.templateCiphertext
+    ? Buffer.from(String(await reportingXlsxCipher.decrypt(schema.templateCiphertext)), "base64")
+    : null;
+  const rendered = await renderRegulatoryWorkbook(workbook, body.context, template, schema.templateBindingJson as never);
+  response.json({
+    format: "XLSX",
+    contentBase64: rendered.buffer.toString("base64"),
+    validation: { valid: rendered.issues.length === 0, issues: rendered.issues },
+  });
+});
+
+router.post("/aml/report-schemas/:id/promote", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(z.object({ setAsDefault: z.boolean().default(true) }).strict(), request.body ?? {});
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  if (schema.status === "CONFIRMED") {
+    throw new ApiError(409, "REPORT_SCHEMA_ALREADY_CONFIRMED", "The reporting schema is already confirmed");
+  }
+  if (schema.status === "PENDING_APPROVAL") {
+    throw new ApiError(409, "REPORT_SCHEMA_PROMOTION_PENDING", "The reporting schema promotion is already pending");
+  }
+  const actor = actorFromRequest(request);
+  const approval = await client.$transaction(async (tx) => {
+    const created = await tx.approvalRequest.create({
+      data: {
+        subjectType: "REGULATORY_REPORT_SCHEMA",
+        subjectId: schema.id,
+        payloadDiffJson: {
+          schemaCode: schema.schemaCode,
+          version: schema.version,
+          revision: schema.revision,
+          definitionSha256: schema.definitionSha256,
+          mappingSha256: schema.mappingSha256,
+          setAsDefault: body.setAsDefault,
+        },
+        mode: "STANDARD",
+        makerUserId: actor.userId,
+        state: "PENDING_REVIEW",
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      },
+    });
+    await tx.regulatoryReportSchema.update({
+      where: { id: schema.id },
+      data: { status: "PENDING_APPROVAL", approvalRequestId: created.id },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "REGULATORY_REPORT_SCHEMA_PROMOTION_PROPOSED",
+        entityType: "REGULATORY_REPORT_SCHEMA",
+        entityId: schema.id,
+        beforeJson: { status: schema.status },
+        afterJson: { status: "PENDING_APPROVAL", approvalRequestId: created.id, setAsDefault: body.setAsDefault },
+        approvalRequestId: created.id,
+      },
+    });
+    return created;
+  });
+  response.status(202).json({ approvalRequestId: approval.id, status: "PENDING_APPROVAL" });
+});
+
+
+router.get("/aml/reporting-rules/:id/schema-bindings", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const rows = await client.regulatoryRuleSchemaBinding.findMany({
+    where: { ruleId: id },
+    include: { schema: true },
+    orderBy: { format: "asc" },
+  });
+  response.json({ bindings: rows.map((row) => ({ ...row, schema: regulatorySchemaRow(row.schema as never) })) });
+});
+
+router.put("/aml/reporting-rules/:id/schema-bindings", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      bindings: z.array(z.object({ format: z.enum(["XML", "XLSX", "DOCX"]), schemaId: z.string().min(1).max(64) })).max(3),
+    }).strict(),
+    request.body ?? {},
+  );
+  const rule = await client.reportingRule.findUnique({ where: { id } });
+  if (!rule) throw new ApiError(404, "REPORTING_RULE_NOT_FOUND", "The reporting rule does not exist");
+  const schemas = await client.regulatoryReportSchema.findMany({ where: { id: { in: body.bindings.map((binding) => binding.schemaId) } } });
+  for (const binding of body.bindings) {
+    const schema = schemas.find((row) => row.id === binding.schemaId);
+    if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", `Schema '${binding.schemaId}' does not exist`);
+    if (schema.status !== "CONFIRMED") throw new ApiError(409, "REPORT_SCHEMA_NOT_CONFIRMED", "Only a confirmed schema can be bound");
+    if (schema.format !== binding.format) throw new ApiError(409, "REPORT_SCHEMA_BINDING_MISMATCH", "The schema format does not match the binding format");
+    if (schema.authority !== rule.authority || schema.reportType !== rule.reportType) {
+      throw new ApiError(409, "REPORT_SCHEMA_BINDING_MISMATCH", "The schema authority/report type does not match the rule");
+    }
+  }
+  const pending = await client.approvalRequest.findFirst({
+    where: {
+      subjectType: "REPORTING_RULE_SCHEMA_BINDING",
+      subjectId: id,
+      state: { in: ["DRAFT", "PENDING_REVIEW"] },
+    },
+  });
+  if (pending) throw new ApiError(409, "REPORTING_RULE_SCHEMA_BINDING_PENDING", "A binding change is already pending", { approvalRequestId: pending.id });
+  const actor = actorFromRequest(request);
+  const approval = await client.$transaction(async (tx) => {
+    const created = await tx.approvalRequest.create({
+      data: {
+        subjectType: "REPORTING_RULE_SCHEMA_BINDING",
+        subjectId: id,
+        payloadDiffJson: {
+          bindings: body.bindings,
+          schemaHashes: body.bindings.map((binding) => {
+            const schema = schemas.find((row) => row.id === binding.schemaId)!;
+            return { format: binding.format, schemaId: schema.id, version: schema.version, revision: schema.revision, definitionSha256: schema.definitionSha256, mappingSha256: schema.mappingSha256 };
+          }),
+        },
+        mode: "STANDARD",
+        makerUserId: actor.userId,
+        state: "PENDING_REVIEW",
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "REPORTING_RULE_SCHEMA_BINDINGS_PROPOSED",
+        entityType: "REPORTING_RULE",
+        entityId: id,
+        beforeJson: {},
+        afterJson: { approvalRequestId: created.id, bindings: body.bindings },
+        approvalRequestId: created.id,
+      },
+    });
+    return created;
+  });
+  response.status(202).json({ approvalRequestId: approval.id, status: "PENDING_REVIEW" });
+});
+
+router.get("/aml/reports/:id/requirements", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const report = await client.regulatoryReport.findUnique({ where: { id } });
+  if (!report) throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+  const ruleId = report.subjectType === "REPORTING_RULE" ? report.subjectId : null;
+  const requirements: Array<Record<string, unknown>> = [];
+  for (const format of report.requiredOutputFormats) {
+    let schema: any = null;
+    if (ruleId) {
+      const binding = await client.regulatoryRuleSchemaBinding.findFirst({ where: { ruleId, format }, include: { schema: true } });
+      schema = binding?.schema ?? null;
+    }
+    if (!schema) {
+      const binding = await client.regulatorySchemaDefaultBinding.findFirst({
+        where: { authority: report.authority, reportType: report.reportType, reportCode: report.reportCode ?? "", format },
+        include: { schema: true },
+      });
+      schema = binding?.schema ?? null;
+    }
+    const workbook = schema?.compiledDefinitionJson as XlsxWorkbookSchema | undefined;
+    requirements.push({
+      format,
+      schema: schema ? regulatorySchemaRow(schema) : null,
+      narrativeSections: format === "DOCX"
+        ? ((schema?.compiledDefinitionJson as any)?.sections ?? []).map((section: any) => ({ key: section.key, title: section.title, required: section.required === true }))
+        : format === "XLSX" ? workbook?.narrativeSections ?? [] : [],
+      paths: schema?.compiledDefinitionJson && typeof schema.compiledDefinitionJson === "object"
+        ? Object.keys((schema.compiledDefinitionJson as Record<string, any>).paths ?? {}).length
+        : 0,
+      codeLists: schema?.compiledDefinitionJson && typeof schema.compiledDefinitionJson === "object"
+        ? Object.keys((schema.compiledDefinitionJson as Record<string, any>).codeLists ?? {}).length
+        : 0,
+      editable: report.status === "DRAFT" || report.status === "PENDING_CHECKER",
+    });
+  }
+  const payload = await readRegulatoryReportPayload(report.payloadCiphertext);
+  response.json({
+    report: { id: report.id, status: report.status, reportCode: report.reportCode, periodKey: report.periodKey, dueAt: report.dueAt, requiredOutputFormats: report.requiredOutputFormats, payloadSha256: report.payloadSha256 },
+    requirements,
+    narrative: payload.narrative ?? {},
+    pending: Array.isArray(payload.pending) ? payload.pending : [],
+  });
+});
+
+router.get("/aml/report-schema-defaults", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  await ensureBaselineReportingSchemas(client as never);
+  const rows = await client.regulatorySchemaDefaultBinding.findMany({
+    include: { schema: true },
+    orderBy: [{ authority: "asc" }, { reportType: "asc" }, { reportCode: "asc" }, { format: "asc" }],
+  });
+  response.json({ bindings: rows.map((row) => ({ ...row, schema: regulatorySchemaRow(row.schema as never) })) });
+});
+
+router.put("/aml/report-schema-defaults", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const body = parseOrThrow(
+    z.object({
+      authority: z.string().min(2).max(64).default("CBL"),
+      reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN", "INCIDENT"]),
+      reportCode: z.string().max(40).default(""),
+      format: z.enum(["XML", "XLSX", "DOCX"]),
+      schemaId: z.string().min(1).max(64),
+    }).strict(),
+    request.body ?? {},
+  );
+  const schema = await client.regulatoryReportSchema.findUnique({ where: { id: body.schemaId } });
+  if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
+  if (schema.status !== "CONFIRMED") {
+    throw new ApiError(409, "REPORT_SCHEMA_NOT_CONFIRMED", "Only a confirmed schema can become the default");
+  }
+  if (
+    schema.authority !== body.authority
+    || schema.reportType !== body.reportType
+    || schema.reportCode !== body.reportCode
+    || schema.format !== body.format
+  ) {
+    throw new ApiError(409, "REPORT_SCHEMA_BINDING_MISMATCH", "The schema does not match the default binding key", {
+      schema: { authority: schema.authority, reportType: schema.reportType, reportCode: schema.reportCode, format: schema.format },
+      binding: body,
+    });
+  }
+  const pending = await client.approvalRequest.findFirst({
+    where: {
+      subjectType: "REGULATORY_REPORT_SCHEMA",
+      subjectId: schema.id,
+      state: { in: ["DRAFT", "PENDING_REVIEW"] },
+    },
+  });
+  if (pending) {
+    throw new ApiError(409, "REPORT_SCHEMA_DEFAULT_PENDING", "A default-binding request already exists", { approvalRequestId: pending.id });
+  }
+  const actor = actorFromRequest(request);
+  const approval = await client.$transaction(async (tx) => {
+    const created = await tx.approvalRequest.create({
+      data: {
+        subjectType: "REGULATORY_REPORT_SCHEMA",
+        subjectId: schema.id,
+        payloadDiffJson: {
+          schemaCode: schema.schemaCode,
+          version: schema.version,
+          revision: schema.revision,
+          definitionSha256: schema.definitionSha256,
+          mappingSha256: schema.mappingSha256,
+          setAsDefault: true,
+          defaultBinding: { authority: body.authority, reportType: body.reportType, reportCode: body.reportCode, format: body.format },
+        },
+        mode: "STANDARD",
+        makerUserId: actor.userId,
+        state: "PENDING_REVIEW",
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "REGULATORY_REPORT_SCHEMA_DEFAULT_PROPOSED",
+        entityType: "REGULATORY_REPORT_SCHEMA",
+        entityId: schema.id,
+        beforeJson: {},
+        afterJson: { approvalRequestId: created.id, ...body },
+        approvalRequestId: created.id,
+      },
+    });
+    return created;
+  });
+  response.status(202).json({ approvalRequestId: approval.id, status: "PENDING_REVIEW" });
+});
+
+router.get("/aml/reports/:id/payload", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const report = await client.regulatoryReport.findUnique({
+    where: { id },
+    include: { outputs: { where: { supersededAt: null }, orderBy: { revision: "desc" } } },
+  });
+  if (!report) throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+  const payload = await readRegulatoryReportPayload(report.payloadCiphertext);
+  response.json({
+    reportId: report.id,
+    payload,
+    payloadSha256: report.payloadSha256,
+    requiredOutputFormats: report.requiredOutputFormats,
+    narrative: payload.narrative ?? {},
+    outputs: report.outputs.map((output) => ({
+      id: output.id,
+      format: output.format,
+      revision: output.revision,
+      schemaId: output.schemaId,
+      schemaVersion: output.schemaVersion,
+      validationStatus: output.validationStatus,
+      validationErrors: output.validationErrorsJson,
+      contentSha256: output.contentSha256,
+      generatedAt: output.generatedAt,
+      submittedAt: output.submittedAt,
+    })),
+  });
+});
+
+router.patch("/aml/reports/:id/payload", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      narrative: z.record(z.string().max(80), z.string().max(20_000)),
+      basePayloadSha256: z.string().length(64).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
+  const report = await client.regulatoryReport.findUnique({ where: { id } });
+  if (!report) throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+  if (report.status !== "DRAFT" && report.status !== "PENDING_CHECKER") {
+    throw new ApiError(409, "REPORT_NOT_EDITABLE", "The report payload can only be edited while it is a draft or pending approval");
+  }
+  if (body.basePayloadSha256 && body.basePayloadSha256 !== report.payloadSha256) {
+    throw new ApiError(409, "REPORT_PAYLOAD_STALE", "The report payload changed in another session", {
+      reportId: report.id,
+      expected: body.basePayloadSha256,
+      actual: report.payloadSha256,
+    });
+  }
+  const payload = await readRegulatoryReportPayload(report.payloadCiphertext);
+  const updatedPayload = { ...payload, narrative: { ...(typeof payload.narrative === "object" && payload.narrative ? payload.narrative : {}), ...body.narrative } };
+  const plaintext = JSON.stringify(updatedPayload);
+  const payloadSha256 = createHash("sha256").update(plaintext).digest("hex");
+  const payloadCiphertext = await reportingPayloadCipher.encrypt(plaintext);
+  const actor = actorFromRequest(request);
+  await client.$transaction(async (tx) => {
+    await tx.regulatoryReport.update({ where: { id }, data: { payloadCiphertext, payloadSha256 } });
+    const outputTable = (tx as unknown as Record<string, any>).regulatoryReportOutput;
+    if (typeof outputTable?.updateMany === "function") {
+      await outputTable.updateMany({
+        where: { reportId: id, supersededAt: null },
+        data: { supersededAt: new Date() },
+      });
+    }
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "REGULATORY_REPORT_PAYLOAD_UPDATED",
+        entityType: "REGULATORY_REPORT",
+        entityId: id,
+        beforeJson: { payloadSha256: report.payloadSha256 },
+        afterJson: { payloadSha256, narrativeKeys: Object.keys(body.narrative) },
+      },
+    });
+  });
+  response.json({ reportId: id, payloadSha256, narrative: body.narrative });
+});
+
+router.post("/aml/reports/:id/generate-output", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      formats: z.array(z.enum(["XML", "XLSX", "DOCX"])).min(1).max(3).optional(),
+      allowRegenerate: z.boolean().default(false),
+    }).strict(),
+    request.body ?? {},
+  );
+  const report = await client.regulatoryReport.findUnique({ where: { id } });
+  if (!report) throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+  if (report.status !== "DRAFT" && report.status !== "PENDING_CHECKER") {
+    throw new ApiError(409, "REPORT_NOT_EDITABLE", "Outputs can only be generated for a draft or pending report");
+  }
+  const payload = await readRegulatoryReportPayload(report.payloadCiphertext);
+  await ensureBaselineReportingSchemas(client as never);
+  const ruleId = report.subjectType === "REPORTING_RULE"
+    ? report.subjectId
+    : typeof payload.ruleId === "string" ? payload.ruleId : null;
+  const results = await reportGeneration.generate(client as never, {
+    report: {
+      id: report.id,
+      reportType: report.reportType,
+      reportCode: report.reportCode,
+      authority: report.authority,
+      subjectType: report.subjectType,
+      subjectId: report.subjectId,
+      amlCaseId: report.amlCaseId,
+      periodStart: report.periodStart,
+      periodEnd: report.periodEnd,
+      periodKey: report.periodKey,
+      dueAt: report.dueAt,
+      requiredOutputFormats: report.requiredOutputFormats,
+    },
+    payload,
+    ruleId,
+    formats: body.formats ?? report.requiredOutputFormats as never,
+    allowRegenerate: body.allowRegenerate,
+  });
+  const actor = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "REGULATORY_REPORT_OUTPUT_GENERATED",
+      entityType: "REGULATORY_REPORT",
+      entityId: report.id,
+      beforeJson: {},
+      afterJson: results.map((result) => ({ format: result.format, validationStatus: result.validationStatus, sha256: result.sha256 })),
+    },
+  });
+  response.json({ outputs: results.map((result) => ({ format: result.format, validationStatus: result.validationStatus, sha256: result.sha256, errors: result.errors })) });
+});
+
+router.get("/aml/reports/:id/outputs/:format/download", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const format = parseOrThrow(z.object({ format: z.enum(["XML", "XLSX", "DOCX"]) }), request.params).format;
+  const output = await client.regulatoryReportOutput.findFirst({
+    where: { reportId: id, format, supersededAt: null },
+    orderBy: { revision: "desc" },
+  });
+  if (!output || output.validationStatus === "NOT_GENERATED") {
+    throw new ApiError(404, "REPORT_OUTPUT_NOT_FOUND", "The requested report output does not exist");
+  }
+  const cipher = format === "XML" ? reportingXmlCipher : format === "DOCX" ? reportingDocxCipher : reportingXlsxCipher;
+  const content = await cipher.decrypt(output.contentCiphertext);
+  const actualHash = createHash("sha256").update(format === "XML" ? String(content) : Buffer.from(String(content), "base64")).digest("hex");
+  if (actualHash !== output.contentSha256) {
+    throw new ApiError(409, "REPORT_OUTPUT_HASH_MISMATCH", "The stored report output failed its integrity check");
+  }
+  const actor = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "SYSTEM",
+      action: "REGULATORY_REPORT_OUTPUT_DOWNLOADED",
+      entityType: "REGULATORY_REPORT_OUTPUT",
+      entityId: output.id,
+      beforeJson: {},
+      afterJson: { reportId: id, format, sha256: output.contentSha256 },
+    },
+  });
+  if (format === "XML") {
+    response.setHeader("Content-Type", "application/xml; charset=utf-8");
+    response.setHeader("X-Content-SHA256", output.contentSha256);
+    response.send(String(content));
+    return;
+  }
+  if (format === "DOCX") {
+    response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    response.setHeader("Content-Disposition", `attachment; filename="report-${id}.docx"`);
+    response.setHeader("X-Content-SHA256", output.contentSha256);
+    response.send(Buffer.from(String(content), "base64"));
+    return;
+  }
+  response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  response.setHeader("Content-Disposition", `attachment; filename="report-${id}.xlsx"`);
+  response.setHeader("X-Content-SHA256", output.contentSha256);
+  response.send(Buffer.from(String(content), "base64"));
+});
+
+router.post("/aml/reports/:id/request-approval", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const report = await client.regulatoryReport.findUnique({ where: { id } });
+  if (!report) throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+  if (report.status !== "DRAFT") {
+    throw new ApiError(409, "REPORT_NOT_DRAFT", "Only a draft report can be submitted for approval");
+  }
+  const pending = await client.approvalRequest.findFirst({
+    where: { subjectType: "REGULATORY_REPORT", subjectId: id, state: { in: ["DRAFT", "PENDING_REVIEW"] } },
+  });
+  if (pending) {
+    throw new ApiError(409, "REPORT_APPROVAL_PENDING", "This report already has a pending approval", { approvalRequestId: pending.id });
+  }
+  const actor = actorFromRequest(request);
+  const approval = await client.$transaction(async (tx) => {
+    const created = await tx.approvalRequest.create({
+      data: {
+        subjectType: "REGULATORY_REPORT",
+        subjectId: report.id,
+        payloadDiffJson: {
+          reportType: report.reportType,
+          reportCode: report.reportCode,
+          periodKey: report.periodKey,
+          requiredOutputFormats: report.requiredOutputFormats,
+          payloadSha256: report.payloadSha256,
+        },
+        mode: "STANDARD",
+        makerUserId: actor.userId,
+        state: "PENDING_REVIEW",
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      },
+    });
+    await tx.regulatoryReport.update({ where: { id: report.id }, data: { status: "PENDING_CHECKER", approvalRequestId: created.id } });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "SYSTEM",
+        action: "REGULATORY_REPORT_APPROVAL_REQUESTED",
+        entityType: "REGULATORY_REPORT",
+        entityId: report.id,
+        beforeJson: { status: "DRAFT" },
+        afterJson: { status: "PENDING_CHECKER", approvalRequestId: created.id },
+        approvalRequestId: created.id,
+      },
+    });
+    return created;
+  });
+  response.status(202).json({ approvalRequestId: approval.id, status: "PENDING_CHECKER" });
+});
+
 const AML_REPORT_OPEN_STATUSES = ["DRAFT", "PENDING_CHECKER", "APPROVED"] as const;
 const AML_REPORT_SUBMITTED_STATUSES = ["SUBMITTED", "ACKNOWLEDGED", "REJECTED_BY_AUTHORITY"] as const;
+
+const regulatoryReportOutputRow = (output: Record<string, any>) => ({
+  id: output.id,
+  format: output.format,
+  revision: output.revision,
+  schemaId: output.schemaId,
+  schemaVersion: output.schemaVersion,
+  schemaCode: output.schema?.schemaCode ?? null,
+  schemaName: output.schema?.name ?? null,
+  schemaStatus: output.schema?.status ?? null,
+  validationStatus: output.validationStatus,
+  validationErrors: output.validationErrorsJson ?? null,
+  contentSha256: output.contentSha256,
+  generatedAt: output.generatedAt,
+  submittedAt: output.submittedAt,
+});
+
+const incidentIdsMatchingSearch = async (search: string): Promise<string[]> => {
+  const rows = await client.incident.findMany({
+    where: { OR: [{ reference: { contains: search, mode: "insensitive" } }, { title: { contains: search, mode: "insensitive" } }] },
+    select: { id: true },
+    take: 200,
+  });
+  return rows.map((row) => row.id);
+};
+
+const includeIncidentSearch = (built: { where: unknown }, search: unknown, ids: string[]): void => {
+  if (typeof search !== "string" || search.trim() === "" || ids.length === 0) return;
+  const where = built.where as { AND?: Array<{ OR?: Array<Record<string, unknown>> }> };
+  const first = where.AND?.[0];
+  if (first && Array.isArray(first.OR)) first.OR.push({ subjectId: { in: ids } });
+};
+
+const incidentNamesForReports = async (reports: Array<{ subjectType: string; subjectId: string }>): Promise<Map<string, string>> => {
+  const ids = [...new Set(reports.filter((report) => report.subjectType === "INCIDENT").map((report) => report.subjectId))];
+  if (ids.length === 0) return new Map();
+  const incidents = await client.incident.findMany({ where: { id: { in: ids } }, select: { id: true, reference: true, title: true } });
+  return new Map(incidents.map((incident) => [incident.id, `${incident.reference} · ${incident.title}`]));
+};
 
 const regulatoryReportRow = (report: Record<string, any>, subjectNameOverride?: string | null) => ({
   id: report.id,
@@ -7603,6 +9354,14 @@ const regulatoryReportRow = (report: Record<string, any>, subjectNameOverride?: 
   periodStart: report.periodStart,
   periodEnd: report.periodEnd,
   submissionRef: report.submissionRef,
+  reportCode: report.reportCode ?? null,
+  periodKey: report.periodKey ?? null,
+  dueAt: report.dueAt ?? null,
+  requiredOutputFormats: report.requiredOutputFormats ?? [],
+  filingChannel: report.filingChannel ?? null,
+  acknowledgedAt: report.acknowledgedAt ?? null,
+  rejectionReason: report.rejectionReason ?? null,
+  outputs: (report.outputs ?? []).map(regulatoryReportOutputRow),
   payloadSha256: report.payloadSha256,
   confidential: report.confidential,
   approvalRequestId: report.approvalRequestId,
@@ -7628,6 +9387,7 @@ router.get("/aml/reports", async (request: Request, response: Response) => {
     defaultSort: { createdAt: "desc" },
     defaultPageSize: 20,
   });
+  if (typeof request.query.search === "string") includeIncidentSearch(built, request.query.search, await incidentIdsMatchingSearch(request.query.search));
   const [reports, total] = await Promise.all([
     client.regulatoryReport.findMany({
       where: built.where as never,
@@ -7635,6 +9395,10 @@ router.get("/aml/reports", async (request: Request, response: Response) => {
       include: {
         amlCase: { select: { id: true, status: true, severity: true, subjectType: true, subjectId: true } },
         approvalRequest: { select: { state: true } },
+        outputs: {
+          where: { supersededAt: null },
+          select: { format: true, revision: true, schemaVersion: true, validationStatus: true, contentSha256: true, generatedAt: true, submittedAt: true },
+        },
       },
       skip: built.skip,
       take: built.take,
@@ -7649,9 +9413,10 @@ router.get("/aml/reports", async (request: Request, response: Response) => {
         select: { id: true, sourceReference: true, reportType: true, status: true },
       });
   const ruleNames = new Map(rules.map((rule) => [rule.id, rule.sourceReference ?? `${rule.reportType} · ${rule.status}`]));
+  const incidentNames = await incidentNamesForReports(reports);
   response.json(listResponse(
     "reports",
-    reports.map((report) => regulatoryReportRow(report as never, ruleNames.get(report.subjectId) ?? null)),
+    reports.map((report) => regulatoryReportRow(report as never, ruleNames.get(report.subjectId) ?? incidentNames.get(report.subjectId) ?? null)),
     total,
     built,
   ));
@@ -7681,6 +9446,10 @@ router.get("/aml/reports/export", async (request: Request, response: Response) =
       include: {
         amlCase: { select: { id: true, status: true, severity: true, subjectType: true, subjectId: true } },
         approvalRequest: { select: { state: true } },
+        outputs: {
+          where: { supersededAt: null },
+          select: { format: true, revision: true, schemaVersion: true, validationStatus: true, contentSha256: true, generatedAt: true, submittedAt: true },
+        },
       },
       take,
     }),
@@ -7694,6 +9463,7 @@ router.get("/aml/reports/export", async (request: Request, response: Response) =
         select: { id: true, sourceReference: true, reportType: true, status: true },
       });
   const ruleNames = new Map(rules.map((rule) => [rule.id, rule.sourceReference ?? `${rule.reportType} · ${rule.status}`]));
+  const incidentNames = await incidentNamesForReports(reports);
   const actor = actorFromRequest(request);
   await writeAudit(client, {
     data: {
@@ -7707,7 +9477,7 @@ router.get("/aml/reports/export", async (request: Request, response: Response) =
     },
   });
   response.json({
-    reports: reports.map((report) => regulatoryReportRow(report as never, ruleNames.get(report.subjectId) ?? null)),
+    reports: reports.map((report) => regulatoryReportRow(report as never, ruleNames.get(report.subjectId) ?? incidentNames.get(report.subjectId) ?? null)),
     total,
     exported: reports.length,
     truncated: total > reports.length,
@@ -7778,15 +9548,22 @@ router.get("/aml/reports/:id", async (request: Request, response: Response) => {
     include: {
       amlCase: { select: { id: true, status: true, severity: true, subjectType: true, subjectId: true, triggerReason: true } },
       approvalRequest: { select: { id: true, state: true, makerUserId: true, checkerUserId: true, rejectionReason: true, createdAt: true } },
+      outputs: {
+        where: { supersededAt: null },
+        include: { schema: { select: { id: true, schemaCode: true, name: true, version: true, status: true, format: true } } },
+      },
     },
   });
   if (!report) throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
   const subjectRule = report.subjectType === "REPORTING_RULE"
     ? await client.reportingRule.findUnique({ where: { id: report.subjectId }, select: { sourceReference: true, reportType: true, status: true } })
     : null;
+  const incident = report.subjectType === "INCIDENT"
+    ? await client.incident.findUnique({ where: { id: report.subjectId }, select: { reference: true, title: true } })
+    : null;
   response.json({
     report: {
-      ...regulatoryReportRow(report as never, subjectRule ? subjectRule.sourceReference ?? `${subjectRule.reportType} · ${subjectRule.status}` : null),
+      ...regulatoryReportRow(report as never, subjectRule ? subjectRule.sourceReference ?? `${subjectRule.reportType} · ${subjectRule.status}` : incident ? `${incident.reference} · ${incident.title}` : null),
       approval: report.approvalRequest ? {
         id: report.approvalRequest.id,
         state: report.approvalRequest.state,
@@ -7805,7 +9582,7 @@ router.post("/aml/reports", async (request: Request, response: Response) => {
   const body = parseOrThrow(
     z
       .object({
-        reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN"]),
+        reportType: z.enum(["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN", "INCIDENT"]),
         authority: z.string().min(2).max(64).default("CBL"),
         subjectType: z.string().min(2).max(40),
         subjectId: z.string().min(1).max(64),
@@ -7846,6 +9623,7 @@ router.post("/aml/reports/:id/submit", async (request: Request, response: Respon
       .object({
         submissionRef: z.string().min(1).max(200),
         submittedAt: z.string().max(64).optional(),
+        filingChannel: z.string().min(2).max(80).optional(),
         checklist: z.array(z.enum([
           "REPORT_APPROVED_VERIFIED",
           "AUTHORITY_REFERENCE_VERIFIED",
@@ -7865,6 +9643,7 @@ router.post("/aml/reports/:id/submit", async (request: Request, response: Respon
     reportId: id,
     submissionRef: body.submissionRef,
     submittedAt,
+    filingChannel: body.filingChannel ?? null,
     actorUserId: actor.userId,
     actorRole: actor.role,
   });
@@ -16243,6 +18022,7 @@ router.post("/settings/restore-apply", async (request: Request, response: Respon
     });
     return written;
   });
+  invalidateMerchantReportPolicyCache();
   response.json({ applied: applied.length, settings: applied });
 });
 
@@ -16404,8 +18184,782 @@ router.put("/settings", async (request: Request, response: Response) => {
       afterJson: { settings: written, checklist: body.checklist ?? [] },
     },
   });
+  invalidateMerchantReportPolicyCache();
   response.json({ settings: written });
 });
+
+
+
+const filingAdapterSchema = z.object({
+  name: z.string().min(2).max(120),
+  authority: z.string().min(2).max(64).default("CBL"),
+  kind: z.enum(["MANUAL", "HTTP"]).default("MANUAL"),
+  status: z.enum(["ACTIVE", "DISABLED"]).default("ACTIVE"),
+  endpointUrl: z.string().url().max(500).nullable().optional(),
+  authHeaderName: z.string().min(2).max(80).nullable().optional(),
+  authSecret: z.string().min(4).max(4000).nullable().optional(),
+  timeoutSeconds: z.number().int().min(5).max(120).default(30),
+  configJson: z.record(z.string().max(64), z.unknown()).nullable().optional(),
+}).strict();
+
+const SECRET_CONFIG_KEY = /(secret|token|password|api[_-]?key|authorization|private[_-]?key|credential)/i;
+const assertSafeAdapterConfig = (value: unknown, path = "configJson"): void => {
+  if (value === null || value === undefined) return;
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertSafeAdapterConfig(entry, `${path}[${index}]`));
+    return;
+  }
+  if (typeof value !== "object") return;
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (SECRET_CONFIG_KEY.test(key)) throw new ApiError(400, "FILING_ADAPTER_CONFIG_SECRET", `The adapter configuration must not contain a plaintext secret at ${path}.${key}`);
+    assertSafeAdapterConfig(entry, `${path}.${key}`);
+  }
+};
+
+const redactConfigJson = (value: unknown): unknown => {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map(redactConfigJson);
+  if (typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, SECRET_CONFIG_KEY.test(key) ? "[redacted]" : redactConfigJson(entry)]));
+};
+
+const filingAdapterView = (row: any) => ({
+  id: row.id,
+  name: row.name,
+  authority: row.authority,
+  kind: row.kind,
+  status: row.status,
+  endpointUrl: row.endpointUrl,
+  authHeaderName: row.authHeaderName,
+  hasSecret: Boolean(row.authSecretCiphertext),
+  timeoutSeconds: row.timeoutSeconds,
+  configJson: redactConfigJson(row.configJson),
+  lastUsedAt: row.lastUsedAt,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+const assertAdapterAuthHeader = (name: string | null | undefined): void => {
+  if (!name) return;
+  if (!/^[A-Za-z0-9-]+$/.test(name)) throw new ApiError(400, "FILING_ADAPTER_HEADER_INVALID", "The auth header name is not valid");
+  if (["host", "content-length", "transfer-encoding", "connection"].includes(name.toLowerCase())) {
+    throw new ApiError(400, "FILING_ADAPTER_HEADER_FORBIDDEN", "The auth header name is reserved");
+  }
+};
+
+const assertAdapterEndpoint = (kind: string, endpointUrl: string | null | undefined): void => {
+  if (kind !== "HTTP") return;
+  if (!endpointUrl) throw new ApiError(400, "FILING_ENDPOINT_REQUIRED", "An HTTP filing adapter requires an endpoint");
+  try { assertFilingEndpoint(endpointUrl); } catch (error) { throw new ApiError(400, "FILING_ENDPOINT_INVALID", (error as Error).message); }
+};
+
+const pendingAdapterApproval = async (adapterId: string) =>
+  client.approvalRequest.findFirst({
+    where: { subjectType: "FILING_ADAPTER", subjectId: adapterId, state: { in: ["DRAFT", "PENDING_REVIEW"] } },
+  });
+
+router.get("/aml/filing-adapters", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const rows = await client.externalFilingAdapter.findMany({ orderBy: [{ authority: "asc" }, { name: "asc" }] });
+  response.json({ adapters: rows.map(filingAdapterView) });
+});
+
+router.post("/aml/filing-adapters", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const body = parseOrThrow(filingAdapterSchema, request.body ?? {});
+  assertAdapterEndpoint(body.kind, body.endpointUrl);
+  assertAdapterAuthHeader(body.authHeaderName);
+  assertSafeAdapterConfig(body.configJson);
+  const actor = actorFromRequest(request);
+  const secretCiphertext = body.authSecret ? await filingAdapterCipher.encrypt(body.authSecret) : null;
+  try {
+    const result = await client.$transaction(async (tx) => {
+      const adapter = await tx.externalFilingAdapter.create({
+        data: {
+          name: body.name,
+          authority: body.authority,
+          kind: body.kind,
+          status: "DISABLED",
+          endpointUrl: body.endpointUrl ?? null,
+          authHeaderName: body.authHeaderName ?? null,
+          authSecretCiphertext: null,
+          timeoutSeconds: body.timeoutSeconds,
+          configJson: body.configJson === null ? Prisma.JsonNull : body.configJson as Prisma.InputJsonValue,
+          createdByUserId: actor.userId,
+        },
+      });
+      const approval = await tx.approvalRequest.create({
+        data: {
+          subjectType: "FILING_ADAPTER",
+          subjectId: adapter.id,
+          payloadDiffJson: {
+            operation: "CREATE",
+            changes: {
+              name: body.name,
+              authority: body.authority,
+              kind: body.kind,
+              status: body.status,
+              endpointUrl: body.endpointUrl ?? null,
+              authHeaderName: body.authHeaderName ?? null,
+              authSecretCiphertext: secretCiphertext,
+              timeoutSeconds: body.timeoutSeconds,
+              configJson: body.configJson ?? null,
+            },
+          } as Prisma.InputJsonValue,
+          mode: "STANDARD",
+          makerUserId: actor.userId,
+          makerReason: "Filing adapter configuration requires a second person",
+          state: "PENDING_REVIEW",
+          expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+        },
+      });
+      await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "FILING_ADAPTER_PROPOSED", entityType: "EXTERNAL_FILING_ADAPTER", entityId: adapter.id, beforeJson: {}, afterJson: { approvalRequestId: approval.id, name: adapter.name, authority: adapter.authority, kind: adapter.kind }, approvalRequestId: approval.id } });
+      return { adapter, approval };
+    });
+    response.status(202).json({ adapter: filingAdapterView(result.adapter), approvalRequestId: result.approval.id, status: "PENDING_REVIEW" });
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") throw new ApiError(409, "FILING_ADAPTER_NAME_EXISTS", "A filing adapter with this name already exists");
+    throw error;
+  }
+});
+
+router.patch("/aml/filing-adapters/:id", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(filingAdapterSchema.partial(), request.body ?? {});
+  const existing = await client.externalFilingAdapter.findUnique({ where: { id } });
+  if (!existing) throw new ApiError(404, "FILING_ADAPTER_NOT_FOUND", "The filing adapter does not exist");
+  if (await pendingAdapterApproval(id)) throw new ApiError(409, "FILING_ADAPTER_APPROVAL_PENDING", "A filing adapter change is already pending");
+  const endpointUrl = body.endpointUrl === undefined ? existing.endpointUrl : body.endpointUrl;
+  const kind = body.kind ?? existing.kind;
+  assertAdapterEndpoint(kind, endpointUrl);
+  assertAdapterAuthHeader(body.authHeaderName === undefined ? existing.authHeaderName : body.authHeaderName);
+  assertSafeAdapterConfig(body.configJson);
+  const actor = actorFromRequest(request);
+  const changes = {
+    ...(body.name !== undefined ? { name: body.name } : {}),
+    ...(body.authority !== undefined ? { authority: body.authority } : {}),
+    ...(body.kind !== undefined ? { kind: body.kind } : {}),
+    ...(body.status !== undefined ? { status: body.status } : {}),
+    ...(body.endpointUrl !== undefined ? { endpointUrl: body.endpointUrl } : {}),
+    ...(body.authHeaderName !== undefined ? { authHeaderName: body.authHeaderName } : {}),
+    ...(body.authSecret !== undefined ? { authSecretCiphertext: body.authSecret ? await filingAdapterCipher.encrypt(body.authSecret) : null } : {}),
+    ...(body.timeoutSeconds !== undefined ? { timeoutSeconds: body.timeoutSeconds } : {}),
+    ...(body.configJson !== undefined ? { configJson: body.configJson } : {}),
+  };
+  const approval = await client.$transaction(async (tx) => {
+    const created = await tx.approvalRequest.create({
+      data: {
+        subjectType: "FILING_ADAPTER",
+        subjectId: id,
+        payloadDiffJson: { operation: "UPDATE", changes } as Prisma.InputJsonValue,
+        mode: "STANDARD",
+        makerUserId: actor.userId,
+        makerReason: "Filing adapter configuration requires a second person",
+        state: "PENDING_REVIEW",
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      },
+    });
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "FILING_ADAPTER_CHANGE_PROPOSED", entityType: "EXTERNAL_FILING_ADAPTER", entityId: id, beforeJson: { name: existing.name, status: existing.status }, afterJson: { approvalRequestId: created.id, changes: Object.keys(changes) }, approvalRequestId: created.id } });
+    return created;
+  });
+  response.status(202).json({ adapter: filingAdapterView(existing), approvalRequestId: approval.id, status: "PENDING_REVIEW" });
+});
+
+router.delete("/aml/filing-adapters/:id", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const existing = await client.externalFilingAdapter.findUnique({ where: { id } });
+  if (!existing) throw new ApiError(404, "FILING_ADAPTER_NOT_FOUND", "The filing adapter does not exist");
+  if (await pendingAdapterApproval(id)) throw new ApiError(409, "FILING_ADAPTER_APPROVAL_PENDING", "A filing adapter change is already pending");
+  const actor = actorFromRequest(request);
+  const approval = await client.$transaction(async (tx) => {
+    const created = await tx.approvalRequest.create({
+      data: {
+        subjectType: "FILING_ADAPTER",
+        subjectId: id,
+        payloadDiffJson: { operation: "DISABLE", changes: { status: "DISABLED" } },
+        mode: "STANDARD",
+        makerUserId: actor.userId,
+        makerReason: "Disabling a filing adapter requires a second person",
+        state: "PENDING_REVIEW",
+        expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+      },
+    });
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "FILING_ADAPTER_DISABLE_PROPOSED", entityType: "EXTERNAL_FILING_ADAPTER", entityId: id, beforeJson: { status: existing.status }, afterJson: { approvalRequestId: created.id }, approvalRequestId: created.id } });
+    return created;
+  });
+  response.status(202).json({ adapter: filingAdapterView(existing), approvalRequestId: approval.id, status: "PENDING_REVIEW" });
+});
+
+router.get("/aml/reports/:id/submissions", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const rows = await client.externalSubmission.findMany({ where: { reportId: id }, include: { adapter: { select: { id: true, name: true, kind: true } } }, orderBy: { createdAt: "desc" }, take: 50 });
+  response.json({ submissions: rows });
+});
+
+router.post("/aml/reports/:id/file", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(z.object({ adapterId: z.string().min(1).max(64), checklist: z.array(z.enum(["REPORT_APPROVED_VERIFIED", "AUTHORITY_REFERENCE_VERIFIED", "DEADLINE_VERIFIED", "PAYLOAD_DIGEST_VERIFIED"])).max(10).optional() }).strict(), request.body ?? {});
+  const report = await client.regulatoryReport.findUnique({
+    where: { id },
+    include: { outputs: { where: { supersededAt: null }, include: { schema: true } } },
+  });
+  if (!report) throw new ApiError(404, "REGULATORY_REPORT_NOT_FOUND", "The regulatory report does not exist");
+  if (report.status !== "APPROVED") throw new ApiError(409, "REGULATORY_REPORT_NOT_APPROVED", "Only an approved report can be filed");
+  const adapter = await client.externalFilingAdapter.findUnique({ where: { id: body.adapterId } });
+  if (!adapter) throw new ApiError(404, "FILING_ADAPTER_NOT_FOUND", "The filing adapter does not exist");
+  if (adapter.status !== "ACTIVE") throw new ApiError(409, "FILING_ADAPTER_DISABLED", "The filing adapter is disabled");
+  if (adapter.authority !== report.authority) throw new ApiError(409, "FILING_ADAPTER_AUTHORITY_MISMATCH", "The adapter authority does not match the report");
+  await assertReportSubmitter(client, report, actorFromRequest(request).userId);
+  for (const format of report.requiredOutputFormats ?? []) {
+    const output = report.outputs.find((entry) => entry.format === format);
+    if (!output) throw new ApiError(409, "REPORT_OUTPUT_NOT_READY", `The ${format} output has not been generated`, { format, reason: "NOT_GENERATED" });
+    if (output.validationStatus !== "VALIDATED") throw new ApiError(409, "REPORT_OUTPUT_NOT_READY", `The ${format} output is '${output.validationStatus}'`, { format, reason: output.validationStatus });
+    if (!output.schema || output.schema.status !== "CONFIRMED") throw new ApiError(409, "REPORT_OUTPUT_NOT_READY", `The ${format} schema is not CONFIRMED`, { format, reason: "SCHEMA_NOT_CONFIRMED" });
+    if (output.payloadSha256 && output.payloadSha256 !== report.payloadSha256) throw new ApiError(409, "REPORT_OUTPUT_NOT_READY", `The ${format} output is stale`, { format, reason: "OUTPUT_STALE" });
+  }
+  const artifacts: FilingArtifact[] = [];
+  for (const output of report.outputs) {
+    if (!(report.requiredOutputFormats ?? []).includes(output.format)) continue;
+    const cipher = output.format === "XML" ? reportingXmlCipher : output.format === "DOCX" ? reportingDocxCipher : reportingXlsxCipher;
+    const content = await cipher.decrypt(output.contentCiphertext);
+    artifacts.push({
+      format: output.format,
+      filename: `report-${report.id}.${output.format === "XML" ? "xml" : output.format === "DOCX" ? "docx" : "xlsx"}`,
+      contentType: output.format === "XML" ? "application/xml" : output.format === "DOCX" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      base64: output.format === "XML" ? Buffer.from(String(content)).toString("base64") : String(content),
+    });
+  }
+  const requestBody = {
+    report: { id: report.id, reportCode: report.reportCode, reportType: report.reportType, authority: report.authority, periodKey: report.periodKey, payloadSha256: report.payloadSha256 },
+    artifacts,
+  };
+  const requestSha256 = createHash("sha256").update(JSON.stringify(requestBody)).digest("hex");
+  const actor = actorFromRequest(request);
+  const existingSubmission = await client.externalSubmission.findFirst({
+    where: { reportId: report.id, adapterId: adapter.id, status: { in: ["PENDING", "SUBMITTED"] } },
+  });
+  if (existingSubmission) {
+    const stalePending = existingSubmission.status === "PENDING" && Date.now() - new Date(existingSubmission.createdAt).getTime() > 15 * 60 * 1000;
+    if (!stalePending) {
+      throw new ApiError(409, "REPORT_ALREADY_FILING", "This report is already being filed through this adapter", { submissionId: existingSubmission.id, status: existingSubmission.status });
+    }
+    await client.externalSubmission.update({ where: { id: existingSubmission.id }, data: { status: "FAILED", errorMessage: "Stale pending filing lease expired" } });
+  }
+  const submission = await client.externalSubmission.create({
+    data: {
+      reportId: report.id,
+      adapterId: adapter.id,
+      status: "PENDING",
+      requestSha256,
+    },
+  });
+  const secret = adapter.authSecretCiphertext ? String(await filingAdapterCipher.decrypt(adapter.authSecretCiphertext)) : null;
+  const result = await dispatchFiling({ kind: adapter.kind, endpointUrl: adapter.endpointUrl, authHeaderName: adapter.authHeaderName, secret, timeoutSeconds: adapter.timeoutSeconds, request: requestBody });
+  if (result.status !== "SUBMITTED") {
+    await client.externalSubmission.update({
+      where: { id: submission.id },
+      data: {
+        status: "FAILED",
+        externalRef: result.externalRef,
+        responseCode: result.responseCode,
+        responseBody: result.responseBody,
+        errorMessage: result.errorMessage,
+      },
+    });
+    await writeAudit(client, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "REGULATORY_REPORT_FILING_FAILED", entityType: "REGULATORY_REPORT", entityId: report.id, beforeJson: {}, afterJson: { submissionId: submission.id, adapterId: adapter.id, responseCode: result.responseCode, error: result.errorMessage } } });
+    throw new ApiError(502, "FILING_DISPATCH_FAILED", result.errorMessage ?? "The filing adapter failed", { submissionId: submission.id });
+  }
+  const submittedSubmission = await client.externalSubmission.update({
+    where: { id: submission.id },
+    data: {
+      status: "SUBMITTED",
+      externalRef: result.externalRef,
+      responseCode: result.responseCode,
+      responseBody: result.responseBody,
+      submittedAt: new Date(),
+    },
+  });
+  await client.externalFilingAdapter.update({ where: { id: adapter.id }, data: { lastUsedAt: new Date() } });
+  let submitted;
+  try {
+    submitted = await submitRegulatoryReport(client, {
+      reportId: report.id,
+      submissionRef: result.externalRef ?? `ADAPTER-${submission.id}`,
+      filingChannel: adapter.name,
+      recordManual: false,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+    });
+  } catch (error) {
+    await writeAudit(client, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "REGULATORY_REPORT_FILING_RECONCILE_REQUIRED", entityType: "REGULATORY_REPORT", entityId: report.id, beforeJson: {}, afterJson: { submissionId: submission.id, adapterId: adapter.id, externalRef: result.externalRef, error: (error as Error).message } } });
+    throw error;
+  }
+  await writeAudit(client, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "REGULATORY_REPORT_FILED", entityType: "REGULATORY_REPORT", entityId: report.id, beforeJson: {}, afterJson: { submissionId: submission.id, adapterId: adapter.id, externalRef: result.externalRef, checklist: body.checklist ?? [] } } });
+  response.json({ submission: submittedSubmission, report: submitted });
+});
+
+const incidentSeveritySchema = z.enum(["SEV1", "SEV2", "SEV3", "SEV4"]);
+const incidentStatusSchema = z.enum(["DETECTED", "TRIAGED", "DECLARED", "CONTAINED", "MONITORING", "RESOLVED", "POSTMORTEM", "CLOSED"]);
+const incidentCategorySchema = z.enum(["AVAILABILITY", "DATA_INTEGRITY", "SECURITY", "FRAUD", "COMPLIANCE", "THIRD_PARTY", "PAYMENT_PROCESSING", "OTHER"]);
+const incidentImpactSchema = z.enum(["PLATFORM", "MERCHANT", "CHECKOUT", "ADMIN", "MULTI_TENANT"]);
+const incidentLinkTypeSchema = z.enum(["ATTEMPT", "MERCHANT", "RAIL", "GATEWAY", "REPORT", "CASE", "OTHER"]);
+const incidentDateTime = z.string().datetime({ offset: true }).transform((value) => new Date(value));
+
+const incidentCreateSchema = z.object({
+  title: z.string().min(3).max(300),
+  summary: z.string().max(20_000).optional(),
+  category: incidentCategorySchema.default("OTHER"),
+  severity: incidentSeveritySchema.default("SEV3"),
+  impactScope: incidentImpactSchema.default("PLATFORM"),
+  detectedAt: incidentDateTime.optional(),
+  commanderUserId: z.string().uuid().optional(),
+  affectedServices: z.array(z.string().min(1).max(120)).max(100).default([]),
+  affectedMerchantIds: z.array(z.string().uuid()).max(500).default([]),
+  affectedAttemptIds: z.array(z.string().uuid()).max(500).default([]),
+  regulatorsNotified: z.boolean().default(false),
+}).strict();
+
+const incidentPatchSchema = z.object({
+  title: z.string().min(3).max(300).optional(),
+  summary: z.string().max(20_000).nullable().optional(),
+  category: incidentCategorySchema.optional(),
+  severity: incidentSeveritySchema.optional(),
+  impactScope: incidentImpactSchema.optional(),
+  commanderUserId: z.string().uuid().nullable().optional(),
+  affectedServices: z.array(z.string().min(1).max(120)).max(100).optional(),
+  affectedMerchantIds: z.array(z.string().uuid()).max(500).optional(),
+  affectedAttemptIds: z.array(z.string().uuid()).max(500).optional(),
+  regulatorsNotified: z.boolean().optional(),
+  rootCause: z.string().max(20_000).nullable().optional(),
+  postmortemSummary: z.string().max(50_000).nullable().optional(),
+  postmortemJson: z.record(z.string().max(64), z.unknown()).nullable().optional(),
+}).strict();
+
+const incidentTimelineSchema = z.object({
+  type: z.enum(["DETECTED", "DECLARED", "STATUS_CHANGE", "NOTE", "ESCALATION", "COMMUNICATION", "ACTION", "REGULATORY"]).default("NOTE"),
+  summary: z.string().min(1).max(5000),
+  detailJson: z.record(z.string().max(64), z.unknown()).optional(),
+  occurredAt: incidentDateTime.optional(),
+}).strict();
+
+const incidentResponderSchema = z.object({
+  userId: z.string().uuid().optional(),
+  name: z.string().min(1).max(200),
+  role: z.string().min(1).max(120),
+  isCommander: z.boolean().default(false),
+}).strict();
+
+const incidentActionSchema = z.object({
+  title: z.string().min(1).max(500),
+  ownerUserId: z.string().uuid().optional(),
+  priority: z.number().int().min(1).max(4).default(3),
+  dueAt: incidentDateTime.optional(),
+  notes: z.string().max(5000).optional(),
+}).strict();
+
+const incidentActionPatchSchema = z.object({
+  title: z.string().min(1).max(500).optional(),
+  ownerUserId: z.string().uuid().nullable().optional(),
+  priority: z.number().int().min(1).max(4).optional(),
+  status: z.enum(["OPEN", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"]).optional(),
+  dueAt: incidentDateTime.nullable().optional(),
+  notes: z.string().max(5000).nullable().optional(),
+}).strict();
+
+const incidentCommunicationSchema = z.object({
+  channel: z.enum(["STATUS_PAGE", "EMAIL", "SMS", "REGULATOR", "INTERNAL"]),
+  audience: z.string().min(1).max(500),
+  subject: z.string().min(1).max(500),
+  body: z.string().min(1).max(50_000),
+}).strict();
+
+const incidentView = (incident: any, detail = false) => ({
+  ...incident,
+  affectedMerchantIds: incident.affectedMerchantIds ?? [],
+  affectedAttemptIds: incident.affectedAttemptIds ?? [],
+  affectedServices: incident.affectedServices ?? [],
+  ...(detail
+    ? {
+        timeline: (incident.timeline ?? []).map((entry: any) => ({ ...entry })),
+        responders: incident.responders ?? [],
+        actions: incident.actions ?? [],
+        links: incident.links ?? [],
+        communications: incident.communications ?? [],
+      }
+    : {}),
+});
+
+const incidentInclude = {
+  timeline: { orderBy: { occurredAt: "desc" as const }, take: 500 },
+  responders: { orderBy: { createdAt: "asc" as const } },
+  actions: { orderBy: [{ status: "asc" as const }, { dueAt: "asc" as const }] },
+  links: { orderBy: { createdAt: "asc" as const } },
+  communications: { orderBy: { createdAt: "desc" as const }, take: 200 },
+};
+
+const incidentUserIds = (incidents: any[]): string[] => {
+  const ids = new Set<string>();
+  for (const incident of incidents) {
+    for (const key of ["commanderUserId", "reporterUserId", "closedByUserId"]) {
+      if (typeof incident[key] === "string") ids.add(incident[key]);
+    }
+    for (const entry of incident.timeline ?? []) if (typeof entry.actorUserId === "string") ids.add(entry.actorUserId);
+    for (const action of incident.actions ?? []) if (typeof action.ownerUserId === "string") ids.add(action.ownerUserId);
+    for (const responder of incident.responders ?? []) if (typeof responder.userId === "string") ids.add(responder.userId);
+    for (const communication of incident.communications ?? []) if (typeof communication.sentByUserId === "string") ids.add(communication.sentByUserId);
+  }
+  return [...ids];
+};
+
+const incidentUsers = async (incidents: any[]): Promise<Map<string, { label: string; email: string; role: string }>> => {
+  const ids = incidentUserIds(incidents);
+  if (ids.length === 0) return new Map();
+  const users = await client.user.findMany({ where: { id: { in: ids } }, select: { id: true, email: true, phone: true, role: true } });
+  return new Map(users.map((user) => [user.id, { label: user.email || user.phone || user.id, email: user.email, role: user.role }]));
+};
+
+const incidentViews = async (incidents: any[], detail = false) => {
+  const users = await incidentUsers(incidents);
+  return incidents.map((incident) => {
+    const view = incidentView(incident, detail);
+    const nameOf = (id: unknown) => typeof id === "string" ? users.get(id)?.label ?? id : null;
+    const shaped = {
+      ...view,
+      commanderName: nameOf(incident.commanderUserId),
+      reporterName: nameOf(incident.reporterUserId),
+      closedByName: nameOf(incident.closedByUserId),
+    };
+    if (!detail) return shaped;
+    return {
+      ...shaped,
+      timeline: (view.timeline ?? []).map((entry: any) => ({ ...entry, actorName: entry.actorName ?? nameOf(entry.actorUserId) })),
+      actions: (view.actions ?? []).map((action: any) => ({ ...action, ownerName: nameOf(action.ownerUserId) })),
+      communications: (view.communications ?? []).map((communication: any) => ({ ...communication, sentByName: nameOf(communication.sentByUserId) })),
+      responders: (view.responders ?? []).map((responder: any) => ({ ...responder, userName: nameOf(responder.userId) })),
+    };
+  });
+};
+
+const incidentSummary = async () => {
+  const [total, open, high, postmortemDue] = await Promise.all([
+    client.incident.count(),
+    client.incident.count({ where: { status: { not: "CLOSED" } } }),
+    client.incident.count({ where: { severity: { in: ["SEV1", "SEV2"] }, status: { not: "CLOSED" } } }),
+    client.incident.count({ where: { postmortemRequired: true, postmortemSummary: null } }),
+  ]);
+  return { total, open, high, postmortemDue };
+};
+
+const incidentRef = (): string => {
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  return `INC-${date}-${randomBytes(3).toString("hex").toUpperCase()}`;
+};
+
+router.get("/incidents", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const query = parseOrThrow(z.object({
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).max(200).default(50),
+    status: incidentStatusSchema.optional(),
+    severity: incidentSeveritySchema.optional(),
+    category: incidentCategorySchema.optional(),
+    search: z.string().max(200).optional(),
+  }).strict(), request.query ?? {});
+  const where: Prisma.IncidentWhereInput = {
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.severity ? { severity: query.severity } : {}),
+    ...(query.category ? { category: query.category } : {}),
+    ...(query.search ? { OR: [{ reference: { contains: query.search, mode: "insensitive" } }, { title: { contains: query.search, mode: "insensitive" } }, { summary: { contains: query.search, mode: "insensitive" } }] } : {}),
+  };
+  const [total, rows, summary] = await Promise.all([
+    client.incident.count({ where }),
+    client.incident.findMany({ where, orderBy: { detectedAt: "desc" }, skip: (query.page - 1) * query.pageSize, take: query.pageSize }),
+    incidentSummary(),
+  ]);
+  response.json({ incidents: await incidentViews(rows), total, summary, page: query.page, pageSize: query.pageSize });
+});
+
+router.post("/incidents", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const body = parseOrThrow(incidentCreateSchema, request.body ?? {});
+  const actor = actorFromRequest(request);
+  const created = await client.$transaction(async (tx) => {
+    const incident = await tx.incident.create({
+      data: {
+        reference: incidentRef(),
+        title: body.title,
+        summary: body.summary ?? null,
+        category: body.category,
+        severity: body.severity,
+        impactScope: body.impactScope,
+        detectedAt: body.detectedAt ?? new Date(),
+        commanderUserId: body.commanderUserId ?? null,
+        reporterUserId: actor.userId,
+        affectedServices: body.affectedServices,
+        affectedMerchantIds: body.affectedMerchantIds,
+        affectedAttemptIds: body.affectedAttemptIds,
+        regulatorsNotified: body.regulatorsNotified,
+        postmortemRequired: incidentRequiresPostmortem({ severity: body.severity, category: body.category }),
+        timeline: { create: { occurredAt: body.detectedAt ?? new Date(), type: "DETECTED", actorUserId: actor.userId, summary: body.summary ?? body.title } },
+      },
+      include: incidentInclude,
+    });
+    await writeAudit(tx, {
+      data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_OPENED", entityType: "INCIDENT", entityId: incident.id, beforeJson: {}, afterJson: { reference: incident.reference, severity: incident.severity, category: incident.category } },
+    });
+    return incident;
+  });
+  response.status(201).json({ incident: (await incidentViews([created], true))[0] });
+});
+
+router.get("/incidents/:id", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const incident = await client.incident.findUnique({ where: { id }, include: incidentInclude });
+  if (!incident) throw new ApiError(404, "INCIDENT_NOT_FOUND", "The incident does not exist");
+  response.json({ incident: (await incidentViews([incident], true))[0] });
+});
+
+router.patch("/incidents/:id", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(incidentPatchSchema, request.body ?? {});
+  const actor = actorFromRequest(request);
+  const { postmortemJson, ...incidentFields } = body;
+  const updated = await client.$transaction(async (tx) => {
+    await tx.$queryRawUnsafe("SELECT id FROM incidents WHERE id = $1::uuid FOR UPDATE", id);
+    const existing = await tx.incident.findUnique({ where: { id } });
+    if (!existing) throw new ApiError(404, "INCIDENT_NOT_FOUND", "The incident does not exist");
+    if (existing.status === "CLOSED") throw new ApiError(409, "INCIDENT_CLOSED", "A closed incident cannot be changed");
+    const severity = body.severity ?? existing.severity;
+    const category = body.category ?? existing.category;
+    const incident = await tx.incident.update({
+      where: { id },
+      data: {
+        ...incidentFields,
+        postmortemRequired: incidentRequiresPostmortem({ severity, category }),
+        ...(postmortemJson !== undefined ? { postmortemJson: postmortemJson === null ? Prisma.JsonNull : postmortemJson as Prisma.InputJsonValue } : {}),
+      },
+      include: incidentInclude,
+    });
+    await writeAudit(tx, {
+      data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_UPDATED", entityType: "INCIDENT", entityId: id, beforeJson: { severity: existing.severity, category: existing.category, title: existing.title }, afterJson: { severity: incident.severity, category: incident.category, title: incident.title } },
+    });
+    return incident;
+  });
+  response.json({ incident: (await incidentViews([updated], true))[0] });
+});
+
+router.post("/incidents/:id/transition", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(z.object({ status: incidentStatusSchema, note: z.string().max(5000).optional() }).strict(), request.body ?? {});
+  const at = new Date();
+  const actor = actorFromRequest(request);
+  const updated = await client.$transaction(async (tx) => {
+    await tx.$queryRawUnsafe("SELECT id FROM incidents WHERE id = $1::uuid FOR UPDATE", id);
+    const existing = await tx.incident.findUnique({ where: { id } });
+    if (!existing) throw new ApiError(404, "INCIDENT_NOT_FOUND", "The incident does not exist");
+    if (!canTransitionIncident(existing.status as never, body.status as never)) {
+      throw new ApiError(409, "INCIDENT_TRANSITION_INVALID", `Cannot move an incident from ${existing.status} to ${body.status}`);
+    }
+    if (body.status === "CLOSED" && existing.postmortemRequired && !existing.postmortemSummary && !existing.rootCause) {
+      throw new ApiError(409, "INCIDENT_POSTMORTEM_REQUIRED", "A required postmortem must be recorded before closing the incident");
+    }
+    const timestampField = incidentTimestampField(body.status as never);
+    const postmortemDueAt = body.status === "RESOLVED" && incidentRequiresPostmortem({ severity: existing.severity, category: existing.category })
+      ? incidentPostmortemDueAt(at, existing.severity as never)
+      : existing.postmortemDueAt;
+    const incident = await tx.incident.update({
+      where: { id },
+      data: {
+        status: body.status,
+        ...(timestampField ? { [timestampField]: at } : {}),
+        ...(body.status === "RESOLVED" ? { postmortemRequired: incidentRequiresPostmortem({ severity: existing.severity, category: existing.category }), postmortemDueAt } : {}),
+        ...(body.status === "CLOSED" ? { closedByUserId: actor.userId } : {}),
+        timeline: { create: { occurredAt: at, type: "STATUS_CHANGE", actorUserId: actor.userId, summary: body.note ?? `Status changed from ${existing.status} to ${body.status}`, detailJson: { from: existing.status, to: body.status } } },
+      },
+      include: incidentInclude,
+    });
+    await writeAudit(tx, {
+      data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_STATUS_CHANGED", entityType: "INCIDENT", entityId: id, beforeJson: { status: existing.status }, afterJson: { status: body.status, note: body.note ?? null } },
+    });
+    return incident;
+  });
+  response.json({ incident: (await incidentViews([updated], true))[0] });
+});
+
+router.post("/incidents/:id/timeline", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(incidentTimelineSchema, request.body ?? {});
+  const actor = actorFromRequest(request);
+  const entry = await client.$transaction(async (tx) => {
+    const incident = await tx.incident.findUnique({ where: { id } });
+    if (!incident) throw new ApiError(404, "INCIDENT_NOT_FOUND", "The incident does not exist");
+    const created = await tx.incidentTimelineEntry.create({
+      data: { incidentId: id, occurredAt: body.occurredAt ?? new Date(), type: body.type, actorUserId: actor.userId, summary: body.summary, detailJson: body.detailJson as never },
+    });
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_TIMELINE_ADDED", entityType: "INCIDENT", entityId: id, beforeJson: {}, afterJson: { entryId: created.id, type: created.type } } });
+    return created;
+  });
+  response.status(201).json({ entry });
+});
+
+router.post("/incidents/:id/responders", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(incidentResponderSchema, request.body ?? {});
+  const actor = actorFromRequest(request);
+  const responder = await client.$transaction(async (tx) => {
+    const incident = await tx.incident.findUnique({ where: { id } });
+    if (!incident) throw new ApiError(404, "INCIDENT_NOT_FOUND", "The incident does not exist");
+    const created = await tx.incidentResponder.create({ data: { incidentId: id, userId: body.userId ?? null, name: body.name, role: body.role, isCommander: body.isCommander, pagedAt: new Date() } });
+    if (body.isCommander && !incident.commanderUserId && body.userId) {
+      await tx.incident.update({ where: { id }, data: { commanderUserId: body.userId } });
+    }
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_RESPONDER_ADDED", entityType: "INCIDENT", entityId: id, beforeJson: {}, afterJson: { responderId: created.id, role: body.role, isCommander: body.isCommander } } });
+    return created;
+  });
+  response.status(201).json({ responder });
+});
+
+router.patch("/incidents/:id/responders/:responderId", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id, responderId } = parseOrThrow(z.object({ id: z.string().min(1).max(64), responderId: z.string().min(1).max(64) }), request.params);
+  const body = parseOrThrow(z.object({ acknowledged: z.boolean().optional(), released: z.boolean().optional() }).strict(), request.body ?? {});
+  const actor = actorFromRequest(request);
+  const updated = await client.$transaction(async (tx) => {
+    const responder = await tx.incidentResponder.findFirst({ where: { id: responderId, incidentId: id } });
+    if (!responder) throw new ApiError(404, "INCIDENT_RESPONDER_NOT_FOUND", "The responder does not exist on this incident");
+    const next = await tx.incidentResponder.update({
+      where: { id: responderId },
+      data: {
+        ...(body.acknowledged ? { acknowledgedAt: new Date() } : {}),
+        ...(body.released ? { releasedAt: new Date() } : {}),
+      },
+    });
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_RESPONDER_UPDATED", entityType: "INCIDENT", entityId: id, beforeJson: { responderId, acknowledgedAt: responder.acknowledgedAt, releasedAt: responder.releasedAt }, afterJson: { responderId, acknowledgedAt: next.acknowledgedAt, releasedAt: next.releasedAt } } });
+    return next;
+  });
+  response.json({ responder: updated });
+});
+
+router.post("/incidents/:id/actions", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(incidentActionSchema, request.body ?? {});
+  const actor = actorFromRequest(request);
+  const action = await client.$transaction(async (tx) => {
+    const incident = await tx.incident.findUnique({ where: { id } });
+    if (!incident) throw new ApiError(404, "INCIDENT_NOT_FOUND", "The incident does not exist");
+    const created = await tx.incidentActionItem.create({ data: { incidentId: id, title: body.title, ownerUserId: body.ownerUserId ?? null, priority: body.priority, dueAt: body.dueAt ?? null, notes: body.notes ?? null } });
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_ACTION_ADDED", entityType: "INCIDENT", entityId: id, beforeJson: {}, afterJson: { actionId: created.id, title: created.title } } });
+    return created;
+  });
+  response.status(201).json({ action });
+});
+
+router.patch("/incidents/:id/actions/:actionId", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id, actionId } = parseOrThrow(z.object({ id: z.string().min(1).max(64), actionId: z.string().min(1).max(64) }), request.params);
+  const body = parseOrThrow(incidentActionPatchSchema, request.body ?? {});
+  const actor = actorFromRequest(request);
+  const updated = await client.$transaction(async (tx) => {
+    const action = await tx.incidentActionItem.findFirst({ where: { id: actionId, incidentId: id } });
+    if (!action) throw new ApiError(404, "INCIDENT_ACTION_NOT_FOUND", "The action item does not exist on this incident");
+    const next = await tx.incidentActionItem.update({
+      where: { id: actionId },
+      data: {
+        ...body,
+        ...(body.status === "DONE" ? { completedAt: new Date() } : {}),
+        ...(body.status && body.status !== "DONE" ? { completedAt: null } : {}),
+      },
+    });
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_ACTION_UPDATED", entityType: "INCIDENT", entityId: id, beforeJson: { actionId, status: action.status, title: action.title }, afterJson: { actionId, status: next.status, title: next.title } } });
+    return next;
+  });
+  response.json({ action: updated });
+});
+
+router.post("/incidents/:id/links", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(z.object({ linkType: incidentLinkTypeSchema, targetId: z.string().min(1).max(200), label: z.string().max(300).optional() }).strict(), request.body ?? {});
+  const actor = actorFromRequest(request);
+  const link = await client.$transaction(async (tx) => {
+    const incident = await tx.incident.findUnique({ where: { id } });
+    if (!incident) throw new ApiError(404, "INCIDENT_NOT_FOUND", "The incident does not exist");
+    const created = await tx.incidentLink.create({ data: { incidentId: id, linkType: body.linkType, targetId: body.targetId, label: body.label ?? null } });
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_LINK_ADDED", entityType: "INCIDENT", entityId: id, beforeJson: {}, afterJson: { linkId: created.id, linkType: created.linkType, targetId: created.targetId } } });
+    return created;
+  });
+  response.status(201).json({ link });
+});
+
+router.delete("/incidents/:id/links/:linkId", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id, linkId } = parseOrThrow(z.object({ id: z.string().min(1).max(64), linkId: z.string().min(1).max(64) }), request.params);
+  const actor = actorFromRequest(request);
+  await client.$transaction(async (tx) => {
+    const deleted = await tx.incidentLink.deleteMany({ where: { id: linkId, incidentId: id } });
+    if (deleted.count === 0) throw new ApiError(404, "INCIDENT_LINK_NOT_FOUND", "The link does not exist on this incident");
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_LINK_REMOVED", entityType: "INCIDENT", entityId: id, beforeJson: { linkId }, afterJson: {} } });
+  });
+  response.status(204).end();
+});
+
+router.post("/incidents/:id/communications", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(incidentCommunicationSchema, request.body ?? {});
+  const actor = actorFromRequest(request);
+  const communication = await client.$transaction(async (tx) => {
+    const incident = await tx.incident.findUnique({ where: { id } });
+    if (!incident) throw new ApiError(404, "INCIDENT_NOT_FOUND", "The incident does not exist");
+    const created = await tx.incidentCommunication.create({ data: { incidentId: id, channel: body.channel, audience: body.audience, subject: body.subject, body: body.body, sentAt: new Date(), sentByUserId: actor.userId } });
+    await tx.incidentTimelineEntry.create({ data: { incidentId: id, occurredAt: new Date(), type: "COMMUNICATION", actorUserId: actor.userId, summary: `Communication sent via ${body.channel}` } });
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_COMMUNICATION_RECORDED", entityType: "INCIDENT", entityId: id, beforeJson: {}, afterJson: { communicationId: created.id, channel: created.channel, audience: created.audience } } });
+    return created;
+  });
+  response.status(201).json({ communication });
+});
+
+router.post("/incidents/:id/report", async (request: Request, response: Response) => {
+  assertReportingAuthority(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const actor = actorFromRequest(request);
+  const created = await client.$transaction(async (tx) => {
+    await tx.$queryRawUnsafe("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)", `incident-report:${id}`);
+    const incident = await tx.incident.findUnique({ where: { id }, include: incidentInclude });
+    if (!incident) throw new ApiError(404, "INCIDENT_NOT_FOUND", "The incident does not exist");
+    if (incident.regulatoryReportId) throw new ApiError(409, "INCIDENT_REPORT_EXISTS", "This incident already has a regulatory report");
+    const payload = incidentReportPayload({
+      incident: { reference: incident.reference, title: incident.title, summary: incident.summary, category: incident.category, severity: incident.severity, impactScope: incident.impactScope, detectedAt: incident.detectedAt.toISOString(), declaredAt: incident.declaredAt?.toISOString() ?? null, containedAt: incident.containedAt?.toISOString() ?? null, resolvedAt: incident.resolvedAt?.toISOString() ?? null, affectedServices: incident.affectedServices, rootCause: incident.rootCause, postmortemSummary: incident.postmortemSummary },
+      timeline: incident.timeline.map((entry) => ({ type: entry.type, occurredAt: entry.occurredAt.toISOString(), summary: entry.summary })),
+      actions: incident.actions.map((action) => ({ title: action.title, status: action.status, dueAt: action.dueAt?.toISOString() ?? null })),
+      communications: incident.communications.map((communication) => ({ channel: communication.channel, audience: communication.audience, subject: communication.subject, sentAt: communication.sentAt?.toISOString() ?? null })),
+    });
+    const result = await createRegulatoryReportViaApproval(client, {
+      reportType: "INCIDENT",
+      authority: "CBL",
+      subjectType: "INCIDENT",
+      subjectId: id,
+      payload,
+      checklist: ["incident facts confirmed", "impact assessed", "regulator notification decision recorded"],
+    }, actor);
+    await tx.incident.update({ where: { id }, data: { regulatoryReportId: result.reportId } });
+    await tx.incidentTimelineEntry.create({ data: { incidentId: id, occurredAt: new Date(), type: "REGULATORY", actorUserId: actor.userId, summary: "Regulatory incident report drafted" } });
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_REGULATORY_REPORT_DRAFTED", entityType: "INCIDENT", entityId: id, beforeJson: {}, afterJson: { reportId: result.reportId, approvalRequestId: result.approvalRequestId } } });
+    return result;
+  });
+  response.status(202).json(created);
+});
+
 
 export const adminInternalRouter = router;
 export { LedgerPoster };

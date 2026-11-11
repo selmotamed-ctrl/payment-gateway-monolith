@@ -83,6 +83,10 @@ export const extractApiErrorMessage = (error: any): string => {
     return extracted.error || "unexpected error occurred";
 };
 
+export const extractApiErrorPayload = (error: any): unknown => {
+    return error?.response?.data?.details ?? error?.details ?? null;
+};
+
 export const extractApiErrorDetails = (error: any): string[] => {
     const extracted = extractApiError(error);
     if (!extracted) {

@@ -31,22 +31,14 @@ const ensureXlsxTitle = (title: string): string => {
     return trimmed.toLowerCase().endsWith(".xlsx") ? trimmed : `${trimmed}.xlsx`;
 };
 
-export async function downloadXlsxFromHeadersAndData({
-    headers,
-    data,
-    title,
-    color
-}: {
-    headers: XlsxHeader[];
-    data?: any[];
-    title: string;
-    color: string;
-}) {
+function writeXlsxSheet(
+    wb: ExcelJS.Workbook,
+    sheet: { name: string; headers: XlsxHeader[]; data?: any[] },
+    color: string,
+): void {
     const primaryColor = color.slice(1);
-    const filename = ensureXlsxTitle(title);
-
-    const wb = new ExcelJS.Workbook();
-    const worksheet = wb.addWorksheet("Main Sheet", {
+    const { headers, data } = sheet;
+    const worksheet = wb.addWorksheet(sheet.name.slice(0, 31) || "Sheet", {
         properties: {
             tabColor: {
                 argb: `FF${primaryColor}`,
@@ -121,10 +113,48 @@ export async function downloadXlsxFromHeadersAndData({
         });
         col.width = Math.min(width, 60);
     });
+}
+
+export async function downloadXlsxFromHeadersAndData({
+    headers,
+    data,
+    title,
+    color
+}: {
+    headers: XlsxHeader[];
+    data?: any[];
+    title: string;
+    color: string;
+}) {
+    const filename = ensureXlsxTitle(title);
+    const wb = new ExcelJS.Workbook();
+    writeXlsxSheet(wb, { name: "Main Sheet", headers, data }, color);
     const buffer = await wb.xlsx.writeBuffer({
         filename,
     });
 
+    saveAs(
+        new Blob([buffer], {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
+        filename
+    );
+}
+
+/** One worksheet per report dataset, with translated headers and formatted values. */
+export async function downloadXlsxWorkbook({
+    sheets,
+    title,
+    color = "#2563EB",
+}: {
+    sheets: Array<{ name: string; headers: XlsxHeader[]; data?: any[] }>;
+    title: string;
+    color?: string;
+}) {
+    const filename = ensureXlsxTitle(title);
+    const wb = new ExcelJS.Workbook();
+    for (const sheet of sheets) writeXlsxSheet(wb, sheet, color);
+    const buffer = await wb.xlsx.writeBuffer({ filename });
     saveAs(
         new Blob([buffer], {
             type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

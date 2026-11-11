@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
 import type { PrismaLike } from "../db/ports";
 import { decimal, type DecimalInput } from "../ledger/LedgerPoster";
+import { ReportGenerationService } from "./reporting/ReportGenerationService";
+import { ensureBaselineReportingSchemas } from "./reporting/baselineSchemas";
+import type { ReportOutputFormat } from "./reporting/types";
 
 export type ReportingRuleStatus = "PROVISIONAL" | "CONFIRMED";
-export type ReportingType = "LARGE_TRANSACTION" | "SUSPICIOUS_ACTIVITY" | "PERIODIC_RETURN";
+export type ReportingType = "LARGE_TRANSACTION" | "SUSPICIOUS_ACTIVITY" | "PERIODIC_RETURN" | "INCIDENT";
 export type RegulatoryReportStatus =
   | "DRAFT"
   | "PENDING_CHECKER"
@@ -24,6 +27,7 @@ export interface ReportingRuleRecord {
   status: ReportingRuleStatus;
   effectiveFrom: Date;
   effectiveTo: Date | null;
+  requiredOutputFormats?: string[];
 }
 
 export interface RegulatoryReportRecord {
@@ -44,12 +48,22 @@ export interface RegulatoryReportCreateData {
   payloadCiphertext: string;
   payloadSha256: string;
   confidential: boolean;
+  reportCode?: string | null;
+  periodKey?: string | null;
+  dueAt?: Date | null;
+  requiredOutputFormats?: string[];
 }
 
 export interface ReportingRuleSource {
   listRules(): Promise<ReportingRuleRecord[]>;
   listReportsForAttempt(attemptId: string): Promise<RegulatoryReportRecord[]>;
   createReport(data: RegulatoryReportCreateData): Promise<{ id: string }>;
+  generateOutputs?(
+    reportId: string,
+    payload: Record<string, unknown>,
+    ruleId: string,
+    formats: string[],
+  ): Promise<void>;
 }
 
 export interface ReportingPayloadCodec {
@@ -181,18 +195,24 @@ export class ReportingRuleEvaluator {
         skipped.push(rule.id);
         continue;
       }
-      const live = rule.status === "CONFIRMED";
-      const status: RegulatoryReportStatus = live ? "PENDING_CHECKER" : "DRAFT";
+      const status: RegulatoryReportStatus = "DRAFT";
       const periodEnd = now;
       const periodStart = rule.windowSeconds && rule.windowSeconds > 0
         ? new Date(now.getTime() - rule.windowSeconds * 1000)
         : now;
+      const reportCode = rule.reportType === "SUSPICIOUS_ACTIVITY"
+        ? "STR"
+        : rule.reportType === "LARGE_TRANSACTION"
+          ? "LTR"
+          : null;
+      const requiredOutputFormats = (rule.requiredOutputFormats ?? (reportCode === "STR" ? ["XML"] : reportCode === "LTR" ? ["XML", "XLSX"] : []))
+        .filter((format): format is "XML" | "XLSX" | "DOCX" => format === "XML" || format === "XLSX" || format === "DOCX");
       const payload = {
         ruleId: rule.id,
         sourceReference: rule.sourceReference,
         reportType: rule.reportType,
         authority: rule.authority,
-        internalOnly: !live,
+        internalOnly: rule.status !== "CONFIRMED",
         attemptId: attempt.id,
         merchantId: attempt.merchantId ?? null,
         amount: amount.toFixed(4),
@@ -216,7 +236,14 @@ export class ReportingRuleEvaluator {
         payloadCiphertext,
         payloadSha256,
         confidential: true,
+        reportCode,
+        periodKey: `attempt:${attempt.id}:${rule.id}`,
+        dueAt: null,
+        requiredOutputFormats,
       });
+      if (this.source.generateOutputs && requiredOutputFormats.length > 0) {
+        await this.source.generateOutputs(report.id, payload, rule.id, requiredOutputFormats);
+      }
       firedRules.add(rule.id);
       created.push(report.id);
     }
@@ -250,6 +277,8 @@ export class ReportingRuleEvaluator {
 
 export class PrismaReportingRuleSource implements ReportingRuleSource {
   private readonly client: PrismaLike;
+  private readonly generation = new ReportGenerationService();
+  private baselineReady = false;
 
   constructor(client: PrismaLike) {
     this.client = client;
@@ -266,7 +295,45 @@ export class PrismaReportingRuleSource implements ReportingRuleSource {
   }
 
   async createReport(data: RegulatoryReportCreateData): Promise<{ id: string }> {
-    const created = await this.client.regulatoryReport.create({ data });
+    const created = await this.client.regulatoryReport.create({ data: data as never });
     return { id: String(created.id) };
+  }
+
+  async generateOutputs(
+    reportId: string,
+    payload: Record<string, unknown>,
+    ruleId: string,
+    formats: string[],
+  ): Promise<void> {
+    const db = this.client as unknown as Record<string, any>;
+    if (!this.baselineReady && typeof db.regulatoryReportSchema?.findUnique === "function") {
+      try {
+        await ensureBaselineReportingSchemas(db);
+        this.baselineReady = true;
+      } catch {
+        // The report remains DRAFT with no output; the worker/API can retry.
+      }
+    }
+    const report = await db.regulatoryReport.findUnique({ where: { id: reportId } });
+    if (!report) return;
+    await this.generation.generate(db, {
+      report: {
+        id: String(report.id),
+        reportType: String(report.reportType),
+        reportCode: report.reportCode ?? null,
+        authority: String(report.authority),
+        subjectType: String(report.subjectType),
+        subjectId: String(report.subjectId),
+        amlCaseId: report.amlCaseId ?? null,
+        periodStart: report.periodStart ?? null,
+        periodEnd: report.periodEnd ?? null,
+        periodKey: report.periodKey ?? null,
+        dueAt: report.dueAt ?? null,
+        requiredOutputFormats: (report.requiredOutputFormats ?? []) as string[],
+      },
+      payload,
+      ruleId,
+      formats: formats as ReportOutputFormat[],
+    });
   }
 }

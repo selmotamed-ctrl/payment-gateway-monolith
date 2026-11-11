@@ -205,7 +205,7 @@ export const loadArticles: (lang:"en"|"ar") => Promise<Article[]>; // dynamic im
 | Item | Count | Source |
 | :--- | :--- | :--- |
 | Books | 14 | `@@book` blocks |
-| Articles | 134 | `@@article` blocks |
+| Articles | 135 | `@@article` blocks |
 | Glossary terms | 151 | `@@term` lines |
 | Safeguard cards | 25 | `@@card` blocks (the 22 ids in §II-7 plus `sg-trigger-backup`, `sg-run-restore-drill`, `sg-update-backup-policy`) |
 | Safeguard checklist items | 112 | lines `- [ ] ` inside cards |
@@ -213,7 +213,7 @@ export const loadArticles: (lang:"en"|"ar") => Promise<Article[]>; // dynamic im
 | Reading paths | 8 | `@@path` lines (`ALL` plus the 7 staff roles) |
 | Quick answers (FAQ) | 58 | `@@faq` blocks |
 | Data blocks | 3 | `ledger-events` (16 events), `visible-rails` (7 vectors), `attempt-transitions` |
-| Context map screens | 25 | `screens` array of `context-map` |
+| Context map screens | 26 | `screens` array of `context-map` |
 | Error codes (from b13-01) | 19 | first-column backticked tokens |
 | Edge cases | 140 | parsed from the repository's v4 design file |
 
@@ -1572,6 +1572,39 @@ There is **no retry** on the two outbox tabs. The screen says: "This is a monito
 
 :::warning Find out why before you re-queue
 A job that failed may fail again for the same reason. Read the **Last error** first. If you do not understand it, ask Engineering before you click **Re-queue**.
+:::
+@@end
+
+
+@@article id=b03-15 book=3 order=15 title="Reports: the catalog, the studio and shared headers and footers" roles=SECURITY_ADMIN,FINANCE,COMPLIANCE,OPERATOR minutes=4 ui=AVAILABLE related=b03-13,b03-14,b12-08
+:::summary Big picture in 20 seconds
+The Reporting section has four screens. **Report Catalog** runs a published report and prints or exports it. **Report Studio** verifies a report definition written by an AI, previews a draft and publishes it. **Headers & Footers** stores the reusable page chrome. **Merchant Reports** lets staff review merchant-authored reports, their execution history and suspend a merchant's Studio. A report is declarative: it never contains raw SQL, and every query runs read-only.
+:::
+
+### Why reports are separate from dashboards
+A dashboard shows a live summary. A report is a document: it has a title, a period, a language, a page header and footer, and a verification hash. You can print it as a vector PDF or export its data. The report engine executes only the declarative query definition that was verified and published. It cannot write to the database.
+
+### Report Catalog
+Open **Reporting → Catalog**. Only reports your role can run are listed. Choose a report, fill its inputs in the side panel, choose the output language and any header/footer, then click **Generate Report**. The preview shows the exact paginated pages; **Print** opens the browser's vector PDF dialog and **Export Excel** downloads one sheet per dataset. If the report has a merchant input, the merchant is chosen there; a merchant report generated for a merchant is limited to that merchant's data.
+
+### Report Studio
+Open **Reporting → Studio**. First download the AI transcript. It contains the live schema, the allowed query vocabulary and the bilingual rules. Give it to the external AI, then paste the JSON it returns and verify it. The scorecard shows five layers: schema and translations, query safety and partition pruning, authority inference, asset and HTML safety, and a read-only dry run. If a layer fails, copy the repair prompt back to the AI. When everything passes, generate a draft preview, then save it as verified or publish it. A conflict between domains is shown as a warning; a Security Admin can attach an authority override with a written justification.
+
+### Headers & Footers
+Open **Reporting → Headers & Footers**. A header or footer is its own reusable spec with a bilingual template and optional logo assets. Only one published header and one published footer can be the global default. A report can use the global default, a specific registered chrome, an inline template, or none.
+
+### Merchant Reports
+Open **Reporting → Merchant Reports** to review the reports merchants authored in their own Studio. Each row names the merchant and report, and **Executions** shows that merchant's run history. With `security:write`, **Suspend Studio** immediately blocks that merchant's runner and Studio until **Resume Studio** is used. The platform-wide switch and whether merchants may attach asset bundles are the `merchant_reports.policy` setting in **Platform Settings**.
+
+### Safety rules
+* A report spec never contains raw SQL; the engine compiles the declarative query.
+* `journal_lines` queries must include a bounded `created_at` range.
+* Credential ciphertext, password hashes and other forbidden secrets are never selectable.
+* A merchant-facing report must be filtered by the merchant scope input on every merchant-scoped model.
+* Report execution is recorded with the actor, language, row count, duration and verification hash.
+
+:::tip If a report will not run
+Read the diagnostic code and its **How to fix** line. Do not edit the JSON by guesswork. In the Studio, the same diagnostic is available as a copyable repair prompt for the AI.
 :::
 @@end
 
@@ -5527,7 +5560,7 @@ A **backup** is a saved copy of the database that you can restore after a disast
 For more, read [[a:b12-09|Backups from zero]], [[a:b12-10|The Backups screen]] and [[a:b12-11|Operating backups safely]].
 
 ### Platform settings
-**Platform Settings** lists every setting key with its versions and effective date. `SECURITY_ADMIN` can create or edit a setting, export a settings backup and preview a restore. Sensitive changes go through approval. Payer-facing checkout copy stays on **Checkout Help**. It is explained in [[a:b07-10|the Checkout Help article]].
+**Platform Settings** lists every setting key with its versions and effective date. `SECURITY_ADMIN` can create or edit a setting, export a settings backup and preview a restore. Sensitive changes go through approval. Payer-facing checkout copy stays on **Checkout Help**. `merchant_reports.policy` controls whether the merchant report runner/Studio is enabled and whether merchants may attach asset bundles; the merchant AI transcript always states the current asset policy. It is explained in [[a:b07-10|the Checkout Help article]].
 
 ### Health checks
 A **health check** asks a service "are you working?". The tool checks:
@@ -7112,6 +7145,50 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
    "situations": []
   },
   {
+   "screenId": "AmlReportingStudio",
+   "routeNames": [
+    "AmlReportingStudio"
+   ],
+   "pageDir": "pages/aml/reporting-studio",
+   "summary": "Upload and version the XML XSD and XLSX workbook contracts, map report fields, simulate output and submit schema changes for four-eyes approval.",
+   "articles": [
+    "b09-07",
+    "b09-08"
+   ],
+   "cards": [
+    "sg-aml-report"
+   ],
+   "situations": []
+  },
+  {
+   "screenId": "Incidents",
+   "routeNames": [
+    "Incidents"
+   ],
+   "pageDir": "pages/incidents",
+   "summary": "Operational incidents with a response timeline, responders, corrective actions, communications and the regulatory report. High-severity and security incidents need a postmortem before close.",
+   "articles": [
+    "b09-07",
+    "b09-08"
+   ],
+   "cards": [],
+   "situations": []
+  },
+  {
+   "screenId": "FilingAdapters",
+   "routeNames": [
+    "FilingAdapters"
+   ],
+   "pageDir": "pages/filing-adapters",
+   "summary": "The manual or HTTPS channel used to file an approved regulatory report. Manual remains the default; an HTTP adapter stores only an encrypted auth secret.",
+   "articles": [
+    "b09-07",
+    "b09-08"
+   ],
+   "cards": [],
+   "situations": []
+  },
+  {
    "screenId": "OperatorCases",
    "routeNames": [
     "OperatorCases",
@@ -7425,6 +7502,24 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
     "s-wal-archive-lag-high",
     "s-restore-drill-failed"
    ]
+  },
+  {
+   "screenId": "Reports",
+   "routeNames": [
+    "ReportsCatalog",
+    "ReportsStudio",
+    "ReportsChrome",
+    "ReportsMerchantReports"
+   ],
+   "pageDir": "pages/reports",
+   "summary": "The reporting workspace: run a published report with its inputs and language, verify and publish a declarative report definition, manage reusable bilingual headers and footers, and oversee merchant-authored reports and their execution history.",
+   "articles": [
+    "b03-15",
+    "b03-13",
+    "b03-14"
+   ],
+   "cards": [],
+   "situations": []
   },
   {
    "screenId": "General",

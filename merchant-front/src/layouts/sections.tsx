@@ -34,6 +34,8 @@ export const routesAuthorities: {
     Webhooks: ["applications.read"],
     Credentials: ["credentials.manage"],
     Team: ["users.manage"],
+    MerchantReports: ["reports.run"],
+    MerchantReportsStudio: ["reports.studio"],
 };
 
 export const useSections = () => {
@@ -145,6 +147,18 @@ export const useSections = () => {
                     name: "Webhooks",
                     icon: "mdi-webhook",
                     if: () => hasOneOfAuthorities(["applications.read"]),
+                },
+                {
+                    label: t("Reports"),
+                    name: "MerchantReports",
+                    icon: "mdi-file-chart-outline",
+                    if: () => hasOneOfAuthorities(["reports.run"]),
+                },
+                {
+                    label: t("Report Studio"),
+                    name: "MerchantReportsStudio",
+                    icon: "mdi-robot-outline",
+                    if: () => hasOneOfAuthorities(["reports.studio"]),
                 },
                 {
                     label: t("Merchant Credentials"),

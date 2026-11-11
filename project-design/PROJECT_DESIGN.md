@@ -24,6 +24,7 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Backup Control](#corebackup) — `partial`
 - [Synthetic Seeder](#coreseeder) — `partial`
 - [Tests and Benchmarks](#coretests) — `partial`
+- [Dynamic Report Engine SDK and Report Studio Host](#corereport-engine) — `implemented`
 - [Shared Core Upstream Client](#edgeshared) — `implemented`
 - [Admin Edge BFF](#edgeadmin) — `partial`
 - [Merchant Edge BFF](#edgemerchant) — `partial`
@@ -35,8 +36,10 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Contextual Help](#admin-uihelp) — `implemented`
 - [Backups Settings and Operations](#admin-uioperations) — `partial`
 - [Admin Guide v2](#admin-uiguide-v2) — `implemented`
+- [Report Catalog, Studio and Chrome](#admin-uireport-studio) — `implemented`
 - [Merchant Portal](#merchant-uiportal) — `partial`
 - [Merchant Guide and Developer API](#merchant-uiguide) — `partial`
+- [Merchant Reports](#merchant-uireports) — `implemented`
 - [Checkout Payer Flow](#checkout-uiflow) — `partial`
 - [Checkout Help Center](#checkout-uihelp) — `partial`
 - [Fake Rails Backend Architecture](#fake-railsbackend) — `partial`
@@ -1036,7 +1039,7 @@ Fake Rails tester tokens stay in localStorage (GAP-019 residual); httpOnly cooki
 
 <a id="platformruntime"></a>
 
-> **Part ID:** `platform.runtime` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `platform.runtime` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `d695518+working-tree`
 
 # Runtime and Configuration
 
@@ -1099,6 +1102,13 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `PGBOUNCER_ENABLED` | `false` | deploy sets it when the pooler fronts PostgreSQL; enforces the session endpoint |
 | `DATABASE_REPLICA_URLS` | empty | read replicas |
 | `AUDIT_DATABASE_URL` | unset | dedicated audit store |
+| `REPORT_READONLY_DATABASE_URL` | unset | dedicated staff report read-only pool; falls back to a replica or `DATABASE_URL` |
+| `REPORT_READONLY_SERVED_BY` | `primary-readonly-tx` | honest serving label for the report executor (`replica` only after confirming a physical replica) |
+| `REPORT_MERCHANT_READONLY_DATABASE_URL` | unset | optional dedicated merchant report read-only pool; falls back to the report pool/`DATABASE_URL` |
+| `MERCHANT_REPORT_EXECUTE_PER_HOUR` / `MERCHANT_REPORT_VERIFY_PER_HOUR` | `60` / `30` | per-merchant hourly limits |
+| `MERCHANT_REPORT_DAILY_DB_TIME_MS` | `600000` | per-merchant daily execution-time budget |
+| `MERCHANT_REPORT_MAX_CODES` / `MERCHANT_REPORT_MAX_VERSIONS_PER_CODE` | `50` / `20` | merchant Studio storage quotas |
+| `REPORT_ASSET_STORAGE_DIR` | `.report-assets` | persistent report asset directory; set outside the release tree |
 | `LOG_DATABASE_URL` | unset | dedicated log sink |
 | `REDIS_URL` | unset | cache/velocity and invalidation |
 | `REDIS_NODES` | empty | first node used when `REDIS_URL` is absent |
@@ -1221,7 +1231,7 @@ The storage engine is constructed before `listen`, but after the server object i
 
 ### 3.5 Schema version check
 
-`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 26`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
+`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 33`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
 
 ```sql
 SELECT "version" FROM "schema_versions" WHERE "id" = 1
@@ -1491,7 +1501,7 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 
 ## 11. Security hardening config changes (2026-11-05)
 
-- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 11`.
+- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 32`.
 - Edges: `TRUSTED_PROXY_CIDRS` default loopback only; `MAX_INBOUND_BODY_BYTES` default 1 MiB; `CORS_ALLOWED_ORIGINS` (no CORS headers on admin/merchant when unset); newly wired rate-limit window envs `AUTH_/ADMIN_/API_/EXTERNAL_/PAY_/INBOUND_RATE_LIMIT_WINDOW_MS`; `CORE_MAX_RESPONSE_BYTES` (64 MiB), `CORE_TOTAL_DEADLINE_MS` (300000), `MAX_STREAMS_PER_IP` (5), `ADMIN_AUTHORITY_HINTS` (default empty, restrict-only), merchant `TOKEN_MAX_SCOPES`, `TOKEN_MAX_TTL_DAYS`, `TOKEN_DEFAULT_TTL_DAYS`, `UPLOAD_RATE_LIMIT_MAX`, admin `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
 - Frontends: `VITE_CHECKOUT_BASE_URL`, `VITE_IDENTITY_HOSTS` (merchant), `VITE_CHECKOUT_ORIGIN` (fake-rails). Real `.env` files in the frontends are no longer tracked; copy `.env.example` to `.env` on a fresh clone.
 - Deploy and daemon keys are listed in the deploy parts.
@@ -2917,6 +2927,23 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 - `POST /internal/admin/users` accepts no password or phone and creates an `INVITED` user; `POST /internal/admin/users/:id/invite` re-issues an invitation; `POST /internal/admin/auth/accept-invitation` (public, token-bound) sets the password and phone and marks the invitation complete. The maker-checker activation of a staff user requires a completed invitation.
 - `GET|POST /internal/checkout/return/:attemptToken` accepts only the attempt `reference`, and runs the gateway inquiry at most once per `RETURN_INQUIRY_COOLDOWN_MS` (10 s) per attempt across core instances (a shared flag in the auth-state store); calls inside the window answer with the current status (GAP-055).
 
+## Reporting Studio completion, incidents and filing adapters (2026-11-10)
+
+Core adds these internal admin routes under `/internal/admin` (all confidential AML/reporting routes; writes require the reporting authority and maker-checker where noted):
+
+- Reporting Studio: `POST /aml/report-schemas/:id/template/analyze`, `POST /aml/report-schemas/:id/template/upload`, `DELETE /aml/report-schemas/:id/template`; `GET|PUT /aml/report-schemas/:id/template` now include `templateBinding`; `POST /aml/report-schemas/:id/workbook/preview` renders XML/XLSX/DOCX. `PUT /aml/reporting-rules/:id/schema-bindings` returns 202 with `approvalRequestId` and requires a `REPORTING_RULE_SCHEMA_BINDING` checker.
+- Incidents: `GET|POST /aml/incidents`, `GET|PATCH /aml/incidents/:id`, `POST /aml/incidents/:id/transition|timeline|responders|actions|links|communications|report` and `PATCH /aml/incidents/:id/responders/:responderId|actions/:actionId`, `DELETE /aml/incidents/:id/links/:linkId`. Writes require the reporting authority; the incident report uses the normal REGULATORY_REPORT approval.
+- Filing: `GET|POST /aml/filing-adapters`, `PATCH|DELETE /aml/filing-adapters/:id`, `GET /aml/reports/:id/submissions`, `POST /aml/reports/:id/file`. The file route returns 502 with a submission id on adapter failure and never returns the decrypted secret.
+- Formats: reporting schema/default/binding/output enums now accept `XML`, `XLSX` and `DOCX`; report output download returns the Matching content type and SHA-256 header.
+
+### Final AML API sweep (2026-11-10)
+
+- `GET /internal/admin/incidents` returns server-filtered rows plus `summary` counts and resolved user names; `page/pageSize/status/severity/category/search` are the supported filters.
+- `PATCH /incidents/:id`, `POST /incidents/:id/transition` and `POST /incidents/:id/report` serialize on the incident row; child timeline/responder/action/link/communication writes are audited. Incident report drafting is allowed from any lifecycle status by owner decision.
+- Filing adapter `POST`, `PATCH` and `DELETE` now return 202 with `approvalRequestId`; the checker executes `FILING_ADAPTER` through `GovernanceExecution`. `GET` responses redact secret-looking `configJson` keys.
+- `POST /aml/reports/:id/file` creates a PENDING `ExternalSubmission` before dispatch, blocks duplicate PENDING/SUBMITTED attempts, records failure details, and passes the authoritative status change through the normal submission gate. Manual submissions create a MANUAL adapter and submission history.
+- Template upload/update URLs reject non-XLSX schemas and any unsafe/invalid workbook; DOCX validation/simulation uses the narrative schema renderer; clone copies the XLSX template binding.
+
 ---
 
 <a id="coreengine"></a>
@@ -3980,7 +4007,7 @@ Tests: `core-back/test/ledger-raw-sql-parity.test.ts` (same entries, lines, bala
 
 <a id="coregovernance"></a>
 
-> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-08 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree 2026-11-10`
 
 # Governance and Compliance
 
@@ -4105,7 +4132,7 @@ The seven design layers map to code as follows:
 | L3 transaction-time posture | `AttemptGuardPipeline` checks merchant status, velocity, local watch-list, and AML rules inside the attempt-creation transaction; a confirmed sanctions match or a `BLOCK` rule creates a terminal blocked attempt. |
 | L4 transaction monitoring | AML rules are evaluated at attempt initiation. There is no deferred confirmation pass and no daily batch analytics for structuring/fan-in/fan-out. |
 | L5 case management | `aml_cases` with severity, SLA, reviewer, confidential flag; resolution is proposed by a confidential reviewer and approved by a different checker; release/void post the ledger and finalise the attempt. |
-| L6 regulatory reporting | `ReportingRuleEvaluator` creates reports on settlement; manual report drafting, approval, submit, and acknowledge routes exist. Submission is not integrated with an authority adapter. |
+| L6 regulatory reporting | `ReportingRuleEvaluator` creates DRAFT reports on settlement; `RegulatoryReportWorker` drafts scheduled returns; the schema registry and `ReportGenerationService` generate validated XML/XLSX outputs. Manual drafting, request-approval, payload/narrative editing, submit and acknowledge routes exist. Confirmed FIU/CBL schemas and an external authority adapter are still missing. |
 | L7 record keeping | Audit rows, rule versions, detail changes, and the retention worker. Retention is opt-in and incomplete for AML evidence. |
 
 Screening is a provider interface (`ScreeningProvider`) with Arabic normalization, name similarity, internal watch-list provider, mock provider, and a cached provider. `MerchantScreeningService` persists `aml_screenings` and `aml_screening_matches` with list versions and input hashes, applies owner screening status, and raises a confirmed-match case only. Potential matches remain in the screening queue for disposition.
@@ -4145,11 +4172,18 @@ No `CASHOUT_REQUEST` approval row is created and there is no `PENDING -> PROCESS
 
 ### 3.9 Regulatory reporting
 
-`ReportingRuleEvaluator` (`core-back/engine/compliance/ReportingRuleEvaluator.ts:130`) evaluates a settled attempt against effective rules. A `CONFIRMED` rule creates a `PENDING_CHECKER` report; a `PROVISIONAL` rule creates a `DRAFT` internal-only report. Evaluation is idempotent per rule and attempt, and the confirmation path calls it after a successful settlement.
+The reporting engine is now format-aware (`design/11-automation/declarative_regulatory_reporting_engine_final_design.md`). A report has a canonical encrypted JSON payload and zero or more derived outputs: XML validated against a compiled XSD, and XLSX generated from a declarative workbook/template. One schema registry (`RegulatoryReportSchema`) and per-(authority, report type, report code, format) default bindings resolve the contract; rules can pin a schema per format. Every schema has a lifecycle (`DRAFT`, `PROVISIONAL`, `PENDING_APPROVAL`, `CONFIRMED`, `SUPERSEDED`, `ARCHIVED`) and is promoted through a `REGULATORY_REPORT_SCHEMA` maker-checker approval.
 
-Manual report creation (`createRegulatoryReportViaApproval`) creates a `PENDING_CHECKER` report and a `REGULATORY_REPORT` approval in one transaction. Approval sets `APPROVED`; submission is a separate reporting-authority route that requires an `APPROVED` report, enforces maker ≠ submitter when the approval has a maker, and rejects a report linked to a non-`CONFIRMED` rule. Acknowledgement records `ACKNOWLEDGED` or `REJECTED_BY_AUTHORITY` with a reason.
+`ReportingRuleEvaluator` evaluates a settled attempt against effective rules. It now creates every report as `DRAFT` (with `reportCode` and `requiredOutputFormats`) and calls the generation service; it never creates a `PENDING_CHECKER` report without an approval. `RegulatoryReportWorker` drafts the scheduled returns as `DRAFT`, stores the encrypted payload and its SHA-256, then generates every required output. The regulatory aggregates filter `payment_attempts.env = 'LIVE'`, so sandbox traffic cannot enter a filing. The output generator:
 
-Report payloads generated by the evaluator are encrypted with `VaultContextCipher("reporting-payload")`. Manual report creation stores `JSON.stringify(payload)` directly in `payload_ciphertext` (despite the column name), and the admin read path parses it as plaintext JSON. This is a code gap against the confidentiality intent.
+- builds a format-neutral `CanonicalReportContext` (institution, report, merchant, wallet, transactions, AML case, indicators, aggregates, narrative, pending sections);
+- for XML, compiles the uploaded `.xsd` into a safe AST, walks it in `xs:sequence` order, applies the mapping blueprint and `TransformPipeline`, escapes values, and validates cardinality, types, facets, enums and cross-field assertions;
+- for XLSX, loads an uploaded workbook or generates the declared workbook server-side with `exceljs`, fills mapped rows/totals/narrative sections, guards formula injection, and validates required columns, totals and narrative sections;
+- encrypts and hashes the result in `RegulatoryReportOutput` (revision, schema version, validation status `NOT_GENERATED`/`PROVISIONAL_SCHEMA`/`VALIDATED`/`INVALID`, errors).
+
+Manual report creation (`createRegulatoryReportViaApproval`) now encrypts the payload with `VaultContextCipher("reporting-payload")`; the read path understands both the Vault envelope and legacy plaintext. Existing DRAFT reports can be sent for approval through `POST /aml/reports/:id/request-approval`; rejection/expiry returns them to `DRAFT`. Submission enforces the format-aware gate: every `requiredOutputFormats` entry must have a current `VALIDATED` output backed by a `CONFIRMED` schema/template, and a `PROVISIONAL_SCHEMA`/`INVALID`/missing output blocks filing. XLSX-only returns such as PSP-M and AML-Q have no XSD requirement; XML returns such as STR/LTR still require a confirmed XSD. Acknowledgement records the authority decision and timestamp/reason.
+
+The admin surface includes the report payload/output endpoints, output download (hash verified), schema registry/compile/simulate/promote/default-binding routes, schema detail/update/clone/validate, context catalog and sample context, code-list preview, template download/upload, workbook preview, per-rule schema bindings, report requirements, and the Reporting Studio page at `/aml/reporting-studio` with an XML element mapper, code-list translator, XLSX workbook builder, draft save with revision conflict, clone-as-new-version and read-only lifecycle states. Outputs are bound to the payload SHA-256; changing the payload marks current outputs stale, and filing refuses stale/missing/provisional/invalid outputs. The baseline seeds are provisional: `cbl-goaml-str-v1`, `cbl-goaml-ltr-v1`, `cbl-psp-m-v1`, `cbl-aml-q-v1`, `cbl-aml-a-v1`, and `cbl-goaml-ltr-xlsx-v1`. No FIU XSD or CBL workbook is present in the repository, so they remain `PROVISIONAL` and cannot be filed. INC and separate narrative DOCX/PDF rendering are deferred.
 
 ### 3.10 Operator cases and inquiry schedules
 
@@ -4185,14 +4219,14 @@ AML reads are gated by `hasConfidentialAmlAccess`: `COMPLIANCE`/`MLRO` roles pas
 - `JoinRequest`, `KybDocument`, `KybRevalidationRequest`, `BeneficialOwner`: onboarding state, documents, owners, screening status, revalidation.
 - `AmlScreening`, `AmlScreeningMatch`, `AmlRule`, `AmlCase`: screening results, match dispositions, rule versions, severity/SLA, hold journal entry.
 - `Dispute`, `Adjustment`, `CashoutRequest`: intake, drafted/executed adjustments, cash-out state.
-- `ReportingRule`, `RegulatoryReport`: thresholds, status, encrypted payload, submission reference, approval.
+- `ReportingRule`, `RegulatoryReport`, `RegulatoryReportSchema`, `RegulatorySchemaDefaultBinding`, `RegulatoryRuleSchemaBinding`, `RegulatoryReportOutput`: thresholds, status, encrypted payload, required formats, schema/template versions, derived XML/XLSX outputs, submission reference, approval.
 - `OperatorCase`, `GatewayInquirySchedule`, `DetailChangeLog`, `AuditLog`, and `PlatformSetting` (with approval link and version).
 
 ### Admin routes (representative)
 
 - Approvals: `GET /admin/approvals`, `/summary`, `/export`, `/:id`, `POST /:id/approve`, `/:id/reject`.
 - Onboarding: `/join-requests` including `submit`, `decide`, `assign`, `request-info`, `checklist`, `screening/retry`, and `/kyb-documents/:id/review`, `request-replacement`, `request-revalidation`.
-- AML: `/aml/screenings`, `/aml/matches/:id/disposition`, `/aml/cases`, `/:id/propose`, `/aml/rules`, `/aml/reporting-rules`, `/:id/promote`, `/aml/reports`, `/:id/submit`, `/:id/acknowledge`.
+- AML: `/aml/screenings`, `/aml/matches/:id/disposition`, `/aml/cases`, `/:id/propose`, `/aml/rules`, `/aml/reporting-rules`, `/:id/promote`, `/aml/reports`, `/:id/payload`, `/:id/generate-output`, `/:id/outputs/:format/download`, `/:id/request-approval`, `/:id/submit`, `/:id/acknowledge`, `/aml/report-schemas`, `/:id/compile`, `/:id/simulate`, `/:id/promote`, `/aml/report-schema-defaults`.
 - Money, cases, and merchant changes: `/adjustments`, `/cashouts/:id/process`, `/disputes`, `/operator-cases/:id/resolve`, `/gateway-inquiries/:id/*`, `/merchants/:id/propose-edit|suspend|reinstate|close`, `/pending-changes`, `/detail-changes`.
 
 ### Platform settings and environment
@@ -4225,9 +4259,10 @@ Settings consumed: `join_request.four_eyes_policy` (policy, owner threshold, vol
 
 ### Regulatory report
 
-1. Let `ReportingRuleEvaluator` create a report on settlement, or draft one manually through `/aml/reports`.
-2. Approve the `REGULATORY_REPORT` request.
-3. Submit through `/aml/reports/:id/submit` with a submission reference, then acknowledge.
+1. Let `ReportingRuleEvaluator`/`RegulatoryReportWorker` draft the report, or draft one manually through `/aml/reports`.
+2. Review the canonical payload and generated outputs; generate/regenerate any missing XML/XLSX output and complete the narrative sections.
+3. Submit the DRAFT for approval, approve the `REGULATORY_REPORT` request as a different checker, then file.
+4. Submit through `/aml/reports/:id/submit` with the authority reference and filing channel; the route refuses any required output that is not `VALIDATED` against a `CONFIRMED` schema/template. Then acknowledge.
 
 ## 7. Status and deviations
 
@@ -4238,6 +4273,7 @@ Settings consumed: `join_request.four_eyes_policy` (policy, owner threshold, vol
 - Onboarding readiness, KYB review/revalidation, duplicate detection, four-eyes policy, screening provider abstraction, Arabic normalization, L1/L2/L3 screening, AML rule engine, cases, hold escrow, release/void.
 - Dispute drafting with system maker and human checker, chargeback outcomes, negative-balance ceiling, regulatory report approval/submission/acknowledgement, operator cases, persisted inquiry schedules.
 - Tipping-off template guard, AML payload redaction, and the confidential AML route gate.
+- Format-aware regulatory reporting: schema registry/default/rule bindings, encrypted payloads, DRAFT evaluator reports, request-approval/reject/expiry lifecycle, safe XSD compiler and XML validator, server-side XLSX renderer, provisional baseline schemas, output revisions/download hash verification, narrative editing, and per-format filing gates.
 
 ### Partial
 
@@ -4264,7 +4300,8 @@ Settings consumed: `join_request.four_eyes_policy` (policy, owner threshold, vol
 
 - **Security gap:** the generic approval route is not confidential-gated. A principal with `approval:check` can approve an `AML_CASE` even without `aml:read`/`aml:write`; the seeded `FINANCE` role holds `approval:check`.
 - **Security gap:** emergency suspension takes effect immediately by one actor and leaves an approval in `PENDING_REVIEW`; rejecting it records `MERCHANT_EMERGENCY_SUSPENSION_NOT_RATIFIED` but does not undo the suspension. The `ApprovalService` emergency path also executes without a checker, and `ratifyEmergencyRequest` only records a note.
-- **Data gap:** manual regulatory report payloads are written as plaintext JSON in `payload_ciphertext`.
+- **Coverage gap:** no FIU-confirmed XSD or CBL XLSX template has been uploaded, so the baseline reporting schemas/templates remain `PROVISIONAL` and filing is blocked by design.
+- **Coverage gap:** INC, DOCX/PDF narrative export and external authority filing adapters are deferred.
 - **Coverage gap:** an `APPLICATION` approval can be created and listed but cannot be approved; the checker receives `NO_EXECUTABLE_SUBJECT`.
 - **Configuration gap:** `PUT /admin/settings` requires `settings:write` and writes directly, despite the design's maker-checker requirement for compliance settings.
 - **Seed gap:** the seeded `COMPLIANCE` and `MLRO` users lack `approval:check`, so the documented maker-checker role matrix is not exercised by the default deployment seed.
@@ -4357,11 +4394,28 @@ Some governance tests use fake clients; database-backed suites require PostgreSQ
 
 **Known limits.** A merchant can still move its own INACTIVE terminal back to ACTIVE (INACTIVE cannot be told apart from a staff-set INACTIVE; only BLOCKED is staff-only). `approvalSubjectContext` (admin.ts) has no case for the three new subjects, so the approvals detail shows the generic payload diff.
 
+## Reporting Studio phases 2-5, incident management and filing adapters (2026-11-10)
+
+The Reporting Studio now covers the full authoring and filing lane in addition to the v26 engine:
+
+- **XLSX template workflow.** A DRAFT schema can upload an `.xlsx` template. `lib/xlsx/template.ts` inspects the zip (20 MB compressed / 100 MB uncompressed / 1,000,000 cells / 100 sheets), rejects `vbaProject.bin`, external links, OLE/embedded objects and `customUI`, and reports sheets and defined names. The visual mapping (`template_binding_json`) binds each workbook-schema column and narrative section to a named range, a data start row, a prototype row and optional total anchors. `renderRegulatoryWorkbook` copies the prototype row style, writes the rows, totals and narrative, and reports `template-range` / `template-binding` / `REQUIRED_SECTION` issues. The generation service decrypts the template with the `reporting-xlsx` context and passes the saved binding, so a preview and a filed output use the same mapping.
+- **Rule-schema bindings are maker-checker.** `PUT /aml/reporting-rules/:id/schema-bindings` no longer writes directly: it creates a `REPORTING_RULE_SCHEMA_BINDING` approval (payload contains the bindings and every schema's version/revision/definition/mapping hash), rejects a second pending change, and returns 202. `GovernanceExecution` re-validates the confirmed status, format, authority and report type at execution, replaces the rule bindings in one transaction and audits `REPORTING_RULE_SCHEMA_BINDINGS_UPDATED`. The studio shows the bound schema per rule and submits the change for approval.
+- **DOCX narrative output.** `ReportOutputFormat.DOCX` plus the `DocxNarrativeSchema` compiler validate title, sections, required sections and optional tables; `lib/docx/regulatoryDocx.ts` writes a minimal OOXML package (document, styles, content types and relationships) with escaped text and tables. Outputs are encrypted with the `reporting-docx` context and downloaded with the Word content type. The provisional `cbl-incident-docx-v1` baseline is the default for `CBL / INCIDENT / INC / DOCX`.
+- **Expanded incidents.** `Incident` is the operational record: severity, category, impact scope, lifecycle timestamps, commander/reporter, affected services/merchants/attempts, regulator notification, postmortem requirement/due date and root cause. Child tables hold the timeline, responders (paging/acknowledgement/release), corrective actions, links to attempts/merchants/rails/gateways/reports/cases and communications. Transitions are forward-only (`DETECTED -> TRIAGED/DECLARED -> CONTAINED -> MONITORING -> RESOLVED -> POSTMORTEM -> CLOSED`); closing requires the postmortem when the incident is SEV1/SEV2, security or data-integrity. `POST /aml/incidents/:id/report` builds the narrative and timeline, then drafts a `REGULATORY_REPORT` through the standard maker-checker path. The admin portal has `/incidents` with Overview, Timeline, Responders, Actions, Communications and Postmortem tabs.
+- **External filing adapters.** `external_filing_adapters` stores a name, authority, MANUAL/HTTP kind, status, HTTPS endpoint, an encrypted auth secret, timeout and config; `external_submissions` records each attempt with the request SHA-256, external reference, response code/body and error. `POST /aml/reports/:id/file` re-checks the approval submitter, every required output (generated, VALIDATED, confirmed schema, matching payload hash), dispatches the encrypted artifacts, records the submission and then calls the normal submission gate. The HTTP adapter enforces public HTTPS, no redirect and a timeout; MANUAL remains the default and the existing submit route is unchanged. The admin portal has `/filing-adapters` and the report drawer can file through an active adapter.
+
+## Final reporting/compliance sweep (2026-11-10)
+
+- **Template writes are uniformly validated.** `POST /report-schemas`, schema `PUT`, `POST /template/upload`, `PUT /template` and the template branch of schema updates now all run `analyzeWorkbookTemplate`, reject every reported issue (malformed zip/workbook, macros, external links, OLE, oversized packs, too many sheets/cells) and accept templates only for XLSX schemas. `fflate` filtering aborts decompression as soon as the uncompressed budget would be exceeded instead of allocating the whole archive first. Replacing a template clears the old `template_binding_json` unless the caller supplies a new binding.
+- **DOCX is a first-class schema format.** `buildSchemaValidation`, DRAFT schema `PUT`, `simulate` and `clone` now use `parseDocxNarrativeSchema` and `renderRegulatoryDocx`; cloning copies the XLSX template binding. Simulation of a template-backed XLSX schema decrypts the template instead of silently rendering generated mode.
+- **Incidents are operationally complete.** List/detail responses resolve commander, reporter, timeline actor, action owner and communication sender names from the referenced users. The list returns server-side summary counts and filters/pagination are forwarded by the edge. Child writes are audited; transitions and postmortem edits lock the incident row; report drafting takes an advisory lock so concurrent requests cannot create two reports. Incident reporting is intentionally allowed from any lifecycle state (the owner decision), with the UI confirmation.
+- **Filing adapters are maker-checker.** Create, update and disable produce `FILING_ADAPTER` approvals; the adapter row stays `DISABLED` until a checker applies the encrypted secret/endpoint/status changes. `configJson` rejects secret-looking keys and is redacted on output; HTTP endpoints remain public-HTTPS-only. `POST /reports/:id/file` creates a PENDING submission before dispatch, records failure, blocks duplicate PENDING/SUBMITTED attempts and audits a reconciliation case if the report state cannot be advanced after a successful external send. Manual submissions now record a `MANUAL` `ExternalSubmission` and appear in the same history.
+
 ---
 
 <a id="coreworkers"></a>
 
-> **Part ID:** `core.workers` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `core.workers` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `d695518+working-tree`
 
 # Background Workers and Outboxes
 
@@ -4428,7 +4482,7 @@ The loop is not a distributed lock by itself. Cross-node safety comes from `FOR 
 | `StatementScheduleWorker` | every 5 min (`WORKER_STATEMENT_SCHEDULE_INTERVAL_MS`) | Advisory-lock singleton | Keyed missing-statement cases per scheduled slot, resolved when the statement arrives. | Implemented (AUTO-07) |
 | `ConsistencyAuditWorker` | every 1 h (`WORKER_CONSISTENCY_AUDIT_INTERVAL_MS`) | Advisory-lock singleton | Reports (and, behind `CONSISTENCY_AUDIT_REPAIR`, repairs) payment-link slot counter drift. | Implemented (AUTO-12, report only by default) |
 | `MerchantWebhookWorker` | every 2 s (`WORKER_MERCHANT_WEBHOOK_INTERVAL_MS`), batch 50 | `SKIP LOCKED` claim with a 2-minute lease (not a singleton) | Signs and sends merchant webhooks to the pinned public address of each endpoint, retries with exponential backoff and jitter, parks after 8 attempts, disables an endpoint after 5 days of failure. The `OutboxRelayWorker` fan-out creates the deliveries. | Implemented (AUTO-34) |
-| `RegulatoryReportWorker` | every 1 h (`WORKER_REGULATORY_REPORT_INTERVAL_MS`) | Advisory-lock singleton | Drafts the scheduled returns (PSP-M, AML-Q, AML-A) per closed period and the business-day large-transaction batch; draft only, a person files. | Implemented (AUTO-16) |
+| `RegulatoryReportWorker` | every 1 h (`WORKER_REGULATORY_REPORT_INTERVAL_MS`) | Advisory-lock singleton | Drafts the scheduled returns (PSP-M, AML-Q, AML-A) per closed period and the business-day large-transaction batch, then generates every required XML/XLSX output; draft only, a person files. | Implemented (AUTO-16; format-aware outputs) |
 | `AuditChainAnchorWorker` | every 24 h (`WORKER_AUDIT_ANCHOR_INTERVAL_MS`) | Advisory-lock singleton | Verifies the live audit hash chain since the last anchor and stores a signed anchor; incidents become keyed P1 cases. Registered only with the dedicated audit database. | Implemented (AUTO-27) |
 | `RetentionWorker` | every hour when enabled; batch 500 | Bounded transactions per table | Purges notifications, inbound events, step logs, audit logs, detail logs, terminal attempts and dependents; never purges the ledger. | Partial / opt-in |
 | `JournalPartitionWorker` | every 6 h (`WORKER_JOURNAL_PARTITION_INTERVAL_MS`), leader-elected | Two small catalogue reads, one DDL call only when a month is missing | Keeps the next `LEDGER_PARTITION_MONTHS_AHEAD` (6) monthly `journal_lines` partitions in existence through the same database function the deploy cron calls; raises the most-urgent cases `ledger.partition.default_rows` and `ledger.partition.ensure_failed`. | Implemented (AUTO-01) |
@@ -4610,7 +4664,7 @@ Source: `design/11-automation/background_automation_and_workers_plan.md`. Every 
 
 **Backup failures and the audit-chain anchor (AUTO-27).** (1) `createBackupMonitorCheck` (`engine/workers/backupMonitorChecks.ts`, check id `backup`, registered only when `BACKUP_DAEMON_URL` is set) polls the overview `BackupControlClient` already reads and turns the daemon's own catalog into keyed operator cases `platform.backup:<key>`: `daemon` (unreachable, P1), `unhealthy` (P1), `wal-lag` (archive lag above the policy's `alertLagSeconds`, P1), `backup-failed:<target>` (the latest finished run of that target FAILED, P1; a later PASSED run clears it), `backup-stale` (no PASSED full backup within `PLATFORM_MONITOR_BACKUP_MAX_FULL_AGE_MS`, 36 h, P1), `drill-failed` (latest restore drill FAILED, carrying the double-entry, balance-parity and audit-chain numbers, P1) and `drill-stale` (no drill within `PLATFORM_MONITOR_BACKUP_DRILL_MAX_AGE_MS`, 8 days, P2). The daemon needs no push channel. (2) `AuditChainAnchorWorker` (cluster singleton, daily, only with the dedicated audit database) verifies the LIVE hash chain incrementally and stores a signed anchor in the core table `audit_chain_anchors` (append-only trigger): it checks the latest anchor's HMAC (`Vault.sign`, key `AUDIT_ANCHOR_KEY_ID`), checks that the audit database still holds the anchored row with the anchored hash (the chain alone cannot show a removed tail), verifies the rows added since the anchor in segments of `AUDIT_ANCHOR_SEGMENT_ROWS` (at most `AUDIT_ANCHOR_MAX_SEGMENTS_PER_TICK` per tick, so a long history is verified over several ticks) with `DedicatedAuditDatabaseDriver.verifyChainSegment`, then anchors the end of the verified range and writes `AUDIT_CHAIN_ANCHORED`. Failures open ONE keyed P1 case each and never move the anchor over unverified rows: `audit.anchor_invalid` (forged or edited anchor), `audit.chain_rewritten` (anchored row missing or with another hash), `audit.chain_broken` (a row does not chain; the rows before it are still anchored so the break stays located). Cases are not auto-resolved. Not built: the anchor is not yet copied outside the core database (for example to the backup store), so someone who controls both databases AND the vault key can still rewrite history consistently.
 
-**Scheduled regulatory returns (AUTO-16, decision D3).** The provisional CBL catalogue (plan section 6.2) is DATA: migration `20261109190000_regulatory_report_automation` seeds `reporting_rules` rows (status `PROVISIONAL`, source "provisional default, pending CBL confirmation") whose `conditions` carries a `returnCode`: `PSP-M` (monthly, `dueDays` 10), `AML-Q` (quarterly, 15), `AML-A` (annual, 31) and `LTR` (`batch: BUSINESS_DAY`, LYD 50,000). `RegulatoryReportWorker` (cluster singleton, hourly) drafts them: one `DRAFT` per closed period and rule (boundaries are local midnights in `Africa/Tripoli`, `engine/workers/regulatory/periods.ts`), idempotent per `(report_code, period_key)` through a partial unique index and `ON CONFLICT DO NOTHING` (concurrent nodes draft once), `due_at` = period end + `dueDays`, payload stored encrypted (vault key `reporting-payload`, the same as the per-attempt reports) with its SHA-256, `confidential`, subject `REPORTING_RULE`, audit `REGULATORY_REPORT_DRAFTED`, MLRO and compliance told (`REGULATORY_REPORT_DRAFTED`). Only the `REGULATORY_REPORT_MAX_PERIODS` (2) most recent closed periods are considered, so enabling the worker on old data does not draft years of returns; a period that starts before the rule's effective LOCAL date is skipped. The payload sections come from read-only aggregates (`regulatory/payloads.ts`): payments by rail with success, failure and UNKNOWN rates and succeeded value, refunds, disputes opened and decided, cash-outs, merchants by status and onboarded, a funds-position reading (point in time at generation), and for AML returns screening, case and KYB counts (the number of STRs is a count only); what the platform cannot know is listed in the payload's `pending` (service availability and incidents, staff training completion, narratives). `LTR` drafts one report per business-day batch (the batch of a Thursday also holds the weekend; a holiday extends it) with every successful attempt at or above the threshold (lines capped at `REGULATORY_REPORT_MAX_BATCH_LINES`, marked `truncated`), due the end of the next business day; a batch without a breach produces no report. The per-attempt `ReportingRuleEvaluator` now skips any rule that names a `returnCode`, so a scheduled rule never fires once per payment. The `DeadlineWorker` rule `reports` watches unfiled reports (`DRAFT`, `PENDING_CHECKER`, `APPROVED`) with a `due_at`: a reminder to MLRO and compliance `REGULATORY_REPORT_REMINDER_BUSINESS_DAYS` (3) business days before, and at the due date ONE keyed P1 case `report.overdue:<id>`, audit `REGULATORY_REPORT_OVERDUE`; its catch-up window is at least 30 days so a missed filing is not forgotten. Nothing is filed: the MLRO reviews, completes the pending sections, approves and files, then records the reference. NOT BUILT: goAML XML (needs the FIU's XSD), the XLSX output through the shared export pipeline, the `INC` incident return, due dates and a draft deadline for suspicious-activity reports created by the AML flow, and a "regenerate draft" action (a correction today means a new draft by hand).
+**Scheduled regulatory returns (AUTO-16, decision D3).** The provisional CBL catalogue (plan section 6.2) is DATA: migration `20261109190000_regulatory_report_automation` seeds `reporting_rules` rows (status `PROVISIONAL`, source "provisional default, pending CBL confirmation") whose `conditions` carries a `returnCode`: `PSP-M` (monthly, `dueDays` 10), `AML-Q` (quarterly, 15), `AML-A` (annual, 31) and `LTR` (`batch: BUSINESS_DAY`, LYD 50,000). `RegulatoryReportWorker` (cluster singleton, hourly) drafts them: one `DRAFT` per closed period and rule (boundaries are local midnights in `Africa/Tripoli`, `engine/workers/regulatory/periods.ts`), idempotent per `(report_code, period_key)` through a partial unique index and `ON CONFLICT DO NOTHING` (concurrent nodes draft once), `due_at` = period end + `dueDays`, payload stored encrypted (vault key `reporting-payload`, the same as the per-attempt reports) with its SHA-256, `confidential`, subject `REPORTING_RULE`, audit `REGULATORY_REPORT_DRAFTED`, MLRO and compliance told (`REGULATORY_REPORT_DRAFTED`). Only the `REGULATORY_REPORT_MAX_PERIODS` (2) most recent closed periods are considered, so enabling the worker on old data does not draft years of returns; a period that starts before the rule's effective LOCAL date is skipped. The payload sections come from read-only aggregates (`regulatory/payloads.ts`): payments by rail with success, failure and UNKNOWN rates and succeeded value, refunds, disputes opened and decided, cash-outs, merchants by status and onboarded, a funds-position reading (point in time at generation), and for AML returns screening, case and KYB counts (the number of STRs is a count only); what the platform cannot know is listed in the payload's `pending` (service availability and incidents, staff training completion, narratives). `LTR` drafts one report per business-day batch (the batch of a Thursday also holds the weekend; a holiday extends it) with every successful attempt at or above the threshold (lines capped at `REGULATORY_REPORT_MAX_BATCH_LINES`, marked `truncated`), due the end of the next business day; a batch without a breach produces no report. The per-attempt `ReportingRuleEvaluator` now skips any rule that names a `returnCode`, so a scheduled rule never fires once per payment. The `DeadlineWorker` rule `reports` watches unfiled reports (`DRAFT`, `PENDING_CHECKER`, `APPROVED`) with a `due_at`: a reminder to MLRO and compliance `REGULATORY_REPORT_REMINDER_BUSINESS_DAYS` (3) business days before, and at the due date ONE keyed P1 case `report.overdue:<id>`, audit `REGULATORY_REPORT_OVERDUE`; its catch-up window is at least 30 days so a missed filing is not forgotten. Nothing is filed: the MLRO reviews, completes the pending sections, approves and files, then records the reference. The worker now calls `ReportGenerationService` and writes `RegulatoryReportOutput` rows for every required format (XML against a compiled XSD, XLSX against a declarative workbook/template). The baseline schemas are provisional, so the filing gate blocks them until a confirmed FIU/CBL schema is promoted. NOT BUILT: `INC`, DOCX/PDF narrative export, external authority filing adapters and a full visual mapper.
 
 **Outbound merchant webhooks (AUTO-34, decision D9).** A merchant registers up to five HTTPS endpoints per application (`merchant_webhook_endpoints`, migration `20261109200000_merchant_webhooks`, v24) through `/internal/merchant/webhooks/*` (proxied by merchant-back, `/portal/developers/webhooks`): reading needs a merchant read authority, changing needs `application:manage`, an application-scoped user only reaches their applications, another merchant's endpoint or delivery looks nonexistent. The `whsec_` signing secret (32 random bytes) is stored vault-encrypted (key `webhook-secret`), returned exactly once by create and rotate, never listed or logged; a rotation keeps the previous secret verifying for `MERCHANT_WEBHOOK_ROTATION_OVERLAP_HOURS` (24), during which every request carries two signatures. Events: `payment.succeeded|failed|expired|refunded` (from the terminal `attempt.transitioned` outbox event; cancelled and blocked attempts are not sent), `link.expired`, `dispute.opened|closed` and `cashout.paid|failed`, each written to the transactional outbox in the same transaction as the state change (`GovernanceExecution` at the dispute intake, the ruling, the cash-out payout and rejection; the `DeadlineWorker` at a dispute expiry). The `OutboxRelayWorker` gained a `fanout` option: `createWebhookFanout` runs in the relay's own transaction and writes one `merchant_webhook_deliveries` row per matching ACTIVE endpoint (application-scoped events by application, dispute and cash-out events by merchant), idempotent through the unique `(endpoint_id, event_id)` (`evt_<outbox id>`), with the exact signed body stored as text. `MerchantWebhookWorker` (not a singleton: `FOR UPDATE SKIP LOCKED` with a 2-minute lease that already counts the attempt) signs each request with the Standard Webhooks scheme (`webhook-id`, `webhook-timestamp` per attempt, `webhook-signature: v1,<base64 HMAC-SHA256 of id.timestamp.body>`) and sends it through `lib/webhooks/egress.ts`: HTTPS only (HTTP and private hosts only with `MERCHANT_WEBHOOK_ALLOW_INSECURE`), no URL credentials or fragments, every resolved address must be public, DNS is resolved once and the connection is PINNED to that address (a name that re-resolves to a private address cannot redirect the request; SNI and certificate validation keep the real host name), redirects are never followed, the response is read to at most 4 KiB and never stored. 2xx = delivered; network errors, timeouts, 408, 429 and 5xx retry after 5 s, 5 min, 30 min, 2 h, 5 h, 10 h and 10 h with +-20 % jitter (8 attempts, about 27 h); any other 4xx, a redirect or an unsafe URL parks the delivery at once, as does the 8th failure (`PARKED`, with `park_reason`). An endpoint that fails continuously for `MERCHANT_WEBHOOK_DISABLE_AFTER_DAYS` (5) is DISABLED (`failing_since` is cleared by any success), its pending deliveries are parked, one audit row `MERCHANT_WEBHOOK_ENDPOINT_DISABLED` is written and the merchant gets a notice (`MERCHANT_WEBHOOK_DISABLED`, host only). The merchant can send a `webhook.test` event (delivered whatever the filter), disable and enable an endpoint (enabling clears the failure streak), and redeliver a parked or delivered event as a fresh attempt cycle (the endpoint must be active); every management action is audited without the secret. Payloads carry identifiers, status and amounts only (payment: `paymentId`, `reference`, `status`, `currency`, `amount`, `netAmount`, `linkId`), never card, customer or AML data; ordering is not guaranteed. NOT BUILT: a delivery attempt history (only the last attempt is kept), `payment.refunded` for partial refunds (only the terminal `REFUNDED` status is sent), per-event retry-policy settings, and the portal has no payload viewer.
 
@@ -5302,7 +5356,7 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 
 <a id="coredata"></a>
 
-> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `d695518+working-tree`
 
 # Data Schema and Migrations
 
@@ -5314,7 +5368,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 26 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 33 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -5369,7 +5423,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 26`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 33`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5382,7 +5436,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261110090000_resilient_journal_partitions`, schema version 26). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261110190000_merchant_report_engine`, schema version 33). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -5559,7 +5613,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 25.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 33.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -5574,7 +5628,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 84 models and 105 enums in the Prisma datamodel.
-- Schema version 26 with an equality check used by the seeders.
+- Schema version 33 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -5677,7 +5731,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 26 (`REQUIRED_SCHEMA_VERSION = 26`; model count 84). The schema migrations since version 10 are:
+The current schema version is 33 (`REQUIRED_SCHEMA_VERSION = 33`; model count 105). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -5689,8 +5743,8 @@ The current schema version is 26 (`REQUIRED_SCHEMA_VERSION = 26`; model count 84
 - `20261107150000_shard_repairs` (version 14): `gl_shard_checkpoints.baseline_seq` (the exemption marker of a re-baselined shard) and the append-only history table `gl_shard_repairs` (see `core.ledger` 3.10).
 - `20261108090000_partition_truncate_guard` (functions and triggers only; `schema_versions` stays at 14): `pgw_guard_journal_line_partition(regclass)` installs the `pgw_journal_lines_no_truncate` statement trigger only when it is missing; `ensure_journal_line_partitions` (run daily by the deploy cron) calls it for every partition it covers, and the migration backfills every existing partition. Statement-level TRUNCATE triggers are not cloned from the partitioned parent, so partitions created after `20261105090000_append_only_ledger_guards` could be truncated by their owner without meeting the guard.
 - `20261107120000_inbound_event_claims` (version 13): adds nullable `inbound_events.claimed_at` and `claimed_by` plus `(processed_at, claimed_at)`, the durable lease the inbound webhook worker uses to prevent duplicate processing across a brief leadership overlap.
-- `20261109210000_ledger_query_and_index_optimization` (version 25): covering indexes and append-only autovacuum (see `core.ledger`). Revised 2026-11-10 before any production use: `SET lock_timeout = '10s'`, each `journal_lines` covering index is rebuilt only when `pg_get_indexdef` differs from its target (so an index pre-built online is never rebuilt, see section 13), and the resilient `ensure_journal_line_partitions`.
-- `20261110090000_resilient_journal_partitions` (version 26): redefines `ensure_journal_line_partitions` for databases that applied version 25 before that revision (`prisma migrate deploy` never re-runs an applied migration: verified 2026-11-10). A month that cannot be created (rows already in `journal_lines_default`: `check_violation`; a lock wait over 5 s: `lock_not_available`) is skipped with a WARNING instead of aborting the call; storage parameters are set only on a partition the call creates; `lock_timeout = 5s`, `timezone = UTC`.
+- `20261109210000_ledger_query_and_index_optimization` (version 25): covering indexes and append-only autovacuum (see `core.ledger`). Revised 2026-11-10 before any production use: `SET lock_timeout = '10s'`, each `journal_lines` covering index is rebuilt only when `pg_get_indexdef` differs from its target (so an index pre-built online is never rebuilt, see section 12b), and the resilient `ensure_journal_line_partitions`.
+- `20261110090000_resilient_journal_partitions` (functions only, no version bump): redefines `ensure_journal_line_partitions` for databases that applied version 25 before that revision (`prisma migrate deploy` never re-runs an applied migration: verified 2026-11-10). A month that cannot be created (rows already in `journal_lines_default`: `check_violation`; a lock wait over 5 s: `lock_not_available`) is skipped with a WARNING instead of aborting the call; storage parameters are set only on a partition the call creates; `lock_timeout = 5s`, `timezone = UTC`.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -5714,7 +5768,7 @@ The application is not available for the duration, and an old binary posting whi
 
 Open: a deploy-time guard that refuses to run this migration on a database with a large `journal_lines` unless the operator passes an explicit acknowledgement is not implemented. The pipeline already takes a pre-migration dump and probes pending migrations (`deploy/deploy.ts` `probeMigrationState`), so the guard would extend that probe.
 
-## 13. Runbook: applying `20261109210000_ledger_query_and_index_optimization` to a populated database (2026-11-10)
+## 12b. Runbook: applying `20261109210000_ledger_query_and_index_optimization` to a populated database (2026-11-10)
 
 Fresh and small databases need nothing special. On a populated ledger the migration's index builds are plain `CREATE INDEX`: a migration runs as one transaction, and `CONCURRENTLY` is refused both inside a transaction and on a partitioned parent, so a build blocks ledger writes for its whole duration. Since 2026-11-10 every build is skipped when the index already has its target definition, so build them online first, then deploy.
 
@@ -5774,6 +5828,37 @@ These steps, the guard and the resilient function were rehearsed on embedded Pos
 Operationally, the migration drops and rebuilds the two `journal_lines` indexes on the partitioned parent, which takes an `ACCESS EXCLUSIVE` lock on every partition for the duration of each build. It is a direct migration because the project has no live production data; on a populated database, run it in a maintenance window (the same operational rule as the shard-checkpoint migration in section 12).
 
 The query rules that depend on these indexes are in `core.ledger` section 3.11 and `core-back/README.md` section 3.1.
+
+## 16. Report engine schema (schema version 26, 2026-11-09)
+
+`20261110120000_dynamic_report_engine_sdk` adds the report-engine registry and bumps `REQUIRED_SCHEMA_VERSION` to 26. It defines `ReportSpecStatus`, `ReportChromeType`, `ReportAudienceScope`, `ReportAuthorityMode`, `report_asset_bundles`, `report_chrome_specs`, `report_definition_specs` and `report_execution_audit`. The partial unique index `report_chrome_specs_one_default_per_type_idx` permits only one published global default header and one footer. The four models are listed in `core.report-engine` section 6.
+
+## 17. Report engine hardening and merchant execution (schema version 27, 2026-11-09)
+
+`20261110130000_report_engine_merchant_and_aml` adds `report_definition_specs.allow_confidential_aml_bypass` (default false), a partial unique index on `report_definition_specs(code) WHERE is_latest_published = true`, and append-only triggers on `report_execution_audit`. The AML bypass is only applied after a different MLRO or Security Admin approves a `REPORT_AML_BYPASS` approval request. The merchant report API forces `merchant_scope_input_key` from the authenticated merchant and rejects any non-merchant-scopable model.
+
+## 18. Declarative regulatory reporting (schema version 28, 2026-11-10)
+
+`20261110140000_declarative_regulatory_reporting` adds the format-aware reporting engine:
+
+- Enums `ReportOutputFormat` (`XML`, `XLSX`), `RegulatorySchemaStatus` (`DRAFT`, `PROVISIONAL`, `PENDING_APPROVAL`, `CONFIRMED`, `SUPERSEDED`, `ARCHIVED`) and `ReportOutputValidationStatus` (`NOT_GENERATED`, `PROVISIONAL_SCHEMA`, `VALIDATED`, `INVALID`).
+- `regulatory_report_schemas` (authority, report type, format, schema code/name/version, lifecycle status, XSD text or workbook JSON, optional encrypted uploaded template, compiled AST/workbook, mapping blueprint, sample context, approval link, seed key; unique `(authority, schema_code, version)`).
+- `regulatory_schema_default_bindings` (authority, report type, report code, format -> schema; unique together), `regulatory_rule_schema_bindings` (rule + format -> schema), and `regulatory_report_outputs` (report, format, revision, schema id/version, encrypted content, SHA-256, validation status/errors, generated/submitted times, superseded time; unique `(report_id, format, revision)` and a partial unique current-output index).
+- `reporting_rules.required_output_formats` and `primary_output_format`; `regulatory_reports.required_output_formats`, `filing_channel`, `acknowledged_at`, `rejection_reason`, `supersedes_id`; and a full `due_at` index. `regulatory_report_schemas.revision`, `cloned_from_schema_id`, `mapping_sha256`, `compiled_from_sha256`; `regulatory_report_outputs.payload_sha256`; `regulatory_reports.aml_case_id` is no longer unique and has a normal index. A database trigger blocks definition/mapping/compiled/template changes once a schema leaves `DRAFT`. Existing scheduled rules/reports are backfilled by `returnCode`/`reportCode`.
+- The baseline provisional schemas/templates are inserted lazily by `ensureBaselineReportingSchemas` (`cbl-goaml-str-v1`, `cbl-goaml-ltr-v1`, `cbl-psp-m-v1`, `cbl-aml-q-v1`, `cbl-aml-a-v1`, `cbl-goaml-ltr-xlsx-v1`) and their default bindings. They are `PROVISIONAL`; a confirmed FIU XSD/CBL workbook must be uploaded and promoted before XML filing.
+
+## 19. Reporting Studio phases 2-5 (schema versions 29 to 32, 2026-11-10)
+
+- `20261110150000_report_template_binding` (version 29): `regulatory_report_schemas.template_binding_json` stores the visual named-range mapping for an uploaded XLSX template. The column is separate from `template_ciphertext` so the encrypted workbook and its mapping can be rotated independently; the template upload route validates the zip, rejects macros/external links/OLE/zip bombs and audits the SHA-256.
+- `20261110160000_incident_management` (version 30): `ReportingType.INCIDENT`; enums `IncidentSeverity`, `IncidentStatus`, `IncidentCategory`, `IncidentImpactScope`, `IncidentTimelineType`, `IncidentActionStatus`, `IncidentCommunicationChannel`, `IncidentLinkType`; tables `incidents`, `incident_timeline_entries`, `incident_responders`, `incident_action_items`, `incident_links`, `incident_communications`. The lifecycle is DETECTED -> TRIAGED/DECLARED -> CONTAINED -> MONITORING -> RESOLVED -> POSTMORTEM -> CLOSED, with timestamp columns and postmortem due dates for SEV1/SEV2, security and data-integrity incidents.
+- `20261110170000_docx_report_output` (version 31): adds `ReportOutputFormat.DOCX`. `DocxNarrativeSchema` sections are rendered by the pure-JS OOXML builder; the output is stored encrypted under the `reporting-docx` context and downloaded as `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
+- `20261110180000_external_filing_adapters` (version 32): `FilingAdapterKind`, `FilingAdapterStatus`, `ExternalSubmissionStatus`; `external_filing_adapters` (name, authority, MANUAL/HTTP, status, HTTPS endpoint, encrypted auth secret, timeout, config) and `external_submissions` (report, adapter, status, request SHA-256, external reference, response code/body, error). The HTTP adapter rejects non-HTTPS, private/loopback/link-local endpoints, embedded credentials and redirects; the manual adapter remains the default.
+
+The reporting baseline set now includes a PROVISIONAL `cbl-incident-docx-v1` default binding for `CBL / INCIDENT / INC / DOCX`. As with the other provisional baselines, the incident output cannot be filed until the schema is reviewed and confirmed.
+
+## 16. Merchant report authoring line (schema version 33)
+
+`20261110190000_merchant_report_engine` adds five tables separate from the staff report registry: `merchant_report_specs` (merchant-owned versioned specs; unique `(merchant_id, code, version)` and a partial unique latest-published index), `merchant_report_asset_bundles` (unique per merchant and content hash), `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` (hourly verify/execute counters) and `merchant_report_studio_status` (per-merchant Studio suspension). The migration bumps the schema version to 33; `phase1-mtls-and-schema.test.ts` asserts the applied version.
 
 ---
 
@@ -7347,6 +7432,198 @@ To run them against a private, throwaway cluster (never the live databases): `in
 
 ---
 
+<a id="corereport-engine"></a>
+
+> **Part ID:** `core.report-engine` · **Status:** `implemented` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree`
+
+# Dynamic Report Engine SDK and Report Studio Host
+
+## 1. Purpose and scope
+
+The report engine turns a declarative, AI-authored `ReportDescriptorSpec` into a bilingual, read-only financial report without storing or executing raw SQL. It is split into two layers:
+
+- `core-back/lib/reportEngineSdk/**` is a host-agnostic SDK. It knows the DSL, the compilers, the five verification layers, the read-only PostgreSQL executor and the AI transcripts. It imports no `core-back/api`, `core-back/engine` or generated Prisma client modules.
+- `core-back/engine/reportStudio/**` is the payment-gateway host adapter. It supplies the live schema catalog, authority/domain/optimization metadata, autocomplete providers, asset storage and the `ReportEngineHostConfig`.
+
+`core-back/api/internal/adminReportEngine.ts` exposes the SDK through internal admin routes. `admin-back/api/protected/reportEngine.ts` proxies the same surface to the admin portal.
+
+## 2. DSL and verification
+
+`ReportDescriptorSpec v1.0` contains:
+
+- `inputs`: typed form fields compiled to Zod (`string`, `uuid`, `number`, `integer`, `amount_minor`, `boolean`, `date`, `datetime`, `daterange`, `enum`, `multi_enum`, `entity_autocomplete`, `entity_multi_autocomplete`) with presets and a dependent autocomplete source.
+- `datasets`: a safe AST (`from_model`, joins, select aliases, where tree, group by, having, window fields, order by, limit). The compiler emits only parameterized `SELECT` statements.
+- `transforms`: deterministic post-query operations (`COMPUTE_COLUMN`, `JOIN_DATASETS`, `PIVOT_DATASET`, `COMPARE_WITH_ASSET`).
+- `sections`: `KPI_GRID`, `DATA_TABLE`, `CHART`, `VECTOR_DRAW`, `HTML_TEMPLATE`, `IMAGE_BANNER`, `PAGE_BREAK`.
+- `i18n.locales`: mandatory `en` and `ar` dictionaries; additional locales are allowed but must cover every referenced key.
+- `required_assets`: flat-file image, JSON or CSV assets delivered in a partnered `.zip`.
+
+The verification pipeline is:
+
+1. **Layer 1** — Zod schema and bilingual completeness (`SpecStructuralValidator.ts`).
+2. **Layer 2** — read-only AST safety, mandatory partition filters, merchant isolation, forbidden secret columns, `EXPLAIN` cost and sequential-scan guard (`QuerySafetyAndOptValidator.ts`).
+3. **Layer 3** — automatic authority inference, cross-domain conflict detection and Security Admin override (`AuthorityInferenceEngine.ts`).
+4. **Layer 4** — HTML/CSS/SVG sanitizer and `.zip` asset validation (magic bytes, traversal, zip bombs, comparison data) (`CssAndHtmlSanitizer.ts`, `AssetBundleValidator.ts`).
+5. **Layer 5** — read-only dry run with synthesized inputs (`ReportDryRunSimulator.ts`).
+
+`buildReportRepairPrompt` returns a deterministic Markdown prompt containing the original JSON, every diagnostic path/code and the `aiFixHint`.
+
+## 3. Read-only execution line
+
+`PostgresReadOnlyReportExecutor` enforces the following before and during every query:
+
+- `assertPureSelectSql` rejects anything that is not a single `SELECT`/`WITH` statement and blocks `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `COPY`, `CALL`, `DO`, DDL, `pg_sleep` and other unsafe functions.
+- The transaction is `BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`.
+- Session settings are `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `work_mem` and UTC.
+- Rows are capped by the dataset `limit` and the host `maxRowsPerDataset`.
+- The pool is a dedicated pool; it is not the application pool and does not accept writes.
+
+The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back query to the standard execution error response.
+
+## 4. Host catalog and authority metadata
+
+`core-back/engine/reportStudio/schemaCatalog.ts` parses `core-back/prisma/schema.prisma` at startup (cached) and builds `CatalogModelDef` entries:
+
+- model/table names, scalar columns (keyed by database column name), enums, relations;
+- domain (`LEDGER`, `PAYMENTS`, `MERCHANTS`, `COMPLIANCE_AML`, `GATEWAYS`, `SECURITY_AUDIT`, ...);
+- natural roles and required authorities;
+- merchant-scopable column and confidential AML marker;
+- optimization rules (`journal_lines` requires a bounded `created_at`; `payment_attempts` requires a bounded range; row limits);
+- `minorUnitScale: 1000` for the synthetic `amount_minor`/`balance_minor` vocabulary used by the DSL.
+
+`core-back/engine/reportStudio/paymentGatewayHostConfig.ts` assembles the host config, including the read-only pool (replica URL when configured), asset storage and autocomplete providers.
+
+`autocompleteProviders.ts` provides the eight sources: `merchants`, `applications`, `gateways`, `payment_rails`, `gl_accounts`, `currencies`, `staff_users`, `aml_cases`.
+
+## 5. API surface
+
+`core-back/api/internal/adminReportEngine.ts` (mounted in `core-back/api/internal/admin.ts`):
+
+| Method | Path | Purpose |
+| :--- | :--- | :--- |
+| GET | `/report-engine/transcript` | AI authoring transcript for report descriptors. |
+| GET | `/report-engine/chrome/transcript` | AI authoring transcript for chrome specs. |
+| POST | `/report-engine/specs/verify` | Parse and run all five verification layers; returns diagnostics and the repair prompt. |
+| POST | `/report-engine/specs` | Persist a verified draft; optionally publish. |
+| POST | `/report-engine/specs/:id/authority-override` | Security Admin override with justification; requires `security:write`. |
+| GET | `/report-engine/catalog` | Published catalog filtered by the actor's authority policy; accepts `audience`, `page`, `pageSize`, `search`, `sortKey`, `sortDirection` and returns `total`. |
+| GET | `/report-engine/autocomplete` | Autocomplete provider query. |
+| POST | `/report-engine/execute` | Read-only execution; returns datasets, resolved chrome, asset data URLs and verification hash. |
+| GET | `/report-engine/chrome` | Chrome registry; accepts `type`, `includeArchived`, `page`, `pageSize`, `search`, `sortKey`, `sortDirection` and returns `total`. |
+| POST | `/report-engine/chrome` | Create/update a chrome spec. |
+| POST | `/report-engine/chrome/:id/set-default` | Set the single published global default per type. |
+| POST | `/report-engine/chrome/:id/archive` | Archive a header/footer; archived rows are hidden from the registry by default. |
+
+`admin-back/api/protected/reportEngine.ts` forwards the same routes under `/api/v1/admin/report-engine/*` with the admin authority guard.
+
+## 6. Schema versions 26, 27 and 33
+
+`20261110120000_dynamic_report_engine_sdk` adds:
+
+- enums `ReportSpecStatus`, `ReportChromeType`, `ReportAudienceScope`, `ReportAuthorityMode`;
+- `report_asset_bundles` (bundle SHA-256, storage key, total bytes, file count, manifest, uploader);
+- `report_chrome_specs` (code/version, type, status, single global default per type via a partial unique index, supported locales, spec JSON/SHA-256, publisher);
+- `report_definition_specs` (code/version, category, audience, status, latest-published flag, supported/default locales, spec JSON/SHA-256, verification report, inferred roles/authorities, conflict status, confidential AML flag, override fields, publisher);
+- `report_execution_audit` (spec, code/version, actor, locale, scoped merchant, redacted inputs, row count, duration, node, verification hash, render target).
+
+`REQUIRED_SCHEMA_VERSION` is 33. Version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. Version 33 adds the separate merchant authoring line: `merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` and `merchant_report_studio_status`, with unique `(merchant_id, code, version)` and one latest-published row per merchant/code. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
+
+## 7. Security invariants
+
+- Report SQL is never stored or accepted as raw SQL; only the AST is persisted.
+- Every query runs in a read-only transaction on a dedicated pool.
+- A merchant-facing report must bind `merchant_id` to the merchant scope input; the API also rejects a merchant actor whose application scope does not match.
+- `FORBIDDEN_SECRET` columns (credential ciphertext, password hashes, sealed secrets) are rejected at Layer 2 and never appear in the transcript catalog.
+- A Security Admin override requires the `security:write` authority and a non-empty justification; the override is stored on the spec and audited.
+- The execution audit stores redacted inputs and a SHA-256 verification hash of the executed datasets.
+
+## 8. Tests
+
+`core-back/test/reportEngineSdk/**` implements the RE-T01..RE-T22 matrix (plus extra dry-run/transcript cases). `admin-front/src/lib/reportEngineSdk/__tests__/**` covers formatting, RTL vector mirroring, chrome binding, the language prompt options, the paged-media document and the client sanitizer. The exhaustive schema suite and `phase1-mtls-and-schema.test.ts` verify schema version 27 and the four new models.
+
+## 9. Merchant reporting line (schema version 33)
+
+The merchant line is physically separate from the staff registry. It has its own tables (`merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit`), its own host catalog (`engine/reportStudio/merchantHostConfig.ts`) and its own transcript.
+
+### 9.1 Merchant host catalog
+
+The merchant host is built from an explicit allow-list of directly merchant-scoped models only: `merchants`, `applications`, `wallets`, `payment_attempts`, `cashout_requests` and `rm_merchant_daily_stats`. Each model has an explicit column allow-list. Ledger, credentials, audit, AML, users, payment links, POS terminals, disputes, adjustments, reconciliation rows, webhooks and outbox tables are absent from the catalog. Models without a direct `merchant_id` are not admitted because the engine cannot inject a scope predicate on them.
+
+### 9.2 Engine-injected identity
+
+`compileDatasetQueryToSql` accepts `options.merchantScope`. It rejects any alias whose model is not merchant-scopable, adds `<alias>.<merchant_column> = $merchant` as a top-level AND for the base alias and every joined alias, and selects a hidden `__scope_merchant_id` column. `executeReport` verifies the injected alias set, asserts every returned row equals the principal's merchant, strips the hidden column, and on mismatch invokes the merchant callback before throwing `ReportMerchantScopeViolationError`; the API audits the event and opens a P1 `MANUAL_REVIEW` operator case.
+
+### 9.3 Routes
+
+Core merchant routes (mounted without a prefix behind merchant authentication):
+
+| Method | Path | Purpose |
+| :--- | :--- | :--- |
+| GET | `/report-engine/catalog` | Platform templates plus the merchant's own published reports; strips the query AST. |
+| GET | `/report-engine/autocomplete/:sourceKey` | Own applications, payment links, POS terminals and currencies. |
+| POST | `/report-engine/catalog/:code/execute` | Scoped execution with the merchant identity injected. |
+| GET | `/report-engine/studio/transcript` | Merchant-only AI transcript. |
+| POST | `/report-engine/studio/verify` | Five layers plus merchant-tier limits. |
+| POST | `/report-engine/studio/specs` | Save verified or publish. |
+| GET | `/report-engine/studio/specs` | Own versions. |
+| GET | `/report-engine/studio/specs/:id` | Own spec detail. |
+| POST | `/report-engine/studio/specs/:id/publish` | Publish an own verified version. |
+| POST | `/report-engine/studio/specs/:id/archive` | Archive and promote the previous published version. |
+| GET | `/report-engine/studio/usage` | Codes, runs, DB time, hourly limits and suspension. |
+| POST | `/report-engine/studio/templates/:code/clone` | Clone a platform template into the merchant registry. |
+
+`merchant-back/api/protected/reportEngine.ts` proxies the same paths. Staff oversight lives in the admin router: `/report-engine/merchant-reports`, `/report-engine/merchant-executions` and the suspend/resume actions, proxied by `admin-back` and shown at `/reports/merchant-reports`.
+
+### 9.4 Limits and abuse controls
+
+Merchant tier limits are re-checked on verify, save and execute: ≤ 6 datasets, ≤ 2 joins, ≤ 20 select fields, ≤ 2 window fields, ≤ 24 sections, ≤ 10,000 rows, a bounded date range ≤ 92 days, spec ≤ 256 KB, zip ≤ 2 MB, a 5 s statement timeout, a lower EXPLAIN cost cap and no large-table sequential scans. Runtime controls: the `merchant_reports.policy` Platform Setting (`enabled` runner/Studio switch, `assetsEnabled` asset-bundle switch, read through a 5 s cache and invalidated after settings writes), per-merchant Studio suspension, 30 verifications/hour and 60 executions/hour, a daily DB-time budget (default 10 minutes), 50 codes with 20 versions each, one running execution per merchant plus a global semaphore (4), and a 60 s result cache keyed by `(merchant, spec, inputs)`. The merchant transcript prints the current asset policy; when assets are disabled, `required_assets` must be empty and `.zip` uploads are rejected.
+
+## 9.5 API error handling
+
+Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `400 SCHEMA_VALIDATION_ERROR` with the Zod issues. Admin execute returns `404 REPORT_NOT_FOUND` only when the code has no versions and `409 REPORT_NOT_PUBLISHED` with the latest status when versions exist but none is the published latest. Chrome save maps `P2002` to `409 REPORT_CHROME_DUPLICATE`, `P2003` to `409 REPORT_CHROME_REFERENCE_CONFLICT`, asset storage failures to `500 REPORT_CHROME_ASSET_SAVE_FAILED` and database failures to `500 REPORT_CHROME_SAVE_FAILED`, each with a reason. The admin portal renders returned diagnostics through `ReportDiagnosticsPanel`. The Studio also calls `POST /report-engine/specs/preview` to execute a verified draft with sample inputs and render the sandboxed paginated preview; nothing is persisted.
+
+## 10. Security additions
+
+- `PII_MASKED` values are redacted after query execution unless the actor holds `piiUnmaskAuthorities` (default `security:write`).
+- Confidential AML reports require MLRO/Compliance access. A Security Admin may request `allowConfidentialAmlBypass`, but it applies only after a different MLRO/Security Admin approves the `REPORT_AML_BYPASS` request.
+- Chrome templates, inline chrome, `global_scoped_css` and custom SVG templates are sanitized. `<style>`, external `src`/`href`, `@import`, event handlers and executable URI schemes are rejected.
+- The client Paged.js preview runs in a sandboxed same-origin iframe (`sandbox="allow-same-origin allow-scripts allow-modals"`) with a strict meta CSP (`script-src 'self'`, no inline scripts or executable URLs), external same-origin Paged.js scripts, and `postMessage` page counts with render tokens. The report cannot execute scripts or inject styles into the portal head; printing copies the paginated DOM into a fresh same-origin print window (scripts stripped), with a bridge `window.print()` fallback. Report font URLs are absolute same-origin URLs because Paged.js resolves CSS `url()` values against the `about:srcdoc` document URL; relative font paths make its CSS parser throw and leave a blank preview. The chrome preview uses a separate script-free sandboxed surface.
+- Chrome `required_assets` are loaded during execution and during the Chrome preview.
+- Schema version 27 adds the AML bypass flag, latest-published uniqueness and append-only execution audit.
+
+## 11. Performance, transcript and DSL completeness
+
+- Datasets execute with bounded concurrency (4) on the read-only pool; each dataset still runs in its own read-only transaction, and transforms run after all datasets complete.
+- Window functions are evaluated over the full filtered/grouped result, then the dataset `ORDER BY`/`LIMIT` is applied. Base columns referenced only by window/order clauses are added to the inner projection so the window query remains valid.
+- The AI transcript now includes the complete report field reference, dataset/query operators, transforms, sections, inputs, assets, merchant-scope rules, suggested access and chrome fields. The chrome transcript documents height, first-page, border, asset dimensions and every allowed variable.
+- `suggested_access` is validated and surfaced as a warning when it grants a role/authority the queried models do not naturally allow.
+- Chrome `max_width_mm`/`max_height_mm` are applied to `asset://` images when the template does not already set an inline style.
+
+## 12. Authoring compatibility and limits
+
+- The report schema accepts up to 64 datasets, 64 transforms, 128 sections, 20 inputs, 6 joins per dataset, 40 select fields and 5 window fields.
+- Transform `operation` also accepts the authoring alias `kind`; COMPUTE_COLUMN accepts `compute`, `compute_op` or `operator` as aliases for `formula`. The persisted canonical form is always `operation` + `formula`.
+- `default_value` accepts a raw literal, a preset object, or `{ literal: <value> }` (normalised to the raw value).
+- `view_box` accepts `{ width, height }` or an SVG-style `"x y width height"` string.
+- `format_hint` supports `INTEGER` in dataset selects and table columns, matching KPI cards; `BAR` is a valid vector node shape and maps to a rectangle.
+- These limits, aliases and shapes are documented in the AI authoring transcript.
+
+## 13. Reference resolution and compiler edge cases
+
+- Layer 1 now builds a field registry from every dataset's `select[].alias` and `window_fields[].alias`, then processes transforms in order: COMPUTE_COLUMN adds its output, JOIN_DATASETS unions left/right fields, PIVOT_DATASET exposes the row key plus a wildcard for data-dependent columns, and COMPARE_WITH_ASSET exposes the source fields plus `_asset_matched`, `_has_discrepancy`, `<field>_expected` and `<field>_variance`. Sections and visibility conditions are validated against this final registry.
+- GROUP BY on a select alias backed by `CASE_WHEN_ENUM` expands to the underlying column, while other expressions still compile normally.
+- `resolveColumnSql` is initialized before join processing, so `additional_on` predicates compile safely; a regression test covers an `additional_on` join plus an aggregate from the joined alias.
+- ZIP assets are flattened to unique basenames, `./` prefixes are removed, duplicate basenames are rejected, and required-asset lookup is case-insensitive when there is exactly one match. The stored relative path uses the required canonical `file_name`, so later execution can retrieve the asset.
+
+## 14. Transform output contract and diagnostics
+
+- COMPARE_WITH_ASSET accepts an optional `output_field` per compare field. The output dataset always contains the source fields, the `asset_field` target value, `_asset_matched`, `_has_discrepancy`, `<dataset_field>_expected` and `<dataset_field>_variance`. When `output_field` is set it is an additional alias for the asset_field target value; when omitted, the asset_field name is addressable.
+- COMPUTE_COLUMN `right_operand` is optional only for unary `PERCENTAGE_SHARE`; other formulas require it. `PERCENT_BPS` is accepted as a transform output format.
+- Section-field diagnostics list available fields/datasets, add a closest-match suggestion, and distinguish unknown datasets from unknown fields.
+- ZERO_NATURAL_ROLE_INTERSECTION remains a non-blocking warning and points to the Security Admin override; SUGGESTED_ACCESS_CONFLICT is emitted only when `suggested_access` is present.
+
+---
+
 <a id="edgeshared"></a>
 
 > **Part ID:** `edge.shared` · **Status:** `implemented` · **Last verified:** 2026-11-08 · **Verified against:** `5a24f6f+working-tree`
@@ -7623,7 +7900,7 @@ Applies to all three copies of the client:
 
 <a id="edgeadmin"></a>
 
-> **Part ID:** `edge.admin` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `edge.admin` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `5a24f6f+working-tree`
 
 # Admin Edge BFF
 
@@ -7713,7 +7990,7 @@ All routes are prefixed with `/api/v1/admin`. The auth routes are inside the LAN
 | KYB documents | `GET /kyb-documents`, `GET /kyb-documents/:id`, `GET /kyb-documents/:id/content`, `POST /kyb-documents/:id/review`, `POST /kyb-documents/:id/request-replacement`, `POST /kyb-documents/:id/request-revalidation`, plus export/summary variants |
 | Merchants | `GET /merchants`, `GET /merchants/:id`, `GET /merchants/:id/stats`, `PATCH /merchants/:id/descriptive`, `POST /merchants/:id/suspend`, `POST /merchants/:id/reinstate`, `POST /merchants/:id/close`, `GET /merchants/:id/pending-changes`, `POST /merchants/:id/pending-changes/:approvalId/withdraw`, `POST /merchants/:id/propose-edit`, `GET /merchants/:id/detail-changes`, plus export/summary variants |
 | Approvals | `GET /approvals`, `GET /approvals/:id`, `POST /approvals/:id/approve`, `POST /approvals/:id/reject`, `POST /approvals/bulk-reject`, plus export/summary variants |
-| AML (confidential) | `GET /aml/screenings`, `GET /aml/screenings/:id`, `POST /aml/matches/:id/disposition`, `GET /aml/cases`, `GET /aml/cases/:id`, `POST /aml/cases/:id/propose`, `GET, POST /aml/rules`, `GET, POST /aml/reporting-rules`, `GET, POST /aml/reports`, `POST /aml/reports/:id/submit`, `POST /aml/reports/:id/acknowledge`, plus export/summary variants |
+| AML (confidential) | `GET /aml/screenings`, `GET /aml/screenings/:id`, `POST /aml/matches/:id/disposition`, `GET /aml/cases`, `GET /aml/cases/:id`, `POST /aml/cases/:id/propose`, `GET, POST /aml/rules`, `GET, POST /aml/reporting-rules`, `GET, POST /aml/reports`, `GET /aml/reports/:id/payload`, `PATCH /aml/reports/:id/payload`, `POST /aml/reports/:id/generate-output`, `GET /aml/reports/:id/outputs/:format/download`, `POST /aml/reports/:id/request-approval`, `POST /aml/reports/:id/submit`, `POST /aml/reports/:id/acknowledge`, `GET, POST /aml/report-schemas`, `GET, PUT /aml/report-schemas/:id`, `GET /aml/report-schemas/:id/definition`, `GET /aml/report-context-catalog`, `POST /aml/report-schemas/:id/compile`, `POST /aml/report-schemas/:id/validate`, `POST /aml/report-schemas/:id/simulate`, `POST /aml/report-schemas/:id/clone`, `POST /aml/report-schemas/:id/sample-context`, `POST /aml/report-schemas/:id/code-lists/preview`, `GET, PUT /aml/report-schemas/:id/template`, `POST /aml/report-schemas/:id/workbook/preview`, `POST /aml/report-schemas/:id/promote`, `GET, PUT /aml/report-schema-defaults`, `GET, PUT /aml/reporting-rules/:id/schema-bindings`, `GET /aml/reports/:id/requirements`, plus export/summary variants |
 | Gateways | `GET /gateways/ai-transcript`, `POST /gateways/spec-verify`, `POST /gateways/spec-import`, `GET, POST /gateways`, `GET, PATCH /gateways/:id`, `POST /gateways/:id/rollback`, `GET, POST /gateways/:id/versions`, plus export/summary variants |
 | Gateway versions | `POST /gateway-versions/:vid/clone`, `GET /gateway-versions/:vid`, `PUT /gateway-versions/:vid/environments`, `/auth`, `/settings`, `/crypto-profiles`, `/flows`, `/channels`, `/status-rules`, `/error-maps`, `POST /gateway-versions/:vid/dry-run`, `/run-suite`, `/submit-approval` |
 | Credential sets | `GET, POST /credential-sets`, `GET, PUT /credential-sets/:id`, `POST /credential-sets/:id/verify`, `POST /credential-sets/:id/revoke` |
@@ -7897,6 +8174,27 @@ Contracts enforced at the edge: bodies are `.strict()` zod; `reason` is `z.strin
 ## Remediation round 2 (2026-11-08): limiters, uploads, invitation routes
 
 `api/public/auth.ts` wires `createAccountLimiters` (per `identifier|ip` and an identifier ceiling, failures only) and the public `POST /auth/accept-invitation` route; `api/upload.ts` exports `uploadGuards` (limiter, `Content-Length` pre-check, session-shape check before multer) and is used by the reconciliation and join-request uploads; `api/protected/users.ts` and `api/contract.ts` carry the invitation-based create and re-invite contracts (no password or phone in the create body).
+
+## Report engine forwards (2026-11-10)
+
+`/api/v1/admin/report-engine/*` forwards the core report-engine routes. The catalog forwards `audience`, `page`, `pageSize`, `search`, `sortKey` and `sortDirection`; the chrome registry forwards `type`, `includeArchived`, `page`, `pageSize`, `search`, `sortKey` and `sortDirection`; and `POST /chrome/:id/archive` is proxied. The edge authority guard accepts `report:review`, `report:approve`, `report_engine:author`, `report_engine:run`, `gateway:write`, `security:read`, `security:write` and `reports.draft` for reads, and `report:approve`, `report_engine:author`, `report:review`, `security:write` and `reports.draft` for writes.
+
+## Reporting Studio, incidents and filing adapters (2026-11-10)
+
+`admin-back/api/protected/aml.ts` forwards the new reporting surface to core; every route remains behind `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` and core re-checks the authority:
+
+- template/studio: `POST /report-schemas/:id/template/analyze`, `POST /report-schemas/:id/template/upload`, `DELETE /report-schemas/:id/template`, `GET|PUT /report-schemas/:id/template`, `POST /report-schemas/:id/workbook/preview`; the XML/XLSX/DOCX schema enums accept `DOCX`.
+- rule bindings: `PUT /reporting-rules/:id/schema-bindings` relays the core 202 (approval request), not 200.
+- incidents: list/create/detail/update and transition, timeline, responders and responder acknowledgement/release, actions, links, communications and `POST /incidents/:id/report`.
+- filing: `GET|POST|PATCH|DELETE /filing-adapters`, `GET /reports/:id/submissions` and `POST /reports/:id/file`; file relays core's 202/502 status and never exposes the adapter secret.
+
+The edge validates identifiers, enums and body shapes, but keeps the core as the authority for maker-checker, schema lifecycle, output readiness and adapter authority matching.
+
+## Final AML forwarding sweep (2026-11-10)
+
+- `GET /aml/incidents` now has an explicit query schema and forwards `search`, `page`, `pageSize`, `status`, `severity` and `category`; without it `coreForward` dropped every filter.
+- Incident writes, filing-adapter create/update/disable and `POST /reports/:id/file` relay core's 202 instead of returning a false 200.
+- The new AML routes remain behind the shared `amlConfidential` guard; the edge only validates shapes while core remains the authority for maker-checker, submission readiness and adapter matching.
 
 ---
 
@@ -8197,6 +8495,16 @@ The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` an
 
 `lib/authLimiters.ts` mirrors the admin account limiters; `lib/security/sessionCookie.ts` exports `assertMerchantSessionShape`, which `api/upload.ts` applies (with the existing limiter and size cap) before any body is buffered.
 
+## 8. Merchant report proxy (2026-11-10)
+
+`merchant-back/api/protected/reportEngine.ts` is mounted at `/report-engine` and forwards:
+
+- `GET /catalog` to `/internal/merchant/report-engine/catalog`, forwarding `page`, `pageSize`, `search`, `sortKey` and `sortDirection`;
+- `GET /autocomplete/:sourceKey` to the merchant autocomplete route;
+- `POST /catalog/:code/execute` to the merchant execute route.
+
+The edge validates the catalog query shape and the public execute shape (`inputs`, `locale`, `renderMode`). Core enforces the merchant authority, audience scope, forced merchant ID and report safety. A client-supplied merchant ID is rejected by the strict edge schema and would be overwritten by core even if it reached it.
+
 ---
 
 <a id="edgecheckout"></a>
@@ -8450,7 +8758,7 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 
 <a id="admin-uisystem"></a>
 
-> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `d695518+working-tree`
 
 # Admin UI System
 
@@ -8529,6 +8837,8 @@ No external font request is required. `tests/e2e/admin/a11y.spec.ts` and the she
 - Component defaults: flat cards with `rounded: "lg"`; 36 px, `rounded: "md"`, no-transform buttons; outlined compact text fields/selects/autocompletes/textareas/comboboxes with `hideDetails: "auto"`; small rounded chips; a `rgba(15, 23, 42, 0.45)` dialog scrim.
 - `VDateInput` receives an outlined default through the blueprint defaults block.
 
+Theme mode is `system | light | dark`. `utils/theme` resolves the persisted mode (localStorage `theme`; absent means `system`) against `prefers-color-scheme`; `state/theme` applies it to Vuetify, listens to `matchMedia` changes while in `system` mode, and syncs across tabs. `plugins/vuetify.ts` uses `initialTheme()` for `defaultTheme` and `main.ts` calls `initTheme()` before mount, so every route (including the login page) starts in the operating-system theme with no light flash. `ThemeMenu` is the explicit three-option menu (System, Light, Dark) used by the shell, the auth layout and the merchant landing header; the old `toggleTheme` remains as a compatibility cycle (system -> light -> dark).
+
 ### 3.4 Primitives and extras
 
 `admin-front/src/components/ui/index.ts` is the primitive barrel. The compliance test requires these 13 named exports:
@@ -8559,7 +8869,7 @@ Additional exported primitives/extras are `SurfaceCardText`, `MetaPill`, `FormCh
 `admin-front/src/layouts/default.tsx` implements the authenticated shell:
 
 - A skip link targeting `#pg-main-content`.
-- A 56 px flat app bar with menu toggle, brand, breadcrumbs, live ledger invariant pill (for `profit.read` or `liquidity.read`), global search trigger (`Ctrl+K`/`Cmd+K`), help button, theme toggle, language menu, and user menu.
+- A 56 px flat app bar with menu toggle, brand, breadcrumbs, live ledger invariant pill (for `profit.read` or `liquidity.read`), global search trigger (`Ctrl+K`/`Cmd+K`), help button, theme mode menu (System/Light/Dark), language menu, and user menu.
 - A 248 px `VNavigationDrawer`, permanent on desktop and temporary below the compact breakpoint. It contains brand/environment badge, guide search pill, collapsible navigation sections, and an operator card with role and maker/checker dots.
 - Route progress bar, focused `VMain`, global search palette, guide search modal, and contextual help drawer.
 - The `?` key opens help when the user is not typing in an input; `Escape` closes the topmost overlay.
@@ -8577,6 +8887,8 @@ Additional exported primitives/extras are `SurfaceCardText`, `MetaPill`, `FormCh
 - Three posture badges: TLS 1.3 mTLS Verified, AES-256-GCM Hardware Vault, Four-Eyes Governance.
 - A live status line.
 - A main panel slot for the login form.
+
+The auth shell also carries the three-mode theme menu in its top-right corner. `initTheme()` runs before mount and `plugins/vuetify.ts` uses `initialTheme()`, so the login page follows the OS theme on first paint and tracks OS changes while in System mode.
 
 The auth shell is presentation only. Authentication, MFA, and session authority enforcement live in the edge and core services.
 
@@ -8716,6 +9028,7 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 ## 10. Change history
 
+- 2026-11-09 — Added system/light/dark theme modes across all four portals: `utils/theme` + `state/theme` resolve the persisted mode against `prefers-color-scheme`, `initialTheme()`/`initTheme()` apply it before mount (login included), a live `matchMedia` listener follows OS changes in System mode, and the explicit `ThemeMenu` replaces the light/dark toggle in the shell, auth layout and merchant landing. See `TRACKER.md`.
 - 2026-11-03 — Initial canonical part created from the v1/v2 UI designs and working-tree code. Records the 13-primitive contract, 248/56 shell, Fake Rails partial rollout, removed app scaling, and the still-present stale files.
 
 ## Security hardening (2026-11-05)
@@ -8744,11 +9057,15 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 - **Lazy heavy chunks (GAP-060).** `utils/xlsx` is a lazy facade (the exceljs/xlsx chunk loads on the first export click) and charts load through `components/EChart/lazy.tsx` (`defineAsyncComponent`); `tests/unit/admin-bundle-lazy.test.ts` fails if the dashboard, profitability page, gateway health drawer or table header import the heavy libraries statically.
 - **Translation gate (GAP-061).** `tests/unit/i18n-catalogue.test.ts` (scanner `tests/unit/helpers/i18nScan.ts`) fails on a literal `t()` key with no catalogue entry that is not in the shrink-only baselines `tests/unit/fixtures/i18n-missing-*.json`, and on a key whose Arabic value conflicts across catalogue files (the last spread silently won). The 18 conflicts were resolved; the existing missing keys stay in the baselines and are filled over time (`UPDATE_I18N_BASELINE=1` rewrites a baseline after a fix).
 
+## Dark teleported overlays (2026-11-10)
+
+Vuetify teleports dialogs, menus and drawers under a `.v-overlay__content` / `.v-navigation-drawer` element that receives the theme class and CSS variables but not a base text color. Custom surface components (`FormModal`, `SlideOverDrawer`, SafeguardDialog, the guide search surface, and any raw dialog content) therefore inherited the body's black text while sitting on the dark surface. `fintech-minimal.css` now sets `color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`; component-specific text colors and status tones still override it. The same rule is mirrored in the merchant, checkout and Fake Rails portals, and `tests/unit/dark-overlay-colors.test.ts` guards all four stylesheets.
+
 ---
 
 <a id="admin-uiroutes"></a>
 
-> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `5a24f6f+working-tree`
 
 # Admin Route and Page Catalog
 
@@ -8785,7 +9102,7 @@ The historical operator-case design also expects a dedicated operator-case inqui
 
 `admin-front/src/layouts/sections.tsx` groups visible navigation into Overview, Onboarding, Governance, Operations, Finance, Gateways, and Learning. Sections and route items are filtered by their `if` callbacks. Empty sections are removed.
 
-### 3.2 Admin protected routes (37)
+### 3.2 Admin protected routes (48)
 
 The authority column is the UI gate. "None" means no effective `routesAuthorities` entry; the backend may still require an authority. Help shows the guide screen used by the generated context map; "none" means no mapping resolves.
 
@@ -8806,35 +9123,40 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 13 | `/aml/cases` | `AmlCases` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | AML case investigation, proposal and escalation. |
 | 14 | `/aml/screenings` | `AmlScreenings` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Sanctions/PEP screening queue and match disposition. |
 | 15 | `/aml/rules` | `AmlRules` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | AML rule versions, thresholds and maker-checker drafts. |
-| 16 | `/aml/reports` | `AmlReports` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Regulatory report drafting, submission and acknowledgement. |
-| 17 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | UNKNOWN/conflict/reconciliation operator queue. |
-| 18 | `/operator-cases/inquiries` | `GatewayInquirySchedules` | `case:read` or `operator:read` | 7 / 7.2 | Gateway inquiry schedule monitoring, run/retry/cancel. |
-| 19 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case evidence, step logs, inbound events, maker-checker resolution. |
-| 20 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage. |
-| 21 | `/adjustments` | `Adjustments` | `adjustments.propose` | 11 / 11.2 | Refund/manual adjustment drafting and review. |
-| 22 | `/cashouts` | `CashOuts` | `cashout.process` | 12 / 12.1 | Cash-out processing with wallet, destination and AML checks. |
-| 23 | `/reconciliation` | `Reconciliation` | `reconciliation.run` or `reconciliation.resolve` | 8 / 8.2 | Statement upload, run monitoring and variance resolution. |
-| 24 | `/finance/pricing` | `PricingControls` | none (nav hides without `profit.read`/`liquidity.read`) | none | Commission profiles and velocity controls under governance. |
-| 25 | `/finance/profitability` | `Profitability` | `profit.read` | 12 / 12.1 | Gross commission, gateway cost and net contribution. |
-| 26 | `/finance/liquidity` | `Liquidity` | `liquidity.read` | 12 / 12.1 | Treasury cover, clearing ageing, cash-out demand and holds. |
-| 27 | `/finance/invariant` | `Invariant` | `profit.read` or `liquidity.read` | 12 / 12.1 | Double-entry invariant, treasury cover and account balances. |
-| 28 | `/gateways` | `Gateways` | `gateways.edit` | 6 / 6.1 | Gateway portfolio, version state, rollback and creation. |
-| 29 | `/gateways/ai-import` | `GatewayAiImport` | none (direct URL; not in nav) | 6 / 6.2 | External-AI integration spec import with local/backend verification. |
-| 30 | `/gateways/wizard/:id` | `GatewayWizard` | `gateways.edit` | 6 / 6.1 | Eight-step gateway version wizard. |
-| 31 | `/rails` | `Rails` | `gateways.edit` | 3 / 3.2 | Rail catalog, collection modes and customer fields. |
-| 32 | `/routes` | `GatewayRoutes` | `gateways.edit` | 3 / 3.2 | Route priority, limits, credential policy and circuit-breaker health. |
-| 33 | `/guide` | `AdminGuide` | none (intentional) | 1 / 1.1 | Interactive admin system guide, glossary, simulators and checklists. |
-| 34 | `/academy` | `AdminAcademy` | none (intentional learning) | 1 / 1.1 | Employee Academy home (full-width hero with the single Continue action and progress rings, tracks, certificates list, Guide reading). Sub-routes `AdminAcademyTracks`, `AdminAcademyTrack`, `AdminAcademyModule`, `AdminAcademyLesson`, `AdminAcademyLab`, `AdminAcademyExam`, `AdminAcademyCertificate`, `AdminAcademyHelp` (none gated) and `AdminAcademyTeam` (role `SECURITY_ADMIN`); see `03-guide-and-academy.md` §7. |
-| 35 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
-| 36 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | 4 / 4.2 | Checkout support config, preview, version history and diff. |
-| 37 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | none | WAL/daemon/target health, backup history, drills and policy. |
-| 38 | `/guide/book/:bookId` | `AdminGuideBook` | none (learning surface) | 1 / 1.1 | One guide book with ordered articles and progress. |
-| 39 | `/guide/a/:articleId` | `AdminGuideArticle` | none (learning surface) | 1 / 1.1 | Guide article reader with glossary, TOC, widgets and read tracking. |
-| 40 | `/guide/glossary/:slug?` | `AdminGuideGlossary` | none (learning surface) | 13 / 13.1 | A–Z glossary and deep-linkable term detail. |
-| 41 | `/guide/tools/:tool?` | `AdminGuideTools` | none (learning surface) | 1 / 1.1 | Five client-only teaching simulators. |
-| 42 | `/guide/playbook/:id?` | `AdminGuidePlaybook` | none (learning surface) | 10 / 10.1 | Symptom-to-action situation playbook. |
-| 43 | `/guide/cards/:id?` | `AdminGuideCards` | none (learning surface) | 1 / 1.1 | Safeguard checklist card catalog. |
-| 44 | `/guide/edge-cases` | `AdminGuideEdgeCases` | none (learning surface) | 13 / 13.5 | Filterable 140-case edge-case catalog. |
+| 16 | `/aml/reports` | `AmlReports` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Regulatory report drafting, payload/output review, generation, submission and acknowledgement. |
+| 17 | `/aml/reporting-studio` | `AmlReportingStudio` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Declarative XML/XLSX schema registry, compile/simulate, promotion and default bindings. |
+| 18 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | UNKNOWN/conflict/reconciliation operator queue. |
+| 19 | `/operator-cases/inquiries` | `GatewayInquirySchedules` | `case:read` or `operator:read` | 7 / 7.2 | Gateway inquiry schedule monitoring, run/retry/cancel. |
+| 20 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case evidence, step logs, inbound events, maker-checker resolution. |
+| 21 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage. |
+| 22 | `/adjustments` | `Adjustments` | `adjustments.propose` | 11 / 11.2 | Refund/manual adjustment drafting and review. |
+| 23 | `/cashouts` | `CashOuts` | `cashout.process` | 12 / 12.1 | Cash-out processing with wallet, destination and AML checks. |
+| 24 | `/reconciliation` | `Reconciliation` | `reconciliation.run` or `reconciliation.resolve` | 8 / 8.2 | Statement upload, run monitoring and variance resolution. |
+| 25 | `/finance/pricing` | `PricingControls` | none (nav hides without `profit.read`/`liquidity.read`) | none | Commission profiles and velocity controls under governance. |
+| 26 | `/finance/profitability` | `Profitability` | `profit.read` | 12 / 12.1 | Gross commission, gateway cost and net contribution. |
+| 27 | `/finance/liquidity` | `Liquidity` | `liquidity.read` | 12 / 12.1 | Treasury cover, clearing ageing, cash-out demand and holds. |
+| 28 | `/finance/invariant` | `Invariant` | `profit.read` or `liquidity.read` | 12 / 12.1 | Double-entry invariant, treasury cover and account balances. |
+| 29 | `/gateways` | `Gateways` | `gateways.edit` | 6 / 6.1 | Gateway portfolio, version state, rollback and creation. |
+| 30 | `/gateways/ai-import` | `GatewayAiImport` | none (direct URL; not in nav) | 6 / 6.2 | External-AI integration spec import with local/backend verification. |
+| 31 | `/gateways/wizard/:id` | `GatewayWizard` | `gateways.edit` | 6 / 6.1 | Eight-step gateway version wizard. |
+| 32 | `/rails` | `Rails` | `gateways.edit` | 3 / 3.2 | Rail catalog, collection modes and customer fields. |
+| 33 | `/routes` | `GatewayRoutes` | `gateways.edit` | 3 / 3.2 | Route priority, limits, credential policy and circuit-breaker health. |
+| 34 | `/guide` | `AdminGuide` | none (intentional) | 1 / 1.1 | Interactive admin system guide, glossary, simulators and checklists. |
+| 35 | `/reports/catalog` | `ReportsCatalog` | `reports.run`/`reports.draft`/`report_engine:run`/`report_engine:author`/`report:review`/`report:approve`/`security:write` | none | Published report catalog, language prompt, typed inputs, preview and print. |
+| 36 | `/reports/studio` | `ReportsStudio` | `reports.studio`/`reports.draft`/`report_engine:author`/`report:review`/`report:approve`/`security:write` | none | AI transcript, JSON spec editor, five-layer verification, authority override and publish. |
+| 37 | `/reports/chrome` | `ReportsChrome` | `reports.studio` (projected from `report_engine:author`) | none | Reusable header/footer registry and single global default per type. |
+| 38 | `/reports/merchant-reports` | `ReportsMerchantReports` | `report:review`/`report:approve`/`security:read`/`security:write` | none | Merchant-authored report registry, per-merchant execution history, Studio suspend/resume. |
+| 38 | `/academy` | `AdminAcademy` | none (intentional learning) | 1 / 1.1 | Employee Academy home (full-width hero with the single Continue action and progress rings, tracks, certificates list, Guide reading). Sub-routes `AdminAcademyTracks`, `AdminAcademyTrack`, `AdminAcademyModule`, `AdminAcademyLesson`, `AdminAcademyLab`, `AdminAcademyExam`, `AdminAcademyCertificate`, `AdminAcademyHelp` (none gated) and `AdminAcademyTeam` (role `SECURITY_ADMIN`); see `03-guide-and-academy.md` §7. |
+| 39 | `/settings/platform` | `AdminPlatformSettings` | none (backend `settings:read`/`settings:write`) | none | Versioned platform settings, backup export and restore preview. |
+| 40 | `/settings/checkout-help` | `AdminCheckoutHelp` | none (backend `settings:read`/`settings:write`) | 4 / 4.2 | Checkout support config, preview, version history and diff. |
+| 41 | `/system/backups` | `SystemBackups` | `security:read` or `gateway:read` | none | WAL/daemon/target health, backup history, drills and policy. |
+| 42 | `/guide/book/:bookId` | `AdminGuideBook` | none (learning surface) | 1 / 1.1 | One guide book with ordered articles and progress. |
+| 43 | `/guide/a/:articleId` | `AdminGuideArticle` | none (learning surface) | 1 / 1.1 | Guide article reader with glossary, TOC, widgets and read tracking. |
+| 44 | `/guide/glossary/:slug?` | `AdminGuideGlossary` | none (learning surface) | 13 / 13.1 | A–Z glossary and deep-linkable term detail. |
+| 45 | `/guide/tools/:tool?` | `AdminGuideTools` | none (learning surface) | 1 / 1.1 | Five client-only teaching simulators. |
+| 46 | `/guide/playbook/:id?` | `AdminGuidePlaybook` | none (learning surface) | 10 / 10.1 | Symptom-to-action situation playbook. |
+| 47 | `/guide/cards/:id?` | `AdminGuideCards` | none (learning surface) | 1 / 1.1 | Safeguard checklist card catalog. |
+| 48 | `/guide/edge-cases` | `AdminGuideEdgeCases` | none (learning surface) | 13 / 13.5 | Filterable 140-case edge-case catalog. |
 
 Public admin routes are `/login` (`Login`, visitor-only) and the catch-all `NotFound`. The root `/` redirects to `Dashboard`.
 
@@ -8873,7 +9195,7 @@ Public admin routes are `/login` (`Login`, visitor-only) and the catch-all `NotF
 
 ## 4. Contracts and invariants
 
-1. **Protected route count is 37.** The generated catalog and tests must treat the 37 children under `/` as the protected admin surface; `/login` and `NotFound` are excluded.
+1. **Protected route count is 38.** The generated catalog and tests must treat the 38 children under `/` as the protected admin surface; `/login` and `NotFound` are excluded.
 2. **Merchant protected route count is 16.** Public landing/login/register/not-found are excluded.
 3. **A UI gate exists only when the authority array is non-empty.** `[]`, `undefined`, and a missing key all behave as "no UI gate".
 4. **Authority checks use OR semantics.** `hasOneOfAuthorities` accepts any listed authority.
@@ -9010,6 +9332,20 @@ Gaps: the dashboards/global search still route `payment_attempt` hits to Merchan
 ## Remediation round 2 (2026-11-08): invitation route
 
 `/accept-invitation` (`pages/public/auth/accept-invitation`) is a public route reached from the invitation message; the Users page creates users without a password and shows invitation state with a re-invite action; the login page links to nothing new.
+
+## Reporting Studio completion, incidents and filing adapters (2026-11-10)
+
+- `/reporting-studio` (`AmlReportingStudio`) now includes a workbook-template card on XLSX schemas: upload, analysis summary, named-range/sheet/column mapping and save; a rule-schema override panel that submits each rule's XML/XLSX/DOCX binding for approval; DOCX as a schema format with a narrative-JSON definition; and a "Filing adapters" route is available from the Compliance menu.
+- `/incidents` (`Incidents`) is the expanded incident workspace: filters, severity/status metrics, create dialog and a detail drawer with Overview (timeline timestamps, impacted services, links), Timeline, Responders, Actions, Communications and Postmortem. Status transitions are offered only when the core lifecycle allows them; a regulatory report can be drafted from the incident.
+- `/filing-adapters` (`FilingAdapters`) lists manual/HTTP adapters, shows authority/kind/status/endpoint/last use, creates an adapter with an HTTPS endpoint and optional encrypted auth secret, and disables an adapter. The AML report drawer offers an active HTTP adapter and a "File via adapter" action for an APPROVED report.
+
+All three routes are gated by `aml.read_confidential` at the edge/UI; writes are re-checked by core.
+
+## Final compliance UI sweep (2026-11-10)
+
+- `Incidents` now uses the shared `ApiTable`/`TableRowActions` surface with server pagination, search, status/severity/category filters, correct server summary metrics, row actions, refresh and confidential badge. The detail drawer resets transient state, preserves the active tab on refresh, supports editing incident facts, commander/reporter names, affected merchant/attempt IDs, regulator notification, link removal, responder acknowledgement/release, full action status changes, communication bodies, postmortem due date and a link to the drafted report.
+- `FilingAdapters` uses the shared table surface and exposes edit, re-enable/disable approval requests, secret-present state, endpoint display, confirmation and maker-checker messaging. The create/edit form never sends a blank secret (so an existing secret is kept).
+- `AmlReports` filters include INCIDENT, the generic draft dialog no longer offers INCIDENT, and the drawer shows `filingChannel`, external submission history, adapter filing confirmation and reset-safe adapter selection. `AmlReportingStudio` labels DOCX correctly, preserves template analysis after upload, and offers analyze/download/remove plus narrative, total and prototype-row mappings.
 
 ---
 
@@ -9301,7 +9637,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 <a id="admin-uiguide"></a>
 
-> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `working-tree`
+> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree`
 
 # Admin Guide and Academy
 
@@ -9309,7 +9645,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 This part owns two employee learning products in `admin-front`:
 
-- The Admin Interactive Guide at `/guide/**`: 14 books, 134 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
+- The Admin Interactive Guide at `/guide/**`: 14 books, 135 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
 - The Employee Academy under `/academy/**`: eight tracks, lessons with practice checks, simulated labs, server-graded certification exams, 12-month badges, certificates and a `SECURITY_ADMIN` team view.
 
 It does not own the merchant guide or the checkout help center. The future-guide design is now implemented; its detailed implementation notes live in `06-guide-v2.md`.
@@ -9323,14 +9659,14 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | Artifact | Count / notes |
 | :--- | :--- |
 | `books.json` | 14 books |
-| `articles.en.json` | 134 articles with headings, plain text, roles, UI status and related ids |
+| `articles.en.json` | 135 articles with headings, plain text, roles, UI status and related ids |
 | `glossary.en.json` | 151 terms with aliases, Arabic term and related slugs |
 | `cards.en.json` | 25 cards and 112 required checklist items |
 | `playbook.en.json` | 32 situations with screens, cases and articles |
 | `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
 | `faq.en.json` | 58 quick answers |
 | `data.json` | `ledger-events`, `visible-rails`, `attempt-transitions` |
-| `context-map.json` | 25 screens (including `Wallets` and `SystemBackups`), the last being the `General` fallback |
+| `context-map.json` | 29 screens (including `Wallets`, `SystemBackups`, `AmlReportingStudio`, `Incidents`, `FilingAdapters` and `Reports`), the last being the `General` fallback |
 | `error-codes.en.json` | 19 codes parsed from `b13-01` |
 | `edge-cases.en.json` | 140 rows parsed from the v4.1 design |
 | `meta.json` | `contentVersion`, deterministic `generatedAt`, counts and source SHA-256 |
@@ -9952,7 +10288,7 @@ Delivered:
 - Eight guide routes: home, book, article, glossary, tools, playbook, cards and edge cases.
 - Markdown reader with callouts, diagram fences, tables, stable heading ids, safe article/card/situation/glossary links and first-occurrence glossary popovers.
 - MiniSearch command palette with Arabic-aware normalisation, grouping, recents and keyboard navigation.
-- Contextual help button/drawer driven by the 25-screen context map, mounted automatically by `PageHeader`.
+- Contextual help button/drawer driven by the 26-screen context map, mounted automatically by `PageHeader`.
 - 22 safeguard integrations at risky action points; Continue is disabled until all required checks are ticked.
 - Five client-only simulators with published test vectors.
 - Guide read tracking stored in the shared Academy progress JSON with a `localStorage` fallback.
@@ -9979,9 +10315,86 @@ cd ../tests && bunx playwright test --project=admin e2e/admin/guide-reader.spec.
 
 ---
 
+<a id="admin-uireport-studio"></a>
+
+> **Part ID:** `admin-ui.report-studio` · **Status:** `implemented` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree`
+
+# Report Catalog, Studio and Chrome
+
+## 1. Routes
+
+| Path | Route name | Authority | Purpose |
+| :--- | :--- | :--- | :--- |
+| `/reports/catalog` | `ReportsCatalog` | `reports.draft` / `reports.run` | Published reports, language selection, input form and print/preview. |
+| `/reports/studio` | `ReportsStudio` | `reports.studio` | AI transcript, JSON spec editor, five-layer verification, authority override and publish. |
+| `/reports/chrome` | `ReportsChrome` | `reports.studio` | Reusable header/footer registry and default selection. |
+
+The routes are registered in `admin-front/src/router/index.ts`, projected from `report_engine:author` / `report_engine:run` in `core-back/lib/auth/uiAuthorities.ts`, and shown in the Reporting section of the shell.
+
+## 2. Catalog
+
+The catalog page:
+
+- loads the authority-filtered published catalog from the edge with server-side page, page size, search and sort through the shared `ApiTable` (the same pagination pattern as the Merchants page);
+- keeps the audience tabs server-filtered (`ALL`, `BACKOFFICE_INTERNAL`, `MERCHANT_FACING`);
+- prompts for a locale when the report supports more than one (`ReportLanguagePromptDialog`);
+- renders the typed input form (`ReportInputForm`) with entity autocomplete and date-range validation;
+- executes the report, shows KPI/table/chart/vector sections, and prints through the isolated Paged.js surface;
+- exposes the verification hash and the resolved header/footer.
+
+## 3. Studio
+
+The Studio page:
+
+- downloads the report authoring transcript from the API;
+- accepts a `ReportDescriptorSpec` JSON and an optional `.zip` asset bundle;
+- runs the five verification layers and renders every diagnostic with a human-readable title, path, code, severity and `aiFixHint` through `ReportDiagnosticsPanel`; API failures also show extracted diagnostics and a friendly message;
+- shows the AI repair prompt for a rejected spec;
+- saves a draft and publishes a verified version;
+- shows the inferred roles/authorities and, for a Security Admin, the override form with a mandatory justification.
+
+## 4. Chrome registry
+
+The Chrome page lists header/footer specs with server-side pagination, search and sort through `ApiTable`, shows their type/status/supported locales and the single global default per type, and archives a header/footer instead of hard-deleting it. It creates a new version from an edited spec and sets the global default. Save/publish failures map duplicate, reference and storage/database errors to explicit API codes, render `ReportDiagnosticsPanel` when the server returns diagnostics, and invalid JSON/schema input returns 400 rather than 500. The default seed creates `cbl-institutional-header-v1` and `cbl-institutional-footer-v1`.
+
+## 5. Client rendering SDK
+
+`admin-front/src/lib/reportEngineSdk/**` is independent of the pages:
+
+- `render/reportHtmlRenderer.ts` renders KPI, table, chart, vector, HTML and image sections and binds chrome variables;
+- `print/ClientVectorPdfExporter.ts` builds the `@page` CSS Paged.js document with running header/footer, repeated table headers and vector charts;
+- `components/ReportVectorDrawRenderer.tsx` mirrors nodes for RTL;
+- `components/ReportChartRenderer.ts` renders ECharts SVG;
+- `sanitizer/ClientDomSanitizer.ts` strips active content before preview/print;
+- `utils/inputDefaults.ts` and `utils/localeMeta.ts` resolve presets and language options.
+
+## 6. Tests
+
+`admin-front/src/lib/reportEngineSdk/__tests__/**` covers value formatting, preset defaults, Arabic KPI/table/vector rendering, RTL mirroring, chrome binding, the paged-media document, the language options and the fallback sanitizer. The Vitest include list was extended to run these tests.
+
+## 7. Audience, chrome and AML controls
+
+The Catalog has All / Backoffice Internal / Merchant Reports tabs. Chrome selectors are hidden when the report sets `allow_runtime_chrome_selection=false`. CSV/XLSX exports include every dataset (with a `dataset` column).
+
+The Studio reports the domain filter using catalog domains (`LEDGER`, `PAYMENTS`, ...), can download the Chrome transcript, supports clearing an override, and can request a confidential AML bypass. An MLRO or Security Admin sees the pending bypass list and can approve/reject it; maker and checker must differ.
+
+The Studio renders a read-only draft preview through `POST /report-engine/specs/preview` (sample inputs, no persistence) inside the same sandboxed Paged.js surface as the Catalog. It loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type. Report execution returns `404 REPORT_NOT_FOUND` only when the code does not exist and `409 REPORT_NOT_PUBLISHED` when a non-published version exists.
+
+## 8. Layout and action polish (2026-11-09)
+
+All three pages use the shared `ScreenContainer`/`ThemedView` page shell, so they inherit the desktop/mobile screen padding and the 18px section rhythm. Catalog and Studio tables use `pg-unified-table` plus the shared `Table/styling.css`; the Catalog row actions use `TableRowActions` (Run primary, Copy code/Download spec/Open Studio overflow).
+
+Actions added: Catalog Refresh/Open Studio/Headers & Footers, row copy/download/open, Reset inputs, Clear selection, Regenerate; Studio Open Catalog/Headers, Refresh pending, Format/Copy/Download/Clear editor, verification badge and disabled Save/Publish until verification passes; Chrome Refresh/Open Catalog/Studio, Format/Copy/Download/Clear editor, publish/make-default switches, empty/loading states and per-row Edit/Copy code/Download spec/Preview/default actions. The Paged.js preview toolbar now uses theme tokens, wraps on small screens and uses a responsive height.
+
+## Report run form (2026-11-10)
+
+The Catalog run drawer is built as a filter-style form rather than a dense grid. `ReportInputForm` groups visible inputs into **Report scope**, **Reporting period** and **Filters and options** sections, with an uppercase muted section title and a short description. Fields are stacked one per row; `FormField` gained a `filter` variant that uses the same label/control anatomy as `TableFilters` (`pg-filter-label`, 36 px compact outlined controls, 13 px inputs). Every field has a label (spec translation or a humanised fallback key) and a description (the spec's `help_i18n_key` or a type fallback such as “Search and select a record.”). The output language, page header/footer and template selectors live in an **Output options** section, and Reset/Clear/Generate are pinned in the `SlideOverDrawer` footer. The drawer is 720 px wide and capped at `100vw` on narrow screens.
+
+---
+
 <a id="merchant-uiportal"></a>
 
-> **Part ID:** `merchant-ui.portal` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `merchant-ui.portal` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `d695518+working-tree`
 
 # Merchant Portal
 
@@ -10024,7 +10437,7 @@ The merchant portal is the self-service business workspace:
 
 | Section | Content | Implementation |
 | :--- | :--- | :--- |
-| Sticky header | Brand, anchor nav (How it works / Product / Developers / Security, hidden < 960 px), AR/EN toggle, theme toggle, Login, Get started | `index.tsx`; theme/locale switches run inside a View Transition when supported and motion is allowed. |
+| Sticky header | Brand, anchor nav (How it works / Product / Developers / Security, hidden < 960 px), AR/EN toggle, theme menu (System/Light/Dark), Login, Get started | `index.tsx`; theme/locale switches run inside a View Transition when supported and motion is allowed. |
 | Hero | Two-tone h1 "Collect on any rail. Reconcile every dinar.", lede, CTAs to `Register` and `Login`, three proof points | h1 is the LCP element and is never opacity-hidden. |
 | Hero simulator | Interactive payment-link checkout: five checkout experiences (OTP, QR, push approval, bank redirect, card form = the five `RENDER` client actions), real statuses `AWAITING_CUSTOMER → VERIFYING → SUCCEEDED`, then an illustrative `PLATFORM_CLEARING` journal (Dr gateway clearing / Cr wallet / Cr platform commission) that balances, and a wallet count-up | `HeroDemo.tsx` + `content/landing/landingModel.ts` (decimal.js). Autoplay pauses off-screen, when the tab is hidden and on user pause; play/pause and next-step buttons; rail buttons are `aria-pressed` toggles. |
 | How money moves | Link → hosted checkout → trusted confirmation → double-entry ledger → wallet & cash-out | Responsive horizontal/vertical track that fills on reveal; mirrors in RTL. |
@@ -10070,7 +10483,7 @@ Rules:
 
 `merchant-front/src/layouts/default.tsx` mirrors the admin 248/56 shell:
 
-- 56 px app bar with menu toggle, brand, breadcrumbs, guide search, help, theme, AR/EN language controls and account menu.
+- 56 px app bar with menu toggle, brand, breadcrumbs, guide search, help, theme mode menu (System/Light/Dark), AR/EN language controls and account menu.
 - 248 px drawer permanent on desktop and temporary on compact screens.
 - Drawer sections: Overview, Money, Commerce, Developer.
 - Active navigation uses `meta.parentName` or the longest matching path.
@@ -10080,7 +10493,7 @@ Rules:
 - Route loading bar and focused main content.
 - Skip link and RTL-aware layout.
 
-Public auth pages use `layouts/auth.tsx`. The POS screen page is still under the `/portal` layout but renders a focused full-height status surface.
+Public auth pages use `layouts/auth.tsx`, which carries the same three-mode theme menu in its top-right corner. The theme mode is persisted (`system` by default) and resolved against `prefers-color-scheme`; `initialTheme()`/`initTheme()` apply it before mount, so the login page follows the OS theme on first paint and tracks OS changes live in System mode. The POS screen page is still under the `/portal` layout but renders a focused full-height status surface.
 
 ### 3.4 Onboarding
 
@@ -10347,6 +10760,7 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 
 - 2026-11-03 — Initial canonical merchant portal part. Confirms 16 portal routes, the 248/56 shell, onboarding and money/commerce/developer pages, guide surfaces, and the Statements/route authority and Google OIDC gaps.
 - 2026-11-04 — Public landing page redesigned (§3.1a): hero payment simulator, money-flow track, product bento with fee preview, stats, lazy developer section with a schema-accurate snippet, security, onboarding, FAQ; EN/AR landing catalogue; motion/reduced-motion/RTL rules; new landing unit and e2e tests. Removed unverifiable claims from the old page (fixed "3.00%" commission, "LYD · USD · EUR", "Live"/"All systems operational" badges) and nested `<a><button>` CTAs. `SegmentedTabs` arrow keys now follow the rendered direction in RTL.
+- 2026-11-09 — Added system/light/dark theme modes: persisted mode resolved against `prefers-color-scheme`, applied before mount so the login and landing pages follow the OS theme, live OS tracking in System mode, and an explicit three-option `ThemeMenu` in the shell, auth layout and landing header. See `TRACKER.md`.
 - 2026-11-04 — Landing visual system v2 "Aurora Ledger" (design note §9): new type system (Inter/Geist/Instrument Serif/Readex Pro, self-hosted), aurora/grid/grain backdrop, glass header with scroll progress and active section, word-by-word headline, tilting product stage, rail ticker with pause control, spotlight bento, live BigInt ledger ticker, gradient CTA. Fixed: cramped word spacing (all four portals), dark theme painting only one screen, tiled backgrounds not repeating, RTL chip placement, light-theme contrast. axe-core 0 violations (6 configurations), Playwright merchant 17/17.
 
 ## Security hardening (2026-11-05)
@@ -10365,6 +10779,10 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 
 - **Logout and cookie sessions (GAP-019).** Logout calls the merchant-back logout route (server-side revoke, cookie cleared) and clears the local session; `utils/security/sessionToken.ts` supports the `cookie-session` sentinel and the `x-pg-csrf` header used when `SESSION_COOKIE_MODE=true`. The POS stream (`sseFetch`) and the API client use the same header helper.
 - **XLSX 0.20.3 (GAP-029).** `xlsx` comes from `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` and `@types/xlsx` was dropped.
+
+## Dark teleported overlays (2026-11-10)
+
+Merchant dialogs, menus and drawers share the admin shell rule: `.v-overlay__content` and `.v-navigation-drawer__content` inherit `color: rgb(var(--v-theme-on-surface))`, so custom `FormModal`/`SlideOverDrawer` content is readable in dark mode. See `admin-ui.system` and `tests/unit/dark-overlay-colors.test.ts`.
 
 ---
 
@@ -10642,9 +11060,52 @@ The content test is a Bun test; the Playwright suites require the live stack.
 
 ---
 
+<a id="merchant-uireports"></a>
+
+> **Part ID:** `merchant-ui.reports` · **Status:** `implemented` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree`
+
+# Merchant Reports
+
+## 1. Routes and authorities
+
+- `/portal/reports` (`MerchantReports`) lists platform templates plus the merchant's own published reports. It needs `reports.run`, projected from the merchant `report_engine:run` authority.
+- `/portal/reports/studio` (`MerchantReportsStudio`) is the merchant authoring line. It needs `reports.studio`, projected from `report_engine:author`, which a `MERCHANT_ADMIN` holding `merchant:write` holds.
+
+Both pages are separate from the staff report catalog/studio. Staff tables (`report_definition_specs`, `report_assets`, `report_execution_audit`) are never read or written by merchant authoring routes.
+
+## 2. Runner behavior
+
+The runner uses the shared `ApiTable`, opens the run form in a `SlideOverDrawer`, hides the merchant-scope input, renders report-defined labels from the spec dictionary, validates inputs client-side, and shows the sandboxed Paged.js preview with Excel export and print. Errors use the shared friendly mapping and snackbars.
+
+## 3. Merchant Studio
+
+The Studio downloads the merchant-only AI transcript (merchant-safe catalog, no staff authority/override sections), accepts a JSON spec and an optional `.zip` (≤ 2 MB), runs the five verification layers plus the merchant-tier limits, and supports save-as-verified, publish, archive, version history and an execution/usage meter (codes, runs today, DB time, hourly verify/execute counts, suspension). Platform templates can be cloned into the merchant registry from the runner; templates that use assets must be re-authored with the merchant's own bundle. The Studio reads `merchant_reports.policy`: `enabled` is the platform switch (also staff-suspendable per merchant) and `assetsEnabled` shows or hides the `.zip` input; the transcript prints the current asset policy.
+
+## 4. Server enforcement
+
+`core-back/api/internal/merchantReportEngine.ts` uses a dedicated merchant host (`merchantHostConfig.ts`) built from an explicit allow-list of directly merchant-scoped models (`merchants`, `applications`, `wallets`, `payment_attempts`, `cashout_requests`, `rm_merchant_daily_stats`) and explicit column allow-lists. Ledger, credentials, audit, AML, users, webhooks, payment links, POS terminals, disputes and outbox tables are absent from the catalog, not merely blocked.
+
+Every execution:
+
+- resolves the merchant only from the authenticated principal;
+- injects `<alias>.merchant_id = $merchant` as a top-level AND on the base model and every joined alias (spec-supplied merchant predicates are never trusted);
+- verifies the compiled alias set and selects a hidden `__scope_merchant_id` column, asserting every returned row before stripping it; a mismatch aborts, is audited (`MERCHANT_REPORT_SCOPE_VIOLATION`) and opens a P1 `MANUAL_REVIEW` case;
+- enforces ≤ 6 datasets, ≤ 2 joins, ≤ 20 selects, ≤ 2 window fields, ≤ 24 sections, ≤ 10,000 rows, a bounded date range ≤ 92 days, spec ≤ 256 KB, zip ≤ 2 MB, 5 s statement timeout, a lower EXPLAIN cost cap and no large-table sequential scans;
+- checks the kill switch, merchant Studio suspension, hourly verify (30) / execute (60) limits, the daily DB-time budget (10 minutes), code/version quotas (50 codes, 20 versions each), one running execution per merchant and a global merchant semaphore, and a 60 s result cache keyed by merchant + spec + inputs.
+
+## 5. Staff oversight
+
+`admin-front` `/reports/merchant-reports` lists merchant-authored reports per merchant with their execution history and a `SUSPEND`/`RESUME` Studio action (`security:write`, audited). The merchant registry, usage rows and execution audit are separate tables (schema version 33).
+
+## Run form layout (2026-11-10)
+
+The merchant run drawer mirrors the admin filter-style form: sectioned, one field per row, labels and descriptions on every field, and a dedicated output-language section when multiple locales exist. Reset and Generate live in the drawer footer; the merchant scope input remains hidden.
+
+---
+
 <a id="checkout-uiflow"></a>
 
-> **Part ID:** `checkout-ui.flow` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `checkout-ui.flow` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `5a24f6f+working-tree`
 
 # Checkout Payer Flow
 
@@ -10681,7 +11142,7 @@ The checkout is deliberately narrow and zero-trust:
 - `/` (`Home`) redirects to `NotFound`.
 - `/:pathMatch(.*)*` (`NotFound`) renders the token-styled 404 page.
 - `layouts/checkout.tsx` is a single `<main class="pg-checkout">` with an optional title.
-- The page adds a max-width 560 px column with the merchant name, help button, language toggle, summary card, phase content and footer.
+- The page adds a max-width 560 px column with the merchant name, help button, three-mode theme menu (System/Light/Dark), language toggle, summary card, phase content and footer. The theme mode is persisted and resolved against `prefers-color-scheme`; `initialTheme()`/`initTheme()` apply it before mount, so the payer surface follows the OS theme and tracks OS changes live in System mode.
 
 ### 3.2 Phase machine
 
@@ -10944,6 +11405,7 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 
 ## 10. Change history
 
+- 2026-11-09 — Added system/light/dark theme modes: persisted mode resolved against `prefers-color-scheme`, applied before mount, live OS tracking in System mode, and an explicit three-option `ThemeMenu` in the payer header. See `TRACKER.md`.
 - 2026-11-03 — Initial canonical payer-flow part. Confirms the phase machine, five client-action renderers, SSE status stream, amount breakdown, receipt/return allowlist and the checkout 404 recovery bug.
 
 ## Security hardening (2026-11-05)
@@ -10960,6 +11422,10 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 ## Gap resolutions (2026-11-05)
 
 - **XLSX and dependencies (GAP-029, RESOLVED).** `xlsx` is pinned to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`, `@types/xlsx` was dropped and the unused `@prisma/client` dependency was removed from `checkout-front/package.json`.
+
+## Dark teleported overlays (2026-11-10)
+
+Checkout dialogs/drawers use the shared overlay text-color rule (`color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`), keeping custom modal content readable in dark mode.
 
 ---
 
@@ -11838,7 +12304,7 @@ Only the outbound webhook path computes signatures (`FakeCryptoSigner` plus six 
 
 <a id="fake-railschaos"></a>
 
-> **Part ID:** `fake-rails.chaos` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `fake-rails.chaos` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `5a24f6f+working-tree`
 
 # Fake Rails Chaos Engine and Tester Portal
 
@@ -12060,7 +12526,7 @@ The router guard redirects unauthenticated non-hosted routes to `/login` and kee
 
 The portal layout has four navigation links and an environment badge. `LiveTransactionFeed` opens the SSE stream with the query token and listens for a subset of event names. `WireInspectorDrawer` shows transaction fields, step events and webhook deliveries. `WebhookComposerModal` fires or disputes a webhook. `RailChaosCard` edits failure chance, latency, primary failure mode, duplicates, out-of-order and corruption.
 
-The SPA is fixed to the portal shell's language and theme; it does not have the admin/merchant i18n catalogue. `tests/e2e/exhaustive/exhaustive-fake-rails-surface.spec.ts` only visits `/login` across three viewports, two locales and two themes while mocking every portal API; it asserts shell geometry, no `#app` transform and no horizontal overflow.
+The SPA has light and dark Vuetify themes and an explicit System/Light/Dark theme menu in the portal app bar and the login card. `main.ts` calls `initTheme()` before mount and `plugins/vuetify.ts` uses `initialTheme()`, so the login page follows `prefers-color-scheme` on first paint; System mode tracks OS changes live. The theme mode is persisted in localStorage under `theme`. The SPA does not have the admin/merchant i18n catalogue. `tests/e2e/exhaustive/exhaustive-fake-rails-surface.spec.ts` visits `/login` across three viewports, two locales and two themes while mocking every portal API; it asserts shell geometry, no `#app` transform and no horizontal overflow.
 
 ## 4. Contracts and invariants
 
@@ -12177,11 +12643,16 @@ curl -X POST http://127.0.0.1:4104/portal-api/webhooks/$TX_ID/fire \
 
 ## 10. Change history
 
+- 2026-11-09: added light/dark themes and the System/Light/Dark theme menu to the tester SPA and login card; the theme follows `prefers-color-scheme` on first paint and tracks OS changes in System mode. See `TRACKER.md`.
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
 
 ## Security hardening (2026-11-05)
 
 fake-rails-front: the postMessage target is `VITE_CHECKOUT_ORIGIN`, otherwise the embedding parent's origin, never `*`; `redirect_url` is validated as http(s) without credentials. The live feed opens its EventSource with a 30-second single-use ticket obtained from `POST /portal-api/transactions/stream-ticket` (`streamUrl()` is now async), never the session token, and the hosted redirect page and widget frame post approve/decline with the session-bound `X-Hosted-Action-Token` (`postHostedAction`) (GAP-024, resolved 2026-11-05). The tester token itself remains in localStorage. New env: `VITE_CHECKOUT_ORIGIN`.
+
+## Dark teleported overlays (2026-11-10)
+
+The Fake Rails tester portal applies the same overlay text-color rule as the other portals, fixing black-on-dark custom dialog/drawer content in dark mode.
 
 ---
 
@@ -12624,7 +13095,7 @@ Zod field validation:
 - `PG_VERSION` is one or two digits (default `18`).
 - `BACKUP_ENCRYPTION_KEY_HEX` must be exactly 64 hex characters, or empty; it is required when backups are enabled.
 - `BACKUP_PRIMARY_S3_ENDPOINT` must be an absolute HTTP(S) URL when backups are enabled.
-- SSL mode is `certbot`, `custom` or `self_signed`.
+- SSL mode is `certbot`, `custom` or `self_signed` for the merchant/checkout public vhosts. The admin vhost has no SSL-mode setting: `ADMIN_SSL` only toggles TLS on the LAN vhost and the deploy mints a self-signed certificate; see `02-pki.md` section 3.8 for the operator-managed public admin front.
 
 Cross-field validation:
 
@@ -13108,7 +13579,7 @@ The planner's config validation now rejects weak secrets and restricts charsets 
 
 <a id="deploypki"></a>
 
-> **Part ID:** `deploy.pki` · **Status:** `partial` · **Last verified:** 2026-11-03 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `deploy.pki` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `6765e90+working-tree`
 
 # Internal PKI and mTLS Certificates
 
@@ -13244,6 +13715,16 @@ A co-located edge host receives the union for all edge roles on that host, in ea
 
 The provisioner creates the directory for `pgbackup` and `deployBackupDaemon()` chowns `/opt/pg-backup-daemon`, but neither step chowns the certificate files. The systemd unit runs `User=pgbackup`. As written, the daemon may be unable to read the 0600 server key. The deploy health probe would then fail, but the deploy does not repair ownership. This is an open readiness gap; storage/backup mTLS must not be described as proven until a staging run confirms the effective ownership and startup.
 
+### 3.8 Public portal certificates (operator-managed, 2026-11-09)
+
+The internal PKI in sections 3.1-3.7 covers mTLS between the services. The public merchant, checkout and admin URLs use a separate, publicly trusted certificate, and this split matters operationally:
+
+- `MERCHANT_SSL_MODE` and `CHECKOUT_SSL_MODE` accept `certbot`, `custom` and `self_signed`. In `certbot` mode the deploy verifies that the certificate file already exists (it does not request it), writes the `pg-certbot-renew.timer`, the `pg-certbot-renew.service` and the Nginx reload hook, and enables the timer. In `custom` mode it uses the configured certificate and key paths and does not schedule renewal.
+- The certificate is not generated by the deploy. The operator issues it (for example `certbot certonly --webroot` with the Nginx `/.well-known/acme-challenge/` location) before switching the mode from `self_signed`, then reruns `--only=merchant,checkout`.
+- One SAN certificate can cover every public hostname. The merchant vhost can use `certbot` mode with the default lineage path `/etc/letsencrypt/live/<MERCHANT_DOMAIN>/`; the checkout vhost points `CHECKOUT_SSL_CERT_PATH`/`CHECKOUT_SSL_KEY_PATH` at the same lineage. Renewal of that one lineage updates both vhosts through the deploy hook.
+- The admin vhost has no public-certificate setting. `ADMIN_SSL=true` only enables TLS on the LAN vhost and the deploy mints a self-signed certificate for `ADMIN_DOMAIN`. To make the admin URL warning-free without a code change, add an operator-managed Nginx vhost on `443` with the trusted SAN certificate, `server_name <admin-domain>`, and `proxy_pass https://127.0.0.1:<ADMIN_NGINX_LAN_PORT>` with `proxy_ssl_verify off`. Add a `real_ip` snippet (`set_real_ip_from 127.0.0.1; set_real_ip_from <host-ip>; real_ip_header X-Forwarded-For; real_ip_recursive on;`) so the inner admin vhost forwards the real client address to `admin-back`. Name the file so it sorts after the deploy-managed public vhosts (for example `zz-pg-admin-tls.conf`) so the merchant/checkout default server is unchanged. This file is outside the deploy engine and persists across deploys; the deploy's Nginx reload picks up its renewed certificate.
+- Test-server verification (2026-11-09): one Let's Encrypt SAN certificate for three DuckDNS names, `MERCHANT_SSL_MODE=certbot`, `CHECKOUT_SSL_MODE=custom`, the manual admin front, `certbot renew --dry-run --no-random-sleep-on-renew` succeeded, and `https://merchant...`, `https://checkout...` and `https://admin...` all returned 200 with the trusted issuer.
+
 ## 4. Contracts and invariants
 
 - The internal CA private key is never copied to a target host.
@@ -13333,6 +13814,7 @@ Keep `deploy/deploy.env` and `deploy/.certs/` at restrictive permissions. Do not
 - The backup daemon's cert/key ownership is not aligned with its `pgbackup` user.
 - A CA that nears its end is reported (`--check-certs`, the deploy warning) but never replaced automatically: replacing it is a rotation of every certificate (`--rotate-certs`).
 - The backup daemon does not authorize a client CN per route.
+- The admin vhost has no deploy-managed public certificate; a warning-free admin URL needs the operator-managed 443 front described in section 3.8, or a code change adding admin certificate settings.
 
 ### Missing / deferred
 
@@ -15326,7 +15808,7 @@ Security regression suites exist for core-back (`test/security-regressions/`), t
 
 <a id="testingsuites"></a>
 
-> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `d695518+working-tree`
 
 # Test Suite Catalog
 
@@ -15519,6 +16001,14 @@ The seeder checks live in suite 10, and the deploy matrix lives in `deploy/test/
 
 This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations, so the executed test count is higher, especially in suites 01-04. It is far below the 38,500 claim. The stale-claims register records 1,778; the working tree has about 29 more declarations.
 
+### 3.14 Report engine SDK tests
+
+`core-back/test/reportEngineSdk/**` implements the RE-T01..RE-T22 matrix from `design/12-reporting/dynamic_ai_transcript_report_engine_sdk_plan.md`: structural/bilingual validation, partition and EXPLAIN safety, forbidden secrets, merchant isolation, authority inference/override, read-only executor rejection and timeout recovery, asset bundle traversal/magic bytes, sanitizer, transforms, chrome resolution, input Zod compilation, dry run, transcript/repair prompt and SDK decoupling. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers value formatting, preset defaults, Arabic/RTL rendering, chrome binding, language options, paged-media CSS and the client sanitizer. The frontend Vitest include list was extended for the report SDK tests.
+
+### 3.15 Report engine and merchant report tests
+
+`core-back/test/reportEngineSdk/**` now covers the original RE-T01..RE-T22 matrix plus PII masking, confidential AML denial/bypass, merchant scope (including OR-bypass), semantic AST diagnostics, asset validation, chrome resolution and SDK decoupling, and the remediation suites: AuthorityAndCatalog (referenced-column PII, relation parsing, sensitivity/AML domains), MerchantReportLine (allow-list, identity injection/row assertion, tier limits), SeedChrome (seed idempotence), ExecuteAndRedaction (bundle comparison assets, aggregate/truncation), and the A08/A09/A10/A11/A12/A14/A15/A16/A17 regression cases. `merchant-back/test/core-forwarding.test.ts` covers the merchant catalog/execute/autocomplete proxy and the merchant Studio proxies. `core-back/test/admin-slice/admin-report-engine.test.ts` (DB-gated) covers version persistence, publish supersede, archive promotion, audience tabs and the merchant mount/authority; `admin-back/test/report-engine-edge.test.ts` covers the 24 MB parser, edge execute/list permissions and the publish proxy. `tests/unit/report-engine-sdk-mirror.test.ts` asserts the admin/merchant client SDK copies are identical; `tests/unit/report-ui-styles.test.ts` pins the shared report input grid/preview CSS in both portals; `tests/unit/builders-settings-parser.test.ts` covers the `merchant_reports.policy` Platform Setting editor. Core unit tests `report-engine-body-path.test.ts` and `MerchantReportPolicy.test.ts` cover the merchant body parser prefix and the staff-managed policy defaults/cache/assets gate. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers the client renderer, chrome variables, enum translation, vector canvas and paged-media contract. The Guide content test was updated for the new Reports screen/article.
+
 ## 4. Contracts and invariants
 
 1. **Suite numbering is not the same as directory numbering.** The runner's `T-EX-09b` and `T-EX-10` do not match the design's Suite 10 and 11.
@@ -15696,6 +16186,33 @@ and real-device performance tests remain open.
 ## Remediation round 2 (2026-11-08): new suites
 
 core-back: `ledger-raw-sql-parity`, `staff-invitation`, `checkout-return-route`, `session-revocation-durability`, `partition-truncate-guard`; admin-back and merchant-back: `auth-account-limiters`; fake-rails-back: `webhook-target`; deploy: `hostProbe`, `pgAppRole`; root `tests/unit`: `admin-bundle-lazy`, `i18n-catalogue`.
+
+## Declarative regulatory reporting suites (2026-11-10)
+
+`core-back/test/reporting-xsd-xlsx.test.ts` (8 tests) covers the safe XSD compiler (paths, facets, enumerations, DOCTYPE/external import rejection), the deterministic XML generator and validator (sequence order, required fields, type and enumeration violations), the XLSX renderer (generated workbook, totals, narrative, required data, formula-injection guard, macro rejection), and the six provisional baseline schemas with a generated STR XML that validates against its compiled XSD. `core-back/test/reporting-rule-evaluator.test.ts` and `test/regulatory-report-lifecycle.test.ts` were updated for DRAFT evaluator reports, encrypted manual payloads, the report approval request and the format-aware submission gate. The report lifecycle suite still uses the governance fake database; the schema/output tables are optional there so the fake remains focused on the lifecycle.
+
+
+## Reporting studio and automation sweep suites (2026-11-10)
+
+`core-back/test/reporting-generation.test.ts` covers the production generation path and payload-hash binding. `reporting-xsd-xlsx.test.ts` now covers attributes, LTR date mapping, list columns and required narrative sections. `reporting-rule-evaluator.test.ts` and `regulatory-report-lifecycle.test.ts` cover DRAFT reports, encrypted payloads, stale-output filing, approval and format gates. New studio suites are specified in `design/11-automation/reporting_studio_and_automation_test_plan.md`: `reporting-schema-studio.test.ts`, `reporting-output-integration.test.ts`, `reporting-lifecycle-pg.test.ts`, `reporting-xsd-edge.test.ts`, `reporting-xlsx-edge.test.ts`, admin-back forwarding, frontend unit models and Playwright studio flows.
+
+## Reporting Studio completion, INC, DOCX and filing adapters (2026-11-10)
+
+- `core-back/test/reporting-template.test.ts`: named-range parsing, safe-template analysis, binding requirement, prototype style/total/narrative writes, range overflow and unbound-template rejection (4 tests).
+- `core-back/test/reporting-docx.test.ts`: DOCX schema parsing, escaped narrative/tables in a valid OOXML package and required-section failure (3 tests).
+- `core-back/test/incident-lifecycle.test.ts`: forward-only transitions, postmortem requirement/due date and the de-identified filing payload shape (3 tests).
+- `core-back/test/filing-adapters.test.ts`: public-HTTPS endpoint rules, manual no-dispatch and HTTP auth-header/reference capture with a stubbed fetch (3 tests).
+- `core-back/test/reporting-xsd-xlsx.test.ts` now expects the seventh (DOCX incident) provisional baseline binding.
+- The admin-back suite covers the inbound forwarding schemas; admin-front `test:unit` covers the UI abstraction gate; the root `tests/unit` suite includes the i18n catalogue gate for every new label.
+
+These are development/CI tests only; no production-time test job or test endpoint is created by this change.
+
+## Final compliance regression tests (2026-11-10)
+
+- `admin-back/test/admin-ui-completion.test.ts` now proves that incident filters are forwarded, filing-adapter writes relay 202, and both incident and adapter reads remain confidential.
+- `core-back/test/reporting-template.test.ts` now proves a malformed workbook is reported rather than accepted, in addition to named-range mapping and range-overflow coverage.
+- Existing core reporting, DOCX, incident, adapter and XLSX tests remain the targeted gate; the full core suite is expected to fail only the four tests that require a reachable PostgreSQL test database.
+- Playwright coverage for the new pages should be added when a browser is available: incident create/filter/detail/close/report, filing-adapter approval flow, Studio template upload/reload/analyze/remove, and report adapter filing/submission history at 360/390/768/1280 px in both themes and RTL.
 
 ---
 
@@ -17451,7 +17968,7 @@ The app mirrors the true content during build:
 4. `scripts/check-content.ts` re-runs the extractors and fails if the committed snapshot is
    stale, or if `admin-front` generated content has drifted.
 
-The current snapshot contains 14 guide books, 134 articles, 151 glossary terms, 25 safeguard
+The current snapshot contains 14 guide books, 135 articles, 151 glossary terms, 25 safeguard
 cards, 32 situations, 58 quick answers, 19 error codes, 140 edge cases; and 8 Academy tracks,
 11 modules, 50 lessons, 100 practice checks, 16 labs / 92 tasks, 11 drills and 6 learner pages.
 The exam bank has 223 questions with keys but is not in the bundle.

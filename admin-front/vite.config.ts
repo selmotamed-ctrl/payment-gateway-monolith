@@ -73,6 +73,11 @@ export default ({ mode }: any) => {
         resolve: {
             alias: {
                 "@": fileURLToPath(new URL("./src", import.meta.url)),
+                // The pagedjs package does not export its dist files; alias the
+                // polyfill so it can be inlined into the report sandbox.
+                "pagedjs-polyfill": fileURLToPath(
+                    new URL("./node_modules/pagedjs/dist/paged.polyfill.min.js", import.meta.url),
+                ),
             },
         },
 

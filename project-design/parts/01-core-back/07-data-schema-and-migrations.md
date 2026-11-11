@@ -3,7 +3,7 @@ id: core.data
 title: Data Schema and Migrations
 status: partial
 confidence: high
-last_verified: 2026-11-09
+last_verified: 2026-11-10
 verified_against: d695518+working-tree
 code:
   - core-back/prisma/schema.prisma
@@ -22,6 +22,8 @@ code:
   - core-back/prisma/migrations/20261107150000_shard_repairs/migration.sql
   - core-back/prisma/migrations/20261108090000_partition_truncate_guard/migration.sql
   - core-back/prisma/migrations/20261109210000_ledger_query_and_index_optimization/migration.sql
+  - core-back/prisma/migrations/20261110120000_dynamic_report_engine_sdk/migration.sql
+  - core-back/prisma/migrations/20261110130000_report_engine_merchant_and_aml/migration.sql
 tests:
   - core-back/test/exhaustive/01-schema/**
   - core-back/test/phase1-mtls-and-schema.test.ts
@@ -29,10 +31,11 @@ tests:
   - core-back/test/synthetic-seeder.test.ts
   - core-back/test/security-regressions/c2-mfa.test.ts
   - core-back/test/security-regressions/h4-cashout.test.ts
+  - core-back/test/reportEngineSdk/**
 gaps:
   - Core tables use `TIMESTAMP(3)` while storage-engine tables use `TIMESTAMPTZ(3)`.
   - The migration history is forward-only; there are no down migrations.
-  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 26.
+  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 33.
   - `journal_lines` partition maintenance depends on an external deploy cron.
   - The generated schema catalog appendix is produced by the project-design generator and is not hand-maintained.
 ---
@@ -47,7 +50,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 26 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 33 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -102,7 +105,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 26`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 33`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -115,7 +118,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261110090000_resilient_journal_partitions`, schema version 26). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261110190000_merchant_report_engine`, schema version 33). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -292,7 +295,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 25.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 33.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -307,7 +310,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 84 models and 105 enums in the Prisma datamodel.
-- Schema version 26 with an equality check used by the seeders.
+- Schema version 33 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -410,7 +413,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 26 (`REQUIRED_SCHEMA_VERSION = 26`; model count 84). The schema migrations since version 10 are:
+The current schema version is 33 (`REQUIRED_SCHEMA_VERSION = 33`; model count 105). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -422,8 +425,8 @@ The current schema version is 26 (`REQUIRED_SCHEMA_VERSION = 26`; model count 84
 - `20261107150000_shard_repairs` (version 14): `gl_shard_checkpoints.baseline_seq` (the exemption marker of a re-baselined shard) and the append-only history table `gl_shard_repairs` (see `core.ledger` 3.10).
 - `20261108090000_partition_truncate_guard` (functions and triggers only; `schema_versions` stays at 14): `pgw_guard_journal_line_partition(regclass)` installs the `pgw_journal_lines_no_truncate` statement trigger only when it is missing; `ensure_journal_line_partitions` (run daily by the deploy cron) calls it for every partition it covers, and the migration backfills every existing partition. Statement-level TRUNCATE triggers are not cloned from the partitioned parent, so partitions created after `20261105090000_append_only_ledger_guards` could be truncated by their owner without meeting the guard.
 - `20261107120000_inbound_event_claims` (version 13): adds nullable `inbound_events.claimed_at` and `claimed_by` plus `(processed_at, claimed_at)`, the durable lease the inbound webhook worker uses to prevent duplicate processing across a brief leadership overlap.
-- `20261109210000_ledger_query_and_index_optimization` (version 25): covering indexes and append-only autovacuum (see `core.ledger`). Revised 2026-11-10 before any production use: `SET lock_timeout = '10s'`, each `journal_lines` covering index is rebuilt only when `pg_get_indexdef` differs from its target (so an index pre-built online is never rebuilt, see section 13), and the resilient `ensure_journal_line_partitions`.
-- `20261110090000_resilient_journal_partitions` (version 26): redefines `ensure_journal_line_partitions` for databases that applied version 25 before that revision (`prisma migrate deploy` never re-runs an applied migration: verified 2026-11-10). A month that cannot be created (rows already in `journal_lines_default`: `check_violation`; a lock wait over 5 s: `lock_not_available`) is skipped with a WARNING instead of aborting the call; storage parameters are set only on a partition the call creates; `lock_timeout = 5s`, `timezone = UTC`.
+- `20261109210000_ledger_query_and_index_optimization` (version 25): covering indexes and append-only autovacuum (see `core.ledger`). Revised 2026-11-10 before any production use: `SET lock_timeout = '10s'`, each `journal_lines` covering index is rebuilt only when `pg_get_indexdef` differs from its target (so an index pre-built online is never rebuilt, see section 12b), and the resilient `ensure_journal_line_partitions`.
+- `20261110090000_resilient_journal_partitions` (functions only, no version bump): redefines `ensure_journal_line_partitions` for databases that applied version 25 before that revision (`prisma migrate deploy` never re-runs an applied migration: verified 2026-11-10). A month that cannot be created (rows already in `journal_lines_default`: `check_violation`; a lock wait over 5 s: `lock_not_available`) is skipped with a WARNING instead of aborting the call; storage parameters are set only on a partition the call creates; `lock_timeout = 5s`, `timezone = UTC`.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -447,7 +450,7 @@ The application is not available for the duration, and an old binary posting whi
 
 Open: a deploy-time guard that refuses to run this migration on a database with a large `journal_lines` unless the operator passes an explicit acknowledgement is not implemented. The pipeline already takes a pre-migration dump and probes pending migrations (`deploy/deploy.ts` `probeMigrationState`), so the guard would extend that probe.
 
-## 13. Runbook: applying `20261109210000_ledger_query_and_index_optimization` to a populated database (2026-11-10)
+## 12b. Runbook: applying `20261109210000_ledger_query_and_index_optimization` to a populated database (2026-11-10)
 
 Fresh and small databases need nothing special. On a populated ledger the migration's index builds are plain `CREATE INDEX`: a migration runs as one transaction, and `CONCURRENTLY` is refused both inside a transaction and on a partitioned parent, so a build blocks ledger writes for its whole duration. Since 2026-11-10 every build is skipped when the index already has its target definition, so build them online first, then deploy.
 
@@ -507,3 +510,34 @@ These steps, the guard and the resilient function were rehearsed on embedded Pos
 Operationally, the migration drops and rebuilds the two `journal_lines` indexes on the partitioned parent, which takes an `ACCESS EXCLUSIVE` lock on every partition for the duration of each build. It is a direct migration because the project has no live production data; on a populated database, run it in a maintenance window (the same operational rule as the shard-checkpoint migration in section 12).
 
 The query rules that depend on these indexes are in `core.ledger` section 3.11 and `core-back/README.md` section 3.1.
+
+## 16. Report engine schema (schema version 26, 2026-11-09)
+
+`20261110120000_dynamic_report_engine_sdk` adds the report-engine registry and bumps `REQUIRED_SCHEMA_VERSION` to 26. It defines `ReportSpecStatus`, `ReportChromeType`, `ReportAudienceScope`, `ReportAuthorityMode`, `report_asset_bundles`, `report_chrome_specs`, `report_definition_specs` and `report_execution_audit`. The partial unique index `report_chrome_specs_one_default_per_type_idx` permits only one published global default header and one footer. The four models are listed in `core.report-engine` section 6.
+
+## 17. Report engine hardening and merchant execution (schema version 27, 2026-11-09)
+
+`20261110130000_report_engine_merchant_and_aml` adds `report_definition_specs.allow_confidential_aml_bypass` (default false), a partial unique index on `report_definition_specs(code) WHERE is_latest_published = true`, and append-only triggers on `report_execution_audit`. The AML bypass is only applied after a different MLRO or Security Admin approves a `REPORT_AML_BYPASS` approval request. The merchant report API forces `merchant_scope_input_key` from the authenticated merchant and rejects any non-merchant-scopable model.
+
+## 18. Declarative regulatory reporting (schema version 28, 2026-11-10)
+
+`20261110140000_declarative_regulatory_reporting` adds the format-aware reporting engine:
+
+- Enums `ReportOutputFormat` (`XML`, `XLSX`), `RegulatorySchemaStatus` (`DRAFT`, `PROVISIONAL`, `PENDING_APPROVAL`, `CONFIRMED`, `SUPERSEDED`, `ARCHIVED`) and `ReportOutputValidationStatus` (`NOT_GENERATED`, `PROVISIONAL_SCHEMA`, `VALIDATED`, `INVALID`).
+- `regulatory_report_schemas` (authority, report type, format, schema code/name/version, lifecycle status, XSD text or workbook JSON, optional encrypted uploaded template, compiled AST/workbook, mapping blueprint, sample context, approval link, seed key; unique `(authority, schema_code, version)`).
+- `regulatory_schema_default_bindings` (authority, report type, report code, format -> schema; unique together), `regulatory_rule_schema_bindings` (rule + format -> schema), and `regulatory_report_outputs` (report, format, revision, schema id/version, encrypted content, SHA-256, validation status/errors, generated/submitted times, superseded time; unique `(report_id, format, revision)` and a partial unique current-output index).
+- `reporting_rules.required_output_formats` and `primary_output_format`; `regulatory_reports.required_output_formats`, `filing_channel`, `acknowledged_at`, `rejection_reason`, `supersedes_id`; and a full `due_at` index. `regulatory_report_schemas.revision`, `cloned_from_schema_id`, `mapping_sha256`, `compiled_from_sha256`; `regulatory_report_outputs.payload_sha256`; `regulatory_reports.aml_case_id` is no longer unique and has a normal index. A database trigger blocks definition/mapping/compiled/template changes once a schema leaves `DRAFT`. Existing scheduled rules/reports are backfilled by `returnCode`/`reportCode`.
+- The baseline provisional schemas/templates are inserted lazily by `ensureBaselineReportingSchemas` (`cbl-goaml-str-v1`, `cbl-goaml-ltr-v1`, `cbl-psp-m-v1`, `cbl-aml-q-v1`, `cbl-aml-a-v1`, `cbl-goaml-ltr-xlsx-v1`) and their default bindings. They are `PROVISIONAL`; a confirmed FIU XSD/CBL workbook must be uploaded and promoted before XML filing.
+
+## 19. Reporting Studio phases 2-5 (schema versions 29 to 32, 2026-11-10)
+
+- `20261110150000_report_template_binding` (version 29): `regulatory_report_schemas.template_binding_json` stores the visual named-range mapping for an uploaded XLSX template. The column is separate from `template_ciphertext` so the encrypted workbook and its mapping can be rotated independently; the template upload route validates the zip, rejects macros/external links/OLE/zip bombs and audits the SHA-256.
+- `20261110160000_incident_management` (version 30): `ReportingType.INCIDENT`; enums `IncidentSeverity`, `IncidentStatus`, `IncidentCategory`, `IncidentImpactScope`, `IncidentTimelineType`, `IncidentActionStatus`, `IncidentCommunicationChannel`, `IncidentLinkType`; tables `incidents`, `incident_timeline_entries`, `incident_responders`, `incident_action_items`, `incident_links`, `incident_communications`. The lifecycle is DETECTED -> TRIAGED/DECLARED -> CONTAINED -> MONITORING -> RESOLVED -> POSTMORTEM -> CLOSED, with timestamp columns and postmortem due dates for SEV1/SEV2, security and data-integrity incidents.
+- `20261110170000_docx_report_output` (version 31): adds `ReportOutputFormat.DOCX`. `DocxNarrativeSchema` sections are rendered by the pure-JS OOXML builder; the output is stored encrypted under the `reporting-docx` context and downloaded as `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
+- `20261110180000_external_filing_adapters` (version 32): `FilingAdapterKind`, `FilingAdapterStatus`, `ExternalSubmissionStatus`; `external_filing_adapters` (name, authority, MANUAL/HTTP, status, HTTPS endpoint, encrypted auth secret, timeout, config) and `external_submissions` (report, adapter, status, request SHA-256, external reference, response code/body, error). The HTTP adapter rejects non-HTTPS, private/loopback/link-local endpoints, embedded credentials and redirects; the manual adapter remains the default.
+
+The reporting baseline set now includes a PROVISIONAL `cbl-incident-docx-v1` default binding for `CBL / INCIDENT / INC / DOCX`. As with the other provisional baselines, the incident output cannot be filed until the schema is reviewed and confirmed.
+
+## 16. Merchant report authoring line (schema version 33)
+
+`20261110190000_merchant_report_engine` adds five tables separate from the staff report registry: `merchant_report_specs` (merchant-owned versioned specs; unique `(merchant_id, code, version)` and a partial unique latest-published index), `merchant_report_asset_bundles` (unique per merchant and content hash), `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` (hourly verify/execute counters) and `merchant_report_studio_status` (per-merchant Studio suspension). The migration bumps the schema version to 33; `phase1-mtls-and-schema.test.ts` asserts the applied version.

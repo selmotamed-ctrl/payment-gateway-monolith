@@ -3,6 +3,7 @@ import {
     downloadXlsxFromCsvLines,
     downloadXlsxFromCsvText,
     downloadXlsxFromHeadersAndData,
+    downloadXlsxWorkbook,
     uploadXlsxFromHeadersAndData,
     type XlsxHeader,
 } from "./templateDownload";
@@ -11,6 +12,7 @@ export const xlsxUIPipeline = {
     downloadXlsxFromCsvLines,
     downloadXlsxFromCsvText,
     downloadXlsxFromHeadersAndData,
+    downloadXlsxWorkbook,
     uploadXlsxFromHeadersAndData,
 };
 export default xlsxUIPipeline;

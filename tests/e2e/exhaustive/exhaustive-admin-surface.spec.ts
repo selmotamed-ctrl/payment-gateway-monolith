@@ -16,6 +16,7 @@ const ROUTES = [
   "/aml/screenings",
   "/aml/rules",
   "/aml/reports",
+  "/aml/reporting-studio",
   "/operator-cases",
   "/disputes",
   "/adjustments",

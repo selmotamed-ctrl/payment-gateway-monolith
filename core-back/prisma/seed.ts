@@ -4,6 +4,7 @@ import { client, ensureSchemaVersion } from "./client";
 import { seedBlueprints, seedPlatformCredentialSets } from "./seedBlueprints";
 import { seedCheckoutSupport, seedRailHelpGuides } from "./seedGuides";
 import { seedSystemGlAccounts } from "./seedGlAccounts";
+import { seedDefaultChromeSpecs } from "../engine/reportStudio/seedDefaultChromeSpecs";
 
 const platformSettings = [
   {
@@ -86,6 +87,14 @@ const platformSettings = [
     },
   },
   {
+    key: "merchant_reports.policy",
+    valueJson: {
+      enabled: true,
+      assetsEnabled: true,
+      description: "Merchant report authoring and execution are enabled; merchant asset bundles are allowed up to the 2 MB limit.",
+    },
+  },
+  {
     key: "OD-11",
     valueJson: {
       checkerRoles: ["MLRO", "COMPLIANCE", "FINANCE"],
@@ -157,49 +166,49 @@ const adminUsers = [
   {
     email: "gateway-admin@payment-gateway.internal",
     role: "GATEWAY_ADMIN",
-    authorities: ["gateway:read", "gateway:write", "gateway:test", "settings:read", "settings:write"],
+    authorities: ["gateway:read", "gateway:write", "gateway:test", "settings:read", "settings:write", "report_engine:run"],
     isMaker: true,
     isChecker: false,
   },
   {
     email: "security-admin@payment-gateway.internal",
     role: "SECURITY_ADMIN",
-    authorities: ["security:read", "security:write", "credential:write"],
+    authorities: ["security:read", "security:write", "credential:write", "report_engine:run"],
     isMaker: true,
     isChecker: true,
   },
   {
     email: "finance@payment-gateway.internal",
     role: "FINANCE",
-    authorities: ["finance:read", "finance:write", "commission:write", "cashout:review", "dispute:read", "dispute:write", "approval:read", "approval:check", "approval:write"],
+    authorities: ["finance:read", "finance:write", "commission:write", "cashout:review", "dispute:read", "dispute:write", "approval:read", "approval:check", "approval:write", "report_engine:run"],
     isMaker: false,
     isChecker: true,
   },
   {
     email: "compliance@payment-gateway.internal",
     role: "COMPLIANCE",
-    authorities: ["compliance:read", "compliance:write", "aml:review", "report:review"],
+    authorities: ["compliance:read", "compliance:write", "aml:review", "report:review", "aml.read_confidential", "approval:read", "approval:check", "approval:write", "report_engine:run"],
     isMaker: false,
     isChecker: true,
   },
   {
     email: "mlro@payment-gateway.internal",
     role: "MLRO",
-    authorities: ["aml:read", "aml:write", "aml:release", "report:approve"],
+    authorities: ["aml:read", "aml:write", "aml:release", "report:approve", "aml.read_confidential", "approval:read", "approval:check", "approval:write", "report_engine:run"],
     isMaker: false,
     isChecker: true,
   },
   {
     email: "operator@payment-gateway.internal",
     role: "OPERATOR",
-    authorities: ["attempt:read", "attempt:inquire", "case:read", "case:write"],
+    authorities: ["attempt:read", "attempt:inquire", "case:read", "case:write", "report_engine:run"],
     isMaker: true,
     isChecker: false,
   },
   {
     email: "support@payment-gateway.internal",
     role: "SUPPORT",
-    authorities: ["merchant:read", "attempt:read", "case:read"],
+    authorities: ["merchant:read", "attempt:read", "case:read", "report_engine:run"],
     isMaker: false,
     isChecker: false,
   },
@@ -371,6 +380,14 @@ const seed = async () => {
     });
   }
 
+  // Default bilingual report chrome (header/footer) for the Report Studio.
+  const chromeSeedUser = await client.user.findUnique({
+    where: { email: "security-admin@payment-gateway.internal" },
+  });
+  if (chromeSeedUser) {
+    await seedDefaultChromeSpecs(client, chromeSeedUser.id);
+  }
+
   for (const template of notificationTemplates) {
     const channel = "channel" in template ? template.channel : "EMAIL";
     for (const [lang, content] of [
@@ -435,18 +452,13 @@ const seed = async () => {
   // generates a live filing; a PROVISIONAL rule only drafts an internal one.
   const reportingRuleSeeds = [
     {
-      reportType: "LARGE_TRANSACTION" as const,
-      thresholdAmount: "50000.0000",
-      windowSeconds: null as number | null,
-      sourceReference: "CBL-LARGE-TRANSACTION-CONFIRMED-001",
-      status: "CONFIRMED" as const,
-    },
-    {
       reportType: "SUSPICIOUS_ACTIVITY" as const,
       thresholdAmount: "50000.0000",
       windowSeconds: 86400,
       sourceReference: "CBL-SUSPICIOUS-ACTIVITY-PROVISIONAL-001",
       status: "PROVISIONAL" as const,
+      requiredOutputFormats: ["XML"] as const,
+      primaryOutputFormat: "XML" as const,
     },
   ];
   let seededReportingRules = 0;
@@ -467,6 +479,8 @@ const seed = async () => {
         conditions: {},
         sourceReference: rule.sourceReference,
         status: rule.status,
+        requiredOutputFormats: [...rule.requiredOutputFormats] as never,
+        primaryOutputFormat: rule.primaryOutputFormat as never,
         effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
       },
     });

@@ -3,7 +3,7 @@ id: admin-ui.system
 title: Admin UI System
 status: partial
 confidence: high
-last_verified: 2026-11-07
+last_verified: 2026-11-09
 verified_against: d695518+working-tree
 code:
   - admin-front/src/plugins/vuetify.ts
@@ -13,6 +13,9 @@ code:
   - admin-front/src/components/ui/**
   - admin-front/src/components/Table/**
   - admin-front/src/utils/iconSet/**
+  - admin-front/src/utils/theme/index.ts
+  - admin-front/src/state/theme.ts
+  - admin-front/src/components/ThemeMenu/index.tsx
   - merchant-front/src/plugins/vuetify.ts
   - merchant-front/src/layouts/**
   - checkout-front/src/plugins/vuetify.ts
@@ -132,6 +135,8 @@ No external font request is required. `tests/e2e/admin/a11y.spec.ts` and the she
 - Component defaults: flat cards with `rounded: "lg"`; 36 px, `rounded: "md"`, no-transform buttons; outlined compact text fields/selects/autocompletes/textareas/comboboxes with `hideDetails: "auto"`; small rounded chips; a `rgba(15, 23, 42, 0.45)` dialog scrim.
 - `VDateInput` receives an outlined default through the blueprint defaults block.
 
+Theme mode is `system | light | dark`. `utils/theme` resolves the persisted mode (localStorage `theme`; absent means `system`) against `prefers-color-scheme`; `state/theme` applies it to Vuetify, listens to `matchMedia` changes while in `system` mode, and syncs across tabs. `plugins/vuetify.ts` uses `initialTheme()` for `defaultTheme` and `main.ts` calls `initTheme()` before mount, so every route (including the login page) starts in the operating-system theme with no light flash. `ThemeMenu` is the explicit three-option menu (System, Light, Dark) used by the shell, the auth layout and the merchant landing header; the old `toggleTheme` remains as a compatibility cycle (system -> light -> dark).
+
 ### 3.4 Primitives and extras
 
 `admin-front/src/components/ui/index.ts` is the primitive barrel. The compliance test requires these 13 named exports:
@@ -162,7 +167,7 @@ Additional exported primitives/extras are `SurfaceCardText`, `MetaPill`, `FormCh
 `admin-front/src/layouts/default.tsx` implements the authenticated shell:
 
 - A skip link targeting `#pg-main-content`.
-- A 56 px flat app bar with menu toggle, brand, breadcrumbs, live ledger invariant pill (for `profit.read` or `liquidity.read`), global search trigger (`Ctrl+K`/`Cmd+K`), help button, theme toggle, language menu, and user menu.
+- A 56 px flat app bar with menu toggle, brand, breadcrumbs, live ledger invariant pill (for `profit.read` or `liquidity.read`), global search trigger (`Ctrl+K`/`Cmd+K`), help button, theme mode menu (System/Light/Dark), language menu, and user menu.
 - A 248 px `VNavigationDrawer`, permanent on desktop and temporary below the compact breakpoint. It contains brand/environment badge, guide search pill, collapsible navigation sections, and an operator card with role and maker/checker dots.
 - Route progress bar, focused `VMain`, global search palette, guide search modal, and contextual help drawer.
 - The `?` key opens help when the user is not typing in an input; `Escape` closes the topmost overlay.
@@ -180,6 +185,8 @@ Additional exported primitives/extras are `SurfaceCardText`, `MetaPill`, `FormCh
 - Three posture badges: TLS 1.3 mTLS Verified, AES-256-GCM Hardware Vault, Four-Eyes Governance.
 - A live status line.
 - A main panel slot for the login form.
+
+The auth shell also carries the three-mode theme menu in its top-right corner. `initTheme()` runs before mount and `plugins/vuetify.ts` uses `initialTheme()`, so the login page follows the OS theme on first paint and tracks OS changes while in System mode.
 
 The auth shell is presentation only. Authentication, MFA, and session authority enforcement live in the edge and core services.
 
@@ -319,6 +326,7 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 ## 10. Change history
 
+- 2026-11-09 — Added system/light/dark theme modes across all four portals: `utils/theme` + `state/theme` resolve the persisted mode against `prefers-color-scheme`, `initialTheme()`/`initTheme()` apply it before mount (login included), a live `matchMedia` listener follows OS changes in System mode, and the explicit `ThemeMenu` replaces the light/dark toggle in the shell, auth layout and merchant landing. See `TRACKER.md`.
 - 2026-11-03 — Initial canonical part created from the v1/v2 UI designs and working-tree code. Records the 13-primitive contract, 248/56 shell, Fake Rails partial rollout, removed app scaling, and the still-present stale files.
 
 ## Security hardening (2026-11-05)
@@ -346,3 +354,7 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 - **Lazy heavy chunks (GAP-060).** `utils/xlsx` is a lazy facade (the exceljs/xlsx chunk loads on the first export click) and charts load through `components/EChart/lazy.tsx` (`defineAsyncComponent`); `tests/unit/admin-bundle-lazy.test.ts` fails if the dashboard, profitability page, gateway health drawer or table header import the heavy libraries statically.
 - **Translation gate (GAP-061).** `tests/unit/i18n-catalogue.test.ts` (scanner `tests/unit/helpers/i18nScan.ts`) fails on a literal `t()` key with no catalogue entry that is not in the shrink-only baselines `tests/unit/fixtures/i18n-missing-*.json`, and on a key whose Arabic value conflicts across catalogue files (the last spread silently won). The 18 conflicts were resolved; the existing missing keys stay in the baselines and are filled over time (`UPDATE_I18N_BASELINE=1` rewrites a baseline after a fix).
+
+## Dark teleported overlays (2026-11-10)
+
+Vuetify teleports dialogs, menus and drawers under a `.v-overlay__content` / `.v-navigation-drawer` element that receives the theme class and CSS variables but not a base text color. Custom surface components (`FormModal`, `SlideOverDrawer`, SafeguardDialog, the guide search surface, and any raw dialog content) therefore inherited the body's black text while sitting on the dark surface. `fintech-minimal.css` now sets `color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`; component-specific text colors and status tones still override it. The same rule is mirrored in the merchant, checkout and Fake Rails portals, and `tests/unit/dark-overlay-colors.test.ts` guards all four stylesheets.

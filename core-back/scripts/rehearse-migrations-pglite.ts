@@ -63,9 +63,10 @@ try {
   const one = async (sql: string, params: unknown[] = []) => (await db.query(sql, params)).rows[0] as Record<string, unknown>;
 
   const version = await one(`SELECT version FROM schema_versions WHERE id = 1`);
-  check("schema version is 26", Number(version.version) === 26, String(version.version));
+  const required = Number(/REQUIRED_SCHEMA_VERSION = (\d+)/.exec(readFileSync(join(CORE, "prisma/schemaVersion.ts"), "utf8"))?.[1]);
+  check("schema version equals REQUIRED_SCHEMA_VERSION", Number(version.version) === required, `${version.version} vs ${required}`);
 
-  const targets: Record<string, string> = {
+  const targets: { journal_lines_entry_id_created_at_idx: string; journal_lines_account_id_cov_idx: string } = {
     journal_lines_entry_id_created_at_idx: "USING btree (entry_id, created_at) INCLUDE (gl_account_id, direction, amount, id)",
     journal_lines_account_id_cov_idx: "USING btree (gl_account_id, created_at) INCLUDE (direction, amount, entry_id, id)",
   };
@@ -94,14 +95,16 @@ try {
   const cols = (await db.query(`SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = 'journal_lines' ORDER BY ordinal_position`)).rows as Array<Record<string, string>>;
   const values: Record<string, string> = {};
   for (const col of cols) {
-    if (col.is_nullable === "YES" || col.column_default) continue;
-    values[col.column_name] =
-      col.column_name === "created_at" ? `'${far.d} 12:00:00'` :
-      col.column_name === "direction" ? `'DEBIT'` :
-      col.column_name === "amount" ? `1` :
-      /int/.test(col.data_type) ? `1` :
-      col.data_type === "uuid" ? `gen_random_uuid()` :
-      /timestamp/.test(col.data_type) ? `now()` :
+    const name = col.column_name ?? "";
+    const dataType = col.data_type ?? "";
+    if (!name || col.is_nullable === "YES" || col.column_default) continue;
+    values[name] =
+      name === "created_at" ? `'${far.d} 12:00:00'` :
+      name === "direction" ? `'DEBIT'` :
+      name === "amount" ? `1` :
+      /int/.test(dataType) ? `1` :
+      dataType === "uuid" ? `gen_random_uuid()` :
+      /timestamp/.test(dataType) ? `now()` :
       `'x'`;
   }
   if (!values.created_at) values.created_at = `'${far.d} 12:00:00'`;

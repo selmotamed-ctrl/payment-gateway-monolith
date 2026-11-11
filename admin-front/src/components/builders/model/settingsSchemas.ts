@@ -205,6 +205,27 @@ const NAMESPACES: Record<string, SettingNamespaceDef> = {
         description: "Anti-self-dealing policy: a merchant paying into its own wallet.",
         fields: [{ key: "policy", kind: "select", label: "Policy", options: ["BLOCK", "ALLOW"], required: true }],
     },
+    "merchant_reports.policy": {
+        id: "merchant_reports.policy",
+        title: "Merchant reporting policy",
+        description: "Controls the merchant report runner/Studio and whether merchants may attach asset bundles.",
+        fields: [
+            {
+                key: "enabled",
+                kind: "boolean",
+                label: "Merchant report Studio enabled",
+                hint: "When off, the merchant report runner and Studio are unavailable for every merchant.",
+            },
+            {
+                key: "assetsEnabled",
+                kind: "boolean",
+                label: "Merchant report assets enabled",
+                aliases: ["assets_enabled"],
+                hint: "When off, merchant reports cannot declare required assets and asset .zip uploads are rejected.",
+            },
+            description,
+        ],
+    },
 };
 
 /** The canonical key of the OD-2 policy carries the same shape (`join_request.four_eyes_policy`). */

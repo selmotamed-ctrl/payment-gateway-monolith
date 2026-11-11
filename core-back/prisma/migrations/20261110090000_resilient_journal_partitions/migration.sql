@@ -1,5 +1,6 @@
 -- ============================================================================
--- Schema version 26: a resilient ensure_journal_line_partitions.
+-- A resilient ensure_journal_line_partitions (functions only; the schema version is left to
+-- the neighbouring migrations, like 20261108090000_partition_truncate_guard).
 --
 -- 20261109210000 now defines this function, but a database that applied that
 -- migration before it was revised (2026-11-10) keeps the earlier body, because
@@ -83,10 +84,3 @@ BEGIN
     GRANT EXECUTE ON FUNCTION ensure_journal_line_partitions(INT) TO pgw_app;
   END IF;
 END $$;
-
--- ---------------------------------------------------------------------------
--- Schema version 26
--- ---------------------------------------------------------------------------
-UPDATE "schema_versions"
-SET "version" = 26, "updated_at" = now()
-WHERE "id" = 1;

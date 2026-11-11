@@ -123,6 +123,21 @@ const router = createRouter({
                     component: () => import("@/pages/aml/reports/index"),
                 },
                 {
+                    path: "aml/reporting-studio",
+                    name: "AmlReportingStudio",
+                    component: () => import("@/pages/aml/reporting-studio/index"),
+                },
+                {
+                    path: "incidents",
+                    name: "Incidents",
+                    component: () => import("@/pages/incidents/index"),
+                },
+                {
+                    path: "filing-adapters",
+                    name: "FilingAdapters",
+                    component: () => import("@/pages/filing-adapters/index"),
+                },
+                {
                     path: "operator-cases",
                     name: "OperatorCases",
                     component: () => import("@/pages/operator-cases/index"),
@@ -213,6 +228,26 @@ const router = createRouter({
                     path: "routes",
                     name: "GatewayRoutes",
                     component: () => import("@/pages/routes/index"),
+                },
+                {
+                    path: "reports/catalog",
+                    name: "ReportsCatalog",
+                    component: () => import("@/pages/reports/catalog/index"),
+                },
+                {
+                    path: "reports/studio",
+                    name: "ReportsStudio",
+                    component: () => import("@/pages/reports/studio/index"),
+                },
+                {
+                    path: "reports/chrome",
+                    name: "ReportsChrome",
+                    component: () => import("@/pages/reports/chrome/index"),
+                },
+                {
+                    path: "reports/merchant-reports",
+                    name: "ReportsMerchantReports",
+                    component: () => import("@/pages/reports/merchant-reports/index"),
                 },
                 {
                     path: "guide",

@@ -1,0 +1,169 @@
+/* Report authoring components (Studio, Headers & Footers). --pg-* tokens only. */
+
+/* ---------- Diagnostics panel ---------- */
+.pg-report-diagnostics {
+  display: flex;
+  flex-direction: column;
+}
+
+.pg-report-diagnostics__row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--pg-border-subtle);
+}
+
+.pg-report-diagnostics__row:first-child {
+  border-top: 0;
+}
+
+.pg-report-diagnostics__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pg-report-diagnostics__title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--pg-ink-primary);
+}
+
+.pg-report-diagnostics__message {
+  font-size: 12.5px;
+  color: var(--pg-ink-secondary);
+  overflow-wrap: anywhere;
+}
+
+.pg-report-diagnostics__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--pg-ink-muted);
+}
+
+.pg-report-diagnostics__hint summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--pg-ink-secondary);
+}
+
+.pg-report-diagnostics__hint p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--pg-ink-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- JSON spec editor ---------- */
+.pg-json-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pg-json-editor__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pg-json-editor__label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--pg-ink-secondary);
+}
+
+.pg-json-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pg-json-editor__frame {
+  display: flex;
+  height: 360px;
+  border: 1px solid var(--pg-border-strong);
+  border-radius: var(--pg-radius-md);
+  background: var(--pg-bg-surface);
+  overflow: hidden;
+}
+
+.pg-json-editor__frame:focus-within {
+  border-color: var(--pg-border-focus);
+}
+
+.pg-json-editor__frame--invalid {
+  border-color: var(--pg-status-danger-border);
+}
+
+.pg-json-editor__gutter,
+.pg-json-editor__input {
+  font-size: 12.5px;
+  line-height: 20px;
+  padding: 8px 0;
+}
+
+.pg-json-editor__gutter {
+  flex: 0 0 auto;
+  min-width: 44px;
+  overflow: hidden;
+  text-align: end;
+  user-select: none;
+  color: var(--pg-ink-muted);
+  background: var(--pg-bg-surface-subtle);
+  border-inline-end: 1px solid var(--pg-border-subtle);
+}
+
+.pg-json-editor__gutter-line {
+  padding: 0 8px;
+  height: 20px;
+}
+
+.pg-json-editor__gutter-line--error {
+  color: var(--pg-status-danger-text);
+  background: var(--pg-status-danger-bg);
+  font-weight: 600;
+}
+
+.pg-json-editor__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-inline: 10px;
+  border: 0;
+  outline: none;
+  resize: none;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 2;
+  color: var(--pg-ink-primary);
+  background: transparent;
+}
+
+.pg-json-editor__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--pg-ink-muted);
+}
+
+.pg-json-editor__error {
+  color: var(--pg-status-danger-text);
+}
+
+/* ---------- Chrome preview (fallback renderer) ---------- */
+.pg-report-chrome-preview {
+  padding: 16px;
+  border: 1px dashed var(--pg-border-strong);
+  border-radius: var(--pg-radius-md);
+  background: var(--pg-bg-surface);
+  overflow: auto;
+}

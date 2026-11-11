@@ -27,6 +27,8 @@ export const MERCHANT_AUTHORITY_CATALOGUE = [
   "user:manage",
   "token:manage",
   "credential:manage",
+  "report_engine:run",
+  "report_engine:author",
 ] as const;
 
 export type MerchantAuthority = (typeof MERCHANT_AUTHORITY_CATALOGUE)[number];
@@ -72,6 +74,7 @@ const IMPLIED_BY_MERCHANT_WRITE = [
   "onboarding:write",
   "dispute:respond",
   "cashout:read",
+  "report_engine:run",
 ] as const;
 
 /**
@@ -94,6 +97,7 @@ export const effectiveMerchantAuthorities = (
     for (const implied of IMPLIED_BY_MERCHANT_WRITE) held.add(implied);
     if (principal.role === "MERCHANT_ADMIN") {
       for (const privileged of PRIVILEGED_MERCHANT_AUTHORITIES) held.add(privileged);
+      held.add("report_engine:author");
     }
   }
   if (held.has("merchant:read") || held.has("link:write")) {
@@ -102,6 +106,7 @@ export const effectiveMerchantAuthorities = (
     // The portal projects the cash-out screen from merchant:read; core must
     // agree, otherwise the screen is visible but its list returns 403.
     held.add("cashout:read");
+    held.add("report_engine:run");
   }
   return held;
 };

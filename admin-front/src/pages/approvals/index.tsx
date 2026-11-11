@@ -337,6 +337,13 @@ const ApprovalsPage = dc(() => {
                 return { name: "PricingControls", query: { tab: "COMMISSION" } };
             case "VELOCITY_RULE":
                 return { name: "PricingControls", query: { tab: "VELOCITY" } };
+            case "FILING_ADAPTER":
+                return { name: "FilingAdapters" };
+            case "REPORTING_RULE_SCHEMA_BINDING":
+            case "REGULATORY_REPORT_SCHEMA":
+                return { name: "AmlReportingStudio", query: { open: row.subjectId } };
+            case "REGULATORY_REPORT":
+                return { name: "AmlReports", query: { open: row.subjectId } };
             default:
                 return null;
         }

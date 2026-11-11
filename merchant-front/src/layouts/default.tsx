@@ -14,16 +14,15 @@ import {
     VMenu,
     VNavigationDrawer,
     VProgressLinear,
-    VTooltip,
 } from "vuetify/components";
-import { useDisplay, useLocale, useTheme } from "vuetify";
+import { useDisplay, useLocale } from "vuetify";
 import LogoSvg from "@/assets/images/logo.svg";
 import { logout, user } from "@/state/user";
-import { toggleTheme } from "@/state/app/index";
 import { setLocale } from "@/plugins/localization";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSections } from "./sections";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import ThemeMenu from "@/components/ThemeMenu";
 import {
     GlobalGuideSearchModal,
     type MerchantGuideSearchEntry,
@@ -32,7 +31,6 @@ import { ContextualHelpDrawer } from "@/components/guide/ContextualHelpDrawer";
 
 const DefaultLayout = dc(() => {
     const { t, current: locale } = useLocale();
-    const theme = useTheme();
     const display = useDisplay();
     const route = useRoute();
     const router = useRouter();
@@ -119,7 +117,6 @@ const DefaultLayout = dc(() => {
 
     const activeLabel = computed(() => activeNavItem.value?.label ?? "");
 
-    const isDark = computed(() => theme.current.value.dark);
     const displayName = computed(
         () => user.value?.userInfo?.name || user.value?.userInfo?.username || "User",
     );
@@ -275,26 +272,7 @@ const DefaultLayout = dc(() => {
                     <span class="pg-help-btn__label">{t("SOP & Help")}</span>
                 </VBtn>
 
-                <VTooltip text={isDark.value ? t("Light Mode") : t("Dark Mode")} location="bottom">
-                    {{
-                        activator: ({ props }: any) => (
-                            <VBtn
-                                {...props}
-                                icon
-                                variant="text"
-                                size="small"
-                                style={{ width: "32px", height: "32px" }}
-                                {...{
-                                    "aria-label": t("Toggle theme"),
-                                    "aria-pressed": isDark.value ? "true" : "false",
-                                }}
-                                onClick={() => toggleTheme()}
-                            >
-                                <VIcon icon={isDark.value ? "mdi-weather-sunny" : "mdi-weather-night"} />
-                            </VBtn>
-                        ),
-                    }}
-                </VTooltip>
+                <ThemeMenu />
 
                 <div
                     role="group"

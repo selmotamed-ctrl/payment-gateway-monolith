@@ -16,7 +16,17 @@ export const createApp = () => {
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", service: "admin-back", uptime: process.uptime() });
   });
-  app.use(express.json({ limit: env.MAX_JSON_BODY_BYTES }));
+  // Report-engine authoring bodies carry a base64 asset zip. That prefix is
+  // parsed with a larger route-scoped limit; every other route keeps the
+  // standard JSON cap (B02).
+  const reportEngineJson = express.json({ limit: "24mb" });
+  const defaultJson = express.json({ limit: env.MAX_JSON_BODY_BYTES });
+  app.use((request, response, next) => {
+    const parser = /^\/api\/v1\/admin\/report-engine(\/|$)/.test(request.path)
+      ? reportEngineJson
+      : defaultJson;
+    parser(request, response, next);
+  });
   app.use(express.urlencoded({ extended: false, limit: env.MAX_JSON_BODY_BYTES }));
   app.use("/api/v1/admin", enforceLanAccess, apiRouter);
   app.use(notFoundHandler);

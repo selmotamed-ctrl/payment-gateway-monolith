@@ -186,6 +186,50 @@
       "situations": []
     },
     {
+      "screenId": "AmlReportingStudio",
+      "routeNames": [
+        "AmlReportingStudio"
+      ],
+      "pageDir": "pages/aml/reporting-studio",
+      "summary": "Upload and version the XML XSD and XLSX workbook contracts, map report fields, simulate output and submit schema changes for four-eyes approval.",
+      "articles": [
+        "b09-07",
+        "b09-08"
+      ],
+      "cards": [
+        "sg-aml-report"
+      ],
+      "situations": []
+    },
+    {
+      "screenId": "Incidents",
+      "routeNames": [
+        "Incidents"
+      ],
+      "pageDir": "pages/incidents",
+      "summary": "Operational incidents with a response timeline, responders, corrective actions, communications and the regulatory report. High-severity and security incidents need a postmortem before close.",
+      "articles": [
+        "b09-07",
+        "b09-08"
+      ],
+      "cards": [],
+      "situations": []
+    },
+    {
+      "screenId": "FilingAdapters",
+      "routeNames": [
+        "FilingAdapters"
+      ],
+      "pageDir": "pages/filing-adapters",
+      "summary": "The manual or HTTPS channel used to file an approved regulatory report. Manual remains the default; an HTTP adapter stores only an encrypted auth secret.",
+      "articles": [
+        "b09-07",
+        "b09-08"
+      ],
+      "cards": [],
+      "situations": []
+    },
+    {
       "screenId": "OperatorCases",
       "routeNames": [
         "OperatorCases",
@@ -499,6 +543,24 @@
         "s-wal-archive-lag-high",
         "s-restore-drill-failed"
       ]
+    },
+    {
+      "screenId": "Reports",
+      "routeNames": [
+        "ReportsCatalog",
+        "ReportsStudio",
+        "ReportsChrome",
+        "ReportsMerchantReports"
+      ],
+      "pageDir": "pages/reports",
+      "summary": "The reporting workspace: run a published report with its inputs and language, verify and publish a declarative report definition, manage reusable bilingual headers and footers, and oversee merchant-authored reports and their execution history.",
+      "articles": [
+        "b03-15",
+        "b03-13",
+        "b03-14"
+      ],
+      "cards": [],
+      "situations": []
     },
     {
       "screenId": "General",

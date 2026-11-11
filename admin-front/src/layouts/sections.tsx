@@ -32,6 +32,9 @@ export const routesRoles: {
     AmlScreenings: ["COMPLIANCE", "MLRO"],
     AmlRules: ["COMPLIANCE", "MLRO"],
     AmlReports: ["COMPLIANCE", "MLRO"],
+    AmlReportingStudio: ["COMPLIANCE", "MLRO"],
+    Incidents: ["COMPLIANCE", "MLRO"],
+    FilingAdapters: ["COMPLIANCE", "MLRO"],
     AdminAcademyTeam: ["SECURITY_ADMIN"],
 };
 
@@ -50,6 +53,36 @@ export const useSections = () => {
                     label: t("Dashboard"),
                     name: "Dashboard",
                     icon: "mdi-view-dashboard-outline",
+                },
+            ],
+        },
+        {
+            title: t("Reporting"),
+            icon: "mdi-file-chart-outline",
+            routes: [
+                {
+                    label: t("Report Catalog"),
+                    name: "ReportsCatalog",
+                    icon: "mdi-file-chart-outline",
+                    if: () => hasOneOfAuthorities(["reports.draft", "report_engine:run", "report_engine:author", "report:review", "report:approve", "security:write"]),
+                },
+                {
+                    label: t("Report Studio"),
+                    name: "ReportsStudio",
+                    icon: "mdi-robot-outline",
+                    if: () => hasOneOfAuthorities(["reports.studio", "reports.draft", "report_engine:author", "report:review", "report:approve", "security:write"]),
+                },
+                {
+                    label: t("Report Headers & Footers"),
+                    name: "ReportsChrome",
+                    icon: "mdi-page-layout-header-footer",
+                    if: () => hasOneOfAuthorities(["reports.studio", "security:write"]),
+                },
+                {
+                    label: t("Merchant Reports"),
+                    name: "ReportsMerchantReports",
+                    icon: "mdi-account-file-text-outline",
+                    if: () => hasOneOfAuthorities(["report:review", "report:approve", "security:read", "security:write"]),
                 },
             ],
         },
@@ -133,6 +166,24 @@ export const useSections = () => {
                     label: t("AML Reports"),
                     name: "AmlReports",
                     icon: "mdi-file-report-outline",
+                    if: () => hasOneOfAuthorities(["aml.read_confidential"]),
+                },
+                {
+                    label: t("Reporting Studio"),
+                    name: "AmlReportingStudio",
+                    icon: "mdi-xml",
+                    if: () => hasOneOfAuthorities(["aml.read_confidential"]),
+                },
+                {
+                    label: t("Incidents"),
+                    name: "Incidents",
+                    icon: "mdi-alert-decagram-outline",
+                    if: () => hasOneOfAuthorities(["aml.read_confidential"]),
+                },
+                {
+                    label: t("Filing Adapters"),
+                    name: "FilingAdapters",
+                    icon: "mdi-send-check-outline",
                     if: () => hasOneOfAuthorities(["aml.read_confidential"]),
                 },
             ],
