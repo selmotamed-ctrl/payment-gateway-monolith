@@ -41,6 +41,37 @@ import {
 } from "./adminReportEngine";
 
 /**
+ * The applications a merchant SESSION user is restricted to (`app_scope_ids`), or undefined for an unrestricted user.
+ * API tokens are bound to one application by the token itself.
+ */
+const applicationScopeOf = (request: Request): readonly string[] | undefined => {
+  const principal = principalOf(request);
+  if (principal.kind !== "session") return undefined;
+  const ids = principal.appScopeIds ?? [];
+  return ids.length > 0 ? ids : undefined;
+};
+
+/**
+ * A restricted user may only report on models whose rows belong to ONE application (payment_attempts); the engine
+ * narrows them to the user's applications. Wallets, cash-outs and the daily stats are merchant-wide and cannot be
+ * narrowed, so a report on them is refused, as the merchant overview is (APP_SCOPE_RESTRICTED). Before, the report
+ * engine ignored the restriction altogether and returned every application's rows.
+ */
+const assertSpecFitsApplicationScope = (spec: ReportDescriptorSpec, applicationIds: readonly string[] | undefined): void => {
+  if (!applicationIds) return;
+  const unsupported = [...new Set(spec.datasets.flatMap((dataset) => [dataset.from_model, ...dataset.joins.map((join) => join.target_model)]))]
+    .filter((model) => !host.models[model]?.merchantScopable?.applicationIdColumn);
+  if (unsupported.length > 0) {
+    throw new ApiError(
+      403,
+      "APP_SCOPE_RESTRICTED",
+      "This report reads merchant-wide data and is not available to a user restricted to specific applications",
+      { models: unsupported },
+    );
+  }
+};
+
+/**
  * Merchant report engine: a SEPARATE authoring/execution line. It reads and
  * writes only merchant-owned registry rows and executes on the merchant host
  * catalog, where the engine injects the authenticated merchant predicate on
@@ -934,11 +965,14 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
     throw new ApiError(501, "SERVER_PDF_NOT_CONFIGURED", "The optional server-side PDF renderer is not configured");
   }
 
+  const applicationIds = applicationScopeOf(request);
+  assertSpecFitsApplicationScope(spec, applicationIds);
+
   await assertMerchantBudget(merchantId);
   await assertMerchantRateLimit(merchantId, "execute");
   const release = acquireMerchantExecutionSlot(merchantId);
   const forcedInputs = { ...body.inputs, [scopeKey]: merchantId };
-  const cacheKey = merchantCacheKey({ merchantId, spec, inputs: forcedInputs });
+  const cacheKey = merchantCacheKey({ merchantId, spec, inputs: forcedInputs, applicationIds });
   const cached = readMerchantCache<ReportExecutionBundle>(cacheKey);
   if (cached) {
     release();
@@ -959,6 +993,7 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
       allowConfidentialAmlBypass: false,
       merchantScope: {
         merchantId,
+        applicationIds,
         onViolation: async (info) => {
           await writeAudit(client as never, {
             data: {

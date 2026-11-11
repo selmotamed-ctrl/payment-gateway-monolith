@@ -3601,6 +3601,7 @@ model MerchantReportSpecRecord {
   executions MerchantReportExecutionAudit[]
 
   @@unique([merchantId, code, version], map: "merchant_report_specs_merchant_code_version_key")
+  @@unique([id, merchantId], map: "merchant_report_specs_id_merchant_key")
   @@index([merchantId, status, isLatestPublished], map: "merchant_report_specs_merchant_published_idx")
   @@map("merchant_report_specs")
 }
@@ -3619,6 +3620,7 @@ model MerchantReportAssetBundle {
   specRecords MerchantReportSpecRecord[]
 
   @@unique([merchantId, bundleSha256], map: "merchant_report_asset_bundles_merchant_sha_key")
+  @@unique([id, merchantId], map: "merchant_report_asset_bundles_id_merchant_key")
   @@index([merchantId, createdAt(sort: Desc)], map: "merchant_report_asset_bundles_merchant_created_idx")
   @@map("merchant_report_asset_bundles")
 }
@@ -3626,7 +3628,7 @@ model MerchantReportAssetBundle {
 model MerchantReportExecutionAudit {
   id                   String   @id @default(uuid(7)) @db.Uuid
   merchantSpecId       String?  @map("merchant_spec_id") @db.Uuid
-  merchantSpec         MerchantReportSpecRecord? @relation(fields: [merchantSpecId], references: [id], onDelete: SetNull)
+  merchantSpec         MerchantReportSpecRecord? @relation(fields: [merchantSpecId], references: [id], onDelete: Restrict)
   merchantId           String   @map("merchant_id") @db.Uuid
   reportCode           String   @map("report_code") @db.VarChar(64)
   reportVersion        Int      @map("report_version")

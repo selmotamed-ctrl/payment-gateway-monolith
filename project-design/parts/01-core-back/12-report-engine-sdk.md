@@ -32,6 +32,8 @@ design_sources:
 tests:
   - core-back/test/reportEngineSdk/**
   - core-back/test/admin-slice/admin-report-engine.test.ts
+  - core-back/test/report-preview-policy.test.ts
+  - core-back/test/report-tenant-and-filing-integrity.test.ts
   - merchant-back/test/core-forwarding.test.ts
   - admin-back/test/report-engine-edge.test.ts
   - tests/unit/report-engine-sdk-mirror.test.ts
@@ -143,7 +145,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - `report_definition_specs` (code/version, category, audience, status, latest-published flag, supported/default locales, spec JSON/SHA-256, verification report, inferred roles/authorities, conflict status, confidential AML flag, override fields, publisher);
 - `report_execution_audit` (spec, code/version, actor, locale, scoped merchant, redacted inputs, row count, duration, node, verification hash, render target).
 
-`REQUIRED_SCHEMA_VERSION` is 33. Version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. Version 33 adds the separate merchant authoring line: `merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` and `merchant_report_studio_status`, with unique `(merchant_id, code, version)` and one latest-published row per merchant/code. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
+`REQUIRED_SCHEMA_VERSION` is 34. Version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. Version 33 adds the separate merchant authoring line: `merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` and `merchant_report_studio_status`, with unique `(merchant_id, code, version)` and one latest-published row per merchant/code. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
 
 ## 7. Security invariants
 
@@ -238,3 +240,9 @@ Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `4
 - COMPUTE_COLUMN `right_operand` is optional only for unary `PERCENTAGE_SHARE`; other formulas require it. `PERCENT_BPS` is accepted as a transform output format.
 - Section-field diagnostics list available fields/datasets, add a closest-match suggestion, and distinguish unknown datasets from unknown fields.
 - ZERO_NATURAL_ROLE_INTERSECTION remains a non-blocking warning and points to the Security Admin override; SUGGESTED_ACCESS_CONFLICT is emitted only when `suggested_access` is present.
+
+## 11. Review fixes (2026-11-11)
+
+- **Staff preview obeys the access policy and is audited.** `POST /report-engine/specs/preview` executes a draft against live data. It used to require only an authoring or review authority, so an author without the ledger or audit authorities could preview a draft over those tables, and it left no trace. It now evaluates the policy inferred from the models the draft queries (`previewAccessDecision` in `api/internal/reportPreviewPolicy.ts`: a natural role, or every required authority; a security admin is always allowed; a missing inference fails closed) and answers `403 REPORT_ACCESS_DENIED` with the queried models and required authorities before executing anything. A successful preview writes `REPORT_SPEC_PREVIEW_EXECUTED` (entity `REPORT_SPEC_DRAFT`, id = the draft's SHA-256, with the queried models, row count and duration) to the audit log; the execution audit table is keyed by a saved spec, which a draft is not.
+- **Merchant reports honour a user's application scope.** A merchant session user can be restricted to some applications (`app_scope_ids`) and the other merchant routes honour it; the report engine ignored it, so such a user got every application's payments, wallets, cash-outs and daily stats. `merchantScopable.applicationIdColumn` (host config) marks the models whose rows belong to ONE application: only `payment_attempts`. For a restricted session user the execute route (1) refuses a report that reads any other model with `403 APP_SCOPE_RESTRICTED` (as the merchant overview is refused), before the budget, rate limit or execution; (2) passes `merchantScope.applicationIds`, so the compiler adds `<alias>.application_id = ANY($n::uuid[])` to every aliased table next to the merchant predicate (and throws `APP_SCOPE_MODEL_NOT_ALLOWED` for a model that cannot be narrowed); (3) keys the result cache by the scope, so a restricted user's result is never served to an unrestricted user or the reverse. An API token is bound to one application by the token itself and is unchanged. The `applications` model is also refused to a restricted user (conservative). The merchant autocomplete sources (payment link keys, POS terminal names) are still merchant-wide.
+- **Tenant-safe merchant report tables and an append-only audit without SET NULL** are migration `20261111090000` (schema version 34), see `core.data` (the migration list).

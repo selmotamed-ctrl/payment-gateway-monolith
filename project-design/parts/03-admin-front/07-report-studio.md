@@ -86,7 +86,7 @@ The Catalog has All / Backoffice Internal / Merchant Reports tabs. Chrome select
 
 The Studio reports the domain filter using catalog domains (`LEDGER`, `PAYMENTS`, ...), can download the Chrome transcript, supports clearing an override, and can request a confidential AML bypass. An MLRO or Security Admin sees the pending bypass list and can approve/reject it; maker and checker must differ.
 
-The Studio renders a read-only draft preview through `POST /report-engine/specs/preview` (sample inputs, no persistence) inside the same sandboxed Paged.js surface as the Catalog. It loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type. Report execution returns `404 REPORT_NOT_FOUND` only when the code does not exist and `409 REPORT_NOT_PUBLISHED` when a non-published version exists.
+The Studio renders a read-only draft preview through `POST /report-engine/specs/preview` (sample inputs, no persistence; it obeys the access policy inferred from the models the draft queries and is recorded as `REPORT_SPEC_PREVIEW_EXECUTED`) inside the same sandboxed Paged.js surface as the Catalog. It loads the version history for a saved report code and can archive a version. The Chrome page previews registered logos using the asset data returned by the API and keeps one published global default per type. Report execution returns `404 REPORT_NOT_FOUND` only when the code does not exist and `409 REPORT_NOT_PUBLISHED` when a non-published version exists.
 
 ## 8. Layout and action polish (2026-11-09)
 

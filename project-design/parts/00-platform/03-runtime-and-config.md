@@ -43,7 +43,7 @@ tests:
   - merchant-back/test/security-regressions.test.ts
   - checkout-back/test/security-regressions.test.ts
 gaps:
-  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 33.
+  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 34.
 - `merchant_reports.policy` (Platform Settings, `settings:write`) is the staff-managed merchant reporting switch. `enabled` controls the runner/Studio; `assetsEnabled` controls merchant asset bundles. Missing values fall back to enabled/allowed.
   - LOG_LEVEL is declared but not used by the console or access logger.
   - WORKER_CONCURRENCY and WORKER_REQUEST_TIMEOUT_MS are accepted but not passed to the production worker runtime.
@@ -242,7 +242,7 @@ The storage engine is constructed before `listen`, but after the server object i
 
 ### 3.5 Schema version check
 
-`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 33`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
+`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 34`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
 
 ```sql
 SELECT "version" FROM "schema_versions" WHERE "id" = 1

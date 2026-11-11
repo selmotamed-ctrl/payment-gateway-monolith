@@ -1231,7 +1231,7 @@ The storage engine is constructed before `listen`, but after the server object i
 
 ### 3.5 Schema version check
 
-`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 33`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
+`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 34`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
 
 ```sql
 SELECT "version" FROM "schema_versions" WHERE "id" = 1
@@ -4402,7 +4402,7 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 - **Rule-schema bindings are maker-checker.** `PUT /aml/reporting-rules/:id/schema-bindings` no longer writes directly: it creates a `REPORTING_RULE_SCHEMA_BINDING` approval (payload contains the bindings and every schema's version/revision/definition/mapping hash), rejects a second pending change, and returns 202. `GovernanceExecution` re-validates the confirmed status, format, authority and report type at execution, replaces the rule bindings in one transaction and audits `REPORTING_RULE_SCHEMA_BINDINGS_UPDATED`. The studio shows the bound schema per rule and submits the change for approval.
 - **DOCX narrative output.** `ReportOutputFormat.DOCX` plus the `DocxNarrativeSchema` compiler validate title, sections, required sections and optional tables; `lib/docx/regulatoryDocx.ts` writes a minimal OOXML package (document, styles, content types and relationships) with escaped text and tables. Outputs are encrypted with the `reporting-docx` context and downloaded with the Word content type. The provisional `cbl-incident-docx-v1` baseline is the default for `CBL / INCIDENT / INC / DOCX`.
 - **Expanded incidents.** `Incident` is the operational record: severity, category, impact scope, lifecycle timestamps, commander/reporter, affected services/merchants/attempts, regulator notification, postmortem requirement/due date and root cause. Child tables hold the timeline, responders (paging/acknowledgement/release), corrective actions, links to attempts/merchants/rails/gateways/reports/cases and communications. Transitions are forward-only (`DETECTED -> TRIAGED/DECLARED -> CONTAINED -> MONITORING -> RESOLVED -> POSTMORTEM -> CLOSED`); closing requires the postmortem when the incident is SEV1/SEV2, security or data-integrity. `POST /aml/incidents/:id/report` builds the narrative and timeline, then drafts a `REGULATORY_REPORT` through the standard maker-checker path. The admin portal has `/incidents` with Overview, Timeline, Responders, Actions, Communications and Postmortem tabs.
-- **External filing adapters.** `external_filing_adapters` stores a name, authority, MANUAL/HTTP kind, status, HTTPS endpoint, an encrypted auth secret, timeout and config; `external_submissions` records each attempt with the request SHA-256, external reference, response code/body and error. `POST /aml/reports/:id/file` re-checks the approval submitter, every required output (generated, VALIDATED, confirmed schema, matching payload hash), dispatches the encrypted artifacts, records the submission and then calls the normal submission gate. The HTTP adapter sends through the same pinned egress as the merchant webhooks (`lib/webhooks/egress.ts`, fixed 2026-11-11): HTTPS only, no credentials, no literal private, loopback, link-local, carrier-grade or local-name host in any IPv4 or IPv6 form (bracketed or mapped), DNS resolved ONCE at dispatch with every address required to be public and the connection pinned to it (so DNS rebinding cannot reach an internal service), no redirect, a total deadline (not only an idle timeout) and a streamed response cap of 16 KiB, of which 4,000 characters are stored. The endpoint is re-validated at every dispatch, whatever was stored. Before, only the hostname text was compared with a few literals, so any name resolving to an internal address, `127.0.0.2`, `0.0.0.0`, `100.64.0.0/10` or a bracketed IPv6 literal passed, and the secret and the confidential report were POSTed there with the response read back into the UI. MANUAL remains the default and the existing submit route is unchanged. The admin portal has `/filing-adapters` and the report drawer can file through an active adapter.
+- **External filing adapters.** `external_filing_adapters` stores a name, authority, MANUAL/HTTP kind, status, HTTPS endpoint, an encrypted auth secret, timeout and config; `external_submissions` records each attempt with the request SHA-256, external reference, response code/body and error. `POST /aml/reports/:id/file` re-checks the approval submitter, every required output (generated, VALIDATED, confirmed schema, matching payload hash), dispatches the encrypted artifacts, records the submission and then calls the normal submission gate. The HTTP adapter sends through the same pinned egress as the merchant webhooks (`lib/webhooks/egress.ts`, fixed 2026-11-11): HTTPS only, no credentials, no literal private, loopback, link-local, carrier-grade or local-name host in any IPv4 or IPv6 form (bracketed or mapped), DNS resolved ONCE at dispatch with every address required to be public and the connection pinned to it (so DNS rebinding cannot reach an internal service), no redirect, a total deadline (not only an idle timeout) and a streamed response cap of 16 KiB, of which 4,000 characters are stored. The endpoint is re-validated at every dispatch, whatever was stored. Before, only the hostname text was compared with a few literals, so any name resolving to an internal address, `127.0.0.2`, `0.0.0.0`, `100.64.0.0/10` or a bracketed IPv6 literal passed, and the secret and the confidential report were POSTed there with the response read back into the UI. A report is filed at most once per adapter: the partial unique index `external_submissions_open_report_adapter_key` allows one PENDING, SUBMITTED or ACKNOWLEDGED submission per report and adapter (a FAILED or REJECTED one can be retried), and the route maps a lost race to `409 REPORT_ALREADY_FILING` (schema version 34). MANUAL remains the default and the existing submit route is unchanged. The admin portal has `/filing-adapters` and the report drawer can file through an active adapter.
 
 ## Final reporting/compliance sweep (2026-11-10)
 
@@ -5368,7 +5368,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 33 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 34 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -5423,7 +5423,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 33`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 34`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5436,7 +5436,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261110190000_merchant_report_engine`, schema version 33). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261111090000_report_tenant_and_filing_integrity`, schema version 34). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -5628,7 +5628,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 84 models and 105 enums in the Prisma datamodel.
-- Schema version 33 with an equality check used by the seeders.
+- Schema version 34 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -5731,7 +5731,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 33 (`REQUIRED_SCHEMA_VERSION = 33`; model count 105). The schema migrations since version 10 are:
+The current schema version is 34 (`REQUIRED_SCHEMA_VERSION = 34`; model count 105). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -5745,6 +5745,7 @@ The current schema version is 33 (`REQUIRED_SCHEMA_VERSION = 33`; model count 10
 - `20261107120000_inbound_event_claims` (version 13): adds nullable `inbound_events.claimed_at` and `claimed_by` plus `(processed_at, claimed_at)`, the durable lease the inbound webhook worker uses to prevent duplicate processing across a brief leadership overlap.
 - `20261109210000_ledger_query_and_index_optimization` (version 25): covering indexes and append-only autovacuum (see `core.ledger`). Revised 2026-11-10 before any production use: `SET lock_timeout = '10s'`, each `journal_lines` covering index is rebuilt only when `pg_get_indexdef` differs from its target (so an index pre-built online is never rebuilt, see section 12b), and the resilient `ensure_journal_line_partitions`.
 - `20261110090000_resilient_journal_partitions` (functions only, no version bump): redefines `ensure_journal_line_partitions` for databases that applied version 25 before that revision (`prisma migrate deploy` never re-runs an applied migration: verified 2026-11-10). A month that cannot be created (rows already in `journal_lines_default`: `check_violation`; a lock wait over 5 s: `lock_not_available`) is skipped with a WARNING instead of aborting the call; storage parameters are set only on a partition the call creates; `lock_timeout = 5s`, `timezone = UTC`.
+- `20261111090000_report_tenant_and_filing_integrity` (version 34): (1) the merchant report tables referenced each other by id only, so nothing at the database level stopped merchant A's spec pointing at merchant B's asset bundle, or an audit row carrying B's spec under A's `merchant_id`: `UNIQUE (id, merchant_id)` on the bundle and spec tables, composite foreign keys `(asset_bundle_id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`) and `(merchant_spec_id, merchant_id)` (`RESTRICT`) alongside the single-column ones (Prisma cannot model a composite relation with an optional first column, so these are SQL-only), and a real foreign key from `merchant_id` to `merchants` on all five tables; (2) `merchant_report_execution_audit.merchant_spec_id` was `ON DELETE SET NULL`, an UPDATE the table's own append-only trigger rejects, so deleting a referenced spec failed: it is now `RESTRICT` (specs are archived, never deleted), and the table gets the `BEFORE TRUNCATE` guard the staff audit has; (3) `external_submissions_open_report_adapter_key`, a partial unique index on `(report_id, adapter_id)` for statuses PENDING, SUBMITTED and ACKNOWLEDGED: a report is filed at most once per adapter (a FAILED or REJECTED submission can be retried), and the file route maps the violation to its existing `409 REPORT_ALREADY_FILING`. Applying it to a database that already holds two open submissions for one report and adapter fails with a duplicate-key error: resolve them first.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -7526,7 +7527,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - `report_definition_specs` (code/version, category, audience, status, latest-published flag, supported/default locales, spec JSON/SHA-256, verification report, inferred roles/authorities, conflict status, confidential AML flag, override fields, publisher);
 - `report_execution_audit` (spec, code/version, actor, locale, scoped merchant, redacted inputs, row count, duration, node, verification hash, render target).
 
-`REQUIRED_SCHEMA_VERSION` is 33. Version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. Version 33 adds the separate merchant authoring line: `merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` and `merchant_report_studio_status`, with unique `(merchant_id, code, version)` and one latest-published row per merchant/code. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
+`REQUIRED_SCHEMA_VERSION` is 34. Version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. Version 33 adds the separate merchant authoring line: `merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` and `merchant_report_studio_status`, with unique `(merchant_id, code, version)` and one latest-published row per merchant/code. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
 
 ## 7. Security invariants
 
@@ -7621,6 +7622,12 @@ Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `4
 - COMPUTE_COLUMN `right_operand` is optional only for unary `PERCENTAGE_SHARE`; other formulas require it. `PERCENT_BPS` is accepted as a transform output format.
 - Section-field diagnostics list available fields/datasets, add a closest-match suggestion, and distinguish unknown datasets from unknown fields.
 - ZERO_NATURAL_ROLE_INTERSECTION remains a non-blocking warning and points to the Security Admin override; SUGGESTED_ACCESS_CONFLICT is emitted only when `suggested_access` is present.
+
+## 11. Review fixes (2026-11-11)
+
+- **Staff preview obeys the access policy and is audited.** `POST /report-engine/specs/preview` executes a draft against live data. It used to require only an authoring or review authority, so an author without the ledger or audit authorities could preview a draft over those tables, and it left no trace. It now evaluates the policy inferred from the models the draft queries (`previewAccessDecision` in `api/internal/reportPreviewPolicy.ts`: a natural role, or every required authority; a security admin is always allowed; a missing inference fails closed) and answers `403 REPORT_ACCESS_DENIED` with the queried models and required authorities before executing anything. A successful preview writes `REPORT_SPEC_PREVIEW_EXECUTED` (entity `REPORT_SPEC_DRAFT`, id = the draft's SHA-256, with the queried models, row count and duration) to the audit log; the execution audit table is keyed by a saved spec, which a draft is not.
+- **Merchant reports honour a user's application scope.** A merchant session user can be restricted to some applications (`app_scope_ids`) and the other merchant routes honour it; the report engine ignored it, so such a user got every application's payments, wallets, cash-outs and daily stats. `merchantScopable.applicationIdColumn` (host config) marks the models whose rows belong to ONE application: only `payment_attempts`. For a restricted session user the execute route (1) refuses a report that reads any other model with `403 APP_SCOPE_RESTRICTED` (as the merchant overview is refused), before the budget, rate limit or execution; (2) passes `merchantScope.applicationIds`, so the compiler adds `<alias>.application_id = ANY($n::uuid[])` to every aliased table next to the merchant predicate (and throws `APP_SCOPE_MODEL_NOT_ALLOWED` for a model that cannot be narrowed); (3) keys the result cache by the scope, so a restricted user's result is never served to an unrestricted user or the reverse. An API token is bound to one application by the token itself and is unchanged. The `applications` model is also refused to a restricted user (conservative). The merchant autocomplete sources (payment link keys, POS terminal names) are still merchant-wide.
+- **Tenant-safe merchant report tables and an append-only audit without SET NULL** are migration `20261111090000` (schema version 34), see `core.data` (the migration list).
 
 ---
 

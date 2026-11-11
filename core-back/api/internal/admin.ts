@@ -18449,14 +18449,25 @@ router.post("/aml/reports/:id/file", async (request: Request, response: Response
     }
     await client.externalSubmission.update({ where: { id: existingSubmission.id }, data: { status: "FAILED", errorMessage: "Stale pending filing lease expired" } });
   }
-  const submission = await client.externalSubmission.create({
-    data: {
-      reportId: report.id,
-      adapterId: adapter.id,
-      status: "PENDING",
-      requestSha256,
-    },
-  });
+  // The check above is find-then-create: two simultaneous requests can both pass it. The partial unique index
+  // `external_submissions_open_report_adapter_key` (one PENDING/SUBMITTED/ACKNOWLEDGED submission per report and
+  // adapter) is what keeps the filing from being POSTed to the regulator twice; the loser gets the same 409.
+  let submission;
+  try {
+    submission = await client.externalSubmission.create({
+      data: {
+        reportId: report.id,
+        adapterId: adapter.id,
+        status: "PENDING",
+        requestSha256,
+      },
+    });
+  } catch (error) {
+    if ((error as { code?: string })?.code === "P2002") {
+      throw new ApiError(409, "REPORT_ALREADY_FILING", "This report is already being filed through this adapter");
+    }
+    throw error;
+  }
   const secret = adapter.authSecretCiphertext ? String(await filingAdapterCipher.decrypt(adapter.authSecretCiphertext)) : null;
   const result = await dispatchFiling({ kind: adapter.kind, endpointUrl: adapter.endpointUrl, authHeaderName: adapter.authHeaderName, secret, timeoutSeconds: adapter.timeoutSeconds, request: requestBody });
   if (result.status !== "SUBMITTED") {

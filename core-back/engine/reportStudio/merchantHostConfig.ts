@@ -130,7 +130,14 @@ function pickMerchantModels(): Record<string, CatalogModelDef> {
       naturalRoles: ["MERCHANT_ADMIN", "MERCHANT_STAFF"],
       confidentialAmlOnly: false,
       merchantScopable:
-        tableName === "merchants" ? { merchantIdColumn: "id" } : { merchantIdColumn: "merchant_id" },
+        tableName === "merchants"
+          ? { merchantIdColumn: "id" }
+          : {
+              merchantIdColumn: "merchant_id",
+              // Only payment_attempts rows belong to one application; wallets, cash-outs and the daily stats are
+              // merchant-wide, so an application-restricted user cannot report on them.
+              ...(columns.application_id ? { applicationIdColumn: "application_id" } : {}),
+            },
     };
   }
   return models;

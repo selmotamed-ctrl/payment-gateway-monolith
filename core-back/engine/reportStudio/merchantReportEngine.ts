@@ -336,9 +336,11 @@ export function merchantCacheKey(params: {
   merchantId: string;
   spec: ReportDescriptorSpec;
   inputs: Record<string, unknown>;
+  /** The applications a restricted user is limited to: their result must never be served to an unrestricted user (or vice versa). */
+  applicationIds?: readonly string[];
 }): string {
   return createHash("sha256")
-    .update(JSON.stringify({ merchantId: params.merchantId, spec: params.spec, inputs: params.inputs }))
+    .update(JSON.stringify({ merchantId: params.merchantId, spec: params.spec, inputs: params.inputs, applicationIds: params.applicationIds ? [...params.applicationIds].sort() : null }))
     .digest("hex");
 }
 

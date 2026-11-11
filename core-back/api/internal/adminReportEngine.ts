@@ -7,6 +7,7 @@ import { ApiError, parseOrThrow } from "../../lib/error";
 import { requireAuthorities, principalOf, isStaffPrincipal, type Principal } from "../middleware/authDoubleCheck";
 import { auditActor, auditBase } from "./adminSliceHelpers";
 import { writeAudit } from "../../lib/audit/writeAudit";
+import { previewAccessDecision } from "./reportPreviewPolicy";
 import {
   extractZipAssetFiles,
   synthesizeDefaultInputs,
@@ -614,8 +615,22 @@ router.post("/report-engine/specs/preview", async (request: Request, response: R
   }
   const inputs = body.inputs ?? synthesizeDefaultInputs(parsedSpec);
   const actor = await actorOf(request);
+  // A preview READS data, so it obeys the access policy a published report would get: the one inferred from
+  // the models the draft queries (a natural role, or every required authority). `report_engine:author` and
+  // `report:review` authorise authoring and reviewing, not reading every catalog model: before this check an
+  // author without the ledger or audit authorities could preview a draft over those tables. No stored
+  // override exists for a draft, so a missing inference fails closed.
+  const inference = verification.authorityInference;
+  const access = previewAccessDecision(inference, actor);
+  if (!access.allowed) {
+    throw new ApiError(403, "REPORT_ACCESS_DENIED", "You are not authorized to read the data this draft queries", {
+      queriedModels: access.queriedModels,
+      requiredAuthorities: access.requiredAuthorities,
+    });
+  }
+  let bundle;
   try {
-    const bundle = await engine.executeReport({
+    bundle = await engine.executeReport({
       spec: parsedSpec,
       inputs,
       actor,
@@ -624,10 +639,29 @@ router.post("/report-engine/specs/preview", async (request: Request, response: R
       assets,
       allowConfidentialAmlBypass: false,
     });
-    response.json({ verification, bundle });
   } catch (error) {
     throw toReportExecutionError(error);
   }
+  // The execution audit table is keyed by a saved spec, which a draft is not: record the read in the audit log.
+  const specSha256 = sha256Of(parsedSpec);
+  await writeAudit(client, {
+    data: {
+      ...auditBase(auditActor(request)),
+      action: "REPORT_SPEC_PREVIEW_EXECUTED",
+      entityType: "REPORT_SPEC_DRAFT",
+      entityId: specSha256,
+      beforeJson: null,
+      afterJson: {
+        code: parsedSpec.report.code,
+        version: parsedSpec.report.version,
+        specSha256,
+        queriedModels: inference?.queriedModels ?? [],
+        rowCountTotal: bundle.rowCountTotal,
+        durationMs: bundle.durationMs,
+      },
+    } as never,
+  });
+  response.json({ verification, bundle });
 });
 
 router.post("/report-engine/specs", async (request: Request, response: Response) => {

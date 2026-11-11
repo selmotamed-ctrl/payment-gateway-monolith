@@ -118,6 +118,8 @@ export interface ExecuteReportInput {
    */
   merchantScope?: {
     merchantId: string;
+    /** A session user restricted to some applications: every queried model is also narrowed to these (see `applicationIdColumn`). */
+    applicationIds?: readonly string[];
     onViolation?: (info: { datasetId: string; expected: string; received: string | null }) => void | Promise<void>;
   };
 }
@@ -414,7 +416,9 @@ async function executeReport(
         userId: input.actor.userId,
         nowUtcIso: nowIso,
       },
-      input.merchantScope ? { merchantScope: { merchantId: input.merchantScope.merchantId } } : undefined,
+      input.merchantScope
+        ? { merchantScope: { merchantId: input.merchantScope.merchantId, applicationIds: input.merchantScope.applicationIds } }
+        : undefined,
     );
     const rowCap = Math.min(ds.limit, host.globalLimits.maxRowsPerDataset);
     const result = await host.dbReadOnlyPort.executeReadOnlyQuery({
