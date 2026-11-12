@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
-import { VBtn, VBtnToggle, VFileInput, VSwitch, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VBtnToggle, VFileInput, VSwitch, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { DataTable } from "@/components/Table/DataTable";
@@ -45,6 +45,7 @@ type VersionRow = {
   category: string;
   status: string;
   isLatestPublished: boolean;
+  compatibility?: { status: "COMPATIBLE" | "NEEDS_MIGRATION" | "INVALID"; reasonCode: string | null; message: string };
   createdAt: string;
   publishedAt: string | null;
 };
@@ -315,6 +316,9 @@ const MerchantReportStudioPage = dc(() => {
       Value: ({ row }) => (
         <div class="d-flex align-center ga-2">
           <StatusBadge status={row.status} />
+          {row.compatibility && row.compatibility.status !== "COMPATIBLE" && (
+            <StatusBadge status={row.compatibility.status} toneOverride="danger" label={t("Needs migration")} />
+          )}
           {row.isLatestPublished && <MetaPill color="success">{t("published")}</MetaPill>}
         </div>
       ),
@@ -365,6 +369,12 @@ const MerchantReportStudioPage = dc(() => {
             </div>
           )}
         />
+
+        {route.query.from === "migration" && (
+          <VAlert type="warning" variant="tonal">
+            {t("This report needs migration. Copy the migration prompt from the migration page, paste the migrated JSON here, verify and save it as a new version.")}
+          </VAlert>
+        )}
 
         {usage.value && (
           <SurfaceCard title={t("Usage and quotas")} subtitle={t("Per-merchant limits protect the platform")}>

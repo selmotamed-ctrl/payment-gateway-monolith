@@ -16,6 +16,7 @@ export const ChromeVariableBindingSchema = z.enum([
   "selectedLocale",
   "merchantTradeName",
   "merchantLegalName",
+  "merchantDisplayName",
   "periodSummary",
   "defaultCurrency",
   "classificationBadge",

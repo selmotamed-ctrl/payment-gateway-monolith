@@ -7509,7 +7509,9 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
     "ReportsCatalog",
     "ReportsStudio",
     "ReportsChrome",
-    "ReportsMerchantReports"
+    "ReportsMerchantReports",
+    "ReportsNeedsMigration",
+    "ReportsChromeNeedsMigration"
    ],
    "pageDir": "pages/reports",
    "summary": "The reporting workspace: run a published report with its inputs and language, verify and publish a declarative report definition, manage reusable bilingual headers and footers, and oversee merchant-authored reports and their execution history.",

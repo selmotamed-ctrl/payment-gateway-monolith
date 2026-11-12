@@ -1435,10 +1435,10 @@ model AmlCase {
   confidential       Boolean        @default(true)
   reviewerNotes      String?        @map("reviewer_notes") @db.Text
 
-  screening        AmlScreening?     @relation("AmlCaseScreening", fields: [screeningId], references: [id], onDelete: SetNull)
-  rule             AmlRule?          @relation("AmlCaseRule", fields: [ruleId], references: [id], onDelete: SetNull)
-  holdJournalEntry JournalEntry?     @relation("AmlCaseHoldEntry", fields: [holdJournalEntryId], references: [id], onDelete: SetNull)
-  assignedReviewer User?             @relation("AmlCaseReviewer", fields: [assignedReviewerId], references: [id], onDelete: SetNull)
+  screening         AmlScreening?      @relation("AmlCaseScreening", fields: [screeningId], references: [id], onDelete: SetNull)
+  rule              AmlRule?           @relation("AmlCaseRule", fields: [ruleId], references: [id], onDelete: SetNull)
+  holdJournalEntry  JournalEntry?      @relation("AmlCaseHoldEntry", fields: [holdJournalEntryId], references: [id], onDelete: SetNull)
+  assignedReviewer  User?              @relation("AmlCaseReviewer", fields: [assignedReviewerId], references: [id], onDelete: SetNull)
   regulatoryReports RegulatoryReport[] @relation("RegulatoryReportAmlCase")
 
   @@index([status])
@@ -1524,20 +1524,20 @@ model ApprovalRequest {
   rejectionReason    String?       @map("rejection_reason") @db.Text
   riskAcceptanceNote String?       @map("risk_acceptance_note") @db.Text
 
-  maker              User                @relation("ApprovalMaker", fields: [makerUserId], references: [id], onDelete: Restrict)
-  checker            User?               @relation("ApprovalChecker", fields: [checkerUserId], references: [id], onDelete: SetNull)
-  commissionProfiles CommissionProfile[] @relation("CommissionProfileApproval")
-  velocityRules      VelocityRule[]      @relation("VelocityRuleApproval")
-  gatewayVersions    GatewayVersion[]    @relation("GatewayVersionApproval")
-  amlRules           AmlRule[]           @relation("AmlRuleApproval")
-  reportingRules     ReportingRule[]     @relation("ReportingRuleApproval")
-  regulatoryReports  RegulatoryReport[]  @relation("RegulatoryReportApproval")
+  maker              User                     @relation("ApprovalMaker", fields: [makerUserId], references: [id], onDelete: Restrict)
+  checker            User?                    @relation("ApprovalChecker", fields: [checkerUserId], references: [id], onDelete: SetNull)
+  commissionProfiles CommissionProfile[]      @relation("CommissionProfileApproval")
+  velocityRules      VelocityRule[]           @relation("VelocityRuleApproval")
+  gatewayVersions    GatewayVersion[]         @relation("GatewayVersionApproval")
+  amlRules           AmlRule[]                @relation("AmlRuleApproval")
+  reportingRules     ReportingRule[]          @relation("ReportingRuleApproval")
+  regulatoryReports  RegulatoryReport[]       @relation("RegulatoryReportApproval")
   reportingSchemas   RegulatoryReportSchema[] @relation("RegulatorySchemaApproval")
-  operatorCases      OperatorCase[]      @relation("OperatorCaseApproval")
-  detailChangeLogs   DetailChangeLog[]   @relation("DetailChangeLogApproval")
-  auditLogs          AuditLog[]          @relation("AuditLogApproval")
-  joinRequests       JoinRequest[]       @relation("JoinRequestApproval")
-  platformSettings   PlatformSetting[]   @relation("PlatformSettingApproval")
+  operatorCases      OperatorCase[]           @relation("OperatorCaseApproval")
+  detailChangeLogs   DetailChangeLog[]        @relation("DetailChangeLogApproval")
+  auditLogs          AuditLog[]               @relation("AuditLogApproval")
+  joinRequests       JoinRequest[]            @relation("JoinRequestApproval")
+  platformSettings   PlatformSetting[]        @relation("PlatformSettingApproval")
 
   @@index([makerUserId])
   @@index([checkerUserId])
@@ -2772,24 +2772,24 @@ model AmlRule {
 }
 
 model ReportingRule {
-  id                String              @id @default(uuid(7)) @db.Uuid
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
-  authority         String              @default("CBL") @db.VarChar(64)
-  reportType        ReportingType       @map("report_type")
-  thresholdAmount   Decimal?            @map("threshold_amount") @db.Decimal(18, 4)
-  windowSeconds     Int?                @map("window_seconds")
-  currency          String              @default("LYD") @db.Char(3)
-  conditions        Json
-  sourceReference   String?             @map("source_reference") @db.Text
-  status            ReportingRuleStatus @default(PROVISIONAL)
-  effectiveFrom     DateTime            @map("effective_from")
-  effectiveTo       DateTime?           @map("effective_to")
-  approvalRequestId String?             @map("approval_request_id") @db.Uuid
+  id                    String               @id @default(uuid(7)) @db.Uuid
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+  authority             String               @default("CBL") @db.VarChar(64)
+  reportType            ReportingType        @map("report_type")
+  thresholdAmount       Decimal?             @map("threshold_amount") @db.Decimal(18, 4)
+  windowSeconds         Int?                 @map("window_seconds")
+  currency              String               @default("LYD") @db.Char(3)
+  conditions            Json
+  sourceReference       String?              @map("source_reference") @db.Text
+  status                ReportingRuleStatus  @default(PROVISIONAL)
+  effectiveFrom         DateTime             @map("effective_from")
+  effectiveTo           DateTime?            @map("effective_to")
+  approvalRequestId     String?              @map("approval_request_id") @db.Uuid
   requiredOutputFormats ReportOutputFormat[] @default([]) @map("required_output_formats")
   primaryOutputFormat   ReportOutputFormat?  @map("primary_output_format")
 
-  approvalRequest ApprovalRequest? @relation("ReportingRuleApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  approvalRequest ApprovalRequest?              @relation("ReportingRuleApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
   schemaBindings  RegulatoryRuleSchemaBinding[]
 
   @@index([status])
@@ -2797,37 +2797,37 @@ model ReportingRule {
 }
 
 model RegulatoryReport {
-  id                String                 @id @default(uuid(7)) @db.Uuid
-  createdAt         DateTime               @default(now()) @map("created_at")
-  updatedAt         DateTime               @updatedAt @map("updated_at")
-  reportType        ReportingType          @map("report_type")
-  authority         String                 @db.Text
-  subjectType       String                 @map("subject_type") @db.Text
-  subjectId         String                 @map("subject_id") @db.Text
-  amlCaseId         String?                @map("aml_case_id") @db.Uuid
-  periodStart       DateTime?              @map("period_start")
-  periodEnd         DateTime?              @map("period_end")
-  status            RegulatoryReportStatus @default(DRAFT)
-  payloadCiphertext String                 @map("payload_ciphertext") @db.Text
-  payloadSha256     String                 @map("payload_sha256") @db.Char(64)
-  submissionRef     String?                @map("submission_ref") @db.Text
-  submittedAt       DateTime?              @map("submitted_at")
-  confidential      Boolean                @default(true)
-  approvalRequestId String?                @map("approval_request_id") @db.Uuid
+  id                    String                 @id @default(uuid(7)) @db.Uuid
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  reportType            ReportingType          @map("report_type")
+  authority             String                 @db.Text
+  subjectType           String                 @map("subject_type") @db.Text
+  subjectId             String                 @map("subject_id") @db.Text
+  amlCaseId             String?                @map("aml_case_id") @db.Uuid
+  periodStart           DateTime?              @map("period_start")
+  periodEnd             DateTime?              @map("period_end")
+  status                RegulatoryReportStatus @default(DRAFT)
+  payloadCiphertext     String                 @map("payload_ciphertext") @db.Text
+  payloadSha256         String                 @map("payload_sha256") @db.Char(64)
+  submissionRef         String?                @map("submission_ref") @db.Text
+  submittedAt           DateTime?              @map("submitted_at")
+  confidential          Boolean                @default(true)
+  approvalRequestId     String?                @map("approval_request_id") @db.Uuid
   /// Filing deadline (AUTO-16), set from the reporting rule when a scheduled draft is created.
-  dueAt             DateTime?              @map("due_at")
+  dueAt                 DateTime?              @map("due_at")
   /// Scheduled-return identity (`PSP-M`, `AML-Q`, ...) and the period it covers (`2026-10`); unique together.
-  reportCode        String?                @map("report_code")
-  periodKey         String?                @map("period_key")
-  requiredOutputFormats ReportOutputFormat[] @default([]) @map("required_output_formats")
-  filingChannel     String?                @map("filing_channel") @db.Text
-  acknowledgedAt    DateTime?              @map("acknowledged_at")
-  rejectionReason   String?                @map("rejection_reason") @db.Text
-  supersedesId      String?                @map("supersedes_id") @db.Uuid
+  reportCode            String?                @map("report_code")
+  periodKey             String?                @map("period_key")
+  requiredOutputFormats ReportOutputFormat[]   @default([]) @map("required_output_formats")
+  filingChannel         String?                @map("filing_channel") @db.Text
+  acknowledgedAt        DateTime?              @map("acknowledged_at")
+  rejectionReason       String?                @map("rejection_reason") @db.Text
+  supersedesId          String?                @map("supersedes_id") @db.Uuid
 
-  amlCase         AmlCase?         @relation("RegulatoryReportAmlCase", fields: [amlCaseId], references: [id], onDelete: SetNull)
-  approvalRequest ApprovalRequest? @relation("RegulatoryReportApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
-  outputs         RegulatoryReportOutput[]
+  amlCase             AmlCase?                 @relation("RegulatoryReportAmlCase", fields: [amlCaseId], references: [id], onDelete: SetNull)
+  approvalRequest     ApprovalRequest?         @relation("RegulatoryReportApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  outputs             RegulatoryReportOutput[]
   externalSubmissions ExternalSubmission[]
 
   @@index([status])
@@ -2839,40 +2839,40 @@ model RegulatoryReport {
 }
 
 model RegulatoryReportSchema {
-  id                    String                 @id @default(uuid(7)) @db.Uuid
-  createdAt             DateTime               @default(now()) @map("created_at")
-  updatedAt             DateTime               @updatedAt @map("updated_at")
-  authority             String                 @db.Text
-  reportType            ReportingType          @map("report_type")
-  reportCode            String                 @default("") @map("report_code") @db.Text
-  format                ReportOutputFormat
-  schemaCode            String                 @map("schema_code") @db.Text
-  name                  String                 @db.Text
-  version               Int                    @default(1)
-  revision              Int                    @default(1)
-  clonedFromSchemaId    String?                @map("cloned_from_schema_id") @db.Uuid
-  status                RegulatorySchemaStatus @default(DRAFT)
-  definitionText        String?                @map("definition_text") @db.Text
-  definitionSha256      String?                @map("definition_sha256") @db.Char(64)
-  mappingSha256         String?                @map("mapping_sha256") @db.Char(64)
-  compiledFromSha256    String?                @map("compiled_from_sha256") @db.Char(64)
-  templateCiphertext    String?                @map("template_ciphertext") @db.Text
-  templateSha256        String?                @map("template_sha256") @db.Char(64)
-  templateBindingJson   Json?                  @map("template_binding_json")
-  compiledDefinitionJson Json                  @map("compiled_definition_json")
-  mappingBlueprintJson  Json                   @map("mapping_blueprint_json")
-  sampleContextJson     Json?                  @map("sample_context_json")
-  notes                 String?                @db.Text
-  createdByUserId       String?                @map("created_by_user_id") @db.Uuid
-  approvedByUserId      String?                @map("approved_by_user_id") @db.Uuid
-  approvedAt            DateTime?              @map("approved_at")
-  approvalRequestId     String?                @map("approval_request_id") @db.Uuid
-  seedKey               String?                @unique @map("seed_key")
+  id                     String                 @id @default(uuid(7)) @db.Uuid
+  createdAt              DateTime               @default(now()) @map("created_at")
+  updatedAt              DateTime               @updatedAt @map("updated_at")
+  authority              String                 @db.Text
+  reportType             ReportingType          @map("report_type")
+  reportCode             String                 @default("") @map("report_code") @db.Text
+  format                 ReportOutputFormat
+  schemaCode             String                 @map("schema_code") @db.Text
+  name                   String                 @db.Text
+  version                Int                    @default(1)
+  revision               Int                    @default(1)
+  clonedFromSchemaId     String?                @map("cloned_from_schema_id") @db.Uuid
+  status                 RegulatorySchemaStatus @default(DRAFT)
+  definitionText         String?                @map("definition_text") @db.Text
+  definitionSha256       String?                @map("definition_sha256") @db.Char(64)
+  mappingSha256          String?                @map("mapping_sha256") @db.Char(64)
+  compiledFromSha256     String?                @map("compiled_from_sha256") @db.Char(64)
+  templateCiphertext     String?                @map("template_ciphertext") @db.Text
+  templateSha256         String?                @map("template_sha256") @db.Char(64)
+  templateBindingJson    Json?                  @map("template_binding_json")
+  compiledDefinitionJson Json                   @map("compiled_definition_json")
+  mappingBlueprintJson   Json                   @map("mapping_blueprint_json")
+  sampleContextJson      Json?                  @map("sample_context_json")
+  notes                  String?                @db.Text
+  createdByUserId        String?                @map("created_by_user_id") @db.Uuid
+  approvedByUserId       String?                @map("approved_by_user_id") @db.Uuid
+  approvedAt             DateTime?              @map("approved_at")
+  approvalRequestId      String?                @map("approval_request_id") @db.Uuid
+  seedKey                String?                @unique @map("seed_key")
 
-  approvalRequest       ApprovalRequest?       @relation("RegulatorySchemaApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
-  defaultBindings       RegulatorySchemaDefaultBinding[]
-  ruleBindings          RegulatoryRuleSchemaBinding[]
-  reportOutputs         RegulatoryReportOutput[]
+  approvalRequest ApprovalRequest?                 @relation("RegulatorySchemaApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  defaultBindings RegulatorySchemaDefaultBinding[]
+  ruleBindings    RegulatoryRuleSchemaBinding[]
+  reportOutputs   RegulatoryReportOutput[]
 
   @@unique([authority, schemaCode, version])
   @@index([authority, reportType, format, status])
@@ -2881,58 +2881,58 @@ model RegulatoryReportSchema {
 }
 
 model RegulatorySchemaDefaultBinding {
-  id                String              @id @default(uuid(7)) @db.Uuid
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
-  authority         String              @db.Text
-  reportType        ReportingType       @map("report_type")
-  reportCode        String              @default("") @map("report_code") @db.Text
+  id                String             @id @default(uuid(7)) @db.Uuid
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  authority         String             @db.Text
+  reportType        ReportingType      @map("report_type")
+  reportCode        String             @default("") @map("report_code") @db.Text
   format            ReportOutputFormat
-  schemaId          String              @map("schema_id") @db.Uuid
-  updatedByUserId   String?             @map("updated_by_user_id") @db.Uuid
-  approvalRequestId String?             @map("approval_request_id") @db.Uuid
+  schemaId          String             @map("schema_id") @db.Uuid
+  updatedByUserId   String?            @map("updated_by_user_id") @db.Uuid
+  approvalRequestId String?            @map("approval_request_id") @db.Uuid
 
-  schema            RegulatoryReportSchema @relation(fields: [schemaId], references: [id], onDelete: Restrict)
+  schema RegulatoryReportSchema @relation(fields: [schemaId], references: [id], onDelete: Restrict)
 
   @@unique([authority, reportType, reportCode, format])
   @@map("regulatory_schema_default_bindings")
 }
 
 model RegulatoryRuleSchemaBinding {
-  id        String              @id @default(uuid(7)) @db.Uuid
-  ruleId    String              @map("rule_id") @db.Uuid
+  id        String             @id @default(uuid(7)) @db.Uuid
+  ruleId    String             @map("rule_id") @db.Uuid
   format    ReportOutputFormat
-  schemaId  String              @map("schema_id") @db.Uuid
-  createdAt DateTime            @default(now()) @map("created_at")
+  schemaId  String             @map("schema_id") @db.Uuid
+  createdAt DateTime           @default(now()) @map("created_at")
 
-  rule      ReportingRule       @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-  schema    RegulatoryReportSchema @relation(fields: [schemaId], references: [id], onDelete: Restrict)
+  rule   ReportingRule          @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  schema RegulatoryReportSchema @relation(fields: [schemaId], references: [id], onDelete: Restrict)
 
   @@unique([ruleId, format])
   @@map("regulatory_rule_schema_bindings")
 }
 
 model RegulatoryReportOutput {
-  id                    String                       @id @default(uuid(7)) @db.Uuid
-  createdAt             DateTime                     @default(now()) @map("created_at")
-  updatedAt             DateTime                     @updatedAt @map("updated_at")
-  reportId              String                       @map("report_id") @db.Uuid
-  format                ReportOutputFormat
-  revision              Int                          @default(1)
-  schemaId              String?                      @map("schema_id") @db.Uuid
-  schemaVersion         Int?                         @map("schema_version")
-  contentCiphertext     String                       @map("content_ciphertext") @db.Text
-  contentSha256         String                       @map("content_sha256") @db.Char(64)
-  payloadSha256         String?                      @map("payload_sha256") @db.Char(64)
-  validationStatus      ReportOutputValidationStatus @default(NOT_GENERATED) @map("validation_status")
-  validationErrorsJson  Json?                        @map("validation_errors_json")
-  generatedAt           DateTime?                    @map("generated_at")
-  generatedByUserId     String?                      @map("generated_by_user_id") @db.Uuid
-  supersededAt          DateTime?                    @map("superseded_at")
-  submittedAt           DateTime?                    @map("submitted_at")
+  id                   String                       @id @default(uuid(7)) @db.Uuid
+  createdAt            DateTime                     @default(now()) @map("created_at")
+  updatedAt            DateTime                     @updatedAt @map("updated_at")
+  reportId             String                       @map("report_id") @db.Uuid
+  format               ReportOutputFormat
+  revision             Int                          @default(1)
+  schemaId             String?                      @map("schema_id") @db.Uuid
+  schemaVersion        Int?                         @map("schema_version")
+  contentCiphertext    String                       @map("content_ciphertext") @db.Text
+  contentSha256        String                       @map("content_sha256") @db.Char(64)
+  payloadSha256        String?                      @map("payload_sha256") @db.Char(64)
+  validationStatus     ReportOutputValidationStatus @default(NOT_GENERATED) @map("validation_status")
+  validationErrorsJson Json?                        @map("validation_errors_json")
+  generatedAt          DateTime?                    @map("generated_at")
+  generatedByUserId    String?                      @map("generated_by_user_id") @db.Uuid
+  supersededAt         DateTime?                    @map("superseded_at")
+  submittedAt          DateTime?                    @map("submitted_at")
 
-  report                RegulatoryReport             @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  schema                RegulatoryReportSchema?      @relation(fields: [schemaId], references: [id], onDelete: Restrict)
+  report RegulatoryReport        @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  schema RegulatoryReportSchema? @relation(fields: [schemaId], references: [id], onDelete: Restrict)
 
   @@unique([reportId, format, revision])
   @@index([reportId, format, supersededAt])
@@ -2958,39 +2958,39 @@ enum ExternalSubmissionStatus {
 }
 
 model Incident {
-  id                    String                @id @default(uuid(7)) @db.Uuid
-  createdAt             DateTime              @default(now()) @map("created_at")
-  updatedAt             DateTime              @updatedAt @map("updated_at")
-  reference             String                @unique @db.Text
-  title                 String                @db.Text
-  summary               String?               @db.Text
-  category              IncidentCategory      @default(OTHER)
-  severity              IncidentSeverity      @default(SEV3)
-  status                IncidentStatus        @default(DETECTED)
-  impactScope           IncidentImpactScope   @default(PLATFORM)
-  detectedAt            DateTime              @map("detected_at")
-  declaredAt            DateTime?             @map("declared_at")
-  containedAt           DateTime?             @map("contained_at")
-  resolvedAt            DateTime?             @map("resolved_at")
-  closedAt              DateTime?             @map("closed_at")
-  commanderUserId       String?               @map("commander_user_id") @db.Uuid
-  reporterUserId        String?               @map("reporter_user_id") @db.Uuid
-  affectedServices      String[]              @default([]) @map("affected_services")
-  affectedMerchantIds   String[]              @default([]) @map("affected_merchant_ids") @db.Uuid
-  affectedAttemptIds    String[]              @default([]) @map("affected_attempt_ids") @db.Uuid
-  regulatorsNotified    Boolean               @default(false) @map("regulators_notified")
-  regulatoryReportId    String?               @map("regulatory_report_id") @db.Uuid
-  postmortemRequired    Boolean               @default(false) @map("postmortem_required")
-  postmortemDueAt       DateTime?             @map("postmortem_due_at")
-  rootCause             String?               @db.Text @map("root_cause")
-  postmortemSummary     String?               @db.Text @map("postmortem_summary")
-  postmortemJson        Json?                 @map("postmortem_json")
-  closedByUserId        String?               @map("closed_by_user_id") @db.Uuid
-  timeline              IncidentTimelineEntry[]
-  responders            IncidentResponder[]
-  actions               IncidentActionItem[]
-  links                 IncidentLink[]
-  communications        IncidentCommunication[]
+  id                  String                  @id @default(uuid(7)) @db.Uuid
+  createdAt           DateTime                @default(now()) @map("created_at")
+  updatedAt           DateTime                @updatedAt @map("updated_at")
+  reference           String                  @unique @db.Text
+  title               String                  @db.Text
+  summary             String?                 @db.Text
+  category            IncidentCategory        @default(OTHER)
+  severity            IncidentSeverity        @default(SEV3)
+  status              IncidentStatus          @default(DETECTED)
+  impactScope         IncidentImpactScope     @default(PLATFORM)
+  detectedAt          DateTime                @map("detected_at")
+  declaredAt          DateTime?               @map("declared_at")
+  containedAt         DateTime?               @map("contained_at")
+  resolvedAt          DateTime?               @map("resolved_at")
+  closedAt            DateTime?               @map("closed_at")
+  commanderUserId     String?                 @map("commander_user_id") @db.Uuid
+  reporterUserId      String?                 @map("reporter_user_id") @db.Uuid
+  affectedServices    String[]                @default([]) @map("affected_services")
+  affectedMerchantIds String[]                @default([]) @map("affected_merchant_ids") @db.Uuid
+  affectedAttemptIds  String[]                @default([]) @map("affected_attempt_ids") @db.Uuid
+  regulatorsNotified  Boolean                 @default(false) @map("regulators_notified")
+  regulatoryReportId  String?                 @map("regulatory_report_id") @db.Uuid
+  postmortemRequired  Boolean                 @default(false) @map("postmortem_required")
+  postmortemDueAt     DateTime?               @map("postmortem_due_at")
+  rootCause           String?                 @map("root_cause") @db.Text
+  postmortemSummary   String?                 @map("postmortem_summary") @db.Text
+  postmortemJson      Json?                   @map("postmortem_json")
+  closedByUserId      String?                 @map("closed_by_user_id") @db.Uuid
+  timeline            IncidentTimelineEntry[]
+  responders          IncidentResponder[]
+  actions             IncidentActionItem[]
+  links               IncidentLink[]
+  communications      IncidentCommunication[]
 
   @@index([status, severity])
   @@index([category, detectedAt])
@@ -2999,33 +2999,33 @@ model Incident {
 }
 
 model IncidentTimelineEntry {
-  id          String             @id @default(uuid(7)) @db.Uuid
-  createdAt   DateTime           @default(now()) @map("created_at")
-  incidentId  String             @map("incident_id") @db.Uuid
-  occurredAt  DateTime           @map("occurred_at")
+  id          String               @id @default(uuid(7)) @db.Uuid
+  createdAt   DateTime             @default(now()) @map("created_at")
+  incidentId  String               @map("incident_id") @db.Uuid
+  occurredAt  DateTime             @map("occurred_at")
   type        IncidentTimelineType
-  actorUserId String?            @map("actor_user_id") @db.Uuid
-  actorName   String?            @map("actor_name") @db.Text
-  summary     String             @db.Text
-  detailJson  Json?              @map("detail_json")
-  incident    Incident           @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  actorUserId String?              @map("actor_user_id") @db.Uuid
+  actorName   String?              @map("actor_name") @db.Text
+  summary     String               @db.Text
+  detailJson  Json?                @map("detail_json")
+  incident    Incident             @relation(fields: [incidentId], references: [id], onDelete: Cascade)
 
   @@index([incidentId, occurredAt])
   @@map("incident_timeline_entries")
 }
 
 model IncidentResponder {
-  id            String   @id @default(uuid(7)) @db.Uuid
-  createdAt     DateTime @default(now()) @map("created_at")
-  incidentId    String   @map("incident_id") @db.Uuid
-  userId        String?  @map("user_id") @db.Uuid
-  name          String   @db.Text
-  role          String   @db.Text
-  isCommander   Boolean  @default(false) @map("is_commander")
-  pagedAt       DateTime? @map("paged_at")
+  id             String    @id @default(uuid(7)) @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+  incidentId     String    @map("incident_id") @db.Uuid
+  userId         String?   @map("user_id") @db.Uuid
+  name           String    @db.Text
+  role           String    @db.Text
+  isCommander    Boolean   @default(false) @map("is_commander")
+  pagedAt        DateTime? @map("paged_at")
   acknowledgedAt DateTime? @map("acknowledged_at")
-  releasedAt    DateTime? @map("released_at")
-  incident      Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  releasedAt     DateTime? @map("released_at")
+  incident       Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
 
   @@index([incidentId, releasedAt])
   @@map("incident_responders")
@@ -3064,37 +3064,37 @@ model IncidentLink {
 }
 
 model IncidentCommunication {
-  id             String                      @id @default(uuid(7)) @db.Uuid
-  createdAt      DateTime                    @default(now()) @map("created_at")
-  incidentId     String                      @map("incident_id") @db.Uuid
-  channel        IncidentCommunicationChannel
-  audience       String                      @db.Text
-  subject        String                      @db.Text
-  body           String                      @db.Text
-  sentAt         DateTime?                   @map("sent_at")
-  sentByUserId   String?                     @map("sent_by_user_id") @db.Uuid
-  externalRef    String?                     @map("external_ref") @db.Text
-  incident       Incident                    @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  id           String                       @id @default(uuid(7)) @db.Uuid
+  createdAt    DateTime                     @default(now()) @map("created_at")
+  incidentId   String                       @map("incident_id") @db.Uuid
+  channel      IncidentCommunicationChannel
+  audience     String                       @db.Text
+  subject      String                       @db.Text
+  body         String                       @db.Text
+  sentAt       DateTime?                    @map("sent_at")
+  sentByUserId String?                      @map("sent_by_user_id") @db.Uuid
+  externalRef  String?                      @map("external_ref") @db.Text
+  incident     Incident                     @relation(fields: [incidentId], references: [id], onDelete: Cascade)
 
   @@index([incidentId, createdAt])
   @@map("incident_communications")
 }
 
 model ExternalFilingAdapter {
-  id                   String              @id @default(uuid(7)) @db.Uuid
-  createdAt            DateTime            @default(now()) @map("created_at")
-  updatedAt            DateTime            @updatedAt @map("updated_at")
-  name                 String              @unique @db.Text
-  authority            String              @db.Text
-  kind                 FilingAdapterKind   @default(MANUAL)
-  status               FilingAdapterStatus @default(ACTIVE)
-  endpointUrl          String?             @map("endpoint_url") @db.Text
-  authHeaderName       String?             @map("auth_header_name") @db.Text
-  authSecretCiphertext String?             @map("auth_secret_ciphertext") @db.Text
-  timeoutSeconds       Int                 @default(30) @map("timeout_seconds")
-  configJson           Json?               @map("config_json")
-  createdByUserId      String?             @map("created_by_user_id") @db.Uuid
-  lastUsedAt           DateTime?           @map("last_used_at")
+  id                   String               @id @default(uuid(7)) @db.Uuid
+  createdAt            DateTime             @default(now()) @map("created_at")
+  updatedAt            DateTime             @updatedAt @map("updated_at")
+  name                 String               @unique @db.Text
+  authority            String               @db.Text
+  kind                 FilingAdapterKind    @default(MANUAL)
+  status               FilingAdapterStatus  @default(ACTIVE)
+  endpointUrl          String?              @map("endpoint_url") @db.Text
+  authHeaderName       String?              @map("auth_header_name") @db.Text
+  authSecretCiphertext String?              @map("auth_secret_ciphertext") @db.Text
+  timeoutSeconds       Int                  @default(30) @map("timeout_seconds")
+  configJson           Json?                @map("config_json")
+  createdByUserId      String?              @map("created_by_user_id") @db.Uuid
+  lastUsedAt           DateTime?            @map("last_used_at")
   submissions          ExternalSubmission[]
 
   @@index([authority, status])
@@ -3102,20 +3102,20 @@ model ExternalFilingAdapter {
 }
 
 model ExternalSubmission {
-  id             String                   @id @default(uuid(7)) @db.Uuid
-  createdAt      DateTime                 @default(now()) @map("created_at")
-  updatedAt      DateTime                 @updatedAt @map("updated_at")
-  reportId       String                   @map("report_id") @db.Uuid
-  adapterId      String                   @map("adapter_id") @db.Uuid
-  status         ExternalSubmissionStatus @default(PENDING)
-  requestSha256  String                   @map("request_sha256") @db.Char(64)
-  externalRef    String?                  @map("external_ref") @db.Text
-  responseCode   Int?                     @map("response_code")
-  responseBody   String?                  @map("response_body") @db.Text
-  submittedAt    DateTime?                @map("submitted_at")
-  errorMessage   String?                  @map("error_message") @db.Text
-  report         RegulatoryReport         @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  adapter        ExternalFilingAdapter    @relation(fields: [adapterId], references: [id], onDelete: Restrict)
+  id            String                   @id @default(uuid(7)) @db.Uuid
+  createdAt     DateTime                 @default(now()) @map("created_at")
+  updatedAt     DateTime                 @updatedAt @map("updated_at")
+  reportId      String                   @map("report_id") @db.Uuid
+  adapterId     String                   @map("adapter_id") @db.Uuid
+  status        ExternalSubmissionStatus @default(PENDING)
+  requestSha256 String                   @map("request_sha256") @db.Char(64)
+  externalRef   String?                  @map("external_ref") @db.Text
+  responseCode  Int?                     @map("response_code")
+  responseBody  String?                  @map("response_body") @db.Text
+  submittedAt   DateTime?                @map("submitted_at")
+  errorMessage  String?                  @map("error_message") @db.Text
+  report        RegulatoryReport         @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  adapter       ExternalFilingAdapter    @relation(fields: [adapterId], references: [id], onDelete: Restrict)
 
   @@index([reportId, createdAt])
   @@index([adapterId, status])
@@ -3484,23 +3484,28 @@ model ReportAssetBundle {
 }
 
 model ReportChromeSpecRecord {
-  id                String             @id @default(uuid(7)) @db.Uuid
-  code              String             @db.VarChar(64)
-  version           Int                @default(1)
-  name              String             @db.VarChar(120)
-  chromeType        ReportChromeType   @map("chrome_type")
-  status            ReportSpecStatus   @default(DRAFT)
-  isDefaultGlobal   Boolean            @default(false) @map("is_default_global")
-  supportedLocales  String[]           @default([]) @map("supported_locales")
-  specJson          Json               @map("spec_json")
-  specSha256        String             @map("spec_sha256") @db.VarChar(64)
-  assetBundleId     String?            @map("asset_bundle_id") @db.Uuid
-  assetBundle       ReportAssetBundle? @relation(fields: [assetBundleId], references: [id], onDelete: SetNull)
-  createdByUserId   String             @map("created_by_user_id") @db.Uuid
-  publishedByUserId String?            @map("published_by_user_id") @db.Uuid
-  publishedAt       DateTime?          @map("published_at") @db.Timestamptz(3)
-  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                         String             @id @default(uuid(7)) @db.Uuid
+  code                       String             @db.VarChar(64)
+  version                    Int                @default(1)
+  name                       String             @db.VarChar(120)
+  chromeType                 ReportChromeType   @map("chrome_type")
+  status                     ReportSpecStatus   @default(DRAFT)
+  isDefaultGlobal            Boolean            @default(false) @map("is_default_global")
+  defaultRevokedAt           DateTime?          @map("default_revoked_at") @db.Timestamptz(3)
+  defaultRevokedReason       String?            @map("default_revoked_reason") @db.VarChar(64)
+  engineVersion              String             @default("1.0.0") @map("engine_version") @db.VarChar(32)
+  specSchemaVersion          String             @default("1.0") @map("spec_schema_version") @db.VarChar(16)
+  authoringTranscriptVersion String?            @map("authoring_transcript_version") @db.VarChar(16)
+  supportedLocales           String[]           @default([]) @map("supported_locales")
+  specJson                   Json               @map("spec_json")
+  specSha256                 String             @map("spec_sha256") @db.VarChar(64)
+  assetBundleId              String?            @map("asset_bundle_id") @db.Uuid
+  assetBundle                ReportAssetBundle? @relation(fields: [assetBundleId], references: [id], onDelete: SetNull)
+  createdByUserId            String             @map("created_by_user_id") @db.Uuid
+  publishedByUserId          String?            @map("published_by_user_id") @db.Uuid
+  publishedAt                DateTime?          @map("published_at") @db.Timestamptz(3)
+  createdAt                  DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                  DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([code, version], map: "report_chrome_specs_code_version_key")
   @@index([chromeType, status, isDefaultGlobal], map: "report_chrome_specs_type_status_default_idx")
@@ -3517,6 +3522,9 @@ model ReportDefinitionSpecRecord {
   isLatestPublished          Boolean             @default(false) @map("is_latest_published")
   supportedLocales           String[]            @default([]) @map("supported_locales")
   defaultLocale              String              @default("en") @map("default_locale") @db.VarChar(16)
+  engineVersion              String              @default("1.0.0") @map("engine_version") @db.VarChar(32)
+  specSchemaVersion          String              @default("1.0") @map("spec_schema_version") @db.VarChar(16)
+  authoringTranscriptVersion String?             @map("authoring_transcript_version") @db.VarChar(16)
   specJson                   Json                @map("spec_json")
   specSha256                 String              @map("spec_sha256") @db.VarChar(64)
   verificationReportJson     Json                @map("verification_report_json")
@@ -3535,11 +3543,11 @@ model ReportDefinitionSpecRecord {
   overriddenByUserId         String?             @map("overridden_by_user_id") @db.Uuid
   overriddenAt               DateTime?           @map("overridden_at") @db.Timestamptz(3)
 
-  createdByUserId            String              @map("created_by_user_id") @db.Uuid
-  publishedByUserId          String?             @map("published_by_user_id") @db.Uuid
-  publishedAt                DateTime?           @map("published_at") @db.Timestamptz(3)
-  createdAt                  DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt                  DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+  createdByUserId   String    @map("created_by_user_id") @db.Uuid
+  publishedByUserId String?   @map("published_by_user_id") @db.Uuid
+  publishedAt       DateTime? @map("published_at") @db.Timestamptz(3)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   executions ReportExecutionAuditRecord[]
 
@@ -3555,6 +3563,8 @@ model ReportExecutionAuditRecord {
   reportSpec         ReportDefinitionSpecRecord @relation(fields: [reportSpecId], references: [id], onDelete: Restrict)
   reportCode         String                     @map("report_code") @db.VarChar(64)
   reportVersion      Int                        @map("report_version")
+  engineVersion      String                     @default("1.0.0") @map("engine_version") @db.VarChar(32)
+  specSchemaVersion  String                     @default("1.0") @map("spec_schema_version") @db.VarChar(16)
   actorUserId        String                     @map("actor_user_id") @db.Uuid
   actorRole          String                     @map("actor_role") @db.VarChar(48)
   selectedLocale     String                     @map("selected_locale") @db.VarChar(16)
@@ -3578,31 +3588,64 @@ model ReportExecutionAuditRecord {
 // ---------------------------------------------------------------------------
 
 model MerchantReportSpecRecord {
-  id                     String              @id @default(uuid(7)) @db.Uuid
-  merchantId             String              @map("merchant_id") @db.Uuid
-  code                   String              @db.VarChar(64)
-  version                Int                 @default(1)
-  category               String              @db.VarChar(48)
-  status                 ReportSpecStatus    @default(DRAFT)
-  isLatestPublished      Boolean             @default(false) @map("is_latest_published")
-  supportedLocales       String[]            @default([]) @map("supported_locales")
-  defaultLocale          String              @default("en") @map("default_locale") @db.VarChar(16)
-  specJson               Json                @map("spec_json")
-  specSha256             String              @map("spec_sha256") @db.VarChar(64)
-  verificationReportJson Json?               @map("verification_report_json")
-  assetBundleId          String?             @map("asset_bundle_id") @db.Uuid
-  assetBundle            MerchantReportAssetBundle? @relation(fields: [assetBundleId], references: [id], onDelete: SetNull)
-  createdByUserId        String              @map("created_by_user_id") @db.Uuid
-  publishedByUserId      String?             @map("published_by_user_id") @db.Uuid
-  publishedAt            DateTime?           @map("published_at") @db.Timestamptz(3)
-  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt              DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                         String                     @id @default(uuid(7)) @db.Uuid
+  merchantId                 String                     @map("merchant_id") @db.Uuid
+  code                       String                     @db.VarChar(64)
+  version                    Int                        @default(1)
+  category                   String                     @db.VarChar(48)
+  status                     ReportSpecStatus           @default(DRAFT)
+  isLatestPublished          Boolean                    @default(false) @map("is_latest_published")
+  supportedLocales           String[]                   @default([]) @map("supported_locales")
+  defaultLocale              String                     @default("en") @map("default_locale") @db.VarChar(16)
+  engineVersion              String                     @default("1.0.0") @map("engine_version") @db.VarChar(32)
+  specSchemaVersion          String                     @default("1.0") @map("spec_schema_version") @db.VarChar(16)
+  authoringTranscriptVersion String?                    @map("authoring_transcript_version") @db.VarChar(16)
+  specJson                   Json                       @map("spec_json")
+  specSha256                 String                     @map("spec_sha256") @db.VarChar(64)
+  verificationReportJson     Json?                      @map("verification_report_json")
+  assetBundleId              String?                    @map("asset_bundle_id") @db.Uuid
+  assetBundle                MerchantReportAssetBundle? @relation(fields: [assetBundleId], references: [id], onDelete: SetNull)
+  createdByUserId            String                     @map("created_by_user_id") @db.Uuid
+  publishedByUserId          String?                    @map("published_by_user_id") @db.Uuid
+  publishedAt                DateTime?                  @map("published_at") @db.Timestamptz(3)
+  createdAt                  DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                  DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   executions MerchantReportExecutionAudit[]
 
   @@unique([merchantId, code, version], map: "merchant_report_specs_merchant_code_version_key")
   @@index([merchantId, status, isLatestPublished], map: "merchant_report_specs_merchant_published_idx")
   @@map("merchant_report_specs")
+}
+
+model MerchantReportChromeSpecRecord {
+  id                         String                     @id @default(uuid(7)) @db.Uuid
+  merchantId                 String                     @map("merchant_id") @db.Uuid
+  code                       String                     @db.VarChar(64)
+  version                    Int                        @default(1)
+  name                       String                     @db.VarChar(120)
+  chromeType                 ReportChromeType           @map("chrome_type")
+  status                     ReportSpecStatus           @default(DRAFT)
+  isDefaultForMerchant       Boolean                    @default(false) @map("is_default_for_merchant")
+  defaultRevokedAt           DateTime?                  @map("default_revoked_at") @db.Timestamptz(3)
+  defaultRevokedReason       String?                    @map("default_revoked_reason") @db.VarChar(64)
+  engineVersion              String                     @default("1.0.0") @map("engine_version") @db.VarChar(32)
+  specSchemaVersion          String                     @default("1.0") @map("spec_schema_version") @db.VarChar(16)
+  authoringTranscriptVersion String?                    @map("authoring_transcript_version") @db.VarChar(16)
+  supportedLocales           String[]                   @default([]) @map("supported_locales")
+  specJson                   Json                       @map("spec_json")
+  specSha256                 String                     @map("spec_sha256") @db.VarChar(64)
+  assetBundleId              String?                    @map("asset_bundle_id") @db.Uuid
+  assetBundle                MerchantReportAssetBundle? @relation(fields: [assetBundleId], references: [id], onDelete: SetNull)
+  createdByUserId            String                     @map("created_by_user_id") @db.Uuid
+  publishedByUserId          String?                    @map("published_by_user_id") @db.Uuid
+  publishedAt                DateTime?                  @map("published_at") @db.Timestamptz(3)
+  createdAt                  DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                  DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([merchantId, code, version], map: "merchant_report_chrome_specs_merchant_code_version_key")
+  @@index([merchantId, chromeType, status, isDefaultForMerchant], map: "merchant_report_chrome_specs_merchant_type_status_idx")
+  @@map("merchant_report_chrome_specs")
 }
 
 model MerchantReportAssetBundle {
@@ -3617,6 +3660,7 @@ model MerchantReportAssetBundle {
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   specRecords MerchantReportSpecRecord[]
+  chromeSpecs MerchantReportChromeSpecRecord[]
 
   @@unique([merchantId, bundleSha256], map: "merchant_report_asset_bundles_merchant_sha_key")
   @@index([merchantId, createdAt(sort: Desc)], map: "merchant_report_asset_bundles_merchant_created_idx")
@@ -3624,22 +3668,24 @@ model MerchantReportAssetBundle {
 }
 
 model MerchantReportExecutionAudit {
-  id                   String   @id @default(uuid(7)) @db.Uuid
-  merchantSpecId       String?  @map("merchant_spec_id") @db.Uuid
-  merchantSpec         MerchantReportSpecRecord? @relation(fields: [merchantSpecId], references: [id], onDelete: SetNull)
-  merchantId           String   @map("merchant_id") @db.Uuid
-  reportCode           String   @map("report_code") @db.VarChar(64)
-  reportVersion        Int      @map("report_version")
-  actorUserId          String   @map("actor_user_id") @db.Uuid
-  actorRole            String   @map("actor_role") @db.VarChar(48)
-  selectedLocale       String   @map("selected_locale") @db.VarChar(16)
-  inputsRedactedJson   Json     @map("inputs_redacted_json")
-  rowCountTotal        Int      @map("row_count_total")
-  durationMs           Int      @map("duration_ms")
-  servedByNode         String   @map("served_by_node") @db.VarChar(64)
-  verificationSha256   String   @map("verification_sha256") @db.VarChar(64)
-  renderTarget         String   @default("CLIENT_PAGED_VECTOR") @map("render_target") @db.VarChar(32)
-  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  id                 String                    @id @default(uuid(7)) @db.Uuid
+  merchantSpecId     String?                   @map("merchant_spec_id") @db.Uuid
+  merchantSpec       MerchantReportSpecRecord? @relation(fields: [merchantSpecId], references: [id], onDelete: SetNull)
+  merchantId         String                    @map("merchant_id") @db.Uuid
+  reportCode         String                    @map("report_code") @db.VarChar(64)
+  reportVersion      Int                       @map("report_version")
+  engineVersion      String                    @default("1.0.0") @map("engine_version") @db.VarChar(32)
+  specSchemaVersion  String                    @default("1.0") @map("spec_schema_version") @db.VarChar(16)
+  actorUserId        String                    @map("actor_user_id") @db.Uuid
+  actorRole          String                    @map("actor_role") @db.VarChar(48)
+  selectedLocale     String                    @map("selected_locale") @db.VarChar(16)
+  inputsRedactedJson Json                      @map("inputs_redacted_json")
+  rowCountTotal      Int                       @map("row_count_total")
+  durationMs         Int                       @map("duration_ms")
+  servedByNode       String                    @map("served_by_node") @db.VarChar(64)
+  verificationSha256 String                    @map("verification_sha256") @db.VarChar(64)
+  renderTarget       String                    @default("CLIENT_PAGED_VECTOR") @map("render_target") @db.VarChar(32)
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([merchantId, createdAt(sort: Desc)], map: "merchant_report_execution_audit_merchant_created_idx")
   @@index([merchantSpecId, createdAt(sort: Desc)], map: "merchant_report_execution_audit_spec_created_idx")
@@ -3657,11 +3703,11 @@ model MerchantReportRateEvent {
 }
 
 model MerchantReportStudioStatus {
-  merchantId         String    @id @map("merchant_id") @db.Uuid
-  suspendedAt        DateTime? @map("suspended_at") @db.Timestamptz(3)
-  suspendedByUserId  String?   @map("suspended_by_user_id") @db.Uuid
-  reason             String?   @db.Text
-  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  merchantId        String    @id @map("merchant_id") @db.Uuid
+  suspendedAt       DateTime? @map("suspended_at") @db.Timestamptz(3)
+  suspendedByUserId String?   @map("suspended_by_user_id") @db.Uuid
+  reason            String?   @db.Text
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("merchant_report_studio_status")
 }

@@ -11,9 +11,11 @@
 | `core-back/test/admin-slice/admin-ledger.test.ts` | 376 | 9 |
 | `core-back/test/admin-slice/admin-operations.test.ts` | 325 | 7 |
 | `core-back/test/admin-slice/admin-rails-routes.test.ts` | 167 | 3 |
-| `core-back/test/admin-slice/admin-report-engine.test.ts` | 153 | 6 |
+| `core-back/test/admin-slice/admin-report-engine.test.ts` | 152 | 6 |
 | `core-back/test/admin-slice/admin-system.test.ts` | 314 | 13 |
-| `core-back/test/admin-slice/harness.ts` | 231 | 1 |
+| `core-back/test/admin-slice/harness.ts` | 239 | 1 |
+| `core-back/test/admin-slice/merchant-report-chrome.test.ts` | 168 | 4 |
+| `core-back/test/admin-slice/report-engine-migration.test.ts` | 248 | 3 |
 | `core-back/test/aml-resolution-finalization.test.ts` | 300 | 7 |
 | `core-back/test/approval-queue.test.ts` | 86 | 4 |
 | `core-back/test/automation/aml-event-rescreening.test.ts` | 182 | 4 |
@@ -147,7 +149,7 @@
 | `core-back/test/onboarding-four-eyes.test.ts` | 200 | 18 |
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/partition-truncate-guard.test.ts` | 86 | 5 |
-| `core-back/test/phase1-mtls-and-schema.test.ts` | 431 | 14 |
+| `core-back/test/phase1-mtls-and-schema.test.ts` | 433 | 14 |
 | `core-back/test/phase2-ledger-and-governance.test.ts` | 281 | 11 |
 | `core-back/test/phase3-dynamic-engine-and-blueprints.test.ts` | 273 | 12 |
 | `core-back/test/phase4-onboarding-aml-disputes-recon.test.ts` | 237 | 16 |
@@ -159,8 +161,9 @@
 | `core-back/test/reportEngineSdk/AssetBundleValidator.test.ts` | 182 | 9 |
 | `core-back/test/reportEngineSdk/AuthorityAndCatalog.test.ts` | 137 | 9 |
 | `core-back/test/reportEngineSdk/AuthorityInferenceEngine.test.ts` | 90 | 6 |
-| `core-back/test/reportEngineSdk/ChromeAccentBand.test.ts` | 64 | 3 |
+| `core-back/test/reportEngineSdk/ChromeAccentBand.test.ts` | 76 | 4 |
 | `core-back/test/reportEngineSdk/ChromeResolution.test.ts` | 52 | 3 |
+| `core-back/test/reportEngineSdk/Compatibility.test.ts` | 144 | 7 |
 | `core-back/test/reportEngineSdk/CompilerAndReferenceRegression.test.ts` | 325 | 9 |
 | `core-back/test/reportEngineSdk/CssAndHtmlSanitizer.test.ts` | 63 | 4 |
 | `core-back/test/reportEngineSdk/ExecuteAndRedaction.test.ts` | 140 | 4 |
@@ -175,6 +178,7 @@
 | `core-back/test/reportEngineSdk/ReportDryRunSimulator.test.ts` | 78 | 5 |
 | `core-back/test/reportEngineSdk/ReportRepairPrompt.test.ts` | 19 | 1 |
 | `core-back/test/reportEngineSdk/ReportTranscriptBuilder.test.ts` | 99 | 6 |
+| `core-back/test/reportEngineSdk/RouteOrder.test.ts` | 72 | 3 |
 | `core-back/test/reportEngineSdk/SdkDecoupling.test.ts` | 37 | 2 |
 | `core-back/test/reportEngineSdk/SeedChrome.test.ts` | 100 | 2 |
 | `core-back/test/reportEngineSdk/SpecNormalization.test.ts` | 128 | 6 |
@@ -243,14 +247,15 @@
 | `admin-back/test/helpers/session.ts` | 135 | 0 |
 | `admin-back/test/helpers/upstream.ts` | 106 | 0 |
 | `admin-back/test/mtls-client.test.ts` | 83 | 8 |
-| `admin-back/test/report-engine-edge.test.ts` | 130 | 6 |
+| `admin-back/test/report-engine-edge.test.ts` | 183 | 8 |
+| `admin-back/test/report-engine-route-order.test.ts` | 52 | 2 |
 | `admin-back/test/search.test.ts` | 83 | 2 |
 | `admin-back/test/security-regressions.test.ts` | 510 | 31 |
 | `admin-back/test/session-cookie-and-logout.test.ts` | 133 | 6 |
 | `admin-back/test/setup.ts` | 3 | 0 |
 | `merchant-back/test/auth-account-limiters.test.ts` | 94 | 3 |
 | `merchant-back/test/core-contract.test.ts` | 569 | 29 |
-| `merchant-back/test/core-forwarding.test.ts` | 396 | 21 |
+| `merchant-back/test/core-forwarding.test.ts` | 424 | 22 |
 | `merchant-back/test/core-internal-client.test.ts` | 662 | 23 |
 | `merchant-back/test/env-isolation.test.ts` | 24 | 1 |
 | `merchant-back/test/helpers/core.ts` | 224 | 1 |
@@ -258,6 +263,7 @@
 | `merchant-back/test/helpers/upstream.ts` | 106 | 0 |
 | `merchant-back/test/merchant-kyb-and-external.test.ts` | 212 | 15 |
 | `merchant-back/test/mtls-client.test.ts` | 85 | 8 |
+| `merchant-back/test/report-engine-route-order.test.ts` | 52 | 2 |
 | `merchant-back/test/security-regressions.test.ts` | 434 | 27 |
 | `merchant-back/test/session-cookie-and-logout.test.ts` | 138 | 6 |
 | `merchant-back/test/webhooks-forwarding.test.ts` | 115 | 6 |
@@ -406,5 +412,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **401**
-- Total literal test declarations: **4060**
+- Total files: **407**
+- Total literal test declarations: **4085**

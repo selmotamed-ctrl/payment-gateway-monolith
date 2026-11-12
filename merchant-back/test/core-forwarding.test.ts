@@ -49,6 +49,7 @@ const putJson = (path: string, body: unknown) =>
 beforeAll(() => {
   process.env.NODE_ENV = "test";
   process.env.CORE_BACK_URL = core.url;
+  process.env.CORE_BACK_URLS = core.url;
   process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
   process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
   process.env.MTLS_CA_CERT_PATH = pki.caCert;
@@ -391,5 +392,32 @@ describe("merchant report Studio forwarding", () => {
       expect(response.status, `${method} ${route}`).toBeLessThan(400);
       expect(forwarded()?.url, `${method} ${route}`).toBe(expected);
     }
+  });
+});
+
+describe("merchant report chrome forwarding", () => {
+  test("forwards branding chrome list, transcript, migration and default routes", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    for (const [method, route, expected] of [
+      ["GET", "/api/v1/merchant/report-engine/studio/chrome", "/internal/merchant/report-engine/studio/chrome"],
+      ["GET", "/api/v1/merchant/report-engine/studio/chrome/transcript", "/internal/merchant/report-engine/studio/chrome/transcript"],
+      ["GET", "/api/v1/merchant/report-engine/studio/chrome/needs-migration?page=2&pageSize=5&search=logo", "/internal/merchant/report-engine/studio/chrome/needs-migration"],
+      ["GET", `/api/v1/merchant/report-engine/studio/chrome/${id}`, `/internal/merchant/report-engine/studio/chrome/${id}`],
+      ["GET", `/api/v1/merchant/report-engine/studio/chrome/${id}/migration-prompt`, `/internal/merchant/report-engine/studio/chrome/${id}/migration-prompt`],
+      ["GET", "/api/v1/merchant/report-engine/studio/needs-migration?page=2&pageSize=5&search=report", "/internal/merchant/report-engine/studio/needs-migration"],
+      ["GET", `/api/v1/merchant/report-engine/studio/specs/${id}/migration-prompt`, `/internal/merchant/report-engine/studio/specs/${id}/migration-prompt`],
+    ] as const) {
+      const response = await fetch(`${edgeUrl}${route}`, { method, headers: auth });
+      expect(response.status).toBe(200);
+      expect(forwarded()?.url).toContain(expected);
+    }
+    const saved = await postJson("/api/v1/merchant/report-engine/studio/chrome", {
+      specJson: "{}",
+      publish: true,
+      makeDefault: true,
+    });
+    expect(saved.status).toBe(201);
+    expect(forwarded()?.url).toBe("/internal/merchant/report-engine/studio/chrome");
+    expect(forwardedBody()).toEqual({ specJson: "{}", publish: true, makeDefault: true });
   });
 });

@@ -43,7 +43,7 @@ tests:
   - merchant-back/test/security-regressions.test.ts
   - checkout-back/test/security-regressions.test.ts
 gaps:
-  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 33.
+  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 35.
 - `merchant_reports.policy` (Platform Settings, `settings:write`) is the staff-managed merchant reporting switch. `enabled` controls the runner/Studio; `assetsEnabled` controls merchant asset bundles. Missing values fall back to enabled/allowed.
   - LOG_LEVEL is declared but not used by the console or access logger.
   - WORKER_CONCURRENCY and WORKER_REQUEST_TIMEOUT_MS are accepted but not passed to the production worker runtime.

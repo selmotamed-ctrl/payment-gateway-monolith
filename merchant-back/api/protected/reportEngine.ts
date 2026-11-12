@@ -165,3 +165,125 @@ router.post(
     status: 201,
   }),
 );
+
+const chromeBody = z
+  .object({
+    specJson: z.union([z.string(), z.record(z.string(), z.unknown())]),
+    assetsZipBase64: z.string().optional(),
+    publish: z.boolean().optional(),
+    makeDefault: z.boolean().optional(),
+  })
+  .strict();
+
+router.get(
+  "/studio/chrome",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/merchant/report-engine/studio/chrome",
+    querySchema: z
+      .object({
+        type: z.string().max(16).optional(),
+        includeArchived: z.string().optional(),
+        includeAssets: z.string().optional(),
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(200).optional(),
+        search: z.string().max(200).optional(),
+      })
+      .passthrough(),
+  }),
+);
+
+router.get(
+  "/studio/chrome/transcript",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/merchant/report-engine/studio/chrome/transcript",
+  }),
+);
+
+router.get(
+  "/studio/chrome/needs-migration",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/merchant/report-engine/studio/chrome/needs-migration",
+    querySchema: z
+      .object({
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(200).optional(),
+        search: z.string().max(200).optional(),
+      })
+      .passthrough(),
+  }),
+);
+
+router.get(
+  "/studio/chrome/:id",
+  coreForward({
+    method: "GET",
+    path: ({ params }) => `/internal/merchant/report-engine/studio/chrome/${params.id}`,
+    paramsSchema: idParams,
+  }),
+);
+
+router.post(
+  "/studio/chrome",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/merchant/report-engine/studio/chrome",
+    schema: chromeBody,
+    status: 201,
+  }),
+);
+
+router.post(
+  "/studio/chrome/:id/archive",
+  coreForward({
+    method: "POST",
+    path: ({ params }) => `/internal/merchant/report-engine/studio/chrome/${params.id}/archive`,
+    paramsSchema: idParams,
+    schema: z.object({}).strict(),
+  }),
+);
+
+router.post(
+  "/studio/chrome/:id/set-default",
+  coreForward({
+    method: "POST",
+    path: ({ params }) => `/internal/merchant/report-engine/studio/chrome/${params.id}/set-default`,
+    paramsSchema: idParams,
+    schema: z.object({ isDefault: z.boolean() }).strict(),
+  }),
+);
+
+router.get(
+  "/studio/chrome/:id/migration-prompt",
+  coreForward({
+    method: "GET",
+    path: ({ params }) => `/internal/merchant/report-engine/studio/chrome/${params.id}/migration-prompt`,
+    paramsSchema: idParams,
+  }),
+);
+
+router.get(
+  "/studio/needs-migration",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/merchant/report-engine/studio/needs-migration",
+    querySchema: z
+      .object({
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(200).optional(),
+        search: z.string().max(200).optional(),
+      })
+      .passthrough(),
+  }),
+);
+
+router.get(
+  "/studio/specs/:id/migration-prompt",
+  coreForward({
+    method: "GET",
+    path: ({ params }) => `/internal/merchant/report-engine/studio/specs/${params.id}/migration-prompt`,
+    paramsSchema: idParams,
+  }),
+);

@@ -245,6 +245,16 @@ const router = createRouter({
                     component: () => import("@/pages/reports/chrome/index"),
                 },
                 {
+                    path: "reports/needs-migration",
+                    name: "ReportsNeedsMigration",
+                    component: () => import("@/pages/reports/needs-migration/index"),
+                },
+                {
+                    path: "reports/chrome/needs-migration",
+                    name: "ReportsChromeNeedsMigration",
+                    component: () => import("@/pages/reports/chrome/needs-migration/index"),
+                },
+                {
                     path: "reports/merchant-reports",
                     name: "ReportsMerchantReports",
                     component: () => import("@/pages/reports/merchant-reports/index"),

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { client } from "../../prisma/client";
 import { env } from "../../lib/env";
+import { ApiError } from "../../lib/error";
 import {
   createReportEngine,
   type ReportDescriptorSpec,
@@ -219,13 +220,12 @@ export function validateMerchantTierLimits(
   return diagnostics;
 }
 
-export class MerchantReportGuardError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly status = 429,
-  ) {
-    super(message);
+export class MerchantReportGuardError extends ApiError {
+  readonly status: number;
+  constructor(code: string, message: string, status = 429) {
+    super(status, code, message);
+    this.name = "MerchantReportGuardError";
+    this.status = status;
   }
 }
 
@@ -336,9 +336,17 @@ export function merchantCacheKey(params: {
   merchantId: string;
   spec: ReportDescriptorSpec;
   inputs: Record<string, unknown>;
+  chromeFingerprint?: string;
 }): string {
   return createHash("sha256")
-    .update(JSON.stringify({ merchantId: params.merchantId, spec: params.spec, inputs: params.inputs }))
+    .update(
+      JSON.stringify({
+        merchantId: params.merchantId,
+        spec: params.spec,
+        inputs: params.inputs,
+        chromeFingerprint: params.chromeFingerprint ?? "",
+      }),
+    )
     .digest("hex");
 }
 

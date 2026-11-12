@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { VAlert, VBtn, VBtnToggle, VCol, VFileInput, VRow, VSelect } from "vuetify/components";
@@ -67,6 +67,7 @@ type VersionRow = {
   version: number;
   status: string;
   isLatestPublished: boolean;
+  compatibility?: { status: "COMPATIBLE" | "NEEDS_MIGRATION" | "INVALID"; reasonCode: string | null; message: string };
   createdAt: string;
   publishedAt: string | null;
 };
@@ -155,6 +156,7 @@ const specHasRequiredAssets = (json: string): boolean => {
 const ReportsStudioPage = dc(() => {
   const { t } = useLocale();
   const router = useRouter();
+  const route = useRoute();
   const domains = ref<string[]>([]);
   const specJson = ref("");
   const specFile = ref<File | null>(null);
@@ -314,7 +316,7 @@ const ReportsStudioPage = dc(() => {
         params: kind === "REPORT" ? { kind, domains: domains.value.join(",") } : { kind },
       });
       const data = response.data ?? {};
-      const fallback = kind === "REPORT" ? "report-engine-ai-transcript-v1.0.md" : "chrome-engine-ai-transcript-v1.0.md";
+      const fallback = kind === "REPORT" ? "report-engine-ai-transcript-v1.1.md" : "chrome-engine-ai-transcript-v1.1.md";
       downloadText(data.filename ?? fallback, data.markdown ?? "", "text/markdown");
     } catch (caught) {
       fail(caught, false);
@@ -415,6 +417,28 @@ const ReportsStudioPage = dc(() => {
       await applySaveResponse(response.data ?? {});
     } catch (caught) {
       fail(caught);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  const loadSpecById = async (id: string) => {
+    busy.value = true;
+    resetFeedback();
+    try {
+      const response = await api.get(urlsMap.reportEngineSpecDetail(id));
+      const json = JSON.stringify(response.data?.spec ?? {}, null, 2);
+      specJson.value = json;
+      specFile.value = null;
+      zipFile.value = null;
+      verification.value = null;
+      verifiedInput.value = null;
+      savedSpecId.value = id;
+      savedSpecCode.value = String(response.data?.code ?? "") || null;
+      savedSpecVersion.value = Number(response.data?.version ?? 0) || null;
+      loadedNeedsAssets.value = specHasRequiredAssets(json);
+    } catch (caught) {
+      fail(caught, false);
     } finally {
       busy.value = false;
     }
@@ -583,7 +607,18 @@ const ReportsStudioPage = dc(() => {
         </div>
       ),
     },
-    { key: "status", label: t("Status"), Value: ({ row }) => <StatusBadge status={row.status} /> },
+    {
+      key: "status",
+      label: t("Status"),
+      Value: ({ row }) => (
+        <div class="d-flex align-center ga-2 flex-wrap">
+          <StatusBadge status={row.status} />
+          {row.compatibility && row.compatibility.status !== "COMPATIBLE" && (
+            <StatusBadge status={row.compatibility.status} toneOverride="danger" label={t("Needs migration")} />
+          )}
+        </div>
+      ),
+    },
     { key: "createdAt", label: t("Created At"), value: (row) => formatDateTime(row.createdAt) },
     { key: "publishedAt", label: t("Published At"), value: (row) => formatDateTime(row.publishedAt) },
     {
@@ -681,6 +716,8 @@ const ReportsStudioPage = dc(() => {
 
   onMounted(() => {
     void loadPendingAml();
+    const open = typeof route.query.open === "string" ? route.query.open : "";
+    if (open) void loadSpecById(open);
   });
 
   const renderScorecard = (report: VerificationReport) => (
@@ -841,6 +878,11 @@ const ReportsStudioPage = dc(() => {
           )}
         />
 
+        {route.query.from === "migration" && (
+          <VAlert type="warning" variant="tonal">
+            {t("This report needs migration. Copy the migration prompt from the migration page, paste the migrated JSON here, verify and save it as a new version.")}
+          </VAlert>
+        )}
         {error.value && (
           <VAlert type="error" variant="tonal" closable onClick:close={() => (error.value = null)}>
             {error.value}

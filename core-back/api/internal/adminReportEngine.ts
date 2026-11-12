@@ -21,8 +21,27 @@ import {
   ReportInputValidationError,
   ReportAccessDeniedError,
   validateMerchantReportScope,
+  classifyStoredReportSpec,
+  safeParseStoredReportSpec,
+  classifyStoredChromeSpec,
+  safeParseStoredChromeSpec,
+  buildReportMigrationPrompt,
+  buildChromeMigrationPrompt,
+  REPORT_ENGINE_VERSION,
+  REPORT_SPEC_VERSION,
+  REPORT_TRANSCRIPT_VERSION,
+  REPORT_CHROME_SPEC_VERSION,
+  REPORT_CHROME_TRANSCRIPT_VERSION,
+  type ReportCompatibilityResult,
+  type ChromeCompatibilityResult,
+  type ReportChromeScope,
+  type ChromeSelectionOverride,
 } from "../../lib/reportEngineSdk";
 import { getReportEngine } from "../../engine/reportStudio/reportEngineRuntime";
+import { getMerchantReportHostConfig } from "../../engine/reportStudio/merchantHostConfig";
+import { readMerchantReportPolicy } from "../../engine/reportStudio/merchantReportEngine";
+import { reconcileReportChromeDefaults } from "../../engine/reportStudio/reconcileChromeDefaults";
+import { buildMerchantReportAuthoringTranscript } from "../../lib/reportEngineSdk/transcript/ReportTranscriptBuilder";
 
 const router = express.Router();
 export const adminReportEngineRouter = router;
@@ -247,35 +266,296 @@ export function toReportExecutionError(error: unknown): unknown {
       reason: compileReason ?? `SQLSTATE_${String(pgCode)}`,
     });
   }
+  if (error instanceof z.ZodError) {
+    return new ApiError(422, "REPORT_SPEC_INVALID", "The stored report spec does not match the current schema", {
+      issues: error.issues,
+    });
+  }
+  if (error instanceof SyntaxError) {
+    return new ApiError(422, "REPORT_SPEC_INVALID", "The stored report spec could not be parsed", {
+      reason: error.message,
+    });
+  }
   return error;
 }
 
+export interface StoredChromeHealth {
+  id: string;
+  code: string;
+  version: number;
+  chromeType: "HEADER" | "FOOTER";
+  isDefaultGlobal: boolean;
+  isDefaultForMerchant?: boolean;
+  compatibility: ChromeCompatibilityResult;
+  row: unknown;
+}
+
+export interface ChromeRegistryState {
+  entries: ReportChromeRegistryEntry[];
+  brokenByCode: Map<string, StoredChromeHealth>;
+  healthByCode: Map<string, StoredChromeHealth>;
+}
+
+export function chromeCompatibilityOf(row: {
+  specJson: unknown;
+  engineVersion?: string | null;
+  specSchemaVersion?: string | null;
+}): ChromeCompatibilityResult {
+  return classifyStoredChromeSpec({
+    specJson: row.specJson,
+    storedEngineVersion: row.engineVersion,
+    storedSpecVersion: row.specSchemaVersion,
+  });
+}
+
+export function reportCompatibilityOf(row: {
+  specJson: unknown;
+  engineVersion?: string | null;
+  specSchemaVersion?: string | null;
+}): ReportCompatibilityResult {
+  return classifyStoredReportSpec({
+    specJson: row.specJson,
+    storedEngineVersion: row.engineVersion,
+    storedSpecVersion: row.specSchemaVersion,
+  });
+}
+
+export function compatibilityApiError(
+  subject: "REPORT" | "CHROME",
+  id: string,
+  compatibility: ReportCompatibilityResult | ChromeCompatibilityResult,
+): ApiError {
+  const status = compatibility.status === "NEEDS_MIGRATION" ? 409 : 422;
+  const code =
+    subject === "REPORT"
+      ? compatibility.status === "NEEDS_MIGRATION"
+        ? "REPORT_NEEDS_MIGRATION"
+        : "REPORT_SPEC_INVALID"
+      : compatibility.status === "NEEDS_MIGRATION"
+        ? "REPORT_CHROME_NEEDS_MIGRATION"
+        : "REPORT_CHROME_SPEC_INVALID";
+  return new ApiError(status, code, compatibility.message, {
+    id,
+    subject,
+    compatibility,
+    promptAvailable: compatibility.promptAvailable,
+  });
+}
+
 /**
- * The published chrome registry: the highest published version of each code.
- * Older published rows (legacy data, before publishing superseded them) never
- * win on row order; the default flag of any published version of a code is
- * carried by its latest version.
+ * Published chrome plus compatibility health. A broken latest version of a
+ * code is never silently replaced by an older version: the code is reported as
+ * broken and callers must block reports that depend on it.
  */
-export async function loadChromeRegistry(): Promise<ReportChromeRegistryEntry[]> {
+export async function loadChromeRegistryState(): Promise<ChromeRegistryState> {
   const rows = await client.reportChromeSpecRecord.findMany({
     where: { status: "PUBLISHED" },
     orderBy: [{ chromeType: "asc" }, { code: "asc" }, { version: "desc" }],
   });
-  const byCode = new Map<string, { row: (typeof rows)[number]; isDefault: boolean }>();
+  const latestByCode = new Map<string, (typeof rows)[number]>();
   for (const row of rows) {
-    const current = byCode.get(row.code);
-    if (!current) {
-      byCode.set(row.code, { row, isDefault: row.isDefaultGlobal });
-    } else if (row.isDefaultGlobal) {
-      current.isDefault = true;
+    if (!latestByCode.has(row.code)) latestByCode.set(row.code, row);
+  }
+  const defaultCodes = new Set(rows.filter((row) => row.isDefaultGlobal).map((row) => row.code));
+  const entries: ReportChromeRegistryEntry[] = [];
+  const brokenByCode = new Map<string, StoredChromeHealth>();
+  const healthByCode = new Map<string, StoredChromeHealth>();
+  for (const row of latestByCode.values()) {
+    const compatibility = chromeCompatibilityOf(row);
+    const health: StoredChromeHealth = {
+      id: row.id,
+      code: row.code,
+      version: row.version,
+      chromeType: row.chromeType,
+      isDefaultGlobal: row.isDefaultGlobal,
+      compatibility,
+      row,
+    };
+    healthByCode.set(row.code, health);
+    if (compatibility.status !== "COMPATIBLE") {
+      brokenByCode.set(row.code, health);
+      continue;
+    }
+    const parsed = safeParseStoredChromeSpec({
+      specJson: row.specJson,
+      storedEngineVersion: row.engineVersion,
+      storedSpecVersion: row.specSchemaVersion,
+    });
+    if (!parsed.ok) {
+      brokenByCode.set(row.code, { ...health, compatibility: parsed.compatibility });
+      healthByCode.set(row.code, { ...health, compatibility: parsed.compatibility });
+      continue;
+    }
+    entries.push({
+      spec: parsed.spec,
+      isDefaultGlobal: defaultCodes.has(row.code),
+      scope: "PLATFORM",
+      merchantId: null,
+      status: row.status,
+      version: row.version,
+      assetBundleId: row.assetBundleId,
+    });
+  }
+  return { entries, brokenByCode, healthByCode };
+}
+
+/** Compatibility entry point for report/chrome callers that only need runnable chrome. */
+export async function loadChromeRegistry(): Promise<ReportChromeRegistryEntry[]> {
+  return (await loadChromeRegistryState()).entries;
+}
+
+export interface ChromeDependencyResult {
+  ready: boolean;
+  reasonCode: string | null;
+  message: string | null;
+  brokenChromeCode: string | null;
+}
+
+export function assertNoChromeAssetKeyCollision(
+  spec: ReportDescriptorSpec,
+  entries: Array<ReportChromeRegistryEntry | null>,
+): void {
+  const reportKeys = new Set(spec.required_assets.map((asset) => asset.asset_key));
+  const chromeKeys = new Set<string>();
+  const collisions = new Set<string>();
+  for (const entry of entries) {
+    if (!entry) continue;
+    for (const asset of entry.spec.required_assets) {
+      if (reportKeys.has(asset.asset_key) || chromeKeys.has(asset.asset_key)) {
+        collisions.add(asset.asset_key);
+      }
+      chromeKeys.add(asset.asset_key);
     }
   }
-  return [...byCode.values()].map(({ row, isDefault }) => ({
-    spec: ReportChromeSpecSchema.parse(row.specJson) as ReportChromeSpec,
-    isDefaultGlobal: isDefault,
-    status: row.status,
-    assetBundleId: row.assetBundleId,
-  }));
+  if (collisions.size > 0) {
+    throw new ApiError(
+      409,
+      "REPORT_ASSET_KEY_COLLISION",
+      "Report and header/footer asset keys must be unique",
+      { assetKeys: [...collisions] },
+    );
+  }
+}
+
+export function chromeOverrideDependency(
+  state: ChromeRegistryState,
+  override: ChromeSelectionOverride | null | undefined,
+): ChromeDependencyResult {
+  if (!override) return { ready: true, reasonCode: null, message: null, brokenChromeCode: null };
+  const check = (
+    type: "HEADER" | "FOOTER",
+    mode: string | undefined,
+    code: string | null | undefined,
+  ): ChromeDependencyResult | null => {
+    if (!mode || mode === "NONE" || mode === "INLINE_SPEC") return null;
+    const entries = state.entries.filter(
+      (entry) => entry.status === "PUBLISHED" && entry.spec.chrome.chrome_type === type,
+    );
+    if (mode === "SPECIFIC_CHROME_CODE") {
+      if (!code) {
+        return { ready: false, reasonCode: "REPORT_CHROME_NOT_FOUND", message: `${type} chrome code is missing.`, brokenChromeCode: null };
+      }
+      if (entries.some((entry) => entry.spec.chrome.code === code)) return null;
+      const broken = state.brokenByCode.get(code);
+      return {
+        ready: false,
+        reasonCode: broken ? "REPORT_CHROME_NEEDS_MIGRATION" : "REPORT_CHROME_NOT_FOUND",
+        message: broken ? `The requested ${type.toLowerCase()} chrome needs migration.` : `The requested ${type.toLowerCase()} chrome is not published.`,
+        brokenChromeCode: code,
+      };
+    }
+    if (mode === "GLOBAL_DEFAULT") {
+      if (entries.some((entry) => (entry.scope ?? "PLATFORM") === "PLATFORM" && entry.isDefaultGlobal)) return null;
+      const brokenDefault = [...state.brokenByCode.values()].find(
+        (entry) => entry.chromeType === type && entry.isDefaultGlobal,
+      );
+      return {
+        ready: false,
+        reasonCode: brokenDefault ? "REPORT_CHROME_NEEDS_MIGRATION" : "REPORT_CHROME_DEFAULT_MISSING",
+        message: brokenDefault
+          ? `The requested default ${type.toLowerCase()} chrome needs migration.`
+          : `No published default ${type.toLowerCase()} chrome is configured.`,
+        brokenChromeCode: brokenDefault?.code ?? null,
+      };
+    }
+    return null;
+  };
+  const header = check("HEADER", override.headerMode, override.headerChromeCode);
+  if (header) return header;
+  const footer = check("FOOTER", override.footerMode, override.footerChromeCode);
+  if (footer) return footer;
+  return { ready: true, reasonCode: null, message: null, brokenChromeCode: null };
+}
+
+export function reportChromeDependency(
+  spec: ReportDescriptorSpec,
+  state: ChromeRegistryState,
+  defaultScope: ReportChromeScope = "PLATFORM",
+  rowCompatibility: ReportCompatibilityResult,
+): ChromeDependencyResult {
+  if (rowCompatibility.status !== "COMPATIBLE") {
+    return { ready: false, reasonCode: rowCompatibility.reasonCode, message: rowCompatibility.message, brokenChromeCode: null };
+  }
+  const check = (
+    type: "HEADER" | "FOOTER",
+    mode: string,
+    code: string | null | undefined,
+  ): ChromeDependencyResult | null => {
+    if (mode === "NONE" || mode === "INLINE_SPEC") return null;
+    const entries = state.entries.filter(
+      (entry) => entry.status === "PUBLISHED" && entry.spec.chrome.chrome_type === type,
+    );
+    if (mode === "SPECIFIC_CHROME_CODE") {
+      if (!code) {
+        return { ready: false, reasonCode: "REPORT_CHROME_NOT_FOUND", message: `${type} chrome code is missing.`, brokenChromeCode: null };
+      }
+      const found =
+        defaultScope === "MERCHANT"
+          ? entries.find((entry) => entry.scope === "MERCHANT" && entry.spec.chrome.code === code) ??
+            entries.find((entry) => (entry.scope ?? "PLATFORM") === "PLATFORM" && entry.spec.chrome.code === code)
+          : entries.find((entry) => (entry.scope ?? "PLATFORM") === "PLATFORM" && entry.spec.chrome.code === code);
+      if (found) return null;
+      const broken = state.brokenByCode.get(code);
+      return {
+        ready: false,
+        reasonCode: broken ? "REPORT_CHROME_NEEDS_MIGRATION" : "REPORT_CHROME_NOT_FOUND",
+        message: broken ? `The ${type.toLowerCase()} chrome "${code}" needs migration.` : `The ${type.toLowerCase()} chrome "${code}" is not published.`,
+        brokenChromeCode: code,
+      };
+    }
+    if (mode === "GLOBAL_DEFAULT") {
+      const merchantDefault =
+        defaultScope === "MERCHANT"
+          ? entries.find((entry) => entry.scope === "MERCHANT" && entry.isDefaultForMerchant === true)
+          : undefined;
+      if (merchantDefault) return null;
+      const platformDefault = entries.find(
+        (entry) => (entry.scope ?? "PLATFORM") === "PLATFORM" && entry.isDefaultGlobal === true,
+      );
+      if (platformDefault) return null;
+      const brokenDefault = [...state.brokenByCode.values()].find(
+        (entry) =>
+          entry.chromeType === type &&
+          (defaultScope === "MERCHANT"
+            ? entry.isDefaultForMerchant === true || entry.isDefaultGlobal
+            : entry.isDefaultGlobal),
+      );
+      return {
+        ready: false,
+        reasonCode: brokenDefault ? "REPORT_CHROME_NEEDS_MIGRATION" : "REPORT_CHROME_DEFAULT_MISSING",
+        message: brokenDefault
+          ? `The default ${type.toLowerCase()} chrome needs migration.`
+          : `No published default ${type.toLowerCase()} chrome is configured.`,
+        brokenChromeCode: brokenDefault?.code ?? null,
+      };
+    }
+    return null;
+  };
+  const header = check("HEADER", spec.page_layout.header_mode, spec.page_layout.header_chrome_code);
+  if (header) return header;
+  const footer = check("FOOTER", spec.page_layout.footer_mode, spec.page_layout.footer_chrome_code);
+  if (footer) return footer;
+  return { ready: true, reasonCode: null, message: null, brokenChromeCode: null };
 }
 
 /** Holds one of the authorities, with the staff wildcard. */
@@ -634,7 +914,29 @@ router.post("/report-engine/specs/preview", async (request: Request, response: R
   }
   const inputs = body.inputs ?? synthesizeDefaultInputs(parsedSpec);
   const actor = await actorOf(request);
-  const chromeRegistry = await loadChromeRegistry();
+  const chromeState = await loadChromeRegistryState();
+  const draftCompatibility = classifyStoredReportSpec({
+    specJson: parsedSpec,
+    storedEngineVersion: REPORT_ENGINE_VERSION,
+    storedSpecVersion: REPORT_SPEC_VERSION,
+  });
+  const dependency = reportChromeDependency(parsedSpec, chromeState, "PLATFORM", draftCompatibility);
+  if (!dependency.ready) {
+    throw new ApiError(
+      409,
+      dependency.reasonCode ?? "REPORT_CHROME_UNAVAILABLE",
+      dependency.message ?? "The selected header/footer is not available",
+      { chromeCode: dependency.brokenChromeCode, dependency },
+    );
+  }
+  const chromeRegistry = chromeState.entries;
+  const previewChrome = engine.resolveChrome({
+    spec: parsedSpec,
+    chromeRegistry,
+    override: null,
+    chromeDefaultScope: "PLATFORM",
+  });
+  assertNoChromeAssetKeyCollision(parsedSpec, [previewChrome.headerEntry, previewChrome.footerEntry]);
   try {
     if (body.mode === "MOCK") {
       const assetDataUrls: Record<string, string> = {};
@@ -724,6 +1026,9 @@ router.post("/report-engine/specs", async (request: Request, response: Response)
           isLatestPublished: publish,
           supportedLocales: Object.keys(spec.i18n.locales),
           defaultLocale: spec.i18n.default_locale,
+          engineVersion: REPORT_ENGINE_VERSION,
+          specSchemaVersion: REPORT_SPEC_VERSION,
+          authoringTranscriptVersion: REPORT_TRANSCRIPT_VERSION,
           specJson: persistedSpec as never,
           specSha256,
           verificationReportJson: verification as never,
@@ -781,23 +1086,166 @@ router.get("/report-engine/specs", async (request: Request, response: Response) 
     take: 200,
   });
   response.json({
-    specs: rows.map((row) => ({
-      id: row.id,
-      code: row.code,
-      version: row.version,
-      category: row.category,
-      audienceScope: row.audienceScope,
-      status: row.status,
-      isLatestPublished: row.isLatestPublished,
-      supportedLocales: row.supportedLocales,
-      defaultLocale: row.defaultLocale,
-      specSha256: row.specSha256,
-      createdAt: row.createdAt,
-      publishedAt: row.publishedAt,
-      assetBundleId: row.assetBundleId,
-      authorityMode: row.authorityMode,
-      allowConfidentialAmlBypass: row.allowConfidentialAmlBypass,
-    })),
+    specs: rows.map((row) => {
+      const compatibility = reportCompatibilityOf(row);
+      return {
+        id: row.id,
+        code: row.code,
+        version: row.version,
+        category: row.category,
+        audienceScope: row.audienceScope,
+        status: row.status,
+        isLatestPublished: row.isLatestPublished,
+        supportedLocales: row.supportedLocales,
+        defaultLocale: row.defaultLocale,
+        engineVersion: row.engineVersion,
+        specSchemaVersion: row.specSchemaVersion,
+        authoringTranscriptVersion: row.authoringTranscriptVersion,
+        compatibility,
+        specSha256: row.specSha256,
+        createdAt: row.createdAt,
+        publishedAt: row.publishedAt,
+        assetBundleId: row.assetBundleId,
+        authorityMode: row.authorityMode,
+        allowConfidentialAmlBypass: row.allowConfidentialAmlBypass,
+      };
+    }),
+  });
+});
+
+router.get("/report-engine/specs/needs-migration", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["report:review", "report_engine:author", "report:approve", "security:read", "security:write"]);
+  const source = typeof request.query.source === "string" ? request.query.source.toUpperCase() : "ALL";
+  const search = typeof request.query.search === "string" ? request.query.search.trim().toLowerCase() : "";
+  const page = Math.max(1, Number(request.query.page ?? 1) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(request.query.pageSize ?? 20) || 20));
+  const staffRows = await client.reportDefinitionSpecRecord.findMany({
+    where: { status: { not: "ARCHIVED" } },
+    orderBy: [{ code: "asc" }, { version: "desc" }],
+  });
+  const staffLatest = new Map<string, (typeof staffRows)[number]>();
+  for (const row of staffRows) {
+    if (!staffLatest.has(row.code) || row.isLatestPublished) staffLatest.set(row.code, row);
+  }
+  const merchantRows = await client.merchantReportSpecRecord.findMany({
+    where: { status: { not: "ARCHIVED" } },
+    orderBy: [{ merchantId: "asc" }, { code: "asc" }, { version: "desc" }],
+  });
+  const merchantLatest = new Map<string, (typeof merchantRows)[number]>();
+  for (const row of merchantRows) {
+    const key = `${row.merchantId}:${row.code}`;
+    if (!merchantLatest.has(key) || row.isLatestPublished) merchantLatest.set(key, row);
+  }
+  const items: Array<Record<string, unknown>> = [];
+  if (source === "ALL" || source === "STAFF") {
+    for (const row of staffLatest.values()) {
+      const compatibility = reportCompatibilityOf(row);
+      if (compatibility.status === "COMPATIBLE") continue;
+      if (search && !`${row.code} ${row.category}`.toLowerCase().includes(search)) continue;
+      items.push({
+        id: row.id,
+        source: "STAFF",
+        code: row.code,
+        version: row.version,
+        category: row.category,
+        audienceScope: row.audienceScope,
+        status: row.status,
+        isLatestPublished: row.isLatestPublished,
+        compatibility,
+        updatedAt: row.updatedAt,
+        promptAvailable: true,
+      });
+    }
+  }
+  if (source === "ALL" || source === "MERCHANT") {
+    for (const row of merchantLatest.values()) {
+      const compatibility = reportCompatibilityOf(row);
+      if (compatibility.status === "COMPATIBLE") continue;
+      if (search && !`${row.code} ${row.category}`.toLowerCase().includes(search)) continue;
+      items.push({
+        id: row.id,
+        source: "MERCHANT",
+        merchantId: row.merchantId,
+        code: row.code,
+        version: row.version,
+        category: row.category,
+        audienceScope: "MERCHANT_FACING",
+        status: row.status,
+        isLatestPublished: row.isLatestPublished,
+        compatibility,
+        updatedAt: row.updatedAt,
+        promptAvailable: true,
+      });
+    }
+  }
+  items.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  response.json({
+    specs: items.slice((page - 1) * pageSize, page * pageSize),
+    total: items.length,
+  });
+});
+
+router.get("/report-engine/specs/:id/migration-prompt", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["report:review", "report_engine:author", "report:approve", "security:write"]);
+  const id = String(request.params.id);
+  const row = await client.reportDefinitionSpecRecord.findUnique({ where: { id } });
+  if (!row) throw new ApiError(404, "REPORT_SPEC_NOT_FOUND", "The report spec does not exist");
+  const compatibility = reportCompatibilityOf(row);
+  if (compatibility.status === "COMPATIBLE") {
+    throw new ApiError(409, "REPORT_SPEC_NOT_MIGRATABLE", "This report spec does not need migration");
+  }
+  const transcript = engine.buildTranscript({});
+  const prompt = buildReportMigrationPrompt({
+    code: row.code,
+    version: row.version,
+    oldSpec: row.specJson,
+    compatibility,
+    targetTranscript: transcript.markdown,
+    targetTranscriptVersion: transcript.transcriptVersion,
+  });
+  response.json({
+    filename: `migrate-${row.code}-v${row.version}-to-engine-${REPORT_ENGINE_VERSION}.md`,
+    prompt,
+    compatibility,
+    target: {
+      engineVersion: REPORT_ENGINE_VERSION,
+      specVersion: REPORT_SPEC_VERSION,
+      transcriptVersion: transcript.transcriptVersion,
+    },
+  });
+});
+
+router.get("/report-engine/merchant-reports/:id/migration-prompt", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["report:review", "report_engine:author", "report:approve", "security:read", "security:write"]);
+  const id = String(request.params.id);
+  const row = await client.merchantReportSpecRecord.findUnique({ where: { id } });
+  if (!row) throw new ApiError(404, "MERCHANT_REPORT_SPEC_NOT_FOUND", "The merchant report spec does not exist");
+  const compatibility = reportCompatibilityOf(row);
+  if (compatibility.status === "COMPATIBLE") {
+    throw new ApiError(409, "REPORT_SPEC_NOT_MIGRATABLE", "This report spec does not need migration");
+  }
+  const policy = await readMerchantReportPolicy();
+  const transcript = buildMerchantReportAuthoringTranscript(getMerchantReportHostConfig(), {
+    merchantAssetsEnabled: policy.assetsEnabled,
+  });
+  const prompt = buildReportMigrationPrompt({
+    code: row.code,
+    version: row.version,
+    oldSpec: row.specJson,
+    compatibility,
+    targetTranscript: transcript.markdown,
+    targetTranscriptVersion: transcript.transcriptVersion,
+    merchantMode: true,
+  });
+  response.json({
+    filename: `migrate-${row.code}-v${row.version}-to-engine-${REPORT_ENGINE_VERSION}.md`,
+    prompt,
+    compatibility,
+    target: {
+      engineVersion: REPORT_ENGINE_VERSION,
+      specVersion: REPORT_SPEC_VERSION,
+      transcriptVersion: transcript.transcriptVersion,
+    },
   });
 });
 
@@ -816,6 +1264,10 @@ router.get("/report-engine/specs/:id", async (request: Request, response: Respon
     isLatestPublished: row.isLatestPublished,
     supportedLocales: row.supportedLocales,
     defaultLocale: row.defaultLocale,
+    engineVersion: row.engineVersion,
+    specSchemaVersion: row.specSchemaVersion,
+    authoringTranscriptVersion: row.authoringTranscriptVersion,
+    compatibility: reportCompatibilityOf(row),
     spec: row.specJson,
     verification: row.verificationReportJson,
     specSha256: row.specSha256,
@@ -850,7 +1302,17 @@ router.post("/report-engine/specs/:id/publish", async (request: Request, respons
       status: existing.status,
     });
   }
-  const spec = ReportDescriptorSpecSchema.parse(existing.specJson);
+  const compatibility = reportCompatibilityOf(existing);
+  if (compatibility.status !== "COMPATIBLE") {
+    throw compatibilityApiError("REPORT", existing.id, compatibility);
+  }
+  const parsedExisting = safeParseStoredReportSpec({
+    specJson: existing.specJson,
+    storedEngineVersion: existing.engineVersion,
+    storedSpecVersion: existing.specSchemaVersion,
+  });
+  if (!parsedExisting.ok) throw compatibilityApiError("REPORT", existing.id, parsedExisting.compatibility);
+  const spec = parsedExisting.spec;
   const verification = await engine.verifyDescriptor({
     rawSpecJson: JSON.stringify(existing.specJson),
     extractedZipFiles: await loadStoredAssetFiles(existing.assetBundleId, spec.required_assets),
@@ -946,11 +1408,20 @@ router.post("/report-engine/specs/:id/archive", async (request: Request, respons
     // version, so the report stays runnable.
     let promoted: { id: string; version: number } | null = null;
     if (existing.isLatestPublished) {
-      promoted = await tx.reportDefinitionSpecRecord.findFirst({
+      const candidates = await tx.reportDefinitionSpecRecord.findMany({
         where: { code: existing.code, status: "PUBLISHED", id: { not: id } },
         orderBy: { version: "desc" },
-        select: { id: true, version: true },
+        select: { id: true, version: true, specJson: true, engineVersion: true, specSchemaVersion: true },
       });
+      promoted =
+        candidates.find(
+          (candidate) =>
+            reportCompatibilityOf({
+              specJson: candidate.specJson,
+              engineVersion: candidate.engineVersion,
+              specSchemaVersion: candidate.specSchemaVersion,
+            }).status === "COMPATIBLE",
+        ) ?? null;
       if (promoted) {
         await tx.reportDefinitionSpecRecord.update({
           where: { id: promoted.id },
@@ -1361,9 +1832,32 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
           ? { code: sortDirection }
           : { updatedAt: sortDirection };
   const rows = await client.reportDefinitionSpecRecord.findMany({ where, orderBy });
-  const allowed = rows
-    .filter((row) => isAllowed(row, actor))
-    .map((row) => ({
+  const chromeState = await loadChromeRegistryState();
+  let brokenReportSpecs = 0;
+  let blockedByChrome = 0;
+  const allowed = [];
+  for (const row of rows) {
+    if (!isAllowed(row, actor)) continue;
+    const compatibility = reportCompatibilityOf(row);
+    if (compatibility.status !== "COMPATIBLE") {
+      brokenReportSpecs += 1;
+      continue;
+    }
+    const parsed = safeParseStoredReportSpec({
+      specJson: row.specJson,
+      storedEngineVersion: row.engineVersion,
+      storedSpecVersion: row.specSchemaVersion,
+    });
+    if (!parsed.ok) {
+      brokenReportSpecs += 1;
+      continue;
+    }
+    const dependency = reportChromeDependency(parsed.spec, chromeState, "PLATFORM", compatibility);
+    if (!dependency.ready) {
+      blockedByChrome += 1;
+      continue;
+    }
+    allowed.push({
       id: row.id,
       code: row.code,
       version: row.version,
@@ -1377,12 +1871,21 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
       conflictStatus: row.conflictStatus,
       requiresConfidentialAml: row.requiresConfidentialAml,
       assetBundleId: row.assetBundleId,
-      spec: row.specJson,
+      spec: parsed.spec,
       updatedAt: row.updatedAt,
-    }));
+    });
+  }
   const total = allowed.length;
   const items = allowed.slice((page - 1) * pageSize, page * pageSize);
-  response.json({ reports: items, total });
+  response.json({
+    reports: items,
+    total,
+    health: {
+      brokenReportSpecs,
+      brokenChromeSpecs: chromeState.brokenByCode.size,
+      reportsBlockedByChrome: blockedByChrome,
+    },
+  });
 });
 
 router.get("/report-engine/autocomplete/:sourceKey", async (request: Request, response: Response) => {
@@ -1436,7 +1939,17 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
   if (!isAllowed(row, actor)) {
     throw new ApiError(403, "REPORT_ACCESS_DENIED", "You are not authorized to run this report");
   }
-  const spec = ReportDescriptorSpecSchema.parse(row.specJson);
+  const compatibility = reportCompatibilityOf(row);
+  if (compatibility.status !== "COMPATIBLE") {
+    throw compatibilityApiError("REPORT", row.id, compatibility);
+  }
+  const parsedStored = safeParseStoredReportSpec({
+    specJson: row.specJson,
+    storedEngineVersion: row.engineVersion,
+    storedSpecVersion: row.specSchemaVersion,
+  });
+  if (!parsedStored.ok) throw compatibilityApiError("REPORT", row.id, parsedStored.compatibility);
+  const spec = parsedStored.spec;
   if (body.locale && !Object.keys(spec.i18n.locales).includes(body.locale)) {
     throw new ApiError(400, "REPORT_LOCALE_NOT_SUPPORTED", `The report does not provide locale "${body.locale}"`);
   }
@@ -1458,7 +1971,33 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
       });
     }
   }
-  const registry = await loadChromeRegistry();
+  const chromeState = await loadChromeRegistryState();
+  const dependency = reportChromeDependency(spec, chromeState, "PLATFORM", compatibility);
+  if (!dependency.ready) {
+    throw new ApiError(
+      409,
+      dependency.reasonCode ?? "REPORT_CHROME_UNAVAILABLE",
+      dependency.message ?? "The requested header/footer is not available",
+      { chromeCode: dependency.brokenChromeCode, dependency },
+    );
+  }
+  const overrideDependency = chromeOverrideDependency(chromeState, body.chromeOverride);
+  if (!overrideDependency.ready) {
+    throw new ApiError(
+      409,
+      overrideDependency.reasonCode ?? "REPORT_CHROME_UNAVAILABLE",
+      overrideDependency.message ?? "The requested runtime header/footer is not available",
+      { chromeCode: overrideDependency.brokenChromeCode, dependency: overrideDependency },
+    );
+  }
+  const registry = chromeState.entries;
+  const resolvedChrome = engine.resolveChrome({
+    spec,
+    chromeRegistry: registry,
+    override: body.chromeOverride,
+    chromeDefaultScope: "PLATFORM",
+  });
+  assertNoChromeAssetKeyCollision(spec, [resolvedChrome.headerEntry, resolvedChrome.footerEntry]);
   if (body.chromeOverride?.headerMode === "SPECIFIC_CHROME_CODE") {
     const found = registry.some(
       (entry) => entry.spec.chrome.chrome_type === "HEADER" && entry.spec.chrome.code === body.chromeOverride?.headerChromeCode,
@@ -1494,6 +2033,8 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
       reportSpecId: row.id,
       reportCode: row.code,
       reportVersion: row.version,
+      engineVersion: REPORT_ENGINE_VERSION,
+      specSchemaVersion: REPORT_SPEC_VERSION,
       actorUserId: actor.userId,
       actorRole: actor.role,
       selectedLocale: body.locale ?? spec.i18n.default_locale,
@@ -1531,7 +2072,13 @@ async function chromeAssetDataUrls(row: ChromeRow, spec: ReportChromeSpec): Prom
 }
 
 async function chromeView(row: ChromeRow, includeAssets: boolean) {
-  const spec = ReportChromeSpecSchema.parse(row.specJson);
+  const compatibility = chromeCompatibilityOf(row);
+  const parsed = safeParseStoredChromeSpec({
+    specJson: row.specJson,
+    storedEngineVersion: row.engineVersion,
+    storedSpecVersion: row.specSchemaVersion,
+  });
+  const spec = parsed.ok ? parsed.spec : row.specJson;
   return {
     id: row.id,
     code: row.code,
@@ -1540,9 +2087,15 @@ async function chromeView(row: ChromeRow, includeAssets: boolean) {
     chromeType: row.chromeType,
     status: row.status,
     isDefaultGlobal: row.isDefaultGlobal,
+    defaultRevokedAt: row.defaultRevokedAt,
+    defaultRevokedReason: row.defaultRevokedReason,
+    engineVersion: row.engineVersion,
+    specSchemaVersion: row.specSchemaVersion,
+    authoringTranscriptVersion: row.authoringTranscriptVersion,
+    compatibility: parsed.ok ? compatibility : parsed.compatibility,
     supportedLocales: row.supportedLocales,
     assetBundleId: row.assetBundleId,
-    assetDataUrls: includeAssets ? await chromeAssetDataUrls(row, spec) : {},
+    assetDataUrls: includeAssets && parsed.ok ? await chromeAssetDataUrls(row, parsed.spec) : {},
     spec,
   };
 }
@@ -1560,6 +2113,7 @@ router.get("/report-engine/chrome", async (request: Request, response: Response)
   const type = typeof request.query.type === "string" ? request.query.type : undefined;
   const includeArchived = truthyFlag(request.query.includeArchived);
   const includeAssets = truthyFlag(request.query.includeAssets);
+  const includeIncompatible = truthyFlag(request.query.includeIncompatible);
   const page = Math.max(1, Number(request.query.page ?? 1) || 1);
   const pageSize = Math.min(200, Math.max(1, Number(request.query.pageSize ?? 200) || 200));
   const search = typeof request.query.search === "string" ? request.query.search.trim() : "";
@@ -1587,18 +2141,211 @@ router.get("/report-engine/chrome", async (request: Request, response: Response)
           : sortKey === "version"
             ? [{ version: sortDirection }]
             : [{ chromeType: "asc" }, { code: "asc" }, { version: "desc" }];
-  const [total, rows] = await Promise.all([
-    client.reportChromeSpecRecord.count({ where }),
-    client.reportChromeSpecRecord.findMany({
-      where,
-      orderBy,
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-  ]);
-  const specs = [];
-  for (const row of rows) specs.push(await chromeView(row, includeAssets));
-  response.json({ specs, total });
+  const rows = await client.reportChromeSpecRecord.findMany({ where, orderBy });
+  const views = [];
+  for (const row of rows) {
+    const view = await chromeView(row, includeAssets);
+    if (!includeIncompatible && view.compatibility.status !== "COMPATIBLE") continue;
+    views.push(view);
+  }
+  const total = views.length;
+  response.json({ specs: views.slice((page - 1) * pageSize, page * pageSize), total });
+});
+
+router.get("/report-engine/chrome/needs-migration", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["report:review", "report:approve", "report_engine:author", "security:read", "security:write"]);
+  const page = Math.max(1, Number(request.query.page ?? 1) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(request.query.pageSize ?? 20) || 20));
+  const search = typeof request.query.search === "string" ? request.query.search.trim().toLowerCase() : "";
+  const rows = await client.reportChromeSpecRecord.findMany({
+    where: { status: { not: "ARCHIVED" } },
+    orderBy: [{ chromeType: "asc" }, { code: "asc" }, { version: "desc" }],
+  });
+  const latestByCode = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) if (!latestByCode.has(row.code)) latestByCode.set(row.code, row);
+  const staffReports = await client.reportDefinitionSpecRecord.findMany({
+    where: { status: "PUBLISHED", isLatestPublished: true },
+    select: { code: true, specJson: true, engineVersion: true, specSchemaVersion: true },
+  });
+  const reportLayouts = staffReports.flatMap((row) => {
+    const parsed = safeParseStoredReportSpec({
+      specJson: row.specJson,
+      storedEngineVersion: row.engineVersion,
+      storedSpecVersion: row.specSchemaVersion,
+    });
+    return parsed.ok
+      ? [
+          {
+            code: row.code,
+            headerMode: parsed.spec.page_layout.header_mode,
+            headerCode: parsed.spec.page_layout.header_chrome_code ?? null,
+            footerMode: parsed.spec.page_layout.footer_mode,
+            footerCode: parsed.spec.page_layout.footer_chrome_code ?? null,
+          },
+        ]
+      : [];
+  });
+  const merchantReports = await client.merchantReportSpecRecord.findMany({
+    where: { status: "PUBLISHED", isLatestPublished: true },
+    select: { merchantId: true, code: true, specJson: true, engineVersion: true, specSchemaVersion: true },
+  });
+  const merchantReportLayouts = merchantReports.flatMap((row) => {
+    const parsed = safeParseStoredReportSpec({
+      specJson: row.specJson,
+      storedEngineVersion: row.engineVersion,
+      storedSpecVersion: row.specSchemaVersion,
+    });
+    return parsed.ok
+      ? [
+          {
+            merchantId: row.merchantId,
+            code: row.code,
+            headerMode: parsed.spec.page_layout.header_mode,
+            headerCode: parsed.spec.page_layout.header_chrome_code ?? null,
+            footerMode: parsed.spec.page_layout.footer_mode,
+            footerCode: parsed.spec.page_layout.footer_chrome_code ?? null,
+          },
+        ]
+      : [];
+  });
+  const merchantDefaults = await client.merchantReportChromeSpecRecord.findMany({
+    where: { status: "PUBLISHED", isDefaultForMerchant: true },
+    select: { merchantId: true, chromeType: true },
+  });
+  const merchantDefaultTypes = new Set(
+    merchantDefaults.map((row) => `${row.merchantId}:${row.chromeType}`),
+  );
+  const items = [];
+  for (const row of latestByCode.values()) {
+    const compatibility = chromeCompatibilityOf(row);
+    if (compatibility.status === "COMPATIBLE") continue;
+    if (search && !`${row.code} ${row.name}`.toLowerCase().includes(search)) continue;
+    const impactedCodes = new Set<string>();
+    const impactedKeys = new Set<string>();
+    for (const entry of reportLayouts) {
+      const isImpacted =
+        row.chromeType === "HEADER"
+          ? (entry.headerMode === "SPECIFIC_CHROME_CODE" && entry.headerCode === row.code) ||
+            (entry.headerMode === "GLOBAL_DEFAULT" && (row.isDefaultGlobal || row.defaultRevokedAt !== null))
+          : (entry.footerMode === "SPECIFIC_CHROME_CODE" && entry.footerCode === row.code) ||
+            (entry.footerMode === "GLOBAL_DEFAULT" && (row.isDefaultGlobal || row.defaultRevokedAt !== null));
+      if (isImpacted) {
+        impactedCodes.add(entry.code);
+        impactedKeys.add(`staff:${entry.code}`);
+      }
+    }
+    for (const entry of merchantReportLayouts) {
+      const hasOwnDefault = merchantDefaultTypes.has(`${entry.merchantId}:${row.chromeType}`);
+      const usesPlatformDefault = !hasOwnDefault && (row.isDefaultGlobal || row.defaultRevokedAt !== null);
+      const isImpacted =
+        row.chromeType === "HEADER"
+          ? (entry.headerMode === "SPECIFIC_CHROME_CODE" && entry.headerCode === row.code) ||
+            (entry.headerMode === "GLOBAL_DEFAULT" && usesPlatformDefault)
+          : (entry.footerMode === "SPECIFIC_CHROME_CODE" && entry.footerCode === row.code) ||
+            (entry.footerMode === "GLOBAL_DEFAULT" && usesPlatformDefault);
+      if (isImpacted) {
+        impactedCodes.add(entry.code);
+        impactedKeys.add(`merchant:${entry.merchantId}:${entry.code}`);
+      }
+    }
+    const impacted = [...impactedCodes];
+    items.push({
+      id: row.id,
+      code: row.code,
+      version: row.version,
+      name: row.name,
+      chromeType: row.chromeType,
+      status: row.status,
+      isDefaultGlobal: row.isDefaultGlobal,
+      defaultRevokedAt: row.defaultRevokedAt,
+      defaultRevokedReason: row.defaultRevokedReason,
+      defaultState: row.isDefaultGlobal ? "ACTIVE" : row.defaultRevokedAt ? "REVOKED" : "NONE",
+      compatibility,
+      impactedReportCount: impactedKeys.size,
+      impactedReportCodes: impacted.slice(0, 10),
+    });
+  }
+  const defaultState = (type: "HEADER" | "FOOTER"): "ACTIVE" | "REVOKED" | "MISSING" => {
+    const candidates = rows.filter((entry) => entry.chromeType === type);
+    const active = candidates.find(
+      (entry) =>
+        entry.status === "PUBLISHED" &&
+        entry.isDefaultGlobal &&
+        chromeCompatibilityOf(entry).status === "COMPATIBLE",
+    );
+    if (active) return "ACTIVE";
+    const revoked = candidates.find(
+      (entry) =>
+        entry.status === "PUBLISHED" &&
+        (entry.isDefaultGlobal || entry.defaultRevokedAt !== null) &&
+        chromeCompatibilityOf(entry).status !== "COMPATIBLE",
+    );
+    return revoked ? "REVOKED" : "MISSING";
+  };
+  response.json({
+    specs: items.slice((page - 1) * pageSize, page * pageSize),
+    total: items.length,
+    defaults: {
+      header: defaultState("HEADER"),
+      footer: defaultState("FOOTER"),
+    },
+  });
+});
+
+router.get("/report-engine/chrome/:id/migration-prompt", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["report:review", "report:approve", "report_engine:author", "security:write"]);
+  const id = String(request.params.id);
+  const row = await client.reportChromeSpecRecord.findUnique({ where: { id } });
+  if (!row) throw new ApiError(404, "REPORT_CHROME_SPEC_NOT_FOUND", "The chrome spec does not exist");
+  const compatibility = chromeCompatibilityOf(row);
+  if (compatibility.status === "COMPATIBLE") {
+    throw new ApiError(409, "REPORT_CHROME_NOT_MIGRATABLE", "This header/footer does not need migration");
+  }
+  const transcript = engine.buildChromeTranscript();
+  const prompt = buildChromeMigrationPrompt({
+    code: row.code,
+    version: row.version,
+    oldSpec: row.specJson,
+    compatibility,
+    targetTranscript: transcript.markdown,
+    targetTranscriptVersion: transcript.transcriptVersion,
+  });
+  response.json({
+    filename: `migrate-${row.code}-v${row.version}-to-engine-${REPORT_ENGINE_VERSION}.md`,
+    prompt,
+    compatibility,
+    target: {
+      engineVersion: REPORT_ENGINE_VERSION,
+      specVersion: REPORT_CHROME_SPEC_VERSION,
+      transcriptVersion: transcript.transcriptVersion,
+    },
+  });
+});
+
+router.post("/report-engine/chrome/reconcile-defaults", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["report:approve", "security:write"]);
+  const actor = await actorOf(request);
+  const audit = auditBase(auditActor(request));
+  const revoked = await reconcileReportChromeDefaults();
+  if (revoked.length > 0) {
+    await client.$transaction(async (tx) => {
+      await writeAudit(tx, {
+        data: {
+          ...audit,
+          action: "REPORT_CHROME_DEFAULTS_RECONCILED",
+          entityType: "REPORT_CHROME_DEFAULT",
+          entityId: actor.userId,
+          beforeJson: null,
+          afterJson: { revoked },
+        } as never,
+      });
+    });
+  }
+  response.json({
+    platformRevoked: revoked.filter((entry) => entry.subject === "PLATFORM").length,
+    merchantRevoked: revoked.filter((entry) => entry.subject === "MERCHANT").length,
+    revoked,
+  });
 });
 
 /** One chrome with its assets inlined (preview). Non-authors only reach published chrome. */
@@ -1684,6 +2431,9 @@ router.post("/report-engine/chrome", async (request: Request, response: Response
           status: publish ? "PUBLISHED" : "VERIFIED",
           isDefaultGlobal: makeDefault,
           supportedLocales: Object.keys(spec.i18n.locales),
+          engineVersion: REPORT_ENGINE_VERSION,
+          specSchemaVersion: REPORT_CHROME_SPEC_VERSION,
+          authoringTranscriptVersion: REPORT_CHROME_TRANSCRIPT_VERSION,
           specJson: spec as never,
           specSha256,
           assetBundleId: assetBundle.assetBundleId,
@@ -1739,7 +2489,13 @@ router.post("/report-engine/chrome/:id/archive", async (request: Request, respon
   const updated = await client.$transaction(async (tx) => {
     const row = await tx.reportChromeSpecRecord.update({
       where: { id },
-      data: { status: "ARCHIVED", isDefaultGlobal: false },
+      data: {
+        status: "ARCHIVED",
+        isDefaultGlobal: false,
+        ...(existing.isDefaultGlobal
+          ? { defaultRevokedAt: new Date(), defaultRevokedReason: "ARCHIVED" }
+          : {}),
+      },
     });
     await writeAudit(tx, {
       data: {
@@ -1765,6 +2521,10 @@ router.post("/report-engine/chrome/:id/set-default", async (request: Request, re
   if (existing.status !== "PUBLISHED" && body.isDefault) {
     throw new ApiError(409, "REPORT_CHROME_NOT_PUBLISHED", "Only a published chrome spec can be the global default");
   }
+  const compatibility = chromeCompatibilityOf(existing);
+  if (body.isDefault && compatibility.status !== "COMPATIBLE") {
+    throw compatibilityApiError("CHROME", existing.id, compatibility);
+  }
   const audit = auditBase(auditActor(request));
   await client.$transaction(async (tx) => {
     if (body.isDefault) {
@@ -1775,7 +2535,10 @@ router.post("/report-engine/chrome/:id/set-default", async (request: Request, re
     }
     await tx.reportChromeSpecRecord.update({
       where: { id },
-      data: { isDefaultGlobal: body.isDefault },
+      data: {
+        isDefaultGlobal: body.isDefault,
+        ...(body.isDefault ? { defaultRevokedAt: null, defaultRevokedReason: null } : {}),
+      },
     });
     await writeAudit(tx, {
       data: {

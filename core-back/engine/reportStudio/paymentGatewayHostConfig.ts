@@ -4,6 +4,7 @@ import { buildPaymentGatewayAutocompleteProviders } from "./autocompleteProvider
 import { buildSchemaCatalog } from "./schemaCatalog";
 import { LocalReportAssetStorage } from "./assetStorage";
 import { env } from "../../lib/env";
+import { REPORT_ENGINE_VERSION } from "../../lib/reportEngineSdk/version";
 
 let cached: ReportEngineHostConfig | null = null;
 
@@ -33,7 +34,7 @@ export function createPaymentGatewayReportHostConfig(deps: {
   const assetStoragePort = deps.assetStoragePort ?? new LocalReportAssetStorage();
 
   return {
-    engineVersion: "1.0",
+    engineVersion: REPORT_ENGINE_VERSION,
     institutionName: "Libyan National Payment Gateway",
     defaultCurrency: "LYD",
     defaultTimezone: "Africa/Tripoli",

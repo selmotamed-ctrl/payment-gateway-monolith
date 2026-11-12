@@ -3,7 +3,7 @@ id: admin-ui.report-studio
 title: Report Catalog, Studio and Chrome
 status: implemented
 confidence: high
-last_verified: 2026-11-10
+last_verified: 2026-11-11
 verified_against: working-tree
 code:
   - admin-front/src/pages/reports/**
@@ -35,7 +35,9 @@ gaps:
 | :--- | :--- | :--- | :--- |
 | `/reports/catalog` | `ReportsCatalog` | `reports.draft` / `reports.run` | Published reports, language selection, input form and print/preview. |
 | `/reports/studio` | `ReportsStudio` | `reports.studio` | AI transcript, JSON spec editor, five-layer verification, authority override and publish. |
-| `/reports/chrome` | `ReportsChrome` | `reports.studio` | Reusable header/footer registry and default selection. |
+| `/reports/chrome` | `ReportsChrome` | `reports.studio` | Reusable platform header/footer registry, compatibility and default selection. |
+| `/reports/needs-migration` | `ReportsNeedsMigration` | `report_engine:author` / `report:review` / `report:approve` / `security:*` | Staff and merchant report specs that must be migrated. |
+| `/reports/chrome/needs-migration` | `ReportsChromeNeedsMigration` | `report_engine:author` / `report:approve` / `security:*` | Platform chrome needing migration, default revocation and impacted reports. |
 
 The routes are registered in `admin-front/src/router/index.ts`, projected from `report_engine:author` / `report_engine:run` in `core-back/lib/auth/uiAuthorities.ts`, and shown in the Reporting section of the shell.
 
@@ -115,3 +117,10 @@ The A4 regression spec (`tests/e2e/admin/report-a4-layout.spec.ts`) now measures
 The Report Headers & Footers page now previews the selected chrome on a real A4 page frame with sample body content, the global default counterpart, the header top 2 mm/22 mm slot and footer bottom 4 mm/16 mm slot. The preview uses realistic report title/subtitle, period, currency, actor and generated-at values so it matches the reference institutional chrome.
 
 The renderer fills the chrome slot with the template root, supports the structured `accent_band` (multi-color hard-stop gradient) and suppresses the legacy single-color border when a band is present. The transcript documents the band, `defaultCurrency`, locale-formatted period/generated timestamps and the slot-fill rule. The A4 report gate now measures chrome fill, band colors/height, header-to-body and footer-to-page offsets, and formatted variables through `tests/e2e/admin/chrome-layout.spec.ts`; `tests/e2e/admin/chrome-preview.spec.ts` covers the Studio A4 preview.
+
+
+## 10. Compatibility migration pages (2026-11-11)
+
+The Reporting section adds a single “Needs Migration” navigation entry plus two dedicated routes. The report page lists one current row per staff/merchant report code, shows stored vs current engine/spec versions, red `NEEDS_MIGRATION`/`INVALID` badges, copy/download prompt and (for staff reports) Studio prefill via `?open=<id>&from=migration`. The chrome page lists platform headers/footers needing migration, revoked/missing default state, impacted reports, prompt actions, Chrome Studio prefill and a reconcile-defaults action.
+
+The catalog now receives `health` counts and shows a warning callout linking to both migration pages. Chrome Studio requests `includeIncompatible=1`, displays compatibility/default-revocation badges, disables preview/default for broken rows and prechecks “Make default” for a previously-default chrome being migrated. Admin Studio reads `?open=<id>` so a broken raw spec can be loaded without parsing it.

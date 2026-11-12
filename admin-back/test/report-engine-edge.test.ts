@@ -13,6 +13,7 @@ let edgeServer: ReturnType<ReturnType<typeof createApp>["listen"]>;
 beforeAll(async () => {
   process.env.NODE_ENV = "test";
   process.env.CORE_BACK_URL = core.url;
+  process.env.CORE_BACK_URLS = core.url;
   process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
   process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
   process.env.MTLS_CA_CERT_PATH = pki.caCert;
@@ -125,5 +126,57 @@ describe("merchant reporting oversight forwarding", () => {
       {},
     );
     expect(resume.status).toBe(200);
+  });
+});
+
+describe("migration and chrome forwarding", () => {
+  test("forwards report needs-migration and prompt routes", async () => {
+    const list = await request(
+      "GET",
+      "/api/v1/admin/report-engine/specs/needs-migration?source=ALL&page=2&pageSize=5&search=ledger",
+      fullStaffToken(),
+    );
+    expect(list.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toContain("/internal/admin/report-engine/specs/needs-migration");
+    expect(core.requests.at(-1)?.url).toContain("page=2");
+    expect(core.requests.at(-1)?.url).toContain("pageSize=5");
+    expect(core.requests.at(-1)?.url).toContain("search=ledger");
+    const id = "11111111-1111-4111-8111-111111111111";
+    const prompt = await request("GET", `/api/v1/admin/report-engine/specs/${id}/migration-prompt`, fullStaffToken());
+    expect(prompt.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toBe(`/internal/admin/report-engine/specs/${id}/migration-prompt`);
+  });
+
+  test("forwards chrome migration, reconciliation and merchant prompt routes", async () => {
+    const list = await request(
+      "GET",
+      "/api/v1/admin/report-engine/chrome/needs-migration?page=2&pageSize=5&search=header",
+      fullStaffToken(),
+    );
+    expect(list.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toContain("/internal/admin/report-engine/chrome/needs-migration");
+    expect(core.requests.at(-1)?.url).toContain("page=2");
+    expect(core.requests.at(-1)?.url).toContain("pageSize=5");
+    expect(core.requests.at(-1)?.url).toContain("search=header");
+    const chromeDetail = await request(
+      "GET",
+      "/api/v1/admin/report-engine/chrome/11111111-1111-4111-8111-111111111111",
+      fullStaffToken(),
+    );
+    expect(chromeDetail.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toBe(
+      "/internal/admin/report-engine/chrome/11111111-1111-4111-8111-111111111111",
+    );
+    const reconcile = await request("POST", "/api/v1/admin/report-engine/chrome/reconcile-defaults", fullStaffToken(), {});
+    expect(reconcile.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/report-engine/chrome/reconcile-defaults");
+    const id = "11111111-1111-4111-8111-111111111111";
+    const merchantPrompt = await request(
+      "GET",
+      `/api/v1/admin/report-engine/merchant-reports/${id}/migration-prompt`,
+      fullStaffToken(),
+    );
+    expect(merchantPrompt.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toBe(`/internal/admin/report-engine/merchant-reports/${id}/migration-prompt`);
   });
 });

@@ -4,6 +4,7 @@ export type BadgeTone = "success" | "warning" | "danger" | "info" | "neutral";
 
 const STATUS_TO_TONE: Record<string, BadgeTone> = {
     LIVE: "success",
+    PUBLISHED: "success",
     ACTIVE: "success",
     SUCCEEDED: "success",
     APPROVED: "success",
@@ -35,6 +36,11 @@ const STATUS_TO_TONE: Record<string, BadgeTone> = {
     INFO_REQUESTED: "warning",
     AWAITING_CUSTOMER: "warning",
     DRAFT: "warning",
+    ARCHIVED: "neutral",
+    NEEDS_MIGRATION: "danger",
+    INVALID: "danger",
+    BROKEN: "danger",
+    MISSING: "danger",
     UNVERIFIED: "warning",
     PARTIAL: "warning",
     DRAINING: "warning",

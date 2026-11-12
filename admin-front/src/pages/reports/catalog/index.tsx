@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VBtn, VSelect } from "vuetify/components";
+import { VAlert, VBtn, VSelect } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { ApiTable } from "@/components/Table/ApiTable";
@@ -100,10 +100,17 @@ const ReportsCatalogPage = dc(() => {
   const inputFormRef = ref<{ validate?: () => boolean } | null>(null);
   const catalogRefresh = ref<CatalogRefreshHook | null>(null);
   const previewPages = ref(1);
+  const health = ref<{ reportsBlockedByChrome?: number; brokenReportSpecs?: number; brokenChromeSpecs?: number } | null>(null);
   const canStudio = computed(() =>
     hasOneOfAuthorities(["reports.studio", "reports.draft", "report_engine:author", "report:review", "report:approve", "security:write"]),
   );
   const canChrome = computed(() => hasOneOfAuthorities(["reports.studio", "security:write"]));
+  const canMigrateReports = computed(() =>
+    hasOneOfAuthorities(["reports.studio", "reports.draft", "report_engine:author", "report:review", "report:approve", "security:read", "security:write"]),
+  );
+  const canMigrateChrome = computed(() =>
+    hasOneOfAuthorities(["reports.studio", "report:approve", "report_engine:author", "security:read", "security:write"]),
+  );
   const hasRows = computed(() =>
     bundle.value ? Object.values(bundle.value.datasets).some((rows) => rows.length > 0) : false,
   );
@@ -210,14 +217,29 @@ const ReportsCatalogPage = dc(() => {
     if (extracted?.code === "REPORT_NOT_FOUND") {
       return t("This report could not be found. Refresh the catalog or open Report Studio to publish it.");
     }
+    if (extracted?.code === "REPORT_NEEDS_MIGRATION" || extracted?.code === "REPORT_SPEC_INVALID") {
+      return t("This report needs migration. Open the migration page, copy the prompt, and save a migrated version.");
+    }
+    if (extracted?.code === "REPORT_CHROME_NEEDS_MIGRATION" || extracted?.code === "REPORT_CHROME_DEFAULT_MISSING") {
+      return t("This report's header/footer needs migration. Open the header/footer migration page.");
+    }
     if (extracted?.status === 403) {
       return t("You do not have permission to run this report. Ask a Security Admin to grant the report access policy.");
     }
     return extracted?.error ?? (caught instanceof Error ? caught.message : String(caught));
   };
 
+  const loadHealth = async () => {
+    try {
+      const response = await api.get(urlsMap.reportEngineCatalog, { params: { page: 1, pageSize: 1 } });
+      health.value = (response.data?.health ?? null) as typeof health.value;
+    } catch {
+      health.value = null;
+    }
+  };
+
   const refresh = async () => {
-    await loadChrome();
+    await Promise.all([loadChrome(), loadHealth()]);
     catalogRefresh.value?.refreshAsIs();
   };
 
@@ -420,7 +442,7 @@ const ReportsCatalogPage = dc(() => {
     latestChromeByCode(type).map((row) => ({ title: `${row.name} (${row.code})`, value: row.code }));
 
   onMounted(() => {
-    void loadChrome();
+    void Promise.all([loadChrome(), loadHealth()]);
   });
 
   return () => (
@@ -447,6 +469,27 @@ const ReportsCatalogPage = dc(() => {
             </ThemedView>
           )}
         />
+
+        {((health.value?.brokenReportSpecs ?? 0) > 0 ||
+          (health.value?.brokenChromeSpecs ?? 0) > 0 ||
+          (health.value?.reportsBlockedByChrome ?? 0) > 0) && (
+          <VAlert type="warning" variant="tonal">
+            <div class="d-flex flex-wrap align-center ga-3">
+              <span>{t("Reports Needing Migration")}: {health.value?.brokenReportSpecs ?? 0}</span>
+              <span>{t("Reports blocked by header/footer")}: {health.value?.reportsBlockedByChrome ?? 0}</span>
+              {canMigrateReports.value && (
+                <VBtn size="small" variant="text" onClick={() => void router.push({ name: "ReportsNeedsMigration" })}>
+                  {t("Report migration")}
+                </VBtn>
+              )}
+              {canMigrateChrome.value && (
+                <VBtn size="small" variant="text" onClick={() => void router.push({ name: "ReportsChromeNeedsMigration" })}>
+                  {t("Headers & Footers migration")}
+                </VBtn>
+              )}
+            </div>
+          </VAlert>
+        )}
 
         {bundle.value && selected.value && (
           <SurfaceCard

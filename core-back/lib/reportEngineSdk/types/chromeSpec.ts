@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { REPORT_CHROME_SPEC_VERSION } from "../version";
 
-export const REPORT_CHROME_SPEC_VERSION = "1.0" as const;
+export { REPORT_CHROME_SPEC_VERSION } from "../version";
 
 export const ChromeVariableBindingSchema = z.enum([
   "institutionName",
@@ -16,6 +17,7 @@ export const ChromeVariableBindingSchema = z.enum([
   "selectedLocale",
   "merchantTradeName",
   "merchantLegalName",
+  "merchantDisplayName",
   "periodSummary",
   "defaultCurrency",
   "classificationBadge",

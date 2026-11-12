@@ -116,6 +116,29 @@ router.get(
 );
 
 router.get(
+  "/specs/needs-migration",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/report-engine/specs/needs-migration",
+    querySchema: z
+      .object({
+        source: z.string().max(16).optional(),
+        search: z.string().max(200).optional(),
+      })
+      .passthrough(),
+  }),
+);
+
+router.get(
+  "/specs/:id/migration-prompt",
+  coreForward({
+    method: "GET",
+    path: ({ params }) => `/internal/admin/report-engine/specs/${params.id}/migration-prompt`,
+    paramsSchema: idParams,
+  }),
+);
+
+router.get(
   "/specs/:id",
   coreForward({
     method: "GET",
@@ -337,6 +360,57 @@ router.post(
     method: "POST",
     path: ({ params }) => `/internal/admin/report-engine/merchant-reports/${params.merchantId}/resume`,
     paramsSchema: merchantIdParams,
+    schema: z.object({}).strict(),
+  }),
+);
+
+router.get(
+  "/merchant-reports/:id/migration-prompt",
+  coreForward({
+    method: "GET",
+    path: ({ params }) => `/internal/admin/report-engine/merchant-reports/${params.id}/migration-prompt`,
+    paramsSchema: idParams,
+  }),
+);
+
+router.get(
+  "/chrome/needs-migration",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/report-engine/chrome/needs-migration",
+    querySchema: z
+      .object({
+        page: z.coerce.number().int().min(1).optional(),
+        pageSize: z.coerce.number().int().min(1).max(200).optional(),
+        search: z.string().max(200).optional(),
+      })
+      .passthrough(),
+  }),
+);
+
+router.get(
+  "/chrome/:id",
+  coreForward({
+    method: "GET",
+    path: ({ params }) => `/internal/admin/report-engine/chrome/${params.id}`,
+    paramsSchema: idParams,
+  }),
+);
+
+router.get(
+  "/chrome/:id/migration-prompt",
+  coreForward({
+    method: "GET",
+    path: ({ params }) => `/internal/admin/report-engine/chrome/${params.id}/migration-prompt`,
+    paramsSchema: idParams,
+  }),
+);
+
+router.post(
+  "/chrome/reconcile-defaults",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/report-engine/chrome/reconcile-defaults",
     schema: z.object({}).strict(),
   }),
 );

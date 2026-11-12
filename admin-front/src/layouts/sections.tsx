@@ -79,6 +79,12 @@ export const useSections = () => {
                     if: () => hasOneOfAuthorities(["reports.studio", "security:write"]),
                 },
                 {
+                    label: t("Needs Migration"),
+                    name: "ReportsNeedsMigration",
+                    icon: "mdi-alert-decagram-outline",
+                    if: () => hasOneOfAuthorities(["reports.studio", "reports.draft", "report_engine:author", "report:review", "report:approve", "security:read", "security:write"]),
+                },
+                {
                     label: t("Merchant Reports"),
                     name: "ReportsMerchantReports",
                     icon: "mdi-account-file-text-outline",

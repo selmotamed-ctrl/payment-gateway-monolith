@@ -20,7 +20,7 @@ const INFO = new Set([
 const ERROR = new Set([
     "FAILED", "REJECTED", "BLOCKED", "SUSPENDED", "EXPIRED", "CANCELLED", "FROZEN", "REVOKED",
     "LOST", "HIGH", "HIGH_RISK", "CRITICAL", "FAILING", "REJECTED_BY_AUTHORITY", "CONFIRMED_MATCH",
-    "P1", "OVERDUE", "ERROR", "MISSING_AT_GATEWAY",
+    "P1", "OVERDUE", "ERROR", "MISSING_AT_GATEWAY", "NEEDS_MIGRATION", "INVALID", "BROKEN", "MISSING",
 ]);
 
 /** One shared colour vocabulary for chips, filter options and row markers. */

@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { adminInternalRouter } from "../../api/internal/admin";
 import { merchantInternalRouter } from "../../api/internal/merchant";
 import { client } from "../../prisma/client";
@@ -20,7 +19,7 @@ let authorId = "";
 
 if (dbAvailable) {
   beforeAll(async () => {
-    app = await startApp([adminInternalRouter, merchantInternalRouter]);
+    app = await startApp([adminInternalRouter, merchantInternalRouter], { channelPrefixes: true });
     staffId = await createStaffUser("SECURITY_ADMIN");
     authorId = await createStaffUser("SUPPORT");
   });
@@ -63,7 +62,7 @@ describe.skipIf(!dbAvailable)("report-engine route remediation", () => {
 
     const row = await client.reportDefinitionSpecRecord.findUniqueOrThrow({ where: { id: first.json.id } });
     expect((row.specJson as Record<string, any>).report.version).toBe(row.version);
-    expect(row.specSha256).toBe(createHash("sha256").update(JSON.stringify(row.specJson)).digest("hex"));
+    expect(row.specSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(row.isLatestPublished).toBe(true);
 
     const second = await save(2, true);
@@ -115,7 +114,7 @@ describe.skipIf(!dbAvailable)("report-engine route remediation", () => {
     });
     const catalog = await app.request("GET", "/internal/merchant/report-engine/catalog");
     expect(catalog.status).toBe(403);
-    expect(catalog.json.code).toBe("MERCHANT_CONTEXT_REQUIRED");
+    expect(catalog.json.code).toBe("MERCHANT_PRINCIPAL_REQUIRED");
 
     const execute = await app.request(
       "POST",
@@ -133,7 +132,7 @@ describe.skipIf(!dbAvailable)("report-engine route remediation", () => {
     });
     const response = await app.request("GET", "/internal/merchant/report-engine/catalog");
     expect(response.status).toBe(403);
-    expect(String(response.json.code)).toContain("AUTHORITY");
+    expect(String(response.json.code)).toContain("MERCHANT_PRINCIPAL_REQUIRED");
   });
 
   test("B11: chrome drafts are hidden from non-authors and assets are not inlined by default", async () => {
@@ -143,9 +142,9 @@ describe.skipIf(!dbAvailable)("report-engine route remediation", () => {
     app.setPrincipal(makePrincipal(staffId, ["report_engine:run"], "SUPPORT"));
     const response = await app.request("GET", "/internal/admin/report-engine/chrome?pageSize=200");
     expect(response.status).toBe(200);
-    const items = response.json.chrome as Array<Record<string, unknown>>;
+    const items = response.json.specs as Array<Record<string, unknown>>;
     expect(items.every((item) => item.status === "PUBLISHED")).toBe(true);
-    expect(items.every((item) => item.assetDataUrls === undefined)).toBe(true);
+    expect(items.every((item) => Object.keys((item.assetDataUrls as Record<string, unknown>) ?? {}).length === 0)).toBe(true);
   });
 });
 

@@ -58,6 +58,18 @@ describe("chrome transcript", () => {
     expect(transcript.markdown).toContain("Multi-color band example");
     expect(transcript.markdown).toContain("defaultCurrency");
     expect(transcript.markdown).toContain("fills the configured");
+    expect(transcript.engineVersion).toBe("1.0.0");
+    expect(transcript.transcriptVersion).toBe("1.1");
+  });
+
+  test("merchant mode documents company identity variables and logo assets", () => {
+    const transcript = buildChromeAuthoringTranscript(createTestHostConfig(), { merchantMode: true });
+    expect(transcript.markdown).toContain("Merchant Report Branding");
+    expect(transcript.markdown).toContain("merchantTradeName");
+    expect(transcript.markdown).toContain("merchantLegalName");
+    expect(transcript.markdown).toContain("merchantDisplayName");
+    expect(transcript.markdown).toContain("company logo");
+    expect(transcript.markdown).toContain("merchant default first");
   });
 });
 

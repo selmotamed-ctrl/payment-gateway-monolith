@@ -7,6 +7,7 @@ import { PostgresReadOnlyReportExecutor } from "../../lib/reportEngineSdk/runtim
 import { buildSchemaCatalog } from "./schemaCatalog";
 import { LocalReportAssetStorage } from "./assetStorage";
 import { env } from "../../lib/env";
+import { REPORT_ENGINE_VERSION } from "../../lib/reportEngineSdk/version";
 
 /**
  * Explicit merchant allow-list (E02). Every model here has a direct
@@ -244,7 +245,7 @@ export function createMerchantReportHostConfig(deps: {
   }
 
   return {
-    engineVersion: "1.0-merchant",
+    engineVersion: REPORT_ENGINE_VERSION,
     institutionName: "Libyan National Payment Gateway",
     defaultCurrency: "LYD",
     defaultTimezone: "Africa/Tripoli",

@@ -36,3 +36,5 @@
 | `20261110170000_docx_report_output` | 4 |  |
 | `20261110180000_external_filing_adapters` | 47 |  |
 | `20261110190000_merchant_report_engine` | 117 | ============================================================================ |
+| `20261111120000_report_engine_versioning` | 40 | Schema version 34: report/chrome compatibility provenance and default revocation. |
+| `20261111130000_merchant_report_chrome` | 40 | Schema version 35: merchant-owned report headers and footers. |

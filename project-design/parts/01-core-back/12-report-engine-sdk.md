@@ -3,7 +3,7 @@ id: core.report-engine
 title: Dynamic Report Engine SDK and Report Studio Host
 status: implemented
 confidence: high
-last_verified: 2026-11-10
+last_verified: 2026-11-11
 verified_against: working-tree
 code:
   - core-back/lib/reportEngineSdk/**
@@ -18,6 +18,10 @@ code:
   - core-back/prisma/migrations/20261110130000_report_engine_merchant_and_aml/migration.sql
   - core-back/prisma/migrations/20261110190000_merchant_report_engine/migration.sql
   - core-back/api/internal/merchantReportEngine.ts
+  - core-back/engine/reportStudio/reconcileChromeDefaults.ts
+  - core-back/lib/reportEngineSdk/version.ts
+  - core-back/lib/reportEngineSdk/compatibility/**
+  - core-back/lib/reportEngineSdk/migrations/**
   - core-back/api/internal/merchant.ts
   - merchant-back/api/protected/reportEngine.ts
   - merchant-front/src/pages/reports/index.tsx
@@ -31,6 +35,8 @@ design_sources:
   - design/12-reporting/dynamic_ai_transcript_report_engine_sdk_plan.md
 tests:
   - core-back/test/reportEngineSdk/**
+  - core-back/test/admin-slice/report-engine-migration.test.ts
+  - core-back/test/admin-slice/merchant-report-chrome.test.ts
   - core-back/test/admin-slice/admin-report-engine.test.ts
   - merchant-back/test/core-forwarding.test.ts
   - admin-back/test/report-engine-edge.test.ts
@@ -50,7 +56,7 @@ gaps:
   - `REPORT_READONLY_DATABASE_URL` may point at a replica, but replica routing is not verified in the report executor on a live multi-host deployment.
   - Report execution audits record the actor, scope and verification hash but do not yet copy the audit row into the dedicated audit database.
   - The merchant line uses an in-process concurrency semaphore and 60 s cache per core node; a multi-node deployment needs a shared semaphore for a strict global cap.
-  - Chrome authoring remains staff-only; merchants run platform chrome.
+  - Merchant-owned chrome uses its own registry, default per merchant and fallback to platform chrome.
 ---
 
 # Dynamic Report Engine SDK and Report Studio Host
@@ -133,7 +139,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 
 `admin-back/api/protected/reportEngine.ts` forwards the same routes under `/api/v1/admin/report-engine/*` with the admin authority guard.
 
-## 6. Schema versions 26, 27 and 33
+## 6. Schema versions 26, 27, 33, 34 and 35
 
 `20261110120000_dynamic_report_engine_sdk` adds:
 
@@ -158,7 +164,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 
 `core-back/test/reportEngineSdk/**` implements the RE-T01..RE-T22 matrix (plus extra dry-run/transcript cases). `admin-front/src/lib/reportEngineSdk/__tests__/**` covers formatting, RTL vector mirroring, chrome binding, the language prompt options, the paged-media document and the client sanitizer. The exhaustive schema suite and `phase1-mtls-and-schema.test.ts` verify schema version 27 and the four new models.
 
-## 9. Merchant reporting line (schema version 33)
+## 9. Merchant reporting line (introduced in schema version 33; current schema 35)
 
 The merchant line is physically separate from the staff registry. It has its own tables (`merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit`), its own host catalog (`engine/reportStudio/merchantHostConfig.ts`) and its own transcript.
 
@@ -298,3 +304,60 @@ The institutional header/footer review exposed a chrome-specific layout defect: 
 - `ChromeVariableBindingSchema` adds `defaultCurrency`; the core execution bundle now returns `currency`. `renderChromeHtml` localizes `periodSummary` (`01 Jan 2026 – 31 Oct 2026`) and `generatedAtFormatted` (`11 Nov 2026, 14:31`) using the selected report locale.
 - The provided `institutional-header-v1`/`institutional-footer-v1` specs were aligned to the reference HTML values (root `height:100%`, reference font sizes/widths, header period currency and multi-color band). They were published as new versions and set as the global defaults.
 - The Chrome Studio preview now renders a real A4 page frame with sample body content, the selected header/footer and the global default counterpart, using realistic period/currency/title/subtitle/timestamp samples.
+
+
+## 18. Compatibility versioning, migration and merchant chrome (2026-11-11)
+
+The engine now has an explicit contract-version boundary instead of relying on the serialized `spec_version` literal alone.
+
+### 18.1 Version axes
+
+- `REPORT_ENGINE_VERSION` (`1.0.0`) is the runtime compatibility gate. A major mismatch makes stored report and chrome specs non-runnable until migrated.
+- `REPORT_SPEC_VERSION` (`1.0`) changes only when a stored report schema becomes incompatible.
+- `REPORT_TRANSCRIPT_VERSION` (`1.1`) identifies the AI authoring contract; it may change independently of runtime compatibility.
+- `REPORT_CHROME_SPEC_VERSION` (`1.0`) and `REPORT_CHROME_TRANSCRIPT_VERSION` (`1.1`) are the chrome counterparts.
+- `report.version` remains the per-document version; it is not a contract version.
+- Database schema versions 34 and 35 add compatibility provenance, default revocation and merchant chrome.
+
+The saved engine/spec/transcript versions are stamped on report and chrome rows. Execution audits record the engine/spec versions. Compatibility is derived at read time and never stored as a lifecycle status.
+
+### 18.2 Compatibility states
+
+- `COMPATIBLE`: supported engine major and spec version, and safe parsing succeeds.
+- `NEEDS_MIGRATION`: engine major or spec version mismatch, or missing version metadata.
+- `INVALID`: claims current versions but malformed JSON or invalid schema.
+
+Classification extracts the declared version before full parsing, so stale specs never throw a raw `ZodError`. Safe parsing is used on list, detail, publish, clone and execute paths. Incompatible rows are excluded from catalogs and cannot run. Direct calls return `409 REPORT_NEEDS_MIGRATION`, `422 REPORT_SPEC_INVALID` or the chrome equivalent; a missed spec parse is mapped defensively to 422 rather than 500.
+
+### 18.3 Migration prompts and pages
+
+- `GET /report-engine/specs/needs-migration` lists current staff and merchant report specs needing migration.
+- `GET /report-engine/chrome/needs-migration` lists platform chrome needing migration, default state and impacted report counts.
+- Staff, admin-merchant and chrome prompt endpoints build a Markdown prompt from the old spec, the current target transcript and the registered migration guide.
+- Admin and merchant report migration pages show red rows, copy/download prompt and Studio prefill. Chrome migration is admin-only for platform chrome and merchant-owned for merchant chrome.
+- No automatic migration is performed; the migrated JSON is verified and saved as a new version through Studio.
+
+### 18.4 Default chrome lifecycle
+
+- A platform global default is staff-owned. A merchant default is merchant-owned and scoped to that merchant.
+- Archiving a default or detecting an incompatible default clears the flag transactionally and records `defaultRevokedAt`/`defaultRevokedReason`. The admin reconciliation endpoint writes an audit summary; the best-effort startup reconciliation logs affected defaults and removes them without an operator actor.
+- Merchant-owned reports using `GLOBAL_DEFAULT` resolve the merchant default first, then the platform default. Platform-provided templates always use platform chrome.
+- A revoked merchant default falls back to platform chrome; if no compatible platform default exists the report is blocked. No older chrome version is auto-promoted.
+- Migrating a previously-default chrome and leaving “Make default” enabled restores the default.
+- `defaultCurrency`, `merchantTradeName`, `merchantLegalName` and `merchantDisplayName` are server-populated chrome variables; merchant execution resolves the identity from the authenticated merchant row, not report inputs.
+- Merchant chrome assets use the merchant asset bundle store, enforce ownership and the merchant asset policy, and render real logos in previews. Chrome/report asset keys must not collide.
+
+### 18.5 Merchant chrome
+
+Merchant chrome is physically separate in `merchant_report_chrome_specs` with unique `(merchant_id, code, version)` and one published default per merchant/type. Merchants author/list/verify/publish/archive their own chrome with `report_engine:author`; publishing and default changes additionally require `MERCHANT_ADMIN`. Merchant responses never include platform chrome lists or specs. Merchant chrome codes resolve merchant-first for merchant-owned reports; platform templates remain platform-only.
+
+### 18.6 Transcript versioning for AI agents
+
+When changing the report engine:
+
+1. Classify the change as major/minor/patch for engine, spec and transcript contracts.
+2. Bump `REPORT_ENGINE_VERSION` for behavioral compatibility; bump a spec version only for serialized-schema incompatibility.
+3. Add a migration guide and prompt for every major transition.
+4. Regenerate or add transcript snapshots under a new version label; never overwrite a released snapshot.
+5. Update `report-spec-generator/src/base/MANIFEST.json`, `CHANGELOG.md` and the migration prompt library; refresh the eval corpus and record transcript version/hash.
+6. Update this part, the admin/merchant report docs, testing catalog and `TRACKER.md`; run the project-design gate.

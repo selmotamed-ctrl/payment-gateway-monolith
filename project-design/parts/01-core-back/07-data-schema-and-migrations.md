@@ -3,7 +3,7 @@ id: core.data
 title: Data Schema and Migrations
 status: partial
 confidence: high
-last_verified: 2026-11-10
+last_verified: 2026-11-11
 verified_against: d695518+working-tree
 code:
   - core-back/prisma/schema.prisma
@@ -35,7 +35,7 @@ tests:
 gaps:
   - Core tables use `TIMESTAMP(3)` while storage-engine tables use `TIMESTAMPTZ(3)`.
   - The migration history is forward-only; there are no down migrations.
-  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 33.
+  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 35.
   - `journal_lines` partition maintenance depends on an external deploy cron.
   - The generated schema catalog appendix is produced by the project-design generator and is not hand-maintained.
 ---
@@ -50,7 +50,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 33 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 35 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -105,7 +105,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 33`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 35`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -118,7 +118,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261110190000_merchant_report_engine`, schema version 33). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261111130000_merchant_report_chrome`, schema version 35). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -295,7 +295,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 33.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 35.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -310,7 +310,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 84 models and 105 enums in the Prisma datamodel.
-- Schema version 33 with an equality check used by the seeders.
+- Schema version 35 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -413,7 +413,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 33 (`REQUIRED_SCHEMA_VERSION = 33`; model count 105). The schema migrations since version 10 are:
+The current schema version is 35 (`REQUIRED_SCHEMA_VERSION = 35`; model count 106). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -510,3 +510,10 @@ The reporting baseline set now includes a PROVISIONAL `cbl-incident-docx-v1` def
 ## 16. Merchant report authoring line (schema version 33)
 
 `20261110190000_merchant_report_engine` adds five tables separate from the staff report registry: `merchant_report_specs` (merchant-owned versioned specs; unique `(merchant_id, code, version)` and a partial unique latest-published index), `merchant_report_asset_bundles` (unique per merchant and content hash), `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` (hourly verify/execute counters) and `merchant_report_studio_status` (per-merchant Studio suspension). The migration bumps the schema version to 33; `phase1-mtls-and-schema.test.ts` asserts the applied version.
+
+
+## 17. Report engine versioning and merchant chrome (schema versions 34-35, 2026-11-11)
+
+`20261111120000_report_engine_versioning` bumps the schema to 34. It adds `engine_version`, `spec_schema_version` and `authoring_transcript_version` to staff reports, merchant reports and platform chrome; `engine_version`/`spec_schema_version` to both execution audit tables; and `default_revoked_at`/`default_revoked_reason` to platform chrome. Existing rows are backfilled to engine `1.0.0` and spec version `1.0`.
+
+`20261111130000_merchant_report_chrome` bumps the schema to 35 and adds `merchant_report_chrome_specs`, with `merchant_id`, code/version, type, lifecycle status, merchant default flag, revocation metadata, version provenance, locales, spec JSON/hash, asset bundle FK and publisher metadata. Unique `(merchant_id, code, version)` and a partial unique `(merchant_id, chrome_type)` for published defaults preserve tenant isolation and one default per type. The migration catalog is generated; the required schema version is 35.

@@ -3,6 +3,7 @@ import type { CatalogModelDef, ReportActorContext, ReportEngineHostConfig } from
 import type { ReportDescriptorSpec, ReportSectionSpec } from "../types/reportSpec";
 import type { ReportChromeSpec } from "../types/chromeSpec";
 import { executeTransformPipeline, type DatasetMap } from "../compiler/TransformPipelineExecutor";
+import { REPORT_ENGINE_VERSION, REPORT_SPEC_VERSION } from "../version";
 
 /**
  * Deterministic, database-free bundle used by the Studio preview.
@@ -26,6 +27,9 @@ export interface MockReportBundle {
   actor: { name: string; email: string; role: string };
   institutionName?: string;
   chromeVariables?: Record<string, string>;
+  chromeFallbackUsed?: boolean;
+  engineVersion?: string;
+  reportSpecVersion?: string;
   currency?: string;
   inputsUsed: Record<string, unknown>;
   rowCountTotal: number;
@@ -379,6 +383,7 @@ export function buildMockReportBundle(params: {
   actor?: ReportActorContext | null;
   resolvedHeaderChrome?: ReportChromeSpec | null;
   resolvedFooterChrome?: ReportChromeSpec | null;
+  chromeVariables?: Record<string, string>;
   assetDataUrls?: Record<string, string>;
   now?: Date;
 }): MockReportBundle {
@@ -429,7 +434,7 @@ export function buildMockReportBundle(params: {
       }),
     );
 
-  const chromeVariables: Record<string, string> = {};
+  const chromeVariables: Record<string, string> = { ...(params.chromeVariables ?? {}) };
   const periodRange = Object.values(inputsUsed).find(
     (value): value is { start: string; end: string } =>
       Boolean(value) &&
@@ -459,6 +464,8 @@ export function buildMockReportBundle(params: {
     },
     institutionName: host.institutionName,
     chromeVariables,
+    engineVersion: REPORT_ENGINE_VERSION,
+    reportSpecVersion: REPORT_SPEC_VERSION,
     currency: host.defaultCurrency,
     inputsUsed,
     rowCountTotal,

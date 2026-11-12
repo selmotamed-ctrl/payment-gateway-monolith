@@ -3,11 +3,14 @@ id: merchant-ui.reports
 title: Merchant Reports
 status: implemented
 confidence: high
-last_verified: 2026-11-10
+last_verified: 2026-11-11
 verified_against: working-tree
 code:
   - merchant-front/src/pages/reports/index.tsx
   - merchant-front/src/pages/reports/studio/index.tsx
+  - merchant-front/src/pages/reports/chrome/index.tsx
+  - merchant-front/src/pages/reports/chrome/needs-migration/index.tsx
+  - merchant-front/src/pages/reports/needs-migration/index.tsx
   - merchant-front/src/lib/reportEngineSdk/**
   - merchant-front/src/router/index.ts
   - merchant-front/src/layouts/sections.tsx
@@ -28,7 +31,8 @@ tests:
   - core-back/test/reportEngineSdk/MerchantReportLine.test.ts
   - tests/unit/report-engine-sdk-mirror.test.ts
 gaps:
-  - The merchant line has no branded PDF, delivery scheduling or emailing; exports are Excel and browser print.
+  - The merchant line has no delivery scheduling or emailing; exports are Excel and browser print.
+  - Merchant chrome migration prompts are generated in the merchant host; platform chrome lists remain hidden.
   - Per-merchant concurrency is enforced in-process per core node; a multi-node deployment needs a shared semaphore for a strict global cap.
   - Replica routing for the dedicated merchant read-only pool is not verified on a live multi-host deployment.
 ---
@@ -39,6 +43,9 @@ gaps:
 
 - `/portal/reports` (`MerchantReports`) lists platform templates plus the merchant's own published reports. It needs `reports.run`, projected from the merchant `report_engine:run` authority.
 - `/portal/reports/studio` (`MerchantReportsStudio`) is the merchant authoring line. It needs `reports.studio`, projected from `report_engine:author`, which a `MERCHANT_ADMIN` holding `merchant:write` holds.
+- `/portal/reports/chrome` (`MerchantReportsChrome`) is the merchant-owned report branding page: company header/footer list, AI transcript, JSON editor, logo `.zip`, preview, publish, archive and default selection.
+- `/portal/reports/chrome/needs-migration` (`MerchantReportsChromeNeedsMigration`) lists the merchant's broken headers/footers, default revocation and migration prompts.
+- `/portal/reports/needs-migration` (`MerchantReportsNeedsMigration`) lists the merchant's report specs that must be migrated.
 
 Both pages are separate from the staff report catalog/studio. Staff tables (`report_definition_specs`, `report_assets`, `report_execution_audit`) are never read or written by merchant authoring routes.
 
@@ -64,7 +71,7 @@ Every execution:
 
 ## 5. Staff oversight
 
-`admin-front` `/reports/merchant-reports` lists merchant-authored reports per merchant with their execution history and a `SUSPEND`/`RESUME` Studio action (`security:write`, audited). The merchant registry, usage rows and execution audit are separate tables (schema version 33).
+`admin-front` `/reports/merchant-reports` lists merchant-authored reports per merchant with their execution history and a `SUSPEND`/`RESUME` Studio action (`security:write`, audited). The merchant registry, usage rows and execution audit are separate tables (introduced in schema version 33; current schema 35).
 
 ## Run form layout (2026-11-10)
 
@@ -83,3 +90,10 @@ The merchant portal receives the same client SDK mirror as the admin portal, so 
 ## Shared chrome layout and accent bands (2026-11-11)
 
 The merchant portal client SDK mirror receives the same chrome root-fill, `accent_band`, `defaultCurrency` and localized chrome-variable changes as the admin portal. Merchant prints using platform chrome therefore get the same full-height header/footer and multi-color band.
+
+
+## 9. Merchant branding chrome and migration (2026-11-11)
+
+Merchants own a separate `merchant_report_chrome_specs` registry. The branding page exposes only the merchant's own chrome: AI transcript, JSON, optional logo bundle, A4 preview, verify/save/publish, archive and one default header/footer per merchant. Platform chrome lists and specs are never returned to merchant clients.
+
+Merchant-owned reports using `GLOBAL_DEFAULT` resolve the merchant default first and the platform global default second; platform-provided templates continue to use platform chrome. If a merchant default is archived or becomes incompatible, the engine clears it and records the revocation. Own reports then fall back to platform chrome; if the platform default is also missing the report is blocked. The migration page explains the fallback, offers copy/download prompts and opens the branding editor with the raw JSON prefilled. Merchant chrome previews load the real uploaded logo assets.

@@ -9,13 +9,29 @@ import { assertMerchantAuthority, effectiveMerchantAuthorities } from "../../lib
 import { writeAudit } from "../../lib/audit/writeAudit";
 import {
   ReportDescriptorSpecSchema,
+  ReportChromeSpecSchema,
   ReportMerchantScopeViolationError,
   extractZipAssetFiles,
   synthesizeDefaultInputs,
   validateMerchantReportScope,
+  classifyStoredReportSpec,
+  safeParseStoredReportSpec,
+  classifyStoredChromeSpec,
+  safeParseStoredChromeSpec,
+  buildReportMigrationPrompt,
+  buildChromeMigrationPrompt,
+  REPORT_ENGINE_VERSION,
+  REPORT_SPEC_VERSION,
+  REPORT_TRANSCRIPT_VERSION,
+  REPORT_CHROME_SPEC_VERSION,
+  REPORT_CHROME_TRANSCRIPT_VERSION,
   type ReportActorContext,
   type ReportDescriptorSpec,
   type ReportExecutionBundle,
+  type ReportChromeSpec,
+  type ReportChromeRegistryEntry,
+  type ReportCompatibilityResult,
+  type ChromeCompatibilityResult,
 } from "../../lib/reportEngineSdk";
 import { openKeyedOperatorCase } from "../../engine/workers/automationCases";
 import {
@@ -36,9 +52,15 @@ import {
 } from "../../engine/reportStudio/merchantReportEngine";
 import {
   actorIdentityOf,
-  loadChromeRegistry,
+  assertNoChromeAssetKeyCollision,
+  chromeCompatibilityOf,
+  compatibilityApiError,
+  loadChromeRegistryState,
   redactInputs,
+  reportChromeDependency,
+  reportCompatibilityOf,
   toReportExecutionError,
+  type ChromeRegistryState,
 } from "./adminReportEngine";
 
 /**
@@ -83,6 +105,17 @@ const studioPreviewSchema = studioVerifySchema
   .strict();
 
 const cloneSchema = z.object({ code: z.string().min(1).max(64).optional() }).strict();
+
+const chromeSaveSchema = z
+  .object({
+    specJson: z.union([z.string(), z.record(z.string(), z.unknown())]),
+    assetsZipBase64: z.string().optional(),
+    publish: z.boolean().optional(),
+    makeDefault: z.boolean().optional(),
+  })
+  .strict();
+
+const chromeDefaultSchema = z.object({ isDefault: z.boolean() }).strict();
 
 const codeParams = z.object({ code: z.string().min(1).max(64) }).strict();
 const sourceParams = z.object({ sourceKey: z.string().min(1).max(64) }).strict();
@@ -153,11 +186,11 @@ async function extractMerchantZip(base64: string | undefined): Promise<{
 async function storeMerchantAssets(params: {
   merchantId: string;
   userId: string;
-  spec: ReportDescriptorSpec;
+  requiredAssets: Array<{ file_name: string; mime_type: string }>;
   filesByName: Map<string, Buffer>;
 }): Promise<string | null> {
-  if (params.spec.required_assets.length === 0) return null;
-  const requiredByFile = new Map(params.spec.required_assets.map((asset) => [asset.file_name.toLowerCase(), asset]));
+  if (params.requiredAssets.length === 0) return null;
+  const requiredByFile = new Map(params.requiredAssets.map((asset) => [asset.file_name.toLowerCase(), asset]));
   const files = [...params.filesByName.entries()].map(([relativePath, buffer]) => {
     const required = requiredByFile.get(relativePath.toLowerCase());
     return {
@@ -218,6 +251,183 @@ async function storedMerchantFiles(
     if (stored) files.set(asset.file_name, stored.buffer);
   }
   return files;
+}
+
+type MerchantChromeRow = Awaited<ReturnType<typeof client.merchantReportChromeSpecRecord.findMany>>[number];
+
+function requireMerchantAdmin(request: Request): void {
+  const principal = principalOf(request);
+  if (String(principal.role ?? "") !== "MERCHANT_ADMIN") {
+    throw new ApiError(403, "MERCHANT_ADMIN_REQUIRED", "Only a merchant administrator may publish or set the default header/footer");
+  }
+}
+
+async function merchantIdentityVariables(merchantId: string): Promise<Record<string, string>> {
+  const merchant = await client.merchant.findUnique({
+    where: { id: merchantId },
+    select: { legalName: true, tradeName: true, displayName: true },
+  });
+  if (!merchant) return {};
+  const display = merchant.displayName?.trim() || merchant.tradeName;
+  return {
+    merchantTradeName: merchant.tradeName,
+    merchantLegalName: merchant.legalName,
+    merchantDisplayName: display,
+  };
+}
+
+async function loadMerchantChromeState(merchantId: string): Promise<{
+  platform: ChromeRegistryState;
+  combined: ChromeRegistryState;
+  rows: MerchantChromeRow[];
+}> {
+  const platform = await loadChromeRegistryState();
+  const rows = await client.merchantReportChromeSpecRecord.findMany({
+    where: { merchantId, status: "PUBLISHED" },
+    orderBy: [{ chromeType: "asc" }, { code: "asc" }, { version: "desc" }],
+  });
+  const latestByCode = new Map<string, MerchantChromeRow>();
+  for (const row of rows) if (!latestByCode.has(row.code)) latestByCode.set(row.code, row);
+  const defaultCodes = new Set(rows.filter((row) => row.isDefaultForMerchant).map((row) => row.code));
+  const entries: ReportChromeRegistryEntry[] = [...platform.entries];
+  const brokenByCode = new Map(platform.brokenByCode);
+  const healthByCode = new Map(platform.healthByCode);
+  for (const row of latestByCode.values()) {
+    const compatibility = classifyStoredChromeSpec({
+      specJson: row.specJson,
+      storedEngineVersion: row.engineVersion,
+      storedSpecVersion: row.specSchemaVersion,
+    });
+    const health = {
+      id: row.id,
+      code: row.code,
+      version: row.version,
+      chromeType: row.chromeType,
+      isDefaultGlobal: false,
+      isDefaultForMerchant: row.isDefaultForMerchant,
+      compatibility,
+      row,
+    };
+    healthByCode.set(`MERCHANT:${row.code}`, health);
+    if (compatibility.status !== "COMPATIBLE") {
+      brokenByCode.set(row.code, health);
+      continue;
+    }
+    const parsed = safeParseStoredChromeSpec({
+      specJson: row.specJson,
+      storedEngineVersion: row.engineVersion,
+      storedSpecVersion: row.specSchemaVersion,
+    });
+    if (!parsed.ok) {
+      brokenByCode.set(row.code, { ...health, compatibility: parsed.compatibility });
+      continue;
+    }
+    entries.push({
+      spec: parsed.spec,
+      isDefaultGlobal: false,
+      isDefaultForMerchant: defaultCodes.has(row.code),
+      scope: "MERCHANT",
+      merchantId,
+      status: row.status,
+      version: row.version,
+      assetBundleId: row.assetBundleId,
+    });
+  }
+  return {
+    platform,
+    combined: { entries, brokenByCode, healthByCode },
+    rows,
+  };
+}
+
+async function chromeAssetDataUrls(
+  entries: ReportChromeRegistryEntry[],
+): Promise<Record<string, string>> {
+  const result: Record<string, string> = {};
+  for (const entry of entries) {
+    if (!entry.assetBundleId) continue;
+    for (const required of entry.spec.required_assets) {
+      const stored = await host.assetStoragePort.getAssetBuffer({
+        bundleId: entry.assetBundleId,
+        relativePath: required.file_name,
+      });
+      if (stored) {
+        result[required.asset_key] = `data:${stored.mimeType};base64,${stored.buffer.toString("base64")}`;
+      }
+    }
+  }
+  return result;
+}
+
+function merchantFallbackUsed(
+  spec: ReportDescriptorSpec,
+  chromeRows: MerchantChromeRow[],
+  registry: ReportChromeRegistryEntry[],
+): boolean {
+  const activeMerchantDefault = (type: "HEADER" | "FOOTER") =>
+    registry.some(
+      (entry) => entry.scope === "MERCHANT" && entry.spec.chrome.chrome_type === type && entry.isDefaultForMerchant,
+    );
+  const platformDefault = (type: "HEADER" | "FOOTER") =>
+    registry.some(
+      (entry) => (entry.scope ?? "PLATFORM") === "PLATFORM" && entry.spec.chrome.chrome_type === type && entry.isDefaultGlobal,
+    );
+  const revokedDefault = (type: "HEADER" | "FOOTER") =>
+    chromeRows.some(
+      (row) => row.chromeType === type && row.defaultRevokedAt !== null && row.isDefaultForMerchant === false,
+    ) || chromeRows.some((row) => row.chromeType === type && row.isDefaultForMerchant && !activeMerchantDefault(type));
+  const needsFallback = (type: "HEADER" | "FOOTER", mode: string) =>
+    mode === "GLOBAL_DEFAULT" && revokedDefault(type) && !activeMerchantDefault(type) && platformDefault(type);
+  return (
+    needsFallback("HEADER", spec.page_layout.header_mode) ||
+    needsFallback("FOOTER", spec.page_layout.footer_mode)
+  );
+}
+
+async function merchantChromeView(row: MerchantChromeRow, includeAssets: boolean) {
+  const compatibility = classifyStoredChromeSpec({
+    specJson: row.specJson,
+    storedEngineVersion: row.engineVersion,
+    storedSpecVersion: row.specSchemaVersion,
+  });
+  const parsed = safeParseStoredChromeSpec({
+    specJson: row.specJson,
+    storedEngineVersion: row.engineVersion,
+    storedSpecVersion: row.specSchemaVersion,
+  });
+  const spec = parsed.ok ? parsed.spec : row.specJson;
+  let assetDataUrls: Record<string, string> = {};
+  if (includeAssets && parsed.ok && row.assetBundleId) {
+    const bundle = await client.merchantReportAssetBundle.findFirst({ where: { id: row.assetBundleId, merchantId: row.merchantId } });
+    if (bundle) {
+      for (const required of parsed.spec.required_assets) {
+        const stored = await host.assetStoragePort.getAssetBuffer({
+          bundleId: row.assetBundleId,
+          relativePath: required.file_name,
+        });
+        if (stored) assetDataUrls[required.asset_key] = `data:${stored.mimeType};base64,${stored.buffer.toString("base64")}`;
+      }
+    }
+  }
+  return {
+    id: row.id,
+    code: row.code,
+    version: row.version,
+    name: row.name,
+    chromeType: row.chromeType,
+    status: row.status,
+    isDefaultForMerchant: row.isDefaultForMerchant,
+    defaultRevokedAt: row.defaultRevokedAt,
+    defaultRevokedReason: row.defaultRevokedReason,
+    engineVersion: row.engineVersion,
+    specSchemaVersion: row.specSchemaVersion,
+    authoringTranscriptVersion: row.authoringTranscriptVersion,
+    compatibility: parsed.ok ? compatibility : parsed.compatibility,
+    supportedLocales: row.supportedLocales,
+    assetBundleId: row.assetBundleId,
+    assetDataUrls,
+    spec,
+  };
 }
 
 async function verifyMerchantSpec(params: {
@@ -363,13 +573,38 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
     );
   };
 
+  const platformChrome = await loadChromeRegistryState();
+  const merchantChrome = await loadMerchantChromeState(merchantId);
+  let brokenReportSpecs = 0;
+  let blockedByChrome = 0;
+  let ownReportsBlockedByChrome = 0;
+  let brokenTemplateSpecs = 0;
   const templates = [];
   for (const row of rows) {
     if (!merchantRoleAllowed(row as never)) continue;
-    const spec = ReportDescriptorSpecSchema.parse(row.specJson);
+    const compatibility = reportCompatibilityOf(row);
+    if (compatibility.status !== "COMPATIBLE") {
+      brokenTemplateSpecs += 1;
+      continue;
+    }
+    const parsed = safeParseStoredReportSpec({
+      specJson: row.specJson,
+      storedEngineVersion: row.engineVersion,
+      storedSpecVersion: row.specSchemaVersion,
+    });
+    if (!parsed.ok) {
+      brokenTemplateSpecs += 1;
+      continue;
+    }
+    const spec = parsed.spec;
     if (!policy.assetsEnabled && spec.required_assets.length > 0) continue;
     if (validateMerchantReportScope(spec, host).some((diagnostic) => diagnostic.severity === "error")) continue;
     if (validateMerchantTierLimits(spec, { specBytes: Buffer.byteLength(JSON.stringify(row.specJson)) }).some((diagnostic) => diagnostic.severity === "error")) continue;
+    const dependency = reportChromeDependency(spec, platformChrome, "PLATFORM", compatibility);
+    if (!dependency.ready) {
+      blockedByChrome += 1;
+      continue;
+    }
     templates.push({
       id: row.id,
       code: row.code,
@@ -384,19 +619,32 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
       merchantId,
     });
   }
-  const ownRows = own
-    .filter((row) => {
-      try {
-        const spec = ReportDescriptorSpecSchema.parse(row.specJson);
-        if (!policy.assetsEnabled && spec.required_assets.length > 0) return false;
-        return !validateMerchantTierLimits(spec, {
-          specBytes: Buffer.byteLength(JSON.stringify(row.specJson)),
-        }).some((diagnostic) => diagnostic.severity === "error");
-      } catch {
-        return false;
-      }
-    })
-    .map((row) => ({
+  const ownRows = [];
+  for (const row of own) {
+    const compatibility = reportCompatibilityOf(row);
+    if (compatibility.status !== "COMPATIBLE") {
+      brokenReportSpecs += 1;
+      continue;
+    }
+    const parsed = safeParseStoredReportSpec({
+      specJson: row.specJson,
+      storedEngineVersion: row.engineVersion,
+      storedSpecVersion: row.specSchemaVersion,
+    });
+    if (!parsed.ok) {
+      brokenReportSpecs += 1;
+      continue;
+    }
+    const spec = parsed.spec;
+    if (!policy.assetsEnabled && spec.required_assets.length > 0) continue;
+    if (validateMerchantTierLimits(spec, { specBytes: Buffer.byteLength(JSON.stringify(row.specJson)) }).some((diagnostic) => diagnostic.severity === "error")) continue;
+    const dependency = reportChromeDependency(spec, merchantChrome.combined, "MERCHANT", compatibility);
+    if (!dependency.ready) {
+      blockedByChrome += 1;
+      ownReportsBlockedByChrome += 1;
+      continue;
+    }
+    ownRows.push({
       id: row.id,
       code: row.code,
       version: row.version,
@@ -404,14 +652,26 @@ router.get("/report-engine/catalog", async (request: Request, response: Response
       audienceScope: "MERCHANT_FACING",
       supportedLocales: row.supportedLocales,
       defaultLocale: row.defaultLocale,
-      spec: merchantSafeSpec(ReportDescriptorSpecSchema.parse(row.specJson)),
+      spec: merchantSafeSpec(spec),
       updatedAt: row.updatedAt,
       source: "OWN" as const,
       merchantId,
-    }));
+    });
+  }
   const merged = [...ownRows, ...templates].sort((a, b) => String(a.code).localeCompare(String(b.code)));
   const total = merged.length;
-  response.json({ reports: merged.slice((page - 1) * pageSize, page * pageSize), total });
+  response.json({
+    reports: merged.slice((page - 1) * pageSize, page * pageSize),
+    total,
+    health: {
+      brokenReportSpecs,
+      brokenTemplateSpecs,
+      brokenChromeSpecs: merchantChrome.combined.brokenByCode.size,
+      reportsBlockedByChrome: blockedByChrome,
+      ownReportsBlockedByChrome,
+      missingChromeDefaults: 0,
+    },
+  });
 });
 
 router.get("/report-engine/autocomplete/:sourceKey", async (request: Request, response: Response) => {
@@ -441,6 +701,397 @@ router.get("/report-engine/autocomplete/:sourceKey", async (request: Request, re
     dependentValues: { ...(dependentValues ?? {}), merchantId },
   });
   response.json({ items });
+});
+
+/* ------------------------------------------------------------------------ */
+/* Merchant-owned report headers and footers                                 */
+/* ------------------------------------------------------------------------ */
+
+router.get("/report-engine/studio/chrome", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["report_engine:author"]);
+  const merchantId = merchantIdOf(request);
+  await assertMerchantEngineAvailable(merchantId);
+  const type = typeof request.query.type === "string" ? request.query.type : undefined;
+  const includeArchived = request.query.includeArchived === "1" || request.query.includeArchived === "true";
+  const includeAssets = request.query.includeAssets === "1" || request.query.includeAssets === "true";
+  const page = Math.max(1, Number(request.query.page ?? 1) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(request.query.pageSize ?? 50) || 50));
+  const search = typeof request.query.search === "string" ? request.query.search.trim() : "";
+  const where: Prisma.MerchantReportChromeSpecRecordWhereInput = {
+    merchantId,
+    ...(type === "HEADER" || type === "FOOTER" ? { chromeType: type } : {}),
+    ...(includeArchived ? {} : { status: { not: "ARCHIVED" as const } }),
+    ...(search
+      ? {
+          OR: [
+            { code: { contains: search, mode: "insensitive" as const } },
+            { name: { contains: search, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
+  const rows = await client.merchantReportChromeSpecRecord.findMany({
+    where,
+    orderBy: [{ chromeType: "asc" }, { code: "asc" }, { version: "desc" }],
+  });
+  const latestByCode = new Map<string, MerchantChromeRow>();
+  for (const row of rows) if (!latestByCode.has(row.code)) latestByCode.set(row.code, row);
+  const views = [];
+  for (const row of latestByCode.values()) views.push(await merchantChromeView(row, includeAssets));
+  response.json({
+    specs: views.slice((page - 1) * pageSize, page * pageSize),
+    total: views.length,
+  });
+});
+
+router.get("/report-engine/studio/chrome/transcript", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["report_engine:author"]);
+  const policy = await assertMerchantEngineAvailable(merchantIdOf(request));
+  const transcript = engine.buildChromeTranscript({ merchantMode: true });
+  response.json({
+    filename: transcript.filename,
+    contentType: transcript.contentType,
+    markdown: transcript.markdown,
+    specVersion: transcript.specVersion,
+    engineVersion: transcript.engineVersion,
+    transcriptVersion: transcript.transcriptVersion,
+    assetsEnabled: policy.assetsEnabled,
+  });
+});
+
+router.get("/report-engine/studio/chrome/needs-migration", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["report_engine:author"]);
+  const merchantId = merchantIdOf(request);
+  const page = Math.max(1, Number(request.query.page ?? 1) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(request.query.pageSize ?? 20) || 20));
+  const search = typeof request.query.search === "string" ? request.query.search.trim().toLowerCase() : "";
+  const rows = await client.merchantReportChromeSpecRecord.findMany({
+    where: { merchantId, status: { not: "ARCHIVED" } },
+    orderBy: [{ chromeType: "asc" }, { code: "asc" }, { version: "desc" }],
+  });
+  const latestByCode = new Map<string, MerchantChromeRow>();
+  for (const row of rows) if (!latestByCode.has(row.code)) latestByCode.set(row.code, row);
+  const specRows = await client.merchantReportSpecRecord.findMany({
+    where: { merchantId, status: "PUBLISHED", isLatestPublished: true },
+  });
+  const reportSpecs = specRows.flatMap((row) => {
+    const parsed = safeParseStoredReportSpec({
+      specJson: row.specJson,
+      storedEngineVersion: row.engineVersion,
+      storedSpecVersion: row.specSchemaVersion,
+    });
+    return parsed.ok ? [{ id: row.id, code: row.code, spec: parsed.spec }] : [];
+  });
+  const items = [];
+  for (const row of latestByCode.values()) {
+    const compatibility = classifyStoredChromeSpec({
+      specJson: row.specJson,
+      storedEngineVersion: row.engineVersion,
+      storedSpecVersion: row.specSchemaVersion,
+    });
+    if (compatibility.status === "COMPATIBLE") continue;
+    if (search && !`${row.code} ${row.name}`.toLowerCase().includes(search)) continue;
+    const impacted = reportSpecs.filter((entry) => {
+      const mode = row.chromeType === "HEADER" ? entry.spec.page_layout.header_mode : entry.spec.page_layout.footer_mode;
+      const code = row.chromeType === "HEADER" ? entry.spec.page_layout.header_chrome_code : entry.spec.page_layout.footer_chrome_code;
+      return (
+        (mode === "SPECIFIC_CHROME_CODE" && code === row.code) ||
+        (mode === "GLOBAL_DEFAULT" && (row.defaultRevokedAt !== null || row.isDefaultForMerchant))
+      );
+    });
+    items.push({
+      id: row.id,
+      code: row.code,
+      version: row.version,
+      name: row.name,
+      chromeType: row.chromeType,
+      status: row.status,
+      isDefaultForMerchant: row.isDefaultForMerchant,
+      defaultRevokedAt: row.defaultRevokedAt,
+      defaultRevokedReason: row.defaultRevokedReason,
+      compatibility,
+      impactedReportCount: impacted.length,
+      impactedReportCodes: impacted.map((entry) => entry.code).slice(0, 10),
+    });
+  }
+  response.json({
+    specs: items.slice((page - 1) * pageSize, page * pageSize),
+    total: items.length,
+  });
+});
+
+router.get("/report-engine/studio/chrome/:id", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["report_engine:author"]);
+  const merchantId = merchantIdOf(request);
+  const { id } = parseOrThrow(idParams, request.params);
+  const row = await client.merchantReportChromeSpecRecord.findFirst({ where: { id, merchantId } });
+  if (!row) throw new ApiError(404, "MERCHANT_REPORT_CHROME_NOT_FOUND", "The header/footer does not exist");
+  response.json(await merchantChromeView(row, true));
+});
+
+router.post("/report-engine/studio/chrome", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["report_engine:author"]);
+  const merchantId = merchantIdOf(request);
+  const policy = await assertMerchantEngineAvailable(merchantId);
+  const body = parseOrThrow(chromeSaveSchema, request.body ?? {});
+  const publish = Boolean(body.publish);
+  const makeDefaultRequested = Boolean(body.makeDefault);
+  if (publish || makeDefaultRequested) requireMerchantAdmin(request);
+  let spec: ReportChromeSpec;
+  try {
+    const raw = typeof body.specJson === "string" ? JSON.parse(body.specJson) : body.specJson;
+    const parsed = ReportChromeSpecSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new ApiError(400, "SCHEMA_VALIDATION_ERROR", "The header/footer spec is not valid", {
+        issues: parsed.error.issues,
+      });
+    }
+    spec = parsed.data;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(400, "INVALID_JSON_SYNTAX", "The header/footer spec is not valid JSON");
+  }
+  if (!policy.assetsEnabled && spec.required_assets.length > 0) {
+    throw new ApiError(
+      409,
+      "MERCHANT_REPORT_CHROME_ASSETS_DISABLED",
+      "Merchant report assets are disabled by platform policy",
+    );
+  }
+  const rawSpecJson = typeof body.specJson === "string" ? body.specJson : JSON.stringify(spec);
+  const zip = await extractMerchantZip(body.assetsZipBase64);
+  const verification = await engine.verifyChrome({
+    rawSpecJson,
+    extractedZipFiles: zip.filesByName,
+  });
+  if (!verification.valid) {
+    throw new ApiError(400, "MERCHANT_REPORT_CHROME_VERIFICATION_FAILED", "The header/footer failed verification", {
+      verification,
+    });
+  }
+  const actor = await actorOf(request);
+  const assetBundleId = await storeMerchantAssets({
+    merchantId,
+    userId: actor.userId,
+    requiredAssets: spec.required_assets,
+    filesByName: zip.filesByName,
+  });
+  const specSha256 = createHash("sha256").update(rawSpecJson).digest("hex");
+  let created;
+  try {
+    created = await client.$transaction(async (tx) => {
+      const previous = await tx.merchantReportChromeSpecRecord.findFirst({
+        where: { merchantId, code: spec.chrome.code },
+        orderBy: { version: "desc" },
+        select: { version: true },
+      });
+      const version = (previous?.version ?? 0) + 1;
+      let superseded: Array<{ id: string; version: number; isDefaultForMerchant: boolean }> = [];
+      if (publish) {
+        superseded = await tx.merchantReportChromeSpecRecord.findMany({
+          where: { merchantId, code: spec.chrome.code, status: "PUBLISHED" },
+          select: { id: true, version: true, isDefaultForMerchant: true },
+        });
+        if (superseded.length > 0) {
+          await tx.merchantReportChromeSpecRecord.updateMany({
+            where: { id: { in: superseded.map((row) => row.id) } },
+            data: { status: "ARCHIVED", isDefaultForMerchant: false },
+          });
+        }
+      }
+      const makeDefault = publish && (makeDefaultRequested || superseded.some((row) => row.isDefaultForMerchant));
+      if (makeDefault) {
+        await tx.merchantReportChromeSpecRecord.updateMany({
+          where: { merchantId, chromeType: spec.chrome.chrome_type, isDefaultForMerchant: true },
+          data: { isDefaultForMerchant: false },
+        });
+      }
+      const row = await tx.merchantReportChromeSpecRecord.create({
+        data: {
+          merchantId,
+          code: spec.chrome.code,
+          version,
+          name: spec.chrome.name,
+          chromeType: spec.chrome.chrome_type,
+          status: publish ? "PUBLISHED" : "VERIFIED",
+          isDefaultForMerchant: makeDefault,
+          engineVersion: REPORT_ENGINE_VERSION,
+          specSchemaVersion: REPORT_CHROME_SPEC_VERSION,
+          authoringTranscriptVersion: REPORT_CHROME_TRANSCRIPT_VERSION,
+          supportedLocales: Object.keys(spec.i18n.locales),
+          specJson: spec as never,
+          specSha256,
+          assetBundleId,
+          createdByUserId: actor.userId,
+          publishedByUserId: publish ? actor.userId : null,
+          publishedAt: publish ? new Date() : null,
+        },
+      });
+      await writeAudit(tx, {
+        data: {
+          actorId: actor.userId,
+          role: actor.role,
+          action: publish ? "MERCHANT_REPORT_CHROME_PUBLISHED" : "MERCHANT_REPORT_CHROME_VERIFIED",
+          entityType: "MERCHANT_REPORT_CHROME_SPEC",
+          entityId: row.id,
+          beforeJson: superseded.length ? { superseded } : null,
+          afterJson: {
+            merchantId,
+            code: row.code,
+            version: row.version,
+            chromeType: row.chromeType,
+            status: row.status,
+            isDefaultForMerchant: row.isDefaultForMerchant,
+            specSha256,
+            assetBundleId,
+          },
+        } as never,
+      });
+      return row;
+    });
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(409, "MERCHANT_REPORT_CHROME_SAVE_CONFLICT", "The header/footer could not be saved; retry");
+  }
+  response.status(201).json({
+    id: created.id,
+    code: created.code,
+    version: created.version,
+    status: created.status,
+    isDefaultForMerchant: created.isDefaultForMerchant,
+    verification,
+  });
+});
+
+router.post("/report-engine/studio/chrome/:id/archive", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["report_engine:author"]);
+  const merchantId = merchantIdOf(request);
+  const { id } = parseOrThrow(idParams, request.params);
+  const existing = await client.merchantReportChromeSpecRecord.findFirst({ where: { id, merchantId } });
+  if (!existing) throw new ApiError(404, "MERCHANT_REPORT_CHROME_NOT_FOUND", "The header/footer does not exist");
+  if (existing.isDefaultForMerchant) requireMerchantAdmin(request);
+  if (existing.status === "ARCHIVED") {
+    response.json({ id, status: "ARCHIVED", isDefaultForMerchant: false });
+    return;
+  }
+  const actor = await actorOf(request);
+  await client.$transaction(async (tx) => {
+    await tx.merchantReportChromeSpecRecord.update({
+      where: { id },
+      data: {
+        status: "ARCHIVED",
+        isDefaultForMerchant: false,
+        ...(existing.isDefaultForMerchant
+          ? { defaultRevokedAt: new Date(), defaultRevokedReason: "ARCHIVED" }
+          : {}),
+      },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role,
+        action: "MERCHANT_REPORT_CHROME_ARCHIVED",
+        entityType: "MERCHANT_REPORT_CHROME_SPEC",
+        entityId: id,
+        beforeJson: { status: existing.status, isDefaultForMerchant: existing.isDefaultForMerchant },
+        afterJson: { status: "ARCHIVED", isDefaultForMerchant: false, merchantId },
+      } as never,
+    });
+  });
+  response.json({ id, status: "ARCHIVED", isDefaultForMerchant: false });
+});
+
+router.post("/report-engine/studio/chrome/:id/set-default", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["report_engine:author"]);
+  requireMerchantAdmin(request);
+  const merchantId = merchantIdOf(request);
+  const { id } = parseOrThrow(idParams, request.params);
+  const body = parseOrThrow(chromeDefaultSchema, request.body ?? {});
+  const existing = await client.merchantReportChromeSpecRecord.findFirst({ where: { id, merchantId } });
+  if (!existing) throw new ApiError(404, "MERCHANT_REPORT_CHROME_NOT_FOUND", "The header/footer does not exist");
+  if (body.isDefault && existing.status !== "PUBLISHED") {
+    throw new ApiError(409, "MERCHANT_REPORT_CHROME_NOT_PUBLISHED", "Only a published header/footer can be the default");
+  }
+  const compatibility = classifyStoredChromeSpec({
+    specJson: existing.specJson,
+    storedEngineVersion: existing.engineVersion,
+    storedSpecVersion: existing.specSchemaVersion,
+  });
+  if (body.isDefault && compatibility.status !== "COMPATIBLE") {
+    throw compatibilityApiError("CHROME", existing.id, compatibility);
+  }
+  const actor = await actorOf(request);
+  await client.$transaction(async (tx) => {
+    if (body.isDefault) {
+      await tx.merchantReportChromeSpecRecord.updateMany({
+        where: { merchantId, chromeType: existing.chromeType, isDefaultForMerchant: true },
+        data: { isDefaultForMerchant: false },
+      });
+    }
+    await tx.merchantReportChromeSpecRecord.update({
+      where: { id },
+      data: {
+        isDefaultForMerchant: body.isDefault,
+        ...(body.isDefault ? { defaultRevokedAt: null, defaultRevokedReason: null } : {}),
+      },
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role,
+        action: "MERCHANT_REPORT_CHROME_DEFAULT_CHANGED",
+        entityType: "MERCHANT_REPORT_CHROME_SPEC",
+        entityId: id,
+        beforeJson: { isDefaultForMerchant: existing.isDefaultForMerchant },
+        afterJson: { isDefaultForMerchant: body.isDefault, merchantId, chromeType: existing.chromeType },
+      } as never,
+    });
+  });
+  response.json({ id, isDefaultForMerchant: body.isDefault });
+});
+
+router.get("/report-engine/studio/chrome/:id/migration-prompt", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["report_engine:author"]);
+  const merchantId = merchantIdOf(request);
+  const { id } = parseOrThrow(idParams, request.params);
+  const row = await client.merchantReportChromeSpecRecord.findFirst({ where: { id, merchantId } });
+  if (!row) throw new ApiError(404, "MERCHANT_REPORT_CHROME_NOT_FOUND", "The header/footer does not exist");
+  const compatibility = classifyStoredChromeSpec({
+    specJson: row.specJson,
+    storedEngineVersion: row.engineVersion,
+    storedSpecVersion: row.specSchemaVersion,
+  });
+  if (compatibility.status === "COMPATIBLE") {
+    throw new ApiError(409, "MERCHANT_REPORT_CHROME_NOT_MIGRATABLE", "This header/footer does not need migration");
+  }
+  const transcript = engine.buildChromeTranscript({ merchantMode: true });
+  const prompt = buildChromeMigrationPrompt({
+    code: row.code,
+    version: row.version,
+    oldSpec: row.specJson,
+    compatibility,
+    targetTranscript: transcript.markdown,
+    targetTranscriptVersion: transcript.transcriptVersion,
+    merchantMode: true,
+  });
+  response.json({
+    filename: `migrate-${row.code}-v${row.version}-to-engine-${REPORT_ENGINE_VERSION}.md`,
+    prompt,
+    compatibility,
+    target: {
+      engineVersion: REPORT_ENGINE_VERSION,
+      specVersion: REPORT_CHROME_SPEC_VERSION,
+      transcriptVersion: transcript.transcriptVersion,
+    },
+  });
 });
 
 /* ------------------------------------------------------------------------ */
@@ -519,10 +1170,38 @@ router.post("/report-engine/studio/preview", async (request: Request, response: 
       verification,
     });
   }
-  const chromeRegistry = await loadChromeRegistry();
+  const chromeState = (await loadMerchantChromeState(merchantId)).combined;
+  const draftCompatibility = classifyStoredReportSpec({
+    specJson: parsedSpec,
+    storedEngineVersion: REPORT_ENGINE_VERSION,
+    storedSpecVersion: REPORT_SPEC_VERSION,
+  });
+  const chromeDependency = reportChromeDependency(parsedSpec, chromeState, "MERCHANT", draftCompatibility);
+  if (!chromeDependency.ready) {
+    throw new ApiError(
+      409,
+      chromeDependency.reasonCode ?? "REPORT_CHROME_UNAVAILABLE",
+      chromeDependency.message ?? "The selected header/footer is not available",
+      { chromeCode: chromeDependency.brokenChromeCode, dependency: chromeDependency },
+    );
+  }
+  const chromeRegistry = chromeState.entries;
+  const chromeVariables = await merchantIdentityVariables(merchantId);
   const actor = await actorOf(request);
   const scopeKey = parsedSpec.report.merchant_scope_input_key;
   if (body.mode === "MOCK") {
+    const resolved = engine.resolveChrome({
+      spec: parsedSpec,
+      chromeRegistry,
+      override: null,
+      chromeDefaultScope: "MERCHANT",
+    });
+    assertNoChromeAssetKeyCollision(parsedSpec, [resolved.headerEntry, resolved.footerEntry]);
+    const chromeAssets = await chromeAssetDataUrls(
+      [resolved.headerEntry, resolved.footerEntry].filter(
+        (entry): entry is ReportChromeRegistryEntry => Boolean(entry),
+      ),
+    );
     const bundle = engine.buildMockPreviewBundle({
       spec: parsedSpec,
       locale: body.locale,
@@ -530,11 +1209,21 @@ router.post("/report-engine/studio/preview", async (request: Request, response: 
       actor,
       chromeRegistry,
       chromeOverride: null,
+      chromeDefaultScope: "MERCHANT",
+      chromeVariables,
+      assetDataUrls: chromeAssets,
     });
     response.json({ verification, bundle, mode: "MOCK" });
     return;
   }
   const inputs = { ...(body.inputs ?? synthesizeDefaultInputs(parsedSpec)), ...(scopeKey ? { [scopeKey]: merchantId } : {}) };
+  const liveChrome = engine.resolveChrome({
+    spec: parsedSpec,
+    chromeRegistry,
+    override: null,
+    chromeDefaultScope: "MERCHANT",
+  });
+  assertNoChromeAssetKeyCollision(parsedSpec, [liveChrome.headerEntry, liveChrome.footerEntry]);
   try {
     const bundle = await engine.executeReport({
       spec: parsedSpec,
@@ -542,6 +1231,8 @@ router.post("/report-engine/studio/preview", async (request: Request, response: 
       actor,
       chromeRegistry,
       chromeOverride: null,
+      chromeDefaultScope: "MERCHANT",
+      chromeVariables,
       allowConfidentialAmlBypass: false,
       merchantScope: { merchantId },
     });
@@ -576,7 +1267,7 @@ router.post("/report-engine/studio/specs", async (request: Request, response: Re
   const assetBundleId = await storeMerchantAssets({
     merchantId,
     userId: actor.userId,
-    spec,
+    requiredAssets: spec.required_assets,
     filesByName: zip.filesByName,
   });
   const publish = Boolean(body.publish);
@@ -607,6 +1298,9 @@ router.post("/report-engine/studio/specs", async (request: Request, response: Re
           isLatestPublished: publish,
           supportedLocales: Object.keys(spec.i18n.locales),
           defaultLocale: spec.i18n.default_locale,
+          engineVersion: REPORT_ENGINE_VERSION,
+          specSchemaVersion: REPORT_SPEC_VERSION,
+          authoringTranscriptVersion: REPORT_TRANSCRIPT_VERSION,
           specJson: persistedSpec as never,
           specSha256,
           verificationReportJson: verification as never,
@@ -662,10 +1356,87 @@ router.get("/report-engine/studio/specs", async (request: Request, response: Res
       isLatestPublished: row.isLatestPublished,
       supportedLocales: row.supportedLocales,
       defaultLocale: row.defaultLocale,
+      engineVersion: row.engineVersion,
+      specSchemaVersion: row.specSchemaVersion,
+      authoringTranscriptVersion: row.authoringTranscriptVersion,
+      compatibility: reportCompatibilityOf(row),
       assetBundleId: row.assetBundleId,
       createdAt: row.createdAt,
       publishedAt: row.publishedAt,
     })),
+  });
+});
+
+router.get("/report-engine/studio/needs-migration", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["report_engine:author"]);
+  const merchantId = merchantIdOf(request);
+  await assertMerchantEngineAvailable(merchantId);
+  const page = Math.max(1, Number(request.query.page ?? 1) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(request.query.pageSize ?? 20) || 20));
+  const search = typeof request.query.search === "string" ? request.query.search.trim().toLowerCase() : "";
+  const rows = await client.merchantReportSpecRecord.findMany({
+    where: { merchantId, status: { not: "ARCHIVED" } },
+    orderBy: [{ code: "asc" }, { version: "desc" }],
+  });
+  const latestByCode = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) if (!latestByCode.has(row.code)) latestByCode.set(row.code, row);
+  const items = [];
+  for (const row of latestByCode.values()) {
+    const compatibility = reportCompatibilityOf(row);
+    if (compatibility.status === "COMPATIBLE") continue;
+    if (search && !`${row.code} ${row.category}`.toLowerCase().includes(search)) continue;
+    items.push({
+      id: row.id,
+      code: row.code,
+      version: row.version,
+      category: row.category,
+      status: row.status,
+      isLatestPublished: row.isLatestPublished,
+      compatibility,
+      updatedAt: row.updatedAt,
+    });
+  }
+  response.json({
+    specs: items.slice((page - 1) * pageSize, page * pageSize),
+    total: items.length,
+  });
+});
+
+router.get("/report-engine/studio/specs/:id/migration-prompt", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["report_engine:author"]);
+  const merchantId = merchantIdOf(request);
+  const policy = await assertMerchantEngineAvailable(merchantId);
+  const { id } = parseOrThrow(idParams, request.params);
+  const row = await client.merchantReportSpecRecord.findFirst({ where: { id, merchantId } });
+  if (!row) throw new ApiError(404, "MERCHANT_REPORT_SPEC_NOT_FOUND", "The report spec does not exist");
+  const compatibility = reportCompatibilityOf(row);
+  if (compatibility.status === "COMPATIBLE") {
+    throw new ApiError(409, "MERCHANT_REPORT_SPEC_NOT_MIGRATABLE", "This report spec does not need migration");
+  }
+  const transcript = engine.buildTranscript({
+    merchantMode: true,
+    merchantAssetsEnabled: policy.assetsEnabled,
+  });
+  const prompt = buildReportMigrationPrompt({
+    code: row.code,
+    version: row.version,
+    oldSpec: row.specJson,
+    compatibility,
+    targetTranscript: transcript.markdown,
+    targetTranscriptVersion: transcript.transcriptVersion,
+    merchantMode: true,
+  });
+  response.json({
+    filename: `migrate-${row.code}-v${row.version}-to-engine-${REPORT_ENGINE_VERSION}.md`,
+    prompt,
+    compatibility,
+    target: {
+      engineVersion: REPORT_ENGINE_VERSION,
+      specVersion: REPORT_SPEC_VERSION,
+      transcriptVersion: transcript.transcriptVersion,
+    },
   });
 });
 
@@ -682,6 +1453,10 @@ router.get("/report-engine/studio/specs/:id", async (request: Request, response:
     version: row.version,
     status: row.status,
     isLatestPublished: row.isLatestPublished,
+    engineVersion: row.engineVersion,
+    specSchemaVersion: row.specSchemaVersion,
+    authoringTranscriptVersion: row.authoringTranscriptVersion,
+    compatibility: reportCompatibilityOf(row),
     spec: row.specJson,
     verification: row.verificationReportJson,
     assetBundleId: row.assetBundleId,
@@ -702,7 +1477,17 @@ router.post("/report-engine/studio/specs/:id/publish", async (request: Request, 
       status: existing.status,
     });
   }
-  const spec = ReportDescriptorSpecSchema.parse(existing.specJson);
+  const compatibility = reportCompatibilityOf(existing);
+  if (compatibility.status !== "COMPATIBLE") {
+    throw compatibilityApiError("REPORT", existing.id, compatibility);
+  }
+  const parsedExisting = safeParseStoredReportSpec({
+    specJson: existing.specJson,
+    storedEngineVersion: existing.engineVersion,
+    storedSpecVersion: existing.specSchemaVersion,
+  });
+  if (!parsedExisting.ok) throw compatibilityApiError("REPORT", existing.id, parsedExisting.compatibility);
+  const spec = parsedExisting.spec;
   const verification = await verifyMerchantSpec({
     rawSpecJson: JSON.stringify(existing.specJson),
     filesByName: await storedMerchantFiles(merchantId, existing.assetBundleId, spec.required_assets),
@@ -789,11 +1574,20 @@ router.post("/report-engine/studio/specs/:id/archive", async (request: Request, 
     });
     let promoted: { id: string } | null = null;
     if (existing.isLatestPublished) {
-      promoted = await tx.merchantReportSpecRecord.findFirst({
+      const candidates = await tx.merchantReportSpecRecord.findMany({
         where: { merchantId, code: existing.code, status: "PUBLISHED", id: { not: id } },
         orderBy: { version: "desc" },
-        select: { id: true },
+        select: { id: true, specJson: true, engineVersion: true, specSchemaVersion: true },
       });
+      promoted =
+        candidates.find(
+          (candidate) =>
+            reportCompatibilityOf({
+              specJson: candidate.specJson,
+              engineVersion: candidate.engineVersion,
+              specSchemaVersion: candidate.specSchemaVersion,
+            }).status === "COMPATIBLE",
+        ) ?? null;
       if (promoted) {
         await tx.merchantReportSpecRecord.update({ where: { id: promoted.id }, data: { isLatestPublished: true } });
       }
@@ -915,6 +1709,9 @@ router.post("/report-engine/studio/templates/:code/clone", async (request: Reque
         isLatestPublished: false,
         supportedLocales: Object.keys(cloned.i18n.locales),
         defaultLocale: cloned.i18n.default_locale,
+        engineVersion: REPORT_ENGINE_VERSION,
+        specSchemaVersion: REPORT_SPEC_VERSION,
+        authoringTranscriptVersion: REPORT_TRANSCRIPT_VERSION,
         specJson: cloned as never,
         specSha256: sha256(cloned),
         verificationReportJson: verification as never,
@@ -975,7 +1772,17 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
     throw new ApiError(403, "REPORT_ACCESS_DENIED", "This report is not available to merchants");
   }
 
-  const spec = ReportDescriptorSpecSchema.parse(row.specJson);
+  const compatibility = reportCompatibilityOf(row);
+  if (compatibility.status !== "COMPATIBLE") {
+    throw compatibilityApiError("REPORT", row.id, compatibility);
+  }
+  const parsedStored = safeParseStoredReportSpec({
+    specJson: row.specJson,
+    storedEngineVersion: row.engineVersion,
+    storedSpecVersion: row.specSchemaVersion,
+  });
+  if (!parsedStored.ok) throw compatibilityApiError("REPORT", row.id, parsedStored.compatibility);
+  const spec = parsedStored.spec;
   if (!policy.assetsEnabled && spec.required_assets.length > 0) {
     throw new ApiError(
       409,
@@ -1015,11 +1822,41 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
     throw new ApiError(501, "SERVER_PDF_NOT_CONFIGURED", "The optional server-side PDF renderer is not configured");
   }
 
+  const chromeState = ownRow
+    ? (await loadMerchantChromeState(merchantId)).combined
+    : (await loadChromeRegistryState());
+  const chromeDependency = reportChromeDependency(
+    spec,
+    chromeState,
+    ownRow ? "MERCHANT" : "PLATFORM",
+    compatibility,
+  );
+  if (!chromeDependency.ready) {
+    throw new ApiError(
+      409,
+      chromeDependency.reasonCode ?? "REPORT_CHROME_UNAVAILABLE",
+      chromeDependency.message ?? "The selected header/footer is not available",
+      { chromeCode: chromeDependency.brokenChromeCode, dependency: chromeDependency },
+    );
+  }
+  const chromeVariables = await merchantIdentityVariables(merchantId);
+  const resolvedChrome = engine.resolveChrome({
+    spec,
+    chromeRegistry: chromeState.entries,
+    override: null,
+    chromeDefaultScope: ownRow ? "MERCHANT" : "PLATFORM",
+  });
+  assertNoChromeAssetKeyCollision(spec, [resolvedChrome.headerEntry, resolvedChrome.footerEntry]);
+
   await assertMerchantBudget(merchantId);
   await assertMerchantRateLimit(merchantId, "execute");
   const release = acquireMerchantExecutionSlot(merchantId);
   const forcedInputs = { ...body.inputs, [scopeKey]: merchantId };
-  const cacheKey = merchantCacheKey({ merchantId, spec, inputs: forcedInputs });
+  const chromeFingerprint = chromeState.entries
+    .map((entry) => `${entry.scope ?? "PLATFORM"}:${entry.spec.chrome.chrome_type}:${entry.spec.chrome.code}:v${entry.version ?? 0}:${entry.isDefaultGlobal ? 1 : 0}${entry.isDefaultForMerchant ? 1 : 0}`)
+    .sort()
+    .join("|");
+  const cacheKey = merchantCacheKey({ merchantId, spec, inputs: forcedInputs, chromeFingerprint });
   const cached = readMerchantCache<ReportExecutionBundle>(cacheKey);
   if (cached) {
     release();
@@ -1028,13 +1865,15 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
   }
 
   try {
-    const registry = await loadChromeRegistry();
+    const registry = chromeState.entries;
     const bundle = await engine.executeReport({
       spec,
       inputs: forcedInputs,
       actor,
       chromeRegistry: registry,
       chromeOverride: null,
+      chromeDefaultScope: ownRow ? "MERCHANT" : "PLATFORM",
+      chromeVariables,
       assetBundleId: ownRow?.assetBundleId ?? null,
       assets: {},
       allowConfidentialAmlBypass: false,
@@ -1070,6 +1909,8 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
           merchantId,
           reportCode: row.code,
           reportVersion: row.version,
+          engineVersion: REPORT_ENGINE_VERSION,
+          specSchemaVersion: REPORT_SPEC_VERSION,
           actorUserId: actor.userId,
           actorRole: actor.role,
           selectedLocale: body.locale ?? spec.i18n.default_locale,
@@ -1099,8 +1940,14 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
         } as never,
       });
     });
-    writeMerchantCache(cacheKey, bundle);
-    response.json({ ...bundle, spec: merchantSafeSpec(bundle.spec) });
+    const responseBundle = ownRow
+      ? {
+          ...bundle,
+          chromeFallbackUsed: merchantFallbackUsed(spec, (await loadMerchantChromeState(merchantId)).rows, registry),
+        }
+      : bundle;
+    writeMerchantCache(cacheKey, responseBundle);
+    response.json({ ...responseBundle, spec: merchantSafeSpec(responseBundle.spec) });
   } catch (error) {
     if (error instanceof ReportMerchantScopeViolationError) {
       throw new ApiError(403, "MERCHANT_SCOPE_VIOLATION", error.message);

@@ -35,6 +35,8 @@
 - All spreadsheet exports use the shared XLSX pipeline.
 - Deploy-generated UI flags (`ADMIN_SHOW_CHECKLISTS`, `ADMIN_SHOW_HELP_PANELS`) are runtime-config controlled.
 
+For report-engine changes, also read `project-design/parts/01-core-back/12-report-engine-sdk.md` §18 and follow the version/migration/transcript checklist; never overwrite a released transcript snapshot.
+
 ## Documentation workflow
 
 Any change to behavior, APIs, schema/migrations, env/config, deploy, UI routes, tests or invariants must update the affected `project-design/parts/**` file and `project-design/TRACKER.md` in the same change.

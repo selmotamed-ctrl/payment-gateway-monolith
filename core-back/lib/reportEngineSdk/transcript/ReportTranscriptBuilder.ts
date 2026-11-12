@@ -9,9 +9,19 @@ import {
   SQL_SCALAR_EXPRESSIONS,
   WHERE_OPERATORS,
 } from "../types/reportSpec";
+import { REPORT_ENGINE_VERSION, REPORT_TRANSCRIPT_VERSION } from "../version";
 import { isReportableModel } from "./reportableModels";
 
-export const REPORT_TRANSCRIPT_VERSION = "1.1" as const;
+export { REPORT_TRANSCRIPT_VERSION } from "../version";
+
+export interface ReportTranscriptResult {
+  filename: string;
+  contentType: "text/markdown";
+  markdown: string;
+  specVersion: string;
+  engineVersion: string;
+  transcriptVersion: string;
+}
 
 export interface ReportTranscriptOptions {
   domains?: Array<CatalogModelDef["domain"]>;
@@ -323,7 +333,7 @@ function recipesMarkdown(): string[] {
 export function buildReportAuthoringTranscript(
   host: ReportEngineHostConfig,
   options: ReportTranscriptOptions = {},
-): { filename: string; contentType: "text/markdown"; markdown: string; specVersion: string } {
+): ReportTranscriptResult {
   const generatedAtIso = (options.generatedAt ?? new Date()).toISOString();
   const merchantMode = options.merchantMode === true;
   const merchantAssetsEnabled = options.merchantAssetsEnabled !== false;
@@ -461,6 +471,8 @@ export function buildReportAuthoringTranscript(
     contentType: "text/markdown",
     markdown,
     specVersion: REPORT_SPEC_VERSION,
+    engineVersion: REPORT_ENGINE_VERSION,
+    transcriptVersion: REPORT_TRANSCRIPT_VERSION,
   };
 }
 
@@ -468,7 +480,7 @@ export function buildReportAuthoringTranscript(
 export function buildMerchantReportAuthoringTranscript(
   host: ReportEngineHostConfig,
   options: Omit<ReportTranscriptOptions, "merchantMode"> = {},
-): { filename: string; contentType: "text/markdown"; markdown: string; specVersion: string } {
+): ReportTranscriptResult {
   return buildReportAuthoringTranscript(host, { ...options, merchantMode: true });
 }
 

@@ -3,7 +3,7 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-10
+last_verified: 2026-11-11
 verified_against: d695518+working-tree
 code:
   - core-back/test/exhaustive/**
@@ -493,3 +493,13 @@ These are development/CI tests only; no production-time test job or test endpoin
 ## Chrome layout gate (2026-11-11)
 
 `tests/e2e/admin/chrome-layout.spec.ts` renders the published default header/footer on an A4 frame and asserts root fill, full-height accent bars, footer fill, the 1.4 mm three-segment band, header/footer offsets, and localized period/currency/generated-at values. `tests/e2e/admin/chrome-preview.spec.ts` renders the Studio A4 chrome preview with a mocked registry and checks the header, footer and accent band in the sandboxed surface.
+
+
+## Report compatibility and migration coverage (2026-11-11)
+
+- `core-back/test/reportEngineSdk/Compatibility.test.ts` covers compatible/current specs, engine and spec version mismatches, invalid current schemas, missing metadata, safe parsing and report/chrome migration prompt content.
+- `core-back/test/admin-slice/report-engine-migration.test.ts` inserts version-mismatched report/chrome rows and asserts catalog exclusion, structured 409 execution errors, migration listing/prompts, default revocation and reconciliation without 500s.
+- `core-back/test/admin-slice/merchant-report-chrome.test.ts` covers merchant chrome publishing/defaulting, tenant isolation, migration listing and prompts, and incompatible-default revocation.
+- Route-order suites (`core-back/test/reportEngineSdk/RouteOrder.test.ts`, `admin-back/test/report-engine-route-order.test.ts`, `merchant-back/test/report-engine-route-order.test.ts`) assert that every new static migration/transcript route is registered before a dynamic id route and that the expected endpoints exist.
+- `admin-back/test/report-engine-edge.test.ts` and `merchant-back/test/core-forwarding.test.ts` cover migration list pagination/search query forwarding, prompts, Chrome detail, reconciliation, merchant branding and Studio prefill routes.
+- Frontend type checks cover the new admin/merchant migration pages, branding editor and Studio query prefill; the existing i18n and SDK mirror gates cover Arabic catalogue completeness and client mirror equality.

@@ -3,20 +3,36 @@ import {
   ChromeVariableBindingSchema,
   REPORT_CHROME_SPEC_VERSION,
 } from "../types/chromeSpec";
+import {
+  REPORT_CHROME_TRANSCRIPT_VERSION,
+  REPORT_ENGINE_VERSION,
+} from "../version";
 
 export interface ChromeTranscriptOptions {
   generatedAt?: Date;
+  /** Merchant-owned branding workflow: merchant name variables and logo assets. */
+  merchantMode?: boolean;
+}
+
+export interface ChromeTranscriptResult {
+  filename: string;
+  contentType: "text/markdown";
+  markdown: string;
+  specVersion: string;
+  engineVersion: string;
+  transcriptVersion: string;
 }
 
 export function buildChromeAuthoringTranscript(
   host: ReportEngineHostConfig,
   options: ChromeTranscriptOptions = {},
-): { filename: string; contentType: "text/markdown"; markdown: string; specVersion: string } {
+): ChromeTranscriptResult {
   const generatedAtIso = (options.generatedAt ?? new Date()).toISOString();
   const variables = ChromeVariableBindingSchema.options;
+  const merchantMode = options.merchantMode === true;
 
   const markdown = [
-    `# ${host.institutionName} — Report Header/Footer (Chrome) AI Authoring Transcript (v${REPORT_CHROME_SPEC_VERSION})`,
+    `# ${host.institutionName} — ${merchantMode ? "Merchant Report Branding" : "Report Header/Footer (Chrome)"} AI Authoring Transcript (v${REPORT_CHROME_TRANSCRIPT_VERSION})`,
     `Generated: \`${generatedAtIso}\` | Default Currency: \`${host.defaultCurrency}\``,
     ``,
     `## 1. Your Role & Output Instructions`,
@@ -28,6 +44,14 @@ export function buildChromeAuthoringTranscript(
     `- The first top-level element of \`template.html\` fills the configured \`height_mm\` slot. Use one root wrapper (usually a flex row) and do not rely on a parent min-height.`,
     `- \`periodSummary\` and \`generatedAtFormatted\` are localized by the renderer; do not pre-format ISO strings in the template.`,
     `- \`defaultCurrency\` is the host default currency (for example LYD); use it only when the header/footer design calls for it.`,
+    ...(merchantMode
+      ? [
+          `- This is merchant-owned branding. Use \`merchantTradeName\`, \`merchantLegalName\` or \`merchantDisplayName\` for the company identity; these are injected from the authenticated merchant profile and cannot be spoofed by report inputs.`,
+          `- Upload the company logo as a flat image asset and reference it as \`asset://logo_asset_key\`. Do not use external/data URLs.`,
+          `- When the merchant publishes this as a default, it applies to the merchant's own reports that use \`GLOBAL_DEFAULT\`. Platform templates keep platform chrome.`,
+          `- If merchant report assets are disabled by platform policy, author a text-only chrome with an empty \`required_assets\` array.`,
+        ]
+      : []),
     ``,
     `## 2. Available Variables`,
     variables.map((v) => `- \`{{${v}}}\``).join("\n"),
@@ -68,14 +92,22 @@ export function buildChromeAuthoringTranscript(
     `This is the institutional header band: teal 58%, green 26%, orange 16%. Set \`chrome.border_style\` to \`"NONE"\` when using it.`,
     ``,
     `## 6. Page Layout Integration`,
-    `A report selects this chrome with \`page_layout.header_mode/footer_mode\` = \`GLOBAL_DEFAULT\`, \`SPECIFIC_CHROME_CODE\` (with \`header_chrome_code\`/\`footer_chrome_code\`), \`INLINE_SPEC\`, or \`NONE\`. Only one published HEADER and one published FOOTER can be the global default at a time.`,
+    `A report selects this chrome with \`page_layout.header_mode/footer_mode\` = \`GLOBAL_DEFAULT\`, \`SPECIFIC_CHROME_CODE\` (with \`header_chrome_code\`/\`footer_chrome_code\`), \`INLINE_SPEC\`, or \`NONE\`.`,
+    merchantMode
+      ? `For merchant-owned reports, \`GLOBAL_DEFAULT\` resolves the merchant default first and then the platform global default. Platform-provided templates always use platform chrome.`
+      : `Only one published HEADER and one published FOOTER can be the platform global default at a time.`,
+    ``,
+    `## 7. Version Provenance`,
+    `Engine version: \`${REPORT_ENGINE_VERSION}\` | Chrome spec version: \`${REPORT_CHROME_SPEC_VERSION}\` | Chrome transcript version: \`${REPORT_CHROME_TRANSCRIPT_VERSION}\``,
   ].join("\n");
 
   return {
-    filename: `chrome-engine-ai-transcript-v${REPORT_CHROME_SPEC_VERSION}.md`,
+    filename: `chrome-engine-ai-transcript-v${REPORT_CHROME_TRANSCRIPT_VERSION}.md`,
     contentType: "text/markdown",
     markdown,
     specVersion: REPORT_CHROME_SPEC_VERSION,
+    engineVersion: REPORT_ENGINE_VERSION,
+    transcriptVersion: REPORT_CHROME_TRANSCRIPT_VERSION,
   };
 }
 

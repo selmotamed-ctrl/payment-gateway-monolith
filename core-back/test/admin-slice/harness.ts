@@ -15,6 +15,8 @@ import { LedgerPoster, decimal } from "../../engine/ledger/LedgerPoster";
 import { createLedgerShardWriter } from "../../lib/storageEngine/ledgerShardWriter";
 import { isApiError, toErrorEnvelope } from "../../lib/error";
 import type { Principal } from "../../api/middleware/authDoubleCheck";
+import { adminInternalRouter } from "../../api/internal/admin";
+import { merchantInternalRouter } from "../../api/internal/merchant";
 
 export const uid = (prefix = "t"): string => `${prefix}-${randomUUID().slice(0, 8)}`;
 
@@ -40,6 +42,7 @@ export const makePrincipal = (
   scopes: [],
   tokenId: null,
   sessionId: null,
+  sessionChannel: (role.startsWith("MERCHANT_") ? "merchant" : "admin") as never,
 });
 
 export interface TestApp {
@@ -48,7 +51,10 @@ export interface TestApp {
   close(): Promise<void>;
 }
 
-export const startApp = async (routers: Router[]): Promise<TestApp> => {
+export const startApp = async (
+  routers: Router[],
+  options: { channelPrefixes?: boolean } = {},
+): Promise<TestApp> => {
   let current: Principal | undefined;
   const app = express();
   app.use(express.json());
@@ -57,7 +63,9 @@ export const startApp = async (routers: Router[]): Promise<TestApp> => {
     next();
   });
   for (const router of routers) {
-    app.use(router);
+    if (options.channelPrefixes && router === adminInternalRouter) app.use("/internal/admin", router);
+    else if (options.channelPrefixes && router === merchantInternalRouter) app.use("/internal/merchant", router);
+    else app.use(router);
   }
   app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
     if (isApiError(error)) {

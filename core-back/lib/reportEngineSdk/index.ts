@@ -43,11 +43,17 @@ import {
 } from "./verifier/AssetBundleValidator";
 import { validateSafeHtmlAndScopedCss } from "./verifier/CssAndHtmlSanitizer";
 import { buildMockReportBundle, type MockReportBundle } from "./preview/MockReportBundleBuilder";
+import { REPORT_CHROME_SPEC_VERSION, REPORT_ENGINE_VERSION, REPORT_SPEC_VERSION } from "./version";
 
 export * from "./types/hostConfig";
 export * from "./types/chromeSpec";
 export * from "./types/reportSpec";
 export * from "./types/diagnostics";
+export * from "./version";
+export * from "./compatibility/reportCompatibility";
+export * from "./compatibility/chromeCompatibility";
+export * from "./migrations/reportMigrationRegistry";
+export * from "./migrations/buildMigrationPrompt";
 export { buildReportRepairPrompt } from "./transcript/ReportTranscriptBuilder";
 export { executeReport };
 export { inferReportAuthorities, canApplySecurityOverride, isActorAllowedByPolicy } from "./verifier/AuthorityInferenceEngine";
@@ -66,10 +72,17 @@ export {
 export { sanitizeHtmlForClient } from "./verifier/CssAndHtmlSanitizer";
 export type { ReportVerificationReport, AuthorityInferenceResult };
 
+export type ReportChromeScope = "PLATFORM" | "MERCHANT";
+
 export interface ReportChromeRegistryEntry {
   spec: ReportChromeSpec;
   isDefaultGlobal: boolean;
+  /** Merchant-owned chrome only. */
+  isDefaultForMerchant?: boolean;
+  scope?: ReportChromeScope;
+  merchantId?: string | null;
   status: "DRAFT" | "VERIFIED" | "PUBLISHED" | "ARCHIVED";
+  version?: number;
   assetBundleId?: string | null;
 }
 
@@ -87,6 +100,12 @@ export interface ReportExecutionBundle {
   spec: ReportDescriptorSpec;
   resolvedHeaderChrome: ReportChromeSpec | null;
   resolvedFooterChrome: ReportChromeSpec | null;
+  resolvedHeaderChromeScope?: ReportChromeScope | null;
+  resolvedFooterChromeScope?: ReportChromeScope | null;
+  /** True when a merchant report fell back to platform chrome. */
+  chromeFallbackUsed?: boolean;
+  engineVersion?: string;
+  reportSpecVersion?: string;
   datasets: Record<string, Array<Record<string, unknown>>>;
   /** True when a dataset hit its row cap, so the caller can warn the user. */
   datasetTruncated: Record<string, boolean>;
@@ -112,6 +131,10 @@ export interface ExecuteReportInput {
   actor: ReportActorContext;
   chromeRegistry: ReportChromeRegistryEntry[];
   chromeOverride?: ChromeSelectionOverride | null;
+  /** Merchant-owned reports prefer the merchant default; platform templates stay platform-first. */
+  chromeDefaultScope?: ReportChromeScope;
+  /** Server-resolved chrome variables (merchant identity etc.); never taken from user inputs. */
+  chromeVariables?: Record<string, string>;
   /** Already-verified assets, keyed by asset_key. */
   assets?: Record<string, { mimeType: string; buffer: Buffer; sha256: string }>;
   assetBundleId?: string | null;
@@ -151,13 +174,23 @@ export interface ReportEngine {
     actor?: ReportActorContext | null;
     chromeRegistry: ReportChromeRegistryEntry[];
     chromeOverride?: ChromeSelectionOverride | null;
+    chromeDefaultScope?: ReportChromeScope;
+    chromeVariables?: Record<string, string>;
     assetDataUrls?: Record<string, string>;
   }): MockReportBundle;
   resolveChrome(params: {
     spec: ReportDescriptorSpec;
     chromeRegistry: ReportChromeRegistryEntry[];
     override?: ChromeSelectionOverride | null;
-  }): { header: ReportChromeSpec | null; footer: ReportChromeSpec | null };
+    chromeDefaultScope?: ReportChromeScope;
+  }): {
+    header: ReportChromeSpec | null;
+    footer: ReportChromeSpec | null;
+    headerEntry: ReportChromeRegistryEntry | null;
+    footerEntry: ReportChromeRegistryEntry | null;
+    headerScope: ReportChromeScope | null;
+    footerScope: ReportChromeScope | null;
+  };
   executeReport(input: ExecuteReportInput): Promise<ReportExecutionBundle>;
 }
 
@@ -234,18 +267,19 @@ export function createReportEngine(host: ReportEngineHostConfig): ReportEngine {
       }
       return parsed.data as Record<string, unknown>;
     },
-    buildMockPreviewBundle: ({ spec, chromeRegistry, chromeOverride, ...rest }) => {
-      const { header, footer } = resolveChrome(spec, chromeRegistry, chromeOverride);
+    buildMockPreviewBundle: ({ spec, chromeRegistry, chromeOverride, chromeDefaultScope, chromeVariables, ...rest }) => {
+      const resolved = resolveChrome(spec, chromeRegistry, chromeOverride, chromeDefaultScope);
       return buildMockReportBundle({
         spec,
         host,
-        resolvedHeaderChrome: header,
-        resolvedFooterChrome: footer,
+        resolvedHeaderChrome: resolved.header,
+        resolvedFooterChrome: resolved.footer,
+        chromeVariables,
         ...rest,
       });
     },
-    resolveChrome: ({ spec, chromeRegistry, override }) =>
-      resolveChrome(spec, chromeRegistry, override),
+    resolveChrome: ({ spec, chromeRegistry, override, chromeDefaultScope }) =>
+      resolveChrome(spec, chromeRegistry, override, chromeDefaultScope),
     executeReport: async (input) => executeReport(host, input),
   };
   return engine;
@@ -331,21 +365,45 @@ function redactPiiRow(
   return output;
 }
 
-function findChrome(
+type ResolvedChromeEntry = {
+  spec: ReportChromeSpec;
+  entry: ReportChromeRegistryEntry;
+} | null;
+
+function findChromeEntry(
   registry: ReportChromeRegistryEntry[],
   type: "HEADER" | "FOOTER",
   mode: string,
   code?: string | null,
-): ReportChromeSpec | null {
+  defaultScope: ReportChromeScope = "PLATFORM",
+): ResolvedChromeEntry {
   if (mode === "NONE") return null;
   const published = registry.filter(
     (entry) => entry.status === "PUBLISHED" && entry.spec.chrome.chrome_type === type,
   );
   if (mode === "SPECIFIC_CHROME_CODE") {
-    return published.find((entry) => entry.spec.chrome.code === code)?.spec ?? null;
+    if (defaultScope === "MERCHANT") {
+      const merchantEntry = published.find(
+        (entry) => entry.scope === "MERCHANT" && entry.spec.chrome.code === code,
+      );
+      if (merchantEntry) return { spec: merchantEntry.spec, entry: merchantEntry };
+    }
+    const platformEntry = published.find(
+      (entry) => (entry.scope ?? "PLATFORM") === "PLATFORM" && entry.spec.chrome.code === code,
+    );
+    return platformEntry ? { spec: platformEntry.spec, entry: platformEntry } : null;
   }
   if (mode === "GLOBAL_DEFAULT") {
-    return published.find((entry) => entry.isDefaultGlobal)?.spec ?? null;
+    if (defaultScope === "MERCHANT") {
+      const merchantDefault = published.find(
+        (entry) => entry.scope === "MERCHANT" && entry.isDefaultForMerchant === true,
+      );
+      if (merchantDefault) return { spec: merchantDefault.spec, entry: merchantDefault };
+    }
+    const platformDefault = published.find(
+      (entry) => (entry.scope ?? "PLATFORM") === "PLATFORM" && entry.isDefaultGlobal === true,
+    );
+    return platformDefault ? { spec: platformDefault.spec, entry: platformDefault } : null;
   }
   return null;
 }
@@ -359,7 +417,7 @@ function inlineChrome(
   if (!template) return null;
   return {
     spec_kind: "REPORT_CHROME",
-    spec_version: "1.0",
+    spec_version: REPORT_CHROME_SPEC_VERSION,
     chrome: {
       code: `inline-${type.toLowerCase()}`,
       name: `Inline ${type}`,
@@ -381,21 +439,32 @@ function resolveChrome(
   spec: ReportDescriptorSpec,
   registry: ReportChromeRegistryEntry[],
   override?: ChromeSelectionOverride | null,
-): { header: ReportChromeSpec | null; footer: ReportChromeSpec | null } {
+  defaultScope: ReportChromeScope = "PLATFORM",
+): {
+  header: ReportChromeSpec | null;
+  footer: ReportChromeSpec | null;
+  headerEntry: ReportChromeRegistryEntry | null;
+  footerEntry: ReportChromeRegistryEntry | null;
+  headerScope: ReportChromeScope | null;
+  footerScope: ReportChromeScope | null;
+} {
   const headerMode = override?.headerMode ?? spec.page_layout.header_mode;
   const footerMode = override?.footerMode ?? spec.page_layout.footer_mode;
   const headerCode = override?.headerChromeCode ?? spec.page_layout.header_chrome_code;
   const footerCode = override?.footerChromeCode ?? spec.page_layout.footer_chrome_code;
 
-  const header =
-    headerMode === "INLINE_SPEC"
-      ? inlineChrome(spec, "HEADER")
-      : findChrome(registry, "HEADER", headerMode, headerCode);
-  const footer =
-    footerMode === "INLINE_SPEC"
-      ? inlineChrome(spec, "FOOTER")
-      : findChrome(registry, "FOOTER", footerMode, footerCode);
-  return { header, footer };
+  const inlineHeader = headerMode === "INLINE_SPEC" ? inlineChrome(spec, "HEADER") : null;
+  const inlineFooter = footerMode === "INLINE_SPEC" ? inlineChrome(spec, "FOOTER") : null;
+  const headerResolved = headerMode === "INLINE_SPEC" ? null : findChromeEntry(registry, "HEADER", headerMode, headerCode, defaultScope);
+  const footerResolved = footerMode === "INLINE_SPEC" ? null : findChromeEntry(registry, "FOOTER", footerMode, footerCode, defaultScope);
+  return {
+    header: inlineHeader ?? headerResolved?.spec ?? null,
+    footer: inlineFooter ?? footerResolved?.spec ?? null,
+    headerEntry: headerResolved?.entry ?? null,
+    footerEntry: footerResolved?.entry ?? null,
+    headerScope: inlineHeader ? null : (headerResolved?.entry.scope ?? (headerResolved ? "PLATFORM" : null)),
+    footerScope: inlineFooter ? null : (footerResolved?.entry.scope ?? (footerResolved ? "PLATFORM" : null)),
+  };
 }
 
 async function executeReport(
@@ -533,14 +602,12 @@ async function executeReport(
   }
 
   const finalDatasets = executeTransformPipeline(datasets, spec.transforms, comparisonAssets);
-  const chrome = resolveChrome(spec, input.chromeRegistry, input.chromeOverride);
+  const chrome = resolveChrome(spec, input.chromeRegistry, input.chromeOverride, input.chromeDefaultScope);
+  const chromeEntries = [chrome.headerEntry, chrome.footerEntry].filter(
+    (entry): entry is ReportChromeRegistryEntry => Boolean(entry),
+  );
 
   const assetDataUrls: Record<string, string> = {};
-  const chromeEntries = input.chromeRegistry.filter(
-    (entry) =>
-      (entry.spec.chrome.code === chrome.header?.chrome.code && entry.spec.chrome.chrome_type === "HEADER") ||
-      (entry.spec.chrome.code === chrome.footer?.chrome.code && entry.spec.chrome.chrome_type === "FOOTER"),
-  );
   for (const entry of chromeEntries) {
     if (!entry.assetBundleId) continue;
     for (const required of entry.spec.required_assets) {
@@ -579,9 +646,15 @@ async function executeReport(
       typeof (value as { end: unknown }).end === "string",
   ) as { start: string; end: string } | undefined;
   const chromeVariables: Record<string, string> = {
+    ...(input.chromeVariables ?? {}),
     periodSummary: periodInput ? `${periodInput.start.slice(0, 10)} – ${periodInput.end.slice(0, 10)}` : "",
-    merchantTradeName: typeof inputsUsed.merchantTradeName === "string" ? inputsUsed.merchantTradeName : "",
-    merchantLegalName: typeof inputsUsed.merchantLegalName === "string" ? inputsUsed.merchantLegalName : "",
+    merchantTradeName:
+      input.chromeVariables?.merchantTradeName ??
+      (typeof inputsUsed.merchantTradeName === "string" ? inputsUsed.merchantTradeName : ""),
+    merchantLegalName:
+      input.chromeVariables?.merchantLegalName ??
+      (typeof inputsUsed.merchantLegalName === "string" ? inputsUsed.merchantLegalName : ""),
+    merchantDisplayName: input.chromeVariables?.merchantDisplayName ?? "",
   };
 
   const verificationSha256 = createHash("sha256")
@@ -591,6 +664,12 @@ async function executeReport(
         reportVersion: spec.report.version,
         inputsUsed,
         datasets: finalDatasets,
+        headerChrome: chrome.header
+          ? `${chrome.header.chrome.code}@${chrome.headerScope ?? "PLATFORM"}#v${chrome.headerEntry?.version ?? "?"}`
+          : null,
+        footerChrome: chrome.footer
+          ? `${chrome.footer.chrome.code}@${chrome.footerScope ?? "PLATFORM"}#v${chrome.footerEntry?.version ?? "?"}`
+          : null,
         executedAtIso: nowIso,
       }),
     )
@@ -603,6 +682,10 @@ async function executeReport(
     spec,
     resolvedHeaderChrome: chrome.header,
     resolvedFooterChrome: chrome.footer,
+    resolvedHeaderChromeScope: chrome.headerScope,
+    resolvedFooterChromeScope: chrome.footerScope,
+    engineVersion: REPORT_ENGINE_VERSION,
+    reportSpecVersion: REPORT_SPEC_VERSION,
     datasets: finalDatasets,
     datasetTruncated,
     assetDataUrls,

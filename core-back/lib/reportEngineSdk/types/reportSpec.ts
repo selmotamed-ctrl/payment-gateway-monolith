@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { ReportChromeSpecSchema } from "./chromeSpec";
 import { normalizeReportSpec } from "./normalizeReportSpec";
+import { REPORT_SPEC_VERSION } from "../version";
 
-export const REPORT_SPEC_VERSION = "1.0" as const;
+export { REPORT_SPEC_VERSION } from "../version";
 
 // ---------------------------------------------------------------------------
 // 1. INPUT FORM & AUTOCOMPLETE PARAMETER DSL

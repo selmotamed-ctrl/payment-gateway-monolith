@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { VAlert, VBtn, VCol, VFileInput, VRow, VSwitch } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
@@ -34,6 +34,9 @@ type ChromeRow = {
   chromeType: "HEADER" | "FOOTER";
   status: string;
   isDefaultGlobal: boolean;
+  defaultRevokedAt?: string | null;
+  defaultRevokedReason?: string | null;
+  compatibility?: { status: "COMPATIBLE" | "NEEDS_MIGRATION" | "INVALID"; reasonCode: string | null; message: string };
   supportedLocales: string[];
   assetBundleId?: string | null;
   /** Inlined only when the list is requested with `includeAssets=1`; keyed by `asset_key`. */
@@ -51,6 +54,7 @@ const pickFile = (files: File | File[] | null): File | null => (Array.isArray(fi
 const ReportsChromePage = dc(() => {
   const { t } = useLocale();
   const router = useRouter();
+  const route = useRoute();
   const busy = ref(false);
   const error = ref<string | null>(null);
   const diagnostics = ref<ReturnType<typeof diagnosticsFromApiError>>([]);
@@ -72,7 +76,13 @@ const ReportsChromePage = dc(() => {
   const chromeSearch = ref<string | null>(null);
   const chromePageSize = ref(20);
   const chromeRefresh = ref<ChromeRefreshHook | null>(null);
+  const migrationOpen = ref(false);
+  const migrationPromptBusy = ref(false);
   const canAuthor = computed(() => hasOneOfAuthorities(["reports.studio", "report_engine:author"]));
+  const canPrompt = computed(() =>
+    hasOneOfAuthorities(["report_engine:author", "report:review", "report:approve", "security:write"]),
+  );
+  const canManageChrome = computed(() => hasOneOfAuthorities(["report:approve", "security:write"]));
   const canSave = computed(() => specJson.value.trim().length > 0 && !zipError.value);
   const editingNeedsZip = computed(
     () => Boolean(editingRow.value?.spec?.required_assets?.length) && !zipFile.value,
@@ -128,7 +138,11 @@ const ReportsChromePage = dc(() => {
       Value: ({ row }) => (
         <div class="d-flex align-center ga-2 flex-wrap">
           <StatusBadge status={row.status} toneOverride={row.status === "PUBLISHED" ? "success" : undefined} />
+          {row.compatibility && row.compatibility.status !== "COMPATIBLE" && (
+            <StatusBadge status={row.compatibility.status} toneOverride="danger" label={t("Needs migration")} />
+          )}
           {row.isDefaultGlobal && <StatusBadge status="DEFAULT" label={t("Global Default")} toneOverride="success" />}
+          {row.defaultRevokedAt && <StatusBadge status="REVOKED" label={t("Default revoked")} toneOverride="warning" />}
         </div>
       ),
     },
@@ -146,17 +160,21 @@ const ReportsChromePage = dc(() => {
           primaryAction={{
             label: t("Preview"),
             icon: "mdi-eye-outline",
+            disabled: Boolean(row.compatibility && row.compatibility.status !== "COMPATIBLE"),
             onClick: () => void openPreview(row),
           }}
           items={[
-            { key: "edit", label: t("Edit"), icon: "mdi-pencil-outline", onClick: () => editRow(row) },
+            { key: "edit", label: row.compatibility && row.compatibility.status !== "COMPATIBLE" ? t("Migrate and restore default") : t("Edit"), icon: "mdi-pencil-outline", onClick: () => editRow(row) },
             { key: "copy", label: t("Copy code"), icon: "mdi-content-copy", onClick: () => void copyCode(row.code) },
             { key: "download", label: t("Download spec"), icon: "mdi-download", onClick: () => downloadSpec(row) },
             {
               key: "default",
               label: row.isDefaultGlobal ? t("Clear default") : t("Set global default"),
               icon: "mdi-star-outline",
-              disabled: row.status !== "PUBLISHED",
+              disabled:
+                !canManageChrome.value ||
+                row.status !== "PUBLISHED" ||
+                (row.compatibility !== undefined && row.compatibility.status !== "COMPATIBLE"),
               onClick: () => void setDefault(row, !row.isDefaultGlobal),
             },
             {
@@ -165,6 +183,7 @@ const ReportsChromePage = dc(() => {
               icon: "mdi-archive-outline",
               danger: true,
               dividerBefore: true,
+              disabled: !canManageChrome.value,
               onClick: () => void archiveRow(row),
             },
           ]}
@@ -179,7 +198,7 @@ const ReportsChromePage = dc(() => {
     try {
       const response = await api.get(urlsMap.reportEngineTranscript, { params: { kind: "CHROME" } });
       const data = response.data ?? {};
-      downloadText(data.filename ?? "chrome-engine-ai-transcript-v1.0.md", data.markdown ?? "", "text/markdown");
+      downloadText(data.filename ?? "chrome-engine-ai-transcript-v1.1.md", data.markdown ?? "", "text/markdown");
     } catch (caught) {
       error.value = friendlyApiErrorMessage(caught, t);
     } finally {
@@ -213,8 +232,60 @@ const ReportsChromePage = dc(() => {
     resetFeedback();
     // Saving creates the next version; editing a published row republishes by default.
     publish.value = row.status === "PUBLISHED";
-    makeDefault.value = row.isDefaultGlobal;
+    makeDefault.value = row.isDefaultGlobal || Boolean(row.defaultRevokedAt);
+    migrationOpen.value = Boolean(row.compatibility && row.compatibility.status !== "COMPATIBLE");
     showSnackBar({ message: t("Loaded {name} into the editor", { name: row.name }), type: "success" });
+  };
+
+  const loadChromeById = async (id: string) => {
+    busy.value = true;
+    resetFeedback();
+    try {
+      const response = await api.get(urlsMap.reportEngineChrome + `/${encodeURIComponent(id)}`);
+      const row = response.data as ChromeRow;
+      specJson.value = JSON.stringify(row.spec ?? {}, null, 2);
+      specFile.value = null;
+      zipFile.value = null;
+      editingRow.value = row;
+      publish.value = row.status === "PUBLISHED";
+      makeDefault.value = row.isDefaultGlobal || Boolean(row.defaultRevokedAt);
+      migrationOpen.value = route.query.from === "migration";
+    } catch (caught) {
+      fail(caught);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  const copyMigrationPrompt = async () => {
+    if (!editingRow.value) return;
+    migrationPromptBusy.value = true;
+    try {
+      const response = await api.get(urlsMap.reportEngineChromeMigrationPrompt(editingRow.value.id));
+      await navigator.clipboard.writeText(String(response.data?.prompt ?? ""));
+      showSnackBar({ message: t("Migration prompt copied"), type: "success" });
+    } catch (caught) {
+      fail(caught);
+    } finally {
+      migrationPromptBusy.value = false;
+    }
+  };
+
+  const downloadMigrationPrompt = async () => {
+    if (!editingRow.value) return;
+    migrationPromptBusy.value = true;
+    try {
+      const response = await api.get(urlsMap.reportEngineChromeMigrationPrompt(editingRow.value.id));
+      downloadText(
+        String(response.data?.filename ?? `${editingRow.value.code}-migration.prompt.md`),
+        String(response.data?.prompt ?? ""),
+        "text/markdown",
+      );
+    } catch (caught) {
+      fail(caught);
+    } finally {
+      migrationPromptBusy.value = false;
+    }
   };
 
   const copyCode = async (code: string) => {
@@ -249,6 +320,7 @@ const ReportsChromePage = dc(() => {
           : t("Header/footer spec saved"),
         type: "success",
       });
+      migrationOpen.value = false;
       refresh();
     } catch (caught) {
       fail(caught);
@@ -468,6 +540,11 @@ const ReportsChromePage = dc(() => {
     </div>
   );
 
+  onMounted(() => {
+    const open = typeof route.query.open === "string" ? route.query.open : "";
+    if (open) void loadChromeById(open);
+  });
+
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
@@ -478,6 +555,9 @@ const ReportsChromePage = dc(() => {
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <VBtn variant="tonal" prependIcon="mdi-refresh" loading={busy.value} onClick={refresh}>
                 {t("Refresh")}
+              </VBtn>
+              <VBtn variant="tonal" prependIcon="mdi-alert-decagram-outline" onClick={() => void router.push({ name: "ReportsChromeNeedsMigration" })}>
+                {t("Needs Migration")}
               </VBtn>
               <VBtn variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsCatalog" })}>
                 {t("Open Catalog")}
@@ -505,6 +585,22 @@ const ReportsChromePage = dc(() => {
             {t("Download Header/Footer AI Transcript")}
           </VBtn>
         </SurfaceCard>
+
+        {migrationOpen.value && editingRow.value && (
+          <VAlert type="warning" variant="tonal">
+            <div class="d-flex flex-column ga-2">
+              <span>{t("Migrate and restore default")}: {editingRow.value.code} v{editingRow.value.version}</span>
+              <div class="d-flex flex-wrap ga-2">
+                <VBtn size="small" variant="tonal" loading={migrationPromptBusy.value} disabled={!canPrompt.value} onClick={() => void copyMigrationPrompt()}>
+                  {t("Copy migration prompt")}
+                </VBtn>
+                <VBtn size="small" variant="tonal" loading={migrationPromptBusy.value} disabled={!canPrompt.value} onClick={() => void downloadMigrationPrompt()}>
+                  {t("Download migration prompt")}
+                </VBtn>
+              </div>
+            </div>
+          </VAlert>
+        )}
 
         <SurfaceCard
             title={t("Upload Chrome Spec")}
@@ -553,7 +649,7 @@ const ReportsChromePage = dc(() => {
                 copiedMessage={t("Chrome JSON copied")}
               />
               <div class="d-flex flex-wrap ga-4 align-center">
-                <VBtn color="primary" loading={busy.value} disabled={!canSave.value} onClick={() => void saveChrome()}>
+                <VBtn color="primary" loading={busy.value} disabled={!canSave.value || !canManageChrome.value} onClick={() => void saveChrome()}>
                   {t("Verify & Save")}
                 </VBtn>
                 <VSwitch
@@ -568,6 +664,7 @@ const ReportsChromePage = dc(() => {
                   color="primary"
                   hideDetails
                   modelValue={makeDefault.value}
+                  disabled={!publish.value}
                   onUpdate:modelValue={(value: boolean | null) => (makeDefault.value = Boolean(value))}
                 />
               </div>
@@ -596,6 +693,7 @@ const ReportsChromePage = dc(() => {
           onRefresh={(table, refreshTable) => {
             void refreshTable({
               queryParams: {
+                includeIncompatible: 1,
                 page: table.page,
                 pageSize: chromePageSize.value,
                 ...(chromeSearch.value ? { search: chromeSearch.value } : {}),

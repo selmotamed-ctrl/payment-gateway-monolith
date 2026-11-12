@@ -190,7 +190,9 @@ export const requireAuthentication = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
-    request.principal = await authenticate(request);
+    if (!request.principal) {
+      request.principal = await authenticate(request);
+    }
     next();
   } catch (error) {
     next(error);
