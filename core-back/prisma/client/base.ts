@@ -5,6 +5,7 @@ import {
   buildPostgresPoolConfig,
   isPostgresUrl,
 } from "../../lib/db/connectionConfig";
+import { prismaTransactionOptions } from "../../lib/db/waitBudgets";
 
 let baseClientInstance: PrismaClient | undefined;
 
@@ -19,6 +20,8 @@ export const createClientForUrl = (databaseUrl: string): PrismaClient =>
   new PrismaClient({
     adapter: adapterFor(databaseUrl),
     log: [],
+    // Only when PG_TX_MAX_WAIT_MS is set (tests); otherwise Prisma's own defaults.
+    ...(prismaTransactionOptions() ? { transactionOptions: prismaTransactionOptions() } : {}),
   });
 
 export const createBaseClient = (): PrismaClient => createClientForUrl(env.DATABASE_URL);

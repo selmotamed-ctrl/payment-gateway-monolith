@@ -198,9 +198,15 @@ describe("prisma schema", () => {
     // The automation plan adds one migration per item; the ledger query/index optimisation is applied after them
     // (schema version 25) so its partition function carries both the automation security hardening and the
     // append-only autovacuum settings. The newest migration must be well-formed and set the required version.
-    // The newest migration is the report tenant and filing integrity fix (schema version 34), after the plan
-    // branch's merchant report engine (33).
-    expect(ordered.at(-1)).toBe("20261111090000_report_tenant_and_filing_integrity");
+    // The newest migration (schema version 35) restores fillfactor on new journal partitions and makes the
+    // partition function safe for concurrent callers; before it, the report tenant and filing integrity fix
+    // (34), after the plan branch's merchant report engine (33).
+    expect(ordered.at(-1)).toBe("20261112090000_journal_partition_storage_and_race");
+    expect(ordered).toContain("20261111090000_report_tenant_and_filing_integrity");
+    const partitionFix = fs.readFileSync(path.join(migrationsDirectory, "20261112090000_journal_partition_storage_and_race", "migration.sql"), "utf8");
+    expect(partitionFix).toContain("fillfactor = 100");
+    expect(partitionFix).toContain("WHEN duplicate_table OR unique_violation THEN");
+
     expect(ordered).toContain("20261110190000_merchant_report_engine");
     const integrity = fs.readFileSync(path.join(migrationsDirectory, "20261111090000_report_tenant_and_filing_integrity", "migration.sql"), "utf8");
     // Tenant-safe references, an append-only audit without SET NULL, and one open filing per report and adapter.
@@ -234,7 +240,7 @@ describe("prisma schema", () => {
     expect(guard).not.toContain("schema_versions");
     const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
     expect(newest).toMatch(new RegExp(`UPDATE "schema_versions"\\s+SET "version" = ${REQUIRED_SCHEMA_VERSION}\\b`));
-    expect(REQUIRED_SCHEMA_VERSION).toBe(34);
+    expect(REQUIRED_SCHEMA_VERSION).toBe(35);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),

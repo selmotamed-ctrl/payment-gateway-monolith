@@ -523,5 +523,7 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 | :--- | :--- | :--- |
 | `UPLOAD_RATE_LIMIT_MAX` | admin-back | Uploads per address per rate-limit window (default 20). |
 | `LEDGER_RAW_SQL` | core-back | `false` turns the raw-SQL ledger posting path off (default on). |
+| `PG_POOL_CONNECT_TIMEOUT_MS` | core-back | (2026-11-12) node-postgres `connectionTimeoutMillis`, the wait for a pooled connection (default 5000). Unset in production: a caller that cannot get a connection fails fast. `lib/db/waitBudgets.ts`. |
+| `PG_TX_MAX_WAIT_MS` | core-back | (2026-11-12) Prisma interactive-transaction `maxWait`, the wait to start a transaction (`P2028` when exceeded). Unset: each call site keeps its default (Prisma 2000, unit-of-work adapter 2500, workers 5000 to 10000). Set: it replaces them all and becomes the client-wide default. |
 | `FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS` | fake-rails-back | Extra hosts (`host` or `host:port`) a webhook may target; the host of `CORE_INBOUND_BASE_URL` is always allowed. |
 | `PG_APP_USER`, `PG_APP_PASSWORD` | deploy | The non-owner role the deployed application connects as; setting the password enables the split (see `deploy.storage`). |

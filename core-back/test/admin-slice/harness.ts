@@ -48,7 +48,10 @@ export interface TestApp {
   close(): Promise<void>;
 }
 
-export const startApp = async (routers: Router[]): Promise<TestApp> => {
+/** A router, or a router mounted under a path prefix (as production mounts it). */
+export type Mount = Router | readonly [string, Router];
+
+export const startApp = async (routers: Mount[]): Promise<TestApp> => {
   let current: Principal | undefined;
   const app = express();
   app.use(express.json());
@@ -56,8 +59,9 @@ export const startApp = async (routers: Router[]): Promise<TestApp> => {
     request.principal = current;
     next();
   });
-  for (const router of routers) {
-    app.use(router);
+  for (const mount of routers) {
+    if (Array.isArray(mount)) app.use(mount[0] as string, mount[1] as Router);
+    else app.use(mount as Router);
   }
   app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
     if (isApiError(error)) {

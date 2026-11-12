@@ -8,6 +8,7 @@ import { requireAuthorities, principalOf, isStaffPrincipal, type Principal } fro
 import { auditActor, auditBase } from "./adminSliceHelpers";
 import { writeAudit } from "../../lib/audit/writeAudit";
 import { previewAccessDecision } from "./reportPreviewPolicy";
+import { specContentSha256 } from "../../lib/reportEngineSdk/specHash";
 import {
   extractZipAssetFiles,
   synthesizeDefaultInputs,
@@ -483,8 +484,9 @@ function specSaveError(error: unknown): unknown {
   return error;
 }
 
+/** The spec's content hash, reproducible from the stored `spec_json` (see `specContentSha256`). */
 function sha256Of(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  return specContentSha256(value);
 }
 
 /** Loads the stored asset files a spec requires, keyed by file name (as the zip extractor does). */

@@ -6,6 +6,7 @@
  * so files can run in parallel, and deterministic ids. Nothing stands in for a
  * production adapter.
  */
+import { poolConnectTimeoutMs, prismaTransactionOptions } from "../../../lib/db/waitBudgets";
 import { randomUUID } from "node:crypto";
 import { describe } from "bun:test";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -67,6 +68,7 @@ export const createPrisma = (options: PrismaOptions = {}): PrismaClient =>
       }),
     ),
     log: [],
+    ...(prismaTransactionOptions() ? { transactionOptions: prismaTransactionOptions() } : {}),
   });
 
 /**
@@ -97,7 +99,7 @@ export const createPool = (options: PoolOptions = {}): Pool => {
       ? schemaConnectionUrl(options.schema, options.url ?? DATABASE_URL)
       : pinUtcInConnectionUrl(options.url ?? DATABASE_URL),
     max: options.max ?? 5,
-    connectionTimeoutMillis: options.connectionTimeoutMillis ?? 3_000,
+    connectionTimeoutMillis: options.connectionTimeoutMillis ?? poolConnectTimeoutMs(3_000),
   };
   return new Pool(config);
 };
@@ -114,6 +116,7 @@ export const createPrismaForSchema = (
       }),
     ),
     log: [],
+    ...(prismaTransactionOptions() ? { transactionOptions: prismaTransactionOptions() } : {}),
   });
 
 const probe = async (

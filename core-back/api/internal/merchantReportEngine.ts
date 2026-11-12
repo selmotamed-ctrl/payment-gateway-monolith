@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { specContentSha256 } from "../../lib/reportEngineSdk/specHash";
 import express, { type Request, type Response } from "express";
 import { z } from "zod";
 import { client } from "../../prisma/client";
@@ -78,6 +79,7 @@ const assertSpecFitsApplicationScope = (spec: ReportDescriptorSpec, applicationI
  * every dataset alias and asserts every returned row (E04).
  */
 const router = express.Router();
+
 export const merchantReportEngineRouter = router;
 
 const engine = getMerchantReportEngine();
@@ -144,7 +146,8 @@ const mimeFor = (fileName: string): string => {
   return "application/octet-stream";
 };
 
-const sha256 = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+/** The spec's content hash, reproducible from the stored `spec_json` (see `specContentSha256`). */
+const sha256 = (value: unknown): string => specContentSha256(value);
 
 async function extractMerchantZip(base64: string | undefined): Promise<{
   filesByName: Map<string, Buffer>;

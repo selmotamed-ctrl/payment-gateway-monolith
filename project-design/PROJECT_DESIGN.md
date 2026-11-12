@@ -1512,6 +1512,8 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 | :--- | :--- | :--- |
 | `UPLOAD_RATE_LIMIT_MAX` | admin-back | Uploads per address per rate-limit window (default 20). |
 | `LEDGER_RAW_SQL` | core-back | `false` turns the raw-SQL ledger posting path off (default on). |
+| `PG_POOL_CONNECT_TIMEOUT_MS` | core-back | (2026-11-12) node-postgres `connectionTimeoutMillis`, the wait for a pooled connection (default 5000). Unset in production: a caller that cannot get a connection fails fast. `lib/db/waitBudgets.ts`. |
+| `PG_TX_MAX_WAIT_MS` | core-back | (2026-11-12) Prisma interactive-transaction `maxWait`, the wait to start a transaction (`P2028` when exceeded). Unset: each call site keeps its default (Prisma 2000, unit-of-work adapter 2500, workers 5000 to 10000). Set: it replaces them all and becomes the client-wide default. |
 | `FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS` | fake-rails-back | Extra hosts (`host` or `host:port`) a webhook may target; the host of `CORE_INBOUND_BASE_URL` is always allowed. |
 | `PG_APP_USER`, `PG_APP_PASSWORD` | deploy | The non-owner role the deployed application connects as; setting the password enables the split (see `deploy.storage`). |
 
@@ -5379,7 +5381,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 34 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 35 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -5434,7 +5436,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 34`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 35`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5447,7 +5449,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261111090000_report_tenant_and_filing_integrity`, schema version 34). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261112090000_journal_partition_storage_and_race`, schema version 35). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -5639,7 +5641,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 84 models and 105 enums in the Prisma datamodel.
-- Schema version 34 with an equality check used by the seeders.
+- Schema version 35 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -5742,7 +5744,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 34 (`REQUIRED_SCHEMA_VERSION = 34`; model count 105). The schema migrations since version 10 are:
+The current schema version is 35 (`REQUIRED_SCHEMA_VERSION = 35`; model count 105). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -5757,6 +5759,7 @@ The current schema version is 34 (`REQUIRED_SCHEMA_VERSION = 34`; model count 10
 - `20261109210000_ledger_query_and_index_optimization` (version 25): covering indexes and append-only autovacuum (see `core.ledger`). Revised 2026-11-10 before any production use: `SET lock_timeout = '10s'`, each `journal_lines` covering index is rebuilt only when `pg_get_indexdef` differs from its target (so an index pre-built online is never rebuilt, see section 12b), and the resilient `ensure_journal_line_partitions`.
 - `20261110090000_resilient_journal_partitions` (functions only, no version bump): redefines `ensure_journal_line_partitions` for databases that applied version 25 before that revision (`prisma migrate deploy` never re-runs an applied migration: verified 2026-11-10). A month that cannot be created (rows already in `journal_lines_default`: `check_violation`; a lock wait over 5 s: `lock_not_available`) is skipped with a WARNING instead of aborting the call; storage parameters are set only on a partition the call creates; `lock_timeout = 5s`, `timezone = UTC`.
 - `20261111090000_report_tenant_and_filing_integrity` (version 34): (1) the merchant report tables referenced each other by id only, so nothing at the database level stopped merchant A's spec pointing at merchant B's asset bundle, or an audit row carrying B's spec under A's `merchant_id`: `UNIQUE (id, merchant_id)` on the bundle and spec tables, composite foreign keys `(asset_bundle_id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`) and `(merchant_spec_id, merchant_id)` (`RESTRICT`) alongside the single-column ones (Prisma cannot model a composite relation with an optional first column, so these are SQL-only), and a real foreign key from `merchant_id` to `merchants` on all five tables; (2) `merchant_report_execution_audit.merchant_spec_id` was `ON DELETE SET NULL`, an UPDATE the table's own append-only trigger rejects, so deleting a referenced spec failed: it is now `RESTRICT` (specs are archived, never deleted), and the table gets the `BEFORE TRUNCATE` guard the staff audit has; (3) `external_submissions_open_report_adapter_key`, a partial unique index on `(report_id, adapter_id)` for statuses PENDING, SUBMITTED and ACKNOWLEDGED: a report is filed at most once per adapter (a FAILED or REJECTED submission can be retried), and the file route maps the violation to its existing `409 REPORT_ALREADY_FILING`. Applying it to a database that already holds two open submissions for one report and adapter fails with a duplicate-key error: resolve them first.
+- `20261112090000_journal_partition_storage_and_race` (version 35, no table shape change): redefines `ensure_journal_line_partitions` again. (1) The 2026-11-10 revision set only the insert-autovacuum parameters on a new monthly partition and dropped the explicit `fillfactor = 100` of the original body; it is restored, and set once (`SHARE UPDATE EXCLUSIVE`, no write blocking) on every monthly partition created without it. (2) The same revision replaced `CREATE TABLE IF NOT EXISTS` with a `to_regclass` check and a plain `CREATE TABLE`, so two callers at once (the partition worker on two nodes, or the worker and a deploy) both saw a month missing and the second aborted with `duplicate_table` (measured: 3 of 4 concurrent callers failed); `duplicate_table` / `unique_violation` from a concurrent creator are now accepted, and the truncate-guard install tolerates `duplicate_object`. The version is bumped because the newest migration sets `REQUIRED_SCHEMA_VERSION` (checked by `phase1-mtls-and-schema.test.ts`) and the seeders' equality guard then refuses a database without it; core HTTP start does not check the version. Test: `ledger-query-pruning-and-accuracy.test.ts` EC-15 (storage parameters) and EC-15b (four concurrent callers on a dropped empty month).
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -7639,6 +7642,7 @@ Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `4
 - **Staff preview obeys the access policy and is audited.** `POST /report-engine/specs/preview` executes a draft against live data. It used to require only an authoring or review authority, so an author without the ledger or audit authorities could preview a draft over those tables, and it left no trace. It now evaluates the policy inferred from the models the draft queries (`previewAccessDecision` in `api/internal/reportPreviewPolicy.ts`: a natural role, or every required authority; a security admin is always allowed; a missing inference fails closed) and answers `403 REPORT_ACCESS_DENIED` with the queried models and required authorities before executing anything. A successful preview writes `REPORT_SPEC_PREVIEW_EXECUTED` (entity `REPORT_SPEC_DRAFT`, id = the draft's SHA-256, with the queried models, row count and duration) to the audit log; the execution audit table is keyed by a saved spec, which a draft is not.
 - **Merchant reports honour a user's application scope.** A merchant session user can be restricted to some applications (`app_scope_ids`) and the other merchant routes honour it; the report engine ignored it, so such a user got every application's payments, wallets, cash-outs and daily stats. `merchantScopable.applicationIdColumn` (host config) marks the models whose rows belong to ONE application: only `payment_attempts`. For a restricted session user the execute route (1) refuses a report that reads any other model with `403 APP_SCOPE_RESTRICTED` (as the merchant overview is refused), before the budget, rate limit or execution; (2) passes `merchantScope.applicationIds`, so the compiler adds `<alias>.application_id = ANY($n::uuid[])` to every aliased table next to the merchant predicate (and throws `APP_SCOPE_MODEL_NOT_ALLOWED` for a model that cannot be narrowed); (3) keys the result cache by the scope, so a restricted user's result is never served to an unrestricted user or the reverse. An API token is bound to one application by the token itself and is unchanged. The `applications` model is also refused to a restricted user (conservative). The merchant autocomplete sources (payment link keys, POS terminal names) are still merchant-wide.
 - **Tenant-safe merchant report tables and an append-only audit without SET NULL** are migration `20261111090000` (schema version 34), see `core.data` (the migration list).
+- **The spec hash is a content hash (2026-11-12).** `report_definition_specs.spec_sha256` (staff and merchant lines) was SHA-256 of `JSON.stringify(spec)` taken before the insert. `spec_json` is `jsonb`, which reorders object keys, so the hash could never be recomputed from the stored row and proved nothing about it. It is now `specContentSha256` (`lib/reportEngineSdk/specHash.ts`): SHA-256 of the spec with every object's keys sorted, recursively, identical before the insert and after any read. Rows saved earlier keep their old hash (nothing compares spec hashes across rows). The chrome registry keeps hashing the uploaded spec text byte for byte, which is a different contract (the exact file). Test: `admin-slice/admin-report-engine.test.ts` B05/B04, which recomputes the hash from the row as read back.
 
 ---
 
@@ -16276,6 +16280,9 @@ The live environment is expected to be provisioned by the deploy engine, not by 
 | `REDIS_URL` | `redis://127.0.0.1:56379` | Storage performance, production adapters |
 
 `core-back/test/setup.ts` also defaults `KMS_MASTER_KEY`, the mTLS certificate paths and `LOG_LEVEL=error`. The certificate paths point at `core-back/certs/*`; the files must exist or the mTLS tests fail.
+
+**Wait budgets in the test run (2026-11-12).** The preload also sets `PG_POOL_CONNECT_TIMEOUT_MS=20000` and `PG_TX_MAX_WAIT_MS=20000` (unless already set) and raises Bun's per-test limit to 30 s (`setDefaultTimeout`, override with `TEST_TIMEOUT_MS`). Diagnosis: the concurrency suites (`exhaustive/06-concurrency/*`, `storage-engine/uow`, `ledger-shard-*`, `cashout-lock-order`, `storage-engine/ledger-shards`, the multi-node outbox and webhook workers) queue 50 transactions on pools of 10 to 40. On a busy host the single Bun process is starved and the queue wait crosses the production fail-fast budgets (`P2028` after 2 to 2.5 s, "timeout exceeded when trying to connect" after 3 to 5 s) or Bun's 5 s default, while PostgreSQL itself is idle (measured during a failing run: at most 31 connections, fresh connects under 20 ms). Reproduced by saturating the 12 cores with 14 busy processes: 6 of 73 failed before, 79 of 79 pass with the new budgets. The assertions (one winner, no deadlock, gapless sequences, exactly-once delivery) are unchanged; a real hang still fails at 30 s. The absolute performance budgets in `storage-engine/performance/*` are left strict on purpose: they pass with a wide margin on a quiet machine (UoW p95 about 130 ms against 500 ms) and fail on a saturated one, so run them on a quiet machine.
+
 
 The expected local services are PostgreSQL 18 on 55432 and Redis on 56379. The production port (5432) is not assumed by the test harness.
 

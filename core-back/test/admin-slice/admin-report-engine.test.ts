@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
-import { adminInternalRouter } from "../../api/internal/admin";
-import { merchantInternalRouter } from "../../api/internal/merchant";
+import { specContentSha256 } from "../../lib/reportEngineSdk/specHash";
+import { adminReportEngineRouter } from "../../api/internal/adminReportEngine";
+import { merchantReportEngineRouter } from "../../api/internal/merchantReportEngine";
 import { client } from "../../prisma/client";
 import { exampleDescriptorSpec } from "../../lib/reportEngineSdk/transcript/ReportTranscriptBuilder";
 import {
@@ -20,7 +20,10 @@ let authorId = "";
 
 if (dbAvailable) {
   beforeAll(async () => {
-    app = await startApp([adminInternalRouter, merchantInternalRouter]);
+    // The report-engine routers alone, under their production prefixes. The full admin and
+    // merchant routers start with bearer-token authentication, which replaces the principal the
+    // harness injects, so every request answered 401 before it reached a report-engine route.
+    app = await startApp([["/internal/admin", adminReportEngineRouter], ["/internal/merchant", merchantReportEngineRouter]]);
     staffId = await createStaffUser("SECURITY_ADMIN");
     authorId = await createStaffUser("SUPPORT");
   });
@@ -63,7 +66,8 @@ describe.skipIf(!dbAvailable)("report-engine route remediation", () => {
 
     const row = await client.reportDefinitionSpecRecord.findUniqueOrThrow({ where: { id: first.json.id } });
     expect((row.specJson as Record<string, any>).report.version).toBe(row.version);
-    expect(row.specSha256).toBe(createHash("sha256").update(JSON.stringify(row.specJson)).digest("hex"));
+    // Recomputed from the row as read back (jsonb reorders keys): the hash is of the content.
+    expect(row.specSha256).toBe(specContentSha256(row.specJson));
     expect(row.isLatestPublished).toBe(true);
 
     const second = await save(2, true);
@@ -127,8 +131,9 @@ describe.skipIf(!dbAvailable)("report-engine route remediation", () => {
   });
 
   test("B13: a merchant without report_engine:run is refused", async () => {
+    // Not merchant:read (or link:write, merchant:write): those imply report_engine:run.
     app.setPrincipal({
-      ...makePrincipal("merchant-user", ["merchant:read"], "MERCHANT_ADMIN"),
+      ...makePrincipal("merchant-user", ["pos:manage"], "MERCHANT_STAFF"),
       merchantId: null,
     });
     const response = await app.request("GET", "/internal/merchant/report-engine/catalog");
