@@ -47,6 +47,8 @@ export interface RestoreDrillDependencies {
   config: BackupDaemonConfig;
   engine: BackupEngine;
   runner: CommandRunner;
+  /** The same artifact repository used by syncObjectStorageBackup (required for WAL-G/Barman drill parity). */
+  repository?: ArtifactRepository;
   fileSystem?: DrillFileSystem;
   clock?: () => Date;
   idFactory?: () => string;
@@ -675,7 +677,7 @@ export class RestoreDrillRunner {
       }
 
       if (objectStorageBackupConfigured(config)) {
-        const repository = (this.deps.engine as { repo?: ArtifactRepository }).repo;
+        const repository = this.deps.repository ?? (this.deps.engine as { repo?: ArtifactRepository }).repo;
         if (!repository) {
           checks.objectStorage = {
             ok: false,

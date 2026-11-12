@@ -343,5 +343,5 @@ Not covered by automated tests:
 `IP:127.0.0.1`, `DNS:object-storage-daemon.internal`) and, when object storage is
 configured, the `object-storage-client` client certificate. `certFilesForHost`
 gives the storage host its server + client material; core hosts and the backup
-host receive `internal-ca.crt` and `object-storage-client.*`. Renewal/SAN drift
+host receive `internal-ca.crt` and `object-storage-client.*`. Certificate placement is per consumer: a co-located core/backup host does not receive the object-storage server key, and the backup host receives the client leaf in its own cert directory. Renewal/SAN drift
 handling includes the object-storage server leaf.

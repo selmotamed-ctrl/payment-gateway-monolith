@@ -499,6 +499,12 @@ system user, `/var/lib/pg-object-storage` and the vault subdirectories
 `/etc/pg-object-storage/object-storage.env` and
 `pg-object-storage-daemon.service` (Bun, `ProtectSystem=strict`,
 `PrivateTmp=true`, `ReadWritePaths` for the vault and cert directories).
-`deployObjectStorageDaemon` syncs `deploy/object-storage-daemon` to
-`/opt/pg-object-storage-daemon` and starts/restarts it only on change; the
-provisioner refuses multiple core nodes without a configured object-storage node.
+`deployObjectStorageDaemon` installs pinned Bun, syncs `deploy/object-storage-daemon` to
+`/opt/pg-object-storage-daemon` and starts/restarts it only on change. The
+provisioner creates the user first, hands only the dedicated certificate files
+to `pgobjstore`, and refuses multiple core nodes without a configured
+object-storage node. Storage roots and cert directories are restricted to
+`/var/lib/pg-object-storage/`.
+
+
+The fresh-host sequence is tested with a fake runner; the real two-host lab remains manual.

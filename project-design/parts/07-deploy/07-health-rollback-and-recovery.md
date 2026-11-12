@@ -359,3 +359,8 @@ Not covered: a real edge-to-core handshake, Nginx reload/vhost probe, PostgreSQL
 ## Security hardening (2026-11-05)
 
 The pre-migration dump is taken before migrating in both modes when the database is non-empty or unknown, uses `PGPASSFILE`, and only the newest `KEEP_RELEASES` dumps are kept (see the pipeline part). Migrations remain forward-only. Real WAL-G/bun/barman SHA256 values must be supplied before recovery tooling can be installed (GAP-023).
+
+
+## Object storage probes
+
+Every storage-only deploy checks `systemctl is-active pg-object-storage-daemon` on the storage host and `/v1/health` over mTLS from every core and backup host. A missing or unhealthy daemon fails verification.

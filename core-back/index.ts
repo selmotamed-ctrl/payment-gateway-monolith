@@ -13,6 +13,7 @@ import {
 import { defaultWorkerHealthRegistry, type WorkerHealthRegistry } from "./engine/workers/workerRuntime";
 import { env } from "./lib/env";
 import { ApiError, isApiError, toErrorEnvelope } from "./lib/error";
+import { BlobStoreUnavailableError, ObjectStorageError } from "./lib/objectStorageSdk";
 import { REPORT_ENGINE_JSON_LIMIT } from "./api/internal/adminReportEngine";
 import { reconcileReportChromeDefaults } from "./engine/reportStudio/reconcileChromeDefaults";
 
@@ -162,17 +163,23 @@ export const createApp = (options: CreateAppOptions = {}) => {
       }
 
       const requestId = request.requestId;
-      if (!isApiError(error)) {
-        const message = error instanceof Error ? error.message : "unknown error";
+      // Storage denials must keep their public meaning (403 tenant/authority,
+      // 404 missing, 409 state, 413 size, 415 MIME, 423 quarantine, 503 vault
+      // unavailable) on every domain route, not become a generic 500.
+      const mapped = error instanceof ObjectStorageError || error instanceof BlobStoreUnavailableError
+        ? new ApiError(error.httpStatus, error.code, error.message)
+        : error;
+      if (!isApiError(mapped)) {
+        const message = mapped instanceof Error ? mapped.message : "unknown error";
         console.error(`[${requestId}] ${message}`);
       }
 
-      const statusCode = isApiError(error)
-        ? error.statusCode
-        : error instanceof SyntaxError
+      const statusCode = isApiError(mapped)
+        ? mapped.statusCode
+        : mapped instanceof SyntaxError
           ? 400
           : 500;
-      response.status(statusCode).json(toErrorEnvelope(error, requestId));
+      response.status(statusCode).json(toErrorEnvelope(mapped, requestId));
     },
   );
 

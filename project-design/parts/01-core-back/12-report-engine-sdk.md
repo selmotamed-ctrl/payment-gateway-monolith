@@ -52,7 +52,7 @@ tests:
   - admin-back/test/**
 gaps:
   - `SERVER_PDF` rendering is not implemented; execution requests for it return `501 SERVER_PDF_NOT_CONFIGURED` and the client Paged.js vector path is the supported renderer.
-  - The report asset store is local filesystem (`REPORT_ASSET_STORAGE_DIR`, default `.report-assets`); object storage and signed asset delivery are not implemented.
+  - The report asset store uses the shared object-storage vault for new bundles; `REPORT_ASSET_STORAGE_DIR` (default `.report-assets`) is a legacy/local test fallback and signed asset delivery is still missing.
   - `REPORT_READONLY_DATABASE_URL` may point at a replica, but replica routing is not verified in the report executor on a live multi-host deployment.
   - Report execution audits record the actor, scope and verification hash but do not yet copy the audit row into the dedicated audit database.
   - The merchant line uses an in-process concurrency semaphore and 60 s cache per core node; a multi-node deployment needs a shared semaphore for a strict global cap.
@@ -149,7 +149,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - `report_definition_specs` (code/version, category, audience, status, latest-published flag, supported/default locales, spec JSON/SHA-256, verification report, inferred roles/authorities, conflict status, confidential AML flag, override fields, publisher);
 - `report_execution_audit` (spec, code/version, actor, locale, scoped merchant, redacted inputs, row count, duration, node, verification hash, render target).
 
-`REQUIRED_SCHEMA_VERSION` is 33. Version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. Version 33 adds the separate merchant authoring line: `merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` and `merchant_report_studio_status`, with unique `(merchant_id, code, version)` and one latest-published row per merchant/code. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
+`REQUIRED_SCHEMA_VERSION` is 37. Version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. Version 33 adds the separate merchant authoring line: `merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` and `merchant_report_studio_status`, with unique `(merchant_id, code, version)` and one latest-published row per merchant/code. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
 
 ## 7. Security invariants
 
@@ -164,7 +164,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 
 `core-back/test/reportEngineSdk/**` implements the RE-T01..RE-T22 matrix (plus extra dry-run/transcript cases). `admin-front/src/lib/reportEngineSdk/__tests__/**` covers formatting, RTL vector mirroring, chrome binding, the language prompt options, the paged-media document and the client sanitizer. The exhaustive schema suite and `phase1-mtls-and-schema.test.ts` verify schema version 27 and the four new models.
 
-## 9. Merchant reporting line (introduced in schema version 33; current schema 35)
+## 9. Merchant reporting line (introduced in schema version 33; current schema 37)
 
 The merchant line is physically separate from the staff registry. It has its own tables (`merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit`), its own host catalog (`engine/reportStudio/merchantHostConfig.ts`) and its own transcript.
 

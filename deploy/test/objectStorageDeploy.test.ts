@@ -4,6 +4,7 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { loadDeployConfig, objectStorageConfigured } from "../lib/configSchema";
+import { deployObjectStorageDaemon, uploadStorageCertificates } from "../deploy";
 import { planHosts } from "../lib/hostPlanner";
 import { buildPki, certFilesForHost } from "../lib/pkiManager";
 import { objectStorageCoreEnv } from "../lib/hostPlanner";
@@ -118,6 +119,50 @@ describe("T21 object storage deploy topology", () => {
     expect(unit).toContain("User=pgobjstore");
     expect(unit).toContain("ExecStart=/usr/local/bin/bun run src/index.ts");
     expect(unit).toContain("PrivateTmp=true");
+  });
+
+  test("a co-located object-storage host never receives core private keys", () => {
+    const config = requireConfig(`${BASE}\n${OBJECT_STORAGE.replace("10.10.14.10", "10.10.0.20")}\nOBJECT_STORAGE_SSH_KEY_PATH="~/.ssh/core"`);
+    const plan = planHosts(config);
+    const pki = buildPki({ config, directory: path.join(os.tmpdir(), `pki-dry-${Date.now()}`), dryRun: true });
+    const writes: Array<{ path: string; target: unknown }> = [];
+    const runner = {
+      run: () => undefined,
+      capture: () => "__PG_APPLY__=unchanged",
+      writeRemoteFile: (input: { path: string; target: unknown }) => {
+        writes.push(input);
+        return false;
+      },
+    } as never;
+    uploadStorageCertificates(runner, plan, pki, config, true);
+    expect(writes.some((entry) => entry.path.includes("/pg-object-storage/shared/certs/object-storage-daemon.crt"))).toBe(true);
+    expect(writes.some((entry) => entry.path.includes("/pg-object-storage/shared/certs/core-back.crt"))).toBe(false);
+    expect(writes.some((entry) => entry.path.includes("/pg-object-storage/shared/certs/object-storage-client.crt"))).toBe(false);
+    expect(writes.some((entry) => entry.path.includes("/var/www/pg-core/shared/certs/object-storage-client.crt"))).toBe(true);
+  });
+
+  test("the daemon deploy installs Bun before starting the unit", () => {
+    const config = requireConfig(`${BASE}\n${OBJECT_STORAGE}`);
+    const plan = planHosts(config);
+    const host = plan.hosts.find((candidate) => candidate.roles.includes("object-storage"))!;
+    const commands: string[] = [];
+    let synced = false;
+    const runner = {
+      run: (_target: unknown, command: string) => { commands.push(command); },
+      capture: (_target: unknown, command: string) => { commands.push(command); return "__PG_APPLY__=unchanged"; },
+      sync: () => { synced = true; return { changed: false }; },
+      writeRemoteFile: () => false,
+    } as never;
+    deployObjectStorageDaemon({ runner, config, host, forceRestart: false });
+    expect(synced).toBe(true);
+    expect(commands.some((command) => command.includes("/usr/local/bin/bun"))).toBe(true);
+    expect(commands.some((command) => command.includes("systemctl"))).toBe(true);
+  });
+
+  test("rejects root/system storage paths, v0 KEKs and an undersized client CN list", () => {
+    expect(loadDeployConfig(`${BASE}\n${OBJECT_STORAGE}\nOBJECT_STORAGE_ROOT_DIR="/"`).ok).toBe(false);
+    expect(loadDeployConfig(`${BASE}\n${OBJECT_STORAGE.replace("v1:7e1f4b9a3c6d2058e1a7b4c9d3f6082a5b1c8e4d7a0f3b6c9e2d5a8f1b4c7e03", "v0:7e1f4b9a3c6d2058e1a7b4c9d3f6082a5b1c8e4d7a0f3b6c9e2d5a8f1b4c7e03")}`).ok).toBe(false);
+    expect(loadDeployConfig(`${BASE}\n${OBJECT_STORAGE}\nOBJECT_STORAGE_ALLOWED_CLIENT_CNS="backup-client"`).ok).toBe(false);
   });
 
   test("two core nodes without a shared object storage node are refused", () => {

@@ -9,6 +9,11 @@ export interface ObjectStorageDaemonConfig {
   requireMtls: boolean
 }
 
+const bool = (value: string | undefined, fallback: boolean): boolean => {
+  if (value === undefined || value.trim() === '') return fallback
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase())
+}
+
 export function loadDaemonConfigFromEnv(overrides?: Partial<ObjectStorageDaemonConfig>): ObjectStorageDaemonConfig {
   const tlsCaCertPath = process.env.OBJECT_STORAGE_DAEMON_TLS_CA_PATH?.trim() || null
   const tlsServerCertPath = process.env.OBJECT_STORAGE_DAEMON_TLS_CERT_PATH?.trim() || null
@@ -17,6 +22,23 @@ export function loadDaemonConfigFromEnv(overrides?: Partial<ObjectStorageDaemonC
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean)
+  const configuredPaths = [tlsCaCertPath, tlsServerCertPath, tlsServerKeyPath]
+  const anyTls = configuredPaths.some(Boolean)
+  const allTls = configuredPaths.every(Boolean)
+  const explicitRequire = process.env.OBJECT_STORAGE_REQUIRE_MTLS
+  const requireMtls = overrides?.requireMtls
+    ?? (explicitRequire !== undefined ? bool(explicitRequire, true) : process.env.NODE_ENV === 'production')
+
+  if (anyTls && !allTls) {
+    throw new Error(
+      'OBJECT_STORAGE_DAEMON_TLS_INCOMPLETE: set all of OBJECT_STORAGE_DAEMON_TLS_CA_PATH, OBJECT_STORAGE_DAEMON_TLS_CERT_PATH and OBJECT_STORAGE_DAEMON_TLS_KEY_PATH, or none with OBJECT_STORAGE_REQUIRE_MTLS=false for local development',
+    )
+  }
+  if (requireMtls && !allTls && overrides?.requireMtls !== false) {
+    throw new Error(
+      'OBJECT_STORAGE_DAEMON_MTLS_REQUIRED: the shared vault must run with mTLS; supply the CA, server certificate and server key',
+    )
+  }
 
   return {
     bindHost: process.env.OBJECT_STORAGE_DAEMON_BIND_HOST ?? '0.0.0.0',
@@ -26,9 +48,7 @@ export function loadDaemonConfigFromEnv(overrides?: Partial<ObjectStorageDaemonC
     tlsServerCertPath,
     tlsServerKeyPath,
     allowedClientCns,
-    // mTLS is mandatory unless every TLS setting is absent (explicit local
-    // development only; the deploy engine always supplies the three files).
-    requireMtls: Boolean(tlsCaCertPath && tlsServerCertPath && tlsServerKeyPath),
+    requireMtls: Boolean(allTls && requireMtls),
     ...overrides,
   }
 }

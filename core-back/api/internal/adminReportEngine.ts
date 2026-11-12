@@ -707,20 +707,41 @@ async function storeAssets(
 
   const bundleId = randomUUID();
   const storage = await host.assetStoragePort.storeAssetBundle({ bundleId, files });
-  const row = await client.reportAssetBundle.upsert({
-    where: { bundleSha256 },
-    create: {
-      id: bundleId,
-      bundleSha256,
-      storageKey: storage.bundleStorageKey,
-      storageObjectId: storage.storageObjectId ?? null,
-      totalBytes,
-      fileCount: files.length,
-      manifestJson: manifest,
-      uploadedByUserId: actor.userId,
-    },
-    update: {},
-  });
+  let row: Awaited<ReturnType<typeof client.reportAssetBundle.upsert>>;
+  try {
+    row = await client.$transaction(async (tx) => {
+      const created = await tx.reportAssetBundle.upsert({
+        where: { bundleSha256 },
+        create: {
+          id: bundleId,
+          bundleSha256,
+          storageKey: storage.bundleStorageKey,
+          storageObjectId: storage.storageObjectId ?? null,
+          totalBytes,
+          fileCount: files.length,
+          manifestJson: manifest,
+          uploadedByUserId: actor.userId,
+        },
+        update: {},
+      });
+      if (created.storageObjectId) {
+        await host.assetStoragePort.bindAssetBundle?.({
+          bundleId: created.id,
+          storageObjectId: created.storageObjectId,
+          actorId: actor.userId,
+        }, tx);
+      }
+      return created;
+    });
+  } catch (error) {
+    if (storage.storageObjectId) await host.assetStoragePort.discardAssetBundle?.(storage.storageObjectId);
+    throw error;
+  }
+  // The content-addressed upsert may have selected a winner created by another
+  // request. The losing staged copy is not referenced by any row.
+  if (storage.storageObjectId && row.storageObjectId !== storage.storageObjectId) {
+    await host.assetStoragePort.discardAssetBundle?.(storage.storageObjectId);
+  }
   return {
     bundleId: row.id,
     assetBundleId: row.id,

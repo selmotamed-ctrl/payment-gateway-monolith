@@ -103,6 +103,8 @@ Request logging writes console lines with a separate short id and an `http_acces
 
 ## 3. Database and storage
 
+The shared object & asset storage engine (schema v37) stores new uploads in the mTLS object vault (`OBJECT_STORAGE_DAEMON_URL`). A production process without the vault stays bootable but fails closed with `503 STORAGE_UNAVAILABLE`; it never falls back to local disk. Raw binary uploads are captured before JSON parsing with per-route limits. See `project-design/parts/01-core-back/13-object-storage.md`.
+
 ### 3.1 PostgreSQL 18 contract
 
 - Engine: PostgreSQL 18. The Prisma datasource is `provider = "postgresql"`.
@@ -113,7 +115,7 @@ Request logging writes console lines with a separate short id and an `http_acces
 - The migration order and files are generated in [`../project-design/appendices/migration-catalog.md`](../project-design/appendices/migration-catalog.md).
 - The committed history is forward-only: baseline schema, storage-engine indexes, CQRS read models and storage hardening. There are no down migrations. Recovery is restore/PITR or a new forward migration.
 - `journal_lines` is monthly range-partitioned by `created_at`; the primary key includes `created_at`. The deploy engine installs a daily partition-maintenance cron. Elsewhere, run `SELECT ensure_journal_line_partitions(18)` on a schedule.
-- Schema version 35 is required (latest migrations `20261111120000_report_engine_versioning` and `20261111130000_merchant_report_chrome`; the automation, report-engine SDK, regulatory reporting and merchant-line migrations are applied before them). `ensureSchemaVersion()` is called by the baseline seeder, the Fake Rails seeder and the synthetic seeder, but not by the HTTP start path. A stale database can boot and fail later at query time.
+- Schema version 37 is required (latest migration `20261113090000_storage_engine_hardening`; the automation, report-engine SDK, regulatory reporting, merchant-line and object-storage migrations are applied before it). `ensureSchemaVersion()` is called by the baseline seeder, the Fake Rails seeder and the synthetic seeder, but not by the HTTP start path. A stale database can boot and fail later at query time.
 
 #### Query and indexing rules for the ledger tables
 

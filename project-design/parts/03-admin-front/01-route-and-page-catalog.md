@@ -328,7 +328,7 @@ All three routes are gated by `aml.read_confidential` at the edge/UI; writes are
 
 | Route | Name | Page | Authorities |
 | :--- | :--- | :--- | :--- |
-| `/system/object-storage` | `SystemObjectStorage` | `pages/system/object-storage/index.tsx` | `system:storage:read`, `system:storage:admin`, `system:storage:legal-hold` |
+| `/system/object-storage` | `SystemObjectStorage` | `pages/system/object-storage/index.tsx` | `system:storage:read`, `system:storage:admin`, `system:storage:legal-hold` | Operations |
 
-The nav entry is under System ("Object & Asset Storage") and the route-authority
-aliases normalize the colon names to `system.storage` for the UI guard.
+The nav entry is under **Operations** ("Object & Asset Storage") and the route-authority
+aliases normalize the colon names to `system.storage` for the UI guard. The page has server-paginated/filtered object and access-log tables, a real quarantine query, a full detail drawer, legal-hold approval requests and maintenance confirmation/results.

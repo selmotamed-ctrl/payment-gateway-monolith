@@ -273,6 +273,7 @@ export const objectStorageCoreEnv = (config: DeployConfig): Record<string, strin
     OBJECT_STORAGE_ACTIVE_KEK_VERSION: String(config.OBJECT_STORAGE_ACTIVE_KEK_VERSION),
     OBJECT_STORAGE_TRASH_RETENTION_DAYS: String(config.OBJECT_STORAGE_TRASH_RETENTION_DAYS),
     OBJECT_STORAGE_GC_GRACE_HOURS: String(config.OBJECT_STORAGE_GC_GRACE_HOURS),
+    OBJECT_STORAGE_ALLOW_INSECURE_HTTP: config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP ? "true" : "false",
   };
   if (!objectStorageConfigured(config)) return base;
   const scheme = config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP ? "http" : "https";

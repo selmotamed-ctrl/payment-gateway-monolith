@@ -209,27 +209,50 @@ async function storeMerchantAssets(params: {
   });
   if (existing) return existing.id;
   const bundleId = randomUUID();
-  const storage = await host.assetStoragePort.storeAssetBundle({ bundleId, files });
-  const row = await client.merchantReportAssetBundle.upsert({
-    where: { merchantId_bundleSha256: { merchantId: params.merchantId, bundleSha256 } },
-    create: {
-      id: bundleId,
-      merchantId: params.merchantId,
-      bundleSha256,
-      storageKey: storage.bundleStorageKey,
-      storageObjectId: storage.storageObjectId ?? null,
-      totalBytes: files.reduce((sum, file) => sum + file.buffer.byteLength, 0),
-      fileCount: files.length,
-      manifestJson: files.map((file) => ({
-        fileName: file.relativePath,
-        mimeType: file.mimeType,
-        sha256: file.sha256,
-        bytes: file.buffer.byteLength,
-      })) as never,
-      uploadedByUserId: params.userId,
-    },
-    update: {},
+  const storage = await host.assetStoragePort.storeAssetBundle({
+    bundleId,
+    ownerMerchantId: params.merchantId,
+    files,
   });
+  let row: Awaited<ReturnType<typeof client.merchantReportAssetBundle.upsert>>;
+  try {
+    row = await client.$transaction(async (tx) => {
+      const created = await tx.merchantReportAssetBundle.upsert({
+        where: { merchantId_bundleSha256: { merchantId: params.merchantId, bundleSha256 } },
+        create: {
+          id: bundleId,
+          merchantId: params.merchantId,
+          bundleSha256,
+          storageKey: storage.bundleStorageKey,
+          storageObjectId: storage.storageObjectId ?? null,
+          totalBytes: files.reduce((sum, file) => sum + file.buffer.byteLength, 0),
+          fileCount: files.length,
+          manifestJson: files.map((file) => ({
+            fileName: file.relativePath,
+            mimeType: file.mimeType,
+            sha256: file.sha256,
+            bytes: file.buffer.byteLength,
+          })) as never,
+          uploadedByUserId: params.userId,
+        },
+        update: {},
+      });
+      if (created.storageObjectId) {
+        await host.assetStoragePort.bindAssetBundle?.({
+          bundleId: created.id,
+          storageObjectId: created.storageObjectId,
+          actorId: params.userId,
+        }, tx);
+      }
+      return created;
+    });
+  } catch (error) {
+    if (storage.storageObjectId) await host.assetStoragePort.discardAssetBundle?.(storage.storageObjectId);
+    throw error;
+  }
+  if (storage.storageObjectId && row.storageObjectId !== storage.storageObjectId) {
+    await host.assetStoragePort.discardAssetBundle?.(storage.storageObjectId);
+  }
   return row.id;
 }
 

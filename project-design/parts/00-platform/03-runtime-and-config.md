@@ -43,7 +43,7 @@ tests:
   - merchant-back/test/security-regressions.test.ts
   - checkout-back/test/security-regressions.test.ts
 gaps:
-  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 35.
+  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 37.
 - `merchant_reports.policy` (Platform Settings, `settings:write`) is the staff-managed merchant reporting switch. `enabled` controls the runner/Studio; `assetsEnabled` controls merchant asset bundles. Missing values fall back to enabled/allowed.
   - LOG_LEVEL is declared but not used by the console or access logger.
   - WORKER_CONCURRENCY and WORKER_REQUEST_TIMEOUT_MS are accepted but not passed to the production worker runtime.
@@ -147,10 +147,11 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 
 | Key | Default | Consumer |
 | :--- | :--- | :--- |
-| `OBJECT_STORAGE_DAEMON_URL` | unset; required in production or when `CLUSTER_CORE_NODE_COUNT > 1` | `RemoteMtlsBlobStore` (all core nodes) |
+| `OBJECT_STORAGE_DAEMON_URL` | unset; configure the shared node in production. Without it a production core boots but every storage operation returns `503 STORAGE_UNAVAILABLE`; multi-node refuses to boot. | `RemoteMtlsBlobStore` (all core nodes) |
 | `OBJECT_STORAGE_TLS_CA_PATH` / `_CLIENT_CERT_PATH` / `_CLIENT_KEY_PATH` | unset | client mTLS |
 | `OBJECT_STORAGE_DAEMON_TIMEOUT_MS` | `30000` (max 120000) | blob requests |
-| `OBJECT_STORAGE_ROOT_DIR` | `/tmp/pg-object-storage-dev` (dev) | `FsBlobStore` fallback |
+| `OBJECT_STORAGE_ROOT_DIR` | `/tmp/pg-object-storage-dev` (dev) | `FsBlobStore` fallback (development only; production never writes local disk) |
+| `OBJECT_STORAGE_ALLOW_INSECURE_HTTP` | `false` | explicit local-test-only HTTP opt-in; refused in production deploy validation |
 | `OBJECT_STORAGE_KEK_KEYRING` | unset (dev derives from `DATABASE_URL`) | DEK wrap/unwrap; format `v1:<64 hex>[,v2:<64 hex>]` |
 | `OBJECT_STORAGE_ACTIVE_KEK_VERSION` | `1` | new DEK wraps |
 | `OBJECT_STORAGE_TRASH_RETENTION_DAYS` | `7` | trash purge |
@@ -160,7 +161,7 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `WORKER_OBJECT_STORAGE_INTERVAL_MS` | `60000` | maintenance worker |
 | `WORKER_OBJECT_STORAGE_BATCH_SIZE` | `25` | AV/scrub batch |
 
-The core refuses to boot (`OBJECT_STORAGE_DAEMON_URL_REQUIRED`) when
+A production core without a configured daemon stays bootable with an unavailable store; storage-backed routes return 503. A multi-node core refuses to boot (`OBJECT_STORAGE_DAEMON_URL_REQUIRED`) when
 `NODE_ENV=production` or the core-node count is above one and no daemon URL is
 configured.
 
@@ -263,13 +264,13 @@ The storage engine is constructed before `listen`, but after the server object i
 
 ### 3.5 Schema version check
 
-`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 32`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
+`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 37`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
 
 ```sql
 SELECT "version" FROM "schema_versions" WHERE "id" = 1
 ```
 
-and throws if the version is not 25. The check is invoked by `prisma/seed.ts`, `prisma/seedFakeRails.ts` and `prisma/syntheticSeeder/index.ts`. It is **not** invoked by `core-back/index.ts`, so the API can boot against a stale schema and fail later at query time. Migration deployment is an external deploy step (`bunx prisma migrate deploy`).
+and throws if the version is not 37. The check is invoked by `prisma/seed.ts`, `prisma/seedFakeRails.ts` and `prisma/syntheticSeeder/index.ts`. It is **not** invoked by `core-back/index.ts`, so the API can boot against a stale schema and fail later at query time. Migration deployment is an external deploy step (`bunx prisma migrate deploy`).
 
 ### 3.6 Worker composition
 
@@ -366,7 +367,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 5. **The raw body is preserved before JSON parsing.** Webhook signatures and uploaded document bytes must be exact.
 6. **A request id is always returned.** Invalid or missing client values are replaced with a UUID.
 7. **Redis is never authoritative for money.** When Redis is unavailable the cache/velocity adapter falls back to memory and invalidation stays local.
-8. **Schema version 11 is the contract.** Seeders enforce it; migrations are deployed separately.
+8. **Schema version 37 is the contract.** Seeders enforce it; migrations are deployed separately.
 9. **Workers are stateless across nodes.** Coordination is by database claims, not by an in-memory scheduler.
 10. **The admin UI flags are deployment-owned.** A source build uses the frontend defaults; a deployed build receives the deploy engine's values.
 
@@ -395,7 +396,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 | Backup daemon | No | Backup routes return 503 |
 | Notification webhook | No | Log transport reports SENT |
 | Fake Rails | No | Only required by synthetic seeding/seeding routes |
-| Schema version 11 | Yes at seed time | Seeders fail; server boot does not check |
+| Schema version 37 | Yes at seed time | Seeders fail; server boot does not check |
 
 ### 5.3 Config consumers outside the env proxy
 
@@ -533,7 +534,7 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 
 ## 11. Security hardening config changes (2026-11-05)
 
-- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 32`.
+- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 37`.
 - Edges: `TRUSTED_PROXY_CIDRS` default loopback only; `MAX_INBOUND_BODY_BYTES` default 1 MiB; `CORS_ALLOWED_ORIGINS` (no CORS headers on admin/merchant when unset); newly wired rate-limit window envs `AUTH_/ADMIN_/API_/EXTERNAL_/PAY_/INBOUND_RATE_LIMIT_WINDOW_MS`; `CORE_MAX_RESPONSE_BYTES` (64 MiB), `CORE_TOTAL_DEADLINE_MS` (300000), `MAX_STREAMS_PER_IP` (5), `ADMIN_AUTHORITY_HINTS` (default empty, restrict-only), merchant `TOKEN_MAX_SCOPES`, `TOKEN_MAX_TTL_DAYS`, `TOKEN_DEFAULT_TTL_DAYS`, `UPLOAD_RATE_LIMIT_MAX`, admin `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
 - Frontends: `VITE_CHECKOUT_BASE_URL`, `VITE_IDENTITY_HOSTS` (merchant), `VITE_CHECKOUT_ORIGIN` (fake-rails). Real `.env` files in the frontends are no longer tracked; copy `.env.example` to `.env` on a fresh clone.
 - Deploy and daemon keys are listed in the deploy parts.

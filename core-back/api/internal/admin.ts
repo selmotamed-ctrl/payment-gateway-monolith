@@ -4604,6 +4604,23 @@ const approvalSubjectContext = async (subjectType: string, subjectId: string): P
       });
       return row ? { contextType: "JOIN_REQUEST", ...row } : null;
     }
+    case "STORAGE_LEGAL_HOLD": {
+      const row = await client.storageObject.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          namespace: true,
+          status: true,
+          originalFilename: true,
+          legalHold: true,
+          legalHoldReason: true,
+          legalHoldByAdminId: true,
+          legalHoldPlacedAt: true,
+          retainUntil: true,
+        },
+      });
+      return row ? { contextType: "STORAGE_LEGAL_HOLD", ...row } : null;
+    }
     case "ADJUSTMENT": {
       const row = await client.adjustment.findUnique({
         where: { id: subjectId },
@@ -9429,6 +9446,25 @@ router.patch("/aml/reports/:id/payload", async (request: Request, response: Resp
   await client.$transaction(async (tx) => {
     await tx.regulatoryReport.update({ where: { id }, data: { payloadCiphertext, payloadSha256 } });
     const outputTable = (tx as unknown as Record<string, any>).regulatoryReportOutput;
+    if (typeof outputTable?.findMany === "function") {
+      const outputs = await outputTable.findMany({
+        where: { reportId: id, supersededAt: null },
+        select: { id: true, storageObjectId: true },
+      }) as Array<{ id: string; storageObjectId: string | null }>;
+      if (outputs.some((row) => row.storageObjectId)) {
+        const objectStorage = getObjectStorageSdk();
+        for (const row of outputs) {
+          if (!row.storageObjectId) continue;
+          await objectStorage.routeClient.release(tx as never, {
+            objectId: row.storageObjectId,
+            holderType: "REG_REPORT_OUTPUT",
+            holderId: row.id,
+            actorId: actor.userId,
+            reason: "REGULATORY_REPORT_PAYLOAD_UPDATED",
+          });
+        }
+      }
+    }
     if (typeof outputTable?.updateMany === "function") {
       await outputTable.updateMany({
         where: { reportId: id, supersededAt: null },
@@ -15507,6 +15543,46 @@ router.get("/assets/:id/content", async (request: Request, response: Response) =
   response.send(Buffer.from(stored.bytes));
 });
 
+router.delete("/assets/:id", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const asset = await client.asset.findUnique({ where: { id } });
+  if (!asset) throw new ApiError(404, "ASSET_NOT_FOUND", "The asset does not exist");
+  const actor = actorFromRequest(request);
+  await client.$transaction(async (tx) => {
+    if (asset.storageObjectId) {
+      const railLock = await tx.storageObjectLock.findFirst({
+        where: { objectId: asset.storageObjectId, holderType: "RAIL_LOGO", releasedAt: null },
+      });
+      if (railLock) {
+        throw new ApiError(409, "ASSET_IN_USE", "The asset is still assigned to a payment rail");
+      }
+    }
+    await tx.asset.delete({ where: { id: asset.id } });
+    if (asset.storageObjectId) {
+      await getObjectStorageSdk().routeClient.release(tx as never, {
+        objectId: asset.storageObjectId,
+        holderType: "CATALOG_ASSET",
+        holderId: asset.id,
+        actorId: actor.userId,
+        reason: "CATALOG_ASSET_DELETED",
+      });
+    }
+  });
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "ASSET_DELETED",
+      entityType: "ASSET",
+      entityId: asset.id,
+      beforeJson: { name: asset.name, mime: asset.mime, storageObjectId: asset.storageObjectId },
+      afterJson: {},
+    },
+  });
+  response.json({ id: asset.id, deleted: true });
+});
+
 const reconciliationSourceRow = (source: Record<string, any>) => {
   const parser = source.parserConfig && typeof source.parserConfig === "object" && !Array.isArray(source.parserConfig)
     ? source.parserConfig as Record<string, unknown>
@@ -15676,6 +15752,8 @@ const reconciliationRunRow = (run: Record<string, any>) => {
       ? `${run.statementSource.gateway.name} · ${run.statementSource.type}`
       : run.statementSource?.type ?? "",
     fileName: run.fileName ?? "—",
+    fileHash: run.fileHash ?? null,
+    storageObjectId: run.storageObjectId ?? null,
     state: run.ingestedAt ? "COMPLETED" : "PROCESSING",
     totalRows,
     matchedRows,
@@ -15861,6 +15939,45 @@ router.get("/reconciliation/runs/:id", async (request: Request, response: Respon
       itemResultFilter: resultFilter || null,
     },
   });
+});
+
+router.get("/reconciliation/runs/:id/statement", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["reconciliation:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const run = await client.reconciliationRun.findUnique({ where: { id } });
+  if (!run) throw new ApiError(404, "RECONCILIATION_RUN_NOT_FOUND", "The reconciliation run does not exist");
+  if (!run.storageObjectId) {
+    throw new ApiError(404, "RECONCILIATION_FILE_MISSING", "The original statement is not available in the shared vault");
+  }
+  const actor = actorFromRequest(request);
+  const stored = await getObjectStorageSdk().routeClient.readAuthorized({
+    objectId: run.storageObjectId,
+    actor: {
+      actorType: "ADMIN",
+      actorId: actor.userId,
+      authorities: request.principal?.authorities ?? [],
+      ipAddress: request.ip ?? null,
+    },
+    holderContext: { holderType: "RECON_RUN", holderId: run.id },
+  });
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "RECONCILIATION_STATEMENT_DOWNLOADED",
+      entityType: "RECONCILIATION_RUN",
+      entityId: run.id,
+      beforeJson: {},
+      afterJson: { storageObjectId: run.storageObjectId, sha256: stored.sha256Hex },
+    },
+  });
+  const fileName = (run.fileName ?? stored.originalFilename ?? "statement").replace(/["\r\n]/g, "_");
+  response.setHeader("Content-Type", stored.detectedMimeType);
+  response.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  response.setHeader("X-Content-SHA256", stored.sha256Hex);
+  response.setHeader("Cache-Control", "private, no-store");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.send(Buffer.from(stored.bytes));
 });
 
 router.get("/reconciliation/runs/:id/export", async (request: Request, response: Response) => {

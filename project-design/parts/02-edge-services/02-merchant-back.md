@@ -340,3 +340,8 @@ The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` an
 - `POST /catalog/:code/execute` to the merchant execute route.
 
 The edge validates the catalog query shape and the public execute shape (`inputs`, `locale`, `renderMode`). Core enforces the merchant authority, audience scope, forced merchant ID and report safety. A client-supplied merchant ID is rejected by the strict edge schema and would be overwritten by core even if it reached it.
+
+
+## Dispute attachments
+
+`GET/POST /api/v1/merchant/disputes/:id/attachments`, `GET .../:attachmentId/content` and `DELETE .../:attachmentId` proxy the shared-vault evidence routes. Uploads use the raw-byte forwarder; content uses the streaming proxy. Downloads are refused by core while the object is quarantined.

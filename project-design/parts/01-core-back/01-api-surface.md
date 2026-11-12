@@ -240,8 +240,8 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `POST /rails`, `PATCH /rails/:id`, `PUT /rails/:id/fields` | `gateway:write` |
 | `GET /routes`, `/export`, `/summary`, `/summary/export`, `GET /routes/:id` | `gateway:read` |
 | `POST /routes`, `PATCH /routes/:id`, `POST /routes/:id/state` | `gateway:write` |
-| `GET /assets`, `GET /assets/:id` | `gateway:read` |
-| `POST /assets` | `gateway:write` |
+| `GET /assets`, `GET /assets/:id`, `GET /assets/:id/content` | `gateway:read` |
+| `POST /assets`, `POST /assets/upload`, `DELETE /assets/:id` | `gateway:write` |
 
 #### Reconciliation
 
@@ -717,3 +717,6 @@ Core adds these internal admin routes under `/internal/admin` (all confidential 
 - Filing adapter `POST`, `PATCH` and `DELETE` now return 202 with `approvalRequestId`; the checker executes `FILING_ADAPTER` through `GovernanceExecution`. `GET` responses redact secret-looking `configJson` keys.
 - `POST /aml/reports/:id/file` creates a PENDING `ExternalSubmission` before dispatch, blocks duplicate PENDING/SUBMITTED attempts, records failure details, and passes the authoritative status change through the normal submission gate. Manual submissions create a MANUAL adapter and submission history.
 - Template upload/update URLs reject non-XLSX schemas and any unsafe/invalid workbook; DOCX validation/simulation uses the narrative schema renderer; clone copies the XLSX template binding.
+
+
+Object-storage routes include the admin summary/object/access-log/legal-hold/maintenance surface, dispute attachments (admin and merchant), AML case evidence, reconciliation statement download, and brand-asset upload/content/delete. The admin object list accepts `page`, `pageSize`, `namespace`, `status`, `statuses`, `bucket`, `ownerMerchantId`, `legalHold`, `sha256Hex`, `search`, `sortKey` and `sortDirection`. Legal-hold lift returns `202` for a second checker; place is immediate.

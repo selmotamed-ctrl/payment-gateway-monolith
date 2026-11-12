@@ -17,7 +17,7 @@ Audience: IT operations, security administration, compliance.
    OBJECT_STORAGE_ACTIVE_KEK_VERSION="1"
    ```
 
-2. Run `./deploy/deploy.sh --update --only=object-storage`. The engine:
+2. On a fresh host run a full/auto bootstrap (or `--fresh --only=object-storage`), then `./deploy/deploy.sh --update --only=object-storage,core,backup` so Bun, the firewall, the daemon and the core/backup environments converge. The engine:
    - creates the `pgobjstore` service user and the vault directories;
    - mints `object-storage-daemon` and `object-storage-client` certificates;
    - installs `/opt/pg-object-storage-daemon`, the environment file and the
@@ -43,7 +43,7 @@ host, without `OBJECT_STORAGE_NODE` fail validation with
 
 ## 2. Daily checks
 
-- Admin portal → **System → Object & Asset Storage**.
+- Admin portal → **Operations → Object & Asset Storage**.
 - Health tab: vault mode, free space, KEK version, scrub errors, active locks.
 - Quarantine tab: uploads waiting for AV older than 30 minutes raise a P2 case
   (`quarantine-stuck`). Check `WORKER_KYB_SCAN_*` and the ClamAV daemon.
@@ -71,20 +71,23 @@ host, without `OBJECT_STORAGE_NODE` fail validation with
    OBJECT_STORAGE_ACTIVE_KEK_VERSION="2"
    ```
 
-3. Deploy the core nodes (`--update --only=core`). New uploads immediately use
-   `v2`; existing objects still unwrap with `v1`.
+3. Deploy core **and** backup (`--update --only=core,backup`). New uploads
+   immediately use `v2`; existing objects still unwrap with `v1`, and the backup
+   daemon must escrow the new key version before the next backup.
 4. In **Object & Asset Storage → Health**, run **KEK Rewrap** (or wait for the
    maintenance worker). It unwraps each DEK with its recorded version and
    rewraps it with `v2`; `.v1.enc` files are unchanged.
-5. Verify the summary shows `Active KEK version = 2` and that the KEK rotation
-   index has no remaining old rows. Only then may `v1` be removed from the
-   keyring on a later deploy.
+5. Verify the summary shows `Active KEK version = 2` and run
+   `SELECT kek_key_version, count(*) FROM storage_objects GROUP BY 1;` to confirm
+   no row still uses an old version. Only then may `v1` be removed from the
+   keyring on a later deploy. Per-version backup escrows keep older backups
+   decryptable.
 
 **Never remove a key version that still has objects.**
 
 ## 5. Restore a file from soft trash
 
-`GcWorker` moves a purged object's ciphertext to
+The object-storage maintenance worker moves the claimed object's ciphertext to
 `OBJECT_STORAGE_ROOT_DIR/.trash/YYYY-MM-DD/{bucket}/{storageKey}`.
 
 1. Locate the file (the StorageObject detail page shows the storage key; the
@@ -102,8 +105,9 @@ host, without `OBJECT_STORAGE_NODE` fail validation with
 2. Restore the object store from the same backup run:
    - the repository contains `object-blobs/{HOT|COLD}/{storageKey}` and
      `object-storage/kek-escrow.enc`;
-   - copy `object-blobs/*` back to the vault (or restore the whole vault disk
-     from the backup host);
+   - copy `object-blobs/HOT/*` back to the vault's `hot/` directory and
+     `object-blobs/COLD/*` to `cold/` (or restore the whole vault disk from the
+     backup host);
    - the escrowed keyring decrypts the blobs when the production keyring is
      unavailable; treat it as a secret.
 3. Run a restore drill; the report must include the `objectStorage` check
@@ -125,12 +129,11 @@ host, without `OBJECT_STORAGE_NODE` fail validation with
 | `av-scan` | Generic EICAR/active-content scan of non-KYB quarantine uploads. | Yes. |
 
 Jobs are available to `system:storage:admin` in the portal and via
-`POST /api/v1/admin/object-storage/maintenance/<job>`.
+`POST /api/v1/admin/object-storage/maintenance/<job>`. They are cluster-singleton work; the portal asks for confirmation and shows the result. A legal-hold lift is a separate approval request.
 
 ## 8. Incident: vault unreachable
 
-Symptoms: uploads/downloads fail; Platform Monitor opens `object-storage/health`
-(P1); `/health` probing fails.
+Symptoms: uploads/downloads fail; Platform Monitor opens `platform.object_storage:health` (P1); `/health` probing fails.
 
 1. `systemctl status pg-object-storage-daemon` on the object host;
    `journalctl -u pg-object-storage-daemon -n 100`.

@@ -11,10 +11,13 @@ import {
   toCoreAmlRule,
 } from "../contract";
 import { coreForward, coreForwardRaw } from "../forward";
+import { forwardUpload, uploadGuards, uploadSingle } from "../upload";
+import { ApiError, parseOrThrow } from "../../lib/error";
 
 const router = express.Router();
 
 const idParamsSchema = z.object({ id: zIdentifier });
+const evidenceParamsSchema = z.object({ id: zIdentifier, evidenceId: zIdentifier });
 
 // Confidential AML routes: the role names are the canonical check, the aml authority
 // strings are the equivalent claim core accepts for the same resources.
@@ -221,6 +224,44 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/aml/cases/summary/export",
+  }),
+);
+
+router.get(
+  "/cases/:id/evidence",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/aml/cases/${encodeURIComponent(context.params.id ?? "")}/evidence`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+
+router.post(
+  "/cases/:id/evidence",
+  ...uploadGuards,
+  uploadSingle("file"),
+  async (req, res): Promise<void> => {
+    const { id } = parseOrThrow(idParamsSchema, req.params);
+    if (!req.file) throw new ApiError(400, "UPLOAD_REQUIRED", "An evidence file is required");
+    await forwardUpload(req, res, {
+      path: `/internal/admin/aml/cases/${encodeURIComponent(id)}/evidence`,
+      fileField: "file",
+      metadata: {
+        label: (typeof req.body?.label === "string" ? req.body.label : req.file.originalname).slice(0, 255),
+        evidenceType: typeof req.body?.evidenceType === "string" ? req.body.evidenceType : "DOCUMENT",
+        notes: typeof req.body?.notes === "string" ? req.body.notes : undefined,
+      },
+      status: 201,
+    });
+  },
+);
+
+router.get(
+  "/cases/:id/evidence/:evidenceId/content",
+  coreForwardRaw({
+    method: "GET",
+    path: (context) => `/internal/admin/aml/cases/${encodeURIComponent(context.params.id ?? "")}/evidence/${encodeURIComponent(context.params.evidenceId ?? "")}/content`,
+    paramsSchema: evidenceParamsSchema,
   }),
 );
 

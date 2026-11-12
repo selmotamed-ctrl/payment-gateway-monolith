@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import type { ArtifactRepository } from "./artifactStore";
 import { buildPsqlCommand } from "./backupEngine";
 import type { BackupDaemonConfig } from "./config";
@@ -25,6 +25,9 @@ import { decryptPgos1ToBuffer, InMemoryKeyProvider } from "./shared/crypto";
 
 export const OBJECT_BLOB_PREFIX = "object-blobs";
 export const OBJECT_STORAGE_ESCROW_KEY = "object-storage/kek-escrow.enc";
+/** Per-version escrow keeps old backups decryptable after a version is removed from the live keyring. */
+export const objectStorageEscrowKeyForVersion = (version: number): string =>
+  `object-storage/kek-escrow-v${version}.enc`;
 const ESCROW_MAGIC = Buffer.from("PGOSESC1", "ascii");
 const ESCROW_IV_BYTES = 12;
 const ESCROW_TAG_BYTES = 16;
@@ -89,6 +92,7 @@ const blobStoreFor = (config: BackupDaemonConfig): BlobStore | null => {
     // a multi-node deployment always supplies OBJECT_STORAGE_DAEMON_URL.
     nodeEnv: config.OBJECT_STORAGE_DAEMON_URL ? "production" : "development",
     coreNodeCount: 1,
+    allowInsecureHttp: config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP,
   });
 };
 
@@ -181,17 +185,6 @@ export const fetchActiveStorageObjects = async (
   return parsed as ActiveStorageObject[];
 };
 
-const repositoryHas = async (repository: ArtifactRepository, key: string): Promise<boolean> => {
-  for (const store of repository.stores) {
-    try {
-      if (await store.exists(key)) return true;
-    } catch {
-      // an unreachable tier is retried by the parity check on the next tier
-    }
-  }
-  return false;
-};
-
 export const syncObjectStorageBackup = async (input: {
   config: BackupDaemonConfig;
   repository: ArtifactRepository;
@@ -247,41 +240,52 @@ export const syncObjectStorageBackup = async (input: {
       if (!blob.relPath.endsWith(".v1.enc")) continue;
       scannedBlobs++;
       const key = objectBlobKey(bucket, blob.relPath);
-      if (await repositoryHas(repository, key)) continue;
+      const missing = await repository.missingStores(key);
+      if (missing.length === 0) continue;
       const bytes = await blobStore.readBytes(bucket, blob.relPath);
-      const actual = createHash("sha256").update(bytes).digest("hex");
-      // The repository stores the ciphertext as-is (already authenticated by
-      // pgos1); this checksum guards the transport copy.
-      void actual;
-      await repository.putBuffer(key, bytes);
+      // Repair every tier independently: a blob present only on the local tier
+      // must still be copied to S3/off-site.
+      for (const storeId of missing) {
+        await repository.putBuffer(key, bytes, [storeId]);
+      }
       copiedBlobs++;
     }
   }
 
+  const requiredIds = new Set(repository.requiredStoreIds);
   const missingActive: string[] = [];
-  for (const object of activeObjects) {
-    const key = objectBlobKey(object.bucket, object.storageKey);
-    if (!(await repositoryHas(repository, key))) missingActive.push(object.id);
-  }
-  if (missingActive.length > 0) {
-    throw new Error(
-      `OBJECT_STORAGE_BACKUP_PARITY_ERROR: ${missingActive.length} ACTIVE storage object(s) have no blob in the backup repository (first: ${missingActive.slice(0, 5).join(", ")})`,
-    );
+  if (config.OBJECT_STORAGE_VERIFY_PARITY) {
+    for (const object of activeObjects) {
+      const key = objectBlobKey(object.bucket, object.storageKey);
+      const missing = (await repository.missingStores(key)).filter((id) => requiredIds.has(id));
+      if (missing.length > 0) missingActive.push(object.id);
+    }
+    if (missingActive.length > 0) {
+      throw new Error(
+        `OBJECT_STORAGE_BACKUP_PARITY_ERROR: ${missingActive.length} ACTIVE storage object(s) have no blob in the backup repository (first: ${missingActive.slice(0, 5).join(", ")})`,
+      );
+    }
   }
 
   const keyringProvider = parseObjectStorageKeyring(config);
-  const keyringJson = JSON.stringify({
-    activeVersion: keyringProvider.getActiveVersion(),
-    keys: Object.fromEntries(
-      config.OBJECT_STORAGE_KEK_KEYRING.split(",")
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-        .map((entry) => {
-          const [versionPart, hexPart] = entry.split(":");
-          return [versionPart!.replace(/^v/i, ""), hexPart!.toLowerCase()];
-        }),
-    ),
-  });
+  const keys = Object.fromEntries(
+    config.OBJECT_STORAGE_KEK_KEYRING.split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const [versionPart, hexPart] = entry.split(":");
+        return [versionPart!.replace(/^v/i, ""), hexPart!.toLowerCase()];
+      }),
+  );
+  // Keep one escrow per version (a later rotation must not make an older
+  // backup undecryptable) plus the legacy single-file key for compatibility.
+  for (const [version, hex] of Object.entries(keys)) {
+    await repository.putBuffer(
+      objectStorageEscrowKeyForVersion(Number(version)),
+      sealKekEscrow(config.BACKUP_ENCRYPTION_KEY_HEX, JSON.stringify({ activeVersion: Number(version), keys: { [version]: hex } })),
+    );
+  }
+  const keyringJson = JSON.stringify({ activeVersion: keyringProvider.getActiveVersion(), keys });
   await repository.putBuffer(
     OBJECT_STORAGE_ESCROW_KEY,
     sealKekEscrow(config.BACKUP_ENCRYPTION_KEY_HEX, keyringJson),
@@ -324,40 +328,56 @@ export const runObjectStorageDrill = async (input: {
   const rows = JSON.parse(sample.stdout.trim() || "[]") as ActiveStorageObject[];
   if (rows.length === 0) return { ok: true, detail: "no ACTIVE storage objects to sample", sampled: 0 };
 
-  const escrow = await repository.getBuffer(OBJECT_STORAGE_ESCROW_KEY);
-  if (!escrow) {
-    return { ok: false, detail: "the backup repository has no escrowed KEK keyring", sampled: 0 };
-  }
-  const escrowed = JSON.parse(openKekEscrow(config.BACKUP_ENCRYPTION_KEY_HEX, escrow)) as {
-    activeVersion: number;
-    keys: Record<string, string>;
+  const keyrings = new Map<number, InMemoryKeyProvider>();
+  const keyringFor = async (version: number): Promise<InMemoryKeyProvider> => {
+    const cached = keyrings.get(version);
+    if (cached) return cached;
+    const perVersion = objectStorageEscrowKeyForVersion(version);
+    const escrow = await repository.getBufferVerified(perVersion, (value) => {
+      JSON.parse(openKekEscrow(config.BACKUP_ENCRYPTION_KEY_HEX, value));
+    }) ?? await repository.getBufferVerified(OBJECT_STORAGE_ESCROW_KEY, (value) => {
+      const parsed = JSON.parse(openKekEscrow(config.BACKUP_ENCRYPTION_KEY_HEX, value)) as { keys?: Record<string, string> };
+      if (!parsed.keys?.[String(version)]) throw new Error(`legacy escrow has no key version ${version}`);
+    });
+    if (!escrow) throw new Error(`the backup repository has no escrow for KEK version ${version}`);
+    const escrowed = JSON.parse(openKekEscrow(config.BACKUP_ENCRYPTION_KEY_HEX, escrow)) as {
+      activeVersion: number;
+      keys: Record<string, string>;
+    };
+    const key = escrowed.keys[String(version)];
+    if (!key) throw new Error(`escrow has no key version ${version}`);
+    const provider = new InMemoryKeyProvider({
+      activeVersion: version,
+      keysByVersion: new Map([[version, Buffer.from(key, "hex")]]),
+    });
+    keyrings.set(version, provider);
+    return provider;
   };
-  const keyring = new InMemoryKeyProvider({
-    activeVersion: escrowed.activeVersion,
-    keysByVersion: new Map(
-      Object.entries(escrowed.keys).map(([version, hex]) => [Number(version), Buffer.from(hex, "hex")]),
-    ),
-  });
 
   let verified = 0;
   for (const object of rows) {
-    const ciphertext = await repository.getBuffer(objectBlobKey(object.bucket, object.storageKey));
-    if (!ciphertext) {
-      return { ok: false, detail: `the backup repository is missing ${object.storageKey}`, sampled: rows.length };
-    }
     try {
-      decryptPgos1ToBuffer({
-        ciphertext,
-        objectId: object.id,
-        kekKeyVersion: object.kekKeyVersion,
-        wrappedDek: Buffer.from(object.wrappedDekHex, "hex"),
-        dekNonce: Buffer.from(object.dekNonceHex, "hex"),
-        streamNoncePrefix: Buffer.from(object.streamNoncePrefixHex, "hex"),
-        expectedChunkCount: object.chunkCount,
-        expectedByteSize: BigInt(object.byteSize),
-        expectedSha256Hex: object.sha256Hex,
-        keyProvider: keyring,
-      });
+      const keyring = await keyringFor(object.kekKeyVersion);
+      const ciphertext = await repository.getBufferVerified(
+        objectBlobKey(object.bucket, object.storageKey),
+        (value) => {
+          decryptPgos1ToBuffer({
+            ciphertext: value,
+            objectId: object.id,
+            kekKeyVersion: object.kekKeyVersion,
+            wrappedDek: Buffer.from(object.wrappedDekHex, "hex"),
+            dekNonce: Buffer.from(object.dekNonceHex, "hex"),
+            streamNoncePrefix: Buffer.from(object.streamNoncePrefixHex, "hex"),
+            expectedChunkCount: object.chunkCount,
+            expectedByteSize: BigInt(object.byteSize),
+            expectedSha256Hex: object.sha256Hex,
+            keyProvider: keyring,
+          });
+        },
+      );
+      if (!ciphertext) {
+        return { ok: false, detail: `the backup repository is missing ${object.storageKey}`, sampled: rows.length };
+      }
       verified++;
     } catch (error) {
       return { ok: false, detail: `object ${object.id} failed its decryption check: ${(error as Error).message}`, sampled: rows.length };

@@ -216,15 +216,33 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
     if (obj.status === 'PURGED') {
       throw new ObjectStorageError('STORAGE_OBJECT_PURGED', `StorageObject ${objectId} is purged`, 409)
     }
+    if (obj.status === 'QUARANTINE_REJECTED') {
+      throw new ObjectStorageError('STORAGE_OBJECT_QUARANTINED', `Object ${objectId} was rejected by malware scanning`, 423)
+    }
+    if (obj.gcClaimToken) {
+      throw new ObjectStorageError('STORAGE_OBJECT_GC_IN_PROGRESS', `Object ${objectId} is being collected`, 409)
+    }
+    if (obj.locks.length === 0) {
+      throw new ObjectStorageError(
+        'STORAGE_OBJECT_HOLDER_REQUIRED',
+        `Object ${objectId} cannot be activated without a domain-record lock`,
+        409,
+      )
+    }
     const policy = NAMESPACE_POLICIES[obj.namespace]
-    const defaultRetainUntil = new Date(Date.now() + policy.defaultRetentionDays * 86400 * 1000)
+    const now = new Date()
+    // Retention is stamped once, at first activation. Re-binds and CLEAN
+    // re-scans must not extend a compliance clock indefinitely.
+    const defaultRetainUntil = obj.activatedAt
+      ? obj.retainUntil
+      : new Date(now.getTime() + policy.defaultRetentionDays * 86400 * 1000)
 
     let maxRetain = defaultRetainUntil
-    if (obj.retainUntil && obj.retainUntil > maxRetain) {
+    if (obj.retainUntil && (!maxRetain || obj.retainUntil > maxRetain)) {
       maxRetain = obj.retainUntil
     }
     for (const lock of obj.locks) {
-      if (lock.retentionFloorUntil && lock.retentionFloorUntil > maxRetain) {
+      if (lock.retentionFloorUntil && (!maxRetain || lock.retentionFloorUntil > maxRetain)) {
         maxRetain = lock.retentionFloorUntil
       }
     }
@@ -233,7 +251,7 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
       where: { id: objectId },
       data: {
         status: 'ACTIVE',
-        activatedAt: obj.activatedAt ?? new Date(),
+        activatedAt: obj.activatedAt ?? now,
         retainUntil: maxRetain,
         gcEligibleAt: null,
       },
@@ -252,6 +270,13 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
       throw new ObjectStorageError(
         'STORAGE_OBJECT_PURGED',
         `Cannot bind lock to ${obj.status} object ${input.objectId}`,
+        409
+      )
+    }
+    if (obj.gcClaimToken) {
+      throw new ObjectStorageError(
+        'STORAGE_OBJECT_GC_IN_PROGRESS',
+        `Cannot bind lock to object ${input.objectId} while it is being collected`,
         409
       )
     }
@@ -350,14 +375,40 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
       where: { id: objectId },
       include: { locks: { where: { releasedAt: null } } },
     })
-    if (!obj || obj.locks.length > 0 || obj.status === 'ACTIVE' || obj.status === 'PURGED') {
+    if (
+      !obj
+      || obj.locks.length > 0
+      || obj.status === 'ACTIVE'
+      || obj.status === 'PURGED'
+      || obj.legalHold
+      || obj.gcClaimToken
+    ) {
       return
     }
-    await blobStore.moveToTrash(obj.bucket, obj.storageKey)
-    await prisma.storageObject.update({
-      where: { id: objectId },
-      data: { status: 'PURGED', purgedAt: new Date() },
-    })
+    const claim = randomUUID()
+    const claimed = await prisma.storageObject.updateMany({
+      where: {
+        id: objectId,
+        status: obj.status,
+        gcClaimToken: null,
+        legalHold: false,
+      },
+      data: { gcClaimToken: claim, gcClaimedAt: new Date() },
+    }).catch(() => ({ count: 0 }))
+    if (claimed.count !== 1) return
+    try {
+      await blobStore.moveToTrash(obj.bucket, obj.storageKey)
+      await prisma.storageObject.update({
+        where: { id: objectId },
+        data: { status: 'PURGED', purgedAt: new Date() },
+      })
+    } catch (error) {
+      await prisma.storageObject.updateMany({
+        where: { id: objectId, gcClaimToken: claim },
+        data: { gcClaimToken: null, gcClaimedAt: null },
+      }).catch(() => undefined)
+      throw error
+    }
   }
 
   async function decryptObject(obj: {
@@ -465,6 +516,16 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
           409
         )
       }
+      if (obj.gcClaimToken) {
+        await writeAccessLog({
+          objectId: obj.id,
+          actor: input.actor,
+          action: 'READ_DENIED_GC_CLAIM',
+          allowed: false,
+          denialReason: 'Object is being collected',
+        })
+        throw new ObjectStorageError('STORAGE_OBJECT_GC_IN_PROGRESS', `Object ${obj.id} is being collected`, 409)
+      }
 
       if (input.holderContext) {
         const hasMatchingLock = obj.locks.some(
@@ -506,9 +567,11 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
       }
 
       const hasSuperAdmin = input.actor.authorities.includes('*') || input.actor.authorities.includes('system:storage:admin')
+      const acceptedAuthorities = NAMESPACE_POLICIES[obj.namespace]?.requiredAuthorities ?? [obj.requiredAuthority]
       const hasRequiredAuthority =
         hasSuperAdmin ||
         obj.confidentialityTier === 'PUBLIC_BRAND' ||
+        acceptedAuthorities.some((authority) => input.actor.authorities.includes(authority)) ||
         input.actor.authorities.includes(obj.requiredAuthority)
 
       if (!hasRequiredAuthority) {
@@ -621,6 +684,9 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
           423
         )
       }
+      if (obj.gcClaimToken) {
+        throw new ObjectStorageError('STORAGE_OBJECT_GC_IN_PROGRESS', `Worker ${workerName} cannot read object ${objectId} while it is being collected`, 409)
+      }
       const decrypted = await decryptObject(obj)
       await writeAccessLog({
         objectId: obj.id,
@@ -651,6 +717,9 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
       if (!obj) {
         throw new ObjectStorageError('STORAGE_OBJECT_NOT_FOUND', `Object ${objectId} not found`, 404)
       }
+      if (obj.gcClaimToken) {
+        throw new ObjectStorageError('STORAGE_OBJECT_GC_IN_PROGRESS', `Object ${objectId} is being collected`, 409)
+      }
       const decrypted = await decryptObject(obj)
       return { objectId: obj.id, bytes: decrypted, detectedMimeType: obj.detectedMimeType }
     },
@@ -661,17 +730,34 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
       signature?: string | null
     }): Promise<void> {
       await prisma.$transaction(async (tx) => {
+        const current = await tx.storageObject.findUnique({ where: { id: params.objectId } })
+        if (!current) {
+          throw new ObjectStorageError('STORAGE_OBJECT_NOT_FOUND', `Object ${params.objectId} not found`, 404)
+        }
+        if (current.gcClaimToken) {
+          throw new ObjectStorageError('STORAGE_OBJECT_GC_IN_PROGRESS', `Object ${params.objectId} is being collected`, 409)
+        }
+        if (current.status === 'PURGED') {
+          throw new ObjectStorageError('STORAGE_OBJECT_PURGED', `Object ${params.objectId} is purged`, 409)
+        }
         if (params.verdict === 'CLEAN') {
-          await tx.storageObject.update({
-            where: { id: params.objectId },
+          if (current.status === 'QUARANTINE_REJECTED') {
+            throw new ObjectStorageError('STORAGE_OBJECT_QUARANTINED', `Object ${params.objectId} was rejected by malware scanning`, 423)
+          }
+          const updated = await tx.storageObject.updateMany({
+            where: { id: params.objectId, gcClaimToken: null },
             data: {
               avScanStatus: 'CLEAN',
               avScannedAt: new Date(),
               avSignature: null,
             },
           })
+          if (updated.count !== 1) {
+            throw new ObjectStorageError('STORAGE_OBJECT_GC_IN_PROGRESS', `Object ${params.objectId} is being collected`, 409)
+          }
           await promoteInTx(tx, params.objectId)
         } else {
+          if (current.status === 'QUARANTINE_REJECTED') return
           await tx.storageObjectLock.updateMany({
             where: { objectId: params.objectId, releasedAt: null },
             data: {
@@ -680,8 +766,8 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
               releaseReason: `AV_INFECTED:${params.signature ?? 'MALWARE'}`,
             },
           })
-          await tx.storageObject.update({
-            where: { id: params.objectId },
+          const updated = await tx.storageObject.updateMany({
+            where: { id: params.objectId, gcClaimToken: null },
             data: {
               status: 'QUARANTINE_REJECTED',
               avScanStatus: 'INFECTED',
@@ -690,6 +776,9 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
               stagingExpiresAt: new Date(Date.now() + 24 * 3600 * 1000),
             },
           })
+          if (updated.count !== 1) {
+            throw new ObjectStorageError('STORAGE_OBJECT_GC_IN_PROGRESS', `Object ${params.objectId} is being collected`, 409)
+          }
         }
       })
     },
@@ -698,8 +787,10 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
       const candidates = await prisma.storageObject.findMany({
         where: {
           legalHold: false,
+          gcClaimToken: null,
           OR: [
             { status: 'STAGING', stagingExpiresAt: { lte: now } },
+            { status: 'QUARANTINE_PENDING_AV', stagingExpiresAt: { lte: now } },
             { status: 'QUARANTINE_REJECTED', stagingExpiresAt: { lte: now } },
             {
               status: 'ACTIVE',
@@ -715,16 +806,40 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
       const purgedObjectIds: string[] = []
       for (const obj of candidates) {
         if (obj.locks.length > 0) continue
-        await blobStore.moveToTrash(obj.bucket, obj.storageKey, now.toISOString().slice(0, 10))
+        const claim = randomUUID()
+        // Claim before any filesystem/network I/O. The trigger refuses this
+        // update if a lock, legal hold or retention won the race.
+        const claimed = await prisma.storageObject.updateMany({
+          where: {
+            id: obj.id,
+            status: obj.status,
+            gcClaimToken: null,
+            legalHold: false,
+          },
+          data: { gcClaimToken: claim, gcClaimedAt: now },
+        }).catch(() => ({ count: 0 }))
+        if (claimed.count !== 1) continue
         try {
-          await prisma.storageObject.update({
-            where: { id: obj.id },
+          await blobStore.moveToTrash(obj.bucket, obj.storageKey, now.toISOString().slice(0, 10))
+          const purged = await prisma.storageObject.updateMany({
+            where: { id: obj.id, gcClaimToken: claim },
             data: { status: 'PURGED', purgedAt: now },
           })
-          purgedObjectIds.push(obj.id)
+          if (purged.count === 1) {
+            purgedObjectIds.push(obj.id)
+          } else {
+            await prisma.storageObject.updateMany({
+              where: { id: obj.id, gcClaimToken: claim },
+              data: { gcClaimToken: null, gcClaimedAt: null },
+            }).catch(() => undefined)
+          }
         } catch {
-          // A concurrent bind/legal hold won the race; the trigger refused the
-          // purge. The row stays readable and the next GC pass retries.
+          // Move failed. Release the claim; the row and blob stay intact for a
+          // later pass (or an operator repair).
+          await prisma.storageObject.updateMany({
+            where: { id: obj.id, gcClaimToken: claim },
+            data: { gcClaimToken: null, gcClaimedAt: null },
+          }).catch(() => undefined)
         }
       }
       return { purgedObjectIds }
@@ -813,7 +928,23 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
         for (let index = 0; index < locks.length; index += 100) {
           const batch = locks.slice(index, index + 100)
           const holderIds = Array.from(new Set(batch.map((lock) => lock.holderId)))
-          const existingSet = await checkHoldersExistInDb(prisma, holderType, holderIds)
+          let existingSet = await checkHoldersExistInDb(prisma, holderType, holderIds)
+          if (holderType === 'RAIL_LOGO') {
+            // A rail row can exist while its logoAssetId was changed by a
+            // non-SDK path. Release the old lock instead of keeping it forever.
+            const rails = await prisma.rail.findMany({
+              where: { id: { in: holderIds } },
+              select: { id: true, logoAsset: { select: { storageObjectId: true } } },
+            })
+            existingSet = new Set(
+              rails
+                .filter((rail) => {
+                  const objectId = rail.logoAsset?.storageObjectId
+                  return Boolean(objectId && batch.some((lock) => lock.holderId === rail.id && lock.objectId === objectId))
+                })
+                .map((rail) => rail.id),
+            )
+          }
           for (const lock of batch) {
             if (!existingSet.has(lock.holderId)) {
               await prisma.$transaction(async (tx) => {

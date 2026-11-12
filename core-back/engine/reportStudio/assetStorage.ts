@@ -43,6 +43,7 @@ export class LocalReportAssetStorage implements ReportAssetStoragePort {
 
   async storeAssetBundle(params: {
     bundleId: string;
+    ownerMerchantId?: string | null;
     files: Array<{ relativePath: string; mimeType: string; sha256: string; buffer: Buffer }>;
   }): Promise<{ bundleStorageKey: string }> {
     const dir = path.join(this.baseDir, params.bundleId.replace(/[^a-zA-Z0-9_-]/g, ""));
@@ -51,6 +52,14 @@ export class LocalReportAssetStorage implements ReportAssetStoragePort {
       await writeFile(this.safePath(params.bundleId, file.relativePath), file.buffer);
     }
     return { bundleStorageKey: params.bundleId };
+  }
+
+  async bindAssetBundle(): Promise<void> {
+    // Local development/test driver has no locks.
+  }
+
+  async discardAssetBundle(): Promise<void> {
+    // Local development/test driver has no remote object.
   }
 
   async getAssetBuffer(params: {
@@ -85,6 +94,7 @@ export class ObjectStorageReportAssetStorage implements ReportAssetStoragePort {
 
   async storeAssetBundle(params: {
     bundleId: string;
+    ownerMerchantId?: string | null;
     files: Array<{ relativePath: string; mimeType: string; sha256: string; buffer: Buffer }>;
   }): Promise<{ bundleStorageKey: string; storageObjectId: string }> {
     const entries: Record<string, Uint8Array> = {};
@@ -97,21 +107,33 @@ export class ObjectStorageReportAssetStorage implements ReportAssetStoragePort {
     const staged = await this.sdk.workerClient.stageSystemGenerated({
       namespace: "REPORT_STUDIO_ASSETS",
       data: archive,
+      ownerMerchantId: params.ownerMerchantId ?? null,
       originalFilename: `${params.bundleId}.zip`,
       claimedMimeType: "application/zip",
       actorId: "report-studio-asset-store",
       metadata: { bundleId: params.bundleId, archive: true },
     });
-    await this.sdk.prisma.$transaction(async (tx) => {
-      await this.sdk.routeClient.bind(tx, {
-        objectId: staged.objectId,
-        holderType: "REPORT_ASSET_ENTRY",
-        holderId: params.bundleId,
-        actorId: "report-studio-asset-store",
-        reason: "REPORT_ASSET_BUNDLE_STORED",
-      });
-    });
+    // The lock is bound by the caller AFTER the bundle row exists. Binding here
+    // would let the lock reconciler see a missing holder and release it, or let
+    // GC purge a row that is about to be created.
     return { bundleStorageKey: staged.storageKey, storageObjectId: staged.objectId };
+  }
+
+  async bindAssetBundle(
+    params: { bundleId: string; storageObjectId: string; actorId: string },
+    tx?: unknown,
+  ): Promise<void> {
+    await this.sdk.routeClient.bind((tx ?? this.sdk.prisma) as never, {
+      objectId: params.storageObjectId,
+      holderType: "REPORT_ASSET_ENTRY",
+      holderId: params.bundleId,
+      actorId: params.actorId,
+      reason: "REPORT_ASSET_BUNDLE_STORED",
+    });
+  }
+
+  async discardAssetBundle(storageObjectId: string): Promise<void> {
+    await this.sdk.routeClient.discardStaged(storageObjectId).catch(() => undefined);
   }
 
   async getAssetBuffer(params: {

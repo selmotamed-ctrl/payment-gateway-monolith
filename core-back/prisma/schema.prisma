@@ -3804,6 +3804,13 @@ model StorageObject {
   legalHoldByAdminId String?   @map("legal_hold_by_admin_id") @db.Uuid
   legalHoldPlacedAt  DateTime? @map("legal_hold_placed_at") @db.Timestamptz(3)
   gcEligibleAt       DateTime? @map("gc_eligible_at") @db.Timestamptz(3)
+  /**
+   * A GC/discard worker claims an object before moving its blob. The row stays
+   * in its current status while claimed, but reads and binds are refused; the
+   * trigger requires this token before a transition to PURGED.
+   */
+  gcClaimToken       String?   @map("gc_claim_token") @db.Uuid
+  gcClaimedAt        DateTime? @map("gc_claimed_at") @db.Timestamptz(3)
 
   // Malware / Content Verification State
   avScanStatus    StorageAvScanStatus @default(PENDING) @map("av_scan_status")
@@ -3839,6 +3846,12 @@ model StorageObject {
   @@index([status, gcEligibleAt], map: "idx_storage_objects_active_gc")
   @@index([status, lastScrubbedAt], map: "idx_storage_objects_scrub_queue")
   @@index([kekKeyVersion, status], map: "idx_storage_objects_kek_rotation")
+  @@index([createdAt(sort: Desc)], map: "idx_storage_objects_created_at")
+  @@index([status, createdAt(sort: Desc)], map: "idx_storage_objects_status_created")
+  @@index([ownerMerchantId, createdAt(sort: Desc)], map: "idx_storage_objects_owner_created")
+  @@index([bucket, createdAt(sort: Desc)], map: "idx_storage_objects_bucket_created")
+  @@index([legalHold, createdAt(sort: Desc)], map: "idx_storage_objects_legal_hold_created")
+  @@index([sha256Hex], map: "idx_storage_objects_sha256")
   @@map("storage_objects")
 }
 
@@ -3883,6 +3896,8 @@ model StorageObjectAccessLog {
 
   @@index([objectId, occurredAt(sort: Desc)], map: "idx_storage_access_logs_object_time")
   @@index([actorId, occurredAt(sort: Desc)], map: "idx_storage_access_logs_actor_time")
+  @@index([allowed, occurredAt(sort: Desc)], map: "idx_storage_access_logs_allowed_time")
+  @@index([action, occurredAt(sort: Desc)], map: "idx_storage_access_logs_action_time")
   @@map("storage_object_access_logs")
 }
 

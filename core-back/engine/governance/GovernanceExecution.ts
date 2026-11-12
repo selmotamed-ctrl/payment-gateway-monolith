@@ -4136,6 +4136,46 @@ export async function executeApprovalSubject(
       checkerRole: input.checkerRole,
     });
   }
+  if (subjectType === "STORAGE_LEGAL_HOLD") {
+    const payload = asRecord(input.approval.payloadDiffJson);
+    const action = String(payload.action ?? "").toUpperCase();
+    if (action !== "LIFT") {
+      throw new ApiError(400, "STORAGE_LEGAL_HOLD_ACTION_INVALID", "Only a legal-hold lift can be approved");
+    }
+    const storageObject = modelOf(tx, "storageObject");
+    const object = await storageObject.findUnique({ where: { id: input.approval.subjectId } });
+    if (!object) throw new ApiError(404, "STORAGE_OBJECT_NOT_FOUND", "The storage object does not exist");
+    if (object.status === "PURGED") {
+      throw new ApiError(409, "STORAGE_OBJECT_PURGED", "A purged object cannot have its legal hold lifted");
+    }
+    if (!object.legalHold) {
+      return { status: "EXECUTED", entityId: input.approval.subjectId, idempotent: true };
+    }
+    const reason = String(payload.reason ?? input.notes ?? "approved legal hold lift").slice(0, 512);
+    await storageObject.update({
+      where: { id: input.approval.subjectId },
+      data: { legalHold: false, legalHoldReason: reason },
+    });
+    await modelOf(tx, "storageObjectAccessLog").create({
+      data: {
+        objectId: input.approval.subjectId,
+        actorType: "ADMIN",
+        actorId: input.checkerUserId,
+        action: "LIFT_LEGAL_HOLD",
+        allowed: true,
+      },
+    });
+    await writeAudit(ctx, tx, {
+      actorId: input.checkerUserId,
+      role: input.checkerRole,
+      action: "STORAGE_LEGAL_HOLD_LIFTED",
+      entityType: "STORAGE_OBJECT",
+      entityId: input.approval.subjectId,
+      beforeJson: { legalHold: true, approvalRequestId: input.approval.id },
+      afterJson: { legalHold: false, reason, approvalRequestId: input.approval.id },
+    });
+    return { status: "EXECUTED", entityId: input.approval.subjectId, idempotent: false };
+  }
   if (subjectType === "GATEWAY_VERSION") {
     const activated = await activateGatewayVersionInTransaction(
       tx,

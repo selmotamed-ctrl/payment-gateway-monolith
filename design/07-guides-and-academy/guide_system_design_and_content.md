@@ -1062,7 +1062,7 @@ Your menu only shows screens you may open. Buttons you cannot use are hidden or 
 
 @@article id=b03-03 book=3 order=3 title="The menu, screen by screen" roles=ALL minutes=5 ui=AVAILABLE related=b03-05,b03-02,b03-07,b13-02
 :::summary Big picture in 20 seconds
-The menu on the left groups every Back Office screen into seven sections: Overview, Onboarding, Governance, Operations, Finance, Gateways and Learning. You only see the screens your authorities allow, so your menu is shorter than this article. Use the tables below to find out what a screen is for, who normally uses it, and which article explains it in full.
+The menu on the left groups every Back Office screen into eight sections: Overview, Reporting, Onboarding, Governance, Operations, Finance, Gateways and Learning. You only see the screens your authorities allow, so your menu is shorter than this article. Use the tables below to find out what a screen is for, who normally uses it, and which article explains it in full.
 :::
 
 ### How the menu works
@@ -1078,6 +1078,17 @@ The "Typically used by" column describes the usual job, not a rule. What you can
 | Screen | What it is for | Typically used by | Read more |
 | :--- | :--- | :--- | :--- |
 | **Dashboard** | health of the platform at a glance | everyone | [[a:b03-05]] |
+
+### Reporting
+This section is about the reports the platform can generate.
+
+| Screen | What it is for | Typically used by | Read more |
+| :--- | :--- | :--- | :--- |
+| **Report Catalog** | run published reports | report_engine:run, report reviewers | [[a:b03-15]] |
+| **Report Studio** | author, verify and preview reports | report authors, SECURITY_ADMIN | [[a:b03-15]] |
+| **Report Headers & Footers** | manage the printed chrome | report authors, SECURITY_ADMIN | [[a:b03-15]] |
+| **Needs Migration** | find reports and chrome built for an older engine | report authors, SECURITY_ADMIN | [[a:b03-15]] |
+| **Merchant Reports** | review merchant-owned reports | COMPLIANCE, SECURITY_ADMIN | [[a:b03-15]] |
 
 ### Onboarding
 This section is about merchants: who they are, where their money lands and where they take payments.
@@ -1116,6 +1127,7 @@ This section is about the day-to-day running of payments and of the platform its
 | **Cash-Outs** | merchant payouts | FINANCE | [[a:b08-07]] |
 | **Reconciliation** | match partner statements to our books | FINANCE | [[a:b08-06]] |
 | **Backups** | backup engine, WAL archive lag, storage targets, schedule, last backup and restore drill | SECURITY_ADMIN | [[a:b12-10]] |
+| **Object & Asset Storage** | shared vault health, objects, locks, quarantine, legal holds and access audit | SECURITY_ADMIN, COMPLIANCE | [[a:b12-13]] |
 | **Jobs & Outbox** | delivery health of background work: outbox, audit outbox, jobs, notifications | SECURITY_ADMIN | [[a:b03-14]] |
 | **Platform Settings** | versioned platform settings, export and restore | SECURITY_ADMIN, GATEWAY_ADMIN | [[a:b12-07]] |
 | **Checkout Help** | the help payers see at checkout | admins | [[a:b07-10]] |
@@ -7875,35 +7887,36 @@ Every uploaded document, statement, report output and brand logo lives in the en
 
 ### Why files never live on core nodes or inside PostgreSQL
 In a multi-node deployment, several `core-back` servers and a dedicated `backup-daemon` server work together. If `core-1` saved a KYB PDF on its own disk, `core-2` and `backup-1` could not read it. Therefore:
-* The deploy engine requires a shared **Object Storage Node** (`OBJECT_STORAGE_NODE`, running `pg-object-storage-daemon` over mTLS on port `4095`). If someone configures multiple core nodes without `OBJECT_STORAGE_NODE`, deployment refuses to start (`MULTI_NODE_SHARED_STORAGE_REQUIRED`).
+* The platform requires a shared **Object Storage Node** (`OBJECT_STORAGE_NODE`, running `pg-object-storage-daemon` over mTLS on port `4095`). A multi-node deployment refuses to start without it (`MULTI_NODE_SHARED_STORAGE_REQUIRED`). A single-host production process stays bootable but every storage-backed feature returns `503 STORAGE_UNAVAILABLE` rather than writing to local disk; configure the vault before using those features.
 * Every file is encrypted in 64 KiB `AES-256-GCM` chunks (`pgos1`) with its own 256-bit Data Encryption Key (DEK) wrapped by the Key Encryption Keyring (`OBJECT_STORAGE_KEK_KEYRING`).
 * PostgreSQL stores only the small control-plane ledger: `storage_objects`, `storage_object_locks` and `storage_object_access_logs`.
 
 ### Shared multi-record locks (`storage_object_locks`)
 One file can be locked by more than one record at the same time. For example, a payment rail logo uploaded into the Asset Catalog (`CATALOG_ASSET`) and assigned to two payment rails (`RAIL_LOGO`) has three active locks.
 * Database trigger `storage_objects_guard_trg` forbids deleting rows from `storage_objects` and forbids transitioning an object to `PURGED` while **any** active lock (`released_at IS NULL`) exists, while `legal_hold = true`, or while `retain_until` is in the future.
-* When the last active lock is released, the object enters a 24-hour grace window (`gc_eligible_at`). After 24 hours (and after `retain_until` expires), `GcWorker` moves the ciphertext file to `.trash/YYYY-MM-DD/` for 7 days before permanent removal.
+* When the last active lock is released, the object enters a 24-hour grace window (`gc_eligible_at`). After 24 hours (and after `retain_until` expires), the object-storage maintenance worker claims the row, moves the ciphertext file to `.trash/YYYY-MM-DD/` for 7 days, and only then marks it `PURGED`. A concurrent lock, legal hold or retention boundary cancels the claim before anything moves.
 
 ### Two-stage retention and malware quarantine
 When a merchant or operator uploads a KYB document, dispute attachment or AML evidence file:
 1. It is staged and bound in `QUARANTINE_PENDING_AV` state with `retain_until = NULL`. While in quarantine, nobody can download it (`423 STORAGE_OBJECT_QUARANTINED`).
-2. `AvScanWorker` decrypts and scans the file. If clean, it promotes the object to `ACTIVE` and stamps its compliance retention window (`retain_until`). If infected, it releases the lock and marks the object `QUARANTINE_REJECTED` so malware never receives a 7-year compliance lock.
+2. `KybScanWorker` (KYB) or the object-storage maintenance worker (dispute/AML evidence) scans the file. If clean, it promotes the object to `ACTIVE` and stamps its compliance retention window **once** (`retain_until`). Re-binds and CLEAN re-scans do not extend that clock. If infected, it releases the lock and marks the object `QUARANTINE_REJECTED` so malware never receives a compliance lock.
 @@end
 
 @@article id=b12-13 book=12 order=13 title="Operating the Object & Asset Storage screen: legal holds, KEK rotation and maintenance jobs" roles=SECURITY_ADMIN,GATEWAY_ADMIN,COMPLIANCE minutes=3 ui=AVAILABLE related=b12-12,b12-10,b12-11
 :::summary Big picture in 20 seconds
-Use `/system/object-storage` to inspect shared storage health, check active locks on any file, place or lift legal holds, and trigger maintenance jobs (`Integrity Scrub`, `KEK Rewrap`, `Lock Reconcile`, `GC`).
+Use **Operations → Object & Asset Storage** (`/system/object-storage`) to inspect shared storage health, filter and page objects, check locks, review quarantine, place a legal hold, request a hold lift for a second checker, and run maintenance jobs (`GC`, `Blob Sweep`, `Integrity Scrub`, `Lock Reconcile`, `KEK Rewrap`, `AV Scan`).
 :::
 
 ### Who may do what on `/system/object-storage`
 * **View health, objects, locks and access logs:** `system:storage:read`.
-* **Place or lift a Legal Hold:** `system:storage:legal-hold` (Security Admin / Compliance).
-* **Trigger maintenance jobs (`scrub`, `rewrap`, `reconcile-locks`, `gc`, `sweep`):** `system:storage:admin`.
+* **Place a Legal Hold:** `system:storage:legal-hold` (Security Admin / Compliance).
+* **Request a Legal Hold lift:** `system:storage:legal-hold`; a different authorized checker must approve it under **Approvals**.
+* **Trigger maintenance jobs (`gc`, `sweep`, `scrub`, `reconcile-locks`, `rewrap`, `av-scan`):** `system:storage:admin`.
 
 ### Placing and lifting a Legal Hold
-During an investigation, dispute or audit, a Compliance or Security Admin can place a **Legal Hold** on any object with a mandatory written reason. While `legal_hold = true`, database trigger `storage_objects_guard_trg` and `GcWorker` refuse to purge the object even if all domain locks are released and `retain_until` has passed. Checklist: [[c:sg-place-legal-hold|Place or lift a storage legal hold]].
+During an investigation, dispute or audit, a Compliance or Security Admin can place a **Legal Hold** on any object with a mandatory written reason. While `legal_hold = true`, database trigger `storage_objects_guard_trg` and the maintenance worker refuse to purge the object even if all domain locks are released and `retain_until` has passed. Lifting a hold is a loosening action: the request goes to **Approvals** and a different authorized checker must approve it. Checklist: [[c:sg-place-legal-hold|Place or lift a storage legal hold]].
 
-### Zero-downtime KEK key rotation (`RewrapWorker`)
+### Zero-downtime KEK key rotation (Object Storage Maintenance Worker)
 When IT rotates `OBJECT_STORAGE_KEK_KEYRING` from `v1` to `v2`, the encrypted `.v1.enc` files on disk do not need to be rewritten. Running the **KEK Rewrap** job unwraps each object's 32-byte DEK with `v1` and re-wraps it with `v2` in `storage_objects`.
 @@end
 
@@ -7921,7 +7934,7 @@ Freezes or unfreezes a stored object against garbage collection and purging.
 - Never lift a hold while the investigation or court order is still open.
 
 **If you made a mistake**
-Lift the hold with a correcting reason. The audit trail keeps both actions.
+Request the lift with a correcting reason. A different authorized checker approves it, and the audit trail keeps both actions.
 @@end
 
 @@term slug=object-storage-vault term="Object Storage Vault" aliases="OBJECT_STORAGE_NODE;pg-object-storage-daemon" ar="خزنة تخزين الكائنات" related=storage-object-lock,legal-hold :: The dedicated mTLS service (`pg-object-storage-daemon`) that stores chunk-encrypted (`pgos1`) files shared across all core-back nodes and backup-daemon.

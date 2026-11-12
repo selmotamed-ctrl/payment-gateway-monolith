@@ -84,7 +84,7 @@ const main = async (): Promise<void> => {
     );
     return ["object-storage"];
   };
-  const drillRunner = new RestoreDrillRunner({ config, engine, runner });
+  const drillRunner = new RestoreDrillRunner({ config, engine, runner, repository: repository ?? undefined });
   const scheduler = new BackupScheduler({ config, engine, drillRunner, catalog, jobs, syncObjectStorage });
   const server = await startBackupDaemonServer({ config, engine, drillRunner, catalog, scheduler, jobs, logger, syncObjectStorage });
   await engine.start?.();

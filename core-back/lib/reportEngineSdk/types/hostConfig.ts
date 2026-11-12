@@ -159,6 +159,7 @@ export interface ReadOnlyDatabasePort {
 export interface ReportAssetStoragePort {
   storeAssetBundle(params: {
     bundleId: string;
+    ownerMerchantId?: string | null;
     files: Array<{
       relativePath: string;
       mimeType: string;
@@ -166,6 +167,16 @@ export interface ReportAssetStoragePort {
       buffer: Buffer;
     }>;
   }): Promise<{ bundleStorageKey: string; storageObjectId?: string }>;
+
+  /** Bind the bundle row's lock after the DB row exists (inside the caller transaction when supplied). */
+  bindAssetBundle?(params: {
+    bundleId: string;
+    storageObjectId: string;
+    actorId: string;
+  }, tx?: unknown): Promise<void>;
+
+  /** Discard a staged bundle that lost a content-addressed race. */
+  discardAssetBundle?(storageObjectId: string): Promise<void>;
 
   getAssetBuffer(params: {
     bundleId: string;

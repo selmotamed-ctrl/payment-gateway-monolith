@@ -39,7 +39,7 @@ The host planner converts a validated `DeployConfig` into a `DeployPlan`:
 - unique hosts keyed by `sshHost:sshPort`;
 - per-host roles, services, Nginx sites, certificate bundles, firewall rules and deploy order;
 - per-tier node plans for core, admin, merchant and checkout;
-- the PostgreSQL/Redis/audit/log/backup storage plan;
+- the PostgreSQL/Redis/audit/log/backup/object-storage storage plan;
 - the backup plan and topology label.
 
 It owns grouping and unioning only. It does not validate the raw environment (that is `deploy.topology`), generate certificates (`deploy.pki`), apply firewall rules (`deploy.firewall`) or execute the pipeline (`deploy.pipeline`).

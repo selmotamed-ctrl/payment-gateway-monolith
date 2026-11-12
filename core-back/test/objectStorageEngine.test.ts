@@ -641,6 +641,126 @@ describeDatabase("object storage engine (live PostgreSQL)", () => {
     }
   });
 
+  test("T23 activation requires an active domain lock", async () => {
+    const staged = await stage("REPORT_STUDIO_ASSETS", png("t23"));
+    await expect(
+      prisma.$transaction((tx) => sdk.routeClient.promote(tx, staged.objectId)),
+    ).rejects.toMatchObject({ code: "STORAGE_OBJECT_HOLDER_REQUIRED" });
+  });
+
+  test("T24 a re-bind does not extend compliance retention", async () => {
+    const staged = await stage("SYSTEM_BRAND_ASSETS", png("t24"));
+    const holder = await bindActive(staged);
+    const first = await prisma.storageObject.findUniqueOrThrow({ where: { id: staged.objectId } });
+    await prisma.$transaction((tx) => sdk.routeClient.release(tx, {
+      objectId: staged.objectId,
+      holderType: "CATALOG_ASSET",
+      holderId: holder,
+      actorId: "test",
+      reason: "T24",
+    }));
+    await prisma.$transaction((tx) => sdk.routeClient.bind(tx, {
+      objectId: staged.objectId,
+      holderType: "CATALOG_ASSET",
+      holderId: holder,
+      actorId: "test",
+      reason: "T24_REBIND",
+    }));
+    const second = await prisma.storageObject.findUniqueOrThrow({ where: { id: staged.objectId } });
+    expect(second.retainUntil?.getTime()).toBe(first.retainUntil?.getTime());
+    expect(second.activatedAt?.getTime()).toBe(first.activatedAt?.getTime());
+  });
+
+  test("T25 direct purge without a GC claim is refused", async () => {
+    const objectId = uniqueUuid();
+    const storageKey = `synthetic/${objectId}.v1.enc`;
+    await prisma.storageObject.create({
+      data: {
+        id: objectId,
+        bucket: "HOT",
+        namespace: "SYSTEM_BRAND_ASSETS",
+        storageKey,
+        status: "ACTIVE",
+        sha256Hex: createHash("sha256").update("t25").digest("hex"),
+        byteSize: 8n,
+        chunkSizeBytes: 65536,
+        chunkCount: 1,
+        detectedMimeType: "image/png",
+        wrappedDek: new Uint8Array(48),
+        dekNonce: new Uint8Array(12),
+        streamNoncePrefix: new Uint8Array(7),
+        uploadedByActorType: "SYSTEM_WORKER",
+        uploadedByActorId: "test",
+        requiredAuthority: "system:assets:read",
+        confidentialityTier: "PUBLIC_BRAND",
+        retainUntil: null,
+        gcEligibleAt: new Date(Date.now() - 1000),
+        stagingExpiresAt: new Date(Date.now() + 3600_000),
+      },
+    });
+    await expectSqlRejects(
+      "UPDATE storage_objects SET status = 'PURGED', purged_at = NOW() WHERE id = $1",
+      [objectId],
+      /STORAGE_OBJECT_GC_CLAIM_REQUIRED/,
+    );
+  });
+
+  test("T26 access logs are append-only", async () => {
+    const staged = await stage("REPORT_STUDIO_ASSETS", png("t26"));
+    const holder = await bindActive(staged);
+    await sdk.routeClient.readAuthorized({
+      objectId: staged.objectId,
+      actor: actor(),
+      holderContext: { holderType: "CATALOG_ASSET", holderId: holder },
+    });
+    const log = await prisma.storageObjectAccessLog.findFirstOrThrow({ where: { objectId: staged.objectId } });
+    await expectSqlRejects(
+      "UPDATE storage_object_access_logs SET allowed = false WHERE id = $1",
+      [log.id],
+      /STORAGE_ACCESS_LOG_APPEND_ONLY/,
+    );
+    await expectSqlRejects(
+      "DELETE FROM storage_object_access_logs WHERE id = $1",
+      [log.id],
+      /STORAGE_ACCESS_LOG_APPEND_ONLY/,
+    );
+  });
+
+  test("T27 an abandoned pending-AV object is collected", async () => {
+    const staged = await stage("KYB_DOCUMENTS", pdf("abandoned"), { actor: merchantActor(uniqueUuid()) });
+    const holder = uniqueUuid();
+    await prisma.$transaction(async (tx) => {
+      await sdk.routeClient.bind(tx, {
+        objectId: staged.objectId,
+        holderType: "KYB_DOCUMENT",
+        holderId: holder,
+        actorId: "test",
+        reason: "T27",
+        autoPromoteIfNoAvRequired: false,
+      });
+      await sdk.routeClient.release(tx, {
+        objectId: staged.objectId,
+        holderType: "KYB_DOCUMENT",
+        holderId: holder,
+        actorId: "test",
+        reason: "T27_ABANDONED",
+      });
+    });
+    await sdk.workerClient.runGcBatch(new Date(Date.now() + 2 * 3600 * 1000));
+    const row = await prisma.storageObject.findUniqueOrThrow({ where: { id: staged.objectId } });
+    expect(row.status).toBe("PURGED");
+  });
+
+  test("T28 discardStaged never moves a legally held blob", async () => {
+    const staged = await stage("REPORT_STUDIO_ASSETS", png("t28"));
+    await sdk.routeClient.placeLegalHold({ objectId: staged.objectId, adminId: uniqueUuid(), reason: "T28 investigation" });
+    await sdk.routeClient.discardStaged(staged.objectId);
+    const row = await prisma.storageObject.findUniqueOrThrow({ where: { id: staged.objectId } });
+    expect(row.status).toBe("STAGING");
+    expect(row.legalHold).toBe(true);
+    await expect(fsp.stat(hotPath(staged))).resolves.toBeTruthy();
+  });
+
   test("T22 backup parity, KEK escrow and drill decryption", async () => {
     // Covered end-to-end in deploy/test/objectStorageDeploy.test.ts with a
     // real artifact repository; here we prove the escrow envelope round-trip.

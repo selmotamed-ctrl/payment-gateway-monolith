@@ -9,12 +9,13 @@ import {
   coreDisputeEvidenceSchema,
   toCoreDisputeEvidence,
 } from "../contract";
-import { coreCallContext, coreForward, requireBearer } from "../forward";
-import { uploadGuards, uploadSingleAny } from "../upload";
+import { coreCallContext, coreForward, coreProxyStream, requireBearer } from "../forward";
+import { forwardUpload, uploadGuards, uploadSingleAny } from "../upload";
 
 const router = express.Router();
 
 const disputeParamsSchema = z.object({ id: zIdentifier });
+const attachmentParamsSchema = z.object({ id: zIdentifier, attachmentId: zIdentifier });
 
 const disputeQuerySchema = z
   .object({
@@ -89,6 +90,50 @@ router.post(
     });
     res.status(200).json(payload);
   },
+);
+
+router.get(
+  "/:id/attachments",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/merchant/disputes/${encodeURIComponent(context.params.id ?? "")}/attachments`,
+    paramsSchema: disputeParamsSchema,
+  }),
+);
+
+router.post(
+  "/:id/attachments",
+  ...uploadGuards,
+  uploadSingleAny(["file", "evidence"]),
+  async (req: Request, res: Response): Promise<void> => {
+    requireBearer(req);
+    const { id } = parseOrThrow(disputeParamsSchema, req.params);
+    if (!req.file) throw new ApiError(400, "UPLOAD_REQUIRED", "An evidence file is required");
+    await forwardUpload(req, res, {
+      path: `/internal/merchant/disputes/${encodeURIComponent(id)}/attachments`,
+      fileField: "file",
+      metadata: { label: (typeof req.body?.label === "string" ? req.body.label : req.file.originalname).slice(0, 255) },
+      status: 201,
+    });
+  },
+);
+
+router.get(
+  "/:id/attachments/:attachmentId/content",
+  coreProxyStream({
+    method: "GET",
+    path: (context) => `/internal/merchant/disputes/${encodeURIComponent(context.params.id ?? "")}/attachments/${encodeURIComponent(context.params.attachmentId ?? "")}/content`,
+    paramsSchema: attachmentParamsSchema,
+  }),
+);
+
+router.delete(
+  "/:id/attachments/:attachmentId",
+  coreForward({
+    method: "DELETE",
+    path: (context) => `/internal/merchant/disputes/${encodeURIComponent(context.params.id ?? "")}/attachments/${encodeURIComponent(context.params.attachmentId ?? "")}`,
+    paramsSchema: attachmentParamsSchema,
+  }),
 );
 
 router.get(

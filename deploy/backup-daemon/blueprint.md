@@ -233,9 +233,9 @@ Not covered: the dedicated-backup-host and host-loss topologies on real machines
 `deploy/backup-daemon/src/objectStorageBackup.ts` copies new HOT/COLD
 `.v1.enc` blobs into `object-blobs/{bucket}/{storageKey}` (immutable, so the
 copy is incremental), fails with `OBJECT_STORAGE_BACKUP_PARITY_ERROR` when an
-ACTIVE row has no blob, and writes `object-storage/kek-escrow.enc` (AES-256-GCM
+ACTIVE row has no blob on every required tier, repairs missing tier copies, and writes per-KEK-version escrows plus the legacy `object-storage/kek-escrow.enc` (AES-256-GCM
 under the backup master key). The restore drill samples up to
 `OBJECT_STORAGE_DRILL_SAMPLE` ACTIVE rows, decrypts them with the escrowed
 keyring and compares the SHA-256; the report's `checks.objectStorage` carries the
-result. The daemon receives the object-storage URL/client certs/KEK keyring from
+result; the drill tries every tier and the escrow for the row's KEK version. The daemon receives the object-storage URL/client certs/KEK keyring from
 the deploy engine.

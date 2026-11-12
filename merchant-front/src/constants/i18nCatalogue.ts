@@ -771,4 +771,12 @@ export const appCatalogue: Record<string, [string, string]> = {
     "Search and select a record.": ["Search and select a record.", "ابحث واختر سجلاً."],
     "Search and select one or more records.": ["Search and select one or more records.", "ابحث واختر سجلاً واحداً أو أكثر."],
     "Reset inputs": ["Reset inputs", "إعادة تعيين المدخلات"],
+    'Choose an evidence file': ['Choose an evidence file', 'اختر ملف إثبات'],
+    'Delete this evidence file?': ['Delete this evidence file?', 'حذف ملف الإثبات هذا؟'],
+    'Evidence deleted': ['Evidence deleted', 'تم حذف الإثبات'],
+    'Evidence file': ['Evidence file', 'ملف الإثبات'],
+    'Evidence uploaded': ['Evidence uploaded', 'تم رفع الإثبات'],
+    'Label or note': ['Label or note', 'التسمية أو الملاحظة'],
+    'No evidence uploaded yet.': ['No evidence uploaded yet.', 'لم يُرفع أي إثبات بعد.'],
+    'Uploaded evidence': ['Uploaded evidence', 'الإثبات المرفوع'],
 };

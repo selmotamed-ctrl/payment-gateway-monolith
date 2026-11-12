@@ -128,6 +128,7 @@ export const backupDaemonEnvSchema = z
     // Shared object & asset storage vault: parity sync and the escrowed-KEK
     // decryption drill. Present only when OBJECT_STORAGE_NODE is configured.
     OBJECT_STORAGE_DAEMON_URL: optionalUrl,
+    OBJECT_STORAGE_ALLOW_INSECURE_HTTP: booleanish.default(false),
     OBJECT_STORAGE_TLS_CA_PATH: optionalNonEmpty,
     OBJECT_STORAGE_TLS_CLIENT_CERT_PATH: optionalNonEmpty,
     OBJECT_STORAGE_TLS_CLIENT_KEY_PATH: optionalNonEmpty,

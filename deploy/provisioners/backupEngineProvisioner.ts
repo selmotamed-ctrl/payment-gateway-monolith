@@ -129,6 +129,7 @@ export const backupDaemonEnv = (config: DeployConfig): Record<string, string> =>
             const scheme = config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP ? "http" : "https";
             return `${scheme}://${spec?.privateIp ?? "127.0.0.1"}:${spec?.servicePort ?? config.OBJECT_STORAGE_DAEMON_PORT}`;
           })(),
+          OBJECT_STORAGE_ALLOW_INSECURE_HTTP: config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP ? "true" : "false",
           OBJECT_STORAGE_TLS_CA_PATH: `${config.BACKUP_DAEMON_CERT_DIR}/internal-ca.crt`,
           OBJECT_STORAGE_TLS_CLIENT_CERT_PATH: `${config.BACKUP_DAEMON_CERT_DIR}/object-storage-client.crt`,
           OBJECT_STORAGE_TLS_CLIENT_KEY_PATH: `${config.BACKUP_DAEMON_CERT_DIR}/object-storage-client.key`,

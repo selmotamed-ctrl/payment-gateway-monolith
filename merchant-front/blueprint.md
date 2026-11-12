@@ -394,6 +394,10 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 
 Merchant dialogs, menus and drawers share the admin shell rule: `.v-overlay__content` and `.v-navigation-drawer__content` inherit `color: rgb(var(--v-theme-on-surface))`, so custom `FormModal`/`SlideOverDrawer` content is readable in dark mode. See `admin-ui.system` and `tests/unit/dark-overlay-colors.test.ts`.
 
+## Dispute evidence
+
+Dispute evidence is uploaded as raw bytes to `POST /api/v1/merchant/disputes/:id/attachments` and listed/read/deleted through the matching attachment routes. The old base64 `POST /disputes/:id/evidence` remains only as a legacy JSON endpoint; the portal no longer uses it. Downloads are available only once the vault object is `ACTIVE` (AV clean).
+
 ## Merchant Guide and Developer API
 
 > Status: `partial` · Last verified: 2026-11-04

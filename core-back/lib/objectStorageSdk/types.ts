@@ -34,7 +34,10 @@ export interface NamespacePolicy {
   maxByteSize: number
   requiresAsyncAvScan: boolean
   defaultRetentionDays: number // Applied ONLY at promote() time, never at stageUpload()
+  /** Canonical authority stored on the object (for audit and legacy readers). */
   requiredAuthority: string
+  /** Accepted authorities for a read; any one is sufficient. */
+  requiredAuthorities: readonly string[]
   confidentialityTier: 'PUBLIC_BRAND' | 'INTERNAL' | 'CONFIDENTIAL' | 'RESTRICTED_PII'
 }
 
@@ -47,6 +50,7 @@ export const NAMESPACE_POLICIES: Record<StorageNamespace, NamespacePolicy> = {
     requiresAsyncAvScan: true,
     defaultRetentionDays: 365 * 7, // 7 years after activation
     requiredAuthority: 'kyb:read',
+    requiredAuthorities: ['kyb:read', 'compliance:read'],
     confidentialityTier: 'RESTRICTED_PII',
   },
   RECON_STATEMENTS: {
@@ -57,6 +61,7 @@ export const NAMESPACE_POLICIES: Record<StorageNamespace, NamespacePolicy> = {
     requiresAsyncAvScan: false,
     defaultRetentionDays: 365 * 7,
     requiredAuthority: 'reconciliation:read',
+    requiredAuthorities: ['reconciliation:read'],
     confidentialityTier: 'CONFIDENTIAL',
   },
   REGULATORY_REPORTS: {
@@ -76,6 +81,7 @@ export const NAMESPACE_POLICIES: Record<StorageNamespace, NamespacePolicy> = {
     requiresAsyncAvScan: false,
     defaultRetentionDays: 365 * 10,
     requiredAuthority: 'compliance:reports:read',
+    requiredAuthorities: ['compliance:reports:read', 'report:review', 'report:approve', 'compliance:write', 'aml:write'],
     confidentialityTier: 'RESTRICTED_PII',
   },
   REPORT_STUDIO_ASSETS: {
@@ -95,6 +101,7 @@ export const NAMESPACE_POLICIES: Record<StorageNamespace, NamespacePolicy> = {
     requiresAsyncAvScan: false,
     defaultRetentionDays: 365 * 5,
     requiredAuthority: 'reports.studio.read',
+    requiredAuthorities: ['reports.studio.read', 'report_engine:run', 'report_engine:author', 'report:review'],
     confidentialityTier: 'INTERNAL',
   },
   MERCHANT_STATEMENTS: {
@@ -105,6 +112,7 @@ export const NAMESPACE_POLICIES: Record<StorageNamespace, NamespacePolicy> = {
     requiresAsyncAvScan: false,
     defaultRetentionDays: 365 * 7,
     requiredAuthority: 'reports:read',
+    requiredAuthorities: ['reports:read'],
     confidentialityTier: 'CONFIDENTIAL',
   },
   DISPUTE_EVIDENCE: {
@@ -115,6 +123,7 @@ export const NAMESPACE_POLICIES: Record<StorageNamespace, NamespacePolicy> = {
     requiresAsyncAvScan: true,
     defaultRetentionDays: 365 * 7,
     requiredAuthority: 'disputes:read',
+    requiredAuthorities: ['disputes:read', 'dispute:read', 'dispute:respond'],
     confidentialityTier: 'CONFIDENTIAL',
   },
   AML_CASE_ATTACHMENTS: {
@@ -125,6 +134,7 @@ export const NAMESPACE_POLICIES: Record<StorageNamespace, NamespacePolicy> = {
     requiresAsyncAvScan: true,
     defaultRetentionDays: 365 * 10,
     requiredAuthority: 'compliance:aml:read',
+    requiredAuthorities: ['compliance:aml:read', 'aml.read_confidential', 'aml:read', 'aml:write'],
     confidentialityTier: 'RESTRICTED_PII',
   },
   SYSTEM_BRAND_ASSETS: {
@@ -135,6 +145,7 @@ export const NAMESPACE_POLICIES: Record<StorageNamespace, NamespacePolicy> = {
     requiresAsyncAvScan: false,
     defaultRetentionDays: 365,
     requiredAuthority: 'system:assets:read',
+    requiredAuthorities: ['system:assets:read', 'gateway:read', 'gateway:write'],
     confidentialityTier: 'PUBLIC_BRAND',
   },
   BACKUP_ARTIFACTS: {
@@ -145,6 +156,7 @@ export const NAMESPACE_POLICIES: Record<StorageNamespace, NamespacePolicy> = {
     requiresAsyncAvScan: false,
     defaultRetentionDays: 90,
     requiredAuthority: 'system:storage:admin',
+    requiredAuthorities: ['system:storage:admin'],
     confidentialityTier: 'RESTRICTED_PII',
   },
 }
@@ -224,11 +236,14 @@ export type StorageErrorCode =
   | 'STORAGE_OBJECT_QUARANTINED'
   | 'STORAGE_OBJECT_STAGING_NOT_READY'
   | 'STORAGE_OBJECT_PURGED'
+  | 'STORAGE_OBJECT_GC_IN_PROGRESS'
+  | 'STORAGE_OBJECT_HOLDER_REQUIRED'
   | 'STORAGE_ACCESS_DENIED'
   | 'STORAGE_TENANT_MISMATCH'
   | 'STORAGE_INTEGRITY_CORRUPTED'
   | 'STORAGE_LOCKED_CANNOT_DELETE'
   | 'STORAGE_LEGAL_HOLD_ACTIVE'
+  | 'STORAGE_UNAVAILABLE'
 
 export class ObjectStorageError extends Error {
   public readonly code: StorageErrorCode

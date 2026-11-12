@@ -125,6 +125,15 @@ router.get("/:id/content", async (req: Request, res: Response): Promise<void> =>
   res.status(upstream.statusCode).send(upstream.body);
 });
 
+router.delete(
+  "/:id",
+  coreForward({
+    method: "DELETE",
+    path: (context) => `/internal/admin/assets/${encodeURIComponent(context.params.id ?? "")}`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+
 router.get(
   "/:id",
   coreForward({

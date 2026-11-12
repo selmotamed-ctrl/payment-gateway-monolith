@@ -171,34 +171,51 @@ export const uploadStorageCertificates = (
   config: DeployConfig,
   dryRun: boolean,
 ): void => {
+  const coreCertDir = `${config.CORE_REMOTE_DIR}/shared/certs`;
   for (const host of plan.hosts.filter((candidate) => candidate.roles.some(isStorageRole))) {
-    const directory = host.roles.includes("object-storage")
-      ? config.OBJECT_STORAGE_DAEMON_CERT_DIR
-      : host.roles.includes("backup")
-        ? config.BACKUP_DAEMON_CERT_DIR
-        : STORAGE_CERT_DIR;
     const materials = certFilesForHost(pki, host.roles);
-    // The WAL ingest client (and the CA that verifies the daemon) always live in
-    // STORAGE_CERT_DIR on the PostgreSQL host, where archive_command reads them,
-    // even when that host is also the backup node (whose daemon uses its own dir).
-    // A co-located object-storage + backup host needs each service certificate in
-    // its own directory, while the CA must be present in both.
-    const walClient = materials.find((material) => material.name === WAL_ARCHIVE_CLIENT);
+    const has = (role: string) => (host.roles as readonly string[]).includes(role);
+
+    // Certificate placement is per consumer, never by "the first role on the
+    // host". A co-located storage/core/backup host must not let the storage
+    // service read core or edge private keys (and vice versa).
     const directoriesFor = (material: { name: string; kind: string }): string[] => {
-      if (material.name === WAL_ARCHIVE_CLIENT) return [STORAGE_CERT_DIR];
-      if (material.name.startsWith("object-storage-")) return [config.OBJECT_STORAGE_DAEMON_CERT_DIR];
-      if (material.name === "backup-daemon" || material.name === "backup-client") return [config.BACKUP_DAEMON_CERT_DIR];
+      const dirs = new Set<string>();
       if (material.kind === "ca") {
-        const dirs = new Set<string>([directory]);
-        if (host.roles.includes("backup")) dirs.add(config.BACKUP_DAEMON_CERT_DIR);
-        if (host.roles.includes("object-storage")) dirs.add(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
-        return [...dirs];
+        if (has("object-storage")) dirs.add(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
+        if (has("backup")) dirs.add(config.BACKUP_DAEMON_CERT_DIR);
+        if (has("pg-primary") || has("pg-replica") || has("audit-db")) dirs.add(STORAGE_CERT_DIR);
       }
-      return [directory];
+      if (material.name === "object-storage-daemon" && has("object-storage")) {
+        dirs.add(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
+      }
+      if (material.name === "object-storage-client") {
+        if (has("core")) dirs.add(coreCertDir);
+        if (has("backup")) dirs.add(config.BACKUP_DAEMON_CERT_DIR);
+        // An object-storage-only host has no consumer for the client leaf; the
+        // CA + server leaf are sufficient. Keep it only when it is the sole role
+        // for compatibility with the standalone daemon checks.
+        if (has("object-storage") && !has("core") && !has("backup")) {
+          dirs.add(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
+        }
+      }
+      if ((material.name === "backup-daemon" || material.name === "backup-client") && has("backup")) {
+        dirs.add(config.BACKUP_DAEMON_CERT_DIR);
+      }
+      if (material.name === "pg-client") {
+        if (has("backup")) dirs.add(config.BACKUP_DAEMON_CERT_DIR);
+        if (has("pg-primary") || has("pg-replica") || has("pgbouncer") || has("audit-db")) dirs.add(STORAGE_CERT_DIR);
+      }
+      if (material.name === WAL_ARCHIVE_CLIENT) dirs.add(STORAGE_CERT_DIR);
+      return [...dirs];
     };
+
+    const written = new Set<string>();
     for (const material of materials) {
       const content = dryRun ? null : readMaterial(material);
       for (const target of directoriesFor(material)) {
+        if (written.has(`${target}/${material.name}`)) continue;
+        written.add(`${target}/${material.name}`);
         if (dryRun) {
           runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.crt`, content: "", mode: 0o644, sudo: true });
           continue;
@@ -209,11 +226,7 @@ export const uploadStorageCertificates = (
         }
       }
     }
-    if (walClient && !dryRun) {
-      if (directory !== STORAGE_CERT_DIR) {
-        const ca = materials.find((material) => material.kind === "ca");
-        if (ca) runner.writeRemoteFile({ target: host.ssh, path: `${STORAGE_CERT_DIR}/${ca.name}.crt`, content: readMaterial(ca).cert, mode: 0o644, sudo: true });
-      }
+    if (materials.some((material) => material.name === WAL_ARCHIVE_CLIENT) && !dryRun) {
       // archive_command runs as the postgres OS user: it must read the WAL
       // client key, and nothing else in this directory is made group-readable.
       const dir = shellQuote(STORAGE_CERT_DIR);
@@ -223,25 +236,22 @@ export const uploadStorageCertificates = (
         { sudo: true },
       );
     }
-    if (host.roles.includes("backup") && !dryRun) {
+    if (has("backup") && !dryRun) {
       // The daemon (pgbackup, or postgres when co-located in wal-g mode) must own its mTLS material.
       const owner = shellQuote(`${backupDaemonUser(config)}:${backupDaemonUser(config)}`);
       const dir = shellQuote(config.BACKUP_DAEMON_CERT_DIR);
       runner.run(
         host.ssh,
-        `chown ${owner} ${dir} && chmod 0750 ${dir} && { chown ${owner} ${dir}/*.crt ${dir}/*.key 2>/dev/null; chmod 0640 ${dir}/*.crt 2>/dev/null; chmod 0600 ${dir}/*.key 2>/dev/null; true; } || true`,
+        `chown ${owner} ${dir} 2>/dev/null && chmod 0750 ${dir} 2>/dev/null && { chown ${owner} ${dir}/*.crt ${dir}/*.key 2>/dev/null; chmod 0640 ${dir}/*.crt 2>/dev/null; chmod 0600 ${dir}/*.key 2>/dev/null; true; } || true`,
         { sudo: true },
       );
     }
-    if (host.roles.includes("object-storage") && !dryRun) {
-      // The unprivileged daemon account must own its mTLS material and the vault.
-      const owner = shellQuote(`${OBJECT_STORAGE_SERVICE_USER}:${OBJECT_STORAGE_SERVICE_USER}`);
+    if (has("object-storage") && !dryRun) {
+      // The user is created in step 5, after this step on a fresh host. Keep the
+      // directory root-owned here; the provisioner hands the dedicated cert
+      // files to pgobjstore after the account exists.
       const dir = shellQuote(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
-      runner.run(
-        host.ssh,
-        `chown -R ${owner} ${dir} && chmod 0750 ${dir} && { chown ${owner} ${dir}/*.crt ${dir}/*.key 2>/dev/null; chmod 0640 ${dir}/*.crt 2>/dev/null; chmod 0600 ${dir}/*.key 2>/dev/null; true; } || true`,
-        { sudo: true },
-      );
+      runner.run(host.ssh, `install -d -m 0750 -o root -g root ${dir}`, { sudo: true });
     }
   }
 };
@@ -544,7 +554,7 @@ const deployService = (input: {
   }
 
   // 3. The least-privilege certificates of this host.
-  for (const material of certFilesForHost(pki, host.roles)) {
+  for (const material of certFilesForHost(pki, [service.role])) {
     if (runner.dryRun) {
       log(`[dry-run] upload ${material.name}.crt${material.kind === "ca" ? "" : ` + ${material.name}.key`} -> ${remote}/shared/certs/`);
       continue;
@@ -718,6 +728,10 @@ export const deployObjectStorageDaemon = (input: {
   const daemonOwner = `${daemonUser}:${daemonUser}`;
   const chownSource = (owner: string): string =>
     `find ${shellQuote(installDir)} -path ${shellQuote(`${installDir}/node_modules`)} -prune -o -exec chown ${shellQuote(owner)} {} +`;
+  // The daemon unit runs the pinned /usr/local/bin/bun. A fresh storage host
+  // has no bun unless this step installs it, including the documented
+  // --update --only=object-storage path.
+  runner.run(host.ssh, bunInstallCommand(config), { sudo: true });
   runner.run(
     host.ssh,
     `install -d -m 0755 -o ${shellQuote(targetUser)} -g ${shellQuote(targetUser)} ${shellQuote(installDir)} && ${chownSource(`${targetUser}:${targetUser}`)}`,
@@ -1095,6 +1109,9 @@ const main = async (): Promise<void> => {
     throw new Error(`Invalid deploy.env:\n- ${loaded.problems.join("\n- ")}`);
   }
   const config = loaded.config;
+  if (!objectStorageConfigured(config)) {
+    warn("OBJECT_STORAGE_NODE is not configured: the platform will boot, but every storage-backed feature (KYB, reconciliation, reports, disputes, AML evidence, brand assets) will return 503 until the shared vault is configured.");
+  }
   const conflicts = findSshConflicts(config);
   if (conflicts.length > 0) {
     throw new Error(`Invalid host topology:\n- ${conflicts.join("\n- ")}`);
@@ -1102,7 +1119,7 @@ const main = async (): Promise<void> => {
   if (options.checkCerts) {
     // AUTO-28: read-only expiry report for cron / an alert hook; exit 1 when anything needs attention.
     const window = config.MTLS_RENEW_WITHIN_DAYS > 0 ? config.MTLS_RENEW_WITHIN_DAYS : 30;
-    const report = checkPkiExpiry(buildPki({ config, dryRun: true }), window);
+    const report = checkPkiExpiry(buildPki({ config, dryRun: true }), window, new Date(), objectStorageConfigured(config));
     log(report.lines.join("\n"));
     log(report.ok ? `\nAll certificates are valid for at least ${window} days.` : `\nAttention: leaves are re-issued by the next deploy; a CA near expiry needs --rotate-certs.`);
     process.exit(report.ok ? 0 : 1);
@@ -1161,6 +1178,7 @@ const main = async (): Promise<void> => {
     }
   }
   uploadStorageCertificates(runner, plan, pki, config, options.dryRun);
+  const certRefresh = options.rotateCerts || (pki.renewed ?? []).length > 0;
 
   // ---- Step 4: bootstrap the unique hosts -------------------------------
   step(4, "Bootstrap the target hosts and apply the firewall");
@@ -1253,7 +1271,7 @@ const main = async (): Promise<void> => {
         config,
         host: objectStorageHost,
         configChanged: report.daemonConfigChanged,
-        forceRestart: options.forceRestart,
+        forceRestart: options.forceRestart || certRefresh,
       });
     } else {
       warn("object storage is configured but the plan has no object-storage host; the daemon was not deployed");
@@ -1265,7 +1283,7 @@ const main = async (): Promise<void> => {
     logOutcomes(report.outcomes);
     const backupHost = plan.hosts.find((host) => host.roles.includes("backup"));
     if (backupHost) {
-      deployBackupDaemon({ runner, config, host: backupHost, configChanged: report.daemonConfigChanged, forceRestart: options.forceRestart });
+      deployBackupDaemon({ runner, config, host: backupHost, configChanged: report.daemonConfigChanged, forceRestart: options.forceRestart || certRefresh });
     } else {
       warn("BACKUP_ENABLED but the plan has no backup host; the daemon was not deployed");
     }

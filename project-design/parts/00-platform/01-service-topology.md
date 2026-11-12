@@ -71,7 +71,7 @@ The design also defines the network zones:
 - All three edge backends call `core-back` over a private LAN with mTLS 1.3 client certificates.
 - `core-back` is never published by a reverse proxy and has no public listener.
 - `core-back` reaches PostgreSQL, Redis, the audit database, the log database and external gateways.
-- The backup daemon is a separate mTLS control plane, normally `:4090`, with backup storage in S3/MinIO/R2 and an optional secondary vault.
+- The object-storage daemon is a separate mTLS data plane, normally `:4095`; the backup daemon is a separate mTLS control plane, normally `:4090`, with backup storage in S3/MinIO/R2 and an optional secondary vault.
 
 The historical target for compute is `CORE_NODES`, `ADMIN_NODES`, `MERCHANT_NODES` and `CHECKOUT_NODES` arrays, each entry shaped `nodeId@sshHost:sshPort:privateIp:servicePort`. Storage is declared separately with `PG_PRIMARY_NODE`, `PG_REPLICA_NODES`, `PGBOUNCER_*`, `REDIS_NODES`, `AUDIT_DB_NODE`, `LOG_DB_NODE` and `BACKUP_NODE`. The design supports a single all-in-one host, combined compute hosts, fully distributed hosts and horizontal compute.
 
@@ -88,6 +88,7 @@ The historical target for compute is `CORE_NODES`, `ADMIN_NODES`, `MERCHANT_NODE
 | `admin-front` | static build behind nginx `:8443` | LAN | None | `admin-back` HTTP API | `admin-front/src/**` |
 | `merchant-front` | static build behind public nginx | Public | None | `merchant-back` HTTP API | `merchant-front/src/**` |
 | `checkout-front` | static build behind public nginx | Public | None | `checkout-back` HTTP API | `checkout-front/src/**` |
+| `pg-object-storage-daemon` | `:4095` (`https`) | Private LAN, mTLS client certificate required | None (shared vault) | Core nodes and backup daemon | `deploy/object-storage-daemon` |
 | `fake-rails-back` | `127.0.0.1:4104` (`HOST`/`PORT`) | Optional, behind `fake-rails` nginx `:8444` | Its own SQLite store | Core inbound URL for synthetic webhooks | `fake-rails-back/index.ts` |
 | `fake-rails-front` | static build behind the Fake Rails vhost | Optional | None | `fake-rails-back` portal API | `fake-rails-front/src/**` |
 

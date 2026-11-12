@@ -574,6 +574,7 @@ export const checkPkiExpiry = (
   bundle: PkiBundle,
   withinDays: number,
   now = new Date(),
+  includeObjectStorage = existsSync(bundle.objectStorage.certPath),
 ): { ok: boolean; lines: string[] } => {
   const lines: string[] = [];
   let ok = true;
@@ -582,7 +583,7 @@ export const checkPkiExpiry = (
     bundle.server,
     bundle.fakeRails,
     bundle.backup,
-    ...(existsSync(bundle.objectStorage.certPath) ? [bundle.objectStorage] : []),
+    ...(includeObjectStorage ? [bundle.objectStorage] : []),
     ...bundle.clients,
     ...bundle.storageClients,
   ];

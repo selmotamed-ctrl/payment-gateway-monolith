@@ -39,3 +39,4 @@
 | `20261111120000_report_engine_versioning` | 40 | Schema version 34: report/chrome compatibility provenance and default revocation. |
 | `20261111130000_merchant_report_chrome` | 40 | Schema version 35: merchant-owned report headers and footers. |
 | `20261112000000_v36_enterprise_object_storage_engine` | 311 | ============================================================================ |
+| `20261113090000_storage_engine_hardening` | 183 | Shared object & asset storage hardening (schema version 37). |

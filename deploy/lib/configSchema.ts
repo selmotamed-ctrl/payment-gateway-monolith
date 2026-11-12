@@ -173,6 +173,11 @@ const unixUser = z.string().trim().min(1).max(64).regex(/^[A-Za-z_][A-Za-z0-9_-]
 export const SAFE_ABS_PATH = /^\/[A-Za-z0-9._+@/-]*$/;
 const noDotDot = (value: string) => !value.split("/").includes("..");
 const safeDir = (max = 200) => z.string().trim().min(1).max(max).regex(SAFE_ABS_PATH, "must be an absolute path using only [A-Za-z0-9._+@/-]").refine(noDotDot, "must not contain '..'");
+/** Object-storage paths are privileged: keep them inside the dedicated vault base. */
+const objectStorageDir = (max = 300) => safeDir(max).refine(
+  (value) => value.startsWith("/var/lib/pg-object-storage/") && value !== "/var/lib/pg-object-storage/",
+  "must be under /var/lib/pg-object-storage/ (not a system path)",
+);
 const optionalSafeDir = (max = 300) => z.string().trim().max(max).refine((value) => value === "" || (SAFE_ABS_PATH.test(value) && noDotDot(value)), "must be empty or an absolute path using only [A-Za-z0-9._+@/-]");
 const optionalSafeFile = (max = 300) => z.string().trim().max(max).refine((value) => value === "" || (SAFE_ABS_PATH.test(value) && noDotDot(value)), "must be an absolute path using only [A-Za-z0-9._+@/-]").optional();
 const cronExpr = z.string().trim().min(1).max(120).regex(/^[0-9A-Za-z*/,@ -]+$/, "must be a cron expression (letters, digits and * / , - @ only)");
@@ -562,10 +567,10 @@ const base = z.strictObject({
   OBJECT_STORAGE_SSH_PORT: port.default(22),
   OBJECT_STORAGE_SSH_KEY_PATH: sshPath.optional(),
   OBJECT_STORAGE_SUDO_PASSWORD: z.string().max(256).default(""),
-  OBJECT_STORAGE_ROOT_DIR: safeDir(300).default("/var/lib/pg-object-storage/vault"),
+  OBJECT_STORAGE_ROOT_DIR: objectStorageDir(300).default("/var/lib/pg-object-storage/vault"),
   OBJECT_STORAGE_DAEMON_PORT: port.default(4095),
   OBJECT_STORAGE_DAEMON_BIND_HOST: hostLike.default(""),
-  OBJECT_STORAGE_DAEMON_CERT_DIR: safeDir(300).default("/var/lib/pg-object-storage/shared/certs"),
+  OBJECT_STORAGE_DAEMON_CERT_DIR: objectStorageDir(300).default("/var/lib/pg-object-storage/shared/certs"),
   OBJECT_STORAGE_ALLOWED_CLIENT_CNS: z
     .string()
     .trim()
@@ -578,7 +583,7 @@ const base = z.strictObject({
   OBJECT_STORAGE_KEK_KEYRING: z
     .string()
     .trim()
-    .regex(/^v\d+:[0-9a-fA-F]{64}(,v\d+:[0-9a-fA-F]{64})*$/, "must be v<N>:<64-hex>[,v<M>:<64-hex>]")
+    .regex(/^v[1-9]\d*:[0-9a-fA-F]{64}(,v[1-9]\d*:[0-9a-fA-F]{64})*$/, "must be v<N>:<64-hex>[,v<M>:<64-hex>] with N/M >= 1")
     .or(z.literal(""))
     .default(""),
   OBJECT_STORAGE_ACTIVE_KEK_VERSION: z.coerce.number().int().positive().default(1),
@@ -1144,6 +1149,18 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     }
     if (!config.OBJECT_STORAGE_KEK_KEYRING) {
       problems.push("OBJECT_STORAGE_KEK_KEYRING is required when object storage is enabled");
+    }
+    if (config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP && config.DEPLOY_ENV === "production") {
+      problems.push("OBJECT_STORAGE_ALLOW_INSECURE_HTTP=true is forbidden in a production deployment");
+    }
+    const allowedCns = config.OBJECT_STORAGE_ALLOWED_CLIENT_CNS.split(",").map((value) => value.trim());
+    if (!allowedCns.includes("object-storage-client")) {
+      problems.push("OBJECT_STORAGE_ALLOWED_CLIENT_CNS must include object-storage-client");
+    }
+    const objectStoragePrivateIp = objectStorageNodes[0]?.privateIp;
+    const configuredBind = config.OBJECT_STORAGE_DAEMON_BIND_HOST.trim();
+    if (configuredBind && configuredBind !== "0.0.0.0" && configuredBind !== objectStoragePrivateIp) {
+      problems.push(`OBJECT_STORAGE_DAEMON_BIND_HOST (${configuredBind}) must be empty, 0.0.0.0, or the OBJECT_STORAGE_NODE private IP (${objectStoragePrivateIp ?? "unknown"})`);
     }
   }
 

@@ -56,6 +56,7 @@ export const objectStorageDaemonEnv = (config: DeployConfig): Record<string, str
     ? ""
     : `${config.OBJECT_STORAGE_DAEMON_CERT_DIR}/object-storage-daemon.key`,
   OBJECT_STORAGE_ALLOWED_CLIENT_CNS: config.OBJECT_STORAGE_ALLOWED_CLIENT_CNS,
+  OBJECT_STORAGE_REQUIRE_MTLS: config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP ? "false" : "true",
 });
 
 export const renderObjectStorageEnvFile = (env: Record<string, string>): string =>
@@ -132,6 +133,7 @@ export const provisionObjectStorageEngine = (input: {
     `getent group ${serviceUser} >/dev/null 2>&1 || groupadd --system ${serviceUser}`,
     `id -u ${serviceUser} >/dev/null 2>&1 || useradd --system --gid ${serviceUser} --home /var/lib/pg-object-storage --shell /usr/sbin/nologin ${serviceUser}`,
     `install -d -m 0750 -o ${serviceUser} -g ${serviceUser} /var/lib/pg-object-storage ${shellQuote(rootDir)} ${shellQuote(`${rootDir}/hot`)} ${shellQuote(`${rootDir}/cold`)} ${shellQuote(`${rootDir}/quarantine`)} ${shellQuote(`${rootDir}/tmp`)} ${shellQuote(`${rootDir}/.trash`)} ${shellQuote(certDir)}`,
+    `find ${shellQuote(certDir)} -maxdepth 1 -type f \\( -name '*.crt' -o -name '*.key' \\) -exec chown ${serviceUser}:${serviceUser} {} + 2>/dev/null || true`,
     `install -d -m 0750 -o root -g ${serviceUser} /etc/pg-object-storage`,
   ].join(" && ");
 

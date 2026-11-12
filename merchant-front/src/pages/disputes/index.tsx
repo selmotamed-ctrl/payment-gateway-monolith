@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { ref } from "vue";
 import { useLocale } from "vuetify";
-import { VFileInput, VTextarea } from "vuetify/components";
+import { VBtn, VFileInput, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -20,6 +20,18 @@ import { FormField } from "@/components/ui/FormField";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { MonoRef } from "@/components/ui/MonoRef";
+type Attachment = {
+    id: string;
+    label: string;
+    fileName: string | null;
+    mimeType: string | null;
+    byteSize: string | null;
+    sha256: string | null;
+    status: string | null;
+    avScanStatus: string | null;
+    createdAt: string;
+};
+
 type Dispute = {
     id: string;
     disputeRef: string;
@@ -46,6 +58,8 @@ const DisputesPage = dc(() => {
     const file = ref<File | null>(null);
     const actionLoading = ref(false);
     const formError = ref("");
+    const attachments = ref<Attachment[]>([]);
+    const attachmentsLoading = ref(false);
 
     const load = async () => {
         loading.value = true;
@@ -66,23 +80,41 @@ const DisputesPage = dc(() => {
 
     void load();
 
+    const loadAttachments = async (disputeId: string) => {
+        attachmentsLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.disputeAttachments(disputeId));
+            const payload = response.data?.data ?? response.data ?? {};
+            attachments.value = (payload.attachments ?? []) as Attachment[];
+        } catch (e) {
+            attachments.value = [];
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        } finally {
+            attachmentsLoading.value = false;
+        }
+    };
+
     const submitEvidence = async () => {
         if (!selected.value) {
+            return;
+        }
+        if (!file.value) {
+            formError.value = t("Choose an evidence file");
             return;
         }
         actionLoading.value = true;
         formError.value = "";
         try {
             const body = new FormData();
-            body.append("note", note.value);
-            if (file.value) {
-                body.append("file", file.value);
-            }
-            await api.post(urlsMap.disputeEvidence(selected.value.id), body, {
+            body.append("file", file.value);
+            body.append("label", note.value.trim() || file.value.name);
+            await api.post(urlsMap.disputeAttachments(selected.value.id), body, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
-            dialogOpen.value = false;
-            showSnackBar({ type: "success", message: t("Evidence") });
+            showSnackBar({ type: "success", message: t("Evidence uploaded") });
+            file.value = null;
+            note.value = "";
+            await loadAttachments(selected.value.id);
             await load();
         } catch (e) {
             const message = extractApiErrorMessage(e);
@@ -90,6 +122,33 @@ const DisputesPage = dc(() => {
             showSnackBar({ type: "error", message });
         } finally {
             actionLoading.value = false;
+        }
+    };
+
+    const downloadAttachment = async (attachment: Attachment) => {
+        if (!selected.value) return;
+        try {
+            const response = await api.get(urlsMap.disputeAttachmentContent(selected.value.id, attachment.id), { responseType: "blob" });
+            const blob = new Blob([response.data], { type: attachment.mimeType ?? "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = attachment.fileName ?? attachment.label;
+            anchor.click();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        }
+    };
+
+    const deleteAttachment = async (attachment: Attachment) => {
+        if (!selected.value || !window.confirm(t("Delete this evidence file?"))) return;
+        try {
+            await api.delete(urlsMap.disputeAttachmentDelete(selected.value.id, attachment.id));
+            await loadAttachments(selected.value.id);
+            showSnackBar({ type: "success", message: t("Evidence deleted") });
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
         }
     };
 
@@ -152,7 +211,9 @@ const DisputesPage = dc(() => {
                             note.value = "";
                             file.value = null;
                             formError.value = "";
+                            attachments.value = [];
                             dialogOpen.value = true;
+                            void loadAttachments(row.id);
                         },
                     }}
                     items={[]}
@@ -197,15 +258,15 @@ const DisputesPage = dc(() => {
                 onSubmit={() => void submitEvidence()}
             >
                 <SectionFields title={t("Evidence")}>
-                    <FormField label={t("Notes")}>
+                    <FormField label={t("Label or note")}>
                         <VTextarea
                             modelValue={note.value}
                             onUpdate:modelValue={(v: string) => (note.value = v)}
-                            rows={3}
+                            rows={2}
                             hideDetails
                         />
                     </FormField>
-                    <FormField label={t("Evidence")}>
+                    <FormField label={t("Evidence file")}>
                         <VFileInput
                             modelValue={file.value}
                             onUpdate:modelValue={(v: File | File[] | null) => {
@@ -214,6 +275,26 @@ const DisputesPage = dc(() => {
                             hideDetails
                         />
                     </FormField>
+                </SectionFields>
+                <SectionFields title={t("Uploaded evidence")}>
+                    {attachmentsLoading.value ? (
+                        <ThemedText>{t("Loading…")}</ThemedText>
+                    ) : attachments.value.length === 0 ? (
+                        <ThemedText class="text-medium-emphasis">{t("No evidence uploaded yet.")}</ThemedText>
+                    ) : attachments.value.map((attachment) => (
+                        <ThemedView key={attachment.id} style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "8px 0", borderBottom: "1px solid var(--pg-border-subtle)" }}>
+                            <ThemedView style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                <ThemedText>{attachment.label}</ThemedText>
+                                <StatusBadge status={attachment.avScanStatus ?? "PENDING"} />
+                                <MonoRef value={attachment.sha256 ?? ""} truncate={12} />
+                                {attachment.byteSize && <ThemedText class="text-medium-emphasis">{attachment.byteSize} B</ThemedText>}
+                            </ThemedView>
+                            <ThemedView style={{ display: "flex", gap: "6px" }}>
+                                <VBtn size="small" variant="text" disabled={attachment.status !== "ACTIVE"} onClick={() => void downloadAttachment(attachment)}>{t("Download")}</VBtn>
+                                <VBtn size="small" variant="text" color="error" onClick={() => void deleteAttachment(attachment)}>{t("Delete")}</VBtn>
+                            </ThemedView>
+                        </ThemedView>
+                    ))}
                 </SectionFields>
             </FormModal>
         </ScreenContainer>

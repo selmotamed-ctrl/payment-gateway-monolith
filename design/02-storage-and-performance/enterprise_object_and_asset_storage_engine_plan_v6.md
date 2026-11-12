@@ -2,9 +2,9 @@
 
 **Target Audience:** Autonomous Coding Agent (`OpenCode`) & Platform Engineering
 
-**Baseline Repository State:** `REQUIRED_SCHEMA_VERSION = 33` (includes Dynamic Report Studio v32 & Backup Engine v33)
+**Baseline Repository State:** `REQUIRED_SCHEMA_VERSION = 33` (historical)
 
-**Target Repository State:** `REQUIRED_SCHEMA_VERSION = 34`
+**Target Repository State:** `REQUIRED_SCHEMA_VERSION = 34` (historical; implemented as schema 36 with hardening at 37)
 
 **Core Mandate:** **100% Shared Across Nodes and Records, Multi-Node Ready, Self-Hosted, Recoverable, Fast, Zero External Cloud Subscriptions.** Every line of SQL, Prisma schema, SDK code, first-party mTLS Shared Object Storage Daemon (`deploy/object-storage-daemon`), Multi-Node Deploy Engine provisioner (`deploy/`), Backup Engine integration, Domain Call-Site migration, Admin UI, and Test Suite is specified verbatim below. **Do not skip, abbreviate, or invent shortcuts for any section.**
 

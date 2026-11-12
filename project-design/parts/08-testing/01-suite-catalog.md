@@ -506,9 +506,18 @@ These are development/CI tests only; no production-time test job or test endpoin
 
 ## Object storage suites
 
-- `core-back/test/objectStorageEngine.test.ts` — T01–T20 (DB-gated) and DB-free
-  pgos1/sniff edge cases; runs against a real PostgreSQL 18 + Redis.
-- `deploy/test/objectStorageDeploy.test.ts` — T21 topology/PKI/firewall/guard
-  and T22 parity/escrow/drill, plus the shared `blobStore.ts` drift guard.
+- `core-back/test/objectStorageEngine.test.ts` — T01–T28 (DB-gated) and DB-free
+  pgos1/sniff edge cases; includes no-lock activation, retention-once, GC claim,
+  access-log append-only, abandoned quarantine and held discard; runs against a
+  real PostgreSQL 18 + Redis.
+- `core-back/test/runtime/raw-body.test.ts` — raw-body capture and per-route
+  budgets for assets, dispute/AML evidence, reconciliation, KYB and checkout.
+- `deploy/test/objectStorageDeploy.test.ts` — T21 topology/PKI/firewall/guard,
+  per-consumer certificate placement, safe-path/KEK validation and T22
+  parity/escrow/drill, plus the shared `blobStore.ts` drift guard.
 - `deploy/object-storage-daemon/test/server.test.ts` — HTTP round-trip, checksum
   mismatch, path traversal, trash/purge and unknown bucket/route refusals.
+- `admin-back/test/object-storage-forwarding.test.ts` — verifies page/filter/
+  sort/search/access-log forwarding and the legal-hold request path.
+- Route/UI coverage still needs a live Playwright pass for the four storage tabs
+  and the dispute/AML/reconciliation attachment surfaces.

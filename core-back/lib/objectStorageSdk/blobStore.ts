@@ -244,19 +244,26 @@ export class RemoteMtlsBlobStore implements BlobStore {
     this.timeoutMs = config.timeoutMs ?? 30_000
 
     if (this.baseUrl.protocol === 'https:') {
-      const ca = config.caCertPath && fs.existsSync(config.caCertPath) ? fs.readFileSync(config.caCertPath) : undefined
-      const cert =
-        config.clientCertPath && fs.existsSync(config.clientCertPath)
-          ? fs.readFileSync(config.clientCertPath)
-          : undefined
-      const key =
-        config.clientKeyPath && fs.existsSync(config.clientKeyPath) ? fs.readFileSync(config.clientKeyPath) : undefined
+      const requireFile = (value: string | null | undefined, label: string): Buffer => {
+        if (!value) {
+          throw new Error(`OBJECT_STORAGE_TLS_INCOMPLETE: ${label} is required for an https object-storage-daemon URL`)
+        }
+        try {
+          return fs.readFileSync(value)
+        } catch (error) {
+          throw new Error(`OBJECT_STORAGE_TLS_UNREADABLE: cannot read ${label} at ${value}: ${(error as Error).message}`)
+        }
+      }
+      const ca = requireFile(config.caCertPath, 'OBJECT_STORAGE_TLS_CA_PATH')
+      const cert = requireFile(config.clientCertPath, 'OBJECT_STORAGE_TLS_CLIENT_CERT_PATH')
+      const key = requireFile(config.clientKeyPath, 'OBJECT_STORAGE_TLS_CLIENT_KEY_PATH')
       this.agent = new https.Agent({
         keepAlive: true,
         ca,
         cert,
         key,
-        rejectUnauthorized: Boolean(ca),
+        rejectUnauthorized: true,
+        minVersion: 'TLSv1.3',
       })
     } else {
       this.agent = new http.Agent({ keepAlive: true })
@@ -431,11 +438,82 @@ export interface BlobStoreEnvConfig {
   rootDir?: string | null
   nodeEnv?: string | null
   coreNodeCount?: number
+  allowInsecureHttp?: boolean
+}
+
+/**
+ * A production core that was started without the shared vault is not allowed to
+ * fall back to local disk. It stays bootable (so /health and the rest of the
+ * platform are diagnosable) but every storage operation fails closed with a
+ * clear 503 instead of silently writing bytes to one node.
+ */
+export class BlobStoreUnavailableError extends Error {
+  readonly code = 'STORAGE_UNAVAILABLE'
+  readonly httpStatus = 503
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'BlobStoreUnavailableError'
+  }
+}
+
+export class UnavailableBlobStore implements BlobStore {
+  private readonly detail: string
+
+  constructor(detail = 'OBJECT_STORAGE_DAEMON_URL is not configured') {
+    this.detail = detail
+  }
+
+  private unavailable(): never {
+    throw new BlobStoreUnavailableError(
+      `${this.detail}. Configure OBJECT_STORAGE_NODE / OBJECT_STORAGE_DAEMON_URL so every core node and the backup daemon share the vault.`,
+    )
+  }
+
+  async put(): Promise<{ byteSize: number; sha256Hex: string }> {
+    this.unavailable()
+  }
+
+  async readBytes(): Promise<Buffer> {
+    this.unavailable()
+  }
+
+  async stat(): Promise<{ exists: boolean; byteSize: number }> {
+    this.unavailable()
+  }
+
+  async moveToTrash(): Promise<void> {
+    this.unavailable()
+  }
+
+  async purgeTrashOlderThan(): Promise<number> {
+    this.unavailable()
+  }
+
+  async list(): Promise<BlobListEntry[]> {
+    this.unavailable()
+  }
+
+  async healthCheck(): Promise<BlobHealthReport> {
+    return {
+      ok: false,
+      mode: 'REMOTE_MTLS',
+      rootDirOrUrl: 'unavailable',
+      freeBytes: 0,
+      latencyMs: 0,
+      error: `${this.detail}; shared storage is required`,
+    }
+  }
 }
 
 export function createBlobStore(config: BlobStoreEnvConfig): BlobStore {
   const daemonUrl = config.daemonUrl?.trim()
   if (daemonUrl) {
+    if (config.nodeEnv === 'production' && daemonUrl.startsWith('http://') && !config.allowInsecureHttp) {
+      throw new Error(
+        'OBJECT_STORAGE_INSECURE_HTTP_FORBIDDEN: the shared vault must use mTLS in production. Set OBJECT_STORAGE_ALLOW_INSECURE_HTTP=true only for an explicitly isolated local test deployment.',
+      )
+    }
     return new RemoteMtlsBlobStore({
       baseUrl: daemonUrl,
       caCertPath: config.caCertPath ?? null,
@@ -445,12 +523,17 @@ export function createBlobStore(config: BlobStoreEnvConfig): BlobStore {
     })
   }
 
-  // HARD GUARD: Never allow a production or multi-node core-back instance to silently write to its own local disk!
+  // HARD GUARD: never allow a multi-node core-back instance to silently write to
+  // its own local disk. A single-host production process stays bootable but
+  // fails closed on every storage operation; it never writes to local disk.
   const coreNodeCount = config.coreNodeCount ?? 1
-  if (config.nodeEnv === 'production' || coreNodeCount > 1) {
+  if (coreNodeCount > 1) {
     throw new Error(
-      'OBJECT_STORAGE_DAEMON_URL_REQUIRED: Shared storage is mandatory. Refusing to store blobs on a core node local disk in production or multi-node mode. Please configure OBJECT_STORAGE_NODE in deploy/deploy.env so all services read and write to the shared storage server.'
+      'OBJECT_STORAGE_DAEMON_URL_REQUIRED: Shared storage is mandatory. Refusing to store blobs on a core node local disk in multi-node mode. Please configure OBJECT_STORAGE_NODE in deploy/deploy.env so all services read and write to the shared storage server.'
     )
+  }
+  if (config.nodeEnv === 'production') {
+    return new UnavailableBlobStore('OBJECT_STORAGE_DAEMON_URL is not configured')
   }
 
   // Allowed ONLY for single-process local development / unit tests
@@ -467,6 +550,7 @@ export function createBlobStoreFromEnv(): BlobStore {
     rootDir: process.env.OBJECT_STORAGE_ROOT_DIR,
     nodeEnv: process.env.NODE_ENV,
     coreNodeCount: Number(process.env.CLUSTER_CORE_NODE_COUNT ?? '1'),
+    allowInsecureHttp: ['1', 'true', 'yes', 'on'].includes((process.env.OBJECT_STORAGE_ALLOW_INSECURE_HTTP ?? '').trim().toLowerCase()),
   })
 }
 

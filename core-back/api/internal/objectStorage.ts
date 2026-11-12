@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Prisma } from "../../generated/prisma/client";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { writeAudit } from "../../lib/audit/writeAudit";
-import { ObjectStorageError } from "../../lib/objectStorageSdk";
+import { BlobStoreUnavailableError, ObjectStorageError } from "../../lib/objectStorageSdk";
 import { getObjectStorageSdk } from "../../lib/objectStorageSdk/runtime";
 import { createObjectStorageWorkers } from "../../engine/workers/ObjectStorageWorkers";
 
@@ -37,7 +37,11 @@ const asApiError = (error: unknown): ApiError => {
   if (error instanceof ObjectStorageError) {
     return new ApiError(error.httpStatus, error.code, error.message);
   }
-  return new ApiError(500, "OBJECT_STORAGE_ERROR", error instanceof Error ? error.message : "object storage operation failed");
+  if (error instanceof BlobStoreUnavailableError) {
+    return new ApiError(error.httpStatus, error.code, error.message);
+  }
+  // Do not echo Prisma/SQL messages to a console user; log server-side only.
+  return new ApiError(500, "OBJECT_STORAGE_ERROR", "The object-storage operation failed");
 };
 
 const handler = (fn: (request: Request, response: Response) => Promise<void>) =>
@@ -72,6 +76,7 @@ const safeObjectRow = (row: Record<string, any>) => ({
   legalHoldByAdminId: row.legalHoldByAdminId,
   legalHoldPlacedAt: row.legalHoldPlacedAt,
   gcEligibleAt: row.gcEligibleAt,
+  gcClaimedAt: row.gcClaimedAt,
   avScanStatus: row.avScanStatus,
   avScannedAt: row.avScannedAt,
   avSignature: row.avSignature,
@@ -153,16 +158,25 @@ router.get("/summary", handler(async (request, response) => {
   });
 }));
 
+const NAMESPACES = [
+  "KYB_DOCUMENTS", "RECON_STATEMENTS", "REGULATORY_REPORTS", "REPORT_STUDIO_ASSETS",
+  "MERCHANT_STATEMENTS", "DISPUTE_EVIDENCE", "AML_CASE_ATTACHMENTS", "SYSTEM_BRAND_ASSETS", "BACKUP_ARTIFACTS",
+] as const;
+const STATUSES = ["STAGING", "QUARANTINE_PENDING_AV", "QUARANTINE_REJECTED", "ACTIVE", "PURGED"] as const;
+const BUCKETS = ["HOT", "COLD", "QUARANTINE"] as const;
 const listQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(25),
-  namespace: z.string().trim().max(64).optional(),
-  status: z.string().trim().max(32).optional(),
-  bucket: z.string().trim().max(16).optional(),
+  namespace: z.enum(NAMESPACES).optional(),
+  status: z.enum(STATUSES).optional(),
+  statuses: z.string().trim().max(200).optional(),
+  bucket: z.enum(BUCKETS).optional(),
   ownerMerchantId: z.string().uuid().optional(),
   legalHold: z.enum(["true", "false"]).optional(),
   sha256Hex: z.string().trim().length(64).regex(/^[a-f0-9]{64}$/i).optional(),
   search: z.string().trim().max(200).optional(),
+  sortKey: z.enum(["createdAt", "namespace", "status", "retainUntil", "byteSize", "originalFilename"]).default("createdAt"),
+  sortDirection: z.enum(["asc", "desc"]).default("desc"),
 }).strict();
 
 router.get("/objects", handler(async (request, response) => {
@@ -171,6 +185,12 @@ router.get("/objects", handler(async (request, response) => {
   const where: Record<string, unknown> = {};
   if (query.namespace) where.namespace = query.namespace;
   if (query.status) where.status = query.status;
+  if (query.statuses) {
+    const statuses = query.statuses.split(",").map((value) => value.trim()).filter(Boolean);
+    const invalid = statuses.find((value) => !STATUSES.includes(value as never));
+    if (invalid) throw new ApiError(400, "STORAGE_STATUS_INVALID", `Unknown storage status: ${invalid}`);
+    if (statuses.length > 0) where.status = { in: statuses };
+  }
   if (query.bucket) where.bucket = query.bucket;
   if (query.ownerMerchantId) where.ownerMerchantId = query.ownerMerchantId;
   if (query.legalHold) where.legalHold = query.legalHold === "true";
@@ -180,14 +200,15 @@ router.get("/objects", handler(async (request, response) => {
       { storageKey: { contains: query.search, mode: "insensitive" } },
       { originalFilename: { contains: query.search, mode: "insensitive" } },
     ];
-    if (/^[0-9a-f-]{36}$/i.test(query.search)) or.push({ id: query.search });
+    const uuid = z.string().uuid().safeParse(query.search);
+    if (uuid.success) or.push({ id: uuid.data });
     where.OR = or;
   }
   const prisma = getObjectStorageSdk().prisma;
   const [rows, total] = await Promise.all([
     prisma.storageObject.findMany({
       where: where as Prisma.StorageObjectWhereInput,
-      orderBy: { createdAt: "desc" },
+      orderBy: { [query.sortKey]: query.sortDirection },
       skip: (query.page - 1) * query.pageSize,
       take: query.pageSize,
       include: { locks: { where: { releasedAt: null } } },
@@ -246,19 +267,37 @@ router.delete("/objects/:id/legal-hold", handler(async (request, response) => {
   const { id } = parseOrThrow(z.object({ id: z.string().uuid() }).strict(), request.params);
   const body = parseOrThrow(z.object({ reason: z.string().trim().min(5).max(512) }).strict(), request.body ?? {});
   const actor = actorOf(request);
-  const updated = await getObjectStorageSdk().routeClient.liftLegalHold({ objectId: id, adminId: actor.userId, reason: body.reason });
-  await writeAudit(getObjectStorageSdk().prisma, {
+  const sdk = getObjectStorageSdk();
+  // Lifting a hold is a sensitive, loosening action: the maker proposes and a
+  // different checker approves. Placing a hold stays immediate.
+  const existing = await sdk.prisma.approvalRequest.findFirst({
+    where: { subjectType: "STORAGE_LEGAL_HOLD", subjectId: id, state: "PENDING_REVIEW" },
+    orderBy: { createdAt: "desc" },
+  });
+  const approval = existing ?? await sdk.prisma.approvalRequest.create({
+    data: {
+      subjectType: "STORAGE_LEGAL_HOLD",
+      subjectId: id,
+      payloadDiffJson: { action: "LIFT", reason: body.reason } as Prisma.InputJsonValue,
+      makerReason: body.reason,
+      mode: "STANDARD",
+      makerUserId: actor.userId,
+      state: "PENDING_REVIEW",
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    },
+  });
+  await writeAudit(sdk.prisma, {
     data: {
       actorId: actor.userId,
       role: actor.role,
-      action: "STORAGE_LEGAL_HOLD_LIFTED",
+      action: "STORAGE_LEGAL_HOLD_LIFT_REQUESTED",
       entityType: "STORAGE_OBJECT",
       entityId: id,
-      beforeJson: { reason: body.reason },
-      afterJson: {},
+      beforeJson: { legalHold: true },
+      afterJson: { legalHold: true, approvalRequestId: approval.id, reason: body.reason },
     },
   });
-  response.json({ object: safeObjectRow(updated as never) });
+  response.status(202).json({ status: "PENDING_CHECKER", approvalRequestId: approval.id });
 }));
 
 const accessLogQuery = z.object({
@@ -267,6 +306,7 @@ const accessLogQuery = z.object({
   allowed: z.enum(["true", "false"]).optional(),
   action: z.string().trim().max(48).optional(),
   objectId: z.string().uuid().optional(),
+  search: z.string().trim().max(200).optional(),
 }).strict();
 
 router.get("/access-logs", handler(async (request, response) => {
@@ -276,6 +316,13 @@ router.get("/access-logs", handler(async (request, response) => {
   if (query.allowed) where.allowed = query.allowed === "true";
   if (query.action) where.action = query.action;
   if (query.objectId) where.objectId = query.objectId;
+  if (query.search) {
+    where.OR = [
+      { actorId: { contains: query.search, mode: "insensitive" } },
+      { requestId: { contains: query.search, mode: "insensitive" } },
+      { denialReason: { contains: query.search, mode: "insensitive" } },
+    ];
+  }
   const prisma = getObjectStorageSdk().prisma;
   const [rows, total] = await Promise.all([
     prisma.storageObjectAccessLog.findMany({

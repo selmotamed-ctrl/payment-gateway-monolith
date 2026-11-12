@@ -212,36 +212,50 @@ export class ReportGenerationService {
     const contentCiphertext = staged ? null : await encode(isXml ? this.xmlCipher : format === "DOCX" ? this.docxCipher : this.xlsxCipher, payload);
 
     const write = async (tx: Any): Promise<void> => {
+      // Serialize concurrent generations of the same report output. A row lock
+      // is cheaper than binding two storage objects to one output.
+      if (typeof tx.$queryRawUnsafe === "function") {
+        await tx.$queryRawUnsafe(
+          'SELECT id FROM "regulatory_report_outputs" WHERE "report_id" = $1::uuid AND "format" = $2::"ReportOutputFormat" AND "superseded_at" IS NULL ORDER BY "revision" DESC LIMIT 1 FOR UPDATE',
+          input.report.id,
+          format,
+        );
+      }
       const current = await tx.regulatoryReportOutput.findFirst({
         where: { reportId: input.report.id, format, supersededAt: null },
         orderBy: { revision: "desc" },
       });
+      const releaseOldOutput = async (row: Any, reason: string) => {
+        if (!row.storageObjectId) return;
+        if (this.objectStorage) {
+          await this.objectStorage.routeClient.release(tx as never, {
+            objectId: row.storageObjectId,
+            holderType: "REG_REPORT_OUTPUT",
+            holderId: row.id,
+            actorId: "report-generation-service",
+            reason,
+          });
+          return;
+        }
+        // Test/legacy driver without the vault keeps the old raw update path.
+        await tx.storageObjectLock.updateMany({
+          where: { objectId: row.storageObjectId, holderType: "REG_REPORT_OUTPUT", holderId: row.id, releasedAt: null },
+          data: { releasedAt: new Date(), releasedByActorId: "report-generation-service", releaseReason: reason },
+        });
+      };
       let targetId: string | null = null;
       if (current) {
         if (!input.allowRegenerate && current.validationStatus === "VALIDATED") {
           return;
         }
         if (input.allowRegenerate) {
+          await releaseOldOutput(current, "REGULATORY_REPORT_OUTPUT_REGENERATED");
           await tx.regulatoryReportOutput.update({
             where: { id: current.id },
             data: { supersededAt: new Date() },
           });
         } else {
-          if (current.storageObjectId || staged) {
-            await tx.storageObjectLock.updateMany({
-              where: {
-                objectId: current.storageObjectId ?? undefined,
-                holderType: "REG_REPORT_OUTPUT",
-                holderId: current.id,
-                releasedAt: null,
-              },
-              data: {
-                releasedAt: new Date(),
-                releasedByActorId: "report-generation-service",
-                releaseReason: "REGULATORY_REPORT_OUTPUT_REPLACED",
-              },
-            });
-          }
+          await releaseOldOutput(current, "REGULATORY_REPORT_OUTPUT_REPLACED");
           await tx.regulatoryReportOutput.update({
             where: { id: current.id },
             data: {

@@ -3,7 +3,7 @@ id: core.object-storage
 title: Shared Object & Asset Storage Engine
 status: implemented
 confidence: high
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 verified_against: working-tree
 code:
   - core-back/lib/objectStorageSdk/**
@@ -19,14 +19,17 @@ code:
   - admin-front/src/pages/system/object-storage/index.tsx
 tests:
   - core-back/test/objectStorageEngine.test.ts
+  - core-back/test/runtime/raw-body.test.ts
   - deploy/test/objectStorageDeploy.test.ts
   - deploy/object-storage-daemon/test/server.test.ts
+  - admin-back/test/object-storage-forwarding.test.ts
 design_sources:
   - design/02-storage-and-performance/enterprise_object_and_asset_storage_engine_plan_v6.md
 gaps:
-  - Backup parity/drill proof runs on the backup daemon and is covered with an in-memory repository; a live two-host parity drill is not automated in this tree.
+  - Backup parity/drill proof is covered with an in-memory repository; a live two-host parity drill is not automated in this tree (GAP-067).
   - Backup artifacts (`BACKUP_ARTIFACTS`) are a policy namespace but the daemon keeps its own encrypted artifact repository; the namespace is reserved for future core-managed artifacts.
-  - SERVER_PDF rendering is still client-side (Paged.js/Chrome); report assets are stored and served but not rendered server-side.
+  - Large uploads are still buffered in memory; a true streaming BlobStore is future work.
+- SERVER_PDF rendering is still client-side (Paged.js/Chrome); report assets are stored and served but not rendered server-side.
 ---
 
 # Shared Object & Asset Storage Engine
@@ -48,15 +51,15 @@ The engine does not own PostgreSQL backups (see `core.backup`) or the API
 authority model (`core.api`); it enforces the authority recorded on each object
 as defence in depth.
 
-## 2. Database control plane (schema version 36)
+## 2. Database control plane (schema version 37)
 
-Migration `20261112000000_v36_enterprise_object_storage_engine` adds:
+Migration `20261112000000_v36_enterprise_object_storage_engine` adds the v36 control plane; `20261113090000_storage_engine_hardening` adds GC claims, access-log append-only, authorization immutability and the performance indexes. Together they provide:
 
 | Table | Notes |
 | :--- | :--- |
-| `storage_objects` | One row per upload. `byte_size > 0`, `chunk_size_bytes >= 4096`, `chunk_count >= 1`; unique `(bucket, storage_key)`. |
+| `storage_objects` | One row per upload. `byte_size > 0`, `chunk_size_bytes >= 4096`, `chunk_count >= 1`; unique `(bucket, storage_key)`; `gc_claim_token`/`gc_claimed_at` make collection safe. |
 | `storage_object_locks` | Append-only lock ledger with unique `(object_id, holder_type, holder_id)`. |
-| `storage_object_access_logs` | Allowed and denied read attempts. |
+| `storage_object_access_logs` | Allowed and denied read attempts; append-only (UPDATE/DELETE refused). |
 | `report_asset_bundle_entries` | Per-file entries of Report Studio bundle archives. |
 | `dispute_attachments`, `aml_case_evidence` | Evidence links (FKs to disputes/merchants/AML cases). |
 
@@ -141,9 +144,13 @@ deploy test asserts they match the canonical core file.
   `runIntegrityScrubBatch`, `runLockReconcile`, `runRewrapBatch`,
   `exportManifest`.
 
-`readAuthorized` checks ACTIVE status, the holder lock, the merchant tenant and
-the object's required authority, and writes a `storage_object_access_logs` row
-for every outcome. `createBlobStore` refuses to fall back to local disk in
+`readAuthorized` checks ACTIVE status, the holder lock (when `holderContext` is
+supplied), the merchant tenant and the namespace's accepted authority set, and
+writes a `storage_object_access_logs` row for every outcome when the database is
+reachable. A namespace can accept more than one real role authority (for example
+`kyb:read` or `compliance:read`; `dispute:read`, `disputes:read` or
+`dispute:respond`); the stored `requiredAuthority` remains the canonical audit
+value. `createBlobStore` refuses to fall back to local disk in
 production or when `CLUSTER_CORE_NODE_COUNT > 1`
 (`OBJECT_STORAGE_DAEMON_URL_REQUIRED`).
 
@@ -165,14 +172,18 @@ production or when `CLUSTER_CORE_NODE_COUNT > 1`
   wait for AV (`QUARANTINE_PENDING_AV`).
 - The synthetic seeder stages preview KYB PDFs and reconciliation statements and
   binds them.
+- Dispute and AML evidence have raw-body upload routes, list/content/delete
+  routes and admin/merchant portal sections. Reconciliation runs expose the
+  original statement for download. Brand assets have an authenticated preview,
+  5 MiB upload limit and a guarded delete/archive path.
 
 ## 7. Workers and monitoring
 
 `ObjectStorageMaintenanceWorker` (enabled by `WORKER_OBJECT_STORAGE_ENABLED`,
-interval/batch env) runs the generic AV fallback (EICAR + active content, not
-KYB), staging/expired GC, integrity scrub, lock reconcile, periodic blob sweep
-and KEK rewrap. It is not a cluster singleton; the DB guards make each action
-idempotent.
+interval/batch env) is a cluster singleton. It runs the generic AV fallback
+(EICAR + active content, not KYB), staging/expired/abandoned GC, integrity scrub,
+lock reconcile, periodic blob sweep and KEK rewrap. A single leader avoids two
+nodes scanning the same quarantine row and avoids every node walking the vault.
 
 `createObjectStorageMonitorCheck` (`object_storage`) raises keyed findings for
 an unreachable vault (P1), scrub errors (P1) and quarantine uploads older than
@@ -200,18 +211,22 @@ the SHA-256.
 - Firewall opens 4095 only to core and backup private IPs.
 - Health probes run `systemctl is-active` on the storage host and
   `/v1/health` over mTLS from every core host and the backup host.
-- Admin API: `GET /object-storage/summary`, list/detail objects, access logs,
-  POST/DELETE legal holds, POST maintenance jobs. The admin portal route
-  `/system/object-storage` renders the four tabs.
+- Admin API: `GET /object-storage/summary`, filtered/sorted/paginated objects,
+  detail, filtered access logs, place-hold and request-lift, and maintenance
+  jobs. The admin portal route `/system/object-storage` (Operations navigation)
+  renders four tabs: health, object explorer, quarantine and access audit, with
+  a full detail drawer, legal-hold approval flow and confirmation/result for
+  maintenance jobs.
 
 ## 10. Tests
 
-`core-back/test/objectStorageEngine.test.ts` covers T01–T20 end to end against
-live PostgreSQL (round-trip, chunk tamper/truncation/reorder, cross-object swap,
-rollback cleanup, trigger guards, multi-holder ref counting, retention, legal
-hold, quarantine/no-retention, infected verdict, SVG/executable rejection,
-tenant/authority denial logs, KEK rewrap, GC/trash, lock reconciler, two-node
-shared daemon) plus DB-free envelope/sniff tests.
+`core-back/test/objectStorageEngine.test.ts` covers T01–T20 plus T23–T28 end to
+end against live PostgreSQL (round-trip, chunk tamper/truncation/reorder,
+cross-object swap, rollback cleanup, trigger guards, multi-holder ref counting,
+retention-once, no-lock activation, legal hold, quarantine/no-retention,
+infected verdict, SVG/executable rejection, tenant/authority denial logs, KEK
+rewrap, GC/claim/trash, abandoned quarantine, access-log append-only, lock
+reconciler, two-node shared daemon) plus DB-free envelope/sniff tests.
 
 `deploy/test/objectStorageDeploy.test.ts` covers T21 (topology derivation, core
 env, PKI, firewall, multi-node guard/provisioner refusal, shared-copy drift) and
@@ -231,3 +246,27 @@ Implemented end to end. Deviations recorded:
   holder type are available for future per-file extraction.
 - Backup artifacts are not yet uploaded through the core SDK; the backup daemon
   keeps its own established encrypted artifact repository.
+
+
+## 12. 2026-11-13 hardening pass
+
+- Production core without `OBJECT_STORAGE_DAEMON_URL` now stays bootable with an
+  `UnavailableBlobStore`; every storage operation fails closed with
+  `503 STORAGE_UNAVAILABLE` and no local-disk fallback.
+- Raw-body capture now covers every binary storage route: assets (5 MiB),
+  admin/merchant dispute attachments (25 MiB), AML evidence (50 MiB),
+  reconciliation (100 MiB), KYB (25 MiB). Each has a route-level budget.
+- Deploy certificate placement is per consumer: a co-located core/backup host
+  never receives the object-storage server key, and a backup host receives
+  `object-storage-client` in `BACKUP_DAEMON_CERT_DIR`.
+- Fresh storage hosts install pinned Bun, create `pgobjstore`, then hand only
+  the storage certificate files to it; storage paths are restricted to
+  `/var/lib/pg-object-storage/`.
+- mTLS fails closed on partial TLS configuration and unreadable/missing CA,
+  client certificate or key; production HTTP requires the explicit insecure
+  opt-in.
+- Regulatory output regeneration/supersede releases the old object lock;
+  report-asset bundles bind after the bundle row exists, record the merchant
+  owner for merchant bundles, and discard a content-addressed loser.
+- Added indexes for the object explorer and access-log filters, append-only
+  access logs, immutable authorization/tenant columns and schema version 37.

@@ -4,8 +4,8 @@
 
 - Models: **112**
 - Enums: **127**
-- Schema version: **36**
-- Migrations: **35**
+- Schema version: **37**
+- Migrations: **36**
 
 ## Models
 
@@ -289,3 +289,4 @@
 - `20261111120000_report_engine_versioning`
 - `20261111130000_merchant_report_chrome`
 - `20261112000000_v36_enterprise_object_storage_engine`
+- `20261113090000_storage_engine_hardening`

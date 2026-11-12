@@ -146,7 +146,7 @@
 | `core-back/test/merchant-read-scope.test.ts` | 437 | 13 |
 | `core-back/test/merchant-webhooks-api.test.ts` | 234 | 9 |
 | `core-back/test/notifications-and-gl-accounts.test.ts` | 526 | 20 |
-| `core-back/test/objectStorageEngine.test.ts` | 683 | 25 |
+| `core-back/test/objectStorageEngine.test.ts` | 803 | 31 |
 | `core-back/test/onboarding-four-eyes.test.ts` | 200 | 18 |
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/partition-truncate-guard.test.ts` | 86 | 5 |
@@ -193,7 +193,7 @@
 | `core-back/test/reporting-xsd-xlsx.test.ts` | 289 | 11 |
 | `core-back/test/retention-worker.test.ts` | 504 | 17 |
 | `core-back/test/runtime/production-adapters.test.ts` | 569 | 16 |
-| `core-back/test/runtime/raw-body.test.ts` | 88 | 4 |
+| `core-back/test/runtime/raw-body.test.ts` | 127 | 6 |
 | `core-back/test/runtime/rotating-refresh-token.test.ts` | 106 | 2 |
 | `core-back/test/screening-and-caps.test.ts` | 515 | 13 |
 | `core-back/test/security-regressions/c1-forged-success.test.ts` | 119 | 8 |
@@ -248,6 +248,7 @@
 | `admin-back/test/helpers/session.ts` | 135 | 0 |
 | `admin-back/test/helpers/upstream.ts` | 106 | 0 |
 | `admin-back/test/mtls-client.test.ts` | 83 | 8 |
+| `admin-back/test/object-storage-forwarding.test.ts` | 95 | 3 |
 | `admin-back/test/report-engine-edge.test.ts` | 185 | 8 |
 | `admin-back/test/report-engine-route-order.test.ts` | 52 | 2 |
 | `admin-back/test/search.test.ts` | 83 | 2 |
@@ -299,7 +300,7 @@
 | `deploy/test/hostPlannerScale.test.ts` | 161 | 6 |
 | `deploy/test/hostProbe.test.ts` | 40 | 5 |
 | `deploy/test/ipv6Loopback.test.ts` | 37 | 2 |
-| `deploy/test/objectStorageDeploy.test.ts` | 293 | 6 |
+| `deploy/test/objectStorageDeploy.test.ts` | 338 | 9 |
 | `deploy/test/pgAppRole.test.ts` | 220 | 13 |
 | `deploy/test/pipeline.test.ts` | 124 | 7 |
 | `deploy/test/pkiRenewal.test.ts` | 183 | 7 |
@@ -414,5 +415,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **409**
-- Total literal test declarations: **4116**
+- Total files: **410**
+- Total literal test declarations: **4130**

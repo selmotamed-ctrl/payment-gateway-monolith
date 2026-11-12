@@ -257,7 +257,7 @@ node arrays mean what was intended:
 | Redis | `REDIS_MANAGE_VIA_SSH`, `REDIS_NODES`, `REDIS_SSH_*`, `REDIS_PASSWORD`, `REDIS_MAXMEMORY` | Cache/velocity tier. |
 | Audit database | `AUDIT_DB_MANAGE_VIA_SSH`, `AUDIT_DB_NODE`, `AUDIT_DB_SSH_*`, `AUDIT_DB_NAME`, `AUDIT_DB_USER`, `AUDIT_DB_PASSWORD` | Tamper-evident audit database. |
 | Log database | `LOG_DB_MANAGE_VIA_SSH`, `LOG_DB_NODE`, `LOG_DB_SSH_*`, `LOG_DB_NAME`, `LOG_DB_USER`, `LOG_DB_PASSWORD`, `LOG_RETENTION_MONTHS` | Partitioned operational log database. |
-| Backup | `BACKUP_ENABLED`, `BACKUP_NODE`, `BACKUP_SSH_*`, `BACKUP_ENGINE_MODE`, `BACKUP_COMPRESSION`, `BACKUP_ENCRYPTION_KEY_HEX`, `BACKUP_PRIMARY_S3_*`, prefixes/secondary, cron/retention/alert, `BACKUP_DAEMON_*`, catalog/scratch/pgpass, binary paths | WAL-G/Barman engine and daemon. |
+| Backup | `BACKUP_ENABLED`, `BACKUP_NODE and OBJECT_STORAGE_NODE`, `BACKUP_SSH_*`, `BACKUP_ENGINE_MODE`, `BACKUP_COMPRESSION`, `BACKUP_ENCRYPTION_KEY_HEX`, `BACKUP_PRIMARY_S3_*`, prefixes/secondary, cron/retention/alert, `BACKUP_DAEMON_*`, catalog/scratch/pgpass, binary paths | WAL-G/Barman engine and daemon. |
 | Fake Rails | `FAKE_RAILS_ENABLED`, `FAKE_RAILS_ALLOW_IN_PRODUCTION`, `FAKE_RAILS_SSH_*`, `FAKE_RAILS_PRIVATE_IP`, ports, SSL/domain, public base URL, allowed CIDRs/hosts, tester credentials, JWT/seeder secrets, `SEED_FAKE_RAILS_BLUEPRINTS` | Optional emulator and portal. |
 | Synthetic seeder | `RUN_SYNTHETIC_HISTORY_SEED`, `SYNTHETIC_SEED_PROFILE`, `SYNTHETIC_SEED_KEY`, `SYNTHETIC_YEARS_SPAN` | Test-server historical data. |
 | Test marker | `IS_TEST_SERVER` | Declaration required by the synthetic seed. |
@@ -700,3 +700,8 @@ bun run test-matrix --topologies=T1 --intensity=smoke
 - New optional keys: `BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION`, `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `BACKUP_S3_ALLOW_INSECURE_HTTP` (managed MinIO over http; independent of the daemon protocol), `KYB_SCANNER_MODE` (`eicar` content gate by default), `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; lab: `LAB_WALG_SHA256`.
 - `deploy.env.example` ships `DEPLOY_ENV=production` and placeholder secrets, so it fails validation until you replace them.
 - Open: legacy per-service `deploy.yml` workflows deploy without tests, with `StrictHostKeyChecking=no` and `rsync --delete`; the backup daemon runs as the `postgres` user; PostgreSQL TLS is not provisioned. See `project-design/TRACKER.md`.
+
+
+## Object storage
+
+`OBJECT_STORAGE_NODE` runs `deploy/object-storage-daemon` on port 4095 over mTLS. The deploy installs Bun, creates `pgobjstore`, provisions the vault and certs, opens 4095 only to core and backup private IPs and injects the client cert/KEK into every core and backup host. Certificate distribution is per consumer: a co-located core/backup host never receives the object-storage server key. See `docs/architecture/object-storage-engine.md` and `docs/runbooks/object-storage-operations-and-dr.md`.

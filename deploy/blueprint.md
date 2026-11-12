@@ -330,7 +330,7 @@ The host planner converts a validated `DeployConfig` into a `DeployPlan`:
 - unique hosts keyed by `sshHost:sshPort`;
 - per-host roles, services, Nginx sites, certificate bundles, firewall rules and deploy order;
 - per-tier node plans for core, admin, merchant and checkout;
-- the PostgreSQL/Redis/audit/log/backup storage plan;
+- the PostgreSQL/Redis/audit/log/backup/object-storage storage plan;
 - the backup plan and topology label.
 
 It owns grouping and unioning only. It does not validate the raw environment (that is `deploy.topology`), generate certificates (`deploy.pki`), apply firewall rules (`deploy.firewall`) or execute the pipeline (`deploy.pipeline`).
@@ -915,7 +915,7 @@ Not covered by automated tests:
 `IP:127.0.0.1`, `DNS:object-storage-daemon.internal`) and, when object storage is
 configured, the `object-storage-client` client certificate. `certFilesForHost`
 gives the storage host its server + client material; core hosts and the backup
-host receive `internal-ca.crt` and `object-storage-client.*`. Renewal/SAN drift
+host receive `internal-ca.crt` and `object-storage-client.*`. Certificate placement is per consumer: a co-located core/backup host does not receive the object-storage server key, and the backup host receives the client leaf in its own cert directory. Renewal/SAN drift
 handling includes the object-storage server leaf.
 
 ## Firewall Policy and Application
@@ -1174,6 +1174,11 @@ Not covered:
 ## Security hardening (2026-11-05)
 
 The Fake Rails nginx vhost now also applies `allow`/`deny` rules from `FAKE_RAILS_ALLOWED_CIDRS` (the application-level check compares `socket.remoteAddress`, not `X-Forwarded-For`). All six nginx templates set `server_tokens off` and `limit_req` with `limit_req_status 429`. UFW rules are unchanged.
+
+
+## Object storage
+
+TCP 4095 is opened only to core and backup private IPs. The deploy health step probes `/v1/health` over mTLS from every core and backup host.
 
 ## Deployment Pipeline
 
@@ -2011,9 +2016,15 @@ system user, `/var/lib/pg-object-storage` and the vault subdirectories
 `/etc/pg-object-storage/object-storage.env` and
 `pg-object-storage-daemon.service` (Bun, `ProtectSystem=strict`,
 `PrivateTmp=true`, `ReadWritePaths` for the vault and cert directories).
-`deployObjectStorageDaemon` syncs `deploy/object-storage-daemon` to
-`/opt/pg-object-storage-daemon` and starts/restarts it only on change; the
-provisioner refuses multiple core nodes without a configured object-storage node.
+`deployObjectStorageDaemon` installs pinned Bun, syncs `deploy/object-storage-daemon` to
+`/opt/pg-object-storage-daemon` and starts/restarts it only on change. The
+provisioner creates the user first, hands only the dedicated certificate files
+to `pgobjstore`, and refuses multiple core nodes without a configured
+object-storage node. Storage roots and cert directories are restricted to
+`/var/lib/pg-object-storage/`.
+
+
+The fresh-host sequence is tested with a fake runner; the real two-host lab remains manual.
 
 ## Backup Daemon
 
@@ -2244,11 +2255,11 @@ Not covered: the dedicated-backup-host and host-loss topologies on real machines
 `deploy/backup-daemon/src/objectStorageBackup.ts` copies new HOT/COLD
 `.v1.enc` blobs into `object-blobs/{bucket}/{storageKey}` (immutable, so the
 copy is incremental), fails with `OBJECT_STORAGE_BACKUP_PARITY_ERROR` when an
-ACTIVE row has no blob, and writes `object-storage/kek-escrow.enc` (AES-256-GCM
+ACTIVE row has no blob on every required tier, repairs missing tier copies, and writes per-KEK-version escrows plus the legacy `object-storage/kek-escrow.enc` (AES-256-GCM
 under the backup master key). The restore drill samples up to
 `OBJECT_STORAGE_DRILL_SAMPLE` ACTIVE rows, decrypts them with the escrowed
 keyring and compares the SHA-256; the report's `checks.objectStorage` carries the
-result. The daemon receives the object-storage URL/client certs/KEK keyring from
+result; the drill tries every tier and the escrow for the row's KEK version. The daemon receives the object-storage URL/client certs/KEK keyring from
 the deploy engine.
 
 ## Health Verification, Rollback and Recovery
@@ -2579,3 +2590,8 @@ Not covered: a real edge-to-core handshake, Nginx reload/vhost probe, PostgreSQL
 ## Security hardening (2026-11-05)
 
 The pre-migration dump is taken before migrating in both modes when the database is non-empty or unknown, uses `PGPASSFILE`, and only the newest `KEEP_RELEASES` dumps are kept (see the pipeline part). Migrations remain forward-only. Real WAL-G/bun/barman SHA256 values must be supplied before recovery tooling can be installed (GAP-023).
+
+
+## Object storage probes
+
+Every storage-only deploy checks `systemctl is-active pg-object-storage-daemon` on the storage host and `/v1/health` over mTLS from every core and backup host. A missing or unhealthy daemon fails verification.

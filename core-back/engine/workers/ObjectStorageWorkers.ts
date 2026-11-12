@@ -90,12 +90,15 @@ export interface ObjectStorageWorkerOptions extends WorkerOptions, ObjectStorage
 
 /**
  * One periodic worker that drains every object-storage housekeeping job that
- * does not need its own scheduler. It is NOT a singleton: every node may scan
- * its own batch; the database guard triggers and the row updates make the
- * operations idempotent, and the AV claims move rows out of the PENDING state
- * so two nodes never apply a different verdict to the same object.
+ * does not need its own scheduler. It is a cluster singleton: the AV scanner
+ * has no row claim, and the full-vault sweep is too expensive to repeat on
+ * every node. The database guards still protect individual rows.
  */
 export class ObjectStorageMaintenanceWorker extends BaseWorker {
+  protected override get singleton(): boolean {
+    return true;
+  }
+
   private readonly sdk: ObjectStorageSdk;
   private readonly prisma: PrismaClient;
   private readonly sweepEveryTicks: number;

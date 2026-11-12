@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import express, { type Request, type Response } from "express";
-import { rawBodyMiddleware } from "../../lib/rawBody";
+import { rawBodyLimitFor, rawBodyMiddleware } from "../../lib/rawBody";
 
 const app = express();
 app.use(rawBodyMiddleware);
@@ -18,6 +18,17 @@ app.post("/internal/admin/join-requests/:id/kyb-documents", (request: Request, r
     length: Buffer.isBuffer(request.body) ? request.body.byteLength : 0,
   });
 });
+for (const path of [
+  "/internal/admin/assets/upload",
+  "/internal/admin/aml/cases/:id/evidence",
+  "/internal/admin/disputes/:id/attachments",
+  "/internal/merchant/disputes/:id/attachments",
+  "/internal/admin/reconciliation/upload",
+]) {
+  app.post(path, (request: Request, response: Response) => {
+    response.json({ isBuffer: Buffer.isBuffer(request.body), length: Buffer.isBuffer(request.body) ? request.body.byteLength : 0 });
+  });
+}
 app.post("/internal/other", (request: Request, response: Response) => {
   response.json({ isBuffer: Buffer.isBuffer(request.body), body: request.body });
 });
@@ -72,6 +83,34 @@ describe("core raw body capture", () => {
     const body = (await response.json()) as { isBuffer: boolean; length: number };
     expect(body.isBuffer).toBe(true);
     expect(body.length).toBe(payload.byteLength);
+  });
+
+  test("preserves every binary storage upload route", async () => {
+    const payload = Buffer.from("%PDF-1.4\nshared-vault\n", "utf8");
+    for (const path of [
+      "/internal/admin/assets/upload",
+      "/internal/admin/aml/cases/case-1/evidence",
+      "/internal/admin/disputes/dispute-1/attachments",
+      "/internal/merchant/disputes/dispute-1/attachments",
+      "/internal/admin/reconciliation/upload",
+    ]) {
+      const response = await fetch(`${baseUrl}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: payload,
+      });
+      const body = (await response.json()) as { isBuffer: boolean; length: number };
+      expect(body.isBuffer).toBe(true);
+      expect(body.length).toBe(payload.byteLength);
+    }
+  });
+
+  test("uses a per-route raw body budget", () => {
+    expect(rawBodyLimitFor("/internal/admin/assets/upload")).toBe("5mb");
+    expect(rawBodyLimitFor("/internal/admin/aml/cases/x/evidence")).toBe("50mb");
+    expect(rawBodyLimitFor("/internal/admin/disputes/x/attachments")).toBe("25mb");
+    expect(rawBodyLimitFor("/internal/merchant/disputes/x/attachments")).toBe("25mb");
+    expect(rawBodyLimitFor("/internal/admin/reconciliation/upload")).toBe("100mb");
   });
 
   test("still parses ordinary JSON routes", async () => {
