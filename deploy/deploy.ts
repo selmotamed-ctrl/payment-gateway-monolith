@@ -15,6 +15,8 @@ import {
   certbotRenewalTimer,
 } from "./lib/certRenewal";
 import { collectSecretValues, effectiveTargetHome, effectiveTargetUser, SshRunner, shellQuote } from "./lib/sshRunner";
+import { deploymentUnits, normalizeOnlyRole, shouldRun, shouldRunStorage, type OnlyRole } from "./lib/selection";
+import { buildPreflightPlan, renderPreflightReport, runPreflight } from "./lib/preflight";
 import { dollarTag, pgpassField, sqlIdent, sqlLiteral } from "./lib/quoting";
 import { applyFirewall, readFirewallStatus } from "./lib/firewallConfigurator";
 import { probeCoreService, probeEdgeService, renderVerification, verifyDeployment } from "./lib/healthVerifier";
@@ -48,9 +50,6 @@ import {
 
 const REPO_ROOT = resolve(import.meta.dirname, "..");
 
-type StorageOnlyRole = "pg" | "pg-primary" | "pg-replica" | "pgbouncer" | "redis" | "audit-db" | "log-db" | "backup" | "object-storage" | "storage";
-type OnlyRole = DeployRole | StorageOnlyRole;
-
 interface CliOptions {
   envPath: string;
   only: Set<OnlyRole>;
@@ -69,12 +68,16 @@ interface CliOptions {
   forceRestart: boolean;
   /** Ignore the frontend build cache and rebuild every SPA. */
   rebuild: boolean;
+  /** Run only the read-only preflight and exit. */
+  preflightOnly: boolean;
+  /** Skip the preflight gate (emergency use). */
+  skipPreflight: boolean;
+  /** Allow the preflight to stop safe same-repo dev listeners. */
+  stopUnmanaged: boolean;
   keepReleases?: number;
   rollingBatch?: number;
   nodes?: Set<string>;
 }
-
-const ONLY_ROLES: OnlyRole[] = ["db", "core", "admin", "merchant", "checkout", "fake-rails", "pg", "pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup", "object-storage", "storage"];
 
 /** Splits an ordered node list into rolling batches without reordering it. */
 export const rollingBatches = <T>(nodes: readonly T[], batchSize: number): T[][] => {
@@ -102,6 +105,9 @@ const parseArgs = (argv: string[]): CliOptions => {
     checkCerts: false,
     forceRestart: false,
     rebuild: false,
+    preflightOnly: false,
+    skipPreflight: false,
+    stopUnmanaged: false,
   };
   for (const raw of argv) {
     if (raw === "--dry-run") options.dryRun = true;
@@ -115,14 +121,13 @@ const parseArgs = (argv: string[]): CliOptions => {
     else if (raw === "--check-certs") options.checkCerts = true;
     else if (raw === "--force-restart") options.forceRestart = true;
     else if (raw === "--rebuild") options.rebuild = true;
+    else if (raw === "--preflight-only") options.preflightOnly = true;
+    else if (raw === "--skip-preflight") options.skipPreflight = true;
+    else if (raw === "--stop-unmanaged") options.stopUnmanaged = true;
     else if (raw.startsWith("--env=")) options.envPath = resolve(REPO_ROOT, raw.slice(6));
     else if (raw.startsWith("--only=")) {
       for (const role of raw.slice(7).split(",")) {
-        const normalized = role.trim().toLowerCase();
-        if (!ONLY_ROLES.includes(normalized as OnlyRole)) {
-          throw new Error(`Unknown --only role '${role}'`);
-        }
-        options.only.add(normalized as OnlyRole);
+        options.only.add(normalizeOnlyRole(role));
       }
     } else if (raw.startsWith("--keep=")) options.keepReleases = Number(raw.slice(7));
     else if (raw.startsWith("--rolling-batch=")) {
@@ -138,6 +143,15 @@ const parseArgs = (argv: string[]): CliOptions => {
 };
 
 const log = (message = ""): void => console.log(message);
+
+/** Short commit used in health payloads and the final audit summary. */
+const deployCommit = (): string => {
+  try {
+    return execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+  } catch {
+    return "unknown";
+  }
+};
 const stepTimes: Array<{ index: number; title: string; startedAt: number }> = [];
 const step = (index: number, title: string): void => {
   stepTimes.push({ index, title, startedAt: Date.now() });
@@ -568,7 +582,10 @@ const deployService = (input: {
 
   // 4. The environment. It lives in `shared/` and is symlinked into the release
   //    so a release always reads the current configuration.
-  const env = absoluteEnv(service.env, remote);
+  const env = absoluteEnv(
+    { ...service.env, APP_RELEASE: releaseTimestamp, APP_COMMIT: deployCommit() },
+    remote,
+  );
   const envPath = `${remote}/shared/${service.envFileName ?? ".env"}`;
   runner.writeRemoteFile({ target: host.ssh, path: envPath, content: renderEnvFile(env), mode: 0o600, sudo: false });
   runner.run(host.ssh, `ln -sfn ${shellQuote(envPath)} ${shellQuote(`${appDir}/.env`)}`, { sudo: false });
@@ -1098,24 +1115,6 @@ const frontendsToBuild = (config: DeployConfig, options: CliOptions): string[] =
   return wanted.filter(([role]) => shouldRun(options, role)).map(([, frontend]) => frontend);
 };
 
-const shouldRun = (options: CliOptions, role: DeployRole): boolean =>
-  options.only.size === 0 || options.only.has(role);
-
-const shouldRunStorage = (options: CliOptions, roles: StorageOnlyRole[]): boolean =>
-  options.only.size === 0 || options.only.has("storage") || roles.some((role) => options.only.has(role));
-
-const deploymentUnits = (
-  plan: DeployPlan,
-  role: DeployRole,
-  nodes?: Set<string>,
-): Array<{ host: HostPlan; service: ServicePlan }> =>
-  plan.hosts.flatMap((host) =>
-    host.services
-      .filter((service) => service.role === role)
-      .filter((service) => !nodes || (service.nodeId !== undefined && nodes.has(service.nodeId)))
-      .map((service) => ({ host, service })),
-  );
-
 /** One line per managed service: what the convergence did (started / restarted / reloaded / unchanged). */
 const logOutcomes = (outcomes: Record<string, string> | undefined): void => {
   const entries = Object.entries(outcomes ?? {});
@@ -1171,6 +1170,37 @@ const main = async (): Promise<void> => {
   runner.addSecrets(collectSecretValues(config));
   activeRunner = runner;
 
+  const fresh = options.fresh || (options.update ? false : config.DEPLOY_MODE === "fresh");
+  // `auto` (the default) decides PER HOST: a host with gaps is bootstrapped, a complete one is left alone.
+  const autoProbe = !fresh && !options.update && config.DEPLOY_MODE === "auto";
+
+  // ---- Preflight (read-only; before builds, PKI, bootstrap or any mutation) ----
+  if (options.preflightOnly || !options.skipPreflight) {
+    const preflightOptions = {
+      only: options.only,
+      nodes: options.nodes,
+      fresh,
+      deployMode: config.DEPLOY_MODE,
+      dryRun: options.dryRun,
+      stopUnmanaged: options.stopUnmanaged,
+    };
+    const preflightPlan = buildPreflightPlan(config, plan, preflightOptions);
+    const report = runPreflight(runner, config, plan, preflightOptions);
+    for (const line of renderPreflightReport(report, preflightPlan)) log(line);
+    if (options.preflightOnly) {
+      runner.close();
+      process.exit(report.blocking.length > 0 ? 1 : 0);
+    }
+    if (report.blocking.length > 0) {
+      throw new Error(
+        `Preflight failed with ${report.blocking.length} blocking issue(s). Nothing was built or changed. ` +
+          "Fix the issues above (or use --stop-unmanaged for a safe same-repo dev listener).",
+      );
+    }
+  } else {
+    warn("Preflight skipped (--skip-preflight): port ownership, SSH/sudo, dependency and release checks were not run.");
+  }
+
   // ---- Step 2: build the SPAs locally ------------------------------------
   // Started in the background (content-addressed cache, parallel): the builds
   // overlap with storage provisioning and each one is awaited right before the
@@ -1218,10 +1248,6 @@ const main = async (): Promise<void> => {
 
   // ---- Step 4: bootstrap the unique hosts -------------------------------
   step(4, "Bootstrap the target hosts and apply the firewall");
-  const fresh = options.fresh || (options.update ? false : config.DEPLOY_MODE === "fresh");
-  // `auto` (the default) decides PER HOST: a host with gaps is bootstrapped, a complete one is left alone. It used
-  // to behave like update mode, so a bare host only failed late, after core had been migrated and switched.
-  const autoProbe = !fresh && !options.update && config.DEPLOY_MODE === "auto";
   if (fresh || options.enforceFirewall || autoProbe) {
     for (const host of plan.hosts) {
       if (!options.dryRun) {
@@ -1390,8 +1416,8 @@ const main = async (): Promise<void> => {
       if (options.dryRun) continue;
       for (const unit of batch) {
         const probe = target.role === "core"
-          ? probeCoreService(runner, unit.host, unit.service, config)
-          : probeEdgeService(runner, unit.host, unit.service);
+          ? probeCoreService(runner, unit.host, unit.service, config, releaseTimestamp)
+          : probeEdgeService(runner, unit.host, unit.service, releaseTimestamp);
         if (!probe.ok) {
           throw new Error(
             runner.scrub(`Rolling batch ${batchIndex + 1} failed health check on ${probe.host} ${probe.check}: ${probe.detail}`),
@@ -1412,7 +1438,7 @@ const main = async (): Promise<void> => {
   if (options.skipVerify || options.dryRun) {
     log("  skipped");
   } else {
-    const verification = verifyDeployment(runner, plan, config);
+    const verification = verifyDeployment(runner, plan, config, releaseTimestamp);
     log(runner.scrub(renderVerification(verification)));
     if (!verification.ok) {
       throw new Error("Deployment verification failed. There is no automatic rollback and no rollback command: the previous release is still on disk (KEEP_RELEASES), but `current` already points at the new one and the database schema was already migrated and is NOT reverted. To go back, re-point <remote dir>/current to the previous release on each host, restart the PM2 services, and only then decide about the schema.");
@@ -1462,12 +1488,7 @@ const main = async (): Promise<void> => {
 
   // ---- Step 14: audit summary -------------------------------------------
   step(14, "Deployment audit summary");
-  let commit = "unknown";
-  try {
-    commit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).trim();
-  } catch {
-    // git may be unavailable on the operator machine; the summary is still useful
-  }
+  const commit = deployCommit();
   log(`  commit:     ${commit}`);
   log(`  release:    ${releaseTimestamp}`);
   log(`  topology:   ${plan.topology} (${plan.hosts.length} host(s))`);

@@ -65,7 +65,7 @@ import { WEBHOOK_EVENT_TYPES, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_MS } fr
 const router = express.Router();
 
 router.get("/health", (_request, response) => {
-  response.json({ status: "ok", channel: "merchant" });
+  response.json({ status: "ok", channel: "merchant", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null });
 });
 
 

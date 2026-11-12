@@ -131,3 +131,22 @@ describe("the durable queue health payload", () => {
     expect(snapshot.thresholdMs).toBe(1_000);
   });
 });
+
+describe("release identity", () => {
+  test("advertises the deployment release and commit on /health", async () => {
+    const previousRelease = process.env.APP_RELEASE;
+    const previousCommit = process.env.APP_COMMIT;
+    process.env.APP_RELEASE = "20260101000000";
+    process.env.APP_COMMIT = "abc1234";
+    try {
+      const result = await health([]);
+      expect((result.body as { release?: string }).release).toBe("20260101000000");
+      expect((result.body as { commit?: string }).commit).toBe("abc1234");
+    } finally {
+      if (previousRelease === undefined) delete process.env.APP_RELEASE;
+      else process.env.APP_RELEASE = previousRelease;
+      if (previousCommit === undefined) delete process.env.APP_COMMIT;
+      else process.env.APP_COMMIT = previousCommit;
+    }
+  });
+});

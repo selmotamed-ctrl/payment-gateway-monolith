@@ -6,7 +6,7 @@ Generated from: `deploy.topology`, `deploy.planner`, `deploy.pki`, `deploy.firew
 
 ## Deploy Topology and Configuration
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -175,7 +175,7 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | Flag | Effect |
 | :--- | :--- |
 | `--env=<path>` | Use another environment file. |
-| `--only=core,checkout` | Restrict roles. Storage aliases: `pg`, `pg-primary`, `pg-replica`, `pgbouncer`, `redis`, `audit-db`, `log-db`, `backup`, `storage`. |
+| `--only=core,checkout` | Restrict roles. Storage aliases: `pg`, `pg-primary`, `pg-replica`, `pgbouncer`, `redis`, `audit-db`, `log-db`, `backup`, `storage`. Backend aliases: `core-back`, `admin-back`, `merchant-back`, `checkout-back`, `fake-rails-back`. |
 | `--nodes=<id,...>` | Restrict compute units by node id. |
 | `--rolling-batch=<n>` | Override `ROLLING_BATCH_SIZE`. |
 | `--keep=<n>` | Override `KEEP_RELEASES`. |
@@ -184,7 +184,10 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | `--skip-build`, `--skip-verify` | Skip local SPA builds or end-to-end verification. |
 | `--rotate-certs` | Rotate the CA and every leaf. |
 | `--check-certs` | Print the certificate expiry table and exit 1 when a certificate is missing, expired or inside `MTLS_RENEW_WITHIN_DAYS` (AUTO-28). |
-| `--dry-run` | Print commands; execute nothing. |
+| `--dry-run` | Print commands; execute nothing (preflight prints its checks without connecting). |
+| `--preflight-only` | Run the read-only preflight and exit; no build, PKI or deployment. |
+| `--skip-preflight` | Skip the preflight gate (emergency use, warns). |
+| `--stop-unmanaged` | Allow the preflight to stop safe same-repo dev listeners on selected service ports. |
 
 ### Files
 
@@ -1205,6 +1208,18 @@ It also requires atomic releases, a symlinked `current`, least-privilege environ
 `--force-restart` and `--rebuild` are the two engine-level overrides of the convergence and build-cache behaviour. After loading the config, the runner registers every credential value (any key matching PASSWORD/SECRET/TOKEN/MASTER_KEY/ACCESS_KEY/ENCRYPTION_KEY/JWT/SEED_KEY with a value of at least 8 characters) and masks it **wherever it appears** in logs, the timing report, thrown error messages, the verification report and the final failure line. `redactSecrets` alone only recognised `NAME=value`; the health verifier's pgpass lines (`host:port:db:user:PASSWORD`) and connection URLs were printed in clear before this change.
 
 A missing file, schema error, cross-field error or SSH credential conflict aborts before any remote command. With `--dry-run`, every later command is logged instead of executed. Every logged command line passes through `redactSecrets` (`deploy/lib/sshRunner.ts`), which masks the value of any `NAME=value` whose name contains PASSWORD, PASSWD, SECRET, TOKEN, AUTH, API_KEY, ACCESS_KEY or MASTER_KEY (for example `PGPASSWORD=`, `REDISCLI_AUTH=`); before 2026-11-04 these were printed in the clear.
+
+### 3.1a Step 1b: read-only preflight
+
+After the host plan is built (and before step 2), `runPreflight()` executes a read-only check of only the selected `--only`/`--nodes` parts and their required dependencies. `--preflight-only` runs this phase and exits without building or touching a host; `--skip-preflight` bypasses it with a warning.
+
+The preflight checks SSH reachability, key validity and sudo on every selected host; OS/tool readiness (missing bootstrap packages are informational in fresh/auto mode and blocking in update mode); disk, memory and clock skew; service ports and Nginx ports; current Nginx configuration; PM2 state; and the dependency paths (edge-to-core mTLS, core-to-database/PgBouncer, and storage prerequisites). Database/object-storage/backup probes are read-only and reuse the health verifier.
+
+Port ownership is classified as `free`, `managed-current` (the current PM2 app for the planned service), `managed-orphan` (an old same-tier PM2 app), `managed-service` (the expected Nginx/PostgreSQL/Redis/PgBouncer/systemd daemon), `unmanaged-same-repo` (a non-PM2 Bun/Node dev process whose cwd/package matches the service), or `foreign`. Only `managed-*` and `free` pass. `unmanaged-same-repo` fails by default and can be stopped with `--stop-unmanaged`, but only after every other blocking check passes; the stop uses a PID/cwd re-check, SIGTERM, and a post-stop port re-read. Foreign processes, databases, Redis, Nginx and systemd services are never stopped.
+
+`--only` accepts the backend aliases `core-back`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` in addition to the canonical tier names. The selection helpers are shared with the deployment loop, so an admin-only deploy checks `4101`/`8080` and the core dependency but never core's `4000`.
+
+A blocking preflight result aborts with "Nothing was built or changed". The final verification and the rolling batch probes also assert the new release identity (`APP_RELEASE`/`APP_COMMIT` in `/health`), so a stale listener cannot satisfy verification even if PM2 reports the new app online.
 
 ### 3.2 Step 2: build SPAs locally (background, cached)
 
@@ -2267,7 +2282,7 @@ the deploy engine.
 
 ## Health Verification, Rollback and Recovery
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -2299,7 +2314,8 @@ The design describes zero-downtime rolling updates. The code provides rolling ba
 - reads the background-job queue health when workers are enabled;
 - returns `msg: "OK"`, `status: "ok"` when workers are enabled, the queue is reachable and the oldest job is below the threshold;
 - returns `msg: "DEGRADED"`, `status: "degraded"` when workers are disabled, the queue cannot be inspected, or the oldest queued job exceeds the threshold;
-- stays reachable when the database cannot be read, with `queue.degraded=true` and `QUEUE_HEALTH_UNAVAILABLE`.
+- stays reachable when the database cannot be read, with `queue.degraded=true` and `QUEUE_HEALTH_UNAVAILABLE`;
+- advertises the deploy identity (`release`, `commit`) from `APP_RELEASE`/`APP_COMMIT`; the batch probes and final verification require the expected release, so a stale process behind the port fails even if its `/health` says `OK`.
 
 `probeCoreHealth()` and `probeCoreService()` run on the core host and use `curl` with the CA and the core certificate as both server and client material. They pass when the body contains `"msg":"OK"` or the literal `OK`. A degraded core fails the probe.
 
@@ -2369,6 +2385,7 @@ The mTLS backup probe presents the `backup-client` certificate/key, matching the
 - probes each Fake Rails host;
 - for each edge host, probes the edge backends, the edge-to-core handshake for every core URL and the public vhosts;
 - appends storage probes;
+- checks core-node, edge-backend, edge-to-core and Fake Rails health against the expected release identity;
 - returns `{ ok, results }`.
 
 `deploy.ts` prints `PASS`/`FAIL` per result and throws if any result fails. The error message says the previous release is still on disk. It does not switch back automatically.

@@ -13,7 +13,7 @@ export const createApp = () => {
   app.use(corsAllowList());
   app.use(requestLoggerMiddleware);
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", service: "merchant-back", uptime: process.uptime() });
+    res.json({ status: "ok", service: "merchant-back", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null, uptime: process.uptime() });
   });
   app.use(express.json({ limit: env.MAX_JSON_BODY_BYTES }));
   app.use(express.urlencoded({ extended: false, limit: env.MAX_JSON_BODY_BYTES }));

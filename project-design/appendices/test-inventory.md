@@ -234,7 +234,7 @@
 | `core-back/test/synthetic-seeder-realism.test.ts` | 504 | 45 |
 | `core-back/test/synthetic-seeder.test.ts` | 178 | 10 |
 | `core-back/test/ui-authorities.test.ts` | 35 | 3 |
-| `core-back/test/worker-runtime-health.test.ts` | 134 | 7 |
+| `core-back/test/worker-runtime-health.test.ts` | 153 | 8 |
 | `admin-back/test/academy-progress.test.ts` | 240 | 13 |
 | `admin-back/test/admin-surface.test.ts` | 1423 | 58 |
 | `admin-back/test/admin-ui-completion.test.ts` | 443 | 29 |
@@ -295,7 +295,7 @@
 | `deploy/test/fakeRails.test.ts` | 109 | 7 |
 | `deploy/test/frontendBuild.test.ts` | 171 | 12 |
 | `deploy/test/gap-hardening.test.ts` | 114 | 10 |
-| `deploy/test/healthVerifierScale.test.ts` | 145 | 4 |
+| `deploy/test/healthVerifierScale.test.ts` | 154 | 5 |
 | `deploy/test/hostPlanner.test.ts` | 342 | 25 |
 | `deploy/test/hostPlannerScale.test.ts` | 161 | 6 |
 | `deploy/test/hostProbe.test.ts` | 40 | 5 |
@@ -305,6 +305,7 @@
 | `deploy/test/pipeline.test.ts` | 124 | 7 |
 | `deploy/test/pkiRenewal.test.ts` | 183 | 7 |
 | `deploy/test/pkiScale.test.ts` | 115 | 5 |
+| `deploy/test/preflight.test.ts` | 179 | 9 |
 | `deploy/test/provisioners.test.ts` | 581 | 32 |
 | `deploy/test/redactSecrets.test.ts` | 63 | 5 |
 | `deploy/test/rollingDeploy.test.ts` | 52 | 5 |
@@ -355,6 +356,7 @@
 | `tests/e2e/admin/guide-palette.spec.ts` | 32 | 1 |
 | `tests/e2e/admin/guide-reader.spec.ts` | 116 | 5 |
 | `tests/e2e/admin/guide-safeguard.spec.ts` | 104 | 1 |
+| `tests/e2e/admin/jobs-outbox.spec.ts` | 57 | 2 |
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/operator-cases.spec.ts` | 187 | 2 |
 | `tests/e2e/admin/report-a4-layout.spec.ts` | 280 | 1 |
@@ -415,5 +417,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **410**
-- Total literal test declarations: **4135**
+- Total files: **412**
+- Total literal test declarations: **4148**

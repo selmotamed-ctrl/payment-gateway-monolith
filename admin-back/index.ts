@@ -14,7 +14,7 @@ export const createApp = () => {
   app.use(corsAllowList());
   app.use(requestLoggerMiddleware);
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", service: "admin-back", uptime: process.uptime() });
+    res.json({ status: "ok", service: "admin-back", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null, uptime: process.uptime() });
   });
   // Report-engine authoring bodies carry a base64 asset zip. That prefix is
   // parsed with a larger route-scoped limit; every other route keeps the

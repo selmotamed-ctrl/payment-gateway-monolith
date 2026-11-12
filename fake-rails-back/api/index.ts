@@ -50,7 +50,7 @@ export const createApiRouter = (): Router => {
   router.use("/portal-api", createPortalRouter());
 
   router.get("/health", (_request, response) => {
-    response.json({ status: "ok", service: "fake-rails-back" });
+    response.json({ status: "ok", service: "fake-rails-back", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null });
   });
 
   router.get("/hosted/health", (_request, response) => {

@@ -20,6 +20,17 @@ export interface ProbeResult {
   detail: string;
 }
 
+/** True when the health body advertises the expected release (or no release check was requested). */
+export const healthReleaseMatches = (body: string, expectedRelease?: string): boolean => {
+  if (!expectedRelease) return true;
+  try {
+    const parsed = JSON.parse(body) as { release?: unknown };
+    return parsed.release === expectedRelease;
+  } catch {
+    return false;
+  }
+};
+
 const sleepSync = (ms: number): void => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
@@ -64,6 +75,7 @@ export const probeCoreHealth = (
   runner: SshRunner,
   host: HostPlan,
   config: DeployConfig,
+  expectedRelease?: string,
 ): ProbeResult => {
   const certs = certsDir(host, config);
   const coreServices = host.services.filter((service) => service.role === "core");
@@ -77,7 +89,7 @@ export const probeCoreHealth = (
   const check = coreServices[0] ? `${coreServices[0].name} /health (mTLS)` : "core /health (mTLS)";
   try {
     const body = runner.capture(host.ssh, command);
-    const ok = /"msg"\s*:\s*"OK"/.test(body) || body.includes("OK");
+    const ok = (/"msg"\s*:\s*"OK"/.test(body) || body.includes("OK")) && healthReleaseMatches(body, expectedRelease);
     return { host: host.ssh.host, check, ok, detail: body.slice(0, 200) };
   } catch (error) {
     return { host: host.ssh.host, check, ok: false, detail: (error as Error).message };
@@ -90,6 +102,7 @@ export const probeCoreService = (
   host: HostPlan,
   service: { name: string; port: number },
   config: DeployConfig,
+  expectedRelease?: string,
 ): ProbeResult => {
   const certs = `${config.CORE_REMOTE_DIR}/shared/certs`;
   const command = mtlsCurl({
@@ -102,7 +115,8 @@ export const probeCoreService = (
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
       const body = runner.capture(host.ssh, command);
-      return { host: host.ssh.host, check: `${service.name} /health (mTLS)`, ok: /"msg"\s*:\s*"OK"/.test(body) || body.includes("OK"), detail: body.slice(0, 200) };
+      const ok = (/"msg"\s*:\s*"OK"/.test(body) || body.includes("OK")) && healthReleaseMatches(body, expectedRelease);
+      return { host: host.ssh.host, check: `${service.name} /health (mTLS)`, ok, detail: body.slice(0, 200) };
     } catch (error) {
       lastError = (error as Error).message;
       sleepSync(1_000);
@@ -116,13 +130,15 @@ export const probeEdgeService = (
   runner: SshRunner,
   host: HostPlan,
   service: { name: string; port: number; privateIp?: string },
+  expectedRelease?: string,
 ): ProbeResult => {
   const address = service.privateIp ?? "127.0.0.1";
   let lastError = "";
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
       const body = runner.capture(host.ssh, `curl -fsS --max-time 10 http://${address}:${service.port}/health`);
-      return { host: host.ssh.host, check: `${service.name} /health`, ok: /"status"\s*:\s*"ok"/.test(body) || body.includes("ok"), detail: body.slice(0, 200) };
+      const ok = (/"status"\s*:\s*"ok"/.test(body) || body.includes("ok")) && healthReleaseMatches(body, expectedRelease);
+      return { host: host.ssh.host, check: `${service.name} /health`, ok, detail: body.slice(0, 200) };
     } catch (error) {
       lastError = (error as Error).message;
       sleepSync(1_000);
@@ -136,6 +152,7 @@ export const probeCoreNodes = (
   runner: SshRunner,
   plan: DeployPlan,
   config: DeployConfig,
+  expectedRelease?: string,
 ): ProbeResult[] => {
   const results: ProbeResult[] = [];
   const cores = plan.nodes.core.length > 0
@@ -165,7 +182,7 @@ export const probeCoreNodes = (
       results.push({
         host: node.ssh.host,
         check: `${node.nodeId} ${node.serviceName} /health (mTLS)`,
-        ok: /"msg"\s*:\s*"OK"/.test(body) || body.includes("OK"),
+        ok: (/"msg"\s*:\s*"OK"/.test(body) || body.includes("OK")) && healthReleaseMatches(body, expectedRelease),
         detail: body.slice(0, 200),
       });
     } catch (error) {
@@ -180,6 +197,7 @@ export const probeEdgeBackend = (
   runner: SshRunner,
   host: HostPlan,
   config: DeployConfig,
+  expectedRelease?: string,
 ): ProbeResult[] => {
   const results: ProbeResult[] = [];
   for (const service of host.services) {
@@ -189,7 +207,7 @@ export const probeEdgeBackend = (
       results.push({
         host: host.ssh.host,
         check: `${service.name} /health`,
-        ok: /"status"\s*:\s*"ok"/.test(body) || body.includes("ok"),
+        ok: (/"status"\s*:\s*"ok"/.test(body) || body.includes("ok")) && healthReleaseMatches(body, expectedRelease),
         detail: body.slice(0, 200),
       });
     } catch (error) {
@@ -209,6 +227,7 @@ export const probeEdgeToCore = (
   host: HostPlan,
   config: DeployConfig,
   coreUrls?: string[],
+  expectedRelease?: string,
 ): ProbeResult[] => {
   const results: ProbeResult[] = [];
   const certs = certsDir(host, config);
@@ -228,7 +247,7 @@ export const probeEdgeToCore = (
         results.push({
           host: host.ssh.host,
           check: `${role}-back mTLS -> ${coreUrl} /internal/${channel}/health`,
-          ok: /"status"\s*:\s*"ok"/.test(body) || /"channel"\s*:\s*"${channel}"/.test(body) || body.includes("ok"),
+          ok: (/"status"\s*:\s*"ok"/.test(body) || /"channel"\s*:\s*"${channel}"/.test(body) || body.includes("ok")) && healthReleaseMatches(body, expectedRelease),
           detail: body.slice(0, 200),
         });
       } catch (error) {
@@ -426,6 +445,7 @@ export const probeFakeRails = (
   runner: SshRunner,
   host: HostPlan,
   config: DeployConfig,
+  expectedRelease?: string,
 ): ProbeResult[] => {
   const results: ProbeResult[] = [];
   const fakeRailsPort = parseNodeList(config.FAKE_RAILS_NODE)[0]?.servicePort ?? config.FAKE_RAILS_BACK_PORT;
@@ -434,7 +454,7 @@ export const probeFakeRails = (
     results.push({
       host: host.ssh.host,
       check: "fake-rails-back /health",
-      ok: /"status"\s*:\s*"ok"/.test(body),
+      ok: /"status"\s*:\s*"ok"/.test(body) && healthReleaseMatches(body, expectedRelease),
       detail: body.slice(0, 200),
     });
   } catch (error) {
@@ -450,7 +470,7 @@ export const probeFakeRails = (
     results.push({
       host: host.ssh.host,
       check: `fake-rails vhost ${scheme}:${config.FAKE_RAILS_NGINX_PORT}`,
-      ok: /"status"\s*:\s*"ok"/.test(body),
+      ok: /"status"\s*:\s*"ok"/.test(body) && healthReleaseMatches(body, expectedRelease),
       detail: body.slice(0, 200),
     });
   } catch (error) {
@@ -511,16 +531,17 @@ export const verifyDeployment = (
   runner: SshRunner,
   plan: DeployPlan,
   config: DeployConfig,
+  expectedRelease?: string,
 ): DeploymentVerification => {
-  const results: ProbeResult[] = probeCoreNodes(runner, plan, config);
+  const results: ProbeResult[] = probeCoreNodes(runner, plan, config, expectedRelease);
   const coreUrls = edgeCoreUrls(config);
   for (const host of plan.hosts) {
     if (host.roles.includes("fake-rails")) {
-      results.push(...probeFakeRails(runner, host, config));
+      results.push(...probeFakeRails(runner, host, config, expectedRelease));
     }
     if (host.roles.some((role) => role === "admin" || role === "merchant" || role === "checkout")) {
-      results.push(...probeEdgeBackend(runner, host, config));
-      results.push(...probeEdgeToCore(runner, host, config, coreUrls));
+      results.push(...probeEdgeBackend(runner, host, config, expectedRelease));
+      results.push(...probeEdgeToCore(runner, host, config, coreUrls, expectedRelease));
       results.push(...probePublicVhost(runner, host, config));
     }
   }

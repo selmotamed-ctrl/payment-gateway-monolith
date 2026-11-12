@@ -3,8 +3,8 @@ id: deploy.topology
 title: Deploy Topology and Configuration
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-12
+verified_against: 19d6a54+working-tree
 code:
   - deploy/test-matrix/topologies.ts
   - deploy/deploy.ts
@@ -207,7 +207,7 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | Flag | Effect |
 | :--- | :--- |
 | `--env=<path>` | Use another environment file. |
-| `--only=core,checkout` | Restrict roles. Storage aliases: `pg`, `pg-primary`, `pg-replica`, `pgbouncer`, `redis`, `audit-db`, `log-db`, `backup`, `storage`. |
+| `--only=core,checkout` | Restrict roles. Storage aliases: `pg`, `pg-primary`, `pg-replica`, `pgbouncer`, `redis`, `audit-db`, `log-db`, `backup`, `storage`. Backend aliases: `core-back`, `admin-back`, `merchant-back`, `checkout-back`, `fake-rails-back`. |
 | `--nodes=<id,...>` | Restrict compute units by node id. |
 | `--rolling-batch=<n>` | Override `ROLLING_BATCH_SIZE`. |
 | `--keep=<n>` | Override `KEEP_RELEASES`. |
@@ -216,7 +216,10 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | `--skip-build`, `--skip-verify` | Skip local SPA builds or end-to-end verification. |
 | `--rotate-certs` | Rotate the CA and every leaf. |
 | `--check-certs` | Print the certificate expiry table and exit 1 when a certificate is missing, expired or inside `MTLS_RENEW_WITHIN_DAYS` (AUTO-28). |
-| `--dry-run` | Print commands; execute nothing. |
+| `--dry-run` | Print commands; execute nothing (preflight prints its checks without connecting). |
+| `--preflight-only` | Run the read-only preflight and exit; no build, PKI or deployment. |
+| `--skip-preflight` | Skip the preflight gate (emergency use, warns). |
+| `--stop-unmanaged` | Allow the preflight to stop safe same-repo dev listeners on selected service ports. |
 
 ### Files
 

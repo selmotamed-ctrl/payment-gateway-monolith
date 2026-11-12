@@ -142,3 +142,12 @@ describe("scaled health verification", () => {
     expect(checks).toContain("backup-daemon /health");
   });
 });
+
+describe("release identity", () => {
+  test("a health payload from another release fails verification", () => {
+    const { config, plan } = fixture();
+    const result = verifyDeployment(new FakeRunner() as never, plan, config, "20260101000000");
+    expect(result.ok).toBe(false);
+    expect(result.results.some((entry) => entry.check.includes("core") && !entry.ok)).toBe(true);
+  });
+});

@@ -3,8 +3,8 @@ id: deploy.health
 title: Health Verification, Rollback and Recovery
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-12
+verified_against: 19d6a54+working-tree
 code:
   - deploy/lib/healthVerifier.ts
   - deploy/deploy.ts
@@ -65,7 +65,8 @@ The design describes zero-downtime rolling updates. The code provides rolling ba
 - reads the background-job queue health when workers are enabled;
 - returns `msg: "OK"`, `status: "ok"` when workers are enabled, the queue is reachable and the oldest job is below the threshold;
 - returns `msg: "DEGRADED"`, `status: "degraded"` when workers are disabled, the queue cannot be inspected, or the oldest queued job exceeds the threshold;
-- stays reachable when the database cannot be read, with `queue.degraded=true` and `QUEUE_HEALTH_UNAVAILABLE`.
+- stays reachable when the database cannot be read, with `queue.degraded=true` and `QUEUE_HEALTH_UNAVAILABLE`;
+- advertises the deploy identity (`release`, `commit`) from `APP_RELEASE`/`APP_COMMIT`; the batch probes and final verification require the expected release, so a stale process behind the port fails even if its `/health` says `OK`.
 
 `probeCoreHealth()` and `probeCoreService()` run on the core host and use `curl` with the CA and the core certificate as both server and client material. They pass when the body contains `"msg":"OK"` or the literal `OK`. A degraded core fails the probe.
 
@@ -135,6 +136,7 @@ The mTLS backup probe presents the `backup-client` certificate/key, matching the
 - probes each Fake Rails host;
 - for each edge host, probes the edge backends, the edge-to-core handshake for every core URL and the public vhosts;
 - appends storage probes;
+- checks core-node, edge-backend, edge-to-core and Fake Rails health against the expected release identity;
 - returns `{ ok, results }`.
 
 `deploy.ts` prints `PASS`/`FAIL` per result and throws if any result fails. The error message says the previous release is still on disk. It does not switch back automatically.

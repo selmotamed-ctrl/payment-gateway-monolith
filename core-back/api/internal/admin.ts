@@ -210,7 +210,7 @@ const auditActorOf = (request: Request): { userId: string | null; role: string |
 };
 
 router.get("/health", (_request, response) => {
-  response.json({ status: "ok", channel: "admin" });
+  response.json({ status: "ok", channel: "admin", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null });
 });
 
 

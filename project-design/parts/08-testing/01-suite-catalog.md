@@ -3,8 +3,8 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-11
-verified_against: d695518+working-tree
+last_verified: 2026-11-12
+verified_against: 19d6a54+working-tree
 code:
   - core-back/test/exhaustive/**
   - core-back/test/storage-engine/**
@@ -46,6 +46,7 @@ tests:
   - merchant-back/test/security-regressions.test.ts
   - checkout-back/test/security-regressions.test.ts
   - deploy/test/security-regressions.test.ts
+  - deploy/test/preflight.test.ts
   - deploy/backup-daemon/test/mtlsAuthorization.test.ts
   - deploy/object-storage-daemon/test/mtls.test.ts
   - deploy/object-storage-daemon/test/sdk-mtls.test.ts
@@ -222,6 +223,11 @@ There is **no** `core-back/test/exhaustive/09-storage-backup` directory. The run
 - `core-back/test/hardening-gap-regressions.test.ts` covers the leader-election environment guard, backend-PID/`pg_locks` ownership checks, refused unlocks, the session-safety probe and the durable `inbound_events` claim lease.
 - `core-back/test/backup-admin` — backup routes and control client.
 - `deploy/backup-daemon/test` — 71 declarations across 8 files.
+- `deploy/test/preflight.test.ts` — selection by `--only`/`--nodes` and aliases, dry-run no-connect behavior, and port classification (free, managed PM2 current/orphan, same-repo dev, foreign, Nginx, expected PostgreSQL data directory).
+- `core-back/test/worker-runtime-health.test.ts` — `/health` advertises `APP_RELEASE`/`APP_COMMIT`.
+- `deploy/test/healthVerifierScale.test.ts` — verification rejects a health payload from a different release.
+- `admin-front/src/pages/system/jobs-outbox/components/__tests__/MonitorTable.test.ts` — the Jobs & Outbox table declares its `dc` props and never builds a filter query from an undefined list.
+- `tests/e2e/admin/jobs-outbox.spec.ts` — all four Jobs & Outbox tabs render with mocked APIs without the previous `reduce` error.
 - `deploy/object-storage-daemon/test` — HTTP surface plus real mTLS: allowed/denied/missing/untrusted client certificates, TLS 1.3 enforcement, a PUT/GET over the TLS-to-HTTP bridge, and `RemoteMtlsBlobStore` health/put/get/stat/list over mTLS. The openssl-backed cases skip if the CLI is unavailable.
 
 Some files skip without PostgreSQL or Redis. The design's dedicated fixture names (`uow-outbox-audit-atomicity.test.ts`, `gl-shards-and-lsn-routing.test.ts`, `audit-chain-and-log-backpressure.test.ts`, `backup-control-and-drills.test.ts`, `backup-restore-matrix.test.ts`) do not exist.
@@ -417,6 +423,7 @@ This catalog is derived by counting literal declarations and inspecting the suit
 | `merchant-back/test/security-regressions.test.ts` | token creation, uploads, limiter |
 | `checkout-back/test/security-regressions.test.ts` | inbound limiter, body limits, error mapping |
 | `deploy/test/security-regressions.test.ts` | quoting, config hardening, migration planning |
+| `deploy/test/preflight.test.ts` | selection/aliases, dry-run, port ownership classes, expected PostgreSQL data dirs |
 | `deploy/backup-daemon/test/mtlsAuthorization.test.ts` | CN/SAN authorization |
 | `fake-rails-back/test/security.test.ts` | token compare, CIDR, lockout |
 | `tests/unit/frontend-security-{admin,checkout,merchant}.test.ts` | frontend allow-lists, guards, validation |

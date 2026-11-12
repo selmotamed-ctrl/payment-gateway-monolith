@@ -3,8 +3,8 @@ id: platform.runtime
 title: Runtime and Configuration
 status: partial
 confidence: high
-last_verified: 2026-11-10
-verified_against: d695518+working-tree
+last_verified: 2026-11-12
+verified_against: 19d6a54+working-tree
 code:
   - core-back/index.ts
   - core-back/lib/env/index.ts
@@ -355,6 +355,7 @@ The deploy engine injects admin UI flags rather than requiring a committed front
 - `ADMIN_SHOW_HELP_PANELS` (default true) controls help panels.
 - Build constants `VITE_SHOW_CHECKLISTS`, `VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST` and `VITE_SHOW_HELP_PANELS` are injected into the `admin-front` build.
 - Runtime config `showChecklists`, `showSnapshotExportChecklist` and `showHelpPanels` is written into the deployed admin release and takes precedence at boot.
+- `APP_RELEASE` and `APP_COMMIT` are injected by `deployService()` into every core/edge/Fake Rails environment. `/health` exposes `release`/`commit`; the deploy batch and final verification require the expected release so a stale listener cannot pass health checks. They are additive response fields and are not part of the core/edge env schemas.
 
 These are deploy/frontend flags; they are not core-back env keys.
 

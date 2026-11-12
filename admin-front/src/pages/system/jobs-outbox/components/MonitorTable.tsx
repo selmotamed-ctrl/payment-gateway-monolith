@@ -1,5 +1,5 @@
 import { dc } from "kt-dc";
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues, type TableFilter } from "@/components/Table/filters";
@@ -28,6 +28,7 @@ const MonitorTable = dc(
         searchable?: boolean;
     }) => {
         const search = ref<string | null>(null);
+        const filters = computed(() => props.filters ?? []);
         const values = ref<FilterValues>({ ...(props.initialFilters ?? {}) });
         const total = ref(0);
         const pageSize = ref(25);
@@ -81,14 +82,14 @@ const MonitorTable = dc(
                             page: table.page,
                             pageSize: pageSize.value,
                             ...(props.searchable !== false && search.value ? { search: search.value } : {}),
-                            ...buildFilterQuery(props.filters, values.value),
+                            ...buildFilterQuery(filters.value, values.value),
                             ...(table.sortKey ? { sortKey: table.sortKey, sortDirection: table.sortDirection } : {}),
                         },
                     });
                 }}
                 TopSlot={() => (
                     <TableFilters
-                        filters={props.filters}
+                        filters={filters.value}
                         values={values.value}
                         total={total.value}
                         onChange={onChange}
@@ -100,6 +101,19 @@ const MonitorTable = dc(
                 )}
             />
         );
+    },
+    {
+        props: [
+            "title",
+            "url",
+            "listKey",
+            "headers",
+            "filters",
+            "initialFilters",
+            "refreshSignal",
+            "rowColor",
+            "searchable",
+        ],
     },
 );
 

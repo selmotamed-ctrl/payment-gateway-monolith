@@ -114,8 +114,31 @@ is then only a compatibility fallback.
 | `--rotate-certs` | Regenerate the internal CA and every leaf certificate. |
 | `--check-certs` | Read-only certificate expiry table; exit 1 when something is missing, expired or inside `MTLS_RENEW_WITHIN_DAYS` (for cron/alerts). |
 | `--dry-run` | Validate and print commands; execute no remote command and skip local builds/verification. |
+| `--preflight-only` | Run only the read-only preflight checks, print the report and exit 0/1. No build, PKI, bootstrap or deployment. |
+| `--skip-preflight` | Skip the preflight gate (emergency use only; a warning is printed). |
+| `--stop-unmanaged` | Allow the preflight to stop only provably safe same-repo dev listeners on selected service ports. |
 
 Unknown options and unknown `--only` roles abort before any SSH connection.
+`--only` also accepts backend aliases: `core-back`, `admin-back`, `merchant-back`, `checkout-back`, `fake-rails-back`.
+
+### Preflight (runs before any mutation)
+
+Every deploy runs a read-only preflight inside step 1 after the plan is built and before frontend builds, PKI, bootstrap, storage or PM2. It checks only the selected `--only`/`--nodes` parts plus their required dependencies:
+
+- SSH reachability, key validity and `sudo`;
+- OS/tool readiness (fresh installs may bootstrap missing tools; update deploys block);
+- disk, memory and clock skew;
+- service ports and their owners: free, the current PM2 app (replaceable), an orphan same-tier PM2 app (retireable), a same-repo dev listener (blocked by default, stoppable with `--stop-unmanaged`), or a foreign process (always blocked);
+- Nginx ports and `nginx -t`;
+- edge-to-core mTLS and database/PgBouncer dependencies when the selected part needs them;
+- PostgreSQL data directories, systemd units for storage daemons, and the release identity.
+
+A blocking issue prints PID/cwd/command diagnostics and aborts with **Nothing was built or changed**. The deploy also verifies the new release identity (`APP_RELEASE`/`APP_COMMIT` in `/health`) after each batch and in the final end-to-end verification, so PM2 reporting `online` while an old process serves the port can no longer pass.
+
+```bash
+./deploy/deploy.sh --preflight-only --update --only=admin-back
+./deploy/deploy.sh --update --stop-unmanaged
+```
 
 ### Convergence: reload when you can, restart only when you must
 

@@ -134,6 +134,8 @@ export const createApp = (options: CreateAppOptions = {}) => {
       msg: degraded ? "DEGRADED" : "OK",
       status: degraded ? "degraded" : "ok",
       service: "core-back",
+      release: process.env.APP_RELEASE ?? null,
+      commit: process.env.APP_COMMIT ?? null,
       leader,
       queue: {
         enabled: workersEnabled,

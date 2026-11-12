@@ -33,7 +33,7 @@ const PLATFORM_TTL_CEILINGS: Record<string, number> = {
 const route = express.Router();
 
 route.get("/health", (_request, response) => {
-  response.json({ status: "ok", channel: "checkout" });
+  response.json({ status: "ok", channel: "checkout", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null });
 });
 
 const linkParamsSchema = z.object({ linkKey: z.string().min(6).max(64).regex(/^[A-Za-z0-9_-]+$/) });
