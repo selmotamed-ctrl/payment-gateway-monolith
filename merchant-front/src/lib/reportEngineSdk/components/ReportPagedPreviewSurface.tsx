@@ -1,4 +1,5 @@
-import { defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue";
+import { computed, defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue";
+import { useTheme } from "vuetify";
 import {
   buildPagedMediaHtmlDocument,
   type ReportExecutionBundle,
@@ -22,9 +23,11 @@ export const ReportPagedPreviewSurface = defineComponent({
   },
   emits: ["pageCountChanged"],
   setup(props, { emit, expose }) {
+    const theme = useTheme();
     const iframeRef = ref<HTMLIFrameElement | null>(null);
     const totalPages = ref<number>(1);
     const rendering = ref<boolean>(false);
+    const previewTheme = computed<"light" | "dark">(() => (theme.global.current.value.dark ? "dark" : "light"));
     let renderToken = 0;
 
     const buildSrcdoc = (token: number): string => {
@@ -34,6 +37,7 @@ export const ReportPagedPreviewSurface = defineComponent({
         renderedSectionsHtml: props.renderedSectionsHtml,
         renderedHeaderHtml: props.renderedHeaderHtml,
         renderedFooterHtml: props.renderedFooterHtml,
+        previewTheme: previewTheme.value,
       });
       const csp = [
         "default-src 'none'",
@@ -66,6 +70,11 @@ export const ReportPagedPreviewSurface = defineComponent({
       } finally {
         rendering.value = false;
       }
+    };
+
+    const applyPreviewTheme = () => {
+      const doc = iframeRef.value?.contentDocument;
+      if (doc) doc.documentElement.dataset.reportPreviewTheme = previewTheme.value;
     };
 
     const onMessage = (event: MessageEvent) => {
@@ -135,6 +144,8 @@ export const ReportPagedPreviewSurface = defineComponent({
       },
     );
 
+    watch(previewTheme, applyPreviewTheme);
+
     onMounted(() => {
       window.addEventListener("message", onMessage);
       void renderPaginatedPreview();
@@ -153,7 +164,8 @@ export const ReportPagedPreviewSurface = defineComponent({
           title="Report Paginated Vector Preview"
           sandbox="allow-same-origin allow-scripts allow-modals"
           class="report-paged-preview-frame"
-          style="width: 100%; min-height: min(860px, 74vh); border: 1px solid var(--pg-border-subtle); border-radius: 8px; background: var(--pg-bg-canvas);"
+          style="width: 100%; min-height: min(860px, 74vh); border: 1px solid var(--pg-border-subtle); border-radius: 8px; background: var(--pg-bg-surface-subtle);"
+          onLoad={applyPreviewTheme}
         />
       </div>
     );

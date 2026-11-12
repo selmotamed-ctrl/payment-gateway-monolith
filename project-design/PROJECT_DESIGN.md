@@ -10780,7 +10780,7 @@ cd ../tests && bunx playwright test --project=admin e2e/admin/guide-reader.spec.
 
 <a id="admin-uireport-studio"></a>
 
-> **Part ID:** `admin-ui.report-studio` · **Status:** `implemented` · **Last verified:** 2026-11-11 · **Verified against:** `working-tree`
+> **Part ID:** `admin-ui.report-studio` · **Status:** `implemented` · **Last verified:** 2026-11-12 · **Verified against:** `working-tree`
 
 # Report Catalog, Studio and Chrome
 
@@ -10832,6 +10832,10 @@ The Chrome page lists header/footer specs with server-side pagination, search an
 - `components/ReportChartRenderer.ts` renders ECharts SVG;
 - `sanitizer/ClientDomSanitizer.ts` strips active content before preview/print;
 - `utils/inputDefaults.ts` and `utils/localeMeta.ts` resolve presets and language options.
+
+## 5.1 Preview canvas (2026-11-12)
+
+The sandboxed Paged.js preview (`ReportPagedPreviewSurface`) follows the active Vuetify light/dark theme without re-paginating: the generated document carries `data-report-preview-theme` on `<html>`, and a theme watcher updates that attribute in the iframe. The preview canvas is `#F1F5F9` in light mode and `#18181C` in dark mode; paper pages stay white for print accuracy, with a theme-specific border and shadow, a 24 px page gap, 32 px vertical padding and horizontal centering (20 px/12 px side padding on narrow screens). The outer iframe background matches `--pg-bg-surface-subtle`. Paged.js unwraps author `@media print` rules during pagination, so the bridge injects a print-only reset after rendering; it restores a white canvas and removes borders, shadows, gaps and padding only for the printed document.
 
 ## 6. Tests
 
@@ -11556,7 +11560,7 @@ The content test is a Bun test; the Playwright suites require the live stack.
 
 <a id="merchant-uireports"></a>
 
-> **Part ID:** `merchant-ui.reports` · **Status:** `implemented` · **Last verified:** 2026-11-11 · **Verified against:** `working-tree`
+> **Part ID:** `merchant-ui.reports` · **Status:** `implemented` · **Last verified:** 2026-11-12 · **Verified against:** `working-tree`
 
 # Merchant Reports
 
@@ -11607,6 +11611,10 @@ The merchant transcript example now lowers `periodRange.validation.max_range_day
 ## Shared print layout hardening (2026-11-11)
 
 The merchant portal receives the same client SDK mirror as the admin portal, so merchant previews/prints now use the hardened A4 layout: max 3 KPI columns, centered chart rows and wrapping HTML legends, compact table typography and chips, repeated table headers, no-data chart states, and true landscape pages in print. The merchant Studio mock/live preview uses the same renderer and is covered by the SDK mirror test.
+
+## Shared preview canvas (2026-11-12)
+
+The merchant client SDK mirror receives the same theme-aware Paged.js preview as the admin portal: `#F1F5F9`/`#18181C` canvases for light/dark, white paper pages with theme-specific separation, 24 px gaps, 32 px vertical padding, and an iframe background that matches `--pg-bg-surface-subtle`. Theme changes update the iframe's `data-report-preview-theme` attribute without re-pagination. The bridge injects the print-only canvas/page reset after Paged.js pagination, so merchant PDFs remain white and print-accurate.
 
 ## Shared chrome layout and accent bands (2026-11-11)
 
@@ -16631,7 +16639,7 @@ This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations and t
 
 ### 3.15 Report engine and merchant report tests
 
-`core-back/test/reportEngineSdk/**` now covers the original RE-T01..RE-T22 matrix plus PII masking, confidential AML denial/bypass, merchant scope (including OR-bypass), semantic AST diagnostics, asset validation, chrome resolution and SDK decoupling, and the remediation suites: AuthorityAndCatalog (referenced-column PII, relation parsing, sensitivity/AML domains), MerchantReportLine (allow-list, identity injection/row assertion, tier limits), SeedChrome (seed idempotence), ExecuteAndRedaction (bundle comparison assets, aggregate/truncation), and the A08/A09/A10/A11/A12/A14/A15/A16/A17 regression cases. `merchant-back/test/core-forwarding.test.ts` covers the merchant catalog/execute/autocomplete proxy and the merchant Studio proxies. `core-back/test/admin-slice/admin-report-engine.test.ts` (DB-gated) covers version persistence, publish supersede, archive promotion, audience tabs and the merchant mount/authority; `admin-back/test/report-engine-edge.test.ts` covers the 24 MB parser, edge execute/list permissions and the publish proxy. `tests/unit/report-engine-sdk-mirror.test.ts` asserts the admin/merchant client SDK copies are identical; `tests/unit/report-ui-styles.test.ts` pins the shared report input grid/preview CSS in both portals; `tests/unit/builders-settings-parser.test.ts` covers the `merchant_reports.policy` Platform Setting editor. Core unit tests `report-engine-body-path.test.ts` and `MerchantReportPolicy.test.ts` cover the merchant body parser prefix and the staff-managed policy defaults/cache/assets gate. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers the client renderer, chrome variables, enum translation, vector canvas and paged-media contract. The Guide content test was updated for the new Reports screen/article.
+`core-back/test/reportEngineSdk/**` now covers the original RE-T01..RE-T22 matrix plus PII masking, confidential AML denial/bypass, merchant scope (including OR-bypass), semantic AST diagnostics, asset validation, chrome resolution and SDK decoupling, and the remediation suites: AuthorityAndCatalog (referenced-column PII, relation parsing, sensitivity/AML domains), MerchantReportLine (allow-list, identity injection/row assertion, tier limits), SeedChrome (seed idempotence), ExecuteAndRedaction (bundle comparison assets, aggregate/truncation), and the A08/A09/A10/A11/A12/A14/A15/A16/A17 regression cases. `merchant-back/test/core-forwarding.test.ts` covers the merchant catalog/execute/autocomplete proxy and the merchant Studio proxies. `core-back/test/admin-slice/admin-report-engine.test.ts` (DB-gated) covers version persistence, publish supersede, archive promotion, audience tabs and the merchant mount/authority; `admin-back/test/report-engine-edge.test.ts` covers the 24 MB parser, edge execute/list permissions and the publish proxy. `tests/unit/report-engine-sdk-mirror.test.ts` asserts the admin/merchant client SDK copies are identical; `tests/unit/report-ui-styles.test.ts` pins the shared report input grid/preview CSS in both portals; `tests/unit/report-preview-print-reset.test.ts` pins the post-pagination print reset and asserts the two preview bridges are byte-identical; `tests/unit/builders-settings-parser.test.ts` covers the `merchant_reports.policy` Platform Setting editor. Core unit tests `report-engine-body-path.test.ts` and `MerchantReportPolicy.test.ts` cover the merchant body parser prefix and the staff-managed policy defaults/cache/assets gate. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers the client renderer, chrome variables, enum translation, vector canvas and paged-media contract, including the theme-aware preview canvas, page separation and print reset. The Guide content test was updated for the new Reports screen/article.
 
 ## 4. Contracts and invariants
 

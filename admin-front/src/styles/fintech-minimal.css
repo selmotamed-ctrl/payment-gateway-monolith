@@ -1299,6 +1299,8 @@ div[title]:has(> .pg-status-badge) {
 }
 .report-paged-preview-frame {
   min-block-size: min(860px, 74vh);
+  background: var(--pg-bg-surface-subtle);
+  transition: background-color 160ms ease;
 }
 
 /* --------------------------------------------------------------------------

@@ -3,7 +3,7 @@ id: merchant-ui.reports
 title: Merchant Reports
 status: implemented
 confidence: high
-last_verified: 2026-11-11
+last_verified: 2026-11-12
 verified_against: working-tree
 code:
   - merchant-front/src/pages/reports/index.tsx
@@ -86,6 +86,10 @@ The merchant transcript example now lowers `periodRange.validation.max_range_day
 ## Shared print layout hardening (2026-11-11)
 
 The merchant portal receives the same client SDK mirror as the admin portal, so merchant previews/prints now use the hardened A4 layout: max 3 KPI columns, centered chart rows and wrapping HTML legends, compact table typography and chips, repeated table headers, no-data chart states, and true landscape pages in print. The merchant Studio mock/live preview uses the same renderer and is covered by the SDK mirror test.
+
+## Shared preview canvas (2026-11-12)
+
+The merchant client SDK mirror receives the same theme-aware Paged.js preview as the admin portal: `#F1F5F9`/`#18181C` canvases for light/dark, white paper pages with theme-specific separation, 24 px gaps, 32 px vertical padding, and an iframe background that matches `--pg-bg-surface-subtle`. Theme changes update the iframe's `data-report-preview-theme` attribute without re-pagination. The bridge injects the print-only canvas/page reset after Paged.js pagination, so merchant PDFs remain white and print-accurate.
 
 ## Shared chrome layout and accent bands (2026-11-11)
 

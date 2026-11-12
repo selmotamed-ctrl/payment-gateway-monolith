@@ -3,7 +3,7 @@ id: admin-ui.report-studio
 title: Report Catalog, Studio and Chrome
 status: implemented
 confidence: high
-last_verified: 2026-11-11
+last_verified: 2026-11-12
 verified_against: working-tree
 code:
   - admin-front/src/pages/reports/**
@@ -77,6 +77,10 @@ The Chrome page lists header/footer specs with server-side pagination, search an
 - `components/ReportChartRenderer.ts` renders ECharts SVG;
 - `sanitizer/ClientDomSanitizer.ts` strips active content before preview/print;
 - `utils/inputDefaults.ts` and `utils/localeMeta.ts` resolve presets and language options.
+
+## 5.1 Preview canvas (2026-11-12)
+
+The sandboxed Paged.js preview (`ReportPagedPreviewSurface`) follows the active Vuetify light/dark theme without re-paginating: the generated document carries `data-report-preview-theme` on `<html>`, and a theme watcher updates that attribute in the iframe. The preview canvas is `#F1F5F9` in light mode and `#18181C` in dark mode; paper pages stay white for print accuracy, with a theme-specific border and shadow, a 24 px page gap, 32 px vertical padding and horizontal centering (20 px/12 px side padding on narrow screens). The outer iframe background matches `--pg-bg-surface-subtle`. Paged.js unwraps author `@media print` rules during pagination, so the bridge injects a print-only reset after rendering; it restores a white canvas and removes borders, shadows, gaps and padding only for the printed document.
 
 ## 6. Tests
 
