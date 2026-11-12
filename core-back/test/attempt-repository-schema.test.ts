@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Prisma } from "../generated/prisma/client";
 import type { DynamicAttemptPatch } from "../engine/flow/DynamicRailEngine";
-import { PrismaAttemptRepository } from "../engine/runtime/attemptRepository";
+import { AttemptStateConflictError, PrismaAttemptRepository } from "../engine/runtime/attemptRepository";
 
 /**
  * Regression: `PrismaAttemptRepository.updateAttempt` once forwarded an `adjustmentState` field to
@@ -29,10 +29,12 @@ const everyField: Required<DynamicAttemptPatch> = {
   networkReference: "network-ref",
   settledAmount: "10.0000",
   gatewayFeeAmount: "0.5000",
+  expectedStatus: "VERIFYING",
 };
 
-const capturingClient = () => {
+const capturingClient = (options: { matched?: number } = {}) => {
   const writes: Array<Record<string, unknown>> = [];
+  const conditions: Array<Record<string, unknown>> = [];
   const row = {
     id: "attempt-1",
     reference: "ref",
@@ -61,12 +63,18 @@ const capturingClient = () => {
         writes.push(args.data);
         return row;
       },
+      updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        conditions.push(args.where);
+        writes.push(args.data);
+        return { count: options.matched ?? 1 };
+      },
+      findUnique: async () => row,
     },
     outboxEvent: { create: async () => ({}) },
     $executeRawUnsafe: async () => 0,
     $queryRawUnsafe: async () => [],
   };
-  return { client, writes };
+  return { client, writes, conditions };
 };
 
 describe("PrismaAttemptRepository writes only real payment_attempts columns", () => {
@@ -85,5 +93,47 @@ describe("PrismaAttemptRepository writes only real payment_attempts columns", ()
   test("payment_attempts has no adjustment-state column (the refund state lives on adjustments)", () => {
     expect(columns.has("adjustmentState")).toBe(false);
     expect(new Set<string>(Object.values(Prisma.AdjustmentScalarFieldEnum)).has("state")).toBe(true);
+  });
+});
+
+describe("PrismaAttemptRepository status writes are compare-and-set", () => {
+  test("a patch with expectedStatus only lands while the row still has that status", async () => {
+    const { client, conditions } = capturingClient();
+    await new PrismaAttemptRepository(client as never).updateAttempt("attempt-1", { status: "UNKNOWN", expectedStatus: "VERIFYING" });
+    expect(conditions).toEqual([{ id: "attempt-1", status: "VERIFYING" }]);
+  });
+
+  test("a lost race throws ATTEMPT_STATE_CONFLICT and enqueues nothing", async () => {
+    const { client } = capturingClient({ matched: 0 });
+    const error = await new PrismaAttemptRepository(client as never)
+      .updateAttempt("attempt-1", { status: "FAILED", expectedStatus: "VERIFYING" })
+      .catch((caught) => caught);
+    expect(error).toBeInstanceOf(AttemptStateConflictError);
+    expect((error as { code: string }).code).toBe("ATTEMPT_STATE_CONFLICT");
+  });
+
+  test("the expected status is a condition, never a written column", async () => {
+    const { client, writes } = capturingClient();
+    await new PrismaAttemptRepository(client as never).updateAttempt("attempt-1", { status: "UNKNOWN", expectedStatus: "VERIFYING" });
+    expect(Object.keys(writes[0] ?? {})).not.toContain("expectedStatus");
+  });
+});
+
+describe("PrismaAttemptRepository.claimFinalize", () => {
+  const claim = async (status: string) => {
+    const { client, conditions } = capturingClient();
+    await new PrismaAttemptRepository(client as never).claimFinalize("attempt-1", status);
+    return conditions[0];
+  };
+
+  test("an open attempt is claimed only while it is not terminal", async () => {
+    expect(await claim("VERIFYING")).toEqual({ id: "attempt-1", status: "VERIFYING", terminalAt: null });
+  });
+
+  // FAILED and EXPIRED always carry terminal_at: requiring it to be NULL made a late success unclaimable,
+  // so a verified "paid" callback for such an attempt was refused and dropped.
+  test("a late success on a FAILED or EXPIRED attempt is claimable although it is terminal", async () => {
+    expect(await claim("FAILED")).toEqual({ id: "attempt-1", status: "FAILED" });
+    expect(await claim("EXPIRED")).toEqual({ id: "attempt-1", status: "EXPIRED" });
   });
 });

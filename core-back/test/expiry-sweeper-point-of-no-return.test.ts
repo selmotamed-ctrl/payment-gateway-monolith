@@ -133,7 +133,80 @@ describe("expiry sweeper and attempts past the point of no return", () => {
 
     const updates = attemptUpdates();
     expect(updates).toHaveLength(1);
-    expect(updates[0]?.args[0]).toBe("EXPIRED");
+    expect(updates[0]?.sql).toContain("SET status = 'EXPIRED'");
     expect(releases).toEqual([{ linkId: "link-1", delta: -1 }]);
+  });
+
+  // The flag stays set after a wrong OTP, but the gateway answered definitively that no money
+  // moved: such an abandoned session must expire, not become an UNKNOWN case with a locked slot.
+  test("an abandoned wrong-OTP session (AWAITING_CUSTOMER with the flag still set) expires normally", async () => {
+    const { worker, releases, audits, attemptUpdates } = createWorker([
+      attemptRow({ status: "AWAITING_CUSTOMER", substatus: "RETRYABLE_OTP", point_of_no_return: true }),
+    ]);
+
+    await worker.runOnce();
+
+    const updates = attemptUpdates();
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.sql).toContain("SET status = 'EXPIRED'");
+    expect(updates[0]?.sql).not.toContain("'UNKNOWN'");
+    expect(releases).toEqual([{ linkId: "link-1", delta: -1 }]);
+    expect(audits.map((audit) => audit.action)).toEqual(["ATTEMPT_EXPIRED"]);
+  });
+});
+
+describe("expiry sweeper racing a confirm", () => {
+  // The batch is read under a lock that is released at once. A payer confirms afterwards: the claim
+  // moves the attempt to AUTHORIZING with the flag set and the charge is sent.
+  const claimedMeanwhile = (queries: { count: number }) => (sql: string) => {
+    if (!sql.includes("FROM payment_attempts")) return undefined;
+    queries.count += 1;
+    // 1st query: the batch claim (stale). Later queries: the row as it is now.
+    return queries.count === 1
+      ? [attemptRow({ status: "AWAITING_CUSTOMER", point_of_no_return: false })]
+      : [attemptRow({ status: "AUTHORIZING", point_of_no_return: true })];
+  };
+
+  test("an attempt claimed by a confirm after the batch was read is held as UNKNOWN, never expired", async () => {
+    const queries = { count: 0 };
+    const releases: Array<{ linkId: string; delta: number }> = [];
+    const { db, calls } = createRecordingDb({ onQuery: claimedMeanwhile(queries), onExecute: () => 1 });
+    const worker = new ExpirySweeperWorker({
+      db,
+      repositories: createFakeRepositories({
+        payments: {
+          listRouteInquirySupport: async () => [],
+          updateLinkSlotCount: async (_tx, linkId, delta) => { releases.push({ linkId, delta }); },
+        },
+        governance: { writeAuditLog: async () => undefined },
+      }),
+      clock: () => NOW,
+    });
+
+    await worker.runOnce();
+
+    const updates = calls.filter((call) => call.kind === "execute" && call.sql.includes("UPDATE payment_attempts"));
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.sql).toContain("status = 'UNKNOWN'");
+    expect(updates[0]?.args.slice(1)).toEqual(["attempt-1", "AUTHORIZING"]);
+    expect(releases).toEqual([]);
+  });
+
+  test("the expiry statement itself refuses a row with a money-moving step in flight", async () => {
+    const { worker, attemptUpdates } = createWorker([attemptRow({ status: "AWAITING_CUSTOMER", point_of_no_return: false })]);
+    await worker.runOnce();
+    const sql = attemptUpdates()[0]?.sql ?? "";
+    expect(sql).toContain("terminal_at IS NULL AND status = $3");
+    expect(sql).toContain("NOT (point_of_no_return = true AND status IN ('AUTHORIZING', 'VERIFYING'))");
+  });
+
+  test("a lost expiry (0 rows) releases no slot and writes no audit row", async () => {
+    const { worker, releases, audits } = createWorker(
+      [attemptRow({ status: "AWAITING_CUSTOMER", point_of_no_return: false })],
+      { onExecute: () => 0 },
+    );
+    await worker.runOnce();
+    expect(releases).toEqual([]);
+    expect(audits).toEqual([]);
   });
 });

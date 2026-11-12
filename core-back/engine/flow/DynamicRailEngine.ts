@@ -49,6 +49,11 @@ export interface DynamicAttemptPatch {
   networkReference?: string;
   settledAmount?: string;
   gatewayFeeAmount?: string;
+  /**
+   * Compare-and-set: apply the patch only while the attempt still has this status. A repository
+   * that honours it throws an error with code `ATTEMPT_STATE_CONFLICT` when it does not.
+   */
+  expectedStatus?: AdapterAttemptStatus;
 }
 
 export interface AttemptRepository {
@@ -266,6 +271,8 @@ const TERMINAL_RELEASING_STATES = new Set<AdapterAttemptStatus>([
 ]);
 
 const AML_HOLD_SUBSTATUS = "AML_HOLD";
+/** Set by the AML case executor when a held attempt is rejected (GovernanceExecution). */
+const AML_VOID_SUBSTATUS = "AML_VOID";
 
 /**
  * GAP-016. IDEMPOTENT: the attempt already settled once, a duplicate success
@@ -384,7 +391,38 @@ export class DynamicRailEngine {
     return this.toResult(current, execution);
   }
 
-  async initiate(
+  /**
+   * Runs a flow; when one of its status writes lost a compare-and-set race (another writer moved the
+   * attempt first), nothing further is written or released and the persisted state is returned.
+   */
+  private async persistedStateOnConflict(
+    attemptId: string,
+    run: () => Promise<DynamicRailResult>,
+  ): Promise<DynamicRailResult> {
+    try {
+      return await run();
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code !== "ATTEMPT_STATE_CONFLICT") {
+        throw error;
+      }
+      const latest = await this.getAttempt(attemptId);
+      return this.toResult(latest, {
+        status: latest.status,
+        substatus: latest.substatus,
+        outputs: { state: {}, public: latest.publicOutputs ?? {} },
+      });
+    }
+  }
+
+  initiate(
+    attempt: DynamicAttempt,
+    formData: AdapterFormData,
+    options: { slotReserved?: boolean } = {},
+  ): Promise<DynamicRailResult> {
+    return this.persistedStateOnConflict(attempt.id, () => this.runInitiate(attempt, formData, options));
+  }
+
+  private async runInitiate(
     attempt: DynamicAttempt,
     formData: AdapterFormData,
     options: { slotReserved?: boolean } = {},
@@ -441,7 +479,15 @@ export class DynamicRailEngine {
     }
   }
 
-  async confirm(
+  confirm(
+    attempt: DynamicAttempt,
+    evidence: AdapterEvidence,
+    options: ConfirmOptions = {},
+  ): Promise<DynamicRailResult> {
+    return this.persistedStateOnConflict(attempt.id, () => this.runConfirm(attempt, evidence, options));
+  }
+
+  private async runConfirm(
     attempt: DynamicAttempt,
     evidence: AdapterEvidence,
     options: ConfirmOptions = {},
@@ -574,19 +620,25 @@ export class DynamicRailEngine {
     }
     const trusted = this.verifyTrustedSuccessFacts(evidence, current);
     if (!trusted.trusted) {
-      await this.transition(current, "UNKNOWN", { canonicalError: "TRUSTED_SUCCESS_FACTS_FAILED" });
-      return {
-        attempt: current,
-        status: "UNKNOWN",
-        canonicalError: "TRUSTED_SUCCESS_FACTS_FAILED",
-        outputs: current.publicOutputs ?? {},
-      };
+      return this.persistedStateOnConflict(current.id, async () => {
+        await this.transition(current, "UNKNOWN", { canonicalError: "TRUSTED_SUCCESS_FACTS_FAILED" });
+        return {
+          attempt: current,
+          status: "UNKNOWN",
+          canonicalError: "TRUSTED_SUCCESS_FACTS_FAILED",
+          outputs: current.publicOutputs ?? {},
+        };
+      });
     }
     const finalized = await this.finalizeSuccess(current, evidence);
     return this.successResult(current, current.publicOutputs ?? {}, finalized);
   }
 
-  async inquire(attempt: DynamicAttempt): Promise<DynamicRailResult> {
+  inquire(attempt: DynamicAttempt): Promise<DynamicRailResult> {
+    return this.persistedStateOnConflict(attempt.id, () => this.runInquire(attempt));
+  }
+
+  private async runInquire(attempt: DynamicAttempt): Promise<DynamicRailResult> {
     const current = await this.getAttempt(attempt.id);
     if (current.status === "SUCCEEDED") {
       return this.toResult(current, {
@@ -750,8 +802,17 @@ export class DynamicRailEngine {
         409,
       );
     }
+    // The write is conditional on the status this flow observed. A flow reads the attempt, calls
+    // the gateway (seconds) and only then writes: without the condition, a timeout or a failure
+    // answer arriving after a verified webhook settled the attempt put UNKNOWN or FAILED over the
+    // committed SUCCEEDED (and released its slot). A lost race raises ATTEMPT_STATE_CONFLICT, which
+    // the public entry points turn into "return the persisted state".
+    const updated = await this.options.attempts.updateAttempt(attempt.id, {
+      status: nextStatus,
+      ...patch,
+      expectedStatus: attempt.status,
+    });
     attempt.status = nextStatus;
-    const updated = await this.options.attempts.updateAttempt(attempt.id, { status: nextStatus, ...patch });
     await this.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
       attemptId: attempt.id,
       status: nextStatus,
@@ -1098,10 +1159,15 @@ export class DynamicRailEngine {
     if (guard === "REFUSE") {
       throw engineError("ATTEMPT_TERMINAL", `The attempt is ${fresh.status} and can no longer be finalized`, 409);
     }
+    if (fresh.status === "FAILED" && fresh.substatus === AML_VOID_SUBSTATUS) {
+      // The AML case was rejected and the escrow was returned: a late success signal must not
+      // resurrect the attempt (its confirmation key is already used by the escrow entry).
+      throw engineError("ATTEMPT_TERMINAL", "The attempt was voided by its AML case and can no longer be finalized", 409);
+    }
     if ((fresh.substatus ?? attempt.substatus) === AML_HOLD_SUBSTATUS) {
       return this.escrowHeldCapture(fresh);
     }
-    const previousStatus = attempt.status;
+    const previousStatus = fresh.status;
     const post = async (transaction?: unknown): Promise<string> => {
       if (!this.options.ledgerPoster) {
         return `unposted:${attempt.id}`;

@@ -844,8 +844,13 @@ export interface ConfirmClaimResult {
  * The conditional UPDATE is the single-writer guard: only one concurrent
  * confirm can move a claimable attempt to AUTHORIZING. A repeated confirm with
  * the same idempotency key is refused by the marker comparison before the
- * gateway is contacted, and an UNKNOWN attempt past the point of no return can
- * never be claimed again.
+ * gateway is contacted, and an UNKNOWN or VERIFYING attempt past the point of no
+ * return can never be claimed again: its SUBMIT (the charge) was already sent and
+ * the outcome is pending at the gateway, so a second confirm with a fresh
+ * idempotency key (a retry, a double click, a second tab) would send the charge
+ * twice. It is resolved by inquiry or a verified callback only. AWAITING_CUSTOMER
+ * stays claimable with the flag set: that is the wrong-OTP retry, where the
+ * gateway answered definitively that nothing moved.
  */
 export const claimAttemptForConfirm = async (
   db: typeof client,
@@ -869,7 +874,7 @@ export const claimAttemptForConfirm = async (
         WHERE id = $2::uuid
           AND terminal_at IS NULL
           AND status IN (${statusPlaceholders})
-          AND NOT (status = 'UNKNOWN' AND point_of_no_return = true)
+          AND NOT (status IN ('UNKNOWN', 'VERIFYING') AND point_of_no_return = true)
           AND (
             (customer_fields_masked #>> '{${CONFIRM_IDEMPOTENCY_FIELD}}') IS NULL
             OR (customer_fields_masked #>> '{${CONFIRM_IDEMPOTENCY_FIELD}}') <> ${keyPlaceholder}

@@ -225,10 +225,10 @@ export class PollWorker extends BaseWorker {
     } catch (error) {
       this.logger.warn("PollWorker: inquiry failed", { attemptId: attempt.id, error: (error as Error).message });
       const nextCheckAt = new Date(now.getTime() + delaySeconds * 1000);
-      await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
-        status: "UNKNOWN",
-        nextCheckAt: nextCheckAt,
-      });
+      // Never over a terminal attempt: the inquiry runs outside any transaction, and a verified
+      // webhook may have settled the attempt while the inquiry was failing. An unconditional
+      // write put UNKNOWN over a committed SUCCEEDED.
+      await this.updateOpenAttempt(attempt.id, { status: "UNKNOWN", nextCheckAt });
       if (schedule) {
         await updateGatewayInquiry(this.db as Tx, schedule.id, {
           status: "RETRYING",
@@ -274,10 +274,10 @@ export class PollWorker extends BaseWorker {
       }
     } else {
       const nextCheckAt = new Date(now.getTime() + delaySeconds * 1000);
-      await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
+      await this.updateOpenAttempt(attempt.id, {
         status: outcome.status,
         substatus: outcome.substatus ?? attempt.substatus ?? null,
-        nextCheckAt: nextCheckAt,
+        nextCheckAt,
       });
       if (schedule) {
         await updateGatewayInquiry(this.db as Tx, schedule.id, {
@@ -291,6 +291,29 @@ export class PollWorker extends BaseWorker {
     if (terminal && (outcome.status === "FAILED" || outcome.status === "CANCELLED")) {
       await this.releaseSlot(attempt);
     }
+  }
+
+  /** Writes a non-terminal poll result, only while the attempt is still open. */
+  private async updateOpenAttempt(
+    attemptId: string,
+    patch: { status: string; substatus?: string | null; nextCheckAt: Date },
+  ): Promise<void> {
+    if (patch.substatus === undefined) {
+      await this.db.$executeRawUnsafe(
+        'UPDATE payment_attempts SET status = $1::"AttemptStatus", next_check_at = $2, updated_at = now() WHERE id = $3::uuid AND terminal_at IS NULL',
+        patch.status,
+        patch.nextCheckAt,
+        attemptId,
+      );
+      return;
+    }
+    await this.db.$executeRawUnsafe(
+      'UPDATE payment_attempts SET status = $1::"AttemptStatus", substatus = $2, next_check_at = $3, updated_at = now() WHERE id = $4::uuid AND terminal_at IS NULL',
+      patch.status,
+      patch.substatus,
+      patch.nextCheckAt,
+      attemptId,
+    );
   }
 
   /** Returns false only when the escalation could not be recorded. */

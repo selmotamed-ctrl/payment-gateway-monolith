@@ -128,4 +128,29 @@ describe("postPinned body capture and deadline (real sockets)", () => {
       expect(Date.now() - started).toBeLessThan(900);
     } finally { if (timer) clearInterval(timer); await server.close(); }
   });
+
+  // Once the headers have arrived, tearing the socket down also closes the response. That close
+  // must never be reported as a complete answer: every run rejects, none resolves with a partial body.
+  test("an exchange cut after the headers arrived always rejects, never resolves with a partial body", async () => {
+    const timers: ReturnType<typeof setInterval>[] = [];
+    const server = await serve((_req, res) => {
+      res.writeHead(200);
+      res.write("partial");
+      timers.push(setInterval(() => res.write("."), 20));
+    });
+    try {
+      const outcomes = await Promise.all(Array.from({ length: 12 }, () =>
+        postPinned({ url: server.url, body: "{}", headers: {}, allowInsecure: true, captureBody: true, timeoutMs: 1000, deadlineMs: 150 })
+          .then((result) => `resolved:${result.status}`, (error) => String((error as { code?: string }).code))));
+      expect(outcomes).toEqual(Array.from({ length: 12 }, () => "TIMEOUT"));
+    } finally { for (const timer of timers) clearInterval(timer); await server.close(); }
+  });
+
+  test("an answer that goes silent after the headers is rejected by the idle timeout", async () => {
+    const server = await serve((_req, res) => { res.writeHead(200); res.write("partial"); });
+    try {
+      const error = await postPinned({ url: server.url, body: "{}", headers: {}, allowInsecure: true, captureBody: true, timeoutMs: 200 }).catch((caught) => caught);
+      expect((error as { code?: string }).code).toBe("TIMEOUT");
+    } finally { await server.close(); }
+  });
 });

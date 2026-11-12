@@ -4,8 +4,9 @@ import { RetryableInboundError, type InboundEventHandler, type InboundEventRow }
  * Gateway callbacks (webhooks): the inbound-inbox handler, and the failure classification shared
  * with the synchronous inbound route.
  *
- * A failure is retried only when it is TRANSIENT and ours: the database or its driver, the
- * network, a lock or statement timeout, or a 5xx we raised ourselves. Retrying can then succeed,
+ * A failure is retried only when it is TRANSIENT and ours: the database connection or its
+ * driver, the network, a lock or statement timeout, a write conflict, or a 502/503/504 we raised
+ * ourselves. The list is an allowlist of specific codes, never "any database error". Retrying can then succeed,
  * and the webhook is not lost. Every other failure keeps the previous behaviour and is treated as
  * a rejection of the callback: verification failures are coded 4xx verdicts, and an unexpected
  * error on a malformed body must not let anyone on the internet drive retries and operator cases.
@@ -28,9 +29,22 @@ export interface CallbackInboundHandlerDeps {
   toBuffer(value: unknown): Buffer;
 }
 
-/** Prisma's own error codes (`P1001` unreachable, `P2024` pool timeout, `P2034` write conflict, ...). */
-const PRISMA_ERROR_CODE = /^P\d{4}$/;
-const PRISMA_ERROR_NAME = /^(PrismaClient\w*Error|DriverAdapterError)$/;
+/**
+ * The Prisma errors that describe the CONNECTION or a retryable conflict, never the data:
+ * P1001 unreachable, P1002 timed out, P1008 operation timeout, P1017 connection closed,
+ * P2024 pool timeout, P2028 transaction API error (could not start in time), P2034 write conflict.
+ *
+ * Every other Prisma error (a value too long, a unique violation, an invalid byte in a parameter,
+ * a validation error) is deterministic: retrying cannot help, and the callback verifier queries by
+ * a correlation value taken from the UNAUTHENTICATED request body before it checks the signature.
+ * Treating those as transient let anyone on the internet turn one malformed request into five
+ * retries and an operator case.
+ */
+const TRANSIENT_PRISMA_CODES = new Set(["P1001", "P1002", "P1008", "P1017", "P2024", "P2028", "P2034"]);
+/** Errors raised before any query ran: the engine or the driver could not start or connect. */
+const TRANSIENT_ERROR_NAMES = new Set(["PrismaClientInitializationError", "PrismaClientRustPanicError"]);
+/** Our own "try again later" answers. 501 (not configured) and 500 are deterministic here. */
+const TRANSIENT_HTTP_STATUSES = new Set([502, 503, 504]);
 const NETWORK_ERROR_CODES = new Set([
   "ECONNREFUSED", "ECONNRESET", "ECONNABORTED", "ETIMEDOUT", "EPIPE", "EHOSTUNREACH",
   "ENETUNREACH", "EAI_AGAIN", "ENOTFOUND", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET",
@@ -48,15 +62,14 @@ const isTransientOne = (error: unknown): boolean => {
   const { code, name, statusCode, message, kind } = error as {
     code?: unknown; name?: unknown; statusCode?: unknown; message?: unknown; kind?: unknown;
   };
-  if (typeof name === "string" && PRISMA_ERROR_NAME.test(name)) return true;
+  if (typeof name === "string" && TRANSIENT_ERROR_NAMES.has(name)) return true;
   if (typeof code === "string") {
-    if (PRISMA_ERROR_CODE.test(code) || NETWORK_ERROR_CODES.has(code) || TRANSIENT_SQLSTATE.test(code)) {
+    if (TRANSIENT_PRISMA_CODES.has(code) || NETWORK_ERROR_CODES.has(code) || TRANSIENT_SQLSTATE.test(code)) {
       return true;
     }
   }
   if (typeof kind === "string" && TRANSIENT_MESSAGE.test(kind)) return true;
-  const status = Number(statusCode);
-  if (Number.isInteger(status) && status >= 500 && status < 600) return true;
+  if (TRANSIENT_HTTP_STATUSES.has(Number(statusCode))) return true;
   return typeof message === "string" && TRANSIENT_MESSAGE.test(message);
 };
 

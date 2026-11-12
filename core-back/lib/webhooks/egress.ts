@@ -104,6 +104,14 @@ export const postPinned = async (input: PinnedPostInput): Promise<PinnedPostResu
   const payload = Buffer.from(input.body, "utf8");
   const maxBytes = input.maxResponseBytes ?? 4096;
   return new Promise<PinnedPostResult>((resolve, reject) => {
+    // Set when the idle timeout or the overall deadline fires. Once the response has started, the
+    // socket teardown also ends the RESPONSE ("close"), and that handler used to win the race and
+    // resolve with the status and a truncated body: a cut-off exchange reported as a complete one.
+    let timeoutFailure: WebhookEgressError | undefined;
+    const abort = (message: string): void => {
+      timeoutFailure ??= new WebhookEgressError(message, true, "TIMEOUT");
+      request.destroy(timeoutFailure);
+    };
     const request = (secure ? https : http).request(
       {
         protocol: url.protocol,
@@ -136,6 +144,10 @@ export const postPinned = async (input: PinnedPostInput): Promise<PinnedPostResu
         });
         const done = () => {
           if (deadline) clearTimeout(deadline);
+          if (timeoutFailure) {
+            reject(timeoutFailure);
+            return;
+          }
           resolve({
             status: response.statusCode ?? 0,
             latencyMs: Date.now() - started,
@@ -149,12 +161,12 @@ export const postPinned = async (input: PinnedPostInput): Promise<PinnedPostResu
     );
     // A slow-drip answer never trips the idle timeout above, so a total deadline bounds the whole exchange.
     const deadline = input.deadlineMs
-      ? setTimeout(() => request.destroy(new WebhookEgressError("The endpoint did not complete the exchange in time", true, "TIMEOUT")), input.deadlineMs)
+      ? setTimeout(() => abort("The endpoint did not complete the exchange in time"), input.deadlineMs)
       : undefined;
-    request.on("timeout", () => request.destroy(new WebhookEgressError("The endpoint did not answer in time", true, "TIMEOUT")));
+    request.on("timeout", () => abort("The endpoint did not answer in time"));
     request.on("error", (error) => {
       if (deadline) clearTimeout(deadline);
-      reject(error instanceof WebhookEgressError ? error : new WebhookEgressError(`Connection failed: ${error.message}`.slice(0, 300), true, "NETWORK"));
+      reject(timeoutFailure ?? (error instanceof WebhookEgressError ? error : new WebhookEgressError(`Connection failed: ${error.message}`.slice(0, 300), true, "NETWORK")));
     });
     request.write(payload);
     request.end();

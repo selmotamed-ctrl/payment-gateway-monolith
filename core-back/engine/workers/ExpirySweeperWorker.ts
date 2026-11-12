@@ -27,6 +27,16 @@ const RELEASE_SLOT_STATUSES = ["FAILED", "EXPIRED", "CANCELLED"];
  * must never expire it (and must never release its reserved slot).
  */
 const AML_HOLD_SUBSTATUS = "AML_HOLD";
+/**
+ * The states in which a money-moving step is in flight: the confirm claim moved the attempt to
+ * AUTHORIZING (the SUBMIT stack is running) or the gateway answered "pending" (VERIFYING). With
+ * `point_of_no_return` set, the gateway may have charged the payer. AWAITING_CUSTOMER is NOT one of
+ * them although the flag stays set after a wrong OTP: the gateway answered definitively that no
+ * money moved, so such a session expires normally.
+ */
+const MONEY_IN_FLIGHT_STATUSES = ["AUTHORIZING", "VERIFYING"];
+const moneyMayHaveMoved = (row: { status: string; pointOfNoReturn?: boolean | null }): boolean =>
+  row.pointOfNoReturn === true && MONEY_IN_FLIGHT_STATUSES.includes(row.status);
 
 export class ExpirySweeperWorker extends BaseWorker {
   private readonly inquiry: InquiryPort | undefined;
@@ -114,16 +124,40 @@ export class ExpirySweeperWorker extends BaseWorker {
       }
     }
 
+    // The row was read when the batch was claimed, and that lock is long gone: a payer may have
+    // confirmed since (the claim moves the attempt to AUTHORIZING and sends the charge), and the
+    // inquiry above may have moved it too. Decide on the row as it is NOW.
+    const fresh = await this.reload(attempt.id);
+    if (!fresh || fresh.terminalAt) {
+      return;
+    }
     // Past the point of no return a money-moving step was already sent, so the gateway may have
     // charged the payer. With no definitive answer the outcome is unknown, not expired: expiring
     // would make the attempt terminal, release its slot and drop it from polling, leaving a real
     // charge visible only to a callback or reconciliation.
-    if (attempt.pointOfNoReturn === true) {
-      await this.holdAsUnknown(attempt, now);
+    if (moneyMayHaveMoved(fresh)) {
+      await this.holdAsUnknown(fresh, now);
       return;
     }
+    if (!EXPIRABLE_STATUSES.includes(fresh.status)) {
+      return; // for example UNKNOWN: the PollWorker owns it
+    }
 
-    await this.expireAttempt(attempt, now);
+    const expired = await this.expireAttempt(fresh, now);
+    if (!expired) {
+      // The conditional expiry lost a race with a confirm that claimed the attempt in between.
+      const latest = await this.reload(attempt.id);
+      if (latest && !latest.terminalAt && moneyMayHaveMoved(latest)) {
+        await this.holdAsUnknown(latest, now);
+      }
+    }
+  }
+
+  private async reload(attemptId: string): Promise<PaymentAttemptRow | null> {
+    const rows = toCamelRows<PaymentAttemptRow>(
+      await this.db.$queryRawUnsafe("SELECT * FROM payment_attempts WHERE id = $1::uuid", attemptId),
+    );
+    return rows[0] ?? null;
   }
 
   /**
@@ -133,8 +167,10 @@ export class ExpirySweeperWorker extends BaseWorker {
    * conditional on the status the sweeper observed, so it never overwrites a concurrent finalize.
    */
   private async holdAsUnknown(attempt: PaymentAttemptRow, now: Date): Promise<void> {
+    // An inquiry the PollWorker already scheduled is kept, so a held attempt is not asked on
+    // every sweeper tick.
     const result = await this.db.$executeRawUnsafe(
-      "UPDATE payment_attempts SET status = 'UNKNOWN', next_check_at = $1, updated_at = now()" +
+      "UPDATE payment_attempts SET status = 'UNKNOWN', next_check_at = COALESCE(next_check_at, $1), updated_at = now()" +
         " WHERE id = $2::uuid AND terminal_at IS NULL AND status = $3",
       now,
       attempt.id,
@@ -200,22 +236,32 @@ export class ExpirySweeperWorker extends BaseWorker {
 
   private async deferAttempt(attempt: PaymentAttemptRow, now: Date): Promise<void> {
     const retryAt = new Date(now.getTime() + 60_000);
-    await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
-      status: "UNKNOWN",
-      nextCheckAt: retryAt,
-    });
+    // Never over a terminal attempt: the inquiry runs outside any transaction, and a verified
+    // webhook may have settled the attempt while it was failing.
+    await this.db.$executeRawUnsafe(
+      "UPDATE payment_attempts SET status = 'UNKNOWN', next_check_at = $1, updated_at = now() WHERE id = $2::uuid AND terminal_at IS NULL",
+      retryAt,
+      attempt.id,
+    );
   }
 
-  private async expireAttempt(attempt: PaymentAttemptRow, now: Date): Promise<void> {
-    // The terminal transition is conditional, so two cluster nodes can never
-    // expire the same attempt twice (and can never release its slot twice).
-    const transitioned = await this.terminate(attempt.id, {
-      status: "EXPIRED",
-      terminal_at: now,
-      next_check_at: null,
-    });
-    if (!transitioned) {
-      return;
+  /** Returns false when the attempt was not expired (it changed since it was read). */
+  private async expireAttempt(attempt: PaymentAttemptRow, now: Date): Promise<boolean> {
+    // The terminal transition is conditional on the row still being exactly what was decided
+    // on: open, in the status that was read, and with no money-moving step in flight. Two
+    // cluster nodes can never expire the same attempt twice (or release its slot twice), and a
+    // confirm that claimed the attempt after it was read (status AUTHORIZING, charge sent) can
+    // never be expired underneath: it was the bug that marked a charged payment EXPIRED.
+    const result = await this.db.$executeRawUnsafe(
+      "UPDATE payment_attempts SET status = 'EXPIRED', terminal_at = $1, next_check_at = NULL, updated_at = now()" +
+        " WHERE id = $2::uuid AND terminal_at IS NULL AND status = $3" +
+        " AND NOT (point_of_no_return = true AND status IN ('AUTHORIZING', 'VERIFYING'))",
+      now,
+      attempt.id,
+      attempt.status,
+    );
+    if (Number(result ?? 0) === 0) {
+      return false;
     }
     await this.releaseSlot(attempt);
     await this.repositories.governance.writeAuditLog(this.db as Tx, {
@@ -226,6 +272,7 @@ export class ExpirySweeperWorker extends BaseWorker {
       entityId: attempt.id,
       afterJson: { status: "EXPIRED", graceExpiresAt: attempt.graceExpiresAt ?? null },
     });
+    return true;
   }
 
   /**

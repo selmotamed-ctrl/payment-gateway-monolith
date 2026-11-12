@@ -56,11 +56,14 @@ describe("isTransientCallbackFailure", () => {
   test("database, driver, network, server-state and our own 5xx failures are transient", () => {
     expect(isTransientCallbackFailure(prismaUnreachable())).toBe(true);
     expect(isTransientCallbackFailure(Object.assign(new Error("pool timeout"), { code: "P2024" }))).toBe(true);
-    expect(isTransientCallbackFailure(Object.assign(new Error("x"), { name: "DriverAdapterError" }))).toBe(true);
+    expect(isTransientCallbackFailure(Object.assign(new Error("DatabaseNotReachable"), { name: "DriverAdapterError" }))).toBe(true);
+    expect(isTransientCallbackFailure(Object.assign(new Error("init"), { name: "PrismaClientInitializationError" }))).toBe(true);
+    expect(isTransientCallbackFailure(Object.assign(new Error("Transaction API error: Unable to start a transaction in the given time."), { code: "P2028" }))).toBe(true);
+    expect(isTransientCallbackFailure(Object.assign(new Error("write conflict"), { code: "P2034" }))).toBe(true);
     expect(isTransientCallbackFailure(Object.assign(new Error("refused"), { code: "ECONNREFUSED" }))).toBe(true);
     expect(isTransientCallbackFailure(Object.assign(new Error("deadlock"), { code: "40P01" }))).toBe(true);
     expect(isTransientCallbackFailure(Object.assign(new Error("statement timeout"), { code: "57014" }))).toBe(true);
-    expect(isTransientCallbackFailure(coded("CALLBACK_VERIFIER_MISSING", 501))).toBe(true);
+    expect(isTransientCallbackFailure(coded("CORE_UNAVAILABLE", 503))).toBe(true);
     expect(isTransientCallbackFailure(new Error("Timed out fetching a new connection from the connection pool"))).toBe(true);
     // Wrapped: the cause is what matters.
     expect(isTransientCallbackFailure(new Error("finalize failed", { cause: prismaUnreachable() }))).toBe(true);
@@ -75,6 +78,37 @@ describe("isTransientCallbackFailure", () => {
     expect(isTransientCallbackFailure(new TypeError("cannot read properties of undefined"))).toBe(false);
     expect(isTransientCallbackFailure(Object.assign(new Error("unique"), { code: "P2002x" }))).toBe(false);
     expect(isTransientCallbackFailure(undefined)).toBe(false);
+  });
+
+  // The verifier queries by a correlation value from the UNAUTHENTICATED body before it checks the
+  // signature. A database error caused by that value is deterministic: classing every Prisma error
+  // as transient turned one malformed request into five retries and an operator case.
+  test("deterministic database and configuration errors are not transient", () => {
+    const prisma = (name: string, code?: string, message = "bad input") =>
+      Object.assign(new Error(message), { name, ...(code ? { code } : {}) });
+    for (const error of [
+      prisma("PrismaClientKnownRequestError", "P2000", "The provided value for the column is too long"),
+      prisma("PrismaClientKnownRequestError", "P2002", "Unique constraint failed"),
+      prisma("PrismaClientKnownRequestError", "P2023", "Inconsistent column data"),
+      prisma("PrismaClientKnownRequestError", "P2025", "Record not found"),
+      prisma("PrismaClientValidationError", undefined, "Invalid value provided"),
+      prisma("PrismaClientUnknownRequestError", undefined, "invalid byte sequence for encoding \"UTF8\": 0x00"),
+      Object.assign(new Error("invalid byte sequence"), { code: "22021" }),
+      Object.assign(new Error("x"), { name: "DriverAdapterError" }),
+      coded("CALLBACK_VERIFIER_MISSING", 501),
+      coded("INTERNAL", 500),
+    ]) {
+      expect(isTransientCallbackFailure(error), `${error.name} ${(error as { code?: string }).code ?? ""}`).toBe(false);
+    }
+  });
+
+  test("the handler skips a deterministic database error instead of retrying it", async () => {
+    const handler = createCallbackInboundHandler(deps({
+      verifyCallback: async () => {
+        throw Object.assign(new Error("invalid byte sequence for encoding \"UTF8\": 0x00"), { name: "PrismaClientUnknownRequestError" });
+      },
+    }));
+    expect(await handler.handle(event())).toEqual({ processed: false, result: "CALLBACK_VERIFICATION_FAILED" });
   });
 });
 

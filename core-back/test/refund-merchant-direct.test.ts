@@ -271,3 +271,56 @@ describe("the approved adjustment, not the engine, decides the refund booking", 
     ]);
   });
 });
+
+describe("refund of a settlement that was parked in SUSPENSE", () => {
+  // A second payment on a single-use link is booked Dr GATEWAY_CLEARING / Cr SUSPENSE: the merchant
+  // is never credited, and the automatic refund draft targets the SUSPENSE account. Booking it with
+  // FULL_REFUND debited the merchant wallet for money it never received and left SUSPENSE credited.
+  const seedSuspenseRefund = (fixture: ReturnType<typeof createGovernanceFixture>, adjustmentId: string): void => {
+    fixture.client.adjustment.create({
+      data: {
+        id: adjustmentId,
+        type: "REFUND",
+        targetGlAccountId: "acc-suspense",
+        sourceAttemptId: "attempt-1",
+        draftedBySystem: true,
+        amount: new Decimal(100),
+        reverseCommission: false,
+        reason: "Automatic refund draft: the settlement was routed to SUSPENSE",
+        state: "PENDING_REVIEW",
+      },
+    });
+  };
+  const refunded = { refund: async () => ({ status: "REFUNDED", attempt: { ownershipMode: "PLATFORM_CLEARING" } }) };
+
+  test("it clears SUSPENSE against TREASURY and never touches the merchant wallet or income", async () => {
+    const fixture = createGovernanceFixture();
+    seedSuspenseRefund(fixture, "refund-suspense-1");
+
+    const result = await executeAdjustment(
+      { ...fixture.context, engine: refunded },
+      fixture.client as never,
+      { adjustmentId: "refund-suspense-1", checkerUserId: "user-finance", checkerRole: "FINANCE" },
+    );
+
+    expect(result.status).toBe("EXECUTED");
+    expect(result.template).toBe("SUSPENSE_REFUND");
+    const lines = refundLines("refund-suspense-1");
+    expect(lines).toEqual([
+      { direction: "DEBIT", account: "SUSPENSE", amount: "100.0000" },
+      { direction: "CREDIT", account: "TREASURY", amount: "100.0000" },
+    ]);
+    expect(lines?.map((line) => line.account)).not.toContain("MERCHANT_WALLET");
+    expect(lines?.map((line) => line.account)).not.toContain("PLATFORM_INCOME");
+    expect(fakeTable("adjustment").find((row) => row.id === "refund-suspense-1")?.state).toBe("EXECUTED");
+  });
+
+  test("the template balances and is keyed by the adjustment", () => {
+    const template = buildLedgerTemplate("SUSPENSE_REFUND", { amount: "42.5000" });
+    expect(template.refType).toBe("ADJUSTMENT");
+    expect(template.lines.map((line) => [line.direction, line.account.accountType, String(line.amount)])).toEqual([
+      ["DEBIT", "SUSPENSE", "42.5"],
+      ["CREDIT", "TREASURY", "42.5"],
+    ]);
+  });
+});

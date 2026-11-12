@@ -2685,7 +2685,8 @@ const checks: Record<string, Check> = {
     await worker.runOnce();
     expect(releases).toEqual(["link-1"]);
     const update = calls.find((call) => call.kind === "execute" && call.sql.includes("terminal_at IS NULL"));
-    expect(update?.args[0]).toBe("EXPIRED");
+    // The expiry is one conditional statement (open, unchanged status, no money step in flight).
+    expect(update?.sql).toContain("SET status = 'EXPIRED'");
     expect(update).toBeDefined();
   },
 

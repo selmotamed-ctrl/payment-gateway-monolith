@@ -164,9 +164,9 @@ The actual admin approve route (`core-back/api/internal/admin.ts:6014`) is more 
 
 | Subject type | Handler | Notes |
 | :--- | :--- | :--- |
-| `AML_CASE` | `executeAmlCaseResolution` | Release/void posts ledger, finalises attempt and slot; `MERCHANT_DIRECT` is case-only. |
+| `AML_CASE` | `executeAmlCaseResolution` | Release/void posts ledger, finalises attempt and slot; `MERCHANT_DIRECT` is case-only. Since 2026-11-12 RELEASE/REJECT first claim the case with one conditional update (`WHERE id AND status = <status read>`) and answer `SKIPPED / AML_CASE_ALREADY_RESOLVED` when another approval won: two approvals on one open case (a RELEASE and a REJECT) could both post before. |
 | `OPERATOR_CASE` | `executeOperatorCaseResolution` | `MARK_SUCCEEDED`, `MARK_FAILED`, `CLOSE_CASE`; may post confirmation or release a slot. |
-| `ADJUSTMENT` | `executeAdjustment` | Chargeback, refund, correction, manual credit/debit; refund runs three phases around the gateway call. |
+| `ADJUSTMENT` | `executeAdjustment` | Chargeback, refund, correction, manual credit/debit; refund runs three phases around the gateway call. Since 2026-11-12 the claim phase refuses, BEFORE the gateway is called, an attempt that is not `SUCCEEDED`, `PARTIALLY_REFUNDED` or `DISPUTED`, or that is under `AML_HOLD` (`409 REFUND_ATTEMPT_NOT_SETTLED`, the adjustment stays `PENDING_REVIEW`): the status was only checked by the engine's transition after the gateway had refunded the payer, which left a refunded payer and no journal. |
 | `REGULATORY_REPORT` | `executeRegulatoryReportApproval` | Sets report to `APPROVED`; submission is a separate route. |
 | `REPORTING_RULE` | `executeReportingRuleApproval` | Promotes a rule to `CONFIRMED`. |
 | `AML_RULE` | inline handler | Activates the rule and increments its version. |

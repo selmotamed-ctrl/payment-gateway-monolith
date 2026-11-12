@@ -84,7 +84,9 @@ describe("expiry sweeper and AML holds", () => {
     const update = calls.find((call) =>
       call.kind === "execute" && call.sql.includes("UPDATE payment_attempts")
     );
-    expect(update?.args[0]).toBe("EXPIRED");
+    expect(update?.sql).toContain("SET status = 'EXPIRED'");
+    // Conditional on the status that was read: a confirm that claimed the attempt meanwhile wins.
+    expect(update?.args.slice(1)).toEqual(["attempt-1", "AWAITING_CUSTOMER"]);
     expect(releases).toEqual([{ linkId: "link-1", delta: -1 }]);
   });
 });

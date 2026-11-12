@@ -661,14 +661,32 @@ const auditMerchantAction = async (
 };
 
 /**
- * The applications a scoped merchant user (`app_scope_ids`) may touch, or `null` when the user is
- * not scoped. API tokens are bound to one application by the token itself.
+ * The applications the principal may touch, or `null` when it is not restricted.
+ * A merchant user is restricted by `app_scope_ids`. An API token is restricted to the ONE
+ * application it was issued for: the external API used to check only the merchant, so a token
+ * issued by (or for) one application could create, read and cancel the links and read the
+ * payments of every other application of the merchant.
  */
 const appScopeOf = (request: Request): readonly string[] | null => {
   const principal = principalOf(request);
+  if (principal.kind === "apiToken") {
+    return principal.applicationId ? [principal.applicationId] : null;
+  }
   if (principal.kind !== "session") return null;
   const ids = principal.appScopeIds ?? [];
   return ids.length > 0 ? ids : null;
+};
+
+const APP_SCOPE_MESSAGE = "The principal is restricted to specific applications and this one is not among them";
+
+/**
+ * True when a user row is restricted to applications that ALL lie inside `scope`. An unrestricted
+ * user (no `app_scope_ids`) is never inside a scope: a restricted manager must not be able to
+ * change, suspend or re-authorise someone who sees more of the merchant than they do.
+ */
+const userScopeWithin = (scope: readonly string[], userAppScopeIds: unknown): boolean => {
+  const ids = Array.isArray(userAppScopeIds) ? userAppScopeIds.map(String) : [];
+  return ids.length > 0 && ids.every((id) => scope.includes(id));
 };
 
 /** 403 when a scoped user addresses an application outside their scope. */
@@ -2233,11 +2251,12 @@ router.get("/tokens", async (request: Request, response: Response) => {
     sortable: { name: "name", lastUsedAt: "lastUsedAt", createdAt: "createdAt" },
     defaultSort: { createdAt: "desc" },
   });
-  const where = {
+  // A user restricted to some applications only sees (and below, only manages) their tokens.
+  const where = withAppScope(request, {
     merchantId,
     ...built.where,
     ...(rawRevoked === "true" ? { revokedAt: { not: null } } : rawRevoked === "false" ? { revokedAt: null } : {}),
-  } as never;
+  });
   const [tokens, total] = await Promise.all([
     client.accessToken.findMany({ where, orderBy: built.orderBy as never, include: { ips: true }, skip: built.skip, take: built.take }),
     client.accessToken.count({ where }),
@@ -2282,9 +2301,18 @@ router.post("/tokens", async (request: Request, response: Response) => {
       throw new ApiError(400, "TOKEN_EXPIRY_INVALID", "The expiry must be in the future and within two years");
     }
   }
+  // The token is bound to one application. A user restricted to some applications can only issue
+  // a token for one of them: before this check such a user obtained a token for an arbitrary
+  // application of the merchant (the default was "any application"), and the token then worked
+  // on the whole merchant.
+  const issuerScope = appScopeOf(request);
+  if (body.applicationId) assertApplicationInScope(request, body.applicationId);
   const application = body.applicationId
     ? await client.application.findFirst({ where: { id: body.applicationId, merchantId } })
-    : await client.application.findFirst({ where: { merchantId } });
+    : await client.application.findFirst({
+        where: { merchantId, ...(issuerScope ? { id: { in: [...issuerScope] } } : {}) },
+        orderBy: { createdAt: "asc" },
+      });
   if (!application) {
     throw new ApiError(409, "APPLICATION_REQUIRED", "An application is required to issue an access token");
   }
@@ -2332,6 +2360,7 @@ router.put("/tokens/:id/ips", async (request: Request, response: Response) => {
   if (!token) {
     throw new ApiError(404, "ACCESS_TOKEN_NOT_FOUND", "The access token does not exist");
   }
+  assertApplicationInScope(request, token.applicationId);
   await client.$transaction(async (tx) => {
     const previousCidrs = (await tx.accessTokenIp.findMany({ where: { tokenId: token.id }, select: { cidr: true } })).map((row) => row.cidr);
     await tx.accessTokenIp.deleteMany({ where: { tokenId: token.id } });
@@ -2363,6 +2392,7 @@ router.delete("/tokens/:id", async (request: Request, response: Response) => {
   if (!token) {
     throw new ApiError(404, "ACCESS_TOKEN_NOT_FOUND", "The access token does not exist");
   }
+  assertApplicationInScope(request, token.applicationId);
   const revokedAt = new Date();
   await client.$transaction(async (tx) => {
     await tx.accessToken.update({ where: { id: token.id }, data: { revokedAt } });
@@ -2651,6 +2681,10 @@ router.post("/users", async (request: Request, response: Response) => {
     throw new ApiError(409, "USER_ALREADY_EXISTS", "A user with this email already exists");
   }
   const passwordHash = await hashPassword(body.password);
+  // A creator restricted to some applications hands the SAME restriction to the user they create.
+  // The new user used to be unrestricted: a restricted manager created an account (choosing its
+  // password), activated it and signed in with it to see the whole merchant.
+  const creatorScope = appScopeOf(request);
   const user = await client.$transaction(async (tx) => {
     const created = await tx.user.create({
       data: {
@@ -2660,6 +2694,7 @@ router.post("/users", async (request: Request, response: Response) => {
         passwordHash,
         role: body.role,
         authoritiesMap: body.authoritiesMap,
+        ...(creatorScope ? { appScopeIds: [...creatorScope] } : {}),
         mfaRequired: true,
         status: "INVITED",
         invitedById: creator.userId,
@@ -2673,7 +2708,12 @@ router.post("/users", async (request: Request, response: Response) => {
         entityType: "USER",
         entityId: created.id,
         beforeJson: {},
-        afterJson: { role: created.role, authoritiesMap: body.authoritiesMap, status: created.status },
+        afterJson: {
+          role: created.role,
+          authoritiesMap: body.authoritiesMap,
+          status: created.status,
+          ...(creatorScope ? { appScopeIds: [...creatorScope] } : {}),
+        },
       },
     });
     return created;
@@ -2706,6 +2746,12 @@ const applyMerchantUserPatch = async (
   }
   if (user.role === "MERCHANT_ADMIN" && principal.role !== "MERCHANT_ADMIN") {
     throw new ApiError(403, "ROLE_ESCALATION_FORBIDDEN", "Only a merchant administrator can change an administrator");
+  }
+  // A manager restricted to some applications only manages users restricted to (a subset of) the
+  // same applications: never an unrestricted user, never one of another application.
+  const managerScope = appScopeOf(request);
+  if (managerScope && !userScopeWithin(managerScope, user.appScopeIds)) {
+    throw new ApiError(403, "APP_SCOPE_VIOLATION", APP_SCOPE_MESSAGE);
   }
   if (body.authoritiesMap) {
     assertKnownMerchantAuthorities(body.authoritiesMap);
@@ -3099,7 +3145,8 @@ router.post("/external/links", async (request: Request, response: Response) => {
     throw new ApiError(403, "API_TOKEN_REQUIRED", "An API access token is required for the external API");
   }
   const body = parseOrThrow(linkCreateSchema, request.body);
-  const { link, visible } = await createLink(principal.merchantId as string, body);
+  // The token's application: the link is created in it, and naming another one is refused.
+  const { link, visible } = await createLink(principal.merchantId as string, body, appScopeOf(request));
   await publishRealtimePos({
     merchantId: principal.merchantId as string,
     applicationId: link.applicationId,
@@ -3122,8 +3169,9 @@ router.get("/external/links/:key", async (request: Request, response: Response) 
   assertMerchantAuthority(principal, ["link:read","link:write"]);
   const merchantId = requireMerchantId(principal);
   const key = String(request.params.key ?? "");
+  // Narrowed to the token's application: another application's link does not exist for this token.
   const link = await client.paymentLink.findFirst({
-    where: { key, application: { merchantId } },
+    where: withAppScope(request, { key, application: { merchantId } }),
   });
   if (!link) {
     throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
@@ -3143,8 +3191,9 @@ router.post("/external/links/:key/cancel", async (request: Request, response: Re
   assertMerchantAuthority(principal, ["link:write"]);
   const merchantId = requireMerchantId(principal);
   const key = String(request.params.key ?? "");
+  // Narrowed to the token's application: another application's link does not exist for this token.
   const link = await client.paymentLink.findFirst({
-    where: { key, application: { merchantId } },
+    where: withAppScope(request, { key, application: { merchantId } }),
   });
   if (!link) {
     throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
@@ -3159,7 +3208,7 @@ router.get("/external/payments/:reference", async (request: Request, response: R
   const merchantId = requireMerchantId(principal);
   const reference = String(request.params.reference ?? "");
   const attempt = await client.paymentAttempt.findFirst({
-    where: { reference, merchantId },
+    where: withAppScope(request, { reference, merchantId }),
   });
   if (!attempt) {
     throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "The payment attempt does not exist");

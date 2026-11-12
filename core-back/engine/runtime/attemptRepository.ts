@@ -153,6 +153,17 @@ const toAttempt = (row: AttemptRow): DynamicAttempt => {
 
 export const attemptRowToDynamicAttempt = (row: AttemptRow): DynamicAttempt => toAttempt(row);
 
+/** A compare-and-set status write found the attempt in another status than the caller observed. */
+export class AttemptStateConflictError extends Error {
+  readonly code = "ATTEMPT_STATE_CONFLICT";
+  readonly statusCode = 409;
+
+  constructor(readonly attemptId: string, readonly expectedStatus: string) {
+    super(`Attempt ${attemptId} is no longer ${expectedStatus}`);
+    this.name = "AttemptStateConflictError";
+  }
+}
+
 export class PrismaAttemptRepository implements AttemptRepository {
   private readonly client: PrismaLike;
 
@@ -182,8 +193,14 @@ export class PrismaAttemptRepository implements AttemptRepository {
     transaction?: unknown,
   ): Promise<boolean> {
     const target = (transaction ?? this.client) as PrismaLike;
+    // FAILED and EXPIRED always carry `terminal_at`, and they are exactly the states a late
+    // success recovers from. Requiring `terminal_at IS NULL` for them made the claim match
+    // nothing, so a verified "paid" callback for such an attempt was refused with a 409 and
+    // dropped: the payer was charged and nothing was booked. The status comparison alone is
+    // the single-writer guard there (the winner moves the row to SUCCEEDED before it commits).
+    const lateSuccess = expectedStatus === "FAILED" || expectedStatus === "EXPIRED";
     const result = await target.paymentAttempt.updateMany({
-      where: { id: attemptId, status: expectedStatus, terminalAt: null },
+      where: { id: attemptId, status: expectedStatus, ...(lateSuccess ? {} : { terminalAt: null }) },
       data: { substatus: "FINALIZING" },
     });
     return Number(result?.count ?? 0) === 1;
@@ -218,14 +235,27 @@ export class PrismaAttemptRepository implements AttemptRepository {
       }
     }
 
-    const row = await target.paymentAttempt.update({
-      where: { id: attemptId },
-      data,
-      include: {
-        gatewayVersion: { include: { setting: true, gateway: { select: { id: true, kind: true } } } },
-        route: { select: { mismatchPolicy: true, costModel: true } },
-      },
-    }) as AttemptRow;
+    const include = {
+      gatewayVersion: { include: { setting: true, gateway: { select: { id: true, kind: true } } } },
+      route: { select: { mismatchPolicy: true, costModel: true } },
+    };
+    let row: AttemptRow;
+    if (patch.expectedStatus !== undefined) {
+      // Compare-and-set: the write only lands while the row still has the status the caller
+      // observed. A status read before a slow gateway call can be stale by the time the answer
+      // arrives (a verified webhook may have settled the attempt meanwhile); an unconditional
+      // write would then put UNKNOWN or FAILED over a committed SUCCEEDED.
+      const changed = await target.paymentAttempt.updateMany({
+        where: { id: attemptId, status: patch.expectedStatus },
+        data,
+      });
+      if (Number(changed?.count ?? 0) === 0) {
+        throw new AttemptStateConflictError(attemptId, patch.expectedStatus);
+      }
+      row = await target.paymentAttempt.findUnique({ where: { id: attemptId }, include }) as AttemptRow;
+    } else {
+      row = await target.paymentAttempt.update({ where: { id: attemptId }, data, include }) as AttemptRow;
+    }
     const terminal = ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED", "BLOCKED", "REFUNDED"];
     if (data.status !== undefined && terminal.includes(String(data.status))) {
       await enqueueOutboxEvent(target, {

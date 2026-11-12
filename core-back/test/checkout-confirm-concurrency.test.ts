@@ -75,7 +75,7 @@ const createClaimDb = (attempt: FakeAttempt) => {
       if (!CLAIMABLE.has(attempt.status)) {
         return 0;
       }
-      if (attempt.status === "UNKNOWN" && attempt.pointOfNoReturn) {
+      if ((attempt.status === "UNKNOWN" || attempt.status === "VERIFYING") && attempt.pointOfNoReturn) {
         return 0;
       }
       if (attempt.substatus === "AML_HOLD") {
@@ -269,6 +269,32 @@ describe("checkout confirm concurrency", () => {
     expect(harness.stats.submits).toBe(1);
     expect(harness.stats.journals).toBe(0);
     expect(harness.stats.commits).toBe(0);
+  });
+
+  // The gateway answered "pending" to the charge: the attempt is VERIFYING past the point of no
+  // return. A second confirm with a FRESH idempotency key (a retry, a double click, a second tab)
+  // used to claim it again and send the charge a second time.
+  test("a second confirm with a new key never resubmits a charge that is pending at the gateway", async () => {
+    const harness = createHarness({
+      executor: (step) => ({
+        stepId: step.id,
+        status: "VERIFYING" as never,
+        output: { state: {}, public: {} },
+        logs: [],
+      }),
+    });
+
+    const first = await harness.confirm("confirm-pending-key-1");
+    expect(first.status).toBe("VERIFYING");
+    expect(harness.attempt.pointOfNoReturn).toBe(true);
+    expect(harness.stats.submits).toBe(1);
+
+    const second = await harness.confirm("confirm-pending-key-2");
+    expect(second.status).toBe("VERIFYING");
+    expect(harness.stats.submits).toBe(1);
+
+    const claimStatement = harness.claim.calls.find((call) => call.sql.includes("UPDATE payment_attempts"));
+    expect(claimStatement?.sql).toContain("NOT (status IN ('UNKNOWN', 'VERIFYING') AND point_of_no_return = true)");
   });
 
   test("an AML-held attempt is not claimable for SUBMIT", async () => {

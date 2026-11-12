@@ -1887,6 +1887,26 @@ export async function executeAmlCaseResolution(
         ? "ESCALATED_STR"
         : "FROZEN";
 
+  if (action === "RELEASE" || action === "REJECT") {
+    // Single-writer claim, BEFORE anything is posted. Two approvals on one open case (a RELEASE
+    // and a REJECT approved at the same moment) both used to read it as open and both posted: the
+    // two journals have different keys (AML_RELEASE / AML_VOID), so the escrow was paid out to the
+    // merchant AND returned. The conditional update takes the row lock: the second transaction
+    // waits, then finds the case already resolved and posts nothing.
+    const claimed = await amlCases.updateMany({
+      where: { id: String(amlCase.id), status: amlCase.status },
+      data: { status: targetStatus },
+    });
+    if (Number(claimed?.count ?? 0) === 0) {
+      return {
+        status: "SKIPPED",
+        reason: "AML_CASE_ALREADY_RESOLVED",
+        entityId: String(amlCase.id),
+        idempotent: true,
+      };
+    }
+  }
+
   let journalEntryId: string | null = null;
   let template: string | undefined;
   let postingReason: string | undefined;
@@ -2311,6 +2331,9 @@ const refundInFlightResult = (adjustment: any): GovernanceExecutionResult => ({
  * move the adjustment to `EXECUTING`, then COMMIT. No lock survives this
  * function, so the gateway call in phase 2 never contends with it.
  */
+/** The attempt states the rail engine can move to REFUNDED / PARTIALLY_REFUNDED. */
+const REFUNDABLE_ATTEMPT_STATUSES = ["SUCCEEDED", "PARTIALLY_REFUNDED", "DISPUTED"];
+
 const claimRefundAdjustment = async (
   ctx: GovernanceExecutionContext,
   fallbackTx: Tx,
@@ -2379,6 +2402,20 @@ const claimRefundAdjustment = async (
     }
     if (!lockedAttempt) {
       throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "The refunded payment attempt does not exist");
+    }
+    // Checked BEFORE the gateway is called. The engine can only move a settled attempt to
+    // REFUNDED / PARTIALLY_REFUNDED; for any other state (an AML-held capture still VERIFYING, an
+    // UNKNOWN or FAILED attempt) it used to send the refund to the gateway first and then fail the
+    // status transition, leaving the payer refunded with no journal. An AML-held payment is
+    // returned by rejecting its case (the escrow is voided), never by a refund on top of it.
+    const attemptStatus = String(lockedAttempt.status);
+    if (!REFUNDABLE_ATTEMPT_STATUSES.includes(attemptStatus) || lockedAttempt.substatus === "AML_HOLD") {
+      throw new ApiError(
+        409,
+        "REFUND_ATTEMPT_NOT_SETTLED",
+        `A refund needs a settled payment; the attempt is ${attemptStatus}${lockedAttempt.substatus === "AML_HOLD" ? " (AML hold)" : ""}`,
+        { attemptId: String(lockedAttempt.id), status: attemptStatus },
+      );
     }
     const refundableAmount = lockedAttempt.settledAmount !== null && lockedAttempt.settledAmount !== undefined
       ? toDecimal(lockedAttempt.settledAmount)
@@ -2469,9 +2506,15 @@ const finalizeRefundAdjustment = async (
     const targetAccount = await modelOf(tx, "glAccount").findUnique({
       where: { id: String(adjustment.targetGlAccountId) },
     });
-    const accounts = targetAccount?.accountType === "MERCHANT_WALLET"
+    // A settlement that could not use a link slot was booked to SUSPENSE and its refund draft
+    // targets that SUSPENSE account: the merchant never received the money. Booking FULL_REFUND
+    // for it debited the merchant wallet for the full amount and left SUSPENSE credited forever.
+    const fromSuspense = targetAccount?.accountType === "SUSPENSE";
+    const accounts: Record<string, string> | undefined = targetAccount?.accountType === "MERCHANT_WALLET"
       ? { MERCHANT_WALLET: String(adjustment.targetGlAccountId) }
-      : undefined;
+      : fromSuspense
+        ? { SUSPENSE: String(adjustment.targetGlAccountId) }
+        : undefined;
 
     let ownershipMode = gatewayResult.attempt?.ownershipMode ?? null;
     if (!ownershipMode) {
@@ -2487,7 +2530,9 @@ const finalizeRefundAdjustment = async (
           ? "MERCHANT_DIRECT"
           : "PLATFORM_CLEARING";
     }
-    const refundScenario = refundScenarioFor(ownershipMode as LedgerOwnershipMode);
+    const refundScenario = fromSuspense
+      ? { scenario: "SUSPENSE_REFUND" as const, stage: undefined, label: "SUSPENSE_REFUND" }
+      : refundScenarioFor(ownershipMode as LedgerOwnershipMode);
     const templateName = refundScenario.label;
     const journal = buildLedgerTemplate(refundScenario.scenario, {
       amount,
@@ -2507,13 +2552,31 @@ const finalizeRefundAdjustment = async (
       ? null
       : await ctx.ledgerPoster.post(
         journal,
-        await walletLedgerContext(tx, merchantId, accounts),
+        // A SUSPENSE refund never resolves (or touches) the merchant wallet.
+        fromSuspense ? { accounts } : await walletLedgerContext(tx, merchantId, accounts),
         tx as never,
       );
     await adjustments.update({
       where: { id: String(adjustment.id) },
       data: { state: "EXECUTED", journalEntryId: posted?.entry.id ?? null },
     });
+    if (sourceAttempt && String(sourceAttempt.status) === "PARTIALLY_REFUNDED") {
+      // The engine compares this ONE refund with the charged amount, so partial refunds that add
+      // up to the whole payment (60 + 40 of 100, or 98 of a payment settled at 98) left the attempt
+      // PARTIALLY_REFUNDED forever. The booking owner closes it once the executed refunds cover
+      // everything that was refundable.
+      const refundable = sourceAttempt.settledAmount !== null && sourceAttempt.settledAmount !== undefined
+        ? toDecimal(sourceAttempt.settledAmount)
+        : toDecimal(sourceAttempt.totalChargedAmount);
+      const executedRefunds = await sumGovernanceRefunds(ctx, tx, String(sourceAttempt.id), ["EXECUTED"]);
+      if (executedRefunds.gte(refundable)) {
+        await ctx.repositories.payments.updateAttempt(tx, String(sourceAttempt.id), {
+          status: "REFUNDED",
+          terminalAt: new Date(),
+          nextCheckAt: null,
+        } as never);
+      }
+    }
     await writeAudit(ctx, tx, {
       actorId: input.checkerUserId,
       role: input.checkerRole,
