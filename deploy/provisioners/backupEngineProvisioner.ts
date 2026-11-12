@@ -162,7 +162,9 @@ export const backupDaemonEnv = (config: DeployConfig): Record<string, string> =>
     PG_SSLMODE: "require",
     PG_REPLICA_NODES: config.PG_REPLICA_NODES,
     PG_DATA_DIR: config.PG_DATA_DIR.trim() || primaryCluster?.dataDir || "/var/lib/postgresql/18/main",
-    PG_AUDIT_DATA_DIR: config.PG_AUDIT_DATA_DIR.trim() || auditCluster?.dataDir || "",
+    // A shared cluster is backed up once (core) and its audit database is a logical dump; only a dedicated audit
+    // cluster gets its own data directory, otherwise the daemon would take a second physical backup of the primary.
+    PG_AUDIT_DATA_DIR: config.PG_AUDIT_DATA_DIR.trim() || (dedicatedAudit ? (auditCluster?.dataDir ?? "") : ""),
     PG_BIN_DIR: `/usr/lib/postgresql/${config.PG_VERSION}/bin`,
     PGPASSFILE: config.BACKUP_PGPASSFILE,
     BARMAN_SERVER: config.PG_DB_NAME,

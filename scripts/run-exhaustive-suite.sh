@@ -66,6 +66,7 @@ step "T-EX-08  Edge catalog, STRIDE threats & safeguards"
 step "T-EX-09  PostgreSQL storage engine, backups, CQRS & performance"
 (cd core-back && bun test --parallel=1 test/storage-engine test/backup-admin)
 (cd deploy/backup-daemon && bun test --parallel=1)
+(cd deploy/object-storage-daemon && bun run typecheck && bun test --parallel=1)
 
 step "T-EX-09b  Full-surface Playwright UI matrix"
 (cd tests && bun run test:unit && bunx playwright test -c playwright.exhaustive.config.ts)

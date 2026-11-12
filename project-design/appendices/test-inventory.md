@@ -285,7 +285,7 @@
 | `fake-rails-back/test/security.test.ts` | 139 | 7 |
 | `fake-rails-back/test/setup.ts` | 10 | 0 |
 | `fake-rails-back/test/webhook-target.test.ts` | 123 | 4 |
-| `deploy/test/backupReliability.test.ts` | 508 | 32 |
+| `deploy/test/backupReliability.test.ts` | 510 | 32 |
 | `deploy/test/certRenewal.test.ts` | 112 | 5 |
 | `deploy/test/ci-workflows.test.ts` | 73 | 5 |
 | `deploy/test/clamavProvisioner.test.ts` | 220 | 11 |
@@ -301,7 +301,7 @@
 | `deploy/test/hostProbe.test.ts` | 40 | 5 |
 | `deploy/test/ipv6Loopback.test.ts` | 37 | 2 |
 | `deploy/test/objectStorageDeploy.test.ts` | 338 | 9 |
-| `deploy/test/pgAppRole.test.ts` | 220 | 13 |
+| `deploy/test/pgAppRole.test.ts` | 283 | 18 |
 | `deploy/test/pipeline.test.ts` | 124 | 7 |
 | `deploy/test/pkiRenewal.test.ts` | 183 | 7 |
 | `deploy/test/pkiScale.test.ts` | 115 | 5 |
@@ -416,4 +416,4 @@
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
 - Total files: **410**
-- Total literal test declarations: **4130**
+- Total literal test declarations: **4135**

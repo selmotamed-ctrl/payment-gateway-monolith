@@ -689,12 +689,36 @@ export const deployBackupDaemon = (input: {
   // Ownership and dependencies only need work when the source changed (or the
   // dependency tree is missing).
   runner.run(host.ssh, bunInstallCommand(config), { sudo: true });
+  const nodeModules = shellQuote(`${installDir}/node_modules`);
+  // The dependency tree is deliberately excluded from the recursive chown (a multi-GB node_modules is expensive),
+  // but switching the daemon account (for example wal-g/postgres -> pg-native/pgbackup) would leave the old owner's
+  // files in place and `bun install` fails with "Failed to link <pkg>: EEXIST". Detect a foreign-owned tree and
+  // reinstall it as the current account instead; with the tree removed the install condition below always runs.
+  const foreignNodeModules = `if [ -d ${nodeModules} ] && [ -n "$(find ${nodeModules} ! -user ${shellQuote(daemonUser)} -print -quit 2>/dev/null)" ]; then rm -rf ${nodeModules}; fi`;
   runner.run(
     host.ssh,
-    `${chownSource(daemonOwner)}; install -d -m 0755 -o ${shellQuote(daemonUser)} -g ${shellQuote(daemonUser)} ${shellQuote(bunCacheDir)}; if [ ${synced.changed ? 1 : 0} = 1 ] || [ ! -d ${shellQuote(`${installDir}/node_modules`)} ]; then install -d -o ${shellQuote(daemonUser)} -g ${shellQuote(daemonUser)} ${shellQuote(`${installDir}/node_modules`)} && cd ${shellQuote(installDir)} && runuser -u ${shellQuote(daemonUser)} -- env HOME=/var/lib/pg-backup BUN_INSTALL_CACHE_DIR=${shellQuote(bunCacheDir)} /usr/local/bin/bun install --frozen-lockfile; fi`,
+    `${chownSource(daemonOwner)}; install -d -m 0755 -o ${shellQuote(daemonUser)} -g ${shellQuote(daemonUser)} ${shellQuote(bunCacheDir)}; ${foreignNodeModules}; if [ ${synced.changed ? 1 : 0} = 1 ] || [ ! -d ${nodeModules} ]; then install -d -o ${shellQuote(daemonUser)} -g ${shellQuote(daemonUser)} ${nodeModules} && cd ${shellQuote(installDir)} && runuser -u ${shellQuote(daemonUser)} -- env HOME=/var/lib/pg-backup BUN_INSTALL_CACHE_DIR=${shellQuote(bunCacheDir)} /usr/local/bin/bun install --frozen-lockfile; fi`,
     { sudo: true },
   );
-  const restart = input.forceRestart === true || synced.changed || input.configChanged !== false;
+  // A previous run can leave the unit file/env updated on disk while the old
+  // process keeps running (for example a deploy that failed after rsync but
+  // before the restart, or an engine switch from wal-g/postgres to
+  // pg-native/pgbackup). File-content convergence alone would see "unchanged"
+  // and skip the restart, so also compare the running process account and
+  // systemd's reload state.
+  const runningUser = runner.capture(
+    host.ssh,
+    `pid=$(systemctl show -p MainPID --value pg-backup-daemon 2>/dev/null); if [ -n "$pid" ] && [ "$pid" != 0 ]; then ps -o user= -p "$pid" 2>/dev/null | tr -d ' '; fi`,
+  ).trim();
+  const unitDirty = runner.capture(
+    host.ssh,
+    `systemctl show -p NeedDaemonReload --value pg-backup-daemon 2>/dev/null || true`,
+  ).trim() === "yes";
+  const restart = input.forceRestart === true
+    || synced.changed
+    || input.configChanged !== false
+    || unitDirty
+    || (runningUser !== "" && runningUser !== daemonUser);
   const outcome = parseApplyOutcome(runner.capture(
     host.ssh,
     `systemctl daemon-reload && systemctl enable pg-backup-daemon >/dev/null 2>&1
@@ -846,11 +870,13 @@ export const preMigrationBackup = (
 const OWNER_ENV_FILE = ".env.owner";
 
 /**
- * Runs `build(flag)` with the database OWNER's credentials when the application has its own non-owner role
- * (`PG_APP_PASSWORD`). The runtime `.env` then carries only the application role; the owner's URL exists only in a
- * temporary `.env.owner` (mode 0600) that is created for the one command and removed afterwards, even on failure,
- * so a compromised service process cannot read the owner's credentials from its environment or from disk.
- * `flag` is `--env-file=.env.owner` (Bun layers it over `.env`) or empty in the legacy single-role mode.
+ * Runs `build(flag)` with the database OWNER's credentials when the migration/seed connection differs from the
+ * runtime one. That happens when the application has its own non-owner role (`PG_APP_PASSWORD`) and also in the
+ * legacy single-role mode when PgBouncer is enabled: migrations must use the session-safe endpoint (pgw_session or
+ * the explicit leader URL), while the runtime `DATABASE_URL` stays transaction-pooled. The owner's URL exists only
+ * in a temporary `.env.owner` (mode 0600) that is created for the one command and removed afterwards, even on
+ * failure, so a compromised service process cannot read it from its environment or from disk.
+ * `flag` is `--env-file=.env.owner` (Bun layers it over `.env`) or empty when the runtime URL is already safe.
  */
 export const runAsDatabaseOwner = <T>(
   runner: SshRunner,
@@ -859,11 +885,14 @@ export const runAsDatabaseOwner = <T>(
   config: DeployConfig,
   build: (envFlag: string) => () => T,
 ): T => {
-  if (!pgAppRoleEnabled(config)) return build("")();
-  const ownerUrl = effectiveDatabase(config).ownerUrl;
-  if (!ownerUrl) throw new Error("The owner database URL could not be derived; set the PostgreSQL storage fields");
+  const database = effectiveDatabase(config);
+  const ownerUrl = database.ownerUrl;
+  if (!ownerUrl || ownerUrl === database.url) return build("")();
   const envPath = `${appDir}/${OWNER_ENV_FILE}`;
-  runner.writeRemoteFile({ target: host.ssh, path: envPath, content: `DATABASE_URL="${ownerUrl}"\n`, mode: 0o600, sudo: false });
+  // The owner URL is session-pooled (pgw_session) so Prisma's advisory lock survives. Migrations and seeders do not
+  // start workers, so disable them here: the core loader otherwise rejects a session-pooled DATABASE_URL that has
+  // the same endpoint as LEADER_ELECTION_DATABASE_URL (that check assumes DATABASE_URL is the transaction pool).
+  runner.writeRemoteFile({ target: host.ssh, path: envPath, content: `DATABASE_URL="${ownerUrl}"\nWORKER_ENABLED="false"\n`, mode: 0o600, sudo: false });
   try {
     return build(`--env-file=${OWNER_ENV_FILE}`)();
   } finally {
@@ -1111,6 +1140,13 @@ const main = async (): Promise<void> => {
   const config = loaded.config;
   if (!objectStorageConfigured(config)) {
     warn("OBJECT_STORAGE_NODE is not configured: the platform will boot, but every storage-backed feature (KYB, reconciliation, reports, disputes, AML evidence, brand assets) will return 503 until the shared vault is configured.");
+  }
+  if (config.PGBOUNCER_ENABLED && !config.PG_MANAGE_VIA_SSH && !config.LEADER_ELECTION_DATABASE_URL) {
+    warn(
+      "PgBouncer is externally managed and LEADER_ELECTION_DATABASE_URL is not set: the deploy assumes a session-pooled " +
+        "database alias named 'pgw_session' on the pooler. If your session route has another name or uses a direct " +
+        "PostgreSQL URL, set LEADER_ELECTION_DATABASE_URL; migrations and seeders reuse it with the owner credentials.",
+    );
   }
   const conflicts = findSshConflicts(config);
   if (conflicts.length > 0) {

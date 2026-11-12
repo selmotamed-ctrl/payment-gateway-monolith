@@ -68,13 +68,23 @@ const coreEnv = (config: DeployConfig): Record<string, string> => {
 };
 
 describe("the application role is opt-in and distinct from the owner", () => {
-  test("without PG_APP_PASSWORD nothing changes: the legacy single role", () => {
+  test("without PG_APP_PASSWORD the runtime stays the legacy owner, while migrations use the session endpoint", () => {
     const config = load();
     expect(pgAppRoleEnabled(config)).toBe(false);
     expect(applicationCredentials(config)).toEqual({ user: "gw_core_user", password: OWNER_PW });
     const database = effectiveDatabase(config);
-    expect(database.url).toBe(database.ownerUrl);
+    // The service keeps the transaction-pooled application database (legacy single role).
+    expect(database.url).toContain("gw_core_user:");
+    expect(database.url).toContain("/payment_gateway_prod?");
     expect(coreEnv(config).DATABASE_URL).toContain("gw_core_user");
+    expect(coreEnv(config).DATABASE_URL).toContain("/payment_gateway_prod?");
+    // Migrations never take the lock through the transaction pool.
+    expect(database.ownerUrl).toContain("/pgw_session?");
+  });
+
+  test("legacy without PgBouncer has no separate owner URL", () => {
+    const database = effectiveDatabase(load('PGBOUNCER_ENABLED="false"'));
+    expect(database.ownerUrl).toBe(database.url);
   });
 
   test("with PG_APP_PASSWORD the runtime connects as the app role everywhere it connects", () => {
@@ -103,9 +113,49 @@ describe("the application role is opt-in and distinct from the owner", () => {
     const database = effectiveDatabase(split());
     expect(database.ownerUrl).toContain(`gw_core_user:${OWNER_PW}@`);
     expect(database.ownerUrl).toMatch(/\?sslmode=no-verify$/);
+    // Prisma Migrate's session advisory lock must not run on the transaction pool.
+    expect(database.ownerUrl).toContain("/pgw_session?");
     expect(database.url).toContain("pgw_app_login:");
     expect(database.url).toMatch(/\?sslmode=no-verify$/);
     expect(leaderElectionDatabaseUrl(split())).toContain("pgw_app_login:");
+
+    const direct = effectiveDatabase({ ...split(), PGBOUNCER_ENABLED: false } as DeployConfig);
+    expect(direct.ownerUrl).toContain(":5432/payment_gateway_prod");
+    expect(direct.ownerUrl).not.toContain("pgw_session");
+
+    // An externally managed pooler still needs the same session route the core leader election uses. Without an
+    // explicit override the deploy derives the documented pgw_session alias rather than guessing a different route.
+    const externalPooler = effectiveDatabase({ ...split(), PG_MANAGE_VIA_SSH: false } as DeployConfig);
+    expect(externalPooler.ownerUrl).toContain(":6432/pgw_session");
+    expect(externalPooler.ownerUrl).not.toContain("sslmode");
+  });
+
+  test("an explicit leader URL is reused for migrations with the owner's credentials", () => {
+    const config = load('LEADER_ELECTION_DATABASE_URL="postgresql://leader:leader-pw@db.example:6432/session_db?sslmode=require"');
+    const database = effectiveDatabase(config);
+    expect(database.ownerUrl).toBe(
+      `postgresql://gw_core_user:${OWNER_PW}@db.example:6432/session_db?sslmode=require`,
+    );
+    expect(database.ownerUrl).not.toContain("leader-pw");
+    expect(leaderElectionDatabaseUrl(config)).toBe(
+      "postgresql://leader:leader-pw@db.example:6432/session_db?sslmode=require",
+    );
+  });
+
+  test("an explicit leader URL without a path falls back to the configured database name", () => {
+    const config = load('LEADER_ELECTION_DATABASE_URL="postgresql://leader@db.example:6432"');
+    const database = effectiveDatabase(config);
+    expect(database.ownerUrl).toContain("/payment_gateway_prod");
+    expect(database.ownerUrl).toContain("sslmode=no-verify");
+    expect(database.ownerUrl).not.toContain("leader@");
+  });
+
+  test("a leader URL that is the transaction-pooled runtime endpoint is refused", () => {
+    const result = loadDeployConfig(
+      `${BASE}\nLEADER_ELECTION_DATABASE_URL="postgresql://leader@10.10.10.10:6432/payment_gateway_prod"`,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.problems.join(" ")).toContain("transaction-pooled DATABASE_URL");
   });
 
   test("invalid combinations are refused", () => {
@@ -199,6 +249,7 @@ describe("migrations and seeders get the owner only through a temporary file", (
     expect(calls.map((call) => call.kind)).toEqual(["write", "run", "run"]);
     expect(calls[0]).toMatchObject({ path: "/srv/core/releases/1/core-back/.env.owner", mode: 0o600 });
     expect(calls[0]!.content).toContain(`DATABASE_URL="postgresql://gw_core_user:${OWNER_PW}@`);
+    expect(calls[0]!.content).toContain('WORKER_ENABLED="false"');
     expect(calls[1]!.command).toBe("bun --env-file=.env.owner run migrate-deploy");
     expect(calls[2]!.command).toContain("rm -f '/srv/core/releases/1/core-back/.env.owner'");
   });
@@ -211,9 +262,21 @@ describe("migrations and seeders get the owner only through a temporary file", (
     expect(calls.at(-1)!.command).toContain("rm -f '/srv/app/.env.owner'");
   });
 
-  test("without the split nothing is written and the command is unchanged", () => {
+  test("legacy + PgBouncer writes the session endpoint, then removes it", () => {
     const { runner, calls } = fakeRunner();
-    runAsDatabaseOwner(runner, host, "/srv/app", load(), (flag) => () => runner.run(host.ssh, `${bun} ${flag} run migrate-deploy`.replace("  ", " ")));
+    runAsDatabaseOwner(runner, host, "/srv/app", load(), (flag) => () =>
+      (runner as unknown as { run: (t: unknown, c: string) => unknown }).run(host.ssh, `${bun} ${flag} run migrate-deploy`));
+    expect(calls.map((call) => call.kind)).toEqual(["write", "run", "run"]);
+    expect(calls[0]!.content).toContain("/pgw_session");
+    expect(calls[0]!.content).toContain('WORKER_ENABLED="false"');
+    expect(calls[1]!.command).toBe("bun --env-file=.env.owner run migrate-deploy");
+    expect(calls[2]!.command).toContain("rm -f '/srv/app/.env.owner'");
+  });
+
+  test("legacy without PgBouncer runs the command unchanged", () => {
+    const { runner, calls } = fakeRunner();
+    runAsDatabaseOwner(runner, host, "/srv/app", load('PGBOUNCER_ENABLED="false"'), (flag) => () =>
+      runner.run(host.ssh, `${bun} ${flag} run migrate-deploy`.replace("  ", " ")));
     expect(calls).toEqual([{ kind: "run", command: "bun run migrate-deploy" }]);
   });
 });

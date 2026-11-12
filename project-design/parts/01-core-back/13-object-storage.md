@@ -211,6 +211,10 @@ the SHA-256.
 - Firewall opens 4095 only to core and backup private IPs.
 - Health probes run `systemctl is-active` on the storage host and
   `/v1/health` over mTLS from every core host and the backup host.
+- The daemon terminates mTLS on a `node:tls` front (Bun 1.4's `node:https` request socket does not expose
+  `getPeerCertificate()`), validates the client certificate and its CN against
+  `OBJECT_STORAGE_ALLOWED_CLIENT_CNS`, and only then bridges the decrypted stream to the inner HTTP listener.
+  A rejected certificate receives a raw 403 before any HTTP parsing.
 - Admin API: `GET /object-storage/summary`, filtered/sorted/paginated objects,
   detail, filtered access logs, place-hold and request-lift, and maintenance
   jobs. The admin portal route `/system/object-storage` (Operations navigation)

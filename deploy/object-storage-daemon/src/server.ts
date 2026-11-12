@@ -1,13 +1,35 @@
 import { createHash } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as http from 'node:http'
-import * as https from 'node:https'
-import type { TLSSocket } from 'node:tls'
+import * as net from 'node:net'
+import * as os from 'node:os'
+import * as path from 'node:path'
+import * as tls from 'node:tls'
 import { FsBlobStore, type StorageBucketTier } from './shared/blobStore'
 import { loadDaemonConfigFromEnv, type ObjectStorageDaemonConfig } from './config'
 
 const VALID_BUCKETS = new Set<StorageBucketTier>(['HOT', 'COLD', 'QUARANTINE'])
 const DEFAULT_MAX_BODY_BYTES = 1200 * 1024 * 1024 // the BACKUP_ARTIFACTS namespace allows 1 GiB
+
+/** The identity fields exposed by `tls.TLSSocket#getPeerCertificate()` that the daemon authorizes on. */
+export interface PeerCertificateLike {
+  subject?: { CN?: string | string[] }
+}
+
+/** True when the peer certificate's subject CN is in the allow-list. Missing/empty CNs are always refused. */
+export const isAllowedClientIdentity = (
+  peer: PeerCertificateLike | undefined,
+  allowedClientCns: readonly string[],
+): boolean => {
+  const rawCn = peer?.subject?.CN
+  const cn = Array.isArray(rawCn) ? rawCn[0] : rawCn
+  return Boolean(cn && allowedClientCns.includes(cn))
+}
+
+const clientCertificateCn = (peer: PeerCertificateLike | undefined): string | undefined => {
+  const rawCn = peer?.subject?.CN
+  return Array.isArray(rawCn) ? rawCn[0] : rawCn
+}
 
 function parseBucket(raw: string): StorageBucketTier {
   const upper = raw.toUpperCase() as StorageBucketTier
@@ -54,7 +76,7 @@ function sendJson(res: http.ServerResponse, statusCode: number, payload: unknown
 }
 
 export interface RunningObjectStorageDaemon {
-  server: http.Server | https.Server
+  server: http.Server | tls.Server
   port: number
   baseUrl: string
   store: FsBlobStore
@@ -70,19 +92,9 @@ export async function startObjectStorageDaemon(
 
   const handler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     try {
-      if (config.requireMtls) {
-        const tlsSocket = req.socket as TLSSocket
-        if (!tlsSocket.authorized) {
-          return sendJson(res, 401, { error: 'MTLS_CLIENT_UNAUTHORIZED' })
-        }
-        const peer = tlsSocket.getPeerCertificate()
-        const rawCn = peer?.subject?.CN
-        const cn = Array.isArray(rawCn) ? rawCn[0] : rawCn
-        if (!cn || !config.allowedClientCns.includes(cn)) {
-          return sendJson(res, 403, { error: `MTLS_CLIENT_CN_FORBIDDEN:${cn ?? 'none'}` })
-        }
-      }
-
+      // mTLS is enforced by the tls front below: Bun 1.4's node:https sockets do
+      // not expose getPeerCertificate(), so the decrypted stream is bridged to
+      // this inner HTTP server only after the certificate CN has been accepted.
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
       const method = req.method ?? 'GET'
 
@@ -193,38 +205,125 @@ export async function startObjectStorageDaemon(
     }
   }
 
-  const server = config.requireMtls
-    ? https.createServer(
-        {
-          ca: fs.readFileSync(config.tlsCaCertPath!),
-          cert: fs.readFileSync(config.tlsServerCertPath!),
-          key: fs.readFileSync(config.tlsServerKeyPath!),
-          requestCert: true,
-          rejectUnauthorized: true,
-          minVersion: 'TLSv1.3',
-        },
-        handler
-      )
-    : http.createServer(handler)
+  const closeServer = (server: http.Server | tls.Server): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      server.close((err) => {
+        if (err && (err as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') reject(err)
+        else resolve()
+      })
+    })
 
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(config.port, config.bindHost, () => resolve())
-  })
+  /** Track accepted sockets so shutdown cannot wait forever on a keep-alive or half-open client. */
+  const trackSockets = (server: http.Server | tls.Server): Set<net.Socket> => {
+    const sockets = new Set<net.Socket>()
+    server.on('connection', (socket) => {
+      sockets.add(socket)
+      socket.on('close', () => sockets.delete(socket))
+    })
+    return sockets
+  }
 
-  const address = server.address()
-  const actualPort = typeof address === 'object' && address ? address.port : config.port
-  const protocol = config.requireMtls ? 'https' : 'http'
   const hostForUrl = config.bindHost === '0.0.0.0' ? '127.0.0.1' : config.bindHost
 
+  if (!config.requireMtls) {
+    const server = http.createServer(handler)
+    const sockets = trackSockets(server)
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(config.port, config.bindHost, () => resolve())
+    })
+    const address = server.address()
+    const actualPort = typeof address === 'object' && address ? address.port : config.port
+    return {
+      server,
+      port: actualPort,
+      baseUrl: `http://${hostForUrl}:${actualPort}`,
+      store,
+      close: async () => {
+        const closed = closeServer(server)
+        for (const socket of sockets) socket.destroy()
+        await closed
+      },
+    }
+  }
+
+  // Bun 1.4's node:https server does not expose getPeerCertificate() on the
+  // request socket, so mTLS runs on a node:tls front. The front verifies the
+  // client certificate and its CN, then bridges the decrypted stream to an
+  // inner HTTP server on a private unix socket (loopback port on Windows).
+  const socketDir = process.platform === 'win32' ? undefined : fs.mkdtempSync(path.join(os.tmpdir(), 'pg-object-storage-daemon-'))
+  if (socketDir) fs.chmodSync(socketDir, 0o700)
+  const inner = http.createServer(handler)
+  let upstream: net.NetConnectOpts
+  if (socketDir) {
+    const socketPath = path.join(socketDir, 'http.sock')
+    await new Promise<void>((resolve, reject) => {
+      inner.once('error', reject)
+      inner.listen(socketPath, () => resolve())
+    })
+    upstream = { path: socketPath }
+  } else {
+    await new Promise<void>((resolve, reject) => {
+      inner.once('error', reject)
+      inner.listen(0, '127.0.0.1', () => resolve())
+    })
+    const innerAddress = inner.address()
+    upstream = { host: '127.0.0.1', port: typeof innerAddress === 'object' && innerAddress ? innerAddress.port : 0 }
+  }
+
+  const forbidden = (error: string): string => {
+    const body = JSON.stringify({ error })
+    return `HTTP/1.1 403 Forbidden\r\ncontent-type: application/json; charset=utf-8\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`
+  }
+  const front = tls.createServer(
+    {
+      ca: fs.readFileSync(config.tlsCaCertPath!),
+      cert: fs.readFileSync(config.tlsServerCertPath!),
+      key: fs.readFileSync(config.tlsServerKeyPath!),
+      requestCert: true,
+      rejectUnauthorized: true,
+      minVersion: 'TLSv1.3',
+    },
+    (socket) => {
+      if (!socket.authorized) {
+        socket.on('error', () => undefined)
+        socket.end(forbidden('MTLS_CLIENT_UNAUTHORIZED'))
+        return
+      }
+      const peer = socket.getPeerCertificate()
+      const cn = clientCertificateCn(peer)
+      if (!cn || !isAllowedClientIdentity(peer, config.allowedClientCns)) {
+        socket.on('error', () => undefined)
+        socket.end(forbidden(`MTLS_CLIENT_CN_FORBIDDEN:${cn ?? 'none'}`))
+        return
+      }
+      const backend = net.connect(upstream)
+      socket.on('error', () => backend.destroy())
+      backend.on('error', () => socket.destroy())
+      socket.pipe(backend)
+      backend.pipe(socket)
+    },
+  )
+  const frontSockets = trackSockets(front)
+  const innerSockets = trackSockets(inner)
+  await new Promise<void>((resolve, reject) => {
+    front.once('error', reject)
+    front.listen(config.port, config.bindHost, () => resolve())
+  })
+  const address = front.address()
+  const actualPort = typeof address === 'object' && address ? address.port : config.port
   return {
-    server,
+    server: front,
     port: actualPort,
-    baseUrl: `${protocol}://${hostForUrl}:${actualPort}`,
+    baseUrl: `https://${hostForUrl}:${actualPort}`,
     store,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
-        server.close((err) => (err ? reject(err) : resolve()))
-      }),
+    close: async () => {
+      const frontClosed = closeServer(front)
+      const innerClosed = closeServer(inner)
+      for (const socket of frontSockets) socket.destroy()
+      for (const socket of innerSockets) socket.destroy()
+      await Promise.allSettled([frontClosed, innerClosed])
+      if (socketDir) fs.rmSync(socketDir, { recursive: true, force: true })
+    },
   }
 }

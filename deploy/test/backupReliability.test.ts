@@ -379,6 +379,7 @@ describe("daemon env contract", () => {
     expect(env.PG_REPLICATION_PASSWORD).toBe("ultra-strong-repl-K7p2Zq9w");
     expect(env.PG_REPLICATION_SLOT).toBe("pg_backup_core");
     expect(env.PG_SSLMODE).toBe("require");
+    expect(env.PG_AUDIT_DATA_DIR).toBe("/var/lib/postgresql/18/audit");
     expect(env.PG_LOG_DB_NAME).toBe("pg_logs_db");
     expect(env.BACKUP_WAL_CLIENT_CNS).toBe("wal-archive-client");
     expect(env.BACKUP_ALLOWED_CLIENT_CNS).toBe("backup-client");
@@ -388,6 +389,7 @@ describe("daemon env contract", () => {
     const shared = load(`${PG_MODE}\nBACKUP_ENGINE_MODE="pg-native"\nAUDIT_DB_NODE="audit-db@10.10.10.10:22:10.10.10.10:5432"\nLOG_DB_NODE=""\nLOG_DB_MANAGE_VIA_SSH="false"`);
     const env = backupDaemonEnv(shared);
     expect(env.PG_AUDIT_HOST).toBe("");
+    expect(env.PG_AUDIT_DATA_DIR).toBe("");
     expect(env.PG_LOG_DB_NAME).toBe("");
   });
 

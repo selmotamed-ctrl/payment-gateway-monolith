@@ -709,6 +709,93 @@ export const applicationCredentials = (config: DeployConfig): { user: string; pa
     ? { user: config.PG_APP_USER, password: config.PG_APP_PASSWORD }
     : { user: config.PG_DB_USER, password: config.PG_DB_PASSWORD };
 
+export interface DatabaseCredentials {
+  user: string;
+  password: string;
+}
+
+/** The configured database name, including the legacy `DB_*` compatibility path. */
+const configuredDatabaseName = (config: DeployConfig): string =>
+  pgStorageConfigured(config) ? config.PG_DB_NAME : (config.DB_NAME ?? config.PG_DB_NAME);
+
+/**
+ * Replaces the credentials of an explicit session URL and fills in the database
+ * name when the operator supplied only an origin. Used for the owner/migration
+ * URL so it follows the same session-safe endpoint as the leader election while
+ * keeping the owner's own credentials.
+ */
+const withDatabaseCredentials = (
+  source: string,
+  credentials: DatabaseCredentials,
+  fallbackDatabase: string,
+): string | null => {
+  try {
+    const url = new URL(source);
+    if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") return null;
+    url.protocol = "postgresql:";
+    url.username = credentials.user;
+    url.password = credentials.password;
+    if (!url.pathname || url.pathname === "/") url.pathname = `/${fallbackDatabase}`;
+    return url.toString();
+  } catch {
+    return null;
+  }
+};
+
+/** True when two PostgreSQL URLs address the same host/port/database, ignoring credentials. */
+export const sameDatabaseEndpoint = (a: string | null | undefined, b: string | null | undefined): boolean => {
+  if (!a || !b) return false;
+  try {
+    const left = new URL(a);
+    const right = new URL(b);
+    const port = (url: URL): string => url.port || "5432";
+    return left.hostname === right.hostname && port(left) === port(right) && left.pathname === right.pathname;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The session-safe endpoint used by BOTH the singleton-worker leader election
+ * and the owner/migration connection.
+ *
+ * Precedence:
+ *   1. an explicit `LEADER_ELECTION_DATABASE_URL` (external database/pooler);
+ *   2. the deploy-managed PgBouncer session alias `pgw_session`;
+ *   3. a direct PostgreSQL connection when PgBouncer is disabled;
+ *   4. null (callers fall back to `DATABASE_URL`).
+ *
+ * Prisma Migrate takes a session-level `pg_advisory_lock(72707369)`. Routing
+ * that through PgBouncer's transaction pool can strand the lock on a reused
+ * backend and the next migration fails with P1002, so migrations must use this
+ * endpoint, never the transaction-pooled runtime URL.
+ */
+export const sessionDatabaseUrl = (
+  config: DeployConfig,
+  credentials: DatabaseCredentials,
+): string | null => {
+  const database = configuredDatabaseName(config);
+  if (config.LEADER_ELECTION_DATABASE_URL) {
+    const explicit = withDatabaseCredentials(config.LEADER_ELECTION_DATABASE_URL, credentials, database);
+    if (!explicit) return null;
+    if (pgStorageConfigured(config) && config.PG_MANAGE_VIA_SSH) {
+      const url = new URL(explicit);
+      if (!url.searchParams.has("sslmode")) {
+        url.searchParams.set("sslmode", "no-verify");
+        return url.toString();
+      }
+    }
+    return explicit;
+  }
+  if (!pgStorageConfigured(config)) return null;
+  const primary = parseNodeList(config.PG_PRIMARY_NODE)[0] ?? null;
+  if (!primary) return null;
+  const port = config.PGBOUNCER_ENABLED ? config.PGBOUNCER_PORT : primary.servicePort;
+  const name = config.PGBOUNCER_ENABLED ? PGBOUNCER_SESSION_ALIAS : database;
+  const tls = config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : "";
+  return `postgresql://${encodeURIComponent(credentials.user)}:${encodeURIComponent(credentials.password)}@${primary.privateIp}:${port}/${name}${tls}`;
+};
+
 export const effectiveDatabase = (config: DeployConfig): {
   engine: DeployConfig["DB_ENGINE"];
   host: string | null;
@@ -741,9 +828,10 @@ export const effectiveDatabase = (config: DeployConfig): {
     ? `postgresql://${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}@${host}:${derivedPort}/${name}${config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : ""}`
     : (config.DATABASE_URL ?? null);
   // The owner's URL, for migrations and the test-server seeders only. It is never written to the runtime `.env`.
-  const ownerUrl = pg && host
-    ? `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${derivedPort}/${name}${config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : ""}`
-    : (config.DATABASE_URL ?? null);
+  // It follows the session-safe endpoint (explicit leader URL, pgw_session, or a direct PostgreSQL connection), because
+  // Prisma Migrate's session advisory lock cannot survive PgBouncer transaction pooling (P1002). This applies in the
+  // legacy single-role mode too; the runtime `url` above never changes.
+  const ownerUrl = sessionDatabaseUrl(config, { user, password }) ?? (config.DATABASE_URL ?? null);
   return {
     engine: config.DB_ENGINE,
     host,
@@ -768,21 +856,10 @@ export const effectiveDatabase = (config: DeployConfig): {
  * development database).
  */
 export const leaderElectionDatabaseUrl = (config: DeployConfig): string | null => {
-  if (!pgStorageConfigured(config)) {
-    return null;
-  }
-  const primary = parseNodeList(config.PG_PRIMARY_NODE)[0] ?? null;
-  if (!primary) {
-    return null;
-  }
-  const database = effectiveDatabase(config);
-  const app = applicationCredentials(config);
-  const credentials = `${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}`;
-  if (config.PGBOUNCER_ENABLED) {
-    return `postgresql://${credentials}@${primary.privateIp}:${config.PGBOUNCER_PORT}/${PGBOUNCER_SESSION_ALIAS}${config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : ""}`;
-  }
-  const tls = config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : "";
-  return `postgresql://${credentials}@${primary.privateIp}:${primary.servicePort}/${database.name}${tls}`;
+  // An explicit endpoint is authoritative and keeps its own credentials (it may be a dedicated leader role).
+  if (config.LEADER_ELECTION_DATABASE_URL) return config.LEADER_ELECTION_DATABASE_URL;
+  if (!pgStorageConfigured(config)) return null;
+  return sessionDatabaseUrl(config, applicationCredentials(config));
 };
 
 const PLACEHOLDER_MARKERS = ["change-me", "changeme", "change_me", "replace-me", "replaceme", "replace_me", "your-", "your_", "example", "placeholder", "password", "passwd", "admin", "default", "secret123", "xxxx"];
@@ -949,6 +1026,18 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   if (config.PGBOUNCER_ENABLED && !pgConfigured) {
     problems.push("PGBOUNCER_ENABLED requires the PostgreSQL 18 storage fields");
   }
+  if (config.PGBOUNCER_ENABLED && pgConfigured && (primaryNodes.length > 0 || config.LEADER_ELECTION_DATABASE_URL)) {
+    // The core refuses to boot when the leader-election endpoint is the transaction-pooled runtime URL, and the
+    // migration/owner URL must use the same session-safe endpoint. Catch the misconfiguration at deploy time.
+    const runtimeUrl = effectiveDatabase(config).url;
+    const ownerUrl = effectiveDatabase(config).ownerUrl;
+    if (sameDatabaseEndpoint(runtimeUrl, ownerUrl)) {
+      problems.push(
+        "The migration/owner endpoint resolves to the transaction-pooled DATABASE_URL. " +
+          "Set LEADER_ELECTION_DATABASE_URL to a session-capable endpoint (the deploy-managed pgw_session alias or a direct PostgreSQL URL) before deploying.",
+      );
+    }
+  }
 
   if (config.DB_MANAGE_VIA_SSH && !pgConfigured) {
     if (!config.DB_SSH_HOST) problems.push("DB_SSH_HOST is required when DB_MANAGE_VIA_SSH=true");
@@ -971,8 +1060,17 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
       problems.push("DATABASE_URL should point at DB_PRIVATE_IP");
     }
   }
-  if (config.LEADER_ELECTION_DATABASE_URL && !/^postgres(ql)?:\/\//.test(config.LEADER_ELECTION_DATABASE_URL)) {
-    problems.push("LEADER_ELECTION_DATABASE_URL must be a PostgreSQL URL");
+  if (config.LEADER_ELECTION_DATABASE_URL) {
+    if (!/^postgres(ql)?:\/\//.test(config.LEADER_ELECTION_DATABASE_URL)) {
+      problems.push("LEADER_ELECTION_DATABASE_URL must be a PostgreSQL URL");
+    } else {
+      try {
+        const url = new URL(config.LEADER_ELECTION_DATABASE_URL);
+        if (!url.hostname) problems.push("LEADER_ELECTION_DATABASE_URL must include a host");
+      } catch {
+        problems.push("LEADER_ELECTION_DATABASE_URL must be a valid PostgreSQL URL");
+      }
+    }
   }
   // A single-box installation legitimately co-locates the database with the
   // core (the database binds to 127.0.0.1 and is never exposed); on separate

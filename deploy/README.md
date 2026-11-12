@@ -413,10 +413,15 @@ PgBouncer runs in transaction mode for the application database on the primary
 and replicas. The generated `pgbouncer.ini` maps `PG_DB_NAME` to the local
 PostgreSQL port, and adds `pgw_session`, a second alias to the same database
 with `pool_mode=session`. The session alias exists for the singleton-worker
-leader election (`LEADER_ELECTION_DATABASE_URL`); PostgreSQL advisory locks do
-not survive transaction pooling. The provisioner proves a login through both
-aliases before core starts. An explicit `LEADER_ELECTION_DATABASE_URL` in the
-deploy env overrides the derived URL for an external database or pooler.
+leader election (`LEADER_ELECTION_DATABASE_URL`) and for migrations/seeders:
+Prisma Migrate takes a session advisory lock (`pg_advisory_lock(72707369)`) that
+transaction pooling can strand on a reused backend, producing P1002 on the next
+run. The deploy writes the owner/migration URL to a temporary `.env.owner` using
+the same session endpoint; the runtime `DATABASE_URL` stays transaction-pooled.
+The provisioner proves a login through both aliases before core starts. An
+explicit `LEADER_ELECTION_DATABASE_URL` in the deploy env overrides the derived
+URL for an external database or pooler; migrations reuse its endpoint with the
+owner credentials, and an external pooler must allow the owner on that route.
 
 ### Redis
 
@@ -640,6 +645,20 @@ cd deploy/backup-daemon
 bun run typecheck
 bun test
 ```
+
+Object storage daemon suites:
+
+```bash
+cd deploy/object-storage-daemon
+bun run typecheck
+bun test
+```
+
+They include raw mTLS tests (allowed, denied, missing and untrusted certificates,
+TLS 1.3 enforcement, a PUT/GET through the TLS-to-HTTP bridge) and a
+`RemoteMtlsBlobStore` client test. The openssl-backed cases skip when the CLI is
+unavailable; the HTTP surface tests always run. The workspace is part of the
+root CI backend matrix.
 
 No test performs a real multi-host deployment, migration, PM2 restart, Nginx
 reload, edge-to-core handshake, filesystem/certificate ownership check or live

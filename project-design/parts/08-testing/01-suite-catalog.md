@@ -16,6 +16,7 @@ code:
   - fake-rails-back/test/**
   - deploy/test/**
   - deploy/backup-daemon/test/**
+  - deploy/object-storage-daemon/test/**
 design_sources:
   - design/05-testing/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume-coverage-matrix-38500-assertions
   - design/05-testing/master_exhaustive_test_plan_for_opencode.md#2-suite-01-database-schema-66-models-100-enums-fks-triggers-indexes-2200-tests
@@ -46,6 +47,8 @@ tests:
   - checkout-back/test/security-regressions.test.ts
   - deploy/test/security-regressions.test.ts
   - deploy/backup-daemon/test/mtlsAuthorization.test.ts
+  - deploy/object-storage-daemon/test/mtls.test.ts
+  - deploy/object-storage-daemon/test/sdk-mtls.test.ts
   - fake-rails-back/test/security.test.ts
   - tests/unit/frontend-security-admin.test.ts
   - tests/unit/frontend-security-checkout.test.ts
@@ -219,6 +222,7 @@ There is **no** `core-back/test/exhaustive/09-storage-backup` directory. The run
 - `core-back/test/hardening-gap-regressions.test.ts` covers the leader-election environment guard, backend-PID/`pg_locks` ownership checks, refused unlocks, the session-safety probe and the durable `inbound_events` claim lease.
 - `core-back/test/backup-admin` — backup routes and control client.
 - `deploy/backup-daemon/test` — 71 declarations across 8 files.
+- `deploy/object-storage-daemon/test` — HTTP surface plus real mTLS: allowed/denied/missing/untrusted client certificates, TLS 1.3 enforcement, a PUT/GET over the TLS-to-HTTP bridge, and `RemoteMtlsBlobStore` health/put/get/stat/list over mTLS. The openssl-backed cases skip if the CLI is unavailable.
 
 Some files skip without PostgreSQL or Redis. The design's dedicated fixture names (`uow-outbox-audit-atomicity.test.ts`, `gl-shards-and-lsn-routing.test.ts`, `audit-chain-and-log-backpressure.test.ts`, `backup-control-and-drills.test.ts`, `backup-restore-matrix.test.ts`) do not exist.
 
@@ -260,12 +264,13 @@ The seeder checks live in suite 10, and the deploy matrix lives in `deploy/test/
 | `fake-rails-back/test` | 53 |
 | `deploy/test` | 119 |
 | `deploy/backup-daemon/test` | 71 |
+| `deploy/object-storage-daemon/test` | 7 literal + 9 `live` (16 executed) |
 | `tests/e2e` | 65 |
 | `tests/e2e-live` | 6 |
 | `tests/unit` | 26 |
-| **Total** | **1,807** |
+| **Total** | **1,814** |
 
-This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations, so the executed test count is higher, especially in suites 01-04. It is far below the 38,500 claim. The stale-claims register records 1,778; the working tree has about 29 more declarations.
+This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations and the `live` alias used by the openssl-backed object-storage mTLS cases, so the executed test count is higher, especially in suites 01-04. It is far below the 38,500 claim. The stale-claims register records 1,778; the working tree has about 36 more declarations.
 
 ### 3.14 Report engine SDK tests
 
@@ -288,7 +293,7 @@ This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations, so t
 - Core suites: `core-back/test/exhaustive/**`.
 - Edge suites: `admin-back/test`, `merchant-back/test`, `checkout-back/test`.
 - Fake-rails suites: `fake-rails-back/test`.
-- Deploy suites: `deploy/test`, `deploy/backup-daemon/test`.
+- Deploy suites: `deploy/test`, `deploy/backup-daemon/test`, `deploy/object-storage-daemon/test`.
 - UI suites: `tests/e2e`, `tests/e2e-live`, `tests/unit`.
 - Runner: `scripts/run-exhaustive-suite.sh`.
 

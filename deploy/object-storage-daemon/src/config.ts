@@ -15,13 +15,16 @@ const bool = (value: string | undefined, fallback: boolean): boolean => {
 }
 
 export function loadDaemonConfigFromEnv(overrides?: Partial<ObjectStorageDaemonConfig>): ObjectStorageDaemonConfig {
-  const tlsCaCertPath = process.env.OBJECT_STORAGE_DAEMON_TLS_CA_PATH?.trim() || null
-  const tlsServerCertPath = process.env.OBJECT_STORAGE_DAEMON_TLS_CERT_PATH?.trim() || null
-  const tlsServerKeyPath = process.env.OBJECT_STORAGE_DAEMON_TLS_KEY_PATH?.trim() || null
-  const allowedClientCns = (process.env.OBJECT_STORAGE_ALLOWED_CLIENT_CNS ?? 'object-storage-client,backup-daemon,backup-client')
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
+  // Overrides are part of the configuration contract (the tests and embedders use them), so validate the effective
+  // values, not only the process environment.
+  const tlsCaCertPath = overrides?.tlsCaCertPath ?? (process.env.OBJECT_STORAGE_DAEMON_TLS_CA_PATH?.trim() || null)
+  const tlsServerCertPath = overrides?.tlsServerCertPath ?? (process.env.OBJECT_STORAGE_DAEMON_TLS_CERT_PATH?.trim() || null)
+  const tlsServerKeyPath = overrides?.tlsServerKeyPath ?? (process.env.OBJECT_STORAGE_DAEMON_TLS_KEY_PATH?.trim() || null)
+  const allowedClientCns = overrides?.allowedClientCns
+    ?? (process.env.OBJECT_STORAGE_ALLOWED_CLIENT_CNS ?? 'object-storage-client,backup-daemon,backup-client')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
   const configuredPaths = [tlsCaCertPath, tlsServerCertPath, tlsServerKeyPath]
   const anyTls = configuredPaths.some(Boolean)
   const allTls = configuredPaths.every(Boolean)
