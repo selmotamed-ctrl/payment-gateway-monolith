@@ -5,6 +5,8 @@ import { client } from "../../prisma/client";
 import { ApiError } from "../../lib/error";
 import { hashAccessToken, verifySessionToken, type SessionChannel } from "../../lib/auth";
 import { isSessionRevoked, revokeSession } from "../../lib/auth/revocation";
+import { executionPlane, isSandboxPlane } from "../../lib/plane";
+import { ensureSandboxPrincipalProvisioned } from "../../engine/sandbox/SandboxSyncService";
 
 export type PrincipalKind = "session" | "apiToken";
 
@@ -147,8 +149,19 @@ const resolveSessionPrincipal = async (token: string): Promise<Principal> => {
   }
   const user = await client.user.findUnique({ where: { id: claims.sub } });
   if (!user) {
+    if (isSandboxPlane()) {
+      const provisioned = await ensureSandboxPrincipalProvisioned(claims);
+      return principalFromUser(provisioned, claims);
+    }
     throw new ApiError(401, "SESSION_USER_MISSING", "The session principal no longer exists");
   }
+  return principalFromUser(user, claims);
+};
+
+const principalFromUser = (
+  user: NonNullable<Awaited<ReturnType<typeof client.user.findUnique>>>,
+  claims: ReturnType<typeof verifySessionToken>,
+): Principal => {
   if (user.status !== "ACTIVE") {
     throw new ApiError(403, "SESSION_USER_INACTIVE", "The session principal is not active");
   }
@@ -178,7 +191,21 @@ export const authenticate = async (request: Request): Promise<Principal> => {
   if (!token) {
     throw new ApiError(401, "AUTH_REQUIRED", "A bearer token is required for this endpoint");
   }
+  const plane = executionPlane();
   if (token.startsWith("pg_live_")) {
+    if (plane === "SANDBOX") {
+      throw new ApiError(403, "LIVE_TOKEN_ON_SANDBOX_PLANE", "Live API tokens cannot be used on the Sandbox plane");
+    }
+    return resolveApiTokenPrincipal(token, request);
+  }
+  if (token.startsWith("pg_test_")) {
+    if (plane === "LIVE") {
+      throw new ApiError(
+        403,
+        "SANDBOX_TOKEN_ON_LIVE_PLANE",
+        "Sandbox test API tokens are strictly forbidden on the Live production plane",
+      );
+    }
     return resolveApiTokenPrincipal(token, request);
   }
   return resolveSessionPrincipal(token);

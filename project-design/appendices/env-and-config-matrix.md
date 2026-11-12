@@ -239,6 +239,22 @@
 | `deploy/deploy.env.example` | `FAKE_RAILS_ADMIN_PASSWORD` |
 | `deploy/deploy.env.example` | `FAKE_RAILS_JWT_SECRET` |
 | `deploy/deploy.env.example` | `FAKE_RAILS_SEEDER_TOKEN` |
+| `deploy/deploy.env.example` | `SANDBOX_ENABLED` |
+| `deploy/deploy.env.example` | `SANDBOX_MANAGE_VIA_SSH` |
+| `deploy/deploy.env.example` | `SANDBOX_NODE` |
+| `deploy/deploy.env.example` | `SANDBOX_SSH_PORT` |
+| `deploy/deploy.env.example` | `SANDBOX_SSH_USER` |
+| `deploy/deploy.env.example` | `SANDBOX_SSH_KEY_PATH` |
+| `deploy/deploy.env.example` | `SANDBOX_SUDO_PASSWORD` |
+| `deploy/deploy.env.example` | `SANDBOX_CORE_PORT` |
+| `deploy/deploy.env.example` | `SANDBOX_REMOTE_DIR` |
+| `deploy/deploy.env.example` | `SANDBOX_DB_PORT` |
+| `deploy/deploy.env.example` | `SANDBOX_DB_NAME` |
+| `deploy/deploy.env.example` | `SANDBOX_DB_USER` |
+| `deploy/deploy.env.example` | `SANDBOX_DB_PASSWORD` |
+| `deploy/deploy.env.example` | `SANDBOX_APP_USER` |
+| `deploy/deploy.env.example` | `SANDBOX_APP_PASSWORD` |
+| `deploy/deploy.env.example` | `SANDBOX_REDIS_DB_INDEX` |
 | `deploy/deploy.env.example` | `SEED_FAKE_RAILS_BLUEPRINTS` |
 | `deploy/deploy.env.example` | `RUN_SYNTHETIC_HISTORY_SEED` |
 | `deploy/deploy.env.example` | `SYNTHETIC_SEED_PROFILE` |
@@ -415,6 +431,7 @@
 | `core-back/lib/env/index.ts` | `FAKE_RAILS_ENABLED` |
 | `core-back/lib/env/index.ts` | `FAKE_RAILS_ALLOW_IN_PRODUCTION` |
 | `core-back/lib/env/index.ts` | `IS_TEST_SERVER` |
+| `core-back/lib/env/index.ts` | `EXECUTION_PLANE` |
 | `core-back/lib/env/index.ts` | `FAKE_RAILS_PUBLIC_BASE_URL` |
 | `core-back/lib/env/index.ts` | `ALLOW_FAKE_RAILS_HOSTS` |
 | `core-back/lib/env/index.ts` | `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` |
@@ -426,6 +443,8 @@
 | `admin-back/lib/env/index.ts` | `ADMIN_BIND_HOST` |
 | `admin-back/lib/env/index.ts` | `CORE_BACK_URL` |
 | `admin-back/lib/env/index.ts` | `CORE_BACK_URLS` |
+| `admin-back/lib/env/index.ts` | `SANDBOX_CORE_BACK_URL` |
+| `admin-back/lib/env/index.ts` | `SANDBOX_CORE_BACK_URLS` |
 | `admin-back/lib/env/index.ts` | `MTLS_CLIENT_CERT_PATH` |
 | `admin-back/lib/env/index.ts` | `MTLS_CLIENT_KEY_PATH` |
 | `admin-back/lib/env/index.ts` | `MTLS_CA_CERT_PATH` |
@@ -454,6 +473,8 @@
 | `merchant-back/lib/env/index.ts` | `BIND_HOST` |
 | `merchant-back/lib/env/index.ts` | `CORE_BACK_URL` |
 | `merchant-back/lib/env/index.ts` | `CORE_BACK_URLS` |
+| `merchant-back/lib/env/index.ts` | `SANDBOX_CORE_BACK_URL` |
+| `merchant-back/lib/env/index.ts` | `SANDBOX_CORE_BACK_URLS` |
 | `merchant-back/lib/env/index.ts` | `MTLS_CLIENT_CERT_PATH` |
 | `merchant-back/lib/env/index.ts` | `MTLS_CLIENT_KEY_PATH` |
 | `merchant-back/lib/env/index.ts` | `MTLS_CA_CERT_PATH` |
@@ -485,6 +506,8 @@
 | `checkout-back/lib/env/index.ts` | `BIND_HOST` |
 | `checkout-back/lib/env/index.ts` | `CORE_BACK_URL` |
 | `checkout-back/lib/env/index.ts` | `CORE_BACK_URLS` |
+| `checkout-back/lib/env/index.ts` | `SANDBOX_CORE_BACK_URL` |
+| `checkout-back/lib/env/index.ts` | `SANDBOX_CORE_BACK_URLS` |
 | `checkout-back/lib/env/index.ts` | `MTLS_CLIENT_CERT_PATH` |
 | `checkout-back/lib/env/index.ts` | `MTLS_CLIENT_KEY_PATH` |
 | `checkout-back/lib/env/index.ts` | `MTLS_CA_CERT_PATH` |

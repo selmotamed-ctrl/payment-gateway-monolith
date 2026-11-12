@@ -1,4 +1,5 @@
 import { lookup } from "node:dns/promises";
+import { assertOutboundPlaneAllowed } from "../../lib/plane";
 import { isIP } from "node:net";
 import { ApiError } from "../../lib/error";
 import { Vault } from "../crypto/Vault";
@@ -1053,6 +1054,7 @@ export class StepExecutor {
   }
 
   private async assertUrlAllowed(url: string): Promise<void> {
+    assertOutboundPlaneAllowed(url);
     const candidate = new URL(url);
     const fakeRailsTarget = isFakeRailsHostAllowed(candidate.hostname, this.options.allowedHosts);
     const parsed = validateFinalUrl(url, {

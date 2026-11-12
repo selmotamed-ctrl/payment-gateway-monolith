@@ -2,8 +2,8 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { backupS3Configured, clamdManaged, effectiveDatabase, loadDeployConfig, objectStorageConfigured, pgAppRoleEnabled, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
-import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
+import { backupS3Configured, clamdManaged, effectiveDatabase, loadDeployConfig, objectStorageConfigured, pgAppRoleEnabled, resolveBackupS3Mode, sandboxPlaneConfigured, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
+import { findSshConflicts, planHosts, renderTopology, sandboxDatabase, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
 import { buildPki, certFilesForHost, checkPkiExpiry, pkiRenewalReport, readMaterial, verifyPki, WAL_ARCHIVE_CLIENT } from "./lib/pkiManager";
 import {
   CERTBOT_DEPLOY_HOOK_PATH,
@@ -19,7 +19,7 @@ import { deploymentUnits, isFullDeployment, normalizeOnlyRole, shouldRun, should
 import { buildPreflightPlan, renderPreflightReport, runPreflight } from "./lib/preflight";
 import { dollarTag, pgpassField, sqlIdent, sqlLiteral } from "./lib/quoting";
 import { applyFirewall, readFirewallStatus } from "./lib/firewallConfigurator";
-import { probeCoreService, probeEdgeService, renderVerification, verifyDeployment } from "./lib/healthVerifier";
+import { probeCoreService, probeEdgeService, probeSandboxCoreService, renderVerification, verifyDeployment } from "./lib/healthVerifier";
 import { bootstrapPackagesCommand, detectHostOs } from "./lib/osDetector";
 import { bootstrapGaps, hostProbeScript } from "./lib/hostProbe";
 import { parseApplyOutcome } from "./lib/converge";
@@ -519,7 +519,7 @@ const deployService = (input: {
   const remote = service.remoteDir;
   const releaseRoot = service.nodeId ? `${remote}/releases/${service.nodeId}` : `${remote}/releases`;
   const releaseDir = `${releaseRoot}/${releaseTimestamp}`;
-  const frontend = service.role === "core" || service.role === "db" ? null : FRONTENDS[service.role];
+  const frontend = service.role === "core" || service.role === "core-sandbox" || service.role === "db" ? null : FRONTENDS[service.role];
   const appDir = `${releaseDir}/${service.sourceDir}`;
   const targetUser = effectiveTargetUser(host.ssh);
   const owner = `${targetUser}:${targetUser}`;
@@ -593,7 +593,10 @@ const deployService = (input: {
   // 5. Dependencies and, for the core, the schema.
   const bun = 'PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun';
   runner.run(host.ssh, `${bun} install --frozen-lockfile`, { cwd: appDir, sudo: false });
-  if (service.role === "core") {
+  const databaseCore = service.role === "core" || service.role === "core-sandbox";
+  if (databaseCore) {
+    const sandbox = sandboxDatabase(config);
+    const sandboxOwnerUrl = service.role === "core-sandbox" ? sandbox?.directUrl : undefined;
     runner.run(host.ssh, `${bun}x prisma generate`, { cwd: appDir, sudo: false });
     if (input.migration?.firstCoreNode) {
       const state = probeMigrationState({ runner, config, host, appDir, releaseTimestamp });
@@ -611,15 +614,21 @@ const deployService = (input: {
       }
       if (migrationPlan.runMigrate) {
         runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
-          runner.run(host.ssh, `${bun} ${flag} run migrate-deploy`.replace("  ", " "), { cwd: appDir, sudo: false }));
+          runner.run(host.ssh, `${bun} ${flag} run migrate-deploy`.replace("  ", " "), { cwd: appDir, sudo: false }), sandboxOwnerUrl);
       } else {
         log("  no pending migrations");
       }
     }
+    if (input.migration?.firstCoreNode) {
+      const plane = service.role === "core-sandbox" ? "SANDBOX" : "LIVE";
+      runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
+        runner.run(host.ssh, `${bun} ${flag} run set-execution-plane ${plane}`.replace("  ", " "), { cwd: appDir, sudo: false }), sandboxOwnerUrl);
+      log(`  execution plane marked ${plane}`);
+    }
     if (config.RUN_PRISMA_SEED) {
       const seedStarted = Date.now();
       runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
-        runner.run(host.ssh, `${bun} ${flag} run db-seed`.replace("  ", " "), { cwd: appDir, sudo: false }));
+        runner.run(host.ssh, `${bun} ${flag} run db-seed`.replace("  ", " "), { cwd: appDir, sudo: false }), sandboxOwnerUrl);
       const seedMs = Date.now() - seedStarted;
       if (!input.migration?.fresh && seedMs >= 3000) {
         log(`  hint: db-seed took ${(seedMs / 1000).toFixed(1)}s on every deploy; it is first-deploy reference data, so set RUN_PRISMA_SEED=false once it has run`);
@@ -901,10 +910,11 @@ export const runAsDatabaseOwner = <T>(
   appDir: string,
   config: DeployConfig,
   build: (envFlag: string) => () => T,
+  databaseUrlOverride?: string,
 ): T => {
   const database = effectiveDatabase(config);
-  const ownerUrl = database.ownerUrl;
-  if (!ownerUrl || ownerUrl === database.url) return build("")();
+  const ownerUrl = databaseUrlOverride ?? database.ownerUrl;
+  if (!ownerUrl || (databaseUrlOverride === undefined && ownerUrl === database.url)) return build("")();
   const envPath = `${appDir}/${OWNER_ENV_FILE}`;
   // The owner URL is session-pooled (pgw_session) so Prisma's advisory lock survives. Migrations and seeders do not
   // start workers, so disable them here: the core loader otherwise rejects a session-pooled DATABASE_URL that has
@@ -915,6 +925,63 @@ export const runAsDatabaseOwner = <T>(
   } finally {
     runner.run(host.ssh, `rm -f ${shellQuote(envPath)}`, { sudo: false });
   }
+};
+
+/**
+ * Creates the isolated sandbox database and its roles on the co-hosted
+ * PostgreSQL 18 instance. The sandbox was designed to live on its own node;
+ * an operator who points SANDBOX_DB_HOST elsewhere must provision it there.
+ */
+const provisionSandboxDatabase = (
+  runner: SshRunner,
+  config: DeployConfig,
+  host: HostPlan,
+  dryRun: boolean,
+): void => {
+  const database = sandboxDatabase(config);
+  if (!database) return;
+  const sandboxIp = parseNodeList(config.SANDBOX_NODE)[0]?.privateIp ?? (config.SANDBOX_PRIVATE_IP || undefined);
+  if (config.SANDBOX_DB_HOST && sandboxIp && config.SANDBOX_DB_HOST !== sandboxIp) {
+    warn(`SANDBOX_DB_HOST=${config.SANDBOX_DB_HOST} is not the sandbox node; create role '${database.user}' and database '${database.name}' there manually`);
+    return;
+  }
+  const appRole = config.SANDBOX_APP_PASSWORD
+    ? { user: config.SANDBOX_APP_USER, password: config.SANDBOX_APP_PASSWORD }
+    : null;
+  const sql = [
+    `DO $$ BEGIN`,
+    `  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ${sqlLiteral(database.user)}) THEN`,
+    `    CREATE ROLE ${sqlIdent(database.user)} LOGIN PASSWORD ${sqlLiteral(database.password)};`,
+    `  ELSE`,
+    `    ALTER ROLE ${sqlIdent(database.user)} PASSWORD ${sqlLiteral(database.password)};`,
+    `  END IF;`,
+    appRole ? `  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pgw_app') THEN` : "",
+    appRole ? `    CREATE ROLE pgw_app NOLOGIN;` : "",
+    appRole ? `  END IF;` : "",
+    appRole ? `  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ${sqlLiteral(appRole.user)}) THEN` : "",
+    appRole ? `    CREATE ROLE ${sqlIdent(appRole.user)} LOGIN PASSWORD ${sqlLiteral(appRole.password)} NOSUPERUSER NOCREATEDB NOCREATEROLE;` : "",
+    appRole ? `  ELSE` : "",
+    appRole ? `    ALTER ROLE ${sqlIdent(appRole.user)} PASSWORD ${sqlLiteral(appRole.password)} NOSUPERUSER NOCREATEDB NOCREATEROLE;` : "",
+    appRole ? `  END IF;` : "",
+    `END $$;`,
+    ...(appRole ? [`GRANT pgw_app TO ${sqlIdent(appRole.user)};`] : []),
+    `SELECT 'CREATE DATABASE ${database.name} OWNER ${database.user}' WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = ${sqlLiteral(database.name)})\\gexec`,
+    `GRANT CONNECT ON DATABASE ${sqlIdent(database.name)} TO ${sqlIdent(database.user)};`,
+    ...(appRole
+      ? [`GRANT CONNECT ON DATABASE ${sqlIdent(database.name)} TO ${sqlIdent(appRole.user)};`]
+      : []),
+  ].filter(Boolean).join("\n");
+  if (dryRun) {
+    log(`  sandbox database ${database.name} on ${host.ssh.host} (planned)`);
+    return;
+  }
+  const check = runner.capture(host.ssh, "command -v psql >/dev/null 2>&1 && echo yes || echo no", { sudo: false });
+  if (!check.includes("yes")) {
+    throw new Error(`PostgreSQL 18 client tools are required on the sandbox host ${host.ssh.host} to provision ${database.name}`);
+  }
+  const script = `cat <<'PGW_SANDBOX_SQL' | sudo -u postgres psql -v ON_ERROR_STOP=1 -p ${database.port} -d postgres\n${sql}\nPGW_SANDBOX_SQL`;
+  runner.run(host.ssh, script, { sudo: true });
+  log(`  sandbox database ${database.name} ready on ${host.ssh.host}`);
 };
 
 /** Installs the packages, Bun and PM2 a host needs (the `--fresh` bootstrap, for one host). */
@@ -1296,6 +1363,13 @@ const main = async (): Promise<void> => {
   } else if (pgStorageConfigured(config)) {
     log("  PostgreSQL: skipped (--only excludes pg)");
   }
+  if (sandboxPlaneConfigured(config) && shouldRun(options, "core-sandbox")) {
+    const sandboxHost = plan.hosts.find((host) => host.roles.includes("core-sandbox"));
+    if (!sandboxHost) {
+      throw new Error("The Parallel Sandbox Plane is configured but the plan has no core-sandbox host");
+    }
+    provisionSandboxDatabase(runner, config, sandboxHost, options.dryRun);
+  }
   if (pgStorageConfigured(config) && !pgAppRoleEnabled(config)) {
     warn("PG_APP_PASSWORD is not set: the application connects to PostgreSQL as the database OWNER, so the append-only ledger protection can be removed by anything that runs as the application. Set PG_APP_PASSWORD (and optionally PG_APP_USER) to run it as the non-owner `pgw_app` role.");
   }
@@ -1362,8 +1436,11 @@ const main = async (): Promise<void> => {
   // fresh and update mode whenever the database is non-empty (see planMigrations).
 
   // ---- Steps 6-9: deploy the services in dependency order ---------------
-  const deployTargets: Array<{ index: number; role: "core" | "admin" | "merchant" | "checkout" | "fake-rails"; title: string }> = [
+  const deployTargets: Array<{ index: number; role: "core" | "core-sandbox" | "admin" | "merchant" | "checkout" | "fake-rails"; title: string }> = [
     { index: 6, role: "core", title: "Deploy core-back to CORE_HOST" },
+    ...(config.SANDBOX_ENABLED || config.SANDBOX_NODE.trim().length > 0
+      ? [{ index: 6, role: "core-sandbox" as const, title: "Deploy pg-core-sandbox to SANDBOX_NODE" }]
+      : []),
     ...(config.FAKE_RAILS_ENABLED
       ? [{ index: 7, role: "fake-rails" as const, title: "Deploy fake-rails-back + fake-rails-front to FAKE_RAILS_HOST" }]
       : []),
@@ -1390,7 +1467,7 @@ const main = async (): Promise<void> => {
       throw new Error(`The plan has no ${target.role} host`);
     }
     const allUnits = deploymentUnits(plan, target.role);
-    if (builds && target.role !== "core") {
+    if (builds && target.role !== "core" && target.role !== "core-sandbox") {
       const result = await builds.wait(FRONTENDS[target.role]);
       if (!result.cached) log(`  ${FRONTENDS[target.role]} build ready (${(result.ms / 1000).toFixed(1)}s)`);
     }
@@ -1410,14 +1487,18 @@ const main = async (): Promise<void> => {
           plannedServiceNames: allUnits.map((candidate) => candidate.service.name),
           migration: target.role === "core"
             ? { fresh, forceFresh: options.forceFresh, firstCoreNode: unit.service.nodeId === plan.nodes.core[0]?.nodeId }
-            : undefined,
+            : target.role === "core-sandbox"
+              ? { fresh, forceFresh: options.forceFresh, firstCoreNode: unit.service.nodeId === plan.nodes["core-sandbox"][0]?.nodeId }
+              : undefined,
         });
       }
       if (options.dryRun) continue;
       for (const unit of batch) {
         const probe = target.role === "core"
           ? probeCoreService(runner, unit.host, unit.service, config, releaseTimestamp)
-          : probeEdgeService(runner, unit.host, unit.service, releaseTimestamp);
+          : target.role === "core-sandbox"
+            ? probeSandboxCoreService(runner, unit.host, unit.service, config, releaseTimestamp)
+            : probeEdgeService(runner, unit.host, unit.service, releaseTimestamp);
         if (!probe.ok) {
           throw new Error(
             runner.scrub(`Rolling batch ${batchIndex + 1} failed health check on ${probe.host} ${probe.check}: ${probe.detail}`),
@@ -1457,35 +1538,48 @@ const main = async (): Promise<void> => {
     log("  skipped (--dry-run)");
   } else if (!config.FAKE_RAILS_ENABLED) {
     log("  skipped (FAKE_RAILS_ENABLED=false)");
-  } else if (shouldRun(options, "core")) {
-    const firstCore = plan.nodes.core[0];
-    const coreService = coreHost.services.find((service) => service.role === "core" && service.nodeId === firstCore?.nodeId)
-      ?? coreHost.services.find((service) => service.role === "core");
-    const coreCurrent = coreService?.currentLink ?? `${config.CORE_REMOTE_DIR}/current`;
-    const coreRemote = `${coreCurrent}/core-back`;
-    const coreSeedTarget = firstCore?.ssh ?? coreHost.ssh;
-    const bun = 'PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun';
-    if (config.SEED_FAKE_RAILS_BLUEPRINTS) {
-      runAsDatabaseOwner(runner, coreHost, coreRemote, config, (flag) => () =>
-        runner.run(coreSeedTarget, `${bun} ${flag} run seed-fake-rails`.replace("  ", " "), { cwd: coreRemote, sudo: false, timeoutMs: 30 * 60_000 }));
-      log("  fake rails blueprints seeded in core-back");
-    }
-    if (config.RUN_SYNTHETIC_HISTORY_SEED) {
-      // The STANDARD profile generates/writes ~280k rows and syncs 120k
-      // transactions to Fake Rails; on a single box this exceeds the default
-      // 15-minute command timeout, so give it a generous ceiling.
-      const seeded = runAsDatabaseOwner(runner, coreHost, coreRemote, config, (flag) => () =>
-        runner.run(coreSeedTarget, `${bun} ${flag} run seed-synthetic-history`.replace("  ", " "), { cwd: coreRemote, sudo: false, timeoutMs: 60 * 60_000 }));
-      const summary = seeded.stdout.trim().split("\n").slice(-4).join("\n");
-      if (summary) log(summary.split("\n").map((line) => `  ${line}`).join("\n"));
-      if (seeded.stdout.includes("was already seeded successfully") || seeded.stdout.includes("synthetic history already present under seed key")) {
-        log(`  synthetic history already present for seed key '${config.SYNTHETIC_SEED_KEY}'; skipped`);
-      } else {
-        log(`  synthetic history seeded (${config.SYNTHETIC_SEED_PROFILE})`);
+  } else {
+    const sandbox = sandboxPlaneConfigured(config);
+    const seedRole = sandbox ? "core-sandbox" : "core";
+    if (!shouldRun(options, seedRole)) {
+      log(`  skipped (--only excludes ${seedRole})`);
+    } else {
+      const seedNode = sandbox ? plan.nodes["core-sandbox"][0] : plan.nodes.core[0];
+      const seedHost = sandbox
+        ? plan.hosts.find((host) =>
+            host.services.some((service) => service.role === "core-sandbox" && service.nodeId === seedNode?.nodeId),
+          ) ?? plan.hosts.find((host) => host.roles.includes("core-sandbox"))
+        : coreHost;
+      if (!seedHost) throw new Error(`The plan has no ${seedRole} host`);
+      const seedService = seedHost.services.find(
+        (service) => service.role === seedRole && service.nodeId === seedNode?.nodeId,
+      ) ?? seedHost.services.find((service) => service.role === seedRole);
+      const seedRemoteDir = sandbox ? config.SANDBOX_REMOTE_DIR : config.CORE_REMOTE_DIR;
+      const seedCurrent = seedService?.currentLink ?? `${seedRemoteDir}/current`;
+      const seedRemote = `${seedCurrent}/core-back`;
+      const seedTarget = seedNode?.ssh ?? seedHost.ssh;
+      const sandboxOwnerUrl = sandbox ? sandboxDatabase(config)?.directUrl : undefined;
+      const bun = 'PATH="$HOME/.bun/bin:/usr/local/bin:$PATH" bun';
+      if (config.SEED_FAKE_RAILS_BLUEPRINTS) {
+        runAsDatabaseOwner(runner, seedHost, seedRemote, config, (flag) => () =>
+          runner.run(seedTarget, `${bun} ${flag} run seed-fake-rails`.replace("  ", " "), { cwd: seedRemote, sudo: false, timeoutMs: 30 * 60_000 }), sandboxOwnerUrl);
+        log(`  fake rails blueprints seeded in ${sandbox ? "the sandbox plane" : "core-back"}`);
+      }
+      if (config.RUN_SYNTHETIC_HISTORY_SEED) {
+        // The STANDARD profile generates/writes ~280k rows and syncs 120k
+        // transactions to Fake Rails; on a single box this exceeds the default
+        // 15-minute command timeout, so give it a generous ceiling.
+        const seeded = runAsDatabaseOwner(runner, seedHost, seedRemote, config, (flag) => () =>
+          runner.run(seedTarget, `${bun} ${flag} run seed-synthetic-history`.replace("  ", " "), { cwd: seedRemote, sudo: false, timeoutMs: 60 * 60_000 }), sandboxOwnerUrl);
+        const summary = seeded.stdout.trim().split("\n").slice(-4).join("\n");
+        if (summary) log(summary.split("\n").map((line) => `  ${line}`).join("\n"));
+        if (seeded.stdout.includes("was already seeded successfully") || seeded.stdout.includes("synthetic history already present under seed key")) {
+          log(`  synthetic history already present for seed key '${config.SYNTHETIC_SEED_KEY}'; skipped`);
+        } else {
+          log(`  synthetic history seeded (${config.SYNTHETIC_SEED_PROFILE})`);
+        }
       }
     }
-  } else {
-    log("  skipped (--only excludes core)");
   }
 
   // ---- Step 13: prune ----------------------------------------------------

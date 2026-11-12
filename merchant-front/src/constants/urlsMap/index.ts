@@ -59,6 +59,14 @@ export const urlsMap = {
     webhookDeliveries: "v1/merchant/webhooks/deliveries",
     webhookRedeliver: (id: string) => `v1/merchant/webhooks/deliveries/${id}/redeliver`,
 
+    sandboxAccounts: "v1/merchant/sandbox/accounts",
+    sandboxAccount: (id: string) => `v1/merchant/sandbox/accounts/${encodeURIComponent(id)}`,
+    sandboxAccountMovements: (id: string) => `v1/merchant/sandbox/accounts/${encodeURIComponent(id)}/movements`,
+    sandboxReset: "v1/merchant/sandbox/reset",
+    sandboxSeedLinks: "v1/merchant/sandbox/seed-links",
+    sandboxSettlementGenerate: "v1/merchant/sandbox/settlements/generate",
+    sandboxClearingPools: "v1/merchant/sandbox/clearing-pools",
+
     credentialSetsList: "v1/merchant/credential-sets",
     credentialSetDetail: (id: string) => `v1/merchant/credential-sets/${id}`,
 

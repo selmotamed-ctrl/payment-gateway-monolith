@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { env } from "../lib/env";
 import { ApiError, parseOrThrow } from "../lib/error";
-import { callCoreResponse, type CoreCallOptions, type CoreHttpMethod } from "../lib/mtlsClient";
+import { callCoreResponse, type CoreCallOptions, type CoreHttpMethod, type CorePlane } from "../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../lib/net";
 import { resolveRequestId } from "../lib/requestLogger";
 import type { PublicPayload } from "./contract";
@@ -56,6 +56,23 @@ const scalarQuery = (query: Record<string, unknown> | undefined) => {
   return Object.keys(result).length > 0 ? result : undefined;
 };
 
+/**
+ * Resolves the target plane from the request.
+ *
+ * - a `pg_test_*` API token is always Sandbox and `pg_live_*` always Live;
+ * - a portal session carries the switcher's `X-Pg-Env` header;
+ * - otherwise the live pool is used.
+ */
+export const planeOfRequest = (req: Request): CorePlane | undefined => {
+  const header = String(req.headers["x-pg-env"] ?? "").trim().toUpperCase();
+  if (header === "SANDBOX") return "SANDBOX";
+  if (header === "LIVE") return "LIVE";
+  const authorization = req.headers.authorization ?? "";
+  if (authorization.startsWith("Bearer pg_test_")) return "SANDBOX";
+  if (authorization.startsWith("Bearer pg_live_")) return "LIVE";
+  return undefined;
+};
+
 export const requireBearer = (req: Request): string => {
   const authorization = req.headers.authorization;
   if (!authorization) {
@@ -75,6 +92,7 @@ export const coreCallContext = (
   clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
   userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
   authorization: req.headers.authorization,
+  plane: planeOfRequest(req),
 });
 
 export const coreForward =
@@ -113,6 +131,7 @@ export const coreForward =
       clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
       userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
       authorization,
+      plane: planeOfRequest(req),
     });
     for (const header of ["x-pg-served-by", "x-pg-min-lsn"]) {
       const value = response.headers[header];
@@ -139,6 +158,7 @@ export const coreProxyStream =
       clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
       userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
       authorization,
+      plane: planeOfRequest(req),
       timeoutMs: env.POS_STREAM_TIMEOUT_MS,
     });
   };

@@ -24,7 +24,10 @@ CREATE TABLE IF NOT EXISTS fake_transactions (
   gateway_fee_lyd TEXT NOT NULL DEFAULT '0.0000',
   currency TEXT NOT NULL DEFAULT 'LYD',
   collection_mode TEXT NOT NULL,
+  customer_identifier TEXT,
   customer_identifier_masked TEXT,
+  account_id TEXT,
+  held_amount_lyd TEXT,
   expected_otp TEXT,
   status TEXT NOT NULL,
   assigned_fail_phase TEXT,
@@ -102,4 +105,77 @@ CREATE TABLE IF NOT EXISTS fake_portal_audit (
   target TEXT,
   payload_json TEXT NOT NULL,
   created_at TEXT NOT NULL
+);
+
+-- ============================================================================
+-- Stateful Fake Rails v2: customer accounts, holds, movements and clearing.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS fake_accounts (
+  id TEXT PRIMARY KEY,
+  rail_code TEXT NOT NULL,
+  gateway_code TEXT NOT NULL,
+  merchant_id TEXT,
+  instrument_type TEXT NOT NULL DEFAULT 'MOBILE_WALLET',
+  identifier TEXT NOT NULL,
+  holder_name TEXT NOT NULL,
+  secret_pin TEXT NOT NULL DEFAULT '1234',
+  expiry TEXT DEFAULT '12/28',
+  currency TEXT NOT NULL DEFAULT 'LYD',
+  available_balance_lyd TEXT NOT NULL DEFAULT '5000.0000',
+  reserved_balance_lyd TEXT NOT NULL DEFAULT '0.0000',
+  daily_limit_lyd TEXT NOT NULL DEFAULT '10000.0000',
+  daily_spent_lyd TEXT NOT NULL DEFAULT '0.0000',
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  static_otp TEXT,
+  preset_fault TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(rail_code, identifier)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fake_accounts_rail ON fake_accounts(rail_code, status);
+CREATE INDEX IF NOT EXISTS idx_fake_accounts_gateway ON fake_accounts(gateway_code);
+CREATE INDEX IF NOT EXISTS idx_fake_accounts_merchant ON fake_accounts(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_fake_accounts_identifier ON fake_accounts(identifier);
+
+CREATE TABLE IF NOT EXISTS fake_account_holds (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES fake_accounts(id) ON DELETE CASCADE,
+  transaction_id TEXT NOT NULL,
+  amount_lyd TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'HELD',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(transaction_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fake_holds_account ON fake_account_holds(account_id, state);
+
+CREATE TABLE IF NOT EXISTS fake_account_movements (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES fake_accounts(id) ON DELETE CASCADE,
+  transaction_id TEXT,
+  direction TEXT NOT NULL,
+  amount_lyd TEXT NOT NULL,
+  available_before_lyd TEXT NOT NULL,
+  available_after_lyd TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  actor TEXT NOT NULL DEFAULT 'system',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_fake_movements_account ON fake_account_movements(account_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS fake_merchant_clearing_pools (
+  id TEXT PRIMARY KEY,
+  gateway_code TEXT NOT NULL,
+  rail_code TEXT NOT NULL,
+  pending_settlement_lyd TEXT NOT NULL DEFAULT '0.0000',
+  settled_lyd TEXT NOT NULL DEFAULT '0.0000',
+  accumulated_gateway_fee_lyd TEXT NOT NULL DEFAULT '0.0000',
+  tx_count INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  UNIQUE(gateway_code, rail_code)
 );

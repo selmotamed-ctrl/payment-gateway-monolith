@@ -23,6 +23,11 @@ import { defaultScenario, type FailPhase, type RailChaosScenarioConfig, type Rai
 import { deriveOtp } from "../../engine/crypto/FakeCryptoSigner";
 import { webhookDispatcher } from "../../engine/webhooks/WebhookDispatcher";
 import { broadcast } from "../portal/eventHub";
+import {
+  releaseAccountHoldForTransaction,
+  settleAccountForTransaction,
+  type FakeDeclineCode,
+} from "../../engine/accounts/AccountLedgerService";
 
 export interface RailRequestContext {
   request: Request;
@@ -37,6 +42,8 @@ export interface RailRequestContext {
   amountLyd: string;
   currency: string;
   customer: string | null;
+  /** The unmasked customer identifier (phone / PAN / wallet / voucher). */
+  customerRaw: string | null;
   mode: string;
   fault: ChaosDecision | null;
 }
@@ -215,7 +222,10 @@ export const resolveOrCreateTransaction = (input: {
     gateway_fee_lyd: "0.0000",
     currency: (deepFind(body, ["currency", "Currency"]) ?? "LYD").toUpperCase().slice(0, 3),
     collection_mode: input.mode ?? descriptor.collectionModes[0] ?? "OTP_PULL",
+    customer_identifier: customer,
     customer_identifier_masked: maskCustomer(descriptor.gatewayCode, customer),
+    account_id: null,
+    held_amount_lyd: null,
     expected_otp: otp,
     status: "INITIATED",
     assigned_fail_phase: fate.assignedFailPhase,
@@ -274,9 +284,11 @@ export const finalizeFault = (
 ): RailResponse | undefined => {
   switch (fault.failureMode) {
     case "TERMINAL_DECLINE_INSUFFICIENT_FUNDS":
+      releaseAccountHoldForTransaction(context.transaction.id, "Upstream switch declined: insufficient funds");
       updateTransaction(context.transaction.id, { status: "FAILED" });
       return { status: 200, body: failureBody(context, "INSUFFICIENT_FUNDS", "Insufficient funds") };
     case "LIMIT_EXCEEDED_CUSTOMER_CEILING":
+      releaseAccountHoldForTransaction(context.transaction.id, "Upstream switch declined: customer limit exceeded");
       updateTransaction(context.transaction.id, { status: "FAILED" });
       return { status: 200, body: failureBody(context, "LIMIT_EXCEEDED", "Customer limit exceeded") };
     case "WRONG_OTP_RETRYABLE":
@@ -293,10 +305,26 @@ export const finalizeFault = (
       };
     case "AMOUNT_ROUNDING_MISMATCH": {
       const settled = (Number(context.transaction.normalized_amount_lyd) + 0.05).toFixed(4);
+      settleAccountForTransaction({
+        railCode: context.descriptor.railCode,
+        gatewayCode: context.descriptor.gatewayCode,
+        identifier: context.customerRaw,
+        transactionId: context.transaction.id,
+        amountLyd: context.transaction.normalized_amount_lyd,
+        settledAmountLyd: settled,
+      });
       updateTransaction(context.transaction.id, { status: "PAID", settled_amount_lyd: settled });
       return { status: 200, body: { ...successBase(context), status: "PAID", settled_amount: settled } };
     }
     case "CONFLICTING_WEBHOOK_VS_INQUIRY":
+      settleAccountForTransaction({
+        railCode: context.descriptor.railCode,
+        gatewayCode: context.descriptor.gatewayCode,
+        identifier: context.customerRaw,
+        transactionId: context.transaction.id,
+        amountLyd: context.transaction.normalized_amount_lyd,
+        settledAmountLyd: context.transaction.normalized_amount_lyd,
+      });
       updateTransaction(context.transaction.id, { status: "PAID", inquiry_override_status: "FAILED" });
       void dispatchSuccessWebhook(context, "payment.paid");
       return { status: 200, body: { ...successBase(context), status: "PAID" } };
@@ -335,6 +363,23 @@ export const successResponse = (
   status: string,
   extra: Record<string, unknown> = {},
 ): RailResponse => {
+  if (status === "PAID") {
+    const settlement = settleAccountForTransaction({
+      railCode: context.descriptor.railCode,
+      gatewayCode: context.descriptor.gatewayCode,
+      identifier: context.customerRaw,
+      transactionId: context.transaction.id,
+      amountLyd: context.transaction.normalized_amount_lyd,
+      settledAmountLyd: context.transaction.settled_amount_lyd ?? context.transaction.normalized_amount_lyd,
+    });
+    if (!settlement.allowed) {
+      updateTransaction(context.transaction.id, { status: "FAILED" });
+      return {
+        status: 200,
+        body: declineBody(context, settlement.declineCode ?? "INSUFFICIENT_FUNDS", settlement.declineMessage ?? "Declined by account balance/limit check"),
+      };
+    }
+  }
   updateTransaction(context.transaction.id, {
     status,
     settled_amount_lyd: status === "PAID" ? context.transaction.normalized_amount_lyd : null,
@@ -344,6 +389,25 @@ export const successResponse = (
     body: { ...successBase(context), status, success: true, ActionCode: status === "PAID" ? "00" : "00", ...extra },
   };
 };
+
+/**
+ * Builds the customer-facing decline for a balance/limit/status check. The
+ * ActionCode mirrors the real Libyan switches (51 = insufficient funds,
+ * 61 = limit exceeded, 05 = do not honour).
+ */
+export const declineBody = (
+  context: RailRequestContext,
+  code: FakeDeclineCode,
+  message: string,
+): Record<string, unknown> => ({
+  ...successBase(context),
+  status: "FAILED",
+  success: false,
+  error: code,
+  error_code: code,
+  message,
+  ActionCode: code === "LIMIT_EXCEEDED" ? "61" : code === "ACCOUNT_FROZEN" ? "05" : "51",
+});
 
 export const dispatchSuccessWebhook = async (
   context: RailRequestContext,

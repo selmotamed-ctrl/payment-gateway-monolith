@@ -140,7 +140,7 @@ describe.skipIf(!dbAvailable)("report engine migration safety", () => {
     expect(execute.status).toBe(409);
     expect(execute.json.code).toBe("REPORT_NEEDS_MIGRATION");
 
-    const migration = await app.request("GET", "/internal/admin/report-engine/specs/needs-migration");
+    const migration = await app.request("GET", `/internal/admin/report-engine/specs/needs-migration?search=${encodeURIComponent(code)}&pageSize=200`);
     expect(migration.status).toBe(200);
     const row = (migration.json.specs as Array<Record<string, any>>).find((entry) => entry.code === code);
     expect(row?.compatibility?.status).toBe("NEEDS_MIGRATION");

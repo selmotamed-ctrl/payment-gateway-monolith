@@ -39,6 +39,13 @@ export const loadAppStatus = async () => {
 };
 
 export {
+    activeEnvironment,
+    isSandboxEnvironment,
+    setActiveEnvironment,
+    type PgEnvironment,
+} from "@/state/environment";
+
+export {
     getTheme,
     initTheme,
     resolvedTheme,

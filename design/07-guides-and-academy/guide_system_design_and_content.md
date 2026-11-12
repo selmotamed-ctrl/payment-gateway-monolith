@@ -649,11 +649,17 @@ Every payment company gives us two worlds:
 
 The two worlds have **different** web addresses, **different** secrets and **different** webhook addresses. The platform keeps them completely separate: a sandbox payment can never be posted to the real books, and a sandbox webhook sent to the live address is rejected and raises an alert.
 
+### The LIVE | SANDBOX switch
+The Back Office and the Merchant Portal carry a **LIVE | SANDBOX** switch at the top of the page. The switch changes which world every screen reads and writes: wallets, applications, payment links, payments, reports and approvals. A sandbox link starts with `sbx_`; a live link starts with `pay_`. A sandbox API token starts with `pg_test_`; a live token starts with `pg_live_`. Presenting one world's token or link to the other is refused.
+
+### The parallel sandbox plane
+In a production installation the sandbox is a **separate service and database**. The live engine is started with the Live plane and receives no Fake Rails host at all. The sandbox engine runs only on its own host, reads only `payment_gateway_sandbox`, and may call only the co-hosted Fake Rails emulator. The database itself refuses a sandbox row on the live database and a live row on the sandbox database.
+
 :::warning Always check the badge
 Before you act on any payment, case or gateway screen, check whether it says `SANDBOX` or `LIVE`. Acting on live data believing it is practice (or the reverse) is a classic mistake. Never use real customer data in sandbox.
 :::
 
-A merchant who has not yet been approved may use the sandbox only. A **Fake Rails** testing service exists for internal drills; it must never run in production (Book 12).
+A merchant who has not yet been approved may use the sandbox only. An approved merchant can keep using the sandbox for new developers and new rails. A **Fake Rails** testing service exists for internal drills; it must never receive live credentials (Book 12).
 @@end
 
 @@article id=b01-09 book=1 order=9 title="Why we write money down twice (a first look)" roles=ALL minutes=1 ui=AVAILABLE related=b08-01
@@ -5542,11 +5548,33 @@ Every gateway has a sandbox environment on the partner's side. A gateway is our 
 
 The Employee Academy labs use it.
 
+### Stateful Fake Rails accounts
+Fake Rails is not a random yes/no machine. Every test phone number, card, bank account and wallet has a real balance, a daily limit, a status and a hold history:
+* **Hold** when a payment starts: the amount is reserved and the available balance falls.
+* **Capture** when the payment is confirmed: the reservation becomes a real sandbox debit and the daily spend rises.
+* **Release** when the payment is cancelled or declined: the money returns to the available balance.
+* **Refund** when a captured payment is refunded: the amount is credited back to the customer account.
+
+Five canonical test personas exist for every rail: a rich account (50,000 LYD), a standard account (1,500 LYD), a low-balance account (5 LYD), an account with only 5 LYD left on its daily limit, and a frozen account. A frozen account, an amount above the balance, or an amount above the remaining daily limit produces a realistic decline (`ACCOUNT_FROZEN`, `INSUFFICIENT_FUNDS` or `LIMIT_EXCEEDED`). Unknown phone numbers and cards are auto-created with a 2,500 LYD balance so ad-hoc tests are controllable too.
+
+### The Checkout Inspector
+When a merchant, developer or tester opens a **sandbox** payment link, the checkout page shows a **Fake Rails Secret & Account Balance Inspector**. It can:
+* show and auto-fill every test account and its PIN/CVV;
+* set a balance to zero, to the exact link amount, or add 5,000 LYD;
+* freeze or unfreeze an account and show its movements;
+* reveal the live OTP and auto-confirm it (or deliberately submit a wrong OTP);
+* approve or reject a push/QR payment, approve with a small amount mismatch, replay a duplicate webhook, or fire a tampered webhook.
+
+The inspector never appears on a live link. An application can set it to `OPEN_IN_SANDBOX`, `PIN_PROTECTED` or `DISABLED`.
+
+### Workspace controls
+`Sandbox & Developers → Sandbox Test Accounts` in the Merchant Portal adds three controls: the account manager, a settlement-statement generator that runs the reconciliation ingestor, and a workspace reset that removes the merchant's sandbox attempts and links and restores the canonical balances. A reset never touches the live database or the immutable ledger.
+
 ### Rules
-* Fake Rails must **never run in production**. It is protected by explicit switches and allowed-host lists; a production deployment must leave them off.
-* Never point live credentials at it.
+* Fake Rails must **never receive live credentials**, and the live engine must never be configured to call it. A production deployment may run the parallel sandbox plane, which keeps the live engine and the live database behind a hard fence.
 * Never use real customer data in any test environment.
 * Always check the **SANDBOX/LIVE** badge before acting.
+* A sandbox API token (`pg_test_`) is refused on the live plane, and a live token (`pg_live_`) is refused on the sandbox plane.
 @@end
 
 @@article id=b12-07 book=12 order=7 title="Releases, rollback, backups and health checks" roles=SECURITY_ADMIN,GATEWAY_ADMIN minutes=3 ui=AVAILABLE related=b12-05,b12-08,b12-09,b12-10,b12-11

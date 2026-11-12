@@ -322,6 +322,23 @@ auto-detect the tier. Core and backup daemon receive
 `OBJECT_STORAGE_DAEMON_URL` plus `object-storage-client` mTLS paths, and the
 core receives `CLUSTER_CORE_NODE_COUNT` and the KEK keyring.
 
+## Parallel Sandbox Plane (schema 38)
+
+Optional keys: `SANDBOX_ENABLED`, `SANDBOX_MANAGE_VIA_SSH`, `SANDBOX_NODE`
+(`nodeId@sshHost:sshPort:privateIp:servicePort`), `SANDBOX_SSH_*`,
+`SANDBOX_CORE_PORT` (4005), `SANDBOX_REMOTE_DIR`, `SANDBOX_DB_HOST`,
+`SANDBOX_DB_PORT`, `SANDBOX_DB_NAME` (`payment_gateway_sandbox`),
+`SANDBOX_DB_USER/PASSWORD`, `SANDBOX_APP_USER/PASSWORD`,
+`SANDBOX_REDIS_DB_INDEX`.
+`sandboxPlaneConfigured()` is true when `SANDBOX_ENABLED`,
+`SANDBOX_MANAGE_VIA_SSH` or `SANDBOX_NODE` is set. In production,
+`FAKE_RAILS_ENABLED` is refused unless the sandbox plane is configured and
+`SANDBOX_DB_NAME` differs from the live database. The planner emits a
+`core-sandbox` role/service with the `core-sandbox` certificate, the sandbox
+database URL, `EXECUTION_PLANE=SANDBOX` and only the sandbox database/object
+storage reachability. Live core receives `EXECUTION_PLANE=LIVE` and no Fake
+Rails host. Edges receive `SANDBOX_CORE_BACK_URLS=https://<sandboxIp>:4005`.
+
 ## Host Planner
 
 > Status: `implemented` · Last verified: 2026-11-05
@@ -1573,6 +1590,19 @@ probes `systemctl is-active pg-object-storage-daemon` on the storage host and
 `GET /v1/health` over mTLS from every core host and the backup host. The deploy
 fails before any core is touched when multiple core nodes or a separate backup
 host are configured without `OBJECT_STORAGE_NODE`.
+
+## Sandbox deployment (schema 38)
+
+`deployTargets` adds `core-sandbox` after the live core. `deployService`
+generates Prisma for both database cores; the sandbox owner URL comes from
+`SANDBOX_DB_*`. After the first-node migration the deploy runs
+`bun run set-execution-plane LIVE|SANDBOX` through the owner env file, so each
+database carries its plane marker and (for sandbox) the strict fence. The
+storage step creates the sandbox role/database on the sandbox host when
+`SANDBOX_DB_HOST` is the sandbox node (an external host is a documented manual
+step). Step 12 seeds Fake Rails blueprints and synthetic history on the
+sandbox core, never on the live core, when the plane is configured. Verification
+probes every `core-sandbox` node with the `core-sandbox` certificate.
 
 ## Storage Provisioners
 

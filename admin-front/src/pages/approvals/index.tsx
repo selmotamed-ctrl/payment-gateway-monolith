@@ -24,6 +24,7 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
+import { activeEnvironment } from "@/state/environment";
 import ApprovalHelpPanel from "./components/ApprovalHelpPanel";
 import {
     APPROVAL_BLOCK_REASON_HELP,
@@ -466,6 +467,31 @@ const ApprovalsPage = dc(() => {
                         ? t("Approved and queued for execution")
                         : t("Approved")
                     : t("Rejected"),
+            });
+            refreshAll();
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            actionLoading.value = false;
+        }
+    };
+
+    const sandboxFastApprove = async () => {
+        if (!selected.value) return;
+        if (!decisionChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all decision checklist items before deciding") });
+            return;
+        }
+        actionLoading.value = true;
+        try {
+            const response = await api.post(urlsMap.approvalSandboxFastApprove(selected.value.id), {
+                checklist: APPROVAL_CHECKS.filter((check) => decisionChecklist.value[check.key]).map((check) => check.key),
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            closeDetails();
+            showSnackBar({
+                type: "success",
+                message: payload.status === "QUEUED" ? t("Approved and queued for execution") : t("Approved"),
             });
             refreshAll();
         } catch (error) {
@@ -1089,6 +1115,17 @@ const ApprovalsPage = dc(() => {
                                             >
                                                 {t("Reject")}
                                             </VBtn>
+                                            {activeEnvironment.value === "SANDBOX" ? (
+                                                <VBtn
+                                                    color="warning"
+                                                    variant="tonal"
+                                                    disabled={!canReject.value || !decisionChecklistComplete.value}
+                                                    loading={actionLoading.value}
+                                                    onClick={() => void sandboxFastApprove()}
+                                                >
+                                                    {t("Sandbox Fast-Track Approve")}
+                                                </VBtn>
+                                            ) : null}
                                             <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
                                         </ThemedView>
                                     </SurfaceCardText>

@@ -279,3 +279,12 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 ## Gap resolutions (2026-11-05)
 
 - The checkout upstream client uses the same `CORE_FAILURE_THRESHOLD = 3` consecutive-failure threshold before a core node leaves rotation (GAP-021). Checkout sessions use the `payment-gateway-checkout` audience (GAP-020).
+
+## Dual-pool sandbox routing (schema 38)
+
+`/api/v1/pay/:linkKey` selects the sandbox pool when the key starts with
+`sbx_`, and forwards `x-pg-env: SANDBOX` plus the optional
+`x-pg-sandbox-pin`. The three sandbox-only endpoints (accounts list, account
+patch, simulator) refuse a non-`sbx_` key at the edge with `403
+SANDBOX_ONLY_ENDPOINT`. `/inbound/:gateway/:env/:pathToken` routes
+`sandbox|test|uat` to the sandbox pool and `live|production` to the live pool.

@@ -29,8 +29,27 @@ export const getDb = (): Database => {
   db.exec("PRAGMA synchronous = NORMAL;");
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec(schemaSql);
+  ensureAccountColumns(db);
   instance = db;
   return db;
+};
+
+/**
+ * `CREATE TABLE IF NOT EXISTS` cannot add columns to a database created by an
+ * older release. These additive migrations make the stateful v2 schema safe to
+ * roll out over an existing SQLite file.
+ */
+const ensureColumn = (db: Database, table: string, column: string, definition: string): void => {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((entry) => entry.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+  }
+};
+
+const ensureAccountColumns = (db: Database): void => {
+  ensureColumn(db, "fake_transactions", "customer_identifier", "TEXT");
+  ensureColumn(db, "fake_transactions", "account_id", "TEXT");
+  ensureColumn(db, "fake_transactions", "held_amount_lyd", "TEXT");
 };
 
 export const closeDb = (): void => {
@@ -72,7 +91,10 @@ export interface FakeTransactionRow {
   gateway_fee_lyd: string;
   currency: string;
   collection_mode: string;
+  customer_identifier: string | null;
   customer_identifier_masked: string | null;
+  account_id: string | null;
+  held_amount_lyd: string | null;
   expected_otp: string | null;
   status: string;
   assigned_fail_phase: string | null;
@@ -108,16 +130,18 @@ export const insertTransaction = (row: FakeTransactionRow): void => {
       `INSERT OR REPLACE INTO fake_transactions (
         id, gateway_code, rail_code, env, our_reference, provider_reference, network_reference,
         idempotency_key, requested_amount_wire, normalized_amount_lyd, settled_amount_lyd,
-        gateway_fee_lyd, currency, collection_mode, customer_identifier_masked, expected_otp,
-        status, assigned_fail_phase, assigned_failure_mode, inquiry_override_status,
-        return_url, cancel_url, webhook_url, is_seeded_historical, created_at, updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        gateway_fee_lyd, currency, collection_mode, customer_identifier, customer_identifier_masked,
+        account_id, held_amount_lyd, expected_otp, status, assigned_fail_phase, assigned_failure_mode,
+        inquiry_override_status, return_url, cancel_url, webhook_url, is_seeded_historical,
+        created_at, updated_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
     .run(
       row.id, row.gateway_code, row.rail_code, row.env, row.our_reference, row.provider_reference,
       row.network_reference, row.idempotency_key, row.requested_amount_wire, row.normalized_amount_lyd,
       row.settled_amount_lyd, row.gateway_fee_lyd, row.currency, row.collection_mode,
-      row.customer_identifier_masked, row.expected_otp, row.status, row.assigned_fail_phase,
+      row.customer_identifier ?? null, row.customer_identifier_masked, row.account_id ?? null,
+      row.held_amount_lyd ?? null, row.expected_otp, row.status, row.assigned_fail_phase,
       row.assigned_failure_mode, row.inquiry_override_status, row.return_url, row.cancel_url,
       row.webhook_url, row.is_seeded_historical, row.created_at, row.updated_at,
     );

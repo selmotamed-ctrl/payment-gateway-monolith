@@ -141,6 +141,12 @@ const router = createRouter({
                     component: () => import("@/pages/credentials/index"),
                 },
                 {
+                    path: "sandbox/accounts",
+                    name: "SandboxAccounts",
+                    component: () => import("@/pages/sandbox/accounts/index"),
+                    meta: { requiresAuth: true },
+                },
+                {
                     path: "team",
                     name: "Team",
                     component: () => import("@/pages/team/index"),

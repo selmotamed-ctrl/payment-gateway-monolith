@@ -2307,7 +2307,7 @@ Questions: c-l-m10-2-1, c-l-m10-2-2
 - Describe the five server roles and who may connect to each.
 - Explain who holds which key and why a hacked edge host gains little.
 - Explain what the deployment tool does when the end-to-end check fails (it stops, and rollback is manual).
-- Explain Fake Rails and why it never runs in production.
+- Explain Fake Rails, the parallel sandbox plane and why the live engine can never reach it.
 
 ### Key ideas
 - **The platform has five server roles, on one to five physical servers.** The roles are database, core, admin, merchant and checkout. The core is the service that holds the rules and the money records. The three outer services (admin, merchant, checkout) are called edge hosts. The database host never shares an address with the core.
@@ -2315,7 +2315,7 @@ Questions: c-l-m10-2-1, c-l-m10-2-2
 - **Mutual TLS means both sides show an identity card.** Our own authority signs the cards. The authority's private key never leaves the deployment workstation. Each edge host gets the authority's public certificate and only its own client certificate and key. So a hacked checkout host cannot pose as the admin or merchant service.
 - **Only the core holds the database credentials and the master key.** The master key protects every stored secret. Edge hosts never receive either. The file `deploy.env` drives deployment and contains secrets, so it is never committed to a repository and never pasted into chat.
 - **A deployment runs twelve steps in order.** Before database changes, it takes a compressed backup. Restoring it is a manual operator decision. Near the end, an end-to-end check makes each edge prove its identity to the core with a mutual-TLS handshake. If it fails, the tool stops with an error. The new release stays current. The previous release is still on disk, but going back is a manual step by an operator. There is no automatic rollback. A plain `pm2 restart` keeps the release path the service already uses.
-- **Fake Rails imitates payment companies for drills and never runs in production.** It can behave badly on purpose, with timeouts, wrong codes or forged messages. Production needs explicit switches to run it, and must leave them off. Never point live credentials at it, and always check the SANDBOX/LIVE badge.
+- **Fake Rails imitates payment companies for drills and never receives live credentials.** It can behave badly on purpose, with timeouts, wrong codes or forged messages. In a production installation it runs only in the **parallel sandbox plane**: a separate `pg-core-sandbox` process, a separate `payment_gateway_sandbox` database and a hard fence between the planes. The live engine receives no Fake Rails host, a `pg_test_` token is refused on the live plane, a `pg_live_` token is refused on the sandbox plane, and the database rejects a sandbox row on the live database. The portals switch worlds with the **LIVE | SANDBOX** control, and every sandbox link starts with `sbx_`.
 
 ### A worked example
 Layla pays 25.500 LYD at Noon Mart. The checkout host handles her page.
@@ -2323,14 +2323,14 @@ Layla pays 25.500 LYD at Noon Mart. The checkout host handles her page.
 2. He tries to act as the admin service. The host has only the checkout client certificate, so the core refuses.
 3. A Gateway Admin deploys a new release. The tool first takes a compressed backup, because database changes are pending.
 4. At the end-to-end check an edge fails its identity check. The tool stops with an error. The new release stays live, so the operators decide whether to roll back by hand.
-5. For a drill, the team uses Fake Rails with sandbox values. It is off in production.
+5. For a drill, the team switches the portal to SANDBOX and uses the Fake Rails account manager or the checkout inspector. The sandbox process and database are separate, so nothing the drill does can reach live money or the live ledger.
 
 Notice that each protection limits the damage from one failure. None depends on a single secret staying safe.
 
 ### Common mistakes
 - **Committing `deploy.env` to a repository.** It holds secrets, and they are then exposed to everyone who can read it.
 - **Keeping the authority's private key on every server.** Anyone who held it could create identity cards for any service.
-- **Running Fake Rails in production, or giving it live secrets.** It is a test tool, and production must leave it off.
+- **Running Fake Rails on the live plane, or giving it live secrets.** It is a test tool; the live plane is fenced away from it and the live database refuses sandbox rows.
 - **Opening the Back Office to a café or the internet.** Only the office network or approved VPN is allowed.
 
 ### Read now

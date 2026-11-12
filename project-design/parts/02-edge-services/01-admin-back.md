@@ -345,3 +345,12 @@ The edge validates identifiers, enums and body shapes, but keeps the core as the
 read/write guards. `assetsRouter` additionally exposes binary
 `POST /assets/upload` (multipart `file` + `name`) and
 `GET /assets/:id/content`, forwarding raw bytes to core.
+
+## Dual-pool sandbox routing (schema 38)
+
+`lib/coreInternalClient.ts` keeps two independent least-in-flight mTLS pools:
+the live pool (`CORE_BACK_URL(S)`) and the sandbox pool
+(`SANDBOX_CORE_BACK_URL(S)`, falling back to live only in single-process
+development). A request with `X-Pg-Env: SANDBOX` is routed exclusively to the
+sandbox pool and carries `x-pg-env: SANDBOX` upstream. `api/forward.ts` also
+accepts `SANDBOX_CORE_BACK_URL` for tests/legacy single-value configuration.

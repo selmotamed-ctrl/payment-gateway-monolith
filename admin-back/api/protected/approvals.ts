@@ -97,6 +97,7 @@ router.post(
           clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
           userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
           authorization: req.headers.authorization,
+          plane: String(req.headers["x-pg-env"] ?? "").trim().toUpperCase() === "SANDBOX" ? "SANDBOX" : undefined,
         });
         const payload = (response.body ?? {}) as Record<string, unknown>;
         if (response.status >= 200 && response.status < 300) {
@@ -149,6 +150,19 @@ router.post(
     // An adjustment approval is executed by a queued job (`202 Accepted`),
     // every other subject is executed inline (`200 OK`). The edge relays the
     // status that core answered.
+    relayStatus: true,
+  }),
+);
+
+router.post(
+  "/:id/sandbox-fast-approve",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/approvals/${encodeURIComponent(context.params.id ?? "")}/sandbox-fast-approve`,
+    paramsSchema: idParamsSchema,
+    // Core hard-blocks this outside EXECUTION_PLANE=SANDBOX. The synthesized
+    // checker is distinct from the maker, so the invariant still holds.
+    bodyFrom: () => ({}),
     relayStatus: true,
   }),
 );

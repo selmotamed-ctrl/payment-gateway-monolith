@@ -3,6 +3,7 @@ import axios from "axios";
 import { logout, user } from "../user";
 import { sessionHeaders } from "@/utils/security/sessionToken";
 import { extractApiError, isAppSuspendedError } from "@/utils/errors/extractor";
+import { activeEnvironment } from "@/state/environment";
 
 export const api = axios.create({
     baseURL: getBaseUrl(),
@@ -15,6 +16,7 @@ api.interceptors.request.use((config) => {
         config.headers[name] = value;
     }
     config.headers["X-Client-Channel"] = "merchant";
+    config.headers["X-Pg-Env"] = activeEnvironment.value;
     return config;
 });
 

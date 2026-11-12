@@ -1,6 +1,13 @@
 import { env } from "../../lib/env";
 import { updateTransaction } from "../../engine/db";
 import {
+  creditRefundToAccount,
+  releaseAccountHoldForTransaction,
+  reserveAccountFundsForTransaction,
+  type FakeAccountRow,
+} from "../../engine/accounts/AccountLedgerService";
+import {
+  declineBody,
   dispatchSuccessWebhook,
   extractOtp,
   successResponse,
@@ -38,8 +45,51 @@ const awaitingBody = (context: RailRequestContext, extra: Record<string, unknown
   };
 };
 
-/** OTP initiation: returns a process id and the generated OTP. */
-export const otpInitiate: RailHandler = (context) => awaitingBody(context);
+const reserveOrDecline = (
+  context: RailRequestContext,
+): { declined: RailResponse } | { account: FakeAccountRow } => {
+  const hold = reserveAccountFundsForTransaction({
+    railCode: context.descriptor.railCode,
+    gatewayCode: context.descriptor.gatewayCode,
+    identifier: context.customerRaw,
+    transactionId: context.transaction.id,
+    amountLyd: context.transaction.normalized_amount_lyd,
+  });
+  if (!hold.allowed) {
+    updateTransaction(context.transaction.id, { status: "FAILED" });
+    return {
+      declined: {
+        status: 200,
+        body: declineBody(
+          context,
+          hold.declineCode ?? "INSUFFICIENT_FUNDS",
+          hold.declineMessage ?? "Declined by account balance/limit check",
+        ),
+      },
+    };
+  }
+  if (hold.account.static_otp) {
+    updateTransaction(context.transaction.id, { expected_otp: hold.account.static_otp });
+    context.transaction.expected_otp = hold.account.static_otp;
+  }
+  return { account: hold.account };
+};
+
+const accountWire = (account: FakeAccountRow): Record<string, unknown> => ({
+  account_identifier: account.identifier,
+  account_holder_name: account.holder_name,
+  available_balance_after_hold_lyd: account.available_balance_lyd,
+  reserved_balance_lyd: account.reserved_balance_lyd,
+  daily_spent_lyd: account.daily_spent_lyd,
+  daily_limit_lyd: account.daily_limit_lyd,
+});
+
+/** OTP initiation: checks the account balance and returns the process id + OTP. */
+export const otpInitiate: RailHandler = (context) => {
+  const reservation = reserveOrDecline(context);
+  if ("declined" in reservation) return reservation.declined;
+  return awaitingBody(context, accountWire(reservation.account));
+};
 
 /** OTP confirmation: verifies the OTP then settles. */
 export const otpConfirm: RailHandler = async (context) => {
@@ -67,6 +117,8 @@ export const otpConfirm: RailHandler = async (context) => {
 
 /** QR / push / pay-code initiation: awaits a customer action. */
 export const asyncInitiate: RailHandler = (context) => {
+  const reservation = reserveOrDecline(context);
+  if ("declined" in reservation) return reservation.declined;
   const base = `${env.FAKE_RAILS_PUBLIC_BASE_URL.replace(/\/$/, "")}`;
   const qrPayload = `EMVCO|${context.descriptor.railCode}|${context.transaction.provider_reference}|${context.transaction.normalized_amount_lyd}|LYD`;
   return awaitingBody(context, {
@@ -76,11 +128,14 @@ export const asyncInitiate: RailHandler = (context) => {
     push_reference: context.transaction.provider_reference,
     pay_code: context.transaction.expected_otp,
     expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+    ...accountWire(reservation.account),
   });
 };
 
 /** Redirect initiation: returns the hosted checkout URL. */
 export const redirectInitiate: RailHandler = (context) => {
+  const reservation = reserveOrDecline(context);
+  if ("declined" in reservation) return reservation.declined;
   const base = env.FAKE_RAILS_PUBLIC_BASE_URL.replace(/\/$/, "");
   updateTransaction(context.transaction.id, { status: "AWAITING_ACTION" });
   return {
@@ -95,6 +150,7 @@ export const redirectInitiate: RailHandler = (context) => {
       return_url: context.transaction.return_url,
       cancel_url: context.transaction.cancel_url,
       expires_in_seconds: 900,
+      ...accountWire(reservation.account),
     },
   };
 };
@@ -124,7 +180,7 @@ export const inquiry: RailHandler = (context) => {
   };
 };
 
-/** Refund endpoint: succeeds when the transaction is PAID. */
+/** Refund endpoint: succeeds when the transaction is PAID and credits the customer account. */
 export const refund: RailHandler = async (context) => {
   if (context.transaction.status !== "PAID" && context.transaction.status !== "SUCCEEDED") {
     return {
@@ -138,6 +194,11 @@ export const refund: RailHandler = async (context) => {
       },
     };
   }
+  creditRefundToAccount(
+    context.transaction.id,
+    context.transaction.settled_amount_lyd ?? context.transaction.normalized_amount_lyd,
+    "Merchant refund",
+  );
   updateTransaction(context.transaction.id, { status: "REFUNDED", settled_amount_lyd: "0.0000" });
   await dispatchSuccessWebhook(context, "payment.refunded");
   return {
@@ -154,8 +215,9 @@ export const refund: RailHandler = async (context) => {
   };
 };
 
-/** Cancel endpoint. */
+/** Cancel endpoint: releases any reservation. */
 export const cancel: RailHandler = (context) => {
+  releaseAccountHoldForTransaction(context.transaction.id, "Payment cancelled by customer");
   updateTransaction(context.transaction.id, { status: "CANCELLED" });
   return {
     status: 200,

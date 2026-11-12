@@ -422,6 +422,15 @@ export const envSchema = z.strictObject({
   FAKE_RAILS_ENABLED: booleanFromEnvironment.default(false),
   FAKE_RAILS_ALLOW_IN_PRODUCTION: booleanFromEnvironment.default(false),
   IS_TEST_SERVER: booleanFromEnvironment.default(false),
+  /**
+   * Execution plane of this core process. `LIVE` may only talk to real
+   * partner switches and accepts only `pg_live_*` API tokens; `SANDBOX` may
+   * only talk to the co-hosted Fake Rails emulator and accepts only
+   * `pg_test_*` API tokens. Unset keeps the historic single-process
+   * development behaviour (both allowed) and is never written by the deploy
+   * engine.
+   */
+  EXECUTION_PLANE: z.enum(["LIVE", "SANDBOX"]).optional(),
   FAKE_RAILS_PUBLIC_BASE_URL: z.url().optional(),
   ALLOW_FAKE_RAILS_HOSTS: booleanFromEnvironment.default(false),
   /**

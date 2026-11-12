@@ -78,8 +78,58 @@ export type SupportConfig = {
 
 export type FeeBearerMode = "MERCHANT_ABSORBS" | "PAYER_SURCHARGE" | "SPLIT";
 
+export interface SandboxInspectorAccount {
+    id: string;
+    railCode: string;
+    gatewayCode: string;
+    instrumentType: string;
+    identifier: string;
+    holderName: string;
+    secretPin: string;
+    expiry: string | null;
+    currency: string;
+    availableBalanceLyd: string;
+    reservedBalanceLyd: string;
+    dailyLimitLyd: string;
+    dailySpentLyd: string;
+    status: string;
+    notes: string | null;
+}
+
+export interface SandboxActiveAttemptSecrets {
+    ourReference: string;
+    providerReference: string;
+    expectedOtp: string | null;
+    collectionMode: string;
+    boundAccountId?: string | null;
+    boundAccountIdentifier: string | null;
+    boundAccountBalanceAfterHoldLyd: string | null;
+    heldAmountLyd: string | null;
+    qrPayload?: string | null;
+    deepLinkUrl?: string | null;
+    redirectUrl?: string | null;
+    canSimulateMobilePushOrQrApproval: boolean;
+    recentWireEvents?: Array<{
+        phase: string;
+        status: number | null;
+        fault: string | null;
+        durationMs: number;
+        createdAt: string;
+    }>;
+}
+
+export interface SandboxCheckoutInspectorPayload {
+    enabled: boolean;
+    mode: "OPEN_IN_SANDBOX" | "PIN_PROTECTED" | "DISABLED";
+    unlocked: boolean;
+    railAccounts: SandboxInspectorAccount[];
+    activeAttemptSecrets?: SandboxActiveAttemptSecrets | null;
+}
+
 export type PayLinkSummary = {
     linkKey: string;
+    env?: "LIVE" | "SANDBOX";
+    sandboxInspector?: SandboxCheckoutInspectorPayload;
     merchantTradeName: string;
     merchantLogoUrl?: string | null;
     description?: string | null;
@@ -180,6 +230,8 @@ export type AttemptSnapshot = {
     substatus?: string | null;
     clientAction?: ClientAction | null;
     publicOutputs?: Record<string, unknown>;
+    env?: "LIVE" | "SANDBOX";
+    sandboxInspector?: SandboxCheckoutInspectorPayload;
     createdAt?: string;
     updatedAt?: string;
 };

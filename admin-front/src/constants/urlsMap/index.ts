@@ -106,6 +106,7 @@ export const urlsMap = {
     approvalsSummaryExport: "v1/admin/approvals/summary/export",
     approvalDetail: (id: string) => `v1/admin/approvals/${id}`,
     approvalApprove: (id: string) => `v1/admin/approvals/${id}/approve`,
+    approvalSandboxFastApprove: (id: string) => `v1/admin/approvals/${id}/sandbox-fast-approve`,
     approvalReject: (id: string) => `v1/admin/approvals/${id}/reject`,
     approvalsBulkReject: "v1/admin/approvals/bulk-reject",
     approvalsExport: "v1/admin/approvals/export",

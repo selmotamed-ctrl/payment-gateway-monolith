@@ -80,7 +80,16 @@ export const verifyPasswordOrDummy = async (
 export const hashAccessToken = (token: string): string =>
   createHash("sha256").update(token, "utf8").digest("hex");
 
-export const generateAccessToken = (): string => `pg_live_${randomBytes(32).toString("base64url")}`;
+export type ApiTokenPlane = "LIVE" | "SANDBOX";
+
+/**
+ * API tokens are plane-tagged: `pg_live_*` for the Live production plane and
+ * `pg_test_*` for the parallel Sandbox plane. A token from one plane is
+ * rejected by the other before it is hashed or looked up.
+ */
+export const generateAccessToken = (
+  plane: ApiTokenPlane = process.env.EXECUTION_PLANE === "SANDBOX" ? "SANDBOX" : "LIVE",
+): string => `${plane === "SANDBOX" ? "pg_test_" : "pg_live_"}${randomBytes(32).toString("base64url")}`;
 
 export const hashMfaCode = (userId: string, code: string): string =>
   createHmac("sha256", mfaKey).update(`${userId}:${code}`, "utf8").digest("hex");

@@ -4,6 +4,7 @@ import { logout, user } from "../user";
 import { sessionHeaders } from "@/utils/security/sessionToken";
 import { extractApiError, isAppSuspendedError } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { activeEnvironment } from "@/state/environment";
 import router from "@/router";
 
 export const api = axios.create({
@@ -17,6 +18,7 @@ api.interceptors.request.use((config) => {
         config.headers[name] = value;
     }
     config.headers["X-Client-Channel"] = "admin";
+    config.headers["X-Pg-Env"] = activeEnvironment.value;
     return config;
 });
 

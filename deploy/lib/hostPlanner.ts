@@ -8,6 +8,7 @@ import {
   parseNodeList,
   pgStorageConfigured,
   withIpv6Loopback,
+  sandboxPlaneConfigured,
   type DeployConfig,
   type DeployRole,
   type HostRole,
@@ -24,7 +25,7 @@ import {
 
 export type ServiceName = string;
 export type NginxSiteName = "admin-lan" | "merchant-public" | "checkout-public" | "merchant-lan" | "checkout-lan" | "fake-rails";
-export type CertBundle = "core-server" | "admin-client" | "merchant-client" | "checkout-client" | "fake-rails-server" | "backup-server" | "backup-client" | "wal-archive-client" | "pg-client" | "redis-client" | "audit-db-client" | "log-db-client" | "object-storage-server" | "object-storage-client";
+export type CertBundle = "core-server" | "core-sandbox-server" | "admin-client" | "merchant-client" | "checkout-client" | "fake-rails-server" | "backup-server" | "backup-client" | "wal-archive-client" | "pg-client" | "redis-client" | "audit-db-client" | "log-db-client" | "object-storage-server" | "object-storage-client";
 
 export interface SshTarget {
   host: string;
@@ -75,7 +76,7 @@ export interface FirewallRulePlan {
   comment: string;
 }
 
-export type ComputeNodeRole = "core" | "admin" | "merchant" | "checkout";
+export type ComputeNodeRole = "core" | "core-sandbox" | "admin" | "merchant" | "checkout";
 
 export interface NodePlan {
   nodeId: string;
@@ -161,6 +162,7 @@ export interface DeployPlan {
   };
   nodes: {
     core: NodePlan[];
+    "core-sandbox": NodePlan[];
     admin: NodePlan[];
     merchant: NodePlan[];
     checkout: NodePlan[];
@@ -181,6 +183,7 @@ const ROLE_ORDER: Record<HostRole, number> = {
   backup: 1,
   "object-storage": 1,
   core: 2,
+  "core-sandbox": 2,
   "fake-rails": 3,
   admin: 4,
   merchant: 5,
@@ -190,6 +193,7 @@ const ROLE_ORDER: Record<HostRole, number> = {
 const ROLE_LABEL: Record<HostRole, string> = {
   db: "database",
   core: "core-back",
+  "core-sandbox": "core-sandbox (parallel sandbox plane)",
   "fake-rails": "fake-rails-back + fake-rails-front",
   admin: "admin-back + admin-front",
   merchant: "merchant-back + merchant-front",
@@ -226,6 +230,48 @@ const allCorePrivateIps = (config: DeployConfig): string[] => {
   const nodes = parseNodeList(config.CORE_NODES);
   if (nodes.length > 0) return nodes.map((node) => node.privateIp);
   return config.CORE_PRIVATE_IP ? [config.CORE_PRIVATE_IP] : [];
+};
+
+const coreAndSandboxIps = (config: DeployConfig): string[] => {
+  const sandbox = sandboxPlaneConfigured(config) ? sandboxPrivateIp(config) : null;
+  return [...new Set([...allCorePrivateIps(config), ...(sandbox ? [sandbox] : [])])];
+};
+
+const sandboxNodeSpec = (config: DeployConfig): NodeSpec | null =>
+  parseNodeList(config.SANDBOX_NODE)[0] ?? null;
+
+/** The private address of the sandbox core / Fake Rails host. */
+export const sandboxPrivateIp = (config: DeployConfig): string | null =>
+  sandboxNodeSpec(config)?.privateIp ?? (config.SANDBOX_PRIVATE_IP || null);
+
+/** Edge upstream list for the parallel sandbox plane. */
+export const sandboxCoreUrls = (config: DeployConfig): string[] => {
+  const ip = sandboxPrivateIp(config);
+  if (!ip || !sandboxPlaneConfigured(config)) return [];
+  const port = sandboxNodeSpec(config)?.servicePort ?? config.SANDBOX_CORE_PORT;
+  return [`https://${ip}:${port}`];
+};
+
+export const sandboxDatabase = (config: DeployConfig): { host: string; port: number; name: string; user: string; password: string; url: string; directUrl: string; appUrl: string | null } | null => {
+  if (!sandboxPlaneConfigured(config)) return null;
+  const host = config.SANDBOX_DB_HOST || sandboxPrivateIp(config) || "";
+  const password = config.SANDBOX_DB_PASSWORD ?? "";
+  const name = config.SANDBOX_DB_NAME;
+  const user = config.SANDBOX_DB_USER;
+  return {
+    host,
+    port: config.SANDBOX_DB_PORT,
+    name,
+    user,
+    password,
+    // The sandbox database is deploy-managed on its own host or on the primary;
+    // the per-cluster certificate is self-signed, so encrypt without verify.
+    url: `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${config.SANDBOX_DB_PORT}/${name}?sslmode=no-verify`,
+    directUrl: `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${config.SANDBOX_DB_PORT}/${name}?sslmode=no-verify`,
+    appUrl: config.SANDBOX_APP_PASSWORD
+      ? `postgresql://${encodeURIComponent(config.SANDBOX_APP_USER)}:${encodeURIComponent(config.SANDBOX_APP_PASSWORD)}@${host}:${config.SANDBOX_DB_PORT}/${name}?sslmode=no-verify`
+      : null,
+  };
 };
 
 const allEdgePrivateIps = (config: DeployConfig): string[] => {
@@ -381,6 +427,10 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
     TRUST_PROXY: "false",
     LOG_LEVEL: "info",
     WORKER_ENABLED: "true",
+    // The live process is hard-fenced away from the sandbox plane only when a
+    // parallel sandbox is configured; a single-plane development/staging stack
+    // keeps the historic unset behaviour so its Fake Rails test flow works.
+    ...(sandboxPlaneConfigured(config) ? { EXECUTION_PLANE: "LIVE" } : {}),
     ...(redisUrl ? { REDIS_URL: redisUrl } : {}),
     ...storageEnv(config),
     // An explicit session endpoint for an external database / custom pooler
@@ -390,10 +440,10 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
       : {}),
     ...backupCoreEnv(config),
     ...objectStorageCoreEnv(config),
-    FAKE_RAILS_ENABLED: config.FAKE_RAILS_ENABLED ? "true" : "false",
+    FAKE_RAILS_ENABLED: sandboxPlaneConfigured(config) ? "false" : (config.FAKE_RAILS_ENABLED ? "true" : "false"),
     FAKE_RAILS_ALLOW_IN_PRODUCTION: config.FAKE_RAILS_ALLOW_IN_PRODUCTION ? "true" : "false",
     IS_TEST_SERVER: config.IS_TEST_SERVER ? "true" : "false",
-    ...(config.FAKE_RAILS_ENABLED
+    ...(config.FAKE_RAILS_ENABLED && !sandboxPlaneConfigured(config)
       ? {
           FAKE_RAILS_PUBLIC_BASE_URL: config.FAKE_RAILS_PUBLIC_BASE_URL,
           ALLOW_FAKE_RAILS_HOSTS: "true",
@@ -408,6 +458,66 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
       ? {
           SYNTHETIC_SEED_PROFILE: config.SYNTHETIC_SEED_PROFILE,
           SYNTHETIC_SEED_KEY: config.SYNTHETIC_SEED_KEY,
+          SYNTHETIC_SEED_YEARS_SPAN: String(config.SYNTHETIC_YEARS_SPAN),
+        }
+      : {}),
+  };
+};
+
+/**
+ * The isolated sandbox core. It never receives the live database URL, the live
+ * PgBouncer aliases or an edge/client certificate. It may only reach the
+ * co-hosted Fake Rails emulator.
+ */
+const sandboxCoreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> => {
+  const database = sandboxDatabase(config);
+  const sandboxSpec = sandboxNodeSpec(config);
+  const allowedHosts = [
+    config.FAKE_RAILS_PUBLIC_BASE_URL,
+    ...fakeRailsAllowedHosts(config),
+  ].filter(Boolean);
+  return {
+    NODE_ENV: "production",
+    HOST: "0.0.0.0",
+    PORT: String(node?.port ?? sandboxSpec?.servicePort ?? config.SANDBOX_CORE_PORT),
+    EXECUTION_PLANE: "SANDBOX",
+    ...(node ? { NODE_ID: node.nodeId, NODE_PRIVATE_IP: node.privateIp } : {}),
+    DATABASE_URL: database?.appUrl ?? database?.directUrl ?? "",
+    LEADER_ELECTION_DATABASE_URL: database?.appUrl ?? database?.directUrl ?? "",
+    PGBOUNCER_ENABLED: "false",
+    MTLS_CA_CERT_PATH: "shared/certs/internal-ca.crt",
+    MTLS_SERVER_CERT_PATH: "shared/certs/core-sandbox.crt",
+    MTLS_SERVER_KEY_PATH: "shared/certs/core-sandbox.key",
+    KMS_MASTER_KEY: config.KMS_MASTER_KEY,
+    STORAGE_SHARD_COUNT: String(config.STORAGE_SHARD_COUNT),
+    READ_REPLICA_MAX_LAG_MS: String(config.READ_REPLICA_MAX_LAG_MS),
+    KYB_SCANNER_MODE: "eicar",
+    KYB_RESCAN_DAYS: String(config.KYB_RESCAN_DAYS),
+    TRUST_PROXY: "false",
+    LOG_LEVEL: "info",
+    WORKER_ENABLED: "true",
+    // The sandbox plane writes its own audit and log rows into its own
+    // database, so a sandbox audit can never be confused with a live one.
+    ...(database ? { AUDIT_DATABASE_URL: database.directUrl, LOG_DATABASE_URL: database.directUrl } : {}),
+    FAKE_RAILS_ENABLED: "true",
+    FAKE_RAILS_ALLOW_IN_PRODUCTION: "true",
+    IS_TEST_SERVER: config.IS_TEST_SERVER ? "true" : "false",
+    ALLOW_FAKE_RAILS_HOSTS: "true",
+    FAKE_RAILS_PUBLIC_BASE_URL: config.FAKE_RAILS_PUBLIC_BASE_URL,
+    FAKE_RAILS_ALLOWED_HOSTS: config.FAKE_RAILS_ALLOWED_HOSTS,
+    FAKE_RAILS_SEEDER_TOKEN: config.FAKE_RAILS_SEEDER_TOKEN ?? "",
+    ...(config.FAKE_RAILS_SSL ? { NODE_EXTRA_CA_CERTS: "shared/certs/internal-ca.crt" } : {}),
+    ...(config.REDIS_URL || parseNodeList(config.REDIS_NODES).length > 0
+      ? {
+          REDIS_URL: config.REDIS_URL
+            ?? `redis://:${config.REDIS_PASSWORD}@${parseNodeList(config.REDIS_NODES)[0]!.privateIp}:${parseNodeList(config.REDIS_NODES)[0]!.servicePort}/${config.SANDBOX_REDIS_DB_INDEX}`,
+        }
+      : {}),
+    ...objectStorageCoreEnv(config),
+    ...(config.RUN_SYNTHETIC_HISTORY_SEED
+      ? {
+          SYNTHETIC_SEED_PROFILE: config.SYNTHETIC_SEED_PROFILE,
+          SYNTHETIC_SEED_KEY: `${config.SYNTHETIC_SEED_KEY}-sandbox`,
           SYNTHETIC_SEED_YEARS_SPAN: String(config.SYNTHETIC_YEARS_SPAN),
         }
       : {}),
@@ -469,6 +579,9 @@ const edgeEnv = (
     NODE_ENV: "production",
     CORE_BACK_URLS: coreUrls.join(","),
     CORE_BACK_URL: coreUrls[0] ?? "",
+    ...(sandboxCoreUrls(config).length > 0
+      ? { SANDBOX_CORE_BACK_URLS: sandboxCoreUrls(config).join(",") }
+      : {}),
     MTLS_CA_CERT_PATH: "shared/certs/internal-ca.crt",
     MTLS_CLIENT_CERT_PATH: `shared/certs/${role}-back-client.crt`,
     MTLS_CLIENT_KEY_PATH: `shared/certs/${role}-back-client.key`,
@@ -524,13 +637,29 @@ interface TierDefinition {
 
 const tierDefinitions = (config: DeployConfig): TierDefinition[] => [
   { role: "core", nodes: config.CORE_NODES, legacyHost: config.CORE_SSH_HOST, legacyPort: config.CORE_SSH_PORT, legacyUser: config.CORE_SSH_USER, legacyKey: config.CORE_SSH_KEY_PATH, legacySudo: config.CORE_SUDO_PASSWORD, legacyPrivateIp: config.CORE_PRIVATE_IP, servicePort: config.CORE_PORT, serviceName: "pg-core-back", sourceDir: "core-back", remoteDir: config.CORE_REMOTE_DIR },
+  ...(sandboxPlaneConfigured(config)
+    ? [{
+        role: "core-sandbox" as const,
+        nodes: config.SANDBOX_NODE,
+        legacyHost: config.SANDBOX_SSH_HOST,
+        legacyPort: config.SANDBOX_SSH_PORT,
+        legacyUser: config.SANDBOX_SSH_USER,
+        legacyKey: config.SANDBOX_SSH_KEY_PATH,
+        legacySudo: config.SANDBOX_SUDO_PASSWORD,
+        legacyPrivateIp: config.SANDBOX_PRIVATE_IP,
+        servicePort: sandboxNodeSpec(config)?.servicePort ?? config.SANDBOX_CORE_PORT,
+        serviceName: "pg-core-sandbox",
+        sourceDir: "core-back",
+        remoteDir: config.SANDBOX_REMOTE_DIR,
+      }]
+    : []),
   { role: "admin", nodes: config.ADMIN_NODES, legacyHost: config.ADMIN_SSH_HOST, legacyPort: config.ADMIN_SSH_PORT, legacyUser: config.ADMIN_SSH_USER, legacyKey: config.ADMIN_SSH_KEY_PATH, legacySudo: config.ADMIN_SUDO_PASSWORD, legacyPrivateIp: config.ADMIN_PRIVATE_IP, servicePort: config.ADMIN_BACK_PORT, serviceName: "pg-admin-back", sourceDir: "admin-back", remoteDir: config.ADMIN_REMOTE_DIR },
   { role: "merchant", nodes: config.MERCHANT_NODES, legacyHost: config.MERCHANT_SSH_HOST, legacyPort: config.MERCHANT_SSH_PORT, legacyUser: config.MERCHANT_SSH_USER, legacyKey: config.MERCHANT_SSH_KEY_PATH, legacySudo: config.MERCHANT_SUDO_PASSWORD, legacyPrivateIp: config.MERCHANT_PRIVATE_IP, servicePort: config.MERCHANT_BACK_PORT, serviceName: "pg-merchant-back", sourceDir: "merchant-back", remoteDir: config.MERCHANT_REMOTE_DIR },
   { role: "checkout", nodes: config.CHECKOUT_NODES, legacyHost: config.CHECKOUT_SSH_HOST, legacyPort: config.CHECKOUT_SSH_PORT, legacyUser: config.CHECKOUT_SSH_USER, legacyKey: config.CHECKOUT_SSH_KEY_PATH, legacySudo: config.CHECKOUT_SUDO_PASSWORD, legacyPrivateIp: config.CHECKOUT_PRIVATE_IP, servicePort: config.CHECKOUT_BACK_PORT, serviceName: "pg-checkout-back", sourceDir: "checkout-back", remoteDir: config.CHECKOUT_REMOTE_DIR },
 ];
 
 const buildComputeNodes = (config: DeployConfig): Record<ComputeNodeRole, NodePlan[]> => {
-  const result: Record<ComputeNodeRole, NodePlan[]> = { core: [], admin: [], merchant: [], checkout: [] };
+  const result: Record<ComputeNodeRole, NodePlan[]> = { core: [], "core-sandbox": [], admin: [], merchant: [], checkout: [] };
   for (const tier of tierDefinitions(config)) {
     const specs = parseNodeList(tier.nodes);
     const source: Array<NodeSpec | null> = specs.length > 0 ? specs : [null];
@@ -561,7 +690,11 @@ const buildService = (config: DeployConfig, node: NodePlan, tier: TierDefinition
     sourceDir: tier.sourceDir,
     remoteDir: tier.remoteDir,
     port: node.port,
-    env: tier.role === "core" ? coreEnv(config, node) : edgeEnv(config, tier.role as Exclude<DeployRole, "db" | "core">, node),
+    env: tier.role === "core"
+      ? coreEnv(config, node)
+      : tier.role === "core-sandbox"
+        ? sandboxCoreEnv(config, node)
+        : edgeEnv(config, tier.role as Exclude<DeployRole, "db" | "core" | "core-sandbox">, node),
     nodeId: node.nodeId,
     privateIp: node.privateIp,
     envFileName: sharedName ? ".env" : `.env.${node.nodeId}`,
@@ -723,6 +856,8 @@ const buildCertBundles = (role: HostRole, config?: DeployConfig): CertBundle[] =
   switch (role) {
     case "core":
       return ["core-server", ...storageCerts];
+    case "core-sandbox":
+      return ["core-sandbox-server", ...(config && objectStorageConfigured(config) ? ["object-storage-client" as const] : [])];
     case "admin":
       return ["admin-client"];
     case "merchant":
@@ -859,6 +994,24 @@ const buildComputeFirewall = (config: DeployConfig, role: HostRole, context: { s
           comment: "mTLS core only from the edge hosts",
         },
       ];
+    case "core-sandbox":
+      return [
+        { port: context.sshPort, proto: "tcp", comment: "SSH" },
+        {
+          port: context.servicePort ?? config.SANDBOX_CORE_PORT,
+          proto: "tcp",
+          fromCidrs: allEdgePrivateIps(config),
+          comment: "sandbox mTLS core only from the edge hosts",
+        },
+        ...(sandboxPrivateIp(config)
+          ? [{
+              port: config.SANDBOX_DB_PORT,
+              proto: "tcp" as const,
+              fromCidrs: [sandboxPrivateIp(config)!],
+              comment: "sandbox PostgreSQL from the sandbox core only",
+            }]
+          : []),
+      ];
     case "admin":
       return [
         { port: context.sshPort, proto: "tcp", comment: "SSH" },
@@ -900,10 +1053,12 @@ const buildComputeFirewall = (config: DeployConfig, role: HostRole, context: { s
           proto: "tcp",
           fromCidrs: [...new Set([
             ...config.FAKE_RAILS_ALLOWED_CIDRS.split(",").map((entry) => entry.trim()),
-            ...allCorePrivateIps(config),
+            ...(sandboxPlaneConfigured(config)
+              ? (sandboxPrivateIp(config) ? [sandboxPrivateIp(config)!] : [])
+              : allCorePrivateIps(config)),
             ...(config.CHECKOUT_PRIVATE_IP ? [config.CHECKOUT_PRIVATE_IP] : []),
           ])],
-          comment: "Fake Rails portal + hosted pages + gateway APIs",
+          comment: "Fake Rails portal + hosted pages + gateway APIs (sandbox only in a parallel installation)",
         },
       ];
     case "checkout":
@@ -1184,6 +1339,7 @@ export const planHosts = (config: DeployConfig): DeployPlan => {
     },
     nodes: {
       core: computeNodes.core,
+      "core-sandbox": computeNodes["core-sandbox"],
       admin: computeNodes.admin,
       merchant: computeNodes.merchant,
       checkout: computeNodes.checkout,

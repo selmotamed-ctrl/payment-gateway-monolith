@@ -239,6 +239,14 @@ enum GatewayEnvironmentType {
   LIVE
 }
 
+/// Controls whether the developer-only checkout secret/balance inspector is
+/// rendered for sandbox payment links.
+enum SandboxCheckoutInspectorMode {
+  OPEN_IN_SANDBOX
+  PIN_PROTECTED
+  DISABLED
+}
+
 enum AuthMethod {
   NONE
   API_KEY
@@ -1083,6 +1091,13 @@ model Application {
   railWhitelist           Json?             @map("rail_whitelist")
   redirectDomainAllowlist Json?             @map("redirect_domain_allowlist")
   status                  ApplicationStatus @default(PENDING)
+  /// Execution plane that owns this application. In a parallel deployment the
+  /// sandbox database is fenced to SANDBOX and the live database to LIVE.
+  env                     GatewayEnvironmentType @default(LIVE)
+  /// Sandbox-only checkout inspector posture (ignored on LIVE links).
+  sandboxInspectorMode    SandboxCheckoutInspectorMode @default(OPEN_IN_SANDBOX) @map("sandbox_inspector_mode")
+  /// Hashed PIN for PIN_PROTECTED inspector mode (nullable).
+  sandboxInspectorPin     String?           @map("sandbox_inspector_pin") @db.VarChar(16)
 
   merchant           Merchant                  @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   assignedWallet     Wallet                    @relation("ApplicationWallet", fields: [assignedWalletId], references: [id], onDelete: Restrict)
@@ -1096,6 +1111,7 @@ model Application {
   @@index([merchantId])
   @@index([assignedWalletId])
   @@index([merchantId, status])
+  @@index([env, merchantId])
   @@map("applications")
 }
 
@@ -1171,6 +1187,7 @@ model Wallet {
   glAccountId String       @unique @map("gl_account_id") @db.Uuid
   currency    String       @default("LYD") @db.Char(3)
   status      WalletStatus @default(PENDING)
+  env         GatewayEnvironmentType @default(LIVE)
 
   merchant        Merchant         @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   glAccount       GlAccount        @relation("WalletGlAccount", fields: [glAccountId], references: [id], onDelete: Restrict)
@@ -1180,6 +1197,7 @@ model Wallet {
 
   @@index([merchantId])
   @@index([merchantId, status])
+  @@index([env, merchantId])
   @@map("wallets")
 }
 
@@ -1197,6 +1215,7 @@ model AccessToken {
   revokedAt          DateTime? @map("revoked_at")
   lastUsedAt         DateTime? @map("last_used_at")
   expiresAt          DateTime? @map("expires_at")
+  env                GatewayEnvironmentType @default(LIVE)
 
   merchant    Merchant        @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   application Application     @relation(fields: [applicationId], references: [id], onDelete: Restrict)
@@ -1205,6 +1224,7 @@ model AccessToken {
   @@index([merchantId])
   @@index([applicationId])
   @@index([merchantId, revokedAt])
+  @@index([env, merchantId])
   @@map("access_tokens")
 }
 
@@ -1240,6 +1260,8 @@ model PaymentLink {
   railWhitelist     Json?            @map("rail_whitelist")
   state             PaymentLinkState @default(PENDING)
   expiresAt         DateTime?        @map("expires_at")
+  /// The plane this link belongs to. Sandbox links use `sbx_` keys.
+  env               GatewayEnvironmentType @default(LIVE)
 
   application     Application      @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   wallet          Wallet           @relation(fields: [walletId], references: [id], onDelete: Restrict)
@@ -1251,6 +1273,7 @@ model PaymentLink {
   @@index([state])
   @@index([applicationId, createdAt])
   @@index([state, createdAt])
+  @@index([env, applicationId])
   @@map("payment_links")
 }
 
@@ -1324,6 +1347,7 @@ model JournalEntry {
   refType     JournalRefType @map("ref_type")
   refId       String         @map("ref_id")
   description String         @db.Text
+  env         GatewayEnvironmentType @default(LIVE)
 
   journalLines    JournalLine[]
   adjustments     Adjustment[]     @relation("AdjustmentJournalEntry")
@@ -1334,7 +1358,22 @@ model JournalEntry {
   // Admin list/summary queries order and filter by createdAt. The migration adds
   // INCLUDE (id, ref_type, ref_id) and a pg_trgm GIN index on ref_id/description.
   @@index([createdAt])
+  @@index([env, createdAt])
   @@map("journal_entries")
+}
+
+/// Singleton plane marker used by the execution-plane fence trigger and by the
+/// live-to-sandbox mirror sync. The LIVE and SANDBOX databases each carry their
+/// own row (`execution_plane`).
+model SandboxSyncWatermark {
+  id                 String                 @id @default("singleton") @db.VarChar(32)
+  executionPlane     GatewayEnvironmentType @default(LIVE) @map("execution_plane")
+  lastCatalogSyncAt  DateTime?              @map("last_catalog_sync_at") @db.Timestamptz(3)
+  lastMerchantSyncAt DateTime?              @map("last_merchant_sync_at") @db.Timestamptz(3)
+  catalogVersionHash String?                @map("catalog_version_hash") @db.Char(64)
+  updatedAt          DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("sandbox_sync_watermarks")
 }
 
 model JournalLine {

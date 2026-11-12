@@ -116,7 +116,7 @@
 | `core-back/test/gateway-rollback-go-live.test.ts` | 168 | 4 |
 | `core-back/test/globalSearch.test.ts` | 266 | 12 |
 | `core-back/test/governance-execution.test.ts` | 1232 | 28 |
-| `core-back/test/guides-support.test.ts` | 171 | 8 |
+| `core-back/test/guides-support.test.ts` | 174 | 8 |
 | `core-back/test/hardening-gap-regressions.test.ts` | 616 | 40 |
 | `core-back/test/helpers/automationCatalog.ts` | 351 | 0 |
 | `core-back/test/helpers/backgroundJobFake.ts` | 423 | 0 |
@@ -150,7 +150,7 @@
 | `core-back/test/onboarding-four-eyes.test.ts` | 200 | 18 |
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/partition-truncate-guard.test.ts` | 86 | 5 |
-| `core-back/test/phase1-mtls-and-schema.test.ts` | 440 | 14 |
+| `core-back/test/phase1-mtls-and-schema.test.ts` | 442 | 14 |
 | `core-back/test/phase2-ledger-and-governance.test.ts` | 281 | 11 |
 | `core-back/test/phase3-dynamic-engine-and-blueprints.test.ts` | 273 | 12 |
 | `core-back/test/phase4-onboarding-aml-disputes-recon.test.ts` | 237 | 16 |
@@ -195,6 +195,8 @@
 | `core-back/test/runtime/production-adapters.test.ts` | 569 | 16 |
 | `core-back/test/runtime/raw-body.test.ts` | 127 | 6 |
 | `core-back/test/runtime/rotating-refresh-token.test.ts` | 106 | 2 |
+| `core-back/test/sandbox-plane-integration.test.ts` | 217 | 5 |
+| `core-back/test/sandboxPlane.test.ts` | 225 | 12 |
 | `core-back/test/screening-and-caps.test.ts` | 515 | 13 |
 | `core-back/test/security-regressions/c1-forged-success.test.ts` | 119 | 8 |
 | `core-back/test/security-regressions/c2-mfa.test.ts` | 269 | 20 |
@@ -209,7 +211,7 @@
 | `core-back/test/security-regressions/m4-idempotency.test.ts` | 67 | 4 |
 | `core-back/test/security-regressions/m9-m12-upload-kyb.test.ts` | 113 | 6 |
 | `core-back/test/session-revocation-durability.test.ts` | 64 | 4 |
-| `core-back/test/setup.ts` | 8 | 0 |
+| `core-back/test/setup.ts` | 29 | 0 |
 | `core-back/test/spec-importer.test.ts` | 268 | 25 |
 | `core-back/test/spec-materializer.test.ts` | 211 | 4 |
 | `core-back/test/staff-invitation.test.ts` | 219 | 10 |
@@ -251,10 +253,11 @@
 | `admin-back/test/object-storage-forwarding.test.ts` | 95 | 3 |
 | `admin-back/test/report-engine-edge.test.ts` | 185 | 8 |
 | `admin-back/test/report-engine-route-order.test.ts` | 52 | 2 |
+| `admin-back/test/sandbox-plane-routing.test.ts` | 73 | 2 |
 | `admin-back/test/search.test.ts` | 83 | 2 |
 | `admin-back/test/security-regressions.test.ts` | 512 | 31 |
 | `admin-back/test/session-cookie-and-logout.test.ts` | 133 | 6 |
-| `admin-back/test/setup.ts` | 11 | 0 |
+| `admin-back/test/setup.ts` | 16 | 0 |
 | `merchant-back/test/auth-account-limiters.test.ts` | 94 | 3 |
 | `merchant-back/test/core-contract.test.ts` | 569 | 29 |
 | `merchant-back/test/core-forwarding.test.ts` | 426 | 22 |
@@ -266,8 +269,10 @@
 | `merchant-back/test/merchant-kyb-and-external.test.ts` | 212 | 15 |
 | `merchant-back/test/mtls-client.test.ts` | 85 | 8 |
 | `merchant-back/test/report-engine-route-order.test.ts` | 52 | 2 |
+| `merchant-back/test/sandbox-plane-routing.test.ts` | 80 | 3 |
 | `merchant-back/test/security-regressions.test.ts` | 434 | 27 |
 | `merchant-back/test/session-cookie-and-logout.test.ts` | 138 | 6 |
+| `merchant-back/test/setup.ts` | 7 | 0 |
 | `merchant-back/test/webhooks-forwarding.test.ts` | 115 | 6 |
 | `checkout-back/test/checkout-zero-trust.test.ts` | 352 | 23 |
 | `checkout-back/test/core-internal-client.test.ts` | 661 | 23 |
@@ -277,7 +282,9 @@
 | `checkout-back/test/helpers/core.ts` | 238 | 0 |
 | `checkout-back/test/helpers/upstream.ts` | 106 | 0 |
 | `checkout-back/test/mtls-client.test.ts` | 149 | 14 |
+| `checkout-back/test/sandbox-plane-routing.test.ts` | 84 | 3 |
 | `checkout-back/test/security-regressions.test.ts` | 225 | 13 |
+| `fake-rails-back/test/accountsAndInspector.test.ts` | 260 | 8 |
 | `fake-rails-back/test/api.test.ts` | 300 | 11 |
 | `fake-rails-back/test/chaos.test.ts` | 66 | 7 |
 | `fake-rails-back/test/crypto.test.ts` | 53 | 5 |
@@ -309,6 +316,7 @@
 | `deploy/test/provisioners.test.ts` | 581 | 32 |
 | `deploy/test/redactSecrets.test.ts` | 63 | 5 |
 | `deploy/test/rollingDeploy.test.ts` | 52 | 5 |
+| `deploy/test/sandboxPlane.test.ts` | 133 | 5 |
 | `deploy/test/security-regressions.test.ts` | 412 | 36 |
 | `deploy/test/stress-harness.test.ts` | 162 | 15 |
 | `deploy/test/templates.test.ts` | 244 | 17 |
@@ -419,5 +427,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **414**
-- Total literal test declarations: **4152**
+- Total files: **422**
+- Total literal test declarations: **4190**

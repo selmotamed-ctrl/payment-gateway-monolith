@@ -3,7 +3,7 @@ id: core.data
 title: Data Schema and Migrations
 status: partial
 confidence: high
-last_verified: 2026-11-11
+last_verified: 2026-11-13
 verified_against: d695518+working-tree
 code:
   - core-back/prisma/schema.prisma
@@ -50,7 +50,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 37 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 38 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -105,7 +105,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 37`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 38`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -116,7 +116,7 @@ The models are grouped by domain:
 
 `core-back/prisma/seed.ts`, `seedFakeRails.ts` and `syntheticSeeder/index.ts` call `ensureSchemaVersion()` before writing. A stale database is therefore rejected by these seeders and by any caller that explicitly asserts the version. The core HTTP start path does not call it.
 
-Schema version 37 adds the storage hardening migration on top of the v36 object & asset storage control plane
+Schema version 37 added the storage hardening migration on top of the v36 object & asset storage control plane; version 38 adds the Parallel Sandbox Plane fence
 (`storage_objects`, `storage_object_locks`, `storage_object_access_logs`,
 `report_asset_bundle_entries`, `dispute_attachments`, `aml_case_evidence`),
 domain FK links (KYB, reconciliation, regulatory templates/outputs, Report Studio
@@ -126,7 +126,7 @@ installs the two append-only guard triggers. See
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261112000000_v36_enterprise_object_storage_engine`, schema version 37). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261114000000_v38_parallel_sandbox_plane_and_ledger_fence`, schema version 38). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -421,7 +421,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 35 (`REQUIRED_SCHEMA_VERSION = 37`; model count 106). The schema migrations since version 10 are:
+The current schema version is 38 (`REQUIRED_SCHEMA_VERSION = 38`; model count 113). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -527,7 +527,30 @@ plane, domain links and the first guard triggers. `20261113090000_storage_engine
 adds `gc_claim_token`/`gc_claimed_at`, the strict status-transition and
 authorization-immutability checks, the append-only access-log trigger, object
 explorer indexes (including pg_trgm filename/key search) and the access-log
-filter indexes. The current required version is **37**.
+filter indexes. The required version is **38** after the sandbox migration (section 17b).
+
+## 17b. Parallel Sandbox Plane (schema version 38, 2026-11-13)
+
+`20261114000000_v38_parallel_sandbox_plane_and_ledger_fence` adds:
+
+- `SandboxCheckoutInspectorMode` (`OPEN_IN_SANDBOX`, `PIN_PROTECTED`, `DISABLED`);
+- `env` (`GatewayEnvironmentType`) on `applications`, `wallets`, `access_tokens`,
+  `payment_links` and `journal_entries`, with plane indexes;
+- `sandbox_inspector_mode` / `sandbox_inspector_pin` on `applications`;
+- `sandbox_sync_watermarks` (singleton `id`, `execution_plane`, catalog/merchant
+  sync watermarks, catalog hash, `updated_at`);
+- `enforce_execution_plane_fence()` and its five row triggers.
+
+The trigger reads the plane from `pgw.execution_plane` (deploy sets it per
+database) and falls back to the watermark. With
+`pgw.strict_plane_fence=on` it refuses a SANDBOX row on LIVE and a LIVE row on
+SANDBOX (`23514`); it always refuses `provider_reference LIKE 'FK-%'` on LIVE.
+The `updatedAt`/sync timestamps use `TIMESTAMPTZ(3)` to match the exhaustive
+schema suite. Legacy payment links of non-ACTIVE merchants are backfilled to
+`sandbox`. Because the database default on the singleton `id` is not part of
+the Prisma DMMF, the migration omits it and the deploy helper inserts
+`'singleton'` explicitly; Prisma still supplies the same default client-side.
+The required schema version is **38** (113 models).
 
 ## 17. Report engine versioning and merchant chrome (schema versions 34-35, 2026-11-11)
 

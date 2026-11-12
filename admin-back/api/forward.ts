@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { env } from "../lib/env";
 import { ApiError, parseOrThrow } from "../lib/error";
-import { callCoreResponse, callCoreRaw, mapCoreHttpError, parseJsonBuffer, type CoreHttpMethod } from "../lib/mtlsClient";
+import { callCoreResponse, callCoreRaw, mapCoreHttpError, parseJsonBuffer, type CoreHttpMethod, type CorePlane } from "../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../lib/net";
 import { resolveRequestId } from "../lib/requestLogger";
 
@@ -70,6 +70,24 @@ const scalarQuery = (query: Record<string, unknown> | undefined) => {
   return Object.keys(result).length > 0 ? result : undefined;
 };
 
+/** Resolves the target plane: the portal switcher's X-Pg-Env, otherwise Live. */
+export const planeOfRequest = (req: Request): CorePlane | undefined => {
+  const value = String(req.headers["x-pg-env"] ?? "").trim().toUpperCase();
+  if (value === "SANDBOX") return "SANDBOX";
+  if (value === "LIVE") return "LIVE";
+  return undefined;
+};
+
+export const coreCallContext = (
+  req: Request,
+): { requestId: string; clientIp: string; userAgent: string; authorization: string | undefined; plane?: CorePlane } => ({
+  requestId: resolveRequestId(req),
+  clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
+  userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
+  authorization: req.headers.authorization,
+  plane: planeOfRequest(req),
+});
+
 export const coreForwardRaw =
   (options: Omit<ForwardOptions, "status" | "relayStatus" | "splitBodyFrom">) =>
   async (req: Request, res: Response): Promise<void> => {
@@ -93,6 +111,7 @@ export const coreForwardRaw =
       clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
       userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
       authorization,
+      plane: planeOfRequest(req),
       minLsn: minLsnOf(req),
     });
     if (response.statusCode >= 400) {
@@ -130,6 +149,7 @@ export const coreForward =
         clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
         userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
         authorization,
+        plane: planeOfRequest(req),
         minLsn: minLsnOf(req),
       });
 

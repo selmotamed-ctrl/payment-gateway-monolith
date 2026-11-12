@@ -1366,3 +1366,28 @@ html[dir="rtl"] .pg-report-section__title {
     gap: 14px;
   }
 }
+
+/* Parallel sandbox plane switcher and banner (merchant portal). */
+.pg-env-switch {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--pg-border-strong, rgba(128, 128, 128, 0.35));
+    border-radius: 8px;
+    overflow: hidden;
+    margin-inline-end: 4px;
+}
+.pg-env-switch .v-btn {
+    min-width: 58px;
+    letter-spacing: 0.04em;
+    font-size: 11px;
+    font-weight: 700;
+}
+.pg-sandbox-banner {
+    background: rgb(var(--v-theme-warning));
+    color: rgb(var(--v-theme-on-warning));
+    padding: 8px 16px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.45;
+}

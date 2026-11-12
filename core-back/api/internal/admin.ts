@@ -19,6 +19,7 @@ import { invalidateMerchantReportPolicyCache } from "../../engine/reportStudio/m
 import { publicProgress } from "../../engine/academy/progress";
 import { loadCatalog } from "../../engine/academy/catalog";
 import { getPlatformRuntime } from "../../engine/runtime";
+import { isSandboxPlane } from "../../lib/plane";
 import { InvariantVerifier, naturalBalance } from "../../engine/ledger/InvariantVerifier";
 import { moneyToString } from "../../engine/db/money";
 import { ApiError, parseOrThrow } from "../../lib/error";
@@ -6814,6 +6815,39 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
   });
 });
 
+
+const SANDBOX_CHECKER_EMAIL = "sandbox-checker-bot@sandbox.internal";
+
+const ensureSandboxCheckerUser = async () => {
+  if (!isSandboxPlane()) {
+    throw new ApiError(403, "SANDBOX_FAST_APPROVE_FORBIDDEN_ON_LIVE", "Sandbox fast-approve is only available on the Sandbox plane");
+  }
+  const existing = await client.user.findUnique({ where: { email: SANDBOX_CHECKER_EMAIL } });
+  if (existing) {
+    if (existing.status !== "ACTIVE") {
+      return client.user.update({ where: { id: existing.id }, data: { status: "ACTIVE" } });
+    }
+    return existing;
+  }
+  return client.user.create({
+    data: {
+      email: SANDBOX_CHECKER_EMAIL,
+      role: "GATEWAY_ADMIN",
+      authoritiesMap: { "approval:check": true, "approval:write": true, "*": true },
+      isMaker: false,
+      isChecker: true,
+      mfaRequired: false,
+      status: "ACTIVE",
+    },
+  });
+};
+
+/**
+ * Sandbox-only convenience for a single tester validating a maker-checker
+ * workflow. The approval is executed with a synthesized, distinct checker
+ * principal so the maker != checker invariant still holds. Hard-blocked on
+ * the Live plane.
+ */
 /**
  * Promotes a gateway version to LIVE.
  *
@@ -7016,6 +7050,101 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
  * who suspended) may extend the ratification deadline ONCE, by 1 to 7 days, with a written reason. The deadline worker's
  * stages for the approval are cleared so its reminders, escalations and lift run again against the new deadline.
  */
+router.post("/approvals/:id/sandbox-fast-approve", async (request: Request, response: Response) => {
+  if (!isSandboxPlane()) {
+    throw new ApiError(403, "SANDBOX_FAST_APPROVE_FORBIDDEN_ON_LIVE", "Sandbox fast-approve is only available on the Sandbox plane");
+  }
+  requireAuthorities(request, ["approval:check", "approval:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const approval = await client.approvalRequest.findUnique({ where: { id } });
+  if (!approval) {
+    throw new ApiError(404, "APPROVAL_REQUEST_NOT_FOUND", "The approval request does not exist");
+  }
+  if (approval.state !== "PENDING_REVIEW" && approval.state !== "DRAFT") {
+    throw new ApiError(409, "APPROVAL_NOT_PENDING", "The approval request is not pending review");
+  }
+  if (approvalIsExpired(approval.expiresAt)) {
+    throw new ApiError(409, "APPROVAL_EXPIRED", "The approval request has expired");
+  }
+  const subjectType = normalizeApprovalSubjectType(approval.subjectType);
+  if (subjectType === "BACKUP_POLICY") {
+    throw new ApiError(409, "SANDBOX_FAST_APPROVE_UNSUPPORTED", "Backup policy approvals use the dedicated policy executor and cannot be fast-approved");
+  }
+  const checker = await ensureSandboxCheckerUser();
+  if (checker.id === approval.makerUserId) {
+    throw new ApiError(409, "SANDBOX_FAST_APPROVE_SAME_PRINCIPAL", "The synthesized checker cannot be the maker");
+  }
+  const platform = getPlatformRuntime(client as never);
+  if (subjectType === "ADJUSTMENT") {
+    const { updated, job } = await client.$transaction(async (tx) => {
+      await claimPendingApproval(tx as never, id, checker.id);
+      const updatedApproval = await tx.approvalRequest.update({
+        where: { id },
+        data: { checkerUserId: checker.id, state: "APPROVED", riskAcceptanceNote: "SANDBOX_FAST_APPROVE" },
+      });
+      const queued = await platform.repositories.jobs.enqueueJob(tx as never, {
+        jobType: "ADJUSTMENT_EXECUTION",
+        referenceType: "APPROVAL_REQUEST",
+        referenceId: id,
+        payload: { kind: "ADJUSTMENT_EXECUTION", approvalRequestId: id, outcome: null, notes: "sandbox-fast-approve", checkerRole: checker.role },
+      });
+      return { updated: updatedApproval, job: queued };
+    });
+    response.status(202).json({ id: updated.id, state: updated.state, checkerUserId: updated.checkerUserId, jobId: job.id, status: "QUEUED", sandbox: true });
+    return;
+  }
+  const { updated, execution } = await client.$transaction(async (tx) => {
+    await claimPendingApproval(tx as never, id, checker.id);
+    const result = await executeApprovalSubject(governanceContext(platform), tx as never, {
+      approval: {
+        id: approval.id,
+        subjectType,
+        subjectId: approval.subjectId,
+        payloadDiffJson: approval.payloadDiffJson,
+        makerUserId: approval.makerUserId,
+      },
+      checkerUserId: checker.id,
+      checkerRole: checker.role,
+      notes: "sandbox-fast-approve",
+      outcome: null,
+    });
+    const state = result.status === "HELD" ? "PENDING_REVIEW" : "EXECUTED";
+    const updatedApproval = await tx.approvalRequest.update({
+      where: { id },
+      data: { checkerUserId: checker.id, state, riskAcceptanceNote: "SANDBOX_FAST_APPROVE" },
+    });
+    return { updated: updatedApproval, execution: result };
+  });
+  if (subjectType === "GATEWAY_VERSION") {
+    const version = await client.gatewayVersion.findUnique({ where: { id: approval.subjectId } });
+    if (version) await invalidationBus.invalidateGateway(version.gatewayId, "sandbox-fast-approve");
+  }
+  await writeAudit(client, {
+    data: {
+      actorId: checker.id,
+      role: checker.role,
+      action: "APPROVAL_DECISION_CHECKLIST",
+      entityType: "APPROVAL_REQUEST",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { decision: "APPROVED", sandboxFastApprove: true, by: principalOf(request).userId ?? "sandbox-tester" },
+    },
+  });
+  response.json({
+    id: updated.id,
+    state: updated.state,
+    checkerUserId: updated.checkerUserId,
+    sandbox: true,
+    execution: {
+      status: execution.status,
+      reason: execution.reason ?? null,
+      template: execution.template ?? null,
+      journalEntryId: execution.journalEntryId ?? null,
+      operatorCaseId: execution.operatorCaseId ?? null,
+    },
+  });
+});
+
 router.post("/approvals/:id/extend-emergency", async (request: Request, response: Response) => {
   requireAuthorities(request, ["approval:check", "approval:write"]);
   const { id } = parseOrThrow(idSchema, request.params);

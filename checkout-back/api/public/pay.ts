@@ -3,7 +3,7 @@ import rateLimiter from "express-rate-limit";
 import { z } from "zod";
 import { lazyLimiter, rateLimitKey } from "../../lib/clientIp";
 import { env } from "../../lib/env";
-import { parseOrThrow } from "../../lib/error";
+import { ApiError, parseOrThrow } from "../../lib/error";
 import { callCore, proxyCoreStream, type CoreCallOptions } from "../../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../../lib/net";
 import { resolveRequestId } from "../../lib/requestLogger";
@@ -84,20 +84,28 @@ const clientEventSchema = z
   })
   .strict();
 
-const baseOptions = (req: Request): CoreCallOptions => ({
-  method: "GET",
-  path: "",
-  requestId: resolveRequestId(req),
-  clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
-  userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
-});
+const baseOptions = (req: Request, plane?: "LIVE" | "SANDBOX"): CoreCallOptions => {
+  const sandboxPin = req.header("x-pg-sandbox-pin");
+  return {
+    method: "GET",
+    path: "",
+    requestId: resolveRequestId(req),
+    clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
+    userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
+    plane,
+    ...(sandboxPin ? { headers: { "x-pg-sandbox-pin": sandboxPin } } : {}),
+  };
+};
+
+const planeForLink = (linkKey: string): "LIVE" | "SANDBOX" | undefined =>
+  linkKey.startsWith("sbx_") ? "SANDBOX" : undefined;
 
 const encode = (value: string): string => encodeURIComponent(value);
 
 router.get("/:linkKey", async (req: Request, res: Response) => {
   const { linkKey } = parseOrThrow(paramsSchema, req.params);
   const payload = await callCore({
-    ...baseOptions(req),
+    ...baseOptions(req, planeForLink(linkKey)),
     method: "GET",
     path: `/internal/checkout/pay/${encode(linkKey)}`,
   });
@@ -109,7 +117,7 @@ router.post("/:linkKey/initiate", async (req: Request, res: Response) => {
   const { linkKey } = parseOrThrow(paramsSchema, req.params);
   const body = parseOrThrow(initiateSchema, req.body);
   const payload = await callCore({
-    ...baseOptions(req),
+    ...baseOptions(req, planeForLink(linkKey)),
     method: "POST",
     path: `/internal/checkout/pay/${encode(linkKey)}/initiate`,
     body,
@@ -117,10 +125,73 @@ router.post("/:linkKey/initiate", async (req: Request, res: Response) => {
   res.status(201).json(payload);
 });
 
+const assertSandboxLink = (linkKey: string): void => {
+  if (!linkKey.startsWith("sbx_")) {
+    throw new ApiError(403, "SANDBOX_ONLY_ENDPOINT", "This endpoint is only available for sandbox payment links");
+  }
+};
+
+router.get("/:linkKey/sandbox-accounts", async (req: Request, res: Response) => {
+  const { linkKey } = parseOrThrow(paramsSchema, req.params);
+  assertSandboxLink(linkKey);
+  const query = typeof req.query.railCode === "string"
+    ? `?railCode=${encodeURIComponent(req.query.railCode)}`
+    : "";
+  const payload = await callCore({
+    ...baseOptions(req, planeForLink(linkKey)),
+    method: "GET",
+    path: `/internal/checkout/pay/${encode(linkKey)}/sandbox-accounts${query}`,
+  });
+  res.json(payload);
+});
+
+router.patch("/:linkKey/sandbox-accounts/:accountId", async (req: Request, res: Response) => {
+  const { linkKey } = parseOrThrow(paramsSchema, req.params);
+  assertSandboxLink(linkKey);
+  const accountId = String(req.params.accountId ?? "");
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(accountId)) {
+    throw new ApiError(400, "SANDBOX_ACCOUNT_ID_INVALID", "The sandbox account id is invalid");
+  }
+  const payload = await callCore({
+    ...baseOptions(req, planeForLink(linkKey)),
+    method: "PATCH",
+    path: `/internal/checkout/pay/${encode(linkKey)}/sandbox-accounts/${encode(accountId)}`,
+    body: req.body,
+  });
+  res.json(payload);
+});
+
+router.get("/:linkKey/sandbox-accounts/:accountId/movements", async (req: Request, res: Response) => {
+  const { linkKey } = parseOrThrow(paramsSchema, req.params);
+  assertSandboxLink(linkKey);
+  const accountId = String(req.params.accountId ?? "");
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(accountId)) {
+    throw new ApiError(400, "SANDBOX_ACCOUNT_ID_INVALID", "The sandbox account id is invalid");
+  }
+  const payload = await callCore({
+    ...baseOptions(req, planeForLink(linkKey)),
+    method: "GET",
+    path: `/internal/checkout/pay/${encode(linkKey)}/sandbox-accounts/${encode(accountId)}/movements`,
+  });
+  res.json(payload);
+});
+
+router.post("/:linkKey/logs/:attemptId/sandbox-simulate", async (req: Request, res: Response) => {
+  const { linkKey, attemptId } = parseOrThrow(attemptParamsSchema, req.params);
+  assertSandboxLink(linkKey);
+  const payload = await callCore({
+    ...baseOptions(req, planeForLink(linkKey)),
+    method: "POST",
+    path: `/internal/checkout/pay/${encode(linkKey)}/logs/${encode(attemptId)}/sandbox-simulate`,
+    body: req.body,
+  });
+  res.json(payload);
+});
+
 router.get("/:linkKey/logs/:attemptId", async (req: Request, res: Response) => {
   const { linkKey, attemptId } = parseOrThrow(attemptParamsSchema, req.params);
   const payload = await callCore({
-    ...baseOptions(req),
+    ...baseOptions(req, planeForLink(linkKey)),
     method: "GET",
     path: `/internal/checkout/pay/${encode(linkKey)}/logs/${encode(attemptId)}`,
   });
@@ -130,7 +201,7 @@ router.get("/:linkKey/logs/:attemptId", async (req: Request, res: Response) => {
 router.get("/:linkKey/logs/:attemptId/status", async (req: Request, res: Response) => {
   const { linkKey, attemptId } = parseOrThrow(attemptParamsSchema, req.params);
   await proxyCoreStream(req, res, {
-    ...baseOptions(req),
+    ...baseOptions(req, planeForLink(linkKey)),
     method: "GET",
     path: `/internal/checkout/pay/${encode(linkKey)}/logs/${encode(attemptId)}/status`,
     timeoutMs: 10 * 60 * 1000,
@@ -142,7 +213,7 @@ router.post("/:linkKey/logs/:attemptId/confirm", async (req: Request, res: Respo
   const { linkKey, attemptId } = parseOrThrow(attemptParamsSchema, req.params);
   const body = parseOrThrow(confirmSchema, req.body);
   const payload = await callCore({
-    ...baseOptions(req),
+    ...baseOptions(req, planeForLink(linkKey)),
     method: "POST",
     path: `/internal/checkout/pay/${encode(linkKey)}/logs/${encode(attemptId)}/confirm`,
     body,
@@ -155,7 +226,7 @@ router.post("/:linkKey/logs/:attemptId/resend", async (req: Request, res: Respon
   const { linkKey, attemptId } = parseOrThrow(attemptParamsSchema, req.params);
   const body = parseOrThrow(resendSchema, req.body ?? {});
   const payload = await callCore({
-    ...baseOptions(req),
+    ...baseOptions(req, planeForLink(linkKey)),
     method: "POST",
     path: `/internal/checkout/pay/${encode(linkKey)}/logs/${encode(attemptId)}/resend`,
     body,
@@ -168,7 +239,7 @@ router.post("/:linkKey/logs/:attemptId/cancel", async (req: Request, res: Respon
   const { linkKey, attemptId } = parseOrThrow(attemptParamsSchema, req.params);
   const body = parseOrThrow(cancelSchema, req.body ?? {});
   const payload = await callCore({
-    ...baseOptions(req),
+    ...baseOptions(req, planeForLink(linkKey)),
     method: "POST",
     path: `/internal/checkout/pay/${encode(linkKey)}/logs/${encode(attemptId)}/cancel`,
     body,
@@ -181,7 +252,7 @@ router.post("/:linkKey/logs/:attemptId/client-event", async (req: Request, res: 
   const { linkKey, attemptId } = parseOrThrow(attemptParamsSchema, req.params);
   const body = parseOrThrow(clientEventSchema, req.body);
   const payload = await callCore({
-    ...baseOptions(req),
+    ...baseOptions(req, planeForLink(linkKey)),
     method: "POST",
     path: `/internal/checkout/pay/${encode(linkKey)}/logs/${encode(attemptId)}/client-event`,
     body,

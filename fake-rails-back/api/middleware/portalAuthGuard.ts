@@ -16,6 +16,13 @@ declare global {
 const publicPaths = new Set(["/auth/login"]);
 
 /**
+ * The stateful-account control plane is used by `pg-core-sandbox` (shared
+ * seeder token) and by the tester portal (tester JWT). Either credential is
+ * accepted; anything else falls through to the JWT check.
+ */
+const CONTROL_PATHS = ["/accounts", "/checkout-helper"];
+
+/**
  * Only the SSE stream may take a credential in the query string (EventSource cannot set
  * headers), and it is a 30s single-use `ticket`, never the session token (GAP-024).
  */
@@ -43,6 +50,15 @@ export const portalAuthGuard = (request: Request, _response: Response, next: Nex
     }
     next();
     return;
+  }
+
+  if (CONTROL_PATHS.some((path) => relative === path || relative.startsWith(`${path}/`))) {
+    const token = request.header("x-fake-rails-seeder-token") ?? "";
+    if (token && constantTimeEquals(token, env.FAKE_RAILS_SEEDER_TOKEN)) {
+      next();
+      return;
+    }
+    // Fall through to the tester-session check below.
   }
 
   if (TICKET_PATHS.has(relative) && typeof request.query.ticket === "string") {

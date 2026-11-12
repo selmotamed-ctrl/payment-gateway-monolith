@@ -353,3 +353,20 @@ otherwise validation fails with `MULTI_NODE_SHARED_STORAGE_REQUIRED`.
 auto-detect the tier. Core and backup daemon receive
 `OBJECT_STORAGE_DAEMON_URL` plus `object-storage-client` mTLS paths, and the
 core receives `CLUSTER_CORE_NODE_COUNT` and the KEK keyring.
+
+## Parallel Sandbox Plane (schema 38)
+
+Optional keys: `SANDBOX_ENABLED`, `SANDBOX_MANAGE_VIA_SSH`, `SANDBOX_NODE`
+(`nodeId@sshHost:sshPort:privateIp:servicePort`), `SANDBOX_SSH_*`,
+`SANDBOX_CORE_PORT` (4005), `SANDBOX_REMOTE_DIR`, `SANDBOX_DB_HOST`,
+`SANDBOX_DB_PORT`, `SANDBOX_DB_NAME` (`payment_gateway_sandbox`),
+`SANDBOX_DB_USER/PASSWORD`, `SANDBOX_APP_USER/PASSWORD`,
+`SANDBOX_REDIS_DB_INDEX`.
+`sandboxPlaneConfigured()` is true when `SANDBOX_ENABLED`,
+`SANDBOX_MANAGE_VIA_SSH` or `SANDBOX_NODE` is set. In production,
+`FAKE_RAILS_ENABLED` is refused unless the sandbox plane is configured and
+`SANDBOX_DB_NAME` differs from the live database. The planner emits a
+`core-sandbox` role/service with the `core-sandbox` certificate, the sandbox
+database URL, `EXECUTION_PLANE=SANDBOX` and only the sandbox database/object
+storage reachability. Live core receives `EXECUTION_PLANE=LIVE` and no Fake
+Rails host. Edges receive `SANDBOX_CORE_BACK_URLS=https://<sandboxIp>:4005`.

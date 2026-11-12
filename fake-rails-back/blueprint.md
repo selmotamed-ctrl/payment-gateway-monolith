@@ -284,6 +284,20 @@ bun run start
 - **Hosted action token and stream ticket (GAP-024, RESOLVED 2026-11-05).** `GET /hosted/session/:reference` now returns `action_token`, a JWT bound to that transaction id with the purpose role `FAKE_RAILS_HOSTED_ACTION` (15 minutes); the approve/decline action POST must send it in `X-Hosted-Action-Token` or gets `401 HOSTED_ACTION_TOKEN_REQUIRED`. `POST /portal-api/transactions/stream-ticket` (tester session required) issues a `FAKE_RAILS_SSE_TICKET` JWT (30 seconds, unique `jti`); `portalAuthGuard` accepts it only on `/transactions/stream` and consumes it once (`consumeSseTicket`; replay is `401`). Both tokens are signed with the portal JWT secret but carry their own `role` (helpers in `fake-rails-back/lib/tickets.ts`), so neither works as a tester session and a tester session works as neither. The used-ticket map is in-process and pruned on use. `/hosted/*` session reads remain public. Since 2026-11-08 they no longer include `expected_otp` or `webhook_url` (`publicHostedTransaction`, applied to both the session read and the action response); the token itself is still issued by the public session read, so it proves knowledge of the reference, not authority. Testers read the OTP on the authenticated portal routes. The rails initiate response still returns the OTP by design (automated sandbox runner).
 - **Residual.** `fake-rails-front` still keeps the tester token in localStorage (GAP-019 does not cover this portal).
 
+## Stateful accounts v2 (schema 38)
+
+`engine/accounts/AccountLedgerService.ts` adds SQLite `fake_accounts`,
+`fake_account_holds`, `fake_account_movements` and
+`fake_merchant_clearing_pools`. Five canonical personas are seeded per rail
+(rich, standard, low balance, near daily limit, frozen) and unknown
+identifiers are auto-created with 2,500 LYD. All balance changes use integer
+micro-units inside one immediate transaction: hold on initiate, capture on
+confirm/hosted approve, release on cancel/decline, refund credit. The
+`fake_transactions` row stores the unmasked customer identifier, bound account
+and held amount; startup adds those columns to an existing SQLite file.
+`/portal-api/accounts` and `/checkout-helper/:reference` expose the control API
+to `pg-core-sandbox` (seeder token) and the tester portal (JWT).
+
 ## Fake Rails Protocol Matrix
 
 > Status: `partial` · Last verified: 2026-11-03

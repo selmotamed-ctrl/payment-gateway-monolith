@@ -39,6 +39,7 @@ export const routesAuthorities: {
     MerchantReportsChrome: ["reports.studio"],
     MerchantReportsChromeNeedsMigration: ["reports.studio"],
     MerchantReportsNeedsMigration: ["reports.studio"],
+    SandboxAccounts: ["applications.read", "links.create"],
 };
 
 export const useSections = () => {
@@ -186,6 +187,19 @@ export const useSections = () => {
                     name: "Team",
                     icon: "mdi-account-group",
                     if: () => hasOneOfAuthorities(["users.manage"]),
+                },
+            ],
+        },
+        {
+            title: t("Sandbox & Developers"),
+            icon: "mdi-flask-outline",
+            routes: [
+                {
+                    label: t("Sandbox Test Accounts"),
+                    name: "SandboxAccounts",
+                    icon: "mdi-account-cash-outline",
+                    description: t("Fake Rails customer balances, settlement generator and workspace controls."),
+                    if: () => hasOneOfAuthorities(["applications.read", "links.create"]),
                 },
             ],
         },

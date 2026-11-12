@@ -1951,4 +1951,8 @@ export const appCatalogue: Record<string, [string, string]> = {
     'Upload evidence': ['Upload evidence', 'رفع الإثبات'],
     'Uploaded by': ['Uploaded by', 'رفعه'],
     'Vault attachments': ['Vault attachments', 'مرفقات الخزنة'],
+    "LIVE PLANE": ["LIVE PLANE", "المستوى المباشر"],
+    "SANDBOX PLANE": ["SANDBOX PLANE", "مستوى الاختبار"],
+    "SANDBOX PLANE — approvals, wallets, applications, links and ledger postings run on the isolated sandbox plane. No real money moves.": ["SANDBOX PLANE — approvals, wallets, applications, links and ledger postings run on the isolated sandbox plane. No real money moves.", "مستوى الاختبار — الموافقات والمحافظ والتطبيقات وروابط الدفع وقيود دفتر الأستاذ تعمل على مستوى الاختبار المعزول. لا تتحرك أموال حقيقية."],
+    "Sandbox Fast-Track Approve": ["Sandbox Fast-Track Approve", "موافقة سريعة في بيئة الاختبار"],
 };

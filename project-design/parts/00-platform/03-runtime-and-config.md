@@ -548,3 +548,20 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 | `LEDGER_RAW_SQL` | core-back | `false` turns the raw-SQL ledger posting path off (default on). |
 | `FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS` | fake-rails-back | Extra hosts (`host` or `host:port`) a webhook may target; the host of `CORE_INBOUND_BASE_URL` is always allowed. |
 | `PG_APP_USER`, `PG_APP_PASSWORD` | deploy | The non-owner role the deployed application connects as; setting the password enables the split (see `deploy.storage`). |
+
+## Parallel Sandbox Plane runtime keys (schema 38)
+
+- `EXECUTION_PLANE` (`LIVE` | `SANDBOX`; optional). Unset is the historic
+  single-process development behaviour. The deploy writes `LIVE` on every live
+  core and `SANDBOX` on `pg-core-sandbox`.
+- `SANDBOX_CORE_BACK_URLS` on the edges: the second mTLS pool used for
+  `X-Pg-Env: SANDBOX`, `pg_test_*` tokens and `sbx_*` links. It falls back to
+  the live pool in single-process development.
+- Sandbox core only: `SANDBOX_DB_*`, `SANDBOX_REDIS_DB_INDEX`,
+  `SANDBOX_CORE_PORT`, `FAKE_RAILS_PUBLIC_BASE_URL`,
+  `FAKE_RAILS_SEEDER_TOKEN`, `ALLOW_FAKE_RAILS_HOSTS=true`.
+- Deploy helper `bun run set-execution-plane LIVE|SANDBOX` updates
+  `sandbox_sync_watermarks` and sets `pgw.execution_plane` plus
+  `pgw.strict_plane_fence` (on for SANDBOX) at database level.
+- `core.backend` refuses to seed Fake Rails when `EXECUTION_PLANE=LIVE`
+  (`FAKE_RAILS_SEED_FORBIDDEN_ON_LIVE_PLANE`).

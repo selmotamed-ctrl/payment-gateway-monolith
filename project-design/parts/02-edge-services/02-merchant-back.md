@@ -345,3 +345,15 @@ The edge validates the catalog query shape and the public execute shape (`inputs
 ## Dispute attachments
 
 `GET/POST /api/v1/merchant/disputes/:id/attachments`, `GET .../:attachmentId/content` and `DELETE .../:attachmentId` proxy the shared-vault evidence routes. Uploads use the raw-byte forwarder; content uses the streaming proxy. Downloads are refused by core while the object is quarantined.
+
+## Dual-pool sandbox routing (schema 38)
+
+The shared core client keeps a live pool (`CORE_BACK_URL(S)`) and a sandbox
+pool (`SANDBOX_CORE_BACK_URL(S)`; falls back to live in single-process
+development). `planeOfRequest` selects the pool: a `pg_test_*` API token is
+always Sandbox, `pg_live_*` is always Live, and a portal session uses
+`X-Pg-Env`. Every forwarded call adds `x-pg-env`. The external token gate
+accepts both `pg_live_` and `pg_test_` shapes and leaves the plane decision to
+the prefix; core rejects a token presented to the wrong plane. Protected
+`/sandbox/*` routes forward to `/internal/merchant/sandbox/*` for the
+merchant account manager, settlement generator and workspace reset.

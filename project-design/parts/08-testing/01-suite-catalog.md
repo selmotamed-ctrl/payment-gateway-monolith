@@ -534,3 +534,31 @@ These are development/CI tests only; no production-time test job or test endpoin
   sort/search/access-log forwarding and the legal-hold request path.
 - Route/UI coverage still needs a live Playwright pass for the four storage tabs
   and the dispute/AML/reconciliation attachment surfaces.
+
+## Parallel Sandbox Plane suites (2026-11-13)
+
+- `core-back/test/sandboxPlane.test.ts` — plane token prefixes, authentication
+  rejection before the database, outbound URL fence, Fake Rails URL detection,
+  LIVE/SANDBOX database fence (strict and forced-plane), auto-provisioning,
+  and live-plane reset refusal (DB-backed; skips when unavailable).
+- `core-back/test/sandbox-plane-integration.test.ts` — a real sandbox link
+  summary returns the inspector accounts from a Fake Rails control API, the
+  account PATCH is forwarded and re-read, and a live link never exposes the
+  inspector or the sandbox endpoints.
+- `fake-rails-back/test/accountsAndInspector.test.ts` — five personas per rail,
+  hold/capture/release maths, realistic declines, inspector adjustment,
+  checkout-helper OTP + push simulator, refund credit and reset.
+- `admin-back/test/sandbox-plane-routing.test.ts`,
+  `merchant-back/test/sandbox-plane-routing.test.ts`,
+  `checkout-back/test/sandbox-plane-routing.test.ts` — dual-pool routing,
+  header forwarding, `pg_test_` token routing, `sbx_` link routing and
+  sandbox-only endpoint refusal.
+- `deploy/test/sandboxPlane.test.ts` — config acceptance/refusal, distinct DB,
+  planned sandbox service/env/cert/firewall, live-core fence and edge URLs,
+  and Fake Rails firewall isolation.
+
+`core-back/test/setup.ts`, `admin-back/test/setup.ts` and
+`merchant-back/test/setup.ts` isolate the suites from a developer's local
+`.env` (Fake Rails switches, scanner mode, execution plane, deployment core
+URLs and proxy CIDRs). The project-design verification gate is
+`bun scripts/project-design/build.ts --check`.

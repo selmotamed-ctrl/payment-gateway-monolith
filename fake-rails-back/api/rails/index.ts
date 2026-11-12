@@ -117,6 +117,7 @@ export const createRailsRouter = (): Router => {
         amountLyd: transaction.normalized_amount_lyd,
         currency: transaction.currency,
         customer: transaction.customer_identifier_masked,
+        customerRaw: transaction.customer_identifier,
         mode: transaction.collection_mode,
         fault: null,
       };

@@ -97,6 +97,7 @@ router.post(
       clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
       userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
       authorization: req.headers.authorization,
+      plane: String(req.headers["x-pg-env"] ?? "").trim().toUpperCase() === "SANDBOX" ? "SANDBOX" : undefined,
     });
     res.status(201).json(payload);
   },
@@ -111,6 +112,7 @@ router.get("/:id/content", async (req: Request, res: Response): Promise<void> =>
     clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
     userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
     authorization: req.headers.authorization,
+    plane: String(req.headers["x-pg-env"] ?? "").trim().toUpperCase() === "SANDBOX" ? "SANDBOX" : undefined,
   });
   if (upstream.statusCode >= 400) {
     throw mapCoreHttpError(upstream.statusCode, parseJsonBuffer(upstream.body));

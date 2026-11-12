@@ -61,8 +61,25 @@ import { getObjectStorageSdk } from "../../lib/objectStorageSdk/runtime";
 import { env } from "../../lib/env";
 import { WebhookEndpointService } from "../../engine/webhooks/WebhookEndpointService";
 import { WEBHOOK_EVENT_TYPES, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_MS } from "../../engine/webhooks/events";
+import { fakeRailsControlClient } from "../../engine/sandbox/FakeRailsControlClient";
+import { resetMerchantSandboxWorkspace } from "../../engine/sandbox/SandboxSyncService";
+import { StatementIngestor } from "../../engine/reconciliation/StatementIngestor";
 
 const router = express.Router();
+
+const headerPlane = (request: Request): "LIVE" | "SANDBOX" | undefined => {
+  const value = request.header("x-pg-env")?.trim().toUpperCase();
+  if (value === "SANDBOX") return "SANDBOX";
+  if (value === "LIVE") return "LIVE";
+  return undefined;
+};
+
+const processPlane = (): "LIVE" | "SANDBOX" | undefined =>
+  process.env.EXECUTION_PLANE === "SANDBOX"
+    ? "SANDBOX"
+    : process.env.EXECUTION_PLANE === "LIVE"
+      ? "LIVE"
+      : undefined;
 
 router.get("/health", (_request, response) => {
   response.json({ status: "ok", channel: "merchant", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null });
@@ -1506,15 +1523,17 @@ router.post("/wallets", async (request: Request, response: Response) => {
     request.body ?? {},
   );
   const wallet = await client.$transaction(async (tx) => {
+    const env = headerPlane(request) ?? processPlane() ?? "LIVE";
     const glAccount = await tx.glAccount.create({
       data: {
         accountType: "MERCHANT_WALLET",
         ownerId: merchantId,
+        env,
         currency: body.currency.toUpperCase(),
       },
     });
     return tx.wallet.create({
-      data: { merchantId, glAccountId: glAccount.id, currency: body.currency.toUpperCase(), status: "PENDING" },
+      data: { merchantId, glAccountId: glAccount.id, currency: body.currency.toUpperCase(), status: "PENDING", env },
     });
   });
   response.status(201).json({ id: wallet.id, currency: wallet.currency, status: wallet.status });
@@ -1676,6 +1695,7 @@ router.post("/applications", async (request: Request, response: Response) => {
       railWhitelist: jsonOptional(body.railWhitelist),
       redirectDomainAllowlist: jsonOptional(body.redirectDomainAllowlist),
       status: "PENDING",
+      env: headerPlane(request) ?? processPlane() ?? "LIVE",
     },
   });
   response.status(201).json({ id: application.id, name: application.name, status: application.status });
@@ -1783,6 +1803,8 @@ const createLink = async (
   body: z.infer<typeof linkCreateSchema>,
   /** The applications a scoped user is restricted to; the default application is picked from them. */
   appScope: readonly string[] | null = null,
+  /** Explicit request plane (X-Pg-Env on a portal call, or the process plane). */
+  plane?: "LIVE" | "SANDBOX",
 ) => {
   if (appScope && body.applicationId && !appScope.includes(body.applicationId)) {
     throw new ApiError(
@@ -1810,13 +1832,14 @@ const createLink = async (
   if (!merchant) {
     throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
   }
+  const env = plane ?? (processPlane() ?? (merchant.status === "ACTIVE" ? "LIVE" : "SANDBOX"));
   // A suspended application or a frozen wallet can not take in new payment links.
   assertCommerceActive({
     applicationStatus: application.status,
     walletStatus: wallet.status,
-    env: merchant.status === "ACTIVE" ? "LIVE" : "SANDBOX",
+    env,
   });
-  const key = `pl_${randomBytes(12).toString("base64url")}`;
+  const key = `${env === "SANDBOX" ? "sbx" : "pay"}_${randomBytes(12).toString("base64url")}`;
   const link = await client.paymentLink.create({
     data: {
       key,
@@ -1830,6 +1853,7 @@ const createLink = async (
       redirectUrl: null,
       railWhitelist: jsonOptional(body.allowedRails),
       state: "PENDING",
+      env,
       expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
     },
   });
@@ -1849,7 +1873,7 @@ const createLink = async (
       railWhitelist: asStringArray(link.railWhitelist),
     },
     channel: "WEB",
-    env: merchant.status === "ACTIVE" ? "LIVE" : "SANDBOX",
+    env,
   });
   return { link, visible };
 };
@@ -1889,7 +1913,7 @@ router.post("/links", async (request: Request, response: Response) => {
   assertMerchantAuthority(principalOf(request), ["link:write"]);
   const merchantId = merchantIdOf(request);
   const body = parseOrThrow(linkCreateSchema, request.body);
-  const { link, visible } = await createLink(merchantId, body, appScopeOf(request));
+  const { link, visible } = await createLink(merchantId, body, appScopeOf(request), headerPlane(request));
   await publishRealtimePos({
     merchantId,
     applicationId: link.applicationId,
@@ -1899,6 +1923,7 @@ router.post("/links", async (request: Request, response: Response) => {
   response.status(201).json({
     id: link.id,
     key: link.key,
+    env: link.env,
     amount: decimal(link.amount).toFixed(4),
     currency: link.currency,
     feeBearer: link.feeBearer,
@@ -2479,7 +2504,8 @@ router.post("/tokens", async (request: Request, response: Response) => {
   if (!application) {
     throw new ApiError(409, "APPLICATION_REQUIRED", "An application is required to issue an access token");
   }
-  const plaintext = generateAccessToken();
+  const tokenPlane = headerPlane(request) ?? processPlane() ?? "LIVE";
+  const plaintext = generateAccessToken(tokenPlane);
   const created = await client.accessToken.create({
     data: {
       merchantId,
@@ -2488,6 +2514,7 @@ router.post("/tokens", async (request: Request, response: Response) => {
       tokenHash: hashAccessToken(plaintext),
       lastFour: plaintext.slice(-4),
       scopes: tokenScopes,
+      env: tokenPlane,
       expiresAt: tokenExpiresAt,
       ipWhitelistEnabled: Boolean(body.allowedCidrs?.length),
       ips: body.allowedCidrs
@@ -3290,7 +3317,7 @@ router.post("/external/links", async (request: Request, response: Response) => {
     throw new ApiError(403, "API_TOKEN_REQUIRED", "An API access token is required for the external API");
   }
   const body = parseOrThrow(linkCreateSchema, request.body);
-  const { link, visible } = await createLink(principal.merchantId as string, body);
+  const { link, visible } = await createLink(principal.merchantId as string, body, null, processPlane());
   await publishRealtimePos({
     merchantId: principal.merchantId as string,
     applicationId: link.applicationId,
@@ -3299,6 +3326,7 @@ router.post("/external/links", async (request: Request, response: Response) => {
   });
   response.status(201).json({
     key: link.key,
+    env: link.env,
     amount: decimal(link.amount).toFixed(4),
     currency: link.currency,
     feeBearer: link.feeBearer,
@@ -3489,6 +3517,223 @@ router.post("/webhooks/deliveries/:id/redeliver", async (request: Request, respo
     if (row) await scopedEndpoint(request, String(row.endpointId));
   }
   response.status(202).json(await webhookService.redeliver({ merchantId: merchantIdOf(request), deliveryId: id, actor: webhookActor(request) }));
+});
+
+
+const sandboxAccountProjection = (account: Awaited<ReturnType<typeof fakeRailsControlClient.listAccounts>>[number]) => ({
+  id: account.id,
+  railCode: account.rail_code,
+  gatewayCode: account.gateway_code,
+  instrumentType: account.instrument_type,
+  identifier: account.identifier,
+  holderName: account.holder_name,
+  secretPin: account.secret_pin,
+  expiry: account.expiry,
+  currency: account.currency,
+  availableBalanceLyd: account.available_balance_lyd,
+  reservedBalanceLyd: account.reserved_balance_lyd,
+  dailyLimitLyd: account.daily_limit_lyd,
+  dailySpentLyd: account.daily_spent_lyd,
+  status: account.status,
+  notes: account.notes,
+  merchantId: account.merchant_id,
+});
+
+const sandboxAccountPatchSchema = z
+  .object({
+    availableBalanceLyd: z.string().regex(/^[+-]?\d+(\.\d{1,4})?$/).optional(),
+    dailyLimitLyd: z.string().regex(/^[+-]?\d+(\.\d{1,4})?$/).optional(),
+    dailySpentLyd: z.string().regex(/^[+-]?\d+(\.\d{1,4})?$/).optional(),
+    status: z.enum(["ACTIVE", "FROZEN", "EXPIRED", "BLOCKED"]).optional(),
+    staticOtp: z.string().regex(/^\d{4,8}$/).optional().nullable(),
+    presetFault: z.string().max(64).optional().nullable(),
+    quickPreset: z.enum(["SET_ZERO", "SET_LINK_AMOUNT", "TOP_UP_5000", "RESET_DAILY_SPENT"]).optional(),
+    linkAmountLyd: z.string().optional(),
+    reason: z.string().max(255).optional(),
+  })
+  .strict();
+
+router.get("/sandbox/accounts", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["merchant:read", "wallet:read", "application:manage"]);
+  const merchantId = merchantIdOf(request);
+  const railCode = typeof request.query.railCode === "string" ? request.query.railCode : undefined;
+  const accounts = await fakeRailsControlClient.listAccounts({ merchantId, railCode });
+  response.json({ accounts: accounts.map(sandboxAccountProjection) });
+});
+
+router.get("/sandbox/accounts/:accountId/movements", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["merchant:read", "wallet:read", "application:manage"]);
+  const merchantId = merchantIdOf(request);
+  const { accountId } = parseOrThrow(z.object({ accountId: z.string().min(1).max(128) }), request.params);
+  const accounts = await fakeRailsControlClient.listAccounts({ merchantId });
+  if (!accounts.some((account) => account.id === accountId)) {
+    throw new ApiError(404, "SANDBOX_ACCOUNT_NOT_FOUND", "The sandbox test account was not found");
+  }
+  response.json({ movements: await fakeRailsControlClient.listAccountMovements(accountId) });
+});
+
+router.patch("/sandbox/accounts/:accountId", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["application:manage", "wallet:create"]);
+  const merchantId = merchantIdOf(request);
+  const { accountId } = parseOrThrow(z.object({ accountId: z.string().min(1).max(128) }), request.params);
+  const body = parseOrThrow(sandboxAccountPatchSchema, request.body);
+  const accounts = await fakeRailsControlClient.listAccounts({ merchantId });
+  if (!accounts.some((account) => account.id === accountId)) {
+    throw new ApiError(404, "SANDBOX_ACCOUNT_NOT_FOUND", "The sandbox test account was not found");
+  }
+  const account = await fakeRailsControlClient.patchAccount(accountId, body);
+  await writeAudit(client, {
+    data: {
+      actorId: principalOf(request).userId ?? merchantId,
+      role: principalOf(request).role ?? "MERCHANT",
+      action: "SANDBOX_ACCOUNT_UPDATED",
+      entityType: "SANDBOX_ACCOUNT",
+      entityId: accountId,
+      beforeJson: {},
+      afterJson: body as Record<string, unknown>,
+    },
+  });
+  response.json({ account: sandboxAccountProjection(account) });
+});
+
+router.post("/sandbox/reset", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["application:manage"]);
+  const merchantId = merchantIdOf(request);
+  const workspace = await resetMerchantSandboxWorkspace(merchantId);
+  const accounts = await fakeRailsControlClient.resetAccounts(merchantId);
+  await writeAudit(client, {
+    data: {
+      actorId: principalOf(request).userId ?? merchantId,
+      role: principalOf(request).role ?? "MERCHANT",
+      action: "SANDBOX_WORKSPACE_RESET",
+      entityType: "MERCHANT",
+      entityId: merchantId,
+      beforeJson: {},
+      afterJson: { ...workspace, ...accounts },
+    },
+  });
+  response.json({ ...workspace, fakeAccounts: accounts });
+});
+
+router.post("/sandbox/seed-links", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["link:write"]);
+  const merchantId = merchantIdOf(request);
+  const amounts = ["25.0000", "100.0000", "250.0000"];
+  const created: Array<{ key: string; amount: string; env: string }> = [];
+  for (const amount of amounts) {
+    const { link } = await createLink(
+      merchantId,
+      {
+        title: `Sandbox sample ${amount} LYD`,
+        amount,
+        currency: "LYD",
+        feeBearer: "MERCHANT_ABSORBS",
+        maxUses: 1,
+      } as z.infer<typeof linkCreateSchema>,
+      appScopeOf(request),
+      "SANDBOX",
+    );
+    created.push({ key: link.key, amount: decimal(link.amount).toFixed(4), env: link.env });
+  }
+  response.status(201).json({ ok: true, links: created });
+});
+
+const sandboxSettlementSchema = z
+  .object({
+    gatewayCode: z.string().min(1).max(64),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+    anomalies: z
+      .object({
+        feeVariancePercent: z.number().min(0).max(100).optional(),
+        feeVarianceAmount: z.number().min(0).optional(),
+        omitOne: z.boolean().optional(),
+        addUnrecorded: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+router.post("/sandbox/settlements/generate", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["application:manage", "wallet:read"]);
+  const merchantId = merchantIdOf(request);
+  const body = parseOrThrow(sandboxSettlementSchema, request.body ?? {});
+  const statement = await fakeRailsControlClient.generateStatement({
+    gatewayCode: body.gatewayCode,
+    from: body.from,
+    to: body.to,
+    anomalies: body.anomalies,
+  });
+  const gateway = await client.gateway.findFirst({ where: { code: body.gatewayCode } });
+  if (!gateway) {
+    throw new ApiError(404, "GATEWAY_NOT_FOUND", "The gateway does not exist in this sandbox");
+  }
+  const parserConfig = {
+    format: "CSV",
+    headerRow: true,
+    delimiter: ",",
+    columnsMap: {
+      ourReference: "our_reference",
+      providerReference: "provider_reference",
+      amount: "amount",
+      fee: "fee",
+      currency: "currency",
+      occurredAt: "settled_at",
+    },
+  } as const;
+  let source = await client.statementSource.findFirst({ where: { gatewayId: gateway.id, type: "UPLOAD" } });
+  if (!source) {
+    source = await client.statementSource.create({
+      data: { gatewayId: gateway.id, type: "UPLOAD", parserConfig, settlementLagDays: 0 },
+    });
+  }
+  const header = "provider_reference,our_reference,amount,fee,currency,status,settled_at";
+  const csvLine = (line: Record<string, unknown>): string =>
+    ["provider_reference", "our_reference", "amount", "fee", "currency", "status", "settled_at"]
+      .map((key) => {
+        const value = line[key] ?? "";
+        const text = String(value);
+        return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+      })
+      .join(",");
+  const csv = `${header}\n${statement.lines.map(csvLine).join("\n")}\n`;
+  const platform = getPlatformRuntime(client as never);
+  const ingestor = new StatementIngestor({
+    db: client as never,
+    repositories: platform.repositories,
+  });
+  const result = await ingestor.ingest({
+    statementSourceId: source.id,
+    content: Buffer.from(csv, "utf8"),
+    fileName: `${body.gatewayCode}-sandbox-statement.csv`,
+    windowStart: body.from ? new Date(body.from) : undefined,
+    windowEnd: body.to ? new Date(body.to) : undefined,
+  });
+  await writeAudit(client, {
+    data: {
+      actorId: principalOf(request).userId ?? merchantId,
+      role: principalOf(request).role ?? "MERCHANT",
+      action: "SANDBOX_SETTLEMENT_GENERATED",
+      entityType: "RECONCILIATION_RUN",
+      entityId: result.runId,
+      beforeJson: {},
+      afterJson: { gatewayCode: body.gatewayCode, ...result, items: undefined },
+    },
+  });
+  response.status(201).json({
+    statementId: statement.id,
+    gatewayCode: body.gatewayCode,
+    rows: statement.lines.length,
+    ingestion: result,
+  });
+});
+
+router.get("/sandbox/clearing-pools", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["merchant:read", "wallet:read"]);
+  const accounts = await fakeRailsControlClient.listAccounts({ merchantId: merchantIdOf(request) });
+  const gateways = [...new Set(accounts.map((account) => account.gateway_code))];
+  response.json({ gateways });
 });
 
 export const merchantInternalRouter = router;

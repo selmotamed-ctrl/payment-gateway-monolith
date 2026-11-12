@@ -28,6 +28,7 @@ import {
     type MerchantGuideSearchEntry,
 } from "@/components/guide/GlobalGuideSearchModal";
 import { ContextualHelpDrawer } from "@/components/guide/ContextualHelpDrawer";
+import { activeEnvironment, setActiveEnvironment } from "@/state/environment";
 
 const DefaultLayout = dc(() => {
     const { t, current: locale } = useLocale();
@@ -272,6 +273,25 @@ const DefaultLayout = dc(() => {
                     <span class="pg-help-btn__label">{t("SOP & Help")}</span>
                 </VBtn>
 
+                <div class="pg-env-switch" role="group" aria-label={t("Environment")}>
+                    <VBtn
+                        size="small"
+                        variant={activeEnvironment.value === "LIVE" ? "flat" : "text"}
+                        color={activeEnvironment.value === "LIVE" ? "primary" : undefined}
+                        onClick={() => setActiveEnvironment("LIVE")}
+                    >
+                        {t("LIVE")}
+                    </VBtn>
+                    <VBtn
+                        size="small"
+                        variant={activeEnvironment.value === "SANDBOX" ? "flat" : "text"}
+                        color={activeEnvironment.value === "SANDBOX" ? "warning" : undefined}
+                        onClick={() => setActiveEnvironment("SANDBOX")}
+                    >
+                        {t("SANDBOX")}
+                    </VBtn>
+                </div>
+
                 <ThemeMenu />
 
                 <div
@@ -373,7 +393,12 @@ const DefaultLayout = dc(() => {
                         <span class="pg-drawer__title">{t("Payment Gateway")}</span>
                         <span class="pg-drawer__subtitle">{t("Merchant Portal")}</span>
                     </div>
-                    <StatusBadge status="LIVE" label="LIVE" toneOverride="success" showDot={false} />
+                    <StatusBadge
+                        status={activeEnvironment.value}
+                        label={activeEnvironment.value}
+                        toneOverride={activeEnvironment.value === "SANDBOX" ? "warning" : "success"}
+                        showDot={false}
+                    />
                 </div>
                 <div class="pg-drawer__search">
                     <button type="button" class="pg-search-pill" onClick={() => (guideSearchOpen.value = true)}>
@@ -469,6 +494,11 @@ const DefaultLayout = dc(() => {
                 class="pg-main"
                 {...{ id: "pg-main-content", tabindex: "-1", "aria-busy": routeLoading.value ? "true" : "false" }}
             >
+                {activeEnvironment.value === "SANDBOX" ? (
+                    <div class="pg-sandbox-banner" role="status">
+                        {t("SANDBOX ENVIRONMENT — wallets, applications, links (sbx_*), ledger postings and reports run on the isolated sandbox plane through Fake Rails. No real money moves.")}
+                    </div>
+                ) : null}
                 <RouterView />
             </VMain>
 

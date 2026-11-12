@@ -1,3 +1,4 @@
+import { assertOutboundPlaneAllowed } from "../../lib/plane";
 import { createHmac } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import ipaddr from "ipaddr.js";
@@ -491,6 +492,7 @@ export class ApiConsumer {
   }
 
   private async send<T>(request: ApiConsumerRequest): Promise<ApiConsumerResponse<T>> {
+    assertOutboundPlaneAllowed(request.url);
     const candidate = new URL(request.url);
     const fakeRailsTarget = isFakeRailsHostAllowed(candidate.hostname, this.config.allowedHosts);
     const url = compileUrl(request.url, request.query, {

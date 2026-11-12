@@ -428,3 +428,16 @@ probes `systemctl is-active pg-object-storage-daemon` on the storage host and
 `GET /v1/health` over mTLS from every core host and the backup host. The deploy
 fails before any core is touched when multiple core nodes or a separate backup
 host are configured without `OBJECT_STORAGE_NODE`.
+
+## Sandbox deployment (schema 38)
+
+`deployTargets` adds `core-sandbox` after the live core. `deployService`
+generates Prisma for both database cores; the sandbox owner URL comes from
+`SANDBOX_DB_*`. After the first-node migration the deploy runs
+`bun run set-execution-plane LIVE|SANDBOX` through the owner env file, so each
+database carries its plane marker and (for sandbox) the strict fence. The
+storage step creates the sandbox role/database on the sandbox host when
+`SANDBOX_DB_HOST` is the sandbox node (an external host is a documented manual
+step). Step 12 seeds Fake Rails blueprints and synthetic history on the
+sandbox core, never on the live core, when the plane is configured. Verification
+probes every `core-sandbox` node with the `core-sandbox` certificate.

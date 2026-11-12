@@ -5,7 +5,7 @@ import type { ClientRequest } from "node:http";
 import type { TLSSocket } from "node:tls";
 import { Readable } from "node:stream";
 import type { Request, Response } from "express";
-import { coreBackUrls, env } from "./env";
+import { coreBackUrls, sandboxCoreBackUrls, env } from "./env";
 import { ApiError } from "./error";
 import { isValidIp } from "./net";
 
@@ -48,6 +48,8 @@ export interface CoreRequestOptions {
   signal?: AbortSignal;
   minLsn?: string;
   consistencyLsn?: string;
+  /** Target pool. Defaults to LIVE. */
+  plane?: CorePlane;
 }
 
 export interface CoreCallOptions {
@@ -69,6 +71,8 @@ export interface CoreCallOptions {
   maxAttempts?: number;
   minLsn?: string;
   consistencyLsn?: string;
+  /** Target pool. Defaults to LIVE. */
+  plane?: CorePlane;
 }
 
 export interface CoreResponse {
@@ -84,8 +88,12 @@ export interface CoreStream {
   abort: () => void;
 }
 
+export type CorePlane = "LIVE" | "SANDBOX";
+
 export interface CoreNodeState {
   url: string;
+  /** The isolated pool this node belongs to. */
+  plane: CorePlane;
   agent: https.Agent;
   /** Dedicated pool for long-lived SSE streams so they cannot starve request/response traffic. */
   streamAgent: https.Agent;
@@ -337,9 +345,16 @@ const createCoreAgent = (maxSockets = 64): https.Agent =>
     timeout: env.CORE_REQUEST_TIMEOUT_MS,
   });
 
-let nodes: CoreNodeState[] = [];
-let poolSignature = "";
-let roundRobinCursor = 0;
+interface CorePoolState {
+  nodes: CoreNodeState[];
+  signature: string;
+  cursor: number;
+}
+
+const corePools: Record<CorePlane, CorePoolState> = {
+  LIVE: { nodes: [], signature: "", cursor: 0 },
+  SANDBOX: { nodes: [], signature: "", cursor: 0 },
+};
 let clock: () => number = () => Date.now();
 
 export const setCoreClock = (source: (() => number) | number): void => {
@@ -353,14 +368,15 @@ export const resetCoreClock = (): void => {
 export const setCoreClockForTests = setCoreClock;
 export const resetCoreClockForTests = resetCoreClock;
 
-const destroyNodes = (): void => {
-  for (const node of nodes) {
-    node.agent.destroy();
-    node.streamAgent.destroy();
+const destroyNodes = (plane?: CorePlane): void => {
+  const planes: CorePlane[] = plane ? [plane] : ["LIVE", "SANDBOX"];
+  for (const current of planes) {
+    for (const node of corePools[current].nodes) {
+      node.agent.destroy();
+      node.streamAgent.destroy();
+    }
+    corePools[current] = { nodes: [], signature: "", cursor: 0 };
   }
-  nodes = [];
-  poolSignature = "";
-  roundRobinCursor = 0;
 };
 
 export const resetCoreAgent = (): void => {
@@ -369,14 +385,17 @@ export const resetCoreAgent = (): void => {
 
 export const resetCorePool = resetCoreAgent;
 
-const ensureNodes = (): CoreNodeState[] => {
-  const configured = coreBackUrls();
+const ensureNodes = (plane: CorePlane = "LIVE"): CoreNodeState[] => {
+  const configured = plane === "SANDBOX" ? sandboxCoreBackUrls() : coreBackUrls();
   const signature = configured.join("\n");
-  if (signature !== poolSignature) {
-    destroyNodes();
-    poolSignature = signature;
-    nodes = configured.map((url) => ({
+  const pool = corePools[plane];
+  if (signature !== pool.signature) {
+    destroyNodes(plane);
+    const next = corePools[plane];
+    next.signature = signature;
+    next.nodes = configured.map((url) => ({
       url,
+      plane,
       agent: createCoreAgent(),
       streamAgent: createCoreAgent(MAX_STREAM_SOCKETS),
       healthy: true,
@@ -385,11 +404,12 @@ const ensureNodes = (): CoreNodeState[] => {
       cooldownUntil: 0,
     }));
   }
-  return nodes;
+  return corePools[plane].nodes;
 };
 
 export const getCoreAgent = (): https.Agent => {
-  const pool = ensureNodes();
+  const live = ensureNodes("LIVE");
+  const pool = live.length > 0 ? live : ensureNodes("SANDBOX");
   const primary = pool[0];
   if (!primary) {
     throw new ApiError(503, "CORE_UNAVAILABLE", "Core service is temporarily unavailable");
@@ -397,8 +417,9 @@ export const getCoreAgent = (): https.Agent => {
   return primary.agent;
 };
 
-const eligiblePool = (excluded: Set<string>): CoreNodeState[] => {
+const eligiblePool = (plane: CorePlane, excluded: Set<string>): CoreNodeState[] => {
   const now = clock();
+  const nodes = corePools[plane].nodes;
   const halfOpen = nodes.filter(
     (node) => !excluded.has(node.url) && !node.healthy && node.inFlight === 0 && now >= node.cooldownUntil,
   );
@@ -406,17 +427,19 @@ const eligiblePool = (excluded: Set<string>): CoreNodeState[] => {
   return nodes.filter((node) => !excluded.has(node.url) && node.healthy);
 };
 
-const selectNode = (excluded: Set<string>): CoreNodeState | undefined => {
-  const pool = eligiblePool(excluded);
+const selectNode = (plane: CorePlane, excluded: Set<string>): CoreNodeState | undefined => {
+  const pool = eligiblePool(plane, excluded);
   if (pool.length === 0) return undefined;
+  const state = corePools[plane];
   const leastInFlight = Math.min(...pool.map((node) => node.inFlight));
   const tied = pool.filter((node) => node.inFlight === leastInFlight);
-  const node = tied[roundRobinCursor % tied.length];
-  roundRobinCursor = (roundRobinCursor + 1) % Number.MAX_SAFE_INTEGER;
+  const node = tied[state.cursor % tied.length];
+  state.cursor = (state.cursor + 1) % Number.MAX_SAFE_INTEGER;
   return node;
 };
 
-const hasSelectableNode = (excluded: Set<string>): boolean => eligiblePool(excluded).length > 0;
+const hasSelectableNode = (plane: CorePlane, excluded: Set<string>): boolean =>
+  eligiblePool(plane, excluded).length > 0;
 
 const markNodeFailure = (node: CoreNodeState): void => {
   const now = clock();
@@ -483,6 +506,7 @@ const buildRequestHeaders = (options: CoreRequestOptions): Record<string, string
   }
   const lsn = options.minLsn ?? options.consistencyLsn;
   if (lsn !== undefined && lsn.trim().length > 0) headers["x-pg-min-lsn"] = lsn;
+  if (options.plane) headers["x-pg-env"] = options.plane;
   stripFramingHeaders(headers);
   if (options.body !== undefined) headers["content-length"] = String(Buffer.byteLength(options.body));
   assertHeaderSafe(headers);
@@ -512,6 +536,7 @@ export const buildCoreHeaders = (options: CoreCallOptions): Record<string, strin
   else delete headers["content-type"];
   const lsn = options.minLsn ?? options.consistencyLsn;
   if (lsn !== undefined && lsn.trim().length > 0) headers["x-pg-min-lsn"] = lsn;
+  if (options.plane) headers["x-pg-env"] = options.plane;
   assertHeaderSafe(headers);
   return headers;
 };
@@ -648,7 +673,8 @@ const performRequest = (
   });
 
 export const request = async (options: CoreRequestOptions): Promise<CoreResponse> => {
-  const pool = ensureNodes();
+  const plane = options.plane ?? "LIVE";
+  const pool = ensureNodes(plane);
   if (pool.length === 0) throw coreUnavailable();
   const maxAttempts = retryAttemptsFor(
     options.method,
@@ -662,7 +688,7 @@ export const request = async (options: CoreRequestOptions): Promise<CoreResponse
   let lastError: unknown;
   let lastResponse: CoreResponse | undefined;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const node = selectNode(attempted);
+    const node = selectNode(plane, attempted);
     if (!node) break;
     attempted.add(node.url);
     node.inFlight += 1;
@@ -688,7 +714,7 @@ export const request = async (options: CoreRequestOptions): Promise<CoreResponse
   }
   if (lastResponse) return lastResponse;
   if (lastError !== undefined) {
-    if (isNodeFailure(lastError) && !hasSelectableNode(new Set())) throw coreUnavailable();
+    if (isNodeFailure(lastError) && !hasSelectableNode(plane, new Set())) throw coreUnavailable();
     throw mapCoreTransportError(lastError);
   }
   throw coreUnavailable();
@@ -708,6 +734,7 @@ export const callCoreRaw = async (options: CoreCallOptions): Promise<CoreRespons
     maxAttempts: options.maxAttempts,
     minLsn: options.minLsn,
     consistencyLsn: options.consistencyLsn,
+    plane: options.plane,
   });
 
 export const parseJsonBuffer = (buffer: Buffer): unknown => {
@@ -850,7 +877,8 @@ const bufferedStream = (
 };
 
 export const openCoreStream = async (options: CoreCallOptions): Promise<CoreStream> => {
-  const pool = ensureNodes();
+  const plane = options.plane ?? "LIVE";
+  const pool = ensureNodes(plane);
   if (pool.length === 0) throw coreUnavailable();
   const maxAttempts = retryAttemptsFor(
     options.method,
@@ -865,7 +893,7 @@ export const openCoreStream = async (options: CoreCallOptions): Promise<CoreStre
   let lastError: unknown;
   let lastStream: CoreStream | undefined;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const node = selectNode(attempted);
+    const node = selectNode(plane, attempted);
     if (!node) break;
     attempted.add(node.url);
     node.inFlight += 1;
@@ -875,7 +903,7 @@ export const openCoreStream = async (options: CoreCallOptions): Promise<CoreStre
       markNodeHealthy(node);
       if (isUnavailableStatus(stream.statusCode)) {
         const canRetry =
-          attempt + 1 < maxAttempts && hasSelectableNode(attempted);
+          attempt + 1 < maxAttempts && hasSelectableNode(plane, attempted);
         if (canRetry) {
           const body = await drainStream(stream.stream).catch(() => Buffer.alloc(0));
           lastStream = bufferedStream(stream.statusCode, stream.headers, body);
@@ -893,7 +921,7 @@ export const openCoreStream = async (options: CoreCallOptions): Promise<CoreStre
   }
   if (lastStream) return lastStream;
   if (lastError !== undefined) {
-    if (isNodeFailure(lastError) && !hasSelectableNode(new Set())) throw coreUnavailable();
+    if (isNodeFailure(lastError) && !hasSelectableNode(plane, new Set())) throw coreUnavailable();
     throw mapCoreTransportError(lastError);
   }
   throw coreUnavailable();

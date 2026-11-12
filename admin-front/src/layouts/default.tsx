@@ -23,6 +23,7 @@ import { setLocale } from "@/plugins/localization";
 import { showSnackBar } from "@/utils/snackBar";
 import { GlobalSearchPalette } from "@/components/search/GlobalSearchPalette";
 import ThemeMenu from "@/components/ThemeMenu";
+import { activeEnvironment, setActiveEnvironment } from "@/state/environment";
 import { clearGlobalSearchCache } from "@/components/search/api";
 import type { NavigationSectionItem } from "@/components/search/localCommands";
 import { searchGuide } from "@/content/guide/search";
@@ -297,6 +298,25 @@ const DefaultLayout = dc(() => {
                     <span class="pg-help-btn__label">{t("Help & SOP (?)")}</span>
                 </VBtn>
 
+                <div class="pg-env-switch" role="group" aria-label={t("Environment")}>
+                    <VBtn
+                        size="small"
+                        variant={activeEnvironment.value === "LIVE" ? "flat" : "text"}
+                        color={activeEnvironment.value === "LIVE" ? "primary" : undefined}
+                        onClick={() => setActiveEnvironment("LIVE")}
+                    >
+                        {t("LIVE PLANE")}
+                    </VBtn>
+                    <VBtn
+                        size="small"
+                        variant={activeEnvironment.value === "SANDBOX" ? "flat" : "text"}
+                        color={activeEnvironment.value === "SANDBOX" ? "warning" : undefined}
+                        onClick={() => setActiveEnvironment("SANDBOX")}
+                    >
+                        {t("SANDBOX PLANE")}
+                    </VBtn>
+                </div>
+
                 <ThemeMenu />
 
                 <VMenu location="bottom end">
@@ -483,6 +503,11 @@ const DefaultLayout = dc(() => {
                 class="pg-main"
                 {...{ id: "pg-main-content", tabindex: "-1", "aria-busy": routeLoading.value ? "true" : "false" }}
             >
+                {activeEnvironment.value === "SANDBOX" ? (
+                    <div class="pg-sandbox-banner" role="status">
+                        {t("SANDBOX PLANE — approvals, wallets, applications, links and ledger postings run on the isolated sandbox plane. No real money moves.")}
+                    </div>
+                ) : null}
                 <RouterView />
             </VMain>
 

@@ -15,6 +15,7 @@ import { usersRouter } from "./users";
 import { walletsRouter } from "./wallets";
 import { webhooksRouter } from "./webhooks";
 import { reportEngineRouter } from "./reportEngine";
+import { sandboxRouter } from "./sandbox";
 
 const router = express.Router();
 
@@ -47,5 +48,6 @@ router.use("/users", usersRouter);
 router.use("/stats", statsRouter);
 router.use("/webhooks", webhooksRouter);
 router.use("/report-engine", reportEngineRouter);
+router.use("/sandbox", sandboxRouter);
 
 export const protectedRouter = router;

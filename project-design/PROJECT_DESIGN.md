@@ -26,6 +26,7 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Tests and Benchmarks](#coretests) — `partial`
 - [Dynamic Report Engine SDK and Report Studio Host](#corereport-engine) — `implemented`
 - [Shared Object & Asset Storage Engine](#coreobject-storage) — `implemented`
+- [Parallel Sandbox Plane and Stateful Fake Rails v2](#coresandbox-plane) — `partial`
 - [Shared Core Upstream Client](#edgeshared) — `implemented`
 - [Admin Edge BFF](#edgeadmin) — `partial`
 - [Merchant Edge BFF](#edgemerchant) — `partial`
@@ -1541,6 +1542,23 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 | `LEDGER_RAW_SQL` | core-back | `false` turns the raw-SQL ledger posting path off (default on). |
 | `FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS` | fake-rails-back | Extra hosts (`host` or `host:port`) a webhook may target; the host of `CORE_INBOUND_BASE_URL` is always allowed. |
 | `PG_APP_USER`, `PG_APP_PASSWORD` | deploy | The non-owner role the deployed application connects as; setting the password enables the split (see `deploy.storage`). |
+
+## Parallel Sandbox Plane runtime keys (schema 38)
+
+- `EXECUTION_PLANE` (`LIVE` | `SANDBOX`; optional). Unset is the historic
+  single-process development behaviour. The deploy writes `LIVE` on every live
+  core and `SANDBOX` on `pg-core-sandbox`.
+- `SANDBOX_CORE_BACK_URLS` on the edges: the second mTLS pool used for
+  `X-Pg-Env: SANDBOX`, `pg_test_*` tokens and `sbx_*` links. It falls back to
+  the live pool in single-process development.
+- Sandbox core only: `SANDBOX_DB_*`, `SANDBOX_REDIS_DB_INDEX`,
+  `SANDBOX_CORE_PORT`, `FAKE_RAILS_PUBLIC_BASE_URL`,
+  `FAKE_RAILS_SEEDER_TOKEN`, `ALLOW_FAKE_RAILS_HOSTS=true`.
+- Deploy helper `bun run set-execution-plane LIVE|SANDBOX` updates
+  `sandbox_sync_watermarks` and sets `pgw.execution_plane` plus
+  `pgw.strict_plane_fence` (on for SANDBOX) at database level.
+- `core.backend` refuses to seed Fake Rails when `EXECUTION_PLANE=LIVE`
+  (`FAKE_RAILS_SEED_FORBIDDEN_ON_LIVE_PLANE`).
 
 ---
 
@@ -5391,7 +5409,7 @@ fallback) and the `object_storage` Platform Monitor check cover operations.
 
 <a id="coredata"></a>
 
-> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-11 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `d695518+working-tree`
 
 # Data Schema and Migrations
 
@@ -5403,7 +5421,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 37 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 38 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -5458,7 +5476,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 37`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 38`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5469,7 +5487,7 @@ The models are grouped by domain:
 
 `core-back/prisma/seed.ts`, `seedFakeRails.ts` and `syntheticSeeder/index.ts` call `ensureSchemaVersion()` before writing. A stale database is therefore rejected by these seeders and by any caller that explicitly asserts the version. The core HTTP start path does not call it.
 
-Schema version 37 adds the storage hardening migration on top of the v36 object & asset storage control plane
+Schema version 37 added the storage hardening migration on top of the v36 object & asset storage control plane; version 38 adds the Parallel Sandbox Plane fence
 (`storage_objects`, `storage_object_locks`, `storage_object_access_logs`,
 `report_asset_bundle_entries`, `dispute_attachments`, `aml_case_evidence`),
 domain FK links (KYB, reconciliation, regulatory templates/outputs, Report Studio
@@ -5479,7 +5497,7 @@ installs the two append-only guard triggers. See
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261112000000_v36_enterprise_object_storage_engine`, schema version 37). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261114000000_v38_parallel_sandbox_plane_and_ledger_fence`, schema version 38). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -5774,7 +5792,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 35 (`REQUIRED_SCHEMA_VERSION = 37`; model count 106). The schema migrations since version 10 are:
+The current schema version is 38 (`REQUIRED_SCHEMA_VERSION = 38`; model count 113). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -5880,7 +5898,30 @@ plane, domain links and the first guard triggers. `20261113090000_storage_engine
 adds `gc_claim_token`/`gc_claimed_at`, the strict status-transition and
 authorization-immutability checks, the append-only access-log trigger, object
 explorer indexes (including pg_trgm filename/key search) and the access-log
-filter indexes. The current required version is **37**.
+filter indexes. The required version is **38** after the sandbox migration (section 17b).
+
+## 17b. Parallel Sandbox Plane (schema version 38, 2026-11-13)
+
+`20261114000000_v38_parallel_sandbox_plane_and_ledger_fence` adds:
+
+- `SandboxCheckoutInspectorMode` (`OPEN_IN_SANDBOX`, `PIN_PROTECTED`, `DISABLED`);
+- `env` (`GatewayEnvironmentType`) on `applications`, `wallets`, `access_tokens`,
+  `payment_links` and `journal_entries`, with plane indexes;
+- `sandbox_inspector_mode` / `sandbox_inspector_pin` on `applications`;
+- `sandbox_sync_watermarks` (singleton `id`, `execution_plane`, catalog/merchant
+  sync watermarks, catalog hash, `updated_at`);
+- `enforce_execution_plane_fence()` and its five row triggers.
+
+The trigger reads the plane from `pgw.execution_plane` (deploy sets it per
+database) and falls back to the watermark. With
+`pgw.strict_plane_fence=on` it refuses a SANDBOX row on LIVE and a LIVE row on
+SANDBOX (`23514`); it always refuses `provider_reference LIKE 'FK-%'` on LIVE.
+The `updatedAt`/sync timestamps use `TIMESTAMPTZ(3)` to match the exhaustive
+schema suite. Legacy payment links of non-ACTIVE merchants are backfilled to
+`sandbox`. Because the database default on the singleton `id` is not part of
+the Prisma DMMF, the migration omits it and the deploy helper inserts
+`'singleton'` explicitly; Prisma still supplies the same default client-side.
+The required schema version is **38** (113 models).
 
 ## 17. Report engine versioning and merchant chrome (schema versions 34-35, 2026-11-11)
 
@@ -8031,6 +8072,143 @@ Implemented end to end. Deviations recorded:
 
 ---
 
+<a id="coresandbox-plane"></a>
+
+> **Part ID:** `core.sandbox-plane` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `working-tree`
+
+# Parallel Sandbox Plane and Stateful Fake Rails v2
+
+## 1. Purpose
+
+The Sandbox Plane is a fully isolated copy of the payment process: its own
+process (`EXECUTION_PLANE="SANDBOX"`), its own PostgreSQL database
+(`payment_gateway_sandbox`), its own API tokens (`pg_test_*`), its own payment
+links (`sbx_*`) and the stateful Fake Rails emulator. The Live process is hard
+fenced away from it, and the database fence refuses cross-plane writes.
+
+Schema version **38** introduces the plane tags, the `sandbox_sync_watermarks`
+singleton and the database trigger.
+
+## 2. Plane tagging
+
+`GatewayEnvironmentType` (`LIVE` / `SANDBOX`) is stored on `applications`,
+`wallets`, `access_tokens`, `payment_links` and `journal_entries`. A v38
+`payment_link` resolves its plane from its own `env`; legacy rows fall back to
+the `sbx_` key prefix and then to the historic merchant-status rule. A merchant
+who is `PENDING` on the Live plane can still pay in sandbox; an `ACTIVE`
+merchant can keep using sandbox for new developers and rails.
+
+API tokens are minted with the plane prefix: `pg_live_` on Live and `pg_test_`
+on Sandbox. `authenticate()` refuses a token of the other plane before any
+database lookup (`SANDBOX_TOKEN_ON_LIVE_PLANE` / `LIVE_TOKEN_ON_SANDBOX_PLANE`).
+Payment links use `pay_` on Live and `sbx_` on Sandbox.
+
+## 3. Defense in depth
+
+| Layer | Enforcement |
+| :--- | :--- |
+| Process/URL fence | `core-back/lib/plane.ts`: a `LIVE` core refuses Fake Rails URLs (`FAKE_RAILS_FORBIDDEN_ON_LIVE_PLANE`); a `SANDBOX` core refuses non-Fake-Rails URLs (`LIVE_GATEWAY_FORBIDDEN_ON_SANDBOX_PLANE`). Enforced in `StepExecutor.assertUrlAllowed` and `ApiConsumer.send`. |
+| Database fence | `enforce_execution_plane_fence()` on `payment_attempts`, `journal_entries`, `wallets`, `applications` and `payment_links`. The strict mode (`pgw.strict_plane_fence=on`) rejects SANDBOX rows on LIVE and LIVE rows on SANDBOX (`23514`), and also rejects `FK-%` provider references on `payment_attempts`. In a single-plane development/staging stack the strict mode stays off so the historic Fake Rails test flow keeps working; the parallel deployment isolates Fake Rails in its own process and database. The plane is read from `pgw.execution_plane` when set, otherwise from the singleton watermark. |
+| Token/link prefixes | Edge routing and core authentication. |
+| Separate database | `SANDBOX_DB_NAME` must differ from the Live database; the deploy engine creates the sandbox role/database on the sandbox host. |
+| Edge pools | `SANDBOX_CORE_BACK_URLS` is a second mTLS pool. Admin uses `X-Pg-Env`; merchant uses `X-Pg-Env` or the token prefix; checkout uses the `sbx_` link prefix; inbound uses the `/sandbox/` URL segment. |
+| Inbound | A Live core rejects `env=SANDBOX` webhooks; a Sandbox core rejects `env=LIVE`. |
+
+`EXECUTION_PLANE` is optional: unset preserves the historic single-process
+development behaviour (both planes allowed). The deploy engine always writes
+`LIVE` for the live core and `SANDBOX` for `pg-core-sandbox`.
+
+## 4. Stateful Fake Rails v2
+
+`fake-rails-back/engine/accounts/AccountLedgerService.ts` adds:
+
+- `fake_accounts`, `fake_account_holds`, `fake_account_movements`,
+  `fake_merchant_clearing_pools`;
+- five canonical personas per rail (rich 50,000 LYD, standard 1,500 LYD,
+  low-balance 5 LYD, near-limit 5 LYD remaining, frozen);
+- auto-created ad-hoc accounts (2,500 LYD);
+- integer micro-unit arithmetic inside one SQLite transaction;
+- hold on initiate, capture on confirm/hosted approve/simulator approve,
+  release on cancel/decline, refund credit;
+- a clearing pool per gateway/rail.
+
+The `fake_transactions` row keeps the unmasked customer identifier and links to
+its bound account and held amount. The port of the old schema is additive: the
+database adds `customer_identifier`, `account_id` and `held_amount_lyd` on
+startup, so an existing SQLite file upgrades in place.
+
+### Control API
+
+`/portal-api/accounts` (seeder token or tester JWT): list, create, reset, patch,
+movements. `/portal-api/checkout-helper/:reference` reveals the live OTP, the
+bound account, the held amount and recent wire events;
+`/checkout-helper/:reference/simulate-action` can approve/reject a push/QR,
+approve with a variance, replay a duplicate webhook or fire a tampered one.
+
+## 5. Checkout Secret & Balance Inspector
+
+`GET /internal/checkout/pay/:linkKey` includes `env`, `sandboxInspector` and the
+inspector's `railAccounts` when the plane is SANDBOX. The app-level
+`sandboxInspectorMode` is `OPEN_IN_SANDBOX` (default), `PIN_PROTECTED` or
+`DISABLED`; a protected inspector requires the `x-pg-sandbox-pin` header. The
+inspector is never included for a Live link.
+
+`GET /pay/:linkKey/logs/:attemptId` includes the active attempt secrets and the
+simulator flag. Sandbox-only endpoints:
+
+- `GET /pay/:linkKey/sandbox-accounts`
+- `PATCH /pay/:linkKey/sandbox-accounts/:accountId`
+- `POST /pay/:linkKey/logs/:attemptId/sandbox-simulate`
+
+All three return `403 SANDBOX_ONLY_ENDPOINT` for a Live or non-`sbx_` link and
+`403 SANDBOX_INSPECTOR_DISABLED` / `SANDBOX_INSPECTOR_LOCKED` as appropriate.
+
+## 6. Sandbox provisioning and reset
+
+On the first sandbox request, a valid merchant session is auto-provisioned in
+the sandbox database: merchant `ACTIVE` (also when the Live merchant is still
+`PENDING` or in review), a `LYD` `MERCHANT_WALLET` GL account, an `ACTIVE`
+wallet, a default `ACTIVE` application and the user row. `resetMerchantSandbox
+Workspace` deletes the merchant's sandbox attempts, groups and links inside one
+transaction (it does not touch immutable ledger rows) and a conflicting
+dependent (for example a dispute) returns `409 SANDBOX_RESET_CONFLICT`.
+
+## 7. Admin and merchant portals
+
+The Admin and Merchant portals have a `LIVE | SANDBOX` switch. It persists to
+`pg_admin_env` / `pg_merchant_env`, adds `X-Pg-Env` to every API call and
+reloads to refresh every list. The Merchant portal adds
+`Sandbox & Developers → Sandbox Test Accounts`: account balances, movements,
+settlement-statement generation through the reconciliation ingestor, sample
+sandbox links and workspace reset. The Admin approvals drawer adds
+`Sandbox Fast-Track Approve`, which synthesizes a distinct sandbox checker
+(`sandbox-checker-bot`) so a single tester can exercise maker-checker without a
+second account; it is hard-blocked on the Live plane.
+
+## 8. Deploy
+
+`SANDBOX_ENABLED`, `SANDBOX_NODE` and the `SANDBOX_*` fields are optional. When
+configured:
+
+- the Live core receives `EXECUTION_PLANE="LIVE"`, no Fake Rails host and no
+  sandbox URL;
+- a `pg-core-sandbox` service is planned on `SANDBOX_NODE` with its own
+  `core-sandbox` certificate, firewall and database;
+- edges receive `SANDBOX_CORE_BACK_URLS`;
+- the sandbox database role/database are created on the sandbox host and
+  `bun run set-execution-plane SANDBOX` sets the watermark and database GUC;
+- Fake Rails is no longer accepted on the Live plane in production unless the
+  sandbox plane is configured and `SANDBOX_DB_NAME` differs from the live
+  database.
+
+## 9. Verification
+
+The suites cover plane tags, the token prefixes, the database fence, auto
+provisioning, outbound/inbound fences, the account maths, the inspector and
+simulator, reset, dual-pool routing in all three edges and the deploy plan.
+
+---
+
 <a id="edgeshared"></a>
 
 > **Part ID:** `edge.shared` · **Status:** `implemented` · **Last verified:** 2026-11-08 · **Verified against:** `5a24f6f+working-tree`
@@ -8615,6 +8793,15 @@ read/write guards. `assetsRouter` additionally exposes binary
 `POST /assets/upload` (multipart `file` + `name`) and
 `GET /assets/:id/content`, forwarding raw bytes to core.
 
+## Dual-pool sandbox routing (schema 38)
+
+`lib/coreInternalClient.ts` keeps two independent least-in-flight mTLS pools:
+the live pool (`CORE_BACK_URL(S)`) and the sandbox pool
+(`SANDBOX_CORE_BACK_URL(S)`, falling back to live only in single-process
+development). A request with `X-Pg-Env: SANDBOX` is routed exclusively to the
+sandbox pool and carries `x-pg-env: SANDBOX` upstream. `api/forward.ts` also
+accepts `SANDBOX_CORE_BACK_URL` for tests/legacy single-value configuration.
+
 ---
 
 <a id="edgemerchant"></a>
@@ -8929,6 +9116,18 @@ The edge validates the catalog query shape and the public execute shape (`inputs
 
 `GET/POST /api/v1/merchant/disputes/:id/attachments`, `GET .../:attachmentId/content` and `DELETE .../:attachmentId` proxy the shared-vault evidence routes. Uploads use the raw-byte forwarder; content uses the streaming proxy. Downloads are refused by core while the object is quarantined.
 
+## Dual-pool sandbox routing (schema 38)
+
+The shared core client keeps a live pool (`CORE_BACK_URL(S)`) and a sandbox
+pool (`SANDBOX_CORE_BACK_URL(S)`; falls back to live in single-process
+development). `planeOfRequest` selects the pool: a `pg_test_*` API token is
+always Sandbox, `pg_live_*` is always Live, and a portal session uses
+`X-Pg-Env`. Every forwarded call adds `x-pg-env`. The external token gate
+accepts both `pg_live_` and `pg_test_` shapes and leaves the plane decision to
+the prefix; core rejects a token presented to the wrong plane. Protected
+`/sandbox/*` routes forward to `/internal/merchant/sandbox/*` for the
+merchant account manager, settlement generator and workspace reset.
+
 ---
 
 <a id="edgecheckout"></a>
@@ -9177,6 +9376,15 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 ## Gap resolutions (2026-11-05)
 
 - The checkout upstream client uses the same `CORE_FAILURE_THRESHOLD = 3` consecutive-failure threshold before a core node leaves rotation (GAP-021). Checkout sessions use the `payment-gateway-checkout` audience (GAP-020).
+
+## Dual-pool sandbox routing (schema 38)
+
+`/api/v1/pay/:linkKey` selects the sandbox pool when the key starts with
+`sbx_`, and forwards `x-pg-env: SANDBOX` plus the optional
+`x-pg-sandbox-pin`. The three sandbox-only endpoints (accounts list, account
+patch, simulator) refuse a non-`sbx_` key at the edge with `403
+SANDBOX_ONLY_ENDPOINT`. `/inbound/:gateway/:env/:pathToken` routes
+`sandbox|test|uat` to the sandbox pool and `live|production` to the live pool.
 
 ---
 
@@ -9500,6 +9708,17 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 `system:storage:read` (view), `system:storage:admin`
 (maintenance/rewrap/GC/scrub/AV scan), `system:storage:legal-hold`
 (place/lift hold with a written reason).
+
+## LIVE | SANDBOX switch (schema 38)
+
+The admin shell has a `LIVE PLANE | SANDBOX PLANE` control backed by
+`state/environment.ts` (persisted in `pg_admin_env`). Every API call carries
+`X-Pg-Env`. While SANDBOX is selected, a persistent warning banner states that
+wallets, applications, links, ledger postings and approvals run on the isolated
+sandbox plane. The approvals drawer exposes `Sandbox Fast-Track Approve` only
+in SANDBOX; it synthesizes a distinct checker (`sandbox-checker-bot`) so a
+single tester can exercise maker-checker while the maker != checker invariant
+holds.
 
 ---
 
@@ -11282,6 +11501,17 @@ Merchant dialogs, menus and drawers share the admin shell rule: `.v-overlay__con
 
 Dispute evidence is uploaded as raw bytes to `POST /api/v1/merchant/disputes/:id/attachments` and listed/read/deleted through the matching attachment routes. The old base64 `POST /disputes/:id/evidence` remains only as a legacy JSON endpoint; the portal no longer uses it. Downloads are available only once the vault object is `ACTIVE` (AV clean).
 
+## LIVE | SANDBOX switch and sandbox test accounts (schema 38)
+
+`state/environment.ts` persists `pg_merchant_env`; the API interceptor adds
+`X-Pg-Env` and the app bar shows `LIVE | SANDBOX`. A persistent warning banner
+appears in SANDBOX. `Sandbox & Developers → Sandbox Test Accounts`
+(`/portal/sandbox/accounts`) lists Fake Rails accounts and movements, edits
+balances/limits/status, runs a settlement generator through the reconciliation
+ingestor, creates three sample sandbox links and resets the sandbox workspace.
+The page is reachable with `applications.read`; the core enforces the exact
+mutation authorities (`application:manage`, `wallet:create`, `link:write`).
+
 ---
 
 <a id="merchant-uiguide"></a>
@@ -11960,6 +12190,17 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 
 Checkout dialogs/drawers use the shared overlay text-color rule (`color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`), keeping custom modal content readable in dark mode.
 
+## Sandbox Checkout Inspector (schema 38)
+
+When the link summary has `env: "SANDBOX"` and the application inspector is
+enabled, the payer page mounts `SandboxCheckoutInspector`. It fetches the
+rail's Fake Rails accounts, auto-fills the form, adjusts balances, freezes
+accounts, shows movements, reveals/auto-confirms the live OTP, and simulates
+push/QR approval, decline, a variance, duplicate replay or a tampered webhook.
+PIN-protected applications prompt for the inspector PIN (sent as
+`x-pg-sandbox-pin`). The inspector never renders for a LIVE link; the endpoint
+also refuses one server-side.
+
 ---
 
 <a id="checkout-uihelp"></a>
@@ -12523,6 +12764,20 @@ bun run start
 - `FAKE_RAILS_ALLOWED_CIDRS` is enforced against `socket.remoteAddress` (not `X-Forwarded-For`); behind nginx the real allowlist is the nginx `allow`/`deny` block. `FAKE_RAILS_TRUST_PROXY` defaults to loopback. `FAKE_RAILS_PORTAL_ACCOUNT_LOCKOUT` (default 5 per username) locks repeated failed portal logins.
 - **Hosted action token and stream ticket (GAP-024, RESOLVED 2026-11-05).** `GET /hosted/session/:reference` now returns `action_token`, a JWT bound to that transaction id with the purpose role `FAKE_RAILS_HOSTED_ACTION` (15 minutes); the approve/decline action POST must send it in `X-Hosted-Action-Token` or gets `401 HOSTED_ACTION_TOKEN_REQUIRED`. `POST /portal-api/transactions/stream-ticket` (tester session required) issues a `FAKE_RAILS_SSE_TICKET` JWT (30 seconds, unique `jti`); `portalAuthGuard` accepts it only on `/transactions/stream` and consumes it once (`consumeSseTicket`; replay is `401`). Both tokens are signed with the portal JWT secret but carry their own `role` (helpers in `fake-rails-back/lib/tickets.ts`), so neither works as a tester session and a tester session works as neither. The used-ticket map is in-process and pruned on use. `/hosted/*` session reads remain public. Since 2026-11-08 they no longer include `expected_otp` or `webhook_url` (`publicHostedTransaction`, applied to both the session read and the action response); the token itself is still issued by the public session read, so it proves knowledge of the reference, not authority. Testers read the OTP on the authenticated portal routes. The rails initiate response still returns the OTP by design (automated sandbox runner).
 - **Residual.** `fake-rails-front` still keeps the tester token in localStorage (GAP-019 does not cover this portal).
+
+## Stateful accounts v2 (schema 38)
+
+`engine/accounts/AccountLedgerService.ts` adds SQLite `fake_accounts`,
+`fake_account_holds`, `fake_account_movements` and
+`fake_merchant_clearing_pools`. Five canonical personas are seeded per rail
+(rich, standard, low balance, near daily limit, frozen) and unknown
+identifiers are auto-created with 2,500 LYD. All balance changes use integer
+micro-units inside one immediate transaction: hold on initiate, capture on
+confirm/hosted approve, release on cancel/decline, refund credit. The
+`fake_transactions` row stores the unmasked customer identifier, bound account
+and held amount; startup adds those columns to an existing SQLite file.
+`/portal-api/accounts` and `/checkout-helper/:reference` expose the control API
+to `pg-core-sandbox` (seeder token) and the tester portal (JWT).
 
 ---
 
@@ -13831,6 +14086,23 @@ auto-detect the tier. Core and backup daemon receive
 `OBJECT_STORAGE_DAEMON_URL` plus `object-storage-client` mTLS paths, and the
 core receives `CLUSTER_CORE_NODE_COUNT` and the KEK keyring.
 
+## Parallel Sandbox Plane (schema 38)
+
+Optional keys: `SANDBOX_ENABLED`, `SANDBOX_MANAGE_VIA_SSH`, `SANDBOX_NODE`
+(`nodeId@sshHost:sshPort:privateIp:servicePort`), `SANDBOX_SSH_*`,
+`SANDBOX_CORE_PORT` (4005), `SANDBOX_REMOTE_DIR`, `SANDBOX_DB_HOST`,
+`SANDBOX_DB_PORT`, `SANDBOX_DB_NAME` (`payment_gateway_sandbox`),
+`SANDBOX_DB_USER/PASSWORD`, `SANDBOX_APP_USER/PASSWORD`,
+`SANDBOX_REDIS_DB_INDEX`.
+`sandboxPlaneConfigured()` is true when `SANDBOX_ENABLED`,
+`SANDBOX_MANAGE_VIA_SSH` or `SANDBOX_NODE` is set. In production,
+`FAKE_RAILS_ENABLED` is refused unless the sandbox plane is configured and
+`SANDBOX_DB_NAME` differs from the live database. The planner emits a
+`core-sandbox` role/service with the `core-sandbox` certificate, the sandbox
+database URL, `EXECUTION_PLANE=SANDBOX` and only the sandbox database/object
+storage reachability. Live core receives `EXECUTION_PLANE=LIVE` and no Fake
+Rails host. Edges receive `SANDBOX_CORE_BACK_URLS=https://<sandboxIp>:4005`.
+
 ---
 
 <a id="deployplanner"></a>
@@ -15098,6 +15370,19 @@ probes `systemctl is-active pg-object-storage-daemon` on the storage host and
 `GET /v1/health` over mTLS from every core host and the backup host. The deploy
 fails before any core is touched when multiple core nodes or a separate backup
 host are configured without `OBJECT_STORAGE_NODE`.
+
+## Sandbox deployment (schema 38)
+
+`deployTargets` adds `core-sandbox` after the live core. `deployService`
+generates Prisma for both database cores; the sandbox owner URL comes from
+`SANDBOX_DB_*`. After the first-node migration the deploy runs
+`bun run set-execution-plane LIVE|SANDBOX` through the owner env file, so each
+database carries its plane marker and (for sandbox) the strict fence. The
+storage step creates the sandbox role/database on the sandbox host when
+`SANDBOX_DB_HOST` is the sandbox node (an external host is a documented manual
+step). Step 12 seeds Fake Rails blueprints and synthetic history on the
+sandbox core, never on the live core, when the plane is configured. Verification
+probes every `core-sandbox` node with the `core-sandbox` certificate.
 
 ---
 
@@ -16888,6 +17173,34 @@ These are development/CI tests only; no production-time test job or test endpoin
   sort/search/access-log forwarding and the legal-hold request path.
 - Route/UI coverage still needs a live Playwright pass for the four storage tabs
   and the dispute/AML/reconciliation attachment surfaces.
+
+## Parallel Sandbox Plane suites (2026-11-13)
+
+- `core-back/test/sandboxPlane.test.ts` — plane token prefixes, authentication
+  rejection before the database, outbound URL fence, Fake Rails URL detection,
+  LIVE/SANDBOX database fence (strict and forced-plane), auto-provisioning,
+  and live-plane reset refusal (DB-backed; skips when unavailable).
+- `core-back/test/sandbox-plane-integration.test.ts` — a real sandbox link
+  summary returns the inspector accounts from a Fake Rails control API, the
+  account PATCH is forwarded and re-read, and a live link never exposes the
+  inspector or the sandbox endpoints.
+- `fake-rails-back/test/accountsAndInspector.test.ts` — five personas per rail,
+  hold/capture/release maths, realistic declines, inspector adjustment,
+  checkout-helper OTP + push simulator, refund credit and reset.
+- `admin-back/test/sandbox-plane-routing.test.ts`,
+  `merchant-back/test/sandbox-plane-routing.test.ts`,
+  `checkout-back/test/sandbox-plane-routing.test.ts` — dual-pool routing,
+  header forwarding, `pg_test_` token routing, `sbx_` link routing and
+  sandbox-only endpoint refusal.
+- `deploy/test/sandboxPlane.test.ts` — config acceptance/refusal, distinct DB,
+  planned sandbox service/env/cert/firewall, live-core fence and edge URLs,
+  and Fake Rails firewall isolation.
+
+`core-back/test/setup.ts`, `admin-back/test/setup.ts` and
+`merchant-back/test/setup.ts` isolate the suites from a developer's local
+`.env` (Fake Rails switches, scanner mode, execution plane, deployment core
+URLs and proxy CIDRs). The project-design verification gate is
+`bun scripts/project-design/build.ts --check`.
 
 ---
 

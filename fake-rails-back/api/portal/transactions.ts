@@ -11,6 +11,10 @@ import {
 } from "../../engine/db";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { webhookDispatcher } from "../../engine/webhooks/WebhookDispatcher";
+import {
+  releaseAccountHoldForTransaction,
+  settleAccountForTransaction,
+} from "../../engine/accounts/AccountLedgerService";
 import { broadcast, subscribe } from "./eventHub";
 
 const actionSchema = z.object({
@@ -99,6 +103,14 @@ export const createTransactionsRouter = (): Router => {
 
     switch (body.action) {
       case "APPROVE": {
+        settleAccountForTransaction({
+          railCode: transaction.rail_code,
+          gatewayCode: transaction.gateway_code,
+          identifier: transaction.customer_identifier,
+          transactionId: transaction.id,
+          amountLyd: transaction.normalized_amount_lyd,
+          settledAmountLyd: transaction.normalized_amount_lyd,
+        });
         updateTransaction(transaction.id, { status: "PAID", settled_amount_lyd: transaction.normalized_amount_lyd });
         webhookDispatcher.dispatch({
           transaction: { ...transaction, status: "PAID" },
@@ -115,6 +127,14 @@ export const createTransactionsRouter = (): Router => {
       }
       case "APPROVE_MISMATCH": {
         const settled = (Number(transaction.normalized_amount_lyd) + 0.05).toFixed(4);
+        settleAccountForTransaction({
+          railCode: transaction.rail_code,
+          gatewayCode: transaction.gateway_code,
+          identifier: transaction.customer_identifier,
+          transactionId: transaction.id,
+          amountLyd: transaction.normalized_amount_lyd,
+          settledAmountLyd: settled,
+        });
         updateTransaction(transaction.id, { status: "PAID", settled_amount_lyd: settled });
         webhookDispatcher.dispatch({
           transaction: { ...transaction, status: "PAID" },
@@ -130,6 +150,14 @@ export const createTransactionsRouter = (): Router => {
         break;
       }
       case "APPROVE_LATE": {
+        settleAccountForTransaction({
+          railCode: transaction.rail_code,
+          gatewayCode: transaction.gateway_code,
+          identifier: transaction.customer_identifier,
+          transactionId: transaction.id,
+          amountLyd: transaction.normalized_amount_lyd,
+          settledAmountLyd: transaction.normalized_amount_lyd,
+        });
         updateTransaction(transaction.id, { status: "PAID", settled_amount_lyd: transaction.normalized_amount_lyd });
         webhookDispatcher.dispatch({
           transaction: { ...transaction, status: "PAID" },
@@ -147,6 +175,7 @@ export const createTransactionsRouter = (): Router => {
         break;
       }
       case "REJECT": {
+        releaseAccountHoldForTransaction(transaction.id, "Customer rejected on tester portal");
         updateTransaction(transaction.id, { status: "FAILED" });
         webhookDispatcher.dispatch({
           transaction,
@@ -161,6 +190,7 @@ export const createTransactionsRouter = (): Router => {
         break;
       }
       case "CANCEL": {
+        releaseAccountHoldForTransaction(transaction.id, "Cancelled on tester portal");
         updateTransaction(transaction.id, { status: "CANCELLED" });
         break;
       }

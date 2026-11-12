@@ -54,14 +54,19 @@ export const requirePgLiveToken = (req: Request, _res: Response, next: NextFunct
   const header = req.headers.authorization ?? "";
   const parts = header.split(" ");
   const [scheme, token] = parts;
+  const prefix = token?.startsWith("pg_test_")
+    ? "pg_test_"
+    : token?.startsWith(env.PG_LIVE_TOKEN_PREFIX)
+      ? env.PG_LIVE_TOKEN_PREFIX
+      : null;
   if (
     parts.length !== 2 ||
     scheme?.toLowerCase() !== "bearer" ||
     !token ||
-    !token.startsWith(env.PG_LIVE_TOKEN_PREFIX) ||
-    !TOKEN_BODY_PATTERN.test(token.slice(env.PG_LIVE_TOKEN_PREFIX.length))
+    !prefix ||
+    !TOKEN_BODY_PATTERN.test(token.slice(prefix.length))
   ) {
-    throw new ApiError(401, "INVALID_API_TOKEN", "A valid pg_live_ bearer token is required");
+    throw new ApiError(401, "INVALID_API_TOKEN", "A valid pg_live_ or pg_test_ bearer token is required");
   }
   next();
 };

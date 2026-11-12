@@ -15,6 +15,7 @@ import { QrOrCodeRenderer } from "@/components/renderers/QrOrCodeRenderer";
 import { PushOrTransferRenderer } from "@/components/renderers/PushOrTransferRenderer";
 import { PerRailInstructionsBanner } from "@/components/help/PerRailInstructionsBanner";
 import { CheckoutHelpDrawer } from "@/components/help/CheckoutHelpDrawer";
+import { SandboxCheckoutInspector } from "@/components/sandbox/SandboxCheckoutInspector";
 import ThemeMenu from "@/components/ThemeMenu";
 import type {
     AttemptSnapshot,
@@ -23,6 +24,7 @@ import type {
     InitiateResponse,
     PayLinkSummary,
     RailDescriptor,
+    SandboxInspectorAccount,
 } from "@/components/renderers/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -90,6 +92,47 @@ const PayPage = dc(() => {
 
     const linkKey = computed(() => String(route.params.linkKey ?? ""));
     const currentLocale = computed<"ar" | "en">(() => (adaptedLocale.current.value === "ar" ? "ar" : "en"));
+    const sandboxInspector = computed(() => summary.value?.sandboxInspector ?? null);
+    const activeSandboxSecrets = computed(
+        () => attempt.value?.sandboxInspector?.activeAttemptSecrets
+            ?? summary.value?.sandboxInspector?.activeAttemptSecrets
+            ?? null,
+    );
+
+    const refreshAttempt = async (): Promise<void> => {
+        const attemptId = attempt.value?.attemptId;
+        if (!attemptId) return;
+        try {
+            const response = await api.get(urlsMap.payLogs(linkKey.value, attemptId));
+            applySnapshot((response.data?.data ?? response.data) as AttemptSnapshot);
+        } catch {
+            // The sandbox inspector refresh is best effort.
+        }
+    };
+
+    const autoFillSandboxAccount = (account: SandboxInspectorAccount): void => {
+        const rails = summary.value?.visibleRails ?? [];
+        const rail = rails.find((entry) => entry.code === account.railCode) ?? selectedRail.value;
+        if (!rail) return;
+        if (selectedRail.value?.code !== rail.code) {
+            clearIdempotencyKey("initiate", linkKey.value);
+            clearAttemptId(linkKey.value);
+            attempt.value = null;
+            clientAction.value = null;
+            selectedRail.value = rail;
+            formValues.value = {};
+            formErrors.value = {};
+        }
+        const fields = rail.fields ?? [];
+        const target = fields.find((field) =>
+            ["phone", "wallet_id"].includes(field.inputType)
+            || /phone|mobile|card|pan|wallet|account|identifier/i.test(field.key),
+        ) ?? fields[0];
+        if (target) {
+            formValues.value = { ...formValues.value, [target.key]: account.identifier };
+        }
+        phase.value = "FORM";
+    };
 
     const resumeAttempt = async () => {
         const savedId = loadAttemptId(linkKey.value);
@@ -843,6 +886,21 @@ const PayPage = dc(() => {
                         )}
                     </>
                 )}
+
+                {summary.value?.env === "SANDBOX" && sandboxInspector.value?.enabled ? (
+                    <SandboxCheckoutInspector
+                        linkKey={linkKey.value}
+                        linkAmount={summary.value?.totalAmount ?? "0"}
+                        selectedRailCode={selectedRail.value?.code ?? null}
+                        attemptId={attempt.value?.attemptId ?? null}
+                        phase={phase.value}
+                        inspector={sandboxInspector.value}
+                        activeSecrets={activeSandboxSecrets.value}
+                        onAutoFillAccount={autoFillSandboxAccount}
+                        onAutoConfirmOtp={(otp) => void confirmOtp(otp)}
+                        onRefreshAttempt={() => void refreshAttempt()}
+                    />
+                ) : null}
 
                 <div style={{ textAlign: "center", fontSize: "11px", color: "var(--pg-ink-faint)" }}>
                     {t("Powered By")} · {t("Payment Gateway")}

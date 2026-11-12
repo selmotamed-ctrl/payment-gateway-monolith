@@ -1,6 +1,7 @@
 import {
   parseNodeList,
   pgAppRoleEnabled,
+  sandboxPlaneConfigured,
   PGBOUNCER_SESSION_ALIAS,
   type DeployConfig,
   type NodeSpec,
@@ -683,6 +684,9 @@ export const provisionPostgres18 = (input: PostgresProvisionInput): ProvisionRep
     ...parseNodeList(config.BACKUP_NODE).map((node) => node.privateIp),
     ...parseNodeList(config.AUDIT_DB_NODE).map((node) => node.privateIp),
     ...parseNodeList(config.LOG_DB_NODE).map((node) => node.privateIp),
+    ...(sandboxPlaneConfigured(config)
+      ? [parseNodeList(config.SANDBOX_NODE)[0]?.privateIp ?? config.SANDBOX_PRIVATE_IP].filter((value): value is string => Boolean(value))
+      : []),
   ];
   const hbaChanged = write(runner, primarySsh, primaryCluster.hbaPath, pgHbaSnippet(config, primaryAllowed), 0o640);
   runner.run(primarySsh, `chown postgres:postgres ${primaryCluster.hbaPath} && chmod 0640 ${primaryCluster.hbaPath}`, { sudo: true });

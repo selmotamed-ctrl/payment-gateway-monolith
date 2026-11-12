@@ -44,6 +44,8 @@ export interface PkiBundle {
   server: CertMaterial;
   /** The Fake Rails Nginx server certificate (CA-signed, SAN-bound). */
   fakeRails: CertMaterial;
+  /** The parallel sandbox core mTLS server certificate. */
+  sandbox: CertMaterial;
   /** The pg-backup-daemon mTLS server certificate. */
   backup: CertMaterial;
   /** The pg-object-storage-daemon mTLS server certificate. */
@@ -147,6 +149,20 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     cn: "core-back.internal",
     sans: serverSans,
   };
+  const sandboxIp = parseNodeList(config.SANDBOX_NODE)[0]?.privateIp ?? (config.SANDBOX_PRIVATE_IP || undefined);
+  const sandboxPlane = config.SANDBOX_ENABLED || config.SANDBOX_NODE.trim().length > 0;
+  const sandbox: CertMaterial = {
+    name: "core-sandbox",
+    certPath: join(directory, "core-sandbox.crt"),
+    keyPath: join(directory, "core-sandbox.key"),
+    kind: "server",
+    cn: "core-sandbox.internal",
+    sans: [
+      ...(sandboxIp ? [`IP:${sandboxIp}`] : []),
+      "IP:127.0.0.1",
+      "DNS:core-sandbox.internal",
+    ],
+  };
   const clients: CertMaterial[] = [
     { name: "admin-back-client", certPath: join(directory, "admin-back-client.crt"), keyPath: join(directory, "admin-back-client.key"), kind: "client", cn: "admin-back" },
     { name: "merchant-back-client", certPath: join(directory, "merchant-back-client.crt"), keyPath: join(directory, "merchant-back-client.key"), kind: "client", cn: "merchant-back" },
@@ -237,8 +253,8 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
       "IP:127.0.0.1",
     ],
   };
-  const bundle: PkiBundle = { directory, ca: caMaterial, server, fakeRails, backup, objectStorage, clients, storageClients, renewed: [] };
-  const everythingExists = [caCert, caKey, server.certPath, server.keyPath, fakeRails.certPath, fakeRails.keyPath, backup.certPath, backup.keyPath, ...(objectStorageConfigured(config) ? [objectStorage.certPath, objectStorage.keyPath] : []), ...[...clients, ...storageClients].flatMap((client) => [client.certPath, client.keyPath])]
+  const bundle: PkiBundle = { directory, ca: caMaterial, server, sandbox, fakeRails, backup, objectStorage, clients, storageClients, renewed: [] };
+  const everythingExists = [caCert, caKey, server.certPath, server.keyPath, ...(sandboxPlane ? [sandbox.certPath, sandbox.keyPath] : []), fakeRails.certPath, fakeRails.keyPath, backup.certPath, backup.keyPath, ...(objectStorageConfigured(config) ? [objectStorage.certPath, objectStorage.keyPath] : []), ...[...clients, ...storageClients].flatMap((client) => [client.certPath, client.keyPath])]
     .every((path) => existsSync(path));
 
   // AUTO-28: leaves that expire within the renewal window are re-issued by the CA that is already trusted, so a
@@ -246,7 +262,7 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
   const renewNames = new Set<string>();
   const renewWithin = config.MTLS_RENEW_WITHIN_DAYS;
   if (everythingExists && !rotate && renewWithin > 0) {
-    for (const leaf of [server, backup, ...(objectStorageConfigured(config) ? [objectStorage] : []), fakeRails, ...clients, ...storageClients]) {
+    for (const leaf of [server, ...(sandboxPlane ? [sandbox] : []), backup, ...(objectStorageConfigured(config) ? [objectStorage] : []), fakeRails, ...clients, ...storageClients]) {
       if (inspectCertificate(leaf.certPath, leaf.name).expiresInDays < renewWithin) renewNames.add(leaf.name);
     }
   }
@@ -265,7 +281,7 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
         .map((san) => san.replace(/^(IP|DNS|URI):/i, ""))
         .every((san) => current.sans.includes(san));
     };
-    sanDrift = ![server, backup, ...(objectStorageConfigured(config) ? [objectStorage] : []), fakeRails].every(certificateCoversSans);
+    sanDrift = ![server, ...(sandboxPlane ? [sandbox] : []), backup, ...(objectStorageConfigured(config) ? [objectStorage] : []), fakeRails].every(certificateCoversSans);
     if (!sanDrift && renewNames.size === 0) {
       verifyPki(bundle);
       return bundle;
@@ -303,6 +319,17 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     ou: "core",
     sans: serverSans,
     // Also usable as a client so the core host can probe its own /health.
+    extendedKeyUsage: "serverAuth,clientAuth",
+    validityDays: config.MTLS_VALIDITY_DAYS,
+  });
+
+  // ---- 2. Sandbox core server certificate (parallel sandbox plane) -------
+  if (sandboxPlane && signServer(sandbox)) signLeaf({
+    run,
+    directory,
+    material: sandbox,
+    ou: "core-sandbox",
+    sans: sandbox.sans ?? [],
     extendedKeyUsage: "serverAuth,clientAuth",
     validityDays: config.MTLS_VALIDITY_DAYS,
   });
@@ -477,6 +504,7 @@ export const verifyPki = (bundle: PkiBundle, now = new Date()): CertVerification
   const certificates = [
     bundle.ca,
     bundle.server,
+    ...(existsSync(bundle.sandbox.certPath) ? [bundle.sandbox] : []),
     bundle.fakeRails,
     bundle.backup,
     ...(existsSync(bundle.objectStorage.certPath) ? [bundle.objectStorage] : []),
@@ -502,6 +530,12 @@ export const certFilesForHost = (
     if (role === "core") {
       // Everything except the WAL ingest client, which is for PostgreSQL hosts only.
       files.push(bundle.server, ...bundle.storageClients.filter((client) => client.name !== WAL_ARCHIVE_CLIENT));
+    }
+    if (role === "core-sandbox") {
+      files.push(
+        bundle.sandbox,
+        ...bundle.storageClients.filter((client) => client.name === "object-storage-client"),
+      );
     }
     if (role === "admin") {
       files.push(...bundle.clients.filter((client) => client.cn === "admin-back"));
@@ -581,6 +615,7 @@ export const checkPkiExpiry = (
   const materials = [
     bundle.ca,
     bundle.server,
+    ...(existsSync(bundle.sandbox.certPath) ? [bundle.sandbox] : []),
     bundle.fakeRails,
     bundle.backup,
     ...(includeObjectStorage ? [bundle.objectStorage] : []),

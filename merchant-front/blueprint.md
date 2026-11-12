@@ -398,6 +398,17 @@ Merchant dialogs, menus and drawers share the admin shell rule: `.v-overlay__con
 
 Dispute evidence is uploaded as raw bytes to `POST /api/v1/merchant/disputes/:id/attachments` and listed/read/deleted through the matching attachment routes. The old base64 `POST /disputes/:id/evidence` remains only as a legacy JSON endpoint; the portal no longer uses it. Downloads are available only once the vault object is `ACTIVE` (AV clean).
 
+## LIVE | SANDBOX switch and sandbox test accounts (schema 38)
+
+`state/environment.ts` persists `pg_merchant_env`; the API interceptor adds
+`X-Pg-Env` and the app bar shows `LIVE | SANDBOX`. A persistent warning banner
+appears in SANDBOX. `Sandbox & Developers → Sandbox Test Accounts`
+(`/portal/sandbox/accounts`) lists Fake Rails accounts and movements, edits
+balances/limits/status, runs a settlement generator through the reconciliation
+ingestor, creates three sample sandbox links and resets the sandbox workspace.
+The page is reachable with `applications.read`; the core enforces the exact
+mutation authorities (`application:manage`, `wallet:create`, `link:write`).
+
 ## Merchant Guide and Developer API
 
 > Status: `partial` · Last verified: 2026-11-04

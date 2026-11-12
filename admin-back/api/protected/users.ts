@@ -149,6 +149,7 @@ router.patch(
         clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
         userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
         authorization: req.headers.authorization,
+        plane: String(req.headers["x-pg-env"] ?? "").trim().toUpperCase() === "SANDBOX" ? "SANDBOX" : undefined,
       });
       results.push(response.body);
       if (response.status === 202) accepted = true;

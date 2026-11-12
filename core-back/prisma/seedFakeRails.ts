@@ -20,6 +20,12 @@ import { Vault } from "../engine/crypto/Vault";
  *    seeder's safety gate.
  */
 
+if (process.env.EXECUTION_PLANE === "LIVE") {
+  throw new Error(
+    "FAKE_RAILS_SEED_FORBIDDEN_ON_LIVE_PLANE: seedFakeRails rewrites gateway environments to the emulator and must run on the Sandbox plane only",
+  );
+}
+
 const json = (value: unknown): Prisma.InputJsonValue => value as unknown as Prisma.InputJsonValue;
 
 const FAKE_RAILS_PUBLIC_BASE_URL =

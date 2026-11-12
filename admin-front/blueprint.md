@@ -323,6 +323,17 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 (maintenance/rewrap/GC/scrub/AV scan), `system:storage:legal-hold`
 (place/lift hold with a written reason).
 
+## LIVE | SANDBOX switch (schema 38)
+
+The admin shell has a `LIVE PLANE | SANDBOX PLANE` control backed by
+`state/environment.ts` (persisted in `pg_admin_env`). Every API call carries
+`X-Pg-Env`. While SANDBOX is selected, a persistent warning banner states that
+wallets, applications, links, ledger postings and approvals run on the isolated
+sandbox plane. The approvals drawer exposes `Sandbox Fast-Track Approve` only
+in SANDBOX; it synthesizes a distinct checker (`sandbox-checker-bot`) so a
+single tester can exercise maker-checker while the maker != checker invariant
+holds.
+
 ## Admin Route and Page Catalog
 
 > Status: `partial` · Last verified: 2026-11-10

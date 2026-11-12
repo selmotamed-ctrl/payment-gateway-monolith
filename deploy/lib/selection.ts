@@ -11,7 +11,7 @@ export const ONLY_ROLE_ALIASES: Record<string, string> = {
   "object-storage-daemon": "object-storage",
 };
 
-export const COMPUTE_ROLES = ["db", "core", "admin", "merchant", "checkout", "fake-rails"] as const;
+export const COMPUTE_ROLES = ["db", "core", "core-sandbox", "admin", "merchant", "checkout", "fake-rails"] as const;
 export const STORAGE_ONLY_ROLES = [
   "pg",
   "pg-primary",
@@ -101,7 +101,7 @@ export const selectedComputeUnits = (
   plan: DeployPlan,
   options: SelectionOptions,
 ): Array<{ host: HostPlan; service: ServicePlan }> => {
-  const roles: DeployRole[] = ["core", "admin", "merchant", "checkout", "fake-rails"];
+  const roles: DeployRole[] = ["core", "core-sandbox", "admin", "merchant", "checkout", "fake-rails"];
   return roles.flatMap((role) => (shouldRun(options, role) ? deploymentUnits(plan, role, options.nodes) : []));
 };
 

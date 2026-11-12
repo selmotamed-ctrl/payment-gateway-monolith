@@ -70,7 +70,7 @@ const booleanish = z
 export const DEPLOY_MODES = ["auto", "fresh", "update", "rolling_update"] as const;
 export const DB_ENGINES = ["postgresql"] as const;
 export const SSL_MODES = ["certbot", "custom", "self_signed"] as const;
-export const ROLE_NAMES = ["db", "core", "admin", "merchant", "checkout", "fake-rails"] as const;
+export const ROLE_NAMES = ["db", "core", "core-sandbox", "admin", "merchant", "checkout", "fake-rails"] as const;
 export type DeployRole = (typeof ROLE_NAMES)[number];
 export const STORAGE_ROLE_NAMES = ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup", "object-storage"] as const;
 export type StorageRole = (typeof STORAGE_ROLE_NAMES)[number];
@@ -355,6 +355,32 @@ const base = z.strictObject({
   FAKE_RAILS_JWT_SECRET: secretValue(32).optional(),
   FAKE_RAILS_SEEDER_TOKEN: secretValue(32).optional(),
   SEED_FAKE_RAILS_BLUEPRINTS: booleanish.default(true),
+
+  // 7b. Parallel Sandbox Plane (optional, self-contained)
+  // A dedicated pg-core-sandbox process plus the co-hosted Fake Rails emulator
+  // and a separate database. When configured, the Live core is hard-fenced
+  // away from Fake Rails and every sandbox artifact is rejected on the Live
+  // database.
+  SANDBOX_ENABLED: booleanish.default(false),
+  SANDBOX_MANAGE_VIA_SSH: booleanish.default(false),
+  SANDBOX_NODE: nodeList,
+  SANDBOX_SSH_HOST: z.union([ipv4, z.literal("")]).optional(),
+  SANDBOX_SSH_PORT: port.default(22),
+  SANDBOX_SSH_USER: unixUser.default("ubuntu"),
+  SANDBOX_SSH_KEY_PATH: sshPath.optional(),
+  SANDBOX_SUDO_PASSWORD: z.string().max(256).default(""),
+  SANDBOX_PRIVATE_IP: z.union([ipv4, z.literal("")]).optional(),
+  SANDBOX_CORE_PORT: port.default(4005),
+  SANDBOX_REMOTE_DIR: safeDir().default("/var/www/pg-core-sandbox"),
+  SANDBOX_DB_HOST: z.union([ipv4, z.literal("")]).optional(),
+  SANDBOX_DB_PORT: port.default(5432),
+  SANDBOX_DB_NAME: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_]+$/, "must be a database identifier").default("payment_gateway_sandbox"),
+  SANDBOX_DB_USER: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_]+$/, "must be a role identifier").refine(notReservedRole, RESERVED_ROLE_MESSAGE).default("gw_sandbox_owner"),
+  SANDBOX_DB_PASSWORD: secretValue(12).optional(),
+  SANDBOX_APP_USER: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_]+$/, "must be a role identifier").refine(notReservedRole, RESERVED_ROLE_MESSAGE).default("pgw_sandbox_app"),
+  SANDBOX_APP_PASSWORD: secretValue(12).optional(),
+  SANDBOX_REDIS_DB_INDEX: z.coerce.number().int().min(0).max(15).default(1),
+
 
   // 9. PostgreSQL 18 relational core, replicas and PgBouncer
   PG_MANAGE_VIA_SSH: booleanish.default(false),
@@ -905,6 +931,8 @@ export const weakSecretProblems = (config: DeployConfig): string[] => {
     ["FAKE_RAILS_ADMIN_PASSWORD", config.FAKE_RAILS_ADMIN_PASSWORD],
     ["FAKE_RAILS_JWT_SECRET", config.FAKE_RAILS_JWT_SECRET],
     ["FAKE_RAILS_SEEDER_TOKEN", config.FAKE_RAILS_SEEDER_TOKEN],
+    ["SANDBOX_DB_PASSWORD", config.SANDBOX_DB_PASSWORD],
+    ["SANDBOX_APP_PASSWORD", config.SANDBOX_APP_PASSWORD],
   ];
   for (const [name, value] of secrets) {
     if (!value) continue;
@@ -932,18 +960,28 @@ export const weakSecretProblems = (config: DeployConfig): string[] => {
   return problems;
 };
 
+/** True when a dedicated Parallel Sandbox Plane is configured. */
+export const sandboxPlaneConfigured = (config: DeployConfig): boolean =>
+  config.SANDBOX_ENABLED || config.SANDBOX_MANAGE_VIA_SSH || config.SANDBOX_NODE.trim().length > 0;
+
 /**
  * Test/sandbox tooling is refused whenever DEPLOY_ENV is production - which is
- * also what an unset DEPLOY_ENV means. Needs an explicit
- * DEPLOY_ENV=development|staging|test.
+ * also what an unset DEPLOY_ENV means - unless the self-contained Parallel
+ * Sandbox Plane is configured. In that topology Fake Rails can only post to
+ * `payment_gateway_sandbox` and the Live core is fenced away from it.
  */
 export const productionGuardProblems = (config: DeployConfig): string[] => {
   if (config.DEPLOY_ENV !== "production") return [];
   const hint = 'DEPLOY_ENV is "production" (also the default when unset); set DEPLOY_ENV=development|staging|test explicitly for a non-production deployment';
   const problems: string[] = [];
-  if (config.FAKE_RAILS_ENABLED) problems.push(`FAKE_RAILS_PRODUCTION_GUARD_BLOCKED: FAKE_RAILS_ENABLED is refused: ${hint}`);
+  const sandbox = sandboxPlaneConfigured(config);
+  if (config.FAKE_RAILS_ENABLED && !sandbox) {
+    problems.push(`FAKE_RAILS_PRODUCTION_GUARD_BLOCKED: FAKE_RAILS_ENABLED is refused unless the isolated Parallel Sandbox Plane (SANDBOX_ENABLED=true and SANDBOX_NODE set) is configured, so Fake Rails can only post to payment_gateway_sandbox and never to the live ledger: ${hint}`);
+  }
+  if (config.FAKE_RAILS_ALLOW_IN_PRODUCTION && !sandbox) {
+    problems.push("FAKE_RAILS_ALLOW_IN_PRODUCTION=true is refused when DEPLOY_ENV is production without the Parallel Sandbox Plane");
+  }
   if (config.IS_TEST_SERVER) problems.push(`IS_TEST_SERVER is refused: ${hint}`);
-  if (config.FAKE_RAILS_ALLOW_IN_PRODUCTION) problems.push("FAKE_RAILS_ALLOW_IN_PRODUCTION=true is refused when DEPLOY_ENV is production");
   if (config.RUN_SYNTHETIC_HISTORY_SEED) problems.push(`RUN_SYNTHETIC_HISTORY_SEED is refused: ${hint}`);
   return problems;
 };
@@ -1387,6 +1425,33 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     || config.CORE_PORT === config.MERCHANT_BACK_PORT
     || config.CORE_PORT === config.CHECKOUT_BACK_PORT) {
     problems.push("CORE_PORT must differ from the edge backend ports");
+  }
+
+  // --- Parallel Sandbox Plane ---------------------------------------------
+  const sandboxConfigured = sandboxPlaneConfigured(config);
+  if (sandboxConfigured) {
+    const sandboxNodes = (() => {
+      try {
+        return parseNodeList(config.SANDBOX_NODE);
+      } catch (error) {
+        problems.push(`SANDBOX_NODE: ${(error as Error).message}`);
+        return [];
+      }
+    })();
+    if (sandboxNodes.length === 0 && !config.SANDBOX_SSH_HOST) {
+      problems.push("SANDBOX_NODE or SANDBOX_SSH_HOST is required when the Parallel Sandbox Plane is configured");
+    }
+    if (sandboxNodes.length > 1) problems.push("SANDBOX_NODE must describe exactly one node");
+    if (!config.SANDBOX_SSH_KEY_PATH) problems.push("SANDBOX_SSH_KEY_PATH is required when the Parallel Sandbox Plane is configured");
+    if (sandboxNodes.length === 0 && !config.SANDBOX_PRIVATE_IP) problems.push("SANDBOX_PRIVATE_IP or SANDBOX_NODE is required when the Parallel Sandbox Plane is configured");
+    if (!config.SANDBOX_DB_PASSWORD) problems.push("SANDBOX_DB_PASSWORD is required when the Parallel Sandbox Plane is configured");
+    const liveDbName = configuredDatabaseName(config);
+    if (config.SANDBOX_DB_NAME === liveDbName) {
+      problems.push("SANDBOX_DB_NAME must differ from PG_DB_NAME / DB_NAME so the Sandbox ledger never shares the Live database");
+    }
+    if (!config.FAKE_RAILS_ENABLED) {
+      problems.push("FAKE_RAILS_ENABLED must be true when the Parallel Sandbox Plane is configured");
+    }
   }
 
   // --- Fake Rails tier -----------------------------------------------------

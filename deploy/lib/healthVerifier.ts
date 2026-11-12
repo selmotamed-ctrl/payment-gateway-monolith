@@ -125,6 +125,63 @@ export const probeCoreService = (
   return { host: host.ssh.host, check: `${service.name} /health (mTLS)`, ok: false, detail: lastError };
 };
 
+/** Probes one specific sandbox core service (parallel sandbox plane). */
+export const probeSandboxCoreService = (
+  runner: SshRunner,
+  host: HostPlan,
+  service: { name: string; port: number },
+  config: DeployConfig,
+  expectedRelease?: string,
+): ProbeResult => {
+  const certs = `${config.SANDBOX_REMOTE_DIR}/shared/certs`;
+  const command = mtlsCurl({
+    certs,
+    certName: "core-sandbox",
+    url: `https://127.0.0.1:${service.port}/health`,
+    expect: "OK",
+  });
+  let lastError = "";
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      const body = runner.capture(host.ssh, command);
+      const ok = (/"msg"\s*:\s*"OK"/.test(body) || body.includes("OK")) && healthReleaseMatches(body, expectedRelease);
+      return { host: host.ssh.host, check: `${service.name} /health (mTLS)`, ok, detail: body.slice(0, 200) };
+    } catch (error) {
+      lastError = (error as Error).message;
+      sleepSync(1_000);
+    }
+  }
+  return { host: host.ssh.host, check: `${service.name} /health (mTLS)`, ok: false, detail: lastError };
+};
+
+/** Probes every sandbox core node (loopback, mTLS). */
+export const probeSandboxCoreNodes = (
+  runner: SshRunner,
+  plan: DeployPlan,
+  config: DeployConfig,
+  expectedRelease?: string,
+): ProbeResult[] =>
+  (plan.nodes["core-sandbox"] ?? []).map((node): ProbeResult => {
+    const certs = `${config.SANDBOX_REMOTE_DIR}/shared/certs`;
+    const command = mtlsCurl({
+      certs,
+      certName: "core-sandbox",
+      url: `https://127.0.0.1:${node.port}/health`,
+      expect: "OK",
+    });
+    try {
+      const body = runner.capture(node.ssh, command);
+      return {
+        host: node.ssh.host,
+        check: `${node.nodeId} ${node.serviceName} /health (mTLS)`,
+        ok: (/"msg"\s*:\s*"OK"/.test(body) || body.includes("OK")) && healthReleaseMatches(body, expectedRelease),
+        detail: body.slice(0, 200),
+      };
+    } catch (error) {
+      return { host: node.ssh.host, check: `${node.nodeId} ${node.serviceName} /health (mTLS)`, ok: false, detail: (error as Error).message };
+    }
+  });
+
 /** Probes one edge service (used by rolling batches). */
 export const probeEdgeService = (
   runner: SshRunner,
@@ -534,6 +591,7 @@ export const verifyDeployment = (
   expectedRelease?: string,
 ): DeploymentVerification => {
   const results: ProbeResult[] = probeCoreNodes(runner, plan, config, expectedRelease);
+  results.push(...probeSandboxCoreNodes(runner, plan, config, expectedRelease));
   const coreUrls = edgeCoreUrls(config);
   for (const host of plan.hosts) {
     if (host.roles.includes("fake-rails")) {

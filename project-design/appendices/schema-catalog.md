@@ -2,10 +2,10 @@
 
 <!-- GENERATED FILE. Edit core-back/prisma/schema.prisma instead. Do not hand-edit this file. -->
 
-- Models: **112**
-- Enums: **127**
-- Schema version: **37**
-- Migrations: **36**
+- Models: **113**
+- Enums: **128**
+- Schema version: **38**
+- Migrations: **37**
 
 ## Models
 
@@ -23,6 +23,7 @@
 - `PosScreen`
 - `GlAccount`
 - `JournalEntry`
+- `SandboxSyncWatermark`
 - `JournalLine`
 - `CommissionProfile`
 - `VelocityRule`
@@ -154,6 +155,7 @@
 - `GatewayVerificationState`
 - `GatewayRiskClass`
 - `GatewayEnvironmentType`
+- `SandboxCheckoutInspectorMode`
 - `AuthMethod`
 - `AuthApply`
 - `CredentialOwnerType`
@@ -290,3 +292,4 @@
 - `20261111130000_merchant_report_chrome`
 - `20261112000000_v36_enterprise_object_storage_engine`
 - `20261113090000_storage_engine_hardening`
+- `20261114000000_v38_parallel_sandbox_plane_and_ledger_fence`

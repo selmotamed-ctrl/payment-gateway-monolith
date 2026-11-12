@@ -85,6 +85,7 @@ const coreCallContext = (req: Request) => ({
   clientIp: resolveClientIp(req, parseCidrList(env.TRUSTED_PROXY_CIDRS)),
   userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
   authorization: req.headers.authorization,
+  plane: String(req.headers["x-pg-env"] ?? "").trim().toUpperCase() === "SANDBOX" ? "SANDBOX" as const : undefined,
 });
 
 router.get(

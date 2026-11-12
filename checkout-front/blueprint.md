@@ -326,6 +326,17 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 
 Checkout dialogs/drawers use the shared overlay text-color rule (`color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`), keeping custom modal content readable in dark mode.
 
+## Sandbox Checkout Inspector (schema 38)
+
+When the link summary has `env: "SANDBOX"` and the application inspector is
+enabled, the payer page mounts `SandboxCheckoutInspector`. It fetches the
+rail's Fake Rails accounts, auto-fills the form, adjusts balances, freezes
+accounts, shows movements, reveals/auto-confirms the live OTP, and simulates
+push/QR approval, decline, a variance, duplicate replay or a tampered webhook.
+PIN-protected applications prompt for the inspector PIN (sent as
+`x-pg-sandbox-pin`). The inspector never renders for a LIVE link; the endpoint
+also refuses one server-side.
+
 ## Checkout Help Center
 
 > Status: `partial` · Last verified: 2026-11-03

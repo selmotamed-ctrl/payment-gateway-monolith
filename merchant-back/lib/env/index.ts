@@ -17,6 +17,8 @@ export const envSchema = z.object({
   BIND_HOST: z.string().min(1).default("0.0.0.0"),
   CORE_BACK_URL: httpsUrl,
   CORE_BACK_URLS: z.string().optional(),
+  SANDBOX_CORE_BACK_URL: httpsUrl.optional(),
+  SANDBOX_CORE_BACK_URLS: z.string().optional(),
   MTLS_CLIENT_CERT_PATH: z.string().min(1),
   MTLS_CLIENT_KEY_PATH: z.string().min(1),
   MTLS_CA_CERT_PATH: z.string().min(1),
@@ -128,6 +130,20 @@ export const parseCoreBackUrls = (raw: string | undefined, fallback: string): st
 export const coreBackUrls = (): string[] => {
   const loaded = loadEnv();
   return parseCoreBackUrls(loaded.CORE_BACK_URLS, loaded.CORE_BACK_URL);
+};
+
+/**
+ * The parallel Sandbox Plane pool. When `SANDBOX_CORE_BACK_URL(S)` is not
+ * configured this falls back to the live pool, which keeps single-process
+ * development and the unit tests working; the deploy engine writes the real
+ * sandbox URL for a parallel installation.
+ */
+export const sandboxCoreBackUrls = (): string[] => {
+  const loaded = loadEnv();
+  return parseCoreBackUrls(
+    loaded.SANDBOX_CORE_BACK_URLS,
+    loaded.SANDBOX_CORE_BACK_URL ?? loaded.CORE_BACK_URL,
+  );
 };
 
 /**

@@ -171,6 +171,7 @@ router.all("/:gateway/:env/:pathToken", async (req: Request, res: Response) => {
     requestId: resolveRequestId(req),
     clientIp: requestClientIp(req),
     userAgent: typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : "",
+    plane: coreEnvironment === "SANDBOX" ? "SANDBOX" : "LIVE",
     timeoutMs: 10_000,
   }).catch((error: unknown) => {
     const status = (error as { statusCode?: number } | null)?.statusCode;
