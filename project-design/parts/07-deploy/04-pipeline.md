@@ -74,7 +74,7 @@ Port ownership is classified as `free`, `managed-current` (the current PM2 app f
 
 `--only` accepts the backend aliases `core-back`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` in addition to the canonical tier names. The selection helpers are shared with the deployment loop, so an admin-only deploy checks `4101`/`8080` and the core dependency but never core's `4000`.
 
-A blocking preflight result aborts with "Nothing was built or changed". The final verification and the rolling batch probes also assert the new release identity (`APP_RELEASE`/`APP_COMMIT` in `/health`), so a stale listener cannot satisfy verification even if PM2 reports the new app online.
+A blocking preflight result aborts with "Nothing was built or changed". The final verification and the rolling batch probes also assert the new release identity (`APP_RELEASE`/`APP_COMMIT` in `/health`), so a stale listener cannot satisfy verification even if PM2 reports the new app online. On a partial run (`--only` or `--nodes`), release identity is enforced on every deployed unit in the rolling batch; the final cross-tier verification still health-checks the unchanged tiers but does not require them to advertise the new global release (they intentionally remain on their previous release).
 
 ### 3.2 Step 2: build SPAs locally (background, cached)
 

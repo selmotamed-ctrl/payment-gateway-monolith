@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { loadDeployConfig } from "../lib/configSchema";
 import { planHosts } from "../lib/hostPlanner";
 import { buildPreflightPlan, classifyPort, runPreflight, type HostSnapshot } from "../lib/preflight";
-import { normalizeOnlyRole, selectedStorage } from "../lib/selection";
+import { isFullDeployment, normalizeOnlyRole, selectedStorage } from "../lib/selection";
 
 const REPO_ROOT = resolve(import.meta.dir, "../..");
 
@@ -83,6 +83,12 @@ describe("preflight selection", () => {
     expect(preflight.ports.some((check) => check.port === 4000)).toBe(true);
     expect(preflight.ports.some((check) => check.port === 4101)).toBe(false);
     expect(preflight.dependencies.some((check) => check.kind === "core-db")).toBe(true);
+  });
+
+  test("release identity is global only for a full deploy", () => {
+    expect(isFullDeployment({ only: new Set() })).toBe(true);
+    expect(isFullDeployment({ only: new Set(["admin"]) })).toBe(false);
+    expect(isFullDeployment({ only: new Set(), nodes: new Set(["core-2"]) })).toBe(false);
   });
 
   test("a full deploy selects every compute tier and managed storage tier", () => {

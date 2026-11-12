@@ -15,7 +15,7 @@ import {
   certbotRenewalTimer,
 } from "./lib/certRenewal";
 import { collectSecretValues, effectiveTargetHome, effectiveTargetUser, SshRunner, shellQuote } from "./lib/sshRunner";
-import { deploymentUnits, normalizeOnlyRole, shouldRun, shouldRunStorage, type OnlyRole } from "./lib/selection";
+import { deploymentUnits, isFullDeployment, normalizeOnlyRole, shouldRun, shouldRunStorage, type OnlyRole } from "./lib/selection";
 import { buildPreflightPlan, renderPreflightReport, runPreflight } from "./lib/preflight";
 import { dollarTag, pgpassField, sqlIdent, sqlLiteral } from "./lib/quoting";
 import { applyFirewall, readFirewallStatus } from "./lib/firewallConfigurator";
@@ -1438,7 +1438,13 @@ const main = async (): Promise<void> => {
   if (options.skipVerify || options.dryRun) {
     log("  skipped");
   } else {
-    const verification = verifyDeployment(runner, plan, config, releaseTimestamp);
+    // Step 7 already checks APP_RELEASE on every unit this run deployed.
+    // Only a full deploy may require every (possibly unchanged) service to
+    // advertise the new global release; a partial deploy intentionally leaves
+    // the other tiers on their previous release.
+    const releaseToVerify = isFullDeployment(options) ? releaseTimestamp : undefined;
+    if (!releaseToVerify) log("  release identity checked per deployed unit in step 7; unchanged services are health-checked only");
+    const verification = verifyDeployment(runner, plan, config, releaseToVerify);
     log(runner.scrub(renderVerification(verification)));
     if (!verification.ok) {
       throw new Error("Deployment verification failed. There is no automatic rollback and no rollback command: the previous release is still on disk (KEEP_RELEASES), but `current` already points at the new one and the database schema was already migrated and is NOT reverted. To go back, re-point <remote dir>/current to the previous release on each host, restart the PM2 services, and only then decide about the schema.");

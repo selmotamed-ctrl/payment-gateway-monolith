@@ -133,7 +133,7 @@ Every deploy runs a read-only preflight inside step 1 after the plan is built an
 - edge-to-core mTLS and database/PgBouncer dependencies when the selected part needs them;
 - PostgreSQL data directories, systemd units for storage daemons, and the release identity.
 
-A blocking issue prints PID/cwd/command diagnostics and aborts with **Nothing was built or changed**. The deploy also verifies the new release identity (`APP_RELEASE`/`APP_COMMIT` in `/health`) after each batch and in the final end-to-end verification, so PM2 reporting `online` while an old process serves the port can no longer pass.
+A blocking issue prints PID/cwd/command diagnostics and aborts with **Nothing was built or changed**. The deploy also verifies the new release identity (`APP_RELEASE`/`APP_COMMIT` in `/health`) after each batch and in the final end-to-end verification, so PM2 reporting `online` while an old process serves the port can no longer pass. A partial `--only`/`--nodes` run enforces release identity only on the units it deploys; unchanged tiers remain on their previous release and are health-checked without a release assertion.
 
 ```bash
 ./deploy/deploy.sh --preflight-only --update --only=admin-back

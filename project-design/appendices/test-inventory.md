@@ -305,7 +305,7 @@
 | `deploy/test/pipeline.test.ts` | 124 | 7 |
 | `deploy/test/pkiRenewal.test.ts` | 183 | 7 |
 | `deploy/test/pkiScale.test.ts` | 115 | 5 |
-| `deploy/test/preflight.test.ts` | 179 | 9 |
+| `deploy/test/preflight.test.ts` | 185 | 10 |
 | `deploy/test/provisioners.test.ts` | 581 | 32 |
 | `deploy/test/redactSecrets.test.ts` | 63 | 5 |
 | `deploy/test/rollingDeploy.test.ts` | 52 | 5 |
@@ -358,6 +358,7 @@
 | `tests/e2e/admin/guide-safeguard.spec.ts` | 104 | 1 |
 | `tests/e2e/admin/jobs-outbox.spec.ts` | 57 | 2 |
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
+| `tests/e2e/admin/object-storage-style.spec.ts` | 72 | 1 |
 | `tests/e2e/admin/operator-cases.spec.ts` | 187 | 2 |
 | `tests/e2e/admin/report-a4-layout.spec.ts` | 280 | 1 |
 | `tests/e2e/admin/shell.spec.ts` | 254 | 17 |
@@ -417,5 +418,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **412**
-- Total literal test declarations: **4148**
+- Total files: **413**
+- Total literal test declarations: **4150**

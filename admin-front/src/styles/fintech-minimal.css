@@ -260,6 +260,21 @@ html[dir="rtl"] .pg-heading {
   color: var(--pg-ink-muted) !important;
 }
 
+.pg-code-block {
+  margin: 0;
+  padding: 14px 16px;
+  background-color: var(--pg-bg-surface-subtle);
+  border: 1px solid var(--pg-border-subtle);
+  border-radius: var(--pg-radius-sm);
+  color: var(--pg-ink-secondary);
+  font-family: var(--pg-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 240px;
+}
+
 .v-card-text {
   padding: var(--pg-pad-card-body) !important;
 }

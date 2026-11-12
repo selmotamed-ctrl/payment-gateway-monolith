@@ -228,6 +228,7 @@ There is **no** `core-back/test/exhaustive/09-storage-backup` directory. The run
 - `deploy/test/healthVerifierScale.test.ts` — verification rejects a health payload from a different release.
 - `admin-front/src/pages/system/jobs-outbox/components/__tests__/MonitorTable.test.ts` — the Jobs & Outbox table declares its `dc` props and never builds a filter query from an undefined list.
 - `tests/e2e/admin/jobs-outbox.spec.ts` — all four Jobs & Outbox tabs render with mocked APIs without the previous `reduce` error.
+- `tests/e2e/admin/object-storage-style.spec.ts` — `/system/object-storage` uses the shared page/table surfaces: one `ApiTable` card, the built-in filter grid with Namespace/Status/Bucket/Legal hold/Owner/SHA-256 fields, and no nested table card, against mocked storage APIs.
 - `deploy/object-storage-daemon/test` — HTTP surface plus real mTLS: allowed/denied/missing/untrusted client certificates, TLS 1.3 enforcement, a PUT/GET over the TLS-to-HTTP bridge, and `RemoteMtlsBlobStore` health/put/get/stat/list over mTLS. The openssl-backed cases skip if the CLI is unavailable.
 
 Some files skip without PostgreSQL or Redis. The design's dedicated fixture names (`uow-outbox-audit-atomicity.test.ts`, `gl-shards-and-lsn-routing.test.ts`, `audit-chain-and-log-backpressure.test.ts`, `backup-control-and-drills.test.ts`, `backup-restore-matrix.test.ts`) do not exist.

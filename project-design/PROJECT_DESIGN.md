@@ -9489,12 +9489,17 @@ Vuetify teleports dialogs, menus and drawers under a `.v-overlay__content` / `.v
 
 `/system/object-storage` (`pages/system/object-storage/index.tsx`) uses the shared
 `ScreenContainer`, `PageHeader`, `MetricStrip`, `SegmentedTabs`, `SurfaceCard`,
-`DataTable`, `TableRowActions`, `SlideOverDrawer`, `DescriptionList` and
-`FormModal` primitives. It has four tabs: cluster/daemon health with maintenance
-jobs, object explorer with active locks, quarantine/AV queue, and the access
-audit trail. Authority-gated actions: `system:storage:read` (view),
-`system:storage:admin` (maintenance/rewrap/GC/scrub/AV scan),
-`system:storage:legal-hold` (place/lift hold with a written reason).
+`ApiTable` (with the built-in `TableFilters` toolbar), `TableRowActions`,
+`SlideOverDrawer`, `DescriptionList` and `FormModal` primitives. The root uses
+the standard 18 px section gap, the table cards are the `ApiTable` surfaces
+(no nested `SurfaceCard`), and the page-header end slot carries the object,
+quarantine and legal-hold summary badges beside Refresh. It has four tabs:
+cluster/daemon health with maintenance jobs in a titled `SurfaceCard` and the
+result in the shared `.pg-code-block`; object explorer with active locks;
+quarantine/AV queue; and the access audit trail. Authority-gated actions:
+`system:storage:read` (view), `system:storage:admin`
+(maintenance/rewrap/GC/scrub/AV scan), `system:storage:legal-hold`
+(place/lift hold with a written reason).
 
 ---
 
@@ -14731,7 +14736,7 @@ Port ownership is classified as `free`, `managed-current` (the current PM2 app f
 
 `--only` accepts the backend aliases `core-back`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` in addition to the canonical tier names. The selection helpers are shared with the deployment loop, so an admin-only deploy checks `4101`/`8080` and the core dependency but never core's `4000`.
 
-A blocking preflight result aborts with "Nothing was built or changed". The final verification and the rolling batch probes also assert the new release identity (`APP_RELEASE`/`APP_COMMIT` in `/health`), so a stale listener cannot satisfy verification even if PM2 reports the new app online.
+A blocking preflight result aborts with "Nothing was built or changed". The final verification and the rolling batch probes also assert the new release identity (`APP_RELEASE`/`APP_COMMIT` in `/health`), so a stale listener cannot satisfy verification even if PM2 reports the new app online. On a partial run (`--only` or `--nodes`), release identity is enforced on every deployed unit in the rolling batch; the final cross-tier verification still health-checks the unchanged tiers but does not require them to advertise the new global release (they intentionally remain on their previous release).
 
 ### 3.2 Step 2: build SPAs locally (background, cached)
 
@@ -15839,7 +15844,7 @@ The design describes zero-downtime rolling updates. The code provides rolling ba
 - returns `msg: "OK"`, `status: "ok"` when workers are enabled, the queue is reachable and the oldest job is below the threshold;
 - returns `msg: "DEGRADED"`, `status: "degraded"` when workers are disabled, the queue cannot be inspected, or the oldest queued job exceeds the threshold;
 - stays reachable when the database cannot be read, with `queue.degraded=true` and `QUEUE_HEALTH_UNAVAILABLE`;
-- advertises the deploy identity (`release`, `commit`) from `APP_RELEASE`/`APP_COMMIT`; the batch probes and final verification require the expected release, so a stale process behind the port fails even if its `/health` says `OK`.
+- advertises the deploy identity (`release`, `commit`) from `APP_RELEASE`/`APP_COMMIT`; the batch probes and final verification require the expected release, so a stale process behind the port fails even if its `/health` says `OK`. A partial `--only`/`--nodes` run checks release identity on the units it deploys in the rolling batch; unchanged tiers are health-checked but keep their previous release.
 
 `probeCoreHealth()` and `probeCoreService()` run on the core host and use `curl` with the CA and the core certificate as both server and client material. They pass when the body contains `"msg":"OK"` or the literal `OK`. A degraded core fails the probe.
 
@@ -15909,7 +15914,7 @@ The mTLS backup probe presents the `backup-client` certificate/key, matching the
 - probes each Fake Rails host;
 - for each edge host, probes the edge backends, the edge-to-core handshake for every core URL and the public vhosts;
 - appends storage probes;
-- checks core-node, edge-backend, edge-to-core and Fake Rails health against the expected release identity;
+- checks core-node, edge-backend, edge-to-core and Fake Rails health, and asserts the expected release identity on a full deploy (partial runs assert it per deployed unit in the rolling batch);
 - returns `{ ok, results }`.
 
 `deploy.ts` prints `PASS`/`FAIL` per result and throws if any result fails. The error message says the previous release is still on disk. It does not switch back automatically.
@@ -16569,6 +16574,7 @@ There is **no** `core-back/test/exhaustive/09-storage-backup` directory. The run
 - `deploy/test/healthVerifierScale.test.ts` — verification rejects a health payload from a different release.
 - `admin-front/src/pages/system/jobs-outbox/components/__tests__/MonitorTable.test.ts` — the Jobs & Outbox table declares its `dc` props and never builds a filter query from an undefined list.
 - `tests/e2e/admin/jobs-outbox.spec.ts` — all four Jobs & Outbox tabs render with mocked APIs without the previous `reduce` error.
+- `tests/e2e/admin/object-storage-style.spec.ts` — `/system/object-storage` uses the shared page/table surfaces: one `ApiTable` card, the built-in filter grid with Namespace/Status/Bucket/Legal hold/Owner/SHA-256 fields, and no nested table card, against mocked storage APIs.
 - `deploy/object-storage-daemon/test` — HTTP surface plus real mTLS: allowed/denied/missing/untrusted client certificates, TLS 1.3 enforcement, a PUT/GET over the TLS-to-HTTP bridge, and `RemoteMtlsBlobStore` health/put/get/stat/list over mTLS. The openssl-backed cases skip if the CLI is unavailable.
 
 Some files skip without PostgreSQL or Redis. The design's dedicated fixture names (`uow-outbox-audit-atomicity.test.ts`, `gl-shards-and-lsn-routing.test.ts`, `audit-chain-and-log-backpressure.test.ts`, `backup-control-and-drills.test.ts`, `backup-restore-matrix.test.ts`) do not exist.

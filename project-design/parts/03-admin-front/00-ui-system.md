@@ -363,9 +363,14 @@ Vuetify teleports dialogs, menus and drawers under a `.v-overlay__content` / `.v
 
 `/system/object-storage` (`pages/system/object-storage/index.tsx`) uses the shared
 `ScreenContainer`, `PageHeader`, `MetricStrip`, `SegmentedTabs`, `SurfaceCard`,
-`DataTable`, `TableRowActions`, `SlideOverDrawer`, `DescriptionList` and
-`FormModal` primitives. It has four tabs: cluster/daemon health with maintenance
-jobs, object explorer with active locks, quarantine/AV queue, and the access
-audit trail. Authority-gated actions: `system:storage:read` (view),
-`system:storage:admin` (maintenance/rewrap/GC/scrub/AV scan),
-`system:storage:legal-hold` (place/lift hold with a written reason).
+`ApiTable` (with the built-in `TableFilters` toolbar), `TableRowActions`,
+`SlideOverDrawer`, `DescriptionList` and `FormModal` primitives. The root uses
+the standard 18 px section gap, the table cards are the `ApiTable` surfaces
+(no nested `SurfaceCard`), and the page-header end slot carries the object,
+quarantine and legal-hold summary badges beside Refresh. It has four tabs:
+cluster/daemon health with maintenance jobs in a titled `SurfaceCard` and the
+result in the shared `.pg-code-block`; object explorer with active locks;
+quarantine/AV queue; and the access audit trail. Authority-gated actions:
+`system:storage:read` (view), `system:storage:admin`
+(maintenance/rewrap/GC/scrub/AV scan), `system:storage:legal-hold`
+(place/lift hold with a written reason).

@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
-import { VAlert, VBtn, VSelect, VTextarea, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -16,6 +16,8 @@ import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { FormModal } from "@/components/ui/FormModal";
 import { ApiTable } from "@/components/Table/ApiTable";
+import TableFilters from "@/components/Table/TableFilters";
+import { buildFilterQuery, type FilterValues, type TableFilter } from "@/components/Table/filters";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
 import { formatDateTime } from "@/components/ledger/format";
@@ -134,6 +136,22 @@ const STATUSES = ["STAGING", "QUARANTINE_PENDING_AV", "QUARANTINE_REJECTED", "AC
 const BUCKETS = ["HOT", "COLD", "QUARANTINE"];
 const MAINTENANCE_JOBS = ["gc", "sweep", "scrub", "reconcile-locks", "rewrap", "av-scan"] as const;
 
+const filterOptions = (values: readonly string[]) => values.map((value) => ({ title: value, value }));
+const objectFilters: TableFilter[] = [
+  { key: "namespace", label: "Namespace", type: "data-autocomplete", options: filterOptions(NAMESPACES) },
+  { key: "status", label: "Status", type: "data-autocomplete", options: filterOptions(STATUSES) },
+  { key: "bucket", label: "Bucket", type: "data-autocomplete", options: filterOptions(BUCKETS) },
+  { key: "legalHold", label: "Legal hold", type: "boolean", trueLabel: "On hold", falseLabel: "Not held" },
+  { key: "ownerMerchantId", label: "Owner merchant id", type: "text", placeholder: "Merchant UUID" },
+  { key: "sha256Hex", label: "SHA-256", type: "text", placeholder: "Content hash" },
+];
+const quarantineFilters: TableFilter[] = objectFilters.filter((filter) => filter.key !== "status");
+const auditFilters: TableFilter[] = [
+  { key: "allowed", label: "Result", type: "boolean", trueLabel: "Allowed", falseLabel: "Denied" },
+  { key: "action", label: "Action", type: "text", placeholder: "e.g. READ" },
+  { key: "objectId", label: "Object id", type: "text", placeholder: "Storage object UUID" },
+];
+
 const formatBytes = (bytes: number): string => {
   if (!Number.isFinite(bytes) || bytes < 0) return "—";
   if (bytes < 1024) return `${bytes} B`;
@@ -171,21 +189,14 @@ const ObjectStoragePage = dc(() => {
   const detail = ref<ObjectDetail | null>(null);
   const detailLoading = ref(false);
   const drawerOpen = ref(false);
-  const filters = ref<{
-    namespace: string | null;
-    status: string | null;
-    bucket: string | null;
-    legalHold: string | null;
-    ownerMerchantId: string;
-    sha256Hex: string;
-  }>({ namespace: null, status: null, bucket: null, legalHold: null, ownerMerchantId: "", sha256Hex: "" });
+  const objectFilterValues = ref<FilterValues>({});
+  const quarantineFilterValues = ref<FilterValues>({});
+  const auditFilterValues = ref<FilterValues>({});
   const objectSearch = ref<string | null>(null);
   const quarantineSearch = ref<string | null>(null);
   const auditSearch = ref<string | null>(null);
-  const auditAllowed = ref<string | null>(null);
-  const auditAction = ref("");
-  const auditObjectId = ref("");
   const pageSize = ref(25);
+  let filterTimer: ReturnType<typeof setTimeout> | undefined;
   const quarantinePageSize = ref(25);
   const auditPageSize = ref(25);
   const holdTarget = ref<StorageObjectRow | null>(null);
@@ -200,6 +211,29 @@ const ObjectStoragePage = dc(() => {
   const objectsRefresh = ref<null | (() => void)>(null);
   const quarantineRefresh = ref<null | (() => void)>(null);
   const auditRefresh = ref<null | (() => void)>(null);
+
+  const filtersFor = (quarantined: boolean) => (quarantined ? quarantineFilters : objectFilters);
+  const filterValuesFor = (quarantined: boolean) => (quarantined ? quarantineFilterValues.value : objectFilterValues.value);
+  const setFilterValue = (key: string, value: unknown, quarantined = false) => {
+    const target = quarantined ? quarantineFilterValues : objectFilterValues;
+    target.value = { ...target.value, [key]: value };
+    if (filterTimer) clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => (quarantined ? quarantineRefresh.value : objectsRefresh.value)?.(), 300);
+  };
+  const clearFilters = (quarantined = false) => {
+    if (quarantined) quarantineFilterValues.value = {};
+    else objectFilterValues.value = {};
+    (quarantined ? quarantineRefresh.value : objectsRefresh.value)?.();
+  };
+  const setAuditFilterValue = (key: string, value: unknown) => {
+    auditFilterValues.value = { ...auditFilterValues.value, [key]: value };
+    if (filterTimer) clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => auditRefresh.value?.(), 300);
+  };
+  const clearAuditFilters = () => {
+    auditFilterValues.value = {};
+    auditRefresh.value?.();
+  };
 
   const canAdmin = computed(() => hasOneOfAuthorities(["system:storage:admin"]));
   const canLegalHold = computed(() => hasOneOfAuthorities(["system:storage:legal-hold"]));
@@ -322,14 +356,8 @@ const ObjectStoragePage = dc(() => {
   ): Record<string, unknown> => ({
     page,
     pageSize: quarantined ? quarantinePageSize.value : pageSize.value,
-    ...(filters.value.namespace ? { namespace: filters.value.namespace } : {}),
-    ...(quarantined
-      ? { statuses: "QUARANTINE_PENDING_AV,QUARANTINE_REJECTED" }
-      : filters.value.status ? { status: filters.value.status } : {}),
-    ...(filters.value.bucket ? { bucket: filters.value.bucket } : {}),
-    ...(filters.value.legalHold ? { legalHold: filters.value.legalHold } : {}),
-    ...(filters.value.ownerMerchantId.trim() ? { ownerMerchantId: filters.value.ownerMerchantId.trim() } : {}),
-    ...(filters.value.sha256Hex.trim() ? { sha256Hex: filters.value.sha256Hex.trim() } : {}),
+    ...buildFilterQuery(filtersFor(quarantined), filterValuesFor(quarantined)),
+    ...(quarantined ? { statuses: "QUARANTINE_PENDING_AV,QUARANTINE_REJECTED" } : {}),
     ...(sortKey ? { sortKey, sortDirection } : {}),
   });
 
@@ -489,21 +517,25 @@ const ObjectStoragePage = dc(() => {
 
   return (): JSX.Element => (
     <ScreenContainer>
-      <ThemedView>
+      <ThemedView style={{ gap: "18px" }}>
         <PageHeader
           title={t("Object & Asset Storage")}
           subtitle={t("Shared encrypted vault, quarantine, record locks, retention and legal holds across every core node.")}
           end={() => (
-            <VBtn variant="tonal" prependIcon="mdi-refresh" loading={summaryLoading.value} onClick={() => void refreshAll()}>
-              {t("Refresh")}
-            </VBtn>
+            <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+              <StatusBadge status="info" label={`${summary.value?.totalObjects ?? 0} ${t("Objects")}`} toneOverride="info" showDot={false} />
+              <StatusBadge status="pending" label={`${summary.value?.quarantinePendingCount ?? 0} ${t("Quarantine & AV queue")}`} toneOverride={summary.value?.quarantinePendingCount ? "warning" : "neutral"} showDot={false} />
+              <StatusBadge status="legal" label={`${summary.value?.legalHoldCount ?? 0} ${t("Legal holds")}`} toneOverride={summary.value?.legalHoldCount ? "danger" : "neutral"} showDot={false} />
+              <VBtn variant="tonal" prependIcon="mdi-refresh" loading={summaryLoading.value} onClick={() => void refreshAll()}>
+                {t("Refresh")}
+              </VBtn>
+            </ThemedView>
           )}
         />
-        {summaryError.value && <VAlert type="error" variant="tonal" class="mb-4">{summaryError.value}</VAlert>}
+        {summaryError.value && <VAlert type="error" variant="tonal">{summaryError.value}</VAlert>}
         <MetricStrip items={metrics.value} loading={summaryLoading.value} />
 
-        <div class="mb-4">
-          <SegmentedTabs
+        <SegmentedTabs
             modelValue={tab.value}
             tabs={[
               { value: "health", label: t("Cluster & daemon health") },
@@ -512,15 +544,13 @@ const ObjectStoragePage = dc(() => {
               { value: "audit", label: t("Access audit trail") },
             ]}
             onUpdate:modelValue={(value: string) => (tab.value = value)}
-          />
-        </div>
+        />
 
         {tab.value === "health" && (
-          <SurfaceCard>
-            <div class="d-flex flex-wrap align-center justify-space-between ga-3 mb-3">
-              <ThemedText type="subtitle">{t("Maintenance jobs")}</ThemedText>
-              <ThemedText class="text-medium-emphasis">{t("Jobs run on this core node. Rewrap rotates the KEK without rewriting encrypted blobs.")}</ThemedText>
-            </div>
+          <SurfaceCard
+            title={t("Maintenance jobs")}
+            subtitle={t("Jobs run on this core node. Rewrap rotates the KEK without rewriting encrypted blobs.")}
+          >
             {summary.value && !summary.value.health.ok && (
               <VAlert type="error" variant="tonal" class="mb-4">{summary.value.health.error ?? t("The shared vault is unhealthy")}</VAlert>
             )}
@@ -534,7 +564,7 @@ const ObjectStoragePage = dc(() => {
             {maintenanceResult.value !== null && (
               <div class="mt-4">
                 <ThemedText type="defaultSemiBold" class="mb-1">{t("Last maintenance result")}</ThemedText>
-                <pre style={{ whiteSpace: "pre-wrap", fontSize: "12px", maxHeight: "180px", overflow: "auto" }}>{JSON.stringify(maintenanceResult.value, null, 2)}</pre>
+                <pre class="pg-code-block">{JSON.stringify(maintenanceResult.value, null, 2)}</pre>
               </div>
             )}
             {summary.value && (
@@ -563,8 +593,7 @@ const ObjectStoragePage = dc(() => {
         )}
 
         {(tab.value === "objects" || tab.value === "quarantine") && (
-          <SurfaceCard>
-            <ApiTable<StorageObjectRow>
+          <ApiTable<StorageObjectRow>
               key={tab.value}
               title={tab.value === "quarantine" ? t("Quarantine & AV queue") : t("Storage objects")}
               url={urlsMap.objectStorageObjects}
@@ -598,24 +627,19 @@ const ObjectStoragePage = dc(() => {
                 if (tab.value === "objects" && objectSearch.value) query.search = objectSearch.value;
                 void refresh({ queryParams: query });
               }}
-              TopSlot={({ reset }) => (
-                <div class="d-flex flex-wrap align-center ga-3 mb-4">
-                  <VSelect items={NAMESPACES} modelValue={filters.value.namespace} onUpdate:modelValue={(value: string | null) => { filters.value.namespace = value; reset(); }} label={t("Namespace")} density="compact" variant="outlined" hideDetails clearable style={{ maxWidth: "260px" }} />
-                  {tab.value === "objects" && <VSelect items={STATUSES} modelValue={filters.value.status} onUpdate:modelValue={(value: string | null) => { filters.value.status = value; reset(); }} label={t("Status")} density="compact" variant="outlined" hideDetails clearable style={{ maxWidth: "220px" }} />}
-                  <VSelect items={BUCKETS} modelValue={filters.value.bucket} onUpdate:modelValue={(value: string | null) => { filters.value.bucket = value; reset(); }} label={t("Bucket")} density="compact" variant="outlined" hideDetails clearable style={{ maxWidth: "160px" }} />
-                  <VSelect items={[{ title: t("On hold"), value: "true" }, { title: t("Not held"), value: "false" }]} modelValue={filters.value.legalHold} onUpdate:modelValue={(value: string | null) => { filters.value.legalHold = value; reset(); }} label={t("Legal hold")} density="compact" variant="outlined" hideDetails clearable style={{ maxWidth: "180px" }} />
-                  <VTextField modelValue={filters.value.ownerMerchantId} onUpdate:modelValue={(value: string) => (filters.value.ownerMerchantId = value)} label={t("Owner merchant id")} density="compact" variant="outlined" hideDetails style={{ maxWidth: "330px" }} onKeydown={(event: KeyboardEvent) => { if (event.key === "Enter") reset(); }} />
-                  <VTextField modelValue={filters.value.sha256Hex} onUpdate:modelValue={(value: string) => (filters.value.sha256Hex = value)} label={t("SHA-256")} density="compact" variant="outlined" hideDetails style={{ maxWidth: "330px" }} onKeydown={(event: KeyboardEvent) => { if (event.key === "Enter") reset(); }} />
-                  <VBtn variant="text" onClick={() => { filters.value = { namespace: null, status: null, bucket: null, legalHold: null, ownerMerchantId: "", sha256Hex: "" }; reset(); }}>{t("Clear filters")}</VBtn>
-                </div>
+              TopSlot={() => (
+                <TableFilters
+                  filters={tab.value === "quarantine" ? quarantineFilters : objectFilters}
+                  values={tab.value === "quarantine" ? quarantineFilterValues.value : objectFilterValues.value}
+                  onChange={(key, value) => setFilterValue(key, value, tab.value === "quarantine")}
+                  onClear={() => clearFilters(tab.value === "quarantine")}
+                />
               )}
             />
-          </SurfaceCard>
         )}
 
         {tab.value === "audit" && (
-          <SurfaceCard>
-            <ApiTable<AccessLogRow>
+          <ApiTable<AccessLogRow>
               title={t("Access audit trail")}
               url={urlsMap.objectStorageAccessLogs}
               localSearch={false}
@@ -635,29 +659,26 @@ const ObjectStoragePage = dc(() => {
                   queryParams: {
                     page: table.page,
                     pageSize: auditPageSize.value,
-                    ...(auditAllowed.value ? { allowed: auditAllowed.value } : {}),
-                    ...(auditAction.value.trim() ? { action: auditAction.value.trim() } : {}),
-                    ...(auditObjectId.value.trim() ? { objectId: auditObjectId.value.trim() } : {}),
+                    ...buildFilterQuery(auditFilters, auditFilterValues.value),
                     ...(auditSearch.value ? { search: auditSearch.value } : {}),
                   },
                 });
               }}
-              TopSlot={({ reset }) => (
-                <div class="d-flex flex-wrap align-center ga-3 mb-4">
-                  <VSelect items={[{ title: t("Allowed"), value: "true" }, { title: t("Denied"), value: "false" }]} modelValue={auditAllowed.value} onUpdate:modelValue={(value: string | null) => { auditAllowed.value = value; reset(); }} label={t("Result")} density="compact" variant="outlined" hideDetails clearable style={{ maxWidth: "160px" }} />
-                  <VTextField modelValue={auditAction.value} onUpdate:modelValue={(value: string) => (auditAction.value = value)} label={t("Action")} density="compact" variant="outlined" hideDetails style={{ maxWidth: "260px" }} onKeydown={(event: KeyboardEvent) => { if (event.key === "Enter") reset(); }} />
-                  <VTextField modelValue={auditObjectId.value} onUpdate:modelValue={(value: string) => (auditObjectId.value = value)} label={t("Object id")} density="compact" variant="outlined" hideDetails style={{ maxWidth: "330px" }} onKeydown={(event: KeyboardEvent) => { if (event.key === "Enter") reset(); }} />
-                  <VBtn variant="text" onClick={() => { auditAllowed.value = null; auditAction.value = ""; auditObjectId.value = ""; reset(); }}>{t("Clear filters")}</VBtn>
-                </div>
+              TopSlot={() => (
+                <TableFilters
+                  filters={auditFilters}
+                  values={auditFilterValues.value}
+                  onChange={(key, value) => setAuditFilterValue(key, value)}
+                  onClear={() => clearAuditFilters()}
+                />
               )}
             />
-          </SurfaceCard>
         )}
 
         <SlideOverDrawer modelValue={drawerOpen.value} onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)} title={t("Storage object")} subtitle={detail.value?.object.id ?? ""} width={720}>
-          {detailLoading.value && <ThemedText class="pa-4">{t("Loading…")}</ThemedText>}
+          {detailLoading.value && <ThemedText>{t("Loading…")}</ThemedText>}
           {detail.value && !detailLoading.value && (
-            <div class="d-flex flex-column ga-5 pa-4">
+            <div class="d-flex flex-column ga-5">
               <DescriptionList items={detailItems.value} columns={2} />
               <div>
                 <ThemedText type="defaultSemiBold" class="mb-2">{t("Locks (active and historical)")}</ThemedText>

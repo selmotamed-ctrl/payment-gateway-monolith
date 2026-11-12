@@ -50,6 +50,15 @@ export const shouldRun = (options: SelectionOptions, role: DeployRole): boolean 
 export const shouldRunStorage = (options: SelectionOptions, roles: readonly (StorageRole | "pg" | "storage")[]): boolean =>
   options.only.size === 0 || options.only.has("storage") || roles.some((role) => options.only.has(role));
 
+/**
+ * True when the run deploys every compute unit. A partial run (`--only` or
+ * `--nodes`) is verified per deployed unit in the rolling batch step; applying
+ * the new global release identity to unchanged services in step 11 would
+ * fail a correct partial deploy.
+ */
+export const isFullDeployment = (options: SelectionOptions): boolean =>
+  options.only.size === 0 && !(options.nodes && options.nodes.size > 0);
+
 /** The storage provisioner groups, mirroring the branches in `main()` step 5. */
 export const STORAGE_PROVISIONER_GROUPS = {
   postgres: ["pg", "pg-primary", "pg-replica", "pgbouncer"] as StorageRole[],
