@@ -5,6 +5,7 @@ import {
   auditDbConfigured,
   backupStorageConfigured,
   logDbConfigured,
+  objectStorageConfigured,
   parseNodeList,
   pgStorageConfigured,
   redisStorageConfigured,
@@ -45,6 +46,8 @@ export interface PkiBundle {
   fakeRails: CertMaterial;
   /** The pg-backup-daemon mTLS server certificate. */
   backup: CertMaterial;
+  /** The pg-object-storage-daemon mTLS server certificate. */
+  objectStorage: CertMaterial;
   clients: CertMaterial[];
   /** Optional client certificates for storage/backup mTLS links. */
   storageClients: CertMaterial[];
@@ -162,6 +165,19 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
       "DNS:backup-daemon.internal",
     ],
   };
+  const objectStorageIp = parseNodeList(config.OBJECT_STORAGE_NODE)[0]?.privateIp;
+  const objectStorage: CertMaterial = {
+    name: "object-storage-daemon",
+    certPath: join(directory, "object-storage-daemon.crt"),
+    keyPath: join(directory, "object-storage-daemon.key"),
+    kind: "server",
+    cn: "object-storage-daemon.internal",
+    sans: [
+      ...(objectStorageIp ? [`IP:${objectStorageIp}`] : []),
+      "IP:127.0.0.1",
+      "DNS:object-storage-daemon.internal",
+    ],
+  };
   const storageClients: CertMaterial[] = [];
   for (const [name, enabled] of [
     ["pg-client", pgStorageConfigured(config)],
@@ -176,6 +192,15 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
       keyPath: join(directory, `${name}.key`),
       kind: "client",
       cn: name,
+    });
+  }
+  if (objectStorageConfigured(config) && !storageClients.some((client) => client.name === "object-storage-client")) {
+    storageClients.push({
+      name: "object-storage-client",
+      certPath: join(directory, "object-storage-client.crt"),
+      keyPath: join(directory, "object-storage-client.key"),
+      kind: "client",
+      cn: "object-storage-client",
     });
   }
   if (backupStorageConfigured(config) && !storageClients.some((client) => client.name === "backup-client")) {
@@ -212,8 +237,8 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
       "IP:127.0.0.1",
     ],
   };
-  const bundle: PkiBundle = { directory, ca: caMaterial, server, fakeRails, backup, clients, storageClients, renewed: [] };
-  const everythingExists = [caCert, caKey, server.certPath, server.keyPath, fakeRails.certPath, fakeRails.keyPath, backup.certPath, backup.keyPath, ...[...clients, ...storageClients].flatMap((client) => [client.certPath, client.keyPath])]
+  const bundle: PkiBundle = { directory, ca: caMaterial, server, fakeRails, backup, objectStorage, clients, storageClients, renewed: [] };
+  const everythingExists = [caCert, caKey, server.certPath, server.keyPath, fakeRails.certPath, fakeRails.keyPath, backup.certPath, backup.keyPath, ...(objectStorageConfigured(config) ? [objectStorage.certPath, objectStorage.keyPath] : []), ...[...clients, ...storageClients].flatMap((client) => [client.certPath, client.keyPath])]
     .every((path) => existsSync(path));
 
   // AUTO-28: leaves that expire within the renewal window are re-issued by the CA that is already trusted, so a
@@ -221,7 +246,7 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
   const renewNames = new Set<string>();
   const renewWithin = config.MTLS_RENEW_WITHIN_DAYS;
   if (everythingExists && !rotate && renewWithin > 0) {
-    for (const leaf of [server, backup, fakeRails, ...clients, ...storageClients]) {
+    for (const leaf of [server, backup, ...(objectStorageConfigured(config) ? [objectStorage] : []), fakeRails, ...clients, ...storageClients]) {
       if (inspectCertificate(leaf.certPath, leaf.name).expiresInDays < renewWithin) renewNames.add(leaf.name);
     }
   }
@@ -240,7 +265,7 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
         .map((san) => san.replace(/^(IP|DNS|URI):/i, ""))
         .every((san) => current.sans.includes(san));
     };
-    sanDrift = ![server, backup, fakeRails].every(certificateCoversSans);
+    sanDrift = ![server, backup, ...(objectStorageConfigured(config) ? [objectStorage] : []), fakeRails].every(certificateCoversSans);
     if (!sanDrift && renewNames.size === 0) {
       verifyPki(bundle);
       return bundle;
@@ -293,7 +318,18 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
     validityDays: config.MTLS_VALIDITY_DAYS,
   });
 
-  // ---- 2b. The Fake Rails Nginx server certificate -----------------------
+  // ---- 2b. The object-storage-daemon mTLS server certificate -------------
+  if (objectStorageConfigured(config) && signServer(objectStorage)) signLeaf({
+    run,
+    directory,
+    material: objectStorage,
+    ou: "object-storage",
+    sans: objectStorage.sans ?? [],
+    extendedKeyUsage: "serverAuth,clientAuth",
+    validityDays: config.MTLS_VALIDITY_DAYS,
+  });
+
+  // ---- 2c. The Fake Rails Nginx server certificate -----------------------
   if (signServer(fakeRails)) signLeaf({
     run,
     directory,
@@ -438,7 +474,15 @@ export const inspectCertificate = (certPath: string, name: string, now = new Dat
 
 /** Inspects every certificate of the bundle (used by the audit summary and by the health check). */
 export const verifyPki = (bundle: PkiBundle, now = new Date()): CertVerification[] => {
-  const certificates = [bundle.ca, bundle.server, bundle.fakeRails, bundle.backup, ...bundle.clients, ...bundle.storageClients];
+  const certificates = [
+    bundle.ca,
+    bundle.server,
+    bundle.fakeRails,
+    bundle.backup,
+    ...(existsSync(bundle.objectStorage.certPath) ? [bundle.objectStorage] : []),
+    ...bundle.clients,
+    ...bundle.storageClients,
+  ];
   return certificates.map((material) => inspectCertificate(material.certPath, material.name, now));
 };
 
@@ -487,7 +531,21 @@ export const certFilesForHost = (
       files.push(...bundle.storageClients.filter((client) => client.name === "log-db-client"));
     }
     if (role === "backup") {
-      files.push(bundle.backup, ...bundle.storageClients.filter((client) => client.name === "pg-client" || client.name === "backup-client"));
+      files.push(
+        bundle.backup,
+        ...bundle.storageClients.filter(
+          (client) =>
+            client.name === "pg-client"
+            || client.name === "backup-client"
+            || client.name === "object-storage-client",
+        ),
+      );
+    }
+    if (role === "object-storage") {
+      files.push(
+        bundle.objectStorage,
+        ...bundle.storageClients.filter((client) => client.name === "object-storage-client"),
+      );
     }
   }
   // Deduplicate the CA when several roles share a host.
@@ -519,7 +577,15 @@ export const checkPkiExpiry = (
 ): { ok: boolean; lines: string[] } => {
   const lines: string[] = [];
   let ok = true;
-  const materials = [bundle.ca, bundle.server, bundle.fakeRails, bundle.backup, ...bundle.clients, ...bundle.storageClients];
+  const materials = [
+    bundle.ca,
+    bundle.server,
+    bundle.fakeRails,
+    bundle.backup,
+    ...(existsSync(bundle.objectStorage.certPath) ? [bundle.objectStorage] : []),
+    ...bundle.clients,
+    ...bundle.storageClients,
+  ];
   for (const material of materials) {
     if (!existsSync(material.certPath)) {
       ok = false;

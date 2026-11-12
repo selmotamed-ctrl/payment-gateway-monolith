@@ -23,7 +23,7 @@ export interface ProvisionRunner {
 /** A runner that does not report change detection is assumed to have changed the file. */
 export const isChanged = (result: boolean | void): boolean => result !== false;
 
-export type ApplyOutcome = "started" | "restarted" | "reloaded" | "unchanged" | "unknown";
+export type ApplyOutcome = "started" | "restarted" | "reloaded" | "updated" | "unchanged" | "unknown";
 
 const APPLY_MARKER = "__PG_APPLY__=";
 

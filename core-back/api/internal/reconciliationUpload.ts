@@ -3,6 +3,8 @@ import type { Request, Response } from "express";
 import { ApiError } from "../../lib/error";
 import type { PrismaLike, Repositories, Tx } from "../../engine/db/ports";
 import { writeAudit } from "../../lib/audit/writeAudit";
+import type { ObjectStorageSdk } from "../../lib/objectStorageSdk";
+import { getObjectStorageSdk } from "../../lib/objectStorageSdk/runtime";
 
 /**
  * The upload of a statement file.
@@ -15,6 +17,8 @@ export interface ReconciliationUploadDeps {
   db: PrismaLike;
   repositories: Repositories;
   clock?: () => Date;
+  /** Shared object-storage vault; defaults to the process-wide SDK. */
+  objectStorage?: ObjectStorageSdk;
 }
 
 export interface ReconciliationUploadResult {
@@ -85,63 +89,97 @@ export const createReconciliationUploadHandler = (
     ? decodeURIComponent(String(request.headers["x-upload-filename"]))
     : null;
   const fileHash = createHash("sha256").update(raw).digest("hex");
+  const objectStorage = deps.objectStorage ?? getObjectStorageSdk();
+  const staged = await objectStorage.routeClient.stageUpload({
+    namespace: "RECON_STATEMENTS",
+    data: raw,
+    originalFilename: fileName,
+    claimedMimeType: typeof request.headers["x-upload-content-type"] === "string"
+      ? String(request.headers["x-upload-content-type"])
+      : null,
+    ownerMerchantId: null,
+    actor: {
+      actorType: "ADMIN",
+      actorId: principal.userId!,
+      authorities: principal.authorities ?? [],
+      ipAddress: request.ip ?? null,
+    },
+    metadata: { statementSourceId: sourceId },
+  });
 
-  const result = await deps.db.$transaction(async (tx: Tx) => {
-    const source = await deps.repositories.reconciliation.findStatementSourceById(tx, sourceId);
-    if (!source) {
-      throw new ApiError(404, "STATEMENT_SOURCE_NOT_FOUND", "Statement source not found");
-    }
-    // (source, file_hash) is unique: the same statement never produces two runs
-    // for one source (GAP-018); another source may legitimately hold the same bytes.
-    const existingRun = await deps.repositories.reconciliation.findRunByFileHash(tx, fileHash, sourceId);
-    // Defence in depth: the lookup is source-scoped, but a run of another
-    // statement source must never be answered as this source's run.
-    if (existingRun && String(existingRun.statementSourceId) !== sourceId) {
-      throw new ApiError(
-        409,
-        "STATEMENT_FILE_HASH_CONFLICT",
-        "This statement file was already uploaded for a different statement source",
+  let resolved: ReconciliationUploadResult;
+  try {
+    resolved = await deps.db.$transaction(async (tx: Tx) => {
+      const source = await deps.repositories.reconciliation.findStatementSourceById(tx, sourceId);
+      if (!source) {
+        throw new ApiError(404, "STATEMENT_SOURCE_NOT_FOUND", "Statement source not found");
+      }
+      // (source, file_hash) is unique: the same statement never produces two runs
+      // for one source (GAP-018); another source may legitimately hold the same bytes.
+      const existingRun = await deps.repositories.reconciliation.findRunByFileHash(tx, fileHash, sourceId);
+      // Defence in depth: the lookup is source-scoped, but a run of another
+      // statement source must never be answered as this source's run.
+      if (existingRun && String(existingRun.statementSourceId) !== sourceId) {
+        throw new ApiError(
+          409,
+          "STATEMENT_FILE_HASH_CONFLICT",
+          "This statement file was already uploaded for a different statement source",
+        );
+      }
+      const run = existingRun ?? await deps.repositories.reconciliation.createRun(tx, {
+        statementSourceId: sourceId,
+        windowStart,
+        windowEnd,
+        fileHash,
+        statsJson: {},
+        fileName,
+        storageObjectId: staged.objectId,
+      });
+      if (!existingRun) {
+        await objectStorage.routeClient.bind(tx as never, {
+          objectId: staged.objectId,
+          holderType: "RECON_RUN",
+          holderId: String(run.id),
+          actorId: principal.userId!,
+          reason: "RECON_STATEMENT_INGEST",
+        });
+      }
+      // A repeated upload never queues the same work twice.
+      const liveJob = await deps.repositories.jobs.findLiveJobForReference(
+        tx,
+        "RECONCILIATION_RUN",
+        "RECONCILIATION_RUN",
+        String(run.id),
       );
-    }
-    const run = existingRun ?? await deps.repositories.reconciliation.createRun(tx, {
-      statementSourceId: sourceId,
-      windowStart,
-      windowEnd,
-      fileHash,
-      statsJson: {},
-      fileName,
-      fileContent: raw,
-    });
-    // A repeated upload never queues the same work twice.
-    const liveJob = await deps.repositories.jobs.findLiveJobForReference(
-      tx,
-      "RECONCILIATION_RUN",
-      "RECONCILIATION_RUN",
-      String(run.id),
-    );
-    const job = liveJob ?? await deps.repositories.jobs.enqueueJob(tx, {
-      jobType: "RECONCILIATION_RUN",
-      referenceType: "RECONCILIATION_RUN",
-      referenceId: String(run.id),
-      payload: { runId: String(run.id), statementSourceId: sourceId },
-      availableAt: now,
-    });
-    return {
-      runId: String(run.id),
-      jobId: String(job.id),
-      fileHash,
-      state: "QUEUED" as const,
-      idempotent: Boolean(existingRun),
-    };
-  }) as Promise<ReconciliationUploadResult>;
-
-  const resolved = await result;
+      const job = liveJob ?? await deps.repositories.jobs.enqueueJob(tx, {
+        jobType: "RECONCILIATION_RUN",
+        referenceType: "RECONCILIATION_RUN",
+        referenceId: String(run.id),
+        payload: { runId: String(run.id), statementSourceId: sourceId },
+        availableAt: now,
+      });
+      return {
+        runId: String(run.id),
+        jobId: String(job.id),
+        fileHash,
+        state: "QUEUED" as const,
+        idempotent: Boolean(existingRun),
+      };
+    }) as unknown as ReconciliationUploadResult;
+  } catch (error) {
+    await objectStorage.routeClient.discardStaged(staged.objectId).catch(() => undefined);
+    throw error;
+  }
+  if (resolved.idempotent) {
+    // The canonical run already holds its own blob; the newly staged copy is unused.
+    await objectStorage.routeClient.discardStaged(staged.objectId).catch(() => undefined);
+  }
   const checklist = Array.isArray(metadata.checklist)
     ? metadata.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10)
     : [];
   await writeAudit(deps.db, {
     data: {
-      actorId: principal.userId,
+      actorId: principal.userId!,
       role: principal.role ?? "UNKNOWN",
       action: "RECONCILIATION_UPLOAD_CHECKLIST",
       entityType: "RECONCILIATION_RUN",

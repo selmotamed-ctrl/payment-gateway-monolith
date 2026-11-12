@@ -3,7 +3,7 @@ id: core.storage
 title: Storage Engine
 status: partial
 confidence: high
-last_verified: 2026-11-09
+last_verified: 2026-11-12
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/lib/storageEngine/telemetry.ts
@@ -500,3 +500,17 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 - **UTC pinning (GAP-030, RESOLVED with a residual).** `core-back/lib/storageEngine/utcSession.ts` pins every connection the storage engine opens to `timezone=UTC` through the connection-URL startup option `options=-c timezone=UTC` (`pinUtcInConnectionUrl`; any other `timezone` option already in the URL is replaced, because node-postgres lets the connection string override explicit config). `createUtcPinnedClient` builds the Prisma client, the audit and log pools and the leader-election connection use the same pinned URL, and `readSessionTimeZone` reports `SHOW timezone`. The deploy provisioner also writes `timezone = 'UTC'` and `log_timezone = 'UTC'` into every cluster's `postgresql.conf` (see `deploy.storage`). Residual: `core-back/prisma/client/base.ts` is still unpinned (tracked in the gap list above).
 - **Redis velocity failure policy (GAP-031, RESOLVED).** `REDIS_VELOCITY_FAILURE_POLICY` (parsed by `parseVelocityFailurePolicy`, wired in `createStorageEngine`, overridable with `velocityFailurePolicy`) defines what the Redis velocity counter does when Redis is unreachable, errors or exceeds the command timeout. `local-fallback` (default) fails open degraded: the window is counted in this node's memory, so limits still apply per node and are lost on restart. `fail-open` allows without counting (empty `windowStats`). `fail-closed` throws `VelocityUnavailableError` so the caller refuses the attempt. `onVelocityDegraded` is invoked with the policy and the error. Velocity is a risk signal, not a ledger invariant, so the default does not stop payments during an outage; use `fail-closed` only when a missed limit is worse than an outage. Tests: `core-back/test/storage-engine/velocity-failure-policy.test.ts`.
 - **Leader election (GAP-012).** `StorageEngine.leaderElection` is a `PgAdvisoryLeaderElection` built from the primary URL (see `core.workers` for the semantics and the PgBouncer transaction-pooling caveat); it is closed with the engine.
+
+## 13. Shared object & asset storage (schema v36)
+
+The storage engine is paired with the shared object vault documented in
+`parts/01-core-back/13-object-storage.md`. PostgreSQL keeps only the control
+plane (`storage_objects`, `storage_object_locks`,
+`storage_object_access_logs`); the bytes live in
+`deploy/object-storage-daemon` (`RemoteMtlsBlobStore` on every core node and the
+backup daemon, `FsBlobStore` in local dev). The former
+`reconciliation_runs.file_content` bytea column is removed and the run carries
+`storage_object_id`; KYB documents, regulatory outputs/templates, Report Studio
+bundles and catalog assets carry storage-object FKs. The `ObjectStorageMaintenanceWorker`
+(GC, orphan sweep, integrity scrub, lock reconcile, KEK rewrap, generic AV
+fallback) and the `object_storage` Platform Monitor check cover operations.

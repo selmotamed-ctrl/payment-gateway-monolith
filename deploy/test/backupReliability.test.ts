@@ -40,6 +40,9 @@ KMS_MASTER_KEY="kms-Q7x9Lm2Zr4Vb8Nc1Wd5Tg3Hy6Jp0Sa2"
 BACKUP_ENABLED="true"
 BACKUP_SSH_KEY_PATH="~/.ssh/backup"
 BACKUP_ENCRYPTION_KEY_HEX="9f3a7c1e5b2d84f06a1c3e7b9d2f4a8c5e0b6d1a3f7c9e2b4d8a0c6e1f5b3a79"
+OBJECT_STORAGE_NODE="obj-1@10.10.13.10:22:10.10.13.10:4095"
+OBJECT_STORAGE_SSH_KEY_PATH="~/.ssh/backup"
+OBJECT_STORAGE_KEK_KEYRING="v1:7e1f4b9a3c6d2058e1a7b4c9d3f6082a5b1c8e4d7a0f3b6c9e2d5a8f1b4c7e03"
 `;
 
 /** Externally managed database (DB_*): no PG_* storage nodes at all. */

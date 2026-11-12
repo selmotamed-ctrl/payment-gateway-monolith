@@ -3,7 +3,7 @@ id: deploy.pipeline
 title: Deployment Pipeline
 status: partial
 confidence: high
-last_verified: 2026-11-07
+last_verified: 2026-11-12
 verified_against: d695518+working-tree
 code:
   - deploy/deploy.ts
@@ -404,3 +404,13 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 ## Remediation round 2 (2026-11-08): auto probe, preflight and step order
 
 `DEPLOY_MODE=auto` now probes every host read-only in step 4 (`lib/hostProbe.ts`, a pure `bootstrapGaps()` over the probe output) and resolves each host to fresh, update or refuse (an edge host whose core has not been migrated is refused before anything changes). A resource preflight warns when PostgreSQL sizing (`PG_RAM_GB`) exceeds the host's memory. Verification (formerly step 12) now runs before the long seed (formerly step 11). `runAsDatabaseOwner` runs migrations and seeders with the owner URL. Tests: `deploy/test/hostProbe.test.ts`, `pipeline.test.ts`.
+
+## Object storage step
+
+Step 5 provisions the shared object-storage tier before the backup engine:
+`provisionObjectStorageEngine` validates the node/KEK, then
+`deployObjectStorageDaemon` syncs and starts the daemon. Health verification
+probes `systemctl is-active pg-object-storage-daemon` on the storage host and
+`GET /v1/health` over mTLS from every core host and the backup host. The deploy
+fails before any core is touched when multiple core nodes or a separate backup
+host are configured without `OBJECT_STORAGE_NODE`.

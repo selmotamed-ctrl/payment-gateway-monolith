@@ -42,6 +42,8 @@ export interface BackupDaemonServerOptions {
   logger?: Pick<Console, "info" | "warn" | "error">;
   /** Shared with the scheduler so a manual trigger and a scheduled slot never overlap. */
   jobs?: JobQueue;
+  /** Copies/verifies the shared object-storage vault after a successful backup. Returns extra storage target ids. */
+  syncObjectStorage?: () => Promise<string[]>;
 }
 
 /**
@@ -356,6 +358,8 @@ export const createBackupDaemonHandler = (options: BackupDaemonServerOptions): H
                 await catalog.updateRun(id, { status: "RUNNING" });
                 try {
                   const result = await engine.triggerBackup(parsed.data.target, parsed.data.kind);
+                  const extraTargets = await options.syncObjectStorage?.();
+                  if (extraTargets && extraTargets.length > 0) result.storageTargets.push(...extraTargets);
                   const completed = clock();
                   await catalog.updateRun(id, {
                     status: "PASSED",

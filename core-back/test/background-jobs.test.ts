@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import express, { type Request, type Response } from "express";
+import { createHash, randomUUID } from "node:crypto";
 import { Decimal } from "decimal.js";
 import { PrismaRepositories } from "../engine/db/repositories";
 import { LedgerPoster, decimal } from "../engine/ledger/LedgerPoster";
@@ -31,6 +32,46 @@ import {
  */
 
 const clockStart = new Date("2026-10-28T09:00:00.000Z");
+
+/** In-memory stand-in for the shared object-storage vault (the suite never touches PostgreSQL). */
+const statementBlobs = new Map<string, Buffer>();
+const fakeObjectStorage = {
+  routeClient: {
+    stageUpload: async (input: { data: Uint8Array }) => {
+      const objectId = randomUUID();
+      const bytes = Buffer.from(input.data);
+      statementBlobs.set(objectId, bytes);
+      return {
+        objectId,
+        bucket: "HOT",
+        storageKey: `recon_statements/shared/2026/11/${objectId}.v1.enc`,
+        sha256Hex: createHash("sha256").update(bytes).digest("hex"),
+        byteSize: BigInt(bytes.byteLength),
+        detectedMimeType: "text/csv",
+        requiresAsyncAvScan: false,
+      };
+    },
+    bind: async () => undefined,
+    discardStaged: async (objectId: string) => {
+      statementBlobs.delete(objectId);
+    },
+  },
+  workerClient: {
+    readInternal: async (objectId: string) => {
+      const bytes = statementBlobs.get(objectId);
+      if (!bytes) throw new Error(`missing fake blob ${objectId}`);
+      return {
+        objectId,
+        detectedMimeType: "text/csv",
+        originalFilename: "statement.csv",
+        byteSize: BigInt(bytes.byteLength),
+        sha256Hex: createHash("sha256").update(bytes).digest("hex"),
+        bytes,
+        stream: () => new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(bytes); controller.close(); } }),
+      };
+    },
+  },
+} as never;
 
 let now = clockStart;
 const clock = (): Date => now;
@@ -236,6 +277,7 @@ describe("the statement reconciliation upload", () => {
         db: client as never,
         repositories: new PrismaRepositories(client as never),
         clock,
+        objectStorage: fakeObjectStorage,
       }),
     );
     app.use((error: unknown, _request: Request, response: Response, _next: unknown) => {
@@ -281,7 +323,8 @@ describe("the statement reconciliation upload", () => {
     // The uploaded file is stored in the run record.
     const runs = fakeTable("reconciliationRun");
     expect(runs).toHaveLength(1);
-    expect((runs[0]?.fileContent as Buffer).toString("utf8")).toBe(statement);
+    expect(typeof runs[0]?.storageObjectId).toBe("string");
+    expect(statementBlobs.get(String(runs[0]?.storageObjectId))?.toString("utf8")).toBe(statement);
     expect(runs[0]?.ingestedAt).toBeNull();
   });
 
@@ -321,6 +364,7 @@ describe("the statement reconciliation upload", () => {
         db: client as never,
         repositories: new PrismaRepositories(client as never),
         clock,
+        objectStorage: fakeObjectStorage,
         feeVariancePoster: {
           postFeeVariance: async (posting) => {
             variances.push(posting.attemptId ?? "");

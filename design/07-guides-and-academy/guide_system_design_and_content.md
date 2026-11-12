@@ -7480,6 +7480,23 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
    "situations": []
   },
   {
+   "screenId": "SystemObjectStorage",
+   "routeNames": [
+    "SystemObjectStorage"
+   ],
+   "pageDir": "pages/system/object-storage",
+   "summary": "Shared Object & Asset Storage console: inspect mTLS storage daemon health, browse encrypted objects and their active record locks, review AV quarantine items, place or lift legal holds, and audit every allowed or denied file read.",
+   "articles": [
+    "b12-12",
+    "b12-13",
+    "b12-10"
+   ],
+   "cards": [
+    "sg-place-legal-hold"
+   ],
+   "situations": []
+  },
+  {
    "screenId": "SystemBackups",
    "routeNames": [
     "SystemBackups"
@@ -7846,6 +7863,81 @@ Stop and ask. Use Report a problem on the article.
 @@faq id=q-058 article=b00-03
 Q: What are the most serious breaches?
 Sharing credentials, guessing on UNKNOWN and tipping-off.
+@@end
+
+
+
+
+@@article id=b12-12 book=12 order=12 title="Shared Object & Asset Storage: how files, locks, quarantine and retention work" roles=SECURITY_ADMIN,GATEWAY_ADMIN,COMPLIANCE,FINANCE minutes=4 ui=AVAILABLE related=b12-09,b12-10,b12-13
+:::summary Big picture in 20 seconds
+Every uploaded document, statement, report output and brand logo lives in the encrypted Shared Object Storage vault (`OBJECT_STORAGE_NODE`), never inside PostgreSQL table rows and never on individual core nodes.
+:::
+
+### Why files never live on core nodes or inside PostgreSQL
+In a multi-node deployment, several `core-back` servers and a dedicated `backup-daemon` server work together. If `core-1` saved a KYB PDF on its own disk, `core-2` and `backup-1` could not read it. Therefore:
+* The deploy engine requires a shared **Object Storage Node** (`OBJECT_STORAGE_NODE`, running `pg-object-storage-daemon` over mTLS on port `4095`). If someone configures multiple core nodes without `OBJECT_STORAGE_NODE`, deployment refuses to start (`MULTI_NODE_SHARED_STORAGE_REQUIRED`).
+* Every file is encrypted in 64 KiB `AES-256-GCM` chunks (`pgos1`) with its own 256-bit Data Encryption Key (DEK) wrapped by the Key Encryption Keyring (`OBJECT_STORAGE_KEK_KEYRING`).
+* PostgreSQL stores only the small control-plane ledger: `storage_objects`, `storage_object_locks` and `storage_object_access_logs`.
+
+### Shared multi-record locks (`storage_object_locks`)
+One file can be locked by more than one record at the same time. For example, a payment rail logo uploaded into the Asset Catalog (`CATALOG_ASSET`) and assigned to two payment rails (`RAIL_LOGO`) has three active locks.
+* Database trigger `storage_objects_guard_trg` forbids deleting rows from `storage_objects` and forbids transitioning an object to `PURGED` while **any** active lock (`released_at IS NULL`) exists, while `legal_hold = true`, or while `retain_until` is in the future.
+* When the last active lock is released, the object enters a 24-hour grace window (`gc_eligible_at`). After 24 hours (and after `retain_until` expires), `GcWorker` moves the ciphertext file to `.trash/YYYY-MM-DD/` for 7 days before permanent removal.
+
+### Two-stage retention and malware quarantine
+When a merchant or operator uploads a KYB document, dispute attachment or AML evidence file:
+1. It is staged and bound in `QUARANTINE_PENDING_AV` state with `retain_until = NULL`. While in quarantine, nobody can download it (`423 STORAGE_OBJECT_QUARANTINED`).
+2. `AvScanWorker` decrypts and scans the file. If clean, it promotes the object to `ACTIVE` and stamps its compliance retention window (`retain_until`). If infected, it releases the lock and marks the object `QUARANTINE_REJECTED` so malware never receives a 7-year compliance lock.
+@@end
+
+@@article id=b12-13 book=12 order=13 title="Operating the Object & Asset Storage screen: legal holds, KEK rotation and maintenance jobs" roles=SECURITY_ADMIN,GATEWAY_ADMIN,COMPLIANCE minutes=3 ui=AVAILABLE related=b12-12,b12-10,b12-11
+:::summary Big picture in 20 seconds
+Use `/system/object-storage` to inspect shared storage health, check active locks on any file, place or lift legal holds, and trigger maintenance jobs (`Integrity Scrub`, `KEK Rewrap`, `Lock Reconcile`, `GC`).
+:::
+
+### Who may do what on `/system/object-storage`
+* **View health, objects, locks and access logs:** `system:storage:read`.
+* **Place or lift a Legal Hold:** `system:storage:legal-hold` (Security Admin / Compliance).
+* **Trigger maintenance jobs (`scrub`, `rewrap`, `reconcile-locks`, `gc`, `sweep`):** `system:storage:admin`.
+
+### Placing and lifting a Legal Hold
+During an investigation, dispute or audit, a Compliance or Security Admin can place a **Legal Hold** on any object with a mandatory written reason. While `legal_hold = true`, database trigger `storage_objects_guard_trg` and `GcWorker` refuse to purge the object even if all domain locks are released and `retain_until` has passed. Checklist: [[c:sg-place-legal-hold|Place or lift a storage legal hold]].
+
+### Zero-downtime KEK key rotation (`RewrapWorker`)
+When IT rotates `OBJECT_STORAGE_KEK_KEYRING` from `v1` to `v2`, the encrypted `.v1.enc` files on disk do not need to be rewritten. Running the **KEK Rewrap** job unwraps each object's 32-byte DEK with `v1` and re-wraps it with `v2` in `storage_objects`.
+@@end
+
+@@card id=sg-place-legal-hold title="Place or lift a storage legal hold" screen=SystemObjectStorage risk=HIGH irreversible=false
+**What this does**
+Freezes or unfreezes a stored object against garbage collection and purging.
+
+**Check first**
+- [ ] Confirm the exact `objectId` and inspect its active `storage_object_locks` holders first.
+- [ ] Record the case reference or regulatory request ID in the legal hold reason.
+- [ ] Confirm that the requester has the `system:storage:legal-hold` authority.
+
+**Never**
+- Never place a hold without a written reason and a case reference.
+- Never lift a hold while the investigation or court order is still open.
+
+**If you made a mistake**
+Lift the hold with a correcting reason. The audit trail keeps both actions.
+@@end
+
+@@term slug=object-storage-vault term="Object Storage Vault" aliases="OBJECT_STORAGE_NODE;pg-object-storage-daemon" ar="خزنة تخزين الكائنات" related=storage-object-lock,legal-hold :: The dedicated mTLS service (`pg-object-storage-daemon`) that stores chunk-encrypted (`pgos1`) files shared across all core-back nodes and backup-daemon.
+
+@@term slug=storage-object-lock term="Storage Object Lock" aliases="storage_object_locks;holder lock" ar="قفل كائن التخزين" related=object-storage-vault,legal-hold :: An append-only reference in `storage_object_locks` binding a business record (such as `KYB_DOCUMENT` or `RAIL_LOGO`) to a `StorageObject` so it cannot be purged while in use.
+
+@@term slug=legal-hold term="Legal Hold" aliases="legal_hold" ar="حجز قانوني" related=object-storage-vault,storage-object-lock :: A compliance flag on `storage_objects` that freezes an asset against garbage collection or purging regardless of lock count or retention expiry.
+
+@@faq id=q-059 article=b12-12
+Q: Can two core-back servers store uploaded files on their own local disks?
+No. Multi-node deployments must configure `OBJECT_STORAGE_NODE` so every core server and backup daemon reads and writes to the shared mTLS storage vault.
+@@end
+
+@@faq id=q-060 article=b12-13
+Q: Why can't I download a newly uploaded KYB document right away?
+It is in `QUARANTINE_PENDING_AV` until the antivirus scan worker verifies it is clean and promotes it to `ACTIVE`.
 @@end
 
 <!-- CONTENT:END -->

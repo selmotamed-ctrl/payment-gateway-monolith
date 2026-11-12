@@ -25,6 +25,7 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Synthetic Seeder](#coreseeder) — `partial`
 - [Tests and Benchmarks](#coretests) — `partial`
 - [Dynamic Report Engine SDK and Report Studio Host](#corereport-engine) — `implemented`
+- [Shared Object & Asset Storage Engine](#coreobject-storage) — `implemented`
 - [Shared Core Upstream Client](#edgeshared) — `implemented`
 - [Admin Edge BFF](#edgeadmin) — `partial`
 - [Merchant Edge BFF](#edgemerchant) — `partial`
@@ -1131,6 +1132,27 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `BACKUP_DAEMON_CLIENT_CERT_PATH` | unset | backup client mTLS |
 | `BACKUP_DAEMON_CLIENT_KEY_PATH` | unset | backup client mTLS |
 | `BACKUP_DAEMON_TIMEOUT_MS` | `15000` (max 120000) | backup call timeout |
+
+#### Shared object & asset storage (schema v36)
+
+| Key | Default | Consumer |
+| :--- | :--- | :--- |
+| `OBJECT_STORAGE_DAEMON_URL` | unset; required in production or when `CLUSTER_CORE_NODE_COUNT > 1` | `RemoteMtlsBlobStore` (all core nodes) |
+| `OBJECT_STORAGE_TLS_CA_PATH` / `_CLIENT_CERT_PATH` / `_CLIENT_KEY_PATH` | unset | client mTLS |
+| `OBJECT_STORAGE_DAEMON_TIMEOUT_MS` | `30000` (max 120000) | blob requests |
+| `OBJECT_STORAGE_ROOT_DIR` | `/tmp/pg-object-storage-dev` (dev) | `FsBlobStore` fallback |
+| `OBJECT_STORAGE_KEK_KEYRING` | unset (dev derives from `DATABASE_URL`) | DEK wrap/unwrap; format `v1:<64 hex>[,v2:<64 hex>]` |
+| `OBJECT_STORAGE_ACTIVE_KEK_VERSION` | `1` | new DEK wraps |
+| `OBJECT_STORAGE_TRASH_RETENTION_DAYS` | `7` | trash purge |
+| `OBJECT_STORAGE_GC_GRACE_HOURS` | `24` | last-lock-release grace |
+| `CLUSTER_CORE_NODE_COUNT` | `1` | shared-storage boot guard |
+| `WORKER_OBJECT_STORAGE_ENABLED` | `true` | maintenance worker |
+| `WORKER_OBJECT_STORAGE_INTERVAL_MS` | `60000` | maintenance worker |
+| `WORKER_OBJECT_STORAGE_BATCH_SIZE` | `25` | AV/scrub batch |
+
+The core refuses to boot (`OBJECT_STORAGE_DAEMON_URL_REQUIRED`) when
+`NODE_ENV=production` or the core-node count is above one and no daemon URL is
+configured.
 
 #### Workers
 
@@ -4873,7 +4895,7 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 
 <a id="corestorage"></a>
 
-> **Part ID:** `core.storage` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.storage` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `5a24f6f+working-tree`
 
 # Storage Engine
 
@@ -5343,6 +5365,20 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 - **Redis velocity failure policy (GAP-031, RESOLVED).** `REDIS_VELOCITY_FAILURE_POLICY` (parsed by `parseVelocityFailurePolicy`, wired in `createStorageEngine`, overridable with `velocityFailurePolicy`) defines what the Redis velocity counter does when Redis is unreachable, errors or exceeds the command timeout. `local-fallback` (default) fails open degraded: the window is counted in this node's memory, so limits still apply per node and are lost on restart. `fail-open` allows without counting (empty `windowStats`). `fail-closed` throws `VelocityUnavailableError` so the caller refuses the attempt. `onVelocityDegraded` is invoked with the policy and the error. Velocity is a risk signal, not a ledger invariant, so the default does not stop payments during an outage; use `fail-closed` only when a missed limit is worse than an outage. Tests: `core-back/test/storage-engine/velocity-failure-policy.test.ts`.
 - **Leader election (GAP-012).** `StorageEngine.leaderElection` is a `PgAdvisoryLeaderElection` built from the primary URL (see `core.workers` for the semantics and the PgBouncer transaction-pooling caveat); it is closed with the engine.
 
+## 13. Shared object & asset storage (schema v36)
+
+The storage engine is paired with the shared object vault documented in
+`parts/01-core-back/13-object-storage.md`. PostgreSQL keeps only the control
+plane (`storage_objects`, `storage_object_locks`,
+`storage_object_access_logs`); the bytes live in
+`deploy/object-storage-daemon` (`RemoteMtlsBlobStore` on every core node and the
+backup daemon, `FsBlobStore` in local dev). The former
+`reconciliation_runs.file_content` bytea column is removed and the run carries
+`storage_object_id`; KYB documents, regulatory outputs/templates, Report Studio
+bundles and catalog assets carry storage-object FKs. The `ObjectStorageMaintenanceWorker`
+(GC, orphan sweep, integrity scrub, lock reconcile, KEK rewrap, generic AV
+fallback) and the `object_storage` Platform Monitor check cover operations.
+
 ---
 
 <a id="coredata"></a>
@@ -5359,7 +5395,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 35 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 36 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -5414,7 +5450,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 35`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 36`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5425,9 +5461,17 @@ The models are grouped by domain:
 
 `core-back/prisma/seed.ts`, `seedFakeRails.ts` and `syntheticSeeder/index.ts` call `ensureSchemaVersion()` before writing. A stale database is therefore rejected by these seeders and by any caller that explicitly asserts the version. The core HTTP start path does not call it.
 
+Schema version 36 adds the shared object & asset storage control plane
+(`storage_objects`, `storage_object_locks`, `storage_object_access_logs`,
+`report_asset_bundle_entries`, `dispute_attachments`, `aml_case_evidence`),
+domain FK links (KYB, reconciliation, regulatory templates/outputs, Report Studio
+bundles, catalog assets), removes `reconciliation_runs.file_content`, and
+installs the two append-only guard triggers. See
+`parts/01-core-back/13-object-storage.md`.
+
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261111130000_merchant_report_chrome`, schema version 35). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261112000000_v36_enterprise_object_storage_engine`, schema version 36). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -5722,7 +5766,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 35 (`REQUIRED_SCHEMA_VERSION = 35`; model count 106). The schema migrations since version 10 are:
+The current schema version is 35 (`REQUIRED_SCHEMA_VERSION = 36`; model count 106). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -7706,6 +7750,228 @@ When changing the report engine:
 5. Update `report-spec-generator/src/base/MANIFEST.json`, `CHANGELOG.md` and the migration prompt library; refresh the eval corpus and record transcript version/hash.
 6. Update this part, the admin/merchant report docs, testing catalog and `TRACKER.md`; run the project-design gate.
 
+## 17. Shared object storage for report assets and outputs
+
+Report Studio bundles are stored as one encrypted `application/zip` object in the
+`REPORT_STUDIO_ASSETS` namespace (`ReportAssetBundle.storageObjectId` /
+`MerchantReportAssetBundle.storageObjectId`, `REPORT_ASSET_ENTRY` lock).
+Rendering extracts the requested file in memory (`ObjectStorageReportAssetStorage`);
+the local `.report-assets` driver remains only as a fallback for pre-v36 rows and
+tests. Regulatory XLSX templates (`RegulatoryReportSchema.templateObjectId`) and
+generated XML/XLSX/DOCX outputs (`RegulatoryReportOutput.storageObjectId`,
+`REG_REPORT_OUTPUT` lock) are stored in `REGULATORY_REPORTS`; new writes stop
+writing `contentCiphertext`/`templateCiphertext` and all readers prefer the
+storage object. The full engine is `parts/01-core-back/13-object-storage.md`.
+
+---
+
+<a id="coreobject-storage"></a>
+
+> **Part ID:** `core.object-storage` · **Status:** `implemented` · **Last verified:** 2026-11-12 · **Verified against:** `working-tree`
+
+# Shared Object & Asset Storage Engine
+
+## 1. Purpose and scope
+
+The engine is the single encrypted storage plane for every uploaded or generated
+file in the platform. It replaces asset `bytea`/base64 columns and local-disk
+writes with:
+
+- a shared, network-accessible vault (`deploy/object-storage-daemon`) used by
+  every `core-back` node and the backup daemon;
+- a PostgreSQL control plane (`storage_objects`, `storage_object_locks`,
+  `storage_object_access_logs`) with append-only/guard triggers;
+- a host-agnostic SDK (`core-back/lib/objectStorageSdk/**`) used by all domain
+  call sites.
+
+The engine does not own PostgreSQL backups (see `core.backup`) or the API
+authority model (`core.api`); it enforces the authority recorded on each object
+as defence in depth.
+
+## 2. Database control plane (schema version 36)
+
+Migration `20261112000000_v36_enterprise_object_storage_engine` adds:
+
+| Table | Notes |
+| :--- | :--- |
+| `storage_objects` | One row per upload. `byte_size > 0`, `chunk_size_bytes >= 4096`, `chunk_count >= 1`; unique `(bucket, storage_key)`. |
+| `storage_object_locks` | Append-only lock ledger with unique `(object_id, holder_type, holder_id)`. |
+| `storage_object_access_logs` | Allowed and denied read attempts. |
+| `report_asset_bundle_entries` | Per-file entries of Report Studio bundle archives. |
+| `dispute_attachments`, `aml_case_evidence` | Evidence links (FKs to disputes/merchants/AML cases). |
+
+Domain links: `kyb_documents.storage_object_id`,
+`reconciliation_runs.storage_object_id` (replaces `file_content`),
+`regulatory_report_schemas.template_object_id`,
+`regulatory_report_outputs.storage_object_id`,
+`report_asset_bundles.storage_object_id`,
+`merchant_report_asset_bundles.storage_object_id`, `assets.storage_object_id`.
+
+All new FKs are `ON DELETE RESTRICT ON UPDATE CASCADE`; timestamps are
+`TIMESTAMPTZ(3)` to match the repo convention.
+
+### Guard triggers (no GUC backdoors)
+
+`storage_objects_guard_trg` forbids `DELETE` (`STORAGE_OBJECT_DELETE_FORBIDDEN`,
+23503), mutating cryptographic identity (`STORAGE_OBJECT_IMMUTABLE_FIELD`,
+23514), shortening `retain_until` (`STORAGE_OBJECT_RETENTION_SHORTEN_FORBIDDEN`,
+23514), and `PURGED`/`QUARANTINE_REJECTED` while a legal hold is active, an
+active lock exists, or (for `PURGED`) `retain_until` is in the future
+(`STORAGE_OBJECT_LEGAL_HOLD_ACTIVE`, `STORAGE_OBJECT_LOCKED`,
+`STORAGE_OBJECT_RETENTION_ACTIVE`).
+
+`storage_object_locks_guard_trg` forbids `DELETE` and mutation of
+`id/object_id/holder_type/holder_id`; lock release is an `UPDATE` of
+`released_at`.
+
+## 3. Data plane: `pgos1`
+
+One object is one immutable file:
+`{namespace}/{tenant-or-shared}/{yyyy}/{mm}/{objectId}.v1.enc`.
+
+```
+"pgos1" | frame 0 | ... | final frame
+frame = uint32be(plaintextLength) | AES-256-GCM ciphertext | 16-byte tag
+```
+
+- Per-object random 32-byte DEK wrapped by a KEK with
+  `AAD = "dek:{objectId}:v{version}"`.
+- Chunk nonce `streamNoncePrefix(7) | uint32be(index) | finalFlag`;
+  chunk AAD `objectId(16) | uint32be(index) | finalFlag`.
+- Tampering, truncation, reordering, cross-object swaps, size/count/SHA-256
+  mismatches and missing blobs raise `STORAGE_INTEGRITY_CORRUPTED`.
+- Default chunk size 64 KiB; the reader caps a frame at 16 MiB.
+
+## 4. Lifecycle and policies
+
+`NAMESPACE_POLICIES` in `types.ts` defines bucket, MIME allow-list, max size,
+async AV, default retention, required authority and confidentiality tier for
+KYB, reconciliation, regulatory, Report Studio, merchant statements, dispute,
+AML, brand assets and backup artifacts.
+
+`stageUpload` (no DB transaction) inserts `STAGING`, encrypts and writes to the
+`BlobStore`. `bind` (inside a caller transaction) upserts the lock and either
+promotes immediately or moves to `QUARANTINE_PENDING_AV`. Promotion stamps
+`retain_until` as the maximum of the policy retention, the existing retention
+and every lock's `retention_floor_until`. Releasing the last lock stamps
+`gc_eligible_at = GREATEST(retain_until, NOW() + grace)`. `runGcBatch` moves
+eligible blobs to `.trash/YYYY-MM-DD/` and marks them `PURGED`; trash is purged
+after `OBJECT_STORAGE_TRASH_RETENTION_DAYS`.
+
+SVG uploads are sanitised (script/event handlers/foreignObject/javascript/data
+HTML/iframes/embedded objects/external hrefs -> `STORAGE_SVG_UNSAFE`).
+Executable headers are refused at sniff time.
+
+## 5. SDK
+
+Files: `types.ts`, `sniff.ts`, `crypto.ts`, `blobStore.ts`,
+`holderRegistry.ts`, `index.ts`, `runtime.ts`.
+
+`BlobStore` has two drivers: `FsBlobStore` (daemon/local test) and
+`RemoteMtlsBlobStore` (all core nodes and the backup daemon). The daemon and
+backup-daemon keep byte-identical copies under `src/shared/blobStore.ts`; the
+deploy test asserts they match the canonical core file.
+
+`createObjectStorageSdk` exposes:
+
+- `routeClient`: `stageUpload`, `bind`, `promote`, `release`, `discardStaged`,
+  `withStagedUpload`, `readAuthorized`, `placeLegalHold`, `liftLegalHold`.
+- `workerClient`: `stageSystemGenerated`, `readInternal`, `readForScan`,
+  `applyScanVerdict`, `runGcBatch`, `runBlobSweep`,
+  `runIntegrityScrubBatch`, `runLockReconcile`, `runRewrapBatch`,
+  `exportManifest`.
+
+`readAuthorized` checks ACTIVE status, the holder lock, the merchant tenant and
+the object's required authority, and writes a `storage_object_access_logs` row
+for every outcome. `createBlobStore` refuses to fall back to local disk in
+production or when `CLUSTER_CORE_NODE_COUNT > 1`
+(`OBJECT_STORAGE_DAEMON_URL_REQUIRED`).
+
+## 6. Domain call sites
+
+- KYB upload/download and the join-request flow use `KYB_DOCUMENTS`; the
+  `KybScanWorker` applies the scanner verdict to both the document and the
+  storage object.
+- Reconciliation upload stages `RECON_STATEMENTS` before the DB transaction and
+  binds `RECON_RUN`; the parse worker reads the vault object.
+- Regulatory templates/outputs use `REGULATORY_REPORTS`; output generation
+  stages and binds `REG_REPORT_OUTPUT`, replacing/superseding rows releases the
+  old lock.
+- Report Studio bundles become one `application/zip` `REPORT_STUDIO_ASSETS`
+  object; rendering extracts files in memory.
+- Catalog assets upload to `SYSTEM_BRAND_ASSETS` with a `CATALOG_ASSET` lock;
+  assigning a rail logo adds a `RAIL_LOGO` lock (shared multi-record lock).
+- Dispute and AML evidence use `DISPUTE_EVIDENCE`/`AML_CASE_ATTACHMENTS` and
+  wait for AV (`QUARANTINE_PENDING_AV`).
+- The synthetic seeder stages preview KYB PDFs and reconciliation statements and
+  binds them.
+
+## 7. Workers and monitoring
+
+`ObjectStorageMaintenanceWorker` (enabled by `WORKER_OBJECT_STORAGE_ENABLED`,
+interval/batch env) runs the generic AV fallback (EICAR + active content, not
+KYB), staging/expired GC, integrity scrub, lock reconcile, periodic blob sweep
+and KEK rewrap. It is not a cluster singleton; the DB guards make each action
+idempotent.
+
+`createObjectStorageMonitorCheck` (`object_storage`) raises keyed findings for
+an unreachable vault (P1), scrub errors (P1) and quarantine uploads older than
+30 minutes (P2).
+
+## 8. Backup integration
+
+The backup daemon copies new HOT/COLD `.v1.enc` files into
+`object-blobs/{bucket}/{storageKey}` in the artifact repository, verifies every
+ACTIVE row has its blob (`OBJECT_STORAGE_BACKUP_PARITY_ERROR`), writes the KEK
+keyring as an AES-256-GCM escrow (`object-storage/kek-escrow.enc`) under the
+backup master key, and samples up to `OBJECT_STORAGE_DRILL_SAMPLE` ACTIVE rows
+in the restore drill, decrypting them with the escrowed keyring and comparing
+the SHA-256.
+
+## 9. Deploy and operations
+
+- `OBJECT_STORAGE_NODE` is mandatory for >1 core node or a backup host on
+  another host; validation fails with `MULTI_NODE_SHARED_STORAGE_REQUIRED`.
+- `deploy/provisioners/objectStorageProvisioner.ts` creates the `pgobjstore`
+  user, vault directories, environment file and `pg-object-storage-daemon`
+  unit; `deployObjectStorageDaemon` syncs and starts the daemon.
+- PKI mints `object-storage-daemon.crt` (SANs: storage private IP, 127.0.0.1,
+  `object-storage-daemon.internal`) and `object-storage-client.crt`.
+- Firewall opens 4095 only to core and backup private IPs.
+- Health probes run `systemctl is-active` on the storage host and
+  `/v1/health` over mTLS from every core host and the backup host.
+- Admin API: `GET /object-storage/summary`, list/detail objects, access logs,
+  POST/DELETE legal holds, POST maintenance jobs. The admin portal route
+  `/system/object-storage` renders the four tabs.
+
+## 10. Tests
+
+`core-back/test/objectStorageEngine.test.ts` covers T01–T20 end to end against
+live PostgreSQL (round-trip, chunk tamper/truncation/reorder, cross-object swap,
+rollback cleanup, trigger guards, multi-holder ref counting, retention, legal
+hold, quarantine/no-retention, infected verdict, SVG/executable rejection,
+tenant/authority denial logs, KEK rewrap, GC/trash, lock reconciler, two-node
+shared daemon) plus DB-free envelope/sniff tests.
+
+`deploy/test/objectStorageDeploy.test.ts` covers T21 (topology derivation, core
+env, PKI, firewall, multi-node guard/provisioner refusal, shared-copy drift) and
+T22 (incremental blob sync, parity failure, KEK escrow and drill decryption).
+`deploy/object-storage-daemon/test/server.test.ts` covers the daemon HTTP
+surface and path-traversal refusal.
+
+## 11. Status and deviations
+
+Implemented end to end. Deviations recorded:
+
+- Regulatory schema templates and outputs keep their nullable legacy encrypted
+  text columns as a fallback for rows created before v36; new writes use the
+  shared vault and all readers prefer `storageObjectId`/`templateObjectId`.
+- Report Studio bundles are stored as one encrypted ZIP object rather than one
+  row per file; `report_asset_bundle_entries` and the `REPORT_ASSET_ENTRY`
+  holder type are available for future per-file extraction.
+- Backup artifacts are not yet uploaded through the core SDK; the backup daemon
+  keeps its own established encrypted artifact repository.
+
 ---
 
 <a id="edgeshared"></a>
@@ -8280,6 +8546,18 @@ The edge validates identifiers, enums and body shapes, but keeps the core as the
 - Incident writes, filing-adapter create/update/disable and `POST /reports/:id/file` relay core's 202 instead of returning a false 200.
 - The new AML routes remain behind the shared `amlConfidential` guard; the edge only validates shapes while core remains the authority for maker-checker, submission readiness and adapter matching.
 
+## Object & asset storage proxy
+
+`admin-back/api/protected/objectStorage.ts` forwards the console API:
+`GET /object-storage/summary`, `GET /object-storage/objects`,
+`GET /object-storage/objects/:id`, `GET /object-storage/access-logs`,
+`POST|DELETE /object-storage/objects/:id/legal-hold` and
+`POST /object-storage/maintenance/:job`. It is mounted with
+`system:storage:read`/`system:storage:admin`/`system:storage:legal-hold`
+read/write guards. `assetsRouter` additionally exposes binary
+`POST /assets/upload` (multipart `file` + `name`) and
+`GET /assets/:id/content`, forwarding raw bytes to core.
+
 ---
 
 <a id="edgemerchant"></a>
@@ -8842,7 +9120,7 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 
 <a id="admin-uisystem"></a>
 
-> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `d695518+working-tree`
 
 # Admin UI System
 
@@ -9145,6 +9423,17 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 Vuetify teleports dialogs, menus and drawers under a `.v-overlay__content` / `.v-navigation-drawer` element that receives the theme class and CSS variables but not a base text color. Custom surface components (`FormModal`, `SlideOverDrawer`, SafeguardDialog, the guide search surface, and any raw dialog content) therefore inherited the body's black text while sitting on the dark surface. `fintech-minimal.css` now sets `color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`; component-specific text colors and status tones still override it. The same rule is mirrored in the merchant, checkout and Fake Rails portals, and `tests/unit/dark-overlay-colors.test.ts` guards all four stylesheets.
 
+## Object & Asset Storage page
+
+`/system/object-storage` (`pages/system/object-storage/index.tsx`) uses the shared
+`ScreenContainer`, `PageHeader`, `MetricStrip`, `SegmentedTabs`, `SurfaceCard`,
+`DataTable`, `TableRowActions`, `SlideOverDrawer`, `DescriptionList` and
+`FormModal` primitives. It has four tabs: cluster/daemon health with maintenance
+jobs, object explorer with active locks, quarantine/AV queue, and the access
+audit trail. Authority-gated actions: `system:storage:read` (view),
+`system:storage:admin` (maintenance/rewrap/GC/scrub/AV scan),
+`system:storage:legal-hold` (place/lift hold with a written reason).
+
 ---
 
 <a id="admin-uiroutes"></a>
@@ -9430,6 +9719,15 @@ All three routes are gated by `aml.read_confidential` at the edge/UI; writes are
 - `Incidents` now uses the shared `ApiTable`/`TableRowActions` surface with server pagination, search, status/severity/category filters, correct server summary metrics, row actions, refresh and confidential badge. The detail drawer resets transient state, preserves the active tab on refresh, supports editing incident facts, commander/reporter names, affected merchant/attempt IDs, regulator notification, link removal, responder acknowledgement/release, full action status changes, communication bodies, postmortem due date and a link to the drafted report.
 - `FilingAdapters` uses the shared table surface and exposes edit, re-enable/disable approval requests, secret-present state, endpoint display, confirmation and maker-checker messaging. The create/edit form never sends a blank secret (so an existing secret is kept).
 - `AmlReports` filters include INCIDENT, the generic draft dialog no longer offers INCIDENT, and the drawer shows `filingChannel`, external submission history, adapter filing confirmation and reset-safe adapter selection. `AmlReportingStudio` labels DOCX correctly, preserves template analysis after upload, and offers analyze/download/remove plus narrative, total and prototype-row mappings.
+
+## Object & Asset Storage route
+
+| Route | Name | Page | Authorities |
+| :--- | :--- | :--- | :--- |
+| `/system/object-storage` | `SystemObjectStorage` | `pages/system/object-storage/index.tsx` | `system:storage:read`, `system:storage:admin`, `system:storage:legal-hold` |
+
+The nav entry is under System ("Object & Asset Storage") and the route-authority
+aliases normalize the colon names to `system.storage` for the UI guard.
 
 ---
 
@@ -9968,6 +10266,18 @@ Every new or edited Guide article and Academy lesson follows this standard. Read
 Added from `design/02-storage-and-performance/backup_engine_reliability_architecture_and_test_plan.md` section 5, corrected against the real product: Guide articles `b12-09` (full/delta/WAL/PITR, topologies, encryption and the three storage tiers), `b12-10` (the Backups screen: real tile, badge and column labels) and `b12-11` (manual triggers, maker-checker policy changes, queueing and idempotency); safeguard cards `sg-trigger-backup`, `sg-run-restore-drill`, `sg-update-backup-policy`; situations `s-backup-daemon-unreachable`, `s-wal-archive-lag-high`, `s-restore-drill-failed`; a `SystemBackups` context-map screen. Academy: lesson `l-m10-4` (GATEWAY_ADMIN and SECURITY_ADMIN tracks only, to avoid adding certification time for every learner), lab `lab-backup-dr-desk`, drill `drill-pitr-recovery` and exam questions `q-m10-113..117`.
 
 Corrections to the draft: the exam question ids `q-m10-004..008` collided with existing questions and were renumbered; the extractor requires exactly two checks per lesson, so the third moved into the exam pool; `@@map` takes a JSON block, not the draft's one-liner; the real route is `SystemBackups` (not `AdminSystemBackups`); the menu path is Operations -> Backups; the drill has three invariant checks, not five gates; unverified claims (cron gap minimums, hard-coded retention defaults, a 30-second tick) were removed. Content stays English-only like the rest of the Guide/Academy bodies. The three new cards are content only: they are not wired into `pages/system/backups/index.tsx` with `useSafeguard`.
+
+## Object storage content
+
+Guide Book 12 adds `b12-12` "Shared Object & Asset Storage: how files, locks,
+quarantine and retention work" and `b12-13` "Operating the Object & Asset Storage
+screen: legal holds, KEK rotation and maintenance jobs", plus card
+`sg-place-legal-hold`, terms `object-storage-vault`/`storage-object-lock`/
+`legal-hold`, FAQ `q-059`/`q-060` and context-map screen `SystemObjectStorage`.
+Academy module 10 adds lesson `l-m10-5`, checks `c-l-m10-5-1/2` and exam
+questions `q-m10-118/119`. Counts are 137 articles, 154 terms, 26 cards, 51
+lessons, 102 checks and 224 exam-pool questions. Generated Guide/Academy and
+Companion snapshots were regenerated.
 
 ---
 
@@ -11235,6 +11545,13 @@ The merchant portal client SDK mirror receives the same chrome root-fill, `accen
 Merchants own a separate `merchant_report_chrome_specs` registry. The branding page exposes only the merchant's own chrome: AI transcript, JSON, optional logo bundle, A4 preview, verify/save/publish, archive and one default header/footer per merchant. Platform chrome lists and specs are never returned to merchant clients.
 
 Merchant-owned reports using `GLOBAL_DEFAULT` resolve the merchant default first and the platform global default second; platform-provided templates continue to use platform chrome. If a merchant default is archived or becomes incompatible, the engine clears it and records the revocation. Own reports then fall back to platform chrome; if the platform default is also missing the report is blocked. The migration page explains the fallback, offers copy/download prompts and opens the branding editor with the raw JSON prefilled. Merchant chrome previews load the real uploaded logo assets.
+
+## Shared object storage
+
+Merchant report bundles and generated outputs are stored in the shared encrypted
+vault (`REPORT_STUDIO_ASSETS`/`REGULATORY_REPORTS`), locked by
+`REPORT_ASSET_ENTRY`/`REG_REPORT_OUTPUT`; the portal never receives asset bytes
+from local disk. The full engine is `parts/01-core-back/13-object-storage.md`.
 
 ---
 
@@ -13419,6 +13736,17 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 `PG_APP_USER` (default `pgw_app_login`) and `PG_APP_PASSWORD` (at least 12 characters, different from the owner's) enable the role split: the owner (`PG_DB_USER`) runs migrations and seeders through `ownerUrl`, while the running services connect as `PG_APP_USER`, a plain LOGIN member of `pgw_app`. `PG_APP_USER` must not be `postgres`, `pgw_app` or `pgw_ledger_maintenance`, nor equal the owner or replication user. Without `PG_APP_PASSWORD` the legacy single-role behaviour is kept and the deploy warns.
 
+## Shared object storage topology
+
+`OBJECT_STORAGE_NODE` (same `nodeId@sshHost:sshPort:privateIp:servicePort`
+format) adds `object-storage` to the storage roles. It is mandatory when
+`CORE_NODES` has more than one node or the backup daemon is on a separate host;
+otherwise validation fails with `MULTI_NODE_SHARED_STORAGE_REQUIRED`.
+`OBJECT_STORAGE_ENABLED`, `OBJECT_STORAGE_MANAGE_VIA_SSH` or a non-empty node
+auto-detect the tier. Core and backup daemon receive
+`OBJECT_STORAGE_DAEMON_URL` plus `object-storage-client` mTLS paths, and the
+core receives `CLUSTER_CORE_NODE_COUNT` and the KEK keyring.
+
 ---
 
 <a id="deployplanner"></a>
@@ -13714,7 +14042,7 @@ The planner's config validation now rejects weak secrets and restricts charsets 
 
 <a id="deploypki"></a>
 
-> **Part ID:** `deploy.pki` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `6765e90+working-tree`
+> **Part ID:** `deploy.pki` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `6765e90+working-tree`
 
 # Internal PKI and mTLS Certificates
 
@@ -14016,6 +14344,16 @@ Not covered by automated tests:
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
 
+## Object storage certificates
+
+`buildPki` mints `object-storage-daemon.crt` (server; CN
+`object-storage-daemon.internal`, SANs `IP:<OBJECT_STORAGE_NODE private IP>`,
+`IP:127.0.0.1`, `DNS:object-storage-daemon.internal`) and, when object storage is
+configured, the `object-storage-client` client certificate. `certFilesForHost`
+gives the storage host its server + client material; core hosts and the backup
+host receive `internal-ca.crt` and `object-storage-client.*`. Renewal/SAN drift
+handling includes the object-storage server leaf.
+
 ---
 
 <a id="deployfirewall"></a>
@@ -14281,7 +14619,7 @@ The Fake Rails nginx vhost now also applies `allow`/`deny` rules from `FAKE_RAIL
 
 <a id="deploypipeline"></a>
 
-> **Part ID:** `deploy.pipeline` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `deploy.pipeline` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `d695518+working-tree`
 
 # Deployment Pipeline
 
@@ -14648,11 +14986,21 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 
 `DEPLOY_MODE=auto` now probes every host read-only in step 4 (`lib/hostProbe.ts`, a pure `bootstrapGaps()` over the probe output) and resolves each host to fresh, update or refuse (an edge host whose core has not been migrated is refused before anything changes). A resource preflight warns when PostgreSQL sizing (`PG_RAM_GB`) exceeds the host's memory. Verification (formerly step 12) now runs before the long seed (formerly step 11). `runAsDatabaseOwner` runs migrations and seeders with the owner URL. Tests: `deploy/test/hostProbe.test.ts`, `pipeline.test.ts`.
 
+## Object storage step
+
+Step 5 provisions the shared object-storage tier before the backup engine:
+`provisionObjectStorageEngine` validates the node/KEK, then
+`deployObjectStorageDaemon` syncs and starts the daemon. Health verification
+probes `systemctl is-active pg-object-storage-daemon` on the storage host and
+`GET /v1/health` over mTLS from every core host and the backup host. The deploy
+fails before any core is touched when multiple core nodes or a separate backup
+host are configured without `OBJECT_STORAGE_NODE`.
+
 ---
 
 <a id="deploystorage"></a>
 
-> **Part ID:** `deploy.storage` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `deploy.storage` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `d695518+working-tree`
 
 # Storage Provisioners
 
@@ -15103,6 +15451,18 @@ Not covered:
 - The bootstrap SQL creates the app login role as a member of `pgw_app` with no UPDATE/DELETE/TRUNCATE on the ledger and audit tables and no DDL. Validated end to end on a TLS PostgreSQL 18 with a real PgBouncer (owner migrations, app-role privilege probes, core's Prisma client). It has not run on a multi-host lab (GAP-057 stays partial).
 - Redis (`redisProvisioner.ts`): `maxmemory-policy volatile-ttl` plus AOF, so only keys with a TTL are evictable and a restart does not lose revoke flags; every durable key must carry a TTL.
 
+## Object storage provisioner (v36)
+
+`deploy/provisioners/objectStorageProvisioner.ts` creates the `pgobjstore`
+system user, `/var/lib/pg-object-storage` and the vault subdirectories
+(`hot`, `cold`, `quarantine`, `tmp`, `.trash`), writes
+`/etc/pg-object-storage/object-storage.env` and
+`pg-object-storage-daemon.service` (Bun, `ProtectSystem=strict`,
+`PrivateTmp=true`, `ReadWritePaths` for the vault and cert directories).
+`deployObjectStorageDaemon` syncs `deploy/object-storage-daemon` to
+`/opt/pg-object-storage-daemon` and starts/restarts it only on change; the
+provisioner refuses multiple core nodes without a configured object-storage node.
+
 ---
 
 <a id="deploybackup"></a>
@@ -15330,6 +15690,18 @@ Not covered: the dedicated-backup-host and host-loss topologies on real machines
 - 2026-11-06: two-host lab pass: "latest" recovery, primary-clock manifests, stream lag health, `AbortError` handling, reserved default role names (`PG_DB_USER`, `PG_REPLICATION_USER`), real-copy bun install, the lab itself.
 - 2026-11-06: gap-closure pass: idle lag, restart state and instance lock, tablespace guard, drill role mapping, cron fallback drill, reserved default role names, least-privilege live coverage.
 - 2026-11-06: backup engine reliability implementation (previous revision): pg-native engine, three-tier encrypted repository, signed manifests and catalog mirror, WAL ingest over mTLS plus streaming, shared job queue and idempotency, per-role mTLS, topology-aware audit handling, drill fixes, deploy wiring fixes; section 9 lists where the design was corrected.
+
+## Object storage parity, escrow and drill
+
+`deploy/backup-daemon/src/objectStorageBackup.ts` copies new HOT/COLD
+`.v1.enc` blobs into `object-blobs/{bucket}/{storageKey}` (immutable, so the
+copy is incremental), fails with `OBJECT_STORAGE_BACKUP_PARITY_ERROR` when an
+ACTIVE row has no blob, and writes `object-storage/kek-escrow.enc` (AES-256-GCM
+under the backup master key). The restore drill samples up to
+`OBJECT_STORAGE_DRILL_SAMPLE` ACTIVE rows, decrypts them with the escrowed
+keyring and compares the SHA-256; the report's `checks.objectStorage` carries the
+result. The daemon receives the object-storage URL/client certs/KEK keyring from
+the deploy engine.
 
 ---
 
@@ -16372,6 +16744,15 @@ These are development/CI tests only; no production-time test job or test endpoin
 - Route-order suites (`core-back/test/reportEngineSdk/RouteOrder.test.ts`, `admin-back/test/report-engine-route-order.test.ts`, `merchant-back/test/report-engine-route-order.test.ts`) assert that every new static migration/transcript route is registered before a dynamic id route and that the expected endpoints exist.
 - `admin-back/test/report-engine-edge.test.ts` and `merchant-back/test/core-forwarding.test.ts` cover migration list pagination/search query forwarding, prompts, Chrome detail, reconciliation, merchant branding and Studio prefill routes.
 - Frontend type checks cover the new admin/merchant migration pages, branding editor and Studio query prefill; the existing i18n and SDK mirror gates cover Arabic catalogue completeness and client mirror equality.
+
+## Object storage suites
+
+- `core-back/test/objectStorageEngine.test.ts` — T01–T20 (DB-gated) and DB-free
+  pgos1/sniff edge cases; runs against a real PostgreSQL 18 + Redis.
+- `deploy/test/objectStorageDeploy.test.ts` — T21 topology/PKI/firewall/guard
+  and T22 parity/escrow/drill, plus the shared `blobStore.ts` drift guard.
+- `deploy/object-storage-daemon/test/server.test.ts` — HTTP round-trip, checksum
+  mismatch, path traversal, trash/purge and unknown bucket/route refusals.
 
 ---
 

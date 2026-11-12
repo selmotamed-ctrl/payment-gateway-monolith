@@ -434,6 +434,13 @@ export const BOOKS_PART_2: GuideBook[] = [
                     "revenue",
                     "total"
                 ]
+            },
+            {
+                "id": "book-12-chapter-12.2",
+                "number": "12.2",
+                "titleEn": "Shared Object & Asset Storage Engine (`/system/object-storage`)",
+                "bodyEn": "Uploaded documents, reconciliation statements, regulatory outputs, Report Studio assets and rail logos are not stored in PostgreSQL rows or on individual core servers. They live in the encrypted shared vault run by `pg-object-storage-daemon` on `OBJECT_STORAGE_NODE` (mTLS port 4095). Every `core-back` node and the backup daemon read and write the same vault, so a file uploaded on `core-1` is immediately readable on `core-2` and recoverable by `backup-1`.\n\n**Encryption and integrity.** Each upload becomes one `.v1.enc` file using the `pgos1` format: 64 KiB AES-256-GCM frames, a fresh per-object Data Encryption Key wrapped by the Key Encryption Keyring (`OBJECT_STORAGE_KEK_KEYRING`), and the object id bound as authenticated data. Truncation, chunk reordering, cross-object swaps and bit flips fail decryption. The plaintext SHA-256 stored in `storage_objects` is verified on every read and scrub.\n\n**Locks, quarantine and retention.** `storage_object_locks` binds a business record (for example `KYB_DOCUMENT`, `CATALOG_ASSET`, `RAIL_LOGO` or `REPORT_ASSET_ENTRY`) to one object. Several records can hold independent locks on the same file. PostgreSQL triggers refuse `DELETE` and refuse `PURGED` while any lock is active, a legal hold is on, or `retain_until` is in the future. Untrusted uploads start in `QUARANTINE_PENDING_AV` with no retention; only a CLEAN antivirus verdict promotes the object and stamps its compliance retention.\n\n**Operating the screen.** `/system/object-storage` shows the vault mode (shared mTLS or local), free space, the active KEK version and scrub errors. It lists objects with their active locks, opens an object inspector with access logs, and offers maintenance jobs: GC, Blob Sweep, Integrity Scrub, Lock Reconcile, KEK Rewrap and AV scan. Legal holds require `system:storage:legal-hold`; maintenance jobs require `system:storage:admin`.",
+                "tags": ["object", "storage", "shared", "vault", "locks", "legal", "hold", "quarantine", "encryption"]
             }
         ],
         "sopChecklist": [

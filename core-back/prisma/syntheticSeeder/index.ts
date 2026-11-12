@@ -15,6 +15,7 @@ import { generateOperatorCases } from "./generators/09_operatorCasesGenerator";
 import { bulkDataWriter } from "./sync/bulkDataWriter";
 import { fakeRailsBulkSync } from "./sync/fakeRailsBulkSyncClient";
 import { enrichKybDocuments } from "./sync/enrichKybDocuments";
+import { attachReconciliationStatements } from "./sync/attachReconciliationStatements";
 import { encryptPendingSecrets } from "./sync/encryptSecrets";
 import { writeReadModels } from "./sync/readModels";
 import { auditInMemory, postSeedAudit } from "./verify/postSeedAudit";
@@ -103,6 +104,9 @@ export const runSyntheticSeeder = async (): Promise<void> => {
 
   const readModels = await writeReadModels(client, ctx);
   console.log(`[synthetic-seeder] projected ${readModels.merchantDays} merchant-day and ${readModels.routeDays} route-day read-model rows`);
+
+  const statements = await attachReconciliationStatements(client);
+  console.log(`[synthetic-seeder] attached ${statements.runs} reconciliation statement(s) to the shared object vault`);
 
   const kyb = await enrichKybDocuments(client);
   console.log(

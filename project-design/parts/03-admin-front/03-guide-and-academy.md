@@ -305,3 +305,15 @@ Every new or edited Guide article and Academy lesson follows this standard. Read
 Added from `design/02-storage-and-performance/backup_engine_reliability_architecture_and_test_plan.md` section 5, corrected against the real product: Guide articles `b12-09` (full/delta/WAL/PITR, topologies, encryption and the three storage tiers), `b12-10` (the Backups screen: real tile, badge and column labels) and `b12-11` (manual triggers, maker-checker policy changes, queueing and idempotency); safeguard cards `sg-trigger-backup`, `sg-run-restore-drill`, `sg-update-backup-policy`; situations `s-backup-daemon-unreachable`, `s-wal-archive-lag-high`, `s-restore-drill-failed`; a `SystemBackups` context-map screen. Academy: lesson `l-m10-4` (GATEWAY_ADMIN and SECURITY_ADMIN tracks only, to avoid adding certification time for every learner), lab `lab-backup-dr-desk`, drill `drill-pitr-recovery` and exam questions `q-m10-113..117`.
 
 Corrections to the draft: the exam question ids `q-m10-004..008` collided with existing questions and were renumbered; the extractor requires exactly two checks per lesson, so the third moved into the exam pool; `@@map` takes a JSON block, not the draft's one-liner; the real route is `SystemBackups` (not `AdminSystemBackups`); the menu path is Operations -> Backups; the drill has three invariant checks, not five gates; unverified claims (cron gap minimums, hard-coded retention defaults, a 30-second tick) were removed. Content stays English-only like the rest of the Guide/Academy bodies. The three new cards are content only: they are not wired into `pages/system/backups/index.tsx` with `useSafeguard`.
+
+## Object storage content
+
+Guide Book 12 adds `b12-12` "Shared Object & Asset Storage: how files, locks,
+quarantine and retention work" and `b12-13` "Operating the Object & Asset Storage
+screen: legal holds, KEK rotation and maintenance jobs", plus card
+`sg-place-legal-hold`, terms `object-storage-vault`/`storage-object-lock`/
+`legal-hold`, FAQ `q-059`/`q-060` and context-map screen `SystemObjectStorage`.
+Academy module 10 adds lesson `l-m10-5`, checks `c-l-m10-5-1/2` and exam
+questions `q-m10-118/119`. Counts are 137 articles, 154 terms, 26 cards, 51
+lessons, 102 checks and 224 exam-pool questions. Generated Guide/Academy and
+Companion snapshots were regenerated.

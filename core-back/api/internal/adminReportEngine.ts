@@ -713,6 +713,7 @@ async function storeAssets(
       id: bundleId,
       bundleSha256,
       storageKey: storage.bundleStorageKey,
+      storageObjectId: storage.storageObjectId ?? null,
       totalBytes,
       fileCount: files.length,
       manifestJson: manifest,

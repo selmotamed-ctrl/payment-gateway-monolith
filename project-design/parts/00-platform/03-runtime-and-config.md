@@ -143,6 +143,27 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `BACKUP_DAEMON_CLIENT_KEY_PATH` | unset | backup client mTLS |
 | `BACKUP_DAEMON_TIMEOUT_MS` | `15000` (max 120000) | backup call timeout |
 
+#### Shared object & asset storage (schema v36)
+
+| Key | Default | Consumer |
+| :--- | :--- | :--- |
+| `OBJECT_STORAGE_DAEMON_URL` | unset; required in production or when `CLUSTER_CORE_NODE_COUNT > 1` | `RemoteMtlsBlobStore` (all core nodes) |
+| `OBJECT_STORAGE_TLS_CA_PATH` / `_CLIENT_CERT_PATH` / `_CLIENT_KEY_PATH` | unset | client mTLS |
+| `OBJECT_STORAGE_DAEMON_TIMEOUT_MS` | `30000` (max 120000) | blob requests |
+| `OBJECT_STORAGE_ROOT_DIR` | `/tmp/pg-object-storage-dev` (dev) | `FsBlobStore` fallback |
+| `OBJECT_STORAGE_KEK_KEYRING` | unset (dev derives from `DATABASE_URL`) | DEK wrap/unwrap; format `v1:<64 hex>[,v2:<64 hex>]` |
+| `OBJECT_STORAGE_ACTIVE_KEK_VERSION` | `1` | new DEK wraps |
+| `OBJECT_STORAGE_TRASH_RETENTION_DAYS` | `7` | trash purge |
+| `OBJECT_STORAGE_GC_GRACE_HOURS` | `24` | last-lock-release grace |
+| `CLUSTER_CORE_NODE_COUNT` | `1` | shared-storage boot guard |
+| `WORKER_OBJECT_STORAGE_ENABLED` | `true` | maintenance worker |
+| `WORKER_OBJECT_STORAGE_INTERVAL_MS` | `60000` | maintenance worker |
+| `WORKER_OBJECT_STORAGE_BATCH_SIZE` | `25` | AV/scrub batch |
+
+The core refuses to boot (`OBJECT_STORAGE_DAEMON_URL_REQUIRED`) when
+`NODE_ENV=production` or the core-node count is above one and no daemon URL is
+configured.
+
 #### Workers
 
 | Key | Default | Consumer |

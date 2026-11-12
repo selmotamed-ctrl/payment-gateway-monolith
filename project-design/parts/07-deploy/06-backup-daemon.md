@@ -279,3 +279,15 @@ Not covered: the dedicated-backup-host and host-loss topologies on real machines
 - 2026-11-06: two-host lab pass: "latest" recovery, primary-clock manifests, stream lag health, `AbortError` handling, reserved default role names (`PG_DB_USER`, `PG_REPLICATION_USER`), real-copy bun install, the lab itself.
 - 2026-11-06: gap-closure pass: idle lag, restart state and instance lock, tablespace guard, drill role mapping, cron fallback drill, reserved default role names, least-privilege live coverage.
 - 2026-11-06: backup engine reliability implementation (previous revision): pg-native engine, three-tier encrypted repository, signed manifests and catalog mirror, WAL ingest over mTLS plus streaming, shared job queue and idempotency, per-role mTLS, topology-aware audit handling, drill fixes, deploy wiring fixes; section 9 lists where the design was corrected.
+
+## Object storage parity, escrow and drill
+
+`deploy/backup-daemon/src/objectStorageBackup.ts` copies new HOT/COLD
+`.v1.enc` blobs into `object-blobs/{bucket}/{storageKey}` (immutable, so the
+copy is incremental), fails with `OBJECT_STORAGE_BACKUP_PARITY_ERROR` when an
+ACTIVE row has no blob, and writes `object-storage/kek-escrow.enc` (AES-256-GCM
+under the backup master key). The restore drill samples up to
+`OBJECT_STORAGE_DRILL_SAMPLE` ACTIVE rows, decrypts them with the escrowed
+keyring and compares the SHA-256; the report's `checks.objectStorage` carries the
+result. The daemon receives the object-storage URL/client certs/KEK keyring from
+the deploy engine.

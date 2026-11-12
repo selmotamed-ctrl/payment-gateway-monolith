@@ -3,7 +3,7 @@ id: deploy.storage
 title: Storage Provisioners
 status: partial
 confidence: high
-last_verified: 2026-11-07
+last_verified: 2026-11-12
 verified_against: d695518+working-tree
 code:
   - deploy/test/testMatrix.test.ts
@@ -490,3 +490,15 @@ Not covered:
 - PgBouncer authenticates each client as its own user (per-client userlist entry for `PG_APP_USER`) instead of forcing the owner, and terminates TLS on the client leg (`client_tls_sslmode`, self-signed certificate); `DATABASE_URL` carries `sslmode=no-verify` whenever the deploy manages the cluster (encrypted, not identity-verified; certificate verification remains open).
 - The bootstrap SQL creates the app login role as a member of `pgw_app` with no UPDATE/DELETE/TRUNCATE on the ledger and audit tables and no DDL. Validated end to end on a TLS PostgreSQL 18 with a real PgBouncer (owner migrations, app-role privilege probes, core's Prisma client). It has not run on a multi-host lab (GAP-057 stays partial).
 - Redis (`redisProvisioner.ts`): `maxmemory-policy volatile-ttl` plus AOF, so only keys with a TTL are evictable and a restart does not lose revoke flags; every durable key must carry a TTL.
+
+## Object storage provisioner (v36)
+
+`deploy/provisioners/objectStorageProvisioner.ts` creates the `pgobjstore`
+system user, `/var/lib/pg-object-storage` and the vault subdirectories
+(`hot`, `cold`, `quarantine`, `tmp`, `.trash`), writes
+`/etc/pg-object-storage/object-storage.env` and
+`pg-object-storage-daemon.service` (Bun, `ProtectSystem=strict`,
+`PrivateTmp=true`, `ReadWritePaths` for the vault and cert directories).
+`deployObjectStorageDaemon` syncs `deploy/object-storage-daemon` to
+`/opt/pg-object-storage-daemon` and starts/restarts it only on change; the
+provisioner refuses multiple core nodes without a configured object-storage node.

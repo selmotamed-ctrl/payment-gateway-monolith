@@ -19,6 +19,7 @@ Every file here is mapped in [`../project-design/appendices/design-source-map.md
 | :--- | :--- | :--- | :--- |
 | `00-process/` | `blueprint-management.md`: how `project-design/` is generated and governed | ACTIVE | `project-design/README.md` |
 | `01-platform-architecture/` | `payment_gateway_final_design-v5.md`: master architecture v5 (catalog, flow engine, ledger, KYB/AML/disputes) | REFERENCE (counts and schema stale) | `parts/00-platform/**`, `parts/01-core-back/**` |
+| `02-storage-and-performance/` | `enterprise_object_and_asset_storage_engine_plan_v6.md`: shared mTLS object vault, pgos1 encryption, control plane, backup parity, admin console | IMPLEMENTED | `parts/01-core-back/13`, `06`, `07`, `parts/07-deploy/05,06` |
 | `02-storage-and-performance/` | `storage_driver_postgres18_backup_and_scaling_architecture.md`: PostgreSQL 18 storage engine, CQRS/replicas, backups, scaling | ACTIVE | `parts/01-core-back/06,07,09`, `parts/07-deploy/05,06` |
 | | `backup_engine_reliability_architecture_and_test_plan.md`: backup engine reliability and test plan (implemented 2026-11-06) | ACTIVE | `parts/07-deploy/06-backup-daemon.md`, `parts/01-core-back/09-backup-control.md` |
 | | `deep_search_plugin_architecture_plan.md`: global deep search and plugin registry | ACTIVE | `parts/01-core-back/08-search.md` |

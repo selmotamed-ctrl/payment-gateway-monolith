@@ -2998,5 +2998,66 @@
       }
     ],
     "why": "The drill runs exactly these three invariant checks, signs the report and destroys the scratch cluster."
+  },
+  {
+    "id": "c-l-m10-5-1",
+    "module": "m10",
+    "type": "single",
+    "difficulty": 1,
+    "critical": false,
+    "lesson": "l-m10-5",
+    "refs": [
+      "b12-12"
+    ],
+    "stem": "What happens if an operator configures two `CORE_NODES` in `deploy.env` and leaves `OBJECT_STORAGE_NODE` empty?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Deployment validation fails with `MULTI_NODE_SHARED_STORAGE_REQUIRED` because core nodes are forbidden from storing blobs on their own local disks.",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Each core node stores half of the uploaded files on its own local disk.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Files are stored inside PostgreSQL `BYTEA` columns instead.",
+        "correct": false
+      }
+    ],
+    "why": "Every multi-node deployment must point all core nodes and the backup daemon at the shared `OBJECT_STORAGE_NODE` server."
+  },
+  {
+    "id": "c-l-m10-5-2",
+    "module": "m10",
+    "type": "single",
+    "difficulty": 2,
+    "critical": false,
+    "lesson": "l-m10-5",
+    "refs": [
+      "b12-12",
+      "b12-13"
+    ],
+    "stem": "When is the multi-year compliance `retain_until` timestamp stamped on a newly uploaded KYB document?",
+    "options": [
+      {
+        "id": "o1",
+        "text": "Only when `promote()` activates the object after the antivirus scan passes (`CLEAN`).",
+        "correct": true
+      },
+      {
+        "id": "o2",
+        "text": "Before the file is scanned for malware.",
+        "correct": false
+      },
+      {
+        "id": "o3",
+        "text": "Only when a Legal Hold is placed.",
+        "correct": false
+      }
+    ],
+    "why": "Stamping compliance retention before AV scanning would make malware undeletable; retention is stamped at promotion time."
   }
 ]

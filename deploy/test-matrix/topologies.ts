@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { machineById, machinePrivateIp, machineSshPort, type LabConfig } from "./labConfig";
 import type { LabSecrets } from "./labSecrets";
 import type { ResolvedIntensity } from "./intensity";
@@ -40,7 +41,7 @@ const lanCidrs = (config: LabConfig): string => {
 
 const sshFields = (config: LabConfig, sudoPassword: string): Record<string, string> => {
   const fields: Record<string, string> = {};
-  for (const prefix of ["CORE", "ADMIN", "MERCHANT", "CHECKOUT", "FAKE_RAILS", "PG", "REDIS", "AUDIT_DB", "LOG_DB", "BACKUP"]) {
+  for (const prefix of ["CORE", "ADMIN", "MERCHANT", "CHECKOUT", "FAKE_RAILS", "PG", "REDIS", "AUDIT_DB", "LOG_DB", "BACKUP", "OBJECT_STORAGE"]) {
     fields[`${prefix}_SSH_USER`] = config.ssh.user;
     fields[`${prefix}_SSH_KEY_PATH`] = config.ssh.keyPath;
     fields[`${prefix}_SUDO_PASSWORD`] = sudoPassword;
@@ -116,6 +117,17 @@ export const renderTopologyEnv = ({ config, topology, secrets, intensity, sudoPa
     ...(backupMode === "wal-g" && auditOffBackupHost ? { PG_AUDIT_DATA_DIR: "/var/lib/postgresql/18/audit" } : {}),
     BACKUP_ENABLED: "true",
     BACKUP_NODE: nodeSpec(config, topology.backup),
+    // The Shared Object & Asset Storage daemon is mandatory in every lab: the
+    // multi-core and separate-backup topologies must never write blobs to an
+    // individual core node's disk.
+    OBJECT_STORAGE_ENABLED: "true",
+    OBJECT_STORAGE_MANAGE_VIA_SSH: "true",
+    OBJECT_STORAGE_NODE: (() => {
+      const backupMachine = machineById(config, topology.backup.machineId);
+      return `obj-1@${backupMachine.address}:${machineSshPort(config, backupMachine)}:${machinePrivateIp(backupMachine)}:4095`;
+    })(),
+    OBJECT_STORAGE_KEK_KEYRING: `v1:${createHash("sha256").update(`${secrets.kmsMasterKeyHex}:object-storage`).digest("hex")}`,
+    OBJECT_STORAGE_ACTIVE_KEK_VERSION: "1",
     // LAB_BACKUP_MODE=pg-native switches any topology to the daemon's PostgreSQL-native engine
     // (it works for co-located and remote backup nodes); otherwise the derived mode is used.
     BACKUP_ENGINE_MODE: backupMode,

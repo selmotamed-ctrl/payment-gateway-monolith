@@ -97,3 +97,10 @@ The merchant portal client SDK mirror receives the same chrome root-fill, `accen
 Merchants own a separate `merchant_report_chrome_specs` registry. The branding page exposes only the merchant's own chrome: AI transcript, JSON, optional logo bundle, A4 preview, verify/save/publish, archive and one default header/footer per merchant. Platform chrome lists and specs are never returned to merchant clients.
 
 Merchant-owned reports using `GLOBAL_DEFAULT` resolve the merchant default first and the platform global default second; platform-provided templates continue to use platform chrome. If a merchant default is archived or becomes incompatible, the engine clears it and records the revocation. Own reports then fall back to platform chrome; if the platform default is also missing the report is blocked. The migration page explains the fallback, offers copy/download prompts and opens the branding editor with the raw JSON prefilled. Merchant chrome previews load the real uploaded logo assets.
+
+## Shared object storage
+
+Merchant report bundles and generated outputs are stored in the shared encrypted
+vault (`REPORT_STUDIO_ASSETS`/`REGULATORY_REPORTS`), locked by
+`REPORT_ASSET_ENTRY`/`REG_REPORT_OUTPUT`; the portal never receives asset bytes
+from local disk. The full engine is `parts/01-core-back/13-object-storage.md`.

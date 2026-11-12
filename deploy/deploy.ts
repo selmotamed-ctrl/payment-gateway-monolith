@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { backupS3Configured, clamdManaged, effectiveDatabase, loadDeployConfig, pgAppRoleEnabled, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
+import { backupS3Configured, clamdManaged, effectiveDatabase, loadDeployConfig, objectStorageConfigured, pgAppRoleEnabled, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
 import { buildPki, certFilesForHost, checkPkiExpiry, pkiRenewalReport, readMaterial, verifyPki, WAL_ARCHIVE_CLIENT } from "./lib/pkiManager";
 import {
@@ -27,6 +27,11 @@ import { provisionRedis } from "./provisioners/redisProvisioner";
 import { provisionClamav } from "./provisioners/clamavProvisioner";
 import { provisionAuditAndLogDb } from "./provisioners/auditAndLogDbProvisioner";
 import { backupDaemonUser, provisionBackupEngine, STORAGE_CERT_DIR } from "./provisioners/backupEngineProvisioner";
+import {
+  OBJECT_STORAGE_INSTALL_DIR,
+  OBJECT_STORAGE_SERVICE_USER,
+  provisionObjectStorageEngine,
+} from "./provisioners/objectStorageProvisioner";
 
 /**
  * The multi-host deployment orchestrator.
@@ -43,7 +48,7 @@ import { backupDaemonUser, provisionBackupEngine, STORAGE_CERT_DIR } from "./pro
 
 const REPO_ROOT = resolve(import.meta.dirname, "..");
 
-type StorageOnlyRole = "pg" | "pg-primary" | "pg-replica" | "pgbouncer" | "redis" | "audit-db" | "log-db" | "backup" | "storage";
+type StorageOnlyRole = "pg" | "pg-primary" | "pg-replica" | "pgbouncer" | "redis" | "audit-db" | "log-db" | "backup" | "object-storage" | "storage";
 type OnlyRole = DeployRole | StorageOnlyRole;
 
 interface CliOptions {
@@ -69,7 +74,7 @@ interface CliOptions {
   nodes?: Set<string>;
 }
 
-const ONLY_ROLES: OnlyRole[] = ["db", "core", "admin", "merchant", "checkout", "fake-rails", "pg", "pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup", "storage"];
+const ONLY_ROLES: OnlyRole[] = ["db", "core", "admin", "merchant", "checkout", "fake-rails", "pg", "pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup", "object-storage", "storage"];
 
 /** Splits an ordered node list into rolling batches without reordering it. */
 export const rollingBatches = <T>(nodes: readonly T[], batchSize: number): T[][] => {
@@ -157,7 +162,7 @@ const timestamp = (): string => new Date().toISOString().replace(/[-:T]/g, "").s
 
 
 const isStorageRole = (role: string): boolean =>
-  ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup"].includes(role);
+  ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup", "object-storage"].includes(role);
 
 export const uploadStorageCertificates = (
   runner: SshRunner,
@@ -167,26 +172,41 @@ export const uploadStorageCertificates = (
   dryRun: boolean,
 ): void => {
   for (const host of plan.hosts.filter((candidate) => candidate.roles.some(isStorageRole))) {
-    const directory = host.roles.includes("backup")
-      ? config.BACKUP_DAEMON_CERT_DIR
-      : STORAGE_CERT_DIR;
+    const directory = host.roles.includes("object-storage")
+      ? config.OBJECT_STORAGE_DAEMON_CERT_DIR
+      : host.roles.includes("backup")
+        ? config.BACKUP_DAEMON_CERT_DIR
+        : STORAGE_CERT_DIR;
     const materials = certFilesForHost(pki, host.roles);
     // The WAL ingest client (and the CA that verifies the daemon) always live in
     // STORAGE_CERT_DIR on the PostgreSQL host, where archive_command reads them,
     // even when that host is also the backup node (whose daemon uses its own dir).
+    // A co-located object-storage + backup host needs each service certificate in
+    // its own directory, while the CA must be present in both.
     const walClient = materials.find((material) => material.name === WAL_ARCHIVE_CLIENT);
-    const directoryFor = (material: { name: string }): string =>
-      material.name === WAL_ARCHIVE_CLIENT ? STORAGE_CERT_DIR : directory;
-    for (const material of materials) {
-      const target = directoryFor(material);
-      if (dryRun) {
-        runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.crt`, content: "", mode: 0o644, sudo: true });
-        continue;
+    const directoriesFor = (material: { name: string; kind: string }): string[] => {
+      if (material.name === WAL_ARCHIVE_CLIENT) return [STORAGE_CERT_DIR];
+      if (material.name.startsWith("object-storage-")) return [config.OBJECT_STORAGE_DAEMON_CERT_DIR];
+      if (material.name === "backup-daemon" || material.name === "backup-client") return [config.BACKUP_DAEMON_CERT_DIR];
+      if (material.kind === "ca") {
+        const dirs = new Set<string>([directory]);
+        if (host.roles.includes("backup")) dirs.add(config.BACKUP_DAEMON_CERT_DIR);
+        if (host.roles.includes("object-storage")) dirs.add(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
+        return [...dirs];
       }
-      const content = readMaterial(material);
-      runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.crt`, content: content.cert, mode: 0o644, sudo: true });
-      if (content.key) {
-        runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.key`, content: content.key, mode: 0o600, sudo: true });
+      return [directory];
+    };
+    for (const material of materials) {
+      const content = dryRun ? null : readMaterial(material);
+      for (const target of directoriesFor(material)) {
+        if (dryRun) {
+          runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.crt`, content: "", mode: 0o644, sudo: true });
+          continue;
+        }
+        runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.crt`, content: content!.cert, mode: 0o644, sudo: true });
+        if (content!.key) {
+          runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.key`, content: content!.key, mode: 0o600, sudo: true });
+        }
       }
     }
     if (walClient && !dryRun) {
@@ -206,10 +226,20 @@ export const uploadStorageCertificates = (
     if (host.roles.includes("backup") && !dryRun) {
       // The daemon (pgbackup, or postgres when co-located in wal-g mode) must own its mTLS material.
       const owner = shellQuote(`${backupDaemonUser(config)}:${backupDaemonUser(config)}`);
-      const dir = shellQuote(directory);
+      const dir = shellQuote(config.BACKUP_DAEMON_CERT_DIR);
       runner.run(
         host.ssh,
         `chown ${owner} ${dir} && chmod 0750 ${dir} && { chown ${owner} ${dir}/*.crt ${dir}/*.key 2>/dev/null; chmod 0640 ${dir}/*.crt 2>/dev/null; chmod 0600 ${dir}/*.key 2>/dev/null; true; } || true`,
+        { sudo: true },
+      );
+    }
+    if (host.roles.includes("object-storage") && !dryRun) {
+      // The unprivileged daemon account must own its mTLS material and the vault.
+      const owner = shellQuote(`${OBJECT_STORAGE_SERVICE_USER}:${OBJECT_STORAGE_SERVICE_USER}`);
+      const dir = shellQuote(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
+      runner.run(
+        host.ssh,
+        `chown -R ${owner} ${dir} && chmod 0750 ${dir} && { chown ${owner} ${dir}/*.crt ${dir}/*.key 2>/dev/null; chmod 0640 ${dir}/*.crt 2>/dev/null; chmod 0600 ${dir}/*.key 2>/dev/null; true; } || true`,
         { sudo: true },
       );
     }
@@ -665,6 +695,55 @@ ${daemonReadinessWait()}`,
     { sudo: true },
   ));
   log(`  backup daemon ${outcome === "unknown" ? "applied" : outcome} -> ${host.ssh.host}:${installDir} (BACKUP_DAEMON_PORT=${config.BACKUP_DAEMON_PORT})`);
+};
+
+/**
+ * Copies the shared object-storage daemon source to OBJECT_STORAGE_NODE and
+ * brings its systemd unit up. The daemon has no runtime dependencies, so the
+ * deploy does not run a package install on the storage host. It is restarted
+ * only when its source, environment or unit changed (or on --force-restart).
+ */
+export const deployObjectStorageDaemon = (input: {
+  runner: SshRunner;
+  config: DeployConfig;
+  host: HostPlan;
+  configChanged?: boolean;
+  forceRestart?: boolean;
+}): void => {
+  const { runner, config, host } = input;
+  const installDir = OBJECT_STORAGE_INSTALL_DIR;
+  const sourceDir = join(REPO_ROOT, "deploy", "object-storage-daemon");
+  const targetUser = effectiveTargetUser(host.ssh);
+  const daemonUser = OBJECT_STORAGE_SERVICE_USER;
+  const daemonOwner = `${daemonUser}:${daemonUser}`;
+  const chownSource = (owner: string): string =>
+    `find ${shellQuote(installDir)} -path ${shellQuote(`${installDir}/node_modules`)} -prune -o -exec chown ${shellQuote(owner)} {} +`;
+  runner.run(
+    host.ssh,
+    `install -d -m 0755 -o ${shellQuote(targetUser)} -g ${shellQuote(targetUser)} ${shellQuote(installDir)} && ${chownSource(`${targetUser}:${targetUser}`)}`,
+    { sudo: true },
+  );
+  const synced = runner.sync({
+    target: host.ssh,
+    local: sourceDir,
+    remote: installDir,
+    delete: true,
+    excludes: ["node_modules", ".git", "dist", "test", "*.log", ".env", "bun.lock"],
+  });
+  runner.run(host.ssh, `${chownSource(daemonOwner)}`, { sudo: true });
+  const restart = input.forceRestart === true || synced.changed || input.configChanged !== false;
+  const outcome = parseApplyOutcome(
+    runner.capture(
+      host.ssh,
+      `systemctl daemon-reload && systemctl enable pg-object-storage-daemon >/dev/null 2>&1
+if ! systemctl is-active --quiet pg-object-storage-daemon; then systemctl start pg-object-storage-daemon; echo __PG_APPLY__=started
+elif [ ${restart ? 1 : 0} = 1 ]; then systemctl restart pg-object-storage-daemon; echo __PG_APPLY__=restarted
+else echo __PG_APPLY__=unchanged; fi
+${daemonReadinessWait("pg-object-storage-daemon")}`,
+      { sudo: true },
+    ),
+  );
+  log(`  object-storage daemon ${outcome === "unknown" ? "applied" : outcome} -> ${host.ssh.host}:${installDir}`);
 };
 
 /**
@@ -1157,6 +1236,28 @@ const main = async (): Promise<void> => {
     const report = provisionAuditAndLogDb({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });
     log(`  Audit/log databases: ${report.nodes.join(", ") || "none"}`);
     logOutcomes(report.outcomes);
+  }
+  if (objectStorageConfigured(config) && shouldRunStorage(options, ["object-storage"])) {
+    const report = provisionObjectStorageEngine({
+      runner,
+      config,
+      dryRun: options.dryRun,
+      forceRestart: options.forceRestart,
+    });
+    log(`  Object storage engine on: ${report.nodes.join(", ") || "none"}`);
+    logOutcomes(report.outcomes);
+    const objectStorageHost = plan.hosts.find((host) => host.roles.includes("object-storage"));
+    if (objectStorageHost) {
+      deployObjectStorageDaemon({
+        runner,
+        config,
+        host: objectStorageHost,
+        configChanged: report.daemonConfigChanged,
+        forceRestart: options.forceRestart,
+      });
+    } else {
+      warn("object storage is configured but the plan has no object-storage host; the daemon was not deployed");
+    }
   }
   if (config.BACKUP_ENABLED && shouldRunStorage(options, ["backup"])) {
     const report = provisionBackupEngine({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });

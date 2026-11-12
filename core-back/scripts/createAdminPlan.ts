@@ -20,7 +20,7 @@ export type AdminRole = (typeof ADMIN_ROLES)[number];
 /** Mirrors the seeded role definitions (core-back/prisma/seed.ts). */
 export const ROLE_AUTHORITIES: Record<AdminRole, readonly string[]> = {
   GATEWAY_ADMIN: ["gateway:read", "gateway:write", "gateway:test", "settings:read", "settings:write", "report_engine:run"],
-  SECURITY_ADMIN: ["security:read", "security:write", "credential:write", "report_engine:run"],
+  SECURITY_ADMIN: ["security:read", "security:write", "credential:write", "system:storage:read", "system:storage:admin", "system:storage:legal-hold", "report_engine:run"],
   FINANCE: ["finance:read", "finance:write", "commission:write", "cashout:review", "approval:read", "approval:check", "approval:write", "report_engine:run"],
   COMPLIANCE: ["compliance:read", "compliance:write", "aml:review", "report:review", "aml.read_confidential", "approval:read", "approval:check", "approval:write", "report_engine:run"],
   MLRO: ["aml:read", "aml:write", "aml:release", "report:approve", "aml.read_confidential", "approval:read", "approval:check", "approval:write", "report_engine:run"],

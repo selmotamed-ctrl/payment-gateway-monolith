@@ -8,7 +8,7 @@ import { showSnackBar } from "@/utils/snackBar";
 import { FormField } from "@/components/ui/FormField";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { LOGO_ERROR_MESSAGES } from "./messages";
-import { assetMimeToContentType, formatBytes, logoStorageKey, toHex, validateLogoFile } from "./model/assets";
+import { assetMimeToContentType, formatBytes, validateLogoFile } from "./model/assets";
 
 export type LogoAsset = {
     id: string;
@@ -22,9 +22,9 @@ export type LogoAsset = {
 const MIME_LABEL: Record<string, string> = { "image/png": "PNG", "image/svg+xml": "SVG" };
 
 /**
- * Picks the logo asset of a rail from the asset catalogue (`GET /assets`) and registers a new logo
- * (`POST /assets`: name, type, size, SHA-256 and storage key). The asset API records metadata only;
- * the image file itself is not uploaded by this endpoint, which the picker states.
+ * Picks the logo asset of a rail from the asset catalogue (`GET /assets`) and uploads a new logo to
+ * the shared object-storage vault (`POST /assets/upload`). The bytes are stored once and locked by
+ * the Asset row; assigning the asset to a rail adds a second `RAIL_LOGO` lock.
  */
 export const LogoAssetPicker = defineComponent({
     name: "LogoAssetPicker",
@@ -68,21 +68,12 @@ export const LogoAssetPicker = defineComponent({
                 registerError.value = t(LOGO_ERROR_MESSAGES[problem]);
                 return;
             }
-            if (typeof crypto === "undefined" || !crypto.subtle) {
-                registerError.value = t("This browser context cannot compute the file checksum. Open the portal over HTTPS.");
-                return;
-            }
             registering.value = true;
             try {
-                const sha = toHex(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()));
-                const response = await api.post(urlsMap.assetsList, {
-                    kind: "LOGO",
-                    name: file.name,
-                    contentType: file.type.split(";")[0]!.trim().toLowerCase(),
-                    sizeBytes: file.size,
-                    checksumSha256: sha,
-                    storageKey: logoStorageKey(sha, file.name),
-                });
+                const form = new FormData();
+                form.append("file", file, file.name);
+                form.append("name", file.name.slice(0, 120));
+                const response = await api.post(urlsMap.assetsUpload, form);
                 const payload = response.data?.data ?? response.data ?? {};
                 await load();
                 if (typeof payload.id === "string") emit("update:modelValue", payload.id);

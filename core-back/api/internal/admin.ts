@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Prisma, type ContentType } from "../../generated/prisma/client";
 import { canTransitionIncident, incidentPostmortemDueAt, incidentReportPayload, incidentRequiresPostmortem, incidentTimestampField } from "../../engine/compliance/incidents";
 import { client } from "../../prisma/client";
+import { getObjectStorageSdk } from "../../lib/objectStorageSdk/runtime";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { createReconciliationUploadHandler } from "./reconciliationUpload";
 import { backupInternalRouter } from "./backups";
@@ -13,6 +14,7 @@ import { adminLedgerRouter } from "./adminLedger";
 import { adminOperationsRouter } from "./adminOperations";
 import { adminSystemRouter } from "./adminSystem";
 import { adminReportEngineRouter } from "./adminReportEngine";
+import { objectStorageAdminRouter } from "./objectStorage";
 import { invalidateMerchantReportPolicyCache } from "../../engine/reportStudio/merchantReportEngine";
 import { publicProgress } from "../../engine/academy/progress";
 import { loadCatalog } from "../../engine/academy/catalog";
@@ -250,7 +252,66 @@ const reportingXmlCipher = new VaultContextCipher(vault, "reporting-xml");
 const reportingXlsxCipher = new VaultContextCipher(vault, "reporting-xlsx");
 const reportingDocxCipher = new VaultContextCipher(vault, "reporting-docx");
 const filingAdapterCipher = new VaultContextCipher(vault, "filing-adapter-secret");
-const reportGeneration = new ReportGenerationService(vault);
+const reportGeneration = new ReportGenerationService(vault, getObjectStorageSdk());
+
+/** Stages an XLSX workbook template in the shared regulatory-report vault (outside any DB transaction). */
+const stageXlsxTemplate = async (
+  bytes: Buffer,
+  actorId: string,
+  metadata: Record<string, unknown>,
+) => getObjectStorageSdk().workerClient.stageSystemGenerated({
+  namespace: "REGULATORY_REPORTS",
+  data: bytes,
+  originalFilename: "workbook-template.xlsx",
+  claimedMimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  actorId,
+  metadata,
+});
+
+const schemaTemplateBytes = async (schema: { templateObjectId?: string | null; templateCiphertext?: string | null }): Promise<Buffer | null> => {
+  if (schema.templateObjectId) {
+    return Buffer.from(
+      (await getObjectStorageSdk().workerClient.readInternal(schema.templateObjectId, "reporting-template-admin")).bytes,
+    );
+  }
+  if (schema.templateCiphertext) {
+    return Buffer.from(String(await reportingXlsxCipher.decrypt(schema.templateCiphertext)), "base64");
+  }
+  return null;
+};
+
+const releaseSchemaTemplate = async (
+  tx: unknown,
+  schemaId: string,
+  objectId: string | null | undefined,
+  actorId: string,
+  reason: string,
+): Promise<void> => {
+  if (!objectId) return;
+  await getObjectStorageSdk().routeClient.release(tx as never, {
+    objectId,
+    holderType: "REG_REPORT_SCHEMA",
+    holderId: schemaId,
+    actorId,
+    reason,
+  });
+};
+
+const bindSchemaTemplate = async (
+  tx: unknown,
+  schemaId: string,
+  objectId: string,
+  actorId: string,
+  reason: string,
+): Promise<void> => {
+  await getObjectStorageSdk().routeClient.bind(tx as never, {
+    objectId,
+    holderType: "REG_REPORT_SCHEMA",
+    holderId: schemaId,
+    actorId,
+    reason,
+  });
+};
 
 const REPORTING_ROLES = ["MLRO", "COMPLIANCE"];
 const REPORTING_AUTHORITIES = [
@@ -1909,7 +1970,7 @@ const contentAvailabilityForIds = async (ids: string[]): Promise<Map<string, boo
   if (ids.length === 0) return new Map();
   const placeholders = postgresPlaceholders(ids.length, 1, "uuid");
   const rows = (await client.$queryRawUnsafe(
-    `SELECT id, (content_ciphertext IS NOT NULL) AS contentAvailable FROM kyb_documents WHERE id IN (${placeholders})`,
+    `SELECT id, (storage_object_id IS NOT NULL) AS contentAvailable FROM kyb_documents WHERE id IN (${placeholders})`,
     ...ids,
   )) as Array<{ id: string; contentAvailable: number | bigint | boolean }>;
   return new Map(rows.map((row) => [String(row.id), Boolean(Number(row.contentAvailable))]));
@@ -2909,29 +2970,58 @@ router.post("/join-requests/:id/kyb-documents", async (request: Request, respons
   const expiresOn = typeof metadata.expiresOn === "string" && /^\d{4}-\d{2}-\d{2}$/.test(metadata.expiresOn)
     ? new Date(metadata.expiresOn)
     : null;
-  const sha256 = createHash("sha256").update(raw).digest("hex");
   const avStatus = scanKybBytes(raw);
   const infected = avStatus === "INFECTED";
-  const storageKey = `kyb/${joinRequest.merchantId}/${sha256}`;
-  const document = await client.kybDocument.create({
-    data: {
-      merchantId: joinRequest.merchantId,
-      joinRequestId: id,
-      subjectType: "MERCHANT",
-      subjectId: joinRequest.merchantId,
-      docType,
-      storageKey,
-      originalFileName,
-      contentCiphertext: await vault.encryptSecret(raw.toString("base64"), "kyb-document"),
-      sha256,
-      mime,
-      sizeBytes: raw.byteLength,
-      avStatus,
-      status: infected ? "REJECTED" : "UPLOADED",
-      uploadedById: actor.userId,
-      expiresOn,
+  const objectStorage = getObjectStorageSdk();
+  const document = await objectStorage.routeClient.withStagedUpload(
+    {
+      namespace: "KYB_DOCUMENTS",
+      data: raw,
+      originalFilename: originalFileName,
+      claimedMimeType: mime,
+      ownerMerchantId: joinRequest.merchantId,
+      actor: {
+        actorType: "ADMIN",
+        actorId: actor.userId,
+        authorities: request.principal?.authorities ?? [],
+        ipAddress: request.ip ?? null,
+      },
+      metadata: { merchantId: joinRequest.merchantId, docType, joinRequestId: id },
     },
-  });
+    async (staged) => {
+      const created = await client.$transaction(async (tx) => {
+        const row = await tx.kybDocument.create({
+          data: {
+            merchantId: joinRequest.merchantId,
+            joinRequestId: id,
+            subjectType: "MERCHANT",
+            subjectId: joinRequest.merchantId,
+            docType,
+            storageKey: staged.storageKey,
+            originalFileName,
+            storageObjectId: staged.objectId,
+            sha256: staged.sha256Hex,
+            mime: staged.detectedMimeType,
+            sizeBytes: Number(staged.byteSize),
+            avStatus,
+            status: infected ? "REJECTED" : "UPLOADED",
+            uploadedById: actor.userId,
+            expiresOn,
+          },
+        });
+        await objectStorage.routeClient.bind(tx as never, {
+          objectId: staged.objectId,
+          holderType: "KYB_DOCUMENT",
+          holderId: row.id,
+          actorId: actor.userId,
+          reason: "JOIN_REQUEST_KYB_DOCUMENT_UPLOAD",
+          autoPromoteIfNoAvRequired: false,
+        });
+        return row;
+      });
+      return created;
+    },
+  );
   const duplicateFlags = await refreshJoinDuplicateFlags(id);
   await writeAudit(client, {
     data: {
@@ -2941,7 +3031,7 @@ router.post("/join-requests/:id/kyb-documents", async (request: Request, respons
       entityType: "KYB_DOCUMENT",
       entityId: document.id,
       beforeJson: {},
-      afterJson: { joinRequestId: id, docType, avStatus, sha256 },
+      afterJson: { joinRequestId: id, docType, avStatus, sha256: document.sha256 },
     },
   });
   const payload = {
@@ -2950,10 +3040,13 @@ router.post("/join-requests/:id/kyb-documents", async (request: Request, respons
     originalFileName: document.originalFileName,
     status: document.status,
     avStatus: document.avStatus,
-    sha256,
+    sha256: document.sha256,
     duplicateFlags,
   };
   if (infected) {
+    await objectStorage.workerClient
+      .applyScanVerdict({ objectId: document.storageObjectId!, verdict: "INFECTED", signature: "ACTIVE_CONTENT_AT_UPLOAD" })
+      .catch(() => undefined);
     response.status(422).json({
       code: "KIB_DOCUMENT_INFECTED",
       message: "The uploaded document failed malware scanning",
@@ -2987,7 +3080,19 @@ router.delete("/join-requests/:id/kyb-documents/:docId", async (request: Request
   if (!document) {
     throw new ApiError(404, "KIB_DOCUMENT_NOT_FOUND", "The KYB document does not exist");
   }
-  await client.kybDocument.delete({ where: { id: document.id } });
+  const deletedObjectId = document.storageObjectId;
+  await client.$transaction(async (tx) => {
+    await tx.kybDocument.delete({ where: { id: document.id } });
+    if (deletedObjectId) {
+      await getObjectStorageSdk().routeClient.release(tx as never, {
+        objectId: deletedObjectId,
+        holderType: "KYB_DOCUMENT",
+        holderId: document.id,
+        actorId: actor.userId,
+        reason: "JOIN_REQUEST_KYB_DOCUMENT_DELETED",
+      });
+    }
+  });
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -3014,11 +3119,23 @@ router.get("/kyb-documents/:id/content", async (request: Request, response: Resp
   if (document.avStatus !== "CLEAN") {
     throw new ApiError(409, "KIB_DOCUMENT_NOT_SCANNED", "The KYB document has not passed malware scanning");
   }
-  if (!document.contentCiphertext) {
+  if (!document.storageObjectId) {
     throw new ApiError(404, "KIB_DOCUMENT_CONTENT_MISSING", "The KYB document content is not available");
   }
-  const base64 = await vault.decryptSecret(document.contentCiphertext);
-  const content = Buffer.from(base64, "base64");
+  const content = Buffer.from(
+    await getObjectStorageSdk()
+      .routeClient.readAuthorized({
+        objectId: document.storageObjectId,
+        actor: {
+          actorType: "ADMIN",
+          actorId: actor.userId,
+          authorities: request.principal?.authorities ?? [],
+          ipAddress: request.ip ?? null,
+        },
+        holderContext: { holderType: "KYB_DOCUMENT", holderId: document.id },
+      })
+      .then((result) => result.bytes),
+  );
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -7543,6 +7660,140 @@ router.post("/aml/cases/:id/propose", async (request: Request, response: Respons
   response.status(202).json({ status: "PENDING_CHECKER", approvalRequestId: approval.id });
 });
 
+router.get("/aml/cases/:id/evidence", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const amlCase = await client.amlCase.findUnique({ where: { id }, select: { id: true } });
+  if (!amlCase) throw new ApiError(404, "AML_CASE_NOT_FOUND", "The AML case does not exist");
+  const evidence = await client.amlCaseEvidence.findMany({
+    where: { amlCaseId: id },
+    orderBy: { createdAt: "desc" },
+    include: { storageObject: true },
+  });
+  response.json({
+    evidence: evidence.map((row) => ({
+      id: row.id,
+      amlCaseId: row.amlCaseId,
+      evidenceType: row.evidenceType,
+      notes: row.notes,
+      uploadedById: row.uploadedById,
+      createdAt: row.createdAt,
+      fileName: row.storageObject.originalFilename,
+      mimeType: row.storageObject.detectedMimeType,
+      byteSize: row.storageObject.byteSize.toString(),
+      sha256: row.storageObject.sha256Hex,
+      status: row.storageObject.status,
+      avScanStatus: row.storageObject.avScanStatus,
+    })),
+  });
+});
+
+router.post("/aml/cases/:id/evidence", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const amlCase = await client.amlCase.findUnique({ where: { id }, select: { id: true, subjectType: true, subjectId: true } });
+  if (!amlCase) throw new ApiError(404, "AML_CASE_NOT_FOUND", "The AML case does not exist");
+  const raw = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+  if (raw.byteLength === 0) throw new ApiError(400, "UPLOAD_REQUIRED", "An evidence file is required");
+  let metadata: Record<string, unknown> = {};
+  const metadataHeader = request.headers["x-upload-metadata"];
+  if (typeof metadataHeader === "string") {
+    try {
+      metadata = JSON.parse(Buffer.from(metadataHeader, "base64url").toString("utf8")) as Record<string, unknown>;
+    } catch {
+      throw new ApiError(400, "UPLOAD_METADATA_INVALID", "The upload metadata is not valid JSON");
+    }
+  }
+  const actor = actorFromRequest(request);
+  const fileName = typeof request.headers["x-upload-filename"] === "string"
+    ? decodeURIComponent(String(request.headers["x-upload-filename"]))
+    : "evidence";
+  const evidenceType = String(metadata.evidenceType ?? "DOCUMENT").slice(0, 64);
+  const notes = typeof metadata.notes === "string" ? metadata.notes.slice(0, 4000) : null;
+  const ownerMerchantId = amlCase.subjectType === "MERCHANT" ? amlCase.subjectId : null;
+  const objectStorage = getObjectStorageSdk();
+  const evidence = await objectStorage.routeClient.withStagedUpload(
+    {
+      namespace: "AML_CASE_ATTACHMENTS",
+      data: raw,
+      originalFilename: fileName,
+      claimedMimeType: typeof request.headers["x-upload-content-type"] === "string"
+        ? String(request.headers["x-upload-content-type"])
+        : null,
+      ownerMerchantId,
+      actor: {
+        actorType: "ADMIN",
+        actorId: actor.userId,
+        authorities: request.principal?.authorities ?? [],
+        ipAddress: request.ip ?? null,
+      },
+      metadata: { amlCaseId: amlCase.id, evidenceType },
+    },
+    async (staged) => client.$transaction(async (tx) => {
+      const row = await tx.amlCaseEvidence.create({
+        data: {
+          amlCaseId: amlCase.id,
+          storageObjectId: staged.objectId,
+          evidenceType,
+          notes,
+          uploadedById: actor.userId,
+        },
+        include: { storageObject: true },
+      });
+      await objectStorage.routeClient.bind(tx as never, {
+        objectId: staged.objectId,
+        holderType: "AML_CASE_EVIDENCE",
+        holderId: row.id,
+        actorId: actor.userId,
+        reason: "AML_EVIDENCE_UPLOAD",
+        autoPromoteIfNoAvRequired: false,
+      });
+      return row;
+    }),
+  );
+  response.status(201).json({
+    evidence: {
+      id: evidence.id,
+      amlCaseId: evidence.amlCaseId,
+      evidenceType: evidence.evidenceType,
+      notes: evidence.notes,
+      fileName: evidence.storageObject.originalFilename,
+      mimeType: evidence.storageObject.detectedMimeType,
+      byteSize: evidence.storageObject.byteSize.toString(),
+      sha256: evidence.storageObject.sha256Hex,
+      status: evidence.storageObject.status,
+      avScanStatus: evidence.storageObject.avScanStatus,
+    },
+  });
+});
+
+router.get("/aml/cases/:id/evidence/:evidenceId/content", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const { id, evidenceId } = parseOrThrow(
+    z.object({ id: z.string().min(1).max(64), evidenceId: z.string().min(1).max(64) }).strict(),
+    request.params,
+  );
+  const evidence = await client.amlCaseEvidence.findFirst({ where: { id: evidenceId, amlCaseId: id } });
+  if (!evidence) throw new ApiError(404, "AML_EVIDENCE_NOT_FOUND", "The AML evidence does not exist");
+  const actor = actorFromRequest(request);
+  const stored = await getObjectStorageSdk().routeClient.readAuthorized({
+    objectId: evidence.storageObjectId,
+    actor: {
+      actorType: "ADMIN",
+      actorId: actor.userId,
+      authorities: request.principal?.authorities ?? [],
+      ipAddress: request.ip ?? null,
+    },
+    holderContext: { holderType: "AML_CASE_EVIDENCE", holderId: evidence.id },
+  });
+  response.setHeader("Content-Type", stored.detectedMimeType);
+  response.setHeader("Content-Disposition", `attachment; filename="${(stored.originalFilename ?? "evidence").replace(/["\r\n]/g, "_")}"`);
+  response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
+  response.setHeader("Cache-Control", "private, no-store");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.send(Buffer.from(stored.bytes));
+});
+
 router.get("/aml/rules", async (request: Request, response: Response) => {
   assertConfidential(request);
   const built = buildListQuery(request.query, {
@@ -8079,7 +8330,7 @@ router.get("/aml/report-schemas/:id", async (request: Request, response: Respons
     notes: schema.notes,
     compiled: schema.compiledDefinitionJson,
     mapping: schema.mappingBlueprintJson,
-    template: schema.templateCiphertext ? { present: true, sha256: schema.templateSha256, binding: schema.templateBindingJson } : { present: false, sha256: null, binding: schema.templateBindingJson },
+    template: schema.templateObjectId || schema.templateCiphertext ? { present: true, sha256: schema.templateSha256, binding: schema.templateBindingJson } : { present: false, sha256: null, binding: schema.templateBindingJson },
     approval: schema.approvalRequestId ? await client.approvalRequest.findUnique({ where: { id: schema.approvalRequestId }, select: { id: true, state: true, expiresAt: true, makerUserId: true, checkerUserId: true } }) : null,
     usage: { defaultBindings, ruleBindings, outputs },
     capabilities: {
@@ -8199,9 +8450,10 @@ router.put("/aml/report-schemas/:id", async (request: Request, response: Respons
   const mappingBlueprint = body.mappingBlueprint ?? (schema.mappingBlueprintJson as Record<string, unknown>);
   let compiled: unknown;
   let definitionSha256: string;
-  let templateCiphertext = schema.templateCiphertext;
+  let templateObjectId = schema.templateObjectId;
   let templateSha256 = schema.templateSha256;
   let templateBindingJson: Prisma.InputJsonValue | typeof Prisma.JsonNull | undefined;
+  let stagedTemplate: Awaited<ReturnType<typeof stageXlsxTemplate>> | null = null;
   if (schema.format === "XML") {
     if (body.templateBase64 !== undefined) throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_NOT_XLSX", "Only an XLSX schema can hold a workbook template");
     compiled = compileXsdForAdmin(definitionText);
@@ -8223,35 +8475,45 @@ router.put("/aml/report-schemas/:id", async (request: Request, response: Respons
         assertXlsxTemplateSafe(bytes);
         assertWorkbookAnalysisSafe(await analyzeWorkbookTemplate(bytes));
         templateSha256 = createHash("sha256").update(bytes).digest("hex");
-        templateCiphertext = await reportingXlsxCipher.encrypt(body.templateBase64);
+        stagedTemplate = await stageXlsxTemplate(bytes, actorFromRequest(request).userId, { schemaId: id, revision: schema.revision + 1 });
+        templateObjectId = stagedTemplate.objectId;
       } else {
-        templateCiphertext = null;
+        templateObjectId = null;
         templateSha256 = null;
       }
       templateBindingJson = Prisma.JsonNull;
     }
   }
   const actor = actorFromRequest(request);
-  const updated = await client.$transaction(async (tx) => {
-    const row = await tx.regulatoryReportSchema.update({
-      where: { id },
-      data: {
-        ...(body.name !== undefined ? { name: body.name } : {}),
-        definitionText,
-        definitionSha256,
-        mappingSha256: hashJsonValue(mappingBlueprint),
-        mappingBlueprintJson: mappingBlueprint as never,
-        compiledDefinitionJson: compiled as never,
-        compiledFromSha256: definitionSha256,
-        revision: { increment: 1 },
-        ...(body.sampleContext !== undefined ? { sampleContextJson: body.sampleContext as never } : {}),
-        ...(body.notes !== undefined ? { notes: body.notes } : {}),
-        templateCiphertext,
-        templateSha256,
-        ...(templateBindingJson !== undefined ? { templateBindingJson } : {}),
-      },
-    });
-    await writeAudit(tx, {
+  let updated: Awaited<ReturnType<typeof client.regulatoryReportSchema.update>>;
+  try {
+    updated = await client.$transaction(async (tx) => {
+      const row = await tx.regulatoryReportSchema.update({
+        where: { id },
+        data: {
+          ...(body.name !== undefined ? { name: body.name } : {}),
+          definitionText,
+          definitionSha256,
+          mappingSha256: hashJsonValue(mappingBlueprint),
+          mappingBlueprintJson: mappingBlueprint as never,
+          compiledDefinitionJson: compiled as never,
+          compiledFromSha256: definitionSha256,
+          revision: { increment: 1 },
+          ...(body.sampleContext !== undefined ? { sampleContextJson: body.sampleContext as never } : {}),
+          ...(body.notes !== undefined ? { notes: body.notes } : {}),
+          templateCiphertext: null,
+          templateObjectId,
+          templateSha256,
+          ...(templateBindingJson !== undefined ? { templateBindingJson } : {}),
+        },
+      });
+      if (stagedTemplate || (body.templateBase64 === "" && schema.templateObjectId)) {
+        await releaseSchemaTemplate(tx, id, schema.templateObjectId, actor.userId, "REGULATORY_REPORT_SCHEMA_TEMPLATE_REPLACED");
+      }
+      if (stagedTemplate) {
+        await bindSchemaTemplate(tx, id, stagedTemplate.objectId, actor.userId, "REGULATORY_REPORT_SCHEMA_TEMPLATE_UPLOADED");
+      }
+      await writeAudit(tx, {
       data: {
         actorId: actor.userId,
         role: actor.role ?? "SYSTEM",
@@ -8259,11 +8521,15 @@ router.put("/aml/report-schemas/:id", async (request: Request, response: Respons
         entityType: "REGULATORY_REPORT_SCHEMA",
         entityId: id,
         beforeJson: { revision: schema.revision, definitionSha256: schema.definitionSha256, mappingSha256: schema.mappingSha256 },
-        afterJson: { revision: row.revision, definitionSha256, mappingSha256: row.mappingSha256 },
-      },
+          afterJson: { revision: row.revision, definitionSha256, mappingSha256: row.mappingSha256 },
+        },
+      });
+      return row;
     });
-    return row;
-  });
+  } catch (error) {
+    if (stagedTemplate) await getObjectStorageSdk().routeClient.discardStaged(stagedTemplate.objectId).catch(() => undefined);
+    throw error;
+  }
   response.json({ schema: regulatorySchemaRow(updated as never) });
 });
 
@@ -8307,7 +8573,8 @@ router.post("/aml/report-schemas/:id/clone", async (request: Request, response: 
         definitionText: source.definitionText,
         definitionSha256: source.definitionSha256,
         mappingSha256: source.mappingSha256,
-        templateCiphertext: source.templateCiphertext,
+        templateCiphertext: null,
+        templateObjectId: source.templateObjectId,
         templateSha256: source.templateSha256,
         templateBindingJson: source.templateBindingJson as never,
         compiledDefinitionJson: source.compiledDefinitionJson as never,
@@ -8317,6 +8584,9 @@ router.post("/aml/report-schemas/:id/clone", async (request: Request, response: 
         createdByUserId: actor.userId,
       },
     });
+    if (source.templateObjectId) {
+      await bindSchemaTemplate(tx, created.id, source.templateObjectId, actor.userId, "REGULATORY_REPORT_SCHEMA_TEMPLATE_CLONED");
+    }
     await writeAudit(tx, {
       data: {
         actorId: actor.userId,
@@ -8491,9 +8761,8 @@ router.post("/aml/report-schemas/:id/template/analyze", async (request: Request,
   const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
   if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
   if (schema.format !== "XLSX") throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_NOT_XLSX", "Only an XLSX schema can hold a workbook template");
-  const base64 = body.templateBase64 ?? (schema.templateCiphertext ? String(await reportingXlsxCipher.decrypt(schema.templateCiphertext)) : null);
-  if (!base64) throw new ApiError(404, "REPORT_SCHEMA_TEMPLATE_NOT_FOUND", "This schema has no workbook template");
-  const bytes = Buffer.from(base64, "base64");
+  const bytes = body.templateBase64 ? Buffer.from(body.templateBase64, "base64") : await schemaTemplateBytes(schema);
+  if (!bytes) throw new ApiError(404, "REPORT_SCHEMA_TEMPLATE_NOT_FOUND", "This schema has no workbook template");
   const analysis = await analyzeWorkbookTemplate(bytes);
   response.json({ analysis });
 });
@@ -8514,17 +8783,29 @@ router.post("/aml/report-schemas/:id/template/upload", async (request: Request, 
   const analysis = await analyzeWorkbookTemplate(bytes);
   assertWorkbookAnalysisSafe(analysis);
   const templateSha256 = createHash("sha256").update(bytes).digest("hex");
-  const templateCiphertext = await reportingXlsxCipher.encrypt(body.templateBase64);
-  const updated = await client.regulatoryReportSchema.update({
-    where: { id },
-    data: {
-      templateCiphertext,
-      templateSha256,
-      templateBindingJson: body.templateBinding !== undefined ? body.templateBinding as Prisma.InputJsonValue : Prisma.JsonNull,
-      revision: { increment: 1 },
-    },
-  });
   const actor = actorFromRequest(request);
+  const staged = await stageXlsxTemplate(bytes, actor.userId, { schemaId: id, revision: schema.revision + 1 });
+  let updated: Awaited<ReturnType<typeof client.regulatoryReportSchema.update>>;
+  try {
+    updated = await client.$transaction(async (tx) => {
+      const row = await tx.regulatoryReportSchema.update({
+        where: { id },
+        data: {
+          templateCiphertext: null,
+          templateObjectId: staged.objectId,
+          templateSha256,
+          templateBindingJson: body.templateBinding !== undefined ? body.templateBinding as Prisma.InputJsonValue : Prisma.JsonNull,
+          revision: { increment: 1 },
+        },
+      });
+      await releaseSchemaTemplate(tx, id, schema.templateObjectId, actor.userId, "REGULATORY_REPORT_SCHEMA_TEMPLATE_REPLACED");
+      await bindSchemaTemplate(tx, id, staged.objectId, actor.userId, "REGULATORY_REPORT_SCHEMA_TEMPLATE_UPLOADED");
+      return row;
+    });
+  } catch (error) {
+    await getObjectStorageSdk().routeClient.discardStaged(staged.objectId).catch(() => undefined);
+    throw error;
+  }
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -8546,11 +8827,15 @@ router.delete("/aml/report-schemas/:id/template", async (request: Request, respo
   if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
   if (schema.format !== "XLSX") throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_NOT_XLSX", "Only an XLSX schema can hold a workbook template");
   if (schema.status !== "DRAFT") throw new ApiError(409, "REPORT_SCHEMA_NOT_EDITABLE", "Only a DRAFT schema can change its template");
-  const updated = await client.regulatoryReportSchema.update({
-    where: { id },
-    data: { templateCiphertext: null, templateSha256: null, templateBindingJson: Prisma.JsonNull, revision: { increment: 1 } },
-  });
   const actor = actorFromRequest(request);
+  const updated = await client.$transaction(async (tx) => {
+    const row = await tx.regulatoryReportSchema.update({
+      where: { id },
+      data: { templateCiphertext: null, templateObjectId: null, templateSha256: null, templateBindingJson: Prisma.JsonNull, revision: { increment: 1 } },
+    });
+    await releaseSchemaTemplate(tx, id, schema.templateObjectId, actor.userId, "REGULATORY_REPORT_SCHEMA_TEMPLATE_REMOVED");
+    return row;
+  });
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -8570,8 +8855,9 @@ router.get("/aml/report-schemas/:id/template", async (request: Request, response
   const { id } = parseOrThrow(idSchema, request.params);
   const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
   if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
-  if (!schema.templateCiphertext) throw new ApiError(404, "REPORT_SCHEMA_TEMPLATE_NOT_FOUND", "This schema has no workbook template");
-  const base64 = String(await reportingXlsxCipher.decrypt(schema.templateCiphertext));
+  const templateBytes = await schemaTemplateBytes(schema);
+  if (!templateBytes) throw new ApiError(404, "REPORT_SCHEMA_TEMPLATE_NOT_FOUND", "This schema has no workbook template");
+  const base64 = templateBytes.toString("base64");
   const actor = actorFromRequest(request);
   await writeAudit(client, {
     data: {
@@ -8603,17 +8889,29 @@ router.put("/aml/report-schemas/:id/template", async (request: Request, response
   assertXlsxTemplateSafe(bytes);
   assertWorkbookAnalysisSafe(await analyzeWorkbookTemplate(bytes));
   const templateSha256 = createHash("sha256").update(bytes).digest("hex");
-  const templateCiphertext = await reportingXlsxCipher.encrypt(body.templateBase64);
-  const updated = await client.regulatoryReportSchema.update({
-    where: { id },
-    data: {
-      templateCiphertext,
-      templateSha256,
-      templateBindingJson: body.templateBinding !== undefined ? body.templateBinding as Prisma.InputJsonValue : Prisma.JsonNull,
-      revision: { increment: 1 },
-    },
-  });
   const actor = actorFromRequest(request);
+  const staged = await stageXlsxTemplate(bytes, actor.userId, { schemaId: id, revision: schema.revision + 1 });
+  let updated: Awaited<ReturnType<typeof client.regulatoryReportSchema.update>>;
+  try {
+    updated = await client.$transaction(async (tx) => {
+      const row = await tx.regulatoryReportSchema.update({
+        where: { id },
+        data: {
+          templateCiphertext: null,
+          templateObjectId: staged.objectId,
+          templateSha256,
+          templateBindingJson: body.templateBinding !== undefined ? body.templateBinding as Prisma.InputJsonValue : Prisma.JsonNull,
+          revision: { increment: 1 },
+        },
+      });
+      await releaseSchemaTemplate(tx, id, schema.templateObjectId, actor.userId, "REGULATORY_REPORT_SCHEMA_TEMPLATE_REPLACED");
+      await bindSchemaTemplate(tx, id, staged.objectId, actor.userId, "REGULATORY_REPORT_SCHEMA_TEMPLATE_UPLOADED");
+      return row;
+    });
+  } catch (error) {
+    await getObjectStorageSdk().routeClient.discardStaged(staged.objectId).catch(() => undefined);
+    throw error;
+  }
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -8641,7 +8939,7 @@ router.post("/aml/report-schemas/:id/workbook/preview", async (request: Request,
   }
   if (schema.format !== "XLSX") throw new ApiError(400, "REPORT_SCHEMA_NOT_XLSX", "This schema is not an XLSX workbook");
   const workbook = schema.compiledDefinitionJson as unknown as XlsxWorkbookSchema;
-  const template = schema.templateCiphertext ? Buffer.from(String(await reportingXlsxCipher.decrypt(schema.templateCiphertext)), "base64") : null;
+  const template = await schemaTemplateBytes(schema);
   const rendered = await renderRegulatoryWorkbook(workbook, body.context, template, schema.templateBindingJson as never);
   response.json({ contentBase64: rendered.buffer.toString("base64"), validation: { valid: rendered.issues.length === 0, issues: rendered.issues } });
 });
@@ -8652,7 +8950,8 @@ router.post("/aml/report-schemas", async (request: Request, response: Response) 
   const actor = actorFromRequest(request);
   if (body.templateBase64 && body.format !== "XLSX") throw new ApiError(400, "REPORT_SCHEMA_TEMPLATE_NOT_XLSX", "Only an XLSX schema can hold a workbook template");
   let compiledDefinitionJson: unknown;
-  let templateCiphertext: string | null = null;
+  let templateObjectId: string | null = null;
+  let stagedTemplate: Awaited<ReturnType<typeof stageXlsxTemplate>> | null = null;
   let templateSha256: string | null = null;
   let definitionSha256: string;
   if (body.format === "XML") {
@@ -8684,7 +8983,8 @@ router.post("/aml/report-schemas", async (request: Request, response: Response) 
       const analysis = await analyzeWorkbookTemplate(bytes);
       assertWorkbookAnalysisSafe(analysis);
       templateSha256 = createHash("sha256").update(bytes).digest("hex");
-      templateCiphertext = await reportingXlsxCipher.encrypt(body.templateBase64);
+      stagedTemplate = await stageXlsxTemplate(bytes, actor.userId, { schemaCode: body.schemaCode, version: body.version ?? 1 });
+      templateObjectId = stagedTemplate.objectId;
     }
   }
   const version = body.version ?? 1;
@@ -8694,8 +8994,10 @@ router.post("/aml/report-schemas", async (request: Request, response: Response) 
   if (existing) {
     throw new ApiError(409, "REPORT_SCHEMA_VERSION_EXISTS", "This schema code and version already exist");
   }
-  const schema = await client.$transaction(async (tx) => {
-    const created = await tx.regulatoryReportSchema.create({
+  let schema: Awaited<ReturnType<typeof client.regulatoryReportSchema.create>>;
+  try {
+    schema = await client.$transaction(async (tx) => {
+      const created = await tx.regulatoryReportSchema.create({
       data: {
         authority: body.authority,
         reportType: body.reportType,
@@ -8708,7 +9010,8 @@ router.post("/aml/report-schemas", async (request: Request, response: Response) 
         definitionText: body.definitionText,
         definitionSha256,
         mappingSha256: hashJsonValue(body.mappingBlueprint),
-        templateCiphertext,
+        templateCiphertext: null,
+        templateObjectId,
         templateSha256,
         compiledDefinitionJson: compiledDefinitionJson as never,
         mappingBlueprintJson: body.mappingBlueprint as never,
@@ -8725,11 +9028,18 @@ router.post("/aml/report-schemas", async (request: Request, response: Response) 
         entityType: "REGULATORY_REPORT_SCHEMA",
         entityId: created.id,
         beforeJson: {},
-        afterJson: { schemaCode: created.schemaCode, reportCode: created.reportCode, version: created.version, format: created.format, definitionSha256 },
-      },
+          afterJson: { schemaCode: created.schemaCode, reportCode: created.reportCode, version: created.version, format: created.format, definitionSha256 },
+        },
+      });
+      if (stagedTemplate) {
+        await bindSchemaTemplate(tx, created.id, stagedTemplate.objectId, actor.userId, "REGULATORY_REPORT_SCHEMA_TEMPLATE_UPLOADED");
+      }
+      return created;
     });
-    return created;
-  });
+  } catch (error) {
+    if (stagedTemplate) await getObjectStorageSdk().routeClient.discardStaged(stagedTemplate.objectId).catch(() => undefined);
+    throw error;
+  }
   response.status(201).json({ schema: regulatorySchemaRow(schema as never) });
 });
 
@@ -8788,9 +9098,7 @@ router.post("/aml/report-schemas/:id/simulate", async (request: Request, respons
     return;
   }
   const workbook = schema.compiledDefinitionJson as unknown as XlsxWorkbookSchema;
-  const template = schema.templateCiphertext
-    ? Buffer.from(String(await reportingXlsxCipher.decrypt(schema.templateCiphertext)), "base64")
-    : null;
+  const template = await schemaTemplateBytes(schema);
   const rendered = await renderRegulatoryWorkbook(workbook, body.context, template, schema.templateBindingJson as never);
   response.json({
     format: "XLSX",
@@ -9209,12 +9517,30 @@ router.get("/aml/reports/:id/outputs/:format/download", async (request: Request,
     throw new ApiError(404, "REPORT_OUTPUT_NOT_FOUND", "The requested report output does not exist");
   }
   const cipher = format === "XML" ? reportingXmlCipher : format === "DOCX" ? reportingDocxCipher : reportingXlsxCipher;
-  const content = await cipher.decrypt(output.contentCiphertext);
-  const actualHash = createHash("sha256").update(format === "XML" ? String(content) : Buffer.from(String(content), "base64")).digest("hex");
+  const actor = actorFromRequest(request);
+  let content: Buffer;
+  if (output.storageObjectId) {
+    const stored = await getObjectStorageSdk().routeClient.readAuthorized({
+      objectId: output.storageObjectId,
+      actor: {
+        actorType: "ADMIN",
+        actorId: actor.userId,
+        authorities: request.principal?.authorities ?? [],
+        ipAddress: request.ip ?? null,
+      },
+      holderContext: { holderType: "REG_REPORT_OUTPUT", holderId: output.id },
+    });
+    content = Buffer.from(stored.bytes);
+  } else if (output.contentCiphertext) {
+    const decrypted = await cipher.decrypt(output.contentCiphertext);
+    content = format === "XML" ? Buffer.from(String(decrypted), "utf8") : Buffer.from(String(decrypted), "base64");
+  } else {
+    throw new ApiError(404, "REPORT_OUTPUT_CONTENT_MISSING", "The stored report output has no content");
+  }
+  const actualHash = createHash("sha256").update(content).digest("hex");
   if (actualHash !== output.contentSha256) {
     throw new ApiError(409, "REPORT_OUTPUT_HASH_MISMATCH", "The stored report output failed its integrity check");
   }
-  const actor = actorFromRequest(request);
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -9229,20 +9555,20 @@ router.get("/aml/reports/:id/outputs/:format/download", async (request: Request,
   if (format === "XML") {
     response.setHeader("Content-Type", "application/xml; charset=utf-8");
     response.setHeader("X-Content-SHA256", output.contentSha256);
-    response.send(String(content));
+    response.send(content);
     return;
   }
   if (format === "DOCX") {
     response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     response.setHeader("Content-Disposition", `attachment; filename="report-${id}.docx"`);
     response.setHeader("X-Content-SHA256", output.contentSha256);
-    response.send(Buffer.from(String(content), "base64"));
+    response.send(content);
     return;
   }
   response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   response.setHeader("Content-Disposition", `attachment; filename="report-${id}.xlsx"`);
   response.setHeader("X-Content-SHA256", output.contentSha256);
-  response.send(Buffer.from(String(content), "base64"));
+  response.send(content);
 });
 
 router.post("/aml/reports/:id/request-approval", async (request: Request, response: Response) => {
@@ -14564,20 +14890,52 @@ router.patch("/rails/:id", async (request: Request, response: Response) => {
     const asset = await client.asset.findUnique({ where: { id: body.logoAssetId }, select: { id: true } });
     if (!asset) throw new ApiError(404, "ASSET_NOT_FOUND", "The logo asset does not exist");
   }
-  const updated = await client.rail.update({
-    where: { id },
-    data: {
-      logoAssetId: body.logoAssetId,
-      nameAr: body.nameAr,
-      nameEn: body.nameEn,
-      blocked: body.blocked,
-      displayOrder: body.displayOrder,
-      minAmount: body.minAmount ? new Prisma.Decimal(body.minAmount) : undefined,
-      maxAmount: body.maxAmount ? new Prisma.Decimal(body.maxAmount) : undefined,
-      capabilities: body.capabilities,
-      instructionsAr: body.instructionsAr,
-      instructionsEn: body.instructionsEn,
-    },
+  const logoChanged = body.logoAssetId !== undefined && body.logoAssetId !== rail.logoAssetId;
+  const oldAsset = logoChanged && rail.logoAssetId
+    ? await client.asset.findUnique({ where: { id: rail.logoAssetId }, select: { storageObjectId: true } })
+    : null;
+  const newAsset = logoChanged && body.logoAssetId
+    ? await client.asset.findUnique({ where: { id: body.logoAssetId }, select: { storageObjectId: true } })
+    : null;
+  const updated = await client.$transaction(async (tx) => {
+    const row = await tx.rail.update({
+      where: { id },
+      data: {
+        logoAssetId: body.logoAssetId,
+        nameAr: body.nameAr,
+        nameEn: body.nameEn,
+        blocked: body.blocked,
+        displayOrder: body.displayOrder,
+        minAmount: body.minAmount ? new Prisma.Decimal(body.minAmount) : undefined,
+        maxAmount: body.maxAmount ? new Prisma.Decimal(body.maxAmount) : undefined,
+        capabilities: body.capabilities,
+        instructionsAr: body.instructionsAr,
+        instructionsEn: body.instructionsEn,
+      },
+    });
+    if (logoChanged) {
+      const objectStorage = getObjectStorageSdk();
+      const actor = actorFromRequest(request);
+      if (oldAsset?.storageObjectId) {
+        await objectStorage.routeClient.release(tx as never, {
+          objectId: oldAsset.storageObjectId,
+          holderType: "RAIL_LOGO",
+          holderId: rail.id,
+          actorId: actor.userId,
+          reason: "RAIL_LOGO_REPLACED",
+        });
+      }
+      if (newAsset?.storageObjectId) {
+        await objectStorage.routeClient.bind(tx as never, {
+          objectId: newAsset.storageObjectId,
+          holderType: "RAIL_LOGO",
+          holderId: rail.id,
+          actorId: actor.userId,
+          reason: "RAIL_LOGO_ASSIGNED",
+        });
+      }
+    }
+    return row;
   });
   await writeAudit(client, {
     data: {
@@ -15031,6 +15389,122 @@ router.post("/assets", async (request: Request, response: Response) => {
     },
   });
   response.status(201).json({ id: asset.id, name: asset.name });
+});
+
+/**
+ * Binary brand-asset upload. The metadata-only JSON route above is kept for
+ * callers that register pre-stored keys; this route is the real asset path:
+ * the bytes land in the SYSTEM_BRAND_ASSETS vault and the Asset row holds a
+ * CATALOG_ASSET lock (and later a RAIL_LOGO lock when a rail uses it).
+ */
+router.post("/assets/upload", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:write"]);
+  const raw = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+  if (raw.byteLength === 0) {
+    throw new ApiError(400, "UPLOAD_REQUIRED", "An asset payload is required");
+  }
+  if (raw.byteLength > 5 * 1024 * 1024) {
+    throw new ApiError(413, "UPLOAD_TOO_LARGE", "Brand assets must be 5 MiB or smaller");
+  }
+  let metadata: Record<string, unknown> = {};
+  const metadataHeader = request.headers["x-upload-metadata"];
+  if (typeof metadataHeader === "string") {
+    try {
+      metadata = JSON.parse(Buffer.from(metadataHeader, "base64url").toString("utf8")) as Record<string, unknown>;
+    } catch {
+      throw new ApiError(400, "UPLOAD_METADATA_INVALID", "The upload metadata is not valid JSON");
+    }
+  }
+  const fileNameHeader = typeof request.headers["x-upload-filename"] === "string"
+    ? decodeURIComponent(String(request.headers["x-upload-filename"]))
+    : "";
+  const actor = actorFromRequest(request);
+  const objectStorage = getObjectStorageSdk();
+  const asset = await objectStorage.routeClient.withStagedUpload(
+    {
+      namespace: "SYSTEM_BRAND_ASSETS",
+      data: raw,
+      originalFilename: fileNameHeader || String(metadata.name ?? "asset"),
+      claimedMimeType: typeof request.headers["x-upload-content-type"] === "string"
+        ? String(request.headers["x-upload-content-type"])
+        : null,
+      ownerMerchantId: null,
+      actor: {
+        actorType: "ADMIN",
+        actorId: actor.userId,
+        authorities: request.principal?.authorities ?? [],
+        ipAddress: request.ip ?? null,
+      },
+      metadata: { name: metadata.name ?? fileNameHeader },
+    },
+    async (staged) => {
+      if (staged.detectedMimeType !== "image/png" && staged.detectedMimeType !== "image/svg+xml") {
+        throw new ApiError(415, "ASSET_TYPE_UNSUPPORTED", "Brand assets must be a PNG or SVG image");
+      }
+      const name = String(metadata.name ?? (fileNameHeader || `asset-${staged.objectId.slice(0, 8)}`)).slice(0, 120);
+      return client.$transaction(async (tx) => {
+        const created = await tx.asset.create({
+          data: {
+            name,
+            mime: staged.detectedMimeType === "image/svg+xml" ? "IMAGE_SVG_XML" : "IMAGE_PNG",
+            sizeBytes: Number(staged.byteSize),
+            storageKey: staged.storageKey,
+            storageObjectId: staged.objectId,
+            sha256: staged.sha256Hex,
+          },
+        });
+        await objectStorage.routeClient.bind(tx as never, {
+          objectId: staged.objectId,
+          holderType: "CATALOG_ASSET",
+          holderId: created.id,
+          actorId: actor.userId,
+          reason: "CATALOG_ASSET_UPLOADED",
+        });
+        return created;
+      });
+    },
+  );
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role,
+      action: "ASSET_REGISTERED",
+      entityType: "ASSET",
+      entityId: asset.id,
+      beforeJson: {},
+      afterJson: { name: asset.name, mime: asset.mime, sizeBytes: asset.sizeBytes, sha256: asset.sha256, storageObjectId: asset.storageObjectId },
+    },
+  });
+  response.status(201).json({ id: asset.id, name: asset.name, mime: asset.mime, sizeBytes: asset.sizeBytes, sha256: asset.sha256 });
+});
+
+router.get("/assets/:id/content", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const asset = await client.asset.findUnique({ where: { id } });
+  if (!asset) throw new ApiError(404, "ASSET_NOT_FOUND", "The asset does not exist");
+  if (!asset.storageObjectId) {
+    throw new ApiError(404, "ASSET_CONTENT_MISSING", "The asset was registered before the shared object storage engine and has no stored bytes");
+  }
+  const actor = actorFromRequest(request);
+  const stored = await getObjectStorageSdk().routeClient.readAuthorized({
+    objectId: asset.storageObjectId,
+    actor: {
+      actorType: "ADMIN",
+      actorId: actor.userId,
+      authorities: request.principal?.authorities ?? [],
+      ipAddress: request.ip ?? null,
+    },
+    holderContext: { holderType: "CATALOG_ASSET", holderId: asset.id },
+  });
+  const contentType = asset.mime === "IMAGE_SVG_XML" ? "image/svg+xml" : "image/png";
+  const fileExtension = asset.mime === "IMAGE_SVG_XML" ? "svg" : "png";
+  response.setHeader("Content-Type", contentType);
+  response.setHeader("Content-Disposition", `inline; filename="${asset.name.replace(/["\r\n]/g, "_")}.${fileExtension}"`);
+  response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
+  response.setHeader("Cache-Control", "private, max-age=300");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.send(Buffer.from(stored.bytes));
 });
 
 const reconciliationSourceRow = (source: Record<string, any>) => {
@@ -15811,6 +16285,147 @@ router.post("/disputes/:id/evidence", async (request: Request, response: Respons
     evidenceSubmittedAt: submittedAt,
     evidenceJson: updated.evidenceJson,
   });
+});
+
+const adminDisputeAttachmentRow = (row: Record<string, any>) => ({
+  id: row.id,
+  disputeId: row.disputeId,
+  merchantId: row.merchantId,
+  label: row.label,
+  uploadedById: row.uploadedById,
+  createdAt: row.createdAt,
+  fileName: row.storageObject?.originalFilename ?? null,
+  mimeType: row.storageObject?.detectedMimeType ?? null,
+  byteSize: row.storageObject?.byteSize?.toString?.() ?? null,
+  sha256: row.storageObject?.sha256Hex ?? null,
+  status: row.storageObject?.status ?? null,
+  avScanStatus: row.storageObject?.avScanStatus ?? null,
+});
+
+router.get("/disputes/:id/attachments", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["dispute:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const dispute = await client.dispute.findUnique({ where: { id } });
+  if (!dispute) throw new ApiError(404, "DISPUTE_NOT_FOUND", "The dispute does not exist");
+  const attachments = await client.disputeAttachment.findMany({
+    where: { disputeId: id },
+    orderBy: { createdAt: "desc" },
+    include: { storageObject: true },
+  });
+  response.json({ attachments: attachments.map(adminDisputeAttachmentRow) });
+});
+
+router.post("/disputes/:id/attachments", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["dispute:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const dispute = await client.dispute.findUnique({ where: { id }, include: { attempt: { select: { merchantId: true } } } });
+  if (!dispute) throw new ApiError(404, "DISPUTE_NOT_FOUND", "The dispute does not exist");
+  const raw = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+  if (raw.byteLength === 0) throw new ApiError(400, "UPLOAD_REQUIRED", "An evidence file is required");
+  let metadata: Record<string, unknown> = {};
+  const metadataHeader = request.headers["x-upload-metadata"];
+  if (typeof metadataHeader === "string") {
+    try {
+      metadata = JSON.parse(Buffer.from(metadataHeader, "base64url").toString("utf8")) as Record<string, unknown>;
+    } catch {
+      throw new ApiError(400, "UPLOAD_METADATA_INVALID", "The upload metadata is not valid JSON");
+    }
+  }
+  const actor = actorFromRequest(request);
+  const fileName = typeof request.headers["x-upload-filename"] === "string"
+    ? decodeURIComponent(String(request.headers["x-upload-filename"]))
+    : "evidence";
+  const label = String(metadata.label ?? fileName).slice(0, 255);
+  const objectStorage = getObjectStorageSdk();
+  const attachment = await objectStorage.routeClient.withStagedUpload(
+    {
+      namespace: "DISPUTE_EVIDENCE",
+      data: raw,
+      originalFilename: fileName,
+      claimedMimeType: typeof request.headers["x-upload-content-type"] === "string"
+        ? String(request.headers["x-upload-content-type"])
+        : null,
+      ownerMerchantId: dispute.attempt.merchantId,
+      actor: {
+        actorType: "ADMIN",
+        actorId: actor.userId,
+        authorities: request.principal?.authorities ?? [],
+        ipAddress: request.ip ?? null,
+      },
+      metadata: { disputeId: dispute.id, label },
+    },
+    async (staged) => client.$transaction(async (tx) => {
+      const row = await tx.disputeAttachment.create({
+        data: {
+          disputeId: dispute.id,
+          merchantId: dispute.attempt.merchantId,
+          storageObjectId: staged.objectId,
+          label,
+          uploadedById: actor.userId,
+        },
+        include: { storageObject: true },
+      });
+      await objectStorage.routeClient.bind(tx as never, {
+        objectId: staged.objectId,
+        holderType: "DISPUTE_ATTACHMENT",
+        holderId: row.id,
+        actorId: actor.userId,
+        reason: "DISPUTE_EVIDENCE_UPLOAD",
+        autoPromoteIfNoAvRequired: false,
+      });
+      return row;
+    }),
+  );
+  response.status(201).json({ attachment: adminDisputeAttachmentRow(attachment as never) });
+});
+
+router.get("/disputes/:id/attachments/:attachmentId/content", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["dispute:read"]);
+  const { id, attachmentId } = parseOrThrow(
+    z.object({ id: z.string().min(1).max(64), attachmentId: z.string().min(1).max(64) }).strict(),
+    request.params,
+  );
+  const attachment = await client.disputeAttachment.findFirst({ where: { id: attachmentId, disputeId: id } });
+  if (!attachment) throw new ApiError(404, "DISPUTE_ATTACHMENT_NOT_FOUND", "The dispute attachment does not exist");
+  const actor = actorFromRequest(request);
+  const stored = await getObjectStorageSdk().routeClient.readAuthorized({
+    objectId: attachment.storageObjectId,
+    actor: {
+      actorType: "ADMIN",
+      actorId: actor.userId,
+      authorities: request.principal?.authorities ?? [],
+      ipAddress: request.ip ?? null,
+    },
+    holderContext: { holderType: "DISPUTE_ATTACHMENT", holderId: attachment.id },
+  });
+  response.setHeader("Content-Type", stored.detectedMimeType);
+  response.setHeader("Content-Disposition", `attachment; filename="${(stored.originalFilename ?? "evidence").replace(/["\r\n]/g, "_")}"`);
+  response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
+  response.setHeader("Cache-Control", "private, no-store");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.send(Buffer.from(stored.bytes));
+});
+
+router.delete("/disputes/:id/attachments/:attachmentId", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["dispute:write"]);
+  const { id, attachmentId } = parseOrThrow(
+    z.object({ id: z.string().min(1).max(64), attachmentId: z.string().min(1).max(64) }).strict(),
+    request.params,
+  );
+  const attachment = await client.disputeAttachment.findFirst({ where: { id: attachmentId, disputeId: id } });
+  if (!attachment) throw new ApiError(404, "DISPUTE_ATTACHMENT_NOT_FOUND", "The dispute attachment does not exist");
+  const actor = actorFromRequest(request);
+  await client.$transaction(async (tx) => {
+    await tx.disputeAttachment.delete({ where: { id: attachment.id } });
+    await getObjectStorageSdk().routeClient.release(tx as never, {
+      objectId: attachment.storageObjectId,
+      holderType: "DISPUTE_ATTACHMENT",
+      holderId: attachment.id,
+      actorId: actor.userId,
+      reason: "DISPUTE_ATTACHMENT_DELETED",
+    });
+  });
+  response.json({ id: attachment.id, deleted: true });
 });
 
 router.post("/disputes", async (request: Request, response: Response) => {
@@ -18422,15 +19037,34 @@ router.post("/aml/reports/:id/file", async (request: Request, response: Response
     if (output.payloadSha256 && output.payloadSha256 !== report.payloadSha256) throw new ApiError(409, "REPORT_OUTPUT_NOT_READY", `The ${format} output is stale`, { format, reason: "OUTPUT_STALE" });
   }
   const artifacts: FilingArtifact[] = [];
+  const filingActor = actorFromRequest(request);
   for (const output of report.outputs) {
     if (!(report.requiredOutputFormats ?? []).includes(output.format)) continue;
     const cipher = output.format === "XML" ? reportingXmlCipher : output.format === "DOCX" ? reportingDocxCipher : reportingXlsxCipher;
-    const content = await cipher.decrypt(output.contentCiphertext);
+    let content: Buffer;
+    if (output.storageObjectId) {
+      const stored = await getObjectStorageSdk().routeClient.readAuthorized({
+        objectId: output.storageObjectId,
+        actor: {
+          actorType: "ADMIN",
+          actorId: filingActor.userId,
+          authorities: request.principal?.authorities ?? [],
+          ipAddress: request.ip ?? null,
+        },
+        holderContext: { holderType: "REG_REPORT_OUTPUT", holderId: output.id },
+      });
+      content = Buffer.from(stored.bytes);
+    } else if (output.contentCiphertext) {
+      const decrypted = await cipher.decrypt(output.contentCiphertext);
+      content = output.format === "XML" ? Buffer.from(String(decrypted), "utf8") : Buffer.from(String(decrypted), "base64");
+    } else {
+      throw new ApiError(409, "REPORT_OUTPUT_NOT_READY", `The ${output.format} output has no content`, { format: output.format, reason: "NOT_GENERATED" });
+    }
     artifacts.push({
       format: output.format,
       filename: `report-${report.id}.${output.format === "XML" ? "xml" : output.format === "DOCX" ? "docx" : "xlsx"}`,
       contentType: output.format === "XML" ? "application/xml" : output.format === "DOCX" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      base64: output.format === "XML" ? Buffer.from(String(content)).toString("base64") : String(content),
+      base64: content.toString("base64"),
     });
   }
   const requestBody = {
@@ -18960,6 +19594,8 @@ router.post("/incidents/:id/report", async (request: Request, response: Response
   response.status(202).json(created);
 });
 
+
+router.use("/object-storage", objectStorageAdminRouter);
 
 export const adminInternalRouter = router;
 export { LedgerPoster };

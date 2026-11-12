@@ -57,6 +57,7 @@ import {
 } from "../middleware/authDoubleCheck";
 import { publishRealtimePos, subscribeRealtimeAttempt, subscribeRealtimePos } from "../../lib/realtimeBus";
 import { writeAudit } from "../../lib/audit/writeAudit";
+import { getObjectStorageSdk } from "../../lib/objectStorageSdk/runtime";
 import { env } from "../../lib/env";
 import { WebhookEndpointService } from "../../engine/webhooks/WebhookEndpointService";
 import { WEBHOOK_EVENT_TYPES, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_MS } from "../../engine/webhooks/events";
@@ -1168,7 +1169,6 @@ router.post("/onboarding/kyb-documents", async (request: Request, response: Resp
     .filter((entry) => entry.merchantId === merchantId)
     .map((entry) => entry.id);
   const sizeBytes = Number(request.headers["x-upload-size"] ?? raw.byteLength);
-  const storageKey = `kyb/${merchantId}/${sha256}`;
   const joinRequest = revalidation
     ? null
     : await client.joinRequest.findFirst({
@@ -1194,69 +1194,108 @@ router.post("/onboarding/kyb-documents", async (request: Request, response: Resp
   const expiresOn = typeof metadata.expiresAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(metadata.expiresAt)
     ? new Date(metadata.expiresAt)
     : null;
-  const document = await client.$transaction(async (tx) => {
-    const created = await tx.kybDocument.create({
-      data: {
+  const objectStorage = getObjectStorageSdk();
+  const document = await objectStorage.routeClient.withStagedUpload(
+    {
+      namespace: "KYB_DOCUMENTS",
+      data: raw,
+      originalFilename: originalFileName,
+      claimedMimeType: mime,
+      ownerMerchantId: merchantId,
+      actor: {
+        actorType: "MERCHANT_USER",
+        actorId: principal.userId ?? "merchant-upload",
         merchantId,
-        joinRequestId: joinRequest?.id ?? null,
-        subjectType: "MERCHANT",
-        subjectId: merchantId,
-        docType: docType as never,
-        storageKey,
-        originalFileName,
-        contentCiphertext: await vault.encryptSecret(raw.toString("base64"), "kyb-document"),
-        sha256,
-        mime,
-        sizeBytes,
-        avStatus,
-        status: avStatus === "INFECTED" ? "REJECTED" : "UPLOADED",
-        uploadedById: principal.userId ?? null,
-        expiresOn,
-        statusChangedAt: now,
+        authorities: principal.authorities ?? [],
+        ipAddress: clientIp(request),
       },
-    });
-    if (revalidation && avStatus !== "INFECTED") {
-      await tx.kybRevalidationRequest.update({
-        where: { id: revalidation.id },
-        data: {
-          status: "FULFILLED",
-          fulfilledAt: now,
-          fulfilledDocumentId: created.id,
-          resolutionNotes: originalFileName,
-        },
-      });
-      await tx.merchant.update({
-        where: { id: merchantId },
-        data: { kybStatus: "PENDING" },
-      });
-    }
-    const auditActorId = principal.userId
-      ?? (await tx.user.findFirst({
-        where: { merchantId, role: "MERCHANT_ADMIN" },
-        select: { id: true },
-      }))?.id;
-    if (auditActorId) {
-      await writeAudit(tx, {
-        data: {
-          actorId: auditActorId,
-          role: principal.role ?? "MERCHANT_ADMIN",
-          action: revalidation ? "KYB_REVALIDATION_DOCUMENT_UPLOADED" : "KYB_DOCUMENT_UPLOADED",
-          entityType: "KYB_DOCUMENT",
-          entityId: created.id,
-          beforeJson: {},
-          afterJson: {
+      metadata: { merchantId, docType, revalidationRequestId: revalidation?.id ?? null },
+    },
+    async (staged) => {
+      const created = await client.$transaction(async (tx) => {
+        const row = await tx.kybDocument.create({
+          data: {
             merchantId,
-            docType,
-            sha256,
+            joinRequestId: joinRequest?.id ?? null,
+            subjectType: "MERCHANT",
+            subjectId: merchantId,
+            docType: docType as never,
+            storageKey: staged.storageKey,
+            originalFileName,
+            storageObjectId: staged.objectId,
+            sha256: staged.sha256Hex,
+            mime: staged.detectedMimeType,
+            sizeBytes: Number(staged.byteSize),
             avStatus,
-            revalidationRequestId: revalidation?.id ?? null,
-            duplicateDocuments: existingDocument.map((entry) => entry.id),
+            status: avStatus === "INFECTED" ? "REJECTED" : "UPLOADED",
+            uploadedById: principal.userId ?? null,
+            expiresOn,
+            statusChangedAt: now,
           },
-        },
+        });
+        await objectStorage.routeClient.bind(tx as never, {
+          objectId: staged.objectId,
+          holderType: "KYB_DOCUMENT",
+          holderId: row.id,
+          actorId: principal.userId ?? "merchant-upload",
+          reason: revalidation ? "KYB_REVALIDATION_DOCUMENT_UPLOAD" : "KYB_DOCUMENT_UPLOAD",
+          // KYB documents always wait for the AV worker unless the upload
+          // gate itself already found active content (then they are rejected).
+          autoPromoteIfNoAvRequired: false,
+        });
+        if (revalidation && avStatus !== "INFECTED") {
+          await tx.kybRevalidationRequest.update({
+            where: { id: revalidation.id },
+            data: {
+              status: "FULFILLED",
+              fulfilledAt: now,
+              fulfilledDocumentId: row.id,
+              resolutionNotes: originalFileName,
+            },
+          });
+          await tx.merchant.update({
+            where: { id: merchantId },
+            data: { kybStatus: "PENDING" },
+          });
+        }
+        const auditActorId = principal.userId
+          ?? (await tx.user.findFirst({
+            where: { merchantId, role: "MERCHANT_ADMIN" },
+            select: { id: true },
+          }))?.id;
+        if (auditActorId) {
+          await writeAudit(tx, {
+            data: {
+              actorId: auditActorId,
+              role: principal.role ?? "MERCHANT_ADMIN",
+              action: revalidation ? "KYB_REVALIDATION_DOCUMENT_UPLOADED" : "KYB_DOCUMENT_UPLOADED",
+              entityType: "KYB_DOCUMENT",
+              entityId: row.id,
+              beforeJson: {},
+              afterJson: {
+                merchantId,
+                docType,
+                sha256: staged.sha256Hex,
+                avStatus,
+                revalidationRequestId: revalidation?.id ?? null,
+                duplicateDocuments: existingDocument.map((entry) => entry.id),
+              },
+            },
+          });
+        }
+        return row;
       });
-    }
-    return created;
-  });
+      return created;
+    },
+  );
+  if (avStatus === "INFECTED") {
+    // The upload-time content gate already rejected it: release the domain
+    // lock and quarantine the object immediately instead of leaving it
+    // PENDING until a scanner examines bytes that are known to be unsafe.
+    await objectStorage.workerClient
+      .applyScanVerdict({ objectId: document.storageObjectId!, verdict: "INFECTED", signature: "ACTIVE_CONTENT_AT_UPLOAD" })
+      .catch(() => undefined);
+  }
   if (joinRequest) {
     const merchant = await client.merchant.findUnique({ where: { id: merchantId } });
     const owners = await client.beneficialOwner.findMany({
@@ -2031,6 +2070,158 @@ router.post("/disputes/:id/evidence", async (request: Request, response: Respons
     throw new ApiError(409, "DISPUTE_NOT_ACCEPTING_EVIDENCE", "The dispute is not accepting evidence");
   }
   response.json({ id: dispute.id, status: "EVIDENCE_SUBMITTED" });
+});
+
+const disputeAttachmentRow = (row: Record<string, any>) => ({
+  id: row.id,
+  disputeId: row.disputeId,
+  label: row.label,
+  uploadedById: row.uploadedById,
+  createdAt: row.createdAt,
+  fileName: row.storageObject?.originalFilename ?? null,
+  mimeType: row.storageObject?.detectedMimeType ?? null,
+  byteSize: row.storageObject?.byteSize?.toString?.() ?? null,
+  sha256: row.storageObject?.sha256Hex ?? null,
+  status: row.storageObject?.status ?? null,
+  avScanStatus: row.storageObject?.avScanStatus ?? null,
+});
+
+router.get("/disputes/:id/attachments", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["payment:read", "dispute:respond"]);
+  const merchantId = merchantIdOf(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const dispute = await client.dispute.findFirst({ where: { id, attempt: { merchantId } } });
+  if (!dispute) throw new ApiError(404, "DISPUTE_NOT_FOUND", "The dispute does not exist");
+  const attachments = await client.disputeAttachment.findMany({
+    where: { disputeId: id, merchantId },
+    orderBy: { createdAt: "desc" },
+    include: { storageObject: true },
+  });
+  response.json({ attachments: attachments.map(disputeAttachmentRow) });
+});
+
+router.post("/disputes/:id/attachments", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["dispute:respond"]);
+  const merchantId = merchantIdOf(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const dispute = await client.dispute.findFirst({
+    where: { id, attempt: { merchantId, ...(appScopeOf(request) ? { applicationId: { in: [...appScopeOf(request)!] } } : {}) } },
+  });
+  if (!dispute) throw new ApiError(404, "DISPUTE_NOT_FOUND", "The dispute does not exist");
+  const raw = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+  if (raw.byteLength === 0) throw new ApiError(400, "UPLOAD_REQUIRED", "An evidence file is required");
+  let metadata: Record<string, unknown> = {};
+  const metadataHeader = request.headers["x-upload-metadata"];
+  if (typeof metadataHeader === "string") {
+    try {
+      metadata = JSON.parse(Buffer.from(metadataHeader, "base64url").toString("utf8")) as Record<string, unknown>;
+    } catch {
+      throw new ApiError(400, "UPLOAD_METADATA_INVALID", "The upload metadata is not valid JSON");
+    }
+  }
+  const fileName = typeof request.headers["x-upload-filename"] === "string"
+    ? decodeURIComponent(String(request.headers["x-upload-filename"]))
+    : "evidence";
+  const label = String(metadata.label ?? fileName).slice(0, 255);
+  const objectStorage = getObjectStorageSdk();
+  const attachment = await objectStorage.routeClient.withStagedUpload(
+    {
+      namespace: "DISPUTE_EVIDENCE",
+      data: raw,
+      originalFilename: fileName,
+      claimedMimeType: typeof request.headers["x-upload-content-type"] === "string"
+        ? String(request.headers["x-upload-content-type"])
+        : null,
+      ownerMerchantId: merchantId,
+      actor: {
+        actorType: "MERCHANT_USER",
+        actorId: principal.userId ?? merchantId,
+        merchantId,
+        authorities: [...(principal.authorities ?? []), "disputes:read"],
+        ipAddress: clientIp(request),
+      },
+      metadata: { disputeId: dispute.id, label },
+    },
+    async (staged) => client.$transaction(async (tx) => {
+      const row = await tx.disputeAttachment.create({
+        data: {
+          disputeId: dispute.id,
+          merchantId,
+          storageObjectId: staged.objectId,
+          label,
+          uploadedById: principal.userId ?? merchantId,
+        },
+        include: { storageObject: true },
+      });
+      await objectStorage.routeClient.bind(tx as never, {
+        objectId: staged.objectId,
+        holderType: "DISPUTE_ATTACHMENT",
+        holderId: row.id,
+        actorId: principal.userId ?? merchantId,
+        reason: "DISPUTE_EVIDENCE_UPLOAD",
+        autoPromoteIfNoAvRequired: false,
+      });
+      return row;
+    }),
+  );
+  response.status(201).json({ attachment: disputeAttachmentRow(attachment as never) });
+});
+
+router.get("/disputes/:id/attachments/:attachmentId/content", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["payment:read", "dispute:respond"]);
+  const merchantId = merchantIdOf(request);
+  const { id, attachmentId } = parseOrThrow(
+    z.object({ id: z.string().min(1).max(64), attachmentId: z.string().min(1).max(64) }).strict(),
+    request.params,
+  );
+  const attachment = await client.disputeAttachment.findFirst({
+    where: { id: attachmentId, disputeId: id, merchantId },
+  });
+  if (!attachment) throw new ApiError(404, "DISPUTE_ATTACHMENT_NOT_FOUND", "The dispute attachment does not exist");
+  const stored = await getObjectStorageSdk().routeClient.readAuthorized({
+    objectId: attachment.storageObjectId,
+    actor: {
+      actorType: "MERCHANT_USER",
+      actorId: principal.userId ?? merchantId,
+      merchantId,
+      authorities: [...(principal.authorities ?? []), "disputes:read"],
+      ipAddress: clientIp(request),
+    },
+    holderContext: { holderType: "DISPUTE_ATTACHMENT", holderId: attachment.id },
+  });
+  response.setHeader("Content-Type", stored.detectedMimeType);
+  response.setHeader("Content-Disposition", `attachment; filename="${(stored.originalFilename ?? "evidence").replace(/["\r\n]/g, "_")}"`);
+  response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
+  response.setHeader("Cache-Control", "private, no-store");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.send(Buffer.from(stored.bytes));
+});
+
+router.delete("/disputes/:id/attachments/:attachmentId", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["dispute:respond"]);
+  const merchantId = merchantIdOf(request);
+  const { id, attachmentId } = parseOrThrow(
+    z.object({ id: z.string().min(1).max(64), attachmentId: z.string().min(1).max(64) }).strict(),
+    request.params,
+  );
+  const attachment = await client.disputeAttachment.findFirst({
+    where: { id: attachmentId, disputeId: id, merchantId },
+  });
+  if (!attachment) throw new ApiError(404, "DISPUTE_ATTACHMENT_NOT_FOUND", "The dispute attachment does not exist");
+  await client.$transaction(async (tx) => {
+    await tx.disputeAttachment.delete({ where: { id: attachment.id } });
+    await getObjectStorageSdk().routeClient.release(tx as never, {
+      objectId: attachment.storageObjectId,
+      holderType: "DISPUTE_ATTACHMENT",
+      holderId: attachment.id,
+      actorId: principal.userId ?? merchantId,
+      reason: "DISPUTE_ATTACHMENT_DELETED",
+    });
+  });
+  response.json({ id: attachment.id, deleted: true });
 });
 
 router.get("/cashouts", async (request: Request, response: Response) => {

@@ -217,6 +217,7 @@ async function storeMerchantAssets(params: {
       merchantId: params.merchantId,
       bundleSha256,
       storageKey: storage.bundleStorageKey,
+      storageObjectId: storage.storageObjectId ?? null,
       totalBytes: files.reduce((sum, file) => sum + file.buffer.byteLength, 0),
       fileCount: files.length,
       manifestJson: files.map((file) => ({

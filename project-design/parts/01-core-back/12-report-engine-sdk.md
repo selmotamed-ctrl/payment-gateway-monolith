@@ -361,3 +361,16 @@ When changing the report engine:
 4. Regenerate or add transcript snapshots under a new version label; never overwrite a released snapshot.
 5. Update `report-spec-generator/src/base/MANIFEST.json`, `CHANGELOG.md` and the migration prompt library; refresh the eval corpus and record transcript version/hash.
 6. Update this part, the admin/merchant report docs, testing catalog and `TRACKER.md`; run the project-design gate.
+
+## 17. Shared object storage for report assets and outputs
+
+Report Studio bundles are stored as one encrypted `application/zip` object in the
+`REPORT_STUDIO_ASSETS` namespace (`ReportAssetBundle.storageObjectId` /
+`MerchantReportAssetBundle.storageObjectId`, `REPORT_ASSET_ENTRY` lock).
+Rendering extracts the requested file in memory (`ObjectStorageReportAssetStorage`);
+the local `.report-assets` driver remains only as a fallback for pre-v36 rows and
+tests. Regulatory XLSX templates (`RegulatoryReportSchema.templateObjectId`) and
+generated XML/XLSX/DOCX outputs (`RegulatoryReportOutput.storageObjectId`,
+`REG_REPORT_OUTPUT` lock) are stored in `REGULATORY_REPORTS`; new writes stop
+writing `contentCiphertext`/`templateCiphertext` and all readers prefer the
+storage object. The full engine is `parts/01-core-back/13-object-storage.md`.

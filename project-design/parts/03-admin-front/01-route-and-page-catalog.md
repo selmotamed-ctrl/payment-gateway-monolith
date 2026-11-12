@@ -323,3 +323,12 @@ All three routes are gated by `aml.read_confidential` at the edge/UI; writes are
 - `Incidents` now uses the shared `ApiTable`/`TableRowActions` surface with server pagination, search, status/severity/category filters, correct server summary metrics, row actions, refresh and confidential badge. The detail drawer resets transient state, preserves the active tab on refresh, supports editing incident facts, commander/reporter names, affected merchant/attempt IDs, regulator notification, link removal, responder acknowledgement/release, full action status changes, communication bodies, postmortem due date and a link to the drafted report.
 - `FilingAdapters` uses the shared table surface and exposes edit, re-enable/disable approval requests, secret-present state, endpoint display, confirmation and maker-checker messaging. The create/edit form never sends a blank secret (so an existing secret is kept).
 - `AmlReports` filters include INCIDENT, the generic draft dialog no longer offers INCIDENT, and the drawer shows `filingChannel`, external submission history, adapter filing confirmation and reset-safe adapter selection. `AmlReportingStudio` labels DOCX correctly, preserves template analysis after upload, and offers analyze/download/remove plus narrative, total and prototype-row mappings.
+
+## Object & Asset Storage route
+
+| Route | Name | Page | Authorities |
+| :--- | :--- | :--- | :--- |
+| `/system/object-storage` | `SystemObjectStorage` | `pages/system/object-storage/index.tsx` | `system:storage:read`, `system:storage:admin`, `system:storage:legal-hold` |
+
+The nav entry is under System ("Object & Asset Storage") and the route-authority
+aliases normalize the colon names to `system.storage` for the UI guard.

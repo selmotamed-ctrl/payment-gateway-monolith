@@ -212,6 +212,10 @@ const FACTORY_DEFAULTS: Record<string, Record<string, unknown>> = {
   journal_lines: { shard_id: 0, shard_seq: 1 },
   // The CHECK constraints of the append-only repair history accept only these values.
   gl_shard_repairs: { kind: "RECOMPUTE", mode: "AUTO" },
+  // Satisfy CHECK (byte_size > 0), CHECK (chunk_size_bytes >= 4096), CHECK (chunk_count >= 1)
+  storage_objects: { byte_size: 1024, chunk_size_bytes: 65536, chunk_count: 1 },
+  // Satisfy CHECK (byte_size > 0) on the report asset entries.
+  report_asset_bundle_entries: { byte_size: 1 },
 };
 
 export const buildRow = async (

@@ -165,6 +165,7 @@ describeDb("scheduled regulatory returns (live PostgreSQL)", () => {
 
   test("the monthly payload counts the period's own data and nothing outside it", async () => {
     const returnCode = code("TDATA");
+    const currency = Array.from({ length: 3 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join("");
     const ruleId = await rule({ returnCode, period: "MONTHLY", dueDays: 10 });
     const catalog = await createAutomationCatalog(client, { label: "regrep" });
     created.catalogs.push(catalog);
@@ -174,16 +175,20 @@ describeDb("scheduled regulatory returns (live PostgreSQL)", () => {
     await catalog.newAttempt({ status: "FAILED", amount: "10.0000", createdAt: inside });
     await catalog.newAttempt({ status: "SUCCEEDED", amount: "999.0000", createdAt: outside });
     expect(a.id).toBeTruthy();
+    // Regulatory returns cover LIVE attempts only; the catalog creates SANDBOX
+    // fixtures, so mark this merchant's attempts live for the return.
+    await client.$executeRawUnsafe(`UPDATE payment_attempts SET env = 'LIVE', currency = $2 WHERE merchant_id = $1::uuid`, catalog.merchantId, currency);
     await worker([ruleId], NOW, { maxPeriods: 1 }).runOnce();
     const payload = payloadOf((await reportsOf(returnCode))[0]!);
-    const mine = (payload.sections.paymentsByRail as Array<Record<string, any>>).filter((row) => row.currency === "LYD");
+    const mine = (payload.sections.paymentsByRail as Array<Record<string, any>>).filter((row) => row.currency === currency);
     const total = mine.reduce((sum, row) => sum + row.attempts, 0);
     expect(total).toBeGreaterThanOrEqual(2);
     const succeededValue = mine.reduce((sum, row) => sum + Number(row.valueSucceeded), 0);
     expect(succeededValue).toBeGreaterThanOrEqual(120.5);
     // the September attempt (999.00) is not in October's return: its value is not part of this month's total unless another suite's attempts are
     const only = await client.$queryRawUnsafe<Array<{ amount: string }>>(
-      `SELECT coalesce(sum(requested_amount), 0)::text AS amount FROM payment_attempts WHERE created_at >= '2026-09-30T22:00:00Z' AND created_at < '2026-10-31T22:00:00Z' AND status = 'SUCCEEDED' AND currency = 'LYD'`,
+      `SELECT coalesce(sum(requested_amount), 0)::text AS amount FROM payment_attempts WHERE created_at >= '2026-09-30T22:00:00Z' AND created_at < '2026-10-31T22:00:00Z' AND status = 'SUCCEEDED' AND currency = $1`,
+      currency,
     );
     expect(succeededValue).toBeCloseTo(Number(only[0]!.amount), 2);
   });
@@ -219,7 +224,7 @@ describeDb("large-transaction batches (live PostgreSQL)", () => {
     created.catalogs.push(catalog);
     for (const [status, amount, at] of amounts) {
       const attempt = await catalog.newAttempt({ status, amount, createdAt: at });
-      await client.$executeRawUnsafe(`UPDATE payment_attempts SET currency = $2 WHERE id = $1::uuid`, attempt.id, currency);
+      await client.$executeRawUnsafe(`UPDATE payment_attempts SET currency = $2, env = 'LIVE' WHERE id = $1::uuid`, attempt.id, currency);
     }
     return catalog;
   };

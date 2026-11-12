@@ -4,6 +4,7 @@ import {
   applicationCredentials,
   effectiveDatabase,
   leaderElectionDatabaseUrl,
+  objectStorageConfigured,
   parseNodeList,
   pgStorageConfigured,
   withIpv6Loopback,
@@ -23,7 +24,7 @@ import {
 
 export type ServiceName = string;
 export type NginxSiteName = "admin-lan" | "merchant-public" | "checkout-public" | "merchant-lan" | "checkout-lan" | "fake-rails";
-export type CertBundle = "core-server" | "admin-client" | "merchant-client" | "checkout-client" | "fake-rails-server" | "backup-server" | "backup-client" | "wal-archive-client" | "pg-client" | "redis-client" | "audit-db-client" | "log-db-client";
+export type CertBundle = "core-server" | "admin-client" | "merchant-client" | "checkout-client" | "fake-rails-server" | "backup-server" | "backup-client" | "wal-archive-client" | "pg-client" | "redis-client" | "audit-db-client" | "log-db-client" | "object-storage-server" | "object-storage-client";
 
 export interface SshTarget {
   host: string;
@@ -115,6 +116,7 @@ export interface StoragePlan {
   auditDb: StorageNodePlan | null;
   logDb: StorageNodePlan | null;
   backup: StorageNodePlan | null;
+  objectStorage: StorageNodePlan | null;
   "pg-primary": StorageNodePlan | null;
   "pg-replica": StorageNodePlan[];
   pgbouncer: StorageNodePlan[];
@@ -177,6 +179,7 @@ const ROLE_ORDER: Record<HostRole, number> = {
   "audit-db": 1,
   "log-db": 1,
   backup: 1,
+  "object-storage": 1,
   core: 2,
   "fake-rails": 3,
   admin: 4,
@@ -198,6 +201,7 @@ const ROLE_LABEL: Record<HostRole, string> = {
   "audit-db": "audit database",
   "log-db": "log database",
   backup: "backup daemon",
+  "object-storage": "shared object storage daemon",
 };
 
 const sshKey = (ssh: { host: string; port: number }): string => `${ssh.host}:${ssh.port}`;
@@ -243,6 +247,44 @@ const allEdgePrivateIps = (config: DeployConfig): string[] => {
 
 const backupPrivateIp = (config: DeployConfig): string | null =>
   parseNodeList(config.BACKUP_NODE)[0]?.privateIp ?? null;
+
+const objectStorageSpec = (config: DeployConfig): NodeSpec | null =>
+  parseNodeList(config.OBJECT_STORAGE_NODE)[0] ?? null;
+
+const objectStoragePrivateIp = (config: DeployConfig): string | null =>
+  objectStorageSpec(config)?.privateIp ?? null;
+
+const objectStoragePort = (config: DeployConfig): number =>
+  objectStorageSpec(config)?.servicePort ?? config.OBJECT_STORAGE_DAEMON_PORT;
+
+/**
+ * core-back's object-storage-daemon client settings and cryptographic keyring.
+ * Relative `shared/certs/...` paths are rewritten to `${remote}/shared/certs/...`
+ * by `absoluteEnv()` in `deploy.ts`, matching `backupCoreEnv()`.
+ */
+export const objectStorageCoreEnv = (config: DeployConfig): Record<string, string> => {
+  const coreNodeCount = Math.max(1, parseNodeList(config.CORE_NODES).length);
+  const base: Record<string, string> = {
+    CLUSTER_CORE_NODE_COUNT: String(coreNodeCount),
+    OBJECT_STORAGE_ROOT_DIR: config.OBJECT_STORAGE_ROOT_DIR,
+    ...(config.OBJECT_STORAGE_KEK_KEYRING
+      ? { OBJECT_STORAGE_KEK_KEYRING: config.OBJECT_STORAGE_KEK_KEYRING }
+      : {}),
+    OBJECT_STORAGE_ACTIVE_KEK_VERSION: String(config.OBJECT_STORAGE_ACTIVE_KEK_VERSION),
+    OBJECT_STORAGE_TRASH_RETENTION_DAYS: String(config.OBJECT_STORAGE_TRASH_RETENTION_DAYS),
+    OBJECT_STORAGE_GC_GRACE_HOURS: String(config.OBJECT_STORAGE_GC_GRACE_HOURS),
+  };
+  if (!objectStorageConfigured(config)) return base;
+  const scheme = config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP ? "http" : "https";
+  return {
+    ...base,
+    OBJECT_STORAGE_DAEMON_URL: `${scheme}://${objectStoragePrivateIp(config) ?? "127.0.0.1"}:${objectStoragePort(config)}`,
+    OBJECT_STORAGE_TLS_CA_PATH: "shared/certs/internal-ca.crt",
+    OBJECT_STORAGE_TLS_CLIENT_CERT_PATH: "shared/certs/object-storage-client.crt",
+    OBJECT_STORAGE_TLS_CLIENT_KEY_PATH: "shared/certs/object-storage-client.key",
+    OBJECT_STORAGE_DAEMON_TIMEOUT_MS: String(config.OBJECT_STORAGE_DAEMON_TIMEOUT_MS),
+  };
+};
 
 /**
  * core-back's backup-daemon client settings. Independent of the PostgreSQL
@@ -346,6 +388,7 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
       ? { LEADER_ELECTION_DATABASE_URL: config.LEADER_ELECTION_DATABASE_URL }
       : {}),
     ...backupCoreEnv(config),
+    ...objectStorageCoreEnv(config),
     FAKE_RAILS_ENABLED: config.FAKE_RAILS_ENABLED ? "true" : "false",
     FAKE_RAILS_ALLOW_IN_PRODUCTION: config.FAKE_RAILS_ALLOW_IN_PRODUCTION ? "true" : "false",
     IS_TEST_SERVER: config.IS_TEST_SERVER ? "true" : "false",
@@ -673,6 +716,7 @@ const buildCertBundles = (role: HostRole, config?: DeployConfig): CertBundle[] =
   // backup-client (core-back -> backup daemon) must reach core whenever backups
   // are on, also when the database itself is externally managed (DB_*).
   if (config?.BACKUP_ENABLED) storageCerts.push("backup-client");
+  if (config && objectStorageConfigured(config)) storageCerts.push("object-storage-client");
   // Least privilege: only the hosts whose PostgreSQL archives WAL get the WAL ingest client.
   const walCerts: CertBundle[] = config?.BACKUP_ENABLED ? ["wal-archive-client"] : [];
   switch (role) {
@@ -687,7 +731,14 @@ const buildCertBundles = (role: HostRole, config?: DeployConfig): CertBundle[] =
     case "fake-rails":
       return ["fake-rails-server"];
     case "backup":
-      return ["backup-server", "backup-client", "pg-client"];
+      return [
+        "backup-server",
+        "backup-client",
+        "pg-client",
+        ...(config && objectStorageConfigured(config) ? ["object-storage-client" as const] : []),
+      ];
+    case "object-storage":
+      return ["object-storage-server", "object-storage-client"];
     case "pg-primary":
       return ["pg-client", ...walCerts];
     case "pg-replica":
@@ -752,7 +803,18 @@ const buildStoragePlan = (config: DeployConfig): StoragePlan => {
   const auditDb = auditSpec ? storageNode({ config, role: "audit-db", spec: auditSpec, user: config.AUDIT_DB_SSH_USER, keyPath: config.AUDIT_DB_SSH_KEY_PATH, sudoPassword: config.AUDIT_DB_SUDO_PASSWORD }) : null;
   const logDb = logSpec ? storageNode({ config, role: "log-db", spec: logSpec, user: config.LOG_DB_SSH_USER, keyPath: config.LOG_DB_SSH_KEY_PATH, sudoPassword: config.LOG_DB_SUDO_PASSWORD }) : null;
   const backup = backupSpec ? storageNode({ config, role: "backup", spec: backupSpec, user: config.BACKUP_SSH_USER, keyPath: config.BACKUP_SSH_KEY_PATH, sudoPassword: config.BACKUP_SUDO_PASSWORD }) : null;
-  const nodes = [pgPrimary, ...pgReplicas, ...pgbouncer, ...redis, auditDb, logDb, backup].filter((node): node is StorageNodePlan => node !== null);
+  const objectStorageSpecValue = parseSingleNode(config.OBJECT_STORAGE_NODE, "OBJECT_STORAGE_NODE");
+  const objectStorage = objectStorageSpecValue
+    ? storageNode({
+        config,
+        role: "object-storage",
+        spec: objectStorageSpecValue,
+        user: config.OBJECT_STORAGE_SSH_USER,
+        keyPath: config.OBJECT_STORAGE_SSH_KEY_PATH,
+        sudoPassword: config.OBJECT_STORAGE_SUDO_PASSWORD,
+      })
+    : null;
+  const nodes = [pgPrimary, ...pgReplicas, ...pgbouncer, ...redis, auditDb, logDb, backup, objectStorage].filter((node): node is StorageNodePlan => node !== null);
   return {
     nodes,
     postgres: { primary: pgPrimary, replicas: pgReplicas, pgbouncer, version: config.PG_VERSION },
@@ -760,6 +822,7 @@ const buildStoragePlan = (config: DeployConfig): StoragePlan => {
     auditDb,
     logDb,
     backup,
+    objectStorage,
     "pg-primary": pgPrimary,
     "pg-replica": pgReplicas,
     pgbouncer,
@@ -914,6 +977,16 @@ const buildStorageFirewall = (config: DeployConfig, node: StorageNodePlan, allSt
           ...(allStorage.auditDb ? [allStorage.auditDb.privateIp] : []),
         ])], comment: "backup-daemon mTLS from core nodes + WAL archive push from PostgreSQL hosts" },
       ];
+    case "object-storage":
+      return [
+        sshRule,
+        {
+          port: node.servicePort || config.OBJECT_STORAGE_DAEMON_PORT,
+          proto: "tcp",
+          fromCidrs: [...new Set([...coreIps, ...(backupIp ? [backupIp] : [])])],
+          comment: "object-storage-daemon mTLS from core + backup nodes",
+        },
+      ];
     default:
       return [sshRule];
   }
@@ -967,6 +1040,7 @@ const storageTargets = (config: DeployConfig, storage: StoragePlan): RoleTarget[
     [storage.auditDb, config.AUDIT_DB_MANAGE_VIA_SSH],
     [storage.logDb, config.LOG_DB_MANAGE_VIA_SSH],
     [storage.backup, config.BACKUP_ENABLED],
+    [storage.objectStorage, objectStorageConfigured(config)],
   ];
   const seen = new Set<string>();
   for (const [node, enabled] of managed) {
@@ -1081,7 +1155,7 @@ export const planHosts = (config: DeployConfig): DeployPlan => {
   const roles = {} as Record<DeployRole, string>;
   for (const host of hosts) {
     for (const role of host.roles) {
-      if (role === "pg-primary" || role === "pg-replica" || role === "pgbouncer" || role === "redis" || role === "audit-db" || role === "log-db" || role === "backup") continue;
+      if (role === "pg-primary" || role === "pg-replica" || role === "pgbouncer" || role === "redis" || role === "audit-db" || role === "log-db" || role === "backup" || role === "object-storage") continue;
       if (!roles[role]) roles[role] = host.ssh.host;
     }
   }

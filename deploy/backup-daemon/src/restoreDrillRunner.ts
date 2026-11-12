@@ -4,7 +4,9 @@ import { join } from "node:path";
 import type { BackupEngine, RecoverResult } from "./backupEngine";
 import { buildPsqlCommand } from "./backupEngine";
 import type { CommandResult, CommandRunner } from "./commandRunner";
-import { auditEndpoint, collectSecretValues, isAuditDedicatedCluster, redactText, type BackupDaemonConfig } from "./config";
+import { auditEndpoint, collectSecretValues, isAuditDedicatedCluster, objectStorageBackupConfigured, redactText, type BackupDaemonConfig } from "./config";
+import { runObjectStorageDrill } from "./objectStorageBackup";
+import type { ArtifactRepository } from "./artifactStore";
 
 export interface DrillCheckResult {
   ok: boolean;
@@ -27,6 +29,7 @@ export interface DrillReport {
     doubleEntry: DrillCheckResult;
     balanceParity: DrillCheckResult;
     auditChain: DrillCheckResult;
+    objectStorage?: DrillCheckResult;
   };
   errorMessage?: string;
   reportSignature?: string;
@@ -671,6 +674,29 @@ export class RestoreDrillRunner {
         }
       }
 
+      if (objectStorageBackupConfigured(config)) {
+        const repository = (this.deps.engine as { repo?: ArtifactRepository }).repo;
+        if (!repository) {
+          checks.objectStorage = {
+            ok: false,
+            detail: "the backup engine does not expose its artifact repository for the object-storage drill",
+          };
+        } else {
+          try {
+            const objectStorage = await runObjectStorageDrill({
+              config,
+              repository,
+              query: (sql) => psql(sql, config.PG_PRIMARY_DB_NAME, "postgres_core"),
+            });
+            checks.objectStorage = objectStorage
+              ? { ok: objectStorage.ok, detail: objectStorage.detail }
+              : { ok: true, detail: "object storage is not configured" };
+          } catch (error) {
+            checks.objectStorage = { ok: false, detail: `object storage drill failed: ${safeError(error, config)}` };
+          }
+        }
+      }
+
       if (!replayedLsn) {
         const lsnResult = await psql(REPLAYED_LSN_QUERY, config.PG_PRIMARY_DB_NAME, "postgres_core");
         if (lsnResult.code === 0) replayedLsn = lsnResult.stdout.trim();
@@ -692,7 +718,10 @@ export class RestoreDrillRunner {
 
     const completedAtDate = this.clock();
     const checksPassed =
-      checks.doubleEntry.ok && checks.balanceParity.ok && checks.auditChain.ok;
+      checks.doubleEntry.ok
+      && checks.balanceParity.ok
+      && checks.auditChain.ok
+      && (checks.objectStorage?.ok ?? true);
     const status: DrillReport["status"] = errorMessage === undefined && checksPassed ? "PASSED" : "FAILED";
     const report: DrillReport = {
       id,

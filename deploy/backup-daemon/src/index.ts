@@ -11,6 +11,7 @@ import { JobQueue } from "./jobQueue";
 import { PgNativeEngine } from "./pgNativeEngine";
 import { buildRepository } from "./repository";
 import { RestoreDrillRunner } from "./restoreDrillRunner";
+import { syncObjectStorageBackup } from "./objectStorageBackup";
 import { BackupScheduler } from "./scheduler";
 import { restoreJobState } from "./startup";
 import { startBackupDaemonServer } from "./server";
@@ -73,9 +74,19 @@ const main = async (): Promise<void> => {
   if (restored.interrupted.length > 0) {
     console.warn(`[pg-backup-daemon] marked ${restored.interrupted.length} interrupted run(s) FAILED after the restart`);
   }
+  const syncObjectStorage = async (): Promise<string[]> => {
+    if (!repository) return [];
+    const result = await syncObjectStorageBackup({ config, repository, runner, logger });
+    if (!result.enabled) return [];
+    console.log(
+      `[pg-backup-daemon] object storage: copied ${result.copiedBlobs}/${result.scannedBlobs} blob(s), ` +
+        `${result.activeObjects} ACTIVE object(s), KEK escrow written`,
+    );
+    return ["object-storage"];
+  };
   const drillRunner = new RestoreDrillRunner({ config, engine, runner });
-  const scheduler = new BackupScheduler({ config, engine, drillRunner, catalog, jobs });
-  const server = await startBackupDaemonServer({ config, engine, drillRunner, catalog, scheduler, jobs, logger });
+  const scheduler = new BackupScheduler({ config, engine, drillRunner, catalog, jobs, syncObjectStorage });
+  const server = await startBackupDaemonServer({ config, engine, drillRunner, catalog, scheduler, jobs, logger, syncObjectStorage });
   await engine.start?.();
   if (config.SCHEDULER_ENABLED) scheduler.start();
 

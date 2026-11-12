@@ -165,7 +165,7 @@ export interface ReportAssetStoragePort {
       sha256: string;
       buffer: Buffer;
     }>;
-  }): Promise<{ bundleStorageKey: string }>;
+  }): Promise<{ bundleStorageKey: string; storageObjectId?: string }>;
 
   getAssetBuffer(params: {
     bundleId: string;

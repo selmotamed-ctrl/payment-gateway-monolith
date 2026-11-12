@@ -2,7 +2,7 @@ import type { ReportEngineHostConfig } from "../../lib/reportEngineSdk/types/hos
 import { PostgresReadOnlyReportExecutor } from "../../lib/reportEngineSdk/runtime/PostgresReadOnlyExecutor";
 import { buildPaymentGatewayAutocompleteProviders } from "./autocompleteProviders";
 import { buildSchemaCatalog } from "./schemaCatalog";
-import { LocalReportAssetStorage } from "./assetStorage";
+import { ObjectStorageReportAssetStorage } from "./assetStorage";
 import { env } from "../../lib/env";
 import { REPORT_ENGINE_VERSION } from "../../lib/reportEngineSdk/version";
 
@@ -31,7 +31,7 @@ export function createPaymentGatewayReportHostConfig(deps: {
     servedBy,
   });
   const catalog = buildSchemaCatalog();
-  const assetStoragePort = deps.assetStoragePort ?? new LocalReportAssetStorage();
+  const assetStoragePort = deps.assetStoragePort ?? new ObjectStorageReportAssetStorage();
 
   return {
     engineVersion: REPORT_ENGINE_VERSION,

@@ -1,6 +1,6 @@
 {
   "contentVersion": "1.0.0",
-  "contentHash": "5702a80cc0cae8650606fa2f6d670d973c851c11f73478a06388e7823cde4043",
+  "contentHash": "82d06e5520be414f8bfe552386296317e512880a2eaec57dd60240f8c8b89369",
   "blueprints": [
     {
       "id": "exam-foundation",
@@ -7358,6 +7358,39 @@
         }
       ],
       "why": "Only one backup or drill job runs at a time; extra requests wait in order, and a repeated request with the same Idempotency-Key is not run twice."
+    },
+    {
+      "id": "q-m10-118",
+      "module": "m10",
+      "type": "single",
+      "difficulty": 2,
+      "critical": true,
+      "tracks": [
+        "GATEWAY_ADMIN",
+        "SECURITY_ADMIN"
+      ],
+      "refs": [
+        "b12-12"
+      ],
+      "stem": "An asset in `storage_objects` has two active locks (`CATALOG_ASSET` and `RAIL_LOGO`). If the catalog entry is released while the payment rail still uses the logo, can the object be purged?",
+      "options": [
+        {
+          "id": "o1",
+          "text": "No; `storage_objects_guard_trg` forbids transitioning to `PURGED` while any active lock (`released_at IS NULL`) remains.",
+          "correct": true
+        },
+        {
+          "id": "o2",
+          "text": "Yes; releasing the first lock deletes the file from disk immediately.",
+          "correct": false
+        },
+        {
+          "id": "o3",
+          "text": "Yes, if an administrator passes a PostgreSQL session GUC override.",
+          "correct": false
+        }
+      ],
+      "why": "There are no GUC backdoors, and an object cannot be purged until active locks reach zero, `legal_hold` is false, and `retain_until` has expired."
     }
   ]
 }

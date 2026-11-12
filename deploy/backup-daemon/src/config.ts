@@ -125,6 +125,17 @@ export const backupDaemonEnvSchema = z
     SCHEDULER_TICK_MS: z.coerce.number().int().positive().default(30_000),
     REDIS_URL: optionalNonEmpty,
     REDIS_CLI_BIN: nonEmpty.default("redis-cli"),
+    // Shared object & asset storage vault: parity sync and the escrowed-KEK
+    // decryption drill. Present only when OBJECT_STORAGE_NODE is configured.
+    OBJECT_STORAGE_DAEMON_URL: optionalUrl,
+    OBJECT_STORAGE_TLS_CA_PATH: optionalNonEmpty,
+    OBJECT_STORAGE_TLS_CLIENT_CERT_PATH: optionalNonEmpty,
+    OBJECT_STORAGE_TLS_CLIENT_KEY_PATH: optionalNonEmpty,
+    OBJECT_STORAGE_ROOT_DIR: optionalNonEmpty,
+    OBJECT_STORAGE_KEK_KEYRING: z.string().default(""),
+    OBJECT_STORAGE_ACTIVE_KEK_VERSION: z.coerce.number().int().positive().default(1),
+    OBJECT_STORAGE_VERIFY_PARITY: booleanish.default(true),
+    OBJECT_STORAGE_DRILL_SAMPLE: z.coerce.number().int().min(0).max(100).default(10),
   })
   .superRefine((config, ctx) => {
     if (Boolean(config.BACKUP_DAEMON_CERT_PATH) !== Boolean(config.BACKUP_DAEMON_KEY_PATH)) {
@@ -157,6 +168,20 @@ export const backupDaemonEnvSchema = z
         code: "custom",
         message: "BACKUP_PRIMARY_S3_ENDPOINT and BACKUP_PRIMARY_S3_BUCKET must be provided together",
         path: ["BACKUP_PRIMARY_S3_ENDPOINT"],
+      });
+    }
+    if (config.OBJECT_STORAGE_DAEMON_URL && !config.OBJECT_STORAGE_KEK_KEYRING) {
+      ctx.addIssue({
+        code: "custom",
+        message: "OBJECT_STORAGE_KEK_KEYRING is required when OBJECT_STORAGE_DAEMON_URL is set (restore drills decrypt sampled objects)",
+        path: ["OBJECT_STORAGE_KEK_KEYRING"],
+      });
+    }
+    if (Boolean(config.OBJECT_STORAGE_TLS_CLIENT_CERT_PATH) !== Boolean(config.OBJECT_STORAGE_TLS_CLIENT_KEY_PATH)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "OBJECT_STORAGE_TLS_CLIENT_CERT_PATH and OBJECT_STORAGE_TLS_CLIENT_KEY_PATH must be provided together",
+        path: ["OBJECT_STORAGE_TLS_CLIENT_CERT_PATH"],
       });
     }
     if (Boolean(config.BACKUP_PRIMARY_S3_ACCESS_KEY) !== Boolean(config.BACKUP_PRIMARY_S3_SECRET_KEY)) {
@@ -246,6 +271,7 @@ export const collectSecretValues = (config: BackupDaemonConfig): string[] =>
     config.PG_PRIMARY_PASSWORD,
     config.PG_AUDIT_PASSWORD,
     config.PG_REPLICATION_PASSWORD,
+    config.OBJECT_STORAGE_KEK_KEYRING,
   ].filter((value) => value.length > 0);
 
 /**
@@ -256,6 +282,11 @@ export const collectSecretValues = (config: BackupDaemonConfig): string[] =>
  * `PG_AUDIT_PORT` is deliberately NOT part of the decision: it defaults to
  * 5434 and would make every shared deployment look dedicated.
  */
+/** True when the daemon is wired to the shared object-storage vault. */
+export const objectStorageBackupConfigured = (
+  config: Pick<BackupDaemonConfig, "OBJECT_STORAGE_DAEMON_URL" | "OBJECT_STORAGE_ROOT_DIR">,
+): boolean => Boolean(config.OBJECT_STORAGE_DAEMON_URL || config.OBJECT_STORAGE_ROOT_DIR);
+
 export const isAuditDedicatedCluster = (
   config: Pick<BackupDaemonConfig, "PG_AUDIT_DATA_DIR" | "PG_AUDIT_HOST" | "PG_PRIMARY_HOST">,
 ): boolean =>

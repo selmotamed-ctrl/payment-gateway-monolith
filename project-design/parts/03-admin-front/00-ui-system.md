@@ -3,7 +3,7 @@ id: admin-ui.system
 title: Admin UI System
 status: partial
 confidence: high
-last_verified: 2026-11-09
+last_verified: 2026-11-12
 verified_against: d695518+working-tree
 code:
   - admin-front/src/plugins/vuetify.ts
@@ -358,3 +358,14 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 ## Dark teleported overlays (2026-11-10)
 
 Vuetify teleports dialogs, menus and drawers under a `.v-overlay__content` / `.v-navigation-drawer` element that receives the theme class and CSS variables but not a base text color. Custom surface components (`FormModal`, `SlideOverDrawer`, SafeguardDialog, the guide search surface, and any raw dialog content) therefore inherited the body's black text while sitting on the dark surface. `fintech-minimal.css` now sets `color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`; component-specific text colors and status tones still override it. The same rule is mirrored in the merchant, checkout and Fake Rails portals, and `tests/unit/dark-overlay-colors.test.ts` guards all four stylesheets.
+
+## Object & Asset Storage page
+
+`/system/object-storage` (`pages/system/object-storage/index.tsx`) uses the shared
+`ScreenContainer`, `PageHeader`, `MetricStrip`, `SegmentedTabs`, `SurfaceCard`,
+`DataTable`, `TableRowActions`, `SlideOverDrawer`, `DescriptionList` and
+`FormModal` primitives. It has four tabs: cluster/daemon health with maintenance
+jobs, object explorer with active locks, quarantine/AV queue, and the access
+audit trail. Authority-gated actions: `system:storage:read` (view),
+`system:storage:admin` (maintenance/rewrap/GC/scrub/AV scan),
+`system:storage:legal-hold` (place/lift hold with a written reason).

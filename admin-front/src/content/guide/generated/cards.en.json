@@ -360,5 +360,18 @@
       "The **Alert lag threshold** is not raised just to hide a warning.",
       "I will ask a different Security Admin to review the `BACKUP_POLICY` request on **Approvals** ([[a:b12-11|Operating backups safely]])."
     ]
+  },
+  {
+    "id": "sg-place-legal-hold",
+    "title": "Place or lift a storage legal hold",
+    "screen": "SystemObjectStorage",
+    "risk": "HIGH",
+    "irreversible": false,
+    "body": "**What this does**\nFreezes or unfreezes a stored object against garbage collection and purging.\n\n**Check first**\n- [ ] Confirm the exact `objectId` and inspect its active `storage_object_locks` holders first.\n- [ ] Record the case reference or regulatory request ID in the legal hold reason.\n- [ ] Confirm that the requester has the `system:storage:legal-hold` authority.\n\n**Never**\n- Never place a hold without a written reason and a case reference.\n- Never lift a hold while the investigation or court order is still open.\n\n**If you made a mistake**\nLift the hold with a correcting reason. The audit trail keeps both actions.",
+    "checklist": [
+      "Confirm the exact `objectId` and inspect its active `storage_object_locks` holders first.",
+      "Record the case reference or regulatory request ID in the legal hold reason.",
+      "Confirm that the requester has the `system:storage:legal-hold` authority."
+    ]
   }
 ]

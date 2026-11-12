@@ -521,6 +521,23 @@
       "situations": []
     },
     {
+      "screenId": "SystemObjectStorage",
+      "routeNames": [
+        "SystemObjectStorage"
+      ],
+      "pageDir": "pages/system/object-storage",
+      "summary": "Shared Object & Asset Storage console: inspect mTLS storage daemon health, browse encrypted objects and their active record locks, review AV quarantine items, place or lift legal holds, and audit every allowed or denied file read.",
+      "articles": [
+        "b12-12",
+        "b12-13",
+        "b12-10"
+      ],
+      "cards": [
+        "sg-place-legal-hold"
+      ],
+      "situations": []
+    },
+    {
       "screenId": "SystemBackups",
       "routeNames": [
         "SystemBackups"

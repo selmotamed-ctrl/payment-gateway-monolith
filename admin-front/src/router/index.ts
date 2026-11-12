@@ -378,6 +378,11 @@ const router = createRouter({
                     name: "JobsOutbox",
                     component: () => import("@/pages/system/jobs-outbox/index"),
                 },
+                {
+                    path: "system/object-storage",
+                    name: "SystemObjectStorage",
+                    component: () => import("@/pages/system/object-storage/index"),
+                },
             ],
             meta: {
                 requiresAuth: true,

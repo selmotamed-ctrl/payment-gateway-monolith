@@ -25,6 +25,9 @@ CHECKOUT_SSH_KEY_PATH="~/.ssh/checkout"
 CHECKOUT_PRIVATE_IP="10.10.0.50"
 CHECKOUT_DOMAIN="pay.example.ly"
 KMS_MASTER_KEY="kms-Q7x9Lm2Zr4Vb8Nc1Wd5Tg3Hy6Jp0Sa2"
+OBJECT_STORAGE_NODE="obj-1@10.10.0.20:22:10.10.0.20:4095"
+OBJECT_STORAGE_SSH_KEY_PATH="~/.ssh/core"
+OBJECT_STORAGE_KEK_KEYRING="v1:7e1f4b9a3c6d2058e1a7b4c9d3f6082a5b1c8e4d7a0f3b6c9e2d5a8f1b4c7e03"
 `;
 
 const withOverrides = (overrides: string): string => `${BASE}\n${overrides}\n`;

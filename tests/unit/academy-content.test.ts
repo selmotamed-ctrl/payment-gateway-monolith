@@ -16,13 +16,13 @@ const GUIDE_ARTICLES = join(REPO_ROOT, "admin-front/src/content/guide/generated/
 const EXPECTED_COUNTS = {
     tracks: 8,
     modules: 11,
-    lessons: 50,
-    lessonChecks: 100,
-    examPoolQuestions: 223,
-    examPoolSingle: 208,
+    lessons: 51,
+    lessonChecks: 102,
+    examPoolQuestions: 224,
+    examPoolSingle: 209,
     examPoolNumber: 13,
     examPoolOrder: 2,
-    criticalExamPoolQuestions: 43,
+    criticalExamPoolQuestions: 44,
     labs: 16,
     labTasks: 92,
     exams: 8,
@@ -99,15 +99,15 @@ describe("academy content extractor output", () => {
         expect(meta.counts).toEqual(EXPECTED_COUNTS);
         expect(tracks.length).toBe(8);
         expect(modules.length).toBe(11);
-        expect(lessons.length).toBe(50);
-        expect(checks.length).toBe(100);
+        expect(lessons.length).toBe(51);
+        expect(checks.length).toBe(102);
         expect(labs.length).toBe(16);
         expect(labs.reduce((sum, lab) => sum + lab.tasks.length, 0)).toBe(92);
-        expect(bank.questions.length).toBe(223);
-        expect(bank.questions.filter((q) => q.type === "single").length).toBe(208);
+        expect(bank.questions.length).toBe(224);
+        expect(bank.questions.filter((q) => q.type === "single").length).toBe(209);
         expect(bank.questions.filter((q) => q.type === "number").length).toBe(13);
         expect(bank.questions.filter((q) => q.type === "order").length).toBe(2);
-        expect(bank.questions.filter((q) => q.critical).length).toBe(43);
+        expect(bank.questions.filter((q) => q.critical).length).toBe(44);
         expect(bank.blueprints.length).toBe(8);
         expect(readJson<unknown[]>("drills.en.json").length).toBe(11);
         // 6 pages in pages.en.json + lab-vectors.json
@@ -221,7 +221,7 @@ describe("academy content extractor output", () => {
 
     test("key-leak guard: no exam-pool question id or exam key under generated/", () => {
         const examIds = bank.questions.map((q) => q.id);
-        expect(examIds.length).toBe(223);
+        expect(examIds.length).toBe(224);
         for (const file of readdirSync(GENERATED_DIR)) {
             const text = readFileSync(join(GENERATED_DIR, file), "utf8");
             for (const id of examIds) expect(text.includes(id), `${file} leaks ${id}`).toBe(false);

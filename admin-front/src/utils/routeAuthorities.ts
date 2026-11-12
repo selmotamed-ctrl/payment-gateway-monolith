@@ -55,6 +55,7 @@ export const routesAuthorities: Record<string, string[]> = {
     AdminPlatformSettings: ["settings:read", "settings:write", "security:read", "security:write"],
     AdminCheckoutHelp: ["settings:read", "settings:write", "gateways.edit", "security:write"],
     SystemBackups: ["security:read", "gateway:read"],
+    SystemObjectStorage: ["system:storage:read", "system:storage:admin", "system:storage:legal-hold"],
     ReportsCatalog: ["reports.draft", "report_engine:run", "report_engine:author", "report:review", "report:approve", "security:write"],
     ReportsStudio: ["reports.studio", "reports.draft", "report_engine:author", "report:review", "report:approve", "security:write"],
     ReportsChrome: ["reports.studio", "report:approve", "security:write"],
@@ -105,6 +106,9 @@ export const AUTHORITY_ALIASES: Record<string, string[]> = {
     "report_engine:run": ["reports.draft", "reports.run"],
     "report:review": ["reports.draft"],
     "report:approve": ["reports.draft"],
+    "system:storage:read": ["system.storage"],
+    "system:storage:admin": ["system.storage"],
+    "system:storage:legal-hold": ["system.storage"],
 };
 
 export const normalizeAuthorities = (list: readonly string[]): string[] => {

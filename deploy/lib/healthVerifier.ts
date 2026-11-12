@@ -365,6 +365,51 @@ export const probeBackupDaemon = (runner: SshRunner, plan: DeployPlan, config: D
   }
 };
 
+/** object-storage-daemon /v1/health over mTLS from every core host and the backup host. */
+export const probeObjectStorage = (runner: SshRunner, plan: DeployPlan, config: DeployConfig): ProbeResult[] => {
+  const node = plan.storage.objectStorage;
+  if (!node) return [];
+  const results: ProbeResult[] = [];
+  const port = node.servicePort || config.OBJECT_STORAGE_DAEMON_PORT;
+  const configuredBind = config.OBJECT_STORAGE_DAEMON_BIND_HOST.trim();
+  const healthHost = !configuredBind || configuredBind === "0.0.0.0" ? node.privateIp : configuredBind;
+  const insecure = config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP;
+  const url = `${insecure ? "http" : "https"}://${healthHost}:${port}/v1/health`;
+  const commandFor = (certs: string): string =>
+    insecure
+      ? `curl -fsS --max-time 10 ${JSON.stringify(url)}`
+      : mtlsCurl({ certs, certName: "object-storage-client", url, expect: "ok" });
+  const probe = (host: HostPlan, certs: string, label: string): void => {
+    try {
+      const body = runner.capture(host.ssh, commandFor(certs), { sudo: true });
+      let ok = false;
+      try {
+        const parsed = JSON.parse(body) as { ok?: boolean };
+        ok = parsed.ok === true;
+      } catch {
+        ok = body.includes('"ok":true');
+      }
+      results.push({ host: host.ssh.host, check: label, ok, detail: body.slice(0, 200) });
+    } catch (error) {
+      results.push({ host: host.ssh.host, check: label, ok: false, detail: (error as Error).message });
+    }
+  };
+  try {
+    const body = runner.capture(node.ssh, "systemctl is-active pg-object-storage-daemon", { sudo: true });
+    results.push(result(node, "pg-object-storage-daemon is active", body.trim() === "active", body.slice(0, 200)));
+  } catch (error) {
+    results.push(result(node, "pg-object-storage-daemon is active", false, (error as Error).message));
+  }
+  for (const host of plan.hosts.filter((candidate) => candidate.roles.includes("core"))) {
+    probe(host, `${config.CORE_REMOTE_DIR}/shared/certs`, `${host.ssh.host} -> object-storage /v1/health`);
+  }
+  const backupHost = plan.hosts.find((candidate) => candidate.roles.includes("backup"));
+  if (backupHost && config.BACKUP_ENABLED) {
+    probe(backupHost, config.BACKUP_DAEMON_CERT_DIR, `${backupHost.ssh.host} -> object-storage /v1/health`);
+  }
+  return results;
+};
+
 export const probeStorage = (runner: SshRunner, plan: DeployPlan, config: DeployConfig): ProbeResult[] => [
   ...probePgPrimary(runner, plan, config),
   ...probePgReplicas(runner, plan, config),
@@ -373,6 +418,7 @@ export const probeStorage = (runner: SshRunner, plan: DeployPlan, config: Deploy
   ...probeAuditDb(runner, plan, config),
   ...probeLogDb(runner, plan, config),
   ...probeBackupDaemon(runner, plan, config),
+  ...probeObjectStorage(runner, plan, config),
 ];
 
 /** The Fake Rails service: backend /health and the Nginx vhost. */

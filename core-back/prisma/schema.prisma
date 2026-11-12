@@ -974,8 +974,9 @@ model Merchant {
   beneficialOwners        BeneficialOwner[]
   notifications           Notification[]           @relation("MerchantNotifications")
 
-  webhookEndpoints  MerchantWebhookEndpoint[]
-  webhookDeliveries MerchantWebhookDelivery[]
+  webhookEndpoints   MerchantWebhookEndpoint[]
+  webhookDeliveries  MerchantWebhookDelivery[]
+  disputeAttachments DisputeAttachment[]       @relation("DisputeAttachments")
 
   @@index([status])
   @@index([kybStatus])
@@ -1440,6 +1441,7 @@ model AmlCase {
   holdJournalEntry  JournalEntry?      @relation("AmlCaseHoldEntry", fields: [holdJournalEntryId], references: [id], onDelete: SetNull)
   assignedReviewer  User?              @relation("AmlCaseReviewer", fields: [assignedReviewerId], references: [id], onDelete: SetNull)
   regulatoryReports RegulatoryReport[] @relation("RegulatoryReportAmlCase")
+  evidence          AmlCaseEvidence[]
 
   @@index([status])
   @@index([subjectType, subjectId])
@@ -1731,14 +1733,17 @@ model CredentialSet {
 }
 
 model Asset {
-  id         String    @id @default(uuid(7)) @db.Uuid
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
-  name       String    @unique
-  mime       AssetMime
-  sizeBytes  Int       @map("size_bytes")
-  storageKey String    @map("storage_key") @db.Text
-  sha256     String    @unique @db.Char(64)
+  id              String         @id @default(uuid(7)) @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  name            String         @unique
+  mime            AssetMime
+  sizeBytes       Int            @map("size_bytes")
+  storageKey      String         @map("storage_key") @db.Text
+  /// The brand-asset object in the shared object-storage vault.
+  storageObjectId String?        @map("storage_object_id") @db.Uuid
+  storageObject   StorageObject? @relation(fields: [storageObjectId], references: [id], onDelete: Restrict)
+  sha256          String         @unique @db.Char(64)
 
   rails Rail[] @relation("RailLogoAsset")
 
@@ -2347,23 +2352,23 @@ model GatewayInquirySchedule {
 }
 
 model ReconciliationRun {
-  id                String    @id @default(uuid(7)) @db.Uuid
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
-  statementSourceId String    @map("statement_source_id") @db.Uuid
-  windowStart       DateTime  @map("window_start")
-  windowEnd         DateTime  @map("window_end")
-  fileHash          String    @map("file_hash") @db.Char(64)
-  statsJson         Json      @map("stats_json")
+  id                String         @id @default(uuid(7)) @db.Uuid
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  statementSourceId String         @map("statement_source_id") @db.Uuid
+  windowStart       DateTime       @map("window_start")
+  windowEnd         DateTime       @map("window_end")
+  fileHash          String         @map("file_hash") @db.Char(64)
+  statsJson         Json           @map("stats_json")
   /// The name of the uploaded statement file.
-  fileName          String?   @map("file_name") @db.Text
-  /// The uploaded statement file itself: the reconciliation is a background
-  /// job, so the bytes have to survive the request that stored them.
-  fileContent       Bytes?    @map("file_content") @db.ByteA
+  fileName          String?        @map("file_name") @db.Text
+  /// The encrypted statement file in the shared object-storage vault.
+  storageObjectId   String?        @map("storage_object_id") @db.Uuid
+  storageObject     StorageObject? @relation(fields: [storageObjectId], references: [id], onDelete: Restrict)
   /// Set when the background reconciliation job finished the run. It is the
   /// idempotency marker of the ingestion: a retried job never matches the
   /// same statement twice.
-  ingestedAt        DateTime? @map("ingested_at")
+  ingestedAt        DateTime?      @map("ingested_at")
 
   statementSource StatementSource      @relation(fields: [statementSourceId], references: [id], onDelete: Restrict)
   items           ReconciliationItem[]
@@ -2591,7 +2596,9 @@ model KybDocument {
   docType                KybDocumentType   @map("doc_type")
   storageKey             String            @map("storage_key") @db.Text
   originalFileName       String?           @map("original_file_name") @db.Text
-  contentCiphertext      String?           @map("content_ciphertext") @db.Text
+  /// The shared object-storage vault row that owns this document's encrypted bytes.
+  storageObjectId        String?           @map("storage_object_id") @db.Uuid
+  storageObject          StorageObject?    @relation(fields: [storageObjectId], references: [id], onDelete: Restrict)
   sha256                 String            @db.Char(64)
   mime                   String            @db.Text
   sizeBytes              Int               @map("size_bytes")
@@ -2857,6 +2864,9 @@ model RegulatoryReportSchema {
   mappingSha256          String?                @map("mapping_sha256") @db.Char(64)
   compiledFromSha256     String?                @map("compiled_from_sha256") @db.Char(64)
   templateCiphertext     String?                @map("template_ciphertext") @db.Text
+  /// The XLSX workbook template stored in the shared object-storage vault.
+  templateObjectId       String?                @map("template_object_id") @db.Uuid
+  templateObject         StorageObject?         @relation(fields: [templateObjectId], references: [id], onDelete: Restrict)
   templateSha256         String?                @map("template_sha256") @db.Char(64)
   templateBindingJson    Json?                  @map("template_binding_json")
   compiledDefinitionJson Json                   @map("compiled_definition_json")
@@ -2921,7 +2931,10 @@ model RegulatoryReportOutput {
   revision             Int                          @default(1)
   schemaId             String?                      @map("schema_id") @db.Uuid
   schemaVersion        Int?                         @map("schema_version")
-  contentCiphertext    String                       @map("content_ciphertext") @db.Text
+  contentCiphertext    String?                      @map("content_ciphertext") @db.Text
+  /// The generated output file in the shared object-storage vault.
+  storageObjectId      String?                      @map("storage_object_id") @db.Uuid
+  storageObject        StorageObject?               @relation(fields: [storageObjectId], references: [id], onDelete: Restrict)
   contentSha256        String                       @map("content_sha256") @db.Char(64)
   payloadSha256        String?                      @map("payload_sha256") @db.Char(64)
   validationStatus     ReportOutputValidationStatus @default(NOT_GENERATED) @map("validation_status")
@@ -2967,7 +2980,7 @@ model Incident {
   category            IncidentCategory        @default(OTHER)
   severity            IncidentSeverity        @default(SEV3)
   status              IncidentStatus          @default(DETECTED)
-  impactScope         IncidentImpactScope     @default(PLATFORM)
+  impactScope         IncidentImpactScope     @default(PLATFORM) @map("impact_scope")
   detectedAt          DateTime                @map("detected_at")
   declaredAt          DateTime?               @map("declared_at")
   containedAt         DateTime?               @map("contained_at")
@@ -3141,10 +3154,11 @@ model Dispute {
   adjustmentId       String?       @map("adjustment_id")
   evidenceJson       Json?         @map("evidence_json")
 
-  attempt    PaymentAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
-  gateway    Gateway        @relation(fields: [gatewayId], references: [id], onDelete: Restrict)
-  rail       Rail           @relation(fields: [railId], references: [id], onDelete: Restrict)
-  adjustment Adjustment?    @relation("AdjustmentDispute")
+  attempt     PaymentAttempt      @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  gateway     Gateway             @relation(fields: [gatewayId], references: [id], onDelete: Restrict)
+  rail        Rail                @relation(fields: [railId], references: [id], onDelete: Restrict)
+  adjustment  Adjustment?         @relation("AdjustmentDispute")
+  attachments DisputeAttachment[]
 
   @@unique([gatewayId, externalDisputeRef])
   @@index([attemptId])
@@ -3467,17 +3481,21 @@ enum ReportAuthorityMode {
 }
 
 model ReportAssetBundle {
-  id               String   @id @default(uuid(7)) @db.Uuid
-  bundleSha256     String   @unique @map("bundle_sha256") @db.Char(64)
-  storageKey       String   @map("storage_key") @db.Text
-  totalBytes       Int      @map("total_bytes")
-  fileCount        Int      @map("file_count")
-  manifestJson     Json     @map("manifest_json")
-  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  id               String         @id @default(uuid(7)) @db.Uuid
+  bundleSha256     String         @unique @map("bundle_sha256") @db.Char(64)
+  storageKey       String         @map("storage_key") @db.Text
+  /// The encrypted asset archive in the shared object-storage vault.
+  storageObjectId  String?        @map("storage_object_id") @db.Uuid
+  storageObject    StorageObject? @relation(fields: [storageObjectId], references: [id], onDelete: Restrict)
+  totalBytes       Int            @map("total_bytes")
+  fileCount        Int            @map("file_count")
+  manifestJson     Json           @map("manifest_json")
+  uploadedByUserId String         @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  chromeSpecs ReportChromeSpecRecord[]
-  reportSpecs ReportDefinitionSpecRecord[]
+  chromeSpecs              ReportChromeSpecRecord[]
+  reportSpecs              ReportDefinitionSpecRecord[]
+  reportAssetBundleEntries ReportAssetBundleEntry[]
 
   @@index([uploadedByUserId, createdAt(sort: Desc)], map: "report_asset_bundles_uploader_created_idx")
   @@map("report_asset_bundles")
@@ -3649,15 +3667,18 @@ model MerchantReportChromeSpecRecord {
 }
 
 model MerchantReportAssetBundle {
-  id               String   @id @default(uuid(7)) @db.Uuid
-  merchantId       String   @map("merchant_id") @db.Uuid
-  bundleSha256     String   @map("bundle_sha256") @db.Char(64)
-  storageKey       String   @map("storage_key") @db.Text
-  totalBytes       Int      @map("total_bytes")
-  fileCount        Int      @map("file_count")
-  manifestJson     Json     @map("manifest_json")
-  uploadedByUserId String   @map("uploaded_by_user_id") @db.Uuid
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  id               String         @id @default(uuid(7)) @db.Uuid
+  merchantId       String         @map("merchant_id") @db.Uuid
+  bundleSha256     String         @map("bundle_sha256") @db.Char(64)
+  storageKey       String         @map("storage_key") @db.Text
+  /// The encrypted asset archive in the shared object-storage vault.
+  storageObjectId  String?        @map("storage_object_id") @db.Uuid
+  storageObject    StorageObject? @relation(fields: [storageObjectId], references: [id], onDelete: Restrict)
+  totalBytes       Int            @map("total_bytes")
+  fileCount        Int            @map("file_count")
+  manifestJson     Json           @map("manifest_json")
+  uploadedByUserId String         @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
 
   specRecords MerchantReportSpecRecord[]
   chromeSpecs MerchantReportChromeSpecRecord[]
@@ -3710,4 +3731,207 @@ model MerchantReportStudioStatus {
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("merchant_report_studio_status")
+}
+
+// ============================================================================
+// Shared Object & Asset Storage Engine (schema v36)
+// ============================================================================
+
+enum StorageBucketTier {
+  HOT
+  COLD
+  QUARANTINE
+}
+
+enum StorageNamespace {
+  KYB_DOCUMENTS
+  RECON_STATEMENTS
+  REGULATORY_REPORTS
+  REPORT_STUDIO_ASSETS
+  MERCHANT_STATEMENTS
+  DISPUTE_EVIDENCE
+  AML_CASE_ATTACHMENTS
+  SYSTEM_BRAND_ASSETS
+  BACKUP_ARTIFACTS
+}
+
+enum StorageObjectStatus {
+  STAGING
+  QUARANTINE_PENDING_AV
+  QUARANTINE_REJECTED
+  ACTIVE
+  PURGED
+}
+
+enum StorageAvScanStatus {
+  NOT_REQUIRED
+  PENDING
+  CLEAN
+  INFECTED
+  SCAN_ERROR
+}
+
+model StorageObject {
+  id         String              @id @default(uuid()) @db.Uuid
+  bucket     StorageBucketTier   @default(HOT)
+  namespace  StorageNamespace
+  storageKey String              @map("storage_key") @db.VarChar(512)
+  status     StorageObjectStatus @default(STAGING)
+
+  // Cryptographic & Integrity Envelope (pgos1)
+  sha256Hex         String  @map("sha256_hex") @db.Char(64)
+  byteSize          BigInt  @map("byte_size")
+  chunkSizeBytes    Int     @default(65536) @map("chunk_size_bytes")
+  chunkCount        Int     @map("chunk_count")
+  detectedMimeType  String  @map("detected_mime_type") @db.VarChar(127)
+  originalFilename  String? @map("original_filename") @db.VarChar(255)
+  kekKeyVersion     Int     @default(1) @map("kek_key_version")
+  wrappedDek        Bytes   @map("wrapped_dek")
+  dekNonce          Bytes   @map("dek_nonce")
+  streamNoncePrefix Bytes   @map("stream_nonce_prefix")
+
+  // Ownership & Authority Context
+  ownerMerchantId     String? @map("owner_merchant_id") @db.Uuid
+  uploadedByActorType String  @map("uploaded_by_actor_type") @db.VarChar(32)
+  uploadedByActorId   String  @map("uploaded_by_actor_id") @db.VarChar(128)
+  requiredAuthority   String  @map("required_authority") @db.VarChar(128)
+  confidentialityTier String  @default("CONFIDENTIAL") @map("confidentiality_tier") @db.VarChar(32)
+
+  // Retention, Legal Hold & Two-Stage GC Grace Window
+  retainUntil        DateTime? @map("retain_until") @db.Timestamptz(3)
+  legalHold          Boolean   @default(false) @map("legal_hold")
+  legalHoldReason    String?   @map("legal_hold_reason") @db.VarChar(512)
+  legalHoldByAdminId String?   @map("legal_hold_by_admin_id") @db.Uuid
+  legalHoldPlacedAt  DateTime? @map("legal_hold_placed_at") @db.Timestamptz(3)
+  gcEligibleAt       DateTime? @map("gc_eligible_at") @db.Timestamptz(3)
+
+  // Malware / Content Verification State
+  avScanStatus    StorageAvScanStatus @default(PENDING) @map("av_scan_status")
+  avScannedAt     DateTime?           @map("av_scanned_at") @db.Timestamptz(3)
+  avSignature     String?             @map("av_signature") @db.VarChar(255)
+  lastScrubbedAt  DateTime?           @map("last_scrubbed_at") @db.Timestamptz(3)
+  scrubErrorCount Int                 @default(0) @map("scrub_error_count")
+
+  metadata         Json?     @default("{}")
+  stagingExpiresAt DateTime  @map("staging_expires_at") @db.Timestamptz(3)
+  activatedAt      DateTime? @map("activated_at") @db.Timestamptz(3)
+  purgedAt         DateTime? @map("purged_at") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  locks      StorageObjectLock[]
+  accessLogs StorageObjectAccessLog[]
+
+  kybDocuments               KybDocument[]
+  reconRuns                  ReconciliationRun[]
+  regReportSchemas           RegulatoryReportSchema[]
+  regReportOutputs           RegulatoryReportOutput[]
+  reportAssetBundles         ReportAssetBundle[]
+  merchantReportAssetBundles MerchantReportAssetBundle[]
+  reportAssetBundleEntries   ReportAssetBundleEntry[]
+  catalogAssets              Asset[]
+  disputeAttachments         DisputeAttachment[]
+  amlCaseEvidences           AmlCaseEvidence[]
+
+  @@unique([bucket, storageKey], map: "uq_storage_objects_bucket_key")
+  @@index([namespace, ownerMerchantId, status], map: "idx_storage_objects_ns_merchant_status")
+  @@index([status, stagingExpiresAt], map: "idx_storage_objects_staging_gc")
+  @@index([status, gcEligibleAt], map: "idx_storage_objects_active_gc")
+  @@index([status, lastScrubbedAt], map: "idx_storage_objects_scrub_queue")
+  @@index([kekKeyVersion, status], map: "idx_storage_objects_kek_rotation")
+  @@map("storage_objects")
+}
+
+model StorageObjectLock {
+  id       String        @id @default(uuid()) @db.Uuid
+  objectId String        @map("object_id") @db.Uuid
+  object   StorageObject @relation(fields: [objectId], references: [id], onDelete: Restrict)
+
+  holderType          String    @map("holder_type") @db.VarChar(64)
+  holderId            String    @map("holder_id") @db.VarChar(128)
+  retentionFloorUntil DateTime? @map("retention_floor_until") @db.Timestamptz(3)
+
+  acquiredByActorId String   @map("acquired_by_actor_id") @db.VarChar(128)
+  acquiredReason    String   @map("acquired_reason") @db.VarChar(255)
+  acquiredAt        DateTime @default(now()) @map("acquired_at") @db.Timestamptz(3)
+
+  releasedAt        DateTime? @map("released_at") @db.Timestamptz(3)
+  releasedByActorId String?   @map("released_by_actor_id") @db.VarChar(128)
+  releaseReason     String?   @map("release_reason") @db.VarChar(255)
+
+  @@unique([objectId, holderType, holderId], map: "uq_storage_object_locks_holder")
+  @@index([objectId, releasedAt], map: "idx_storage_object_locks_active")
+  @@index([holderType, holderId], map: "idx_storage_object_locks_lookup")
+  @@map("storage_object_locks")
+}
+
+model StorageObjectAccessLog {
+  id           String        @id @default(uuid()) @db.Uuid
+  objectId     String        @map("object_id") @db.Uuid
+  object       StorageObject @relation(fields: [objectId], references: [id], onDelete: Restrict)
+  actorType    String        @map("actor_type") @db.VarChar(32)
+  actorId      String        @map("actor_id") @db.VarChar(128)
+  action       String        @db.VarChar(48)
+  allowed      Boolean
+  denialReason String?       @map("denial_reason") @db.VarChar(255)
+  holderType   String?       @map("holder_type") @db.VarChar(64)
+  holderId     String?       @map("holder_id") @db.VarChar(128)
+  ipAddress    String?       @map("ip_address") @db.VarChar(64)
+  requestId    String?       @map("request_id") @db.VarChar(128)
+  bytesServed  BigInt?       @map("bytes_served")
+  occurredAt   DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(3)
+
+  @@index([objectId, occurredAt(sort: Desc)], map: "idx_storage_access_logs_object_time")
+  @@index([actorId, occurredAt(sort: Desc)], map: "idx_storage_access_logs_actor_time")
+  @@map("storage_object_access_logs")
+}
+
+model ReportAssetBundleEntry {
+  id              String            @id @default(uuid()) @db.Uuid
+  bundleId        String            @map("bundle_id") @db.Uuid
+  bundle          ReportAssetBundle @relation(fields: [bundleId], references: [id], onDelete: Restrict)
+  relativePath    String            @map("relative_path") @db.VarChar(255)
+  mimeType        String            @map("mime_type") @db.VarChar(127)
+  sha256          String            @db.Char(64)
+  byteSize        Int               @map("byte_size")
+  storageObjectId String?           @map("storage_object_id") @db.Uuid
+  storageObject   StorageObject?    @relation(fields: [storageObjectId], references: [id], onDelete: Restrict)
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([bundleId, relativePath], map: "uq_report_asset_entries_bundle_path")
+  @@index([storageObjectId], map: "idx_report_asset_entries_object")
+  @@map("report_asset_bundle_entries")
+}
+
+model DisputeAttachment {
+  id              String        @id @default(uuid()) @db.Uuid
+  disputeId       String        @map("dispute_id") @db.Uuid
+  dispute         Dispute       @relation(fields: [disputeId], references: [id], onDelete: Restrict)
+  merchantId      String        @map("merchant_id") @db.Uuid
+  merchant        Merchant      @relation("DisputeAttachments", fields: [merchantId], references: [id], onDelete: Restrict)
+  storageObjectId String        @map("storage_object_id") @db.Uuid
+  storageObject   StorageObject @relation(fields: [storageObjectId], references: [id], onDelete: Restrict)
+  label           String        @db.VarChar(255)
+  uploadedById    String        @map("uploaded_by_id") @db.VarChar(128)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([disputeId], map: "idx_dispute_attachments_dispute")
+  @@index([storageObjectId], map: "idx_dispute_attachments_object")
+  @@map("dispute_attachments")
+}
+
+model AmlCaseEvidence {
+  id              String        @id @default(uuid()) @db.Uuid
+  amlCaseId       String        @map("aml_case_id") @db.Uuid
+  amlCase         AmlCase       @relation(fields: [amlCaseId], references: [id], onDelete: Restrict)
+  storageObjectId String        @map("storage_object_id") @db.Uuid
+  storageObject   StorageObject @relation(fields: [storageObjectId], references: [id], onDelete: Restrict)
+  evidenceType    String        @map("evidence_type") @db.VarChar(64)
+  notes           String?       @db.Text
+  uploadedById    String        @map("uploaded_by_id") @db.VarChar(128)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([amlCaseId], map: "idx_aml_case_evidence_case")
+  @@index([storageObjectId], map: "idx_aml_case_evidence_object")
+  @@map("aml_case_evidence")
 }

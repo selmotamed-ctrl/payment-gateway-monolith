@@ -5,7 +5,7 @@ import type {
 } from "../../lib/reportEngineSdk/types/hostConfig";
 import { PostgresReadOnlyReportExecutor } from "../../lib/reportEngineSdk/runtime/PostgresReadOnlyExecutor";
 import { buildSchemaCatalog } from "./schemaCatalog";
-import { LocalReportAssetStorage } from "./assetStorage";
+import { ObjectStorageReportAssetStorage } from "./assetStorage";
 import { env } from "../../lib/env";
 import { REPORT_ENGINE_VERSION } from "../../lib/reportEngineSdk/version";
 
@@ -262,7 +262,7 @@ export function createMerchantReportHostConfig(deps: {
     defaultCurrencyMinorUnitScale: 1000,
     autocompleteProviders: merchantProviders(dbReadOnlyPort),
     dbReadOnlyPort,
-    assetStoragePort: deps.assetStoragePort ?? new LocalReportAssetStorage(),
+    assetStoragePort: deps.assetStoragePort ?? new ObjectStorageReportAssetStorage(),
     globalLimits: {
       maxDatasetsPerReport: 6,
       maxJoinsPerDataset: 2,

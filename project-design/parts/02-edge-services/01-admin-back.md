@@ -333,3 +333,15 @@ The edge validates identifiers, enums and body shapes, but keeps the core as the
 - `GET /aml/incidents` now has an explicit query schema and forwards `search`, `page`, `pageSize`, `status`, `severity` and `category`; without it `coreForward` dropped every filter.
 - Incident writes, filing-adapter create/update/disable and `POST /reports/:id/file` relay core's 202 instead of returning a false 200.
 - The new AML routes remain behind the shared `amlConfidential` guard; the edge only validates shapes while core remains the authority for maker-checker, submission readiness and adapter matching.
+
+## Object & asset storage proxy
+
+`admin-back/api/protected/objectStorage.ts` forwards the console API:
+`GET /object-storage/summary`, `GET /object-storage/objects`,
+`GET /object-storage/objects/:id`, `GET /object-storage/access-logs`,
+`POST|DELETE /object-storage/objects/:id/legal-hold` and
+`POST /object-storage/maintenance/:job`. It is mounted with
+`system:storage:read`/`system:storage:admin`/`system:storage:legal-hold`
+read/write guards. `assetsRouter` additionally exposes binary
+`POST /assets/upload` (multipart `file` + `name`) and
+`GET /assets/:id/content`, forwarding raw bytes to core.

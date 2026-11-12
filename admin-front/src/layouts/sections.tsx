@@ -247,6 +247,12 @@ export const useSections = () => {
                     if: () => hasOneOfAuthorities(["security:read", "gateway:read"]),
                 },
                 {
+                    label: t("Object & Asset Storage"),
+                    name: "SystemObjectStorage",
+                    icon: "mdi-database-lock-outline",
+                    if: () => hasOneOfAuthorities(["system:storage:read", "system:storage:admin", "system:storage:legal-hold"]),
+                },
+                {
                     label: t("Jobs & Outbox"),
                     name: "JobsOutbox",
                     icon: "mdi-tray-full",

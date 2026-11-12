@@ -60,6 +60,9 @@ BACKUP_ENGINE_MODE="barman"
 BACKUP_PRIMARY_S3_ENDPOINT="https://s3.example.invalid"
 BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/prod"
 BACKUP_ENCRYPTION_KEY_HEX="9f3a7c1e5b2d84f06a1c3e7b9d2f4a8c5e0b6d1a3f7c9e2b4d8a0c6e1f5b3a79"
+OBJECT_STORAGE_NODE="obj-1@10.10.13.10:22:10.10.13.10:4095"
+OBJECT_STORAGE_SSH_KEY_PATH="~/.ssh/backup"
+OBJECT_STORAGE_KEK_KEYRING="v1:7e1f4b9a3c6d2058e1a7b4c9d3f6082a5b1c8e4d7a0f3b6c9e2d5a8f1b4c7e03"
 `;
 
 const config = (extra = "") => {

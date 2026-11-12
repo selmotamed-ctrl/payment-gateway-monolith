@@ -11,15 +11,15 @@ const ROUTER_FILE = join(REPO_ROOT, "admin-front/src/router/index.ts");
 
 const EXPECTED_COUNTS = {
     books: 14,
-    articles: 135,
-    glossaryTerms: 151,
-    safeguardCards: 25,
-    safeguardChecklistItems: 112,
+    articles: 137,
+    glossaryTerms: 154,
+    safeguardCards: 26,
+    safeguardChecklistItems: 115,
     situations: 32,
     readingPaths: 8,
-    quickAnswers: 58,
+    quickAnswers: 60,
     dataBlocks: 3,
-    contextMapScreens: 29,
+    contextMapScreens: 30,
     errorCodes: 19,
     edgeCases: 140,
 };
@@ -50,6 +50,7 @@ const EXPECTED_CARD_IDS = [
     "sg-trigger-backup",
     "sg-run-restore-drill",
     "sg-update-backup-policy",
+    "sg-place-legal-hold",
 ];
 
 const readJson = <T>(name: string): T =>

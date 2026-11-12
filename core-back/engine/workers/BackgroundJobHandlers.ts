@@ -18,6 +18,8 @@ import {
 import type { BackgroundJobHandler } from "./BackgroundJobWorker";
 import { runReconciliationFollowUp } from "./ReconciliationFollowUp";
 import { createLedgerPoster } from "../../lib/storageEngine/ledgerPosterFactory";
+import { getObjectStorageSdk } from "../../lib/objectStorageSdk/runtime";
+import type { ObjectStorageSdk } from "../../lib/objectStorageSdk";
 
 /**
  * The payload of a dispute intake job.
@@ -176,6 +178,8 @@ export interface ReconciliationJobHandlerDeps {
   feeVariancePoster?: FeeVariancePoster;
   ledgerPoster?: LedgerPoster;
   clock?: () => Date;
+  /** Shared object-storage vault; tests inject a fake, production uses the singleton. */
+  objectStorage?: ObjectStorageSdk;
   logger?: { info: (message: string, meta?: Record<string, unknown>) => void };
 }
 
@@ -194,18 +198,6 @@ const asRecord = (value: unknown): Record<string, unknown> =>
     ? (value as Record<string, unknown>)
     : {};
 
-const toBuffer = (value: unknown): Buffer => {
-  if (Buffer.isBuffer(value)) {
-    return value;
-  }
-  if (value instanceof Uint8Array) {
-    return Buffer.from(value);
-  }
-  if (typeof value === "string") {
-    return Buffer.from(value, "base64");
-  }
-  return Buffer.alloc(0);
-};
 
 const followUpOf = async (
   deps: ReconciliationJobHandlerDeps,
@@ -247,9 +239,13 @@ export const createReconciliationJobHandler = (
       });
       return;
     }
-    if (!run.fileContent) {
+    if (!run.storageObjectId) {
       throw new ApiError(409, "RECONCILIATION_FILE_MISSING", "The reconciliation run carries no statement file");
     }
+    const statement = await (deps.objectStorage ?? getObjectStorageSdk()).workerClient.readInternal(
+      run.storageObjectId,
+      "recon-parse-worker",
+    );
     const ingestor = new StatementIngestor({
       db: deps.db,
       repositories: deps.repositories,
@@ -258,7 +254,7 @@ export const createReconciliationJobHandler = (
     });
     const result = await ingestor.ingest({
       statementSourceId: run.statementSourceId,
-      content: toBuffer(run.fileContent),
+      content: Buffer.from(statement.bytes),
       fileName: run.fileName ?? undefined,
       windowStart: run.windowStart,
       windowEnd: run.windowEnd,

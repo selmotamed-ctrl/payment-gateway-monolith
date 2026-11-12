@@ -36,6 +36,10 @@ import { ConsistencyAuditWorker } from "./ConsistencyAuditWorker";
 import { createWebhookFanout } from "../webhooks/fanout";
 import { VaultContextCipher } from "../runtime/contextCipher";
 import { createKybScanner } from "../../lib/kybScanner";
+import { ReportGenerationService } from "../compliance/reporting/ReportGenerationService";
+import { createObjectStorageSdk, type ObjectStorageSdk } from "../../lib/objectStorageSdk";
+import { ObjectStorageMaintenanceWorker } from "./ObjectStorageWorkers";
+import { createObjectStorageMonitorCheck } from "./objectStorageMonitorChecks";
 import { createEngineRefundInquiryPort, createRefundInquiryJobHandler } from "./RefundInquiry";
 import type { StorageEngine } from "../../lib/storageEngine/ports";
 import {
@@ -159,6 +163,12 @@ export interface ProductionWorkerRuntimeOptions {
   kybScanBatchSize?: number;
   /** Overrides the scanner `KYB_SCANNER_MODE` selects (tests inject a fake). */
   kybScanner?: import("../../lib/kybScanner").KybScanner | null;
+  /** Shared object storage housekeeping (staging GC, orphan sweep, integrity scrub, lock reconcile, AV fallback). */
+  objectStorageEnabled?: boolean;
+  objectStorageIntervalMs?: number;
+  objectStorageBatchSize?: number;
+  /** Overrides the SDK (tests inject one bound to a sandbox database). */
+  objectStorageSdk?: ObjectStorageSdk;
   /** Merchant-direct commission netting (AUTO-21). Fall back to their env keys. */
   commissionNettingEnabled?: boolean;
   commissionNettingIntervalMs?: number;
@@ -380,6 +390,11 @@ export const createProductionWorkerRuntime = (
     // Singleton workers only tick on the advisory-lock leader (GAP-012).
     leaderElection: options.storage?.leaderElection,
   };
+
+  const objectStorageEnabled = options.objectStorageEnabled ?? env.WORKER_OBJECT_STORAGE_ENABLED;
+  const platformMonitorEnabled = options.platformMonitorEnabled ?? env.WORKER_PLATFORM_MONITOR_ENABLED;
+  const objectStorageSdk: ObjectStorageSdk =
+    options.objectStorageSdk ?? createObjectStorageSdk({ prisma: options.db as unknown as PrismaClient });
 
   const workers = [
     new ExpirySweeperWorker({ ...workerOptions, inquiry }),
@@ -646,6 +661,7 @@ export const createProductionWorkerRuntime = (
             },
             maxPeriods: env.REGULATORY_REPORT_MAX_PERIODS,
             maxBatchLines: env.REGULATORY_REPORT_MAX_BATCH_LINES,
+            generation: new ReportGenerationService(undefined, objectStorageSdk),
           }),
         ]
       : []),
@@ -673,6 +689,7 @@ export const createProductionWorkerRuntime = (
             ...workerOptions,
             intervalMs: options.kybScanIntervalMs ?? env.WORKER_KYB_SCAN_INTERVAL_MS,
             batchSize: options.kybScanBatchSize ?? env.WORKER_KYB_SCAN_BATCH_SIZE,
+            objectStorage: objectStorageSdk,
             scanner:
               options.kybScanner !== undefined
                 ? options.kybScanner
@@ -684,6 +701,18 @@ export const createProductionWorkerRuntime = (
             // The built-in gate is the upload-time content check; a periodic re-scan against it finds nothing new.
             rescanDays: env.KYB_SCANNER_MODE === "clamd" || options.kybScanner ? env.KYB_RESCAN_DAYS : 0,
             maxAttempts: env.KYB_SCAN_MAX_ATTEMPTS,
+          }),
+        ]
+      : []),
+    // Shared object storage housekeeping: AV fallback, staging GC, orphan sweep, scrub, lock reconcile and KEK rewrap.
+    ...(objectStorageEnabled
+      ? [
+          new ObjectStorageMaintenanceWorker({
+            ...workerOptions,
+            intervalMs: options.objectStorageIntervalMs ?? env.WORKER_OBJECT_STORAGE_INTERVAL_MS,
+            batchSize: options.objectStorageBatchSize ?? env.WORKER_OBJECT_STORAGE_BATCH_SIZE,
+            sdk: objectStorageSdk,
+            prisma: options.db as unknown as PrismaClient,
           }),
         ]
       : []),
@@ -740,6 +769,9 @@ export const createProductionWorkerRuntime = (
             extraChecks: [
               createStaleUnknownMonitorCheck({ olderThanHours: env.UNKNOWN_ATTEMPT_CASE_SLA_HOURS }),
               createUnscheduledRefundMonitorCheck(),
+              ...(platformMonitorEnabled
+                ? [createObjectStorageMonitorCheck({ sdk: objectStorageSdk, prisma: options.db as unknown as PrismaClient })]
+                : []),
               // AUTO-27: only when a backup daemon is configured (a deployment without one has nothing to watch).
               ...(env.BACKUP_DAEMON_URL
                 ? [

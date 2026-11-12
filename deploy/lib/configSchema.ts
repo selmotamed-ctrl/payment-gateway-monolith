@@ -72,7 +72,7 @@ export const DB_ENGINES = ["postgresql"] as const;
 export const SSL_MODES = ["certbot", "custom", "self_signed"] as const;
 export const ROLE_NAMES = ["db", "core", "admin", "merchant", "checkout", "fake-rails"] as const;
 export type DeployRole = (typeof ROLE_NAMES)[number];
-export const STORAGE_ROLE_NAMES = ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup"] as const;
+export const STORAGE_ROLE_NAMES = ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup", "object-storage"] as const;
 export type StorageRole = (typeof STORAGE_ROLE_NAMES)[number];
 export type HostRole = DeployRole | StorageRole;
 
@@ -554,6 +554,37 @@ const base = z.strictObject({
   BACKUP_REDIS_CLI_BIN: binName.default("redis-cli"),
   BARMAN_AUDIT_SERVER: z.string().trim().max(200).regex(/^[A-Za-z0-9_-]*$/, "must be a barman server name").default(""),
 
+  // 13b. Shared Object & Asset Storage Engine (schema v36+)
+  OBJECT_STORAGE_ENABLED: booleanish.default(false),
+  OBJECT_STORAGE_MANAGE_VIA_SSH: booleanish.default(false),
+  OBJECT_STORAGE_NODE: z.string().trim().max(500).default(""),
+  OBJECT_STORAGE_SSH_USER: unixUser.default("ubuntu"),
+  OBJECT_STORAGE_SSH_PORT: port.default(22),
+  OBJECT_STORAGE_SSH_KEY_PATH: sshPath.optional(),
+  OBJECT_STORAGE_SUDO_PASSWORD: z.string().max(256).default(""),
+  OBJECT_STORAGE_ROOT_DIR: safeDir(300).default("/var/lib/pg-object-storage/vault"),
+  OBJECT_STORAGE_DAEMON_PORT: port.default(4095),
+  OBJECT_STORAGE_DAEMON_BIND_HOST: hostLike.default(""),
+  OBJECT_STORAGE_DAEMON_CERT_DIR: safeDir(300).default("/var/lib/pg-object-storage/shared/certs"),
+  OBJECT_STORAGE_ALLOWED_CLIENT_CNS: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    .regex(/^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$/, "must be a comma separated list of certificate names")
+    .default("object-storage-client,backup-client"),
+  OBJECT_STORAGE_DAEMON_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(30_000),
+  OBJECT_STORAGE_ALLOW_INSECURE_HTTP: booleanish.default(false),
+  OBJECT_STORAGE_KEK_KEYRING: z
+    .string()
+    .trim()
+    .regex(/^v\d+:[0-9a-fA-F]{64}(,v\d+:[0-9a-fA-F]{64})*$/, "must be v<N>:<64-hex>[,v<M>:<64-hex>]")
+    .or(z.literal(""))
+    .default(""),
+  OBJECT_STORAGE_ACTIVE_KEK_VERSION: z.coerce.number().int().positive().default(1),
+  OBJECT_STORAGE_TRASH_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+  OBJECT_STORAGE_GC_GRACE_HOURS: z.coerce.number().int().min(1).max(720).default(24),
+
   // 8. Synthetic operational data seeder (test servers with Fake Rails only)
   RUN_SYNTHETIC_HISTORY_SEED: booleanish.default(false),
   SYNTHETIC_SEED_PROFILE: z.enum(["COMPACT", "STANDARD", "STRESS"]).default("COMPACT"),
@@ -632,6 +663,16 @@ export const backupS3Configured = (config: Pick<DeployConfig, "BACKUP_ENGINE_MOD
 
 export const backupStorageConfigured = (config: DeployConfig): boolean =>
   config.BACKUP_ENABLED || config.BACKUP_NODE.trim().length > 0;
+
+/**
+ * True when the Shared Object & Asset Storage Engine tier is configured.
+ * Automatically detected whenever OBJECT_STORAGE_ENABLED, OBJECT_STORAGE_MANAGE_VIA_SSH,
+ * or OBJECT_STORAGE_NODE is set in deploy.env.
+ */
+export const objectStorageConfigured = (config: DeployConfig): boolean =>
+  config.OBJECT_STORAGE_ENABLED
+  || config.OBJECT_STORAGE_MANAGE_VIA_SSH
+  || config.OBJECT_STORAGE_NODE.trim().length > 0;
 
 /**
  * The core upstream URLs every edge service receives. The helper is the single
@@ -794,6 +835,17 @@ export const weakSecretProblems = (config: DeployConfig): string[] => {
   }
   if (config.FAKE_RAILS_JWT_SECRET && config.FAKE_RAILS_JWT_SECRET === config.FAKE_RAILS_SEEDER_TOKEN) {
     problems.push("FAKE_RAILS_JWT_SECRET and FAKE_RAILS_SEEDER_TOKEN must differ");
+  }
+  if (config.OBJECT_STORAGE_KEK_KEYRING) {
+    for (const part of config.OBJECT_STORAGE_KEK_KEYRING.split(",")) {
+      const hex = part.split(":")[1] ?? "";
+      const reason = weakSecretReason(hex);
+      if (reason) problems.push(`OBJECT_STORAGE_KEK_KEYRING ${reason}`);
+    }
+  }
+  if (config.OBJECT_STORAGE_SUDO_PASSWORD) {
+    const reason = weakSecretReason(config.OBJECT_STORAGE_SUDO_PASSWORD);
+    if (reason) problems.push(`OBJECT_STORAGE_SUDO_PASSWORD ${reason}`);
   }
   return problems;
 };
@@ -964,6 +1016,7 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     ["AUDIT_DB_NODE", config.AUDIT_DB_NODE],
     ["LOG_DB_NODE", config.LOG_DB_NODE],
     ["BACKUP_NODE", config.BACKUP_NODE],
+    ["OBJECT_STORAGE_NODE", config.OBJECT_STORAGE_NODE],
   ] as const) {
     storageNodes.push({ label, nodes: label === "PG_PRIMARY_NODE" ? primaryNodes : label === "PG_REPLICA_NODES" ? replicaNodes : (() => {
       try {
@@ -1057,6 +1110,55 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
       }
     }
   }
+
+  // --- Shared Object & Asset Storage Engine -------------------------------
+  const objectStorage = objectStorageConfigured(config);
+  const objectStorageNodes = storageNodes.find((entry) => entry.label === "OBJECT_STORAGE_NODE")?.nodes ?? [];
+  const coreNodesList = parsedTiers.get("CORE_NODES") ?? [];
+  const backupNodesList = storageNodes.find((entry) => entry.label === "BACKUP_NODE")?.nodes ?? [];
+  const singleCoreIp = coreNodesList[0]?.privateIp ?? config.CORE_PRIVATE_IP;
+  const backupOnSeparateHost =
+    config.BACKUP_ENABLED
+    && backupNodesList.length > 0
+    && Boolean(singleCoreIp)
+    && backupNodesList[0]!.privateIp !== singleCoreIp;
+
+  // HARD SHARED-STORAGE ENFORCEMENT:
+  // If more than 1 core node is configured OR backup-daemon runs on a separate host,
+  // storing objects on a core node's local disk is strictly forbidden!
+  if ((coreNodesList.length > 1 || backupOnSeparateHost) && (!objectStorage || objectStorageNodes.length === 0)) {
+    problems.push(
+      "MULTI_NODE_SHARED_STORAGE_REQUIRED: OBJECT_STORAGE_NODE is required when deploying multiple CORE_NODES or a separate BACKUP_NODE. Storing objects on individual core nodes is strictly forbidden — set OBJECT_STORAGE_NODE (e.g. obj-1@10.10.14.10:22:10.10.14.10:4095) so all services point to and read/write from the shared storage server.",
+    );
+  }
+
+  if (objectStorage) {
+    if (objectStorageNodes.length === 0) {
+      problems.push("OBJECT_STORAGE_NODE is required when object storage is enabled");
+    }
+    if (objectStorageNodes.length > 1) {
+      problems.push("OBJECT_STORAGE_NODE must describe exactly one node");
+    }
+    if (!config.OBJECT_STORAGE_SSH_KEY_PATH) {
+      problems.push("OBJECT_STORAGE_SSH_KEY_PATH is required when object storage is enabled");
+    }
+    if (!config.OBJECT_STORAGE_KEK_KEYRING) {
+      problems.push("OBJECT_STORAGE_KEK_KEYRING is required when object storage is enabled");
+    }
+  }
+
+  if (config.OBJECT_STORAGE_KEK_KEYRING) {
+    const activePrefix = `v${config.OBJECT_STORAGE_ACTIVE_KEK_VERSION}:`;
+    const hasActive = config.OBJECT_STORAGE_KEK_KEYRING
+      .split(",")
+      .some((entry) => entry.trim().startsWith(activePrefix));
+    if (!hasActive) {
+      problems.push(
+        `OBJECT_STORAGE_ACTIVE_KEK_VERSION=${config.OBJECT_STORAGE_ACTIVE_KEK_VERSION} is not present in OBJECT_STORAGE_KEK_KEYRING`,
+      );
+    }
+  }
+
   // Node ids are unique across the whole plan; private IPs are unique within a
   // tier (co-locating different tiers on one box remains supported).
   const allNodes = [...parsedTiers.values(), ...storageNodes.map((entry) => entry.nodes)].flat();
@@ -1093,9 +1195,9 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   }
   // A storage listener may share 5432 with another PostgreSQL-family role on
   // the same host (co-located primary/audit/log), but never a compute listener.
-  const storagePortClaims: Array<{ label: string; node: NodeSpec; port: number; family: "postgres" | "redis" | "backup" | "pgbouncer" }> = [];
+  const storagePortClaims: Array<{ label: string; node: NodeSpec; port: number; family: "postgres" | "redis" | "backup" | "pgbouncer" | "object-storage" }> = [];
   for (const entry of storageNodes) {
-    const family = entry.label.startsWith("PG_") ? "postgres" as const : entry.label === "REDIS_NODES" ? "redis" as const : entry.label === "AUDIT_DB_NODE" || entry.label === "LOG_DB_NODE" ? "postgres" as const : "backup" as const;
+    const family = entry.label.startsWith("PG_") ? "postgres" as const : entry.label === "REDIS_NODES" ? "redis" as const : entry.label === "AUDIT_DB_NODE" || entry.label === "LOG_DB_NODE" ? "postgres" as const : entry.label === "OBJECT_STORAGE_NODE" ? "object-storage" as const : "backup" as const;
     for (const node of entry.nodes) storagePortClaims.push({ label: entry.label, node, port: node.servicePort, family });
   }
   for (const node of primaryNodes) storagePortClaims.push({ label: "PGBOUNCER_PORT", node, port: config.PGBOUNCER_PORT, family: "pgbouncer" });

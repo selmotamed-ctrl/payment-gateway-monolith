@@ -346,5 +346,17 @@
     "article": "b00-03",
     "question": "What are the most serious breaches?",
     "answer": "Sharing credentials, guessing on UNKNOWN and tipping-off."
+  },
+  {
+    "id": "q-059",
+    "article": "b12-12",
+    "question": "Can two core-back servers store uploaded files on their own local disks?",
+    "answer": "No. Multi-node deployments must configure `OBJECT_STORAGE_NODE` so every core server and backup daemon reads and writes to the shared mTLS storage vault."
+  },
+  {
+    "id": "q-060",
+    "article": "b12-13",
+    "question": "Why can't I download a newly uploaded KYB document right away?",
+    "answer": "It is in `QUARANTINE_PENDING_AV` until the antivirus scan worker verifies it is clean and promotes it to `ACTIVE`."
   }
 ]

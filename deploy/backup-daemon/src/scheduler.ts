@@ -30,6 +30,8 @@ export interface BackupSchedulerOptions {
   clock?: () => Date;
   idFactory?: () => string;
   logger?: Pick<Console, "info" | "warn" | "error">;
+  /** Copies/verifies the shared object-storage vault after a successful backup. Returns extra storage target ids. */
+  syncObjectStorage?: () => Promise<string[]>;
 }
 
 const policyKey: Record<ScheduledJob, keyof BackupPolicy> = {
@@ -47,6 +49,7 @@ export class BackupScheduler {
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
   private readonly logger: Pick<Console, "info" | "warn" | "error">;
+  private readonly syncObjectStorage?: () => Promise<string[]>;
   private readonly enabled: boolean;
   private readonly issuedIds = new Set<string>();
   private readonly crons: Record<ScheduledJob, string | null> = {
@@ -77,6 +80,7 @@ export class BackupScheduler {
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? (() => randomUUID());
     this.logger = options.logger ?? console;
+    this.syncObjectStorage = options.syncObjectStorage;
     this.enabled = options.config.SCHEDULER_ENABLED;
     const snapshot = this.catalog.snapshot();
     for (const run of snapshot.runs) this.issuedIds.add(run.id);
@@ -231,6 +235,8 @@ export class BackupScheduler {
     await this.catalog.updateRun(id, { status: "RUNNING" });
     try {
       const result = await this.engine.triggerBackup("all", kind);
+      const extraTargets = await this.syncObjectStorage?.();
+      if (extraTargets && extraTargets.length > 0) result.storageTargets.push(...extraTargets);
       const completed = this.clock();
       await this.catalog.updateRun(id, {
         status: "PASSED",

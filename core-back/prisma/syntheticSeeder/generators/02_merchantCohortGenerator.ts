@@ -462,7 +462,6 @@ export const generateMerchantCohort = (ctx: SeederContext): void => {
           docType,
           storageKey: `synthetic/${ctx.config.namespace}/merchants/${merchantId}/${docType.toLowerCase()}-${copy}.pdf`,
           originalFileName: `${docType.toLowerCase()}${superseded ? `-v${copy + 1}` : ""}.pdf`,
-          contentCiphertext: null,
           sha256: sha,
           mime: "application/pdf",
           sizeBytes: ctx.rng.int(80_000, 3_500_000),

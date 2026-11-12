@@ -503,3 +503,12 @@ These are development/CI tests only; no production-time test job or test endpoin
 - Route-order suites (`core-back/test/reportEngineSdk/RouteOrder.test.ts`, `admin-back/test/report-engine-route-order.test.ts`, `merchant-back/test/report-engine-route-order.test.ts`) assert that every new static migration/transcript route is registered before a dynamic id route and that the expected endpoints exist.
 - `admin-back/test/report-engine-edge.test.ts` and `merchant-back/test/core-forwarding.test.ts` cover migration list pagination/search query forwarding, prompts, Chrome detail, reconciliation, merchant branding and Studio prefill routes.
 - Frontend type checks cover the new admin/merchant migration pages, branding editor and Studio query prefill; the existing i18n and SDK mirror gates cover Arabic catalogue completeness and client mirror equality.
+
+## Object storage suites
+
+- `core-back/test/objectStorageEngine.test.ts` — T01–T20 (DB-gated) and DB-free
+  pgos1/sniff edge cases; runs against a real PostgreSQL 18 + Redis.
+- `deploy/test/objectStorageDeploy.test.ts` — T21 topology/PKI/firewall/guard
+  and T22 parity/escrow/drill, plus the shared `blobStore.ts` drift guard.
+- `deploy/object-storage-daemon/test/server.test.ts` — HTTP round-trip, checksum
+  mismatch, path traversal, trash/purge and unknown bucket/route refusals.

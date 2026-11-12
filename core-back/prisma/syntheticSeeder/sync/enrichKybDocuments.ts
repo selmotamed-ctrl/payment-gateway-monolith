@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "../../../generated/prisma/client";
-import { Vault } from "../../../engine/crypto/Vault";
+import { createObjectStorageSdk } from "../../../lib/objectStorageSdk";
 import {
   DEFAULT_KYB_REFRESH_POLICY,
   nextKybReviewAt,
@@ -15,8 +15,9 @@ const previewPdf = (documentId: string): Buffer =>
 
 /**
  * Adds the data that cannot be produced by the synchronous row generator:
- * encrypted document content, owner identity documents, a few active-merchant
- * re-verification requests and the next periodic KYB review date.
+ * shared object-storage document content, owner identity documents, a few
+ * active-merchant re-verification requests and the next periodic KYB review
+ * date.
  */
 export const enrichKybDocuments = async (prisma: PrismaClient): Promise<{
   documents: number;
@@ -24,37 +25,93 @@ export const enrichKybDocuments = async (prisma: PrismaClient): Promise<{
   revalidations: number;
   merchantsScheduled: number;
 }> => {
-  const vault = new Vault();
+  const objectStorage = createObjectStorageSdk({ prisma });
   const uploader = await prisma.user.findFirst({
     where: { merchantId: null },
     orderBy: { createdAt: "asc" },
     select: { id: true },
   });
+  const actorId = uploader?.id ?? "synthetic-seeder";
+
+  const attachPreview = async (document: {
+    id: string;
+    merchantId: string;
+    docType: string;
+    originalFileName: string | null;
+    avStatus: string;
+  }): Promise<void> => {
+    const bytes = previewPdf(document.id);
+    const fileName = document.originalFileName ?? `${document.docType.toLowerCase()}.pdf`;
+    const actor = {
+      actorType: "SYSTEM_WORKER" as const,
+      actorId,
+      authorities: ["*"],
+    };
+    const staged = document.avStatus === "CLEAN"
+      ? await objectStorage.workerClient.stageSystemGenerated({
+          namespace: "KYB_DOCUMENTS",
+          data: bytes,
+          originalFilename: fileName,
+          claimedMimeType: "application/pdf",
+          ownerMerchantId: document.merchantId,
+          actorId,
+          metadata: { synthetic: true, documentId: document.id },
+        })
+      : await objectStorage.routeClient.stageUpload({
+          namespace: "KYB_DOCUMENTS",
+          data: bytes,
+          originalFilename: fileName,
+          claimedMimeType: "application/pdf",
+          ownerMerchantId: document.merchantId,
+          actor,
+          metadata: { synthetic: true, documentId: document.id },
+        });
+    await prisma.$transaction(async (tx) => {
+      await tx.kybDocument.update({
+        where: { id: document.id },
+        data: {
+          storageObjectId: staged.objectId,
+          storageKey: staged.storageKey,
+          originalFileName: fileName,
+        },
+      });
+      await objectStorage.routeClient.bind(tx as never, {
+        objectId: staged.objectId,
+        holderType: "KYB_DOCUMENT",
+        holderId: document.id,
+        actorId,
+        reason: "SYNTHETIC_KYB_DOCUMENT",
+        autoPromoteIfNoAvRequired: document.avStatus === "CLEAN",
+      });
+    });
+    if (document.avStatus === "INFECTED") {
+      await objectStorage.workerClient.applyScanVerdict({
+        objectId: staged.objectId,
+        verdict: "INFECTED",
+        signature: "SYNTHETIC_INFECTED_DOCUMENT",
+      });
+    }
+  };
 
   const documents = await prisma.kybDocument.findMany({
-    where: { contentCiphertext: null },
+    where: { storageObjectId: null },
     select: {
       id: true,
       merchantId: true,
-      joinRequestId: true,
       docType: true,
-      mime: true,
       originalFileName: true,
       uploadedById: true,
-      status: true,
-      expiresOn: true,
-      createdAt: true,
+      avStatus: true,
     },
   });
   for (const document of documents) {
-    await prisma.kybDocument.update({
-      where: { id: document.id },
-      data: {
-        contentCiphertext: await vault.encryptSecret(previewPdf(document.id).toString("base64"), "kyb-document"),
-        originalFileName: document.originalFileName ?? `${document.docType.toLowerCase()}.pdf`,
-        uploadedById: document.uploadedById ?? uploader?.id ?? null,
-      },
-    });
+    await attachPreview(document);
+    if (!document.uploadedById && uploader) {
+      await prisma.kybDocument.update({
+        where: { id: document.id },
+        data: { uploadedById: uploader.id },
+      });
+    }
   }
 
   const activeForDocuments = await prisma.merchant.findMany({
@@ -84,6 +141,7 @@ export const enrichKybDocuments = async (prisma: PrismaClient): Promise<{
       if (validTypes.has(docType)) continue;
       const id = randomUUID();
       const expiresOn = new Date(Date.now() + 365 * 86_400_000);
+      const bytes = previewPdf(id);
       await prisma.kybDocument.create({
         data: {
           id,
@@ -92,12 +150,11 @@ export const enrichKybDocuments = async (prisma: PrismaClient): Promise<{
           subjectType: "MERCHANT",
           subjectId: merchant.id,
           docType: docType as never,
-          storageKey: `synthetic/kyb/merchants/${merchant.id}/${docType}.pdf`,
+          storageKey: `pending-object-storage/${id}`,
           originalFileName: `${docType.toLowerCase()}.pdf`,
-          contentCiphertext: await vault.encryptSecret(previewPdf(id).toString("base64"), "kyb-document"),
           sha256: `seed-valid-${merchant.id}-${docType}`.padEnd(64, "0").slice(0, 64),
           mime: "application/pdf",
-          sizeBytes: previewPdf(id).byteLength,
+          sizeBytes: bytes.byteLength,
           avStatus: "CLEAN",
           status: "ACCEPTED",
           uploadedById: uploader?.id ?? null,
@@ -106,6 +163,13 @@ export const enrichKybDocuments = async (prisma: PrismaClient): Promise<{
           expiresOn,
           statusChangedAt: new Date(),
         },
+      });
+      await attachPreview({
+        id,
+        merchantId: merchant.id,
+        docType,
+        originalFileName: `${docType.toLowerCase()}.pdf`,
+        avStatus: "CLEAN",
       });
       validDocuments += 1;
     }
@@ -129,6 +193,8 @@ export const enrichKybDocuments = async (prisma: PrismaClient): Promise<{
       select: { id: true },
     });
     const id = randomUUID();
+    const originalFileName = `${owner.fullNameAr.replaceAll(/\s+/g, "-")}-identity.pdf`;
+    const bytes = previewPdf(id);
     await prisma.kybDocument.create({
       data: {
         id,
@@ -137,18 +203,24 @@ export const enrichKybDocuments = async (prisma: PrismaClient): Promise<{
         subjectType: "BENEFICIAL_OWNER",
         subjectId: owner.id,
         docType: "OWNER_ID",
-        storageKey: `synthetic/kyb/owners/${owner.id}/OWNER_ID.pdf`,
-        originalFileName: `${owner.fullNameAr.replaceAll(/\s+/g, "-")}-identity.pdf`,
-        contentCiphertext: await vault.encryptSecret(previewPdf(id).toString("base64"), "kyb-document"),
+        storageKey: `pending-object-storage/${id}`,
+        originalFileName,
         sha256: `seed-owner-${owner.id}`.padEnd(64, "0").slice(0, 64),
         mime: "application/pdf",
-        sizeBytes: previewPdf(id).byteLength,
+        sizeBytes: bytes.byteLength,
         avStatus: "CLEAN",
         status: "UPLOADED",
         uploadedById: uploader?.id ?? null,
         expiresOn: new Date(Date.now() + 365 * 86_400_000),
         statusChangedAt: new Date(),
       },
+    });
+    await attachPreview({
+      id,
+      merchantId: owner.merchantId,
+      docType: "OWNER_ID",
+      originalFileName,
+      avStatus: "CLEAN",
     });
     ownerDocuments += 1;
   }

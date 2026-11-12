@@ -2896,7 +2896,7 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 
 ## Storage Engine
 
-> Status: `partial` · Last verified: 2026-11-09
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -3364,6 +3364,20 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 - **Redis velocity failure policy (GAP-031, RESOLVED).** `REDIS_VELOCITY_FAILURE_POLICY` (parsed by `parseVelocityFailurePolicy`, wired in `createStorageEngine`, overridable with `velocityFailurePolicy`) defines what the Redis velocity counter does when Redis is unreachable, errors or exceeds the command timeout. `local-fallback` (default) fails open degraded: the window is counted in this node's memory, so limits still apply per node and are lost on restart. `fail-open` allows without counting (empty `windowStats`). `fail-closed` throws `VelocityUnavailableError` so the caller refuses the attempt. `onVelocityDegraded` is invoked with the policy and the error. Velocity is a risk signal, not a ledger invariant, so the default does not stop payments during an outage; use `fail-closed` only when a missed limit is worse than an outage. Tests: `core-back/test/storage-engine/velocity-failure-policy.test.ts`.
 - **Leader election (GAP-012).** `StorageEngine.leaderElection` is a `PgAdvisoryLeaderElection` built from the primary URL (see `core.workers` for the semantics and the PgBouncer transaction-pooling caveat); it is closed with the engine.
 
+## 13. Shared object & asset storage (schema v36)
+
+The storage engine is paired with the shared object vault documented in
+`parts/01-core-back/13-object-storage.md`. PostgreSQL keeps only the control
+plane (`storage_objects`, `storage_object_locks`,
+`storage_object_access_logs`); the bytes live in
+`deploy/object-storage-daemon` (`RemoteMtlsBlobStore` on every core node and the
+backup daemon, `FsBlobStore` in local dev). The former
+`reconciliation_runs.file_content` bytea column is removed and the run carries
+`storage_object_id`; KYB documents, regulatory outputs/templates, Report Studio
+bundles and catalog assets carry storage-object FKs. The `ObjectStorageMaintenanceWorker`
+(GC, orphan sweep, integrity scrub, lock reconcile, KEK rewrap, generic AV
+fallback) and the `object_storage` Platform Monitor check cover operations.
+
 ## Data Schema and Migrations
 
 > Status: `partial` · Last verified: 2026-11-11
@@ -3376,7 +3390,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 35 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 36 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -3431,7 +3445,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 35`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 36`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -3442,9 +3456,17 @@ The models are grouped by domain:
 
 `core-back/prisma/seed.ts`, `seedFakeRails.ts` and `syntheticSeeder/index.ts` call `ensureSchemaVersion()` before writing. A stale database is therefore rejected by these seeders and by any caller that explicitly asserts the version. The core HTTP start path does not call it.
 
+Schema version 36 adds the shared object & asset storage control plane
+(`storage_objects`, `storage_object_locks`, `storage_object_access_logs`,
+`report_asset_bundle_entries`, `dispute_attachments`, `aml_case_evidence`),
+domain FK links (KYB, reconciliation, regulatory templates/outputs, Report Studio
+bundles, catalog assets), removes `reconciliation_runs.file_content`, and
+installs the two append-only guard triggers. See
+`parts/01-core-back/13-object-storage.md`.
+
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261111130000_merchant_report_chrome`, schema version 35). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261112000000_v36_enterprise_object_storage_engine`, schema version 36). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -3739,7 +3761,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 35 (`REQUIRED_SCHEMA_VERSION = 35`; model count 106). The schema migrations since version 10 are:
+The current schema version is 35 (`REQUIRED_SCHEMA_VERSION = 36`; model count 106). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);

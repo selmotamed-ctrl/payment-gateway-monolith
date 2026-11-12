@@ -3,7 +3,7 @@ id: deploy.pki
 title: Internal PKI and mTLS Certificates
 status: partial
 confidence: high
-last_verified: 2026-11-09
+last_verified: 2026-11-12
 verified_against: 6765e90+working-tree
 code:
   - deploy/lib/pkiManager.ts
@@ -335,3 +335,13 @@ Not covered by automated tests:
 ## 10. Change history
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
+
+## Object storage certificates
+
+`buildPki` mints `object-storage-daemon.crt` (server; CN
+`object-storage-daemon.internal`, SANs `IP:<OBJECT_STORAGE_NODE private IP>`,
+`IP:127.0.0.1`, `DNS:object-storage-daemon.internal`) and, when object storage is
+configured, the `object-storage-client` client certificate. `certFilesForHost`
+gives the storage host its server + client material; core hosts and the backup
+host receive `internal-ca.crt` and `object-storage-client.*`. Renewal/SAN drift
+handling includes the object-storage server leaf.

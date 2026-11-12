@@ -308,6 +308,17 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 `PG_APP_USER` (default `pgw_app_login`) and `PG_APP_PASSWORD` (at least 12 characters, different from the owner's) enable the role split: the owner (`PG_DB_USER`) runs migrations and seeders through `ownerUrl`, while the running services connect as `PG_APP_USER`, a plain LOGIN member of `pgw_app`. `PG_APP_USER` must not be `postgres`, `pgw_app` or `pgw_ledger_maintenance`, nor equal the owner or replication user. Without `PG_APP_PASSWORD` the legacy single-role behaviour is kept and the deploy warns.
 
+## Shared object storage topology
+
+`OBJECT_STORAGE_NODE` (same `nodeId@sshHost:sshPort:privateIp:servicePort`
+format) adds `object-storage` to the storage roles. It is mandatory when
+`CORE_NODES` has more than one node or the backup daemon is on a separate host;
+otherwise validation fails with `MULTI_NODE_SHARED_STORAGE_REQUIRED`.
+`OBJECT_STORAGE_ENABLED`, `OBJECT_STORAGE_MANAGE_VIA_SSH` or a non-empty node
+auto-detect the tier. Core and backup daemon receive
+`OBJECT_STORAGE_DAEMON_URL` plus `object-storage-client` mTLS paths, and the
+core receives `CLUSTER_CORE_NODE_COUNT` and the KEK keyring.
+
 ## Host Planner
 
 > Status: `implemented` · Last verified: 2026-11-05
@@ -597,7 +608,7 @@ The planner's config validation now rejects weak secrets and restricts charsets 
 
 ## Internal PKI and mTLS Certificates
 
-> Status: `partial` · Last verified: 2026-11-09
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -897,6 +908,16 @@ Not covered by automated tests:
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
 
+## Object storage certificates
+
+`buildPki` mints `object-storage-daemon.crt` (server; CN
+`object-storage-daemon.internal`, SANs `IP:<OBJECT_STORAGE_NODE private IP>`,
+`IP:127.0.0.1`, `DNS:object-storage-daemon.internal`) and, when object storage is
+configured, the `object-storage-client` client certificate. `certFilesForHost`
+gives the storage host its server + client material; core hosts and the backup
+host receive `internal-ca.crt` and `object-storage-client.*`. Renewal/SAN drift
+handling includes the object-storage server leaf.
+
 ## Firewall Policy and Application
 
 > Status: `partial` · Last verified: 2026-11-05
@@ -1156,7 +1177,7 @@ The Fake Rails nginx vhost now also applies `allow`/`deny` rules from `FAKE_RAIL
 
 ## Deployment Pipeline
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -1521,9 +1542,19 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 
 `DEPLOY_MODE=auto` now probes every host read-only in step 4 (`lib/hostProbe.ts`, a pure `bootstrapGaps()` over the probe output) and resolves each host to fresh, update or refuse (an edge host whose core has not been migrated is refused before anything changes). A resource preflight warns when PostgreSQL sizing (`PG_RAM_GB`) exceeds the host's memory. Verification (formerly step 12) now runs before the long seed (formerly step 11). `runAsDatabaseOwner` runs migrations and seeders with the owner URL. Tests: `deploy/test/hostProbe.test.ts`, `pipeline.test.ts`.
 
+## Object storage step
+
+Step 5 provisions the shared object-storage tier before the backup engine:
+`provisionObjectStorageEngine` validates the node/KEK, then
+`deployObjectStorageDaemon` syncs and starts the daemon. Health verification
+probes `systemctl is-active pg-object-storage-daemon` on the storage host and
+`GET /v1/health` over mTLS from every core host and the backup host. The deploy
+fails before any core is touched when multiple core nodes or a separate backup
+host are configured without `OBJECT_STORAGE_NODE`.
+
 ## Storage Provisioners
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -1972,6 +2003,18 @@ Not covered:
 - The bootstrap SQL creates the app login role as a member of `pgw_app` with no UPDATE/DELETE/TRUNCATE on the ledger and audit tables and no DDL. Validated end to end on a TLS PostgreSQL 18 with a real PgBouncer (owner migrations, app-role privilege probes, core's Prisma client). It has not run on a multi-host lab (GAP-057 stays partial).
 - Redis (`redisProvisioner.ts`): `maxmemory-policy volatile-ttl` plus AOF, so only keys with a TTL are evictable and a restart does not lose revoke flags; every durable key must carry a TTL.
 
+## Object storage provisioner (v36)
+
+`deploy/provisioners/objectStorageProvisioner.ts` creates the `pgobjstore`
+system user, `/var/lib/pg-object-storage` and the vault subdirectories
+(`hot`, `cold`, `quarantine`, `tmp`, `.trash`), writes
+`/etc/pg-object-storage/object-storage.env` and
+`pg-object-storage-daemon.service` (Bun, `ProtectSystem=strict`,
+`PrivateTmp=true`, `ReadWritePaths` for the vault and cert directories).
+`deployObjectStorageDaemon` syncs `deploy/object-storage-daemon` to
+`/opt/pg-object-storage-daemon` and starts/restarts it only on change; the
+provisioner refuses multiple core nodes without a configured object-storage node.
+
 ## Backup Daemon
 
 > Status: `partial` · Last verified: 2026-11-06
@@ -2195,6 +2238,18 @@ Not covered: the dedicated-backup-host and host-loss topologies on real machines
 - 2026-11-06: two-host lab pass: "latest" recovery, primary-clock manifests, stream lag health, `AbortError` handling, reserved default role names (`PG_DB_USER`, `PG_REPLICATION_USER`), real-copy bun install, the lab itself.
 - 2026-11-06: gap-closure pass: idle lag, restart state and instance lock, tablespace guard, drill role mapping, cron fallback drill, reserved default role names, least-privilege live coverage.
 - 2026-11-06: backup engine reliability implementation (previous revision): pg-native engine, three-tier encrypted repository, signed manifests and catalog mirror, WAL ingest over mTLS plus streaming, shared job queue and idempotency, per-role mTLS, topology-aware audit handling, drill fixes, deploy wiring fixes; section 9 lists where the design was corrected.
+
+## Object storage parity, escrow and drill
+
+`deploy/backup-daemon/src/objectStorageBackup.ts` copies new HOT/COLD
+`.v1.enc` blobs into `object-blobs/{bucket}/{storageKey}` (immutable, so the
+copy is incremental), fails with `OBJECT_STORAGE_BACKUP_PARITY_ERROR` when an
+ACTIVE row has no blob, and writes `object-storage/kek-escrow.enc` (AES-256-GCM
+under the backup master key). The restore drill samples up to
+`OBJECT_STORAGE_DRILL_SAMPLE` ACTIVE rows, decrypts them with the escrowed
+keyring and compares the SHA-256; the report's `checks.objectStorage` carries the
+result. The daemon receives the object-storage URL/client certs/KEK keyring from
+the deploy engine.
 
 ## Health Verification, Rollback and Recovery
 

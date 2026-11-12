@@ -5408,5 +5408,80 @@
     "body": "| What | Value |\n| :--- | :--- |\n| Decimal places for money in the books | 4 (LYD shown with 3) |\n| Wrong OTP tries (default) | 3 |\n| OTP payment time ceiling | 20 minutes |\n| Redirect payment ceiling | 30 minutes |\n| QR and push ceiling | 15 minutes |\n| Late-confirmation grace (default) | 24 hours |\n| Webhook timestamp tolerance | 5 minutes |\n| Webhook duplicate memory | 7 days |\n| Approval request lifetime | 7 days |\n| Emergency suspension ratification | 24 hours |\n| Join request inactive expiry | 30 days |\n| Join review deadline | 2 business days (`LOW`/`STANDARD`), 5 (`HIGH`) |\n| Beneficial owner threshold (default) | 25% |\n| AML case deadlines (default) | `CRITICAL` 4 h, `HIGH` 1 day, `MEDIUM` 3 days, `LOW` 5 days |\n| POS screen idle limit | 15 minutes |\n| Outbound call limits | 10 s (auth, status), 15 s (start, confirm, refund) |\n| Maximum response size | 2 MB |\n| Retention (default) | 5 years after the relationship ends |\n| KYB refresh | `HIGH` yearly, `STANDARD` 2 years, `LOW` 3 years |\n| Document expiry notices | 30 and 7 days before |\n| Go-live gates | 12 |\n| Automatic sandbox scenarios | 15 |\n| Database tables | 64 |\n| Edge cases catalogued | 140 |",
     "headings": [],
     "plainText": "What Value\n:--- :---\nDecimal places for money in the books 4 (LYD shown with 3)\nWrong OTP tries (default) 3\nOTP payment time ceiling 20 minutes\nRedirect payment ceiling 30 minutes\nQR and push ceiling 15 minutes\nLate-confirmation grace (default) 24 hours\nWebhook timestamp tolerance 5 minutes\nWebhook duplicate memory 7 days\nApproval request lifetime 7 days\nEmergency suspension ratification 24 hours\nJoin request inactive expiry 30 days\nJoin review deadline 2 business days (LOW/STANDARD), 5 (HIGH)\nBeneficial owner threshold (default) 25%\nAML case deadlines (default) CRITICAL 4 h, HIGH 1 day, MEDIUM 3 days, LOW 5 days\nPOS screen idle limit 15 minutes\nOutbound call limits 10 s (auth, status), 15 s (start, confirm, refund)\nMaximum response size 2 MB\nRetention (default) 5 years after the relationship ends\nKYB refresh HIGH yearly, STANDARD 2 years, LOW 3 years\nDocument expiry notices 30 and 7 days before\nGo-live gates 12\nAutomatic sandbox scenarios 15\nDatabase tables 64\nEdge cases catalogued 140"
+  },
+  {
+    "id": "b12-12",
+    "book": 12,
+    "order": 12,
+    "title": "Shared Object & Asset Storage: how files, locks, quarantine and retention work",
+    "roles": [
+      "SECURITY_ADMIN",
+      "GATEWAY_ADMIN",
+      "COMPLIANCE",
+      "FINANCE"
+    ],
+    "minutes": 4,
+    "ui": "AVAILABLE",
+    "related": [
+      "b12-09",
+      "b12-10",
+      "b12-13"
+    ],
+    "body": ":::summary Big picture in 20 seconds\nEvery uploaded document, statement, report output and brand logo lives in the encrypted Shared Object Storage vault (`OBJECT_STORAGE_NODE`), never inside PostgreSQL table rows and never on individual core nodes.\n:::\n\n### Why files never live on core nodes or inside PostgreSQL\nIn a multi-node deployment, several `core-back` servers and a dedicated `backup-daemon` server work together. If `core-1` saved a KYB PDF on its own disk, `core-2` and `backup-1` could not read it. Therefore:\n* The deploy engine requires a shared **Object Storage Node** (`OBJECT_STORAGE_NODE`, running `pg-object-storage-daemon` over mTLS on port `4095`). If someone configures multiple core nodes without `OBJECT_STORAGE_NODE`, deployment refuses to start (`MULTI_NODE_SHARED_STORAGE_REQUIRED`).\n* Every file is encrypted in 64 KiB `AES-256-GCM` chunks (`pgos1`) with its own 256-bit Data Encryption Key (DEK) wrapped by the Key Encryption Keyring (`OBJECT_STORAGE_KEK_KEYRING`).\n* PostgreSQL stores only the small control-plane ledger: `storage_objects`, `storage_object_locks` and `storage_object_access_logs`.\n\n### Shared multi-record locks (`storage_object_locks`)\nOne file can be locked by more than one record at the same time. For example, a payment rail logo uploaded into the Asset Catalog (`CATALOG_ASSET`) and assigned to two payment rails (`RAIL_LOGO`) has three active locks.\n* Database trigger `storage_objects_guard_trg` forbids deleting rows from `storage_objects` and forbids transitioning an object to `PURGED` while **any** active lock (`released_at IS NULL`) exists, while `legal_hold = true`, or while `retain_until` is in the future.\n* When the last active lock is released, the object enters a 24-hour grace window (`gc_eligible_at`). After 24 hours (and after `retain_until` expires), `GcWorker` moves the ciphertext file to `.trash/YYYY-MM-DD/` for 7 days before permanent removal.\n\n### Two-stage retention and malware quarantine\nWhen a merchant or operator uploads a KYB document, dispute attachment or AML evidence file:\n1. It is staged and bound in `QUARANTINE_PENDING_AV` state with `retain_until = NULL`. While in quarantine, nobody can download it (`423 STORAGE_OBJECT_QUARANTINED`).\n2. `AvScanWorker` decrypts and scans the file. If clean, it promotes the object to `ACTIVE` and stamps its compliance retention window (`retain_until`). If infected, it releases the lock and marks the object `QUARANTINE_REJECTED` so malware never receives a 7-year compliance lock.",
+    "headings": [
+      {
+        "id": "why-files-never-live-on-core-nodes-or-inside-postgresql",
+        "text": "Why files never live on core nodes or inside PostgreSQL",
+        "level": 3
+      },
+      {
+        "id": "shared-multi-record-locks-storage-object-locks",
+        "text": "Shared multi-record locks (storage_object_locks)",
+        "level": 3
+      },
+      {
+        "id": "two-stage-retention-and-malware-quarantine",
+        "text": "Two-stage retention and malware quarantine",
+        "level": 3
+      }
+    ],
+    "plainText": "Big picture in 20 seconds\nEvery uploaded document, statement, report output and brand logo lives in the encrypted Shared Object Storage vault (OBJECT_STORAGE_NODE), never inside PostgreSQL table rows and never on individual core nodes.\nWhy files never live on core nodes or inside PostgreSQL\nIn a multi-node deployment, several core-back servers and a dedicated backup-daemon server work together. If core-1 saved a KYB PDF on its own disk, core-2 and backup-1 could not read it. Therefore:\nThe deploy engine requires a shared Object Storage Node (OBJECT_STORAGE_NODE, running pg-object-storage-daemon over mTLS on port 4095). If someone configures multiple core nodes without OBJECT_STORAGE_NODE, deployment refuses to start (MULTI_NODE_SHARED_STORAGE_REQUIRED).\nEvery file is encrypted in 64 KiB AES-256-GCM chunks (pgos1) with its own 256-bit Data Encryption Key (DEK) wrapped by the Key Encryption Keyring (OBJECT_STORAGE_KEK_KEYRING).\nPostgreSQL stores only the small control-plane ledger: storage_objects, storage_object_locks and storage_object_access_logs.\nShared multi-record locks (storage_object_locks)\nOne file can be locked by more than one record at the same time. For example, a payment rail logo uploaded into the Asset Catalog (CATALOG_ASSET) and assigned to two payment rails (RAIL_LOGO) has three active locks.\nDatabase trigger storage_objects_guard_trg forbids deleting rows from storage_objects and forbids transitioning an object to PURGED while any active lock (released_at IS NULL) exists, while legal_hold = true, or while retain_until is in the future.\nWhen the last active lock is released, the object enters a 24-hour grace window (gc_eligible_at). After 24 hours (and after retain_until expires), GcWorker moves the ciphertext file to .trash/YYYY-MM-DD/ for 7 days before permanent removal.\nTwo-stage retention and malware quarantine\nWhen a merchant or operator uploads a KYB document, dispute attachment or AML evidence file:\nIt is staged and bound in QUARANTINE_PENDING_AV state with retain_until = NULL. While in quarantine, nobody can download it (423 STORAGE_OBJECT_QUARANTINED).\nAvScanWorker decrypts and scans the file. If clean, it promotes the object to ACTIVE and stamps its compliance retention window (retain_until). If infected, it releases the lock and marks the object QUARANTINE_REJECTED so malware never receives a 7-year compliance lock."
+  },
+  {
+    "id": "b12-13",
+    "book": 12,
+    "order": 13,
+    "title": "Operating the Object & Asset Storage screen: legal holds, KEK rotation and maintenance jobs",
+    "roles": [
+      "SECURITY_ADMIN",
+      "GATEWAY_ADMIN",
+      "COMPLIANCE"
+    ],
+    "minutes": 3,
+    "ui": "AVAILABLE",
+    "related": [
+      "b12-12",
+      "b12-10",
+      "b12-11"
+    ],
+    "body": ":::summary Big picture in 20 seconds\nUse `/system/object-storage` to inspect shared storage health, check active locks on any file, place or lift legal holds, and trigger maintenance jobs (`Integrity Scrub`, `KEK Rewrap`, `Lock Reconcile`, `GC`).\n:::\n\n### Who may do what on `/system/object-storage`\n* **View health, objects, locks and access logs:** `system:storage:read`.\n* **Place or lift a Legal Hold:** `system:storage:legal-hold` (Security Admin / Compliance).\n* **Trigger maintenance jobs (`scrub`, `rewrap`, `reconcile-locks`, `gc`, `sweep`):** `system:storage:admin`.\n\n### Placing and lifting a Legal Hold\nDuring an investigation, dispute or audit, a Compliance or Security Admin can place a **Legal Hold** on any object with a mandatory written reason. While `legal_hold = true`, database trigger `storage_objects_guard_trg` and `GcWorker` refuse to purge the object even if all domain locks are released and `retain_until` has passed. Checklist: [[c:sg-place-legal-hold|Place or lift a storage legal hold]].\n\n### Zero-downtime KEK key rotation (`RewrapWorker`)\nWhen IT rotates `OBJECT_STORAGE_KEK_KEYRING` from `v1` to `v2`, the encrypted `.v1.enc` files on disk do not need to be rewritten. Running the **KEK Rewrap** job unwraps each object's 32-byte DEK with `v1` and re-wraps it with `v2` in `storage_objects`.",
+    "headings": [
+      {
+        "id": "who-may-do-what-on-system-object-storage",
+        "text": "Who may do what on /system/object-storage",
+        "level": 3
+      },
+      {
+        "id": "placing-and-lifting-a-legal-hold",
+        "text": "Placing and lifting a Legal Hold",
+        "level": 3
+      },
+      {
+        "id": "zero-downtime-kek-key-rotation-rewrapworker",
+        "text": "Zero-downtime KEK key rotation (RewrapWorker)",
+        "level": 3
+      }
+    ],
+    "plainText": "Big picture in 20 seconds\nUse /system/object-storage to inspect shared storage health, check active locks on any file, place or lift legal holds, and trigger maintenance jobs (Integrity Scrub, KEK Rewrap, Lock Reconcile, GC).\nWho may do what on /system/object-storage\nView health, objects, locks and access logs: system:storage:read.\nPlace or lift a Legal Hold: system:storage:legal-hold (Security Admin / Compliance).\nTrigger maintenance jobs (scrub, rewrap, reconcile-locks, gc, sweep): system:storage:admin.\nPlacing and lifting a Legal Hold\nDuring an investigation, dispute or audit, a Compliance or Security Admin can place a Legal Hold on any object with a mandatory written reason. While legal_hold = true, database trigger storage_objects_guard_trg and GcWorker refuse to purge the object even if all domain locks are released and retain_until has passed. Checklist: [[c:sg-place-legal-hold Place or lift a storage legal hold]].\nZero-downtime KEK key rotation (RewrapWorker)\nWhen IT rotates OBJECT_STORAGE_KEK_KEYRING from v1 to v2, the encrypted .v1.enc files on disk do not need to be rewritten. Running the KEK Rewrap job unwraps each object's 32-byte DEK with v1 and re-wraps it with v2 in storage_objects."
   }
 ]

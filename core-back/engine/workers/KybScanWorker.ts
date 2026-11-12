@@ -4,6 +4,7 @@ import { writeSystemAudit } from "../ledger/ledgerAlerts";
 import { openKeyedOperatorCase } from "./automationCases";
 import { bilingualNotice, queueNotice, type NoticeDefinition } from "../../lib/automationNotices";
 import { KybScannerError, type KybScanner } from "../../lib/kybScanner";
+import type { ObjectStorageSdk } from "../../lib/objectStorageSdk";
 
 type Any = Record<string, any>;
 
@@ -26,6 +27,8 @@ const CLAIM_LEASE_MS = 5 * 60 * 1000;
 export interface KybScanWorkerDeps extends WorkerOptions {
   /** The engine; null means none is configured and the worker only reports it (documents stay PENDING). */
   scanner: KybScanner | null;
+  /** The shared object-storage vault; when present the document bytes and the object verdict are kept in sync. */
+  objectStorage?: ObjectStorageSdk;
   /** Decrypts a document's `content_ciphertext` to its bytes (production: the platform vault). */
   openContent: (ciphertext: string) => Promise<Buffer>;
   /** Re-scan CLEAN documents older than this many days; 0 turns re-scanning off. Default 30. */
@@ -51,6 +54,7 @@ interface ClaimedDocument {
   attempts: number;
   uploadedBy: string | null;
   sha256: string;
+  storageObjectId: string | null;
 }
 
 /**
@@ -73,6 +77,7 @@ interface ClaimedDocument {
 export class KybScanWorker extends BaseWorker {
   private readonly scanner: KybScanner | null;
   private readonly openContent: KybScanWorkerDeps["openContent"];
+  private readonly objectStorage: ObjectStorageSdk | undefined;
   private readonly rescanDays: number;
   private readonly maxAttempts: number;
   private readonly retryBaseMs: number;
@@ -83,6 +88,7 @@ export class KybScanWorker extends BaseWorker {
     super(deps);
     this.scanner = deps.scanner;
     this.openContent = deps.openContent;
+    this.objectStorage = deps.objectStorage;
     this.rescanDays = Math.max(0, deps.rescanDays ?? 30);
     this.maxAttempts = Math.max(1, Math.floor(deps.maxAttempts ?? 8));
     this.retryBaseMs = deps.retryBaseMs ?? 60_000;
@@ -138,7 +144,7 @@ export class KybScanWorker extends BaseWorker {
             " UPDATE kyb_documents d SET av_next_scan_at = $3, av_scan_attempts = d.av_scan_attempts + 1, updated_at = $1" +
             " FROM target t WHERE d.id = t.id" +
             " RETURNING d.id, d.merchant_id, d.doc_type::text AS doc_type, d.status::text AS status, d.av_status::text AS av_status," +
-            " d.av_scan_attempts AS attempts, d.uploaded_by, d.sha256",
+            " d.av_scan_attempts AS attempts, d.uploaded_by, d.sha256, d.storage_object_id",
           ...params,
         ),
       ),
@@ -152,6 +158,7 @@ export class KybScanWorker extends BaseWorker {
       attempts: Number(row.attempts),
       uploadedBy: row.uploadedBy ? String(row.uploadedBy) : null,
       sha256: String(row.sha256),
+      storageObjectId: row.storageObjectId ? String(row.storageObjectId) : null,
     }));
   }
 
@@ -162,11 +169,17 @@ export class KybScanWorker extends BaseWorker {
   private async scanOne(document: ClaimedDocument): Promise<string | null> {
     const now = this.clock();
     try {
-      const stored = await this.db.kybDocument.findUnique({ where: { id: document.id }, select: { contentCiphertext: true } });
-      if (!stored?.contentCiphertext) {
-        throw new KybScannerError("the document has no stored content to scan", false);
+      let bytes: Buffer;
+      if (document.storageObjectId && this.objectStorage) {
+        bytes = (await this.objectStorage.workerClient.readForScan(document.storageObjectId)).bytes;
+      } else {
+        const stored = await this.db.kybDocument.findUnique({ where: { id: document.id }, select: { storageObjectId: true } });
+        if (stored?.storageObjectId && this.objectStorage) {
+          bytes = (await this.objectStorage.workerClient.readForScan(String(stored.storageObjectId))).bytes;
+        } else {
+          throw new KybScannerError("the document has no shared object-storage content to scan", false);
+        }
       }
-      const bytes = await this.openContent(String(stored.contentCiphertext));
       const result = await this.scanner!.scan(bytes);
       await this.applyVerdict(document, result, this.clock());
       return null;
@@ -185,6 +198,21 @@ export class KybScanWorker extends BaseWorker {
     result: { verdict: "CLEAN" | "INFECTED"; engine: string; signature?: string; threat?: string },
     now: Date,
   ): Promise<void> {
+    if (document.storageObjectId && this.objectStorage) {
+      // Keep the vault state in step with the domain verdict: CLEAN promotes
+      // the object (and stamps retention); INFECTED releases the domain lock
+      // and quarantines it. A vault error is retried by the next scan pass.
+      try {
+        await this.objectStorage.workerClient.applyScanVerdict({
+          objectId: document.storageObjectId,
+          verdict: result.verdict,
+          signature: result.verdict === "INFECTED" ? (result.signature ?? result.threat ?? result.engine) : null,
+        });
+      } catch (error) {
+        const message = sanitizeWorkerError(error);
+        if (!/PURGED|NOT_FOUND|QUARANTINE_REJECTED/i.test(message)) throw error;
+      }
+    }
     await this.inTransaction(async (tx) => {
       const rows = toCamelRows<Record<string, unknown>>(
         await tx.$queryRawUnsafe(

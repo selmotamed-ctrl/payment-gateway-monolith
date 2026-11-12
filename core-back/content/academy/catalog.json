@@ -1,7 +1,7 @@
 {
   "contentVersion": "1.0.0",
   "recertifyFrom": "1.0.0",
-  "contentHash": "5702a80cc0cae8650606fa2f6d670d973c851c11f73478a06388e7823cde4043",
+  "contentHash": "82d06e5520be414f8bfe552386296317e512880a2eaec57dd60240f8c8b89369",
   "tracks": [
     {
       "id": "FOUNDATION",
@@ -158,7 +158,8 @@
       "moduleIds": [
         "m4",
         "m5",
-        "m7"
+        "m7",
+        "m10"
       ],
       "lessonIds": [
         "l-m4-2",
@@ -166,7 +167,8 @@
         "l-m5-1",
         "l-m7-2",
         "l-m7-3",
-        "l-m7-4"
+        "l-m7-4",
+        "l-m10-5"
       ],
       "labIds": [
         "lab-kyb-desk",
@@ -221,7 +223,8 @@
         "l-m9-1",
         "l-m9-2",
         "l-m10-3",
-        "l-m10-4"
+        "l-m10-4",
+        "l-m10-5"
       ],
       "labIds": [
         "lab-runbook-drill",
@@ -250,7 +253,8 @@
         "l-m9-1",
         "l-m9-2",
         "l-m10-3",
-        "l-m10-4"
+        "l-m10-4",
+        "l-m10-5"
       ],
       "labIds": [
         "lab-runbook-drill",
@@ -406,7 +410,8 @@
         "l-m10-1",
         "l-m10-2",
         "l-m10-3",
-        "l-m10-4"
+        "l-m10-4",
+        "l-m10-5"
       ],
       "labIds": [
         "lab-security-desk",
@@ -664,6 +669,11 @@
       "id": "l-m10-4",
       "module": "m10",
       "title": "Backups, point-in-time recovery and restore drills"
+    },
+    {
+      "id": "l-m10-5",
+      "module": "m10",
+      "title": "Shared Object & Asset Storage: multi-node vault, locks, quarantine and legal holds"
     }
   ],
   "labs": [

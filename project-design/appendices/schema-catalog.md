@@ -2,10 +2,10 @@
 
 <!-- GENERATED FILE. Edit core-back/prisma/schema.prisma instead. Do not hand-edit this file. -->
 
-- Models: **106**
-- Enums: **123**
-- Schema version: **35**
-- Migrations: **34**
+- Models: **112**
+- Enums: **127**
+- Schema version: **36**
+- Migrations: **35**
 
 ## Models
 
@@ -115,6 +115,12 @@
 - `MerchantReportExecutionAudit`
 - `MerchantReportRateEvent`
 - `MerchantReportStudioStatus`
+- `StorageObject`
+- `StorageObjectLock`
+- `StorageObjectAccessLog`
+- `ReportAssetBundleEntry`
+- `DisputeAttachment`
+- `AmlCaseEvidence`
 
 ## Enums
 
@@ -241,6 +247,10 @@
 - `ReportChromeType`
 - `ReportAudienceScope`
 - `ReportAuthorityMode`
+- `StorageBucketTier`
+- `StorageNamespace`
+- `StorageObjectStatus`
+- `StorageAvScanStatus`
 
 ## Migrations
 
@@ -278,3 +288,4 @@
 - `20261110190000_merchant_report_engine`
 - `20261111120000_report_engine_versioning`
 - `20261111130000_merchant_report_chrome`
+- `20261112000000_v36_enterprise_object_storage_engine`
