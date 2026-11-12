@@ -2,7 +2,7 @@ import Decimal from "decimal.js";
 import type { ReportChromeSpec } from "../types/chromeSpec";
 import type { ReportDescriptorSpec, ReportSectionSpec } from "../types/reportSpec";
 import type { ReportExecutionBundle } from "../types/bundle";
-import { renderChartSectionToSvg } from "../components/ReportChartRenderer";
+import { CHART_PALETTE, renderChartSectionToSvg } from "../components/ReportChartRenderer";
 import { renderVectorDrawSectionToSvg } from "../components/ReportVectorDrawRenderer";
 import { sanitizeReportCss, sanitizeReportHtml } from "../sanitizer/ClientDomSanitizer";
 import {
@@ -195,7 +195,7 @@ export function expandTableColumns(
         ...col,
         field: key,
         width_percent: share,
-        header: lookup(`${col.header_i18n_key}.${key}`) ?? key,
+        header: lookup(`${col.header_i18n_key}.${key}`) ?? key.replace(/_/g, " "),
       });
     }
   }
@@ -221,6 +221,8 @@ export function renderReportSectionsToHtml(params: {
   locale: string;
   /** @deprecated Ignored for report content: labels always come from the spec dictionary of `locale`. */
   t?: Translate;
+  /** Studio mock preview: render every section, including visibility-gated ones. */
+  includeHiddenSections?: boolean;
 }): string {
   const { bundle, locale } = params;
   const spec = bundle.spec;
@@ -236,46 +238,81 @@ export function renderReportSectionsToHtml(params: {
   const renderSection = (section: ReportSectionSpec): string => {
     switch (section.section_type) {
       case "KPI_GRID": {
+        const columns = Math.max(1, Math.min(3, section.columns));
         const cards = section.cards
           .map((card) => {
             const row = (bundle.datasets[card.dataset_id] ?? [])[card.row_index] ?? {};
             const currency = resolveCurrency(bundle, row);
             const value = formatReportValue(row[card.value_field], card.format_hint, currency, t);
-            const delta = card.delta_field ? formatReportValue(row[card.delta_field], card.format_hint, currency, t) : null;
+            const delta = card.delta_field
+              ? formatReportValue(
+                  row[card.delta_field],
+                  card.delta_format_hint ?? card.format_hint,
+                  currency,
+                  t,
+                )
+              : null;
+            const valueLength = value.length;
+            const valueSize =
+              valueLength > 22 ? "report-kpi-value--xlong" : valueLength > 16 ? "report-kpi-value--long" : "";
             return `<div class="report-kpi-card report-tone-${card.tone.toLowerCase()}">
                 <div class="report-kpi-label">${escapeHtml(t(card.label_i18n_key))}</div>
-                <div class="report-kpi-value">${escapeHtml(value)}</div>
-                ${delta ? `<div class="report-kpi-delta">${escapeHtml(delta)}</div>` : ""}
+                <div class="report-kpi-metric">
+                  <div class="report-kpi-value ${valueSize}">${escapeHtml(value)}</div>
+                  ${delta ? `<div class="report-kpi-delta">${escapeHtml(delta)}</div>` : ""}
+                </div>
               </div>`;
           })
           .join("");
         return `<section class="report-section report-kpi-section">
             ${heading(section.title_i18n_key)}
-            <div class="report-kpi-grid" style="grid-template-columns:repeat(${Math.max(1, Math.min(6, section.columns))},minmax(0,1fr))">${cards}</div>
+            <div class="report-kpi-grid" style="grid-template-columns:repeat(${columns},minmax(0,1fr))">${cards}</div>
           </section>`;
       }
 
       case "DATA_TABLE": {
         const rows = bundle.datasets[section.dataset_id] ?? [];
         const columns = expandTableColumns(section.columns, rows, lookup);
-        const colgroup = columns.some((col) => col.width_percent)
-          ? `<colgroup>${columns.map((col) => (col.width_percent ? `<col style="width:${col.width_percent}%" />` : "<col />")).join("")}</colgroup>`
-          : "";
+        // Fixed-layout percentages must add up to 100%; otherwise browsers
+        // distribute the remainder unpredictably and long values look cramped.
+        const specifiedWidths = columns.map((col) => col.width_percent ?? 0);
+        const specifiedTotal = specifiedWidths.reduce((sum, value) => sum + value, 0);
+        const unspecified = specifiedWidths.filter((value) => value === 0).length;
+        const fallback = unspecified > 0 ? Math.max(1, (100 - specifiedTotal) / unspecified) : 0;
+        const widths = columns.map((col) => (col.width_percent ?? fallback));
+        const widthTotal = widths.reduce((sum, value) => sum + value, 0) || 1;
+        const normalizedWidths = widths.map((width) => Math.round((width / widthTotal) * 1000) / 10);
+        const colgroup = `<colgroup>${normalizedWidths.map((width) => `<col style="width:${width}%" />`).join("")}</colgroup>`;
         const head = columns
           .map((col) => `<th style="text-align:${logicalAlign(col.align)}">${escapeHtml(col.header)}</th>`)
           .join("");
+        const numericHints = new Set([
+          "CURRENCY_MINOR",
+          "DECIMAL_2",
+          "DECIMAL_4",
+          "PERCENT_BPS",
+          "PERCENT_RATIO",
+          "INTEGER",
+        ]);
+        const cellClass = (col: (typeof columns)[number]): string =>
+          col.format_hint === "BADGE"
+            ? "report-cell-badge"
+            : numericHints.has(col.format_hint) || col.align === "END"
+              ? "report-cell-number"
+              : "report-cell-text";
         const cell = (row: Row, col: (typeof columns)[number]): string => {
           const raw = row[col.field];
           if (col.format_hint === "BADGE") {
             if (raw === null || raw === undefined || raw === "") return "—";
             const key = String(raw);
             const tone = (col.badge_tone_map?.[key] ?? BADGE_TONES[key.toUpperCase()] ?? "NEUTRAL").toLowerCase();
-            return `<span class="report-badge report-badge-${tone}">${escapeHtml(formatReportValue(raw, "ENUM_TRANSLATED", undefined, t))}</span>`;
+            const sizeClass = key.length > 16 ? "report-badge--xlong" : key.length > 10 ? "report-badge--long" : "";
+            return `<span class="report-badge report-badge-${tone} ${sizeClass}">${escapeHtml(formatReportValue(raw, "ENUM_TRANSLATED", undefined, t))}</span>`;
           }
           return escapeHtml(formatReportValue(raw, col.format_hint, resolveCurrency(bundle, row), t));
         };
         const body = rows
-          .map((row) => `<tr>${columns.map((col) => `<td style="text-align:${logicalAlign(col.align)}">${cell(row, col)}</td>`).join("")}</tr>`)
+          .map((row) => `<tr>${columns.map((col) => `<td class="${cellClass(col)}" style="text-align:${logicalAlign(col.align)}">${cell(row, col)}</td>`).join("")}</tr>`)
           .join("");
         const summaries = columns.map((col) =>
           computeFooterSummary({
@@ -289,7 +326,10 @@ export function renderReportSectionsToHtml(params: {
         );
         const foot = summaries.some((value) => value !== null)
           ? `<tfoot><tr>${columns
-              .map((col, index) => `<td style="text-align:${logicalAlign(col.align)}">${escapeHtml(summaries[index] ?? "")}</td>`)
+              .map((col, index) => {
+                const isLabel = col.summary_footer === "LABEL_TOTAL";
+                return `<td class="${cellClass(col)}${isLabel ? " report-footer-label" : ""}" style="text-align:${logicalAlign(col.align)}">${escapeHtml(summaries[index] ?? "")}</td>`;
+              })
               .join("")}</tr></tfoot>`
           : "";
         const classes = [
@@ -300,7 +340,8 @@ export function renderReportSectionsToHtml(params: {
         ]
           .filter(Boolean)
           .join(" ");
-        return `<section class="report-section report-table-section">
+        const compactTable = rows.length <= 8;
+        return `<section class="report-section report-table-section${compactTable ? " report-table-section--compact" : ""}">
             ${heading(section.title_i18n_key)}
             ${subtitle(section.subtitle_i18n_key)}
             <table class="${classes}">
@@ -313,6 +354,22 @@ export function renderReportSectionsToHtml(params: {
       }
 
       case "CHART": {
+        const chartRows = bundle.datasets[section.dataset_id] ?? [];
+        const hasData =
+          chartRows.length > 0 &&
+          section.series.some((series) =>
+            chartRows.some((row) => {
+              const value = row[series.field];
+              return value !== null && value !== undefined && String(value) !== "";
+            }),
+          );
+        if (!hasData) {
+          return `<section class="report-section report-chart-box">
+              ${heading(section.title_i18n_key)}
+              ${subtitle(section.subtitle_i18n_key)}
+              <div class="report-chart-empty">${escapeHtml(noDataLabel)}</div>
+            </section>`;
+        }
         const svg = renderChartSectionToSvg({
           section,
           datasets: bundle.datasets,
@@ -320,10 +377,39 @@ export function renderReportSectionsToHtml(params: {
           isRtl,
           contentWidthPx: pageContentWidthPx(spec, orientation),
         });
+        const legendEntries: Array<{ label: string; color: string }> = [];
+        if (section.chart_kind === "PIE" || section.chart_kind === "DONUT") {
+          const seen = new Set<string>();
+          chartRows.forEach((row, index) => {
+            const label = formatReportValue(row[section.x_field], "ENUM_TRANSLATED", undefined, t);
+            if (label === "—" || seen.has(label)) return;
+            seen.add(label);
+            legendEntries.push({
+              label,
+              color: CHART_PALETTE[index % CHART_PALETTE.length]!,
+            });
+          });
+        } else if (section.chart_kind !== "HEATMAP" && section.series.length > 1) {
+          section.series.forEach((series, index) => {
+            legendEntries.push({
+              label: t(series.label_i18n_key),
+              color: series.color_hex ?? CHART_PALETTE[index % CHART_PALETTE.length]!,
+            });
+          });
+        }
+        const legend = legendEntries.length
+          ? `<div class="report-chart-legend">${legendEntries
+              .map(
+                (entry) =>
+                  `<span class="report-chart-legend-item"><span class="report-chart-legend-swatch" style="background:${escapeHtml(entry.color)}"></span>${escapeHtml(entry.label)}</span>`,
+              )
+              .join("")}</div>`
+          : "";
         return `<section class="report-section report-chart-box">
             ${heading(section.title_i18n_key)}
             ${subtitle(section.subtitle_i18n_key)}
-            <div class="report-chart-frame" style="width:${section.width_percent}%">${svg}</div>
+            <div class="report-chart-frame" style="width:100%;max-width:100%">${svg}</div>
+            ${legend}
           </section>`;
       }
 
@@ -372,9 +458,22 @@ export function renderReportSectionsToHtml(params: {
   const groups: Array<{ orientation: string | null; breakBefore: boolean; html: string[] }> = [
     { orientation: null, breakBefore: false, html: [] },
   ];
+  let pendingCharts: Array<{ width: number; html: string }> = [];
+  const flushCharts = (): void => {
+    if (pendingCharts.length === 0) return;
+    const cells = pendingCharts
+      .map(
+        (chart) =>
+          `<div class="report-chart-cell" style="flex:0 1 calc(${chart.width}% - 2.5mm);">${chart.html}</div>`,
+      )
+      .join("");
+    groups[groups.length - 1]!.html.push(`<div class="report-chart-row">${cells}</div>`);
+    pendingCharts = [];
+  };
   for (const section of spec.sections) {
-    if (!isVisible(section, bundle.datasets, bundle.inputsUsed ?? {})) continue;
+    if (!params.includeHiddenSections && !isVisible(section, bundle.datasets, bundle.inputsUsed ?? {})) continue;
     if (section.section_type === "PAGE_BREAK") {
+      flushCharts();
       const previous = groups[groups.length - 1]!;
       if (section.orientation_after) orientation = section.orientation_after;
       groups.push({
@@ -384,8 +483,15 @@ export function renderReportSectionsToHtml(params: {
       });
       continue;
     }
+    if (section.section_type === "CHART" && (section.width_percent ?? 100) < 100) {
+      pendingCharts.push({ width: section.width_percent ?? 50, html: renderSection(section) });
+      if (pendingCharts.length >= 2) flushCharts();
+      continue;
+    }
+    flushCharts();
     groups[groups.length - 1]!.html.push(renderSection(section));
   }
+  flushCharts();
   if (groups.length > 1 && groups[0]!.html.length === 0) {
     groups.shift();
     groups[0]!.breakBefore = false;
@@ -403,6 +509,30 @@ export function renderReportSectionsToHtml(params: {
     })
     .join("\n");
 }
+
+const formatChromeDate = (iso: string, locale: string, withTime: boolean): string => {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return "";
+  const resolved = locale.startsWith("en") ? "en-GB" : locale;
+  return new Intl.DateTimeFormat(resolved, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    ...(withTime ? { hour: "2-digit", minute: "2-digit", hour12: false } : {}),
+    timeZone: "UTC",
+  }).format(date);
+};
+
+/** Normalises the engine's raw ISO period pair into the reference's localized format. */
+const formatChromePeriod = (raw: string, locale: string): string => {
+  if (!raw) return "";
+  // Split only on a dash separator, never on the hyphens inside ISO dates.
+  const parts = raw.split(/\s*[–—]\s*|\s+-\s+/).filter(Boolean);
+  if (parts.length !== 2) return raw;
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(parts[0]!) ? formatChromeDate(`${parts[0]}T00:00:00.000Z`, locale, false) : parts[0]!;
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(parts[1]!) ? formatChromeDate(`${parts[1]}T00:00:00.000Z`, locale, false) : parts[1]!;
+  return `${start} – ${end}`;
+};
 
 /** Renders a header/footer chrome with its variables bound; labels come from the chrome dictionary. */
 export function renderChromeHtml(params: {
@@ -428,15 +558,19 @@ export function renderChromeHtml(params: {
     reportCode: spec?.report.code ?? "",
     reportVersion: String(spec?.report.version ?? ""),
     generatedAtIso: bundle.executedAtIso ?? "",
-    generatedAtFormatted: String(bundle.executedAtIso ?? "").replace("T", " ").slice(0, 19),
+    generatedAtFormatted: formatChromeDate(bundle.executedAtIso ?? "", locale, true),
     actorName: bundle.actor?.name ?? "",
     actorEmail: bundle.actor?.email ?? "",
     actorRole: bundle.actor?.role ?? "",
     selectedLocale: locale,
+    defaultCurrency: bundle.currency ?? "LYD",
     classificationBadge: spec?.report.classification ?? "",
     verificationHashShort: String(bundle.verificationSha256 ?? "").slice(0, 12),
     ...(bundle.chromeVariables ?? {}),
   };
+  if (bundle.chromeVariables?.periodSummary) {
+    variables.periodSummary = formatChromePeriod(bundle.chromeVariables.periodSummary, locale);
+  }
   let html = chrome.template.html;
   html = html.replace(/\{\{\s*\$t\.([a-zA-Z0-9_.-]+)\s*\}\}/g, (_m, key: string) => escapeHtml(t(key)));
   html = html.replace(/\{\{\s*pageNumber\s*\}\}/g, '<span class="report-page-number"></span>');
@@ -460,7 +594,27 @@ export function renderChromeHtml(params: {
     });
   }
   html = html.replace(/asset:\/\/([a-zA-Z0-9_-]+)/g, (_m, key: string) => bundle.assetDataUrls?.[key] ?? "");
-  const borderClass =
-    chrome.chrome.border_style === "NONE" ? "" : ` report-chrome-border-${chrome.chrome.border_style.toLowerCase().replaceAll("_", "-")}`;
-  return `<div class="report-chrome report-chrome-${chrome.chrome.chrome_type.toLowerCase()}${borderClass}" style="min-height:${chrome.chrome.height_mm}mm">${sanitizeReportHtml(html)}</div>`;
+  const band = chrome.chrome.accent_band;
+  const borderClass = band
+    ? ""
+    : chrome.chrome.border_style === "NONE"
+      ? ""
+      : ` report-chrome-border-${chrome.chrome.border_style.toLowerCase().replaceAll("_", "-")}`;
+  let bandHtml = "";
+  if (band) {
+    const total = band.segments.reduce((sum, segment) => sum + segment.width_percent, 0) || 1;
+    let cursor = 0;
+    const stops = band.segments.map((segment) => {
+      const start = (cursor / total) * 100;
+      cursor += segment.width_percent;
+      const end = (cursor / total) * 100;
+      return `${escapeHtml(segment.color)} ${start}% ${end}%`;
+    });
+    const radius =
+      band.position === "TOP"
+        ? `${band.radius_mm}mm ${band.radius_mm}mm 0 0`
+        : `0 0 ${band.radius_mm}mm ${band.radius_mm}mm`;
+    bandHtml = `<div class="report-chrome-accent-band" style="position:absolute;left:0;right:0;${band.position === "TOP" ? "top" : "bottom"}:0;height:${band.height_mm}mm;border-radius:${radius};background:linear-gradient(90deg,${stops.join(",")});"></div>`;
+  }
+  return `<div class="report-chrome report-chrome-${chrome.chrome.chrome_type.toLowerCase()}${borderClass}" style="height:${chrome.chrome.height_mm}mm;min-height:${chrome.chrome.height_mm}mm;position:relative;">${sanitizeReportHtml(html)}${bandHtml}</div>`;
 }

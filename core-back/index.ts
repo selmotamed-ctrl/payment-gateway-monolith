@@ -14,6 +14,7 @@ import { defaultWorkerHealthRegistry, type WorkerHealthRegistry } from "./engine
 import { env } from "./lib/env";
 import { ApiError, isApiError, toErrorEnvelope } from "./lib/error";
 import { REPORT_ENGINE_JSON_LIMIT } from "./api/internal/adminReportEngine";
+import { reconcileReportChromeDefaults } from "./engine/reportStudio/reconcileChromeDefaults";
 
 /** Admin report-engine routes: authoring bodies carry the asset zip. */
 export const REPORT_ENGINE_BODY_PATH = /^\/internal\/(admin|merchant)\/report-engine(\/|$)/;
@@ -321,6 +322,13 @@ export const start = async () => {
       })
     : undefined;
   workers?.start();
+  // Best-effort: a major engine deploy revokes incompatible defaults without
+  // requiring an operator to open the migration page first.
+  void reconcileReportChromeDefaults().catch((error: unknown) => {
+    console.warn(
+      `Report chrome default reconciliation skipped: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
 
   await new Promise<void>((resolve, reject) => {
     server.on("error", reject);

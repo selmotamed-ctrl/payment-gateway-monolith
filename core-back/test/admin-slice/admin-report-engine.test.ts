@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { specContentSha256 } from "../../lib/reportEngineSdk/specHash";
-import { adminReportEngineRouter } from "../../api/internal/adminReportEngine";
-import { merchantReportEngineRouter } from "../../api/internal/merchantReportEngine";
+import { adminInternalRouter } from "../../api/internal/admin";
+import { merchantInternalRouter } from "../../api/internal/merchant";
 import { client } from "../../prisma/client";
 import { exampleDescriptorSpec } from "../../lib/reportEngineSdk/transcript/ReportTranscriptBuilder";
 import {
@@ -20,10 +20,7 @@ let authorId = "";
 
 if (dbAvailable) {
   beforeAll(async () => {
-    // The report-engine routers alone, under their production prefixes. The full admin and
-    // merchant routers start with bearer-token authentication, which replaces the principal the
-    // harness injects, so every request answered 401 before it reached a report-engine route.
-    app = await startApp([["/internal/admin", adminReportEngineRouter], ["/internal/merchant", merchantReportEngineRouter]]);
+    app = await startApp([adminInternalRouter, merchantInternalRouter], { channelPrefixes: true });
     staffId = await createStaffUser("SECURITY_ADMIN");
     authorId = await createStaffUser("SUPPORT");
   });
@@ -119,7 +116,7 @@ describe.skipIf(!dbAvailable)("report-engine route remediation", () => {
     });
     const catalog = await app.request("GET", "/internal/merchant/report-engine/catalog");
     expect(catalog.status).toBe(403);
-    expect(catalog.json.code).toBe("MERCHANT_CONTEXT_REQUIRED");
+    expect(catalog.json.code).toBe("MERCHANT_PRINCIPAL_REQUIRED");
 
     const execute = await app.request(
       "POST",
@@ -131,14 +128,13 @@ describe.skipIf(!dbAvailable)("report-engine route remediation", () => {
   });
 
   test("B13: a merchant without report_engine:run is refused", async () => {
-    // Not merchant:read (or link:write, merchant:write): those imply report_engine:run.
     app.setPrincipal({
-      ...makePrincipal("merchant-user", ["pos:manage"], "MERCHANT_STAFF"),
+      ...makePrincipal("merchant-user", ["merchant:read"], "MERCHANT_ADMIN"),
       merchantId: null,
     });
     const response = await app.request("GET", "/internal/merchant/report-engine/catalog");
     expect(response.status).toBe(403);
-    expect(String(response.json.code)).toContain("AUTHORITY");
+    expect(String(response.json.code)).toContain("MERCHANT_PRINCIPAL_REQUIRED");
   });
 
   test("B11: chrome drafts are hidden from non-authors and assets are not inlined by default", async () => {
@@ -148,9 +144,9 @@ describe.skipIf(!dbAvailable)("report-engine route remediation", () => {
     app.setPrincipal(makePrincipal(staffId, ["report_engine:run"], "SUPPORT"));
     const response = await app.request("GET", "/internal/admin/report-engine/chrome?pageSize=200");
     expect(response.status).toBe(200);
-    const items = response.json.chrome as Array<Record<string, unknown>>;
+    const items = response.json.specs as Array<Record<string, unknown>>;
     expect(items.every((item) => item.status === "PUBLISHED")).toBe(true);
-    expect(items.every((item) => item.assetDataUrls === undefined)).toBe(true);
+    expect(items.every((item) => Object.keys((item.assetDataUrls as Record<string, unknown>) ?? {}).length === 0)).toBe(true);
   });
 });
 

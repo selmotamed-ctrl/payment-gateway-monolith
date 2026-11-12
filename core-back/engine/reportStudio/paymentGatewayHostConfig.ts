@@ -4,6 +4,7 @@ import { buildPaymentGatewayAutocompleteProviders } from "./autocompleteProvider
 import { buildSchemaCatalog } from "./schemaCatalog";
 import { LocalReportAssetStorage } from "./assetStorage";
 import { env } from "../../lib/env";
+import { REPORT_ENGINE_VERSION } from "../../lib/reportEngineSdk/version";
 
 let cached: ReportEngineHostConfig | null = null;
 
@@ -33,7 +34,7 @@ export function createPaymentGatewayReportHostConfig(deps: {
   const assetStoragePort = deps.assetStoragePort ?? new LocalReportAssetStorage();
 
   return {
-    engineVersion: "1.0",
+    engineVersion: REPORT_ENGINE_VERSION,
     institutionName: "Libyan National Payment Gateway",
     defaultCurrency: "LYD",
     defaultTimezone: "Africa/Tripoli",
@@ -106,6 +107,9 @@ export function createPaymentGatewayReportHostConfig(deps: {
       maxRowsPerDataset: 10_000,
       maxQueryTimeoutMs: 15_000,
       maxExplainCost: 150_000,
+      // A bounded query may legitimately seq-scan one small partition. Only
+      // reject large-table scans at or above this estimated cost.
+      maxSeqScanCost: 25_000,
       maxAssetZipBytes: 15 * 1024 * 1024,
       maxSingleAssetBytes: 5 * 1024 * 1024,
     },

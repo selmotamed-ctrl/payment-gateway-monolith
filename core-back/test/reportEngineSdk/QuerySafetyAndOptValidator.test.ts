@@ -236,13 +236,22 @@ describe("remediation A08/A09/A10/A14: mandatory-filter bypasses and grouped que
     expect(diagnostics.some((d) => d.code === "INDEXED_FILTER_REQUIRED")).toBe(true);
   });
 
-  test("A10: a large-table sequential scan is an error", async () => {
+  test("A10: a costly large-table sequential scan is an error", async () => {
     const fake = new FakeReadOnlyPort();
     fake.explain = {
-      totalCost: 100,
-      planRows: 10,
+      totalCost: 100_000,
+      planRows: 500_000,
       hasSeqScanOnLargeTable: true,
       seqScanTables: ["journal_lines_2026_01"],
+      seqScans: [
+        {
+          table: "journal_lines_2026_01",
+          parentTable: "journal_lines",
+          totalCost: 100_000,
+          planRows: 500_000,
+          largeTable: true,
+        },
+      ],
       partitionsScanned: 1,
       rawPlanJson: {},
     };
@@ -252,6 +261,32 @@ describe("remediation A08/A09/A10/A14: mandatory-filter bypasses and grouped que
     );
     const finding = diagnostics.find((d) => d.code === "SEQUENTIAL_SCAN_DETECTED");
     expect(finding?.severity).toBe("error");
+  });
+
+  test("A10b: a cheap bounded scan of one partition is allowed", async () => {
+    const fake = new FakeReadOnlyPort();
+    fake.explain = {
+      totalCost: 100,
+      planRows: 10,
+      hasSeqScanOnLargeTable: true,
+      seqScanTables: ["journal_lines_2026_01"],
+      seqScans: [
+        {
+          table: "journal_lines_2026_01",
+          parentTable: "journal_lines",
+          totalCost: 100,
+          planRows: 10,
+          largeTable: true,
+        },
+      ],
+      partitionsScanned: 1,
+      rawPlanJson: {},
+    };
+    const diagnostics = await validateQueriesAndOptimizations(
+      baseReportSpec(),
+      createTestHostConfig({ dbReadOnlyPort: fake }),
+    );
+    expect(diagnostics.some((d) => d.code === "SEQUENTIAL_SCAN_DETECTED")).toBe(false);
   });
 
   test("A14: grouped ORDER BY on an ungrouped base column is rejected", async () => {
@@ -274,5 +309,31 @@ describe("remediation A08/A09/A10/A14: mandatory-filter bypasses and grouped que
     ];
     const diagnostics = await validateQueriesAndOptimizations(spec, createTestHostConfig());
     expect(diagnostics.some((d) => d.code === "GROUPED_WINDOW_REQUIRES_ALIAS")).toBe(true);
+  });
+});
+
+describe("AGE_DAYS aggregation guard", () => {
+  test("AGE_DAYS on a datetime column is allowed with AVG", async () => {
+    const spec = baseReportSpec();
+    const ds = spec.datasets[0]!;
+    ds.select = [
+      { alias: "currency", column: "currency", expression: "COLUMN", format_hint: "RAW" },
+      { alias: "avg_age_days", column: "created_at", expression: "AGE_DAYS", aggregate: "AVG", format_hint: "INTEGER" },
+    ];
+    ds.group_by = ["currency"];
+    const diagnostics = await validateQueriesAndOptimizations(spec, createTestHostConfig());
+    expect(diagnostics.some((d) => d.code === "AGGREGATE_REQUIRES_NUMERIC")).toBe(false);
+  });
+
+  test("AVG on a datetime column without AGE_DAYS is rejected", async () => {
+    const spec = baseReportSpec();
+    const ds = spec.datasets[0]!;
+    ds.select = [
+      { alias: "currency", column: "currency", expression: "COLUMN", format_hint: "RAW" },
+      { alias: "avg_created", column: "created_at", expression: "COLUMN", aggregate: "AVG", format_hint: "INTEGER" },
+    ];
+    ds.group_by = ["currency"];
+    const diagnostics = await validateQueriesAndOptimizations(spec, createTestHostConfig());
+    expect(diagnostics.some((d) => d.code === "AGGREGATE_REQUIRES_NUMERIC")).toBe(true);
   });
 });

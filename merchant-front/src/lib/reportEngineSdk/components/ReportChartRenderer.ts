@@ -11,6 +11,20 @@ export const DEFAULT_CHART_CONTENT_WIDTH_PX = 688;
 const PX_PER_MM = 96 / 25.4;
 const CHART_FONT = "'Plus Jakarta Sans', 'Cairo', sans-serif";
 
+/** Shared palette so the HTML legend and the ECharts series use identical colors. */
+export const CHART_PALETTE = [
+  "#4C6EF5",
+  "#94C11F",
+  "#495057",
+  "#FD7E14",
+  "#15AABF",
+  "#BE4BDB",
+  "#E8590C",
+  "#0B7285",
+  "#7048E8",
+  "#2F9E44",
+];
+
 /** echarts needs numbers for plotting; the value is display-only (formatted labels go through Decimal). */
 const plotNumber = (value: unknown): number => {
   const parsed = toDecimal(value);
@@ -49,23 +63,39 @@ export function renderChartSectionToSvg(params: {
   const heightPx = Math.max(160, Math.round(section.height_mm * PX_PER_MM));
   const render = (option: echarts.EChartsOption) =>
     renderChartSectionToSvgString({
-      echartsOption: { ...option, textStyle: { fontFamily: CHART_FONT } },
+      echartsOption: { color: CHART_PALETTE, ...option, textStyle: { fontFamily: CHART_FONT } },
       widthPx,
       heightPx,
     });
+  const dateLike = xValues.length > 0 && xValues.every((value) => /^\d{4}-\d{2}-\d{2}([T ].*)?$/.test(value));
+  const formatCategoryLabel = (value: string): string => {
+    if (dateLike) return value.slice(0, 10);
+    return value.length > 14 ? `${value.slice(0, 13)}…` : value;
+  };
+  const rotate = !dateLike && (xValues.length > 7 || xValues.some((value) => value.length > 10));
   const categoryAxis = (): echarts.XAXisComponentOption => ({
     type: "category",
     data: xValues,
     inverse: isRtl,
-    axisLabel: { fontSize: 9, formatter: (value: string) => value.slice(0, 16) },
+    axisLabel: {
+      fontSize: 7.5,
+      interval: 0,
+      rotate: rotate ? (isRtl ? -28 : 28) : 0,
+      hideOverlap: true,
+      width: 72,
+      overflow: "truncate",
+      formatter: (value: string) => formatCategoryLabel(value),
+    },
   });
   const valueAxis = (): echarts.YAXisComponentOption => ({
     type: "value",
     position: isRtl ? "right" : "left",
-    axisLabel: { fontSize: 9, formatter: axisFormatter(section.y_axis_format) },
+    axisLabel: { fontSize: 7.5, formatter: axisFormatter(section.y_axis_format) },
   });
   // The section heading is rendered by the HTML renderer; the chart never repeats it.
-  const grid = { left: 16, right: 16, top: 16, bottom: 36, containLabel: true };
+  const grid = { left: 16, right: 30, top: 12, bottom: 44, containLabel: true };
+  // The legend is rendered as wrapping HTML under the chart; ECharts' canvas
+  // legend cannot wrap and overflows or hides entries on narrow charts.
 
   if (chartKind === "HEATMAP") {
     const values: Array<[number, number, number]> = [];
@@ -76,7 +106,7 @@ export function renderChartSectionToSvg(params: {
     });
     return render({
       animation: false,
-      grid: { ...grid, bottom: 52 },
+      grid: { ...grid, bottom: 58 },
       xAxis: categoryAxis(),
       yAxis: {
         type: "category",
@@ -120,12 +150,19 @@ export function renderChartSectionToSvg(params: {
           stack: "waterfall",
           data: delta,
           itemStyle: first?.color_hex ? { color: first.color_hex } : undefined,
+          label: { show: first?.show_value_labels ?? false, fontSize: 7 },
+          labelLayout: { hideOverlap: true },
         },
       ],
     });
   }
 
   const isPie = chartKind === "PIE" || chartKind === "DONUT";
+  const horizontalBars =
+    (chartKind === "BAR" || chartKind === "STACKED_BAR") &&
+    !dateLike &&
+    xValues.length <= 10 &&
+    xValues.some((value) => value.length > 10);
   const series: echarts.SeriesOption[] = section.series.map((seriesSpec, index) => {
     const rawType =
       seriesSpec.type_override ?? (chartKind === "LINE" || chartKind === "AREA" ? "line" : isPie ? "pie" : "bar");
@@ -135,21 +172,46 @@ export function renderChartSectionToSvg(params: {
       type,
       data: rows.map((row) => plotNumber(row[seriesSpec.field])),
       itemStyle: seriesSpec.color_hex ? { color: seriesSpec.color_hex } : undefined,
-      label: { show: seriesSpec.show_value_labels },
+      label: { show: seriesSpec.show_value_labels, fontSize: 7 },
+      labelLayout: { hideOverlap: true },
     };
     if (type === "line" && (chartKind === "AREA" || seriesSpec.type_override === "area")) base.areaStyle = {};
     if (chartKind === "STACKED_BAR") base.stack = "total";
     if (type === "pie") {
       base.data = rows.map((row) => ({ name: String(row[section.x_field] ?? ""), value: plotNumber(row[seriesSpec.field]) }));
-      base.radius = chartKind === "DONUT" ? ["45%", "70%"] : "70%";
+      base.radius = chartKind === "DONUT" ? ["40%", "64%"] : "62%";
+      base.center = ["50%", "43%"];
+      base.label = { show: false };
+      base.labelLine = { show: false };
+      base.emphasis = { label: { show: false } };
     }
     if (chartKind === "COMBO_BAR_LINE") base.type = index === 0 ? "bar" : "line";
+    if (horizontalBars) {
+      base.label = { show: seriesSpec.show_value_labels, position: "right", fontSize: 7 };
+    }
     return base as echarts.SeriesOption;
   });
 
+  if (horizontalBars) {
+    return render({
+      animation: false,
+      grid: { left: 10, right: 24, top: 12, bottom: 20, containLabel: true },
+      xAxis: {
+        type: "value",
+        axisLabel: { fontSize: 7.5, formatter: axisFormatter(section.y_axis_format) },
+      },
+      yAxis: {
+        type: "category",
+        data: xValues,
+        inverse: !isRtl,
+        axisLabel: { fontSize: 7.5, width: 120, overflow: "truncate", hideOverlap: true },
+      },
+      series,
+    });
+  }
+
   return render({
     animation: false,
-    legend: { bottom: 0, textStyle: { fontSize: 10 }, align: isRtl ? "right" : "left" },
     grid,
     xAxis: isPie ? undefined : categoryAxis(),
     yAxis: isPie ? undefined : valueAxis(),

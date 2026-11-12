@@ -15,6 +15,8 @@ import { LedgerPoster, decimal } from "../../engine/ledger/LedgerPoster";
 import { createLedgerShardWriter } from "../../lib/storageEngine/ledgerShardWriter";
 import { isApiError, toErrorEnvelope } from "../../lib/error";
 import type { Principal } from "../../api/middleware/authDoubleCheck";
+import { adminInternalRouter } from "../../api/internal/admin";
+import { merchantInternalRouter } from "../../api/internal/merchant";
 
 export const uid = (prefix = "t"): string => `${prefix}-${randomUUID().slice(0, 8)}`;
 
@@ -40,6 +42,7 @@ export const makePrincipal = (
   scopes: [],
   tokenId: null,
   sessionId: null,
+  sessionChannel: (role.startsWith("MERCHANT_") ? "merchant" : "admin") as never,
 });
 
 export interface TestApp {
@@ -51,7 +54,10 @@ export interface TestApp {
 /** A router, or a router mounted under a path prefix (as production mounts it). */
 export type Mount = Router | readonly [string, Router];
 
-export const startApp = async (routers: Mount[]): Promise<TestApp> => {
+export const startApp = async (
+  routers: Mount[],
+  options: { channelPrefixes?: boolean } = {},
+): Promise<TestApp> => {
   let current: Principal | undefined;
   const app = express();
   app.use(express.json());
@@ -61,6 +67,8 @@ export const startApp = async (routers: Mount[]): Promise<TestApp> => {
   });
   for (const mount of routers) {
     if (Array.isArray(mount)) app.use(mount[0] as string, mount[1] as Router);
+    else if (options.channelPrefixes && mount === adminInternalRouter) app.use("/internal/admin", mount as Router);
+    else if (options.channelPrefixes && mount === merchantInternalRouter) app.use("/internal/merchant", mount as Router);
     else app.use(mount as Router);
   }
   app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {

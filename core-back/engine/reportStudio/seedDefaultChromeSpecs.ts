@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import {
+  REPORT_CHROME_SPEC_VERSION,
+  REPORT_CHROME_TRANSCRIPT_VERSION,
+  REPORT_ENGINE_VERSION,
+} from "../../lib/reportEngineSdk/version";
 import type { ReportChromeSpec } from "../../lib/reportEngineSdk/types/chromeSpec";
 
 export const DEFAULT_HEADER_CHROME: ReportChromeSpec = {
@@ -119,6 +124,9 @@ export async function seedDefaultChromeSpecs(
           chromeType: spec.chrome.chrome_type,
           status: "PUBLISHED",
           isDefaultGlobal: !otherDefault,
+          engineVersion: REPORT_ENGINE_VERSION,
+          specSchemaVersion: REPORT_CHROME_SPEC_VERSION,
+          authoringTranscriptVersion: REPORT_CHROME_TRANSCRIPT_VERSION,
           supportedLocales: Object.keys(spec.i18n.locales),
           specJson,
           specSha256,
@@ -126,6 +134,9 @@ export async function seedDefaultChromeSpecs(
         },
         update: {
           name: spec.chrome.name,
+          engineVersion: REPORT_ENGINE_VERSION,
+          specSchemaVersion: REPORT_CHROME_SPEC_VERSION,
+          authoringTranscriptVersion: REPORT_CHROME_TRANSCRIPT_VERSION,
           supportedLocales: Object.keys(spec.i18n.locales),
           specJson,
           specSha256,

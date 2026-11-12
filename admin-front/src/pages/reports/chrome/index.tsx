@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { VAlert, VBtn, VCol, VFileInput, VRow, VSwitch } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
@@ -34,6 +34,9 @@ type ChromeRow = {
   chromeType: "HEADER" | "FOOTER";
   status: string;
   isDefaultGlobal: boolean;
+  defaultRevokedAt?: string | null;
+  defaultRevokedReason?: string | null;
+  compatibility?: { status: "COMPATIBLE" | "NEEDS_MIGRATION" | "INVALID"; reasonCode: string | null; message: string };
   supportedLocales: string[];
   assetBundleId?: string | null;
   /** Inlined only when the list is requested with `includeAssets=1`; keyed by `asset_key`. */
@@ -51,6 +54,7 @@ const pickFile = (files: File | File[] | null): File | null => (Array.isArray(fi
 const ReportsChromePage = dc(() => {
   const { t } = useLocale();
   const router = useRouter();
+  const route = useRoute();
   const busy = ref(false);
   const error = ref<string | null>(null);
   const diagnostics = ref<ReturnType<typeof diagnosticsFromApiError>>([]);
@@ -66,12 +70,19 @@ const ReportsChromePage = dc(() => {
   const previewOpen = ref(false);
   const previewLocale = ref("en");
   const previewAssets = ref<Record<string, string>>({});
+  const previewCounterpart = ref<ChromeRow | null>(null);
   const previewLoading = ref(false);
   const previewError = ref("");
   const chromeSearch = ref<string | null>(null);
   const chromePageSize = ref(20);
   const chromeRefresh = ref<ChromeRefreshHook | null>(null);
+  const migrationOpen = ref(false);
+  const migrationPromptBusy = ref(false);
   const canAuthor = computed(() => hasOneOfAuthorities(["reports.studio", "report_engine:author"]));
+  const canPrompt = computed(() =>
+    hasOneOfAuthorities(["report_engine:author", "report:review", "report:approve", "security:write"]),
+  );
+  const canManageChrome = computed(() => hasOneOfAuthorities(["report:approve", "security:write"]));
   const canSave = computed(() => specJson.value.trim().length > 0 && !zipError.value);
   const editingNeedsZip = computed(
     () => Boolean(editingRow.value?.spec?.required_assets?.length) && !zipFile.value,
@@ -127,7 +138,11 @@ const ReportsChromePage = dc(() => {
       Value: ({ row }) => (
         <div class="d-flex align-center ga-2 flex-wrap">
           <StatusBadge status={row.status} toneOverride={row.status === "PUBLISHED" ? "success" : undefined} />
+          {row.compatibility && row.compatibility.status !== "COMPATIBLE" && (
+            <StatusBadge status={row.compatibility.status} toneOverride="danger" label={t("Needs migration")} />
+          )}
           {row.isDefaultGlobal && <StatusBadge status="DEFAULT" label={t("Global Default")} toneOverride="success" />}
+          {row.defaultRevokedAt && <StatusBadge status="REVOKED" label={t("Default revoked")} toneOverride="warning" />}
         </div>
       ),
     },
@@ -145,17 +160,21 @@ const ReportsChromePage = dc(() => {
           primaryAction={{
             label: t("Preview"),
             icon: "mdi-eye-outline",
+            disabled: Boolean(row.compatibility && row.compatibility.status !== "COMPATIBLE"),
             onClick: () => void openPreview(row),
           }}
           items={[
-            { key: "edit", label: t("Edit"), icon: "mdi-pencil-outline", onClick: () => editRow(row) },
+            { key: "edit", label: row.compatibility && row.compatibility.status !== "COMPATIBLE" ? t("Migrate and restore default") : t("Edit"), icon: "mdi-pencil-outline", onClick: () => editRow(row) },
             { key: "copy", label: t("Copy code"), icon: "mdi-content-copy", onClick: () => void copyCode(row.code) },
             { key: "download", label: t("Download spec"), icon: "mdi-download", onClick: () => downloadSpec(row) },
             {
               key: "default",
               label: row.isDefaultGlobal ? t("Clear default") : t("Set global default"),
               icon: "mdi-star-outline",
-              disabled: row.status !== "PUBLISHED",
+              disabled:
+                !canManageChrome.value ||
+                row.status !== "PUBLISHED" ||
+                (row.compatibility !== undefined && row.compatibility.status !== "COMPATIBLE"),
               onClick: () => void setDefault(row, !row.isDefaultGlobal),
             },
             {
@@ -164,6 +183,7 @@ const ReportsChromePage = dc(() => {
               icon: "mdi-archive-outline",
               danger: true,
               dividerBefore: true,
+              disabled: !canManageChrome.value,
               onClick: () => void archiveRow(row),
             },
           ]}
@@ -178,7 +198,7 @@ const ReportsChromePage = dc(() => {
     try {
       const response = await api.get(urlsMap.reportEngineTranscript, { params: { kind: "CHROME" } });
       const data = response.data ?? {};
-      downloadText(data.filename ?? "chrome-engine-ai-transcript-v1.0.md", data.markdown ?? "", "text/markdown");
+      downloadText(data.filename ?? "chrome-engine-ai-transcript-v1.1.md", data.markdown ?? "", "text/markdown");
     } catch (caught) {
       error.value = friendlyApiErrorMessage(caught, t);
     } finally {
@@ -212,8 +232,60 @@ const ReportsChromePage = dc(() => {
     resetFeedback();
     // Saving creates the next version; editing a published row republishes by default.
     publish.value = row.status === "PUBLISHED";
-    makeDefault.value = row.isDefaultGlobal;
+    makeDefault.value = row.isDefaultGlobal || Boolean(row.defaultRevokedAt);
+    migrationOpen.value = Boolean(row.compatibility && row.compatibility.status !== "COMPATIBLE");
     showSnackBar({ message: t("Loaded {name} into the editor", { name: row.name }), type: "success" });
+  };
+
+  const loadChromeById = async (id: string) => {
+    busy.value = true;
+    resetFeedback();
+    try {
+      const response = await api.get(urlsMap.reportEngineChrome + `/${encodeURIComponent(id)}`);
+      const row = response.data as ChromeRow;
+      specJson.value = JSON.stringify(row.spec ?? {}, null, 2);
+      specFile.value = null;
+      zipFile.value = null;
+      editingRow.value = row;
+      publish.value = row.status === "PUBLISHED";
+      makeDefault.value = row.isDefaultGlobal || Boolean(row.defaultRevokedAt);
+      migrationOpen.value = route.query.from === "migration";
+    } catch (caught) {
+      fail(caught);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  const copyMigrationPrompt = async () => {
+    if (!editingRow.value) return;
+    migrationPromptBusy.value = true;
+    try {
+      const response = await api.get(urlsMap.reportEngineChromeMigrationPrompt(editingRow.value.id));
+      await navigator.clipboard.writeText(String(response.data?.prompt ?? ""));
+      showSnackBar({ message: t("Migration prompt copied"), type: "success" });
+    } catch (caught) {
+      fail(caught);
+    } finally {
+      migrationPromptBusy.value = false;
+    }
+  };
+
+  const downloadMigrationPrompt = async () => {
+    if (!editingRow.value) return;
+    migrationPromptBusy.value = true;
+    try {
+      const response = await api.get(urlsMap.reportEngineChromeMigrationPrompt(editingRow.value.id));
+      downloadText(
+        String(response.data?.filename ?? `${editingRow.value.code}-migration.prompt.md`),
+        String(response.data?.prompt ?? ""),
+        "text/markdown",
+      );
+    } catch (caught) {
+      fail(caught);
+    } finally {
+      migrationPromptBusy.value = false;
+    }
   };
 
   const copyCode = async (code: string) => {
@@ -248,6 +320,7 @@ const ReportsChromePage = dc(() => {
           : t("Header/footer spec saved"),
         type: "success",
       });
+      migrationOpen.value = false;
       refresh();
     } catch (caught) {
       fail(caught);
@@ -297,17 +370,28 @@ const ReportsChromePage = dc(() => {
     previewRow.value = row;
     previewLocale.value = row.supportedLocales.includes("en") ? "en" : (row.supportedLocales[0] ?? "en");
     previewAssets.value = row.assetDataUrls ?? {};
+    previewCounterpart.value = null;
     previewError.value = "";
     previewOpen.value = true;
-    if (!row.assetBundleId || !row.spec.required_assets?.length) return;
-    // The list omits asset data URLs unless asked for; fetch them for this row only.
     previewLoading.value = true;
     try {
+      // Fetch asset data plus the global counterpart so the preview shows the
+      // same composed page as a report (header + footer), not an isolated strip.
       const response = await api.get(urlsMap.reportEngineChrome, {
-        params: { includeAssets: 1, includeArchived: "true", search: row.code, pageSize: 200 },
+        params: { includeAssets: 1, includeArchived: "false", pageSize: 200 },
       });
-      const match = ((response.data?.specs ?? []) as ChromeRow[]).find((candidate) => candidate.id === row.id);
-      if (previewRow.value?.id === row.id && match?.assetDataUrls) previewAssets.value = match.assetDataUrls;
+      const specs = (response.data?.specs ?? []) as ChromeRow[];
+      const current = specs.find((candidate) => candidate.id === row.id);
+      if (previewRow.value?.id === row.id) {
+        previewAssets.value = current?.assetDataUrls ?? row.assetDataUrls ?? {};
+        previewCounterpart.value =
+          specs.find(
+            (candidate) =>
+              candidate.status === "PUBLISHED" &&
+              candidate.isDefaultGlobal &&
+              candidate.chromeType !== row.chromeType,
+          ) ?? null;
+      }
     } catch (caught) {
       previewError.value = friendlyApiErrorMessage(caught, t);
     } finally {
@@ -315,35 +399,114 @@ const ReportsChromePage = dc(() => {
     }
   };
 
-  const previewHtml = (row: ChromeRow): string => {
-    const fakeBundle = {
-      executionId: "preview",
-      executedAtIso: new Date().toISOString(),
-      verificationSha256: "0".repeat(64),
-      spec: {
-        report: { code: "preview", version: 1, classification: "INTERNAL" },
-        i18n: { default_locale: "en", locales: row.spec.i18n.locales },
+  const previewHeader = computed(() =>
+    previewRow.value?.chromeType === "HEADER"
+      ? previewRow.value
+      : previewCounterpart.value?.chromeType === "HEADER"
+        ? previewCounterpart.value
+        : null,
+  );
+  const previewFooter = computed(() =>
+    previewRow.value?.chromeType === "FOOTER"
+      ? previewRow.value
+      : previewCounterpart.value?.chromeType === "FOOTER"
+        ? previewCounterpart.value
+        : null,
+  );
+
+  const previewPageHtml = (_row: ChromeRow): string => {
+    const sampleLocales = {
+      en: {
+        "report.title": "Platform Assurance Command Report",
+        "report.subtitle": "Payments, rails, reconciliation, compliance and security",
       },
-      resolvedHeaderChrome: row.chromeType === "HEADER" ? row.spec : null,
-      resolvedFooterChrome: row.chromeType === "FOOTER" ? row.spec : null,
+      ar: {
+        "report.title": "تقرير قيادة ضمان المنصة",
+        "report.subtitle": "المدفوعات والمسارات والمطابقة والامتثال والأمن",
+      },
+    };
+    const bundle = {
+      executionId: "chrome-preview",
+      executedAtIso: "2026-11-11T14:31:00.000Z",
+      verificationSha256: "7f3c9a2e18d4b7f0c1a2e3d4b5c6a7f8",
+      spec: {
+        report: { code: "platform-assurance-command-report", version: 1, classification: "INTERNAL" },
+        page_layout: {
+          paper_size: "A4",
+          orientation: "PORTRAIT",
+          margins_mm: { top: 26, right: 14, bottom: 24, left: 14 },
+          header_mode: "GLOBAL_DEFAULT",
+          footer_mode: "GLOBAL_DEFAULT",
+          allow_runtime_chrome_selection: true,
+          global_scoped_css: "",
+        },
+        i18n: { default_locale: "en", prompt_user_when_multi_locale: true, locales: sampleLocales },
+      },
+      resolvedHeaderChrome: previewHeader.value?.spec ?? null,
+      resolvedFooterChrome: previewFooter.value?.spec ?? null,
       datasets: {},
-      assetDataUrls: previewAssets.value,
-      actor: { name: "Preview", email: "preview@example", role: "SECURITY_ADMIN" },
+      assetDataUrls: { ...previewAssets.value, ...(previewCounterpart.value?.assetDataUrls ?? {}) },
+      actor: { name: "Salem A.", email: "salem@example.test", role: "GATEWAY_ADMIN" },
+      institutionName: "Libyan National Payment Gateway",
+      chromeVariables: { periodSummary: "2026-01-01 – 2026-10-31" },
+      currency: "LYD",
       inputsUsed: {},
       rowCountTotal: 0,
       durationMs: 0,
-      servedByNode: "preview",
+      servedByNode: "chrome-preview",
     } as unknown as ReportExecutionBundle;
-    return renderChromeHtml({
-      chrome: row.spec,
-      bundle: fakeBundle,
-      locale: previewLocale.value,
-      t: (key: string) =>
-        row.spec.i18n.locales[previewLocale.value]?.[key] ??
-        row.spec.i18n.locales[row.spec.i18n.default_locale]?.[key] ??
-        key,
-    });
+    const header = previewHeader.value
+      ? renderChromeHtml({ chrome: previewHeader.value.spec, bundle, locale: previewLocale.value })
+      : "";
+    const footer = previewFooter.value
+      ? renderChromeHtml({ chrome: previewFooter.value.spec, bundle, locale: previewLocale.value })
+      : "";
+    return `<div class="chrome-preview-shell"><div class="chrome-preview-frame"><div class="chrome-preview-page">
+      ${header ? `<div class="chrome-preview-header">${header}</div>` : ""}
+      <div class="chrome-preview-body">
+        <div class="cp-eyebrow">Platform assurance</div>
+        <h1>Platform Assurance Command Report</h1>
+        <p class="cp-lede">Payments, rails, reconciliation, compliance and security across the Libyan National Payment Gateway.</p>
+        <div class="cp-kpis">
+          <div class="cp-kpi"><span>Total attempts</span><strong>48,950</strong></div>
+          <div class="cp-kpi"><span>Success rate</span><strong>98.4%</strong></div>
+          <div class="cp-kpi"><span>Settled volume</span><strong>41.1M LYD</strong></div>
+        </div>
+        <div class="cp-card">
+          <div class="cp-card-head"><strong>Operational health</strong><span>Read-only verified replica extract</span></div>
+          <div class="cp-row"><span>Gateway routes</span><span class="cp-ok">HEALTHY</span></div>
+          <div class="cp-row"><span>Reconciliation</span><span class="cp-ok">97.88% matched</span></div>
+          <div class="cp-row"><span>Approvals</span><span class="cp-warn">3,119 reviewed</span></div>
+        </div>
+      </div>
+      ${footer ? `<div class="chrome-preview-footer">${footer}</div>` : ""}
+    </div></div></div>`;
   };
+
+  const previewPageCss = (_row: ChromeRow): string =>
+    [
+      previewHeader.value?.spec.template.scoped_css ?? "",
+      previewFooter.value?.spec.template.scoped_css ?? "",
+      `.chrome-preview-shell{padding:18px;background:#dfe6ec;display:flex;justify-content:center}
+       .chrome-preview-frame{width:calc(210mm * .78);height:calc(297mm * .78);position:relative}
+       .chrome-preview-page{position:absolute;top:0;left:0;width:210mm;height:297mm;background:#fff;overflow:hidden;transform:scale(.78);transform-origin:top left;box-shadow:0 12px 30px rgba(15,23,42,.16)}
+       .chrome-preview-header{position:absolute;top:2mm;left:14mm;right:14mm;height:22mm}
+       .chrome-preview-footer{position:absolute;bottom:4mm;left:14mm;right:14mm;height:16mm}
+       .chrome-preview-body{position:absolute;top:26mm;left:14mm;right:14mm;bottom:24mm;padding-top:5mm;color:#1f2d3d;font-family:Arial,'Noto Sans Arabic',sans-serif}
+       .cp-eyebrow{font-size:7pt;font-weight:700;letter-spacing:1.4pt;text-transform:uppercase;color:#0b5d7a}
+       .chrome-preview-body h1{font-size:24pt;line-height:1.05;margin:4mm 0 3mm;color:#0d3b66}
+       .cp-lede{font-size:9pt;line-height:1.45;color:#5b6b7a;max-width:135mm;margin:0 0 7mm}
+       .cp-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:3mm}
+       .cp-kpi{border:0.3mm solid #d9e4ea;border-inline-start:1.2mm solid #0b5d7a;border-radius:2.6mm;padding:4mm;background:#f7fafb}
+       .cp-kpi:nth-child(2){border-inline-start-color:#2e8b57}.cp-kpi:nth-child(3){border-inline-start-color:#e67e22}
+       .cp-kpi span{display:block;font-size:6.4pt;letter-spacing:.7pt;text-transform:uppercase;color:#6b7c8c}
+       .cp-kpi strong{display:block;margin-top:2mm;font-size:15pt;color:#0d3b66}
+       .cp-card{margin-top:7mm;border:0.3mm solid #d9e4ea;border-radius:3mm;padding:5mm}
+       .cp-card-head{display:flex;justify-content:space-between;gap:4mm;font-size:7pt;color:#8a99a8;margin-bottom:3mm}
+       .cp-card-head strong{font-size:9pt;color:#0d3b66}
+       .cp-row{display:flex;justify-content:space-between;padding:2.4mm 0;border-bottom:0.2mm solid #eef5f8;font-size:7.4pt}
+       .cp-row:last-child{border-bottom:0}.cp-ok{color:#1e6b43;font-weight:700}.cp-warn{color:#7a4b00;font-weight:700}`,
+    ].join("\n");
 
   const localeLabel = (locale: string) => (locale === "ar" ? t("Arabic") : locale === "en" ? t("English") : locale.toUpperCase());
 
@@ -360,10 +523,10 @@ const ReportsChromePage = dc(() => {
         <div class="text-caption text-medium-emphasis">{t("Loading assets…")}</div>
       ) : (
         <ReportSandboxedHtmlSurface
-          html={previewHtml(row)}
-          css={row.spec.template.scoped_css}
+          html={previewPageHtml(row)}
+          css={previewPageCss(row)}
           locale={previewLocale.value}
-          minHeight={260}
+          minHeight={960}
         />
       )}
       <DescriptionList
@@ -377,6 +540,11 @@ const ReportsChromePage = dc(() => {
     </div>
   );
 
+  onMounted(() => {
+    const open = typeof route.query.open === "string" ? route.query.open : "";
+    if (open) void loadChromeById(open);
+  });
+
   return () => (
     <ScreenContainer>
       <ThemedView style={{ gap: "18px" }}>
@@ -387,6 +555,9 @@ const ReportsChromePage = dc(() => {
             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <VBtn variant="tonal" prependIcon="mdi-refresh" loading={busy.value} onClick={refresh}>
                 {t("Refresh")}
+              </VBtn>
+              <VBtn variant="tonal" prependIcon="mdi-alert-decagram-outline" onClick={() => void router.push({ name: "ReportsChromeNeedsMigration" })}>
+                {t("Needs Migration")}
               </VBtn>
               <VBtn variant="tonal" prependIcon="mdi-file-chart-outline" onClick={() => void router.push({ name: "ReportsCatalog" })}>
                 {t("Open Catalog")}
@@ -414,6 +585,22 @@ const ReportsChromePage = dc(() => {
             {t("Download Header/Footer AI Transcript")}
           </VBtn>
         </SurfaceCard>
+
+        {migrationOpen.value && editingRow.value && (
+          <VAlert type="warning" variant="tonal">
+            <div class="d-flex flex-column ga-2">
+              <span>{t("Migrate and restore default")}: {editingRow.value.code} v{editingRow.value.version}</span>
+              <div class="d-flex flex-wrap ga-2">
+                <VBtn size="small" variant="tonal" loading={migrationPromptBusy.value} disabled={!canPrompt.value} onClick={() => void copyMigrationPrompt()}>
+                  {t("Copy migration prompt")}
+                </VBtn>
+                <VBtn size="small" variant="tonal" loading={migrationPromptBusy.value} disabled={!canPrompt.value} onClick={() => void downloadMigrationPrompt()}>
+                  {t("Download migration prompt")}
+                </VBtn>
+              </div>
+            </div>
+          </VAlert>
+        )}
 
         <SurfaceCard
             title={t("Upload Chrome Spec")}
@@ -462,7 +649,7 @@ const ReportsChromePage = dc(() => {
                 copiedMessage={t("Chrome JSON copied")}
               />
               <div class="d-flex flex-wrap ga-4 align-center">
-                <VBtn color="primary" loading={busy.value} disabled={!canSave.value} onClick={() => void saveChrome()}>
+                <VBtn color="primary" loading={busy.value} disabled={!canSave.value || !canManageChrome.value} onClick={() => void saveChrome()}>
                   {t("Verify & Save")}
                 </VBtn>
                 <VSwitch
@@ -477,6 +664,7 @@ const ReportsChromePage = dc(() => {
                   color="primary"
                   hideDetails
                   modelValue={makeDefault.value}
+                  disabled={!publish.value}
                   onUpdate:modelValue={(value: boolean | null) => (makeDefault.value = Boolean(value))}
                 />
               </div>
@@ -505,6 +693,7 @@ const ReportsChromePage = dc(() => {
           onRefresh={(table, refreshTable) => {
             void refreshTable({
               queryParams: {
+                includeIncompatible: 1,
                 page: table.page,
                 pageSize: chromePageSize.value,
                 ...(chromeSearch.value ? { search: chromeSearch.value } : {}),

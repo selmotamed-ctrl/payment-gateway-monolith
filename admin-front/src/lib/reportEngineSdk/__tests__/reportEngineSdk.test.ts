@@ -163,6 +163,27 @@ describe("report rendering additions", () => {
     expect(formatReportValue("ACTIVE", "ENUM_TRANSLATED", "LYD", (key) => (key === "enum.ACTIVE" ? "Active" : key))).toBe("Active");
   });
 
+  it("mock preview renders visibility-gated sections", () => {
+    const hiddenSpec = {
+      ...spec,
+      sections: [
+        ...spec.sections,
+        {
+          section_type: "HTML_TEMPLATE",
+          section_id: "hidden_section",
+          html_template: "<div>HIDDEN_MARKER</div>",
+          scoped_css: "",
+          visibility: { when: "DATASET_EMPTY", dataset_id: "rows" },
+        },
+      ],
+    } as unknown as ReportDescriptorSpec;
+    const hiddenBundle = { ...bundle, spec: hiddenSpec } as unknown as ReportExecutionBundle;
+    expect(renderReportSectionsToHtml({ bundle: hiddenBundle, locale: "en" })).not.toContain("HIDDEN_MARKER");
+    expect(
+      renderReportSectionsToHtml({ bundle: hiddenBundle, locale: "en", includeHiddenSections: true }),
+    ).toContain("HIDDEN_MARKER");
+  });
+
   it("renders a declarative SVG canvas template", () => {
     const svg = renderVectorDrawSectionToSvg({
       section: {
@@ -181,5 +202,172 @@ describe("report rendering additions", () => {
       isRtl: false,
     });
     expect(svg).toContain("<text>Gross</text>");
+  });
+});
+
+describe("print layout contract", () => {
+  it("groups consecutive half-width charts into one centered row", () => {
+    const chartSpec = {
+      ...spec,
+      sections: [
+        {
+          section_type: "CHART",
+          section_id: "first",
+          title_i18n_key: "table.day",
+          dataset_id: "missing",
+          chart_kind: "BAR",
+          height_mm: 60,
+          width_percent: 50,
+          x_field: "day",
+          y_axis_format: "CURRENCY_MINOR",
+          series: [{ field: "amount", label_i18n_key: "table.amount", show_value_labels: false }],
+        },
+        {
+          section_type: "CHART",
+          section_id: "second",
+          title_i18n_key: "table.amount",
+          dataset_id: "missing",
+          chart_kind: "BAR",
+          height_mm: 60,
+          width_percent: 50,
+          x_field: "day",
+          y_axis_format: "CURRENCY_MINOR",
+          series: [{ field: "amount", label_i18n_key: "table.amount", show_value_labels: false }],
+        },
+      ],
+    } as unknown as ReportDescriptorSpec;
+    const html = renderReportSectionsToHtml({
+      bundle: { ...bundle, spec: chartSpec } as ReportExecutionBundle,
+      locale: "en",
+    });
+    expect(html).toContain("report-chart-row");
+    expect((html.match(/report-chart-cell/g) ?? []).length).toBe(2);
+  });
+
+  it("renders a no-data state instead of an empty chart", () => {
+    const chartSpec = {
+      ...spec,
+      sections: [
+        {
+          section_type: "CHART",
+          section_id: "empty",
+          title_i18n_key: "table.day",
+          dataset_id: "missing",
+          chart_kind: "BAR",
+          height_mm: 60,
+          width_percent: 50,
+          x_field: "day",
+          y_axis_format: "INTEGER",
+          series: [{ field: "amount", label_i18n_key: "table.amount", show_value_labels: false }],
+        },
+      ],
+    } as unknown as ReportDescriptorSpec;
+    const html = renderReportSectionsToHtml({
+      bundle: { ...bundle, spec: chartSpec } as ReportExecutionBundle,
+      locale: "en",
+    });
+    expect(html).toContain("report-chart-empty");
+    expect(html).toContain("No data");
+  });
+
+  it("pins KPI values to the bottom and scales long numbers", () => {
+    const kpiSpec = {
+      ...spec,
+      sections: [
+        {
+          section_type: "KPI_GRID",
+          section_id: "kpis",
+          columns: 3,
+          cards: [
+            {
+              label_i18n_key: "kpi.total",
+              dataset_id: "totals",
+              value_field: "big",
+              row_index: 0,
+              format_hint: "CURRENCY_MINOR",
+              tone: "PRIMARY",
+            },
+          ],
+        },
+      ],
+    } as unknown as ReportDescriptorSpec;
+    const bigBundle = {
+      ...bundle,
+      spec: kpiSpec,
+      datasets: { totals: [{ big: 1234567890123 }] },
+    } as unknown as ReportExecutionBundle;
+    const html = renderReportSectionsToHtml({ bundle: bigBundle, locale: "en" });
+    expect(html).toContain("report-kpi-metric");
+    expect(html).toContain("report-kpi-value--long");
+  });
+
+  it("styles numeric, badge and total cells for the print table", () => {
+    const tableSpec = {
+      ...spec,
+      sections: [
+        {
+          section_type: "DATA_TABLE",
+          section_id: "table",
+          title_i18n_key: "table.day",
+          dataset_id: "rows",
+          columns: [
+            { field: "status", header_i18n_key: "table.day", format_hint: "BADGE", summary_footer: "NONE" },
+            { field: "amount", header_i18n_key: "table.amount", align: "END", format_hint: "CURRENCY_MINOR", summary_footer: "LABEL_TOTAL" },
+          ],
+        },
+      ],
+    } as unknown as ReportDescriptorSpec;
+    const tableBundle = {
+      ...bundle,
+      spec: tableSpec,
+      datasets: { rows: [{ status: "PARTIALLY_REFUNDED", amount: 1234567 }] },
+    } as unknown as ReportExecutionBundle;
+    const html = renderReportSectionsToHtml({ bundle: tableBundle, locale: "en" });
+    expect(html).toContain("report-badge--xlong");
+    expect(html).toContain("report-cell-number");
+    expect(html).toContain("report-cell-badge");
+    expect(html).toContain("report-footer-label");
+  });
+});
+
+describe("chrome accent band and variables", () => {
+  it("renders a structured multi-color band, suppresses the simple border and formats chrome variables", () => {
+    const chromeWithBand = {
+      ...chrome,
+      chrome: {
+        ...chrome.chrome,
+        border_style: "ACCENT_BAND",
+        accent_band: {
+          position: "BOTTOM",
+          height_mm: 1.4,
+          radius_mm: 0.6,
+          segments: [
+            { color: "#0b5d7a", width_percent: 58 },
+            { color: "#2e8b57", width_percent: 26 },
+            { color: "#e67e22", width_percent: 16 },
+          ],
+        },
+      },
+      template: {
+        ...chrome.template,
+        html: "<div style='height:100%'>{{periodSummary}} · {{defaultCurrency}} · {{generatedAtFormatted}}</div>",
+      },
+    } as unknown as ReportChromeSpec;
+    const bundleWithVars = {
+      ...bundle,
+      currency: "LYD",
+      executedAtIso: "2026-11-11T14:31:00.000Z",
+      chromeVariables: { periodSummary: "2026-01-01 – 2026-10-31" },
+    } as unknown as ReportExecutionBundle;
+    const html = renderChromeHtml({ chrome: chromeWithBand, bundle: bundleWithVars, locale: "en" });
+    expect(html).toContain("report-chrome-accent-band");
+    expect(html).toContain("linear-gradient");
+    expect(html).toContain("#0b5d7a");
+    expect(html).toContain("#2e8b57");
+    expect(html).toContain("#e67e22");
+    expect(html).not.toContain("report-chrome-border-accent-band");
+    expect(html).toContain("01 Jan 2026 – 31 Oct 2026");
+    expect(html).toContain("LYD");
+    expect(html).toContain("11 Nov 2026, 14:31");
   });
 });

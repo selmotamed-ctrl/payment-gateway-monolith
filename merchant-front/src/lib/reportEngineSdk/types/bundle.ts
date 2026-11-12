@@ -8,6 +8,11 @@ export interface ReportExecutionBundle {
   spec: ReportDescriptorSpec;
   resolvedHeaderChrome: ReportChromeSpec | null;
   resolvedFooterChrome: ReportChromeSpec | null;
+  resolvedHeaderChromeScope?: "PLATFORM" | "MERCHANT" | null;
+  resolvedFooterChromeScope?: "PLATFORM" | "MERCHANT" | null;
+  chromeFallbackUsed?: boolean;
+  engineVersion?: string;
+  reportSpecVersion?: string;
   datasets: Record<string, Array<Record<string, unknown>>>;
   assetDataUrls: Record<string, string>;
   actor: { name: string; email: string; role: string };
@@ -19,4 +24,6 @@ export interface ReportExecutionBundle {
   rowCountTotal: number;
   durationMs: number;
   servedByNode: string;
+  /** Present on Studio mock previews; live executions omit it. */
+  previewMode?: "MOCK";
 }

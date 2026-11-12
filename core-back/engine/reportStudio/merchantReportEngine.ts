@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { client } from "../../prisma/client";
 import { env } from "../../lib/env";
+import { ApiError } from "../../lib/error";
 import {
   createReportEngine,
   type ReportDescriptorSpec,
@@ -219,13 +220,12 @@ export function validateMerchantTierLimits(
   return diagnostics;
 }
 
-export class MerchantReportGuardError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly status = 429,
-  ) {
-    super(message);
+export class MerchantReportGuardError extends ApiError {
+  readonly status: number;
+  constructor(code: string, message: string, status = 429) {
+    super(status, code, message);
+    this.name = "MerchantReportGuardError";
+    this.status = status;
   }
 }
 
@@ -338,9 +338,19 @@ export function merchantCacheKey(params: {
   inputs: Record<string, unknown>;
   /** The applications a restricted user is limited to: their result must never be served to an unrestricted user (or vice versa). */
   applicationIds?: readonly string[];
+  /** The header/footer registry state the result was rendered with: a changed chrome must not be served from cache. */
+  chromeFingerprint?: string;
 }): string {
   return createHash("sha256")
-    .update(JSON.stringify({ merchantId: params.merchantId, spec: params.spec, inputs: params.inputs, applicationIds: params.applicationIds ? [...params.applicationIds].sort() : null }))
+    .update(
+      JSON.stringify({
+        merchantId: params.merchantId,
+        spec: params.spec,
+        inputs: params.inputs,
+        applicationIds: params.applicationIds ? [...params.applicationIds].sort() : null,
+        chromeFingerprint: params.chromeFingerprint ?? "",
+      }),
+    )
     .digest("hex");
 }
 

@@ -100,9 +100,28 @@ describe("the merchant execute route", () => {
     expect(start).toBeGreaterThan(-1);
     expect(source).toContain('"APP_SCOPE_RESTRICTED"');
     expect(source.indexOf("assertSpecFitsApplicationScope(spec, applicationIds)")).toBeLessThan(source.indexOf("await assertMerchantBudget(merchantId);", start));
-    expect(source).toContain("merchantCacheKey({ merchantId, spec, inputs: forcedInputs, applicationIds })");
+    expect(source).toContain("merchantCacheKey({ merchantId, spec, inputs: forcedInputs, applicationIds, chromeFingerprint })");
     expect(source).toMatch(/merchantScope: \{\s+merchantId,\s+applicationIds,/);
     // An API token is bound to one application by the token itself: only a session carries app_scope_ids.
     expect(source).toContain('if (principal.kind !== "session") return undefined;');
+  });
+});
+
+describe("the merchant Studio preview route", () => {
+  // The plan branch added a LIVE preview that executes a draft. It must apply the rule of the execute route:
+  // before this check a user restricted to some applications could preview every application's rows.
+  test("a LIVE preview refuses merchant-wide specs to a restricted user and passes the scope on; MOCK reads no data", async () => {
+    const source = (await Bun.file(new URL("../../api/internal/merchantReportEngine.ts", import.meta.url)).text()).split("\r\n").join("\n");
+    const start = source.indexOf('router.post("/report-engine/studio/preview"');
+    expect(start).toBeGreaterThan(-1);
+    const route = source.slice(start, source.indexOf('router.post("/report-engine/studio/specs"', start));
+    const check = route.indexOf("assertSpecFitsApplicationScope(parsedSpec, previewApplicationIds)");
+    expect(check).toBeGreaterThan(-1);
+    expect(route).toContain("const previewApplicationIds = applicationScopeOf(request);");
+    // After the MOCK branch (which returns without reading data), before the execution.
+    expect(check).toBeGreaterThan(route.indexOf('mode: "MOCK"'));
+    expect(check).toBeLessThan(route.indexOf("engine.executeReport("));
+    expect(route).toContain("merchantScope: { merchantId, applicationIds: previewApplicationIds }");
+    expect(route).not.toContain("merchantScope: { merchantId }");
   });
 });

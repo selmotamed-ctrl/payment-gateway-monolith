@@ -248,10 +248,40 @@ export function validateSpecStructureAndI18n(
       for (const m of tokenMatches) {
         if (m[1]) referencedKeys.push({ key: m[1], path: `${sPath}.html_template` });
       }
+      // Report HTML templates bind translations and assets only. Dataset tokens
+      // are a common hallucination and would render literally in the preview.
+      for (const match of sec.html_template.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
+        const token = match[1] ?? "";
+        if (token.startsWith("$t.")) continue;
+        diagnostics.push({
+          layer: 1,
+          severity: "error",
+          path: `${sPath}.html_template`,
+          code: "UNSUPPORTED_TEMPLATE_TOKEN",
+          message: `HTML template token "{{${token}}}" is not supported.`,
+          aiFixHint:
+            "Report HTML templates support only {{$t.<translation_key>}} and asset://<asset_key>. Use KPI_GRID, DATA_TABLE or CHART for dataset values.",
+        });
+      }
     } else if (sec.section_type === "IMAGE_BANNER") {
       if (sec.caption_i18n_key) {
         referencedKeys.push({ key: sec.caption_i18n_key, path: `${sPath}.caption_i18n_key` });
       }
+    }
+  }
+
+  for (let i = 0; i < spec.sections.length; i++) {
+    const sec = spec.sections[i]!;
+    if ((sec.section_type === "CHART" || sec.section_type === "DATA_TABLE") && !sec.subtitle_i18n_key) {
+      diagnostics.push({
+        layer: 1,
+        severity: "warning",
+        path: `sections[${i}](${sec.section_id}).subtitle_i18n_key`,
+        code: "MISSING_SECTION_DESCRIPTION",
+        message: `${sec.section_type === "CHART" ? "Chart" : "Table"} "${sec.section_id}" has no subtitle/description.`,
+        aiFixHint:
+          "Add a short subtitle_i18n_key that describes what the section shows; the Studio renders it between the title and the chart/table.",
+      });
     }
   }
 

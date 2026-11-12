@@ -340,7 +340,7 @@ export const KpiGridSectionSchema = z.object({
   section_type: z.literal("KPI_GRID"),
   section_id: z.string(),
   title_i18n_key: z.string().optional(),
-  columns: z.number().int().min(2).max(6).default(4),
+  columns: z.number().int().min(2).max(3).default(3),
   cards: z
     .array(
       z.object({
@@ -352,6 +352,9 @@ export const KpiGridSectionSchema = z.object({
           .enum(["RAW", "CURRENCY_MINOR", "DECIMAL_2", "PERCENT_RATIO", "INTEGER"])
           .default("CURRENCY_MINOR"),
         delta_field: z.string().optional(),
+        delta_format_hint: z
+          .enum(["RAW", "CURRENCY_MINOR", "DECIMAL_2", "PERCENT_BPS", "PERCENT_RATIO", "INTEGER"])
+          .optional(),
         tone: z.enum(["NEUTRAL", "PRIMARY", "SUCCESS", "WARNING", "DANGER"]).default("NEUTRAL"),
       }),
     )

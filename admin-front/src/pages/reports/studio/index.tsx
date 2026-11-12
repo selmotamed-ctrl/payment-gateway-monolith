@@ -1,10 +1,10 @@
 import { dc } from "kt-dc";
 import { computed, onMounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
-import { VAlert, VBtn, VCol, VFileInput, VRow, VSelect } from "vuetify/components";
+import { VAlert, VBtn, VBtnToggle, VCol, VFileInput, VRow, VSelect } from "vuetify/components";
 import { DataTable } from "@/components/Table/DataTable";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
@@ -26,11 +26,10 @@ import {
   ReportPagedPreviewSurface,
   renderChromeHtml,
   renderReportSectionsToHtml,
-  specTranslator,
   type ReportDescriptorSpec,
-  type ReportDiagnostic,
   type ReportExecutionBundle,
 } from "@/lib/reportEngineSdk";
+import {type ReportDiagnostic} from "@/lib/reportEngineSdk/types/diagnostics.ts"
 import {
   ASSET_ZIP_TOO_LARGE_MESSAGE,
   diagnosticsFromApiError,
@@ -68,6 +67,7 @@ type VersionRow = {
   version: number;
   status: string;
   isLatestPublished: boolean;
+  compatibility?: { status: "COMPATIBLE" | "NEEDS_MIGRATION" | "INVALID"; reasonCode: string | null; message: string };
   createdAt: string;
   publishedAt: string | null;
 };
@@ -156,6 +156,7 @@ const specHasRequiredAssets = (json: string): boolean => {
 const ReportsStudioPage = dc(() => {
   const { t } = useLocale();
   const router = useRouter();
+  const route = useRoute();
   const domains = ref<string[]>([]);
   const specJson = ref("");
   const specFile = ref<File | null>(null);
@@ -166,6 +167,7 @@ const ReportsStudioPage = dc(() => {
   const previewLocale = ref("en");
   const previewPages = ref(1);
   const previewLoading = ref(false);
+  const previewMode = ref<"MOCK" | "LIVE">("MOCK");
   const previewRef = ref<{ printClientSideVectorPdf?: () => void } | null>(null);
   /** Editor JSON and zip the current `verification` was produced from; any edit invalidates it. */
   const verifiedInput = ref<{ json: string; zip: File | null } | null>(null);
@@ -212,7 +214,12 @@ const ReportsStudioPage = dc(() => {
   const isVerified = computed(() => verificationCurrent.value && verification.value?.valid === true);
   const previewSectionsHtml = computed(() =>
     previewBundle.value
-      ? renderReportSectionsToHtml({ bundle: previewBundle.value, locale: previewLocale.value, t })
+      ? renderReportSectionsToHtml({
+          bundle: previewBundle.value,
+          locale: previewLocale.value,
+          t,
+          includeHiddenSections: previewMode.value === "MOCK",
+        })
       : "",
   );
   const previewHeaderHtml = computed(() =>
@@ -309,7 +316,7 @@ const ReportsStudioPage = dc(() => {
         params: kind === "REPORT" ? { kind, domains: domains.value.join(",") } : { kind },
       });
       const data = response.data ?? {};
-      const fallback = kind === "REPORT" ? "report-engine-ai-transcript-v1.0.md" : "chrome-engine-ai-transcript-v1.0.md";
+      const fallback = kind === "REPORT" ? "report-engine-ai-transcript-v1.1.md" : "chrome-engine-ai-transcript-v1.1.md";
       downloadText(data.filename ?? fallback, data.markdown ?? "", "text/markdown");
     } catch (caught) {
       fail(caught, false);
@@ -373,6 +380,7 @@ const ReportsStudioPage = dc(() => {
       const response = await api.post(urlsMap.reportEnginePreview, {
         specJson: specJson.value,
         assetsZipBase64,
+        mode: previewMode.value,
       });
       const bundle = response.data?.bundle as ReportExecutionBundle | undefined;
       previewBundle.value = bundle ?? null;
@@ -409,6 +417,28 @@ const ReportsStudioPage = dc(() => {
       await applySaveResponse(response.data ?? {});
     } catch (caught) {
       fail(caught);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  const loadSpecById = async (id: string) => {
+    busy.value = true;
+    resetFeedback();
+    try {
+      const response = await api.get(urlsMap.reportEngineSpecDetail(id));
+      const json = JSON.stringify(response.data?.spec ?? {}, null, 2);
+      specJson.value = json;
+      specFile.value = null;
+      zipFile.value = null;
+      verification.value = null;
+      verifiedInput.value = null;
+      savedSpecId.value = id;
+      savedSpecCode.value = String(response.data?.code ?? "") || null;
+      savedSpecVersion.value = Number(response.data?.version ?? 0) || null;
+      loadedNeedsAssets.value = specHasRequiredAssets(json);
+    } catch (caught) {
+      fail(caught, false);
     } finally {
       busy.value = false;
     }
@@ -577,7 +607,18 @@ const ReportsStudioPage = dc(() => {
         </div>
       ),
     },
-    { key: "status", label: t("Status"), Value: ({ row }) => <StatusBadge status={row.status} /> },
+    {
+      key: "status",
+      label: t("Status"),
+      Value: ({ row }) => (
+        <div class="d-flex align-center ga-2 flex-wrap">
+          <StatusBadge status={row.status} />
+          {row.compatibility && row.compatibility.status !== "COMPATIBLE" && (
+            <StatusBadge status={row.compatibility.status} toneOverride="danger" label={t("Needs migration")} />
+          )}
+        </div>
+      ),
+    },
     { key: "createdAt", label: t("Created At"), value: (row) => formatDateTime(row.createdAt) },
     { key: "publishedAt", label: t("Published At"), value: (row) => formatDateTime(row.publishedAt) },
     {
@@ -675,6 +716,8 @@ const ReportsStudioPage = dc(() => {
 
   onMounted(() => {
     void loadPendingAml();
+    const open = typeof route.query.open === "string" ? route.query.open : "";
+    if (open) void loadSpecById(open);
   });
 
   const renderScorecard = (report: VerificationReport) => (
@@ -835,6 +878,11 @@ const ReportsStudioPage = dc(() => {
           )}
         />
 
+        {route.query.from === "migration" && (
+          <VAlert type="warning" variant="tonal">
+            {t("This report needs migration. Copy the migration prompt from the migration page, paste the migrated JSON here, verify and save it as a new version.")}
+          </VAlert>
+        )}
         {error.value && (
           <VAlert type="error" variant="tonal" closable onClick:close={() => (error.value = null)}>
             {error.value}
@@ -936,10 +984,26 @@ const ReportsStudioPage = dc(() => {
         {verification.value?.valid && (
           <SurfaceCard
             title={t("Step 5 — Draft preview")}
-            subtitle={t("Renders the verified draft with sample inputs; nothing is saved or published")}
+            subtitle={t("Mock data fills every section; switch to live sample data to test real queries. Nothing is saved or published.")}
             v-slots={{
               headerActions: () => (
                 <div class="d-flex flex-wrap align-center ga-2">
+                  <VBtnToggle
+                    modelValue={previewMode.value}
+                    onUpdate:modelValue={(next: unknown) => {
+                      const value = Array.isArray(next) ? next[0] : next;
+                      if (value === "MOCK" || value === "LIVE") {
+                        previewMode.value = value;
+                        previewBundle.value = null;
+                      }
+                    }}
+                    density="compact"
+                    variant="outlined"
+                    divided
+                  >
+                    <VBtn value="MOCK" size="small" prependIcon="mdi-flask-outline">{t("Mock data")}</VBtn>
+                    <VBtn value="LIVE" size="small" prependIcon="mdi-database-outline">{t("Live sample")}</VBtn>
+                  </VBtnToggle>
                   <VBtn
                     size="small"
                     variant="tonal"
@@ -952,6 +1016,9 @@ const ReportsStudioPage = dc(() => {
                   </VBtn>
                   {previewBundle.value && (
                     <>
+                      <MetaPill color={previewMode.value === "MOCK" ? "warning" : "info"}>
+                        {previewMode.value === "MOCK" ? t("Mock data") : t("Live sample")}
+                      </MetaPill>
                       <MetaPill color="info">{`${previewPages.value} ${t("pages")}`}</MetaPill>
                       <MonoRef value={previewBundle.value.verificationSha256} truncate={12} />
                       <VBtn

@@ -130,6 +130,8 @@ const designModelNames = [
   "MerchantReportExecutionAudit",
   "MerchantReportRateEvent",
   "MerchantReportStudioStatus",
+  // Report engine versioning and merchant-owned chrome (schema version 35).
+  "MerchantReportChromeSpecRecord",
   "OutboxEvent",
   "AuditOutbox",
   "BackupCatalogRun",
@@ -198,10 +200,18 @@ describe("prisma schema", () => {
     // The automation plan adds one migration per item; the ledger query/index optimisation is applied after them
     // (schema version 25) so its partition function carries both the automation security hardening and the
     // append-only autovacuum settings. The newest migration must be well-formed and set the required version.
-    // The newest migration (schema version 35) restores fillfactor on new journal partitions and makes the
-    // partition function safe for concurrent callers; before it, the report tenant and filing integrity fix
-    // (34), after the plan branch's merchant report engine (33).
-    expect(ordered.at(-1)).toBe("20261112090000_journal_partition_storage_and_race");
+    // The newest migration (schema version 36) makes the merchant header/footer table tenant-safe and sets the
+    // one version the two merged branches agree on. Before it: the journal partition fix (35: fillfactor on
+    // new partitions, safe for concurrent callers), the plan branch's merchant report chrome (35) and report
+    // engine versioning (34), and the report tenant and filing integrity fix (34). The four share two numbers
+    // because they were written on two branches; none is edited (each may already be applied somewhere).
+    expect(ordered.at(-1)).toBe("20261112100000_merchant_chrome_tenant_integrity");
+    const chromeIntegrity = fs.readFileSync(path.join(migrationsDirectory, "20261112100000_merchant_chrome_tenant_integrity", "migration.sql"), "utf8");
+    expect(chromeIntegrity).toContain('FOREIGN KEY ("asset_bundle_id", "merchant_id")');
+    expect(chromeIntegrity).toContain('REFERENCES "merchant_report_asset_bundles" ("id", "merchant_id")');
+    expect(ordered).toContain("20261111120000_report_engine_versioning");
+    expect(ordered).toContain("20261111130000_merchant_report_chrome");
+    expect(ordered).toContain("20261112090000_journal_partition_storage_and_race");
     expect(ordered).toContain("20261111090000_report_tenant_and_filing_integrity");
     const partitionFix = fs.readFileSync(path.join(migrationsDirectory, "20261112090000_journal_partition_storage_and_race", "migration.sql"), "utf8");
     expect(partitionFix).toContain("fillfactor = 100");
@@ -240,7 +250,7 @@ describe("prisma schema", () => {
     expect(guard).not.toContain("schema_versions");
     const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
     expect(newest).toMatch(new RegExp(`UPDATE "schema_versions"\\s+SET "version" = ${REQUIRED_SCHEMA_VERSION}\\b`));
-    expect(REQUIRED_SCHEMA_VERSION).toBe(35);
+    expect(REQUIRED_SCHEMA_VERSION).toBe(36);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),

@@ -1,8 +1,8 @@
 import { dc } from "kt-dc";
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VBtn, VSelect, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { ApiTable } from "@/components/Table/ApiTable";
@@ -19,6 +19,7 @@ import {
   SurfaceCard,
 } from "@/components/ui";
 import { api } from "@/state/api";
+import { hasOneOfAuthorities } from "@/state/user";
 import { extractApiError, extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { urlsMap } from "@/constants/urlsMap";
@@ -64,6 +65,14 @@ const MerchantReportsPage = dc(() => {
   const inputFormRef = ref<{ validate?: () => boolean } | null>(null);
   const previewPages = ref(1);
   const cloneTarget = ref<MerchantReport | null>(null);
+  const canStudio = computed(() => hasOneOfAuthorities(["reports.studio"]));
+  const health = ref<{
+    reportsBlockedByChrome?: number;
+    ownReportsBlockedByChrome?: number;
+    brokenReportSpecs?: number;
+    brokenTemplateSpecs?: number;
+    brokenChromeSpecs?: number;
+  } | null>(null);
   const cloneCode = ref("");
   const cloning = ref(false);
 
@@ -140,11 +149,30 @@ const MerchantReportsPage = dc(() => {
     if (extracted?.code === "REPORT_NOT_PUBLISHED" || extracted?.code === "REPORT_NOT_FOUND") {
       return t("This report is not available right now. Refresh the list or contact the operator.");
     }
+    if (extracted?.code === "REPORT_NEEDS_MIGRATION" || extracted?.code === "REPORT_SPEC_INVALID") {
+      return t("This report needs migration. Open the migration page, copy the prompt, and save a migrated version.");
+    }
+    if (extracted?.code === "REPORT_CHROME_NEEDS_MIGRATION" || extracted?.code === "REPORT_CHROME_DEFAULT_MISSING") {
+      return t("This report's header/footer is temporarily unavailable. The platform is being updated.");
+    }
     if (extracted?.status === 403) {
       return t("You do not have permission to run this report.");
     }
     return extractApiErrorMessage(caught) || (caught instanceof Error ? caught.message : String(caught));
   };
+
+  const loadHealth = async () => {
+    try {
+      const response = await api.get(urlsMap.reportEngineCatalog, { params: { page: 1, pageSize: 1 } });
+      health.value = (response.data?.health ?? null) as typeof health.value;
+    } catch {
+      health.value = null;
+    }
+  };
+
+  onMounted(() => {
+    void loadHealth();
+  });
 
   const autocomplete = async (
     source: string,
@@ -301,6 +329,26 @@ const MerchantReportsPage = dc(() => {
           subtitle={t("Generate the reports available to your merchant account")}
         />
 
+        {((health.value?.reportsBlockedByChrome ?? 0) > 0 ||
+          (health.value?.brokenReportSpecs ?? 0) > 0 ||
+          (health.value?.brokenTemplateSpecs ?? 0) > 0) && (
+          <VAlert type="warning" variant="tonal">
+            <div class="d-flex flex-wrap align-center ga-3">
+              <span>{t("Some reports are temporarily unavailable while platform templates are updated")}</span>
+              {canStudio.value && (health.value?.brokenReportSpecs ?? 0) > 0 && (
+                <VBtn size="small" variant="text" onClick={() => void router.push({ name: "MerchantReportsNeedsMigration" })}>
+                  {t("Reports Needing Migration")}
+                </VBtn>
+              )}
+              {canStudio.value && (health.value?.ownReportsBlockedByChrome ?? 0) > 0 && (
+                <VBtn size="small" variant="text" onClick={() => void router.push({ name: "MerchantReportsChromeNeedsMigration" })}>
+                  {t("Headers & Footers migration")}
+                </VBtn>
+              )}
+            </div>
+          </VAlert>
+        )}
+
         {bundle.value && selected.value && (
           <SurfaceCard
             title={t("Paginated Vector Preview")}
@@ -309,6 +357,7 @@ const MerchantReportsPage = dc(() => {
               headerActions: () => (
                 <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                   <MetaPill color="info">{`${previewPages.value} ${t("pages")}`}</MetaPill>
+                  {bundle.value?.chromeFallbackUsed && <MetaPill color="warning">{t("Platform chrome is temporarily in use")}</MetaPill>}
                   <MonoRef value={bundle.value?.verificationSha256 ?? ""} truncate={12} />
                   <SegmentedTabs
                     modelValue={locale.value}

@@ -5369,7 +5369,7 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 
 <a id="coredata"></a>
 
-> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-11 · **Verified against:** `d695518+working-tree`
 
 # Data Schema and Migrations
 
@@ -5436,7 +5436,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 35`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 36`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5449,7 +5449,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261112090000_journal_partition_storage_and_race`, schema version 35). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261112100000_merchant_chrome_tenant_integrity`, schema version 36). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -5626,7 +5626,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 33.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 35.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -5744,7 +5744,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 35 (`REQUIRED_SCHEMA_VERSION = 35`; model count 105). The schema migrations since version 10 are:
+The current schema version is 36 (`REQUIRED_SCHEMA_VERSION = 36`; model count 106). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -5759,7 +5759,10 @@ The current schema version is 35 (`REQUIRED_SCHEMA_VERSION = 35`; model count 10
 - `20261109210000_ledger_query_and_index_optimization` (version 25): covering indexes and append-only autovacuum (see `core.ledger`). Revised 2026-11-10 before any production use: `SET lock_timeout = '10s'`, each `journal_lines` covering index is rebuilt only when `pg_get_indexdef` differs from its target (so an index pre-built online is never rebuilt, see section 12b), and the resilient `ensure_journal_line_partitions`.
 - `20261110090000_resilient_journal_partitions` (functions only, no version bump): redefines `ensure_journal_line_partitions` for databases that applied version 25 before that revision (`prisma migrate deploy` never re-runs an applied migration: verified 2026-11-10). A month that cannot be created (rows already in `journal_lines_default`: `check_violation`; a lock wait over 5 s: `lock_not_available`) is skipped with a WARNING instead of aborting the call; storage parameters are set only on a partition the call creates; `lock_timeout = 5s`, `timezone = UTC`.
 - `20261111090000_report_tenant_and_filing_integrity` (version 34): (1) the merchant report tables referenced each other by id only, so nothing at the database level stopped merchant A's spec pointing at merchant B's asset bundle, or an audit row carrying B's spec under A's `merchant_id`: `UNIQUE (id, merchant_id)` on the bundle and spec tables, composite foreign keys `(asset_bundle_id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`) and `(merchant_spec_id, merchant_id)` (`RESTRICT`) alongside the single-column ones (Prisma cannot model a composite relation with an optional first column, so these are SQL-only), and a real foreign key from `merchant_id` to `merchants` on all five tables; (2) `merchant_report_execution_audit.merchant_spec_id` was `ON DELETE SET NULL`, an UPDATE the table's own append-only trigger rejects, so deleting a referenced spec failed: it is now `RESTRICT` (specs are archived, never deleted), and the table gets the `BEFORE TRUNCATE` guard the staff audit has; (3) `external_submissions_open_report_adapter_key`, a partial unique index on `(report_id, adapter_id)` for statuses PENDING, SUBMITTED and ACKNOWLEDGED: a report is filed at most once per adapter (a FAILED or REJECTED submission can be retried), and the file route maps the violation to its existing `409 REPORT_ALREADY_FILING`. Applying it to a database that already holds two open submissions for one report and adapter fails with a duplicate-key error: resolve them first.
+- `20261111120000_report_engine_versioning` (version 34, written on the plan branch): adds `engine_version`, `spec_schema_version` and `authoring_transcript_version` to `report_definition_specs`, `merchant_report_specs` and `report_chrome_specs`, `engine_version` and `spec_schema_version` to both execution audit tables, and `default_revoked_at` / `default_revoked_reason` to `report_chrome_specs`; it backfills `spec_schema_version` from `spec_json.spec_version`. See `core.report-engine` section 18.
+- `20261111130000_merchant_report_chrome` (version 35, written on the plan branch): creates `merchant_report_chrome_specs` (unique `(merchant_id, code, version)`, one published default per merchant and chrome type, a foreign key to the merchant asset bundle).
 - `20261112090000_journal_partition_storage_and_race` (version 35, no table shape change): redefines `ensure_journal_line_partitions` again. (1) The 2026-11-10 revision set only the insert-autovacuum parameters on a new monthly partition and dropped the explicit `fillfactor = 100` of the original body; it is restored, and set once (`SHARE UPDATE EXCLUSIVE`, no write blocking) on every monthly partition created without it. (2) The same revision replaced `CREATE TABLE IF NOT EXISTS` with a `to_regclass` check and a plain `CREATE TABLE`, so two callers at once (the partition worker on two nodes, or the worker and a deploy) both saw a month missing and the second aborted with `duplicate_table` (measured: 3 of 4 concurrent callers failed); `duplicate_table` / `unique_violation` from a concurrent creator are now accepted, and the truncate-guard install tolerates `duplicate_object`. The version is bumped because the newest migration sets `REQUIRED_SCHEMA_VERSION` (checked by `phase1-mtls-and-schema.test.ts`) and the seeders' equality guard then refuses a database without it; core HTTP start does not check the version. Test: `ledger-query-pruning-and-accuracy.test.ts` EC-15 (storage parameters) and EC-15b (four concurrent callers on a dropped empty month).
+- `20261112100000_merchant_chrome_tenant_integrity` (version 36, no new table): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merge.** Two branches each wrote migrations numbered 34 and 35 (`20261111090000` = 34, `20261111120000` = 34, `20261111130000` = 35, `20261112090000` = 35). None of the four is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first. This migration is new to every database, runs last and sets 36. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, plan branch first, `claude-fixes` first): each ends at 36 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -5874,6 +5877,13 @@ The reporting baseline set now includes a PROVISIONAL `cbl-incident-docx-v1` def
 ## 16. Merchant report authoring line (schema version 33)
 
 `20261110190000_merchant_report_engine` adds five tables separate from the staff report registry: `merchant_report_specs` (merchant-owned versioned specs; unique `(merchant_id, code, version)` and a partial unique latest-published index), `merchant_report_asset_bundles` (unique per merchant and content hash), `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` (hourly verify/execute counters) and `merchant_report_studio_status` (per-merchant Studio suspension). The migration bumps the schema version to 33; `phase1-mtls-and-schema.test.ts` asserts the applied version.
+
+
+## 17. Report engine versioning and merchant chrome (schema versions 34-35, 2026-11-11)
+
+`20261111120000_report_engine_versioning` bumps the schema to 34. It adds `engine_version`, `spec_schema_version` and `authoring_transcript_version` to staff reports, merchant reports and platform chrome; `engine_version`/`spec_schema_version` to both execution audit tables; and `default_revoked_at`/`default_revoked_reason` to platform chrome. Existing rows are backfilled to engine `1.0.0` and spec version `1.0`.
+
+`20261111130000_merchant_report_chrome` bumps the schema to 35 and adds `merchant_report_chrome_specs`, with `merchant_id`, code/version, type, lifecycle status, merchant default flag, revocation metadata, version provenance, locales, spec JSON/hash, asset bundle FK and publisher metadata. Unique `(merchant_id, code, version)` and a partial unique `(merchant_id, chrome_type)` for published defaults preserve tenant isolation and one default per type. The migration catalog is generated; the required schema version is 35.
 
 ---
 
@@ -7449,7 +7459,7 @@ To run them against a private, throwaway cluster (never the live databases): `in
 
 <a id="corereport-engine"></a>
 
-> **Part ID:** `core.report-engine` · **Status:** `implemented` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree`
+> **Part ID:** `core.report-engine` · **Status:** `implemented` · **Last verified:** 2026-11-11 · **Verified against:** `working-tree`
 
 # Dynamic Report Engine SDK and Report Studio Host
 
@@ -7531,7 +7541,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 
 `admin-back/api/protected/reportEngine.ts` forwards the same routes under `/api/v1/admin/report-engine/*` with the admin authority guard.
 
-## 6. Schema versions 26, 27 and 33
+## 6. Schema versions 26, 27, 33, 34 and 35
 
 `20261110120000_dynamic_report_engine_sdk` adds:
 
@@ -7556,7 +7566,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 
 `core-back/test/reportEngineSdk/**` implements the RE-T01..RE-T22 matrix (plus extra dry-run/transcript cases). `admin-front/src/lib/reportEngineSdk/__tests__/**` covers formatting, RTL vector mirroring, chrome binding, the language prompt options, the paged-media document and the client sanitizer. The exhaustive schema suite and `phase1-mtls-and-schema.test.ts` verify schema version 27 and the four new models.
 
-## 9. Merchant reporting line (schema version 33)
+## 9. Merchant reporting line (introduced in schema version 33; current schema 36)
 
 The merchant line is physically separate from the staff registry. It has its own tables (`merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit`), its own host catalog (`engine/reportStudio/merchantHostConfig.ts`) and its own transcript.
 
@@ -7637,7 +7647,128 @@ Invalid spec JSON returns `400 INVALID_JSON_SYNTAX`; a schema failure returns `4
 - Section-field diagnostics list available fields/datasets, add a closest-match suggestion, and distinguish unknown datasets from unknown fields.
 - ZERO_NATURAL_ROLE_INTERSECTION remains a non-blocking warning and points to the Security Admin override; SUGGESTED_ACCESS_CONFLICT is emitted only when `suggested_access` is present.
 
-## 11. Review fixes (2026-11-11)
+## 15. Authoring transcript v1.1, mock preview and A4 containment
+
+### 15.1 Transcript v1.1
+
+`ReportTranscriptBuilder` now emits `report-engine-ai-transcript-v1.1.md` with:
+
+- a mandatory self-validation checklist and a diagnostic-code→fix table derived from the verifier contract;
+- the exact zod limits, required fields, identifier regexes and enum vocabularies;
+- the joined-column rule (a select/predicate on a joined model must set `table_alias`) and the missing-column rule (join the related model that owns the field);
+- an explicit COMPUTE_COLUMN contract (it appends `output_column` to `target_dataset_id`; it does not create a dataset and has no `output_dataset_id`);
+- KPI-tone vs badge-tone vocabularies, `badge_tone_map` values, and the `{{$t.*}}`/`asset://`-only HTML template rule;
+- SVG asset hygiene (no C2PA/foreign namespaces/metadata);
+- authoring recipes and a complexity budget;
+- **no chrome authoring** (headers/footers are a separate `kind=CHROME` workflow) unless a brief explicitly asks.
+
+`transcript/reportableModels.ts` excludes engine-internal, authentication, queue, backup, gateway-configuration and report-engine storage tables from the transcript; Layer 2 rejects them with `MODEL_NOT_REPORTABLE`. The `?domains=` filter is fixed to the catalog domains and new `?models=`/`?brief=` parameters support brief-scoped transcripts.
+
+### 15.2 Additional verification and compiler rules
+
+- `AGE_DAYS` is a scalar expression (`EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - column)) / 86400.0`) usable with `AVG`/`MAX`; direct `AVG`/`SUM` on datetime/string/enum columns is rejected with `AGGREGATE_REQUIRES_NUMERIC`.
+- `SUM`/`AVG` over `CASE_WHEN_ENUM` casts numeric `THEN` values to `numeric`, fixing `function sum(text) does not exist`.
+- Report `HTML_TEMPLATE` tokens other than `{{$t.key}}` produce `UNSUPPORTED_TEMPLATE_TOKEN`.
+- A large-table sequential scan is now an error only when its estimated cost is at/above `globalLimits.maxSeqScanCost` (admin: 25 000). A cheap bounded scan of a single partition is allowed, removing a false positive that made valid ledger datasets fail.
+- `UNKNOWN_COLUMN` hints point at the joined model alias, or at the relation to join when the field is not on the base model. `UNKNOWN_TRANSFORM_DATASET`/`UNKNOWN_SECTION_DATASET` recognise a COMPUTE_COLUMN `output_column` and point at its target dataset.
+- The merchant scope column is cast to text when the query is aggregated (`MAX(<scope>::text)`), because PostgreSQL has no `max(uuid)`; an aggregate row with a null scope column (zero matching rows) is skipped instead of raising a false `MERCHANT_SCOPE_VIOLATION`.
+
+### 15.3 Studio mock preview
+
+`lib/reportEngineSdk/preview/MockReportBundleBuilder.ts` builds a database-free, deterministic preview bundle from the spec: typed rows per dataset, window fields, the real transform pipeline (including COMPARE_WITH_ASSET), placeholder image assets and engine-injected merchant inputs. `POST /report-engine/specs/preview` and the merchant `/studio/preview` accept `mode: "MOCK" | "LIVE"` (default `MOCK`); MOCK still runs the five verification layers but never queries the database. The client renderer accepts `includeHiddenSections`, so a mock preview renders visibility-gated sections instead of hiding them.
+
+### 15.4 A4 print containment
+
+The paged-media stylesheet now uses fixed-layout data tables, wraps long values (`overflow-wrap:anywhere`), constrains HTML-template tables, charts, SVGs, images, chrome running elements and Paged.js content wrappers to the page content box. `show_on_first_page=false` still removes the first-page chrome. `tests/e2e/admin/report-a4-layout.spec.ts` renders a mock bundle through the real client SDK + Paged.js and asserts no visible client rect crosses the A4 content box in English and Arabic, portrait and landscape.
+
+## 16. Print layout hardening (2026-11-11)
+
+The showcase fixture `npg-ops-finance-deep-dive-showcase-v2` exposed structural print defects that were independent of the DSL. The renderer and transcripts now enforce:
+
+- **KPI grids:** `columns` is capped at 3 (schema and transcript). Cards are flex columns with a reserved title area and a bottom-anchored metric block; values use a content-length font scale and never wrap mid-number; `delta_format_hint` lets a basis-point delta render as `PERCENT_BPS` instead of currency.
+- **Section flow:** titles/subtitles use `break-after: avoid`; KPI, chart, vector, image and HTML sections use `break-inside: avoid`; compact tables (<= 8 rows) keep their title and content together.
+- **Charts:** consecutive sub-100% charts are paired in a centered `.report-chart-row`; alone they are centered. Charts have an HTML legend outside the SVG with wrapping and real spacing; pie/donut slice labels are suppressed; series/category labels are truncated consistently; date axes render `YYYY-MM-DD`; long category labels switch BAR/STACKED_BAR to horizontal bars; value labels use `labelLayout.hideOverlap`; heatmaps keep the ECharts visualMap and omit the series legend; zero-row charts render a localized empty state.
+- **Descriptions:** the transcript requires `subtitle_i18n_key` on every CHART and DATA_TABLE; missing descriptions produce a Layer 1 `MISSING_SECTION_DESCRIPTION` warning. The transcript also warns against `overflow-wrap:anywhere` on `td,th` in `global_scoped_css`, which defeats chip and number wrapping.
+- **Tables:** print tables use a 7.8pt body / 7pt header scale and 3.5pt padding; numeric cells are no-wrap; long chips get `report-badge--long`/`--xlong` and never break words; pivot wildcard headers humanise snake_case; total labels are no-wrap; column widths are normalised to 100%. Long category charts (BAR/STACKED_BAR with long labels) render as horizontal bars so their labels stay readable.
+- **Header repetition:** Paged.js splits tables into fragments without `<thead>`. `paged-preview-bridge.js` re-inserts the header/colgroup by `data-ref`, with a column-count fallback, MutationObserver and delayed passes; the print handler repeats the pass before printing.
+- **Mixed orientation:** page-level named-page classes carry `page: landscape|portrait`; the bridge injects `@page` size rules after Paged.js has consumed the author rules. Chrome's print/PDF output now produces real landscape pages (12–15 in the showcase) instead of portrait sheets with clipped landscape content.
+- **Vector text:** node labels/values wrap, use a length-aware font cap and padding, and are placed with the value bottom-aligned inside the node; short flow edges omit impossible labels; circle/diamond labels centre.
+- **HTML templates:** `.report-html-section` keeps small narrative blocks together and uses a compact print base (8.5pt; author CSS can still override with a smaller size).
+
+The sample spec was updated as a showcase fixture (KPI columns 3, chart/table subtitles, delta format, compact Methodology CSS). `tests/e2e/admin/report-a4-layout.spec.ts` now asserts sheet containment, vertical overflow, orientation, table header repetition, KPI column/value fit, chart-row centering and orphan titles; it can export the paginated PDF (`REPORT_LAYOUT_PDF`) and the generated `src/output/npg-ops-finance-deep-dive-showcase-v2-fixed-{en,ar}.pdf` are the reference output.
+
+## 17. Chrome layout and multi-color bands (2026-11-11)
+
+The institutional header/footer review exposed a chrome-specific layout defect: `.report-chrome` had a `min-height` slot but the template root (`lnpg-header`/`lnpg-footer`) did not fill it. The header root measured 13.6 mm inside a 22 mm slot, leaving an 8.4 mm internal gap, short teal/orange accent bars and a footer background only 11.4 mm inside a 16 mm slot.
+
+- `.report-chrome` is now a flex column with `position: relative`, and its first child fills the configured height. The wrapper carries an explicit `height`/`min-height` from `chrome.height_mm`. The header/footer roots fill the slot; the left/right accent bars and footer background span the full chrome.
+- `ReportChromeSpec.chrome.accent_band` is a new optional structured field: `position` (`TOP`/`BOTTOM`), `height_mm`, `radius_mm`, and 2-6 `segments` (`color`, `width_percent`). It renders a hard-stop `linear-gradient` band and takes precedence over `border_style`. The old single-color `ACCENT_BAND` rule remains for legacy specs. The chrome transcript documents the field and a reference 58/26/16 example.
+- `ChromeVariableBindingSchema` adds `defaultCurrency`; the core execution bundle now returns `currency`. `renderChromeHtml` localizes `periodSummary` (`01 Jan 2026 – 31 Oct 2026`) and `generatedAtFormatted` (`11 Nov 2026, 14:31`) using the selected report locale.
+- The provided `institutional-header-v1`/`institutional-footer-v1` specs were aligned to the reference HTML values (root `height:100%`, reference font sizes/widths, header period currency and multi-color band). They were published as new versions and set as the global defaults.
+- The Chrome Studio preview now renders a real A4 page frame with sample body content, the selected header/footer and the global default counterpart, using realistic period/currency/title/subtitle/timestamp samples.
+
+
+## 18. Compatibility versioning, migration and merchant chrome (2026-11-11)
+
+The engine now has an explicit contract-version boundary instead of relying on the serialized `spec_version` literal alone.
+
+### 18.1 Version axes
+
+- `REPORT_ENGINE_VERSION` (`1.0.0`) is the runtime compatibility gate. A major mismatch makes stored report and chrome specs non-runnable until migrated.
+- `REPORT_SPEC_VERSION` (`1.0`) changes only when a stored report schema becomes incompatible.
+- `REPORT_TRANSCRIPT_VERSION` (`1.1`) identifies the AI authoring contract; it may change independently of runtime compatibility.
+- `REPORT_CHROME_SPEC_VERSION` (`1.0`) and `REPORT_CHROME_TRANSCRIPT_VERSION` (`1.1`) are the chrome counterparts.
+- `report.version` remains the per-document version; it is not a contract version.
+- Database schema versions 34 and 35 add compatibility provenance, default revocation and merchant chrome.
+
+The saved engine/spec/transcript versions are stamped on report and chrome rows. Execution audits record the engine/spec versions. Compatibility is derived at read time and never stored as a lifecycle status.
+
+### 18.2 Compatibility states
+
+- `COMPATIBLE`: supported engine major and spec version, and safe parsing succeeds.
+- `NEEDS_MIGRATION`: engine major or spec version mismatch, or missing version metadata.
+- `INVALID`: claims current versions but malformed JSON or invalid schema.
+
+Classification extracts the declared version before full parsing, so stale specs never throw a raw `ZodError`. Safe parsing is used on list, detail, publish, clone and execute paths. Incompatible rows are excluded from catalogs and cannot run. Direct calls return `409 REPORT_NEEDS_MIGRATION`, `422 REPORT_SPEC_INVALID` or the chrome equivalent; a missed spec parse is mapped defensively to 422 rather than 500.
+
+### 18.3 Migration prompts and pages
+
+- `GET /report-engine/specs/needs-migration` lists current staff and merchant report specs needing migration.
+- `GET /report-engine/chrome/needs-migration` lists platform chrome needing migration, default state and impacted report counts.
+- Staff, admin-merchant and chrome prompt endpoints build a Markdown prompt from the old spec, the current target transcript and the registered migration guide.
+- Admin and merchant report migration pages show red rows, copy/download prompt and Studio prefill. Chrome migration is admin-only for platform chrome and merchant-owned for merchant chrome.
+- No automatic migration is performed; the migrated JSON is verified and saved as a new version through Studio.
+
+### 18.4 Default chrome lifecycle
+
+- A platform global default is staff-owned. A merchant default is merchant-owned and scoped to that merchant.
+- Archiving a default or detecting an incompatible default clears the flag transactionally and records `defaultRevokedAt`/`defaultRevokedReason`. The admin reconciliation endpoint writes an audit summary; the best-effort startup reconciliation logs affected defaults and removes them without an operator actor.
+- Merchant-owned reports using `GLOBAL_DEFAULT` resolve the merchant default first, then the platform default. Platform-provided templates always use platform chrome.
+- A revoked merchant default falls back to platform chrome; if no compatible platform default exists the report is blocked. No older chrome version is auto-promoted.
+- Migrating a previously-default chrome and leaving “Make default” enabled restores the default.
+- `defaultCurrency`, `merchantTradeName`, `merchantLegalName` and `merchantDisplayName` are server-populated chrome variables; merchant execution resolves the identity from the authenticated merchant row, not report inputs.
+- Merchant chrome assets use the merchant asset bundle store, enforce ownership and the merchant asset policy, and render real logos in previews. Chrome/report asset keys must not collide.
+
+### 18.5 Merchant chrome
+
+Merchant chrome is physically separate in `merchant_report_chrome_specs` with unique `(merchant_id, code, version)` and one published default per merchant/type. Merchants author/list/verify/publish/archive their own chrome with `report_engine:author`; publishing and default changes additionally require `MERCHANT_ADMIN`. Merchant responses never include platform chrome lists or specs. Merchant chrome codes resolve merchant-first for merchant-owned reports; platform templates remain platform-only.
+
+### 18.6 Transcript versioning for AI agents
+
+When changing the report engine:
+
+1. Classify the change as major/minor/patch for engine, spec and transcript contracts.
+2. Bump `REPORT_ENGINE_VERSION` for behavioral compatibility; bump a spec version only for serialized-schema incompatibility.
+3. Add a migration guide and prompt for every major transition.
+4. Regenerate or add transcript snapshots under a new version label; never overwrite a released snapshot.
+5. Update `report-spec-generator/src/base/MANIFEST.json`, `CHANGELOG.md` and the migration prompt library; refresh the eval corpus and record transcript version/hash.
+6. Update this part, the admin/merchant report docs, testing catalog and `TRACKER.md`; run the project-design gate.
+## 19. Review fixes (2026-11-11) and the merge with the plan branch (2026-11-12)
+
+- **Merge (2026-11-12): the staff preview has two modes (section 15.3), and the access policy applies to the one that reads data.** `MOCK` (the default) renders generated rows and reads no stored data, so it needs only the route's authoring or review authority and writes no audit row. `LIVE` reads data: the access-policy check and the `REPORT_SPEC_PREVIEW_EXECUTED` audit row described in the next bullet apply to it. The check sits after the MOCK branch and before `engine.executeReport`; the answer carries `mode`.
+- **Merge (2026-11-12): the merchant result cache key carries the application scope and the chrome fingerprint.** `merchantCacheKey` hashes `applicationIds` (a restricted user's result is never served to an unrestricted user) and `chromeFingerprint` (a changed header or footer is never served from cache).
+- **Merge (2026-11-12): merchant chrome is tenant-safe at the database level (schema version 36).** Migration `20261112100000_merchant_chrome_tenant_integrity` gives `merchant_report_chrome_specs` the composite foreign key `(asset_bundle_id, merchant_id)` and a `merchant_id` foreign key to `merchants`, the rule `20261111090000` set for merchant report specs. See `core.data` (the migration list).
+- **Merge (2026-11-12): the merchant Studio LIVE preview honours the application scope.** The plan branch's `POST /report-engine/studio/preview` executed a draft in `LIVE` mode with the merchant scope only, so a user restricted to some applications (`app_scope_ids`) could preview every application's rows. It now applies the rule of the execute route: merchant-wide models are refused (`APP_SCOPE_RESTRICTED`) and the rest is narrowed to the user's applications. `MOCK` reads no stored data.
 
 - **Staff preview obeys the access policy and is audited.** `POST /report-engine/specs/preview` executes a draft against live data. It used to require only an authoring or review authority, so an author without the ledger or audit authorities could preview a draft over those tables, and it left no trace. It now evaluates the policy inferred from the models the draft queries (`previewAccessDecision` in `api/internal/reportPreviewPolicy.ts`: a natural role, or every required authority; a security admin is always allowed; a missing inference fails closed) and answers `403 REPORT_ACCESS_DENIED` with the queried models and required authorities before executing anything. A successful preview writes `REPORT_SPEC_PREVIEW_EXECUTED` (entity `REPORT_SPEC_DRAFT`, id = the draft's SHA-256, with the queried models, row count and duration) to the audit log; the execution audit table is keyed by a saved spec, which a draft is not.
 - **Merchant reports honour a user's application scope.** A merchant session user can be restricted to some applications (`app_scope_ids`) and the other merchant routes honour it; the report engine ignored it, so such a user got every application's payments, wallets, cash-outs and daily stats. `merchantScopable.applicationIdColumn` (host config) marks the models whose rows belong to ONE application: only `payment_attempts`. For a restricted session user the execute route (1) refuses a report that reads any other model with `403 APP_SCOPE_RESTRICTED` (as the merchant overview is refused), before the budget, rate limit or execution; (2) passes `merchantScope.applicationIds`, so the compiler adds `<alias>.application_id = ANY($n::uuid[])` to every aliased table next to the merchant predicate (and throws `APP_SCOPE_MODEL_NOT_ALLOWED` for a model that cannot be narrowed); (3) keys the result cache by the scope, so a restricted user's result is never served to an unrestricted user or the reverse. An API token is bound to one application by the token itself and is unchanged. The `applications` model is also refused to a restricted user (conservative). The merchant autocomplete sources (payment link keys, POS terminal names) are still merchant-wide.
@@ -10339,7 +10470,7 @@ cd ../tests && bunx playwright test --project=admin e2e/admin/guide-reader.spec.
 
 <a id="admin-uireport-studio"></a>
 
-> **Part ID:** `admin-ui.report-studio` · **Status:** `implemented` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree`
+> **Part ID:** `admin-ui.report-studio` · **Status:** `implemented` · **Last verified:** 2026-11-11 · **Verified against:** `working-tree`
 
 # Report Catalog, Studio and Chrome
 
@@ -10349,7 +10480,9 @@ cd ../tests && bunx playwright test --project=admin e2e/admin/guide-reader.spec.
 | :--- | :--- | :--- | :--- |
 | `/reports/catalog` | `ReportsCatalog` | `reports.draft` / `reports.run` | Published reports, language selection, input form and print/preview. |
 | `/reports/studio` | `ReportsStudio` | `reports.studio` | AI transcript, JSON spec editor, five-layer verification, authority override and publish. |
-| `/reports/chrome` | `ReportsChrome` | `reports.studio` | Reusable header/footer registry and default selection. |
+| `/reports/chrome` | `ReportsChrome` | `reports.studio` | Reusable platform header/footer registry, compatibility and default selection. |
+| `/reports/needs-migration` | `ReportsNeedsMigration` | `report_engine:author` / `report:review` / `report:approve` / `security:*` | Staff and merchant report specs that must be migrated. |
+| `/reports/chrome/needs-migration` | `ReportsChromeNeedsMigration` | `report_engine:author` / `report:approve` / `security:*` | Platform chrome needing migration, default revocation and impacted reports. |
 
 The routes are registered in `admin-front/src/router/index.ts`, projected from `report_engine:author` / `report_engine:run` in `core-back/lib/auth/uiAuthorities.ts`, and shown in the Reporting section of the shell.
 
@@ -10411,6 +10544,31 @@ Actions added: Catalog Refresh/Open Studio/Headers & Footers, row copy/download/
 ## Report run form (2026-11-10)
 
 The Catalog run drawer is built as a filter-style form rather than a dense grid. `ReportInputForm` groups visible inputs into **Report scope**, **Reporting period** and **Filters and options** sections, with an uppercase muted section title and a short description. Fields are stacked one per row; `FormField` gained a `filter` variant that uses the same label/control anatomy as `TableFilters` (`pg-filter-label`, 36 px compact outlined controls, 13 px inputs). Every field has a label (spec translation or a humanised fallback key) and a description (the spec's `help_i18n_key` or a type fallback such as “Search and select a record.”). The output language, page header/footer and template selectors live in an **Output options** section, and Reset/Clear/Generate are pinned in the `SlideOverDrawer` footer. The drawer is 720 px wide and capped at `100vw` on narrow screens.
+
+## Studio mock preview and A4 containment (2026-11-10)
+
+The Studio draft preview now defaults to **Mock data** and offers a **Live sample** toggle. Mock mode still verifies the spec, then renders a deterministic, database-free bundle in which every dataset, transform output, KPI, table, chart, vector node and image asset is populated; `includeHiddenSections` renders visibility-gated sections too, so nothing is silently omitted from a draft. Live mode runs the same preview endpoint with `mode: "LIVE"`, the caller inputs and the real read-only query line. The preview badge shows which mode produced the pages.
+
+The shared paged-media stylesheet now enforces A4 containment: fixed-layout data tables, long-value wrapping, constrained HTML-template tables, `max-width:100%` on SVGs/images/chrome elements and Paged.js content wrappers. `tests/e2e/admin/report-a4-layout.spec.ts` logs into the live admin edge, previews a real spec in mock mode, paginates it through Paged.js and asserts there is no horizontal overflow in English/Arabic and portrait/landscape. This is the regression gate for report width.
+
+## Print layout hardening (2026-11-11)
+
+The Studio preview and print path now enforce the A4 print contract: KPI grids max 3 columns with bottom-anchored values and length-aware font scaling, chart rows centered with HTML legends that wrap without hiding entries, pie/donut labels suppressed in favor of the legend, table typography reduced for wide tables, long chips shrunk instead of broken, repeated table headers across Paged.js fragments, compact table sections kept together, and true landscape pages in the exported PDF. The shared bridge injects print page rules after Paged.js rendering because Paged.js removes the author `@page` rules; without this pass Chrome printed all pages portrait.
+
+The A4 regression spec (`tests/e2e/admin/report-a4-layout.spec.ts`) now measures the sheet, not just the content box, and asserts table headers, KPI limits, chart-row centering, orphan titles, vertical overflow and orientation. It can also export the paginated PDF for visual review.
+
+## Chrome layout and A4 preview (2026-11-11)
+
+The Report Headers & Footers page now previews the selected chrome on a real A4 page frame with sample body content, the global default counterpart, the header top 2 mm/22 mm slot and footer bottom 4 mm/16 mm slot. The preview uses realistic report title/subtitle, period, currency, actor and generated-at values so it matches the reference institutional chrome.
+
+The renderer fills the chrome slot with the template root, supports the structured `accent_band` (multi-color hard-stop gradient) and suppresses the legacy single-color border when a band is present. The transcript documents the band, `defaultCurrency`, locale-formatted period/generated timestamps and the slot-fill rule. The A4 report gate now measures chrome fill, band colors/height, header-to-body and footer-to-page offsets, and formatted variables through `tests/e2e/admin/chrome-layout.spec.ts`; `tests/e2e/admin/chrome-preview.spec.ts` covers the Studio A4 preview.
+
+
+## 10. Compatibility migration pages (2026-11-11)
+
+The Reporting section adds a single “Needs Migration” navigation entry plus two dedicated routes. The report page lists one current row per staff/merchant report code, shows stored vs current engine/spec versions, red `NEEDS_MIGRATION`/`INVALID` badges, copy/download prompt and (for staff reports) Studio prefill via `?open=<id>&from=migration`. The chrome page lists platform headers/footers needing migration, revoked/missing default state, impacted reports, prompt actions, Chrome Studio prefill and a reconcile-defaults action.
+
+The catalog now receives `health` counts and shows a warning callout linking to both migration pages. Chrome Studio requests `includeIncompatible=1`, displays compatibility/default-revocation badges, disables preview/default for broken rows and prechecks “Make default” for a previously-default chrome being migrated. Admin Studio reads `?open=<id>` so a broken raw spec can be loaded without parsing it.
 
 ---
 
@@ -11084,7 +11242,7 @@ The content test is a Bun test; the Playwright suites require the live stack.
 
 <a id="merchant-uireports"></a>
 
-> **Part ID:** `merchant-ui.reports` · **Status:** `implemented` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree`
+> **Part ID:** `merchant-ui.reports` · **Status:** `implemented` · **Last verified:** 2026-11-11 · **Verified against:** `working-tree`
 
 # Merchant Reports
 
@@ -11092,6 +11250,9 @@ The content test is a Bun test; the Playwright suites require the live stack.
 
 - `/portal/reports` (`MerchantReports`) lists platform templates plus the merchant's own published reports. It needs `reports.run`, projected from the merchant `report_engine:run` authority.
 - `/portal/reports/studio` (`MerchantReportsStudio`) is the merchant authoring line. It needs `reports.studio`, projected from `report_engine:author`, which a `MERCHANT_ADMIN` holding `merchant:write` holds.
+- `/portal/reports/chrome` (`MerchantReportsChrome`) is the merchant-owned report branding page: company header/footer list, AI transcript, JSON editor, logo `.zip`, preview, publish, archive and default selection.
+- `/portal/reports/chrome/needs-migration` (`MerchantReportsChromeNeedsMigration`) lists the merchant's broken headers/footers, default revocation and migration prompts.
+- `/portal/reports/needs-migration` (`MerchantReportsNeedsMigration`) lists the merchant's report specs that must be migrated.
 
 Both pages are separate from the staff report catalog/studio. Staff tables (`report_definition_specs`, `report_assets`, `report_execution_audit`) are never read or written by merchant authoring routes.
 
@@ -11117,11 +11278,32 @@ Every execution:
 
 ## 5. Staff oversight
 
-`admin-front` `/reports/merchant-reports` lists merchant-authored reports per merchant with their execution history and a `SUSPEND`/`RESUME` Studio action (`security:write`, audited). The merchant registry, usage rows and execution audit are separate tables (schema version 33).
+`admin-front` `/reports/merchant-reports` lists merchant-authored reports per merchant with their execution history and a `SUSPEND`/`RESUME` Studio action (`security:write`, audited). The merchant registry, usage rows and execution audit are separate tables (introduced in schema version 33; current schema 36).
 
 ## Run form layout (2026-11-10)
 
 The merchant run drawer mirrors the admin filter-style form: sectioned, one field per row, labels and descriptions on every field, and a dedicated output-language section when multiple locales exist. Reset and Generate live in the drawer footer; the merchant scope input remains hidden.
+
+## Merchant Studio mock preview (2026-11-10)
+
+The merchant Studio now has a draft preview after a successful verification. It defaults to **Mock data**, which uses the shared `MockReportBundleBuilder` and renders every section (including visibility-gated ones) without a database query; **Live sample** runs the merchant-scoped executor with the engine-injected merchant identity. The endpoint is `POST /report-engine/studio/preview` (core) and is proxied by `merchant-back`. The shared client renderer/print stylesheet fix applies to both portals, so merchant previews and prints use the same A4 containment rules as the admin Studio.
+
+The merchant transcript example now lowers `periodRange.validation.max_range_days` to 90 so it stays inside the merchant 92-day tier limit, and the merchant host registers a `merchants` autocomplete source for the engine-injected scope input (returning the current merchant only).
+
+## Shared print layout hardening (2026-11-11)
+
+The merchant portal receives the same client SDK mirror as the admin portal, so merchant previews/prints now use the hardened A4 layout: max 3 KPI columns, centered chart rows and wrapping HTML legends, compact table typography and chips, repeated table headers, no-data chart states, and true landscape pages in print. The merchant Studio mock/live preview uses the same renderer and is covered by the SDK mirror test.
+
+## Shared chrome layout and accent bands (2026-11-11)
+
+The merchant portal client SDK mirror receives the same chrome root-fill, `accent_band`, `defaultCurrency` and localized chrome-variable changes as the admin portal. Merchant prints using platform chrome therefore get the same full-height header/footer and multi-color band.
+
+
+## 9. Merchant branding chrome and migration (2026-11-11)
+
+Merchants own a separate `merchant_report_chrome_specs` registry. The branding page exposes only the merchant's own chrome: AI transcript, JSON, optional logo bundle, A4 preview, verify/save/publish, archive and one default header/footer per merchant. Platform chrome lists and specs are never returned to merchant clients.
+
+Merchant-owned reports using `GLOBAL_DEFAULT` resolve the merchant default first and the platform global default second; platform-provided templates continue to use platform chrome. If a merchant default is archived or becomes incompatible, the engine clears it and records the revocation. Own reports then fall back to platform chrome; if the platform default is also missing the report is blocked. The migration page explains the fallback, offers copy/download prompts and opens the branding editor with the raw JSON prefilled. Merchant chrome previews load the real uploaded logo assets.
 
 ---
 
@@ -15830,7 +16012,7 @@ Security regression suites exist for core-back (`test/security-regressions/`), t
 
 <a id="testingsuites"></a>
 
-> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-11 · **Verified against:** `d695518+working-tree`
 
 # Test Suite Catalog
 
@@ -16235,6 +16417,30 @@ These are development/CI tests only; no production-time test job or test endpoin
 - `core-back/test/reporting-template.test.ts` now proves a malformed workbook is reported rather than accepted, in addition to named-range mapping and range-overflow coverage.
 - Existing core reporting, DOCX, incident, adapter and XLSX tests remain the targeted gate; the full core suite is expected to fail only the four tests that require a reachable PostgreSQL test database.
 - Playwright coverage for the new pages should be added when a browser is available: incident create/filter/detail/close/report, filing-adapter approval flow, Studio template upload/reload/analyze/remove, and report adapter filing/submission history at 360/390/768/1280 px in both themes and RTL.
+
+## Report-engine authoring evaluation (2026-11-10)
+
+`report-spec-generator/scripts/eval/pipeline.ts` is the recursive authoring harness: it downloads the current transcript, spawns an unrelated `opencode run` agent with only the transcript and a brief, verifies/saves/executes/mock-previews the resulting spec through the real admin API, and records diagnostics, coverage and chrome artifacts under `report-spec-generator/runs/`. The brief corpus (`report-spec-generator/briefs/*.md`) covers top-N rankings, settlement, latency, failures, ledger, reconciliation, AML, cashouts, Arabic, landscape wide tables and an explicit no-chrome case. The final 12-brief sweep produced a 100% first-pass verification rate and 100% section coverage with the improved transcript.
+
+`tests/e2e/admin/report-a4-layout.spec.ts` is the A4 regression gate. It fetches a mock preview from the live API, renders it through the real client SDK and Paged.js, and fails when any visible element crosses the page content box. Run it with `PLAYWRIGHT_CHROME_PATH=/opt/google/chrome/chrome REPORT_LAYOUT_SPEC=<spec.json> bunx playwright test e2e/admin/report-a4-layout.spec.ts --project=admin`.
+
+## A4 report print gate (2026-11-11)
+
+`tests/e2e/admin/report-a4-layout.spec.ts` renders a real report preview through the client SDK and Paged.js and asserts: no visible rect crosses the sheet, content never exceeds the sheet width, no page has vertical overflow, every table fragment has a `<thead>`, KPI grids have <= 3 columns and no clipped values, chart rows are centered with <= 2 charts, section titles are on the same page as their first content, and landscape/portrait page dimensions match the named page. Options: `REPORT_LAYOUT_SPEC`, `REPORT_LAYOUT_ZIP`, `REPORT_LAYOUT_MODE=MOCK|LIVE`, `REPORT_LAYOUT_PDF` (exports per-locale PDFs) and `REPORT_LAYOUT_HTML`.
+
+## Chrome layout gate (2026-11-11)
+
+`tests/e2e/admin/chrome-layout.spec.ts` renders the published default header/footer on an A4 frame and asserts root fill, full-height accent bars, footer fill, the 1.4 mm three-segment band, header/footer offsets, and localized period/currency/generated-at values. `tests/e2e/admin/chrome-preview.spec.ts` renders the Studio A4 chrome preview with a mocked registry and checks the header, footer and accent band in the sandboxed surface.
+
+
+## Report compatibility and migration coverage (2026-11-11)
+
+- `core-back/test/reportEngineSdk/Compatibility.test.ts` covers compatible/current specs, engine and spec version mismatches, invalid current schemas, missing metadata, safe parsing and report/chrome migration prompt content.
+- `core-back/test/admin-slice/report-engine-migration.test.ts` inserts version-mismatched report/chrome rows and asserts catalog exclusion, structured 409 execution errors, migration listing/prompts, default revocation and reconciliation without 500s.
+- `core-back/test/admin-slice/merchant-report-chrome.test.ts` covers merchant chrome publishing/defaulting, tenant isolation, migration listing and prompts, and incompatible-default revocation.
+- Route-order suites (`core-back/test/reportEngineSdk/RouteOrder.test.ts`, `admin-back/test/report-engine-route-order.test.ts`, `merchant-back/test/report-engine-route-order.test.ts`) assert that every new static migration/transcript route is registered before a dynamic id route and that the expected endpoints exist.
+- `admin-back/test/report-engine-edge.test.ts` and `merchant-back/test/core-forwarding.test.ts` cover migration list pagination/search query forwarding, prompts, Chrome detail, reconciliation, merchant branding and Studio prefill routes.
+- Frontend type checks cover the new admin/merchant migration pages, branding editor and Studio query prefill; the existing i18n and SDK mirror gates cover Arabic catalogue completeness and client mirror equality.
 
 ---
 

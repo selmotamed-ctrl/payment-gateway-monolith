@@ -9,6 +9,7 @@ import type {
 import type { ReportDiagnostic } from "../types/diagnostics";
 import { compileDatasetQueryToSql, isMinorUnitColumn } from "../compiler/QueryAstToSqlCompiler";
 import { resolveInputPresetValue } from "../compiler/InputFormZodCompiler";
+import { isReportableModel } from "../transcript/reportableModels";
 
 export function synthesizeDefaultInputs(
   spec: ReportDescriptorSpec,
@@ -74,6 +75,25 @@ function resolveAliasModel(
 
 function aliasOf(ds: DatasetQuerySpec, tableAlias: string | undefined): string {
   return tableAlias ?? ds.from_alias;
+}
+
+/** Points at the join alias when the column exists on a joined model, not the base model. */
+function joinedColumnHint(
+  ds: DatasetQuerySpec,
+  column: string,
+  host: ReportEngineHostConfig,
+): string {
+  const joined = ds.joins.find((join) => host.models[join.target_model]?.columns[column]);
+  if (joined) {
+    return ` Column "${column}" exists on joined model "${joined.target_model}"; set "table_alias": "${joined.alias}" on this clause.`;
+  }
+  const base = host.models[ds.from_model];
+  for (const relation of Object.values(base?.relations ?? {})) {
+    const target = host.models[relation.targetModel];
+    if (!target?.columns[column]) continue;
+    return ` Column "${column}" does not exist on "${ds.from_model}" but exists on related model "${relation.targetModel}". Add a join through relation "${relation.name}" (unique alias) and set that alias as "table_alias".`;
+  }
+  return "";
 }
 
 function hasMerchantScopePredicate(
@@ -150,7 +170,7 @@ function validateWhereNode(
       path: `${path}.column`,
       code: "UNKNOWN_COLUMN",
       message: `Column "${node.column}" does not exist on model "${model.modelName}".`,
-      aiFixHint: `Use one of the documented columns for model "${model.modelName}".`,
+      aiFixHint: `Use one of the documented columns for model "${model.modelName}".${joinedColumnHint(ds, node.column, host)}`,
     });
     return;
   }
@@ -245,6 +265,15 @@ function validateDatasetReferences(
         code: "INVALID_JOIN_RELATION",
         message: `Relation "${join.relation_name}" does not connect "${ds.from_model}" to "${join.target_model}".`,
         aiFixHint: "Use a relation listed in the transcript for the base model.",
+      });
+    } else if (!isReportableModel(target.tableName)) {
+      diagnostics.push({
+        layer: 2,
+        severity: "error",
+        path: `${path}.joins[${i}].target_model`,
+        code: "MODEL_NOT_REPORTABLE",
+        message: `Join target "${join.target_model}" is engine/operational plumbing and is not reportable.`,
+        aiFixHint: "Join a business model listed in the transcript catalog.",
       });
     }
     if (join.additional_on) {
@@ -478,6 +507,16 @@ export async function validateQueriesAndOptimizations(
       });
       continue;
     }
+    if (!isReportableModel(model.tableName)) {
+      diagnostics.push({
+        layer: 2,
+        severity: "error",
+        path: `${basePath}.from_model`,
+        code: "MODEL_NOT_REPORTABLE",
+        message: `Model "${ds.from_model}" is engine/operational plumbing and is not reportable.`,
+        aiFixHint: "Use a business model listed in the transcript catalog.",
+      });
+    }
     if (ds.joins.length > host.globalLimits.maxJoinsPerDataset) {
       diagnostics.push({
         layer: 2,
@@ -502,7 +541,7 @@ export async function validateQueriesAndOptimizations(
           path: `${basePath}.select.${sel.alias}`,
           code: "UNKNOWN_COLUMN",
           message: `Column "${sel.column}" does not exist on model "${targetModel?.modelName ?? ds.from_model}".`,
-          aiFixHint: `Select only documented columns for model "${targetModel?.modelName ?? ds.from_model}".`,
+          aiFixHint: `Select only documented columns for model "${targetModel?.modelName ?? ds.from_model}".${joinedColumnHint(ds, sel.column, host)}`,
         });
         continue;
       }
@@ -514,6 +553,45 @@ export async function validateQueriesAndOptimizations(
           code: "FORBIDDEN_SECRET_COLUMN",
           message: `Column "${sel.column}" is classified as FORBIDDEN_SECRET and can never be accessed by the Report Engine.`,
           aiFixHint: `Remove "${sel.column}" from the query select list.`,
+        });
+      }
+      if (sel.expression === "AGE_DAYS" && col.type !== "datetime") {
+        diagnostics.push({
+          layer: 2,
+          severity: "error",
+          path: `${basePath}.select.${sel.alias}`,
+          code: "AGE_DAYS_REQUIRES_DATETIME",
+          message: `AGE_DAYS is only valid on a datetime column; "${sel.column}" is ${col.type}.`,
+          aiFixHint: "Use AGE_DAYS on a timestamp column such as created_at or updated_at.",
+        });
+      }
+      const aggregatesTimestamp =
+        (sel.aggregate === "SUM" || sel.aggregate === "AVG") &&
+        col.type === "datetime" &&
+        sel.expression !== "AGE_DAYS" &&
+        sel.expression !== "CASE_WHEN_ENUM";
+      const aggregatesNonNumeric =
+        (sel.aggregate === "SUM" || sel.aggregate === "AVG") &&
+        sel.expression !== "CASE_WHEN_ENUM" &&
+        sel.expression !== "AGE_DAYS" &&
+        ["string", "enum", "boolean", "json", "uuid", "datetime"].includes(col.type);
+      if (aggregatesTimestamp) {
+        diagnostics.push({
+          layer: 2,
+          severity: "error",
+          path: `${basePath}.select.${sel.alias}`,
+          code: "AGGREGATE_REQUIRES_NUMERIC",
+          message: `${sel.aggregate} cannot be applied directly to datetime column "${sel.column}".`,
+          aiFixHint: "Use expression AGE_DAYS on the datetime column before AVG/SUM, or aggregate a numeric column.",
+        });
+      } else if (aggregatesNonNumeric) {
+        diagnostics.push({
+          layer: 2,
+          severity: "error",
+          path: `${basePath}.select.${sel.alias}`,
+          code: "AGGREGATE_REQUIRES_NUMERIC",
+          message: `${sel.aggregate} cannot be applied to ${col.type} column "${sel.column}".`,
+          aiFixHint: "Aggregate a numeric column, or use CASE_WHEN_ENUM with numeric case_map values to count categories.",
         });
       }
       if (sel.expression === "MINOR_TO_MAJOR_DECIMAL" && !isMinorUnitColumn(col)) {
@@ -714,14 +792,34 @@ export async function validateQueriesAndOptimizations(
           });
         }
         if (explain.hasSeqScanOnLargeTable) {
-          diagnostics.push({
-            layer: 2,
-            severity: "error",
-            path: basePath,
-            code: "SEQUENTIAL_SCAN_DETECTED",
-            message: `EXPLAIN detected a sequential scan on large table(s): ${explain.seqScanTables.join(", ")}.`,
-            aiFixHint: "Ensure WHERE predicates reference indexed columns listed in the transcript catalog.",
-          });
+          // A bounded range on a single partition can legitimately choose a
+          // cheap sequential scan. Only reject scans whose estimated cost is
+          // above the configured cap; otherwise valid specs fail forever.
+          const maxSeqScanCost = host.globalLimits.maxSeqScanCost ?? 10_000;
+          const scans = explain.seqScans ?? [];
+          const offending = scans.length > 0
+            ? scans.filter((scan) => scan.largeTable === true && scan.totalCost >= maxSeqScanCost)
+            : [
+                {
+                  table: explain.seqScanTables.join(", ") || "large table",
+                  parentTable: null,
+                  totalCost: explain.totalCost,
+                  planRows: explain.planRows,
+                },
+              ];
+          if (offending.length > 0) {
+            diagnostics.push({
+              layer: 2,
+              severity: "error",
+              path: basePath,
+              code: "SEQUENTIAL_SCAN_DETECTED",
+              message: `EXPLAIN detected a costly sequential scan on large table(s): ${offending
+                .map((scan) => `${scan.table} (cost ${scan.totalCost.toFixed(0)})`)
+                .join(", ")} (cap ${maxSeqScanCost}).`,
+              aiFixHint:
+                "Add selective indexed WHERE predicates (created_at range, merchant_id, status, or an id) or query pre-aggregated shards instead of scanning raw rows.",
+            });
+          }
         }
       } catch (error) {
         diagnostics.push({

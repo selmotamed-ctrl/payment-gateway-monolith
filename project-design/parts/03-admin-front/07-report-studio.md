@@ -3,7 +3,7 @@ id: admin-ui.report-studio
 title: Report Catalog, Studio and Chrome
 status: implemented
 confidence: high
-last_verified: 2026-11-10
+last_verified: 2026-11-11
 verified_against: working-tree
 code:
   - admin-front/src/pages/reports/**
@@ -35,7 +35,9 @@ gaps:
 | :--- | :--- | :--- | :--- |
 | `/reports/catalog` | `ReportsCatalog` | `reports.draft` / `reports.run` | Published reports, language selection, input form and print/preview. |
 | `/reports/studio` | `ReportsStudio` | `reports.studio` | AI transcript, JSON spec editor, five-layer verification, authority override and publish. |
-| `/reports/chrome` | `ReportsChrome` | `reports.studio` | Reusable header/footer registry and default selection. |
+| `/reports/chrome` | `ReportsChrome` | `reports.studio` | Reusable platform header/footer registry, compatibility and default selection. |
+| `/reports/needs-migration` | `ReportsNeedsMigration` | `report_engine:author` / `report:review` / `report:approve` / `security:*` | Staff and merchant report specs that must be migrated. |
+| `/reports/chrome/needs-migration` | `ReportsChromeNeedsMigration` | `report_engine:author` / `report:approve` / `security:*` | Platform chrome needing migration, default revocation and impacted reports. |
 
 The routes are registered in `admin-front/src/router/index.ts`, projected from `report_engine:author` / `report_engine:run` in `core-back/lib/auth/uiAuthorities.ts`, and shown in the Reporting section of the shell.
 
@@ -97,3 +99,28 @@ Actions added: Catalog Refresh/Open Studio/Headers & Footers, row copy/download/
 ## Report run form (2026-11-10)
 
 The Catalog run drawer is built as a filter-style form rather than a dense grid. `ReportInputForm` groups visible inputs into **Report scope**, **Reporting period** and **Filters and options** sections, with an uppercase muted section title and a short description. Fields are stacked one per row; `FormField` gained a `filter` variant that uses the same label/control anatomy as `TableFilters` (`pg-filter-label`, 36 px compact outlined controls, 13 px inputs). Every field has a label (spec translation or a humanised fallback key) and a description (the spec's `help_i18n_key` or a type fallback such as “Search and select a record.”). The output language, page header/footer and template selectors live in an **Output options** section, and Reset/Clear/Generate are pinned in the `SlideOverDrawer` footer. The drawer is 720 px wide and capped at `100vw` on narrow screens.
+
+## Studio mock preview and A4 containment (2026-11-10)
+
+The Studio draft preview now defaults to **Mock data** and offers a **Live sample** toggle. Mock mode still verifies the spec, then renders a deterministic, database-free bundle in which every dataset, transform output, KPI, table, chart, vector node and image asset is populated; `includeHiddenSections` renders visibility-gated sections too, so nothing is silently omitted from a draft. Live mode runs the same preview endpoint with `mode: "LIVE"`, the caller inputs and the real read-only query line. The preview badge shows which mode produced the pages.
+
+The shared paged-media stylesheet now enforces A4 containment: fixed-layout data tables, long-value wrapping, constrained HTML-template tables, `max-width:100%` on SVGs/images/chrome elements and Paged.js content wrappers. `tests/e2e/admin/report-a4-layout.spec.ts` logs into the live admin edge, previews a real spec in mock mode, paginates it through Paged.js and asserts there is no horizontal overflow in English/Arabic and portrait/landscape. This is the regression gate for report width.
+
+## Print layout hardening (2026-11-11)
+
+The Studio preview and print path now enforce the A4 print contract: KPI grids max 3 columns with bottom-anchored values and length-aware font scaling, chart rows centered with HTML legends that wrap without hiding entries, pie/donut labels suppressed in favor of the legend, table typography reduced for wide tables, long chips shrunk instead of broken, repeated table headers across Paged.js fragments, compact table sections kept together, and true landscape pages in the exported PDF. The shared bridge injects print page rules after Paged.js rendering because Paged.js removes the author `@page` rules; without this pass Chrome printed all pages portrait.
+
+The A4 regression spec (`tests/e2e/admin/report-a4-layout.spec.ts`) now measures the sheet, not just the content box, and asserts table headers, KPI limits, chart-row centering, orphan titles, vertical overflow and orientation. It can also export the paginated PDF for visual review.
+
+## Chrome layout and A4 preview (2026-11-11)
+
+The Report Headers & Footers page now previews the selected chrome on a real A4 page frame with sample body content, the global default counterpart, the header top 2 mm/22 mm slot and footer bottom 4 mm/16 mm slot. The preview uses realistic report title/subtitle, period, currency, actor and generated-at values so it matches the reference institutional chrome.
+
+The renderer fills the chrome slot with the template root, supports the structured `accent_band` (multi-color hard-stop gradient) and suppresses the legacy single-color border when a band is present. The transcript documents the band, `defaultCurrency`, locale-formatted period/generated timestamps and the slot-fill rule. The A4 report gate now measures chrome fill, band colors/height, header-to-body and footer-to-page offsets, and formatted variables through `tests/e2e/admin/chrome-layout.spec.ts`; `tests/e2e/admin/chrome-preview.spec.ts` covers the Studio A4 preview.
+
+
+## 10. Compatibility migration pages (2026-11-11)
+
+The Reporting section adds a single “Needs Migration” navigation entry plus two dedicated routes. The report page lists one current row per staff/merchant report code, shows stored vs current engine/spec versions, red `NEEDS_MIGRATION`/`INVALID` badges, copy/download prompt and (for staff reports) Studio prefill via `?open=<id>&from=migration`. The chrome page lists platform headers/footers needing migration, revoked/missing default state, impacted reports, prompt actions, Chrome Studio prefill and a reconcile-defaults action.
+
+The catalog now receives `health` counts and shows a warning callout linking to both migration pages. Chrome Studio requests `includeIncompatible=1`, displays compatibility/default-revocation badges, disables preview/default for broken rows and prechecks “Make default” for a previously-default chrome being migrated. Admin Studio reads `?open=<id>` so a broken raw spec can be loaded without parsing it.

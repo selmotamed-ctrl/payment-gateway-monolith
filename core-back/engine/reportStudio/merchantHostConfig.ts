@@ -7,6 +7,7 @@ import { PostgresReadOnlyReportExecutor } from "../../lib/reportEngineSdk/runtim
 import { buildSchemaCatalog } from "./schemaCatalog";
 import { LocalReportAssetStorage } from "./assetStorage";
 import { env } from "../../lib/env";
+import { REPORT_ENGINE_VERSION } from "../../lib/reportEngineSdk/version";
 
 /**
  * Explicit merchant allow-list (E02). Every model here has a direct
@@ -170,6 +171,20 @@ function merchantProviders(db: ReportEngineHostConfig["dbReadOnlyPort"]): Record
   });
 
   return {
+    // The merchant scope input is engine-injected and hidden in the run form;
+    // registering the source keeps the spec contract identical to the staff
+    // line without exposing a cross-merchant lookup.
+    merchants: {
+      sourceKey: "merchants",
+      description: "Your merchant (injected by the engine)",
+      valueType: "uuid",
+      requiredAuthority: "report_engine:run",
+      search: async ({ dependentValues }) => {
+        const merchantId =
+          typeof dependentValues?.merchantId === "string" ? dependentValues.merchantId : null;
+        return merchantId ? [{ value: merchantId, label: "Current merchant" }] : [];
+      },
+    },
     applications: provider(
       "applications",
       "Your applications",
@@ -237,7 +252,7 @@ export function createMerchantReportHostConfig(deps: {
   }
 
   return {
-    engineVersion: "1.0-merchant",
+    engineVersion: REPORT_ENGINE_VERSION,
     institutionName: "Libyan National Payment Gateway",
     defaultCurrency: "LYD",
     defaultTimezone: "Africa/Tripoli",

@@ -36,6 +36,9 @@ export const routesAuthorities: {
     Team: ["users.manage"],
     MerchantReports: ["reports.run"],
     MerchantReportsStudio: ["reports.studio"],
+    MerchantReportsChrome: ["reports.studio"],
+    MerchantReportsChromeNeedsMigration: ["reports.studio"],
+    MerchantReportsNeedsMigration: ["reports.studio"],
 };
 
 export const useSections = () => {
@@ -153,6 +156,18 @@ export const useSections = () => {
                     name: "MerchantReports",
                     icon: "mdi-file-chart-outline",
                     if: () => hasOneOfAuthorities(["reports.run"]),
+                },
+                {
+                    label: t("Report Branding"),
+                    name: "MerchantReportsChrome",
+                    icon: "mdi-palette-outline",
+                    if: () => hasOneOfAuthorities(["reports.studio"]),
+                },
+                {
+                    label: t("Needs Migration"),
+                    name: "MerchantReportsNeedsMigration",
+                    icon: "mdi-alert-decagram-outline",
+                    if: () => hasOneOfAuthorities(["reports.studio"]),
                 },
                 {
                     label: t("Report Studio"),

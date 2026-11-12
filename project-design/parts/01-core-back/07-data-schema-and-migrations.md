@@ -3,7 +3,7 @@ id: core.data
 title: Data Schema and Migrations
 status: partial
 confidence: high
-last_verified: 2026-11-10
+last_verified: 2026-11-11
 verified_against: d695518+working-tree
 code:
   - core-back/prisma/schema.prisma
@@ -105,7 +105,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 35`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 36`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -118,7 +118,7 @@ The models are grouped by domain:
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261112090000_journal_partition_storage_and_race`, schema version 35). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261112100000_merchant_chrome_tenant_integrity`, schema version 36). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -295,7 +295,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 33.
+- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 35.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -413,7 +413,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 35 (`REQUIRED_SCHEMA_VERSION = 35`; model count 105). The schema migrations since version 10 are:
+The current schema version is 36 (`REQUIRED_SCHEMA_VERSION = 36`; model count 106). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -428,7 +428,10 @@ The current schema version is 35 (`REQUIRED_SCHEMA_VERSION = 35`; model count 10
 - `20261109210000_ledger_query_and_index_optimization` (version 25): covering indexes and append-only autovacuum (see `core.ledger`). Revised 2026-11-10 before any production use: `SET lock_timeout = '10s'`, each `journal_lines` covering index is rebuilt only when `pg_get_indexdef` differs from its target (so an index pre-built online is never rebuilt, see section 12b), and the resilient `ensure_journal_line_partitions`.
 - `20261110090000_resilient_journal_partitions` (functions only, no version bump): redefines `ensure_journal_line_partitions` for databases that applied version 25 before that revision (`prisma migrate deploy` never re-runs an applied migration: verified 2026-11-10). A month that cannot be created (rows already in `journal_lines_default`: `check_violation`; a lock wait over 5 s: `lock_not_available`) is skipped with a WARNING instead of aborting the call; storage parameters are set only on a partition the call creates; `lock_timeout = 5s`, `timezone = UTC`.
 - `20261111090000_report_tenant_and_filing_integrity` (version 34): (1) the merchant report tables referenced each other by id only, so nothing at the database level stopped merchant A's spec pointing at merchant B's asset bundle, or an audit row carrying B's spec under A's `merchant_id`: `UNIQUE (id, merchant_id)` on the bundle and spec tables, composite foreign keys `(asset_bundle_id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`) and `(merchant_spec_id, merchant_id)` (`RESTRICT`) alongside the single-column ones (Prisma cannot model a composite relation with an optional first column, so these are SQL-only), and a real foreign key from `merchant_id` to `merchants` on all five tables; (2) `merchant_report_execution_audit.merchant_spec_id` was `ON DELETE SET NULL`, an UPDATE the table's own append-only trigger rejects, so deleting a referenced spec failed: it is now `RESTRICT` (specs are archived, never deleted), and the table gets the `BEFORE TRUNCATE` guard the staff audit has; (3) `external_submissions_open_report_adapter_key`, a partial unique index on `(report_id, adapter_id)` for statuses PENDING, SUBMITTED and ACKNOWLEDGED: a report is filed at most once per adapter (a FAILED or REJECTED submission can be retried), and the file route maps the violation to its existing `409 REPORT_ALREADY_FILING`. Applying it to a database that already holds two open submissions for one report and adapter fails with a duplicate-key error: resolve them first.
+- `20261111120000_report_engine_versioning` (version 34, written on the plan branch): adds `engine_version`, `spec_schema_version` and `authoring_transcript_version` to `report_definition_specs`, `merchant_report_specs` and `report_chrome_specs`, `engine_version` and `spec_schema_version` to both execution audit tables, and `default_revoked_at` / `default_revoked_reason` to `report_chrome_specs`; it backfills `spec_schema_version` from `spec_json.spec_version`. See `core.report-engine` section 18.
+- `20261111130000_merchant_report_chrome` (version 35, written on the plan branch): creates `merchant_report_chrome_specs` (unique `(merchant_id, code, version)`, one published default per merchant and chrome type, a foreign key to the merchant asset bundle).
 - `20261112090000_journal_partition_storage_and_race` (version 35, no table shape change): redefines `ensure_journal_line_partitions` again. (1) The 2026-11-10 revision set only the insert-autovacuum parameters on a new monthly partition and dropped the explicit `fillfactor = 100` of the original body; it is restored, and set once (`SHARE UPDATE EXCLUSIVE`, no write blocking) on every monthly partition created without it. (2) The same revision replaced `CREATE TABLE IF NOT EXISTS` with a `to_regclass` check and a plain `CREATE TABLE`, so two callers at once (the partition worker on two nodes, or the worker and a deploy) both saw a month missing and the second aborted with `duplicate_table` (measured: 3 of 4 concurrent callers failed); `duplicate_table` / `unique_violation` from a concurrent creator are now accepted, and the truncate-guard install tolerates `duplicate_object`. The version is bumped because the newest migration sets `REQUIRED_SCHEMA_VERSION` (checked by `phase1-mtls-and-schema.test.ts`) and the seeders' equality guard then refuses a database without it; core HTTP start does not check the version. Test: `ledger-query-pruning-and-accuracy.test.ts` EC-15 (storage parameters) and EC-15b (four concurrent callers on a dropped empty month).
+- `20261112100000_merchant_chrome_tenant_integrity` (version 36, no new table): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merge.** Two branches each wrote migrations numbered 34 and 35 (`20261111090000` = 34, `20261111120000` = 34, `20261111130000` = 35, `20261112090000` = 35). None of the four is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first. This migration is new to every database, runs last and sets 36. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, plan branch first, `claude-fixes` first): each ends at 36 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -543,3 +546,10 @@ The reporting baseline set now includes a PROVISIONAL `cbl-incident-docx-v1` def
 ## 16. Merchant report authoring line (schema version 33)
 
 `20261110190000_merchant_report_engine` adds five tables separate from the staff report registry: `merchant_report_specs` (merchant-owned versioned specs; unique `(merchant_id, code, version)` and a partial unique latest-published index), `merchant_report_asset_bundles` (unique per merchant and content hash), `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` (hourly verify/execute counters) and `merchant_report_studio_status` (per-merchant Studio suspension). The migration bumps the schema version to 33; `phase1-mtls-and-schema.test.ts` asserts the applied version.
+
+
+## 17. Report engine versioning and merchant chrome (schema versions 34-35, 2026-11-11)
+
+`20261111120000_report_engine_versioning` bumps the schema to 34. It adds `engine_version`, `spec_schema_version` and `authoring_transcript_version` to staff reports, merchant reports and platform chrome; `engine_version`/`spec_schema_version` to both execution audit tables; and `default_revoked_at`/`default_revoked_reason` to platform chrome. Existing rows are backfilled to engine `1.0.0` and spec version `1.0`.
+
+`20261111130000_merchant_report_chrome` bumps the schema to 35 and adds `merchant_report_chrome_specs`, with `merchant_id`, code/version, type, lifecycle status, merchant default flag, revocation metadata, version provenance, locales, spec JSON/hash, asset bundle FK and publisher metadata. Unique `(merchant_id, code, version)` and a partial unique `(merchant_id, chrome_type)` for published defaults preserve tenant isolation and one default per type. The migration catalog is generated; the required schema version is 35.

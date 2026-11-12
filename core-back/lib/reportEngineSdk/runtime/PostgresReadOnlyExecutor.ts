@@ -64,12 +64,14 @@ export function summarizeExplainPlan(
     const parent = relName ? partitionParentOf(relName, parents) : null;
     if (parent) partitions.add(relName);
     if ((nodeType === "Seq Scan" || nodeType === "Parallel Seq Scan") && relName) {
+      const largeTable = largeTables.has(relName) || (parent !== null && largeTables.has(parent));
       seqScanTables.push(relName);
       seqScans.push({
         table: relName,
         parentTable: parent,
         totalCost: Number(node["Total Cost"] ?? 0),
         planRows: Number(node["Plan Rows"] ?? 0),
+        largeTable,
       });
     }
     for (const key of ["Plans", "Subplans"]) {

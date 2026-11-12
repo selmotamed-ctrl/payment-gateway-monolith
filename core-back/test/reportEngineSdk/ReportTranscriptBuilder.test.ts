@@ -17,8 +17,12 @@ describe("RE-T20b: AI authoring transcript and repair prompt", () => {
     expect(transcript.markdown).toContain("finance:read");
     expect(transcript.markdown).toMatch(/English.*Arabic|Arabic.*English/is);
     expect(transcript.markdown).toContain("asset://");
-    expect(transcript.markdown).toContain("REPORT_CHROME");
+    expect(transcript.markdown).toContain("Do not author headers/footers");
+    expect(transcript.markdown).not.toContain("## 12. Chrome Example");
     expect(transcript.markdown).toContain("2026-05-15T00:00:00.000Z");
+    expect(transcript.markdown).toContain("max 3 per row");
+    expect(transcript.markdown).toContain("REQUIRED `subtitle_i18n_key`");
+    expect(transcript.markdown).toContain("delta_format_hint");
   });
 
   test("the repair prompt embeds the diagnostics and the rejected spec JSON", () => {
@@ -43,7 +47,7 @@ import { validateSpecStructureAndI18n } from "../../lib/reportEngineSdk/verifier
 import { validateQueriesAndOptimizations } from "../../lib/reportEngineSdk/verifier/QuerySafetyAndOptValidator";
 
 function parseSpecFromTranscript(markdown: string): Record<string, any> {
-  const section = markdown.split("## 11. Complete Bilingual Example")[1]!;
+  const section = markdown.split("## 10. Complete Bilingual Example")[1]!;
   const match = /```json\n([\s\S]*?)\n```/.exec(section);
   if (!match) throw new Error("example block not found");
   return JSON.parse(match[1]!);

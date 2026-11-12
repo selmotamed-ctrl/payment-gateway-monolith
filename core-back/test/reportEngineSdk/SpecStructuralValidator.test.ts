@@ -129,3 +129,44 @@ describe("remediation A18: IMAGE_BANNER caption translation keys", () => {
     ).toBe(true);
   });
 });
+
+describe("print layout guardrails", () => {
+  test("KPI grids reject more than three columns per row", () => {
+    const spec = baseReportSpec();
+    const kpi = spec.sections[0]!;
+    if (kpi.section_type !== "KPI_GRID") throw new Error("base KPI expected");
+    kpi.columns = 4;
+    const result = validateSpecStructureAndI18n(spec, createTestHostConfig());
+    expect(result.spec).toBeNull();
+    expect(result.diagnostics.some((d) => d.code === "SCHEMA_VALIDATION_ERROR" && d.path.includes("columns"))).toBe(true);
+  });
+
+  test("KPI cards accept a separate delta format hint", () => {
+    const spec = baseReportSpec();
+    const kpi = spec.sections[0]!;
+    if (kpi.section_type !== "KPI_GRID") throw new Error("base KPI expected");
+    kpi.columns = 3;
+    kpi.cards[0]!.delta_field = "total";
+    kpi.cards[0]!.delta_format_hint = "PERCENT_BPS";
+    const result = validateSpecStructureAndI18n(spec, createTestHostConfig());
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+  });
+
+  test("a chart without a descriptive subtitle emits MISSING_SECTION_DESCRIPTION", () => {
+    const spec = baseReportSpec();
+    spec.sections.push({
+      section_type: "CHART",
+      section_id: "trend",
+      title_i18n_key: "kpi.total",
+      dataset_id: "totals",
+      chart_kind: "BAR",
+      height_mm: 60,
+      width_percent: 100,
+      x_field: "currency",
+      y_axis_format: "CURRENCY_MINOR",
+      series: [{ field: "total", label_i18n_key: "kpi.total", show_value_labels: false }],
+    } as never);
+    const result = validateSpecStructureAndI18n(spec, createTestHostConfig());
+    expect(result.diagnostics.some((d) => d.code === "MISSING_SECTION_DESCRIPTION")).toBe(true);
+  });
+});
