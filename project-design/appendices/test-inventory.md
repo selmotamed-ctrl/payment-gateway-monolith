@@ -301,6 +301,7 @@
 | `deploy/test/converge.test.ts` | 580 | 53 |
 | `deploy/test/exhaustive-deploy-matrix.test.ts` | 311 | 20 |
 | `deploy/test/fakeRails.test.ts` | 109 | 7 |
+| `deploy/test/freshStorage.test.ts` | 87 | 2 |
 | `deploy/test/frontendBuild.test.ts` | 171 | 12 |
 | `deploy/test/gap-hardening.test.ts` | 114 | 10 |
 | `deploy/test/healthVerifierScale.test.ts` | 154 | 5 |
@@ -427,5 +428,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **422**
-- Total literal test declarations: **4193**
+- Total files: **423**
+- Total literal test declarations: **4195**

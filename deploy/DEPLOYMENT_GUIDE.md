@@ -35,7 +35,8 @@ Flags:
 | :--- | :--- |
 | `--env=<path>` | Use another `deploy.env` (default `deploy/deploy.env`). |
 | `--only=core,checkout` | Deploy only those roles (comma separated). |
-| `--fresh` | Bootstrap the OS (packages, ufw, bun, pm2) and enable the firewall. |
+| `--fresh` | Bootstrap the OS (packages, ufw, bun, pm2), enable the firewall, and refuse if the selected PostgreSQL/Redis/object-storage or Fake Rails SQLite storage already contains data. |
+| `--force-fresh` | Implies `--fresh` and erases the selected storage engines and Fake Rails SQLite data after taking a pre-clean Live PostgreSQL dump; backup repositories are preserved. Use only when the data is disposable. |
 | `--update` | Never touch the OS or the firewall. |
 | `--enforce-firewall` | Re-apply the UFW rules without a full bootstrap. |
 | `--skip-build` | Reuse the existing `*/dist` builds. |
@@ -488,8 +489,12 @@ can never lock itself out.
 2. Build the SPAs locally (`bun run build`).
 3. Generate or verify the multi-node PKI.
 4. Bootstrap each unique host (`--fresh`) and apply UFW.
-5. Provision the storage engines (PostgreSQL 18 primary/replicas + PgBouncer,
-   Redis, audit/log databases, backup engine). On the legacy single-host path,
+5. Probe the selected storage engines; a non-empty engine stops a plain
+   `--fresh` and asks for `--force-fresh`. With `--force-fresh`, take the
+   pre-clean Live dump, drop the Live/sandbox/audit/log databases, flush Redis
+   clear the object-storage vault and remove the Fake Rails SQLite files. Then provision the storage engines
+   (PostgreSQL 18 primary/replicas + PgBouncer, Redis, audit/log databases,
+   backup engine). On the legacy single-host path,
    create the database/role and take a compressed pre-migration backup into
    `CORE_REMOTE_DIR/shared/backups/`.
 6. Deploy `core-back` and, when `SANDBOX_ENABLED=true`, `pg-core-sandbox`:

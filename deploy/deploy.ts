@@ -34,6 +34,7 @@ import {
   OBJECT_STORAGE_SERVICE_USER,
   provisionObjectStorageEngine,
 } from "./provisioners/objectStorageProvisioner";
+import { cleanFreshStorage, probeFreshStorage } from "./lib/freshStorage";
 
 /**
  * The multi-host deployment orchestrator.
@@ -1301,6 +1302,49 @@ const main = async (): Promise<void> => {
     throw new Error("The plan has no core host");
   }
   const releaseTimestamp = timestamp();
+
+  // A `--fresh` deploy is only safe when the storage engines it is about to
+  // provision are empty. Probe before installing/migrating anything, so a
+  // populated PostgreSQL/Redis/vault is never silently reused. A typed
+  // --force-fresh is the explicit destructive opt-in; it clears those stores
+  // before the provisioners recreate their schemas. Backup repositories are
+  // deliberately preserved (they are the recovery path, not application data).
+  const freshStorageOptions = {
+    runner,
+    config,
+    plan,
+    includePostgres: pgStorageConfigured(config) && shouldRunStorage(options, ["pg", "pg-primary", "pgbouncer"]),
+    includeRedis: config.REDIS_MANAGE_VIA_SSH && shouldRunStorage(options, ["redis"]),
+    includeAuditLog: (config.AUDIT_DB_MANAGE_VIA_SSH || config.LOG_DB_MANAGE_VIA_SSH)
+      && shouldRunStorage(options, ["audit-db", "log-db"]),
+    includeObjectStorage: objectStorageConfigured(config) && shouldRunStorage(options, ["object-storage"]),
+    includeFakeRails: config.FAKE_RAILS_ENABLED && shouldRun(options, "fake-rails"),
+  };
+  if (fresh && !options.dryRun && (freshStorageOptions.includePostgres || freshStorageOptions.includeRedis || freshStorageOptions.includeAuditLog || freshStorageOptions.includeObjectStorage || freshStorageOptions.includeFakeRails)) {
+    const storageState = probeFreshStorage(freshStorageOptions);
+    const occupied = storageState.nonEmpty || storageState.unknown.length > 0;
+    if (occupied && !options.forceFresh) {
+      throw new Error(
+        [
+          "--fresh refused: existing storage-engine data was found.",
+          ...storageState.details.map((line) => `- ${line}`),
+          ...storageState.unknown.map((line) => `- ${line}`),
+          "Re-run with --force-fresh (or DEPLOY_FORCE_FRESH=1) only if you intend to erase it. A pre-clean dump of the Live PostgreSQL database is taken first.",
+        ].join("\n"),
+      );
+    }
+    if (options.forceFresh) {
+      if (storageState.details.some((line) => line.startsWith("PostgreSQL/Live"))) {
+        // Cleanup happens before the core migration step, so take the safety
+        // dump now rather than after the database has been dropped.
+        backupDatabase({ runner, config, host: coreHost, releaseTimestamp });
+      }
+      if (storageState.details.length > 0) log(`  cleaning storage: ${storageState.details.join("; ")}`);
+      for (const line of cleanFreshStorage(freshStorageOptions)) log(`  cleaned: ${line}`);
+    } else if (storageState.unknown.length > 0) {
+      warn(`  storage emptiness could not be proven: ${storageState.unknown.join("; ")}`);
+    }
+  }
 
   if (config.PG_MANAGE_VIA_SSH && shouldRunStorage(options, ["pg", "pg-primary", "pg-replica", "pgbouncer"])) {
     const report = provisionPostgres18({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });

@@ -1,6 +1,6 @@
 # in office inshallah 
-- build an ai assisted environment generator and update the deploy guide 
-- incomplete work on automation design:
+- build an ai assisted environment generator and update the deploy guide
+- incomplete work on automation design: ---
 ```md
 Not built or partial
 - Deploy: the deploy engine does not install clamav-daemon or freshclam; you provision the daemon. Nothing runs the deploy on a schedule, so a certificate is only renewed when someone deploys inside the window.
@@ -11,7 +11,7 @@ Not built or partial
 - AUTO-12: the daily cap counters are not audited.
 - Untouched: AUTO-09, 15, 29, 30, 31 and 32, the AUTO-10 scaling calibration and scale-down, AUTO-14, 17, 18 and 33, the emergency-extension UI button, and the cash-out P50/P90/P95 dashboard.
 - From earlier: the dispute-loss booking stays a human step (the D1 deviation), and AUTO-26 refresh-failure counting is not built. The seeded MLRO and compliance users lack approval:check, which may be a seed gap.
-```
+``` ---
 
 - sandbox environment
 - resolve broken 3 tests -- 
@@ -22,7 +22,7 @@ Not built or partial
 - missing automations --
 - backup engine full check and understanding --
 
-- object store
+- object store --
 - what does merchant tab show in the report catalog
 
-- reporting engine should track the version and any breaking change due to version changing (major version means previous reports specs wont work and must be regenerated and migrated with a proposed migration prompt), broken reports should not ever throw 500 error (currently that what happens) and should not allow runs and should be marked as needing migration and colored red, and there should be page of these reports, the catalog page should only show working reports, also there should be documentation on how to version transcripts for the ai agents that will develop changes on the report engine
+- reporting engine should track the version and any breaking change due to version changing (major version means previous reports specs wont work and must be regenerated and migrated with a proposed migration prompt), broken reports should not ever throw 500 error (currently that what happens) and should not allow runs and should be marked as needing migration and colored red, and there should be page of these reports, the catalog page should only show working reports, also there should be documentation on how to version transcripts for the ai agents that will develop changes on the report engine --

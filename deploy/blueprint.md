@@ -1271,13 +1271,13 @@ Provisioning is gated by `--only` and by the management flags:
 - audit/log databases when either management flag is set;
 - backup engine plus daemon when `BACKUP_ENABLED`.
 
-The legacy path creates the database/role when `DB_MANAGE_VIA_SSH` and no PG tier is configured. The PG path takes a pre-migration dump from the primary's direct port (never PgBouncer) when the run is not fresh and core is selected. The legacy path takes the dump after database provisioning.
+The legacy path creates the database/role when `DB_MANAGE_VIA_SSH` and no PG tier is configured. Before any fresh provisioning, the deploy probes the selected storage engines (Live and sandbox PostgreSQL, audit/log databases, Redis, the object-storage vault and the Fake Rails SQLite data directory). If any contains data, `--fresh` refuses and asks for `--force-fresh`; `--force-fresh` takes a pre-clean Live PostgreSQL dump (when the Live database exists), then drops the Live/sandbox/audit/log databases, flushes managed Redis, clears the object-storage vault and removes the Fake Rails SQLite files before the provisioners/services recreate them. Backup repositories are deliberately preserved. The PG path still takes the normal pre-migration dump from the primary's direct port when an update run is non-empty; the legacy path takes it after database provisioning.
 
 #### Pre-migration backup details
 
 `preMigrationBackup()` resolves the primary direct port (never PgBouncer) and the PG or legacy credentials, then builds `PGPASSFILE=<private passfile> pg_dump -h <host> -p <port> -U <user> -Fc <db> > <target>.dump`. `backupDatabase()` creates `<CORE_REMOTE_DIR>/shared/backups`, chowns it to the effective target user (the SSH user for a remote host, the orchestrator's OS user for a local target), and runs the command on the **core host** as that user. The file is `pre-migrate-<releaseTimestamp>.dump`.
 
-No dump is taken on a fresh install. A failure aborts before migrations. `pg_dump` must already exist (the bootstrap package list omits `postgresql-client`), the password no longer appears on the command line (PGPASSFILE), and the dump is not automatically verified or restored.
+On a genuinely empty fresh install no dump is needed. `--fresh --force-fresh` takes a pre-clean Live dump before removing the databases, because the normal pre-migration hook runs later. `pg_dump` must already exist (the bootstrap package list omits `postgresql-client`), the password no longer appears on the command line (PGPASSFILE), and the dump is not automatically verified or restored.
 
 #### Backup daemon source deployment
 

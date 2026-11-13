@@ -104,7 +104,8 @@ is then only a compatibility fallback.
 | `--nodes=<id,...>` | Limit compute deployment units to the named node ids. Units without a node id never match. |
 | `--rolling-batch=<n>` | Override `ROLLING_BATCH_SIZE` for this run. Must be an integer >= 1. |
 | `--keep=<n>` | Override `KEEP_RELEASES` (release directories retained per service). |
-| `--fresh` | Bootstrap packages, Bun, PM2 and apply UFW. |
+| `--fresh` | Bootstrap packages, Bun, PM2 and apply UFW; refuse if any selected storage engine (PostgreSQL, Redis, object vault and Fake Rails SQLite) already contains data. |
+| `--force-fresh` | Implies `--fresh`; take a pre-clean Live PostgreSQL dump, then erase the selected storage engines. Backup repositories are preserved. |
 | `--update` | Do not bootstrap; also disables an environment `fresh`. |
 | `--enforce-firewall` | Apply the current UFW plan without a full bootstrap. |
 | `--skip-build` | Reuse the existing `*/dist` builds. Missing edge dist files fail later. |
@@ -730,7 +731,7 @@ bun run test-matrix --topologies=T1 --intensity=smoke
 - `DEPLOY_ENV` unset means `production`: Fake Rails, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION` and the synthetic seeder are refused. Use `development|staging|test` explicitly.
 - Placeholder / low-entropy secrets (`change-me`, `password`, `admin`, repeated or sequential patterns) are rejected; `KMS_MASTER_KEY` needs >= 32 chars. Secrets may not contain quotes, backslash, `$`, backtick or whitespace.
 - `BACKUP_WALG_SHA256` (SHA-256 of the pinned WAL-G asset) is required only when WAL-G must be downloaded; an already installed binary is reused. `BUN_SHA256` is needed to install bun (otherwise an existing `/usr/local/bin/bun` or `~/.bun/bin/bun` is reused).
-- `--fresh` against a non-empty database is refused unless `--force-fresh` (or `DEPLOY_FORCE_FRESH=1`). Update deploys run `migrate deploy` on the first core node when migrations are pending, after a pre-migration dump.
+- `--fresh` first probes every selected storage engine. Non-empty PostgreSQL Live/sandbox/audit/log databases, Redis keys, the object-storage vault or Fake Rails SQLite data make it refuse unless `--force-fresh` (or `DEPLOY_FORCE_FRESH=1`). A forced fresh takes a pre-clean Live PostgreSQL dump, drops those databases, flushes Redis, clears the vault and removes the Fake Rails SQLite files; backup repositories are preserved. Update deploys run `migrate deploy` on the first core node when migrations are pending, after a pre-migration dump.
 - PostgreSQL binds `127.0.0.1,<node private IP>`; `PG_RAM_GB` derives memory settings; `PG_IO_METHOD` defaults to `worker`; `PG_REPLICA_REBUILD=true` is needed to re-clone an existing standby.
 
 ### Additional hardening notes (2026-11-05)
