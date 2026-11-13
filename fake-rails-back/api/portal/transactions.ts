@@ -12,6 +12,12 @@ import {
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { webhookDispatcher } from "../../engine/webhooks/WebhookDispatcher";
 import { broadcast, subscribe } from "./eventHub";
+import {
+  captureAccountHoldForTransaction,
+  fromMicros,
+  releaseAccountHoldForTransaction,
+  toMicros,
+} from "../../engine/accounts/AccountLedgerService";
 
 const actionSchema = z.object({
   action: z.enum(["APPROVE", "REJECT", "APPROVE_MISMATCH", "APPROVE_LATE", "FORCE_OUTCOME", "CANCEL"]),
@@ -23,6 +29,31 @@ const transactionFor = (id: string) => {
   const row = findTransactionAnyReference(id);
   if (!row) throw new ApiError(404, "TRANSACTION_NOT_FOUND", `No fake transaction '${id}'`);
   return row;
+};
+
+const TERMINAL = new Set(["PAID", "REFUNDED", "CANCELLED"]);
+const assertOpen = (transaction: { status: string }, action: string): void => {
+  if (TERMINAL.has(transaction.status) && !(action === "APPROVE" && transaction.status === "PAID")) {
+    throw new ApiError(
+      409,
+      "TRANSACTION_STATE_INVALID",
+      `Cannot ${action.toLowerCase().replaceAll("_", " ")} a transaction in status ${transaction.status}`,
+    );
+  }
+};
+
+const captureIfHeld = (transactionId: string, settledOverrideLyd?: string): void => {
+  try {
+    captureAccountHoldForTransaction(transactionId, settledOverrideLyd);
+  } catch (error) {
+    // A manually seeded/non-account transaction has no hold; the tester action
+    // still moves its status. A real capture error must surface.
+    if ((error as { code?: string }).code === "CAPTURE_EXCEEDS_AVAILABLE") throw error;
+  }
+};
+
+const releaseIfHeld = (transactionId: string, reason: string): void => {
+  releaseAccountHoldForTransaction(transactionId, reason);
 };
 
 export const createTransactionsRouter = (): Router => {
@@ -99,6 +130,8 @@ export const createTransactionsRouter = (): Router => {
 
     switch (body.action) {
       case "APPROVE": {
+        assertOpen(transaction, body.action);
+        captureIfHeld(transaction.id);
         updateTransaction(transaction.id, { status: "PAID", settled_amount_lyd: transaction.normalized_amount_lyd });
         webhookDispatcher.dispatch({
           transaction: { ...transaction, status: "PAID" },
@@ -114,7 +147,9 @@ export const createTransactionsRouter = (): Router => {
         break;
       }
       case "APPROVE_MISMATCH": {
-        const settled = (Number(transaction.normalized_amount_lyd) + 0.05).toFixed(4);
+        assertOpen(transaction, body.action);
+        const settled = fromMicros(toMicros(transaction.normalized_amount_lyd) + 500n);
+        captureIfHeld(transaction.id, settled);
         updateTransaction(transaction.id, { status: "PAID", settled_amount_lyd: settled });
         webhookDispatcher.dispatch({
           transaction: { ...transaction, status: "PAID" },
@@ -130,6 +165,8 @@ export const createTransactionsRouter = (): Router => {
         break;
       }
       case "APPROVE_LATE": {
+        assertOpen(transaction, body.action);
+        captureIfHeld(transaction.id);
         updateTransaction(transaction.id, { status: "PAID", settled_amount_lyd: transaction.normalized_amount_lyd });
         webhookDispatcher.dispatch({
           transaction: { ...transaction, status: "PAID" },
@@ -147,6 +184,8 @@ export const createTransactionsRouter = (): Router => {
         break;
       }
       case "REJECT": {
+        assertOpen(transaction, body.action);
+        releaseIfHeld(transaction.id, "Rejected by the Fake Rails tester");
         updateTransaction(transaction.id, { status: "FAILED" });
         webhookDispatcher.dispatch({
           transaction,
@@ -161,6 +200,8 @@ export const createTransactionsRouter = (): Router => {
         break;
       }
       case "CANCEL": {
+        assertOpen(transaction, body.action);
+        releaseIfHeld(transaction.id, "Cancelled by the Fake Rails tester");
         updateTransaction(transaction.id, { status: "CANCELLED" });
         break;
       }

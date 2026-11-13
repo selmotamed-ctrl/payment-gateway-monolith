@@ -64,11 +64,19 @@ describe("commerce status gates (a freeze that does not freeze is a bug)", () =>
     expect(codeOf(() => assertCommerceActive({ applicationStatus: "ACTIVE", walletStatus: "FROZEN" }))).toBe("WALLET_NOT_ACTIVE");
   });
 
-  test("SANDBOX traffic of a not yet approved merchant (PENDING rows) still runs, a suspension/freeze never does", () => {
-    expect(codeOf(() => assertCommerceActive({ applicationStatus: "PENDING", walletStatus: "PENDING", env: "SANDBOX" }))).toBeUndefined();
-    expect(codeOf(() => assertCommerceActive({ applicationStatus: "SUSPENDED", walletStatus: "ACTIVE", env: "SANDBOX" }))).toBe("APPLICATION_NOT_ACTIVE");
-    expect(codeOf(() => assertCommerceActive({ applicationStatus: "ACTIVE", walletStatus: "FROZEN", env: "SANDBOX" }))).toBe("WALLET_NOT_ACTIVE");
-    expect(codeOf(() => assertCommerceActive({ applicationStatus: "CLOSED", walletStatus: "ACTIVE", env: "SANDBOX" }))).toBe("APPLICATION_NOT_ACTIVE");
+  test("v38: the same strict status rules apply on both planes (no implicit sandbox fallback)", () => {
+    for (const env of ["LIVE", "SANDBOX"] as const) {
+      expect(codeOf(() => assertCommerceActive({ applicationStatus: "PENDING", walletStatus: "PENDING", env }))).toBe("APPLICATION_NOT_ACTIVE");
+      expect(codeOf(() => assertCommerceActive({ applicationStatus: "SUSPENDED", walletStatus: "ACTIVE", env }))).toBe("APPLICATION_NOT_ACTIVE");
+      expect(codeOf(() => assertCommerceActive({ applicationStatus: "ACTIVE", walletStatus: "FROZEN", env }))).toBe("WALLET_NOT_ACTIVE");
+      expect(codeOf(() => assertCommerceActive({ applicationStatus: "CLOSED", walletStatus: "ACTIVE", env }))).toBe("APPLICATION_NOT_ACTIVE");
+      expect(codeOf(() => assertCommerceActive({ applicationStatus: "ACTIVE", walletStatus: "ACTIVE", env }))).toBeUndefined();
+    }
+  });
+
+  test("v38: a not-ACTIVE merchant is refused when the merchant status is supplied", () => {
+    expect(codeOf(() => assertCommerceActive({ merchantStatus: "PENDING", applicationStatus: "ACTIVE", walletStatus: "ACTIVE", env: "LIVE" }))).toBe("MERCHANT_NOT_ACTIVE");
+    expect(codeOf(() => assertCommerceActive({ merchantStatus: "SUSPENDED", applicationStatus: "ACTIVE", walletStatus: "ACTIVE", env: "SANDBOX" }))).toBe("MERCHANT_NOT_ACTIVE");
   });
 });
 
@@ -89,22 +97,38 @@ describe("the attempt-creation guard is the central choke point", () => {
     expect(fixture.state.slotDeltas).toHaveLength(0);
   });
 
-  test("a LIVE request on a PENDING application is refused, the sandbox one is allowed", async () => {
+  test("a PENDING application is refused on both planes (no implicit sandbox fallback)", async () => {
     const live = createGuardFixture();
     await expect(
       pipelineFor(live, { applicationStatus: "PENDING", walletStatus: "PENDING" }).guard(guardRequest("LIVE")),
     ).rejects.toMatchObject({ code: "APPLICATION_NOT_ACTIVE" });
-    const sandbox = createGuardFixture();
-    const decision = await pipelineFor(sandbox, { applicationStatus: "PENDING", walletStatus: "PENDING" }).guard(guardRequest("SANDBOX"));
-    expect(decision.outcome).not.toBe("BLOCK");
-    expect(decision.attemptId).toBeTruthy();
+    const previous = process.env.EXECUTION_PLANE;
+    process.env.EXECUTION_PLANE = "SANDBOX";
+    try {
+      const sandbox = createGuardFixture();
+      await expect(
+        pipelineFor(sandbox, { applicationStatus: "PENDING", walletStatus: "PENDING" }).guard(guardRequest("SANDBOX")),
+      ).rejects.toMatchObject({ code: "APPLICATION_NOT_ACTIVE" });
+      expect(sandbox.state.attempts).toHaveLength(0);
+    } finally {
+      process.env.EXECUTION_PLANE = previous;
+      if (previous === undefined) delete process.env.EXECUTION_PLANE;
+    }
   });
 
-  test("control: an active application and wallet pass", async () => {
-    const fixture = createGuardFixture();
-    const decision = await pipelineFor(fixture, { applicationStatus: "ACTIVE", walletStatus: "ACTIVE" }).guard(guardRequest("SANDBOX"));
-    expect(decision.attemptId).toBeTruthy();
+  test("control: an active application and wallet pass on the sandbox plane", async () => {
+    const previous = process.env.EXECUTION_PLANE;
+    process.env.EXECUTION_PLANE = "SANDBOX";
+    try {
+      const fixture = createGuardFixture();
+      const decision = await pipelineFor(fixture, { applicationStatus: "ACTIVE", walletStatus: "ACTIVE" }).guard(guardRequest("SANDBOX"));
+      expect(decision.attemptId).toBeTruthy();
+    } finally {
+      process.env.EXECUTION_PLANE = previous;
+      if (previous === undefined) delete process.env.EXECUTION_PLANE;
+    }
   });
+
 });
 
 describe("governance subject types", () => {

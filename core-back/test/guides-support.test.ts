@@ -23,6 +23,7 @@ const link = {
   confirmedCount: 0,
   activeLockedCount: 0,
   state: "PENDING",
+  env: "LIVE" as const,
   expiresAt: null,
   railWhitelist: null,
   applicationRailWhitelist: null,

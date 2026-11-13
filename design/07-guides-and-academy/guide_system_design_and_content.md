@@ -7509,6 +7509,58 @@ Any failed check is a **priority-1 incident**. Read the three badges in **Latest
    "situations": []
   },
   {
+   "screenId": "Sandbox",
+   "routeNames": [
+    "SandboxOverview",
+    "SandboxMerchants",
+    "SandboxMerchantDetail",
+    "SandboxFakeRails",
+    "SandboxMirrorDashboard",
+    "SandboxMirrorMerchants",
+    "SandboxMirrorMerchantDetail",
+    "SandboxMirrorWallets",
+    "SandboxMirrorWalletDetail",
+    "SandboxMirrorApplications",
+    "SandboxMirrorTransactions",
+    "SandboxMirrorApprovals",
+    "SandboxMirrorAuditLog",
+    "SandboxMirrorOperatorCases",
+    "SandboxMirrorOperatorCaseDetail",
+    "SandboxMirrorDisputes",
+    "SandboxMirrorAdjustments",
+    "SandboxMirrorCashOuts",
+    "SandboxMirrorReconciliation",
+    "SandboxMirrorPricing",
+    "SandboxMirrorProfitability",
+    "SandboxMirrorLiquidity",
+    "SandboxMirrorJournalEntries",
+    "SandboxMirrorInvariant",
+    "SandboxMirrorCredentialSets",
+    "SandboxMirrorGateways",
+    "SandboxMirrorGatewayWizard",
+    "SandboxMirrorRails",
+    "SandboxMirrorGatewayRoutes",
+    "SandboxMirrorReportsCatalog",
+    "SandboxMirrorReportsStudio",
+    "SandboxMirrorReportsChrome",
+    "SandboxMirrorReportsNeedsMigration",
+    "SandboxMirrorReportsChromeNeedsMigration",
+    "SandboxMirrorReportsMerchantReports",
+    "SandboxMirrorPlatformSettings",
+    "SandboxMirrorJobsOutbox",
+    "SandboxMirrorObjectStorage"
+   ],
+   "pageDir": "pages/sandbox",
+   "summary": "The isolated Sandbox execution plane: inspect the separate core node and database, reset one merchant's sandbox workspace, and control the Fake Rails test customers, their balances and the synthetic clearing pools. Nothing on this screen reads or writes Live money.",
+   "articles": [
+    "b01-08"
+   ],
+   "cards": [],
+   "situations": [
+    "s-sandbox-live"
+   ]
+  },
+  {
    "screenId": "SystemBackups",
    "routeNames": [
     "SystemBackups"

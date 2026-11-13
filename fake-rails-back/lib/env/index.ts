@@ -41,6 +41,12 @@ export const envSchema = z.object({
   FAKE_RAILS_ADMIN_PASSWORD: z.string().min(12).max(512),
   FAKE_RAILS_JWT_SECRET: z.string().min(32).max(512),
   FAKE_RAILS_SEEDER_TOKEN: z.string().min(32).max(512),
+  /**
+   * v38: shared secret the Sandbox core plane presents on the control routes
+   * (`/control/*`). When it is absent the control plane is only reachable in
+   * development/test; production refuses it without the secret.
+   */
+  FAKE_RAILS_CONTROL_TOKEN: z.string().min(16).max(512).optional(),
 
   // Express "trust proxy" setting: "loopback" (default), a CIDR/keyword list, a hop count or "false".
   FAKE_RAILS_TRUST_PROXY: z.string().default("loopback"),

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { env } from "../lib/env";
 import { ApiError, parseOrThrow } from "../lib/error";
 import { callCoreResponse, type CoreCallOptions, type CoreHttpMethod } from "../lib/mtlsClient";
+import { targetUrlsForRequest } from "../lib/corePools";
 import { parseCidrList, resolveClientIp } from "../lib/net";
 import { resolveRequestId } from "../lib/requestLogger";
 import type { PublicPayload } from "./contract";
@@ -104,6 +105,7 @@ export const coreForward =
       body = parseOrThrow(options.coreSchema, body);
     }
     const response = await callCoreResponse({
+      targetUrls: targetUrlsForRequest(req),
       method: options.method,
       path: options.path({ params, body, query: query ?? {} }),
       body,

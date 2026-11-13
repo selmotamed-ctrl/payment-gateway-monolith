@@ -29,6 +29,7 @@ import { inboundEventsRouter, transactionsRouter } from "./transactions";
 import { walletsRouter } from "./wallets";
 import { reportEngineRouter } from "./reportEngine";
 import { objectStorageRouter } from "./objectStorage";
+import { sandboxProxyRouter } from "../sandboxProxy";
 
 const router = express.Router();
 
@@ -64,6 +65,10 @@ const gatewayGuard = guard({ read: ["gateway:read"], write: ["gateway:write", "g
 
 router.use("/search", searchRouter);
 router.use("/academy", academyRouter);
+// v38: the Sandbox plane is a separate database; staff control never falls back to Live.
+// Sandbox control and mirror routes are staff-only and authority-checked in core;
+// the edge cannot express every mirrored authority (gateways, settings, finance).
+router.use("/sandbox", sandboxProxyRouter);
 router.use(
   "/users",
   guard({ read: ["user:read", "security:read"], write: ["user:write", "security:write"] }),

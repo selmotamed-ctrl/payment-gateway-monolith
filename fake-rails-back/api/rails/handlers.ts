@@ -69,10 +69,14 @@ export const otpConfirm: RailHandler = async (context) => {
 export const asyncInitiate: RailHandler = (context) => {
   const base = `${env.FAKE_RAILS_PUBLIC_BASE_URL.replace(/\/$/, "")}`;
   const qrPayload = `EMVCO|${context.descriptor.railCode}|${context.transaction.provider_reference}|${context.transaction.normalized_amount_lyd}|LYD`;
+  const deepLink = `${base}/hosted/redirect/${context.transaction.id}`;
+  updateTransaction(context.transaction.id, { qr_payload: qrPayload, deep_link_url: deepLink });
+  context.transaction.qr_payload = qrPayload;
+  context.transaction.deep_link_url = deepLink;
   return awaitingBody(context, {
     qr_code: qrPayload,
     qr_payload: qrPayload,
-    deep_link: `${base}/hosted/redirect/${context.transaction.id}`,
+    deep_link: deepLink,
     push_reference: context.transaction.provider_reference,
     pay_code: context.transaction.expected_otp,
     expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
@@ -82,7 +86,9 @@ export const asyncInitiate: RailHandler = (context) => {
 /** Redirect initiation: returns the hosted checkout URL. */
 export const redirectInitiate: RailHandler = (context) => {
   const base = env.FAKE_RAILS_PUBLIC_BASE_URL.replace(/\/$/, "");
-  updateTransaction(context.transaction.id, { status: "AWAITING_ACTION" });
+  const redirectUrl = `${base}/hosted/redirect/${context.transaction.id}`;
+  updateTransaction(context.transaction.id, { status: "AWAITING_ACTION", redirect_url: redirectUrl });
+  context.transaction.redirect_url = redirectUrl;
   return {
     status: 200,
     body: {
@@ -91,7 +97,7 @@ export const redirectInitiate: RailHandler = (context) => {
       provider_reference: context.transaction.provider_reference,
       transaction_id: context.transaction.provider_reference,
       status: "AWAITING_CUSTOMER",
-      redirect_url: `${base}/hosted/redirect/${context.transaction.id}`,
+      redirect_url: redirectUrl,
       return_url: context.transaction.return_url,
       cancel_url: context.transaction.cancel_url,
       expires_in_seconds: 900,

@@ -100,11 +100,11 @@ export const probeCoreHealth = (
 export const probeCoreService = (
   runner: SshRunner,
   host: HostPlan,
-  service: { name: string; port: number },
+  service: { name: string; port: number; remoteDir?: string },
   config: DeployConfig,
   expectedRelease?: string,
 ): ProbeResult => {
-  const certs = `${config.CORE_REMOTE_DIR}/shared/certs`;
+  const certs = `${service.remoteDir ?? config.CORE_REMOTE_DIR}/shared/certs`;
   const command = mtlsCurl({
     certs,
     certName: "core-back",
@@ -449,17 +449,27 @@ export const probeFakeRails = (
 ): ProbeResult[] => {
   const results: ProbeResult[] = [];
   const fakeRailsPort = parseNodeList(config.FAKE_RAILS_NODE)[0]?.servicePort ?? config.FAKE_RAILS_BACK_PORT;
-  try {
-    const body = runner.capture(host.ssh, `curl -fsS --max-time 10 http://127.0.0.1:${fakeRailsPort}/health`);
-    results.push({
-      host: host.ssh.host,
-      check: "fake-rails-back /health",
-      ok: /"status"\s*:\s*"ok"/.test(body) && healthReleaseMatches(body, expectedRelease),
-      detail: body.slice(0, 200),
-    });
-  } catch (error) {
-    results.push({ host: host.ssh.host, check: "fake-rails-back /health", ok: false, detail: (error as Error).message });
+  // PM2 can report the app online before its HTTP listener has finished
+  // starting under a full --fresh run. Retry like the core/edge probes so a
+  // slow boot is not reported as a deployment failure.
+  let fakeRailsLastError = "";
+  let fakeRailsBody = "";
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      fakeRailsBody = runner.capture(host.ssh, `curl -fsS --max-time 10 http://127.0.0.1:${fakeRailsPort}/health`);
+      fakeRailsLastError = "";
+      break;
+    } catch (error) {
+      fakeRailsLastError = (error as Error).message;
+      sleepSync(1_000);
+    }
   }
+  results.push({
+    host: host.ssh.host,
+    check: "fake-rails-back /health",
+    ok: fakeRailsLastError === "" && /"status"\s*:\s*"ok"/.test(fakeRailsBody) && healthReleaseMatches(fakeRailsBody, expectedRelease),
+    detail: (fakeRailsLastError || fakeRailsBody).slice(0, 200),
+  });
   const scheme = config.FAKE_RAILS_SSL ? "https" : "http";
   const insecure = config.FAKE_RAILS_SSL ? " -k" : "";
   try {

@@ -3,6 +3,7 @@ import rateLimiter from "express-rate-limit";
 import { z } from "zod";
 import { digestKeyPart, lazyLimiter, rateLimitKey } from "../../lib/clientIp";
 import { env } from "../../lib/env";
+import { liveTokenPrefix, sandboxTokenPrefix } from "../../lib/corePools";
 import { ApiError } from "../../lib/error";
 import { zAmount, zCurrency, zIdentifier, zJsonObject } from "../../lib/zReady";
 import { coreLinkCreateSchema } from "../contract";
@@ -54,14 +55,25 @@ export const requirePgLiveToken = (req: Request, _res: Response, next: NextFunct
   const header = req.headers.authorization ?? "";
   const parts = header.split(" ");
   const [scheme, token] = parts;
+  const prefix = token?.startsWith(sandboxTokenPrefix)
+    ? sandboxTokenPrefix
+    : token?.startsWith(env.PG_LIVE_TOKEN_PREFIX)
+      ? env.PG_LIVE_TOKEN_PREFIX
+      : token?.startsWith(liveTokenPrefix)
+        ? liveTokenPrefix
+        : null;
   if (
     parts.length !== 2 ||
     scheme?.toLowerCase() !== "bearer" ||
     !token ||
-    !token.startsWith(env.PG_LIVE_TOKEN_PREFIX) ||
-    !TOKEN_BODY_PATTERN.test(token.slice(env.PG_LIVE_TOKEN_PREFIX.length))
+    !prefix ||
+    !TOKEN_BODY_PATTERN.test(token.slice(prefix.length))
   ) {
-    throw new ApiError(401, "INVALID_API_TOKEN", "A valid pg_live_ bearer token is required");
+    throw new ApiError(
+      401,
+      "INVALID_API_TOKEN",
+      "A valid pg_live_ (Live) or pg_test_ (Sandbox) bearer token is required",
+    );
   }
   next();
 };

@@ -4,6 +4,7 @@ import * as ipaddr from "ipaddr.js";
 import { client } from "../../prisma/client";
 import { ApiError } from "../../lib/error";
 import { hashAccessToken, verifySessionToken, type SessionChannel } from "../../lib/auth";
+import { getExecutionPlane, isSandboxPlane, tokenMatchesPlane } from "../../lib/executionPlane";
 import { isSessionRevoked, revokeSession } from "../../lib/auth/revocation";
 
 export type PrincipalKind = "session" | "apiToken";
@@ -105,6 +106,13 @@ const resolveApiTokenPrincipal = async (token: string, request: Request): Promis
   if (!record) {
     throw new ApiError(401, "ACCESS_TOKEN_INVALID", "The supplied access token is not recognised");
   }
+  if (record.env && record.env !== getExecutionPlane()) {
+    throw new ApiError(
+      401,
+      getExecutionPlane() === "LIVE" ? "SANDBOX_TOKEN_ON_LIVE_PLANE" : "LIVE_TOKEN_ON_SANDBOX_PLANE",
+      "The access token belongs to the other execution plane",
+    );
+  }
   if (record.revokedAt) {
     throw new ApiError(401, "ACCESS_TOKEN_REVOKED", "The supplied access token has been revoked");
   }
@@ -135,6 +143,67 @@ const resolveApiTokenPrincipal = async (token: string, request: Request): Promis
   };
 };
 
+/**
+ * v38: a merchant signs in once, on the Live plane, and the Sandbox plane is
+ * a separate database with no copy of that user. The Sandbox process accepts
+ * the same signed session (the KMS master key is shared by the deployment) and
+ * mirrors the merchant envelope and user into its own database on first use.
+ * Authorities come from the SIGNED token claims, never from a header.
+ */
+interface MirrorUserRecord {
+  id: string;
+  status: string;
+  role: string;
+  merchantId: string | null;
+  authoritiesMap: unknown;
+  appScopeIds: unknown;
+}
+
+const ensureSandboxMirrorUser = async (claims: {
+  sub: string;
+  role: string;
+  merchantId: string | null;
+  authorities: string[];
+  appScopeIds: string[];
+}): Promise<MirrorUserRecord | null> => {
+  if (!isSandboxPlane()) return null;
+  const existing = await client.user.findUnique({ where: { id: claims.sub } });
+  if (existing) return existing as MirrorUserRecord;
+  return client.$transaction(async (tx) => {
+    if (claims.merchantId) {
+      const merchant = await tx.merchant.findUnique({ where: { id: claims.merchantId } });
+      if (!merchant) {
+        await tx.merchant.create({
+          data: {
+            id: claims.merchantId,
+            legalName: `Sandbox Merchant ${claims.merchantId.slice(0, 8)}`,
+            tradeName: `Sandbox Merchant ${claims.merchantId.slice(0, 8)}`,
+            onboardingChannel: "SANDBOX",
+            country: "LY",
+            status: "ACTIVE",
+            kybStatus: "VERIFIED",
+            contactEmail: `sandbox+${claims.merchantId}@sandbox.local`,
+          } as never,
+        });
+      }
+    }
+    return (await tx.user.create({
+      data: {
+        id: claims.sub,
+        email: `sandbox+${claims.sub}@sandbox.local`,
+        role: claims.role as never,
+        merchantId: claims.merchantId,
+        authoritiesMap: claims.authorities as never,
+        appScopeIds: claims.appScopeIds as never,
+        isMaker: true,
+        isChecker: ["SECURITY_ADMIN", "FINANCE", "MLRO", "COMPLIANCE"].includes(claims.role),
+        mfaRequired: false,
+        status: "ACTIVE",
+      } as never,
+    })) as MirrorUserRecord;
+  });
+};
+
 const resolveSessionPrincipal = async (token: string): Promise<Principal> => {
   let claims;
   try {
@@ -145,7 +214,8 @@ const resolveSessionPrincipal = async (token: string): Promise<Principal> => {
   if (await isSessionRevoked(claims.jti)) {
     throw new ApiError(401, "SESSION_REVOKED", "The session has been revoked");
   }
-  const user = await client.user.findUnique({ where: { id: claims.sub } });
+  const user = await client.user.findUnique({ where: { id: claims.sub } })
+    ?? await ensureSandboxMirrorUser(claims);
   if (!user) {
     throw new ApiError(401, "SESSION_USER_MISSING", "The session principal no longer exists");
   }
@@ -178,8 +248,19 @@ export const authenticate = async (request: Request): Promise<Principal> => {
   if (!token) {
     throw new ApiError(401, "AUTH_REQUIRED", "A bearer token is required for this endpoint");
   }
-  if (token.startsWith("pg_live_")) {
-    return resolveApiTokenPrincipal(token, request);
+  if (token.startsWith("pg_live_") || token.startsWith("pg_test_")) {
+    const plane = getExecutionPlane();
+    if (!tokenMatchesPlane(token, plane)) {
+      throw new ApiError(
+        401,
+        plane === "LIVE" ? "SANDBOX_TOKEN_ON_LIVE_PLANE" : "LIVE_TOKEN_ON_SANDBOX_PLANE",
+        plane === "LIVE"
+          ? "A sandbox (pg_test_) token cannot be used on the LIVE execution plane"
+          : "A live (pg_live_) token cannot be used on the SANDBOX execution plane",
+      );
+    }
+    const principal = await resolveApiTokenPrincipal(token, request);
+    return principal;
   }
   return resolveSessionPrincipal(token);
 };

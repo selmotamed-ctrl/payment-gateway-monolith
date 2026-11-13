@@ -54,9 +54,9 @@ const statement: RailHandler = (context) => {
 };
 
 const STATEMENT_GATEWAYS = [
-  "edfali", "sadad", "mobicash", "moamalat", "ly_pay", "onepay", "tlync", "mypay", "dpay",
+  "edfali", "sadad", "mobicash", "moamalat", "ly_pay", "cbl_lypay", "onepay", "tlync", "mypay", "dpay",
   "plutu", "yussor", "sahara", "masrefy", "hawelli", "gpay_libya", "numo_pay", "libyana",
-  "mpgs", "evopay", "neompay",
+  "mpgs", "evopay", "evo_pay", "neompay",
 ] as const;
 
 /** Every gateway exposes a settlement statement endpoint. */

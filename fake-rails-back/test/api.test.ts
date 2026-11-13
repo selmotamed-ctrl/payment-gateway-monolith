@@ -297,3 +297,76 @@ describe("fake-rails-back API", () => {
     expect("webhook_url" in body.transaction).toBe(false);
   });
 });
+
+describe("stateful Fake Rails v2 control plane", () => {
+  test("lists the seeded test customers with live balances", async () => {
+    const response = await request("/control/accounts?railCode=sadad");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      accounts: Array<{ identifier: string; available_balance_lyd: string; status: string }>;
+    };
+    expect(body.accounts).toHaveLength(5);
+    expect(body.accounts.some((account) => account.available_balance_lyd === "50000.0000")).toBe(true);
+    expect(body.accounts.some((account) => account.status === "FROZEN")).toBe(true);
+  });
+
+  test("adjusts a test customer balance through the control plane", async () => {
+    const list = await request("/control/accounts?railCode=onepay");
+    const body = (await list.json()) as { accounts: Array<{ id: string; identifier: string; available_balance_lyd: string }> };
+    const target = body.accounts.find((account) => account.available_balance_lyd === "50000.0000")!;
+    const patched = await request(`/control/accounts/${target.id}`, {
+      method: "PATCH",
+      body: { quickPreset: "SET_ZERO" },
+    });
+    expect(patched.status).toBe(200);
+    const updated = (await patched.json()) as { account: { available_balance_lyd: string } };
+    expect(updated.account.available_balance_lyd).toBe("0.0000");
+    await request(`/control/accounts/${target.id}`, {
+      method: "PATCH",
+      body: { quickPreset: "TOP_UP_5000" },
+    });
+    const restored = await request(`/control/accounts/${target.id}`);
+    expect(restored.status).toBe(200);
+    const restoredBody = (await restored.json()) as { account: { available_balance_lyd: string } };
+    expect(restoredBody.account.available_balance_lyd).toBe("5000.0000");
+  });
+
+  test("an OTP flow reserves, reveals and captures against a real test account", async () => {
+    const list = await request("/control/accounts?railCode=sadad");
+    const body = (await list.json()) as {
+      accounts: Array<{ id: string; identifier: string; available_balance_lyd: string; daily_spent_lyd: string }>;
+    };
+    const rich = body.accounts.find((account) => account.available_balance_lyd === "50000.0000")!;
+    const reference = `API-V2-${Date.now()}`;
+
+    const verify = await request("/rails/sadad/verify", {
+      method: "POST",
+      body: { reference, amount: "200.00", phone: rich.identifier },
+    });
+    expect(verify.status).toBe(200);
+    const verification = (await verify.json()) as { otp: string };
+
+    const helper = await request(`/control/checkout-helper/${reference}`);
+    expect(helper.status).toBe(200);
+    const helperBody = (await helper.json()) as {
+      activeAttemptSecrets: { expectedOtp: string; boundAccountIdentifier: string; heldAmountLyd: string } | null;
+    };
+    expect(helperBody.activeAttemptSecrets?.expectedOtp).toBe(verification.otp);
+    expect(helperBody.activeAttemptSecrets?.boundAccountIdentifier).toBe(rich.identifier);
+    expect(helperBody.activeAttemptSecrets?.heldAmountLyd).toBe("200.0000");
+
+    const confirm = await request("/rails/sadad/confirm", {
+      method: "POST",
+      body: { reference, otp: verification.otp },
+    });
+    expect(confirm.status).toBe(200);
+
+    const after = await request("/control/accounts?railCode=sadad");
+    const afterBody = (await after.json()) as {
+      accounts: Array<{ identifier: string; available_balance_lyd: string; daily_spent_lyd: string }>;
+    };
+    const updated = afterBody.accounts.find((account) => account.identifier === rich.identifier)!;
+    expect(updated.available_balance_lyd).toBe("49800.0000");
+    expect(updated.daily_spent_lyd).toBe("200.0000");
+  });
+});

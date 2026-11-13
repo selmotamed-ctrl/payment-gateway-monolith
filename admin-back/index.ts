@@ -22,7 +22,7 @@ export const createApp = () => {
   const reportEngineJson = express.json({ limit: "24mb" });
   const defaultJson = express.json({ limit: env.MAX_JSON_BODY_BYTES });
   app.use((request, response, next) => {
-    const parser = /^\/api\/v1\/admin\/report-engine(\/|$)/.test(request.path)
+    const parser = /^\/api\/v1\/admin\/(sandbox\/mirror\/)?report-engine(\/|$)/.test(request.path)
       ? reportEngineJson
       : defaultJson;
     parser(request, response, next);

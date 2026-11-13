@@ -3,9 +3,10 @@ id: platform.topology
 title: Service Topology
 status: partial
 confidence: high
-last_verified: 2026-11-07
+last_verified: 2026-11-13
 verified_against: d695518+working-tree
 code:
+  - core-back/lib/executionPlane.ts
   - core-back/index.ts
   - core-back/api/index.ts
   - admin-back/index.ts
@@ -28,6 +29,7 @@ design_sources:
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#11-high-level-system--storage-topology-diagram
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#62-edge-to-core-mtls-upstream-load-balancer--health-failover-admin-back-merchant-back-checkout-back
 tests:
+  - core-back/test/sandboxPlane.test.ts
   - core-back/test/exhaustive/05-api-matrix/mtls-channel-isolation.test.ts
   - admin-back/test/mtls-client.test.ts
   - merchant-back/test/mtls-client.test.ts
@@ -363,3 +365,7 @@ These are unit/integration tests. No live multi-host deployment was run for this
 ## Security hardening (2026-11-05)
 
 Edge to core: the shared upstream client only marks a node unhealthy on transport/TLS errors and 502/503/504, caps buffered responses and total deadline, uses a separate SSE agent pool, and replays PUT/DELETE only with an idempotency key. Details are in the shared upstream client part. Edge TRUSTED_PROXY_CIDRS now defaults to loopback only.
+
+## v38 sandbox plane (2026-11-13)
+
+The topology gains a second, isolated core process, `pg-core-sandbox`, on port 4005 with `EXECUTION_PLANE=SANDBOX`. It connects only to `payment_gateway_sandbox` and routes every rail call to the local `fake-rails-back`. The Live `pg-core-back` keeps `EXECUTION_PLANE=LIVE` and `payment_gateway_prod`. Both processes are separate even on a single host; there is no shared operational table and no shared connection pool. `checkout-back` selects the sandbox pool for `sbx_*` links and `SANDBOX` inbound environments; merchant/admin select it for their `/sandbox/*` namespaces. See `05-sandbox-execution-plane.md`.

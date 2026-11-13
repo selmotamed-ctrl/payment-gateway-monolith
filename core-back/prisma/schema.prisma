@@ -1170,6 +1170,8 @@ model Wallet {
   merchantId  String       @map("merchant_id") @db.Uuid
   glAccountId String       @unique @map("gl_account_id") @db.Uuid
   currency    String       @default("LYD") @db.Char(3)
+  /// Operator/merchant supplied display label. The wallet id remains the stable identifier.
+  name        String?      @db.VarChar(120)
   status      WalletStatus @default(PENDING)
 
   merchant        Merchant         @relation(fields: [merchantId], references: [id], onDelete: Restrict)
@@ -1193,6 +1195,8 @@ model AccessToken {
   tokenHash          String    @unique @map("token_hash") @db.Char(64)
   lastFour           String    @map("last_four") @db.Char(4)
   scopes             Json
+  /// Execution plane of the token (`v38`). The plaintext prefix (`pg_live_`/`pg_test_`) is checked against the plane.
+  env                GatewayEnvironmentType @default(LIVE)
   ipWhitelistEnabled Boolean   @default(false) @map("ip_whitelist_enabled")
   revokedAt          DateTime? @map("revoked_at")
   lastUsedAt         DateTime? @map("last_used_at")
@@ -1205,6 +1209,7 @@ model AccessToken {
   @@index([merchantId])
   @@index([applicationId])
   @@index([merchantId, revokedAt])
+  @@index([env, revokedAt])
   @@map("access_tokens")
 }
 
@@ -1226,6 +1231,9 @@ model PaymentLink {
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
   key               String           @unique
+  /// Human-readable label for the payment link (not used as a key).
+  title             String?          @db.VarChar(160)
+  description       String?          @db.Text
   applicationId     String           @map("application_id") @db.Uuid
   walletId          String           @map("wallet_id") @db.Uuid
   amount            Decimal          @db.Decimal(18, 4)
@@ -1238,6 +1246,8 @@ model PaymentLink {
   activeLockedCount Int              @default(0) @map("active_locked_count")
   redirectUrl       String?          @map("redirect_url") @db.Text
   railWhitelist     Json?            @map("rail_whitelist")
+  /// Execution plane of the link (`v38`): LIVE on payment_gateway_prod, SANDBOX on payment_gateway_sandbox.
+  env               GatewayEnvironmentType @default(LIVE)
   state             PaymentLinkState @default(PENDING)
   expiresAt         DateTime?        @map("expires_at")
 
@@ -1251,6 +1261,7 @@ model PaymentLink {
   @@index([state])
   @@index([applicationId, createdAt])
   @@index([state, createdAt])
+  @@index([env, createdAt])
   @@map("payment_links")
 }
 
@@ -3949,4 +3960,35 @@ model AmlCaseEvidence {
   @@index([amlCaseId], map: "idx_aml_case_evidence_case")
   @@index([storageObjectId], map: "idx_aml_case_evidence_object")
   @@map("aml_case_evidence")
+}
+
+/// `v38`: the single-row execution-plane fence of a database. A LIVE database
+/// (`payment_gateway_prod`) rejects SANDBOX rows and a SANDBOX database
+/// (`payment_gateway_sandbox`) rejects LIVE rows at trigger level.
+model SystemExecutionPlane {
+  id                 Int       @id @default(autoincrement())
+  plane              String    @db.VarChar(16)
+  allowFakeRails     Boolean   @default(false) @map("allow_fake_rails")
+  liveSyncRevision   Int       @default(0) @map("live_sync_revision")
+  lastSyncedFromLive DateTime? @map("last_synced_from_live")
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@map("system_execution_plane")
+}
+
+/// `v38`: audit trail of sandbox control operations (blueprint sync, demo seed,
+/// merchant reset, wallet balance control, fake-rails account changes).
+model SandboxSyncAudit {
+  id                String   @id @default(cuid())
+  syncType          String   @map("sync_type") @db.VarChar(48)
+  merchantId        String?  @map("merchant_id") @db.Uuid
+  actorId           String?  @map("actor_id") @db.Uuid
+  actorRole         String?  @map("actor_role") @db.VarChar(32)
+  blueprintRevision Int      @default(0) @map("blueprint_revision")
+  summaryJson       Json     @default("{}") @map("summary_json")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([merchantId, createdAt(sort: Desc)], map: "idx_sandbox_sync_audit_merchant_created")
+  @@index([syncType, createdAt(sort: Desc)], map: "idx_sandbox_sync_audit_type_created")
+  @@map("sandbox_sync_audits")
 }

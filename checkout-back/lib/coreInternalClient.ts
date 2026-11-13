@@ -36,6 +36,8 @@ const IDEMPOTENT_METHODS = new Set<CoreHttpMethod>([
 export type CoreHttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 export interface CoreRequestOptions {
+  /** v38: an explicit pool (the Sandbox core plane); absent = the Live pool. */
+  targetUrls?: string[];
   method: CoreHttpMethod;
   path: string;
   headers?: Record<string, string>;
@@ -51,6 +53,8 @@ export interface CoreRequestOptions {
 }
 
 export interface CoreCallOptions {
+  /** v38: an explicit pool (the Sandbox core plane); absent = the Live pool. */
+  targetUrls?: string[];
   method: CoreHttpMethod;
   path: string;
   body?: unknown;
@@ -337,8 +341,16 @@ const createCoreAgent = (maxSockets = 64): https.Agent =>
     timeout: env.CORE_REQUEST_TIMEOUT_MS,
   });
 
-let nodes: CoreNodeState[] = [];
-let poolSignature = "";
+interface CorePoolState {
+  signature: string;
+  nodes: CoreNodeState[];
+}
+/**
+ * v38: the client keeps one pool per configured URL set. The Live and Sandbox
+ * pools are independent, so failing over inside one never sends a request to
+ * the other plane.
+ */
+const corePools = new Map<string, CorePoolState>();
 let roundRobinCursor = 0;
 let clock: () => number = () => Date.now();
 
@@ -354,12 +366,13 @@ export const setCoreClockForTests = setCoreClock;
 export const resetCoreClockForTests = resetCoreClock;
 
 const destroyNodes = (): void => {
-  for (const node of nodes) {
-    node.agent.destroy();
-    node.streamAgent.destroy();
+  for (const pool of corePools.values()) {
+    for (const node of pool.nodes) {
+      node.agent.destroy();
+      node.streamAgent.destroy();
+    }
   }
-  nodes = [];
-  poolSignature = "";
+  corePools.clear();
   roundRobinCursor = 0;
 };
 
@@ -369,13 +382,14 @@ export const resetCoreAgent = (): void => {
 
 export const resetCorePool = resetCoreAgent;
 
-const ensureNodes = (): CoreNodeState[] => {
-  const configured = coreBackUrls();
+const ensureNodes = (targetUrls?: string[]): CoreNodeState[] => {
+  const configured = targetUrls ?? coreBackUrls();
   const signature = configured.join("\n");
-  if (signature !== poolSignature) {
-    destroyNodes();
-    poolSignature = signature;
-    nodes = configured.map((url) => ({
+  const existing = corePools.get(signature);
+  if (existing) return existing.nodes;
+  const created: CorePoolState = {
+    signature,
+    nodes: configured.map((url) => ({
       url,
       agent: createCoreAgent(),
       streamAgent: createCoreAgent(MAX_STREAM_SOCKETS),
@@ -383,9 +397,10 @@ const ensureNodes = (): CoreNodeState[] => {
       inFlight: 0,
       failures: 0,
       cooldownUntil: 0,
-    }));
-  }
-  return nodes;
+    })),
+  };
+  corePools.set(signature, created);
+  return created.nodes;
 };
 
 export const getCoreAgent = (): https.Agent => {
@@ -397,7 +412,7 @@ export const getCoreAgent = (): https.Agent => {
   return primary.agent;
 };
 
-const eligiblePool = (excluded: Set<string>): CoreNodeState[] => {
+const eligiblePool = (nodes: CoreNodeState[], excluded: Set<string>): CoreNodeState[] => {
   const now = clock();
   const halfOpen = nodes.filter(
     (node) => !excluded.has(node.url) && !node.healthy && node.inFlight === 0 && now >= node.cooldownUntil,
@@ -406,8 +421,8 @@ const eligiblePool = (excluded: Set<string>): CoreNodeState[] => {
   return nodes.filter((node) => !excluded.has(node.url) && node.healthy);
 };
 
-const selectNode = (excluded: Set<string>): CoreNodeState | undefined => {
-  const pool = eligiblePool(excluded);
+const selectNode = (nodes: CoreNodeState[], excluded: Set<string>): CoreNodeState | undefined => {
+  const pool = eligiblePool(nodes, excluded);
   if (pool.length === 0) return undefined;
   const leastInFlight = Math.min(...pool.map((node) => node.inFlight));
   const tied = pool.filter((node) => node.inFlight === leastInFlight);
@@ -416,7 +431,7 @@ const selectNode = (excluded: Set<string>): CoreNodeState | undefined => {
   return node;
 };
 
-const hasSelectableNode = (excluded: Set<string>): boolean => eligiblePool(excluded).length > 0;
+const hasSelectableNode = (nodes: CoreNodeState[], excluded: Set<string>): boolean => eligiblePool(nodes, excluded).length > 0;
 
 const markNodeFailure = (node: CoreNodeState): void => {
   const now = clock();
@@ -648,7 +663,7 @@ const performRequest = (
   });
 
 export const request = async (options: CoreRequestOptions): Promise<CoreResponse> => {
-  const pool = ensureNodes();
+  const pool = ensureNodes(options.targetUrls);
   if (pool.length === 0) throw coreUnavailable();
   const maxAttempts = retryAttemptsFor(
     options.method,
@@ -662,7 +677,7 @@ export const request = async (options: CoreRequestOptions): Promise<CoreResponse
   let lastError: unknown;
   let lastResponse: CoreResponse | undefined;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const node = selectNode(attempted);
+    const node = selectNode(pool, attempted);
     if (!node) break;
     attempted.add(node.url);
     node.inFlight += 1;
@@ -688,7 +703,7 @@ export const request = async (options: CoreRequestOptions): Promise<CoreResponse
   }
   if (lastResponse) return lastResponse;
   if (lastError !== undefined) {
-    if (isNodeFailure(lastError) && !hasSelectableNode(new Set())) throw coreUnavailable();
+    if (isNodeFailure(lastError) && !hasSelectableNode(pool, new Set())) throw coreUnavailable();
     throw mapCoreTransportError(lastError);
   }
   throw coreUnavailable();
@@ -696,6 +711,7 @@ export const request = async (options: CoreRequestOptions): Promise<CoreResponse
 
 export const callCoreRaw = async (options: CoreCallOptions): Promise<CoreResponse> =>
   request({
+    ...(options.targetUrls ? { targetUrls: options.targetUrls } : {}),
     method: options.method,
     path: options.path,
     query: options.query,
@@ -850,7 +866,7 @@ const bufferedStream = (
 };
 
 export const openCoreStream = async (options: CoreCallOptions): Promise<CoreStream> => {
-  const pool = ensureNodes();
+  const pool = ensureNodes(options.targetUrls);
   if (pool.length === 0) throw coreUnavailable();
   const maxAttempts = retryAttemptsFor(
     options.method,
@@ -865,7 +881,7 @@ export const openCoreStream = async (options: CoreCallOptions): Promise<CoreStre
   let lastError: unknown;
   let lastStream: CoreStream | undefined;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const node = selectNode(attempted);
+    const node = selectNode(pool, attempted);
     if (!node) break;
     attempted.add(node.url);
     node.inFlight += 1;
@@ -875,7 +891,7 @@ export const openCoreStream = async (options: CoreCallOptions): Promise<CoreStre
       markNodeHealthy(node);
       if (isUnavailableStatus(stream.statusCode)) {
         const canRetry =
-          attempt + 1 < maxAttempts && hasSelectableNode(attempted);
+          attempt + 1 < maxAttempts && hasSelectableNode(pool, attempted);
         if (canRetry) {
           const body = await drainStream(stream.stream).catch(() => Buffer.alloc(0));
           lastStream = bufferedStream(stream.statusCode, stream.headers, body);
@@ -893,7 +909,7 @@ export const openCoreStream = async (options: CoreCallOptions): Promise<CoreStre
   }
   if (lastStream) return lastStream;
   if (lastError !== undefined) {
-    if (isNodeFailure(lastError) && !hasSelectableNode(new Set())) throw coreUnavailable();
+    if (isNodeFailure(lastError) && !hasSelectableNode(pool, new Set())) throw coreUnavailable();
     throw mapCoreTransportError(lastError);
   }
   throw coreUnavailable();

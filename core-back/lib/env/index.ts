@@ -419,6 +419,18 @@ export const envSchema = z.strictObject({
    * gateway version's `allowed_hosts`. Every other private, loopback and
    * metadata address stays blocked.
    */
+  /**
+   * `v38`: the execution plane of this process. LIVE talks only to
+   * payment_gateway_prod; SANDBOX talks only to payment_gateway_sandbox and
+   * routes every rail to the local Fake Rails emulator.
+   */
+  EXECUTION_PLANE: z.enum(["LIVE", "SANDBOX"]).default("LIVE"),
+  /** Development escape hatch: permits the Fake Rails emulator on a LIVE-plane process. */
+  PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE: booleanFromEnvironment.default(false),
+  /** Fake Rails control-plane base URL used by the sandbox routes (http(s)://host:port/api/fake-rails/v1). */
+  FAKE_RAILS_CONTROL_URL: z.url().optional(),
+  /** Shared secret sent as `x-fake-rails-control-token` on control-plane calls. */
+  FAKE_RAILS_CONTROL_TOKEN: z.string().min(8).optional(),
   FAKE_RAILS_ENABLED: booleanFromEnvironment.default(false),
   FAKE_RAILS_ALLOW_IN_PRODUCTION: booleanFromEnvironment.default(false),
   IS_TEST_SERVER: booleanFromEnvironment.default(false),
@@ -692,6 +704,10 @@ const resolveEnvironment = (): CoreEnv => {
     UNKNOWN_ATTEMPT_CASE_SLA_HOURS: 24,
     NOTIFICATION_WEBHOOK_URL: undefined,
     NOTIFICATION_WEBHOOK_TIMEOUT_MS: 5000,
+    EXECUTION_PLANE: "LIVE",
+    PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE: false,
+    FAKE_RAILS_CONTROL_URL: undefined,
+    FAKE_RAILS_CONTROL_TOKEN: undefined,
     FAKE_RAILS_ENABLED: false,
     FAKE_RAILS_ALLOW_IN_PRODUCTION: false,
     IS_TEST_SERVER: false,

@@ -3,9 +3,10 @@ id: merchant-ui.portal
 title: Merchant Portal
 status: partial
 confidence: high
-last_verified: 2026-11-09
+last_verified: 2026-11-13
 verified_against: d695518+working-tree
 code:
+  - merchant-front/src/pages/sandbox/**
   - merchant-front/src/router/index.ts
   - merchant-front/src/layouts/**
   - merchant-front/src/pages/**
@@ -24,6 +25,7 @@ design_sources:
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md
   - design/06-ui/merchant_landing_page_redesign.md
 tests:
+  - tests/unit/guide-content.test.ts
   - tests/e2e/merchant/shell.spec.ts
   - tests/e2e/merchant/table-row-context-menu.spec.ts
   - tests/e2e/merchant/auth.spec.ts
@@ -436,3 +438,9 @@ Merchant dialogs, menus and drawers share the admin shell rule: `.v-overlay__con
 ## Dispute evidence
 
 Dispute evidence is uploaded as raw bytes to `POST /api/v1/merchant/disputes/:id/attachments` and listed/read/deleted through the matching attachment routes. The old base64 `POST /disputes/:id/evidence` remains only as a legacy JSON endpoint; the portal no longer uses it. Downloads are available only once the vault object is `ACTIVE` (AV clean).
+
+## v38-v39 Sandbox Studio (2026-11-13)
+
+A separate "Sandbox Studio (Testing & Training)" section adds `/sandbox/overview`, `/sandbox/wallets`, `/sandbox/wallets/:id`, `/sandbox/applications`, `/sandbox/applications/:id`, `/sandbox/links`, `/sandbox/links/:id`, `/sandbox/payments`, `/sandbox/payments/:id`, `/sandbox/accounts` and `/sandbox/tokens`. The pages call the sandbox namespace only, are wrapped in the amber sandbox banner, use `ApiTable`/`TableFilters`/`TableRowActions`/`SummaryExportCard`/`SlideOverDrawer`/`FormModal`, and expose the demo/history seeder, wallet balance/cash-out/freeze controls, application/link detail, payment timeline and adjustment tabs, Fake Rails account/movement/hold controls (merchant-owned copies; shared presets are read-only), settlement import, and `pg_test_` token/key/webhook actions.
+
+A "Sandbox Live Mirror" section reuses the Live pages under `/sandbox/mirror/*` (cash-outs, disputes, POS, credentials, team, webhooks, tokens, statements, reports). The Axios interceptor rewrites Live API paths to `/sandbox/mirror/*` and the router aliases Live navigation into the mirror; Exit sandbox removes `?live=1` and returns to Live. Wallet detail shows the sharded ledger, balance controller, pending cash-outs and a real sandbox cash-out; payment detail shows charged/settled/fee/commission/net, refundable amount, refund, dispute simulation/resolution, checkout inspector secrets and journal lines.

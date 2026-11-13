@@ -80,13 +80,6 @@ const platformSettings = [
     },
   },
   {
-    key: "OD-10",
-    valueJson: {
-      sandboxBeforeApproval: true,
-      description: "Pending merchants may use sandbox rails before approval.",
-    },
-  },
-  {
     key: "merchant_reports.policy",
     valueJson: {
       enabled: true,

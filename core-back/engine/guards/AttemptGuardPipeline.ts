@@ -206,32 +206,11 @@ export const selfPaymentPolicyFromSetting = (value: unknown): SelfPaymentPolicy 
 };
 
 /**
- * OD-10, the decision register setting that allows a `PENDING` merchant to
- * use the sandbox before the onboarding is approved.
- *
- * The seed stores the register keys (`OD-10`) with a JSON object, so the
- * value is read from the field inside it and the documented default (`true`)
- * applies when the setting is absent.
+ * `v38` removed OD-10. A `PENDING` merchant no longer receives simulated
+ * sandbox access on the Lively-configured process: sandbox is a separate
+ * execution plane and database (`EXECUTION_PLANE=SANDBOX`), so the Live
+ * plane refuses every non-ACTIVE merchant without reinterpretation.
  */
-export const OD10_SANDBOX_BEFORE_APPROVAL_KEY = "OD-10";
-export const OD10_SANDBOX_BEFORE_APPROVAL_FIELD = "sandboxBeforeApproval";
-export const DEFAULT_SANDBOX_BEFORE_APPROVAL = true;
-
-export const sandboxBeforeApprovalFromSetting = (value: unknown): boolean => {
-  if (typeof value === "boolean") {
-    // Tolerate a deployment that still stores the raw flag instead of the
-    // OD-10 register object.
-    return value;
-  }
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const field = (value as Record<string, unknown>)[OD10_SANDBOX_BEFORE_APPROVAL_FIELD];
-    if (typeof field === "boolean") {
-      return field;
-    }
-  }
-  return DEFAULT_SANDBOX_BEFORE_APPROVAL;
-};
-
 const ACTIVE_ATTEMPT_STATUSES = [
   "CREATED",
   "INITIATING",
@@ -1014,26 +993,21 @@ export class AttemptGuardPipeline {
   }
 
   private async merchantStatusPosture(
-    tx: Tx,
+    _tx: Tx,
     merchant: MerchantRow,
     env: Environment,
   ): Promise<{ allowed: boolean; reason: string }> {
+    // The posture is identical on both planes: only an ACTIVE merchant
+    // transacts. A pending Live merchant trains on the Sandbox plane through
+    // its own ACTIVE sandbox envelope, never through a status reinterpretation.
+    // The environment itself is resolved from the process plane by the Intake
+    // routes, and the database fence refuses a row from the other plane.
+    void env;
     switch (merchant.status) {
       case "ACTIVE":
         return { allowed: true, reason: "ACTIVE" };
-      case "PENDING": {
-        if (env !== "SANDBOX") {
-          return { allowed: false, reason: "MERCHANT_NOT_ACTIVE" };
-        }
-        const setting = await this.repositories.governance.getPlatformSetting(
-          tx,
-          OD10_SANDBOX_BEFORE_APPROVAL_KEY,
-        );
-        if (!sandboxBeforeApprovalFromSetting(setting)) {
-          return { allowed: false, reason: "MERCHANT_NOT_ACTIVE" };
-        }
-        return { allowed: true, reason: "SANDBOX_ALLOWED" };
-      }
+      case "PENDING":
+        return { allowed: false, reason: "MERCHANT_NOT_ACTIVE" };
       case "SUSPENDED":
         return { allowed: false, reason: "MERCHANT_SUSPENDED" };
       case "REJECTED":

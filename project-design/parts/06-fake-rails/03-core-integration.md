@@ -352,3 +352,7 @@ Core's outbound URL compile now fails closed on an empty `allowed_hosts` (`HOST_
 ## Remediation round 2 (2026-11-08): webhook target allowlist
 
 `webhook_url` is validated at accept time and again at send time against `lib/webhookTarget.ts` (`allowedWebhookHosts`: the host of `CORE_INBOUND_BASE_URL` plus `FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS`; no credentials in the URL, http/https only) and the dispatcher no longer follows redirects (GAP-059). Test: `fake-rails-back/test/webhook-target.test.ts`.
+
+## v2 sandbox control integration (2026-11-13)
+
+`core-back` reaches the emulator through `FakeRailsControlClient` (`FAKE_RAILS_CONTROL_URL`, optional `FAKE_RAILS_CONTROL_TOKEN`). The sandbox core uses it for the Sandbox Studio account list/edit/reset and the checkout inspector. The Live core never mounts these routes and has no control URL. The synthetic clearing statement is generated and can be settled, but is not yet ingested by sandbox reconciliation (GAP-071).

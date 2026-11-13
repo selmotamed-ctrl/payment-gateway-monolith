@@ -339,6 +339,45 @@ export const useSections = () => {
             ],
         },
         {
+            title: t("Sandbox & Fake Rails"),
+            icon: "mdi-flask-outline",
+            routes: [
+                {
+                    label: t("Sandbox Overview"),
+                    name: "SandboxOverview",
+                    icon: "mdi-view-dashboard-outline",
+                },
+                {
+                    label: t("Sandbox Merchants"),
+                    name: "SandboxMerchants",
+                    icon: "mdi-storefront-outline",
+                },
+                {
+                    label: t("Fake Rails Accounts & Clearing"),
+                    name: "SandboxFakeRails",
+                    icon: "mdi-bank-outline",
+                },
+            ],
+        },
+        {
+            title: t("Sandbox Live Mirror"),
+            icon: "mdi-monitor-multiple",
+            routes: [
+                { label: t("Sandbox Merchants"), name: "SandboxMirrorMerchants", icon: "mdi-storefront-outline" },
+                { label: t("Sandbox Wallets"), name: "SandboxMirrorWallets", icon: "mdi-wallet-outline" },
+                { label: t("Sandbox Applications"), name: "SandboxMirrorApplications", icon: "mdi-apps" },
+                { label: t("Sandbox Transactions"), name: "SandboxMirrorTransactions", icon: "mdi-credit-card-outline" },
+                { label: t("Sandbox Disputes"), name: "SandboxMirrorDisputes", icon: "mdi-scale-balance" },
+                { label: t("Sandbox Cash-Outs"), name: "SandboxMirrorCashOuts", icon: "mdi-cash-fast" },
+                { label: t("Sandbox Adjustments"), name: "SandboxMirrorAdjustments", icon: "mdi-tune-variant" },
+                { label: t("Sandbox Reconciliation"), name: "SandboxMirrorReconciliation", icon: "mdi-clipboard-check-outline" },
+                { label: t("Sandbox Gateways & Routes"), name: "SandboxMirrorGateways", icon: "mdi-connection" },
+                { label: t("Sandbox Audit Logs"), name: "SandboxMirrorAuditLog", icon: "mdi-history" },
+                { label: t("Sandbox Jobs & Outbox"), name: "SandboxMirrorJobsOutbox", icon: "mdi-cog-sync-outline" },
+                { label: t("Sandbox Reports"), name: "SandboxMirrorReportsCatalog", icon: "mdi-file-chart-outline" },
+            ],
+        },
+        {
             title: t("Learning"),
             icon: "mdi-school-outline",
             routes: [

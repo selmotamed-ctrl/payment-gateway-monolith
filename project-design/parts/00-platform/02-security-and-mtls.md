@@ -3,7 +3,7 @@ id: platform.security
 title: Security and mTLS
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-13
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/index.ts
@@ -36,6 +36,7 @@ design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#21-service-roles-boundaries-and-security-constraints
   - design/90-archive/delivery-logs/opencode_technical_delivery_design.md#41-core-back-mtls-server--channel-bound-cn-guard
 tests:
+  - core-back/test/sandboxPlane.test.ts
   - core-back/test/security-regressions/gap-019-020-027-session.test.ts
   - admin-back/test/session-cookie-and-logout.test.ts
   - merchant-back/test/session-cookie-and-logout.test.ts
@@ -470,3 +471,7 @@ Fake Rails tester tokens stay in localStorage (GAP-019 residual); httpOnly cooki
 - **Staff creation (GAP-052).** A maker no longer chooses a staff member's password or phone. `POST /internal/admin/users` creates an `INVITED` user; the invitee sets their own password and phone through a single-use, vault-sealed invitation token (`POST /internal/admin/auth/accept-invitation`, public and rate-limited). The `status: ACTIVE` approval is refused until the invitation is completed, and the checker context shows the masked phone and the invitation state.
 - **Uploads (GAP-054).** Both edges verify the session shape and expiry and apply a per-address limiter and a `Content-Length` pre-check before multer buffers a byte (`uploadGuards`; admin limit `UPLOAD_RATE_LIMIT_MAX`, default 20 per window).
 - **Revocation durability (GAP-058).** A revoked session is written atomically to Redis (`SET ... PX`) and to the `session_revocations` table, so a Redis eviction or restart cannot resurrect it; the lookup falls back to the table. See `core.data` section 13.
+
+## v38 execution-plane security (2026-11-13)
+
+API tokens are bound to a plane: `pg_live_*` is refused on SANDBOX with `401 LIVE_TOKEN_ON_SANDBOX_PLANE` and `pg_test_*` is refused on LIVE with `401 SANDBOX_TOKEN_ON_LIVE_PLANE`; core also compares the token row's `env`. A session minted by Live is accepted on the Sandbox core only after the signed claims are mirrored into the sandbox database (merchant envelope and user with the signed authorities); authorities never come from a header. The edge-to-core channel remains mTLS with the existing per-role client certificates; the sandbox pool uses the same client material but a separate URL set.

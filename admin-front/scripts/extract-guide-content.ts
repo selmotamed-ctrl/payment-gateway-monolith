@@ -869,7 +869,7 @@ const main = (): void => {
         readingPaths: 8,
         quickAnswers: 60,
         dataBlocks: 3,
-        contextMapScreens: 30,
+        contextMapScreens: 31,
         errorCodes: 19,
         edgeCases: 140,
     };

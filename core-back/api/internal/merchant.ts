@@ -14,6 +14,7 @@ import { scanKybBytes } from "../../lib/kybScan";
 import { buildListQuery, countUnlessSkipped, listResponse } from "../../lib/listQuery";
 import { buildMerchantUserInfo } from "../../lib/auth/uiAuthorities";
 import { generateAccessToken, hashAccessToken, hashPassword, signSession, verifyPasswordOrDummy } from "../../lib/auth";
+import { accessTokenPrefixForPlane, getExecutionPlane } from "../../lib/executionPlane";
 import { issueMfaChallenge, verifyMfaChallenge } from "../../lib/auth/mfaChallenges";
 import {
   assertLoginAllowed,
@@ -1514,7 +1515,15 @@ router.post("/wallets", async (request: Request, response: Response) => {
       },
     });
     return tx.wallet.create({
-      data: { merchantId, glAccountId: glAccount.id, currency: body.currency.toUpperCase(), status: "PENDING" },
+      data: {
+        merchantId,
+        glAccountId: glAccount.id,
+        currency: body.currency.toUpperCase(),
+        name: body.label?.trim() || null,
+        // Sandbox entities are immediately usable for testing. Live wallets keep
+        // the approval-driven PENDING lifecycle.
+        status: getExecutionPlane() === "SANDBOX" ? "ACTIVE" : "PENDING",
+      },
     });
   });
   response.status(201).json({ id: wallet.id, currency: wallet.currency, status: wallet.status });
@@ -1675,7 +1684,7 @@ router.post("/applications", async (request: Request, response: Response) => {
       assignedWalletId: wallet.id,
       railWhitelist: jsonOptional(body.railWhitelist),
       redirectDomainAllowlist: jsonOptional(body.redirectDomainAllowlist),
-      status: "PENDING",
+      status: getExecutionPlane() === "SANDBOX" ? "ACTIVE" : "PENDING",
     },
   });
   response.status(201).json({ id: application.id, name: application.name, status: application.status });
@@ -1706,6 +1715,7 @@ router.patch("/applications/:id", async (request: Request, response: Response) =
         assignedWalletId: z.string().min(1).max(64).optional(),
         railWhitelist: z.array(z.string().min(1).max(64)).min(1).optional(),
         redirectDomainAllowlist: z.array(z.string().min(1).max(200)).min(1).optional(),
+        status: z.enum(["ACTIVE", "SUSPENDED"]).optional(),
       })
       .strict(),
     request.body,
@@ -1715,10 +1725,20 @@ router.patch("/applications/:id", async (request: Request, response: Response) =
     throw new ApiError(404,APPLICATION_NOT_FOUND_CODE, "The application does not exist");
   }
   assertApplicationInScope(request, application.id);
+  const plane = getExecutionPlane();
+  if (plane !== "SANDBOX" && body.status !== undefined) {
+    throw new ApiError(
+      400,
+      "APPLICATION_STATUS_LIVE_MANAGED",
+      "An application status is changed by the platform review flow on Live",
+    );
+  }
   const sensitive = body.assignedWalletId !== undefined
     || body.railWhitelist !== undefined
     || body.redirectDomainAllowlist !== undefined;
-  if (sensitive) {
+  // Sandbox testing is self-service: a sensitive edit is applied immediately and
+  // audited instead of entering the Live maker-checker queue.
+  if (sensitive && plane !== "SANDBOX") {
     const principal = principalOf(request);
     const approval = await client.approvalRequest.create({
       data: {
@@ -1734,13 +1754,39 @@ router.patch("/applications/:id", async (request: Request, response: Response) =
     response.status(202).json({ status: "PENDING_REVIEW", approvalRequestId: approval.id });
     return;
   }
-  const updated = await client.application.update({
-    where: { id: application.id },
-    data: {
-      name: body.name,
-      businessUseDescription: body.businessUseDescription,
-      expectedMonthlyVolume: body.expectedMonthlyVolume ? new Prisma.Decimal(body.expectedMonthlyVolume) : undefined,
-    },
+  const updated = await client.$transaction(async (tx) => {
+    const row = await tx.application.update({
+      where: { id: application.id },
+      data: {
+        name: body.name,
+        businessUseDescription: body.businessUseDescription,
+        expectedMonthlyVolume: body.expectedMonthlyVolume ? new Prisma.Decimal(body.expectedMonthlyVolume) : undefined,
+        assignedWalletId: body.assignedWalletId,
+        railWhitelist: body.railWhitelist !== undefined ? jsonOptional(body.railWhitelist) : undefined,
+        redirectDomainAllowlist: body.redirectDomainAllowlist !== undefined ? jsonOptional(body.redirectDomainAllowlist) : undefined,
+        status: body.status,
+      },
+    });
+    if (plane === "SANDBOX") {
+      await auditMerchantAction(tx, request, {
+        action: "SANDBOX_APPLICATION_UPDATED",
+        entityType: "APPLICATION",
+        entityId: row.id,
+        before: {
+          status: application.status,
+          assignedWalletId: application.assignedWalletId,
+          railWhitelist: application.railWhitelist,
+          redirectDomainAllowlist: application.redirectDomainAllowlist,
+        },
+        after: {
+          status: row.status,
+          assignedWalletId: row.assignedWalletId,
+          railWhitelist: row.railWhitelist,
+          redirectDomainAllowlist: row.redirectDomainAllowlist,
+        },
+      });
+    }
+    return row;
   });
   response.json({ id: updated.id, name: updated.name, status: updated.status });
 });
@@ -1773,6 +1819,7 @@ const linkCreateSchema = z
     infiniteUse: z.boolean().optional(),
     activeSlots: z.number().int().min(1).max(100_000).optional(),
     allowedRails: z.array(z.string().min(1).max(64)).max(50).optional(),
+    redirectUrl: z.string().trim().max(1000).url().optional(),
     metadata: z.record(z.string().max(64), z.unknown()).optional(),
     idempotencyKey: z.string().min(8).max(128).optional(),
   })
@@ -1810,16 +1857,45 @@ const createLink = async (
   if (!merchant) {
     throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
   }
-  // A suspended application or a frozen wallet can not take in new payment links.
+  // v38: the link belongs to the process plane, never to a merchant status.
+  // Sandbox links are created only by pg-core-sandbox in the separate sandbox
+  // database; a non-ACTIVE merchant on the Live plane is refused.
+  const env = getExecutionPlane();
   assertCommerceActive({
+    merchantStatus: env === "LIVE" ? merchant.status : "ACTIVE",
     applicationStatus: application.status,
     walletStatus: wallet.status,
-    env: merchant.status === "ACTIVE" ? "LIVE" : "SANDBOX",
+    env,
   });
-  const key = `pl_${randomBytes(12).toString("base64url")}`;
+  if (body.redirectUrl) {
+    const allowlist = asStringArray(application.redirectDomainAllowlist) ?? [];
+    if (allowlist.length > 0) {
+      const redirectHost = new URL(body.redirectUrl).hostname.toLowerCase();
+      const allowed = allowlist.some((entry) => {
+        const value = entry.trim().toLowerCase();
+        try {
+          return new URL(value).hostname === redirectHost;
+        } catch {
+          return value === redirectHost;
+        }
+      });
+      if (!allowed) {
+        throw new ApiError(
+          409,
+          "REDIRECT_DOMAIN_NOT_ALLOWED",
+          "The redirect URL host is not on the application redirect allowlist",
+        );
+      }
+    }
+  }
+  const key = env === "SANDBOX"
+    ? `sbx_${randomBytes(12).toString("base64url")}`
+    : `pl_${randomBytes(12).toString("base64url")}`;
   const link = await client.paymentLink.create({
     data: {
       key,
+      title: body.title.trim(),
+      description: body.description?.trim() || null,
       applicationId: application.id,
       walletId: wallet.id,
       amount: new Prisma.Decimal(body.amount),
@@ -1827,8 +1903,9 @@ const createLink = async (
       feeBearer: normalizeFeeBearer(body.feeBearer),
       infiniteUse: body.infiniteUse ?? false,
       useCount: body.infiniteUse ? 1_000_000 : body.maxUses ?? 1,
-      redirectUrl: null,
+      redirectUrl: body.redirectUrl ?? null,
       railWhitelist: jsonOptional(body.allowedRails),
+      env,
       state: "PENDING",
       expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
     },
@@ -1849,7 +1926,7 @@ const createLink = async (
       railWhitelist: asStringArray(link.railWhitelist),
     },
     channel: "WEB",
-    env: merchant.status === "ACTIVE" ? "LIVE" : "SANDBOX",
+    env,
   });
   return { link, visible };
 };
@@ -2479,14 +2556,19 @@ router.post("/tokens", async (request: Request, response: Response) => {
   if (!application) {
     throw new ApiError(409, "APPLICATION_REQUIRED", "An application is required to issue an access token");
   }
+  const tokenPlane = getExecutionPlane();
   const plaintext = generateAccessToken();
+  const prefixed = tokenPlane === "SANDBOX"
+    ? `${accessTokenPrefixForPlane("SANDBOX")}${plaintext.slice("pg_live_".length)}`
+    : plaintext;
   const created = await client.accessToken.create({
     data: {
       merchantId,
       applicationId: application.id,
       name: body.name,
-      tokenHash: hashAccessToken(plaintext),
-      lastFour: plaintext.slice(-4),
+      env: tokenPlane,
+      tokenHash: hashAccessToken(prefixed),
+      lastFour: prefixed.slice(-4),
       scopes: tokenScopes,
       expiresAt: tokenExpiresAt,
       ipWhitelistEnabled: Boolean(body.allowedCidrs?.length),
@@ -2508,7 +2590,7 @@ router.post("/tokens", async (request: Request, response: Response) => {
   });
   response.status(201).json({
     id: created.id,
-    token: plaintext,
+    token: prefixed,
     lastFour: created.lastFour,
     warning: "This token is shown once and cannot be retrieved again",
   });

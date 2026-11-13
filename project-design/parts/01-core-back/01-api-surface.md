@@ -3,9 +3,10 @@ id: core.api
 title: Core API Surface
 status: partial
 confidence: high
-last_verified: 2026-11-08
+last_verified: 2026-11-13
 verified_against: 5a24f6f+working-tree
 code:
+  - core-back/api/internal/sandboxControl.ts
   - core-back/api/index.ts
   - core-back/api/internal/admin.ts
   - core-back/api/internal/merchant.ts
@@ -39,6 +40,7 @@ design_sources:
   - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#154-the-four-eyes-action-matrix
   - design/10-fixes/_0001_operator_cases.md
 tests:
+  - core-back/test/sandboxPlane.test.ts
   - core-back/test/internal-routes.test.ts
   - core-back/test/list-query.test.ts
   - core-back/test/approval-queue.test.ts
@@ -720,3 +722,13 @@ Core adds these internal admin routes under `/internal/admin` (all confidential 
 
 
 Object-storage routes include the admin summary/object/access-log/legal-hold/maintenance surface, dispute attachments (admin and merchant), AML case evidence, reconciliation statement download, and brand-asset upload/content/delete. The admin object list accepts `page`, `pageSize`, `namespace`, `status`, `statuses`, `bucket`, `ownerMerchantId`, `legalHold`, `sha256Hex`, `search`, `sortKey` and `sortDirection`. Legal-hold lift returns `202` for a second checker; place is immediate.
+
+## Sandbox Studio read models (2026-11-13)
+
+The sandbox control router adds merchant read endpoints under `/internal/sandbox/merchant/studio`: overview, wallets (list/summary/detail), applications (list/summary/detail), links (list/summary/detail), payments (list/summary) and tokens (list/summary/detail). Lists use the shared `buildListQuery`/`listResponse` contract with server pagination, sorting, search and filters, and expose relation labels (wallet/application/rail/gateway) plus computed counts and balances. `PATCH /merchant/wallets/:id/status` freezes/activates a sandbox wallet and records a `sandbox_sync_audits` row.
+
+The admin router adds paginated `/admin/merchants` and `/admin/merchants/summary`, sandbox merchant detail (`/admin/merchants/:id`), `/admin/audits`, and `/admin/fake-rails/accounts/summary`. Fake Rails transaction lists accept `page`/`pageSize` as well as `limit`/`offset`; statements and webhook lists remain bounded. Admin endpoints require a staff principal.
+
+## v38-v39 `/internal/sandbox` (2026-11-13)
+
+A new internal router, reachable from merchant-back and admin-back and mounted only on the SANDBOX plane, exposes the merchant sandbox overview, wallet detail/ledger/balance/simulated cash-out, payment detail/refund/dispute simulation and resolution, demo seed and 20-payment history seed, reset, Fake Rails account proxy/control (paginated, merchant-scoped, preset clone/restore), reconciliation import, webhook test ping, clearing pools/statement/settle, and staff overview, merchant list/overview, global reset, Fake Rails scenarios/transactions/webhooks/statements. Checkout adds `GET/POST /pay/:linkKey/sandbox-accounts`, account movements, `PATCH /pay/:linkKey/sandbox-accounts/:accountId`, `GET /pay/:linkKey/logs/:attemptId/sandbox-inspector` and `POST /pay/:linkKey/logs/:attemptId/sandbox-simulate`; all of them refuse a non-`sbx_` key with `403 SANDBOX_INSPECTOR_FORBIDDEN_ON_LIVE_LINK`.

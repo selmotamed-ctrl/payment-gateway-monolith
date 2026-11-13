@@ -2,10 +2,10 @@
 
 <!-- GENERATED FILE. Edit core-back/prisma/schema.prisma instead. Do not hand-edit this file. -->
 
-- Models: **112**
+- Models: **114**
 - Enums: **127**
-- Schema version: **37**
-- Migrations: **36**
+- Schema version: **39**
+- Migrations: **38**
 
 ## Models
 
@@ -121,6 +121,8 @@
 - `ReportAssetBundleEntry`
 - `DisputeAttachment`
 - `AmlCaseEvidence`
+- `SystemExecutionPlane`
+- `SandboxSyncAudit`
 
 ## Enums
 
@@ -290,3 +292,5 @@
 - `20261111130000_merchant_report_chrome`
 - `20261112000000_v36_enterprise_object_storage_engine`
 - `20261113090000_storage_engine_hardening`
+- `20261113120000_v38_sandbox_execution_plane`
+- `20261114090000_v39_sandbox_studio`

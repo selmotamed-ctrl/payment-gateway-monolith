@@ -3,9 +3,10 @@ id: edge.merchant
 title: Merchant Edge BFF
 status: partial
 confidence: high
-last_verified: 2026-11-06
+last_verified: 2026-11-13
 verified_against: 5a24f6f+working-tree
 code:
+  - merchant-back/api/sandboxProxy.ts
   - core-back/lib/realtimeBus.ts
   - merchant-back/index.ts
   - merchant-back/api/**
@@ -19,6 +20,7 @@ design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#162-merchant-back-public-api-apiv1merchant--apiv1external---forwards-to-core-back-internalmerchant
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#5-host-aware-ufw-firewall--network-isolation-provisioning
 tests:
+  - merchant-back/test/sandbox-routing.test.ts
   - merchant-back/test/session-cookie-and-logout.test.ts
   - core-back/test/storage-engine/telemetry-and-realtime.test.ts
   - merchant-back/test/core-forwarding.test.ts
@@ -345,3 +347,7 @@ The edge validates the catalog query shape and the public execute shape (`inputs
 ## Dispute attachments
 
 `GET/POST /api/v1/merchant/disputes/:id/attachments`, `GET .../:attachmentId/content` and `DELETE .../:attachmentId` proxy the shared-vault evidence routes. Uploads use the raw-byte forwarder; content uses the streaming proxy. Downloads are refused by core while the object is quarantined.
+
+## v38-v39 sandbox namespace (2026-11-13)
+
+`/api/v1/merchant/sandbox/*` is a dedicated namespace forwarded only to `SANDBOX_CORE_BACK_URLS`. `/overview`, `/seed-demo`, `/seed-history`, `/reset`, `/wallets/:id/*`, `/payments/:id/*`, `/disputes/:id/resolve`, `/reconciliation/*`, `/fake-rails/*` and `/webhooks/test-ping` map to the sandbox control routes; list/create resources (`/wallets`, `/applications`, `/links`, `/payments`, `/tokens`) map to the sandbox core's `/internal/merchant/*` (same router, separate database). `/mirror/*` raw-forwards to `/internal/merchant/*` for Live-parity pages, including a dedicated multipart dispute-evidence route and the POS SSE stream. `/api/external/v1/*` accepts `pg_live_*` and `pg_test_*` and selects the Live or Sandbox pool from the prefix. The client keeps one pool per URL set, so failover cannot cross planes.

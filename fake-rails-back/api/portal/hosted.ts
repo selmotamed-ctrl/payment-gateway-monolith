@@ -6,6 +6,10 @@ import { webhookDispatcher } from "../../engine/webhooks/WebhookDispatcher";
 import { resolveRail } from "../../engine/chaos/DefaultRailScenarios";
 import { broadcast } from "./eventHub";
 import { issueHostedActionToken, verifyHostedActionToken } from "../../lib/tickets";
+import {
+  captureAccountHoldForTransaction,
+  releaseAccountHoldForTransaction,
+} from "../../engine/accounts/AccountLedgerService";
 
 const actionSchema = z.object({
   action: z.enum([
@@ -68,6 +72,7 @@ export const createHostedRouter = (): Router => {
 
     switch (body.action) {
       case "APPROVE": {
+        captureAccountHoldForTransaction(transaction.id);
         updateTransaction(transaction.id, { status: "PAID", settled_amount_lyd: transaction.normalized_amount_lyd });
         webhookDispatcher.dispatch({
           transaction: { ...transaction, status: "PAID" },
@@ -77,6 +82,7 @@ export const createHostedRouter = (): Router => {
         break;
       }
       case "APPROVE_TAMPERED": {
+        captureAccountHoldForTransaction(transaction.id);
         updateTransaction(transaction.id, { status: "PAID", settled_amount_lyd: transaction.normalized_amount_lyd });
         webhookDispatcher.dispatch({
           transaction: { ...transaction, status: "PAID" },
@@ -102,6 +108,7 @@ export const createHostedRouter = (): Router => {
         break;
       }
       case "DECLINE": {
+        releaseAccountHoldForTransaction(transaction.id, "Customer declined on the hosted page");
         updateTransaction(transaction.id, { status: "FAILED" });
         webhookDispatcher.dispatch({
           transaction,
@@ -112,6 +119,7 @@ export const createHostedRouter = (): Router => {
         break;
       }
       case "CANCEL": {
+        releaseAccountHoldForTransaction(transaction.id, "Customer cancelled on the hosted page");
         updateTransaction(transaction.id, { status: "CANCELLED" });
         redirectUrl = transaction.cancel_url ?? redirectUrl;
         break;

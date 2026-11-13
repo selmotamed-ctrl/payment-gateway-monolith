@@ -276,7 +276,7 @@ Applies to all three copies of the client:
 
 ## Admin Edge BFF
 
-> Status: `partial` · Last verified: 2026-11-10
+> Status: `partial` · Last verified: 2026-11-13
 
 ## 1. Purpose and scope
 
@@ -581,3 +581,7 @@ The edge validates identifiers, enums and body shapes, but keeps the core as the
 read/write guards. `assetsRouter` additionally exposes binary
 `POST /assets/upload` (multipart `file` + `name`) and
 `GET /assets/:id/content`, forwarding raw bytes to core.
+
+## v38-v39 sandbox proxy (2026-11-13)
+
+`/api/v1/admin/sandbox/*` forwards only to `SANDBOX_CORE_BACK_URLS` (no Live fallback): overview, per-merchant overview/reset, wallet balance, global reset and Fake Rails accounts/clearing/scenarios/transactions/webhooks/statements. `/mirror/*` raw-forwards to `/internal/admin/*` for the Live-parity pages; report-engine mirror bodies use the 24 MB parser. The staff session is mirrored by the sandbox core. The Studio routes are open to signed-in staff; the sandbox data is isolated. An unconfigured sandbox node answers `503 SANDBOX_NODE_UNAVAILABLE`.

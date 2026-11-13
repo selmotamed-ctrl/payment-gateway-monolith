@@ -1,4 +1,5 @@
 import { routesRoles } from "@/layouts/sections";
+import { isSandboxPath, SANDBOX_ROUTE_ALIASES, sandboxMode, setSandboxMode } from "@/state/sandbox";
 import { resolveRouteRequirement } from "@/utils/routeAuthorities";
 import { hasOneOfAuthorities, isAuthenticated, user } from "@/state/user";
 import { showSnackBar } from "@/utils/snackBar";
@@ -59,6 +60,231 @@ const router = createRouter({
                     name: "MerchantDetail",
                     component: () => import("@/pages/merchants/[id]"),
                     meta: { parentName: "Merchants" },
+                },
+                {
+                    path: "sandbox/overview",
+                    name: "SandboxOverview",
+                    component: () => import("@/pages/sandbox/overview/index"),
+                },
+                {
+                    path: "sandbox/merchants",
+                    name: "SandboxMerchants",
+                    component: () => import("@/pages/sandbox/merchants/index"),
+                },
+                {
+                    path: "sandbox/merchants/:id",
+                    name: "SandboxMerchantDetail",
+                    component: () => import("@/pages/sandbox/merchants/[id]"),
+                    meta: { parentName: "SandboxMerchants" },
+                },
+                {
+                    path: "sandbox/fake-rails",
+                    name: "SandboxFakeRails",
+                    component: () => import("@/pages/sandbox/fake-rails/index"),
+                },
+                {
+                    path: "sandbox/mirror/dashboard",
+                    name: "SandboxMirrorDashboard",
+                    component: () => import("@/pages/dashboard/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/merchants",
+                    name: "SandboxMirrorMerchants",
+                    component: () => import("@/pages/merchants/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/merchants/:id",
+                    name: "SandboxMirrorMerchantDetail",
+                    component: () => import("@/pages/merchants/[id]"),
+                    meta: { sandboxMirror: true, parentName: "Merchant"},
+                },
+                {
+                    path: "sandbox/mirror/wallets",
+                    name: "SandboxMirrorWallets",
+                    component: () => import("@/pages/wallets/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/wallets/:id",
+                    name: "SandboxMirrorWalletDetail",
+                    component: () => import("@/pages/wallets/[id]"),
+                    meta: { sandboxMirror: true, parentName: "Wallet"},
+                },
+                {
+                    path: "sandbox/mirror/applications",
+                    name: "SandboxMirrorApplications",
+                    component: () => import("@/pages/applications/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/transactions",
+                    name: "SandboxMirrorTransactions",
+                    component: () => import("@/pages/transactions/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/approvals",
+                    name: "SandboxMirrorApprovals",
+                    component: () => import("@/pages/approvals/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/audit-logs",
+                    name: "SandboxMirrorAuditLog",
+                    component: () => import("@/pages/audit-logs/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/operator-cases",
+                    name: "SandboxMirrorOperatorCases",
+                    component: () => import("@/pages/operator-cases/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/operator-cases/:id",
+                    name: "SandboxMirrorOperatorCaseDetail",
+                    component: () => import("@/pages/operator-cases/[id]"),
+                    meta: { sandboxMirror: true, parentName: "OperatorCase"},
+                },
+                {
+                    path: "sandbox/mirror/disputes",
+                    name: "SandboxMirrorDisputes",
+                    component: () => import("@/pages/disputes/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/adjustments",
+                    name: "SandboxMirrorAdjustments",
+                    component: () => import("@/pages/adjustments/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/cashouts",
+                    name: "SandboxMirrorCashOuts",
+                    component: () => import("@/pages/cashouts/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/reconciliation",
+                    name: "SandboxMirrorReconciliation",
+                    component: () => import("@/pages/reconciliation/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/finance/pricing",
+                    name: "SandboxMirrorPricing",
+                    component: () => import("@/pages/finance/pricing/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/finance/profitability",
+                    name: "SandboxMirrorProfitability",
+                    component: () => import("@/pages/finance/profitability/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/finance/liquidity",
+                    name: "SandboxMirrorLiquidity",
+                    component: () => import("@/pages/finance/liquidity/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/finance/journal-entries",
+                    name: "SandboxMirrorJournalEntries",
+                    component: () => import("@/pages/finance/journal-entries/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/finance/invariant",
+                    name: "SandboxMirrorInvariant",
+                    component: () => import("@/pages/finance/invariant/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/credential-sets",
+                    name: "SandboxMirrorCredentialSets",
+                    component: () => import("@/pages/credential-sets/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/gateways",
+                    name: "SandboxMirrorGateways",
+                    component: () => import("@/pages/gateways/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/gateways/wizard/:id",
+                    name: "SandboxMirrorGatewayWizard",
+                    component: () => import("@/pages/gateways/wizard/[id]"),
+                    meta: { sandboxMirror: true, parentName: "GatewayWizard"},
+                },
+                {
+                    path: "sandbox/mirror/rails",
+                    name: "SandboxMirrorRails",
+                    component: () => import("@/pages/rails/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/routes",
+                    name: "SandboxMirrorGatewayRoutes",
+                    component: () => import("@/pages/routes/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/reports/catalog",
+                    name: "SandboxMirrorReportsCatalog",
+                    component: () => import("@/pages/reports/catalog/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/reports/studio",
+                    name: "SandboxMirrorReportsStudio",
+                    component: () => import("@/pages/reports/studio/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/reports/chrome",
+                    name: "SandboxMirrorReportsChrome",
+                    component: () => import("@/pages/reports/chrome/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/reports/needs-migration",
+                    name: "SandboxMirrorReportsNeedsMigration",
+                    component: () => import("@/pages/reports/needs-migration/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/reports/chrome/needs-migration",
+                    name: "SandboxMirrorReportsChromeNeedsMigration",
+                    component: () => import("@/pages/reports/chrome/needs-migration/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/reports/merchant-reports",
+                    name: "SandboxMirrorReportsMerchantReports",
+                    component: () => import("@/pages/reports/merchant-reports/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/settings/platform",
+                    name: "SandboxMirrorPlatformSettings",
+                    component: () => import("@/pages/settings/platform/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/system/jobs-outbox",
+                    name: "SandboxMirrorJobsOutbox",
+                    component: () => import("@/pages/system/jobs-outbox/index"),
+                    meta: { sandboxMirror: true},
+                },
+                {
+                    path: "sandbox/mirror/system/object-storage",
+                    name: "SandboxMirrorObjectStorage",
+                    component: () => import("@/pages/system/object-storage/index"),
+                    meta: { sandboxMirror: true},
                 },
                 {
                     path: "wallets",
@@ -417,6 +643,25 @@ export const defaultRoute = {
 };
 
 router.beforeEach((to, from) => {
+    const wasSandbox = sandboxMode.value;
+    setSandboxMode(isSandboxPath(to.path));
+    if (wasSandbox && !isSandboxPath(to.path) && to.name) {
+        // An explicit Exit sandbox link always wins over the Live->mirror alias
+        // map; otherwise Exit redirected straight back into the mirror.
+        if (String(to.query.live ?? "") === "1") {
+            const { live: _live, ...query } = to.query;
+            return { path: to.path, query };
+        }
+        const alias = SANDBOX_ROUTE_ALIASES[String(to.name)];
+        if (alias && alias !== to.name) {
+            return { name: alias, params: to.params, query: to.query };
+        }
+        const publicRoute = ["Login", "AcceptInvitation", "NotFound", "Landing"].includes(String(to.name));
+        if (!publicRoute) {
+            showSnackBar({ type: "primary", message: "This screen is not available in Sandbox. Use Exit sandbox to return to Live." });
+            return false;
+        }
+    }
     const authenticated = isAuthenticated();
     if (to.fullPath !== from.fullPath) {
         routeLoading.value = true;

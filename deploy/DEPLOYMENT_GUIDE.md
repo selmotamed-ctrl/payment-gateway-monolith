@@ -345,6 +345,31 @@ format. A PostgreSQL-family role (primary, replica, audit DB, log DB) may
 co-locate on `5432`; a storage listener may never collide with a compute
 listener on the same SSH endpoint.
 
+### Sandbox execution plane (`SANDBOX_*`)
+
+The Sandbox is a **second core process and PostgreSQL database**, not a row
+filter. When enabled, the planner emits `pg-core-sandbox` in addition to
+`pg-core-back`, the PostgreSQL provisioner creates `payment_gateway_sandbox`
+and the PgBouncer application/session aliases `pgw_sandbox` /
+`pgw_sandbox_session`, and the edges receive `SANDBOX_CORE_BACK_URLS`.
+
+| Variable | Notes |
+| :--- | :--- |
+| `SANDBOX_ENABLED` | `true` plans/provisions/migrates/seeds the second core and database. Requires `FAKE_RAILS_ENABLED=true`. |
+| `SANDBOX_NODE` | Optional `nodeId@sshHost:sshPort:privateIp:servicePort`; defaults to the first core node. |
+| `SANDBOX_CORE_PORT` | Sandbox core listener, default `4005`; must differ from every other compute port. |
+| `SANDBOX_DB_NAME` | Sandbox database, default `payment_gateway_sandbox`; must differ from the Live database. |
+| `SANDBOX_REMOTE_DIR` | Sandbox release tree, default `/var/www/pg-core-sandbox`; must differ from `CORE_REMOTE_DIR`. |
+| `SANDBOX_CORE_BACK_URLS` | Optional explicit HTTPS list for the edges; derived from `SANDBOX_NODE`/`CORE_NODES` otherwise. |
+| `FAKE_RAILS_CONTROL_TOKEN` | Shared service token the sandbox core presents to Fake Rails. Required when Fake Rails runs with `NODE_ENV=production`. |
+
+The sandbox core gets `EXECUTION_PLANE=SANDBOX`, the sandbox database URL and
+session leader-election alias, Fake Rails enabled, and **no backup daemon URL**.
+The sandbox database and the Fake Rails SQLite data are not backup targets.
+The provisioner must create the sandbox database before `migrate deploy`; the
+first sandbox deployment runs `db-seed` and `seed-fake-rails` so its reference
+catalog can resolve routes without a separate manual step.
+
 ### Core (`CORE_*`)
 
 `CORE_SSH_HOST`, `CORE_SSH_PORT`, `CORE_SSH_USER`, `CORE_SSH_KEY_PATH`,
@@ -386,8 +411,8 @@ takes effect on the next deploy without rebuilding the SPA.
 
 - `internal-ca.crt` / `internal-ca.key` — the offline root CA.
 - `core-back.crt` / `.key` — the **server** certificate. Its SAN contains
-  `IP:<every CORE_NODES private IP>`, `IP:127.0.0.1` and
-  `DNS:core-back.internal`. The multi-IP SAN is mandatory: edge hosts reach the
+  `IP:<every CORE_NODES private IP>`, `IP:<every SANDBOX_NODE private IP>`,
+  `IP:127.0.0.1` and `DNS:core-back.internal`. The multi-IP SAN is mandatory: edge hosts reach the
   core nodes by private IP and TLS 1.3 verifies the hostname, so a rolling core
   deploy never breaks mTLS on the remaining nodes.
 - `admin-back-client`, `merchant-back-client`, `checkout-back-client` — the
@@ -443,6 +468,7 @@ Playwright specs accept overrides: `PG_ADMIN_URL`, `PG_MERCHANT_URL`,
 | :--- | :--- | :--- |
 | Legacy `DB_HOST` | SSH, `DB_PORT` from `CORE_PRIVATE_IP` | — |
 | `CORE_NODES` | SSH, `CORE_PORT` from the admin/merchant/checkout private IPs | — |
+| Sandbox core | SSH, `SANDBOX_CORE_PORT` from the admin/merchant/checkout private IPs (same host or `SANDBOX_NODE`) | — |
 | `ADMIN_NODES` | SSH, `ADMIN_NGINX_LAN_PORT` from `LAN_ALLOWED_CIDRS` | `admin-back` on `127.0.0.1` |
 | `MERCHANT_NODES` | SSH, 80, 443 | `merchant-back` on `127.0.0.1` |
 | `CHECKOUT_NODES` | SSH, 80, 443 | `checkout-back` on `127.0.0.1` |
@@ -466,9 +492,11 @@ can never lock itself out.
    Redis, audit/log databases, backup engine). On the legacy single-host path,
    create the database/role and take a compressed pre-migration backup into
    `CORE_REMOTE_DIR/shared/backups/`.
-6. Deploy `core-back`: rsync, certs, `.env`, `bun install --frozen-lockfile`,
-   `prisma generate`, `migrate-deploy`, optional seed, atomic `current`
-   symlink, PM2 reload.
+6. Deploy `core-back` and, when `SANDBOX_ENABLED=true`, `pg-core-sandbox`:
+   rsync, certs, `.env`, `bun install --frozen-lockfile`, `prisma generate`,
+   `migrate-deploy`, optional seed, atomic `current` symlink, PM2 reload. The
+   sandbox database is migrated with the direct sandbox owner URL carrying `app.execution_plane=SANDBOX` (PgBouncer rejects custom startup options), then seeded with `db-seed` and `seed-fake-rails`;
+   the sandbox service is health-checked independently.
 7. Optional: deploy `fake-rails-back` + `fake-rails-front`.
 8. Deploy `admin-back` + `admin-front` on the LAN vhost.
 9. Deploy `merchant-back` + `merchant-front` (unbuffered POS SSE).

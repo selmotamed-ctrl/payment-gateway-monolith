@@ -3,9 +3,10 @@ id: core.storage
 title: Storage Engine
 status: partial
 confidence: high
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 verified_against: 5a24f6f+working-tree
 code:
+  - core-back/prisma/migrations/20261113120000_v38_sandbox_execution_plane
   - core-back/lib/storageEngine/telemetry.ts
   - core-back/lib/realtimeBus.ts
   - core-back/lib/storageEngine/**
@@ -13,6 +14,7 @@ code:
   - core-back/api/internal/backups.ts
   - core-back/prisma/migrations/**
 tests:
+  - core-back/test/sandboxPlane.test.ts
   - core-back/test/storage-engine/telemetry-and-realtime.test.ts
   - core-back/test/storage-engine/**
   - core-back/test/storage-engine/performance/**
@@ -514,3 +516,7 @@ backup daemon, `FsBlobStore` in local dev). The former
 bundles and catalog assets carry storage-object FKs. The `ObjectStorageMaintenanceWorker`
 (GC, orphan sweep, integrity scrub, lock reconcile, KEK rewrap, generic AV
 fallback) and the `object_storage` Platform Monitor check cover operations.
+
+## v38 database execution-plane fence (2026-11-13)
+
+`system_execution_plane` is a single-row lock per database. `enforce_execution_plane_env_fence()` is attached to `payment_links`, `payment_attempts` and `access_tokens`: a SANDBOX database always rejects LIVE rows; a LIVE database rejects SANDBOX rows when `app.plane_fence_strict=true` (the migration stores that at database level, and the test suite disables it only for its mixed throwaway database). `enforce_no_fake_rails_on_live_plane()` refuses a `FAKE*` gateway and an enabled gateway environment pointed at Fake Rails on a strict Live database unless `allow_fake_rails=true`.

@@ -7,6 +7,7 @@ import { createWebhooksRouter } from "./webhooks";
 import { createStatementsRouter } from "./statements";
 import { createSeederSyncRouter } from "./seederSync";
 import { createHostedRouter } from "./hosted";
+import { createAccountsRouter } from "./accounts";
 
 export const createPortalRouter = (): Router => {
   const router = Router();
@@ -17,6 +18,7 @@ export const createPortalRouter = (): Router => {
   router.use("/scenarios", createScenariosRouter());
   router.use("/webhooks", createWebhooksRouter());
   router.use("/statements", createStatementsRouter());
+  router.use(createAccountsRouter());
   router.use("/internal", createSeederSyncRouter());
   return router;
 };

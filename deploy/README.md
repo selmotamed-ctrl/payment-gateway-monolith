@@ -747,3 +747,7 @@ bun run test-matrix --topologies=T1 --intensity=smoke
 ## Object storage
 
 `OBJECT_STORAGE_NODE` runs `deploy/object-storage-daemon` on port 4095 over mTLS. The deploy installs Bun, creates `pgobjstore`, provisions the vault and certs, opens 4095 only to core and backup private IPs and injects the client cert/KEK into every core and backup host. Certificate distribution is per consumer: a co-located core/backup host never receives the object-storage server key. See `docs/architecture/object-storage-engine.md` and `docs/runbooks/object-storage-operations-and-dr.md`.
+
+## Parallel Sandbox plane
+
+Set `SANDBOX_ENABLED=true` (and keep Fake Rails enabled) to let the planner emit a second core process, `pg-core-sandbox`, with its own release tree and `payment_gateway_sandbox` database. The provisioner creates the database and the `pgw_sandbox` (transaction) / `pgw_sandbox_session` (session) PgBouncer aliases; the deploy migrates it with a direct owner URL carrying the SANDBOX plane GUC and runs `db-seed` plus `seed-fake-rails` when seeding is enabled. Sandbox and Fake Rails data are intentionally excluded from backup targets. See `project-design/parts/00-platform/05-sandbox-execution-plane.md`.

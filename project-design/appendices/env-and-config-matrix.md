@@ -219,6 +219,10 @@
 | `deploy/deploy.env.example` | `REDIS_URL` |
 | `deploy/deploy.env.example` | `FAKE_RAILS_ENABLED` |
 | `deploy/deploy.env.example` | `FAKE_RAILS_ALLOW_IN_PRODUCTION` |
+| `deploy/deploy.env.example` | `SANDBOX_ENABLED` |
+| `deploy/deploy.env.example` | `SANDBOX_CORE_PORT` |
+| `deploy/deploy.env.example` | `SANDBOX_DB_NAME` |
+| `deploy/deploy.env.example` | `SANDBOX_REMOTE_DIR` |
 | `deploy/deploy.env.example` | `IS_TEST_SERVER` |
 | `deploy/deploy.env.example` | `FAKE_RAILS_SSH_HOST` |
 | `deploy/deploy.env.example` | `FAKE_RAILS_SSH_PORT` |
@@ -412,6 +416,10 @@
 | `core-back/lib/env/index.ts` | `UNKNOWN_ATTEMPT_CASE_SLA_HOURS` |
 | `core-back/lib/env/index.ts` | `NOTIFICATION_WEBHOOK_URL` |
 | `core-back/lib/env/index.ts` | `NOTIFICATION_WEBHOOK_TIMEOUT_MS` |
+| `core-back/lib/env/index.ts` | `EXECUTION_PLANE` |
+| `core-back/lib/env/index.ts` | `PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE` |
+| `core-back/lib/env/index.ts` | `FAKE_RAILS_CONTROL_URL` |
+| `core-back/lib/env/index.ts` | `FAKE_RAILS_CONTROL_TOKEN` |
 | `core-back/lib/env/index.ts` | `FAKE_RAILS_ENABLED` |
 | `core-back/lib/env/index.ts` | `FAKE_RAILS_ALLOW_IN_PRODUCTION` |
 | `core-back/lib/env/index.ts` | `IS_TEST_SERVER` |
@@ -426,6 +434,8 @@
 | `admin-back/lib/env/index.ts` | `ADMIN_BIND_HOST` |
 | `admin-back/lib/env/index.ts` | `CORE_BACK_URL` |
 | `admin-back/lib/env/index.ts` | `CORE_BACK_URLS` |
+| `admin-back/lib/env/index.ts` | `SANDBOX_CORE_BACK_URL` |
+| `admin-back/lib/env/index.ts` | `SANDBOX_CORE_BACK_URLS` |
 | `admin-back/lib/env/index.ts` | `MTLS_CLIENT_CERT_PATH` |
 | `admin-back/lib/env/index.ts` | `MTLS_CLIENT_KEY_PATH` |
 | `admin-back/lib/env/index.ts` | `MTLS_CA_CERT_PATH` |
@@ -454,6 +464,8 @@
 | `merchant-back/lib/env/index.ts` | `BIND_HOST` |
 | `merchant-back/lib/env/index.ts` | `CORE_BACK_URL` |
 | `merchant-back/lib/env/index.ts` | `CORE_BACK_URLS` |
+| `merchant-back/lib/env/index.ts` | `SANDBOX_CORE_BACK_URL` |
+| `merchant-back/lib/env/index.ts` | `SANDBOX_CORE_BACK_URLS` |
 | `merchant-back/lib/env/index.ts` | `MTLS_CLIENT_CERT_PATH` |
 | `merchant-back/lib/env/index.ts` | `MTLS_CLIENT_KEY_PATH` |
 | `merchant-back/lib/env/index.ts` | `MTLS_CA_CERT_PATH` |
@@ -485,6 +497,8 @@
 | `checkout-back/lib/env/index.ts` | `BIND_HOST` |
 | `checkout-back/lib/env/index.ts` | `CORE_BACK_URL` |
 | `checkout-back/lib/env/index.ts` | `CORE_BACK_URLS` |
+| `checkout-back/lib/env/index.ts` | `SANDBOX_CORE_BACK_URL` |
+| `checkout-back/lib/env/index.ts` | `SANDBOX_CORE_BACK_URLS` |
 | `checkout-back/lib/env/index.ts` | `MTLS_CLIENT_CERT_PATH` |
 | `checkout-back/lib/env/index.ts` | `MTLS_CLIENT_KEY_PATH` |
 | `checkout-back/lib/env/index.ts` | `MTLS_CA_CERT_PATH` |
@@ -515,6 +529,7 @@
 | `fake-rails-back/lib/env/index.ts` | `FAKE_RAILS_ADMIN_PASSWORD` |
 | `fake-rails-back/lib/env/index.ts` | `FAKE_RAILS_JWT_SECRET` |
 | `fake-rails-back/lib/env/index.ts` | `FAKE_RAILS_SEEDER_TOKEN` |
+| `fake-rails-back/lib/env/index.ts` | `FAKE_RAILS_CONTROL_TOKEN` |
 | `fake-rails-back/lib/env/index.ts` | `FAKE_RAILS_TRUST_PROXY` |
 | `fake-rails-back/lib/env/index.ts` | `FAKE_RAILS_PORTAL_ACCOUNT_LOCKOUT` |
 | `fake-rails-back/lib/env/index.ts` | `FAKE_RAILS_ALLOWED_CIDRS` |

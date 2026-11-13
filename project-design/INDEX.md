@@ -21,6 +21,7 @@ This is the canonical entrypoint for the payment-gateway project design.
 - [Security and mTLS](parts/00-platform/02-security-and-mtls.md) — `platform.security` · `partial`
 - [Runtime and Configuration](parts/00-platform/03-runtime-and-config.md) — `platform.runtime` · `partial`
 - [Observability](parts/00-platform/04-observability.md) — `platform.observability` · `partial`
+- [Parallel Sandbox Execution Plane](parts/00-platform/05-sandbox-execution-plane.md) — `platform.sandbox` · `partial`
 
 ### 01-core-back
 

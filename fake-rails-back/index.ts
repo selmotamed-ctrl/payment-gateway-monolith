@@ -6,6 +6,8 @@ import { parseTrustProxy, peerAllowlist } from "./lib/security";
 import { requestLoggerMiddleware } from "./lib/requestLogger";
 import { getDb } from "./engine/db";
 import { listScenarios } from "./engine/chaos/scenarioStore";
+import { startAutoApprovalScheduler } from "./engine/chaos/AutoApprovalScheduler";
+import { releaseExpiredHolds } from "./engine/accounts/AccountLedgerService";
 import { webhookDispatcher } from "./engine/webhooks/WebhookDispatcher";
 import { broadcast } from "./api/portal/eventHub";
 
@@ -31,6 +33,11 @@ export const start = async () => {
     broadcast(event.type, event);
   });
 
+  const stopAutoApproval = startAutoApprovalScheduler();
+  const holdSweeper = setInterval(() => {
+    try { releaseExpiredHolds(); } catch { /* retry next tick */ }
+  }, 60_000);
+  (holdSweeper as unknown as { unref?: () => void }).unref?.();
   const app = createApp();
   const server = http.createServer(app);
 
@@ -45,6 +52,8 @@ export const start = async () => {
   });
 
   const stop = (): void => {
+    stopAutoApproval();
+    clearInterval(holdSweeper);
     server.close(() => process.exit(0));
   };
   process.once("SIGTERM", stop);

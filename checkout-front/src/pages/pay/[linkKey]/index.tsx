@@ -15,6 +15,7 @@ import { QrOrCodeRenderer } from "@/components/renderers/QrOrCodeRenderer";
 import { PushOrTransferRenderer } from "@/components/renderers/PushOrTransferRenderer";
 import { PerRailInstructionsBanner } from "@/components/help/PerRailInstructionsBanner";
 import { CheckoutHelpDrawer } from "@/components/help/CheckoutHelpDrawer";
+import { SandboxCheckoutInspector } from "@/components/sandbox/SandboxCheckoutInspector";
 import ThemeMenu from "@/components/ThemeMenu";
 import type {
     AttemptSnapshot,
@@ -23,6 +24,7 @@ import type {
     InitiateResponse,
     PayLinkSummary,
     RailDescriptor,
+    SandboxAccountItem,
 } from "@/components/renderers/types";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
@@ -449,6 +451,52 @@ const PayPage = dc(() => {
         void message;
     };
 
+    const sandboxEnabled = computed(
+        () => summary.value?.env === "SANDBOX" || linkKey.value.startsWith("sbx_"),
+    );
+
+    const autoFillSandboxAccount = (account: SandboxAccountItem) => {
+        const rail = selectedRail.value;
+        if (!rail) return;
+        const next: Record<string, string> = { ...formValues.value };
+        for (const field of rail.fields ?? []) {
+            const key = field.key.toLowerCase();
+            const inputType = String(field.inputType ?? "").toLowerCase();
+            if (inputType === "otp" || key.includes("otp") || key.includes("amount")) {
+                next[field.key] = "";
+            } else if (inputType === "select") {
+                const options = field.options ?? [];
+                next[field.key] = options.includes(account.identifier) ? account.identifier : options[0] ?? "";
+            } else if (/(cvv|cvc|pin|secret|password)/.test(key) || field.sensitivity === "SENSITIVE") {
+                next[field.key] = account.secretPin;
+            } else if (key.includes("expir")) {
+                next[field.key] = account.expiry ?? "";
+            } else if (
+                field.sensitivity === "PAN"
+                || inputType === "phone"
+                || inputType === "wallet_id"
+                || /(card|pan|account|phone|mobile|wallet|msisdn|subscriber|identifier|voucher|serial)/.test(key)
+            ) {
+                next[field.key] = account.identifier;
+            }
+        }
+        formValues.value = next;
+        formErrors.value = {};
+        showNotice("Sandbox test account applied");
+    };
+
+    const refreshAttemptFromInspector = () => {
+        const current = attempt.value;
+        if (!current) return;
+        void api
+            .get(urlsMap.payLogs(linkKey.value, current.attemptId))
+            .then((response) => {
+                const snapshot = (response.data?.data ?? response.data) as AttemptSnapshot;
+                applySnapshot(snapshot);
+            })
+            .catch(() => undefined);
+    };
+
     onBeforeUnmount(() => {
         closeStream();
         if (countdownTimer !== null) {
@@ -614,7 +662,7 @@ const PayPage = dc(() => {
                                         overflowWrap: "anywhere",
                                     }}
                                 >
-                                    {summary.value?.description ?? t("Payment Link")}
+                                    {summary.value?.description ?? summary.value?.title ?? t("Payment Link")}
                                 </span>
                                 <div
                                     style={{
@@ -840,6 +888,19 @@ const PayPage = dc(() => {
                                     </VBtn>
                                 </div>
                             </SurfaceCard>
+                        )}
+
+                        {sandboxEnabled.value && (
+                            <SandboxCheckoutInspector
+                                linkKey={linkKey.value}
+                                linkAmount={summary.value?.totalAmount ?? "0.0000"}
+                                selectedRailCode={selectedRail.value?.code ?? null}
+                                attemptId={attempt.value?.attemptId ?? null}
+                                phase={phase.value}
+                                onAutoFillAccount={autoFillSandboxAccount}
+                                onAutoConfirmOtp={(otp: string) => void confirmOtp(otp)}
+                                onRefreshAttempt={refreshAttemptFromInspector}
+                            />
                         )}
                     </>
                 )}

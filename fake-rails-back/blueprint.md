@@ -6,7 +6,7 @@ Generated from: `fake-rails.backend`, `fake-rails.protocol`, `fake-rails.chaos`,
 
 ## Fake Rails Backend Architecture
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-13
 
 ## 1. Purpose and scope
 
@@ -283,6 +283,10 @@ bun run start
 - `FAKE_RAILS_ALLOWED_CIDRS` is enforced against `socket.remoteAddress` (not `X-Forwarded-For`); behind nginx the real allowlist is the nginx `allow`/`deny` block. `FAKE_RAILS_TRUST_PROXY` defaults to loopback. `FAKE_RAILS_PORTAL_ACCOUNT_LOCKOUT` (default 5 per username) locks repeated failed portal logins.
 - **Hosted action token and stream ticket (GAP-024, RESOLVED 2026-11-05).** `GET /hosted/session/:reference` now returns `action_token`, a JWT bound to that transaction id with the purpose role `FAKE_RAILS_HOSTED_ACTION` (15 minutes); the approve/decline action POST must send it in `X-Hosted-Action-Token` or gets `401 HOSTED_ACTION_TOKEN_REQUIRED`. `POST /portal-api/transactions/stream-ticket` (tester session required) issues a `FAKE_RAILS_SSE_TICKET` JWT (30 seconds, unique `jti`); `portalAuthGuard` accepts it only on `/transactions/stream` and consumes it once (`consumeSseTicket`; replay is `401`). Both tokens are signed with the portal JWT secret but carry their own `role` (helpers in `fake-rails-back/lib/tickets.ts`), so neither works as a tester session and a tester session works as neither. The used-ticket map is in-process and pruned on use. `/hosted/*` session reads remain public. Since 2026-11-08 they no longer include `expected_otp` or `webhook_url` (`publicHostedTransaction`, applied to both the session read and the action response); the token itself is still issued by the public session read, so it proves knowledge of the reference, not authority. Testers read the OTP on the authenticated portal routes. The rails initiate response still returns the OTP by design (automated sandbox runner).
 - **Residual.** `fake-rails-front` still keeps the tester token in localStorage (GAP-019 does not cover this portal).
+
+## v2 stateful accounts (2026-11-13)
+
+The emulator is no longer stateless. v2.1 adds merchant-owned copies: shared presets remain read-only and a merchant edits a clone (`merchant_id`), so two merchants can hold the same identifier without colliding; partial unique indexes replace the old global `(rail_code, identifier)` constraint. Daily limits reset on the Tripoli business date (`daily_spent_date`), holds carry `expires_at` and are swept, and every clearing entry records `statement_run_id`/`statement_included_at` plus settlement and provider reference so a generated statement can be ingested and marked included. `fake_accounts`, `fake_account_holds`, `fake_account_movements`, `fake_merchant_clearing_pools` and `fake_clearing_entries` store controllable test customers, atomic holds, captures, releases, refunds and per-rail clearing pools. Five personas are seeded per rail (high balance, standard, low 5 LYD, daily-limit-exhausted, frozen); an unknown identifier is auto-enrolled with 2,500 LYD. INITIATE reserves, SUBMIT captures, decline/cancel releases, refund credits back and refuses an over-refund. `/control/*` is the core-facing control plane (`x-fake-rails-control-token` when configured); `/portal-api/accounts*` and `/portal-api/checkout-helper/*` serve the tester portal.
 
 ## Fake Rails Protocol Matrix
 
@@ -588,6 +592,10 @@ Only the outbound webhook path computes signatures (`FakeCryptoSigner` plus six 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## v2 account outcomes (2026-11-13)
+
+Every rail route now consults the stateful account ledger: INITIATE reserves, SUBMIT captures, CANCEL/DECLINE releases and REFUND credits back. The raw customer identifier (not the masked one) binds the transaction to the account; a frozen, expired or blocked account declines before the gateway handler runs with `ACCOUNT_FROZEN`/`ACCOUNT_EXPIRED`/`ACCOUNT_BLOCKED`, and the low-balance/limit personas return `INSUFFICIENT_FUNDS`/`LIMIT_EXCEEDED`. A static OTP on the account overrides the deterministic OTP.
 
 ## Fake Rails Chaos Engine and Tester Portal
 
@@ -939,6 +947,10 @@ fake-rails-front: the postMessage target is `VITE_CHECKOUT_ORIGIN`, otherwise th
 
 The Fake Rails tester portal applies the same overlay text-color rule as the other portals, fixing black-on-dark custom dialog/drawer content in dark mode.
 
+## v2 tester surfaces (2026-11-13)
+
+The portal gains account and checkout-helper routes: `GET/POST/PATCH /portal-api/accounts*`, `GET /portal-api/checkout-helper/:reference` and `POST /portal-api/checkout-helper/:reference/simulate-action`. They expose balances, holds, daily limits, statuses, OTPs and the push/QR approve/decline/variance/duplicate/tampered actions. The same routes are mounted at `/control/*` for the Sandbox core, protected by `x-fake-rails-control-token` when configured; production refuses the control plane without the token.
+
 ## Core Integration and Deployment
 
 > Status: `partial` · Last verified: 2026-11-05
@@ -1256,3 +1268,7 @@ Core's outbound URL compile now fails closed on an empty `allowed_hosts` (`HOST_
 ## Remediation round 2 (2026-11-08): webhook target allowlist
 
 `webhook_url` is validated at accept time and again at send time against `lib/webhookTarget.ts` (`allowedWebhookHosts`: the host of `CORE_INBOUND_BASE_URL` plus `FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS`; no credentials in the URL, http/https only) and the dispatcher no longer follows redirects (GAP-059). Test: `fake-rails-back/test/webhook-target.test.ts`.
+
+## v2 sandbox control integration (2026-11-13)
+
+`core-back` reaches the emulator through `FakeRailsControlClient` (`FAKE_RAILS_CONTROL_URL`, optional `FAKE_RAILS_CONTROL_TOKEN`). The sandbox core uses it for the Sandbox Studio account list/edit/reset and the checkout inspector. The Live core never mounts these routes and has no control URL. The synthetic clearing statement is generated and can be settled, but is not yet ingested by sandbox reconciliation (GAP-071).

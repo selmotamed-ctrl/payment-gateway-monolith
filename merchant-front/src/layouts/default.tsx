@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
+import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
 import {
     VAppBar,
     VAvatar,
@@ -469,6 +470,11 @@ const DefaultLayout = dc(() => {
                 class="pg-main"
                 {...{ id: "pg-main-content", tabindex: "-1", "aria-busy": routeLoading.value ? "true" : "false" }}
             >
+                {route.meta.sandboxMirror ? (
+                    <div style={{ padding: "16px 24px 0" }}>
+                        <SandboxBanner subtitle="You are editing Sandbox data only. Live pages, money and reports are untouched." />
+                    </div>
+                ) : null}
                 <RouterView />
             </VMain>
 

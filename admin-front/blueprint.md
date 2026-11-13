@@ -325,7 +325,7 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 
 ## Admin Route and Page Catalog
 
-> Status: `partial` · Last verified: 2026-11-10
+> Status: `partial` · Last verified: 2026-11-13
 
 ## 1. Purpose and scope
 
@@ -613,6 +613,12 @@ All three routes are gated by `aml.read_confidential` at the edge/UI; writes are
 
 The nav entry is under **Operations** ("Object & Asset Storage") and the route-authority
 aliases normalize the colon names to `system.storage` for the UI guard. The page has server-paginated/filtered object and access-log tables, a real quarantine query, a full detail drawer, legal-hold approval requests and maintenance confirmation/results.
+
+## v38-v39 sandbox pages (2026-11-13)
+
+New routes and a "Sandbox & Fake Rails" sidebar section: `/sandbox/overview` (plane/Fake Rails health, reference readiness, sync audits, per-merchant reset and global reset), `/sandbox/merchants` (portfolio table with summary, filters and seed/reset actions), `/sandbox/merchants/:id` (sandbox merchant detail with wallets, applications, links, payments, cash-outs, disputes, Fake Rails accounts and audits) and `/sandbox/fake-rails` (tabbed accounts, clearing pools/statements, chaos scenarios and transaction tables). All use the amber sandbox banner, standard tables/filters/drawers/export and call `/api/v1/admin/sandbox/*` only.
+
+A "Sandbox Live Mirror" section maps `/sandbox/mirror/*` to the real admin pages: merchants, wallets, applications, transactions, approvals, audit log, operator cases, disputes, adjustments, cash-outs, reconciliation, pricing/profitability/liquidity, journal entries, invariant, credential sets, gateways/routes, reports, platform settings, jobs/outbox and object storage. Mirror pages are open to any signed-in staff member (the sandbox data is isolated), use the same `SandboxBanner`, and Exit sandbox returns to the Live page. The Guide context map's `Sandbox` screen covers the Studio and all mirror routes.
 
 ## Tables Filters and Exports
 

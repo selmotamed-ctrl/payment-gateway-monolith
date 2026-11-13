@@ -8,6 +8,7 @@ import { user } from "@/state/user";
 import { openSseStream } from "@/utils/security/sseFetch";
 import { sessionHeaders } from "@/utils/security/sessionToken";
 import { urlsMap } from "@/constants/urlsMap";
+import { sandboxMirrorAbsolute } from "@/state/sandbox";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
@@ -89,7 +90,7 @@ const PosScreenPage = dc(() => {
         loading.value = state.value === null;
         const token = user.value?.token;
         source = openSseStream({
-            url: urlsMap.posScreenStream(code()),
+            url: sandboxMirrorAbsolute(urlsMap.posScreenStream(code())),
             headers: token ? { ...sessionHeaders(token), "X-Client-Channel": "merchant" } : {},
             onOpen: () => {
                 connected.value = true;

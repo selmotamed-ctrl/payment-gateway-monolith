@@ -3,7 +3,7 @@ id: platform.runtime
 title: Runtime and Configuration
 status: partial
 confidence: high
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 verified_against: 19d6a54+working-tree
 code:
   - core-back/index.ts
@@ -29,6 +29,7 @@ design_sources:
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#11-high-level-system--storage-topology-diagram
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#6-ordered-14-step-multi-host-deployment-pipeline
 tests:
+  - core-back/test/sandboxPlane.test.ts
   - core-back/test/db-connection-config.test.ts
   - core-back/test/runtime/raw-body.test.ts
   - core-back/test/runtime/production-adapters.test.ts
@@ -548,3 +549,7 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 | `LEDGER_RAW_SQL` | core-back | `false` turns the raw-SQL ledger posting path off (default on). |
 | `FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS` | fake-rails-back | Extra hosts (`host` or `host:port`) a webhook may target; the host of `CORE_INBOUND_BASE_URL` is always allowed. |
 | `PG_APP_USER`, `PG_APP_PASSWORD` | deploy | The non-owner role the deployed application connects as; setting the password enables the split (see `deploy.storage`). |
+
+## v38 sandbox configuration (2026-11-13)
+
+New core keys: `EXECUTION_PLANE` (`LIVE`|`SANDBOX`, default `LIVE`), `PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE` (development escape hatch, default false), `FAKE_RAILS_CONTROL_URL` and `FAKE_RAILS_CONTROL_TOKEN`. The edges add `SANDBOX_CORE_BACK_URL`/`SANDBOX_CORE_BACK_URLS`; an empty pair means the sandbox is not configured and the sandbox routes answer `503 SANDBOX_NODE_UNAVAILABLE`. Deploy adds `SANDBOX_ENABLED`, `SANDBOX_NODE`, `SANDBOX_CORE_PORT` (4005), `SANDBOX_DB_NAME` (`payment_gateway_sandbox`), `SANDBOX_REMOTE_DIR` and `SANDBOX_CORE_BACK_URLS`. The deploy planner emits a second core service `pg-core-sandbox` with `EXECUTION_PLANE=SANDBOX`, sandbox `DATABASE_URL`/session leader URL, Fake Rails control URL/token, backups disabled and its own release tree; the PostgreSQL provisioner creates the database and `pgw_sandbox`/`pgw_sandbox_session` PgBouncer aliases.

@@ -3,9 +3,10 @@ id: edge.admin
 title: Admin Edge BFF
 status: partial
 confidence: high
-last_verified: 2026-11-10
+last_verified: 2026-11-13
 verified_against: 5a24f6f+working-tree
 code:
+  - admin-back/api/sandboxProxy.ts
   - admin-back/index.ts
   - admin-back/api/**
   - admin-back/lib/env/index.ts
@@ -23,6 +24,7 @@ design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#163-admin-back-lan-only-api-apiv1admin---forwards-to-core-back-internaladmin
   - design/03-deployment/payment_gateway_deployment_and_guides_architecture.md#5-host-aware-ufw-firewall--network-isolation-provisioning
 tests:
+  - admin-back/test/sandbox-routing.test.ts
   - admin-back/test/session-cookie-and-logout.test.ts
   - admin-back/test/admin-surface.test.ts
   - admin-back/test/core-contract.test.ts
@@ -345,3 +347,7 @@ The edge validates identifiers, enums and body shapes, but keeps the core as the
 read/write guards. `assetsRouter` additionally exposes binary
 `POST /assets/upload` (multipart `file` + `name`) and
 `GET /assets/:id/content`, forwarding raw bytes to core.
+
+## v38-v39 sandbox proxy (2026-11-13)
+
+`/api/v1/admin/sandbox/*` forwards only to `SANDBOX_CORE_BACK_URLS` (no Live fallback): overview, per-merchant overview/reset, wallet balance, global reset and Fake Rails accounts/clearing/scenarios/transactions/webhooks/statements. `/mirror/*` raw-forwards to `/internal/admin/*` for the Live-parity pages; report-engine mirror bodies use the 24 MB parser. The staff session is mirrored by the sandbox core. The Studio routes are open to signed-in staff; the sandbox data is isolated. An unconfigured sandbox node answers `503 SANDBOX_NODE_UNAVAILABLE`.

@@ -7,6 +7,8 @@ import { Prisma } from "../../generated/prisma/client";
 import { client } from "../../prisma/client";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { assertCommerceActive } from "../../lib/commerceStatus";
+import { getExecutionPlane, isSandboxPlane } from "../../lib/executionPlane";
+import { FakeRailsControlClient } from "../../engine/rails/FakeRailsControlClient";
 import { VisibleRailsResolver, evaluateRouteDailyCap, type RailRecord, type RailRouteRecord, type CredentialSetRecord, type CommissionProfileRecord } from "../../engine/flow/VisibleRailsResolver";
 import { loadRailCatalog, asStringArray } from "../../engine/flow/VisibleRailsCatalog";
 import { decimal } from "../../engine/ledger/LedgerPoster";
@@ -84,6 +86,10 @@ interface LoadedLink {
   applicationId: string;
   walletId: string;
   merchantId: string;
+  title?: string | null;
+  description?: string | null;
+  redirectUrl?: string | null;
+  applicationRedirectAllowlist?: unknown;
   amount: Prisma.Decimal;
   currency: string;
   feeBearer: "MERCHANT_ABSORBS" | "PAYER_SURCHARGE" | "SPLIT";
@@ -93,6 +99,7 @@ interface LoadedLink {
   confirmedCount: number;
   activeLockedCount: number;
   state: string;
+  env: "LIVE" | "SANDBOX";
   expiresAt: Date | null;
   railWhitelist: unknown;
   applicationRailWhitelist: unknown;
@@ -118,6 +125,7 @@ const loadLink = async (linkKey: string): Promise<LoadedLink | null> => {
           merchantId: true,
           status: true,
           railWhitelist: true,
+          redirectDomainAllowlist: true,
           merchant: {
             select: {
               tradeName: true,
@@ -141,6 +149,10 @@ const loadLink = async (linkKey: string): Promise<LoadedLink | null> => {
     applicationId: link.applicationId,
     walletId: link.walletId,
     merchantId: link.application.merchantId,
+    title: link.title,
+    description: link.description,
+    redirectUrl: link.redirectUrl,
+    applicationRedirectAllowlist: link.application.redirectDomainAllowlist,
     amount: link.amount,
     currency: link.currency,
     feeBearer: link.feeBearer,
@@ -150,6 +162,7 @@ const loadLink = async (linkKey: string): Promise<LoadedLink | null> => {
     confirmedCount: link.confirmedCount,
     activeLockedCount: link.activeLockedCount,
     state: link.state,
+    env: link.env,
     expiresAt: link.expiresAt,
     railWhitelist: link.railWhitelist,
     applicationRailWhitelist: link.application.railWhitelist,
@@ -173,8 +186,90 @@ interface Catalog {
 
 const loadCatalog = async (): Promise<Catalog> => loadRailCatalog(client as never);
 
-const resolveEnvironment = (merchantStatus: string): "SANDBOX" | "LIVE" =>
-  merchantStatus === "ACTIVE" ? "LIVE" : "SANDBOX";
+/**
+ * `v38`: the environment of a checkout is the execution plane of the process,
+ * never the merchant status. A pending merchant trains on the separate
+ * Sandbox plane; it never receives simulated Live traffic.
+ */
+const resolveEnvironment = (): "SANDBOX" | "LIVE" => getExecutionPlane();
+
+const sandboxFakeRails = new FakeRailsControlClient();
+
+const assertSandboxLink = (link: LoadedLink): void => {
+  if (!isSandboxPlane() || link.env !== "SANDBOX" || !link.key.startsWith("sbx_")) {
+    throw new ApiError(
+      403,
+      "SANDBOX_INSPECTOR_FORBIDDEN_ON_LIVE_LINK",
+      "The checkout inspector is only available for a Sandbox (sbx_) payment link",
+    );
+  }
+};
+
+const sandboxAccountPayload = (account: {
+  id: string;
+  rail_code: string;
+  gateway_code: string;
+  instrument_type: string;
+  identifier: string;
+  holder_name: string;
+  secret_pin: string;
+  expiry: string | null;
+  available_balance_lyd: string;
+  reserved_balance_lyd: string;
+  daily_limit_lyd: string;
+  daily_spent_lyd: string;
+  status: string;
+  static_otp: string | null;
+  notes: string | null;
+}) => ({
+  id: account.id,
+  railCode: account.rail_code,
+  gatewayCode: account.gateway_code,
+  instrumentType: account.instrument_type,
+  identifier: account.identifier,
+  holderName: account.holder_name,
+  secretPin: account.secret_pin,
+  expiry: account.expiry,
+  availableBalanceLyd: account.available_balance_lyd,
+  reservedBalanceLyd: account.reserved_balance_lyd,
+  dailyLimitLyd: account.daily_limit_lyd,
+  dailySpentLyd: account.daily_spent_lyd,
+  status: account.status,
+  staticOtp: account.static_otp,
+  notes: account.notes,
+  dailySpentDate: (account as { daily_spent_date?: string | null }).daily_spent_date ?? null,
+  merchantId: (account as { merchant_id?: string | null }).merchant_id ?? null,
+});
+
+const loadSandboxInspector = async (link: LoadedLink) => {
+  let railAccounts: ReturnType<typeof sandboxAccountPayload>[] = [];
+  let unavailable: string | null = null;
+  try {
+    const accounts = await sandboxFakeRails.listAccounts({ merchantId: link.merchantId });
+    railAccounts = accounts.map(sandboxAccountPayload);
+  } catch (error) {
+    unavailable = error instanceof Error ? error.message : String(error);
+  }
+  return {
+    enabled: true,
+    mode: "OPEN_IN_SANDBOX" as const,
+    unlocked: true,
+    unavailable,
+    railAccounts,
+    activeAttemptSecrets: null,
+  };
+};
+
+const assertPlaneMatchesLink = (link: LoadedLink): void => {
+  const plane = getExecutionPlane();
+  if (link.env !== plane) {
+    throw new ApiError(
+      409,
+      "ENVIRONMENT_PLANE_MISMATCH",
+      `Payment link environment (${link.env}) does not match execution plane (${plane})`,
+    );
+  }
+};
 
 const visibleRailsFor = (link: LoadedLink, catalog: Catalog, env: "SANDBOX" | "LIVE") => {
   const resolver = new VisibleRailsResolver();
@@ -783,11 +878,15 @@ const ensureLinkUsable = (link: LoadedLink): void => {
   if (link.expiresAt && link.expiresAt.getTime() <= Date.now()) {
     throw new ApiError(409, "PAYMENT_LINK_EXPIRED", "The payment link has expired");
   }
-  // A suspended application or a frozen wallet takes in no payment.
+  assertPlaneMatchesLink(link);
+  // A suspended application or a frozen wallet takes in no payment, and on
+  // Live the merchant itself must be ACTIVE (the implicit sandbox fallback
+  // of v37 is gone).
   assertCommerceActive({
+    merchantStatus: link.env === "LIVE" ? link.merchantStatus : "ACTIVE",
     applicationStatus: link.applicationStatus,
     walletStatus: link.walletStatus,
-    env: resolveEnvironment(link.merchantStatus),
+    env: link.env,
   });
 };
 
@@ -999,7 +1098,8 @@ route.get("/pay/:linkKey", async (request: Request, response: Response) => {
   if (!link) {
     throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
   }
-  const env = resolveEnvironment(link.merchantStatus);
+  assertPlaneMatchesLink(link);
+  const env = resolveEnvironment();
   const catalog = await loadCatalog();
   const visible = visibleRailsFor(link, catalog, env);
   const railFields = await client.railField.findMany({
@@ -1086,12 +1186,15 @@ route.get("/pay/:linkKey", async (request: Request, response: Response) => {
     link,
   );
 
+  const sandboxInspector = env === "SANDBOX" ? await loadSandboxInspector(link) : null;
   response.json({
     supportConfig,
+    env,
     linkKey: link.key,
     merchantTradeName: link.merchantTradeName,
     merchantLogoUrl: null,
-    description: null,
+    title: link.title,
+    description: link.description,
     amount: decimal(link.amount).toFixed(4),
     currency: link.currency,
     feeBearerMode: link.feeBearer,
@@ -1108,8 +1211,11 @@ route.get("/pay/:linkKey", async (request: Request, response: Response) => {
     excludedRails: visible.excluded,
     expiresAt: link.expiresAt ? link.expiresAt.toISOString() : null,
     status: link.state,
-    redirectUrl: null,
-    allowlistedRedirectHosts: [] as string[],
+    redirectUrl: link.redirectUrl ?? null,
+    allowlistedRedirectHosts: Array.isArray(link.applicationRedirectAllowlist)
+      ? link.applicationRedirectAllowlist.map(String)
+      : [],
+    ...(sandboxInspector ? { sandboxInspector } : {}),
   });
 });
 
@@ -1135,7 +1241,8 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
     return;
   }
 
-  const env = resolveEnvironment(link.merchantStatus);
+  assertPlaneMatchesLink(link);
+  const env = resolveEnvironment();
   const catalog = await loadCatalog();
   const visible = visibleRailsFor(link, catalog, env);
   const visibleRail = visible.rails.find((entry) => entry.rail.code === body.railCode);
@@ -1487,10 +1594,12 @@ route.post("/pay/:linkKey/logs/:attemptId/confirm", async (request: Request, res
   // wallet too: a freeze that lands mid-flow stops the charge from being sent.
   const confirmLink = await loadLink(linkKey);
   if (confirmLink) {
+    assertPlaneMatchesLink(confirmLink);
     assertCommerceActive({
+      merchantStatus: confirmLink.env === "LIVE" ? confirmLink.merchantStatus : "ACTIVE",
       applicationStatus: confirmLink.applicationStatus,
       walletStatus: confirmLink.walletStatus,
-      env: resolveEnvironment(confirmLink.merchantStatus),
+      env: confirmLink.env,
     });
   }
 
@@ -1835,6 +1944,194 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
       ? renderTemplate(channel.ackBodyTemplate, { eventId: stored.id, attemptId: attempt?.id ?? "" })
       : "",
   );
+});
+
+// --- Sandbox checkout inspector (v38) ------------------------------------
+
+const sandboxAccountParamsSchema = z.object({
+  linkKey: linkParamsSchema.shape.linkKey,
+  accountId: z.string().min(1).max(128),
+});
+
+const sandboxPatchSchema = z
+  .object({
+    availableBalanceLyd: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
+    deltaLyd: z.string().regex(/^-?\d{1,14}(\.\d{1,4})?$/).optional(),
+    dailyLimitLyd: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
+    dailySpentLyd: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
+    status: z.enum(["ACTIVE", "FROZEN", "EXPIRED", "BLOCKED"]).optional(),
+    staticOtp: z.string().regex(/^\d{4,8}$/).nullable().optional(),
+    presetFault: z.string().max(64).nullable().optional(),
+    quickPreset: z.enum(["SET_ZERO", "SET_LINK_AMOUNT", "TOP_UP_5000", "RESET_DAILY_SPENT"]).optional(),
+    linkAmountLyd: z.string().optional(),
+    reason: z.string().max(255).optional(),
+  })
+  .strict();
+
+const sandboxSimulateSchema = z
+  .object({
+    action: z.enum([
+      "APPROVE_PUSH_OR_QR",
+      "DECLINE_PUSH_OR_QR",
+      "APPROVE_WITH_VARIANCE",
+      "FIRE_WEBHOOK_NOW",
+      "REPLAY_DUPLICATE_WEBHOOK",
+      "FIRE_TAMPERED_WEBHOOK",
+    ]),
+  })
+  .strict();
+
+route.get("/pay/:linkKey/sandbox-accounts", async (request: Request, response: Response) => {
+  const { linkKey } = parseOrThrow(linkParamsSchema, request.params);
+  const link = await loadLink(linkKey);
+  if (!link) {
+    throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
+  }
+  assertSandboxLink(link);
+  const railCode = typeof request.query.railCode === "string" ? request.query.railCode : undefined;
+  try {
+    const accounts = await sandboxFakeRails.listAccounts({ merchantId: link.merchantId, railCode });
+    response.json({ accounts: accounts.map(sandboxAccountPayload) });
+  } catch (error) {
+    throw new ApiError(
+      502,
+      "SANDBOX_FAKE_RAILS_UNAVAILABLE",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+});
+
+const sandboxCreateAccountSchema = z
+  .object({
+    railCode: z.string().min(2).max(64),
+    gatewayCode: z.string().min(2).max(64),
+    instrumentType: z.enum(["MOBILE_WALLET", "BANK_ACCOUNT", "CARD", "VOUCHER"]).default("MOBILE_WALLET"),
+    identifier: z.string().min(3).max(64),
+    holderName: z.string().min(2).max(120),
+    secretPin: z.string().min(3).max(16).default("1234"),
+    expiry: z.string().max(16).nullable().optional(),
+    availableBalanceLyd: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).default("5000.0000"),
+    dailyLimitLyd: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).default("10000.0000"),
+    status: z.enum(["ACTIVE", "FROZEN", "EXPIRED", "BLOCKED"]).default("ACTIVE"),
+    staticOtp: z.string().regex(/^\d{4,8}$/).nullable().optional(),
+    notes: z.string().max(255).nullable().optional(),
+  })
+  .strict();
+
+route.post("/pay/:linkKey/sandbox-accounts", async (request: Request, response: Response) => {
+  const { linkKey } = parseOrThrow(linkParamsSchema, request.params);
+  const body = parseOrThrow(sandboxCreateAccountSchema, request.body);
+  const link = await loadLink(linkKey);
+  if (!link) throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
+  assertSandboxLink(link);
+  try {
+    const account = await sandboxFakeRails.createAccount({ ...body, merchantId: link.merchantId });
+    response.status(201).json({ account: sandboxAccountPayload(account) });
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(502, "SANDBOX_FAKE_RAILS_UNAVAILABLE", error instanceof Error ? error.message : String(error));
+  }
+});
+
+route.get("/pay/:linkKey/sandbox-accounts/:accountId/movements", async (request: Request, response: Response) => {
+  const { linkKey, accountId } = parseOrThrow(sandboxAccountParamsSchema, request.params);
+  const link = await loadLink(linkKey);
+  if (!link) throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
+  assertSandboxLink(link);
+  const account = await sandboxFakeRails.getAccount(accountId);
+  if (!account || (account.merchant_id && account.merchant_id !== link.merchantId)) {
+    throw new ApiError(404, "FAKE_ACCOUNT_NOT_FOUND", "The test account does not exist");
+  }
+  response.json({
+    movements: await sandboxFakeRails.accountMovements(accountId, Number(request.query.limit ?? 100)),
+    holds: await sandboxFakeRails.accountHolds(accountId, Number(request.query.limit ?? 100)),
+  });
+});
+
+route.patch("/pay/:linkKey/sandbox-accounts/:accountId", async (request: Request, response: Response) => {
+  const { linkKey, accountId } = parseOrThrow(sandboxAccountParamsSchema, request.params);
+  const body = parseOrThrow(sandboxPatchSchema, request.body);
+  const link = await loadLink(linkKey);
+  if (!link) {
+    throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
+  }
+  assertSandboxLink(link);
+  try {
+    const account = await sandboxFakeRails.adjustAccount(accountId, body, link.merchantId);
+    response.json({ account: sandboxAccountPayload(account) });
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      502,
+      "SANDBOX_FAKE_RAILS_UNAVAILABLE",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+});
+
+route.get("/pay/:linkKey/logs/:attemptId/sandbox-inspector", async (request: Request, response: Response) => {
+  const { linkKey, attemptId } = parseOrThrow(attemptParamsSchema, request.params);
+  const link = await loadLink(linkKey);
+  if (!link) {
+    throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
+  }
+  assertSandboxLink(link);
+  const { attempt } = await loadAttempt(linkKey, attemptId);
+  let helper: Awaited<ReturnType<FakeRailsControlClient["checkoutHelper"]>> = {
+    activeAttemptSecrets: null,
+  };
+  for (const reference of [attempt.providerReference, attempt.reference].filter(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  )) {
+    try {
+      const candidate = await sandboxFakeRails.checkoutHelper(reference);
+      if (candidate.activeAttemptSecrets) {
+        helper = candidate;
+        break;
+      }
+    } catch {
+      // Try the next reference; an unreachable emulator is reported below.
+    }
+  }
+  let railAccounts: ReturnType<typeof sandboxAccountPayload>[] = [];
+  let unavailable: string | null = null;
+  try {
+    const accounts = await sandboxFakeRails.listAccounts({ merchantId: link.merchantId });
+    railAccounts = accounts.map(sandboxAccountPayload);
+  } catch (error) {
+    unavailable = error instanceof Error ? error.message : String(error);
+  }
+  response.json({
+    enabled: true,
+    mode: "OPEN_IN_SANDBOX",
+    unlocked: true,
+    unavailable,
+    railAccounts,
+    activeAttemptSecrets: helper.activeAttemptSecrets,
+  });
+});
+
+route.post("/pay/:linkKey/logs/:attemptId/sandbox-simulate", async (request: Request, response: Response) => {
+  const { linkKey, attemptId } = parseOrThrow(attemptParamsSchema, request.params);
+  const { action } = parseOrThrow(sandboxSimulateSchema, request.body);
+  const link = await loadLink(linkKey);
+  if (!link) {
+    throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
+  }
+  assertSandboxLink(link);
+  const { attempt } = await loadAttempt(linkKey, attemptId);
+  const reference = attempt.providerReference ?? attempt.reference;
+  try {
+    const result = await sandboxFakeRails.simulateAction(reference, action);
+    response.json({ ok: true, action, transactionId: result.transactionId, attemptId: attempt.id });
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      502,
+      "SANDBOX_FAKE_RAILS_UNAVAILABLE",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 });
 
 const extractCorrelation = (rawBody: Buffer, selector: string | null): string | null => {

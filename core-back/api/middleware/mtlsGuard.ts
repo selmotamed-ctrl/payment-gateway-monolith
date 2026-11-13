@@ -16,7 +16,8 @@ export const getPeerCommonName = (socket: TLSSocket): string | undefined => {
   return commonName;
 };
 
-export const requireEdgeIdentity = (expectedCn: AllowedEdgeCN) => {
+export const requireEdgeIdentity = (expectedCn: AllowedEdgeCN | AllowedEdgeCN[]) => {
+  const allowed = Array.isArray(expectedCn) ? expectedCn : [expectedCn];
   return (request: Request, _response: Response, next: NextFunction) => {
     const socket = request.socket as TLSSocket;
     if (!socket.authorized) {
@@ -36,11 +37,11 @@ export const requireEdgeIdentity = (expectedCn: AllowedEdgeCN) => {
       );
     }
 
-    if (clientCn !== expectedCn) {
+    if (!allowed.includes(clientCn as AllowedEdgeCN)) {
       throw new ApiError(
         403,
         "FORBIDDEN_SERVICE_IDENTITY",
-        `Certificate CN '${clientCn}' is not permitted on ${expectedCn} channel`,
+        `Certificate CN '${clientCn}' is not permitted on ${allowed.join(", ")} channel`,
       );
     }
 

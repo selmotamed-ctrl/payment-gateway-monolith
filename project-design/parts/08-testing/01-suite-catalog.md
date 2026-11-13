@@ -3,9 +3,10 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 verified_against: 19d6a54+working-tree
 code:
+  - core-back/test/sandboxPlane.test.ts
   - core-back/test/exhaustive/**
   - core-back/test/storage-engine/**
   - core-back/test/storage-engine/performance/ledger-query-pruning-and-accuracy.test.ts
@@ -534,3 +535,23 @@ These are development/CI tests only; no production-time test job or test endpoin
   sort/search/access-log forwarding and the legal-hold request path.
 - Route/UI coverage still needs a live Playwright pass for the four storage tabs
   and the dispute/AML/reconciliation attachment surfaces.
+
+## v38 sandbox suites (2026-11-13)
+
+- `core-back/test/sandboxPlane.test.ts`: plane resolution, token prefixes, boot fence, strict Live/Sandbox DB fence in both directions, Fake Rails gateway/environment fence, development opt-in.
+- `core-back/test/fake-rails-control-client.test.ts`: control URL/token, error mapping, merchant scope, unreachable emulator, helper/simulator.
+- `fake-rails-back/test/accountsAndInspector.test.ts` and the v2 cases in `api.test.ts`: personas, reserve/capture/release/refund, over-reserve, auto-enrolment, merchant reset, clearing statement, control plane and checkout helper.
+- `merchant-back/test/sandbox-routing.test.ts`, `admin-back/test/sandbox-routing.test.ts`, `checkout-back/test/sandbox-routing.test.ts`: pool selection, fail-closed 503 and token prefixes.
+- `merchant-back/test/sandbox-proxy.test.ts` and `checkout-back/test/sandbox-checkout-forward.test.ts`: real forwarding through the sandbox pool for control/resources, `pg_test_` external tokens, `sbx_` summary/inspector routes and the Live-link inspector refusal.
+- `core-back/test/security-regressions/commerce-status-enforcement.test.ts` and `test/engine/attempt-guard-pipeline.test.ts` assert the removed OD-10 fallback.
+
+## v39 Sandbox Studio and mirror suites (2026-11-13)
+
+- `core-back/test/sandboxPlane.test.ts` now runs the schema-local fence functions and passes on v39; `core-back/test/phase1-mtls-and-schema.test.ts` expects `20261114090000_v39_sandbox_studio` as the newest migration and schema version 39.
+- `fake-rails-back/test/accountsAndInspector.test.ts` and `test/api.test.ts` cover merchant-owned account copies, daily business-date reset, hold expiry, capture variance guards, clearing references and statement inclusion.
+- `merchant-back/test/sandbox-proxy.test.ts` covers control routes (`overview`, `seed-demo`, `studio/*`, wallet/payment detail, refund, reconciliation), Live-router resource lists/creates, Fake Rails control routes and `pg_test_` external tokens. `merchant-back/test/sandbox-routing.test.ts` covers the fail-closed pool.
+- `admin-back/test/sandbox-routing.test.ts` also asserts the Studio path mapping for `/merchants`, `/merchants/summary`, merchant detail and `/audits` so the admin control center cannot silently fall back to the Live namespace.
+- `admin-back/test/sandbox-routing.test.ts` covers admin sandbox pool selection; the admin sandbox API forwards Fake Rails accounts, scenarios, transactions, webhooks and statements.
+- Root `tests/unit/frontend-security-admin.test.ts` requires every Sandbox mirror route to be explicitly allowed for authenticated staff; `tests/unit/guide-content.test.ts` requires the generated context map to cover them; `tests/unit/i18n-catalogue.test.ts` requires Arabic entries for every new Studio/mirror label.
+- Deploy tests cover `sandboxDatabase()`, `pgw_sandbox`/`pgw_sandbox_session`, sandbox database creation, the second `pg-core-sandbox` service plan, firewall/PKI SAN, and backup exclusion; `./deploy.sh --dry-run` is the integration smoke check.
+- Not yet covered end to end: a live two-database deploy, a live reconciliation import through the real Fake Rails server, and a Playwright pass over the Studio/mirror pages. The `seed-history` route and ledger postings are typechecked and reviewed but have no DB-backed automated test yet.

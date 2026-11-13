@@ -131,9 +131,15 @@ export const buildPki = (options: PkiOptions): PkiBundle => {
   // The SAN must carry every core private IP: the edge hosts reach the core
   // nodes by IP and TLS 1.3 verifies the hostname.
   const coreNodeIps = parseNodeList(config.CORE_NODES).map((node) => node.privateIp);
-  const coreIps = [...new Set(coreNodeIps.length > 0
-    ? coreNodeIps
-    : (config.CORE_PRIVATE_IP ? [config.CORE_PRIVATE_IP] : []))];
+  const sandboxIps = config.SANDBOX_ENABLED
+    ? parseNodeList(config.SANDBOX_NODE).map((node) => node.privateIp)
+    : [];
+  const coreIps = [...new Set([
+    ...(coreNodeIps.length > 0
+      ? coreNodeIps
+      : (config.CORE_PRIVATE_IP ? [config.CORE_PRIVATE_IP] : [])),
+    ...sandboxIps,
+  ])];
   const serverSans = [
     ...coreIps.map((ip) => `IP:${ip}`),
     "IP:127.0.0.1",

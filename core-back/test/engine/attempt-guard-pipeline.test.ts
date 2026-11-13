@@ -33,7 +33,7 @@ const guardRequest = (overrides: Record<string, unknown> = {}) => ({
   railCode: "edfali",
   applicationId: "application-1",
   merchantId: "merchant-1",
-  env: "SANDBOX" as const,
+  env: "LIVE" as const,
   channel: "WEB" as const,
   mode: "OTP_PULL",
   idempotencyKey: "idem-0001",
@@ -220,25 +220,11 @@ describe("the attempt-creation guard (design §9.1 rule 2)", () => {
   });
 });
 
-describe("OD-10 sandbox access for a pending merchant", () => {
-  test("allows the sandbox when OD-10 is absent (documented default true)", async () => {
+describe("v38: OD-10 is removed; a PENDING merchant never transacts", () => {
+  test("a PENDING merchant is blocked on the LIVE plane", async () => {
+    delete process.env.EXECUTION_PLANE;
     const fixture = createGuardFixture({
       merchant: merchantRow({ status: "PENDING" }),
-    });
-    const pipeline = buildPipeline(fixture);
-
-    const decision = await pipeline.guard(guardRequest());
-
-    expect(decision.outcome).toBe("ALLOW");
-    expect(fixture.state.createdAttempts[0]?.status).toBe("CREATED");
-  });
-
-  test("reads sandboxBeforeApproval=false from the OD-10 register object", async () => {
-    const fixture = createGuardFixture({
-      merchant: merchantRow({ status: "PENDING" }),
-      platformSettings: {
-        "OD-10": { sandboxBeforeApproval: false },
-      },
     });
     const pipeline = buildPipeline(fixture);
 
@@ -249,19 +235,23 @@ describe("OD-10 sandbox access for a pending merchant", () => {
     expect(fixture.state.slotDeltas).toEqual([]);
   });
 
-  test("reads sandboxBeforeApproval=true from the OD-10 register object", async () => {
-    const fixture = createGuardFixture({
-      merchant: merchantRow({ status: "PENDING" }),
-      platformSettings: {
-        "OD-10": { sandboxBeforeApproval: true },
-      },
-    });
-    const pipeline = buildPipeline(fixture);
+  test("a PENDING merchant is also blocked on the SANDBOX plane (its sandbox envelope is ACTIVE instead)", async () => {
+    const previous = process.env.EXECUTION_PLANE;
+    process.env.EXECUTION_PLANE = "SANDBOX";
+    try {
+      const fixture = createGuardFixture({
+        merchant: merchantRow({ status: "PENDING" }),
+      });
+      const pipeline = buildPipeline(fixture);
 
-    const decision = await pipeline.guard(guardRequest());
+      const decision = await pipeline.guard(guardRequest({ env: "SANDBOX" }));
 
-    expect(decision.outcome).toBe("ALLOW");
-    expect(fixture.state.createdAttempts[0]?.status).toBe("CREATED");
+      expect(decision.outcome).toBe("BLOCK");
+      expect(decision.reasons[0]).toBe("MERCHANT_NOT_ACTIVE");
+    } finally {
+      process.env.EXECUTION_PLANE = previous;
+      if (previous === undefined) delete process.env.EXECUTION_PLANE;
+    }
   });
 });
 

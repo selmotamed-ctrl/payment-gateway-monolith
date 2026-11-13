@@ -15,7 +15,14 @@ export const createApp = () => {
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", service: "merchant-back", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null, uptime: process.uptime() });
   });
-  app.use(express.json({ limit: env.MAX_JSON_BODY_BYTES }));
+  const mirrorReportEngineJson = express.json({ limit: "24mb" });
+  const defaultJson = express.json({ limit: env.MAX_JSON_BODY_BYTES });
+  app.use((request, response, next) => {
+    const parser = /^\/api\/v1\/merchant\/sandbox\/mirror\/report-engine(\/|$)/.test(request.path)
+      ? mirrorReportEngineJson
+      : defaultJson;
+    parser(request, response, next);
+  });
   app.use(express.urlencoded({ extended: false, limit: env.MAX_JSON_BODY_BYTES }));
   app.use("/api/v1", apiRouter);
   app.use(notFoundHandler);

@@ -224,9 +224,15 @@ export const startTestCore = async (pki: TestPki): Promise<TestCore> => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
+  const url = `https://localhost:${port}`;
+  // v38: the sandbox inbound path resolves through the sandbox pool. A test
+  // file that has not configured one gets the same fake core.
+  if (!process.env.SANDBOX_CORE_BACK_URLS && !process.env.SANDBOX_CORE_BACK_URL) {
+    process.env.SANDBOX_CORE_BACK_URL = url;
+  }
 
   return {
-    url: `https://localhost:${port}`,
+    url,
     port,
     requests,
     close: () =>

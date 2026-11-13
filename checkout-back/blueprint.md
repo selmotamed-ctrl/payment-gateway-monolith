@@ -276,7 +276,7 @@ Applies to all three copies of the client:
 
 ## Checkout Edge BFF
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-13
 
 ## 1. Purpose and scope
 
@@ -518,3 +518,7 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 ## Gap resolutions (2026-11-05)
 
 - The checkout upstream client uses the same `CORE_FAILURE_THRESHOLD = 3` consecutive-failure threshold before a core node leaves rotation (GAP-021). Checkout sessions use the `payment-gateway-checkout` audience (GAP-020).
+
+## v38 sandbox checkout (2026-11-13)
+
+`sbx_*` link keys and `SANDBOX` inbound environments select `SANDBOX_CORE_BACK_URLS`; `pl_*` and LIVE inbound stay on the Live pool. The inspector routes list accounts, patch an account balance/status and reveal/simulate an attempt; all refuse a non-`sbx_` key with `403`. An unconfigured sandbox node is `503 SANDBOX_NODE_UNAVAILABLE`, never a silent Live fallback.

@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { backupS3Configured, clamdManaged, effectiveDatabase, loadDeployConfig, objectStorageConfigured, pgAppRoleEnabled, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
+import { backupS3Configured, clamdManaged, effectiveDatabase, loadDeployConfig, objectStorageConfigured, pgAppRoleEnabled, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole, sandboxDatabase } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
 import { buildPki, certFilesForHost, checkPkiExpiry, pkiRenewalReport, readMaterial, verifyPki, WAL_ARCHIVE_CLIENT } from "./lib/pkiManager";
 import {
@@ -595,7 +595,21 @@ const deployService = (input: {
   runner.run(host.ssh, `${bun} install --frozen-lockfile`, { cwd: appDir, sudo: false });
   if (service.role === "core") {
     runner.run(host.ssh, `${bun}x prisma generate`, { cwd: appDir, sudo: false });
-    if (input.migration?.firstCoreNode) {
+    const isSandboxCore = service.name === "pg-core-sandbox";
+    if (isSandboxCore) {
+      const sandboxOwnerUrl = sandboxDatabase(config).ownerUrl;
+      if (!sandboxOwnerUrl) throw new Error("The Sandbox database endpoint is not configured (SANDBOX_ENABLED requires a managed database)");
+      runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
+        runner.run(host.ssh, `${bun} ${flag} run migrate-deploy`.replace("  ", " "), { cwd: appDir, sudo: false }), sandboxOwnerUrl);
+      if (config.RUN_PRISMA_SEED) {
+        runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
+          runner.run(host.ssh, `${bun} ${flag} run db-seed`.replace("  ", " "), { cwd: appDir, sudo: false }), sandboxOwnerUrl);
+      }
+      if (config.SEED_FAKE_RAILS_BLUEPRINTS) {
+        runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
+          runner.run(host.ssh, `${bun} ${flag} run seed-fake-rails`.replace("  ", " "), { cwd: appDir, sudo: false, timeoutMs: 30 * 60_000 }), sandboxOwnerUrl);
+      }
+    } else if (input.migration?.firstCoreNode) {
       const state = probeMigrationState({ runner, config, host, appDir, releaseTimestamp });
       const migrationPlan = planMigrations({
         fresh: input.migration.fresh,
@@ -616,7 +630,7 @@ const deployService = (input: {
         log("  no pending migrations");
       }
     }
-    if (config.RUN_PRISMA_SEED) {
+    if (!isSandboxCore && config.RUN_PRISMA_SEED) {
       const seedStarted = Date.now();
       runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
         runner.run(host.ssh, `${bun} ${flag} run db-seed`.replace("  ", " "), { cwd: appDir, sudo: false }));
@@ -901,9 +915,10 @@ export const runAsDatabaseOwner = <T>(
   appDir: string,
   config: DeployConfig,
   build: (envFlag: string) => () => T,
+  ownerUrlOverride?: string | null,
 ): T => {
   const database = effectiveDatabase(config);
-  const ownerUrl = database.ownerUrl;
+  const ownerUrl = ownerUrlOverride ?? database.ownerUrl;
   if (!ownerUrl || ownerUrl === database.url) return build("")();
   const envPath = `${appDir}/${OWNER_ENV_FILE}`;
   // The owner URL is session-pooled (pgw_session) so Prisma's advisory lock survives. Migrations and seeders do not

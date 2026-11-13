@@ -6,6 +6,8 @@ import { requestLoggerMiddleware } from "../lib/requestLogger";
 import { createRailsRouter } from "./rails";
 import { createSdkRouter } from "./sdk";
 import { createPortalRouter } from "./portal";
+import { createControlRouter } from "./control";
+import { ensureDefaultFakeAccountsSeeded } from "../engine/accounts/AccountLedgerService";
 
 export const createApiRouter = (): Router => {
   const router = express.Router();
@@ -48,6 +50,8 @@ export const createApiRouter = (): Router => {
   router.use("/rails/:gatewayCode", createRailsRouter());
   router.use("/sdk", createSdkRouter());
   router.use("/portal-api", createPortalRouter());
+  router.use("/control", createControlRouter());
+  ensureDefaultFakeAccountsSeeded();
 
   router.get("/health", (_request, response) => {
     response.json({ status: "ok", service: "fake-rails-back", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null });

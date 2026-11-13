@@ -1,12 +1,20 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { resolveRail } from "../../engine/chaos/DefaultRailScenarios";
+import { updateTransaction } from "../../engine/db";
 import { getScenario } from "../../engine/chaos/scenarioStore";
 import { ApiError } from "../../lib/error";
+import {
+  captureAccountHoldForTransaction,
+  refundAccountForTransaction,
+  releaseAccountHoldForTransaction,
+  reserveAccountFundsForTransaction,
+} from "../../engine/accounts/AccountLedgerService";
 import {
   applyFault,
   applyLatency,
   asRecord,
   evaluateFor,
+  extractCustomer,
   finalizeFault,
   recordRailEvent,
   resolveOrCreateTransaction,
@@ -50,6 +58,68 @@ export const matchRailRoute = (
       && route.method === method
       && segmentMatches(route.path, path),
   );
+
+const ACTION_CODE: Record<string, string> = {
+  ACCOUNT_FROZEN: "62",
+  ACCOUNT_EXPIRED: "54",
+  ACCOUNT_BLOCKED: "62",
+  INSUFFICIENT_FUNDS: "51",
+  LIMIT_EXCEEDED: "61",
+};
+
+const accountDecline = (
+  context: RailRequestContext,
+  code: string,
+  message: string,
+): RailResponse => ({
+  status: 200,
+  body: {
+    reference: context.reference,
+    our_reference: context.transaction.our_reference,
+    provider_reference: context.transaction.provider_reference,
+    transaction_id: context.transaction.provider_reference,
+    amount: context.transaction.normalized_amount_lyd,
+    currency: context.transaction.currency,
+    status: "FAILED",
+    success: false,
+    error: code,
+    error_code: code,
+    message,
+    ActionCode: ACTION_CODE[code] ?? "05",
+  },
+});
+
+/**
+ * Applies the stateful account outcome of a rail answer. The hold is placed at
+ * INITIATE, captured when the switch answers PAID, released on a decline or a
+ * cancel, and credited back on a refund.
+ */
+const applyAccountOutcome = (
+  context: RailRequestContext,
+  body: Record<string, unknown>,
+): void => {
+  const status = typeof body.status === "string" ? body.status.toUpperCase() : "";
+  if (status === "PAID" || status === "SUCCEEDED") {
+    captureAccountHoldForTransaction(context.transaction.id);
+    return;
+  }
+  if (status === "REFUNDED") {
+    try {
+      refundAccountForTransaction(
+        context.transaction.id,
+        undefined,
+        "Refund returned to the test customer account",
+      );
+    } catch {
+      // An over-refund is rejected by the handler before this point; a
+      // transaction without a capture has nothing to credit.
+    }
+    return;
+  }
+  if (status === "FAILED" || status === "CANCELLED") {
+    releaseAccountHoldForTransaction(context.transaction.id, `Rail answered ${status}`);
+  }
+};
 
 const send = (response: Response, result: RailResponse): void => {
   response.status(result.status ?? 200);
@@ -127,6 +197,34 @@ export const createRailsRouter = (): Router => {
         transaction,
       });
 
+      // Stateful account reservation: INITIATE checks the customer account
+      // (status, balance, daily limit) and holds the amount atomically.
+      if (route.phase === "INITIATE" && !context.transaction.account_id) {
+        const hold = reserveAccountFundsForTransaction({
+          railCode: descriptor.railCode,
+          gatewayCode: descriptor.gatewayCode,
+          identifier: extractCustomer(context.body) ?? context.customer,
+          transactionId: context.transaction.id,
+          amountLyd: context.transaction.normalized_amount_lyd,
+          merchantId: context.transaction.merchant_id ?? context.request.header("x-pg-merchant-id") ?? null,
+        });
+        if (!hold.allowed) {
+          updateTransaction(context.transaction.id, { status: "FAILED" });
+          const declined = accountDecline(
+            context,
+            hold.declineCode ?? "INSUFFICIENT_FUNDS",
+            hold.declineMessage ?? "Declined by the test customer account",
+          );
+          recordRailEvent(context, declined, startedAt);
+          send(response, declined);
+          return;
+        }
+        if (hold.account.static_otp) {
+          updateTransaction(context.transaction.id, { expected_otp: hold.account.static_otp });
+          context.transaction.expected_otp = hold.account.static_otp;
+        }
+      }
+
       await applyLatency(context);
 
       const hardFault = await applyFault(context);
@@ -139,6 +237,7 @@ export const createRailsRouter = (): Router => {
       if (context.fault) {
         const business = finalizeFault(context, context.fault);
         if (business) {
+          applyAccountOutcome(context, asRecord(business.body));
           recordRailEvent(context, business, startedAt);
           send(response, business);
           return;
@@ -146,6 +245,7 @@ export const createRailsRouter = (): Router => {
       }
 
       const result = await route.handler(context);
+      applyAccountOutcome(context, asRecord(result.body));
       recordRailEvent(context, result, startedAt);
       send(response, result);
     } catch (error) {

@@ -16,6 +16,7 @@ import { ApiError, isApiError, toErrorEnvelope } from "./lib/error";
 import { BlobStoreUnavailableError, ObjectStorageError } from "./lib/objectStorageSdk";
 import { REPORT_ENGINE_JSON_LIMIT } from "./api/internal/adminReportEngine";
 import { reconcileReportChromeDefaults } from "./engine/reportStudio/reconcileChromeDefaults";
+import { verifyExecutionPlaneFenceOnBoot } from "./engine/PlaneFenceGuard";
 
 /** Admin report-engine routes: authoring bodies carry the asset zip. */
 export const REPORT_ENGINE_BODY_PATH = /^\/internal\/(admin|merchant)\/report-engine(\/|$)/;
@@ -290,6 +291,9 @@ const configureRedisInvalidation = async (): Promise<(() => Promise<void>)> => {
 };
 
 export const start = async () => {
+  // The execution plane is a property of the process and its database. Prove
+  // they match before Express listens or a worker ticks (v38).
+  await verifyExecutionPlaneFenceOnBoot();
   // The statement upload and the dispute intake are queue-only routes: the
   // service refuses to boot if nothing can drain the durable jobs.
   assertBackgroundJobQueueDrainable({

@@ -354,7 +354,27 @@ const base = z.strictObject({
   FAKE_RAILS_ADMIN_PASSWORD: secretValue(12).optional(),
   FAKE_RAILS_JWT_SECRET: secretValue(32).optional(),
   FAKE_RAILS_SEEDER_TOKEN: secretValue(32).optional(),
+  /** v38: shared token the Sandbox core presents on the Fake Rails control plane. */
+  FAKE_RAILS_CONTROL_TOKEN: secretValue(16).optional(),
   SEED_FAKE_RAILS_BLUEPRINTS: booleanish.default(true),
+
+  // 7b. Parallel Sandbox plane (v38)
+  /** Enables the separate Sandbox core node and database. Off keeps a Live-only deployment. */
+  SANDBOX_ENABLED: booleanish.default(false),
+  /** Optional dedicated Sandbox core host; absent = the first core node hosts it. */
+  SANDBOX_NODE: nodeList,
+  SANDBOX_CORE_PORT: port.default(4005),
+  SANDBOX_DB_NAME: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9_]+$/, "must be an identifier")
+    .default("payment_gateway_sandbox"),
+  /** Sandbox core release tree; never share a remote directory with Live core. */
+  SANDBOX_REMOTE_DIR: safeDir().default("/var/www/pg-core-sandbox"),
+  /** Explicit Sandbox core URL list for the edges (multi-host); derived from SANDBOX_NODE/CORE_NODES otherwise. */
+  SANDBOX_CORE_BACK_URLS: z.string().trim().max(1000).optional(),
 
   // 9. PostgreSQL 18 relational core, replicas and PgBouncer
   PG_MANAGE_VIA_SSH: booleanish.default(false),
@@ -844,6 +864,47 @@ export const effectiveDatabase = (config: DeployConfig): {
     privateIp: pg ? (primary?.privateIp ?? config.DB_PRIVATE_IP ?? null) : (config.DB_PRIVATE_IP ?? primary?.privateIp ?? null),
     managedViaSsh: config.DB_MANAGE_VIA_SSH || config.PG_MANAGE_VIA_SSH,
   };
+};
+
+/**
+ * The sandbox database endpoint. It is a separate database in the same
+ * PostgreSQL cluster (or the external DB host), with its own PgBouncer aliases
+ * `pgw_sandbox` (transaction) and `pgw_sandbox_session` (session). The sandbox
+ * core never receives the Live database name.
+ */
+export const sandboxDatabase = (config: DeployConfig): {
+  name: string;
+  url: string | null;
+  ownerUrl: string | null;
+  sessionUrl: string | null;
+  host: string | null;
+  port: number;
+  privateIp: string | null;
+} => {
+  const live = effectiveDatabase(config);
+  const name = config.SANDBOX_DB_NAME;
+  const app = applicationCredentials(config);
+  const host = live.host;
+  const port = config.PGBOUNCER_ENABLED ? config.PGBOUNCER_PORT : live.port;
+  const tls = config.PG_MANAGE_VIA_SSH || config.DB_MANAGE_VIA_SSH ? "?sslmode=no-verify" : "";
+  const alias = config.PGBOUNCER_ENABLED ? "pgw_sandbox" : name;
+  const sessionAlias = config.PGBOUNCER_ENABLED ? "pgw_sandbox_session" : name;
+  const url = host
+    ? `postgresql://${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}@${host}:${port}/${alias}${tls}`
+    : null;
+  const planeOption = config.SANDBOX_ENABLED ? `${tls ? "&" : "?"}options=-c%20app.execution_plane%3DSANDBOX` : "";
+  // Migrations run directly against PostgreSQL, not through the transaction
+  // pooler. Besides keeping Prisma's session advisory lock safe, this lets the
+  // migration session carry the custom app.execution_plane GUC; PgBouncer
+  // rejects unknown startup options. The runtime URL stays on pgw_sandbox.
+  const ownerPort = live.port;
+  const ownerUrl = host
+    ? `postgresql://${encodeURIComponent(live.user)}:${encodeURIComponent(live.password)}@${host}:${ownerPort}/${name}${tls}${planeOption}`
+    : null;
+  const sessionUrl = host
+    ? `postgresql://${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}@${host}:${port}/${sessionAlias}${tls}`
+    : null;
+  return { name, url, ownerUrl, sessionUrl, host, port, privateIp: live.privateIp };
 };
 
 /**
@@ -1441,6 +1502,43 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   if (config.RUN_SYNTHETIC_HISTORY_SEED) {
     if (!config.IS_TEST_SERVER) problems.push("RUN_SYNTHETIC_HISTORY_SEED requires IS_TEST_SERVER=true");
     if (!config.FAKE_RAILS_ENABLED) problems.push("RUN_SYNTHETIC_HISTORY_SEED requires FAKE_RAILS_ENABLED=true");
+  }
+
+  // --- Parallel Sandbox plane ---------------------------------------------
+  if (config.SANDBOX_ENABLED) {
+    const nodes = (() => {
+      try {
+        return parseNodeList(config.SANDBOX_NODE);
+      } catch (error) {
+        problems.push(`SANDBOX_NODE: ${(error as Error).message}`);
+        return [];
+      }
+    })();
+    if (nodes.length > 1) problems.push("SANDBOX_NODE must describe exactly one node");
+    if (!config.FAKE_RAILS_ENABLED) problems.push("SANDBOX_ENABLED requires FAKE_RAILS_ENABLED=true");
+    if (config.SANDBOX_DB_NAME === (config.PG_DB_NAME || config.DB_NAME)) {
+      problems.push("SANDBOX_DB_NAME must differ from the Live database name");
+    }
+    if (config.SANDBOX_REMOTE_DIR === config.CORE_REMOTE_DIR) {
+      problems.push("SANDBOX_REMOTE_DIR must differ from CORE_REMOTE_DIR");
+    }
+    if (config.SANDBOX_CORE_PORT === config.CORE_PORT
+      || config.SANDBOX_CORE_PORT === config.ADMIN_BACK_PORT
+      || config.SANDBOX_CORE_PORT === config.MERCHANT_BACK_PORT
+      || config.SANDBOX_CORE_PORT === config.CHECKOUT_BACK_PORT
+      || config.SANDBOX_CORE_PORT === config.FAKE_RAILS_BACK_PORT) {
+      problems.push("SANDBOX_CORE_PORT must differ from the Live core, edge and Fake Rails backend ports");
+    }
+    if (config.SANDBOX_CORE_BACK_URLS) {
+      for (const entry of config.SANDBOX_CORE_BACK_URLS.split(",")) {
+        try {
+          const url = new URL(entry.trim());
+          if (url.protocol !== "https:") problems.push("SANDBOX_CORE_BACK_URLS must use https://");
+        } catch {
+          problems.push(`SANDBOX_CORE_BACK_URLS contains an invalid URL: ${entry}`);
+        }
+      }
+    }
   }
 
   return problems;

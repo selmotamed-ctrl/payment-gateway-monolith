@@ -17,6 +17,9 @@ export const envSchema = z.object({
   BIND_HOST: z.string().min(1).default("0.0.0.0"),
   CORE_BACK_URL: httpsUrl,
   CORE_BACK_URLS: z.string().optional(),
+  /** v38: the isolated Sandbox core plane (`pg-core-sandbox`). Absent = Sandbox is not configured. */
+  SANDBOX_CORE_BACK_URL: httpsUrl.optional(),
+  SANDBOX_CORE_BACK_URLS: z.string().optional(),
   MTLS_CLIENT_CERT_PATH: z.string().min(1),
   MTLS_CLIENT_KEY_PATH: z.string().min(1),
   MTLS_CA_CERT_PATH: z.string().min(1),
@@ -128,6 +131,21 @@ export const parseCoreBackUrls = (raw: string | undefined, fallback: string): st
 export const coreBackUrls = (): string[] => {
   const loaded = loadEnv();
   return parseCoreBackUrls(loaded.CORE_BACK_URLS, loaded.CORE_BACK_URL);
+};
+
+/**
+ * The Sandbox core pool, or `null` when this edge was not configured with a
+ * Sandbox node. A caller must fail with `503 SANDBOX_NODE_UNAVAILABLE` rather
+ * than silently sending the request to the Live core.
+ */
+export const sandboxCoreBackUrls = (): string[] | null => {
+  const loaded = loadEnv();
+  const raw = loaded.SANDBOX_CORE_BACK_URLS;
+  if ((!raw || raw.trim().length === 0) && !loaded.SANDBOX_CORE_BACK_URL) {
+    return null;
+  }
+  const fallback = loaded.SANDBOX_CORE_BACK_URL ?? raw!.split(",")[0]!.trim();
+  return parseCoreBackUrls(raw, fallback);
 };
 
 /**

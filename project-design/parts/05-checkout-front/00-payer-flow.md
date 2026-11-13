@@ -3,9 +3,10 @@ id: checkout-ui.flow
 title: Checkout Payer Flow
 status: partial
 confidence: high
-last_verified: 2026-11-09
+last_verified: 2026-11-13
 verified_against: 5a24f6f+working-tree
 code:
+  - checkout-front/src/components/sandbox/SandboxCheckoutInspector.tsx
   - checkout-front/src/router/index.ts
   - checkout-front/src/layouts/checkout.tsx
   - checkout-front/src/utils/theme/index.ts
@@ -23,6 +24,7 @@ design_sources:
   - design/07-guides-and-academy/complete_zero_to_hero_guides_and_academy_specification.md
   - design/90-archive/superseded-ui/portal_ui_abstraction_and_modern_fintech_redesign.md
 tests:
+  - core-back/test/sandboxPlane.test.ts
   - tests/e2e/checkout/pay.spec.ts
   - tests/e2e/checkout/a11y.spec.ts
   - tests/unit/checkout-redirect.test.ts
@@ -356,3 +358,7 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 ## Dark teleported overlays (2026-11-10)
 
 Checkout dialogs/drawers use the shared overlay text-color rule (`color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`), keeping custom modal content readable in dark mode.
+
+## v38 sandbox checkout inspector (2026-11-13)
+
+On an `sbx_` link (summary `env: "SANDBOX"`) the payer page renders `SandboxCheckoutInspector`: Fake Rails test-account picker with auto-fill, live balances/holds/daily limits, PIN/CVV/expiry, freeze/drain/set-exact controls, the live OTP with auto-confirm, and the push/QR approve/decline/variance/duplicate/tampered-webhook simulator. It is never rendered on a Live `pl_*` checkout.
