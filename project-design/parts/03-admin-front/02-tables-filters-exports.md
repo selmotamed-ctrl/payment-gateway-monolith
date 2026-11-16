@@ -3,8 +3,8 @@ id: admin-ui.tables
 title: Tables Filters and Exports
 status: partial
 confidence: high
-last_verified: 2026-11-12
-verified_against: 19d6a54+working-tree
+last_verified: 2026-11-16
+verified_against: 1dcc0f2+working-tree
 code:
   - admin-front/src/components/Table/**
   - admin-front/src/utils/xlsx/**
@@ -113,12 +113,14 @@ The v2 design intends tables to look operational rather than decorative:
 | `AmlReports` | `reports` | 5 |
 | `Adjustments` | `adjustments` | 6 |
 | `CashOuts` | `cashouts` | 5 |
-| `Disputes` | `disputes` | 7 |
+| `Disputes` | `disputes` | 8 |
 | `OperatorCases` | `cases` | 9 |
 | `GatewayInquiries` | `schedules` | 8 |
 | `Reconciliation` | `sources` | 1, with storage key `pg.admin.reconciliation.sources` |
 
 `referenceOptions.ts` caches option lookups per `kind:search` key and requests `/options/:kind` with a search string and `limit=50`.
+
+`Disputes` also exposes the `attemptId` text filter (`Attempt ID`, placeholder `Attempt UUID`). The attempt detail drawer deep-links `/disputes?attemptId=…&merchantId=…`; the page starts on All with those filters, keeps the attempt/merchant scope when switching Open/Resolved, and removes the route scope when filters are cleared.
 
 ### 3.4 Session persistence
 

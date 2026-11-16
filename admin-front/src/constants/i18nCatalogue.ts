@@ -194,6 +194,8 @@ export const appCatalogue: Record<string, [string, string]> = {
     "Payment Reference": ["Payment Reference", "مرجع الدفع"],
     "Instructions": ["Instructions", "التعليمات"],
     "Attempt": ["Attempt", "المحاولة"],
+    "Attempt ID": ["Attempt ID", "معرف المحاولة"],
+    "Attempt UUID": ["Attempt UUID", "UUID المحاولة"],
     "Attempts": ["Attempts", "المحاولات"],
     "Attempts Inspector": ["Attempts Inspector", "فاحص المحاولات"],
     "Generate QR": ["Generate QR", "توليد رمز QR"],

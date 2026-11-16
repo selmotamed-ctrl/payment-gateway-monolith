@@ -300,6 +300,7 @@ export const tableRegistry: Record<string, TableServerConfig> = {
             { key: "status", label: "Status", type: "data-autocomplete", options: options(DISPUTE_STATUS), multiple: true },
             { key: "source", label: "Source", type: "data-autocomplete", options: options(DISPUTE_SOURCE) },
             { key: "merchantId", label: "Merchant", type: "api-autocomplete", load: merchants },
+            { key: "attemptId", label: "Attempt ID", type: "text", placeholder: "Attempt UUID" },
             { key: "railId", label: "Rail", type: "api-autocomplete", load: rails, query: "railId" },
             { key: "amount", label: "Amount", type: "number-range" },
             { key: "from", label: "Opened", type: "date", queryFrom: "from", queryTo: "to" },

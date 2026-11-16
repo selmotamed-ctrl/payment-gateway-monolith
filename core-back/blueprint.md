@@ -340,7 +340,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 ## Core API Surface
 
-> Status: `partial` · Last verified: 2026-11-13
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -525,6 +525,8 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | :--- | :--- |
 | `GET /disputes`, `/export`, `/summary`, `/summary/export`, `GET /disputes/:id` | `dispute:read` |
 | `POST /disputes/:id/evidence`, `POST /disputes` | `dispute:write` |
+
+`GET /disputes` and `/disputes/export` combine the standard list filters with `merchantId` (the attempt's merchant) and `attemptId` (one payment attempt), so the admin payment-attempt drawer can deep-link to the attempt's dispute(s).
 | `GET /adjustments`, `/export`, `/summary`, `/summary/export`, `GET /adjustments/:id` | `finance:read` |
 | `POST /adjustments` | `finance:write`; creates an `ADJUSTMENT` approval and a `PENDING_REVIEW` adjustment |
 | `GET /cashouts`, `/export`, `/summary`, `/summary/export`, `GET /cashouts/:id` | `cashout:read` |

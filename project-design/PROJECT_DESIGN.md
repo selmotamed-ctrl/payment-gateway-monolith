@@ -2444,7 +2444,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 <a id="coreapi"></a>
 
-> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `1dcc0f2+working-tree`
 
 # Core API Surface
 
@@ -2631,6 +2631,8 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | :--- | :--- |
 | `GET /disputes`, `/export`, `/summary`, `/summary/export`, `GET /disputes/:id` | `dispute:read` |
 | `POST /disputes/:id/evidence`, `POST /disputes` | `dispute:write` |
+
+`GET /disputes` and `/disputes/export` combine the standard list filters with `merchantId` (the attempt's merchant) and `attemptId` (one payment attempt), so the admin payment-attempt drawer can deep-link to the attempt's dispute(s).
 | `GET /adjustments`, `/export`, `/summary`, `/summary/export`, `GET /adjustments/:id` | `finance:read` |
 | `POST /adjustments` | `finance:write`; creates an `ADJUSTMENT` approval and a `PENDING_REVIEW` adjustment |
 | `GET /cashouts`, `/export`, `/summary`, `/summary/export`, `GET /cashouts/:id` | `cashout:read` |
@@ -9682,7 +9684,7 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 
 <a id="admin-uiroutes"></a>
 
-> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `1dcc0f2+working-tree`
 
 # Admin Route and Page Catalog
 
@@ -9745,7 +9747,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 18 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | UNKNOWN/conflict/reconciliation operator queue. |
 | 19 | `/operator-cases/inquiries` | `GatewayInquirySchedules` | `case:read` or `operator:read` | 7 / 7.2 | Gateway inquiry schedule monitoring, run/retry/cancel. |
 | 20 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case evidence, step logs, inbound events, maker-checker resolution. |
-| 21 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage. |
+| 21 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage; an attempt-detail link starts on All scoped by `attemptId` and `merchantId`. |
 | 22 | `/adjustments` | `Adjustments` | `adjustments.propose` | 11 / 11.2 | Refund/manual adjustment drafting and review. |
 | 23 | `/cashouts` | `CashOuts` | `cashout.process` | 12 / 12.1 | Cash-out processing with wallet, destination and AML checks. |
 | 24 | `/reconciliation` | `Reconciliation` | `reconciliation.run` or `reconciliation.resolve` | 8 / 8.2 | Statement upload, run monitoring and variance resolution. |
@@ -9983,7 +9985,7 @@ A "Sandbox Live Mirror" section maps `/sandbox/mirror/*` to the real admin pages
 
 <a id="admin-uitables"></a>
 
-> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `19d6a54+working-tree`
+> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `1dcc0f2+working-tree`
 
 # Tables Filters and Exports
 
@@ -10069,12 +10071,14 @@ The v2 design intends tables to look operational rather than decorative:
 | `AmlReports` | `reports` | 5 |
 | `Adjustments` | `adjustments` | 6 |
 | `CashOuts` | `cashouts` | 5 |
-| `Disputes` | `disputes` | 7 |
+| `Disputes` | `disputes` | 8 |
 | `OperatorCases` | `cases` | 9 |
 | `GatewayInquiries` | `schedules` | 8 |
 | `Reconciliation` | `sources` | 1, with storage key `pg.admin.reconciliation.sources` |
 
 `referenceOptions.ts` caches option lookups per `kind:search` key and requests `/options/:kind` with a search string and `limit=50`.
+
+`Disputes` also exposes the `attemptId` text filter (`Attempt ID`, placeholder `Attempt UUID`). The attempt detail drawer deep-links `/disputes?attemptId=…&merchantId=…`; the page starts on All with those filters, keeps the attempt/merchant scope when switching Open/Resolved, and removes the route scope when filters are cleared.
 
 ### 3.4 Session persistence
 
@@ -16653,7 +16657,7 @@ Security regression suites exist for core-back (`test/security-regressions/`), t
 
 <a id="testingsuites"></a>
 
-> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `19d6a54+working-tree`
+> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `1dcc0f2+working-tree`
 
 # Test Suite Catalog
 
@@ -17118,6 +17122,10 @@ These are development/CI tests only; no production-time test job or test endpoin
 - `merchant-back/test/sandbox-routing.test.ts`, `admin-back/test/sandbox-routing.test.ts`, `checkout-back/test/sandbox-routing.test.ts`: pool selection, fail-closed 503 and token prefixes.
 - `merchant-back/test/sandbox-proxy.test.ts` and `checkout-back/test/sandbox-checkout-forward.test.ts`: real forwarding through the sandbox pool for control/resources, `pg_test_` external tokens, `sbx_` summary/inspector routes and the Live-link inspector refusal.
 - `core-back/test/security-regressions/commerce-status-enforcement.test.ts` and `test/engine/attempt-guard-pipeline.test.ts` assert the removed OD-10 fallback.
+
+## Disputes attempt-link regression (2026-11-16)
+
+- `admin-front/src/pages/disputes/__tests__/queryFilters.test.ts` — route query normalization (including repeated keys), attempt/merchant deep-link seeding, merchant-only seeding, and Open/Resolved/All scope preservation.
 
 ## v39 Sandbox Studio and mirror suites (2026-11-13)
 

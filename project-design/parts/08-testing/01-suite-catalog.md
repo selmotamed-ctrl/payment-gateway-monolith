@@ -3,8 +3,8 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-13
-verified_against: 19d6a54+working-tree
+last_verified: 2026-11-16
+verified_against: 1dcc0f2+working-tree
 code:
   - core-back/test/sandboxPlane.test.ts
   - core-back/test/exhaustive/**
@@ -52,6 +52,7 @@ tests:
   - deploy/object-storage-daemon/test/mtls.test.ts
   - deploy/object-storage-daemon/test/sdk-mtls.test.ts
   - fake-rails-back/test/security.test.ts
+  - admin-front/src/pages/disputes/__tests__/queryFilters.test.ts
   - tests/unit/frontend-security-admin.test.ts
   - tests/unit/frontend-security-checkout.test.ts
   - tests/unit/frontend-security-merchant.test.ts
@@ -544,6 +545,10 @@ These are development/CI tests only; no production-time test job or test endpoin
 - `merchant-back/test/sandbox-routing.test.ts`, `admin-back/test/sandbox-routing.test.ts`, `checkout-back/test/sandbox-routing.test.ts`: pool selection, fail-closed 503 and token prefixes.
 - `merchant-back/test/sandbox-proxy.test.ts` and `checkout-back/test/sandbox-checkout-forward.test.ts`: real forwarding through the sandbox pool for control/resources, `pg_test_` external tokens, `sbx_` summary/inspector routes and the Live-link inspector refusal.
 - `core-back/test/security-regressions/commerce-status-enforcement.test.ts` and `test/engine/attempt-guard-pipeline.test.ts` assert the removed OD-10 fallback.
+
+## Disputes attempt-link regression (2026-11-16)
+
+- `admin-front/src/pages/disputes/__tests__/queryFilters.test.ts` — route query normalization (including repeated keys), attempt/merchant deep-link seeding, merchant-only seeding, and Open/Resolved/All scope preservation.
 
 ## v39 Sandbox Studio and mirror suites (2026-11-13)
 

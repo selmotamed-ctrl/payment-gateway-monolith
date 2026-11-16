@@ -325,7 +325,7 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 
 ## Admin Route and Page Catalog
 
-> Status: `partial` · Last verified: 2026-11-13
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -386,7 +386,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 18 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | UNKNOWN/conflict/reconciliation operator queue. |
 | 19 | `/operator-cases/inquiries` | `GatewayInquirySchedules` | `case:read` or `operator:read` | 7 / 7.2 | Gateway inquiry schedule monitoring, run/retry/cancel. |
 | 20 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case evidence, step logs, inbound events, maker-checker resolution. |
-| 21 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage. |
+| 21 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage; an attempt-detail link starts on All scoped by `attemptId` and `merchantId`. |
 | 22 | `/adjustments` | `Adjustments` | `adjustments.propose` | 11 / 11.2 | Refund/manual adjustment drafting and review. |
 | 23 | `/cashouts` | `CashOuts` | `cashout.process` | 12 / 12.1 | Cash-out processing with wallet, destination and AML checks. |
 | 24 | `/reconciliation` | `Reconciliation` | `reconciliation.run` or `reconciliation.resolve` | 8 / 8.2 | Statement upload, run monitoring and variance resolution. |
@@ -622,7 +622,7 @@ A "Sandbox Live Mirror" section maps `/sandbox/mirror/*` to the real admin pages
 
 ## Tables Filters and Exports
 
-> Status: `partial` · Last verified: 2026-11-12
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -706,12 +706,14 @@ The v2 design intends tables to look operational rather than decorative:
 | `AmlReports` | `reports` | 5 |
 | `Adjustments` | `adjustments` | 6 |
 | `CashOuts` | `cashouts` | 5 |
-| `Disputes` | `disputes` | 7 |
+| `Disputes` | `disputes` | 8 |
 | `OperatorCases` | `cases` | 9 |
 | `GatewayInquiries` | `schedules` | 8 |
 | `Reconciliation` | `sources` | 1, with storage key `pg.admin.reconciliation.sources` |
 
 `referenceOptions.ts` caches option lookups per `kind:search` key and requests `/options/:kind` with a search string and `limit=50`.
+
+`Disputes` also exposes the `attemptId` text filter (`Attempt ID`, placeholder `Attempt UUID`). The attempt detail drawer deep-links `/disputes?attemptId=…&merchantId=…`; the page starts on All with those filters, keeps the attempt/merchant scope when switching Open/Resolved, and removes the route scope when filters are cleared.
 
 ### 3.4 Session persistence
 

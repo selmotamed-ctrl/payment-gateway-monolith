@@ -16124,6 +16124,10 @@ router.get("/disputes", async (request: Request, response: Response) => {
   if (merchantId) {
     conditions.push({ attempt: { merchantId } });
   }
+  const attemptId = typeof query.attemptId === "string" && query.attemptId.trim() ? query.attemptId.trim() : "";
+  if (attemptId) {
+    conditions.push({ attemptId });
+  }
   const where = conditions.length === 1 ? conditions[0] : { AND: conditions };
   const [disputes, total] = await Promise.all([
     client.dispute.findMany({
@@ -16178,6 +16182,8 @@ router.get("/disputes/export", async (request: Request, response: Response) => {
   const conditions: Record<string, unknown>[] = [built.where];
   const merchantId = typeof query.merchantId === "string" && query.merchantId.trim() ? query.merchantId.trim() : "";
   if (merchantId) conditions.push({ attempt: { merchantId } });
+  const attemptId = typeof query.attemptId === "string" && query.attemptId.trim() ? query.attemptId.trim() : "";
+  if (attemptId) conditions.push({ attemptId });
   const where = conditions.length === 1 ? conditions[0] : { AND: conditions };
   const take = 5000;
   const [disputes, total] = await Promise.all([
