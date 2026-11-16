@@ -35,6 +35,10 @@ const authorSpec = (version: number) => {
   const spec = structuredClone(exampleDescriptorSpec) as Record<string, any>;
   spec.report.code = code;
   spec.report.version = version;
+  // No header or footer: with GLOBAL_DEFAULT the catalog hides a report until a platform default chrome
+  // exists (the seeder creates one), so these tests would depend on the database having been seeded.
+  spec.page_layout.header_mode = "NONE";
+  spec.page_layout.footer_mode = "NONE";
   return spec;
 };
 
