@@ -5,6 +5,7 @@ import { digestKeyPart, lazyLimiter, rateLimitKey, requestClientIp } from "../..
 import { env } from "../../lib/env";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { callCoreRaw, type CoreHttpMethod } from "../../lib/mtlsClient";
+import { requireSandboxCoreBackUrls } from "../../lib/corePools";
 import { resolveRequestId } from "../../lib/requestLogger";
 
 const router = express.Router();
@@ -163,6 +164,7 @@ router.all("/:gateway/:env/:pathToken", async (req: Request, res: Response) => {
   const contentType = req.headers["content-type"];
   const coreEnvironment = translateInboundEnvironment(params.env);
   const response = await callCoreRaw({
+    ...(coreEnvironment === "SANDBOX" ? { targetUrls: requireSandboxCoreBackUrls() } : {}),
     method: req.method as CoreHttpMethod,
     path: `/internal/checkout/inbound/${encodeURIComponent(params.gateway)}/${coreEnvironment}/${encodeURIComponent(params.pathToken)}`,
     rawBody: raw,

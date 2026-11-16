@@ -6,6 +6,7 @@ import { bilingualNotice, queueNotice, type NoticeDefinition } from "../../lib/a
 import { DEFAULT_BUSINESS_TIME_ZONE, type BusinessCalendar } from "./deadlines/businessTime";
 import { staffByRole } from "./deadlines/common";
 import { ReportGenerationService } from "../compliance/reporting/ReportGenerationService";
+import { createObjectStorageSdkForClient } from "../../lib/objectStorageSdk/runtime";
 import { ensureBaselineReportingSchemas } from "../compliance/reporting/baselineSchemas";
 import type { ReportOutputFormat } from "../compliance/reporting/types";
 import { loadPlatformHolidays } from "./DeadlineWorker";
@@ -100,7 +101,10 @@ export class RegulatoryReportWorker extends BaseWorker {
     super({ ...deps, intervalMs: deps.intervalMs ?? 60 * 60 * 1000 });
     this.deps = deps;
     this.audit = deps.audit ?? writeSystemAudit;
-    this.generation = deps.generation ?? new ReportGenerationService();
+    this.generation = deps.generation ?? new ReportGenerationService(
+      undefined,
+      createObjectStorageSdkForClient(this.db) ?? undefined,
+    );
   }
 
   protected async tick(): Promise<WorkerTickResult> {
@@ -252,7 +256,7 @@ export class RegulatoryReportWorker extends BaseWorker {
           requiredOutputFormats,
         ),
       );
-      if (inserted.length === 0) return null; // another node drafted it first
+      if (inserted.length === 0) return null;
       const createdId = String(inserted[0]!.id);
       await this.audit(tx as Any, {
         action: "REGULATORY_REPORT_DRAFTED",

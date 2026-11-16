@@ -58,7 +58,7 @@ Most factual counts are now fixed in the canonical parts. The remaining items be
 | ID | Feature | Status | Current evidence | Acceptance criteria |
 | :--- | :--- | :--- | :--- | :--- |
 | D-01 | Voucher Provider Management System | `missing` | No voucher code, schema, API or UI | See `future.voucher`; all phases and tests delivered as a separate service |
-| D-02 | Admin Guide v2 | `implemented` | 14 books/125 articles/151 terms/22 cards/29 situations/5 simulators/8 routes with generated content, context help and safeguards | See `admin-ui.guide-v2`; only the Arabic article set remains outstanding |
+| D-02 | Admin Guide v2 | `implemented` | 14 books/137 articles/154 terms/26 cards/32 situations/5 simulators/8 routes with generated content, context help and safeguards | See `admin-ui.guide-v2`; only the Arabic article set remains outstanding |
 | D-03 | Smart AI voucher importer half | `missing` | Gateway importer only in `core-back/engine/specImporter/**` | See `future.smart-ai-voucher`; voucher schema/validator/simulator/materializer/transcript/UI/tests |
 | D-04 | Merchant Google OIDC login | `deferred` | `core-back/api/internal/merchant.ts` `/auth/google` returns `501 GOOGLE_IDENTITY_NOT_CONFIGURED` | Configure issuer/client/audience, verify ID tokens, map identities, test success/failure |
 | D-05 | Keyset pagination | `partial` | `core-back/lib/listQuery.ts` supports cursor pagination (2026-11-04) but only merchant `/payments` uses it; the other lists still use `skip/take` | Add stable cursor keys, cursor encode/decode, index coverage, API compatibility and tests at high offsets |

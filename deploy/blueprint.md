@@ -6,7 +6,7 @@ Generated from: `deploy.topology`, `deploy.planner`, `deploy.pki`, `deploy.firew
 
 ## Deploy Topology and Configuration
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-13
 
 ## 1. Purpose and scope
 
@@ -89,7 +89,7 @@ The node spec carries only host, SSH port, private IP and service port. SSH user
 
 1. **Node arrays over legacy host fields.** `CORE_NODES` overrides `CORE_SSH_HOST`, `CORE_SSH_PORT`, `CORE_PRIVATE_IP` and `CORE_PORT` for planning. The same applies to admin, merchant and checkout. SSH user/key/sudo are still taken from the legacy fields.
 2. **PostgreSQL storage fields over legacy database fields.** When any `PG_*` storage field is configured, `PG_DB_NAME`, `PG_DB_USER` and `PG_DB_PASSWORD` are authoritative. Otherwise `DB_*` is used, falling back to `PG_DB_*`.
-3. **Derived database URL.** When the PostgreSQL tier is configured and a host exists, `DATABASE_URL` is derived from the PG credentials, the primary private IP and `PGBOUNCER_PORT` when enabled; otherwise the explicit `DATABASE_URL` is used.
+3. **Derived database URL.** When the PostgreSQL tier is configured and a host exists, `DATABASE_URL` is derived from the PG credentials, the primary private IP and `PGBOUNCER_PORT` when enabled; otherwise the explicit `DATABASE_URL` is used. The owner/migration URL is derived separately and always uses the session-safe endpoint: an explicit `LEADER_ELECTION_DATABASE_URL` when set, otherwise the deploy-managed `pgw_session` alias, otherwise the direct primary. This applies in the legacy single-role mode too, so Prisma Migrate's advisory lock is never stranded in the transaction pool; the runtime URL does not change. An externally managed pooler is expected to provide the same session route (derived alias or explicit override).
 4. **Explicit core URL list.** `CORE_BACK_URLS` wins; otherwise `https://<privateIp>:<servicePort>` for every `CORE_NODES` entry; otherwise the legacy `https://<CORE_PRIVATE_IP>:<CORE_PORT>`.
 5. **Node service port over configured backend port.** A node's `servicePort` overrides `CORE_PORT`/`ADMIN_BACK_PORT`/`MERCHANT_BACK_PORT`/`CHECKOUT_BACK_PORT` for that node.
 6. **CLI over environment.** `--fresh`, `--update`, `--only`, `--nodes`, `--rolling-batch`, `--keep`, `--rotate-certs`, `--skip-build` and `--skip-verify` override the corresponding configuration for one run.
@@ -175,7 +175,7 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | Flag | Effect |
 | :--- | :--- |
 | `--env=<path>` | Use another environment file. |
-| `--only=core,checkout` | Restrict roles. Storage aliases: `pg`, `pg-primary`, `pg-replica`, `pgbouncer`, `redis`, `audit-db`, `log-db`, `backup`, `storage`. |
+| `--only=core,checkout` | Restrict roles. Storage aliases: `pg`, `pg-primary`, `pg-replica`, `pgbouncer`, `redis`, `audit-db`, `log-db`, `backup`, `storage`. Backend aliases: `core-back`, `admin-back`, `merchant-back`, `checkout-back`, `fake-rails-back`. |
 | `--nodes=<id,...>` | Restrict compute units by node id. |
 | `--rolling-batch=<n>` | Override `ROLLING_BATCH_SIZE`. |
 | `--keep=<n>` | Override `KEEP_RELEASES`. |
@@ -184,7 +184,10 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | `--skip-build`, `--skip-verify` | Skip local SPA builds or end-to-end verification. |
 | `--rotate-certs` | Rotate the CA and every leaf. |
 | `--check-certs` | Print the certificate expiry table and exit 1 when a certificate is missing, expired or inside `MTLS_RENEW_WITHIN_DAYS` (AUTO-28). |
-| `--dry-run` | Print commands; execute nothing. |
+| `--dry-run` | Print commands; execute nothing (preflight prints its checks without connecting). |
+| `--preflight-only` | Run the read-only preflight and exit; no build, PKI or deployment. |
+| `--skip-preflight` | Skip the preflight gate (emergency use, warns). |
+| `--stop-unmanaged` | Allow the preflight to stop safe same-repo dev listeners on selected service ports. |
 
 ### Files
 
@@ -306,7 +309,24 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 ## Remediation round 2 (2026-11-08): app role and host probe configuration
 
-`PG_APP_USER` (default `pgw_app_login`) and `PG_APP_PASSWORD` (at least 12 characters, different from the owner's) enable the role split: the owner (`PG_DB_USER`) runs migrations and seeders through `ownerUrl`, while the running services connect as `PG_APP_USER`, a plain LOGIN member of `pgw_app`. `PG_APP_USER` must not be `postgres`, `pgw_app` or `pgw_ledger_maintenance`, nor equal the owner or replication user. Without `PG_APP_PASSWORD` the legacy single-role behaviour is kept and the deploy warns.
+`PG_APP_USER` (default `pgw_app_login`) and `PG_APP_PASSWORD` (at least 12 characters, different from the owner's) enable the role split: the owner (`PG_DB_USER`) runs migrations and seeders through `ownerUrl`, while the running services connect as `PG_APP_USER`, a plain LOGIN member of `pgw_app`. `PG_APP_USER` must not be `postgres`, `pgw_app` or `pgw_ledger_maintenance`, nor equal the owner or replication user. Without `PG_APP_PASSWORD` the legacy single-role runtime behaviour is kept and the deploy warns; migrations and seeders still use the session-safe `ownerUrl`.
+
+## Shared object storage topology
+
+`OBJECT_STORAGE_NODE` (same `nodeId@sshHost:sshPort:privateIp:servicePort`
+format) adds `object-storage` to the storage roles. It is mandatory when
+`CORE_NODES` has more than one node or the backup daemon is on a separate host;
+otherwise validation fails with `MULTI_NODE_SHARED_STORAGE_REQUIRED`.
+`OBJECT_STORAGE_ENABLED`, `OBJECT_STORAGE_MANAGE_VIA_SSH` or a non-empty node
+auto-detect the tier. Core and backup daemon receive
+`OBJECT_STORAGE_DAEMON_URL` plus `object-storage-client` mTLS paths, and the
+core receives `CLUSTER_CORE_NODE_COUNT` and the KEK keyring.
+
+## v38-v39 sandbox configuration (2026-11-13)
+
+New keys: `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT` (4005), `SANDBOX_DB_NAME` (`payment_gateway_sandbox`), `SANDBOX_REMOTE_DIR`, `SANDBOX_CORE_BACK_URLS`, `FAKE_RAILS_CONTROL_TOKEN`. Validation requires Fake Rails, a distinct sandbox database/remote directory/port and HTTPS edge URLs.
+
+`sandboxDatabase()` derives `pgw_sandbox` (transaction) and `pgw_sandbox_session` (session) PgBouncer aliases; the PostgreSQL provisioner creates `payment_gateway_sandbox` and both aliases. `hostPlanner` emits a second core `ServicePlan` named `pg-core-sandbox` on `SANDBOX_NODE` (or the first core node) with its own release tree, sandbox `DATABASE_URL`/`LEADER_ELECTION_DATABASE_URL`, `EXECUTION_PLANE=SANDBOX`, Fake Rails enabled, backups removed from its env, a firewall rule on 4005 and a core certificate SAN that includes the sandbox IP. `deployService` migrates the sandbox database with the direct sandbox owner URL carrying `app.execution_plane=SANDBOX` (the pooler rejects custom startup options), then `db-seed` and `seed-fake-rails` when seeding is enabled. The seeder stamps an existing sandbox row only when the connected database name matches `SANDBOX_DB_NAME`. Edges receive `SANDBOX_CORE_BACK_URLS`; a sandbox pool failure never falls back to Live. Sandbox and Fake Rails data are deliberately not backup targets.
 
 ## Host Planner
 
@@ -319,7 +339,7 @@ The host planner converts a validated `DeployConfig` into a `DeployPlan`:
 - unique hosts keyed by `sshHost:sshPort`;
 - per-host roles, services, Nginx sites, certificate bundles, firewall rules and deploy order;
 - per-tier node plans for core, admin, merchant and checkout;
-- the PostgreSQL/Redis/audit/log/backup storage plan;
+- the PostgreSQL/Redis/audit/log/backup/object-storage storage plan;
 - the backup plan and topology label.
 
 It owns grouping and unioning only. It does not validate the raw environment (that is `deploy.topology`), generate certificates (`deploy.pki`), apply firewall rules (`deploy.firewall`) or execute the pipeline (`deploy.pipeline`).
@@ -597,7 +617,7 @@ The planner's config validation now rejects weak secrets and restricts charsets 
 
 ## Internal PKI and mTLS Certificates
 
-> Status: `partial` · Last verified: 2026-11-09
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -897,6 +917,16 @@ Not covered by automated tests:
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
 
+## Object storage certificates
+
+`buildPki` mints `object-storage-daemon.crt` (server; CN
+`object-storage-daemon.internal`, SANs `IP:<OBJECT_STORAGE_NODE private IP>`,
+`IP:127.0.0.1`, `DNS:object-storage-daemon.internal`) and, when object storage is
+configured, the `object-storage-client` client certificate. `certFilesForHost`
+gives the storage host its server + client material; core hosts and the backup
+host receive `internal-ca.crt` and `object-storage-client.*`. Certificate placement is per consumer: a co-located core/backup host does not receive the object-storage server key, and the backup host receives the client leaf in its own cert directory. Renewal/SAN drift
+handling includes the object-storage server leaf.
+
 ## Firewall Policy and Application
 
 > Status: `partial` · Last verified: 2026-11-05
@@ -1154,9 +1184,14 @@ Not covered:
 
 The Fake Rails nginx vhost now also applies `allow`/`deny` rules from `FAKE_RAILS_ALLOWED_CIDRS` (the application-level check compares `socket.remoteAddress`, not `X-Forwarded-For`). All six nginx templates set `server_tokens off` and `limit_req` with `limit_req_status 429`. UFW rules are unchanged.
 
+
+## Object storage
+
+TCP 4095 is opened only to core and backup private IPs. The deploy health step probes `/v1/health` over mTLS from every core and backup host.
+
 ## Deployment Pipeline
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -1179,6 +1214,18 @@ It also requires atomic releases, a symlinked `current`, least-privilege environ
 `--force-restart` and `--rebuild` are the two engine-level overrides of the convergence and build-cache behaviour. After loading the config, the runner registers every credential value (any key matching PASSWORD/SECRET/TOKEN/MASTER_KEY/ACCESS_KEY/ENCRYPTION_KEY/JWT/SEED_KEY with a value of at least 8 characters) and masks it **wherever it appears** in logs, the timing report, thrown error messages, the verification report and the final failure line. `redactSecrets` alone only recognised `NAME=value`; the health verifier's pgpass lines (`host:port:db:user:PASSWORD`) and connection URLs were printed in clear before this change.
 
 A missing file, schema error, cross-field error or SSH credential conflict aborts before any remote command. With `--dry-run`, every later command is logged instead of executed. Every logged command line passes through `redactSecrets` (`deploy/lib/sshRunner.ts`), which masks the value of any `NAME=value` whose name contains PASSWORD, PASSWD, SECRET, TOKEN, AUTH, API_KEY, ACCESS_KEY or MASTER_KEY (for example `PGPASSWORD=`, `REDISCLI_AUTH=`); before 2026-11-04 these were printed in the clear.
+
+### 3.1a Step 1b: read-only preflight
+
+After the host plan is built (and before step 2), `runPreflight()` executes a read-only check of only the selected `--only`/`--nodes` parts and their required dependencies. `--preflight-only` runs this phase and exits without building or touching a host; `--skip-preflight` bypasses it with a warning.
+
+The preflight checks SSH reachability, key validity and sudo on every selected host; OS/tool readiness (missing bootstrap packages are informational in fresh/auto mode and blocking in update mode); disk, memory and clock skew; service ports and Nginx ports; current Nginx configuration; PM2 state; and the dependency paths (edge-to-core mTLS, core-to-database/PgBouncer, and storage prerequisites). Database/object-storage/backup probes are read-only and reuse the health verifier.
+
+Port ownership is classified as `free`, `managed-current` (the current PM2 app for the planned service), `managed-orphan` (an old same-tier PM2 app), `managed-service` (the expected Nginx/PostgreSQL/Redis/PgBouncer/systemd daemon), `unmanaged-same-repo` (a non-PM2 Bun/Node dev process whose cwd/package matches the service), or `foreign`. Only `managed-*` and `free` pass. `unmanaged-same-repo` fails by default and can be stopped with `--stop-unmanaged`, but only after every other blocking check passes; the stop uses a PID/cwd re-check, SIGTERM, and a post-stop port re-read. Foreign processes, databases, Redis, Nginx and systemd services are never stopped.
+
+`--only` accepts the backend aliases `core-back`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` in addition to the canonical tier names. The selection helpers are shared with the deployment loop, so an admin-only deploy checks `4101`/`8080` and the core dependency but never core's `4000`.
+
+A blocking preflight result aborts with "Nothing was built or changed". The final verification and the rolling batch probes also assert the new release identity (`APP_RELEASE`/`APP_COMMIT` in `/health`), so a stale listener cannot satisfy verification even if PM2 reports the new app online. On a partial run (`--only` or `--nodes`), release identity is enforced on every deployed unit in the rolling batch; the final cross-tier verification still health-checks the unchanged tiers but does not require them to advertise the new global release (they intentionally remain on their previous release).
 
 ### 3.2 Step 2: build SPAs locally (background, cached)
 
@@ -1224,13 +1271,13 @@ Provisioning is gated by `--only` and by the management flags:
 - audit/log databases when either management flag is set;
 - backup engine plus daemon when `BACKUP_ENABLED`.
 
-The legacy path creates the database/role when `DB_MANAGE_VIA_SSH` and no PG tier is configured. The PG path takes a pre-migration dump from the primary's direct port (never PgBouncer) when the run is not fresh and core is selected. The legacy path takes the dump after database provisioning.
+The legacy path creates the database/role when `DB_MANAGE_VIA_SSH` and no PG tier is configured. Before any fresh provisioning, the deploy probes the selected storage engines (Live and sandbox PostgreSQL, audit/log databases, Redis, the object-storage vault and the Fake Rails SQLite data directory). If any contains data, `--fresh` refuses and asks for `--force-fresh`; `--force-fresh` takes a pre-clean Live PostgreSQL dump (when the Live database exists), then drops the Live/sandbox/audit/log databases, flushes managed Redis, clears the object-storage vault and removes the Fake Rails SQLite files before the provisioners/services recreate them. Backup repositories are deliberately preserved. The PG path still takes the normal pre-migration dump from the primary's direct port when an update run is non-empty; the legacy path takes it after database provisioning.
 
 #### Pre-migration backup details
 
 `preMigrationBackup()` resolves the primary direct port (never PgBouncer) and the PG or legacy credentials, then builds `PGPASSFILE=<private passfile> pg_dump -h <host> -p <port> -U <user> -Fc <db> > <target>.dump`. `backupDatabase()` creates `<CORE_REMOTE_DIR>/shared/backups`, chowns it to the effective target user (the SSH user for a remote host, the orchestrator's OS user for a local target), and runs the command on the **core host** as that user. The file is `pre-migrate-<releaseTimestamp>.dump`.
 
-No dump is taken on a fresh install. A failure aborts before migrations. `pg_dump` must already exist (the bootstrap package list omits `postgresql-client`), the password no longer appears on the command line (PGPASSFILE), and the dump is not automatically verified or restored.
+On a genuinely empty fresh install no dump is needed. `--fresh --force-fresh` takes a pre-clean Live dump before removing the databases, because the normal pre-migration hook runs later. `pg_dump` must already exist (the bootstrap package list omits `postgresql-client`), the password no longer appears on the command line (PGPASSFILE), and the dump is not automatically verified or restored.
 
 #### Backup daemon source deployment
 
@@ -1245,6 +1292,8 @@ After `provisionBackupEngine()`, `deployBackupDaemon()`:
 - runs `systemctl daemon-reload && systemctl enable pg-backup-daemon`, then **starts the unit if it is down and restarts it only if the source, env, unit or archive environment changed** (or `--force-restart`), logging `backup daemon started|restarted|unchanged`.
 
 After the start/restart decision the same remote script runs `daemonReadinessWait()`: it polls up to 10 s for the unit to be active and to stay active for one more second (so `Restart=always` cannot hide a crash loop), and on failure prints `journalctl -u pg-backup-daemon -n 40 --no-pager` to stderr and exits 1, so a startup failure surfaces in step 5 instead of at the first health probe.
+
+The dependency tree is reused across deploys, but a tree owned by a different account (for example after switching from WAL-G's `postgres` to pg-native's `pgbackup`) is removed and reinstalled as the current account instead of failing with `Failed to link <pkg>: EEXIST`. The restart decision also compares the running process account with `backupDaemonUser()` and honours `systemd`'s `NeedDaemonReload`, so a deploy that failed after writing the unit but before restarting cannot leave the old engine running.
 
 The systemd unit and `/etc/pg-backup/backup.env` are written by the provisioner, not by `deployBackupDaemon()`. If `BACKUP_ENABLED` is true but the plan has no backup host, the deploy warns and skips the daemon; validation normally prevents that.
 
@@ -1269,7 +1318,7 @@ For each role, the pipeline skips excluded roles, collects units for that role (
 1. Creates the timestamped release and `shared/{certs,backups,pm2,data}` directories and chowns the remote tree.
 2. Syncs the backend source with rsync, excluding `node_modules`, `.git`, `dist`, `generated`, `test`, `certs`, `.certs`, `*.log` and `.env`; syncs the locally built frontend `dist` for edge roles and writes admin `runtime-config.js`.
 3. Writes the host's certificate set and the 0600 per-node environment (`shared/.env` for a single node, `shared/.env.<nodeId>` for a multi-node tier), then symlinks it to `.env` in the release app directory.
-4. Runs `bun install --frozen-lockfile`; for core also `bunx prisma generate`, `bun run migrate-deploy` and optional `db-seed`. Migrations run on the first core node in every mode (fresh and update), after step 5's pre-migration dump; other core nodes in a multi-node tier skip them.
+4. Runs `bun install --frozen-lockfile`; for core also `bunx prisma generate`, `bun run migrate-deploy` and optional `db-seed`. Migrations run on the first core node in every mode (fresh and update), after step 5's pre-migration dump; other core nodes in a multi-node tier skip them. Migrations and seeders run as the database owner through a temporary `.env.owner` whenever that session-safe URL differs from the runtime one. The URL follows an explicit `LEADER_ELECTION_DATABASE_URL` when set, otherwise the deploy-managed `pgw_session` alias, otherwise the direct primary. This applies in the legacy single-role mode too, because Prisma Migrate's `pg_advisory_lock(72707369)` cannot survive transaction pooling (it would leave a stale lock and the next run fails with P1002). An externally managed pooler must provide the same session route; the deploy warns if `LEADER_ELECTION_DATABASE_URL` is omitted. The same temporary file sets `WORKER_ENABLED=false`: migrations and seeders do not start workers, and the core loader would otherwise reject the session-pooled owner `DATABASE_URL` for sharing the leader-election endpoint.
 5. Switches `current` with `ln -sfn`, writes the inline PM2 ecosystem, runs `pm2 delete`, `pm2 start --update-env` and `pm2 save`.
 6. Renders the Nginx sites for that role, symlinks them, removes the default site, runs `nginx -t` and reloads.
 7. Prunes with `ls -1dt <remote>/releases/*/ | tail -n +<keep+1> | xargs -r rm -rf`.
@@ -1521,9 +1570,19 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 
 `DEPLOY_MODE=auto` now probes every host read-only in step 4 (`lib/hostProbe.ts`, a pure `bootstrapGaps()` over the probe output) and resolves each host to fresh, update or refuse (an edge host whose core has not been migrated is refused before anything changes). A resource preflight warns when PostgreSQL sizing (`PG_RAM_GB`) exceeds the host's memory. Verification (formerly step 12) now runs before the long seed (formerly step 11). `runAsDatabaseOwner` runs migrations and seeders with the owner URL. Tests: `deploy/test/hostProbe.test.ts`, `pipeline.test.ts`.
 
+## Object storage step
+
+Step 5 provisions the shared object-storage tier before the backup engine:
+`provisionObjectStorageEngine` validates the node/KEK, then
+`deployObjectStorageDaemon` syncs and starts the daemon. Health verification
+probes `systemctl is-active pg-object-storage-daemon` on the storage host and
+`GET /v1/health` over mTLS from every core host and the backup host. The deploy
+fails before any core is touched when multiple core nodes or a separate backup
+host are configured without `OBJECT_STORAGE_NODE`.
+
 ## Storage Provisioners
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -1604,7 +1663,7 @@ The slots are created on the primary by `primaryBootstrapSql()`. Replication is 
 
 When `PGBOUNCER_ENABLED=true`, PgBouncer is installed and configured on the primary and every replica. `/etc/pgbouncer/pgbouncer.ini` sets `listen_addr=0.0.0.0`, `listen_port=6432`, transaction pooling for the application database, `server_tls_sslmode=require`, the configured client/pool limits, reserve 10, prepared statements, SCRAM auth and `/etc/pgbouncer/userlist.txt`. The userlist contains the application and replication users with plaintext passwords, mode 0600. PgBouncer is applied by reload, or restarted only when needed (section 16).
 
-The `[databases]` section also contains a session-scoped alias, `pgw_session`, mapping to the same real database with `pool_mode=session` and `pool_size = max(8, 2 × core nodes + 4)`. It exists solely for the singleton-worker advisory-lock leader election (`LEADER_ELECTION_DATABASE_URL`): PostgreSQL session locks do not survive transaction pooling. The ordinary `PG_DB_NAME` entry stays transaction-pooled for application traffic. After PgBouncer is applied, the provisioner proves a login through both the application database and `pgw_session`; if the alias is not yet served after a reload, it restarts PgBouncer once and retries, so core never starts against a missing session route.
+The `[databases]` section also contains a session-scoped alias, `pgw_session`, mapping to the same real database with `pool_mode=session` and `pool_size = max(8, 2 × core nodes + 4)`. It carries the two advisory-lock consumers: the singleton-worker leader election (`LEADER_ELECTION_DATABASE_URL`) and the owner/migration URL used by `migrate deploy` and the seeders. Prisma Migrate takes a session advisory lock (`pg_advisory_lock(72707369)`); on a transaction-pooled route the lock can be left on a pooled backend and the next migration times out with P1002. The ordinary `PG_DB_NAME` entry stays transaction-pooled for application traffic. After PgBouncer is applied, the provisioner proves a login through both the application database and `pgw_session`; if the alias is not yet served after a reload, it restarts PgBouncer once and retries, so core never starts against a missing session route.
 
 After writing both files, the provisioner resolves the service account from `systemctl show -p User --value pgbouncer` (falling back to `pgbouncer`, then `postgres`) and applies `0640` to the ini and `0600` to the userlist. This is required because Ubuntu's unit runs as `postgres` and does not create a `pgbouncer` system user; a root-owned `0640` file otherwise fails with `could not load file "/etc/pgbouncer/pgbouncer.ini": Permission denied`.
 
@@ -1612,6 +1671,7 @@ Important as-built facts:
 
 - The `[databases]` section maps `PG_DB_NAME` to `127.0.0.1:<primaryPort>` with `PG_DB_USER` and its password, so a client connecting to `:6432` with that database name reaches the local PostgreSQL primary.
 - `pgw_session` is a second alias to the same database with `pool_mode=session`; deploy writes `LEADER_ELECTION_DATABASE_URL=postgresql://…@<primary>:6432/pgw_session` into the core environment (or a direct PostgreSQL URL with `sslmode=no-verify` when PgBouncer is disabled). An explicit `LEADER_ELECTION_DATABASE_URL` in the deploy env overrides the derived value for an external database/pooler.
+- The owner URL in the temporary `.env.owner` uses the same session endpoint as the leader election: the explicit `LEADER_ELECTION_DATABASE_URL` when set (including an external pooler), otherwise the deploy-managed `pgw_session` alias, otherwise the direct primary. It applies to the legacy single-role mode too; the runtime `DATABASE_URL` stays transaction-pooled, so Prisma's migration advisory lock and the seeders keep one backend for the whole session. An external pooler must allow the owner on its session route; the deploy warns when no explicit `LEADER_ELECTION_DATABASE_URL` is configured.
 - `server_tls_sslmode = require` encrypts the PgBouncer-to-PostgreSQL leg; it does not verify the server certificate (`verify-full` would) and supplies no client certificate.
 - There is no `client_tls_sslmode`, `client_tls_cert_file` or `client_tls_key_file`; clients are not required to present a certificate.
 - `listen_addr = 0.0.0.0` is protected by UFW only; the plan opens 6432 to core sources.
@@ -1972,9 +2032,27 @@ Not covered:
 - The bootstrap SQL creates the app login role as a member of `pgw_app` with no UPDATE/DELETE/TRUNCATE on the ledger and audit tables and no DDL. Validated end to end on a TLS PostgreSQL 18 with a real PgBouncer (owner migrations, app-role privilege probes, core's Prisma client). It has not run on a multi-host lab (GAP-057 stays partial).
 - Redis (`redisProvisioner.ts`): `maxmemory-policy volatile-ttl` plus AOF, so only keys with a TTL are evictable and a restart does not lose revoke flags; every durable key must carry a TTL.
 
+## Object storage provisioner (v36)
+
+`deploy/provisioners/objectStorageProvisioner.ts` creates the `pgobjstore`
+system user, `/var/lib/pg-object-storage` and the vault subdirectories
+(`hot`, `cold`, `quarantine`, `tmp`, `.trash`), writes
+`/etc/pg-object-storage/object-storage.env` and
+`pg-object-storage-daemon.service` (Bun, `ProtectSystem=strict`,
+`PrivateTmp=true`, `ReadWritePaths` for the vault and cert directories).
+`deployObjectStorageDaemon` installs pinned Bun, syncs `deploy/object-storage-daemon` to
+`/opt/pg-object-storage-daemon` and starts/restarts it only on change. The
+provisioner creates the user first, hands only the dedicated certificate files
+to `pgobjstore`, and refuses multiple core nodes without a configured
+object-storage node. Storage roots and cert directories are restricted to
+`/var/lib/pg-object-storage/`.
+
+
+The fresh-host sequence is tested with a fake runner; the real two-host lab remains manual.
+
 ## Backup Daemon
 
-> Status: `partial` · Last verified: 2026-11-06
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -2002,7 +2080,7 @@ The original design called for a Bun service wrapping WAL-G (same host) or Barma
 | `wal-g` | same host as the primary (reads `PGDATA`, peer auth as `postgres`) | `wal-g`, S3 |
 | `barman` | dedicated backup host | `barman`, `barman-cloud-backup`, S3 |
 
-**Cluster topology** (`config.ts`): `isAuditDedicatedCluster()` is true when `PG_AUDIT_DATA_DIR` is set or `PG_AUDIT_HOST` differs from `PG_PRIMARY_HOST`. `PG_AUDIT_PORT` is deliberately not used (it defaults to 5434 and would make every shared deployment look dedicated). `target=all` expands to `postgres_core`, `audit_db` (when an audit database is configured) and `redis` (when `REDIS_URL` is set). In a shared cluster `audit_db` is a logical dump plus signed manifest (skipped for `all` when the database is absent, an error for an explicit request); in a dedicated cluster it is a physical backup plus a dump. This applies to all three engines, so `PG_AUDIT_DATA_DIR is required` no longer occurs.
+**Cluster topology** (`config.ts`): `isAuditDedicatedCluster()` is true when `PG_AUDIT_DATA_DIR` is set or `PG_AUDIT_HOST` differs from `PG_PRIMARY_HOST`. `PG_AUDIT_PORT` is deliberately not used (it defaults to 5434 and would make every shared deployment look dedicated). `target=all` expands to `postgres_core`, `audit_db` (when an audit database is configured) and `redis` (when `REDIS_URL` is set). In a shared cluster `audit_db` is a logical dump plus signed manifest (skipped for `all` when the database is absent, an error for an explicit request); in a dedicated cluster it is a physical backup plus a dump. This applies to all three engines, so `PG_AUDIT_DATA_DIR is required` no longer occurs. `backupDaemonEnv()` leaves `PG_AUDIT_DATA_DIR` empty when the audit node resolves to the primary's own cluster (same SSH host and service port), so the shared-cluster logical-dump path is actually selected; a dedicated audit node or an explicit `PG_AUDIT_DATA_DIR` still selects the physical audit backup. On Arch-family hosts the daemon's `PG_BIN_DIR` (`/usr/lib/postgresql/<version>/bin`, a Debian layout) must resolve to the PostgreSQL tools; the single-box local setup aliases it to `/usr/bin`.
 
 **pg-native backups**
 
@@ -2196,9 +2274,21 @@ Not covered: the dedicated-backup-host and host-loss topologies on real machines
 - 2026-11-06: gap-closure pass: idle lag, restart state and instance lock, tablespace guard, drill role mapping, cron fallback drill, reserved default role names, least-privilege live coverage.
 - 2026-11-06: backup engine reliability implementation (previous revision): pg-native engine, three-tier encrypted repository, signed manifests and catalog mirror, WAL ingest over mTLS plus streaming, shared job queue and idempotency, per-role mTLS, topology-aware audit handling, drill fixes, deploy wiring fixes; section 9 lists where the design was corrected.
 
+## Object storage parity, escrow and drill
+
+`deploy/backup-daemon/src/objectStorageBackup.ts` copies new HOT/COLD
+`.v1.enc` blobs into `object-blobs/{bucket}/{storageKey}` (immutable, so the
+copy is incremental), fails with `OBJECT_STORAGE_BACKUP_PARITY_ERROR` when an
+ACTIVE row has no blob on every required tier, repairs missing tier copies, and writes per-KEK-version escrows plus the legacy `object-storage/kek-escrow.enc` (AES-256-GCM
+under the backup master key). The restore drill samples up to
+`OBJECT_STORAGE_DRILL_SAMPLE` ACTIVE rows, decrypts them with the escrowed
+keyring and compares the SHA-256; the report's `checks.objectStorage` carries the
+result; the drill tries every tier and the escrow for the row's KEK version. The daemon receives the object-storage URL/client certs/KEK keyring from
+the deploy engine.
+
 ## Health Verification, Rollback and Recovery
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -2230,7 +2320,8 @@ The design describes zero-downtime rolling updates. The code provides rolling ba
 - reads the background-job queue health when workers are enabled;
 - returns `msg: "OK"`, `status: "ok"` when workers are enabled, the queue is reachable and the oldest job is below the threshold;
 - returns `msg: "DEGRADED"`, `status: "degraded"` when workers are disabled, the queue cannot be inspected, or the oldest queued job exceeds the threshold;
-- stays reachable when the database cannot be read, with `queue.degraded=true` and `QUEUE_HEALTH_UNAVAILABLE`.
+- stays reachable when the database cannot be read, with `queue.degraded=true` and `QUEUE_HEALTH_UNAVAILABLE`;
+- advertises the deploy identity (`release`, `commit`) from `APP_RELEASE`/`APP_COMMIT`; the batch probes and final verification require the expected release, so a stale process behind the port fails even if its `/health` says `OK`. A partial `--only`/`--nodes` run checks release identity on the units it deploys in the rolling batch; unchanged tiers are health-checked but keep their previous release.
 
 `probeCoreHealth()` and `probeCoreService()` run on the core host and use `curl` with the CA and the core certificate as both server and client material. They pass when the body contains `"msg":"OK"` or the literal `OK`. A degraded core fails the probe.
 
@@ -2300,6 +2391,7 @@ The mTLS backup probe presents the `backup-client` certificate/key, matching the
 - probes each Fake Rails host;
 - for each edge host, probes the edge backends, the edge-to-core handshake for every core URL and the public vhosts;
 - appends storage probes;
+- checks core-node, edge-backend, edge-to-core and Fake Rails health, and asserts the expected release identity on a full deploy (partial runs assert it per deployed unit in the rolling batch);
 - returns `{ ok, results }`.
 
 `deploy.ts` prints `PASS`/`FAIL` per result and throws if any result fails. The error message says the previous release is still on disk. It does not switch back automatically.
@@ -2524,3 +2616,8 @@ Not covered: a real edge-to-core handshake, Nginx reload/vhost probe, PostgreSQL
 ## Security hardening (2026-11-05)
 
 The pre-migration dump is taken before migrating in both modes when the database is non-empty or unknown, uses `PGPASSFILE`, and only the newest `KEEP_RELEASES` dumps are kept (see the pipeline part). Migrations remain forward-only. Real WAL-G/bun/barman SHA256 values must be supplied before recovery tooling can be installed (GAP-023).
+
+
+## Object storage probes
+
+Every storage-only deploy checks `systemctl is-active pg-object-storage-daemon` on the storage host and `/v1/health` over mTLS from every core and backup host. A missing or unhealthy daemon fails verification.

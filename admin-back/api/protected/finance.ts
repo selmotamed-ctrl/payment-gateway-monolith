@@ -1,5 +1,6 @@
 import express from "express";
 import { z } from "zod";
+import { ApiError } from "../../lib/error";
 import { zAmount, zCurrency, zIdentifier, zJsonObject, zListQuery, zPaginationQuery, zReason } from "../../lib/zReady";
 import {
   toCoreAdjustmentCreate,
@@ -8,12 +9,14 @@ import {
   toCoreDisputeCreate,
   toCoreVelocityRuleCreate,
 } from "../contract";
-import { coreForward } from "../forward";
+import { coreForward, coreForwardRaw } from "../forward";
+import { forwardUpload, uploadGuards, uploadSingle } from "../upload";
 import { encode, reasonOnlySchema, uuidParamsSchema, zMutationReason } from "./mutationSchemas";
 
 const router = express.Router();
 
 const idParamsSchema = z.object({ id: zIdentifier });
+const attachmentParamsSchema = z.object({ id: zIdentifier, attachmentId: zIdentifier });
 
 const financePeriodQuerySchema = z
   .object({
@@ -213,6 +216,49 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/disputes/summary/export",
+  }),
+);
+
+router.get(
+  "/disputes/:id/attachments",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/disputes/${encodeURIComponent(context.params.id ?? "")}/attachments`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+
+router.post(
+  "/disputes/:id/attachments",
+  ...uploadGuards,
+  uploadSingle("file"),
+  async (req, res): Promise<void> => {
+    const { id } = idParamsSchema.parse(req.params);
+    if (!req.file) throw new ApiError(400, "UPLOAD_REQUIRED", "An evidence file is required");
+    await forwardUpload(req, res, {
+      path: `/internal/admin/disputes/${encodeURIComponent(id)}/attachments`,
+      fileField: "file",
+      metadata: { label: (typeof req.body?.label === "string" ? req.body.label : req.file.originalname).slice(0, 255) },
+      status: 201,
+    });
+  },
+);
+
+router.get(
+  "/disputes/:id/attachments/:attachmentId/content",
+  coreForwardRaw({
+    method: "GET",
+    path: (context) => `/internal/admin/disputes/${encodeURIComponent(context.params.id ?? "")}/attachments/${encodeURIComponent(context.params.attachmentId ?? "")}/content`,
+    paramsSchema: attachmentParamsSchema,
+  }),
+);
+
+router.delete(
+  "/disputes/:id/attachments/:attachmentId",
+  coreForward({
+    method: "DELETE",
+    path: (context) => `/internal/admin/disputes/${encodeURIComponent(context.params.id ?? "")}/attachments/${encodeURIComponent(context.params.attachmentId ?? "")}`,
+    paramsSchema: attachmentParamsSchema,
   }),
 );
 

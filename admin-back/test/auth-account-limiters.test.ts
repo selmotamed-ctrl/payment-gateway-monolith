@@ -91,3 +91,6 @@ describe("account limiters", () => {
     expect(await login("someone-else@example.com", "wrong", "198.51.100.99")).toBe(401);
   });
 });
+
+import { afterAll as afterAllCleanup } from "bun:test";
+afterAllCleanup(() => { delete process.env.CORE_BACK_URLS; }); // CLEANUP_CORE_BACK_URLS

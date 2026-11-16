@@ -12,6 +12,7 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Security and mTLS](#platformsecurity) — `partial`
 - [Runtime and Configuration](#platformruntime) — `partial`
 - [Observability](#platformobservability) — `partial`
+- [Parallel Sandbox Execution Plane](#platformsandbox) — `partial`
 - [Core Foundations](#corefoundations) — `partial`
 - [Core API Surface](#coreapi) — `partial`
 - [Core Engine](#coreengine) — `partial`
@@ -25,6 +26,7 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Synthetic Seeder](#coreseeder) — `partial`
 - [Tests and Benchmarks](#coretests) — `partial`
 - [Dynamic Report Engine SDK and Report Studio Host](#corereport-engine) — `implemented`
+- [Shared Object & Asset Storage Engine](#coreobject-storage) — `implemented`
 - [Shared Core Upstream Client](#edgeshared) — `implemented`
 - [Admin Edge BFF](#edgeadmin) — `partial`
 - [Merchant Edge BFF](#edgemerchant) — `partial`
@@ -233,7 +235,7 @@ Production operation uses `deploy/deploy.ts` with `deploy/deploy.env`. The engin
 ### Missing / deferred
 
 - Voucher Provider Management System: absent (future part `09-future-and-unimplemented/00-voucher-provider-system.md`).
-- Admin guide v2: implemented (14 books/125 articles, context help, safeguards, five simulators). Merchant and checkout help remain separate.
+- Admin guide v2: implemented (14 books/137 articles, context help, safeguards, five simulators). Merchant and checkout help remain separate.
 - Google OIDC: `POST /internal/merchant/auth/google` and the edge route return `501 GOOGLE_IDENTITY_NOT_CONFIGURED`.
 - `CAPTURE` and `SETTLEMENT_FETCH`: present in the `FlowPhase` database enum but absent from the engine's runtime phase union and flow-provider mapping.
 - Storage-plane mTLS: certificates are generated and distributed, but PostgreSQL/Redis configuration does not consume them.
@@ -303,7 +305,7 @@ A cross-cutting security hardening pass touched core payment engine, auth/author
 
 <a id="platformtopology"></a>
 
-> **Part ID:** `platform.topology` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `platform.topology` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `d695518+working-tree`
 
 # Service Topology
 
@@ -334,7 +336,7 @@ The design also defines the network zones:
 - All three edge backends call `core-back` over a private LAN with mTLS 1.3 client certificates.
 - `core-back` is never published by a reverse proxy and has no public listener.
 - `core-back` reaches PostgreSQL, Redis, the audit database, the log database and external gateways.
-- The backup daemon is a separate mTLS control plane, normally `:4090`, with backup storage in S3/MinIO/R2 and an optional secondary vault.
+- The object-storage daemon is a separate mTLS data plane, normally `:4095`; the backup daemon is a separate mTLS control plane, normally `:4090`, with backup storage in S3/MinIO/R2 and an optional secondary vault.
 
 The historical target for compute is `CORE_NODES`, `ADMIN_NODES`, `MERCHANT_NODES` and `CHECKOUT_NODES` arrays, each entry shaped `nodeId@sshHost:sshPort:privateIp:servicePort`. Storage is declared separately with `PG_PRIMARY_NODE`, `PG_REPLICA_NODES`, `PGBOUNCER_*`, `REDIS_NODES`, `AUDIT_DB_NODE`, `LOG_DB_NODE` and `BACKUP_NODE`. The design supports a single all-in-one host, combined compute hosts, fully distributed hosts and horizontal compute.
 
@@ -351,6 +353,7 @@ The historical target for compute is `CORE_NODES`, `ADMIN_NODES`, `MERCHANT_NODE
 | `admin-front` | static build behind nginx `:8443` | LAN | None | `admin-back` HTTP API | `admin-front/src/**` |
 | `merchant-front` | static build behind public nginx | Public | None | `merchant-back` HTTP API | `merchant-front/src/**` |
 | `checkout-front` | static build behind public nginx | Public | None | `checkout-back` HTTP API | `checkout-front/src/**` |
+| `pg-object-storage-daemon` | `:4095` (`https`) | Private LAN, mTLS client certificate required | None (shared vault) | Core nodes and backup daemon | `deploy/object-storage-daemon` |
 | `fake-rails-back` | `127.0.0.1:4104` (`HOST`/`PORT`) | Optional, behind `fake-rails` nginx `:8444` | Its own SQLite store | Core inbound URL for synthetic webhooks | `fake-rails-back/index.ts` |
 | `fake-rails-front` | static build behind the Fake Rails vhost | Optional | None | `fake-rails-back` portal API | `fake-rails-front/src/**` |
 
@@ -626,11 +629,15 @@ These are unit/integration tests. No live multi-host deployment was run for this
 
 Edge to core: the shared upstream client only marks a node unhealthy on transport/TLS errors and 502/503/504, caps buffered responses and total deadline, uses a separate SSE agent pool, and replays PUT/DELETE only with an idempotency key. Details are in the shared upstream client part. Edge TRUSTED_PROXY_CIDRS now defaults to loopback only.
 
+## v38 sandbox plane (2026-11-13)
+
+The topology gains a second, isolated core process, `pg-core-sandbox`, on port 4005 with `EXECUTION_PLANE=SANDBOX`. It connects only to `payment_gateway_sandbox` and routes every rail call to the local `fake-rails-back`. The Live `pg-core-back` keeps `EXECUTION_PLANE=LIVE` and `payment_gateway_prod`. Both processes are separate even on a single host; there is no shared operational table and no shared connection pool. `checkout-back` selects the sandbox pool for `sbx_*` links and `SANDBOX` inbound environments; merchant/admin select it for their `/sandbox/*` namespaces. See `05-sandbox-execution-plane.md`.
+
 ---
 
 <a id="platformsecurity"></a>
 
-> **Part ID:** `platform.security` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `platform.security` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
 
 # Security and mTLS
 
@@ -861,7 +868,9 @@ The inbox stores `content-type` and `content-length` in `redactedHeadersJson`, n
 | `merchant-back-client.crt/key` | `merchant-back` | `merchant-back` | mTLS client to core |
 | `checkout-back-client.crt/key` | `checkout-back` | `checkout-back` | mTLS client to core |
 | Backup daemon certificate/key | Daemon identity | `pg-backup-daemon` | mTLS server for core backup client |
-| Storage client certs | Storage roles | Generated by deploy | Intended for PostgreSQL/Redis mTLS; not consumed today |
+| Storage client certs | Storage roles | Generated by deploy | PostgreSQL/Redis mTLS where configured |
+| `object-storage-daemon.crt/key` | `object-storage-daemon.internal` | `pg-object-storage-daemon` | mTLS server for the shared vault |
+| `object-storage-client.crt/key` | `object-storage-client` | Core nodes and `pgbackup` | mTLS client to the shared vault |
 
 ### 5.2 Security env keys
 
@@ -1035,11 +1044,15 @@ Fake Rails tester tokens stay in localStorage (GAP-019 residual); httpOnly cooki
 - **Uploads (GAP-054).** Both edges verify the session shape and expiry and apply a per-address limiter and a `Content-Length` pre-check before multer buffers a byte (`uploadGuards`; admin limit `UPLOAD_RATE_LIMIT_MAX`, default 20 per window).
 - **Revocation durability (GAP-058).** A revoked session is written atomically to Redis (`SET ... PX`) and to the `session_revocations` table, so a Redis eviction or restart cannot resurrect it; the lookup falls back to the table. See `core.data` section 13.
 
+## v38 execution-plane security (2026-11-13)
+
+API tokens are bound to a plane: `pg_live_*` is refused on SANDBOX with `401 LIVE_TOKEN_ON_SANDBOX_PLANE` and `pg_test_*` is refused on LIVE with `401 SANDBOX_TOKEN_ON_LIVE_PLANE`; core also compares the token row's `env`. A session minted by Live is accepted on the Sandbox core only after the signed claims are mirrored into the sandbox database (merchant envelope and user with the signed authorities); authorities never come from a header. The edge-to-core channel remains mTLS with the existing per-role client certificates; the sandbox pool uses the same client material but a separate URL set.
+
 ---
 
 <a id="platformruntime"></a>
 
-> **Part ID:** `platform.runtime` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `platform.runtime` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `19d6a54+working-tree`
 
 # Runtime and Configuration
 
@@ -1131,6 +1144,28 @@ Edge env loaders follow the same pattern: strict-ish Zod object, cached outside 
 | `BACKUP_DAEMON_CLIENT_CERT_PATH` | unset | backup client mTLS |
 | `BACKUP_DAEMON_CLIENT_KEY_PATH` | unset | backup client mTLS |
 | `BACKUP_DAEMON_TIMEOUT_MS` | `15000` (max 120000) | backup call timeout |
+
+#### Shared object & asset storage (schema v36)
+
+| Key | Default | Consumer |
+| :--- | :--- | :--- |
+| `OBJECT_STORAGE_DAEMON_URL` | unset; configure the shared node in production. Without it a production core boots but every storage operation returns `503 STORAGE_UNAVAILABLE`; multi-node refuses to boot. | `RemoteMtlsBlobStore` (all core nodes) |
+| `OBJECT_STORAGE_TLS_CA_PATH` / `_CLIENT_CERT_PATH` / `_CLIENT_KEY_PATH` | unset | client mTLS |
+| `OBJECT_STORAGE_DAEMON_TIMEOUT_MS` | `30000` (max 120000) | blob requests |
+| `OBJECT_STORAGE_ROOT_DIR` | `/tmp/pg-object-storage-dev` (dev) | `FsBlobStore` fallback (development only; production never writes local disk) |
+| `OBJECT_STORAGE_ALLOW_INSECURE_HTTP` | `false` | explicit local-test-only HTTP opt-in; refused in production deploy validation |
+| `OBJECT_STORAGE_KEK_KEYRING` | unset (dev derives from `DATABASE_URL`) | DEK wrap/unwrap; format `v1:<64 hex>[,v2:<64 hex>]` |
+| `OBJECT_STORAGE_ACTIVE_KEK_VERSION` | `1` | new DEK wraps |
+| `OBJECT_STORAGE_TRASH_RETENTION_DAYS` | `7` | trash purge |
+| `OBJECT_STORAGE_GC_GRACE_HOURS` | `24` | last-lock-release grace |
+| `CLUSTER_CORE_NODE_COUNT` | `1` | shared-storage boot guard |
+| `WORKER_OBJECT_STORAGE_ENABLED` | `true` | maintenance worker |
+| `WORKER_OBJECT_STORAGE_INTERVAL_MS` | `60000` | maintenance worker |
+| `WORKER_OBJECT_STORAGE_BATCH_SIZE` | `25` | AV/scrub batch |
+
+A production core without a configured daemon stays bootable with an unavailable store; storage-backed routes return 503. A multi-node core refuses to boot (`OBJECT_STORAGE_DAEMON_URL_REQUIRED`) when
+`NODE_ENV=production` or the core-node count is above one and no daemon URL is
+configured.
 
 #### Workers
 
@@ -1231,13 +1266,13 @@ The storage engine is constructed before `listen`, but after the server object i
 
 ### 3.5 Schema version check
 
-`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 34`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
+`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 40`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
 
 ```sql
 SELECT "version" FROM "schema_versions" WHERE "id" = 1
 ```
 
-and throws if the version is not 25. The check is invoked by `prisma/seed.ts`, `prisma/seedFakeRails.ts` and `prisma/syntheticSeeder/index.ts`. It is **not** invoked by `core-back/index.ts`, so the API can boot against a stale schema and fail later at query time. Migration deployment is an external deploy step (`bunx prisma migrate deploy`).
+and throws if the version is not 37. The check is invoked by `prisma/seed.ts`, `prisma/seedFakeRails.ts` and `prisma/syntheticSeeder/index.ts`. It is **not** invoked by `core-back/index.ts`, so the API can boot against a stale schema and fail later at query time. Migration deployment is an external deploy step (`bunx prisma migrate deploy`).
 
 ### 3.6 Worker composition
 
@@ -1322,6 +1357,7 @@ The deploy engine injects admin UI flags rather than requiring a committed front
 - `ADMIN_SHOW_HELP_PANELS` (default true) controls help panels.
 - Build constants `VITE_SHOW_CHECKLISTS`, `VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST` and `VITE_SHOW_HELP_PANELS` are injected into the `admin-front` build.
 - Runtime config `showChecklists`, `showSnapshotExportChecklist` and `showHelpPanels` is written into the deployed admin release and takes precedence at boot.
+- `APP_RELEASE` and `APP_COMMIT` are injected by `deployService()` into every core/edge/Fake Rails environment. `/health` exposes `release`/`commit`; the deploy batch and final verification require the expected release so a stale listener cannot pass health checks. They are additive response fields and are not part of the core/edge env schemas.
 
 These are deploy/frontend flags; they are not core-back env keys.
 
@@ -1334,7 +1370,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 5. **The raw body is preserved before JSON parsing.** Webhook signatures and uploaded document bytes must be exact.
 6. **A request id is always returned.** Invalid or missing client values are replaced with a UUID.
 7. **Redis is never authoritative for money.** When Redis is unavailable the cache/velocity adapter falls back to memory and invalidation stays local.
-8. **Schema version 11 is the contract.** Seeders enforce it; migrations are deployed separately.
+8. **Schema version 37 is the contract.** Seeders enforce it; migrations are deployed separately.
 9. **Workers are stateless across nodes.** Coordination is by database claims, not by an in-memory scheduler.
 10. **The admin UI flags are deployment-owned.** A source build uses the frontend defaults; a deployed build receives the deploy engine's values.
 
@@ -1363,7 +1399,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 | Backup daemon | No | Backup routes return 503 |
 | Notification webhook | No | Log transport reports SENT |
 | Fake Rails | No | Only required by synthetic seeding/seeding routes |
-| Schema version 11 | Yes at seed time | Seeders fail; server boot does not check |
+| Schema version 37 | Yes at seed time | Seeders fail; server boot does not check |
 
 ### 5.3 Config consumers outside the env proxy
 
@@ -1501,7 +1537,7 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 
 ## 11. Security hardening config changes (2026-11-05)
 
-- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 32`.
+- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 40`.
 - Edges: `TRUSTED_PROXY_CIDRS` default loopback only; `MAX_INBOUND_BODY_BYTES` default 1 MiB; `CORS_ALLOWED_ORIGINS` (no CORS headers on admin/merchant when unset); newly wired rate-limit window envs `AUTH_/ADMIN_/API_/EXTERNAL_/PAY_/INBOUND_RATE_LIMIT_WINDOW_MS`; `CORE_MAX_RESPONSE_BYTES` (64 MiB), `CORE_TOTAL_DEADLINE_MS` (300000), `MAX_STREAMS_PER_IP` (5), `ADMIN_AUTHORITY_HINTS` (default empty, restrict-only), merchant `TOKEN_MAX_SCOPES`, `TOKEN_MAX_TTL_DAYS`, `TOKEN_DEFAULT_TTL_DAYS`, `UPLOAD_RATE_LIMIT_MAX`, admin `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
 - Frontends: `VITE_CHECKOUT_BASE_URL`, `VITE_IDENTITY_HOSTS` (merchant), `VITE_CHECKOUT_ORIGIN` (fake-rails). Real `.env` files in the frontends are no longer tracked; copy `.env.example` to `.env` on a fresh clone.
 - Deploy and daemon keys are listed in the deploy parts.
@@ -1516,6 +1552,10 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 | `PG_TX_MAX_WAIT_MS` | core-back | (2026-11-12) Prisma interactive-transaction `maxWait`, the wait to start a transaction (`P2028` when exceeded). Unset: each call site keeps its default (Prisma 2000, unit-of-work adapter 2500, workers 5000 to 10000). Set: it replaces them all and becomes the client-wide default. |
 | `FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS` | fake-rails-back | Extra hosts (`host` or `host:port`) a webhook may target; the host of `CORE_INBOUND_BASE_URL` is always allowed. |
 | `PG_APP_USER`, `PG_APP_PASSWORD` | deploy | The non-owner role the deployed application connects as; setting the password enables the split (see `deploy.storage`). |
+
+## v38 sandbox configuration (2026-11-13)
+
+New core keys: `EXECUTION_PLANE` (`LIVE`|`SANDBOX`, default `LIVE`), `PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE` (development escape hatch, default false), `FAKE_RAILS_CONTROL_URL` and `FAKE_RAILS_CONTROL_TOKEN`. The edges add `SANDBOX_CORE_BACK_URL`/`SANDBOX_CORE_BACK_URLS`; an empty pair means the sandbox is not configured and the sandbox routes answer `503 SANDBOX_NODE_UNAVAILABLE`. Deploy adds `SANDBOX_ENABLED`, `SANDBOX_NODE`, `SANDBOX_CORE_PORT` (4005), `SANDBOX_DB_NAME` (`payment_gateway_sandbox`), `SANDBOX_REMOTE_DIR` and `SANDBOX_CORE_BACK_URLS`. The deploy planner emits a second core service `pg-core-sandbox` with `EXECUTION_PLANE=SANDBOX`, sandbox `DATABASE_URL`/session leader URL, Fake Rails control URL/token, backups disabled and its own release tree; the PostgreSQL provisioner creates the database and `pgw_sandbox`/`pgw_sandbox_session` PgBouncer aliases.
 
 ---
 
@@ -1959,6 +1999,111 @@ Redaction was extended to PII keys (email, phone, msisdn, iban, account number, 
 
 ---
 
+<a id="platformsandbox"></a>
+
+> **Part ID:** `platform.sandbox` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `working-tree`
+
+# Parallel Sandbox Execution Plane
+
+## 1. Purpose and scope
+
+`v38` makes Sandbox a physically separate world instead of a per-row flag:
+
+- **Live:** `pg-core-back` with `EXECUTION_PLANE=LIVE` against `payment_gateway_prod`.
+- **Sandbox:** `pg-core-sandbox` with `EXECUTION_PLANE=SANDBOX` against `payment_gateway_sandbox`, with every outbound rail routed to `fake-rails-back`.
+
+The separation is enforced in four layers: separate database, separate process, database trigger fence, and edge route namespaces. A missing `WHERE env = 'LIVE'` can therefore never leak sandbox wallets, attempts or journal lines into Live reports, cash-outs or reconciliation.
+
+This part owns the plane model, the fence, the sandbox control API, the edge routing, the Sandbox Studio UI and the Fake Rails v2 stateful accounts. Fake Rails protocol/chaos behaviour remains in `parts/06-fake-rails/**`; deploy topology remains in `parts/07-deploy/**`.
+
+## 2. Non-negotiable rules
+
+1. **Live and Sandbox never share operational tables.** `payment_gateway_prod` contains only LIVE rows; `payment_gateway_sandbox` contains only SANDBOX rows.
+2. **The environment is the process plane, never a merchant status.** `core-back/lib/executionPlane.ts` resolves `EXECUTION_PLANE` (default `LIVE`, invalid values abort). `checkout.ts` and `merchant.ts` no longer contain `resolveEnvironment(merchantStatus)`.
+3. **No implicit OD-10 fallback.** A `PENDING`, `SUSPENDED`, `DRAFT` or `PENDING` wallet/application is refused on both planes with `409 MERCHANT_NOT_ACTIVE` / `APPLICATION_NOT_ACTIVE` / `WALLET_NOT_ACTIVE`. A pending Live merchant trains on the Sandbox plane through an ACTIVE sandbox envelope.
+4. **A sandbox link is `sbx_*`; a Live link is `pl_*`.** `checkout-back` selects the pool from the prefix; it never falls back to Live for a sandbox link.
+5. **API tokens are plane-bound.** `pg_live_*` is refused on the SANDBOX plane with `LIVE_TOKEN_ON_SANDBOX_PLANE`; `pg_test_*` is refused on the LIVE plane with `SANDBOX_TOKEN_ON_LIVE_PLANE`. The core also checks the token row's `env` column.
+6. **The checkout inspector only exists on `sbx_` links.** Three gates: the front end requires `env === "SANDBOX"`/`sbx_`, `checkout-back` refuses any other link key, and core mounts the sandbox routes only on the SANDBOX plane.
+
+## 3. Schema v38-v39
+
+Migration `20261113120000_v38_sandbox_execution_plane` (schema version 38) and `20261114090000_v39_sandbox_studio` (schema version 39) add:
+
+- `payment_links.env` and `access_tokens.env` (`GatewayEnvironmentType`, default `LIVE`); `payment_attempts.env` already existed.
+- `system_execution_plane` singleton (`id = 1`, `plane`, `allow_fake_rails`, `live_sync_revision`, `last_synced_from_live`).
+- `sandbox_sync_audits` (blueprint sync, demo seed, reset, wallet top-up).
+- `enforce_execution_plane_env_fence()` attached to `payment_links`, `payment_attempts` and `access_tokens`.
+- `enforce_no_fake_rails_on_live_plane()` attached to `gateways` and `gateway_environments`.
+- v39 Studio parity: nullable `wallets.name`, `payment_links.title` and `payment_links.description`; both were accepted by portal contracts but discarded before v39.
+
+A SANDBOX database always rejects LIVE rows. A LIVE database rejects SANDBOX rows in strict mode (`app.plane_fence_strict=true`), which the migration stores at database level for real deployments. The test suite deliberately disables strict mode because it keeps both kinds of rows in one throwaway database; `test/sandboxPlane.test.ts` re-enables it per transaction and proves both directions. `PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE=true` is the development-only escape hatch that lets a single-box Live process keep using the emulator (deploy sets it only outside production).
+
+`verifyExecutionPlaneFenceOnBoot()` runs before Express listens. It refuses a process whose plane differs from `system_execution_plane.plane`, and refuses `FAKE_RAILS_ENABLED=true` on LIVE without the development escape hatch.
+
+## 4. Sandbox control API (`core-back/api/internal/sandboxControl.ts`)
+
+Mounted at `/internal/sandbox` for the merchant and admin edges only, and guarded by `isSandboxPlane()`:
+
+| Route | Behaviour |
+| :--- | :--- |
+| `GET /merchant/overview` | Creates the merchant sandbox envelope on first use and returns wallet/application/link/attempt/token counts and live wallet balances. |
+| `POST /merchant/wallets/:walletId/balance` | `CREDIT`, `DEBIT` or `SET_EXACT`; posts a balanced `ADJUSTMENT` journal entry (`DR TREASURY / CR wallet` or the reverse) and audits `WALLET_TOPUP`. Negative results are refused. |
+| `POST /merchant/seed-demo` | Creates a funded 5,000 LYD wallet (opened with a real journal entry), an ACTIVE application, three `sbx_` links, a POS terminal and a one-time `pg_test_` token. |
+| `POST /merchant/seed-history` | Adds 1-100 balanced historical sandbox payments (`PAYMENT_ATTEMPT` journal entries) for the merchant's first demo link, for realistic tables/charts. |
+| `POST /merchant/reset` | Deletes only that merchant's sandbox attempts, links, applications, wallets, tokens, webhooks, disputes and dependent rows; the append-only journal is retained as the sandbox history. |
+| `GET /merchant/wallets/:walletId`, `GET /merchant/wallets/:walletId/ledger` | Wallet detail, live balance and paginated shard ledger. |
+| `GET /merchant/payments/:attemptId`, `POST /merchant/payments/:attemptId/refund`, `POST /merchant/payments/:attemptId/simulate-dispute`, `POST /merchant/disputes/:disputeId/resolve` | Payment detail, real sandbox ledger refund, dispute simulation and resolution (lost dispute books a chargeback through governance). |
+| `GET/POST/PATCH /fake-rails/accounts*` | Proxies the Fake Rails v2 account controller with merchant scoping; shared presets are read-only and cloned into merchant-owned copies. |
+| `POST /merchant/reconciliation/import-fake-rails` | Generates the merchant's synthetic clearing CSV, ingests it through `StatementIngestor`, marks the entries statement-included and returns matched/mismatch/missing counts. |
+| `POST /merchant/webhooks/test-ping` | Queues a test delivery to every ACTIVE merchant webhook endpoint. |
+| `GET/POST /fake-rails/clearing/*` | Pools, synthetic clearing statement and settle. |
+| `GET /admin/overview`, `GET /admin/merchants`, `GET /admin/merchants/:id/overview`, `POST /admin/reset` | Staff inspection and scoped/global reset (staff principal required). |
+| `GET/PUT /admin/fake-rails/scenarios*`, `GET/POST /admin/fake-rails/transactions*`, `GET/POST /admin/fake-rails/webhooks*`, `GET/POST /admin/fake-rails/statements*` | Staff Fake Rails control center: chaos profiles, transaction actions, webhook replay/fire, tester statements. |
+
+The core trusts the edge identity (mTLS) and the signed session. On the SANDBOX plane, a merchant or staff session minted by Live is mirrored into the sandbox database on first use (merchant envelope + user with the signed authorities), so no second login is needed and a pending Live merchant can train immediately.
+
+## 5. Edge routing
+
+- **merchant-back:** `/api/v1/merchant/sandbox/*` → `SANDBOX_CORE_BACK_URLS` via `api/sandboxProxy.ts`. `/overview`, `/seed-demo`, `/seed-history`, `/reset`, `/wallets/:id/*`, `/payments/:id/*`, `/disputes/:id/resolve`, `/reconciliation/*`, `/fake-rails/*` and `/webhooks/test-ping` map to the sandbox control routes; list/create resources (`/wallets`, `/applications`, `/links`, `/payments`, `/tokens`) map to the sandbox core's `/internal/merchant/*` (same router, separate database). `/mirror/*` is a raw forward to `/internal/merchant/*` for Live-parity pages. The external API accepts both `pg_live_*` and `pg_test_*` and selects the pool from the prefix.
+- **admin-back:** `/api/v1/admin/sandbox/*` → sandbox core only (`overview`, merchant overview/reset, wallet balance, fake-rails accounts/clearing/scenarios/transactions/webhooks/statements). `/mirror/*` raw-forwards to `/internal/admin/*` for Live-parity pages.
+- **checkout-back:** `sbx_*` links and `SANDBOX` inbound webhook environments → sandbox core. `pl_*` and LIVE inbound → Live core. The inspector routes (`sandbox-accounts`, `sandbox-inspector`, `sandbox-simulate`) refuse a non-`sbx_` key with `403 SANDBOX_INSPECTOR_FORBIDDEN_ON_LIVE_LINK`.
+- All three edges keep one connection pool per URL set; a failure inside the sandbox pool never fails over to Live (and the reverse). An unconfigured sandbox node answers `503 SANDBOX_NODE_UNAVAILABLE`.
+
+## 6. Sandbox Studio UI
+
+- **merchant-front:** a separate sidebar section "Sandbox Studio (Testing & Training)" with `/sandbox/overview`, `/wallets`, `/wallets/:id`, `/applications`, `/links`, `/payments`, `/payments/:id`, `/accounts`, `/tokens`, each wrapped in the amber `SandboxBanner`. Wallet detail has balance controls, a simulated cash-out and the sandbox ledger; payment detail has refund, dispute simulation/resolution, inspector secrets and journal lines. A "Sandbox Live Mirror" section reuses Live pages under `/sandbox/mirror/*` (cash-outs, disputes, POS, credentials, team, webhooks, tokens, statements, reports); the API interceptor rewrites Live paths and the router aliases Live navigation into the mirror.
+- **admin-front:** `/sandbox/overview`, `/sandbox/merchants`, `/sandbox/merchants/:id` and `/sandbox/fake-rails` (accounts/clearing/chaos/transactions tabs), all built with the standard ApiTable/TableFilters/SummaryExportCard/detail-drawer system, plus a "Sandbox Live Mirror" section for merchants, wallets, applications, transactions, approvals, audit log, operator cases, disputes, adjustments, cash-outs, reconciliation, pricing, profitability, liquidity, journal entries, invariant, credential sets, gateways/routes, reports, platform settings, jobs/outbox and object storage.
+- **checkout-front:** `SandboxCheckoutInspector` renders only when the summary is `env: "SANDBOX"` or the key starts with `sbx_`. It lists Fake Rails test accounts, auto-fills the rail form, reveals the live OTP/hold/QR/deep-link/redirect data, offers the push/QR/webhook simulator, creates merchant test accounts, shows account movements and can freeze or drain a merchant-owned test account without leaving checkout.
+- The Admin Guide context map's `Sandbox` screen covers the Studio and all mirror routes; the guide extractor count is regenerated by `content:guide`.
+
+## 7. Stateful Fake Rails v2
+
+`fake-rails-back/engine/accounts/AccountLedgerService.ts` adds `fake_accounts`, `fake_account_holds`, `fake_account_movements`, `fake_merchant_clearing_pools` and `fake_clearing_entries`. Five default personas are seeded per rail (high balance, standard, low balance 5 LYD, daily-limit-exhausted, frozen), plus ad-hoc auto-enrolment with a 2,500 LYD default.
+
+- INITIATE reserves atomically (`BEGIN IMMEDIATE`), checking status, available balance and daily limit.
+- SUBMIT/APPROVE captures and credits the per-rail clearing pool; CANCEL/DECLINE/expiry releases.
+- REFUND credits the customer and refuses a cumulative refund above the captured amount (`REFUND_EXCEEDS_CAPTURED_AMOUNT`).
+- `fake_transactions.account_id`/`held_amount_lyd` link the rail transaction to the account.
+- The control plane at `/control/*` is shared with `core-back` (`x-fake-rails-control-token` when configured); the tester portal keeps its JWT.
+
+## 8. Deploy configuration
+
+`deploy/lib/configSchema.ts` adds `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT` (4005), `SANDBOX_DB_NAME` (`payment_gateway_sandbox`), `SANDBOX_REMOTE_DIR`, `SANDBOX_CORE_BACK_URLS` and `FAKE_RAILS_CONTROL_TOKEN`; validation requires Fake Rails, a distinct database/remote dir/port and HTTPS edge URLs. `sandboxDatabase()` derives the transaction (`pgw_sandbox`) and session (`pgw_sandbox_session`) PgBouncer aliases. `postgres18Provisioner` creates the database and writes both aliases; `hostPlanner` emits a second core `ServicePlan` (`pg-core-sandbox`, port 4005, own release tree, sandbox `DATABASE_URL`/`LEADER_ELECTION_DATABASE_URL`, Fake Rails enabled, backups disabled) on `SANDBOX_NODE` or the first core node, with its own firewall rule and core certificate SAN. `deployService` migrates/seeds that database with the direct sandbox owner URL carrying `app.execution_plane=SANDBOX` (PgBouncer rejects custom startup options, so migrations deliberately bypass the pooler); the seed path runs `db-seed` and `seed-fake-rails`, and the Fake Rails seeder stamps an existing sandbox database row as SANDBOX only when `current_database()` equals `SANDBOX_DB_NAME`. Edges receive the sandbox URL list when enabled. The sandbox database and Fake Rails SQLite are deliberately not backup targets.
+
+## 9. Verification
+
+- Core: `sandboxPlane.test.ts` (plane resolution, token prefixes, boot fence, strict DB fence both directions, Fake Rails gateway fence), `fake-rails-control-client.test.ts`, `phase1-mtls-and-schema.test.ts` (v39 migration is newest), commerce/guard regressions.
+- Fake Rails: `accountsAndInspector.test.ts` (personas, reserve/capture/release/refund/over-reserve, auto-enrolment, merchant reset, clearing statement) and the v2 control/inspector tests in `api.test.ts`.
+- Edges: `sandbox-routing.test.ts` in merchant-back and admin-back, merchant `sandbox-proxy.test.ts` (control vs resource vs mirror routing). checkout-back routes are covered by its sandbox routing suite.
+- Deploy: 708 tests including sandbox database creation, PgBouncer aliases, host planning and PKI SAN; `./deploy.sh --dry-run` shows `pg-core-sandbox :4005`.
+- Root unit: guide context map, route-authority coverage and i18n catalogues include the sandbox screens/keys.
+
+## 10. Gaps
+
+See the frontmatter. Deployment now provisions/migrates/seeds the second core and database, and the synthetic clearing statement is ingested through `StatementIngestor`. Remaining: Live-to-sandbox sync of operator-customised reference data (GAP-070), a dedicated Fake Rails challenge table, and sandbox role preview. Both deployment and the full Live mirror require a live two-database run that has not been performed in this workspace.
+
+---
+
 <a id="corefoundations"></a>
 
 > **Part ID:** `core.foundations` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
@@ -2299,7 +2444,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 <a id="coreapi"></a>
 
-> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-08 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
 
 # Core API Surface
 
@@ -2468,8 +2613,8 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `POST /rails`, `PATCH /rails/:id`, `PUT /rails/:id/fields` | `gateway:write` |
 | `GET /routes`, `/export`, `/summary`, `/summary/export`, `GET /routes/:id` | `gateway:read` |
 | `POST /routes`, `PATCH /routes/:id`, `POST /routes/:id/state` | `gateway:write` |
-| `GET /assets`, `GET /assets/:id` | `gateway:read` |
-| `POST /assets` | `gateway:write` |
+| `GET /assets`, `GET /assets/:id`, `GET /assets/:id/content` | `gateway:read` |
+| `POST /assets`, `POST /assets/upload`, `DELETE /assets/:id` | `gateway:write` |
 
 #### Reconciliation
 
@@ -2555,6 +2700,7 @@ Authentication behavior:
 - API tokens are bound to a merchant and to one application (enforced on the external routes since 2026-11-12); the token hash, revocation and CIDR checks happen in core.
 - Merchant authorities are enforced per route in core with `assertMerchantAuthority` (the closed catalogue in `lib/auth/merchantAuthorities.ts`); the portal and the edges only project them. Reads: wallets, `/wallets/:id`, `/balance`, `/statements` and `GET /applications*` need `merchant:read` or `merchant:write`; the statement export needs `merchant:write` (the portal's `statements.export`); `GET /links*` needs `link:read`; `GET /payments` and `GET /stats/overview` need `payment:read`; `GET /disputes*` needs `payment:read` or `dispute:respond`. `merchant:read`/`merchant:write` imply `payment:read` and `link:read`, so a payment-only user can read payments but never balances or statements. Before 2026-11-08 these read routes only checked the merchant, so any merchant user could read balances and the 50,000-row export. Writes keep their fine-grained authorities. API tokens only reach `/external/*`.
 - **Application scope (`users.app_scope_ids`).** A session principal carries `appScopeIds`, read from the user row on every request (a change takes effect without a new login). Empty means unscoped. For a scoped user the application, link, payment, dispute and statement lists are narrowed to those applications, by-id reads/cancels/evidence of another application answer `403 APP_SCOPE_VIOLATION`, `POST /links` refuses another application and defaults to the oldest application inside the scope, and the merchant-wide `GET /stats/overview` (it mixes merchant-wide wallet and cash-out figures) answers `403 APP_SCOPE_RESTRICTED`. Since 2026-11-12 the restriction also holds for team management and tokens: `POST /users` gives the new user the creator's `app_scope_ids` (it used to create an UNRESTRICTED user whose password the creator chose and could activate), `PATCH /users` and `PATCH /users/:id` answer `403 APP_SCOPE_VIOLATION` unless the target user is restricted to a subset of the caller's applications (never an unrestricted user), `POST /tokens` refuses another application and defaults to the oldest application inside the scope (it used to pick any application of the merchant), and the token list, `PUT /tokens/:id/ips` and `DELETE /tokens/:id` are narrowed the same way. Not scoped yet: POS terminals, wallets themselves and cash-outs.
+- **Dispute attachments honour the application scope (2026-11-16).** `GET /disputes/:id/attachments`, `GET /disputes/:id/attachments/:attachmentId/content` and `DELETE /disputes/:id/attachments/:attachmentId` arrived from `master` checking the merchant only, so a user restricted to some applications could list, download and delete the evidence files of a dispute in another application. They now resolve the dispute through `disputeInCallerScope` (merchant and application scope; `404 DISPUTE_NOT_FOUND` outside it) before they read an attachment, as `POST /disputes/:id/attachments` and the other dispute routes already did. Pinned by `test/merchant-dispute-attachment-scope.test.ts`.
 - Audit rows added 2026-11-08 (before this, these state changes left no trail): merchant `PUT /tokens/:id/ips` (`ACCESS_TOKEN_IP_ALLOWLIST_CHANGED`, with before/after CIDRs, in the same transaction as the change) and `DELETE /tokens/:id` (`ACCESS_TOKEN_REVOKED`); merchant and admin credential sets `POST` (`CREDENTIAL_SET_CREATED`), `PUT` rotate (`CREDENTIAL_SET_ROTATED`) and `POST .../verify` (`CREDENTIAL_SET_VERIFIED`), recording entry KEY names and versions only, never a secret value or ciphertext; admin `POST /assets` (`ASSET_REGISTERED`); backup `POST /trigger` (`BACKUP_TRIGGERED`) and `POST /drill` (`BACKUP_DRILL_TRIGGERED`, written best effort after the daemon accepted the job: a failed audit write never turns an already-started job into an error).
 - `POST /onboarding/kyb-documents` reports `duplicateDocuments` for the uploader's OWN earlier copies only; matches in other merchants are kept in the staff-only audit row (`KYB_DOCUMENT_UPLOADED.afterJson.duplicateDocuments`) and in the join-request duplicate flags, never returned to the merchant (tipping-off).
 - Sensitive application changes (`assignedWalletId`, `railWhitelist`, `redirectDomainAllowlist`) create an `APPLICATION` approval instead of applying directly.
@@ -2949,11 +3095,24 @@ Core adds these internal admin routes under `/internal/admin` (all confidential 
 - `POST /aml/reports/:id/file` creates a PENDING `ExternalSubmission` before dispatch, blocks duplicate PENDING/SUBMITTED attempts, records failure details, and passes the authoritative status change through the normal submission gate. Manual submissions create a MANUAL adapter and submission history.
 - Template upload/update URLs reject non-XLSX schemas and any unsafe/invalid workbook; DOCX validation/simulation uses the narrative schema renderer; clone copies the XLSX template binding.
 
+
+Object-storage routes include the admin summary/object/access-log/legal-hold/maintenance surface, dispute attachments (admin and merchant), AML case evidence, reconciliation statement download, and brand-asset upload/content/delete. The admin object list accepts `page`, `pageSize`, `namespace`, `status`, `statuses`, `bucket`, `ownerMerchantId`, `legalHold`, `sha256Hex`, `search`, `sortKey` and `sortDirection`. Legal-hold lift returns `202` for a second checker; place is immediate.
+
+## Sandbox Studio read models (2026-11-13)
+
+The sandbox control router adds merchant read endpoints under `/internal/sandbox/merchant/studio`: overview, wallets (list/summary/detail), applications (list/summary/detail), links (list/summary/detail), payments (list/summary) and tokens (list/summary/detail). Lists use the shared `buildListQuery`/`listResponse` contract with server pagination, sorting, search and filters, and expose relation labels (wallet/application/rail/gateway) plus computed counts and balances. `PATCH /merchant/wallets/:id/status` freezes/activates a sandbox wallet and records a `sandbox_sync_audits` row.
+
+The admin router adds paginated `/admin/merchants` and `/admin/merchants/summary`, sandbox merchant detail (`/admin/merchants/:id`), `/admin/audits`, and `/admin/fake-rails/accounts/summary`. Fake Rails transaction lists accept `page`/`pageSize` as well as `limit`/`offset`; statements and webhook lists remain bounded. Admin endpoints require a staff principal.
+
+## v38-v39 `/internal/sandbox` (2026-11-13)
+
+A new internal router, reachable from merchant-back and admin-back and mounted only on the SANDBOX plane, exposes the merchant sandbox overview, wallet detail/ledger/balance/simulated cash-out, payment detail/refund/dispute simulation and resolution, demo seed and 20-payment history seed, reset, Fake Rails account proxy/control (paginated, merchant-scoped, preset clone/restore), reconciliation import, webhook test ping, clearing pools/statement/settle, and staff overview, merchant list/overview, global reset, Fake Rails scenarios/transactions/webhooks/statements. Checkout adds `GET/POST /pay/:linkKey/sandbox-accounts`, account movements, `PATCH /pay/:linkKey/sandbox-accounts/:accountId`, `GET /pay/:linkKey/logs/:attemptId/sandbox-inspector` and `POST /pay/:linkKey/logs/:attemptId/sandbox-simulate`; all of them refuse a non-`sbx_` key with `403 SANDBOX_INSPECTOR_FORBIDDEN_ON_LIVE_LINK`.
+
 ---
 
 <a id="coreengine"></a>
 
-> **Part ID:** `core.engine` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.engine` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
 
 # Core Engine
 
@@ -3589,6 +3748,10 @@ No build or test was run for this documentation change. Tests that require Postg
 - **A pending charge is never resubmitted (2026-11-12).** The confirm claim (`claimAttemptForConfirm`, `api/internal/checkout.ts`) refuses an attempt that is `UNKNOWN` **or `VERIFYING`** with `point_of_no_return = true`. Only `UNKNOWN` was excluded before, so a second confirm with a NEW idempotency key on an attempt whose charge was pending at the gateway re-claimed it and ran the SUBMIT stack a second time (a possible double charge). Such an attempt is resolved by inquiry, callback or the poll worker only.
 - **Re-finalize guard (GAP-016, RESOLVED 2026-11-05).** `finalizeGuardFor(status)` classifies an attempt: `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` are `IDEMPOTENT` (already settled), `CANCELLED` and `BLOCKED` are `REFUSE`, everything else (including `FAILED` and `EXPIRED`, so a late success is still recovered) is `ALLOW`. `verifyCallback` applies it before the trusted-facts check: a duplicate of the trusted success on a settled attempt is a no-op that returns the current state, a contradicting (failure/untrusted) signal on a settled attempt throws `409 ATTEMPT_TERMINAL`, and a callback for a cancelled/blocked attempt throws `409 ATTEMPT_TERMINAL`. `finalizeSuccess` re-reads the attempt status first so a stale in-memory attempt cannot settle twice (idempotent settled attempts return `COMMITTED`, or `SUSPENSE` for `SUSPENSE_SETTLEMENT`, with the stored ledger entry id).
 - **AML hold escrow after capture (GAP-015, RESOLVED 2026-11-05).** The guard pipeline no longer books escrow when it decides `HOLD` (no money has been captured yet, so `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` would fabricate a balance); the decision reason is now `AML_HOLD_PENDING_CAPTURE` and `hold_journal_entry_id` is no longer written on the case. When a verified gateway capture of an AML-held attempt reaches `finalizeSuccess`, `escrowHeldCapture` books the escrow (`AML_HOLD_AND_RELEASE` scenario, idempotent per `PAYMENT_ATTEMPT`/attempt id, in the transaction runner when present) and returns the new `SlotCommitResult.outcome` `HELD`: the attempt is NOT settled, the slot is NOT committed, and the result keeps the `AML_HOLD` substatus. Because the money can only be captured by the rail, the checkout initiate route does NOT stop a `HOLD` attempt before `engine.initiate`; the attempt continues through the normal rail flow and a held attempt remains confirmable (`claimAttemptForConfirm` no longer excludes the `AML_HOLD` substatus). Cancel and expiry still refuse to touch a held attempt. The checker's release (see `core.governance`) settles it and is refused until the escrow exists. A duplicate finalize is refused atomically (`claimFinalize` conditional update), so two concurrent verified callbacks cannot settle/commit the slot twice. Residual: a merchant-direct (`MERCHANT_DIRECT`) held attempt holds no platform cash, so nothing is booked (`AML_HOLD_NO_ESCROW`) and release/void have no escrow to move.
+
+## v38 strict plane status (2026-11-13)
+
+OD-10 and `resolveEnvironment(merchantStatus)` are removed. Checkout and merchant link creation resolve the environment from the process plane; Live requires an ACTIVE merchant, application and wallet. Sandbox uses the same strict status rules, but its merchant envelope is created ACTIVE, so a pending Live merchant can train without a Live approval. `AttemptGuardPipeline` no longer reads the OD-10 setting and applies the same status posture on both planes.
 
 ---
 
@@ -4895,7 +5058,7 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 
 <a id="corestorage"></a>
 
-> **Part ID:** `core.storage` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.storage` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
 
 # Storage Engine
 
@@ -5365,11 +5528,29 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 - **Redis velocity failure policy (GAP-031, RESOLVED).** `REDIS_VELOCITY_FAILURE_POLICY` (parsed by `parseVelocityFailurePolicy`, wired in `createStorageEngine`, overridable with `velocityFailurePolicy`) defines what the Redis velocity counter does when Redis is unreachable, errors or exceeds the command timeout. `local-fallback` (default) fails open degraded: the window is counted in this node's memory, so limits still apply per node and are lost on restart. `fail-open` allows without counting (empty `windowStats`). `fail-closed` throws `VelocityUnavailableError` so the caller refuses the attempt. `onVelocityDegraded` is invoked with the policy and the error. Velocity is a risk signal, not a ledger invariant, so the default does not stop payments during an outage; use `fail-closed` only when a missed limit is worse than an outage. Tests: `core-back/test/storage-engine/velocity-failure-policy.test.ts`.
 - **Leader election (GAP-012).** `StorageEngine.leaderElection` is a `PgAdvisoryLeaderElection` built from the primary URL (see `core.workers` for the semantics and the PgBouncer transaction-pooling caveat); it is closed with the engine.
 
+## 13. Shared object & asset storage (schema v36)
+
+The storage engine is paired with the shared object vault documented in
+`parts/01-core-back/13-object-storage.md`. PostgreSQL keeps only the control
+plane (`storage_objects`, `storage_object_locks`,
+`storage_object_access_logs`); the bytes live in
+`deploy/object-storage-daemon` (`RemoteMtlsBlobStore` on every core node and the
+backup daemon, `FsBlobStore` in local dev). The former
+`reconciliation_runs.file_content` bytea column is removed and the run carries
+`storage_object_id`; KYB documents, regulatory outputs/templates, Report Studio
+bundles and catalog assets carry storage-object FKs. The `ObjectStorageMaintenanceWorker`
+(GC, orphan sweep, integrity scrub, lock reconcile, KEK rewrap, generic AV
+fallback) and the `object_storage` Platform Monitor check cover operations.
+
+## v38 database execution-plane fence (2026-11-13)
+
+`system_execution_plane` is a single-row lock per database. `enforce_execution_plane_env_fence()` is attached to `payment_links`, `payment_attempts` and `access_tokens`: a SANDBOX database always rejects LIVE rows; a LIVE database rejects SANDBOX rows when `app.plane_fence_strict=true` (the migration stores that at database level, and the test suite disables it only for its mixed throwaway database). `enforce_no_fake_rails_on_live_plane()` refuses a `FAKE*` gateway and an enabled gateway environment pointed at Fake Rails on a strict Live database unless `allow_fake_rails=true`.
+
 ---
 
 <a id="coredata"></a>
 
-> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-11 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `d695518+working-tree`
 
 # Data Schema and Migrations
 
@@ -5381,7 +5562,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 35 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 39 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -5436,7 +5617,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 36`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 40`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5447,9 +5628,17 @@ The models are grouped by domain:
 
 `core-back/prisma/seed.ts`, `seedFakeRails.ts` and `syntheticSeeder/index.ts` call `ensureSchemaVersion()` before writing. A stale database is therefore rejected by these seeders and by any caller that explicitly asserts the version. The core HTTP start path does not call it.
 
+Schema version 37 adds the storage hardening migration on top of the v36 object & asset storage control plane
+(`storage_objects`, `storage_object_locks`, `storage_object_access_logs`,
+`report_asset_bundle_entries`, `dispute_attachments`, `aml_case_evidence`),
+domain FK links (KYB, reconciliation, regulatory templates/outputs, Report Studio
+bundles, catalog assets), removes `reconciliation_runs.file_content`, and
+installs the two append-only guard triggers. See
+`parts/01-core-back/13-object-storage.md`.
+
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261112100000_merchant_chrome_tenant_integrity`, schema version 36). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116090000_merchant_chrome_tenant_integrity`, schema version 40). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -5626,7 +5815,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 35.
+- Apply migrations before starting a new core build. The seeders will reject a schema version other than 37.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -5641,7 +5830,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 84 models and 105 enums in the Prisma datamodel.
-- Schema version 35 with an equality check used by the seeders.
+- Schema version 37 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -5744,7 +5933,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 36 (`REQUIRED_SCHEMA_VERSION = 36`; model count 106). The schema migrations since version 10 are:
+The current schema version is 40 (`REQUIRED_SCHEMA_VERSION = 40`; model count 114). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -5762,7 +5951,7 @@ The current schema version is 36 (`REQUIRED_SCHEMA_VERSION = 36`; model count 10
 - `20261111120000_report_engine_versioning` (version 34, written on the plan branch): adds `engine_version`, `spec_schema_version` and `authoring_transcript_version` to `report_definition_specs`, `merchant_report_specs` and `report_chrome_specs`, `engine_version` and `spec_schema_version` to both execution audit tables, and `default_revoked_at` / `default_revoked_reason` to `report_chrome_specs`; it backfills `spec_schema_version` from `spec_json.spec_version`. See `core.report-engine` section 18.
 - `20261111130000_merchant_report_chrome` (version 35, written on the plan branch): creates `merchant_report_chrome_specs` (unique `(merchant_id, code, version)`, one published default per merchant and chrome type, a foreign key to the merchant asset bundle).
 - `20261112090000_journal_partition_storage_and_race` (version 35, no table shape change): redefines `ensure_journal_line_partitions` again. (1) The 2026-11-10 revision set only the insert-autovacuum parameters on a new monthly partition and dropped the explicit `fillfactor = 100` of the original body; it is restored, and set once (`SHARE UPDATE EXCLUSIVE`, no write blocking) on every monthly partition created without it. (2) The same revision replaced `CREATE TABLE IF NOT EXISTS` with a `to_regclass` check and a plain `CREATE TABLE`, so two callers at once (the partition worker on two nodes, or the worker and a deploy) both saw a month missing and the second aborted with `duplicate_table` (measured: 3 of 4 concurrent callers failed); `duplicate_table` / `unique_violation` from a concurrent creator are now accepted, and the truncate-guard install tolerates `duplicate_object`. The version is bumped because the newest migration sets `REQUIRED_SCHEMA_VERSION` (checked by `phase1-mtls-and-schema.test.ts`) and the seeders' equality guard then refuses a database without it; core HTTP start does not check the version. Test: `ledger-query-pruning-and-accuracy.test.ts` EC-15 (storage parameters) and EC-15b (four concurrent callers on a dropped empty month).
-- `20261112100000_merchant_chrome_tenant_integrity` (version 36, no new table): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merge.** Two branches each wrote migrations numbered 34 and 35 (`20261111090000` = 34, `20261111120000` = 34, `20261111130000` = 35, `20261112090000` = 35). None of the four is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first. This migration is new to every database, runs last and sets 36. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, plan branch first, `claude-fixes` first): each ends at 36 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
+- `20261116090000_merchant_chrome_tenant_integrity` (version 40, no new table; the newest migration): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merges.** The branches numbered their migrations independently: `20261111090000` = 34 and `20261112090000` = 35 (`claude-fixes`), `20261111120000` = 34 and `20261111130000` = 35 (plan branch), `20261112000000` = 36, `20261113090000` = 37, `20261113120000` = 38 and `20261114090000` = 39 (`master`). None is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first (a database that followed `master` to 39 and then receives the `claude-fixes` migrations would be left at 35). This migration is new to every database, runs last and sets 40. It was first written as `20261112100000` with version 36 when only the plan branch had been merged; that name was never pushed or deployed and was renamed on 2026-11-16 so that it also runs after `master`'s migrations. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, `master` first, `claude-fixes` first) and applied from empty on PostgreSQL 18.6: each ends at 40 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -5879,11 +6068,28 @@ The reporting baseline set now includes a PROVISIONAL `cbl-incident-docx-v1` def
 `20261110190000_merchant_report_engine` adds five tables separate from the staff report registry: `merchant_report_specs` (merchant-owned versioned specs; unique `(merchant_id, code, version)` and a partial unique latest-published index), `merchant_report_asset_bundles` (unique per merchant and content hash), `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` (hourly verify/execute counters) and `merchant_report_studio_status` (per-merchant Studio suspension). The migration bumps the schema version to 33; `phase1-mtls-and-schema.test.ts` asserts the applied version.
 
 
+## 17a. Shared object & asset storage (schema versions 36-37, 2026-11-12/13)
+
+`20261112000000_v36_enterprise_object_storage_engine` adds the storage control
+plane, domain links and the first guard triggers. `20261113090000_storage_engine_hardening`
+adds `gc_claim_token`/`gc_claimed_at`, the strict status-transition and
+authorization-immutability checks, the append-only access-log trigger, object
+explorer indexes (including pg_trgm filename/key search) and the access-log
+filter indexes. The current required version is **37**.
+
 ## 17. Report engine versioning and merchant chrome (schema versions 34-35, 2026-11-11)
 
 `20261111120000_report_engine_versioning` bumps the schema to 34. It adds `engine_version`, `spec_schema_version` and `authoring_transcript_version` to staff reports, merchant reports and platform chrome; `engine_version`/`spec_schema_version` to both execution audit tables; and `default_revoked_at`/`default_revoked_reason` to platform chrome. Existing rows are backfilled to engine `1.0.0` and spec version `1.0`.
 
 `20261111130000_merchant_report_chrome` bumps the schema to 35 and adds `merchant_report_chrome_specs`, with `merchant_id`, code/version, type, lifecycle status, merchant default flag, revocation metadata, version provenance, locales, spec JSON/hash, asset bundle FK and publisher metadata. Unique `(merchant_id, code, version)` and a partial unique `(merchant_id, chrome_type)` for published defaults preserve tenant isolation and one default per type. The migration catalog is generated; the required schema version is 35.
+
+## v38 schema (2026-11-13)
+
+Schema version 38 adds `system_execution_plane` (singleton `id=1`, `plane`, `allow_fake_rails`, `live_sync_revision`, `last_synced_from_live`) and `sandbox_sync_audits`, plus `payment_links.env` and `access_tokens.env` (existing `payment_attempts.env` participates in the fence). The migration stores the strict-fence database setting and attaches the env and Fake-Rails triggers. `prepare-databases.sh` creates and migrates a separate `payment_gateway_sandbox` database and stamps each database with its plane.
+
+## v39 schema (2026-11-13)
+
+`20261114090000_v39_sandbox_studio` adds nullable `wallets.name` (`VARCHAR(120)`) and `payment_links.title` (`VARCHAR(160)`)/`description` (`TEXT`). The columns already appeared in portal and checkout contracts but were discarded before v39. Existing rows and the Live flow are unaffected. The required schema version is **39**.
 
 ---
 
@@ -7551,7 +7757,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - `report_definition_specs` (code/version, category, audience, status, latest-published flag, supported/default locales, spec JSON/SHA-256, verification report, inferred roles/authorities, conflict status, confidential AML flag, override fields, publisher);
 - `report_execution_audit` (spec, code/version, actor, locale, scoped merchant, redacted inputs, row count, duration, node, verification hash, render target).
 
-`REQUIRED_SCHEMA_VERSION` is 34. Version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. Version 33 adds the separate merchant authoring line: `merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` and `merchant_report_studio_status`, with unique `(merchant_id, code, version)` and one latest-published row per merchant/code. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
+`REQUIRED_SCHEMA_VERSION` is 40. Version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. Version 33 adds the separate merchant authoring line: `merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` and `merchant_report_studio_status`, with unique `(merchant_id, code, version)` and one latest-published row per merchant/code. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
 
 ## 7. Security invariants
 
@@ -7566,7 +7772,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 
 `core-back/test/reportEngineSdk/**` implements the RE-T01..RE-T22 matrix (plus extra dry-run/transcript cases). `admin-front/src/lib/reportEngineSdk/__tests__/**` covers formatting, RTL vector mirroring, chrome binding, the language prompt options, the paged-media document and the client sanitizer. The exhaustive schema suite and `phase1-mtls-and-schema.test.ts` verify schema version 27 and the four new models.
 
-## 9. Merchant reporting line (introduced in schema version 33; current schema 36)
+## 9. Merchant reporting line (introduced in schema version 33; current schema 40)
 
 The merchant line is physically separate from the staff registry. It has its own tables (`merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit`), its own host catalog (`engine/reportStudio/merchantHostConfig.ts`) and its own transcript.
 
@@ -7767,13 +7973,275 @@ When changing the report engine:
 
 - **Merge (2026-11-12): the staff preview has two modes (section 15.3), and the access policy applies to the one that reads data.** `MOCK` (the default) renders generated rows and reads no stored data, so it needs only the route's authoring or review authority and writes no audit row. `LIVE` reads data: the access-policy check and the `REPORT_SPEC_PREVIEW_EXECUTED` audit row described in the next bullet apply to it. The check sits after the MOCK branch and before `engine.executeReport`; the answer carries `mode`.
 - **Merge (2026-11-12): the merchant result cache key carries the application scope and the chrome fingerprint.** `merchantCacheKey` hashes `applicationIds` (a restricted user's result is never served to an unrestricted user) and `chromeFingerprint` (a changed header or footer is never served from cache).
-- **Merge (2026-11-12): merchant chrome is tenant-safe at the database level (schema version 36).** Migration `20261112100000_merchant_chrome_tenant_integrity` gives `merchant_report_chrome_specs` the composite foreign key `(asset_bundle_id, merchant_id)` and a `merchant_id` foreign key to `merchants`, the rule `20261111090000` set for merchant report specs. See `core.data` (the migration list).
+- **Merge (2026-11-12): merchant chrome is tenant-safe at the database level (schema version 40).** Migration `20261116090000_merchant_chrome_tenant_integrity` (first written as `20261112100000`, version 36; renamed before it was ever pushed so that it runs after `master`'s migrations) gives `merchant_report_chrome_specs` the composite foreign key `(asset_bundle_id, merchant_id)` and a `merchant_id` foreign key to `merchants`, the rule `20261111090000` set for merchant report specs. See `core.data` (the migration list).
 - **Merge (2026-11-12): the merchant Studio LIVE preview honours the application scope.** The plan branch's `POST /report-engine/studio/preview` executed a draft in `LIVE` mode with the merchant scope only, so a user restricted to some applications (`app_scope_ids`) could preview every application's rows. It now applies the rule of the execute route: merchant-wide models are refused (`APP_SCOPE_RESTRICTED`) and the rest is narrowed to the user's applications. `MOCK` reads no stored data.
 
 - **Staff preview obeys the access policy and is audited.** `POST /report-engine/specs/preview` executes a draft against live data. It used to require only an authoring or review authority, so an author without the ledger or audit authorities could preview a draft over those tables, and it left no trace. It now evaluates the policy inferred from the models the draft queries (`previewAccessDecision` in `api/internal/reportPreviewPolicy.ts`: a natural role, or every required authority; a security admin is always allowed; a missing inference fails closed) and answers `403 REPORT_ACCESS_DENIED` with the queried models and required authorities before executing anything. A successful preview writes `REPORT_SPEC_PREVIEW_EXECUTED` (entity `REPORT_SPEC_DRAFT`, id = the draft's SHA-256, with the queried models, row count and duration) to the audit log; the execution audit table is keyed by a saved spec, which a draft is not.
 - **Merchant reports honour a user's application scope.** A merchant session user can be restricted to some applications (`app_scope_ids`) and the other merchant routes honour it; the report engine ignored it, so such a user got every application's payments, wallets, cash-outs and daily stats. `merchantScopable.applicationIdColumn` (host config) marks the models whose rows belong to ONE application: only `payment_attempts`. For a restricted session user the execute route (1) refuses a report that reads any other model with `403 APP_SCOPE_RESTRICTED` (as the merchant overview is refused), before the budget, rate limit or execution; (2) passes `merchantScope.applicationIds`, so the compiler adds `<alias>.application_id = ANY($n::uuid[])` to every aliased table next to the merchant predicate (and throws `APP_SCOPE_MODEL_NOT_ALLOWED` for a model that cannot be narrowed); (3) keys the result cache by the scope, so a restricted user's result is never served to an unrestricted user or the reverse. An API token is bound to one application by the token itself and is unchanged. The `applications` model is also refused to a restricted user (conservative). The merchant autocomplete sources (payment link keys, POS terminal names) are still merchant-wide.
 - **Tenant-safe merchant report tables and an append-only audit without SET NULL** are migration `20261111090000` (schema version 34), see `core.data` (the migration list).
 - **The spec hash is a content hash (2026-11-12).** `report_definition_specs.spec_sha256` (staff and merchant lines) was SHA-256 of `JSON.stringify(spec)` taken before the insert. `spec_json` is `jsonb`, which reorders object keys, so the hash could never be recomputed from the stored row and proved nothing about it. It is now `specContentSha256` (`lib/reportEngineSdk/specHash.ts`): SHA-256 of the spec with every object's keys sorted, recursively, identical before the insert and after any read. Rows saved earlier keep their old hash (nothing compares spec hashes across rows). The chrome registry keeps hashing the uploaded spec text byte for byte, which is a different contract (the exact file). Test: `admin-slice/admin-report-engine.test.ts` B05/B04, which recomputes the hash from the row as read back.
+
+## 17. Shared object storage for report assets and outputs
+
+Report Studio bundles are stored as one encrypted `application/zip` object in the
+`REPORT_STUDIO_ASSETS` namespace (`ReportAssetBundle.storageObjectId` /
+`MerchantReportAssetBundle.storageObjectId`, `REPORT_ASSET_ENTRY` lock).
+Rendering extracts the requested file in memory (`ObjectStorageReportAssetStorage`);
+the local `.report-assets` driver remains only as a fallback for pre-v36 rows and
+tests. Regulatory XLSX templates (`RegulatoryReportSchema.templateObjectId`) and
+generated XML/XLSX/DOCX outputs (`RegulatoryReportOutput.storageObjectId`,
+`REG_REPORT_OUTPUT` lock) are stored in `REGULATORY_REPORTS`; new writes stop
+writing `contentCiphertext`/`templateCiphertext` and all readers prefer the
+storage object. The full engine is `parts/01-core-back/13-object-storage.md`.
+
+---
+
+<a id="coreobject-storage"></a>
+
+> **Part ID:** `core.object-storage` · **Status:** `implemented` · **Last verified:** 2026-11-13 · **Verified against:** `working-tree`
+
+# Shared Object & Asset Storage Engine
+
+## 1. Purpose and scope
+
+The engine is the single encrypted storage plane for every uploaded or generated
+file in the platform. It replaces asset `bytea`/base64 columns and local-disk
+writes with:
+
+- a shared, network-accessible vault (`deploy/object-storage-daemon`) used by
+  every `core-back` node and the backup daemon;
+- a PostgreSQL control plane (`storage_objects`, `storage_object_locks`,
+  `storage_object_access_logs`) with append-only/guard triggers;
+- a host-agnostic SDK (`core-back/lib/objectStorageSdk/**`) used by all domain
+  call sites.
+
+The engine does not own PostgreSQL backups (see `core.backup`) or the API
+authority model (`core.api`); it enforces the authority recorded on each object
+as defence in depth.
+
+## 2. Database control plane (schema version 37)
+
+Migration `20261112000000_v36_enterprise_object_storage_engine` adds the v36 control plane; `20261113090000_storage_engine_hardening` adds GC claims, access-log append-only, authorization immutability and the performance indexes. Together they provide:
+
+| Table | Notes |
+| :--- | :--- |
+| `storage_objects` | One row per upload. `byte_size > 0`, `chunk_size_bytes >= 4096`, `chunk_count >= 1`; unique `(bucket, storage_key)`; `gc_claim_token`/`gc_claimed_at` make collection safe. |
+| `storage_object_locks` | Append-only lock ledger with unique `(object_id, holder_type, holder_id)`. |
+| `storage_object_access_logs` | Allowed and denied read attempts; append-only (UPDATE/DELETE refused). |
+| `report_asset_bundle_entries` | Per-file entries of Report Studio bundle archives. |
+| `dispute_attachments`, `aml_case_evidence` | Evidence links (FKs to disputes/merchants/AML cases). |
+
+Domain links: `kyb_documents.storage_object_id`,
+`reconciliation_runs.storage_object_id` (replaces `file_content`),
+`regulatory_report_schemas.template_object_id`,
+`regulatory_report_outputs.storage_object_id`,
+`report_asset_bundles.storage_object_id`,
+`merchant_report_asset_bundles.storage_object_id`, `assets.storage_object_id`.
+
+All new FKs are `ON DELETE RESTRICT ON UPDATE CASCADE`; timestamps are
+`TIMESTAMPTZ(3)` to match the repo convention.
+
+### Guard triggers (no GUC backdoors)
+
+`storage_objects_guard_trg` forbids `DELETE` (`STORAGE_OBJECT_DELETE_FORBIDDEN`,
+23503), mutating cryptographic identity (`STORAGE_OBJECT_IMMUTABLE_FIELD`,
+23514), shortening `retain_until` (`STORAGE_OBJECT_RETENTION_SHORTEN_FORBIDDEN`,
+23514), and `PURGED`/`QUARANTINE_REJECTED` while a legal hold is active, an
+active lock exists, or (for `PURGED`) `retain_until` is in the future
+(`STORAGE_OBJECT_LEGAL_HOLD_ACTIVE`, `STORAGE_OBJECT_LOCKED`,
+`STORAGE_OBJECT_RETENTION_ACTIVE`).
+
+`storage_object_locks_guard_trg` forbids `DELETE` and mutation of
+`id/object_id/holder_type/holder_id`; lock release is an `UPDATE` of
+`released_at`.
+
+## 3. Data plane: `pgos1`
+
+One object is one immutable file:
+`{namespace}/{tenant-or-shared}/{yyyy}/{mm}/{objectId}.v1.enc`.
+
+```
+"pgos1" | frame 0 | ... | final frame
+frame = uint32be(plaintextLength) | AES-256-GCM ciphertext | 16-byte tag
+```
+
+- Per-object random 32-byte DEK wrapped by a KEK with
+  `AAD = "dek:{objectId}:v{version}"`.
+- Chunk nonce `streamNoncePrefix(7) | uint32be(index) | finalFlag`;
+  chunk AAD `objectId(16) | uint32be(index) | finalFlag`.
+- Tampering, truncation, reordering, cross-object swaps, size/count/SHA-256
+  mismatches and missing blobs raise `STORAGE_INTEGRITY_CORRUPTED`.
+- Default chunk size 64 KiB; the reader caps a frame at 16 MiB.
+
+## 4. Lifecycle and policies
+
+`NAMESPACE_POLICIES` in `types.ts` defines bucket, MIME allow-list, max size,
+async AV, default retention, required authority and confidentiality tier for
+KYB, reconciliation, regulatory, Report Studio, merchant statements, dispute,
+AML, brand assets and backup artifacts.
+
+`stageUpload` (no DB transaction) inserts `STAGING`, encrypts and writes to the
+`BlobStore`. `bind` (inside a caller transaction) upserts the lock and either
+promotes immediately or moves to `QUARANTINE_PENDING_AV`. Promotion stamps
+`retain_until` as the maximum of the policy retention, the existing retention
+and every lock's `retention_floor_until`. Releasing the last lock stamps
+`gc_eligible_at = GREATEST(retain_until, NOW() + grace)`. `runGcBatch` moves
+eligible blobs to `.trash/YYYY-MM-DD/` and marks them `PURGED`; trash is purged
+after `OBJECT_STORAGE_TRASH_RETENTION_DAYS`.
+
+SVG uploads are sanitised (script/event handlers/foreignObject/javascript/data
+HTML/iframes/embedded objects/external hrefs -> `STORAGE_SVG_UNSAFE`).
+Executable headers are refused at sniff time.
+
+## 5. SDK
+
+Files: `types.ts`, `sniff.ts`, `crypto.ts`, `blobStore.ts`,
+`holderRegistry.ts`, `index.ts`, `runtime.ts`.
+
+`BlobStore` has two drivers: `FsBlobStore` (daemon/local test) and
+`RemoteMtlsBlobStore` (all core nodes and the backup daemon). The daemon and
+backup-daemon keep byte-identical copies under `src/shared/blobStore.ts`; the
+deploy test asserts they match the canonical core file.
+
+`createObjectStorageSdk` exposes:
+
+- `routeClient`: `stageUpload`, `bind`, `promote`, `release`, `discardStaged`,
+  `withStagedUpload`, `readAuthorized`, `placeLegalHold`, `liftLegalHold`.
+- `workerClient`: `stageSystemGenerated`, `readInternal`, `readForScan`,
+  `applyScanVerdict`, `runGcBatch`, `runBlobSweep`,
+  `runIntegrityScrubBatch`, `runLockReconcile`, `runRewrapBatch`,
+  `exportManifest`.
+
+`readAuthorized` checks ACTIVE status, the holder lock (when `holderContext` is
+supplied), the merchant tenant and the namespace's accepted authority set, and
+writes a `storage_object_access_logs` row for every outcome when the database is
+reachable. A namespace can accept more than one real role authority (for example
+`kyb:read` or `compliance:read`; `dispute:read`, `disputes:read` or
+`dispute:respond`); the stored `requiredAuthority` remains the canonical audit
+value. `createBlobStore` refuses to fall back to local disk in
+production or when `CLUSTER_CORE_NODE_COUNT > 1`
+(`OBJECT_STORAGE_DAEMON_URL_REQUIRED`).
+
+## 6. Domain call sites
+
+- KYB upload/download and the join-request flow use `KYB_DOCUMENTS`; the
+  `KybScanWorker` applies the scanner verdict to both the document and the
+  storage object.
+- Reconciliation upload stages `RECON_STATEMENTS` before the DB transaction and
+  binds `RECON_RUN`; the parse worker reads the vault object.
+- Regulatory templates/outputs use `REGULATORY_REPORTS`; output generation
+  stages and binds `REG_REPORT_OUTPUT`, replacing/superseding rows releases the
+  old lock.
+- Report Studio bundles become one `application/zip` `REPORT_STUDIO_ASSETS`
+  object; rendering extracts files in memory.
+- Catalog assets upload to `SYSTEM_BRAND_ASSETS` with a `CATALOG_ASSET` lock;
+  assigning a rail logo adds a `RAIL_LOGO` lock (shared multi-record lock).
+- Dispute and AML evidence use `DISPUTE_EVIDENCE`/`AML_CASE_ATTACHMENTS` and
+  wait for AV (`QUARANTINE_PENDING_AV`).
+- The synthetic seeder stages preview KYB PDFs and reconciliation statements and
+  binds them.
+- Dispute and AML evidence have raw-body upload routes, list/content/delete
+  routes and admin/merchant portal sections. Reconciliation runs expose the
+  original statement for download. Brand assets have an authenticated preview,
+  5 MiB upload limit and a guarded delete/archive path.
+
+## 7. Workers and monitoring
+
+`ObjectStorageMaintenanceWorker` (enabled by `WORKER_OBJECT_STORAGE_ENABLED`,
+interval/batch env) is a cluster singleton. It runs the generic AV fallback
+(EICAR + active content, not KYB), staging/expired/abandoned GC, integrity scrub,
+lock reconcile, periodic blob sweep and KEK rewrap. A single leader avoids two
+nodes scanning the same quarantine row and avoids every node walking the vault.
+
+`createObjectStorageMonitorCheck` (`object_storage`) raises keyed findings for
+an unreachable vault (P1), scrub errors (P1) and quarantine uploads older than
+30 minutes (P2).
+
+## 8. Backup integration
+
+The backup daemon copies new HOT/COLD `.v1.enc` files into
+`object-blobs/{bucket}/{storageKey}` in the artifact repository, verifies every
+ACTIVE row has its blob (`OBJECT_STORAGE_BACKUP_PARITY_ERROR`), writes the KEK
+keyring as an AES-256-GCM escrow (`object-storage/kek-escrow.enc`) under the
+backup master key, and samples up to `OBJECT_STORAGE_DRILL_SAMPLE` ACTIVE rows
+in the restore drill, decrypting them with the escrowed keyring and comparing
+the SHA-256.
+
+## 9. Deploy and operations
+
+- `OBJECT_STORAGE_NODE` is mandatory for >1 core node or a backup host on
+  another host; validation fails with `MULTI_NODE_SHARED_STORAGE_REQUIRED`.
+- `deploy/provisioners/objectStorageProvisioner.ts` creates the `pgobjstore`
+  user, vault directories, environment file and `pg-object-storage-daemon`
+  unit; `deployObjectStorageDaemon` syncs and starts the daemon.
+- PKI mints `object-storage-daemon.crt` (SANs: storage private IP, 127.0.0.1,
+  `object-storage-daemon.internal`) and `object-storage-client.crt`.
+- Firewall opens 4095 only to core and backup private IPs.
+- Health probes run `systemctl is-active` on the storage host and
+  `/v1/health` over mTLS from every core host and the backup host.
+- The daemon terminates mTLS on a `node:tls` front (Bun 1.4's `node:https` request socket does not expose
+  `getPeerCertificate()`), validates the client certificate and its CN against
+  `OBJECT_STORAGE_ALLOWED_CLIENT_CNS`, and only then bridges the decrypted stream to the inner HTTP listener.
+  A rejected certificate receives a raw 403 before any HTTP parsing.
+- Admin API: `GET /object-storage/summary`, filtered/sorted/paginated objects,
+  detail, filtered access logs, place-hold and request-lift, and maintenance
+  jobs. The admin portal route `/system/object-storage` (Operations navigation)
+  renders four tabs: health, object explorer, quarantine and access audit, with
+  a full detail drawer, legal-hold approval flow and confirmation/result for
+  maintenance jobs.
+
+## 10. Tests
+
+`core-back/test/objectStorageEngine.test.ts` covers T01–T20 plus T23–T28 end to
+end against live PostgreSQL (round-trip, chunk tamper/truncation/reorder,
+cross-object swap, rollback cleanup, trigger guards, multi-holder ref counting,
+retention-once, no-lock activation, legal hold, quarantine/no-retention,
+infected verdict, SVG/executable rejection, tenant/authority denial logs, KEK
+rewrap, GC/claim/trash, abandoned quarantine, access-log append-only, lock
+reconciler, two-node shared daemon) plus DB-free envelope/sniff tests.
+
+`deploy/test/objectStorageDeploy.test.ts` covers T21 (topology derivation, core
+env, PKI, firewall, multi-node guard/provisioner refusal, shared-copy drift) and
+T22 (incremental blob sync, parity failure, KEK escrow and drill decryption).
+`deploy/object-storage-daemon/test/server.test.ts` covers the daemon HTTP
+surface and path-traversal refusal.
+
+## 11. Status and deviations
+
+Implemented end to end. Deviations recorded:
+
+- Regulatory schema templates and outputs keep their nullable legacy encrypted
+  text columns as a fallback for rows created before v36; new writes use the
+  shared vault and all readers prefer `storageObjectId`/`templateObjectId`.
+- Report Studio bundles are stored as one encrypted ZIP object rather than one
+  row per file; `report_asset_bundle_entries` and the `REPORT_ASSET_ENTRY`
+  holder type are available for future per-file extraction.
+- Backup artifacts are not yet uploaded through the core SDK; the backup daemon
+  keeps its own established encrypted artifact repository.
+
+
+## 12. 2026-11-13 hardening pass
+
+- Production core without `OBJECT_STORAGE_DAEMON_URL` now stays bootable with an
+  `UnavailableBlobStore`; every storage operation fails closed with
+  `503 STORAGE_UNAVAILABLE` and no local-disk fallback.
+- Raw-body capture now covers every binary storage route: assets (5 MiB),
+  admin/merchant dispute attachments (25 MiB), AML evidence (50 MiB),
+  reconciliation (100 MiB), KYB (25 MiB). Each has a route-level budget.
+- Deploy certificate placement is per consumer: a co-located core/backup host
+  never receives the object-storage server key, and a backup host receives
+  `object-storage-client` in `BACKUP_DAEMON_CERT_DIR`.
+- Fresh storage hosts install pinned Bun, create `pgobjstore`, then hand only
+  the storage certificate files to it; storage paths are restricted to
+  `/var/lib/pg-object-storage/`.
+- mTLS fails closed on partial TLS configuration and unreadable/missing CA,
+  client certificate or key; production HTTP requires the explicit insecure
+  opt-in.
+- Regulatory output regeneration/supersede releases the old object lock;
+  report-asset bundles bind after the bundle row exists, record the merchant
+  owner for merchant bundles, and discard a content-addressed loser.
+- Added indexes for the object explorer and access-log filters, append-only
+  access logs, immutable authorization/tenant columns and schema version 37.
 
 ---
 
@@ -8053,7 +8521,7 @@ Applies to all three copies of the client:
 
 <a id="edgeadmin"></a>
 
-> **Part ID:** `edge.admin` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `edge.admin` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
 
 # Admin Edge BFF
 
@@ -8349,11 +8817,27 @@ The edge validates identifiers, enums and body shapes, but keeps the core as the
 - Incident writes, filing-adapter create/update/disable and `POST /reports/:id/file` relay core's 202 instead of returning a false 200.
 - The new AML routes remain behind the shared `amlConfidential` guard; the edge only validates shapes while core remains the authority for maker-checker, submission readiness and adapter matching.
 
+## Object & asset storage proxy
+
+`admin-back/api/protected/objectStorage.ts` forwards the console API:
+`GET /object-storage/summary`, `GET /object-storage/objects`,
+`GET /object-storage/objects/:id`, `GET /object-storage/access-logs`,
+`POST|DELETE /object-storage/objects/:id/legal-hold` and
+`POST /object-storage/maintenance/:job`. It is mounted with
+`system:storage:read`/`system:storage:admin`/`system:storage:legal-hold`
+read/write guards. `assetsRouter` additionally exposes binary
+`POST /assets/upload` (multipart `file` + `name`) and
+`GET /assets/:id/content`, forwarding raw bytes to core.
+
+## v38-v39 sandbox proxy (2026-11-13)
+
+`/api/v1/admin/sandbox/*` forwards only to `SANDBOX_CORE_BACK_URLS` (no Live fallback): overview, per-merchant overview/reset, wallet balance, global reset and Fake Rails accounts/clearing/scenarios/transactions/webhooks/statements. `/mirror/*` raw-forwards to `/internal/admin/*` for the Live-parity pages; report-engine mirror bodies use the 24 MB parser. The staff session is mirrored by the sandbox core. The Studio routes are open to signed-in staff; the sandbox data is isolated. An unconfigured sandbox node answers `503 SANDBOX_NODE_UNAVAILABLE`.
+
 ---
 
 <a id="edgemerchant"></a>
 
-> **Part ID:** `edge.merchant` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `edge.merchant` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
 
 # Merchant Edge BFF
 
@@ -8658,11 +9142,20 @@ The core POS SSE stream now subscribes to the Redis-backed `realtime:attempt` an
 
 The edge validates the catalog query shape and the public execute shape (`inputs`, `locale`, `renderMode`). Core enforces the merchant authority, audience scope, forced merchant ID and report safety. A client-supplied merchant ID is rejected by the strict edge schema and would be overwritten by core even if it reached it.
 
+
+## Dispute attachments
+
+`GET/POST /api/v1/merchant/disputes/:id/attachments`, `GET .../:attachmentId/content` and `DELETE .../:attachmentId` proxy the shared-vault evidence routes. Uploads use the raw-byte forwarder; content uses the streaming proxy. Downloads are refused by core while the object is quarantined.
+
+## v38-v39 sandbox namespace (2026-11-13)
+
+`/api/v1/merchant/sandbox/*` is a dedicated namespace forwarded only to `SANDBOX_CORE_BACK_URLS`. `/overview`, `/seed-demo`, `/seed-history`, `/reset`, `/wallets/:id/*`, `/payments/:id/*`, `/disputes/:id/resolve`, `/reconciliation/*`, `/fake-rails/*` and `/webhooks/test-ping` map to the sandbox control routes; list/create resources (`/wallets`, `/applications`, `/links`, `/payments`, `/tokens`) map to the sandbox core's `/internal/merchant/*` (same router, separate database). `/mirror/*` raw-forwards to `/internal/merchant/*` for Live-parity pages, including a dedicated multipart dispute-evidence route and the POS SSE stream. `/api/external/v1/*` accepts `pg_live_*` and `pg_test_*` and selects the Live or Sandbox pool from the prefix. The client keeps one pool per URL set, so failover cannot cross planes.
+
 ---
 
 <a id="edgecheckout"></a>
 
-> **Part ID:** `edge.checkout` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `edge.checkout` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
 
 # Checkout Edge BFF
 
@@ -8907,11 +9400,15 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 
 - The checkout upstream client uses the same `CORE_FAILURE_THRESHOLD = 3` consecutive-failure threshold before a core node leaves rotation (GAP-021). Checkout sessions use the `payment-gateway-checkout` audience (GAP-020).
 
+## v38 sandbox checkout (2026-11-13)
+
+`sbx_*` link keys and `SANDBOX` inbound environments select `SANDBOX_CORE_BACK_URLS`; `pl_*` and LIVE inbound stay on the Live pool. The inspector routes list accounts, patch an account balance/status and reveal/simulate an attempt; all refuse a non-`sbx_` key with `403`. An unconfigured sandbox node is `503 SANDBOX_NODE_UNAVAILABLE`, never a silent Live fallback.
+
 ---
 
 <a id="admin-uisystem"></a>
 
-> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `admin-ui.system` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `d695518+working-tree`
 
 # Admin UI System
 
@@ -9214,11 +9711,27 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 Vuetify teleports dialogs, menus and drawers under a `.v-overlay__content` / `.v-navigation-drawer` element that receives the theme class and CSS variables but not a base text color. Custom surface components (`FormModal`, `SlideOverDrawer`, SafeguardDialog, the guide search surface, and any raw dialog content) therefore inherited the body's black text while sitting on the dark surface. `fintech-minimal.css` now sets `color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`; component-specific text colors and status tones still override it. The same rule is mirrored in the merchant, checkout and Fake Rails portals, and `tests/unit/dark-overlay-colors.test.ts` guards all four stylesheets.
 
+## Object & Asset Storage page
+
+`/system/object-storage` (`pages/system/object-storage/index.tsx`) uses the shared
+`ScreenContainer`, `PageHeader`, `MetricStrip`, `SegmentedTabs`, `SurfaceCard`,
+`ApiTable` (with the built-in `TableFilters` toolbar), `TableRowActions`,
+`SlideOverDrawer`, `DescriptionList` and `FormModal` primitives. The root uses
+the standard 18 px section gap, the table cards are the `ApiTable` surfaces
+(no nested `SurfaceCard`), and the page-header end slot carries the object,
+quarantine and legal-hold summary badges beside Refresh. It has four tabs:
+cluster/daemon health with maintenance jobs in a titled `SurfaceCard` and the
+result in the shared `.pg-code-block`; object explorer with active locks;
+quarantine/AV queue; and the access audit trail. Authority-gated actions:
+`system:storage:read` (view), `system:storage:admin`
+(maintenance/rewrap/GC/scrub/AV scan), `system:storage:legal-hold`
+(place/lift hold with a written reason).
+
 ---
 
 <a id="admin-uiroutes"></a>
 
-> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
 
 # Admin Route and Page Catalog
 
@@ -9261,7 +9774,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 
 | # | Path | Name | UI authority / role | Help | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | `/dashboard` | `Dashboard` | `[]` (authenticated only) | 1 / 1.1 | Live platform health, volume, queues, recent activity, snapshot export. |
+| 1 | `/dashboard` | `Dashboard` | `[]` (authenticated only) | 1 / 1.1 | Live platform health, attempts/volume-by-state bar charts, queues, recent activity, snapshot export. |
 | 2 | `/join-requests` | `JoinRequests` | `joinrequests.review` | 9 / 9.1 | Onboarding application queue, SLA health, summary export. |
 | 3 | `/join-requests/new` | `JoinRequestNew` | `joinrequests.review` | 9 / 9.1 via parent | Admin-assisted onboarding package creation. |
 | 4 | `/join-requests/:id` | `JoinRequestDetail` | `joinrequests.review` | 9 / 9.1 | Review profile, owners, documents, checklist, decisions, audit. |
@@ -9500,11 +10013,26 @@ All three routes are gated by `aml.read_confidential` at the edge/UI; writes are
 - `FilingAdapters` uses the shared table surface and exposes edit, re-enable/disable approval requests, secret-present state, endpoint display, confirmation and maker-checker messaging. The create/edit form never sends a blank secret (so an existing secret is kept).
 - `AmlReports` filters include INCIDENT, the generic draft dialog no longer offers INCIDENT, and the drawer shows `filingChannel`, external submission history, adapter filing confirmation and reset-safe adapter selection. `AmlReportingStudio` labels DOCX correctly, preserves template analysis after upload, and offers analyze/download/remove plus narrative, total and prototype-row mappings.
 
+## Object & Asset Storage route
+
+| Route | Name | Page | Authorities |
+| :--- | :--- | :--- | :--- |
+| `/system/object-storage` | `SystemObjectStorage` | `pages/system/object-storage/index.tsx` | `system:storage:read`, `system:storage:admin`, `system:storage:legal-hold` | Operations |
+
+The nav entry is under **Operations** ("Object & Asset Storage") and the route-authority
+aliases normalize the colon names to `system.storage` for the UI guard. The page has server-paginated/filtered object and access-log tables, a real quarantine query, a full detail drawer, legal-hold approval requests and maintenance confirmation/results.
+
+## v38-v39 sandbox pages (2026-11-13)
+
+New routes and a "Sandbox & Fake Rails" sidebar section: `/sandbox/overview` (plane/Fake Rails health, reference readiness, sync audits, per-merchant reset and global reset), `/sandbox/merchants` (portfolio table with summary, filters and seed/reset actions), `/sandbox/merchants/:id` (sandbox merchant detail with wallets, applications, links, payments, cash-outs, disputes, Fake Rails accounts and audits) and `/sandbox/fake-rails` (tabbed accounts, clearing pools/statements, chaos scenarios and transaction tables). All use the amber sandbox banner, standard tables/filters/drawers/export and call `/api/v1/admin/sandbox/*` only.
+
+A "Sandbox Live Mirror" section maps `/sandbox/mirror/*` to the real admin pages: merchants, wallets, applications, transactions, approvals, audit log, operator cases, disputes, adjustments, cash-outs, reconciliation, pricing/profitability/liquidity, journal entries, invariant, credential sets, gateways/routes, reports, platform settings, jobs/outbox and object storage. Mirror pages are open to any signed-in staff member (the sandbox data is isolated), use the same `SandboxBanner`, and Exit sandbox returns to the Live page. The Guide context map's `Sandbox` screen covers the Studio and all mirror routes.
+
 ---
 
 <a id="admin-uitables"></a>
 
-> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `19d6a54+working-tree`
 
 # Tables Filters and Exports
 
@@ -9528,6 +10056,8 @@ The v2 design intends tables to look operational rather than decorative:
 8. **Actions are always reachable.** The action column is sticky to the inline end, so the visible primary action and the overflow trigger never require horizontal scrolling. A row-level context menu offers the same actions at the pointer (right-click) and from the keyboard (`Shift+F10`); the menu lists the primary action first, then the overflow items. The sticky trigger remains the touch path and the accessible baseline; links and form fields keep their native context menu.
 
 ## 3. As-built architecture
+
+- The shared `MonitorTable` used by Jobs & Outbox declares every prop it reads in its `dc(...)` call (`title`, `url`, `listKey`, `headers`, `filters`, `initialFilters`, `refreshSignal`, `rowColor`, `searchable`) and uses `props.filters ?? []` before `buildFilterQuery`; a missing props declaration previously made `filters` undefined and crashed the page with `undefined.reduce`. The contract is pinned by `admin-front/src/pages/system/jobs-outbox/components/__tests__/MonitorTable.test.ts` and `tests/e2e/admin/jobs-outbox.spec.ts`.
 
 ### 3.1 Components
 
@@ -9798,7 +10328,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 This part owns two employee learning products in `admin-front`:
 
-- The Admin Interactive Guide at `/guide/**`: 14 books, 135 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
+- The Admin Interactive Guide at `/guide/**`: 14 books, 137 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
 - The Employee Academy under `/academy/**`: eight tracks, lessons with practice checks, simulated labs, server-graded certification exams, 12-month badges, certificates and a `SECURITY_ADMIN` team view.
 
 It does not own the merchant guide or the checkout help center. The future-guide design is now implemented; its detailed implementation notes live in `06-guide-v2.md`.
@@ -9812,21 +10342,21 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | Artifact | Count / notes |
 | :--- | :--- |
 | `books.json` | 14 books |
-| `articles.en.json` | 135 articles with headings, plain text, roles, UI status and related ids |
-| `glossary.en.json` | 151 terms with aliases, Arabic term and related slugs |
-| `cards.en.json` | 25 cards and 112 required checklist items |
+| `articles.en.json` | 137 articles with headings, plain text, roles, UI status and related ids |
+| `glossary.en.json` | 154 terms with aliases, Arabic term and related slugs |
+| `cards.en.json` | 26 cards and 115 required checklist items |
 | `playbook.en.json` | 32 situations with screens, cases and articles |
 | `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
-| `faq.en.json` | 58 quick answers |
+| `faq.en.json` | 60 quick answers |
 | `data.json` | `ledger-events`, `visible-rails`, `attempt-transitions` |
-| `context-map.json` | 29 screens (including `Wallets`, `SystemBackups`, `AmlReportingStudio`, `Incidents`, `FilingAdapters` and `Reports`), the last being the `General` fallback |
+| `context-map.json` | 30 screens (including `Wallets`, `SystemBackups`, `SystemObjectStorage`, `AmlReportingStudio`, `Incidents`, `FilingAdapters` and `Reports`), the last being the `General` fallback |
 | `error-codes.en.json` | 19 codes parsed from `b13-01` |
 | `edge-cases.en.json` | 140 rows parsed from the v4.1 design |
 | `meta.json` | `contentVersion`, deterministic `generatedAt`, counts and source SHA-256 |
 
 The extractor output is deterministic and byte-stable. The content test re-runs it into a temporary directory and fails on drift, count changes, unresolved links, empty bodies, external URLs, missing context-map routes, missing widgets or a gzip total above 400 KB.
 
-`scripts/overhaul-guide-and-academy-clarity.ts` is the content clarity gate. It labels every bare inline `[[a:…]]` / `[[c:…]]` / `[[s:…]]` / `[[g:…]]` token outside tables with a short natural title, skips code fences, table rows and already-labelled links, and supports `--check` (used by `guide-content.test.ts`). Table cells stay unlabelled because a `|` inside a link label would split the markdown cell; the readers shorten bare table links at render time instead. Parenthetical reference dumps are removed at render time (see §3), so the canonical prose preserves the links. The clarity overhaul (2026-11-07) rewrote 101 Guide articles (Books 2 and 4–12; Books 0, 1, 3 and 13 untouched) so each opens with a `:::summary` "In plain words" callout and a plain-language opening, and rewrote 40 Academy lessons as self-contained 350–600 word tutorials (all 50 lessons are now in that form); it also added short labels on bare references. Counts, ids, headings, check ids, quiz structure and table rows are unchanged. Each rewrite was validated mechanically and then reviewed independently against the old text and the code; the factual corrections that review found are listed in `design/07-guides-and-academy/guide_content_fixes.md` and `academy_content_fixes.md`. The authoring standard is §10.
+`scripts/overhaul-guide-and-academy-clarity.ts` is the content clarity gate. It labels every bare inline `[[a:…]]` / `[[c:…]]` / `[[s:…]]` / `[[g:…]]` token outside tables with a short natural title, skips code fences, table rows and already-labelled links, and supports `--check` (used by `guide-content.test.ts`). Table cells stay unlabelled because a `|` inside a link label would split the markdown cell; the readers shorten bare table links at render time instead. Parenthetical reference dumps are removed at render time (see §3), so the canonical prose preserves the links. The clarity overhaul (2026-11-07) rewrote 101 Guide articles (Books 2 and 4–12; Books 0, 1, 3 and 13 untouched) so each opens with a `:::summary` "In plain words" callout and a plain-language opening, and rewrote 40 Academy lessons as self-contained 350–600 word tutorials (all 51 lessons are now in that form); it also added short labels on bare references. Counts, ids, headings, check ids, quiz structure and table rows are unchanged. Each rewrite was validated mechanically and then reviewed independently against the old text and the code; the factual corrections that review found are listed in `design/07-guides-and-academy/guide_content_fixes.md` and `academy_content_fixes.md`. The authoring standard is §10.
 
 ## 3. Guide reader and navigation
 
@@ -9902,10 +10432,10 @@ Specification: `design/07-guides-and-academy/academy_system_design_and_content.m
 | Output | Content | Audience |
 | :--- | :--- | :--- |
 | `admin-front/src/content/academy/generated/` | `meta`, `tracks`, `modules`, `lessons.en` (markdown `body`, rendered `html`, `plainText`), `checks.en` (100 practice questions WITH keys), `labs.en` (WITH keys), `drills.en`, `pages.en`, `lab-vectors`, `exam-blueprints.public` (no question ids) | browser |
-| `core-back/content/academy/exam-bank.json` | 223 exam-pool questions WITH keys + 8 blueprints | server only, never served |
+| `core-back/content/academy/exam-bank.json` | 224 exam-pool questions WITH keys + 8 blueprints | server only, never served |
 | `core-back/content/academy/catalog.json` | tracks → lesson/lab/exam ids, lesson/lab titles, badge ids; no questions | server (eligibility, team view) |
 
-Counts (asserted by `academy-content.test.ts`): 8 tracks, 11 modules, 50 lessons (20 Foundation + 30 role), 100 checks, 223 exam-pool questions (208 single, 13 number, 2 order; 43 critical), 16 labs / 92 tasks, 8 exams, 11 drills, 7 pages (+ `lab-vectors`). Generated output is ~75 KB gzipped (budget 600 KB). Exam-pool question ids never appear under `admin-front/src/content/academy/generated/`.
+Counts (asserted by `academy-content.test.ts`): 8 tracks, 11 modules, 51 lessons, 102 checks, 224 exam-pool questions (209 single, 13 number, 2 order; 44 critical), 16 labs / 92 tasks, 8 exams, 11 drills, 7 pages (+ `lab-vectors`). Generated output is ~75 KB gzipped (budget 600 KB). Exam-pool question ids never appear under `admin-front/src/content/academy/generated/`.
 
 ### 7.2 Tracks, badges, routes
 
@@ -10030,13 +10560,25 @@ Every new or edited Guide article and Academy lesson follows this standard. Read
 
 **Lessons.** Six headings in order (`You will be able to`, `Key ideas`, `A worked example`, `Common mistakes`, `Read now`, `Check yourself`); 350–600 words that a learner can pass without opening the Guide; every correct answer and the reason each wrong option is wrong is taught in the lesson; check ids and Read-now links unchanged.
 
-**Review before merging.** A mechanical diff (header, link targets, widgets, dropped numbers and code terms) is not enough: the rewrite of 101 articles and 50 lessons found 21 high-severity and about 67 medium problems (invented behaviour, wrong example roles, misleading analogies) only when a second reader compared old text, new text and the code.
+**Review before merging.** A mechanical diff (header, link targets, widgets, dropped numbers and code terms) is not enough: the rewrite of 101 articles and 51 lessons found 21 high-severity and about 67 medium problems (invented behaviour, wrong example roles, misleading analogies) only when a second reader compared old text, new text and the code.
 
 ## Backup and disaster-recovery content (2026-11-06)
 
 Added from `design/02-storage-and-performance/backup_engine_reliability_architecture_and_test_plan.md` section 5, corrected against the real product: Guide articles `b12-09` (full/delta/WAL/PITR, topologies, encryption and the three storage tiers), `b12-10` (the Backups screen: real tile, badge and column labels) and `b12-11` (manual triggers, maker-checker policy changes, queueing and idempotency); safeguard cards `sg-trigger-backup`, `sg-run-restore-drill`, `sg-update-backup-policy`; situations `s-backup-daemon-unreachable`, `s-wal-archive-lag-high`, `s-restore-drill-failed`; a `SystemBackups` context-map screen. Academy: lesson `l-m10-4` (GATEWAY_ADMIN and SECURITY_ADMIN tracks only, to avoid adding certification time for every learner), lab `lab-backup-dr-desk`, drill `drill-pitr-recovery` and exam questions `q-m10-113..117`.
 
 Corrections to the draft: the exam question ids `q-m10-004..008` collided with existing questions and were renumbered; the extractor requires exactly two checks per lesson, so the third moved into the exam pool; `@@map` takes a JSON block, not the draft's one-liner; the real route is `SystemBackups` (not `AdminSystemBackups`); the menu path is Operations -> Backups; the drill has three invariant checks, not five gates; unverified claims (cron gap minimums, hard-coded retention defaults, a 30-second tick) were removed. Content stays English-only like the rest of the Guide/Academy bodies. The three new cards are content only: they are not wired into `pages/system/backups/index.tsx` with `useSafeguard`.
+
+## Object storage content
+
+Guide Book 12 adds `b12-12` "Shared Object & Asset Storage: how files, locks,
+quarantine and retention work" and `b12-13` "Operating the Object & Asset Storage
+screen: legal holds, KEK rotation and maintenance jobs", plus card
+`sg-place-legal-hold`, terms `object-storage-vault`/`storage-object-lock`/
+`legal-hold`, FAQ `q-059`/`q-060` and context-map screen `SystemObjectStorage`.
+Academy module 10 adds lesson `l-m10-5`, checks `c-l-m10-5-1/2` and exam
+question `q-m10-118`. Counts are 137 articles, 154 terms, 26 cards, 51
+lessons, 102 checks and 224 exam-pool questions. Generated Guide/Academy and
+Companion snapshots were regenerated.
 
 ---
 
@@ -10048,7 +10590,7 @@ Corrections to the draft: the exam question ids `q-m10-004..008` collided with e
 
 ## 1. Purpose and scope
 
-This part owns the admin contextual-help button and drawer, the 25-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
+This part owns the admin contextual-help button and drawer, the 30-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
 
 ## 2. As-built architecture
 
@@ -10060,7 +10602,7 @@ The accessible name is "How this page works".
 
 ### 2.2 Context map
 
-`context-map.json` is generated from `@@map id=context-map` in the guide design. It contains `fallbackScreenId` plus 23 `ContextScreen` entries with `screenId`, `routeNames`, `pageDir`, `summary`, `articles`, `cards` and `situations`.
+`context-map.json` is generated from `@@map id=context-map` in the guide design. It contains `fallbackScreenId` plus 30 `ContextScreen` entries with `screenId`, `routeNames`, `pageDir`, `summary`, `articles`, `cards` and `situations`.
 
 Resolution rules:
 
@@ -10436,7 +10978,7 @@ implemented. The earlier 12-book embedded-content page has been replaced.
 
 Delivered:
 
-- 14 books, 125 articles, 151 glossary terms, 22 safeguard cards (99 checks), 29 situations, 8 reading paths, 58 quick answers, 19 error codes and the 140-case catalog.
+- 14 books, 137 articles, 154 glossary terms, 26 safeguard cards (115 checks), 32 situations, 8 reading paths, 60 quick answers, 19 error codes and the 140-case catalog.
 - A deterministic extractor and committed JSON under `src/content/guide/generated/`.
 - Eight guide routes: home, book, article, glossary, tools, playbook, cards and edge cases.
 - Markdown reader with callouts, diagram fences, tables, stable heading ids, safe article/card/situation/glossary links and first-occurrence glossary popovers.
@@ -10470,7 +11012,7 @@ cd ../tests && bunx playwright test --project=admin e2e/admin/guide-reader.spec.
 
 <a id="admin-uireport-studio"></a>
 
-> **Part ID:** `admin-ui.report-studio` · **Status:** `implemented` · **Last verified:** 2026-11-11 · **Verified against:** `working-tree`
+> **Part ID:** `admin-ui.report-studio` · **Status:** `implemented` · **Last verified:** 2026-11-12 · **Verified against:** `working-tree`
 
 # Report Catalog, Studio and Chrome
 
@@ -10523,6 +11065,10 @@ The Chrome page lists header/footer specs with server-side pagination, search an
 - `sanitizer/ClientDomSanitizer.ts` strips active content before preview/print;
 - `utils/inputDefaults.ts` and `utils/localeMeta.ts` resolve presets and language options.
 
+## 5.1 Preview canvas (2026-11-12)
+
+The sandboxed Paged.js preview (`ReportPagedPreviewSurface`) follows the active Vuetify light/dark theme without re-paginating: the generated document carries `data-report-preview-theme` on `<html>`, and a theme watcher updates that attribute in the iframe. The preview canvas is `#F1F5F9` in light mode and `#18181C` in dark mode; paper pages stay white for print accuracy, with a theme-specific border and shadow, a 24 px page gap, 32 px vertical padding and horizontal centering (20 px/12 px side padding on narrow screens). The outer iframe background matches `--pg-bg-surface-subtle`. Paged.js unwraps author `@media print` rules during pagination, so the bridge injects a print-only reset after rendering; it restores a white canvas and removes borders, shadows, gaps and padding only for the printed document.
+
 ## 6. Tests
 
 `admin-front/src/lib/reportEngineSdk/__tests__/**` covers value formatting, preset defaults, Arabic KPI/table/vector rendering, RTL mirroring, chrome binding, the paged-media document, the language options and the fallback sanitizer. The Vitest include list was extended to run these tests.
@@ -10574,7 +11120,7 @@ The catalog now receives `health` counts and shows a warning callout linking to 
 
 <a id="merchant-uiportal"></a>
 
-> **Part ID:** `merchant-ui.portal` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `merchant-ui.portal` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `d695518+working-tree`
 
 # Merchant Portal
 
@@ -10964,6 +11510,16 @@ The shell/auth/a11y/landing suites run against `bun run preview` with mocked API
 
 Merchant dialogs, menus and drawers share the admin shell rule: `.v-overlay__content` and `.v-navigation-drawer__content` inherit `color: rgb(var(--v-theme-on-surface))`, so custom `FormModal`/`SlideOverDrawer` content is readable in dark mode. See `admin-ui.system` and `tests/unit/dark-overlay-colors.test.ts`.
 
+## Dispute evidence
+
+Dispute evidence is uploaded as raw bytes to `POST /api/v1/merchant/disputes/:id/attachments` and listed/read/deleted through the matching attachment routes. The old base64 `POST /disputes/:id/evidence` remains only as a legacy JSON endpoint; the portal no longer uses it. Downloads are available only once the vault object is `ACTIVE` (AV clean).
+
+## v38-v39 Sandbox Studio (2026-11-13)
+
+A separate "Sandbox Studio (Testing & Training)" section adds `/sandbox/overview`, `/sandbox/wallets`, `/sandbox/wallets/:id`, `/sandbox/applications`, `/sandbox/applications/:id`, `/sandbox/links`, `/sandbox/links/:id`, `/sandbox/payments`, `/sandbox/payments/:id`, `/sandbox/accounts` and `/sandbox/tokens`. The pages call the sandbox namespace only, are wrapped in the amber sandbox banner, use `ApiTable`/`TableFilters`/`TableRowActions`/`SummaryExportCard`/`SlideOverDrawer`/`FormModal`, and expose the demo/history seeder, wallet balance/cash-out/freeze controls, application/link detail, payment timeline and adjustment tabs, Fake Rails account/movement/hold controls (merchant-owned copies; shared presets are read-only), settlement import, and `pg_test_` token/key/webhook actions.
+
+A "Sandbox Live Mirror" section reuses the Live pages under `/sandbox/mirror/*` (cash-outs, disputes, POS, credentials, team, webhooks, tokens, statements, reports). The Axios interceptor rewrites Live API paths to `/sandbox/mirror/*` and the router aliases Live navigation into the mirror; Exit sandbox removes `?live=1` and returns to Live. Wallet detail shows the sharded ledger, balance controller, pending cash-outs and a real sandbox cash-out; payment detail shows charged/settled/fee/commission/net, refundable amount, refund, dispute simulation/resolution, checkout inspector secrets and journal lines.
+
 ---
 
 <a id="merchant-uiguide"></a>
@@ -11242,7 +11798,7 @@ The content test is a Bun test; the Playwright suites require the live stack.
 
 <a id="merchant-uireports"></a>
 
-> **Part ID:** `merchant-ui.reports` · **Status:** `implemented` · **Last verified:** 2026-11-11 · **Verified against:** `working-tree`
+> **Part ID:** `merchant-ui.reports` · **Status:** `implemented` · **Last verified:** 2026-11-12 · **Verified against:** `working-tree`
 
 # Merchant Reports
 
@@ -11278,7 +11834,7 @@ Every execution:
 
 ## 5. Staff oversight
 
-`admin-front` `/reports/merchant-reports` lists merchant-authored reports per merchant with their execution history and a `SUSPEND`/`RESUME` Studio action (`security:write`, audited). The merchant registry, usage rows and execution audit are separate tables (introduced in schema version 33; current schema 36).
+`admin-front` `/reports/merchant-reports` lists merchant-authored reports per merchant with their execution history and a `SUSPEND`/`RESUME` Studio action (`security:write`, audited). The merchant registry, usage rows and execution audit are separate tables (introduced in schema version 33; current schema 40).
 
 ## Run form layout (2026-11-10)
 
@@ -11294,6 +11850,10 @@ The merchant transcript example now lowers `periodRange.validation.max_range_day
 
 The merchant portal receives the same client SDK mirror as the admin portal, so merchant previews/prints now use the hardened A4 layout: max 3 KPI columns, centered chart rows and wrapping HTML legends, compact table typography and chips, repeated table headers, no-data chart states, and true landscape pages in print. The merchant Studio mock/live preview uses the same renderer and is covered by the SDK mirror test.
 
+## Shared preview canvas (2026-11-12)
+
+The merchant client SDK mirror receives the same theme-aware Paged.js preview as the admin portal: `#F1F5F9`/`#18181C` canvases for light/dark, white paper pages with theme-specific separation, 24 px gaps, 32 px vertical padding, and an iframe background that matches `--pg-bg-surface-subtle`. Theme changes update the iframe's `data-report-preview-theme` attribute without re-pagination. The bridge injects the print-only canvas/page reset after Paged.js pagination, so merchant PDFs remain white and print-accurate.
+
 ## Shared chrome layout and accent bands (2026-11-11)
 
 The merchant portal client SDK mirror receives the same chrome root-fill, `accent_band`, `defaultCurrency` and localized chrome-variable changes as the admin portal. Merchant prints using platform chrome therefore get the same full-height header/footer and multi-color band.
@@ -11305,11 +11865,18 @@ Merchants own a separate `merchant_report_chrome_specs` registry. The branding p
 
 Merchant-owned reports using `GLOBAL_DEFAULT` resolve the merchant default first and the platform global default second; platform-provided templates continue to use platform chrome. If a merchant default is archived or becomes incompatible, the engine clears it and records the revocation. Own reports then fall back to platform chrome; if the platform default is also missing the report is blocked. The migration page explains the fallback, offers copy/download prompts and opens the branding editor with the raw JSON prefilled. Merchant chrome previews load the real uploaded logo assets.
 
+## Shared object storage
+
+Merchant report bundles and generated outputs are stored in the shared encrypted
+vault (`REPORT_STUDIO_ASSETS`/`REGULATORY_REPORTS`), locked by
+`REPORT_ASSET_ENTRY`/`REG_REPORT_OUTPUT`; the portal never receives asset bytes
+from local disk. The full engine is `parts/01-core-back/13-object-storage.md`.
+
 ---
 
 <a id="checkout-uiflow"></a>
 
-> **Part ID:** `checkout-ui.flow` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `checkout-ui.flow` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
 
 # Checkout Payer Flow
 
@@ -11631,6 +12198,10 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 
 Checkout dialogs/drawers use the shared overlay text-color rule (`color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`), keeping custom modal content readable in dark mode.
 
+## v38 sandbox checkout inspector (2026-11-13)
+
+On an `sbx_` link (summary `env: "SANDBOX"`) the payer page renders `SandboxCheckoutInspector`: Fake Rails test-account picker with auto-fill, live balances/holds/daily limits, PIN/CVV/expiry, freeze/drain/set-exact controls, the live OTP with auto-confirm, and the push/QR approve/decline/variance/duplicate/tampered-webhook simulator. It is never rendered on a Live `pl_*` checkout.
+
 ---
 
 <a id="checkout-uihelp"></a>
@@ -11915,7 +12486,7 @@ The core support test requires PostgreSQL/Redis; the Playwright suites require t
 
 <a id="fake-railsbackend"></a>
 
-> **Part ID:** `fake-rails.backend` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `fake-rails.backend` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
 
 # Fake Rails Backend Architecture
 
@@ -12194,6 +12765,10 @@ bun run start
 - `FAKE_RAILS_ALLOWED_CIDRS` is enforced against `socket.remoteAddress` (not `X-Forwarded-For`); behind nginx the real allowlist is the nginx `allow`/`deny` block. `FAKE_RAILS_TRUST_PROXY` defaults to loopback. `FAKE_RAILS_PORTAL_ACCOUNT_LOCKOUT` (default 5 per username) locks repeated failed portal logins.
 - **Hosted action token and stream ticket (GAP-024, RESOLVED 2026-11-05).** `GET /hosted/session/:reference` now returns `action_token`, a JWT bound to that transaction id with the purpose role `FAKE_RAILS_HOSTED_ACTION` (15 minutes); the approve/decline action POST must send it in `X-Hosted-Action-Token` or gets `401 HOSTED_ACTION_TOKEN_REQUIRED`. `POST /portal-api/transactions/stream-ticket` (tester session required) issues a `FAKE_RAILS_SSE_TICKET` JWT (30 seconds, unique `jti`); `portalAuthGuard` accepts it only on `/transactions/stream` and consumes it once (`consumeSseTicket`; replay is `401`). Both tokens are signed with the portal JWT secret but carry their own `role` (helpers in `fake-rails-back/lib/tickets.ts`), so neither works as a tester session and a tester session works as neither. The used-ticket map is in-process and pruned on use. `/hosted/*` session reads remain public. Since 2026-11-08 they no longer include `expected_otp` or `webhook_url` (`publicHostedTransaction`, applied to both the session read and the action response); the token itself is still issued by the public session read, so it proves knowledge of the reference, not authority. Testers read the OTP on the authenticated portal routes. The rails initiate response still returns the OTP by design (automated sandbox runner).
 - **Residual.** `fake-rails-front` still keeps the tester token in localStorage (GAP-019 does not cover this portal).
+
+## v2 stateful accounts (2026-11-13)
+
+The emulator is no longer stateless. v2.1 adds merchant-owned copies: shared presets remain read-only and a merchant edits a clone (`merchant_id`), so two merchants can hold the same identifier without colliding; partial unique indexes replace the old global `(rail_code, identifier)` constraint. Daily limits reset on the Tripoli business date (`daily_spent_date`), holds carry `expires_at` and are swept, and every clearing entry records `statement_run_id`/`statement_included_at` plus settlement and provider reference so a generated statement can be ingested and marked included. `fake_accounts`, `fake_account_holds`, `fake_account_movements`, `fake_merchant_clearing_pools` and `fake_clearing_entries` store controllable test customers, atomic holds, captures, releases, refunds and per-rail clearing pools. Five personas are seeded per rail (high balance, standard, low 5 LYD, daily-limit-exhausted, frozen); an unknown identifier is auto-enrolled with 2,500 LYD. INITIATE reserves, SUBMIT captures, decline/cancel releases, refund credits back and refuses an over-refund. `/control/*` is the core-facing control plane (`x-fake-rails-control-token` when configured); `/portal-api/accounts*` and `/portal-api/checkout-helper/*` serve the tester portal.
 
 ---
 
@@ -12503,6 +13078,10 @@ Only the outbound webhook path computes signatures (`FakeCryptoSigner` plus six 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## v2 account outcomes (2026-11-13)
+
+Every rail route now consults the stateful account ledger: INITIATE reserves, SUBMIT captures, CANCEL/DECLINE releases and REFUND credits back. The raw customer identifier (not the masked one) binds the transaction to the account; a frozen, expired or blocked account declines before the gateway handler runs with `ACCOUNT_FROZEN`/`ACCOUNT_EXPIRED`/`ACCOUNT_BLOCKED`, and the low-balance/limit personas return `INSUFFICIENT_FUNDS`/`LIMIT_EXCEEDED`. A static OTP on the account overrides the deterministic OTP.
 
 ---
 
@@ -12858,6 +13437,10 @@ fake-rails-front: the postMessage target is `VITE_CHECKOUT_ORIGIN`, otherwise th
 
 The Fake Rails tester portal applies the same overlay text-color rule as the other portals, fixing black-on-dark custom dialog/drawer content in dark mode.
 
+## v2 tester surfaces (2026-11-13)
+
+The portal gains account and checkout-helper routes: `GET/POST/PATCH /portal-api/accounts*`, `GET /portal-api/checkout-helper/:reference` and `POST /portal-api/checkout-helper/:reference/simulate-action`. They expose balances, holds, daily limits, statuses, OTPs and the push/QR approve/decline/variance/duplicate/tampered actions. The same routes are mounted at `/control/*` for the Sandbox core, protected by `x-fake-rails-control-token` when configured; production refuses the control plane without the token.
+
 ---
 
 <a id="fake-railsintegration"></a>
@@ -13180,11 +13763,15 @@ Core's outbound URL compile now fails closed on an empty `allowed_hosts` (`HOST_
 
 `webhook_url` is validated at accept time and again at send time against `lib/webhookTarget.ts` (`allowedWebhookHosts`: the host of `CORE_INBOUND_BASE_URL` plus `FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS`; no credentials in the URL, http/https only) and the dispatcher no longer follows redirects (GAP-059). Test: `fake-rails-back/test/webhook-target.test.ts`.
 
+## v2 sandbox control integration (2026-11-13)
+
+`core-back` reaches the emulator through `FakeRailsControlClient` (`FAKE_RAILS_CONTROL_URL`, optional `FAKE_RAILS_CONTROL_TOKEN`). The sandbox core uses it for the Sandbox Studio account list/edit/reset and the checkout inspector. The Live core never mounts these routes and has no control URL. The synthetic clearing statement is generated and can be settled, but is not yet ingested by sandbox reconciliation (GAP-071).
+
 ---
 
 <a id="deploytopology"></a>
 
-> **Part ID:** `deploy.topology` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `deploy.topology` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `19d6a54+working-tree`
 
 # Deploy Topology and Configuration
 
@@ -13269,7 +13856,7 @@ The node spec carries only host, SSH port, private IP and service port. SSH user
 
 1. **Node arrays over legacy host fields.** `CORE_NODES` overrides `CORE_SSH_HOST`, `CORE_SSH_PORT`, `CORE_PRIVATE_IP` and `CORE_PORT` for planning. The same applies to admin, merchant and checkout. SSH user/key/sudo are still taken from the legacy fields.
 2. **PostgreSQL storage fields over legacy database fields.** When any `PG_*` storage field is configured, `PG_DB_NAME`, `PG_DB_USER` and `PG_DB_PASSWORD` are authoritative. Otherwise `DB_*` is used, falling back to `PG_DB_*`.
-3. **Derived database URL.** When the PostgreSQL tier is configured and a host exists, `DATABASE_URL` is derived from the PG credentials, the primary private IP and `PGBOUNCER_PORT` when enabled; otherwise the explicit `DATABASE_URL` is used.
+3. **Derived database URL.** When the PostgreSQL tier is configured and a host exists, `DATABASE_URL` is derived from the PG credentials, the primary private IP and `PGBOUNCER_PORT` when enabled; otherwise the explicit `DATABASE_URL` is used. The owner/migration URL is derived separately and always uses the session-safe endpoint: an explicit `LEADER_ELECTION_DATABASE_URL` when set, otherwise the deploy-managed `pgw_session` alias, otherwise the direct primary. This applies in the legacy single-role mode too, so Prisma Migrate's advisory lock is never stranded in the transaction pool; the runtime URL does not change. An externally managed pooler is expected to provide the same session route (derived alias or explicit override).
 4. **Explicit core URL list.** `CORE_BACK_URLS` wins; otherwise `https://<privateIp>:<servicePort>` for every `CORE_NODES` entry; otherwise the legacy `https://<CORE_PRIVATE_IP>:<CORE_PORT>`.
 5. **Node service port over configured backend port.** A node's `servicePort` overrides `CORE_PORT`/`ADMIN_BACK_PORT`/`MERCHANT_BACK_PORT`/`CHECKOUT_BACK_PORT` for that node.
 6. **CLI over environment.** `--fresh`, `--update`, `--only`, `--nodes`, `--rolling-batch`, `--keep`, `--rotate-certs`, `--skip-build` and `--skip-verify` override the corresponding configuration for one run.
@@ -13355,7 +13942,7 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | Flag | Effect |
 | :--- | :--- |
 | `--env=<path>` | Use another environment file. |
-| `--only=core,checkout` | Restrict roles. Storage aliases: `pg`, `pg-primary`, `pg-replica`, `pgbouncer`, `redis`, `audit-db`, `log-db`, `backup`, `storage`. |
+| `--only=core,checkout` | Restrict roles. Storage aliases: `pg`, `pg-primary`, `pg-replica`, `pgbouncer`, `redis`, `audit-db`, `log-db`, `backup`, `storage`. Backend aliases: `core-back`, `admin-back`, `merchant-back`, `checkout-back`, `fake-rails-back`. |
 | `--nodes=<id,...>` | Restrict compute units by node id. |
 | `--rolling-batch=<n>` | Override `ROLLING_BATCH_SIZE`. |
 | `--keep=<n>` | Override `KEEP_RELEASES`. |
@@ -13364,7 +13951,10 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | `--skip-build`, `--skip-verify` | Skip local SPA builds or end-to-end verification. |
 | `--rotate-certs` | Rotate the CA and every leaf. |
 | `--check-certs` | Print the certificate expiry table and exit 1 when a certificate is missing, expired or inside `MTLS_RENEW_WITHIN_DAYS` (AUTO-28). |
-| `--dry-run` | Print commands; execute nothing. |
+| `--dry-run` | Print commands; execute nothing (preflight prints its checks without connecting). |
+| `--preflight-only` | Run the read-only preflight and exit; no build, PKI or deployment. |
+| `--skip-preflight` | Skip the preflight gate (emergency use, warns). |
+| `--stop-unmanaged` | Allow the preflight to stop safe same-repo dev listeners on selected service ports. |
 
 ### Files
 
@@ -13486,7 +14076,24 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 ## Remediation round 2 (2026-11-08): app role and host probe configuration
 
-`PG_APP_USER` (default `pgw_app_login`) and `PG_APP_PASSWORD` (at least 12 characters, different from the owner's) enable the role split: the owner (`PG_DB_USER`) runs migrations and seeders through `ownerUrl`, while the running services connect as `PG_APP_USER`, a plain LOGIN member of `pgw_app`. `PG_APP_USER` must not be `postgres`, `pgw_app` or `pgw_ledger_maintenance`, nor equal the owner or replication user. Without `PG_APP_PASSWORD` the legacy single-role behaviour is kept and the deploy warns.
+`PG_APP_USER` (default `pgw_app_login`) and `PG_APP_PASSWORD` (at least 12 characters, different from the owner's) enable the role split: the owner (`PG_DB_USER`) runs migrations and seeders through `ownerUrl`, while the running services connect as `PG_APP_USER`, a plain LOGIN member of `pgw_app`. `PG_APP_USER` must not be `postgres`, `pgw_app` or `pgw_ledger_maintenance`, nor equal the owner or replication user. Without `PG_APP_PASSWORD` the legacy single-role runtime behaviour is kept and the deploy warns; migrations and seeders still use the session-safe `ownerUrl`.
+
+## Shared object storage topology
+
+`OBJECT_STORAGE_NODE` (same `nodeId@sshHost:sshPort:privateIp:servicePort`
+format) adds `object-storage` to the storage roles. It is mandatory when
+`CORE_NODES` has more than one node or the backup daemon is on a separate host;
+otherwise validation fails with `MULTI_NODE_SHARED_STORAGE_REQUIRED`.
+`OBJECT_STORAGE_ENABLED`, `OBJECT_STORAGE_MANAGE_VIA_SSH` or a non-empty node
+auto-detect the tier. Core and backup daemon receive
+`OBJECT_STORAGE_DAEMON_URL` plus `object-storage-client` mTLS paths, and the
+core receives `CLUSTER_CORE_NODE_COUNT` and the KEK keyring.
+
+## v38-v39 sandbox configuration (2026-11-13)
+
+New keys: `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT` (4005), `SANDBOX_DB_NAME` (`payment_gateway_sandbox`), `SANDBOX_REMOTE_DIR`, `SANDBOX_CORE_BACK_URLS`, `FAKE_RAILS_CONTROL_TOKEN`. Validation requires Fake Rails, a distinct sandbox database/remote directory/port and HTTPS edge URLs.
+
+`sandboxDatabase()` derives `pgw_sandbox` (transaction) and `pgw_sandbox_session` (session) PgBouncer aliases; the PostgreSQL provisioner creates `payment_gateway_sandbox` and both aliases. `hostPlanner` emits a second core `ServicePlan` named `pg-core-sandbox` on `SANDBOX_NODE` (or the first core node) with its own release tree, sandbox `DATABASE_URL`/`LEADER_ELECTION_DATABASE_URL`, `EXECUTION_PLANE=SANDBOX`, Fake Rails enabled, backups removed from its env, a firewall rule on 4005 and a core certificate SAN that includes the sandbox IP. `deployService` migrates the sandbox database with the direct sandbox owner URL carrying `app.execution_plane=SANDBOX` (the pooler rejects custom startup options), then `db-seed` and `seed-fake-rails` when seeding is enabled. The seeder stamps an existing sandbox row only when the connected database name matches `SANDBOX_DB_NAME`. Edges receive `SANDBOX_CORE_BACK_URLS`; a sandbox pool failure never falls back to Live. Sandbox and Fake Rails data are deliberately not backup targets.
 
 ---
 
@@ -13503,7 +14110,7 @@ The host planner converts a validated `DeployConfig` into a `DeployPlan`:
 - unique hosts keyed by `sshHost:sshPort`;
 - per-host roles, services, Nginx sites, certificate bundles, firewall rules and deploy order;
 - per-tier node plans for core, admin, merchant and checkout;
-- the PostgreSQL/Redis/audit/log/backup storage plan;
+- the PostgreSQL/Redis/audit/log/backup/object-storage storage plan;
 - the backup plan and topology label.
 
 It owns grouping and unioning only. It does not validate the raw environment (that is `deploy.topology`), generate certificates (`deploy.pki`), apply firewall rules (`deploy.firewall`) or execute the pipeline (`deploy.pipeline`).
@@ -13783,7 +14390,7 @@ The planner's config validation now rejects weak secrets and restricts charsets 
 
 <a id="deploypki"></a>
 
-> **Part ID:** `deploy.pki` · **Status:** `partial` · **Last verified:** 2026-11-09 · **Verified against:** `6765e90+working-tree`
+> **Part ID:** `deploy.pki` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `6765e90+working-tree`
 
 # Internal PKI and mTLS Certificates
 
@@ -14085,6 +14692,16 @@ Not covered by automated tests:
 
 - 2026-11-03: initial canonical part at `5a24f6f+working-tree`.
 
+## Object storage certificates
+
+`buildPki` mints `object-storage-daemon.crt` (server; CN
+`object-storage-daemon.internal`, SANs `IP:<OBJECT_STORAGE_NODE private IP>`,
+`IP:127.0.0.1`, `DNS:object-storage-daemon.internal`) and, when object storage is
+configured, the `object-storage-client` client certificate. `certFilesForHost`
+gives the storage host its server + client material; core hosts and the backup
+host receive `internal-ca.crt` and `object-storage-client.*`. Certificate placement is per consumer: a co-located core/backup host does not receive the object-storage server key, and the backup host receives the client leaf in its own cert directory. Renewal/SAN drift
+handling includes the object-storage server leaf.
+
 ---
 
 <a id="deployfirewall"></a>
@@ -14346,11 +14963,16 @@ Not covered:
 
 The Fake Rails nginx vhost now also applies `allow`/`deny` rules from `FAKE_RAILS_ALLOWED_CIDRS` (the application-level check compares `socket.remoteAddress`, not `X-Forwarded-For`). All six nginx templates set `server_tokens off` and `limit_req` with `limit_req_status 429`. UFW rules are unchanged.
 
+
+## Object storage
+
+TCP 4095 is opened only to core and backup private IPs. The deploy health step probes `/v1/health` over mTLS from every core and backup host.
+
 ---
 
 <a id="deploypipeline"></a>
 
-> **Part ID:** `deploy.pipeline` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `deploy.pipeline` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `19d6a54+working-tree`
 
 # Deployment Pipeline
 
@@ -14375,6 +14997,18 @@ It also requires atomic releases, a symlinked `current`, least-privilege environ
 `--force-restart` and `--rebuild` are the two engine-level overrides of the convergence and build-cache behaviour. After loading the config, the runner registers every credential value (any key matching PASSWORD/SECRET/TOKEN/MASTER_KEY/ACCESS_KEY/ENCRYPTION_KEY/JWT/SEED_KEY with a value of at least 8 characters) and masks it **wherever it appears** in logs, the timing report, thrown error messages, the verification report and the final failure line. `redactSecrets` alone only recognised `NAME=value`; the health verifier's pgpass lines (`host:port:db:user:PASSWORD`) and connection URLs were printed in clear before this change.
 
 A missing file, schema error, cross-field error or SSH credential conflict aborts before any remote command. With `--dry-run`, every later command is logged instead of executed. Every logged command line passes through `redactSecrets` (`deploy/lib/sshRunner.ts`), which masks the value of any `NAME=value` whose name contains PASSWORD, PASSWD, SECRET, TOKEN, AUTH, API_KEY, ACCESS_KEY or MASTER_KEY (for example `PGPASSWORD=`, `REDISCLI_AUTH=`); before 2026-11-04 these were printed in the clear.
+
+### 3.1a Step 1b: read-only preflight
+
+After the host plan is built (and before step 2), `runPreflight()` executes a read-only check of only the selected `--only`/`--nodes` parts and their required dependencies. `--preflight-only` runs this phase and exits without building or touching a host; `--skip-preflight` bypasses it with a warning.
+
+The preflight checks SSH reachability, key validity and sudo on every selected host; OS/tool readiness (missing bootstrap packages are informational in fresh/auto mode and blocking in update mode); disk, memory and clock skew; service ports and Nginx ports; current Nginx configuration; PM2 state; and the dependency paths (edge-to-core mTLS, core-to-database/PgBouncer, and storage prerequisites). Database/object-storage/backup probes are read-only and reuse the health verifier.
+
+Port ownership is classified as `free`, `managed-current` (the current PM2 app for the planned service), `managed-orphan` (an old same-tier PM2 app), `managed-service` (the expected Nginx/PostgreSQL/Redis/PgBouncer/systemd daemon), `unmanaged-same-repo` (a non-PM2 Bun/Node dev process whose cwd/package matches the service), or `foreign`. Only `managed-*` and `free` pass. `unmanaged-same-repo` fails by default and can be stopped with `--stop-unmanaged`, but only after every other blocking check passes; the stop uses a PID/cwd re-check, SIGTERM, and a post-stop port re-read. Foreign processes, databases, Redis, Nginx and systemd services are never stopped.
+
+`--only` accepts the backend aliases `core-back`, `admin-back`, `merchant-back`, `checkout-back` and `fake-rails-back` in addition to the canonical tier names. The selection helpers are shared with the deployment loop, so an admin-only deploy checks `4101`/`8080` and the core dependency but never core's `4000`.
+
+A blocking preflight result aborts with "Nothing was built or changed". The final verification and the rolling batch probes also assert the new release identity (`APP_RELEASE`/`APP_COMMIT` in `/health`), so a stale listener cannot satisfy verification even if PM2 reports the new app online. On a partial run (`--only` or `--nodes`), release identity is enforced on every deployed unit in the rolling batch; the final cross-tier verification still health-checks the unchanged tiers but does not require them to advertise the new global release (they intentionally remain on their previous release).
 
 ### 3.2 Step 2: build SPAs locally (background, cached)
 
@@ -14420,13 +15054,13 @@ Provisioning is gated by `--only` and by the management flags:
 - audit/log databases when either management flag is set;
 - backup engine plus daemon when `BACKUP_ENABLED`.
 
-The legacy path creates the database/role when `DB_MANAGE_VIA_SSH` and no PG tier is configured. The PG path takes a pre-migration dump from the primary's direct port (never PgBouncer) when the run is not fresh and core is selected. The legacy path takes the dump after database provisioning.
+The legacy path creates the database/role when `DB_MANAGE_VIA_SSH` and no PG tier is configured. Before any fresh provisioning, the deploy probes the selected storage engines (Live and sandbox PostgreSQL, audit/log databases, Redis, the object-storage vault and the Fake Rails SQLite data directory). If any contains data, `--fresh` refuses and asks for `--force-fresh`; `--force-fresh` takes a pre-clean Live PostgreSQL dump (when the Live database exists), then drops the Live/sandbox/audit/log databases, flushes managed Redis, clears the object-storage vault and removes the Fake Rails SQLite files before the provisioners/services recreate them. Backup repositories are deliberately preserved. The PG path still takes the normal pre-migration dump from the primary's direct port when an update run is non-empty; the legacy path takes it after database provisioning.
 
 #### Pre-migration backup details
 
 `preMigrationBackup()` resolves the primary direct port (never PgBouncer) and the PG or legacy credentials, then builds `PGPASSFILE=<private passfile> pg_dump -h <host> -p <port> -U <user> -Fc <db> > <target>.dump`. `backupDatabase()` creates `<CORE_REMOTE_DIR>/shared/backups`, chowns it to the effective target user (the SSH user for a remote host, the orchestrator's OS user for a local target), and runs the command on the **core host** as that user. The file is `pre-migrate-<releaseTimestamp>.dump`.
 
-No dump is taken on a fresh install. A failure aborts before migrations. `pg_dump` must already exist (the bootstrap package list omits `postgresql-client`), the password no longer appears on the command line (PGPASSFILE), and the dump is not automatically verified or restored.
+On a genuinely empty fresh install no dump is needed. `--fresh --force-fresh` takes a pre-clean Live dump before removing the databases, because the normal pre-migration hook runs later. `pg_dump` must already exist (the bootstrap package list omits `postgresql-client`), the password no longer appears on the command line (PGPASSFILE), and the dump is not automatically verified or restored.
 
 #### Backup daemon source deployment
 
@@ -14441,6 +15075,8 @@ After `provisionBackupEngine()`, `deployBackupDaemon()`:
 - runs `systemctl daemon-reload && systemctl enable pg-backup-daemon`, then **starts the unit if it is down and restarts it only if the source, env, unit or archive environment changed** (or `--force-restart`), logging `backup daemon started|restarted|unchanged`.
 
 After the start/restart decision the same remote script runs `daemonReadinessWait()`: it polls up to 10 s for the unit to be active and to stay active for one more second (so `Restart=always` cannot hide a crash loop), and on failure prints `journalctl -u pg-backup-daemon -n 40 --no-pager` to stderr and exits 1, so a startup failure surfaces in step 5 instead of at the first health probe.
+
+The dependency tree is reused across deploys, but a tree owned by a different account (for example after switching from WAL-G's `postgres` to pg-native's `pgbackup`) is removed and reinstalled as the current account instead of failing with `Failed to link <pkg>: EEXIST`. The restart decision also compares the running process account with `backupDaemonUser()` and honours `systemd`'s `NeedDaemonReload`, so a deploy that failed after writing the unit but before restarting cannot leave the old engine running.
 
 The systemd unit and `/etc/pg-backup/backup.env` are written by the provisioner, not by `deployBackupDaemon()`. If `BACKUP_ENABLED` is true but the plan has no backup host, the deploy warns and skips the daemon; validation normally prevents that.
 
@@ -14465,7 +15101,7 @@ For each role, the pipeline skips excluded roles, collects units for that role (
 1. Creates the timestamped release and `shared/{certs,backups,pm2,data}` directories and chowns the remote tree.
 2. Syncs the backend source with rsync, excluding `node_modules`, `.git`, `dist`, `generated`, `test`, `certs`, `.certs`, `*.log` and `.env`; syncs the locally built frontend `dist` for edge roles and writes admin `runtime-config.js`.
 3. Writes the host's certificate set and the 0600 per-node environment (`shared/.env` for a single node, `shared/.env.<nodeId>` for a multi-node tier), then symlinks it to `.env` in the release app directory.
-4. Runs `bun install --frozen-lockfile`; for core also `bunx prisma generate`, `bun run migrate-deploy` and optional `db-seed`. Migrations run on the first core node in every mode (fresh and update), after step 5's pre-migration dump; other core nodes in a multi-node tier skip them.
+4. Runs `bun install --frozen-lockfile`; for core also `bunx prisma generate`, `bun run migrate-deploy` and optional `db-seed`. Migrations run on the first core node in every mode (fresh and update), after step 5's pre-migration dump; other core nodes in a multi-node tier skip them. Migrations and seeders run as the database owner through a temporary `.env.owner` whenever that session-safe URL differs from the runtime one. The URL follows an explicit `LEADER_ELECTION_DATABASE_URL` when set, otherwise the deploy-managed `pgw_session` alias, otherwise the direct primary. This applies in the legacy single-role mode too, because Prisma Migrate's `pg_advisory_lock(72707369)` cannot survive transaction pooling (it would leave a stale lock and the next run fails with P1002). An externally managed pooler must provide the same session route; the deploy warns if `LEADER_ELECTION_DATABASE_URL` is omitted. The same temporary file sets `WORKER_ENABLED=false`: migrations and seeders do not start workers, and the core loader would otherwise reject the session-pooled owner `DATABASE_URL` for sharing the leader-election endpoint.
 5. Switches `current` with `ln -sfn`, writes the inline PM2 ecosystem, runs `pm2 delete`, `pm2 start --update-env` and `pm2 save`.
 6. Renders the Nginx sites for that role, symlinks them, removes the default site, runs `nginx -t` and reloads.
 7. Prunes with `ls -1dt <remote>/releases/*/ | tail -n +<keep+1> | xargs -r rm -rf`.
@@ -14717,11 +15353,21 @@ Found by deploying the single-machine `deploy/deploy.env` repeatedly until it co
 
 `DEPLOY_MODE=auto` now probes every host read-only in step 4 (`lib/hostProbe.ts`, a pure `bootstrapGaps()` over the probe output) and resolves each host to fresh, update or refuse (an edge host whose core has not been migrated is refused before anything changes). A resource preflight warns when PostgreSQL sizing (`PG_RAM_GB`) exceeds the host's memory. Verification (formerly step 12) now runs before the long seed (formerly step 11). `runAsDatabaseOwner` runs migrations and seeders with the owner URL. Tests: `deploy/test/hostProbe.test.ts`, `pipeline.test.ts`.
 
+## Object storage step
+
+Step 5 provisions the shared object-storage tier before the backup engine:
+`provisionObjectStorageEngine` validates the node/KEK, then
+`deployObjectStorageDaemon` syncs and starts the daemon. Health verification
+probes `systemctl is-active pg-object-storage-daemon` on the storage host and
+`GET /v1/health` over mTLS from every core host and the backup host. The deploy
+fails before any core is touched when multiple core nodes or a separate backup
+host are configured without `OBJECT_STORAGE_NODE`.
+
 ---
 
 <a id="deploystorage"></a>
 
-> **Part ID:** `deploy.storage` · **Status:** `partial` · **Last verified:** 2026-11-07 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `deploy.storage` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `d695518+working-tree`
 
 # Storage Provisioners
 
@@ -14804,7 +15450,7 @@ The slots are created on the primary by `primaryBootstrapSql()`. Replication is 
 
 When `PGBOUNCER_ENABLED=true`, PgBouncer is installed and configured on the primary and every replica. `/etc/pgbouncer/pgbouncer.ini` sets `listen_addr=0.0.0.0`, `listen_port=6432`, transaction pooling for the application database, `server_tls_sslmode=require`, the configured client/pool limits, reserve 10, prepared statements, SCRAM auth and `/etc/pgbouncer/userlist.txt`. The userlist contains the application and replication users with plaintext passwords, mode 0600. PgBouncer is applied by reload, or restarted only when needed (section 16).
 
-The `[databases]` section also contains a session-scoped alias, `pgw_session`, mapping to the same real database with `pool_mode=session` and `pool_size = max(8, 2 × core nodes + 4)`. It exists solely for the singleton-worker advisory-lock leader election (`LEADER_ELECTION_DATABASE_URL`): PostgreSQL session locks do not survive transaction pooling. The ordinary `PG_DB_NAME` entry stays transaction-pooled for application traffic. After PgBouncer is applied, the provisioner proves a login through both the application database and `pgw_session`; if the alias is not yet served after a reload, it restarts PgBouncer once and retries, so core never starts against a missing session route.
+The `[databases]` section also contains a session-scoped alias, `pgw_session`, mapping to the same real database with `pool_mode=session` and `pool_size = max(8, 2 × core nodes + 4)`. It carries the two advisory-lock consumers: the singleton-worker leader election (`LEADER_ELECTION_DATABASE_URL`) and the owner/migration URL used by `migrate deploy` and the seeders. Prisma Migrate takes a session advisory lock (`pg_advisory_lock(72707369)`); on a transaction-pooled route the lock can be left on a pooled backend and the next migration times out with P1002. The ordinary `PG_DB_NAME` entry stays transaction-pooled for application traffic. After PgBouncer is applied, the provisioner proves a login through both the application database and `pgw_session`; if the alias is not yet served after a reload, it restarts PgBouncer once and retries, so core never starts against a missing session route.
 
 After writing both files, the provisioner resolves the service account from `systemctl show -p User --value pgbouncer` (falling back to `pgbouncer`, then `postgres`) and applies `0640` to the ini and `0600` to the userlist. This is required because Ubuntu's unit runs as `postgres` and does not create a `pgbouncer` system user; a root-owned `0640` file otherwise fails with `could not load file "/etc/pgbouncer/pgbouncer.ini": Permission denied`.
 
@@ -14812,6 +15458,7 @@ Important as-built facts:
 
 - The `[databases]` section maps `PG_DB_NAME` to `127.0.0.1:<primaryPort>` with `PG_DB_USER` and its password, so a client connecting to `:6432` with that database name reaches the local PostgreSQL primary.
 - `pgw_session` is a second alias to the same database with `pool_mode=session`; deploy writes `LEADER_ELECTION_DATABASE_URL=postgresql://…@<primary>:6432/pgw_session` into the core environment (or a direct PostgreSQL URL with `sslmode=no-verify` when PgBouncer is disabled). An explicit `LEADER_ELECTION_DATABASE_URL` in the deploy env overrides the derived value for an external database/pooler.
+- The owner URL in the temporary `.env.owner` uses the same session endpoint as the leader election: the explicit `LEADER_ELECTION_DATABASE_URL` when set (including an external pooler), otherwise the deploy-managed `pgw_session` alias, otherwise the direct primary. It applies to the legacy single-role mode too; the runtime `DATABASE_URL` stays transaction-pooled, so Prisma's migration advisory lock and the seeders keep one backend for the whole session. An external pooler must allow the owner on its session route; the deploy warns when no explicit `LEADER_ELECTION_DATABASE_URL` is configured.
 - `server_tls_sslmode = require` encrypts the PgBouncer-to-PostgreSQL leg; it does not verify the server certificate (`verify-full` would) and supplies no client certificate.
 - There is no `client_tls_sslmode`, `client_tls_cert_file` or `client_tls_key_file`; clients are not required to present a certificate.
 - `listen_addr = 0.0.0.0` is protected by UFW only; the plan opens 6432 to core sources.
@@ -15172,11 +15819,29 @@ Not covered:
 - The bootstrap SQL creates the app login role as a member of `pgw_app` with no UPDATE/DELETE/TRUNCATE on the ledger and audit tables and no DDL. Validated end to end on a TLS PostgreSQL 18 with a real PgBouncer (owner migrations, app-role privilege probes, core's Prisma client). It has not run on a multi-host lab (GAP-057 stays partial).
 - Redis (`redisProvisioner.ts`): `maxmemory-policy volatile-ttl` plus AOF, so only keys with a TTL are evictable and a restart does not lose revoke flags; every durable key must carry a TTL.
 
+## Object storage provisioner (v36)
+
+`deploy/provisioners/objectStorageProvisioner.ts` creates the `pgobjstore`
+system user, `/var/lib/pg-object-storage` and the vault subdirectories
+(`hot`, `cold`, `quarantine`, `tmp`, `.trash`), writes
+`/etc/pg-object-storage/object-storage.env` and
+`pg-object-storage-daemon.service` (Bun, `ProtectSystem=strict`,
+`PrivateTmp=true`, `ReadWritePaths` for the vault and cert directories).
+`deployObjectStorageDaemon` installs pinned Bun, syncs `deploy/object-storage-daemon` to
+`/opt/pg-object-storage-daemon` and starts/restarts it only on change. The
+provisioner creates the user first, hands only the dedicated certificate files
+to `pgobjstore`, and refuses multiple core nodes without a configured
+object-storage node. Storage roots and cert directories are restricted to
+`/var/lib/pg-object-storage/`.
+
+
+The fresh-host sequence is tested with a fake runner; the real two-host lab remains manual.
+
 ---
 
 <a id="deploybackup"></a>
 
-> **Part ID:** `deploy.backup` · **Status:** `partial` · **Last verified:** 2026-11-06 · **Verified against:** `747d9bc+working-tree`
+> **Part ID:** `deploy.backup` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `1000189+working-tree`
 
 # Backup Daemon
 
@@ -15206,7 +15871,7 @@ The original design called for a Bun service wrapping WAL-G (same host) or Barma
 | `wal-g` | same host as the primary (reads `PGDATA`, peer auth as `postgres`) | `wal-g`, S3 |
 | `barman` | dedicated backup host | `barman`, `barman-cloud-backup`, S3 |
 
-**Cluster topology** (`config.ts`): `isAuditDedicatedCluster()` is true when `PG_AUDIT_DATA_DIR` is set or `PG_AUDIT_HOST` differs from `PG_PRIMARY_HOST`. `PG_AUDIT_PORT` is deliberately not used (it defaults to 5434 and would make every shared deployment look dedicated). `target=all` expands to `postgres_core`, `audit_db` (when an audit database is configured) and `redis` (when `REDIS_URL` is set). In a shared cluster `audit_db` is a logical dump plus signed manifest (skipped for `all` when the database is absent, an error for an explicit request); in a dedicated cluster it is a physical backup plus a dump. This applies to all three engines, so `PG_AUDIT_DATA_DIR is required` no longer occurs.
+**Cluster topology** (`config.ts`): `isAuditDedicatedCluster()` is true when `PG_AUDIT_DATA_DIR` is set or `PG_AUDIT_HOST` differs from `PG_PRIMARY_HOST`. `PG_AUDIT_PORT` is deliberately not used (it defaults to 5434 and would make every shared deployment look dedicated). `target=all` expands to `postgres_core`, `audit_db` (when an audit database is configured) and `redis` (when `REDIS_URL` is set). In a shared cluster `audit_db` is a logical dump plus signed manifest (skipped for `all` when the database is absent, an error for an explicit request); in a dedicated cluster it is a physical backup plus a dump. This applies to all three engines, so `PG_AUDIT_DATA_DIR is required` no longer occurs. `backupDaemonEnv()` leaves `PG_AUDIT_DATA_DIR` empty when the audit node resolves to the primary's own cluster (same SSH host and service port), so the shared-cluster logical-dump path is actually selected; a dedicated audit node or an explicit `PG_AUDIT_DATA_DIR` still selects the physical audit backup. On Arch-family hosts the daemon's `PG_BIN_DIR` (`/usr/lib/postgresql/<version>/bin`, a Debian layout) must resolve to the PostgreSQL tools; the single-box local setup aliases it to `/usr/bin`.
 
 **pg-native backups**
 
@@ -15400,11 +16065,23 @@ Not covered: the dedicated-backup-host and host-loss topologies on real machines
 - 2026-11-06: gap-closure pass: idle lag, restart state and instance lock, tablespace guard, drill role mapping, cron fallback drill, reserved default role names, least-privilege live coverage.
 - 2026-11-06: backup engine reliability implementation (previous revision): pg-native engine, three-tier encrypted repository, signed manifests and catalog mirror, WAL ingest over mTLS plus streaming, shared job queue and idempotency, per-role mTLS, topology-aware audit handling, drill fixes, deploy wiring fixes; section 9 lists where the design was corrected.
 
+## Object storage parity, escrow and drill
+
+`deploy/backup-daemon/src/objectStorageBackup.ts` copies new HOT/COLD
+`.v1.enc` blobs into `object-blobs/{bucket}/{storageKey}` (immutable, so the
+copy is incremental), fails with `OBJECT_STORAGE_BACKUP_PARITY_ERROR` when an
+ACTIVE row has no blob on every required tier, repairs missing tier copies, and writes per-KEK-version escrows plus the legacy `object-storage/kek-escrow.enc` (AES-256-GCM
+under the backup master key). The restore drill samples up to
+`OBJECT_STORAGE_DRILL_SAMPLE` ACTIVE rows, decrypts them with the escrowed
+keyring and compares the SHA-256; the report's `checks.objectStorage` carries the
+result; the drill tries every tier and the escrow for the row's KEK version. The daemon receives the object-storage URL/client certs/KEK keyring from
+the deploy engine.
+
 ---
 
 <a id="deployhealth"></a>
 
-> **Part ID:** `deploy.health` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `deploy.health` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `19d6a54+working-tree`
 
 # Health Verification, Rollback and Recovery
 
@@ -15438,7 +16115,8 @@ The design describes zero-downtime rolling updates. The code provides rolling ba
 - reads the background-job queue health when workers are enabled;
 - returns `msg: "OK"`, `status: "ok"` when workers are enabled, the queue is reachable and the oldest job is below the threshold;
 - returns `msg: "DEGRADED"`, `status: "degraded"` when workers are disabled, the queue cannot be inspected, or the oldest queued job exceeds the threshold;
-- stays reachable when the database cannot be read, with `queue.degraded=true` and `QUEUE_HEALTH_UNAVAILABLE`.
+- stays reachable when the database cannot be read, with `queue.degraded=true` and `QUEUE_HEALTH_UNAVAILABLE`;
+- advertises the deploy identity (`release`, `commit`) from `APP_RELEASE`/`APP_COMMIT`; the batch probes and final verification require the expected release, so a stale process behind the port fails even if its `/health` says `OK`. A partial `--only`/`--nodes` run checks release identity on the units it deploys in the rolling batch; unchanged tiers are health-checked but keep their previous release.
 
 `probeCoreHealth()` and `probeCoreService()` run on the core host and use `curl` with the CA and the core certificate as both server and client material. They pass when the body contains `"msg":"OK"` or the literal `OK`. A degraded core fails the probe.
 
@@ -15508,6 +16186,7 @@ The mTLS backup probe presents the `backup-client` certificate/key, matching the
 - probes each Fake Rails host;
 - for each edge host, probes the edge backends, the edge-to-core handshake for every core URL and the public vhosts;
 - appends storage probes;
+- checks core-node, edge-backend, edge-to-core and Fake Rails health, and asserts the expected release identity on a full deploy (partial runs assert it per deployed unit in the rolling batch);
 - returns `{ ok, results }`.
 
 `deploy.ts` prints `PASS`/`FAIL` per result and throws if any result fails. The error message says the previous release is still on disk. It does not switch back automatically.
@@ -15732,6 +16411,11 @@ Not covered: a real edge-to-core handshake, Nginx reload/vhost probe, PostgreSQL
 ## Security hardening (2026-11-05)
 
 The pre-migration dump is taken before migrating in both modes when the database is non-empty or unknown, uses `PGPASSFILE`, and only the newest `KEEP_RELEASES` dumps are kept (see the pipeline part). Migrations remain forward-only. Real WAL-G/bun/barman SHA256 values must be supplied before recovery tooling can be installed (GAP-023).
+
+
+## Object storage probes
+
+Every storage-only deploy checks `systemctl is-active pg-object-storage-daemon` on the storage host and `/v1/health` over mTLS from every core and backup host. A missing or unhealthy daemon fails verification.
 
 ---
 
@@ -16012,7 +16696,7 @@ Security regression suites exist for core-back (`test/security-regressions/`), t
 
 <a id="testingsuites"></a>
 
-> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-11 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `19d6a54+working-tree`
 
 # Test Suite Catalog
 
@@ -16157,6 +16841,13 @@ There is **no** `core-back/test/exhaustive/09-storage-backup` directory. The run
 - `core-back/test/hardening-gap-regressions.test.ts` covers the leader-election environment guard, backend-PID/`pg_locks` ownership checks, refused unlocks, the session-safety probe and the durable `inbound_events` claim lease.
 - `core-back/test/backup-admin` — backup routes and control client.
 - `deploy/backup-daemon/test` — 71 declarations across 8 files.
+- `deploy/test/preflight.test.ts` — selection by `--only`/`--nodes` and aliases, dry-run no-connect behavior, and port classification (free, managed PM2 current/orphan, same-repo dev, foreign, Nginx, expected PostgreSQL data directory).
+- `core-back/test/worker-runtime-health.test.ts` — `/health` advertises `APP_RELEASE`/`APP_COMMIT`.
+- `deploy/test/healthVerifierScale.test.ts` — verification rejects a health payload from a different release.
+- `admin-front/src/pages/system/jobs-outbox/components/__tests__/MonitorTable.test.ts` — the Jobs & Outbox table declares its `dc` props and never builds a filter query from an undefined list.
+- `tests/e2e/admin/jobs-outbox.spec.ts` — all four Jobs & Outbox tabs render with mocked APIs without the previous `reduce` error.
+- `tests/e2e/admin/object-storage-style.spec.ts` — `/system/object-storage` uses the shared page/table surfaces: one `ApiTable` card, the built-in filter grid with Namespace/Status/Bucket/Legal hold/Owner/SHA-256 fields, and no nested table card, against mocked storage APIs.
+- `deploy/object-storage-daemon/test` — HTTP surface plus real mTLS: allowed/denied/missing/untrusted client certificates, TLS 1.3 enforcement, a PUT/GET over the TLS-to-HTTP bridge, and `RemoteMtlsBlobStore` health/put/get/stat/list over mTLS. The openssl-backed cases skip if the CLI is unavailable.
 
 Some files skip without PostgreSQL or Redis. The design's dedicated fixture names (`uow-outbox-audit-atomicity.test.ts`, `gl-shards-and-lsn-routing.test.ts`, `audit-chain-and-log-backpressure.test.ts`, `backup-control-and-drills.test.ts`, `backup-restore-matrix.test.ts`) do not exist.
 
@@ -16198,12 +16889,13 @@ The seeder checks live in suite 10, and the deploy matrix lives in `deploy/test/
 | `fake-rails-back/test` | 53 |
 | `deploy/test` | 119 |
 | `deploy/backup-daemon/test` | 71 |
+| `deploy/object-storage-daemon/test` | 7 literal + 9 `live` (16 executed) |
 | `tests/e2e` | 65 |
 | `tests/e2e-live` | 6 |
 | `tests/unit` | 26 |
-| **Total** | **1,807** |
+| **Total** | **1,814** |
 
-This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations, so the executed test count is higher, especially in suites 01-04. It is far below the 38,500 claim. The stale-claims register records 1,778; the working tree has about 29 more declarations.
+This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations and the `live` alias used by the openssl-backed object-storage mTLS cases, so the executed test count is higher, especially in suites 01-04. It is far below the 38,500 claim. The stale-claims register records 1,778; the working tree has about 36 more declarations.
 
 ### 3.14 Report engine SDK tests
 
@@ -16211,7 +16903,7 @@ This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations, so t
 
 ### 3.15 Report engine and merchant report tests
 
-`core-back/test/reportEngineSdk/**` now covers the original RE-T01..RE-T22 matrix plus PII masking, confidential AML denial/bypass, merchant scope (including OR-bypass), semantic AST diagnostics, asset validation, chrome resolution and SDK decoupling, and the remediation suites: AuthorityAndCatalog (referenced-column PII, relation parsing, sensitivity/AML domains), MerchantReportLine (allow-list, identity injection/row assertion, tier limits), SeedChrome (seed idempotence), ExecuteAndRedaction (bundle comparison assets, aggregate/truncation), and the A08/A09/A10/A11/A12/A14/A15/A16/A17 regression cases. `merchant-back/test/core-forwarding.test.ts` covers the merchant catalog/execute/autocomplete proxy and the merchant Studio proxies. `core-back/test/admin-slice/admin-report-engine.test.ts` (DB-gated) covers version persistence, publish supersede, archive promotion, audience tabs and the merchant mount/authority; `admin-back/test/report-engine-edge.test.ts` covers the 24 MB parser, edge execute/list permissions and the publish proxy. `tests/unit/report-engine-sdk-mirror.test.ts` asserts the admin/merchant client SDK copies are identical; `tests/unit/report-ui-styles.test.ts` pins the shared report input grid/preview CSS in both portals; `tests/unit/builders-settings-parser.test.ts` covers the `merchant_reports.policy` Platform Setting editor. Core unit tests `report-engine-body-path.test.ts` and `MerchantReportPolicy.test.ts` cover the merchant body parser prefix and the staff-managed policy defaults/cache/assets gate. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers the client renderer, chrome variables, enum translation, vector canvas and paged-media contract. The Guide content test was updated for the new Reports screen/article.
+`core-back/test/reportEngineSdk/**` now covers the original RE-T01..RE-T22 matrix plus PII masking, confidential AML denial/bypass, merchant scope (including OR-bypass), semantic AST diagnostics, asset validation, chrome resolution and SDK decoupling, and the remediation suites: AuthorityAndCatalog (referenced-column PII, relation parsing, sensitivity/AML domains), MerchantReportLine (allow-list, identity injection/row assertion, tier limits), SeedChrome (seed idempotence), ExecuteAndRedaction (bundle comparison assets, aggregate/truncation), and the A08/A09/A10/A11/A12/A14/A15/A16/A17 regression cases. `merchant-back/test/core-forwarding.test.ts` covers the merchant catalog/execute/autocomplete proxy and the merchant Studio proxies. `core-back/test/admin-slice/admin-report-engine.test.ts` (DB-gated) covers version persistence, publish supersede, archive promotion, audience tabs and the merchant mount/authority; `admin-back/test/report-engine-edge.test.ts` covers the 24 MB parser, edge execute/list permissions and the publish proxy. `tests/unit/report-engine-sdk-mirror.test.ts` asserts the admin/merchant client SDK copies are identical; `tests/unit/report-ui-styles.test.ts` pins the shared report input grid/preview CSS in both portals; `tests/unit/report-preview-print-reset.test.ts` pins the post-pagination print reset and asserts the two preview bridges are byte-identical; `tests/unit/builders-settings-parser.test.ts` covers the `merchant_reports.policy` Platform Setting editor. Core unit tests `report-engine-body-path.test.ts` and `MerchantReportPolicy.test.ts` cover the merchant body parser prefix and the staff-managed policy defaults/cache/assets gate. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers the client renderer, chrome variables, enum translation, vector canvas and paged-media contract, including the theme-aware preview canvas, page separation and print reset. The Guide content test was updated for the new Reports screen/article.
 
 ## 4. Contracts and invariants
 
@@ -16226,7 +16918,7 @@ This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations, so t
 - Core suites: `core-back/test/exhaustive/**`.
 - Edge suites: `admin-back/test`, `merchant-back/test`, `checkout-back/test`.
 - Fake-rails suites: `fake-rails-back/test`.
-- Deploy suites: `deploy/test`, `deploy/backup-daemon/test`.
+- Deploy suites: `deploy/test`, `deploy/backup-daemon/test`, `deploy/object-storage-daemon/test`.
 - UI suites: `tests/e2e`, `tests/e2e-live`, `tests/unit`.
 - Runner: `scripts/run-exhaustive-suite.sh`.
 
@@ -16350,6 +17042,7 @@ This catalog is derived by counting literal declarations and inspecting the suit
 | `merchant-back/test/security-regressions.test.ts` | token creation, uploads, limiter |
 | `checkout-back/test/security-regressions.test.ts` | inbound limiter, body limits, error mapping |
 | `deploy/test/security-regressions.test.ts` | quoting, config hardening, migration planning |
+| `deploy/test/preflight.test.ts` | selection/aliases, dry-run, port ownership classes, expected PostgreSQL data dirs |
 | `deploy/backup-daemon/test/mtlsAuthorization.test.ts` | CN/SAN authorization |
 | `fake-rails-back/test/security.test.ts` | token compare, CIDR, lockout |
 | `tests/unit/frontend-security-{admin,checkout,merchant}.test.ts` | frontend allow-lists, guards, validation |
@@ -16441,6 +17134,44 @@ These are development/CI tests only; no production-time test job or test endpoin
 - Route-order suites (`core-back/test/reportEngineSdk/RouteOrder.test.ts`, `admin-back/test/report-engine-route-order.test.ts`, `merchant-back/test/report-engine-route-order.test.ts`) assert that every new static migration/transcript route is registered before a dynamic id route and that the expected endpoints exist.
 - `admin-back/test/report-engine-edge.test.ts` and `merchant-back/test/core-forwarding.test.ts` cover migration list pagination/search query forwarding, prompts, Chrome detail, reconciliation, merchant branding and Studio prefill routes.
 - Frontend type checks cover the new admin/merchant migration pages, branding editor and Studio query prefill; the existing i18n and SDK mirror gates cover Arabic catalogue completeness and client mirror equality.
+
+## Object storage suites
+
+- `core-back/test/objectStorageEngine.test.ts` — T01–T28 (DB-gated) and DB-free
+  pgos1/sniff edge cases; includes no-lock activation, retention-once, GC claim,
+  access-log append-only, abandoned quarantine and held discard; runs against a
+  real PostgreSQL 18 + Redis.
+- `core-back/test/runtime/raw-body.test.ts` — raw-body capture and per-route
+  budgets for assets, dispute/AML evidence, reconciliation, KYB and checkout.
+- `deploy/test/objectStorageDeploy.test.ts` — T21 topology/PKI/firewall/guard,
+  per-consumer certificate placement, safe-path/KEK validation and T22
+  parity/escrow/drill, plus the shared `blobStore.ts` drift guard.
+- `deploy/object-storage-daemon/test/server.test.ts` — HTTP round-trip, checksum
+  mismatch, path traversal, trash/purge and unknown bucket/route refusals.
+- `admin-back/test/object-storage-forwarding.test.ts` — verifies page/filter/
+  sort/search/access-log forwarding and the legal-hold request path.
+- Route/UI coverage still needs a live Playwright pass for the four storage tabs
+  and the dispute/AML/reconciliation attachment surfaces.
+
+## v38 sandbox suites (2026-11-13)
+
+- `core-back/test/sandboxPlane.test.ts`: plane resolution, token prefixes, boot fence, strict Live/Sandbox DB fence in both directions, Fake Rails gateway/environment fence, development opt-in.
+- `core-back/test/fake-rails-control-client.test.ts`: control URL/token, error mapping, merchant scope, unreachable emulator, helper/simulator.
+- `fake-rails-back/test/accountsAndInspector.test.ts` and the v2 cases in `api.test.ts`: personas, reserve/capture/release/refund, over-reserve, auto-enrolment, merchant reset, clearing statement, control plane and checkout helper.
+- `merchant-back/test/sandbox-routing.test.ts`, `admin-back/test/sandbox-routing.test.ts`, `checkout-back/test/sandbox-routing.test.ts`: pool selection, fail-closed 503 and token prefixes.
+- `merchant-back/test/sandbox-proxy.test.ts` and `checkout-back/test/sandbox-checkout-forward.test.ts`: real forwarding through the sandbox pool for control/resources, `pg_test_` external tokens, `sbx_` summary/inspector routes and the Live-link inspector refusal.
+- `core-back/test/security-regressions/commerce-status-enforcement.test.ts` and `test/engine/attempt-guard-pipeline.test.ts` assert the removed OD-10 fallback.
+
+## v39 Sandbox Studio and mirror suites (2026-11-13)
+
+- `core-back/test/sandboxPlane.test.ts` now runs the schema-local fence functions and passes on v39; `core-back/test/phase1-mtls-and-schema.test.ts` expects `20261114090000_v39_sandbox_studio` as the newest migration and schema version 39.
+- `fake-rails-back/test/accountsAndInspector.test.ts` and `test/api.test.ts` cover merchant-owned account copies, daily business-date reset, hold expiry, capture variance guards, clearing references and statement inclusion.
+- `merchant-back/test/sandbox-proxy.test.ts` covers control routes (`overview`, `seed-demo`, `studio/*`, wallet/payment detail, refund, reconciliation), Live-router resource lists/creates, Fake Rails control routes and `pg_test_` external tokens. `merchant-back/test/sandbox-routing.test.ts` covers the fail-closed pool.
+- `admin-back/test/sandbox-routing.test.ts` also asserts the Studio path mapping for `/merchants`, `/merchants/summary`, merchant detail and `/audits` so the admin control center cannot silently fall back to the Live namespace.
+- `admin-back/test/sandbox-routing.test.ts` covers admin sandbox pool selection; the admin sandbox API forwards Fake Rails accounts, scenarios, transactions, webhooks and statements.
+- Root `tests/unit/frontend-security-admin.test.ts` requires every Sandbox mirror route to be explicitly allowed for authenticated staff; `tests/unit/guide-content.test.ts` requires the generated context map to cover them; `tests/unit/i18n-catalogue.test.ts` requires Arabic entries for every new Studio/mirror label.
+- Deploy tests cover `sandboxDatabase()`, `pgw_sandbox`/`pgw_sandbox_session`, sandbox database creation, the second `pg-core-sandbox` service plan, firewall/PKI SAN, and backup exclusion; `./deploy.sh --dry-run` is the integration smoke check.
+- Not yet covered end to end: a live two-database deploy, a live reconciliation import through the real Fake Rails server, and a Playwright pass over the Studio/mirror pages. The `seed-history` route and ledger postings are typechecked and reviewed but have no DB-backed automated test yet.
 
 ---
 
@@ -17906,7 +18637,7 @@ Most factual counts are now fixed in the canonical parts. The remaining items be
 | ID | Feature | Status | Current evidence | Acceptance criteria |
 | :--- | :--- | :--- | :--- | :--- |
 | D-01 | Voucher Provider Management System | `missing` | No voucher code, schema, API or UI | See `future.voucher`; all phases and tests delivered as a separate service |
-| D-02 | Admin Guide v2 | `implemented` | 14 books/125 articles/151 terms/22 cards/29 situations/5 simulators/8 routes with generated content, context help and safeguards | See `admin-ui.guide-v2`; only the Arabic article set remains outstanding |
+| D-02 | Admin Guide v2 | `implemented` | 14 books/137 articles/154 terms/26 cards/32 situations/5 simulators/8 routes with generated content, context help and safeguards | See `admin-ui.guide-v2`; only the Arabic article set remains outstanding |
 | D-03 | Smart AI voucher importer half | `missing` | Gateway importer only in `core-back/engine/specImporter/**` | See `future.smart-ai-voucher`; voucher schema/validator/simulator/materializer/transcript/UI/tests |
 | D-04 | Merchant Google OIDC login | `deferred` | `core-back/api/internal/merchant.ts` `/auth/google` returns `501 GOOGLE_IDENTITY_NOT_CONFIGURED` | Configure issuer/client/audience, verify ID tokens, map identities, test success/failure |
 | D-05 | Keyset pagination | `partial` | `core-back/lib/listQuery.ts` supports cursor pagination (2026-11-04) but only merchant `/payments` uses it; the other lists still use `skip/take` | Add stable cursor keys, cursor encode/decode, index coverage, API compatibility and tests at high offsets |
@@ -18199,9 +18930,9 @@ The app mirrors the true content during build:
 4. `scripts/check-content.ts` re-runs the extractors and fails if the committed snapshot is
    stale, or if `admin-front` generated content has drifted.
 
-The current snapshot contains 14 guide books, 135 articles, 151 glossary terms, 25 safeguard
-cards, 32 situations, 58 quick answers, 19 error codes, 140 edge cases; and 8 Academy tracks,
-11 modules, 50 lessons, 100 practice checks, 16 labs / 92 tasks, 11 drills and 6 learner pages.
+The current snapshot contains 14 guide books, 137 articles, 154 glossary terms, 26 safeguard
+cards, 32 situations, 60 quick answers, 19 error codes, 140 edge cases; and 8 Academy tracks,
+11 modules, 51 lessons, 102 practice checks, 16 labs / 92 tasks, 11 drills and 7 learner pages.
 The exam bank has 223 questions with keys but is not in the bundle.
 
 ## 3. Application

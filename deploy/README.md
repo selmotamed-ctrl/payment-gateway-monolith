@@ -104,7 +104,8 @@ is then only a compatibility fallback.
 | `--nodes=<id,...>` | Limit compute deployment units to the named node ids. Units without a node id never match. |
 | `--rolling-batch=<n>` | Override `ROLLING_BATCH_SIZE` for this run. Must be an integer >= 1. |
 | `--keep=<n>` | Override `KEEP_RELEASES` (release directories retained per service). |
-| `--fresh` | Bootstrap packages, Bun, PM2 and apply UFW. |
+| `--fresh` | Bootstrap packages, Bun, PM2 and apply UFW; refuse if any selected storage engine (PostgreSQL, Redis, object vault and Fake Rails SQLite) already contains data. |
+| `--force-fresh` | Implies `--fresh`; take a pre-clean Live PostgreSQL dump, then erase the selected storage engines. Backup repositories are preserved. |
 | `--update` | Do not bootstrap; also disables an environment `fresh`. |
 | `--enforce-firewall` | Apply the current UFW plan without a full bootstrap. |
 | `--skip-build` | Reuse the existing `*/dist` builds. Missing edge dist files fail later. |
@@ -114,8 +115,31 @@ is then only a compatibility fallback.
 | `--rotate-certs` | Regenerate the internal CA and every leaf certificate. |
 | `--check-certs` | Read-only certificate expiry table; exit 1 when something is missing, expired or inside `MTLS_RENEW_WITHIN_DAYS` (for cron/alerts). |
 | `--dry-run` | Validate and print commands; execute no remote command and skip local builds/verification. |
+| `--preflight-only` | Run only the read-only preflight checks, print the report and exit 0/1. No build, PKI, bootstrap or deployment. |
+| `--skip-preflight` | Skip the preflight gate (emergency use only; a warning is printed). |
+| `--stop-unmanaged` | Allow the preflight to stop only provably safe same-repo dev listeners on selected service ports. |
 
 Unknown options and unknown `--only` roles abort before any SSH connection.
+`--only` also accepts backend aliases: `core-back`, `admin-back`, `merchant-back`, `checkout-back`, `fake-rails-back`.
+
+### Preflight (runs before any mutation)
+
+Every deploy runs a read-only preflight inside step 1 after the plan is built and before frontend builds, PKI, bootstrap, storage or PM2. It checks only the selected `--only`/`--nodes` parts plus their required dependencies:
+
+- SSH reachability, key validity and `sudo`;
+- OS/tool readiness (fresh installs may bootstrap missing tools; update deploys block);
+- disk, memory and clock skew;
+- service ports and their owners: free, the current PM2 app (replaceable), an orphan same-tier PM2 app (retireable), a same-repo dev listener (blocked by default, stoppable with `--stop-unmanaged`), or a foreign process (always blocked);
+- Nginx ports and `nginx -t`;
+- edge-to-core mTLS and database/PgBouncer dependencies when the selected part needs them;
+- PostgreSQL data directories, systemd units for storage daemons, and the release identity.
+
+A blocking issue prints PID/cwd/command diagnostics and aborts with **Nothing was built or changed**. The deploy also verifies the new release identity (`APP_RELEASE`/`APP_COMMIT` in `/health`) after each batch and in the final end-to-end verification, so PM2 reporting `online` while an old process serves the port can no longer pass. A partial `--only`/`--nodes` run enforces release identity only on the units it deploys; unchanged tiers remain on their previous release and are health-checked without a release assertion.
+
+```bash
+./deploy/deploy.sh --preflight-only --update --only=admin-back
+./deploy/deploy.sh --update --stop-unmanaged
+```
 
 ### Convergence: reload when you can, restart only when you must
 
@@ -257,7 +281,7 @@ node arrays mean what was intended:
 | Redis | `REDIS_MANAGE_VIA_SSH`, `REDIS_NODES`, `REDIS_SSH_*`, `REDIS_PASSWORD`, `REDIS_MAXMEMORY` | Cache/velocity tier. |
 | Audit database | `AUDIT_DB_MANAGE_VIA_SSH`, `AUDIT_DB_NODE`, `AUDIT_DB_SSH_*`, `AUDIT_DB_NAME`, `AUDIT_DB_USER`, `AUDIT_DB_PASSWORD` | Tamper-evident audit database. |
 | Log database | `LOG_DB_MANAGE_VIA_SSH`, `LOG_DB_NODE`, `LOG_DB_SSH_*`, `LOG_DB_NAME`, `LOG_DB_USER`, `LOG_DB_PASSWORD`, `LOG_RETENTION_MONTHS` | Partitioned operational log database. |
-| Backup | `BACKUP_ENABLED`, `BACKUP_NODE`, `BACKUP_SSH_*`, `BACKUP_ENGINE_MODE`, `BACKUP_COMPRESSION`, `BACKUP_ENCRYPTION_KEY_HEX`, `BACKUP_PRIMARY_S3_*`, prefixes/secondary, cron/retention/alert, `BACKUP_DAEMON_*`, catalog/scratch/pgpass, binary paths | WAL-G/Barman engine and daemon. |
+| Backup | `BACKUP_ENABLED`, `BACKUP_NODE and OBJECT_STORAGE_NODE`, `BACKUP_SSH_*`, `BACKUP_ENGINE_MODE`, `BACKUP_COMPRESSION`, `BACKUP_ENCRYPTION_KEY_HEX`, `BACKUP_PRIMARY_S3_*`, prefixes/secondary, cron/retention/alert, `BACKUP_DAEMON_*`, catalog/scratch/pgpass, binary paths | WAL-G/Barman engine and daemon. |
 | Fake Rails | `FAKE_RAILS_ENABLED`, `FAKE_RAILS_ALLOW_IN_PRODUCTION`, `FAKE_RAILS_SSH_*`, `FAKE_RAILS_PRIVATE_IP`, ports, SSL/domain, public base URL, allowed CIDRs/hosts, tester credentials, JWT/seeder secrets, `SEED_FAKE_RAILS_BLUEPRINTS` | Optional emulator and portal. |
 | Synthetic seeder | `RUN_SYNTHETIC_HISTORY_SEED`, `SYNTHETIC_SEED_PROFILE`, `SYNTHETIC_SEED_KEY`, `SYNTHETIC_YEARS_SPAN` | Test-server historical data. |
 | Test marker | `IS_TEST_SERVER` | Declaration required by the synthetic seed. |
@@ -413,10 +437,15 @@ PgBouncer runs in transaction mode for the application database on the primary
 and replicas. The generated `pgbouncer.ini` maps `PG_DB_NAME` to the local
 PostgreSQL port, and adds `pgw_session`, a second alias to the same database
 with `pool_mode=session`. The session alias exists for the singleton-worker
-leader election (`LEADER_ELECTION_DATABASE_URL`); PostgreSQL advisory locks do
-not survive transaction pooling. The provisioner proves a login through both
-aliases before core starts. An explicit `LEADER_ELECTION_DATABASE_URL` in the
-deploy env overrides the derived URL for an external database or pooler.
+leader election (`LEADER_ELECTION_DATABASE_URL`) and for migrations/seeders:
+Prisma Migrate takes a session advisory lock (`pg_advisory_lock(72707369)`) that
+transaction pooling can strand on a reused backend, producing P1002 on the next
+run. The deploy writes the owner/migration URL to a temporary `.env.owner` using
+the same session endpoint; the runtime `DATABASE_URL` stays transaction-pooled.
+The provisioner proves a login through both aliases before core starts. An
+explicit `LEADER_ELECTION_DATABASE_URL` in the deploy env overrides the derived
+URL for an external database or pooler; migrations reuse its endpoint with the
+owner credentials, and an external pooler must allow the owner on that route.
 
 ### Redis
 
@@ -641,6 +670,20 @@ bun run typecheck
 bun test
 ```
 
+Object storage daemon suites:
+
+```bash
+cd deploy/object-storage-daemon
+bun run typecheck
+bun test
+```
+
+They include raw mTLS tests (allowed, denied, missing and untrusted certificates,
+TLS 1.3 enforcement, a PUT/GET through the TLS-to-HTTP bridge) and a
+`RemoteMtlsBlobStore` client test. The openssl-backed cases skip when the CLI is
+unavailable; the HTTP surface tests always run. The workspace is part of the
+root CI backend matrix.
+
 No test performs a real multi-host deployment, migration, PM2 restart, Nginx
 reload, edge-to-core handshake, filesystem/certificate ownership check or live
 backup/restore drill. A staging run is required for those.
@@ -688,7 +731,7 @@ bun run test-matrix --topologies=T1 --intensity=smoke
 - `DEPLOY_ENV` unset means `production`: Fake Rails, `IS_TEST_SERVER`, `FAKE_RAILS_ALLOW_IN_PRODUCTION` and the synthetic seeder are refused. Use `development|staging|test` explicitly.
 - Placeholder / low-entropy secrets (`change-me`, `password`, `admin`, repeated or sequential patterns) are rejected; `KMS_MASTER_KEY` needs >= 32 chars. Secrets may not contain quotes, backslash, `$`, backtick or whitespace.
 - `BACKUP_WALG_SHA256` (SHA-256 of the pinned WAL-G asset) is required only when WAL-G must be downloaded; an already installed binary is reused. `BUN_SHA256` is needed to install bun (otherwise an existing `/usr/local/bin/bun` or `~/.bun/bin/bun` is reused).
-- `--fresh` against a non-empty database is refused unless `--force-fresh` (or `DEPLOY_FORCE_FRESH=1`). Update deploys run `migrate deploy` on the first core node when migrations are pending, after a pre-migration dump.
+- `--fresh` first probes every selected storage engine. Non-empty PostgreSQL Live/sandbox/audit/log databases, Redis keys, the object-storage vault or Fake Rails SQLite data make it refuse unless `--force-fresh` (or `DEPLOY_FORCE_FRESH=1`). A forced fresh takes a pre-clean Live PostgreSQL dump, drops those databases, flushes Redis, clears the vault and removes the Fake Rails SQLite files; backup repositories are preserved. Update deploys run `migrate deploy` on the first core node when migrations are pending, after a pre-migration dump.
 - PostgreSQL binds `127.0.0.1,<node private IP>`; `PG_RAM_GB` derives memory settings; `PG_IO_METHOD` defaults to `worker`; `PG_REPLICA_REBUILD=true` is needed to re-clone an existing standby.
 
 ### Additional hardening notes (2026-11-05)
@@ -700,3 +743,12 @@ bun run test-matrix --topologies=T1 --intensity=smoke
 - New optional keys: `BACKUP_WALG_VERSION`, `BACKUP_WALG_ASSET`, `BACKUP_BARMAN_VERSION`, `BUN_VERSION`, `BUN_SHA256`, `BACKUP_ALLOWED_CLIENT_CNS`, `BACKUP_SECONDARY_MIRROR_DELETE`, `BACKUP_S3_ALLOW_INSECURE_HTTP` (managed MinIO over http; independent of the daemon protocol), `KYB_SCANNER_MODE` (`eicar` content gate by default), `PG_RAM_GB`, `PG_IO_METHOD`, `PG_REPLICA_REBUILD`; lab: `LAB_WALG_SHA256`.
 - `deploy.env.example` ships `DEPLOY_ENV=production` and placeholder secrets, so it fails validation until you replace them.
 - Open: legacy per-service `deploy.yml` workflows deploy without tests, with `StrictHostKeyChecking=no` and `rsync --delete`; the backup daemon runs as the `postgres` user; PostgreSQL TLS is not provisioned. See `project-design/TRACKER.md`.
+
+
+## Object storage
+
+`OBJECT_STORAGE_NODE` runs `deploy/object-storage-daemon` on port 4095 over mTLS. The deploy installs Bun, creates `pgobjstore`, provisions the vault and certs, opens 4095 only to core and backup private IPs and injects the client cert/KEK into every core and backup host. Certificate distribution is per consumer: a co-located core/backup host never receives the object-storage server key. See `docs/architecture/object-storage-engine.md` and `docs/runbooks/object-storage-operations-and-dr.md`.
+
+## Parallel Sandbox plane
+
+Set `SANDBOX_ENABLED=true` (and keep Fake Rails enabled) to let the planner emit a second core process, `pg-core-sandbox`, with its own release tree and `payment_gateway_sandbox` database. The provisioner creates the database and the `pgw_sandbox` (transaction) / `pgw_sandbox_session` (session) PgBouncer aliases; the deploy migrates it with a direct owner URL carrying the SANDBOX plane GUC and runs `db-seed` plus `seed-fake-rails` when seeding is enabled. Sandbox and Fake Rails data are intentionally excluded from backup targets. See `project-design/parts/00-platform/05-sandbox-execution-plane.md`.

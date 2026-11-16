@@ -16,16 +16,16 @@ describe("companion content bundle", () => {
         expect(bundle.schema).toBe(1);
         expect(bundle.meta.contentHash).toMatch(/^[0-9a-f]{64}$/);
         expect(bundle.guide.books).toHaveLength(14);
-        expect(bundle.guide.articles).toHaveLength(135);
-        expect(bundle.guide.glossary).toHaveLength(151);
-        expect(bundle.guide.cards).toHaveLength(25);
+        expect(bundle.guide.articles).toHaveLength(137);
+        expect(bundle.guide.glossary).toHaveLength(154);
+        expect(bundle.guide.cards).toHaveLength(26);
         expect(bundle.guide.playbook).toHaveLength(32);
         expect(bundle.guide.edgeCases).toHaveLength(140);
         expect(bundle.academy.tracks).toHaveLength(8);
         expect(bundle.academy.modules).toHaveLength(11);
-        expect(bundle.academy.lessons).toHaveLength(50);
+        expect(bundle.academy.lessons).toHaveLength(51);
         expect(bundle.academy.labs).toHaveLength(16);
-        expect(bundle.academy.checks).toHaveLength(100);
+        expect(bundle.academy.checks).toHaveLength(102);
     });
 
     test("all cross-document links resolve", () => {

@@ -72,7 +72,7 @@ export const DB_ENGINES = ["postgresql"] as const;
 export const SSL_MODES = ["certbot", "custom", "self_signed"] as const;
 export const ROLE_NAMES = ["db", "core", "admin", "merchant", "checkout", "fake-rails"] as const;
 export type DeployRole = (typeof ROLE_NAMES)[number];
-export const STORAGE_ROLE_NAMES = ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup"] as const;
+export const STORAGE_ROLE_NAMES = ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup", "object-storage"] as const;
 export type StorageRole = (typeof STORAGE_ROLE_NAMES)[number];
 export type HostRole = DeployRole | StorageRole;
 
@@ -173,6 +173,11 @@ const unixUser = z.string().trim().min(1).max(64).regex(/^[A-Za-z_][A-Za-z0-9_-]
 export const SAFE_ABS_PATH = /^\/[A-Za-z0-9._+@/-]*$/;
 const noDotDot = (value: string) => !value.split("/").includes("..");
 const safeDir = (max = 200) => z.string().trim().min(1).max(max).regex(SAFE_ABS_PATH, "must be an absolute path using only [A-Za-z0-9._+@/-]").refine(noDotDot, "must not contain '..'");
+/** Object-storage paths are privileged: keep them inside the dedicated vault base. */
+const objectStorageDir = (max = 300) => safeDir(max).refine(
+  (value) => value.startsWith("/var/lib/pg-object-storage/") && value !== "/var/lib/pg-object-storage/",
+  "must be under /var/lib/pg-object-storage/ (not a system path)",
+);
 const optionalSafeDir = (max = 300) => z.string().trim().max(max).refine((value) => value === "" || (SAFE_ABS_PATH.test(value) && noDotDot(value)), "must be empty or an absolute path using only [A-Za-z0-9._+@/-]");
 const optionalSafeFile = (max = 300) => z.string().trim().max(max).refine((value) => value === "" || (SAFE_ABS_PATH.test(value) && noDotDot(value)), "must be an absolute path using only [A-Za-z0-9._+@/-]").optional();
 const cronExpr = z.string().trim().min(1).max(120).regex(/^[0-9A-Za-z*/,@ -]+$/, "must be a cron expression (letters, digits and * / , - @ only)");
@@ -349,7 +354,27 @@ const base = z.strictObject({
   FAKE_RAILS_ADMIN_PASSWORD: secretValue(12).optional(),
   FAKE_RAILS_JWT_SECRET: secretValue(32).optional(),
   FAKE_RAILS_SEEDER_TOKEN: secretValue(32).optional(),
+  /** v38: shared token the Sandbox core presents on the Fake Rails control plane. */
+  FAKE_RAILS_CONTROL_TOKEN: secretValue(16).optional(),
   SEED_FAKE_RAILS_BLUEPRINTS: booleanish.default(true),
+
+  // 7b. Parallel Sandbox plane (v38)
+  /** Enables the separate Sandbox core node and database. Off keeps a Live-only deployment. */
+  SANDBOX_ENABLED: booleanish.default(false),
+  /** Optional dedicated Sandbox core host; absent = the first core node hosts it. */
+  SANDBOX_NODE: nodeList,
+  SANDBOX_CORE_PORT: port.default(4005),
+  SANDBOX_DB_NAME: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9_]+$/, "must be an identifier")
+    .default("payment_gateway_sandbox"),
+  /** Sandbox core release tree; never share a remote directory with Live core. */
+  SANDBOX_REMOTE_DIR: safeDir().default("/var/www/pg-core-sandbox"),
+  /** Explicit Sandbox core URL list for the edges (multi-host); derived from SANDBOX_NODE/CORE_NODES otherwise. */
+  SANDBOX_CORE_BACK_URLS: z.string().trim().max(1000).optional(),
 
   // 9. PostgreSQL 18 relational core, replicas and PgBouncer
   PG_MANAGE_VIA_SSH: booleanish.default(false),
@@ -554,6 +579,37 @@ const base = z.strictObject({
   BACKUP_REDIS_CLI_BIN: binName.default("redis-cli"),
   BARMAN_AUDIT_SERVER: z.string().trim().max(200).regex(/^[A-Za-z0-9_-]*$/, "must be a barman server name").default(""),
 
+  // 13b. Shared Object & Asset Storage Engine (schema v36+)
+  OBJECT_STORAGE_ENABLED: booleanish.default(false),
+  OBJECT_STORAGE_MANAGE_VIA_SSH: booleanish.default(false),
+  OBJECT_STORAGE_NODE: z.string().trim().max(500).default(""),
+  OBJECT_STORAGE_SSH_USER: unixUser.default("ubuntu"),
+  OBJECT_STORAGE_SSH_PORT: port.default(22),
+  OBJECT_STORAGE_SSH_KEY_PATH: sshPath.optional(),
+  OBJECT_STORAGE_SUDO_PASSWORD: z.string().max(256).default(""),
+  OBJECT_STORAGE_ROOT_DIR: objectStorageDir(300).default("/var/lib/pg-object-storage/vault"),
+  OBJECT_STORAGE_DAEMON_PORT: port.default(4095),
+  OBJECT_STORAGE_DAEMON_BIND_HOST: hostLike.default(""),
+  OBJECT_STORAGE_DAEMON_CERT_DIR: objectStorageDir(300).default("/var/lib/pg-object-storage/shared/certs"),
+  OBJECT_STORAGE_ALLOWED_CLIENT_CNS: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    .regex(/^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$/, "must be a comma separated list of certificate names")
+    .default("object-storage-client,backup-client"),
+  OBJECT_STORAGE_DAEMON_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(30_000),
+  OBJECT_STORAGE_ALLOW_INSECURE_HTTP: booleanish.default(false),
+  OBJECT_STORAGE_KEK_KEYRING: z
+    .string()
+    .trim()
+    .regex(/^v[1-9]\d*:[0-9a-fA-F]{64}(,v[1-9]\d*:[0-9a-fA-F]{64})*$/, "must be v<N>:<64-hex>[,v<M>:<64-hex>] with N/M >= 1")
+    .or(z.literal(""))
+    .default(""),
+  OBJECT_STORAGE_ACTIVE_KEK_VERSION: z.coerce.number().int().positive().default(1),
+  OBJECT_STORAGE_TRASH_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+  OBJECT_STORAGE_GC_GRACE_HOURS: z.coerce.number().int().min(1).max(720).default(24),
+
   // 8. Synthetic operational data seeder (test servers with Fake Rails only)
   RUN_SYNTHETIC_HISTORY_SEED: booleanish.default(false),
   SYNTHETIC_SEED_PROFILE: z.enum(["COMPACT", "STANDARD", "STRESS"]).default("COMPACT"),
@@ -634,6 +690,16 @@ export const backupStorageConfigured = (config: DeployConfig): boolean =>
   config.BACKUP_ENABLED || config.BACKUP_NODE.trim().length > 0;
 
 /**
+ * True when the Shared Object & Asset Storage Engine tier is configured.
+ * Automatically detected whenever OBJECT_STORAGE_ENABLED, OBJECT_STORAGE_MANAGE_VIA_SSH,
+ * or OBJECT_STORAGE_NODE is set in deploy.env.
+ */
+export const objectStorageConfigured = (config: DeployConfig): boolean =>
+  config.OBJECT_STORAGE_ENABLED
+  || config.OBJECT_STORAGE_MANAGE_VIA_SSH
+  || config.OBJECT_STORAGE_NODE.trim().length > 0;
+
+/**
  * The core upstream URLs every edge service receives. The helper is the single
  * source of truth: an explicit CORE_BACK_URLS wins, otherwise the core node
  * array, otherwise the legacy single-host fields.
@@ -662,6 +728,93 @@ export const applicationCredentials = (config: DeployConfig): { user: string; pa
   pgAppRoleEnabled(config)
     ? { user: config.PG_APP_USER, password: config.PG_APP_PASSWORD }
     : { user: config.PG_DB_USER, password: config.PG_DB_PASSWORD };
+
+export interface DatabaseCredentials {
+  user: string;
+  password: string;
+}
+
+/** The configured database name, including the legacy `DB_*` compatibility path. */
+const configuredDatabaseName = (config: DeployConfig): string =>
+  pgStorageConfigured(config) ? config.PG_DB_NAME : (config.DB_NAME ?? config.PG_DB_NAME);
+
+/**
+ * Replaces the credentials of an explicit session URL and fills in the database
+ * name when the operator supplied only an origin. Used for the owner/migration
+ * URL so it follows the same session-safe endpoint as the leader election while
+ * keeping the owner's own credentials.
+ */
+const withDatabaseCredentials = (
+  source: string,
+  credentials: DatabaseCredentials,
+  fallbackDatabase: string,
+): string | null => {
+  try {
+    const url = new URL(source);
+    if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") return null;
+    url.protocol = "postgresql:";
+    url.username = credentials.user;
+    url.password = credentials.password;
+    if (!url.pathname || url.pathname === "/") url.pathname = `/${fallbackDatabase}`;
+    return url.toString();
+  } catch {
+    return null;
+  }
+};
+
+/** True when two PostgreSQL URLs address the same host/port/database, ignoring credentials. */
+export const sameDatabaseEndpoint = (a: string | null | undefined, b: string | null | undefined): boolean => {
+  if (!a || !b) return false;
+  try {
+    const left = new URL(a);
+    const right = new URL(b);
+    const port = (url: URL): string => url.port || "5432";
+    return left.hostname === right.hostname && port(left) === port(right) && left.pathname === right.pathname;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The session-safe endpoint used by BOTH the singleton-worker leader election
+ * and the owner/migration connection.
+ *
+ * Precedence:
+ *   1. an explicit `LEADER_ELECTION_DATABASE_URL` (external database/pooler);
+ *   2. the deploy-managed PgBouncer session alias `pgw_session`;
+ *   3. a direct PostgreSQL connection when PgBouncer is disabled;
+ *   4. null (callers fall back to `DATABASE_URL`).
+ *
+ * Prisma Migrate takes a session-level `pg_advisory_lock(72707369)`. Routing
+ * that through PgBouncer's transaction pool can strand the lock on a reused
+ * backend and the next migration fails with P1002, so migrations must use this
+ * endpoint, never the transaction-pooled runtime URL.
+ */
+export const sessionDatabaseUrl = (
+  config: DeployConfig,
+  credentials: DatabaseCredentials,
+): string | null => {
+  const database = configuredDatabaseName(config);
+  if (config.LEADER_ELECTION_DATABASE_URL) {
+    const explicit = withDatabaseCredentials(config.LEADER_ELECTION_DATABASE_URL, credentials, database);
+    if (!explicit) return null;
+    if (pgStorageConfigured(config) && config.PG_MANAGE_VIA_SSH) {
+      const url = new URL(explicit);
+      if (!url.searchParams.has("sslmode")) {
+        url.searchParams.set("sslmode", "no-verify");
+        return url.toString();
+      }
+    }
+    return explicit;
+  }
+  if (!pgStorageConfigured(config)) return null;
+  const primary = parseNodeList(config.PG_PRIMARY_NODE)[0] ?? null;
+  if (!primary) return null;
+  const port = config.PGBOUNCER_ENABLED ? config.PGBOUNCER_PORT : primary.servicePort;
+  const name = config.PGBOUNCER_ENABLED ? PGBOUNCER_SESSION_ALIAS : database;
+  const tls = config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : "";
+  return `postgresql://${encodeURIComponent(credentials.user)}:${encodeURIComponent(credentials.password)}@${primary.privateIp}:${port}/${name}${tls}`;
+};
 
 export const effectiveDatabase = (config: DeployConfig): {
   engine: DeployConfig["DB_ENGINE"];
@@ -695,9 +848,10 @@ export const effectiveDatabase = (config: DeployConfig): {
     ? `postgresql://${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}@${host}:${derivedPort}/${name}${config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : ""}`
     : (config.DATABASE_URL ?? null);
   // The owner's URL, for migrations and the test-server seeders only. It is never written to the runtime `.env`.
-  const ownerUrl = pg && host
-    ? `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${derivedPort}/${name}${config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : ""}`
-    : (config.DATABASE_URL ?? null);
+  // It follows the session-safe endpoint (explicit leader URL, pgw_session, or a direct PostgreSQL connection), because
+  // Prisma Migrate's session advisory lock cannot survive PgBouncer transaction pooling (P1002). This applies in the
+  // legacy single-role mode too; the runtime `url` above never changes.
+  const ownerUrl = sessionDatabaseUrl(config, { user, password }) ?? (config.DATABASE_URL ?? null);
   return {
     engine: config.DB_ENGINE,
     host,
@@ -713,6 +867,47 @@ export const effectiveDatabase = (config: DeployConfig): {
 };
 
 /**
+ * The sandbox database endpoint. It is a separate database in the same
+ * PostgreSQL cluster (or the external DB host), with its own PgBouncer aliases
+ * `pgw_sandbox` (transaction) and `pgw_sandbox_session` (session). The sandbox
+ * core never receives the Live database name.
+ */
+export const sandboxDatabase = (config: DeployConfig): {
+  name: string;
+  url: string | null;
+  ownerUrl: string | null;
+  sessionUrl: string | null;
+  host: string | null;
+  port: number;
+  privateIp: string | null;
+} => {
+  const live = effectiveDatabase(config);
+  const name = config.SANDBOX_DB_NAME;
+  const app = applicationCredentials(config);
+  const host = live.host;
+  const port = config.PGBOUNCER_ENABLED ? config.PGBOUNCER_PORT : live.port;
+  const tls = config.PG_MANAGE_VIA_SSH || config.DB_MANAGE_VIA_SSH ? "?sslmode=no-verify" : "";
+  const alias = config.PGBOUNCER_ENABLED ? "pgw_sandbox" : name;
+  const sessionAlias = config.PGBOUNCER_ENABLED ? "pgw_sandbox_session" : name;
+  const url = host
+    ? `postgresql://${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}@${host}:${port}/${alias}${tls}`
+    : null;
+  const planeOption = config.SANDBOX_ENABLED ? `${tls ? "&" : "?"}options=-c%20app.execution_plane%3DSANDBOX` : "";
+  // Migrations run directly against PostgreSQL, not through the transaction
+  // pooler. Besides keeping Prisma's session advisory lock safe, this lets the
+  // migration session carry the custom app.execution_plane GUC; PgBouncer
+  // rejects unknown startup options. The runtime URL stays on pgw_sandbox.
+  const ownerPort = live.port;
+  const ownerUrl = host
+    ? `postgresql://${encodeURIComponent(live.user)}:${encodeURIComponent(live.password)}@${host}:${ownerPort}/${name}${tls}${planeOption}`
+    : null;
+  const sessionUrl = host
+    ? `postgresql://${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}@${host}:${port}/${sessionAlias}${tls}`
+    : null;
+  return { name, url, ownerUrl, sessionUrl, host, port, privateIp: live.privateIp };
+};
+
+/**
  * The session-safe URL the core uses for singleton-worker leader election.
  *
  * With PgBouncer enabled it is the `pgw_session` alias (same pooler port,
@@ -722,21 +917,10 @@ export const effectiveDatabase = (config: DeployConfig): {
  * development database).
  */
 export const leaderElectionDatabaseUrl = (config: DeployConfig): string | null => {
-  if (!pgStorageConfigured(config)) {
-    return null;
-  }
-  const primary = parseNodeList(config.PG_PRIMARY_NODE)[0] ?? null;
-  if (!primary) {
-    return null;
-  }
-  const database = effectiveDatabase(config);
-  const app = applicationCredentials(config);
-  const credentials = `${encodeURIComponent(app.user)}:${encodeURIComponent(app.password)}`;
-  if (config.PGBOUNCER_ENABLED) {
-    return `postgresql://${credentials}@${primary.privateIp}:${config.PGBOUNCER_PORT}/${PGBOUNCER_SESSION_ALIAS}${config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : ""}`;
-  }
-  const tls = config.PG_MANAGE_VIA_SSH ? "?sslmode=no-verify" : "";
-  return `postgresql://${credentials}@${primary.privateIp}:${primary.servicePort}/${database.name}${tls}`;
+  // An explicit endpoint is authoritative and keeps its own credentials (it may be a dedicated leader role).
+  if (config.LEADER_ELECTION_DATABASE_URL) return config.LEADER_ELECTION_DATABASE_URL;
+  if (!pgStorageConfigured(config)) return null;
+  return sessionDatabaseUrl(config, applicationCredentials(config));
 };
 
 const PLACEHOLDER_MARKERS = ["change-me", "changeme", "change_me", "replace-me", "replaceme", "replace_me", "your-", "your_", "example", "placeholder", "password", "passwd", "admin", "default", "secret123", "xxxx"];
@@ -794,6 +978,17 @@ export const weakSecretProblems = (config: DeployConfig): string[] => {
   }
   if (config.FAKE_RAILS_JWT_SECRET && config.FAKE_RAILS_JWT_SECRET === config.FAKE_RAILS_SEEDER_TOKEN) {
     problems.push("FAKE_RAILS_JWT_SECRET and FAKE_RAILS_SEEDER_TOKEN must differ");
+  }
+  if (config.OBJECT_STORAGE_KEK_KEYRING) {
+    for (const part of config.OBJECT_STORAGE_KEK_KEYRING.split(",")) {
+      const hex = part.split(":")[1] ?? "";
+      const reason = weakSecretReason(hex);
+      if (reason) problems.push(`OBJECT_STORAGE_KEK_KEYRING ${reason}`);
+    }
+  }
+  if (config.OBJECT_STORAGE_SUDO_PASSWORD) {
+    const reason = weakSecretReason(config.OBJECT_STORAGE_SUDO_PASSWORD);
+    if (reason) problems.push(`OBJECT_STORAGE_SUDO_PASSWORD ${reason}`);
   }
   return problems;
 };
@@ -892,6 +1087,18 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   if (config.PGBOUNCER_ENABLED && !pgConfigured) {
     problems.push("PGBOUNCER_ENABLED requires the PostgreSQL 18 storage fields");
   }
+  if (config.PGBOUNCER_ENABLED && pgConfigured && (primaryNodes.length > 0 || config.LEADER_ELECTION_DATABASE_URL)) {
+    // The core refuses to boot when the leader-election endpoint is the transaction-pooled runtime URL, and the
+    // migration/owner URL must use the same session-safe endpoint. Catch the misconfiguration at deploy time.
+    const runtimeUrl = effectiveDatabase(config).url;
+    const ownerUrl = effectiveDatabase(config).ownerUrl;
+    if (sameDatabaseEndpoint(runtimeUrl, ownerUrl)) {
+      problems.push(
+        "The migration/owner endpoint resolves to the transaction-pooled DATABASE_URL. " +
+          "Set LEADER_ELECTION_DATABASE_URL to a session-capable endpoint (the deploy-managed pgw_session alias or a direct PostgreSQL URL) before deploying.",
+      );
+    }
+  }
 
   if (config.DB_MANAGE_VIA_SSH && !pgConfigured) {
     if (!config.DB_SSH_HOST) problems.push("DB_SSH_HOST is required when DB_MANAGE_VIA_SSH=true");
@@ -914,8 +1121,17 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
       problems.push("DATABASE_URL should point at DB_PRIVATE_IP");
     }
   }
-  if (config.LEADER_ELECTION_DATABASE_URL && !/^postgres(ql)?:\/\//.test(config.LEADER_ELECTION_DATABASE_URL)) {
-    problems.push("LEADER_ELECTION_DATABASE_URL must be a PostgreSQL URL");
+  if (config.LEADER_ELECTION_DATABASE_URL) {
+    if (!/^postgres(ql)?:\/\//.test(config.LEADER_ELECTION_DATABASE_URL)) {
+      problems.push("LEADER_ELECTION_DATABASE_URL must be a PostgreSQL URL");
+    } else {
+      try {
+        const url = new URL(config.LEADER_ELECTION_DATABASE_URL);
+        if (!url.hostname) problems.push("LEADER_ELECTION_DATABASE_URL must include a host");
+      } catch {
+        problems.push("LEADER_ELECTION_DATABASE_URL must be a valid PostgreSQL URL");
+      }
+    }
   }
   // A single-box installation legitimately co-locates the database with the
   // core (the database binds to 127.0.0.1 and is never exposed); on separate
@@ -964,6 +1180,7 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
     ["AUDIT_DB_NODE", config.AUDIT_DB_NODE],
     ["LOG_DB_NODE", config.LOG_DB_NODE],
     ["BACKUP_NODE", config.BACKUP_NODE],
+    ["OBJECT_STORAGE_NODE", config.OBJECT_STORAGE_NODE],
   ] as const) {
     storageNodes.push({ label, nodes: label === "PG_PRIMARY_NODE" ? primaryNodes : label === "PG_REPLICA_NODES" ? replicaNodes : (() => {
       try {
@@ -1057,6 +1274,67 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
       }
     }
   }
+
+  // --- Shared Object & Asset Storage Engine -------------------------------
+  const objectStorage = objectStorageConfigured(config);
+  const objectStorageNodes = storageNodes.find((entry) => entry.label === "OBJECT_STORAGE_NODE")?.nodes ?? [];
+  const coreNodesList = parsedTiers.get("CORE_NODES") ?? [];
+  const backupNodesList = storageNodes.find((entry) => entry.label === "BACKUP_NODE")?.nodes ?? [];
+  const singleCoreIp = coreNodesList[0]?.privateIp ?? config.CORE_PRIVATE_IP;
+  const backupOnSeparateHost =
+    config.BACKUP_ENABLED
+    && backupNodesList.length > 0
+    && Boolean(singleCoreIp)
+    && backupNodesList[0]!.privateIp !== singleCoreIp;
+
+  // HARD SHARED-STORAGE ENFORCEMENT:
+  // If more than 1 core node is configured OR backup-daemon runs on a separate host,
+  // storing objects on a core node's local disk is strictly forbidden!
+  if ((coreNodesList.length > 1 || backupOnSeparateHost) && (!objectStorage || objectStorageNodes.length === 0)) {
+    problems.push(
+      "MULTI_NODE_SHARED_STORAGE_REQUIRED: OBJECT_STORAGE_NODE is required when deploying multiple CORE_NODES or a separate BACKUP_NODE. Storing objects on individual core nodes is strictly forbidden — set OBJECT_STORAGE_NODE (e.g. obj-1@10.10.14.10:22:10.10.14.10:4095) so all services point to and read/write from the shared storage server.",
+    );
+  }
+
+  if (objectStorage) {
+    if (objectStorageNodes.length === 0) {
+      problems.push("OBJECT_STORAGE_NODE is required when object storage is enabled");
+    }
+    if (objectStorageNodes.length > 1) {
+      problems.push("OBJECT_STORAGE_NODE must describe exactly one node");
+    }
+    if (!config.OBJECT_STORAGE_SSH_KEY_PATH) {
+      problems.push("OBJECT_STORAGE_SSH_KEY_PATH is required when object storage is enabled");
+    }
+    if (!config.OBJECT_STORAGE_KEK_KEYRING) {
+      problems.push("OBJECT_STORAGE_KEK_KEYRING is required when object storage is enabled");
+    }
+    if (config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP && config.DEPLOY_ENV === "production") {
+      problems.push("OBJECT_STORAGE_ALLOW_INSECURE_HTTP=true is forbidden in a production deployment");
+    }
+    const allowedCns = config.OBJECT_STORAGE_ALLOWED_CLIENT_CNS.split(",").map((value) => value.trim());
+    if (!allowedCns.includes("object-storage-client")) {
+      problems.push("OBJECT_STORAGE_ALLOWED_CLIENT_CNS must include object-storage-client");
+    }
+    const objectStoragePrivateIp = objectStorageNodes[0]?.privateIp;
+    const configuredBind = config.OBJECT_STORAGE_DAEMON_BIND_HOST.trim();
+    if (configuredBind && configuredBind !== "0.0.0.0" && configuredBind !== objectStoragePrivateIp) {
+      problems.push(`OBJECT_STORAGE_DAEMON_BIND_HOST (${configuredBind}) must be empty, 0.0.0.0, or the OBJECT_STORAGE_NODE private IP (${objectStoragePrivateIp ?? "unknown"})`);
+    }
+  }
+
+  if (config.OBJECT_STORAGE_KEK_KEYRING) {
+    const activePrefix = `v${config.OBJECT_STORAGE_ACTIVE_KEK_VERSION}:`;
+    const hasActive = config.OBJECT_STORAGE_KEK_KEYRING
+      .split(",")
+      .some((entry) => entry.trim().startsWith(activePrefix));
+    if (!hasActive) {
+      problems.push(
+        `OBJECT_STORAGE_ACTIVE_KEK_VERSION=${config.OBJECT_STORAGE_ACTIVE_KEK_VERSION} is not present in OBJECT_STORAGE_KEK_KEYRING`,
+      );
+    }
+  }
+
   // Node ids are unique across the whole plan; private IPs are unique within a
   // tier (co-locating different tiers on one box remains supported).
   const allNodes = [...parsedTiers.values(), ...storageNodes.map((entry) => entry.nodes)].flat();
@@ -1093,9 +1371,9 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   }
   // A storage listener may share 5432 with another PostgreSQL-family role on
   // the same host (co-located primary/audit/log), but never a compute listener.
-  const storagePortClaims: Array<{ label: string; node: NodeSpec; port: number; family: "postgres" | "redis" | "backup" | "pgbouncer" }> = [];
+  const storagePortClaims: Array<{ label: string; node: NodeSpec; port: number; family: "postgres" | "redis" | "backup" | "pgbouncer" | "object-storage" }> = [];
   for (const entry of storageNodes) {
-    const family = entry.label.startsWith("PG_") ? "postgres" as const : entry.label === "REDIS_NODES" ? "redis" as const : entry.label === "AUDIT_DB_NODE" || entry.label === "LOG_DB_NODE" ? "postgres" as const : "backup" as const;
+    const family = entry.label.startsWith("PG_") ? "postgres" as const : entry.label === "REDIS_NODES" ? "redis" as const : entry.label === "AUDIT_DB_NODE" || entry.label === "LOG_DB_NODE" ? "postgres" as const : entry.label === "OBJECT_STORAGE_NODE" ? "object-storage" as const : "backup" as const;
     for (const node of entry.nodes) storagePortClaims.push({ label: entry.label, node, port: node.servicePort, family });
   }
   for (const node of primaryNodes) storagePortClaims.push({ label: "PGBOUNCER_PORT", node, port: config.PGBOUNCER_PORT, family: "pgbouncer" });
@@ -1224,6 +1502,43 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
   if (config.RUN_SYNTHETIC_HISTORY_SEED) {
     if (!config.IS_TEST_SERVER) problems.push("RUN_SYNTHETIC_HISTORY_SEED requires IS_TEST_SERVER=true");
     if (!config.FAKE_RAILS_ENABLED) problems.push("RUN_SYNTHETIC_HISTORY_SEED requires FAKE_RAILS_ENABLED=true");
+  }
+
+  // --- Parallel Sandbox plane ---------------------------------------------
+  if (config.SANDBOX_ENABLED) {
+    const nodes = (() => {
+      try {
+        return parseNodeList(config.SANDBOX_NODE);
+      } catch (error) {
+        problems.push(`SANDBOX_NODE: ${(error as Error).message}`);
+        return [];
+      }
+    })();
+    if (nodes.length > 1) problems.push("SANDBOX_NODE must describe exactly one node");
+    if (!config.FAKE_RAILS_ENABLED) problems.push("SANDBOX_ENABLED requires FAKE_RAILS_ENABLED=true");
+    if (config.SANDBOX_DB_NAME === (config.PG_DB_NAME || config.DB_NAME)) {
+      problems.push("SANDBOX_DB_NAME must differ from the Live database name");
+    }
+    if (config.SANDBOX_REMOTE_DIR === config.CORE_REMOTE_DIR) {
+      problems.push("SANDBOX_REMOTE_DIR must differ from CORE_REMOTE_DIR");
+    }
+    if (config.SANDBOX_CORE_PORT === config.CORE_PORT
+      || config.SANDBOX_CORE_PORT === config.ADMIN_BACK_PORT
+      || config.SANDBOX_CORE_PORT === config.MERCHANT_BACK_PORT
+      || config.SANDBOX_CORE_PORT === config.CHECKOUT_BACK_PORT
+      || config.SANDBOX_CORE_PORT === config.FAKE_RAILS_BACK_PORT) {
+      problems.push("SANDBOX_CORE_PORT must differ from the Live core, edge and Fake Rails backend ports");
+    }
+    if (config.SANDBOX_CORE_BACK_URLS) {
+      for (const entry of config.SANDBOX_CORE_BACK_URLS.split(",")) {
+        try {
+          const url = new URL(entry.trim());
+          if (url.protocol !== "https:") problems.push("SANDBOX_CORE_BACK_URLS must use https://");
+        } catch {
+          problems.push(`SANDBOX_CORE_BACK_URLS contains an invalid URL: ${entry}`);
+        }
+      }
+    }
   }
 
   return problems;

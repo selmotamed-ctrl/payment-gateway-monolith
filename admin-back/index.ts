@@ -14,7 +14,7 @@ export const createApp = () => {
   app.use(corsAllowList());
   app.use(requestLoggerMiddleware);
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", service: "admin-back", uptime: process.uptime() });
+    res.json({ status: "ok", service: "admin-back", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null, uptime: process.uptime() });
   });
   // Report-engine authoring bodies carry a base64 asset zip. That prefix is
   // parsed with a larger route-scoped limit; every other route keeps the
@@ -22,7 +22,7 @@ export const createApp = () => {
   const reportEngineJson = express.json({ limit: "24mb" });
   const defaultJson = express.json({ limit: env.MAX_JSON_BODY_BYTES });
   app.use((request, response, next) => {
-    const parser = /^\/api\/v1\/admin\/report-engine(\/|$)/.test(request.path)
+    const parser = /^\/api\/v1\/admin\/(sandbox\/mirror\/)?report-engine(\/|$)/.test(request.path)
       ? reportEngineJson
       : defaultJson;
     parser(request, response, next);

@@ -37,6 +37,9 @@ APP_USER="${POSTGRES_APP_USER:-gateway}"
 APP_PASSWORD="${POSTGRES_APP_PASSWORD:-gateway}"
 DATABASE="${POSTGRES_DATABASE:-payment_gateway_monolith}"
 TEST_DATABASE="${POSTGRES_TEST_DATABASE:-${DATABASE}_test}"
+# v38: the Sandbox plane is a physically separate database in every topology.
+SANDBOX_DATABASE="${POSTGRES_SANDBOX_DATABASE:-payment_gateway_sandbox}"
+ALLOW_FAKE_RAILS_ON_LIVE="${FAKE_RAILS_ENABLED:-false}"
 
 psql_admin() {
   PGPASSWORD="${ADMIN_PASSWORD}" psql \
@@ -62,7 +65,7 @@ SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'role', :'password')
 \gexec
 SQL
 
-for database in "${DATABASE}" "${TEST_DATABASE}"; do
+for database in "${DATABASE}" "${TEST_DATABASE}" "${SANDBOX_DATABASE}"; do
   echo "Creating the database ${database} ..."
   exists="$(psql_admin -tAc "SELECT 1 FROM pg_database WHERE datname = '${database}'")"
   if [[ "${exists}" != "1" ]]; then
@@ -75,6 +78,29 @@ SQL
   fi
 done
 
+# v38: stamp each database with its execution plane before the migration
+# inserts the single-row system_execution_plane lock. A development
+# deployment that intentionally uses the Fake Rails emulator marks its LIVE
+# database with app.allow_fake_rails=true; production never does.
+stamp_plane() {
+  local database="$1"
+  local plane="$2"
+  local allow_fake="false"
+  if [[ "${plane}" == "SANDBOX" || "${ALLOW_FAKE_RAILS_ON_LIVE}" == "true" ]]; then
+    allow_fake="true"
+  fi
+  psql_admin -v ON_ERROR_STOP=1     -v database="${database}"     -v plane="${plane}"     -v allow_fake="${allow_fake}" <<'SQL'
+SELECT format('ALTER DATABASE %I SET app.execution_plane = %L', :'database', :'plane')
+\gexec
+SELECT format('ALTER DATABASE %I SET app.allow_fake_rails = %L', :'database', :'allow_fake')
+\gexec
+SQL
+}
+
+stamp_plane "${DATABASE}" "LIVE"
+stamp_plane "${TEST_DATABASE}" "LIVE"
+stamp_plane "${SANDBOX_DATABASE}" "SANDBOX"
+
 echo
 echo "Applying the PostgreSQL baseline migrations ..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,7 +108,7 @@ CORE_BACK_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${CORE_BACK_DIR}"
 export PATH="${HOME}/.bun/bin:${PATH}"
 
-for database in "${DATABASE}" "${TEST_DATABASE}"; do
+for database in "${DATABASE}" "${TEST_DATABASE}" "${SANDBOX_DATABASE}"; do
   echo "  migrate deploy -> ${database}"
   DATABASE_URL="postgresql://${APP_USER}:${APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${database}" \
     bunx --bun prisma migrate deploy
@@ -92,6 +118,7 @@ echo
 echo "Databases are ready."
 echo "  DATABASE_URL=postgresql://${APP_USER}:${APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${DATABASE}"
 echo "  POSTGRES_TEST_DATABASE_URL=postgresql://${APP_USER}:${APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${TEST_DATABASE}"
+echo "  SANDBOX_DATABASE_URL=postgresql://${APP_USER}:${APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${SANDBOX_DATABASE}"
 echo
 echo "Next:"
 echo "  cd core-back"

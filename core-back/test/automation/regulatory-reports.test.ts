@@ -165,6 +165,7 @@ describeDb("scheduled regulatory returns (live PostgreSQL)", () => {
 
   test("the monthly payload counts the period's own data and nothing outside it", async () => {
     const returnCode = code("TDATA");
+    const currency = Array.from({ length: 3 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join("");
     const ruleId = await rule({ returnCode, period: "MONTHLY", dueDays: 10 });
     const catalog = await createAutomationCatalog(client, { label: "regrep" });
     created.catalogs.push(catalog);
@@ -177,16 +178,20 @@ describeDb("scheduled regulatory returns (live PostgreSQL)", () => {
     // A sandbox payment inside the month is test money: never part of the return.
     await catalog.newAttempt({ status: "SUCCEEDED", amount: "777.0000", createdAt: inside });
     expect(a.id).toBeTruthy();
+    // A currency of this test's own keeps other suites' attempts out of the totals. The attempts keep the
+    // environment they were created with: three LIVE, one SANDBOX (which must stay out of the return).
+    await client.$executeRawUnsafe(`UPDATE payment_attempts SET currency = $2 WHERE merchant_id = $1::uuid`, catalog.merchantId, currency);
     await worker([ruleId], NOW, { maxPeriods: 1 }).runOnce();
     const payload = payloadOf((await reportsOf(returnCode))[0]!);
-    const mine = (payload.sections.paymentsByRail as Array<Record<string, any>>).filter((row) => row.currency === "LYD");
+    const mine = (payload.sections.paymentsByRail as Array<Record<string, any>>).filter((row) => row.currency === currency);
     const total = mine.reduce((sum, row) => sum + row.attempts, 0);
     expect(total).toBeGreaterThanOrEqual(2);
     const succeededValue = mine.reduce((sum, row) => sum + Number(row.valueSucceeded), 0);
     expect(succeededValue).toBeGreaterThanOrEqual(120.5);
     // the September attempt (999.00) is not in October's return: its value is not part of this month's total unless another suite's attempts are
     const only = await client.$queryRawUnsafe<Array<{ amount: string }>>(
-      `SELECT coalesce(sum(requested_amount), 0)::text AS amount FROM payment_attempts WHERE created_at >= '2026-09-30T22:00:00Z' AND created_at < '2026-10-31T22:00:00Z' AND status = 'SUCCEEDED' AND currency = 'LYD' AND env = 'LIVE'`,
+      `SELECT coalesce(sum(requested_amount), 0)::text AS amount FROM payment_attempts WHERE created_at >= '2026-09-30T22:00:00Z' AND created_at < '2026-10-31T22:00:00Z' AND status = 'SUCCEEDED' AND currency = $1 AND env = 'LIVE'`,
+      currency,
     );
     expect(succeededValue).toBeCloseTo(Number(only[0]!.amount), 2);
   });

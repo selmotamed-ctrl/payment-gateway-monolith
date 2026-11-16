@@ -95,6 +95,25 @@ export const envSchema = z.strictObject({
   BACKUP_DAEMON_CLIENT_CERT_PATH: z.string().min(1).optional(),
   BACKUP_DAEMON_CLIENT_KEY_PATH: z.string().min(1).optional(),
   BACKUP_DAEMON_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(15_000),
+  /**
+   * Shared object & asset storage vault (schema v36).
+   *
+   * In a multi-node deployment every core node talks to the dedicated
+   * `pg-object-storage-daemon` over mTLS. In single-process development the
+   * local filesystem driver is used when neither the URL nor the production
+   * guard applies.
+   */
+  OBJECT_STORAGE_DAEMON_URL: z.url().optional(),
+  OBJECT_STORAGE_TLS_CA_PATH: z.string().min(1).optional(),
+  OBJECT_STORAGE_TLS_CLIENT_CERT_PATH: z.string().min(1).optional(),
+  OBJECT_STORAGE_TLS_CLIENT_KEY_PATH: z.string().min(1).optional(),
+  OBJECT_STORAGE_DAEMON_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(30_000),
+  OBJECT_STORAGE_ROOT_DIR: z.string().min(1).default("/tmp/pg-object-storage-dev"),
+  OBJECT_STORAGE_KEK_KEYRING: z.string().optional(),
+  OBJECT_STORAGE_ACTIVE_KEK_VERSION: z.coerce.number().int().positive().default(1),
+  OBJECT_STORAGE_TRASH_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+  OBJECT_STORAGE_GC_GRACE_HOURS: z.coerce.number().int().min(1).max(720).default(24),
+  CLUSTER_CORE_NODE_COUNT: z.coerce.number().int().positive().max(1000).default(1),
   MTLS_CA_CERT_PATH: filePath("MTLS_CA_CERT_PATH"),
   MTLS_SERVER_CERT_PATH: filePath("MTLS_SERVER_CERT_PATH"),
   MTLS_SERVER_KEY_PATH: filePath("MTLS_SERVER_KEY_PATH"),
@@ -136,6 +155,10 @@ export const envSchema = z.strictObject({
   WORKER_KYB_SCAN_ENABLED: booleanFromEnvironment.default(true),
   WORKER_KYB_SCAN_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
   WORKER_KYB_SCAN_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(20),
+  /** Shared object storage maintenance: staging GC, orphan sweep, integrity scrub, lock reconcile and the AV fallback. */
+  WORKER_OBJECT_STORAGE_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_OBJECT_STORAGE_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  WORKER_OBJECT_STORAGE_BATCH_SIZE: z.coerce.number().int().positive().max(1000).default(25),
   /** AUTO-07: statement schedule alerts. */
   WORKER_STATEMENT_SCHEDULE_ENABLED: booleanFromEnvironment.default(true),
   WORKER_STATEMENT_SCHEDULE_INTERVAL_MS: z.coerce.number().int().positive().default(5 * 60 * 1000),
@@ -396,6 +419,18 @@ export const envSchema = z.strictObject({
    * gateway version's `allowed_hosts`. Every other private, loopback and
    * metadata address stays blocked.
    */
+  /**
+   * `v38`: the execution plane of this process. LIVE talks only to
+   * payment_gateway_prod; SANDBOX talks only to payment_gateway_sandbox and
+   * routes every rail to the local Fake Rails emulator.
+   */
+  EXECUTION_PLANE: z.enum(["LIVE", "SANDBOX"]).default("LIVE"),
+  /** Development escape hatch: permits the Fake Rails emulator on a LIVE-plane process. */
+  PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE: booleanFromEnvironment.default(false),
+  /** Fake Rails control-plane base URL used by the sandbox routes (http(s)://host:port/api/fake-rails/v1). */
+  FAKE_RAILS_CONTROL_URL: z.url().optional(),
+  /** Shared secret sent as `x-fake-rails-control-token` on control-plane calls. */
+  FAKE_RAILS_CONTROL_TOKEN: z.string().min(8).optional(),
   FAKE_RAILS_ENABLED: booleanFromEnvironment.default(false),
   FAKE_RAILS_ALLOW_IN_PRODUCTION: booleanFromEnvironment.default(false),
   IS_TEST_SERVER: booleanFromEnvironment.default(false),
@@ -531,6 +566,17 @@ const resolveEnvironment = (): CoreEnv => {
     BACKUP_DAEMON_CLIENT_CERT_PATH: undefined,
     BACKUP_DAEMON_CLIENT_KEY_PATH: undefined,
     BACKUP_DAEMON_TIMEOUT_MS: 15000,
+    OBJECT_STORAGE_DAEMON_URL: undefined,
+    OBJECT_STORAGE_TLS_CA_PATH: undefined,
+    OBJECT_STORAGE_TLS_CLIENT_CERT_PATH: undefined,
+    OBJECT_STORAGE_TLS_CLIENT_KEY_PATH: undefined,
+    OBJECT_STORAGE_DAEMON_TIMEOUT_MS: 30_000,
+    OBJECT_STORAGE_ROOT_DIR: "/tmp/pg-object-storage-dev",
+    OBJECT_STORAGE_KEK_KEYRING: undefined,
+    OBJECT_STORAGE_ACTIVE_KEK_VERSION: 1,
+    OBJECT_STORAGE_TRASH_RETENTION_DAYS: 7,
+    OBJECT_STORAGE_GC_GRACE_HOURS: 24,
+    CLUSTER_CORE_NODE_COUNT: 1,
     MTLS_CA_CERT_PATH: "./certs/internal-ca.crt",
     MTLS_SERVER_CERT_PATH: "./certs/core-back.crt",
     MTLS_SERVER_KEY_PATH: "./certs/core-back.key",
@@ -549,6 +595,9 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_KYB_SCAN_ENABLED: true,
     WORKER_KYB_SCAN_INTERVAL_MS: 60_000,
     WORKER_KYB_SCAN_BATCH_SIZE: 20,
+    WORKER_OBJECT_STORAGE_ENABLED: true,
+    WORKER_OBJECT_STORAGE_INTERVAL_MS: 60_000,
+    WORKER_OBJECT_STORAGE_BATCH_SIZE: 25,
     WORKER_STATEMENT_SCHEDULE_ENABLED: true,
     WORKER_STATEMENT_SCHEDULE_INTERVAL_MS: 300_000,
     STATEMENT_SCHEDULE_GRACE_MINUTES: 120,
@@ -655,6 +704,10 @@ const resolveEnvironment = (): CoreEnv => {
     UNKNOWN_ATTEMPT_CASE_SLA_HOURS: 24,
     NOTIFICATION_WEBHOOK_URL: undefined,
     NOTIFICATION_WEBHOOK_TIMEOUT_MS: 5000,
+    EXECUTION_PLANE: "LIVE",
+    PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE: false,
+    FAKE_RAILS_CONTROL_URL: undefined,
+    FAKE_RAILS_CONTROL_TOKEN: undefined,
     FAKE_RAILS_ENABLED: false,
     FAKE_RAILS_ALLOW_IN_PRODUCTION: false,
     IS_TEST_SERVER: false,

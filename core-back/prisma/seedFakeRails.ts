@@ -193,6 +193,34 @@ export const seedFakeRails = async (): Promise<void> => {
   if (!FAKE_RAILS_SEEDER_TOKEN) {
     throw new Error("FAKE_RAILS_SEEDER_TOKEN is required to seed the Fake Rails blueprints");
   }
+  // The v38 migration stamps a fresh database LIVE unless the migration
+  // session carries app.execution_plane=SANDBOX. The deploy sets that GUC on
+  // the sandbox owner URL, but an existing sandbox database may still carry
+  // the migration default. Stamp it only when the connected database name is
+  // explicitly the configured SANDBOX_DB_NAME, so this can never flip Live.
+  if (process.env.EXECUTION_PLANE === "SANDBOX" && process.env.SANDBOX_DB_NAME) {
+    const [database] = await client.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`;
+    if (database?.name === process.env.SANDBOX_DB_NAME) {
+      await client.systemExecutionPlane.upsert({
+        where: { id: 1 },
+        update: { plane: "SANDBOX", allowFakeRails: true },
+        create: { id: 1, plane: "SANDBOX", allowFakeRails: true },
+      });
+    }
+  }
+  // v38: pointing seeded gateways at Fake Rails is a development activity.
+  // The LIVE database fence refuses it unless the deployment explicitly
+  // opted in (deploy sets this for a development/test server, never for
+  // production).
+  const allowFakeRailsOnLive =
+    process.env.NODE_ENV !== "production"
+    || String(process.env.PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE ?? "false").toLowerCase() === "true";
+  if (allowFakeRailsOnLive) {
+    await client.systemExecutionPlane.updateMany({
+      where: { id: 1, plane: "LIVE" },
+      data: { allowFakeRails: true },
+    });
+  }
   const environments = await updateEnvironments();
   const widgets = await updateWidgets();
   const channels = await updateWebhookChannels();

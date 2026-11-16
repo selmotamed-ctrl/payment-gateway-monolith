@@ -5,6 +5,7 @@ import { sessionHeaders } from "@/utils/security/sessionToken";
 import { extractApiError, isAppSuspendedError } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import router from "@/router";
+import { sandboxMirrorPath } from "@/state/sandbox";
 
 export const api = axios.create({
     baseURL: getBaseUrl(),
@@ -17,6 +18,7 @@ api.interceptors.request.use((config) => {
         config.headers[name] = value;
     }
     config.headers["X-Client-Channel"] = "admin";
+    if (config.url) config.url = sandboxMirrorPath(config.url);
     return config;
 });
 

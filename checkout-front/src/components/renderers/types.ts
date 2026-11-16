@@ -78,10 +78,64 @@ export type SupportConfig = {
 
 export type FeeBearerMode = "MERCHANT_ABSORBS" | "PAYER_SURCHARGE" | "SPLIT";
 
+export type SandboxAccountItem = {
+    id: string;
+    railCode: string;
+    gatewayCode: string;
+    instrumentType: string;
+    identifier: string;
+    holderName: string;
+    secretPin: string;
+    expiry: string | null;
+    availableBalanceLyd: string;
+    reservedBalanceLyd: string;
+    dailyLimitLyd: string;
+    dailySpentLyd: string;
+    status: string;
+    staticOtp?: string | null;
+    notes?: string | null;
+    dailySpentDate?: string | null;
+    merchantId?: string | null;
+};
+
+export type SandboxActiveSecrets = {
+    ourReference: string;
+    providerReference: string;
+    expectedOtp: string | null;
+    collectionMode: string;
+    boundAccountIdentifier: string | null;
+    boundAccountBalanceAfterHoldLyd: string | null;
+    heldAmountLyd: string | null;
+    canSimulateMobilePushOrQrApproval: boolean;
+    qrPayload?: string | null;
+    deepLinkUrl?: string | null;
+    redirectUrl?: string | null;
+    expiresAt?: string | null;
+    recentWireEvents?: Array<{
+        phase: string;
+        status: number | null;
+        fault: string | null;
+        durationMs: number | null;
+        createdAt: string;
+    }>;
+};
+
+export type SandboxInspectorPayload = {
+    enabled: boolean;
+    mode: string;
+    unlocked: boolean;
+    unavailable?: string | null;
+    railAccounts: SandboxAccountItem[];
+    activeAttemptSecrets: SandboxActiveSecrets | null;
+};
+
 export type PayLinkSummary = {
+    env?: "LIVE" | "SANDBOX";
+    sandboxInspector?: SandboxInspectorPayload | null;
     linkKey: string;
     merchantTradeName: string;
     merchantLogoUrl?: string | null;
+    title?: string | null;
     description?: string | null;
     amount: string;
     currency: string;

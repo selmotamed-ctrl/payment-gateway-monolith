@@ -3,8 +3,8 @@ id: deploy.topology
 title: Deploy Topology and Configuration
 status: partial
 confidence: high
-last_verified: 2026-11-05
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-13
+verified_against: 19d6a54+working-tree
 code:
   - deploy/test-matrix/topologies.ts
   - deploy/deploy.ts
@@ -121,7 +121,7 @@ The node spec carries only host, SSH port, private IP and service port. SSH user
 
 1. **Node arrays over legacy host fields.** `CORE_NODES` overrides `CORE_SSH_HOST`, `CORE_SSH_PORT`, `CORE_PRIVATE_IP` and `CORE_PORT` for planning. The same applies to admin, merchant and checkout. SSH user/key/sudo are still taken from the legacy fields.
 2. **PostgreSQL storage fields over legacy database fields.** When any `PG_*` storage field is configured, `PG_DB_NAME`, `PG_DB_USER` and `PG_DB_PASSWORD` are authoritative. Otherwise `DB_*` is used, falling back to `PG_DB_*`.
-3. **Derived database URL.** When the PostgreSQL tier is configured and a host exists, `DATABASE_URL` is derived from the PG credentials, the primary private IP and `PGBOUNCER_PORT` when enabled; otherwise the explicit `DATABASE_URL` is used.
+3. **Derived database URL.** When the PostgreSQL tier is configured and a host exists, `DATABASE_URL` is derived from the PG credentials, the primary private IP and `PGBOUNCER_PORT` when enabled; otherwise the explicit `DATABASE_URL` is used. The owner/migration URL is derived separately and always uses the session-safe endpoint: an explicit `LEADER_ELECTION_DATABASE_URL` when set, otherwise the deploy-managed `pgw_session` alias, otherwise the direct primary. This applies in the legacy single-role mode too, so Prisma Migrate's advisory lock is never stranded in the transaction pool; the runtime URL does not change. An externally managed pooler is expected to provide the same session route (derived alias or explicit override).
 4. **Explicit core URL list.** `CORE_BACK_URLS` wins; otherwise `https://<privateIp>:<servicePort>` for every `CORE_NODES` entry; otherwise the legacy `https://<CORE_PRIVATE_IP>:<CORE_PORT>`.
 5. **Node service port over configured backend port.** A node's `servicePort` overrides `CORE_PORT`/`ADMIN_BACK_PORT`/`MERCHANT_BACK_PORT`/`CHECKOUT_BACK_PORT` for that node.
 6. **CLI over environment.** `--fresh`, `--update`, `--only`, `--nodes`, `--rolling-batch`, `--keep`, `--rotate-certs`, `--skip-build` and `--skip-verify` override the corresponding configuration for one run.
@@ -207,7 +207,7 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | Flag | Effect |
 | :--- | :--- |
 | `--env=<path>` | Use another environment file. |
-| `--only=core,checkout` | Restrict roles. Storage aliases: `pg`, `pg-primary`, `pg-replica`, `pgbouncer`, `redis`, `audit-db`, `log-db`, `backup`, `storage`. |
+| `--only=core,checkout` | Restrict roles. Storage aliases: `pg`, `pg-primary`, `pg-replica`, `pgbouncer`, `redis`, `audit-db`, `log-db`, `backup`, `storage`. Backend aliases: `core-back`, `admin-back`, `merchant-back`, `checkout-back`, `fake-rails-back`. |
 | `--nodes=<id,...>` | Restrict compute units by node id. |
 | `--rolling-batch=<n>` | Override `ROLLING_BATCH_SIZE`. |
 | `--keep=<n>` | Override `KEEP_RELEASES`. |
@@ -216,7 +216,10 @@ The CLI `--fresh` always wins; `--update` disables an environment `fresh`.
 | `--skip-build`, `--skip-verify` | Skip local SPA builds or end-to-end verification. |
 | `--rotate-certs` | Rotate the CA and every leaf. |
 | `--check-certs` | Print the certificate expiry table and exit 1 when a certificate is missing, expired or inside `MTLS_RENEW_WITHIN_DAYS` (AUTO-28). |
-| `--dry-run` | Print commands; execute nothing. |
+| `--dry-run` | Print commands; execute nothing (preflight prints its checks without connecting). |
+| `--preflight-only` | Run the read-only preflight and exit; no build, PKI or deployment. |
+| `--skip-preflight` | Skip the preflight gate (emergency use, warns). |
+| `--stop-unmanaged` | Allow the preflight to stop safe same-repo dev listeners on selected service ports. |
 
 ### Files
 
@@ -338,4 +341,21 @@ These tests run without PostgreSQL/Redis or remote hosts. A real deploy requires
 
 ## Remediation round 2 (2026-11-08): app role and host probe configuration
 
-`PG_APP_USER` (default `pgw_app_login`) and `PG_APP_PASSWORD` (at least 12 characters, different from the owner's) enable the role split: the owner (`PG_DB_USER`) runs migrations and seeders through `ownerUrl`, while the running services connect as `PG_APP_USER`, a plain LOGIN member of `pgw_app`. `PG_APP_USER` must not be `postgres`, `pgw_app` or `pgw_ledger_maintenance`, nor equal the owner or replication user. Without `PG_APP_PASSWORD` the legacy single-role behaviour is kept and the deploy warns.
+`PG_APP_USER` (default `pgw_app_login`) and `PG_APP_PASSWORD` (at least 12 characters, different from the owner's) enable the role split: the owner (`PG_DB_USER`) runs migrations and seeders through `ownerUrl`, while the running services connect as `PG_APP_USER`, a plain LOGIN member of `pgw_app`. `PG_APP_USER` must not be `postgres`, `pgw_app` or `pgw_ledger_maintenance`, nor equal the owner or replication user. Without `PG_APP_PASSWORD` the legacy single-role runtime behaviour is kept and the deploy warns; migrations and seeders still use the session-safe `ownerUrl`.
+
+## Shared object storage topology
+
+`OBJECT_STORAGE_NODE` (same `nodeId@sshHost:sshPort:privateIp:servicePort`
+format) adds `object-storage` to the storage roles. It is mandatory when
+`CORE_NODES` has more than one node or the backup daemon is on a separate host;
+otherwise validation fails with `MULTI_NODE_SHARED_STORAGE_REQUIRED`.
+`OBJECT_STORAGE_ENABLED`, `OBJECT_STORAGE_MANAGE_VIA_SSH` or a non-empty node
+auto-detect the tier. Core and backup daemon receive
+`OBJECT_STORAGE_DAEMON_URL` plus `object-storage-client` mTLS paths, and the
+core receives `CLUSTER_CORE_NODE_COUNT` and the KEK keyring.
+
+## v38-v39 sandbox configuration (2026-11-13)
+
+New keys: `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT` (4005), `SANDBOX_DB_NAME` (`payment_gateway_sandbox`), `SANDBOX_REMOTE_DIR`, `SANDBOX_CORE_BACK_URLS`, `FAKE_RAILS_CONTROL_TOKEN`. Validation requires Fake Rails, a distinct sandbox database/remote directory/port and HTTPS edge URLs.
+
+`sandboxDatabase()` derives `pgw_sandbox` (transaction) and `pgw_sandbox_session` (session) PgBouncer aliases; the PostgreSQL provisioner creates `payment_gateway_sandbox` and both aliases. `hostPlanner` emits a second core `ServicePlan` named `pg-core-sandbox` on `SANDBOX_NODE` (or the first core node) with its own release tree, sandbox `DATABASE_URL`/`LEADER_ELECTION_DATABASE_URL`, `EXECUTION_PLANE=SANDBOX`, Fake Rails enabled, backups removed from its env, a firewall rule on 4005 and a core certificate SAN that includes the sandbox IP. `deployService` migrates the sandbox database with the direct sandbox owner URL carrying `app.execution_plane=SANDBOX` (the pooler rejects custom startup options), then `db-seed` and `seed-fake-rails` when seeding is enabled. The seeder stamps an existing sandbox row only when the connected database name matches `SANDBOX_DB_NAME`. Edges receive `SANDBOX_CORE_BACK_URLS`; a sandbox pool failure never falls back to Live. Sandbox and Fake Rails data are deliberately not backup targets.

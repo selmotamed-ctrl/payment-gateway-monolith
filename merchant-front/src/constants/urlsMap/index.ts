@@ -41,6 +41,9 @@ export const urlsMap = {
 
     disputesList: "v1/merchant/disputes",
     disputeEvidence: (id: string) => `v1/merchant/disputes/${id}/evidence`,
+    disputeAttachments: (id: string) => `v1/merchant/disputes/${id}/attachments`,
+    disputeAttachmentContent: (id: string, attachmentId: string) => `v1/merchant/disputes/${id}/attachments/${attachmentId}/content`,
+    disputeAttachmentDelete: (id: string, attachmentId: string) => `v1/merchant/disputes/${id}/attachments/${attachmentId}`,
 
     cashoutsList: "v1/merchant/cashouts",
 

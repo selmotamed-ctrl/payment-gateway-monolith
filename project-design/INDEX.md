@@ -21,6 +21,7 @@ This is the canonical entrypoint for the payment-gateway project design.
 - [Security and mTLS](parts/00-platform/02-security-and-mtls.md) — `platform.security` · `partial`
 - [Runtime and Configuration](parts/00-platform/03-runtime-and-config.md) — `platform.runtime` · `partial`
 - [Observability](parts/00-platform/04-observability.md) — `platform.observability` · `partial`
+- [Parallel Sandbox Execution Plane](parts/00-platform/05-sandbox-execution-plane.md) — `platform.sandbox` · `partial`
 
 ### 01-core-back
 
@@ -37,6 +38,7 @@ This is the canonical entrypoint for the payment-gateway project design.
 - [Synthetic Seeder](parts/01-core-back/10-synthetic-seeder.md) — `core.seeder` · `partial`
 - [Tests and Benchmarks](parts/01-core-back/11-tests-and-benchmarks.md) — `core.tests` · `partial`
 - [Dynamic Report Engine SDK and Report Studio Host](parts/01-core-back/12-report-engine-sdk.md) — `core.report-engine` · `implemented`
+- [Shared Object & Asset Storage Engine](parts/01-core-back/13-object-storage.md) — `core.object-storage` · `implemented`
 
 ### 02-edge-services
 

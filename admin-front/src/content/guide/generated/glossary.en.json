@@ -1874,5 +1874,46 @@
     ],
     "short": "A sample request and answer used to check a result offline.",
     "ar": "مثال اختبار"
+  },
+  {
+    "slug": "object-storage-vault",
+    "term": "Object Storage Vault",
+    "aliases": [
+      "OBJECT_STORAGE_NODE",
+      "pg-object-storage-daemon"
+    ],
+    "related": [
+      "storage-object-lock",
+      "legal-hold"
+    ],
+    "short": "The dedicated mTLS service (`pg-object-storage-daemon`) that stores chunk-encrypted (`pgos1`) files shared across all core-back nodes and backup-daemon.",
+    "ar": "خزنة تخزين الكائنات"
+  },
+  {
+    "slug": "storage-object-lock",
+    "term": "Storage Object Lock",
+    "aliases": [
+      "storage_object_locks",
+      "holder lock"
+    ],
+    "related": [
+      "object-storage-vault",
+      "legal-hold"
+    ],
+    "short": "An append-only reference in `storage_object_locks` binding a business record (such as `KYB_DOCUMENT` or `RAIL_LOGO`) to a `StorageObject` so it cannot be purged while in use.",
+    "ar": "قفل كائن التخزين"
+  },
+  {
+    "slug": "legal-hold",
+    "term": "Legal Hold",
+    "aliases": [
+      "legal_hold"
+    ],
+    "related": [
+      "object-storage-vault",
+      "storage-object-lock"
+    ],
+    "short": "A compliance flag on `storage_objects` that freezes an asset against garbage collection or purging regardless of lock count or retention expiry.",
+    "ar": "حجز قانوني"
   }
 ]

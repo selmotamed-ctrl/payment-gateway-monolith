@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VProgressCircular, VSelect, VTextarea } from "vuetify/components";
+import { VAlert, VBtn, VFileInput, VProgressCircular, VSelect, VTextarea, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -105,6 +105,21 @@ type AmlCaseDetail = AmlCase & {
     } | null;
 };
 
+type AmlEvidence = {
+    id: string;
+    label?: string;
+    evidenceType: string;
+    notes: string | null;
+    fileName: string | null;
+    mimeType: string | null;
+    byteSize: string;
+    sha256: string;
+    status: string;
+    avScanStatus: string;
+    uploadedById: string;
+    createdAt: string;
+};
+
 type AmlCaseSummary = {
     totalOpen: number;
     byStatus: Record<string, number>;
@@ -186,6 +201,11 @@ const AmlCasesPage = dc(() => {
     const selected = ref<AmlCaseDetail | null>(null);
     const severityView = computed(() => describeSeverityInputs(selected.value?.severityInputs));
     const detailLoading = ref(false);
+    const evidence = ref<AmlEvidence[]>([]);
+    const evidenceLoading = ref(false);
+    const evidenceFile = ref<File | null>(null);
+    const evidenceType = ref("DOCUMENT");
+    const evidenceNotes = ref("");
     const resolution = ref("RELEASE");
     const rationale = ref("");
     const caseChecklist = ref<Record<string, boolean>>({});
@@ -304,11 +324,26 @@ const AmlCasesPage = dc(() => {
         actionError.value = "";
     };
 
+    const loadEvidence = async (caseId: string) => {
+        evidenceLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.amlCaseEvidence(caseId));
+            const payload = response.data?.data ?? response.data ?? {};
+            evidence.value = (payload.evidence ?? []) as AmlEvidence[];
+        } catch (error) {
+            evidence.value = [];
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            evidenceLoading.value = false;
+        }
+    };
+
     const presentCaseDetail = (detail: AmlCaseDetail) => {
         selected.value = detail;
         resetCaseActionState();
         detailsOpen.value = true;
         detailLoading.value = false;
+        void loadEvidence(detail.id);
     };
 
     const fetchAmlCaseDetail = async (id: string): Promise<AmlCaseDetail | null> => {
@@ -318,6 +353,9 @@ const AmlCasesPage = dc(() => {
     };
 
     const openDetails = async (row: AmlCase) => {
+        evidence.value = [];
+        evidenceFile.value = null;
+        evidenceNotes.value = "";
         selected.value = {
             ...row,
             screening: null,
@@ -337,6 +375,40 @@ const AmlCasesPage = dc(() => {
             showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         } finally {
             detailLoading.value = false;
+        }
+    };
+
+    const uploadEvidence = async () => {
+        if (!selected.value || !evidenceFile.value) return;
+        try {
+            const body = new FormData();
+            body.append("file", evidenceFile.value);
+            body.append("label", evidenceFile.value.name);
+            body.append("evidenceType", evidenceType.value);
+            if (evidenceNotes.value.trim()) body.append("notes", evidenceNotes.value.trim());
+            await api.post(urlsMap.amlCaseEvidence(selected.value.id), body, { headers: { "Content-Type": "multipart/form-data" } });
+            evidenceFile.value = null;
+            evidenceNotes.value = "";
+            await loadEvidence(selected.value.id);
+            showSnackBar({ type: "success", message: t("Evidence uploaded") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        }
+    };
+
+    const downloadEvidence = async (item: AmlEvidence) => {
+        if (!selected.value) return;
+        try {
+            const response = await api.get(urlsMap.amlCaseEvidenceContent(selected.value.id, item.id), { responseType: "blob" });
+            const blob = new Blob([response.data], { type: item.mimeType ?? "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = item.fileName ?? "evidence";
+            anchor.click();
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
         }
     };
 
@@ -713,6 +785,31 @@ const AmlCasesPage = dc(() => {
                                 {selected.value.approval && (
                                     <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "Approvals" })}>{t("Open approvals")}</VBtn>
                                 )}
+                            </ThemedView>
+                        </ThemedView>
+
+                        <ThemedView style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
+                            <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Confidential evidence")}</ThemedText>
+                            {evidenceLoading.value ? <ThemedText>{t("Loading…")}</ThemedText> : evidence.value.length === 0 ? (
+                                <ThemedText class="text-medium-emphasis">{t("No evidence attachments.")}</ThemedText>
+                            ) : evidence.value.map((item) => (
+                                <ThemedView key={item.id} style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "8px 0", borderBottom: "1px solid var(--pg-border-subtle)" }}>
+                                    <ThemedView style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                        <ThemedText>{item.label ?? item.fileName ?? item.evidenceType}</ThemedText>
+                                        <StatusBadge status={item.avScanStatus} />
+                                        <MonoRef value={item.sha256} truncate={12} />
+                                        <ThemedText class="text-medium-emphasis">{item.byteSize} B</ThemedText>
+                                    </ThemedView>
+                                    <ThemedView style={{ display: "flex", gap: "6px" }}>
+                                        <VBtn size="small" variant="text" disabled={item.status !== "ACTIVE"} onClick={() => void downloadEvidence(item)}>{t("Download")}</VBtn>
+                                    </ThemedView>
+                                </ThemedView>
+                            ))}
+                            <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginTop: "6px" }}>
+                                <VSelect items={["DOCUMENT", "STATEMENT", "SCREENSHOT", "CORRESPONDENCE", "OTHER"]} modelValue={evidenceType.value} onUpdate:modelValue={(value: string) => (evidenceType.value = value)} label={t("Evidence type")} density="compact" hideDetails style={{ maxWidth: "190px" }} />
+                                <VFileInput modelValue={evidenceFile.value} onUpdate:modelValue={(value: File | File[] | null) => (evidenceFile.value = Array.isArray(value) ? value[0] ?? null : value)} density="compact" hideDetails style={{ maxWidth: "300px" }} />
+                                <VTextField modelValue={evidenceNotes.value} onUpdate:modelValue={(value: string) => (evidenceNotes.value = value)} label={t("Notes")} density="compact" hideDetails style={{ maxWidth: "320px" }} />
+                                <VBtn size="small" variant="tonal" disabled={!evidenceFile.value} onClick={() => void uploadEvidence()}>{t("Upload evidence")}</VBtn>
                             </ThemedView>
                         </ThemedView>
 

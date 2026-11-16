@@ -340,7 +340,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 ## Core API Surface
 
-> Status: `partial` · Last verified: 2026-11-08
+> Status: `partial` · Last verified: 2026-11-13
 
 ## 1. Purpose and scope
 
@@ -507,8 +507,8 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `POST /rails`, `PATCH /rails/:id`, `PUT /rails/:id/fields` | `gateway:write` |
 | `GET /routes`, `/export`, `/summary`, `/summary/export`, `GET /routes/:id` | `gateway:read` |
 | `POST /routes`, `PATCH /routes/:id`, `POST /routes/:id/state` | `gateway:write` |
-| `GET /assets`, `GET /assets/:id` | `gateway:read` |
-| `POST /assets` | `gateway:write` |
+| `GET /assets`, `GET /assets/:id`, `GET /assets/:id/content` | `gateway:read` |
+| `POST /assets`, `POST /assets/upload`, `DELETE /assets/:id` | `gateway:write` |
 
 #### Reconciliation
 
@@ -988,9 +988,22 @@ Core adds these internal admin routes under `/internal/admin` (all confidential 
 - `POST /aml/reports/:id/file` creates a PENDING `ExternalSubmission` before dispatch, blocks duplicate PENDING/SUBMITTED attempts, records failure details, and passes the authoritative status change through the normal submission gate. Manual submissions create a MANUAL adapter and submission history.
 - Template upload/update URLs reject non-XLSX schemas and any unsafe/invalid workbook; DOCX validation/simulation uses the narrative schema renderer; clone copies the XLSX template binding.
 
+
+Object-storage routes include the admin summary/object/access-log/legal-hold/maintenance surface, dispute attachments (admin and merchant), AML case evidence, reconciliation statement download, and brand-asset upload/content/delete. The admin object list accepts `page`, `pageSize`, `namespace`, `status`, `statuses`, `bucket`, `ownerMerchantId`, `legalHold`, `sha256Hex`, `search`, `sortKey` and `sortDirection`. Legal-hold lift returns `202` for a second checker; place is immediate.
+
+## Sandbox Studio read models (2026-11-13)
+
+The sandbox control router adds merchant read endpoints under `/internal/sandbox/merchant/studio`: overview, wallets (list/summary/detail), applications (list/summary/detail), links (list/summary/detail), payments (list/summary) and tokens (list/summary/detail). Lists use the shared `buildListQuery`/`listResponse` contract with server pagination, sorting, search and filters, and expose relation labels (wallet/application/rail/gateway) plus computed counts and balances. `PATCH /merchant/wallets/:id/status` freezes/activates a sandbox wallet and records a `sandbox_sync_audits` row.
+
+The admin router adds paginated `/admin/merchants` and `/admin/merchants/summary`, sandbox merchant detail (`/admin/merchants/:id`), `/admin/audits`, and `/admin/fake-rails/accounts/summary`. Fake Rails transaction lists accept `page`/`pageSize` as well as `limit`/`offset`; statements and webhook lists remain bounded. Admin endpoints require a staff principal.
+
+## v38-v39 `/internal/sandbox` (2026-11-13)
+
+A new internal router, reachable from merchant-back and admin-back and mounted only on the SANDBOX plane, exposes the merchant sandbox overview, wallet detail/ledger/balance/simulated cash-out, payment detail/refund/dispute simulation and resolution, demo seed and 20-payment history seed, reset, Fake Rails account proxy/control (paginated, merchant-scoped, preset clone/restore), reconciliation import, webhook test ping, clearing pools/statement/settle, and staff overview, merchant list/overview, global reset, Fake Rails scenarios/transactions/webhooks/statements. Checkout adds `GET/POST /pay/:linkKey/sandbox-accounts`, account movements, `PATCH /pay/:linkKey/sandbox-accounts/:accountId`, `GET /pay/:linkKey/logs/:attemptId/sandbox-inspector` and `POST /pay/:linkKey/logs/:attemptId/sandbox-simulate`; all of them refuse a non-`sbx_` key with `403 SANDBOX_INSPECTOR_FORBIDDEN_ON_LIVE_LINK`.
+
 ## Core Engine
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-13
 
 ## 1. Purpose and scope
 
@@ -1624,6 +1637,10 @@ No build or test was run for this documentation change. Tests that require Postg
 - **A pending charge is never resubmitted (2026-11-12).** The confirm claim (`claimAttemptForConfirm`, `api/internal/checkout.ts`) refuses an attempt that is `UNKNOWN` **or `VERIFYING`** with `point_of_no_return = true`. Only `UNKNOWN` was excluded before, so a second confirm with a NEW idempotency key on an attempt whose charge was pending at the gateway re-claimed it and ran the SUBMIT stack a second time (a possible double charge). Such an attempt is resolved by inquiry, callback or the poll worker only.
 - **Re-finalize guard (GAP-016, RESOLVED 2026-11-05).** `finalizeGuardFor(status)` classifies an attempt: `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` are `IDEMPOTENT` (already settled), `CANCELLED` and `BLOCKED` are `REFUSE`, everything else (including `FAILED` and `EXPIRED`, so a late success is still recovered) is `ALLOW`. `verifyCallback` applies it before the trusted-facts check: a duplicate of the trusted success on a settled attempt is a no-op that returns the current state, a contradicting (failure/untrusted) signal on a settled attempt throws `409 ATTEMPT_TERMINAL`, and a callback for a cancelled/blocked attempt throws `409 ATTEMPT_TERMINAL`. `finalizeSuccess` re-reads the attempt status first so a stale in-memory attempt cannot settle twice (idempotent settled attempts return `COMMITTED`, or `SUSPENSE` for `SUSPENSE_SETTLEMENT`, with the stored ledger entry id).
 - **AML hold escrow after capture (GAP-015, RESOLVED 2026-11-05).** The guard pipeline no longer books escrow when it decides `HOLD` (no money has been captured yet, so `Dr GATEWAY_CLEARING` / `Cr AML_HOLD` would fabricate a balance); the decision reason is now `AML_HOLD_PENDING_CAPTURE` and `hold_journal_entry_id` is no longer written on the case. When a verified gateway capture of an AML-held attempt reaches `finalizeSuccess`, `escrowHeldCapture` books the escrow (`AML_HOLD_AND_RELEASE` scenario, idempotent per `PAYMENT_ATTEMPT`/attempt id, in the transaction runner when present) and returns the new `SlotCommitResult.outcome` `HELD`: the attempt is NOT settled, the slot is NOT committed, and the result keeps the `AML_HOLD` substatus. Because the money can only be captured by the rail, the checkout initiate route does NOT stop a `HOLD` attempt before `engine.initiate`; the attempt continues through the normal rail flow and a held attempt remains confirmable (`claimAttemptForConfirm` no longer excludes the `AML_HOLD` substatus). Cancel and expiry still refuse to touch a held attempt. The checker's release (see `core.governance`) settles it and is refused until the escrow exists. A duplicate finalize is refused atomically (`claimFinalize` conditional update), so two concurrent verified callbacks cannot settle/commit the slot twice. Residual: a merchant-direct (`MERCHANT_DIRECT`) held attempt holds no platform cash, so nothing is booked (`AML_HOLD_NO_ESCROW`) and release/void have no escrow to move.
+
+## v38 strict plane status (2026-11-13)
+
+OD-10 and `resolveEnvironment(merchantStatus)` are removed. Checkout and merchant link creation resolve the environment from the process plane; Live requires an ACTIVE merchant, application and wallet. Sandbox uses the same strict status rules, but its merchant envelope is created ACTIVE, so a pending Live merchant can train without a Live approval. `AttemptGuardPipeline` no longer reads the OD-10 setting and applies the same status posture on both planes.
 
 ## Double-Entry Ledger
 
@@ -2911,7 +2928,7 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 
 ## Storage Engine
 
-> Status: `partial` · Last verified: 2026-11-09
+> Status: `partial` · Last verified: 2026-11-13
 
 ## 1. Purpose and scope
 
@@ -3379,9 +3396,27 @@ GAP-DB-02 (claim loops outside a transaction), GAP-DB-03 (KYB expiry has no curs
 - **Redis velocity failure policy (GAP-031, RESOLVED).** `REDIS_VELOCITY_FAILURE_POLICY` (parsed by `parseVelocityFailurePolicy`, wired in `createStorageEngine`, overridable with `velocityFailurePolicy`) defines what the Redis velocity counter does when Redis is unreachable, errors or exceeds the command timeout. `local-fallback` (default) fails open degraded: the window is counted in this node's memory, so limits still apply per node and are lost on restart. `fail-open` allows without counting (empty `windowStats`). `fail-closed` throws `VelocityUnavailableError` so the caller refuses the attempt. `onVelocityDegraded` is invoked with the policy and the error. Velocity is a risk signal, not a ledger invariant, so the default does not stop payments during an outage; use `fail-closed` only when a missed limit is worse than an outage. Tests: `core-back/test/storage-engine/velocity-failure-policy.test.ts`.
 - **Leader election (GAP-012).** `StorageEngine.leaderElection` is a `PgAdvisoryLeaderElection` built from the primary URL (see `core.workers` for the semantics and the PgBouncer transaction-pooling caveat); it is closed with the engine.
 
+## 13. Shared object & asset storage (schema v36)
+
+The storage engine is paired with the shared object vault documented in
+`parts/01-core-back/13-object-storage.md`. PostgreSQL keeps only the control
+plane (`storage_objects`, `storage_object_locks`,
+`storage_object_access_logs`); the bytes live in
+`deploy/object-storage-daemon` (`RemoteMtlsBlobStore` on every core node and the
+backup daemon, `FsBlobStore` in local dev). The former
+`reconciliation_runs.file_content` bytea column is removed and the run carries
+`storage_object_id`; KYB documents, regulatory outputs/templates, Report Studio
+bundles and catalog assets carry storage-object FKs. The `ObjectStorageMaintenanceWorker`
+(GC, orphan sweep, integrity scrub, lock reconcile, KEK rewrap, generic AV
+fallback) and the `object_storage` Platform Monitor check cover operations.
+
+## v38 database execution-plane fence (2026-11-13)
+
+`system_execution_plane` is a single-row lock per database. `enforce_execution_plane_env_fence()` is attached to `payment_links`, `payment_attempts` and `access_tokens`: a SANDBOX database always rejects LIVE rows; a LIVE database rejects SANDBOX rows when `app.plane_fence_strict=true` (the migration stores that at database level, and the test suite disables it only for its mixed throwaway database). `enforce_no_fake_rails_on_live_plane()` refuses a `FAKE*` gateway and an enabled gateway environment pointed at Fake Rails on a strict Live database unless `allow_fake_rails=true`.
+
 ## Data Schema and Migrations
 
-> Status: `partial` · Last verified: 2026-11-11
+> Status: `partial` · Last verified: 2026-11-13
 
 ## 1. Purpose and scope
 
@@ -3391,7 +3426,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 35 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 39 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -3446,7 +3481,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 36`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 40`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -3457,9 +3492,17 @@ The models are grouped by domain:
 
 `core-back/prisma/seed.ts`, `seedFakeRails.ts` and `syntheticSeeder/index.ts` call `ensureSchemaVersion()` before writing. A stale database is therefore rejected by these seeders and by any caller that explicitly asserts the version. The core HTTP start path does not call it.
 
+Schema version 37 adds the storage hardening migration on top of the v36 object & asset storage control plane
+(`storage_objects`, `storage_object_locks`, `storage_object_access_logs`,
+`report_asset_bundle_entries`, `dispute_attachments`, `aml_case_evidence`),
+domain FK links (KYB, reconciliation, regulatory templates/outputs, Report Studio
+bundles, catalog assets), removes `reconciliation_runs.file_content`, and
+installs the two append-only guard triggers. See
+`parts/01-core-back/13-object-storage.md`.
+
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it currently ends with `20261112100000_merchant_chrome_tenant_integrity`, schema version 36). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116090000_merchant_chrome_tenant_integrity`, schema version 40). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -3636,7 +3679,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The boot guard will reject a schema version other than 35.
+- Apply migrations before starting a new core build. The seeders will reject a schema version other than 37.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -3651,7 +3694,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 ### Implemented
 
 - 84 models and 105 enums in the Prisma datamodel.
-- Schema version 35 with an equality check used by the seeders.
+- Schema version 37 with an equality check used by the seeders.
 - The committed migration history (baseline, storage indexes, CQRS read models, hardening, MFA, append-only guards, shard checkpoints/repairs, session revocations and the ledger query/index optimisation) is generated in the migration catalog.
 - Monthly range partitioning of `journal_lines` with historical/future partitions and a default partition.
 - Partial, covering, BRIN and trigram indexes for the write path, workers and search.
@@ -3754,7 +3797,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 36 (`REQUIRED_SCHEMA_VERSION = 36`; model count 106). The schema migrations since version 10 are:
+The current schema version is 40 (`REQUIRED_SCHEMA_VERSION = 40`; model count 114). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -3772,7 +3815,7 @@ The current schema version is 36 (`REQUIRED_SCHEMA_VERSION = 36`; model count 10
 - `20261111120000_report_engine_versioning` (version 34, written on the plan branch): adds `engine_version`, `spec_schema_version` and `authoring_transcript_version` to `report_definition_specs`, `merchant_report_specs` and `report_chrome_specs`, `engine_version` and `spec_schema_version` to both execution audit tables, and `default_revoked_at` / `default_revoked_reason` to `report_chrome_specs`; it backfills `spec_schema_version` from `spec_json.spec_version`. See `core.report-engine` section 18.
 - `20261111130000_merchant_report_chrome` (version 35, written on the plan branch): creates `merchant_report_chrome_specs` (unique `(merchant_id, code, version)`, one published default per merchant and chrome type, a foreign key to the merchant asset bundle).
 - `20261112090000_journal_partition_storage_and_race` (version 35, no table shape change): redefines `ensure_journal_line_partitions` again. (1) The 2026-11-10 revision set only the insert-autovacuum parameters on a new monthly partition and dropped the explicit `fillfactor = 100` of the original body; it is restored, and set once (`SHARE UPDATE EXCLUSIVE`, no write blocking) on every monthly partition created without it. (2) The same revision replaced `CREATE TABLE IF NOT EXISTS` with a `to_regclass` check and a plain `CREATE TABLE`, so two callers at once (the partition worker on two nodes, or the worker and a deploy) both saw a month missing and the second aborted with `duplicate_table` (measured: 3 of 4 concurrent callers failed); `duplicate_table` / `unique_violation` from a concurrent creator are now accepted, and the truncate-guard install tolerates `duplicate_object`. The version is bumped because the newest migration sets `REQUIRED_SCHEMA_VERSION` (checked by `phase1-mtls-and-schema.test.ts`) and the seeders' equality guard then refuses a database without it; core HTTP start does not check the version. Test: `ledger-query-pruning-and-accuracy.test.ts` EC-15 (storage parameters) and EC-15b (four concurrent callers on a dropped empty month).
-- `20261112100000_merchant_chrome_tenant_integrity` (version 36, no new table): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merge.** Two branches each wrote migrations numbered 34 and 35 (`20261111090000` = 34, `20261111120000` = 34, `20261111130000` = 35, `20261112090000` = 35). None of the four is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first. This migration is new to every database, runs last and sets 36. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, plan branch first, `claude-fixes` first): each ends at 36 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
+- `20261116090000_merchant_chrome_tenant_integrity` (version 40, no new table; the newest migration): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merges.** The branches numbered their migrations independently: `20261111090000` = 34 and `20261112090000` = 35 (`claude-fixes`), `20261111120000` = 34 and `20261111130000` = 35 (plan branch), `20261112000000` = 36, `20261113090000` = 37, `20261113120000` = 38 and `20261114090000` = 39 (`master`). None is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first (a database that followed `master` to 39 and then receives the `claude-fixes` migrations would be left at 35). This migration is new to every database, runs last and sets 40. It was first written as `20261112100000` with version 36 when only the plan branch had been merged; that name was never pushed or deployed and was renamed on 2026-11-16 so that it also runs after `master`'s migrations. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, `master` first, `claude-fixes` first) and applied from empty on PostgreSQL 18.6: each ends at 40 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -3889,11 +3932,28 @@ The reporting baseline set now includes a PROVISIONAL `cbl-incident-docx-v1` def
 `20261110190000_merchant_report_engine` adds five tables separate from the staff report registry: `merchant_report_specs` (merchant-owned versioned specs; unique `(merchant_id, code, version)` and a partial unique latest-published index), `merchant_report_asset_bundles` (unique per merchant and content hash), `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` (hourly verify/execute counters) and `merchant_report_studio_status` (per-merchant Studio suspension). The migration bumps the schema version to 33; `phase1-mtls-and-schema.test.ts` asserts the applied version.
 
 
+## 17a. Shared object & asset storage (schema versions 36-37, 2026-11-12/13)
+
+`20261112000000_v36_enterprise_object_storage_engine` adds the storage control
+plane, domain links and the first guard triggers. `20261113090000_storage_engine_hardening`
+adds `gc_claim_token`/`gc_claimed_at`, the strict status-transition and
+authorization-immutability checks, the append-only access-log trigger, object
+explorer indexes (including pg_trgm filename/key search) and the access-log
+filter indexes. The current required version is **37**.
+
 ## 17. Report engine versioning and merchant chrome (schema versions 34-35, 2026-11-11)
 
 `20261111120000_report_engine_versioning` bumps the schema to 34. It adds `engine_version`, `spec_schema_version` and `authoring_transcript_version` to staff reports, merchant reports and platform chrome; `engine_version`/`spec_schema_version` to both execution audit tables; and `default_revoked_at`/`default_revoked_reason` to platform chrome. Existing rows are backfilled to engine `1.0.0` and spec version `1.0`.
 
 `20261111130000_merchant_report_chrome` bumps the schema to 35 and adds `merchant_report_chrome_specs`, with `merchant_id`, code/version, type, lifecycle status, merchant default flag, revocation metadata, version provenance, locales, spec JSON/hash, asset bundle FK and publisher metadata. Unique `(merchant_id, code, version)` and a partial unique `(merchant_id, chrome_type)` for published defaults preserve tenant isolation and one default per type. The migration catalog is generated; the required schema version is 35.
+
+## v38 schema (2026-11-13)
+
+Schema version 38 adds `system_execution_plane` (singleton `id=1`, `plane`, `allow_fake_rails`, `live_sync_revision`, `last_synced_from_live`) and `sandbox_sync_audits`, plus `payment_links.env` and `access_tokens.env` (existing `payment_attempts.env` participates in the fence). The migration stores the strict-fence database setting and attaches the env and Fake-Rails triggers. `prepare-databases.sh` creates and migrates a separate `payment_gateway_sandbox` database and stamps each database with its plane.
+
+## v39 schema (2026-11-13)
+
+`20261114090000_v39_sandbox_studio` adds nullable `wallets.name` (`VARCHAR(120)`) and `payment_links.title` (`VARCHAR(160)`)/`description` (`TEXT`). The columns already appeared in portal and checkout contracts but were discarded before v39. Existing rows and the Live flow are unaffected. The required schema version is **39**.
 
 ## Global Search
 

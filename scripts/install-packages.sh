@@ -24,6 +24,7 @@ PROJECTS=(
   core-back
   deploy
   deploy/backup-daemon
+  deploy/object-storage-daemon
   admin-back
   merchant-back
   checkout-back

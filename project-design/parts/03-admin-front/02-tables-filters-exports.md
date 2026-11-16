@@ -3,8 +3,8 @@ id: admin-ui.tables
 title: Tables Filters and Exports
 status: partial
 confidence: high
-last_verified: 2026-11-07
-verified_against: d695518+working-tree
+last_verified: 2026-11-12
+verified_against: 19d6a54+working-tree
 code:
   - admin-front/src/components/Table/**
   - admin-front/src/utils/xlsx/**
@@ -51,6 +51,8 @@ The v2 design intends tables to look operational rather than decorative:
 8. **Actions are always reachable.** The action column is sticky to the inline end, so the visible primary action and the overflow trigger never require horizontal scrolling. A row-level context menu offers the same actions at the pointer (right-click) and from the keyboard (`Shift+F10`); the menu lists the primary action first, then the overflow items. The sticky trigger remains the touch path and the accessible baseline; links and form fields keep their native context menu.
 
 ## 3. As-built architecture
+
+- The shared `MonitorTable` used by Jobs & Outbox declares every prop it reads in its `dc(...)` call (`title`, `url`, `listKey`, `headers`, `filters`, `initialFilters`, `refreshSignal`, `rowColor`, `searchable`) and uses `props.filters ?? []` before `buildFilterQuery`; a missing props declaration previously made `filters` undefined and crashed the page with `undefined.reduce`. The contract is pinned by `admin-front/src/pages/system/jobs-outbox/components/__tests__/MonitorTable.test.ts` and `tests/e2e/admin/jobs-outbox.spec.ts`.
 
 ### 3.1 Components
 

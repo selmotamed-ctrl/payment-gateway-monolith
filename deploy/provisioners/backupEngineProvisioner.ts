@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { backupS3Configured, parseNodeList, resolveBackupS3Mode, type DeployConfig } from "../lib/configSchema";
+import { backupS3Configured, objectStorageConfigured, parseNodeList, resolveBackupS3Mode, type DeployConfig } from "../lib/configSchema";
 import type { SshTarget } from "../lib/hostPlanner";
 import { envAssign, pgpassField, shellQuote } from "../lib/quoting";
 import { ensurePackagesScript, isChanged, outcomeBounced, pipPinnedGuard, type ApplyOutcome, type ProvisionRunner } from "../lib/converge";
@@ -122,6 +122,21 @@ export const backupDaemonEnv = (config: DeployConfig): Record<string, string> =>
     BACKUP_DAEMON_CA_CERT_PATH: `${config.BACKUP_DAEMON_CERT_DIR}/internal-ca.crt`,
     BACKUP_ALLOWED_CLIENT_CNS: config.BACKUP_ALLOWED_CLIENT_CNS,
     BACKUP_WAL_CLIENT_CNS: config.BACKUP_WAL_CLIENT_CNS,
+    ...(objectStorageConfigured(config)
+      ? {
+          OBJECT_STORAGE_DAEMON_URL: (() => {
+            const spec = parseNodeList(config.OBJECT_STORAGE_NODE)[0];
+            const scheme = config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP ? "http" : "https";
+            return `${scheme}://${spec?.privateIp ?? "127.0.0.1"}:${spec?.servicePort ?? config.OBJECT_STORAGE_DAEMON_PORT}`;
+          })(),
+          OBJECT_STORAGE_ALLOW_INSECURE_HTTP: config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP ? "true" : "false",
+          OBJECT_STORAGE_TLS_CA_PATH: `${config.BACKUP_DAEMON_CERT_DIR}/internal-ca.crt`,
+          OBJECT_STORAGE_TLS_CLIENT_CERT_PATH: `${config.BACKUP_DAEMON_CERT_DIR}/object-storage-client.crt`,
+          OBJECT_STORAGE_TLS_CLIENT_KEY_PATH: `${config.BACKUP_DAEMON_CERT_DIR}/object-storage-client.key`,
+          OBJECT_STORAGE_KEK_KEYRING: config.OBJECT_STORAGE_KEK_KEYRING,
+          OBJECT_STORAGE_ACTIVE_KEK_VERSION: String(config.OBJECT_STORAGE_ACTIVE_KEK_VERSION),
+        }
+      : {}),
     ...(config.BACKUP_ENGINE_MODE === "wal-g"
       ? {
           WALG_ENV_FILE: "/etc/pg-backup/wal-g-core.env",
@@ -147,7 +162,9 @@ export const backupDaemonEnv = (config: DeployConfig): Record<string, string> =>
     PG_SSLMODE: "require",
     PG_REPLICA_NODES: config.PG_REPLICA_NODES,
     PG_DATA_DIR: config.PG_DATA_DIR.trim() || primaryCluster?.dataDir || "/var/lib/postgresql/18/main",
-    PG_AUDIT_DATA_DIR: config.PG_AUDIT_DATA_DIR.trim() || auditCluster?.dataDir || "",
+    // A shared cluster is backed up once (core) and its audit database is a logical dump; only a dedicated audit
+    // cluster gets its own data directory, otherwise the daemon would take a second physical backup of the primary.
+    PG_AUDIT_DATA_DIR: config.PG_AUDIT_DATA_DIR.trim() || (dedicatedAudit ? (auditCluster?.dataDir ?? "") : ""),
     PG_BIN_DIR: `/usr/lib/postgresql/${config.PG_VERSION}/bin`,
     PGPASSFILE: config.BACKUP_PGPASSFILE,
     BARMAN_SERVER: config.PG_DB_NAME,

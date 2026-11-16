@@ -806,6 +806,15 @@ export class StepExecutor {
       new URL(resolvedForAllowlist).hostname,
       this.options.allowedHosts,
     );
+    if (fakeRailsTarget) {
+      // The emulator's stateful accounts and tester actions are scoped to the
+      // sandbox merchant. Real gateways never receive these identifiers.
+      const attempt = (context.attempt ?? {}) as Record<string, unknown>;
+      const merchantId = String(attempt.merchantId ?? attempt.merchant_id ?? "");
+      const credentialSetId = String(attempt.credentialSetId ?? "");
+      if (/^[0-9a-f-]{36}$/i.test(merchantId)) headers["x-pg-merchant-id"] = merchantId;
+      if (/^[0-9a-f-]{36}$/i.test(credentialSetId)) headers["x-pg-credential-set-id"] = credentialSetId;
+    }
     const url = compileUrl(step.url_template, query, {
       allowedHosts: this.options.allowedHosts,
       allowAnyHost: this.allowAnyHost(),

@@ -283,3 +283,8 @@ Not covered:
 ## Security hardening (2026-11-05)
 
 The Fake Rails nginx vhost now also applies `allow`/`deny` rules from `FAKE_RAILS_ALLOWED_CIDRS` (the application-level check compares `socket.remoteAddress`, not `X-Forwarded-For`). All six nginx templates set `server_tokens off` and `limit_req` with `limit_req_status 429`. UFW rules are unchanged.
+
+
+## Object storage
+
+TCP 4095 is opened only to core and backup private IPs. The deploy health step probes `/v1/health` over mTLS from every core and backup host.

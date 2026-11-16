@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { useRouter } from "vue-router";
-import { VAlert, VBtn, VProgressCircular, VTextarea, VTextField } from "vuetify/components";
+import { VAlert, VBtn, VFileInput, VProgressCircular, VTextarea, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -77,6 +77,18 @@ type Dispute = {
     adjustmentId: string | null;
     adjustmentState: string | null;
     adjustmentJournalEntryId: string | null;
+};
+
+type DisputeAttachment = {
+    id: string;
+    label: string;
+    fileName: string | null;
+    mimeType: string | null;
+    byteSize: string | null;
+    sha256: string | null;
+    status: string | null;
+    avScanStatus: string | null;
+    createdAt: string;
 };
 
 type DisputeDetail = Dispute & {
@@ -153,6 +165,10 @@ const DisputesPage = dc(() => {
 
     const detailsOpen = ref(false);
     const evidenceOpen = ref(false);
+    const attachments = ref<DisputeAttachment[]>([]);
+    const attachmentsLoading = ref(false);
+    const attachmentFile = ref<File | null>(null);
+    const attachmentLabel = ref("");
     const actionError = ref("");
     const selected = ref<DisputeDetail | null>(null);
     const detailLoading = ref(false);
@@ -266,6 +282,51 @@ const DisputesPage = dc(() => {
         void loadSummary();
     };
 
+    const uploadAttachment = async () => {
+        if (!selected.value || !attachmentFile.value) return;
+        try {
+            const body = new FormData();
+            body.append("file", attachmentFile.value);
+            body.append("label", attachmentLabel.value.trim() || attachmentFile.value.name);
+            await api.post(urlsMap.disputeAttachments(selected.value.id), body, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            attachmentFile.value = null;
+            attachmentLabel.value = "";
+            await loadAttachments(selected.value.id);
+            showSnackBar({ type: "success", message: t("Evidence uploaded") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        }
+    };
+
+    const downloadAttachment = async (attachment: DisputeAttachment) => {
+        if (!selected.value) return;
+        try {
+            const response = await api.get(urlsMap.disputeAttachmentContent(selected.value.id, attachment.id), { responseType: "blob" });
+            const blob = new Blob([response.data], { type: attachment.mimeType ?? "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = attachment.fileName ?? attachment.label;
+            anchor.click();
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        }
+    };
+
+    const deleteAttachment = async (attachment: DisputeAttachment) => {
+        if (!selected.value || !window.confirm(t("Delete this evidence file?"))) return;
+        try {
+            await api.delete(urlsMap.disputeAttachmentDelete(selected.value.id, attachment.id));
+            await loadAttachments(selected.value.id);
+            showSnackBar({ type: "success", message: t("Evidence deleted") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        }
+    };
+
     const resetEvidenceState = () => {
         evidenceForm.value = emptyEvidenceForm();
         evidenceChecklist.value = {};
@@ -273,11 +334,26 @@ const DisputesPage = dc(() => {
         actionError.value = "";
     };
 
+    const loadAttachments = async (disputeId: string) => {
+        attachmentsLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.disputeAttachments(disputeId));
+            const payload = response.data?.data ?? response.data ?? {};
+            attachments.value = (payload.attachments ?? []) as DisputeAttachment[];
+        } catch (error) {
+            attachments.value = [];
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            attachmentsLoading.value = false;
+        }
+    };
+
     const presentDisputeDetail = (detail: DisputeDetail) => {
         selected.value = detail;
         resetEvidenceState();
         detailsOpen.value = true;
         detailLoading.value = false;
+        void loadAttachments(detail.id);
     };
 
     const fetchDisputeDetail = async (id: string): Promise<DisputeDetail | null> => {
@@ -287,6 +363,9 @@ const DisputesPage = dc(() => {
     };
 
     const openDetails = async (row: Dispute) => {
+        attachments.value = [];
+        attachmentFile.value = null;
+        attachmentLabel.value = "";
         selected.value = {
             ...row,
             attemptSettledAmount: "0.0000",
@@ -735,6 +814,30 @@ const DisputesPage = dc(() => {
                                         )}
                                     </>
                                 ) : null}
+                                <ThemedView style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "12px" }}>
+                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Vault attachments")}</ThemedText>
+                                    {attachmentsLoading.value ? <ThemedText>{t("Loading…")}</ThemedText> : attachments.value.length === 0 ? (
+                                        <ThemedText class="text-medium-emphasis">{t("No vault attachments.")}</ThemedText>
+                                    ) : attachments.value.map((attachment) => (
+                                        <ThemedView key={attachment.id} style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "8px 0", borderBottom: "1px solid var(--pg-border-subtle)" }}>
+                                            <ThemedView style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                                <ThemedText>{attachment.label}</ThemedText>
+                                                <StatusBadge status={attachment.avScanStatus ?? "PENDING"} />
+                                                <MonoRef value={attachment.sha256 ?? ""} truncate={12} />
+                                                {attachment.byteSize && <ThemedText class="text-medium-emphasis">{attachment.byteSize} B</ThemedText>}
+                                            </ThemedView>
+                                            <ThemedView style={{ display: "flex", gap: "6px" }}>
+                                                <VBtn size="small" variant="text" disabled={attachment.status !== "ACTIVE"} onClick={() => void downloadAttachment(attachment)}>{t("Download")}</VBtn>
+                                                <VBtn size="small" variant="text" color="error" onClick={() => void deleteAttachment(attachment)}>{t("Delete")}</VBtn>
+                                            </ThemedView>
+                                        </ThemedView>
+                                    ))}
+                                    <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginTop: "6px" }}>
+                                        <VTextField modelValue={attachmentLabel.value} onUpdate:modelValue={(value: string) => (attachmentLabel.value = value)} label={t("Label")} density="compact" hideDetails style={{ maxWidth: "240px" }} />
+                                        <VFileInput modelValue={attachmentFile.value} onUpdate:modelValue={(value: File | File[] | null) => (attachmentFile.value = Array.isArray(value) ? value[0] ?? null : value)} density="compact" hideDetails style={{ maxWidth: "300px" }} />
+                                        <VBtn size="small" variant="tonal" disabled={!attachmentFile.value} onClick={() => void uploadAttachment()}>{t("Upload evidence")}</VBtn>
+                                    </ThemedView>
+                                </ThemedView>
                             </ThemedView>
                         </ThemedView>
                     </>

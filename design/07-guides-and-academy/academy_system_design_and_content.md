@@ -10730,4 +10730,59 @@ Badges last 12 months. When the Academy's major version changes, the team view s
 ## Live drills (optional)
 On staging only, a trainer can run the live drills of section III-F with the Fake Rails service. They are never run in production.
 @@end
+
+@@lesson id=l-m10-5 module=m10 order=5 title="Shared Object & Asset Storage: multi-node vault, locks, quarantine and legal holds" minutes=20 tracks=GATEWAY_ADMIN,SECURITY_ADMIN,COMPLIANCE reading=b12-12,b12-13
+### You will be able to
+- Explain why uploaded files are stored in the shared `pg-object-storage-daemon` vault (`OBJECT_STORAGE_NODE`) rather than inside PostgreSQL or on individual core nodes.
+- Explain how `storage_object_locks`, `retain_until` and `legal_hold` work together to prevent premature deletion.
+- Explain why `QUARANTINE_PENDING_AV` objects have `retain_until = NULL` until the malware scan succeeds.
+
+### Key ideas
+- **Storage is always shared across nodes.** Every `core-back` node and `backup-daemon` connects over mTLS to `OBJECT_STORAGE_NODE` (`pg-object-storage-daemon`). Configuring multiple core nodes without `OBJECT_STORAGE_NODE` is rejected by deployment validation (`MULTI_NODE_SHARED_STORAGE_REQUIRED`).
+- **One upload = one encrypted `.v1.enc` envelope (`pgos1`).** Files are encrypted in 64 KiB `AES-256-GCM` chunks with a unique per-object DEK wrapped by `OBJECT_STORAGE_KEK_KEYRING`.
+- **Multiple records can lock the same object.** `storage_object_locks` tracks every domain holder (`KYB_DOCUMENT`, `RECON_RUN`, `REG_REPORT_OUTPUT`, `REPORT_ASSET_ENTRY`, `CATALOG_ASSET`, `RAIL_LOGO`, `DISPUTE_ATTACHMENT`, `AML_CASE_EVIDENCE`). PostgreSQL trigger `storage_objects_guard_trg` blocks purging while any active lock exists.
+- **Quarantine comes before compliance retention.** Untrusted uploads start in `QUARANTINE_PENDING_AV` with `retain_until = NULL`. Only after `AvScanWorker` marks the file `CLEAN` does `promote()` activate the object and stamp `retain_until`.
+- **Backups verify object parity and KEK decryption.** `backup-daemon` syncs immutable `.v1.enc` blobs over mTLS, checks manifest parity against `ACTIVE` database rows, and tests decryption using the escrowed KEK keyring during weekly restore drills.
+
+### A worked example
+1. An admin uploads a bank logo on `core-1` (`CATALOG_ASSET` lock) and assigns it to two payment rails (`RAIL_LOGO` locks).
+2. `core-2` serves the logo immediately over mTLS from `obj-1`.
+3. Later, an admin tries to purge the logo while one rail still uses it. PostgreSQL trigger `storage_objects_guard_trg` rejects the purge (`STORAGE_OBJECT_LOCKED`) because an active `RAIL_LOGO` lock remains.
+
+### Common mistakes
+- Leaving `OBJECT_STORAGE_NODE` empty when scaling `CORE_NODES` past one server.
+- Expecting a `QUARANTINE_PENDING_AV` KYB file to be downloadable before `AvScanWorker` finishes.
+
+### Read now
+- [[a:b12-12|Shared Object & Asset Storage: how files, locks, quarantine and retention work]]
+- [[a:b12-13|Operating the Object & Asset Storage screen]]
+
+### Check yourself
+Questions: c-l-m10-5-1, c-l-m10-5-2
+@@end
+
+@@q id=c-l-m10-5-1 module=m10 type=single difficulty=1 critical=false exam=false lesson=l-m10-5 tracks=GATEWAY_ADMIN,SECURITY_ADMIN,COMPLIANCE refs=b12-12
+Stem: What happens if an operator configures two `CORE_NODES` in `deploy.env` and leaves `OBJECT_STORAGE_NODE` empty?
+- [x] Deployment validation fails with `MULTI_NODE_SHARED_STORAGE_REQUIRED` because core nodes are forbidden from storing blobs on their own local disks.
+- [ ] Each core node stores half of the uploaded files on its own local disk.
+- [ ] Files are stored inside PostgreSQL `BYTEA` columns instead.
+Why: Every multi-node deployment must point all core nodes and the backup daemon at the shared `OBJECT_STORAGE_NODE` server.
+@@end
+
+@@q id=c-l-m10-5-2 module=m10 type=single difficulty=2 critical=false exam=false lesson=l-m10-5 tracks=GATEWAY_ADMIN,SECURITY_ADMIN,COMPLIANCE refs=b12-12,b12-13
+Stem: When is the multi-year compliance `retain_until` timestamp stamped on a newly uploaded KYB document?
+- [x] Only when `promote()` activates the object after the antivirus scan passes (`CLEAN`).
+- [ ] Before the file is scanned for malware.
+- [ ] Only when a Legal Hold is placed.
+Why: Stamping compliance retention before AV scanning would make malware undeletable; retention is stamped at promotion time.
+@@end
+
+@@q id=q-m10-118 module=m10 type=single difficulty=2 critical=true exam=true tracks=GATEWAY_ADMIN,SECURITY_ADMIN refs=b12-12
+Stem: An asset in `storage_objects` has two active locks (`CATALOG_ASSET` and `RAIL_LOGO`). If the catalog entry is released while the payment rail still uses the logo, can the object be purged?
+- [x] No; `storage_objects_guard_trg` forbids transitioning to `PURGED` while any active lock (`released_at IS NULL`) remains.
+- [ ] Yes; releasing the first lock deletes the file from disk immediately.
+- [ ] Yes, if an administrator passes a PostgreSQL session GUC override.
+Why: There are no GUC backdoors, and an object cannot be purged until active locks reach zero, `legal_hold` is false, and `retain_until` has expired.
+@@end
+
 <!-- CONTENT:END -->

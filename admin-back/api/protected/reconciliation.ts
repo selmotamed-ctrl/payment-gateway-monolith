@@ -4,7 +4,7 @@ import { zListQuery } from "../../lib/zReady";
 import { parseOrThrow } from "../../lib/error";
 import { zIdentifier, zPaginationQuery } from "../../lib/zReady";
 import { toCoreReconciliationSourceCreate, toCoreReconciliationUpload } from "../contract";
-import { coreForward } from "../forward";
+import { coreForward, coreForwardRaw } from "../forward";
 import { forwardUpload, uploadGuards, uploadSingle } from "../upload";
 
 const router = express.Router();
@@ -143,6 +143,15 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/reconciliation/summary/export",
+  }),
+);
+
+router.get(
+  "/runs/:id/statement",
+  coreForwardRaw({
+    method: "GET",
+    path: (context) => `/internal/admin/reconciliation/runs/${encodeURIComponent(context.params.id ?? "")}/statement`,
+    paramsSchema: z.object({ id: zIdentifier }).strict(),
   }),
 );
 

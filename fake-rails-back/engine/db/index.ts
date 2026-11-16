@@ -28,9 +28,122 @@ export const getDb = (): Database => {
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA synchronous = NORMAL;");
   db.exec("PRAGMA foreign_keys = ON;");
+  db.exec("PRAGMA busy_timeout = 5000;");
   db.exec(schemaSql);
+  migrateLegacySchema(db);
   instance = db;
   return db;
+};
+
+/**
+ * Adds the v2 columns to a database created by the stateless v1 emulator.
+ * `CREATE TABLE IF NOT EXISTS` never alters an existing table, so the account
+ * link and the held amount are added explicitly and idempotently.
+ */
+const tableColumns = (db: Database, table: string): Set<string> =>
+  new Set(
+    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((row) => row.name),
+  );
+
+const addColumn = (db: Database, table: string, column: string, definition: string): void => {
+  if (!tableColumns(db, table).has(column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+};
+
+/**
+ * `fake_accounts` originally had a table-level `UNIQUE(rail_code, identifier)`.
+ * Merchant-owned copies need the same identifier as the shared preset, so the
+ * table is rebuilt once with partial unique indexes.
+ */
+const rebuildAccountsForMerchantCopies = (db: Database): void => {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'fake_accounts'")
+    .get() as { sql?: string } | undefined;
+  if (!row?.sql || !/UNIQUE\s*\(\s*rail_code\s*,\s*identifier\s*\)/i.test(row.sql)) {
+    return;
+  }
+  const columns = tableColumns(db, "fake_accounts");
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    db.exec(`
+      CREATE TABLE fake_accounts_new (
+        id TEXT PRIMARY KEY,
+        rail_code TEXT NOT NULL,
+        gateway_code TEXT NOT NULL,
+        merchant_id TEXT,
+        instrument_type TEXT NOT NULL DEFAULT 'MOBILE_WALLET',
+        identifier TEXT NOT NULL,
+        holder_name TEXT NOT NULL,
+        secret_pin TEXT NOT NULL DEFAULT '1234',
+        expiry TEXT DEFAULT '12/28',
+        currency TEXT NOT NULL DEFAULT 'LYD',
+        available_balance_lyd TEXT NOT NULL DEFAULT '5000.0000',
+        reserved_balance_lyd TEXT NOT NULL DEFAULT '0.0000',
+        daily_limit_lyd TEXT NOT NULL DEFAULT '10000.0000',
+        daily_spent_lyd TEXT NOT NULL DEFAULT '0.0000',
+        daily_spent_date TEXT,
+        status TEXT NOT NULL DEFAULT 'ACTIVE',
+        static_otp TEXT,
+        preset_fault TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    const carry = [
+      "id", "rail_code", "gateway_code", "merchant_id", "instrument_type", "identifier",
+      "holder_name", "secret_pin", "expiry", "currency", "available_balance_lyd",
+      "reserved_balance_lyd", "daily_limit_lyd", "daily_spent_lyd", "status",
+      "static_otp", "preset_fault", "notes", "created_at", "updated_at",
+    ].filter((column) => columns.has(column));
+    const daily = columns.has("daily_spent_date") ? "daily_spent_date" : "NULL";
+    db.exec(
+      `INSERT INTO fake_accounts_new (${carry.join(",")}, daily_spent_date)
+       SELECT ${carry.join(",")}, ${daily} FROM fake_accounts`,
+    );
+    db.exec("DROP TABLE fake_accounts");
+    db.exec("ALTER TABLE fake_accounts_new RENAME TO fake_accounts");
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_fake_accounts_global_identifier
+        ON fake_accounts(rail_code, identifier) WHERE merchant_id IS NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_fake_accounts_merchant_identifier
+        ON fake_accounts(rail_code, identifier, merchant_id) WHERE merchant_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_fake_accounts_rail ON fake_accounts(rail_code, status);
+      CREATE INDEX IF NOT EXISTS idx_fake_accounts_gateway ON fake_accounts(gateway_code);
+      CREATE INDEX IF NOT EXISTS idx_fake_accounts_merchant ON fake_accounts(merchant_id);
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch { /* ignore */ }
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+    const violations = db.prepare("PRAGMA foreign_key_check").all();
+    if (violations.length > 0) {
+      throw new Error(`fake-rails account migration left ${violations.length} foreign-key violation(s)`);
+    }
+  }
+};
+
+const migrateLegacySchema = (db: Database): void => {
+  addColumn(db, "fake_transactions", "account_id", "TEXT");
+  addColumn(db, "fake_transactions", "held_amount_lyd", "TEXT");
+  addColumn(db, "fake_transactions", "merchant_id", "TEXT");
+  addColumn(db, "fake_transactions", "qr_payload", "TEXT");
+  addColumn(db, "fake_transactions", "deep_link_url", "TEXT");
+  addColumn(db, "fake_transactions", "redirect_url", "TEXT");
+  addColumn(db, "fake_account_holds", "expires_at", "TEXT");
+  addColumn(db, "fake_accounts", "daily_spent_date", "TEXT");
+  addColumn(db, "fake_clearing_entries", "our_reference", "TEXT");
+  addColumn(db, "fake_clearing_entries", "provider_reference", "TEXT");
+  addColumn(db, "fake_clearing_entries", "currency", "TEXT NOT NULL DEFAULT 'LYD'");
+  addColumn(db, "fake_clearing_entries", "status", "TEXT NOT NULL DEFAULT 'PAID'");
+  addColumn(db, "fake_clearing_entries", "statement_included_at", "TEXT");
+  addColumn(db, "fake_clearing_entries", "statement_run_id", "TEXT");
+  rebuildAccountsForMerchantCopies(db);
+  db.exec("UPDATE fake_schema_version SET version = 2 WHERE version < 2");
 };
 
 export const closeDb = (): void => {
@@ -74,6 +187,12 @@ export interface FakeTransactionRow {
   collection_mode: string;
   customer_identifier_masked: string | null;
   expected_otp: string | null;
+  merchant_id?: string | null;
+  qr_payload?: string | null;
+  deep_link_url?: string | null;
+  redirect_url?: string | null;
+  account_id?: string | null;
+  held_amount_lyd?: string | null;
   status: string;
   assigned_fail_phase: string | null;
   assigned_failure_mode: string | null;

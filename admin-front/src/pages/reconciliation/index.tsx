@@ -90,6 +90,8 @@ type ReconciliationRun = {
     sourceId: string;
     sourceName: string;
     fileName: string;
+    fileHash: string | null;
+    storageObjectId: string | null;
     state: string;
     totalRows: number;
     matchedRows: number;
@@ -355,6 +357,22 @@ const ReconciliationPage = dc(() => {
     const onFiltersCleared = () => {
         runFilters.value = {};
         runRefreshHook.value?.reset();
+    };
+
+    const downloadStatement = async () => {
+        if (!selectedRun.value) return;
+        try {
+            const response = await api.get(urlsMap.reconciliationRunStatement(selectedRun.value.id), { responseType: "blob" });
+            const blob = new Blob([response.data], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = selectedRun.value.fileName ?? "statement";
+            anchor.click();
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        }
     };
 
     const exportRunItems = async () => {
@@ -957,6 +975,7 @@ const ReconciliationPage = dc(() => {
                 v-slots={{
                     footer: () => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
+                            <VBtn variant="tonal" prependIcon="mdi-file-download-outline" disabled={!selectedRun.value?.storageObjectId} onClick={() => void downloadStatement()}>{t("Download statement")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportRunItems()}>{t("Export items")}</VBtn>
                             <VBtn variant="text" onClick={closeRunDetails}>{t("Close")}</VBtn>
                         </ThemedView>

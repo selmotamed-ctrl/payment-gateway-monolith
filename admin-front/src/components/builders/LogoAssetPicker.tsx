@@ -1,4 +1,4 @@
-import { defineComponent, onMounted, ref, type PropType, type VNodeChild } from "vue";
+import { computed, defineComponent, onMounted, ref, watch, type PropType, type VNodeChild } from "vue";
 import { VAlert, VBtn, VFileInput, VSelect } from "vuetify/components";
 import { useLocale } from "vuetify";
 import { api } from "@/state/api";
@@ -8,7 +8,7 @@ import { showSnackBar } from "@/utils/snackBar";
 import { FormField } from "@/components/ui/FormField";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { LOGO_ERROR_MESSAGES } from "./messages";
-import { assetMimeToContentType, formatBytes, logoStorageKey, toHex, validateLogoFile } from "./model/assets";
+import { assetMimeToContentType, formatBytes, validateLogoFile } from "./model/assets";
 
 export type LogoAsset = {
     id: string;
@@ -16,15 +16,16 @@ export type LogoAsset = {
     mime: string;
     sizeBytes: number;
     storageKey: string;
+    storageObjectId: string | null;
     sha256: string;
 };
 
 const MIME_LABEL: Record<string, string> = { "image/png": "PNG", "image/svg+xml": "SVG" };
 
 /**
- * Picks the logo asset of a rail from the asset catalogue (`GET /assets`) and registers a new logo
- * (`POST /assets`: name, type, size, SHA-256 and storage key). The asset API records metadata only;
- * the image file itself is not uploaded by this endpoint, which the picker states.
+ * Picks the logo asset of a rail from the asset catalogue (`GET /assets`) and uploads a new logo to
+ * the shared object-storage vault (`POST /assets/upload`). The bytes are stored once and locked by
+ * the Asset row; assigning the asset to a rail adds a second `RAIL_LOGO` lock.
  */
 export const LogoAssetPicker = defineComponent({
     name: "LogoAssetPicker",
@@ -41,6 +42,7 @@ export const LogoAssetPicker = defineComponent({
         const loadError = ref("");
         const registering = ref(false);
         const registerError = ref("");
+        const previewUrl = ref<string | null>(null);
 
         const load = async () => {
             loading.value = true;
@@ -48,16 +50,48 @@ export const LogoAssetPicker = defineComponent({
             try {
                 const response = await api.get(urlsMap.assetsList);
                 const payload = response.data?.data ?? response.data ?? {};
-                assets.value = ((payload.assets ?? []) as LogoAsset[]).filter((asset) => asset.mime === "IMAGE_PNG" || asset.mime === "IMAGE_SVG_XML" || asset.mime === "image/png" || asset.mime === "image/svg+xml");
+                assets.value = ((payload.assets ?? []) as LogoAsset[]).filter((asset) =>
+                    Boolean(asset.storageObjectId)
+                    && (asset.mime === "IMAGE_PNG" || asset.mime === "IMAGE_SVG_XML" || asset.mime === "image/png" || asset.mime === "image/svg+xml"),
+                );
             } catch (error) {
                 loadError.value = extractApiErrorMessage(error);
             } finally {
                 loading.value = false;
+                void loadPreview();
             }
         };
         onMounted(() => void load());
 
+        const selected = computed(() => assets.value.find((asset) => asset.id === props.modelValue) ?? null);
+        const loadPreview = async () => {
+            if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
+            previewUrl.value = null;
+            if (!selected.value) return;
+            try {
+                const response = await api.get(urlsMap.assetContent(selected.value.id), { responseType: "blob" });
+                previewUrl.value = URL.createObjectURL(new Blob([response.data], { type: assetMimeToContentType(selected.value.mime) }));
+            } catch {
+                previewUrl.value = null;
+            }
+        };
+        watch(() => props.modelValue, () => void loadPreview());
+
         const typeLabel = (asset: LogoAsset): string => MIME_LABEL[assetMimeToContentType(asset.mime)] ?? asset.mime;
+
+        const removeSelected = async () => {
+            if (!selected.value || props.disabled) return;
+            if (!window.confirm(t("Delete this logo asset?"))) return;
+            registerError.value = "";
+            try {
+                await api.delete(urlsMap.assetDelete(selected.value.id));
+                emit("update:modelValue", null);
+                await load();
+                showSnackBar({ type: "success", message: t("Logo deleted") });
+            } catch (error) {
+                registerError.value = extractApiErrorMessage(error);
+            }
+        };
 
         const register = async (value: File | File[] | null) => {
             const file = Array.isArray(value) ? value[0] : value;
@@ -68,21 +102,12 @@ export const LogoAssetPicker = defineComponent({
                 registerError.value = t(LOGO_ERROR_MESSAGES[problem]);
                 return;
             }
-            if (typeof crypto === "undefined" || !crypto.subtle) {
-                registerError.value = t("This browser context cannot compute the file checksum. Open the portal over HTTPS.");
-                return;
-            }
             registering.value = true;
             try {
-                const sha = toHex(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()));
-                const response = await api.post(urlsMap.assetsList, {
-                    kind: "LOGO",
-                    name: file.name,
-                    contentType: file.type.split(";")[0]!.trim().toLowerCase(),
-                    sizeBytes: file.size,
-                    checksumSha256: sha,
-                    storageKey: logoStorageKey(sha, file.name),
-                });
+                const form = new FormData();
+                form.append("file", file, file.name);
+                form.append("name", file.name.slice(0, 120));
+                const response = await api.post(urlsMap.assetsUpload, form);
                 const payload = response.data?.data ?? response.data ?? {};
                 await load();
                 if (typeof payload.id === "string") emit("update:modelValue", payload.id);
@@ -95,8 +120,7 @@ export const LogoAssetPicker = defineComponent({
         };
 
         return (): VNodeChild => {
-            const selected = assets.value.find((asset) => asset.id === props.modelValue) ?? null;
-            const orphan = props.modelValue && !selected && !loading.value;
+            const orphan = props.modelValue && !selected.value && !loading.value;
             return (
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px", minInlineSize: 0 }}>
                     <FormField label={t("Logo asset")} error={loadError.value}>
@@ -112,12 +136,13 @@ export const LogoAssetPicker = defineComponent({
                             hideDetails
                         />
                     </FormField>
-                    {selected && (
+                    {selected.value && (
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", fontSize: "12px", color: "var(--pg-ink-secondary)" }}>
-                            <span dir="auto">{selected.name}</span>
-                            <span>{typeLabel(selected)}</span>
-                            <span>{formatBytes(selected.sizeBytes)}</span>
-                            <MonoRef value={selected.sha256.slice(0, 12)} copyable={false} />
+                            {previewUrl.value && <img src={previewUrl.value} alt={selected.value.name} style={{ maxHeight: "64px", maxWidth: "160px", objectFit: "contain", border: "1px solid var(--pg-border-subtle)", borderRadius: "6px", padding: "4px", background: "var(--pg-surface)" }} />}
+                            <span dir="auto">{selected.value.name}</span>
+                            <span>{typeLabel(selected.value)}</span>
+                            <span>{formatBytes(selected.value.sizeBytes)}</span>
+                            <MonoRef value={selected.value.sha256.slice(0, 12)} copyable={false} />
                         </div>
                     )}
                     {orphan && (
@@ -125,7 +150,7 @@ export const LogoAssetPicker = defineComponent({
                     )}
                     {props.canRegister && !props.disabled && (
                         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                            <FormField label={t("Register a new logo")} hint={t("PNG or SVG, up to 2 MB.")} error={registerError.value}>
+                            <FormField label={t("Register a new logo")} hint={t("PNG or SVG, up to 5 MB.")} error={registerError.value}>
                                 <VFileInput
                                     {...{ accept: "image/png,image/svg+xml" }}
                                     modelValue={null}
@@ -137,10 +162,11 @@ export const LogoAssetPicker = defineComponent({
                                 />
                             </FormField>
                             <VAlert type="info" variant="tonal" density="compact">
-                                {t("Registering records the logo's name, type, size and checksum in the asset catalogue. The image file itself is not stored by this endpoint.")}
+                                {t("The logo is stored in the shared encrypted vault, checked for active content and locked by its catalogue record.")}
                             </VAlert>
-                            <div>
+                            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                                 <VBtn size="small" variant="text" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Reload assets")}</VBtn>
+                                {selected.value && <VBtn size="small" variant="text" color="error" prependIcon="mdi-delete-outline" onClick={() => void removeSelected()}>{t("Delete selected logo")}</VBtn>}
                             </div>
                         </div>
                     )}

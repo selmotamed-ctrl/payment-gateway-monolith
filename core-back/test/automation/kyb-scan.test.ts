@@ -20,6 +20,20 @@ const DAY = 86_400_000;
 const NOW = new Date();
 const quiet = { info: () => undefined, warn: () => undefined, error: () => undefined };
 
+/** The bytes behind each fake StorageObject; the fake vault returns them without touching a blob store. */
+const contentByObject = new Map<string, Buffer>();
+
+const fakeObjectStorage = {
+  workerClient: {
+    readForScan: async (objectId: string) => {
+      const bytes = contentByObject.get(objectId);
+      if (!bytes) throw new KybScannerError("the document has no stored content to scan", false);
+      return { objectId, bytes, detectedMimeType: "application/pdf" };
+    },
+    applyScanVerdict: async () => undefined,
+  },
+} as never;
+
 afterAll(async () => {
   for (const catalog of catalogs) {
     await client.$executeRawUnsafe(`DELETE FROM kyb_documents WHERE merchant_id = $1::uuid`, catalog.merchantId);
@@ -56,17 +70,43 @@ const document = async (
   catalog: AutomationCatalog,
   text: string,
   options: { avStatus?: string; status?: string; scannedDaysAgo?: number; content?: boolean } = {},
-): Promise<string> =>
-  (
+): Promise<string> => {
+  const objectId = randomUUID();
+  const sha256 = createHash("sha256").update(text + randomUUID()).digest("hex");
+  await client.storageObject.create({
+    data: {
+      id: objectId,
+      bucket: "HOT",
+      namespace: "KYB_DOCUMENTS",
+      storageKey: `kyb_documents/${catalog.merchantId}/2026/11/${objectId}.v1.enc`,
+      status: "QUARANTINE_PENDING_AV",
+      sha256Hex: sha256,
+      byteSize: BigInt(Buffer.byteLength(text)),
+      chunkSizeBytes: 65536,
+      chunkCount: 1,
+      detectedMimeType: "application/pdf",
+      wrappedDek: new Uint8Array(48),
+      dekNonce: new Uint8Array(12),
+      streamNoncePrefix: new Uint8Array(7),
+      uploadedByActorType: "SYSTEM_WORKER",
+      uploadedByActorId: "test",
+      requiredAuthority: "kyb:read",
+      confidentialityTier: "RESTRICTED_PII",
+      avScanStatus: "PENDING",
+      stagingExpiresAt: new Date(NOW.getTime() + 3_600_000),
+    },
+  });
+  if (options.content !== false) contentByObject.set(objectId, Buffer.from(text));
+  return (
     await client.kybDocument.create({
       data: {
         merchantId: catalog.merchantId,
         subjectType: "MERCHANT",
         subjectId: catalog.merchantId,
         docType: "COMMERCIAL_REGISTRY" as never,
-        storageKey: `kyb/${catalog.merchantId}/${randomUUID()}`,
-        contentCiphertext: options.content === false ? null : Buffer.from(text).toString("base64"),
-        sha256: createHash("sha256").update(text + randomUUID()).digest("hex"),
+        storageKey: `kyb_documents/${catalog.merchantId}/2026/11/${objectId}.v1.enc`,
+        storageObjectId: objectId,
+        sha256,
         mime: "application/pdf",
         sizeBytes: text.length,
         avStatus: (options.avStatus ?? "PENDING") as never,
@@ -77,6 +117,7 @@ const document = async (
       },
     })
   ).id;
+};
 
 const worker = (catalog: AutomationCatalog, scanner: KybScanner | null, extra: Partial<ConstructorParameters<typeof KybScanWorker>[0]> = {}) =>
   new KybScanWorker({
@@ -87,6 +128,7 @@ const worker = (catalog: AutomationCatalog, scanner: KybScanner | null, extra: P
     clock: () => NOW,
     scanner,
     openContent,
+    objectStorage: fakeObjectStorage,
     merchantIds: [catalog.merchantId],
     batchSize: 20,
     retryBaseMs: 60_000,

@@ -20,6 +20,17 @@ export interface ProbeResult {
   detail: string;
 }
 
+/** True when the health body advertises the expected release (or no release check was requested). */
+export const healthReleaseMatches = (body: string, expectedRelease?: string): boolean => {
+  if (!expectedRelease) return true;
+  try {
+    const parsed = JSON.parse(body) as { release?: unknown };
+    return parsed.release === expectedRelease;
+  } catch {
+    return false;
+  }
+};
+
 const sleepSync = (ms: number): void => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
@@ -64,6 +75,7 @@ export const probeCoreHealth = (
   runner: SshRunner,
   host: HostPlan,
   config: DeployConfig,
+  expectedRelease?: string,
 ): ProbeResult => {
   const certs = certsDir(host, config);
   const coreServices = host.services.filter((service) => service.role === "core");
@@ -77,7 +89,7 @@ export const probeCoreHealth = (
   const check = coreServices[0] ? `${coreServices[0].name} /health (mTLS)` : "core /health (mTLS)";
   try {
     const body = runner.capture(host.ssh, command);
-    const ok = /"msg"\s*:\s*"OK"/.test(body) || body.includes("OK");
+    const ok = (/"msg"\s*:\s*"OK"/.test(body) || body.includes("OK")) && healthReleaseMatches(body, expectedRelease);
     return { host: host.ssh.host, check, ok, detail: body.slice(0, 200) };
   } catch (error) {
     return { host: host.ssh.host, check, ok: false, detail: (error as Error).message };
@@ -88,10 +100,11 @@ export const probeCoreHealth = (
 export const probeCoreService = (
   runner: SshRunner,
   host: HostPlan,
-  service: { name: string; port: number },
+  service: { name: string; port: number; remoteDir?: string },
   config: DeployConfig,
+  expectedRelease?: string,
 ): ProbeResult => {
-  const certs = `${config.CORE_REMOTE_DIR}/shared/certs`;
+  const certs = `${service.remoteDir ?? config.CORE_REMOTE_DIR}/shared/certs`;
   const command = mtlsCurl({
     certs,
     certName: "core-back",
@@ -102,7 +115,8 @@ export const probeCoreService = (
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
       const body = runner.capture(host.ssh, command);
-      return { host: host.ssh.host, check: `${service.name} /health (mTLS)`, ok: /"msg"\s*:\s*"OK"/.test(body) || body.includes("OK"), detail: body.slice(0, 200) };
+      const ok = (/"msg"\s*:\s*"OK"/.test(body) || body.includes("OK")) && healthReleaseMatches(body, expectedRelease);
+      return { host: host.ssh.host, check: `${service.name} /health (mTLS)`, ok, detail: body.slice(0, 200) };
     } catch (error) {
       lastError = (error as Error).message;
       sleepSync(1_000);
@@ -116,13 +130,15 @@ export const probeEdgeService = (
   runner: SshRunner,
   host: HostPlan,
   service: { name: string; port: number; privateIp?: string },
+  expectedRelease?: string,
 ): ProbeResult => {
   const address = service.privateIp ?? "127.0.0.1";
   let lastError = "";
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
       const body = runner.capture(host.ssh, `curl -fsS --max-time 10 http://${address}:${service.port}/health`);
-      return { host: host.ssh.host, check: `${service.name} /health`, ok: /"status"\s*:\s*"ok"/.test(body) || body.includes("ok"), detail: body.slice(0, 200) };
+      const ok = (/"status"\s*:\s*"ok"/.test(body) || body.includes("ok")) && healthReleaseMatches(body, expectedRelease);
+      return { host: host.ssh.host, check: `${service.name} /health`, ok, detail: body.slice(0, 200) };
     } catch (error) {
       lastError = (error as Error).message;
       sleepSync(1_000);
@@ -136,6 +152,7 @@ export const probeCoreNodes = (
   runner: SshRunner,
   plan: DeployPlan,
   config: DeployConfig,
+  expectedRelease?: string,
 ): ProbeResult[] => {
   const results: ProbeResult[] = [];
   const cores = plan.nodes.core.length > 0
@@ -165,7 +182,7 @@ export const probeCoreNodes = (
       results.push({
         host: node.ssh.host,
         check: `${node.nodeId} ${node.serviceName} /health (mTLS)`,
-        ok: /"msg"\s*:\s*"OK"/.test(body) || body.includes("OK"),
+        ok: (/"msg"\s*:\s*"OK"/.test(body) || body.includes("OK")) && healthReleaseMatches(body, expectedRelease),
         detail: body.slice(0, 200),
       });
     } catch (error) {
@@ -180,6 +197,7 @@ export const probeEdgeBackend = (
   runner: SshRunner,
   host: HostPlan,
   config: DeployConfig,
+  expectedRelease?: string,
 ): ProbeResult[] => {
   const results: ProbeResult[] = [];
   for (const service of host.services) {
@@ -189,7 +207,7 @@ export const probeEdgeBackend = (
       results.push({
         host: host.ssh.host,
         check: `${service.name} /health`,
-        ok: /"status"\s*:\s*"ok"/.test(body) || body.includes("ok"),
+        ok: (/"status"\s*:\s*"ok"/.test(body) || body.includes("ok")) && healthReleaseMatches(body, expectedRelease),
         detail: body.slice(0, 200),
       });
     } catch (error) {
@@ -209,6 +227,7 @@ export const probeEdgeToCore = (
   host: HostPlan,
   config: DeployConfig,
   coreUrls?: string[],
+  expectedRelease?: string,
 ): ProbeResult[] => {
   const results: ProbeResult[] = [];
   const certs = certsDir(host, config);
@@ -228,7 +247,7 @@ export const probeEdgeToCore = (
         results.push({
           host: host.ssh.host,
           check: `${role}-back mTLS -> ${coreUrl} /internal/${channel}/health`,
-          ok: /"status"\s*:\s*"ok"/.test(body) || /"channel"\s*:\s*"${channel}"/.test(body) || body.includes("ok"),
+          ok: (/"status"\s*:\s*"ok"/.test(body) || /"channel"\s*:\s*"${channel}"/.test(body) || body.includes("ok")) && healthReleaseMatches(body, expectedRelease),
           detail: body.slice(0, 200),
         });
       } catch (error) {
@@ -365,6 +384,51 @@ export const probeBackupDaemon = (runner: SshRunner, plan: DeployPlan, config: D
   }
 };
 
+/** object-storage-daemon /v1/health over mTLS from every core host and the backup host. */
+export const probeObjectStorage = (runner: SshRunner, plan: DeployPlan, config: DeployConfig): ProbeResult[] => {
+  const node = plan.storage.objectStorage;
+  if (!node) return [];
+  const results: ProbeResult[] = [];
+  const port = node.servicePort || config.OBJECT_STORAGE_DAEMON_PORT;
+  const configuredBind = config.OBJECT_STORAGE_DAEMON_BIND_HOST.trim();
+  const healthHost = !configuredBind || configuredBind === "0.0.0.0" ? node.privateIp : configuredBind;
+  const insecure = config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP;
+  const url = `${insecure ? "http" : "https"}://${healthHost}:${port}/v1/health`;
+  const commandFor = (certs: string): string =>
+    insecure
+      ? `curl -fsS --max-time 10 ${JSON.stringify(url)}`
+      : mtlsCurl({ certs, certName: "object-storage-client", url, expect: "ok" });
+  const probe = (host: HostPlan, certs: string, label: string): void => {
+    try {
+      const body = runner.capture(host.ssh, commandFor(certs), { sudo: true });
+      let ok = false;
+      try {
+        const parsed = JSON.parse(body) as { ok?: boolean };
+        ok = parsed.ok === true;
+      } catch {
+        ok = body.includes('"ok":true');
+      }
+      results.push({ host: host.ssh.host, check: label, ok, detail: body.slice(0, 200) });
+    } catch (error) {
+      results.push({ host: host.ssh.host, check: label, ok: false, detail: (error as Error).message });
+    }
+  };
+  try {
+    const body = runner.capture(node.ssh, "systemctl is-active pg-object-storage-daemon", { sudo: true });
+    results.push(result(node, "pg-object-storage-daemon is active", body.trim() === "active", body.slice(0, 200)));
+  } catch (error) {
+    results.push(result(node, "pg-object-storage-daemon is active", false, (error as Error).message));
+  }
+  for (const host of plan.hosts.filter((candidate) => candidate.roles.includes("core"))) {
+    probe(host, `${config.CORE_REMOTE_DIR}/shared/certs`, `${host.ssh.host} -> object-storage /v1/health`);
+  }
+  const backupHost = plan.hosts.find((candidate) => candidate.roles.includes("backup"));
+  if (backupHost && config.BACKUP_ENABLED) {
+    probe(backupHost, config.BACKUP_DAEMON_CERT_DIR, `${backupHost.ssh.host} -> object-storage /v1/health`);
+  }
+  return results;
+};
+
 export const probeStorage = (runner: SshRunner, plan: DeployPlan, config: DeployConfig): ProbeResult[] => [
   ...probePgPrimary(runner, plan, config),
   ...probePgReplicas(runner, plan, config),
@@ -373,6 +437,7 @@ export const probeStorage = (runner: SshRunner, plan: DeployPlan, config: Deploy
   ...probeAuditDb(runner, plan, config),
   ...probeLogDb(runner, plan, config),
   ...probeBackupDaemon(runner, plan, config),
+  ...probeObjectStorage(runner, plan, config),
 ];
 
 /** The Fake Rails service: backend /health and the Nginx vhost. */
@@ -380,20 +445,31 @@ export const probeFakeRails = (
   runner: SshRunner,
   host: HostPlan,
   config: DeployConfig,
+  expectedRelease?: string,
 ): ProbeResult[] => {
   const results: ProbeResult[] = [];
   const fakeRailsPort = parseNodeList(config.FAKE_RAILS_NODE)[0]?.servicePort ?? config.FAKE_RAILS_BACK_PORT;
-  try {
-    const body = runner.capture(host.ssh, `curl -fsS --max-time 10 http://127.0.0.1:${fakeRailsPort}/health`);
-    results.push({
-      host: host.ssh.host,
-      check: "fake-rails-back /health",
-      ok: /"status"\s*:\s*"ok"/.test(body),
-      detail: body.slice(0, 200),
-    });
-  } catch (error) {
-    results.push({ host: host.ssh.host, check: "fake-rails-back /health", ok: false, detail: (error as Error).message });
+  // PM2 can report the app online before its HTTP listener has finished
+  // starting under a full --fresh run. Retry like the core/edge probes so a
+  // slow boot is not reported as a deployment failure.
+  let fakeRailsLastError = "";
+  let fakeRailsBody = "";
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      fakeRailsBody = runner.capture(host.ssh, `curl -fsS --max-time 10 http://127.0.0.1:${fakeRailsPort}/health`);
+      fakeRailsLastError = "";
+      break;
+    } catch (error) {
+      fakeRailsLastError = (error as Error).message;
+      sleepSync(1_000);
+    }
   }
+  results.push({
+    host: host.ssh.host,
+    check: "fake-rails-back /health",
+    ok: fakeRailsLastError === "" && /"status"\s*:\s*"ok"/.test(fakeRailsBody) && healthReleaseMatches(fakeRailsBody, expectedRelease),
+    detail: (fakeRailsLastError || fakeRailsBody).slice(0, 200),
+  });
   const scheme = config.FAKE_RAILS_SSL ? "https" : "http";
   const insecure = config.FAKE_RAILS_SSL ? " -k" : "";
   try {
@@ -404,7 +480,7 @@ export const probeFakeRails = (
     results.push({
       host: host.ssh.host,
       check: `fake-rails vhost ${scheme}:${config.FAKE_RAILS_NGINX_PORT}`,
-      ok: /"status"\s*:\s*"ok"/.test(body),
+      ok: /"status"\s*:\s*"ok"/.test(body) && healthReleaseMatches(body, expectedRelease),
       detail: body.slice(0, 200),
     });
   } catch (error) {
@@ -465,16 +541,17 @@ export const verifyDeployment = (
   runner: SshRunner,
   plan: DeployPlan,
   config: DeployConfig,
+  expectedRelease?: string,
 ): DeploymentVerification => {
-  const results: ProbeResult[] = probeCoreNodes(runner, plan, config);
+  const results: ProbeResult[] = probeCoreNodes(runner, plan, config, expectedRelease);
   const coreUrls = edgeCoreUrls(config);
   for (const host of plan.hosts) {
     if (host.roles.includes("fake-rails")) {
-      results.push(...probeFakeRails(runner, host, config));
+      results.push(...probeFakeRails(runner, host, config, expectedRelease));
     }
     if (host.roles.some((role) => role === "admin" || role === "merchant" || role === "checkout")) {
-      results.push(...probeEdgeBackend(runner, host, config));
-      results.push(...probeEdgeToCore(runner, host, config, coreUrls));
+      results.push(...probeEdgeBackend(runner, host, config, expectedRelease));
+      results.push(...probeEdgeToCore(runner, host, config, coreUrls, expectedRelease));
       results.push(...probePublicVhost(runner, host, config));
     }
   }

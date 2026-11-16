@@ -397,6 +397,9 @@ export const primaryBootstrapSql = (config: DeployConfig, replicas: Array<PgNode
     return `DO ${tag} BEGIN ${body} END ${tag};`;
   };
   const createDb = sqlLiteral(`CREATE DATABASE ${dbName} OWNER ${appUser}`, "CREATE DATABASE");
+  const sandboxDbName = sqlIdent(config.SANDBOX_DB_NAME, "SANDBOX_DB_NAME");
+  const sandboxDbNameLit = sqlLiteral(config.SANDBOX_DB_NAME, "SANDBOX_DB_NAME");
+  const createSandboxDb = sqlLiteral(`CREATE DATABASE ${sandboxDbName} OWNER ${appUser}`, "CREATE SANDBOX DATABASE");
   // The runtime login role: a plain LOGIN member of `pgw_app` (DML only; no DDL, no UPDATE/DELETE/TRUNCATE on the
   // ledger and audit tables). `pgw_app` itself is also created by the append-only migration; creating it here first
   // lets the role exist before the first migration runs, and the migration's own IF NOT EXISTS keeps both safe.
@@ -411,6 +414,9 @@ export const primaryBootstrapSql = (config: DeployConfig, replicas: Array<PgNode
     doBlock(`IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = ${appUserLit}) THEN CREATE ROLE ${appUser} LOGIN PASSWORD ${appPw}; ELSE ALTER ROLE ${appUser} PASSWORD ${appPw}; END IF;`),
     ...runtimeRole,
     `SELECT ${createDb} WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = ${dbNameLit})\\gexec`,
+    ...(config.SANDBOX_ENABLED
+      ? [`SELECT ${createSandboxDb} WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = ${sandboxDbNameLit})\\gexec`]
+      : []),
     replicationRoleSql(config),
     ...replicas.map((node, index) => {
       const slot = sqlLiteral(slotName(node, index), "replication slot");
@@ -513,6 +519,7 @@ export const pgbouncerIni = (config: DeployConfig, serverPort = 5432): string =>
   return `[databases]
 ${assertSingleLine(config.PG_DB_NAME, "PG_DB_NAME")} = host=127.0.0.1 port=${serverPort} dbname=${connValue(config.PG_DB_NAME)}
 ${PGBOUNCER_SESSION_ALIAS} = host=127.0.0.1 port=${serverPort} dbname=${connValue(config.PG_DB_NAME)} pool_mode=session pool_size=${sessionPoolSize}
+${config.SANDBOX_ENABLED ? `pgw_sandbox = host=127.0.0.1 port=${serverPort} dbname=${connValue(config.SANDBOX_DB_NAME)}\npgw_sandbox_session = host=127.0.0.1 port=${serverPort} dbname=${connValue(config.SANDBOX_DB_NAME)} pool_mode=session pool_size=${sessionPoolSize}` : ""}
 
 [pgbouncer]
 listen_addr = 0.0.0.0

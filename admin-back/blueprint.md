@@ -276,7 +276,7 @@ Applies to all three copies of the client:
 
 ## Admin Edge BFF
 
-> Status: `partial` · Last verified: 2026-11-10
+> Status: `partial` · Last verified: 2026-11-13
 
 ## 1. Purpose and scope
 
@@ -569,3 +569,19 @@ The edge validates identifiers, enums and body shapes, but keeps the core as the
 - `GET /aml/incidents` now has an explicit query schema and forwards `search`, `page`, `pageSize`, `status`, `severity` and `category`; without it `coreForward` dropped every filter.
 - Incident writes, filing-adapter create/update/disable and `POST /reports/:id/file` relay core's 202 instead of returning a false 200.
 - The new AML routes remain behind the shared `amlConfidential` guard; the edge only validates shapes while core remains the authority for maker-checker, submission readiness and adapter matching.
+
+## Object & asset storage proxy
+
+`admin-back/api/protected/objectStorage.ts` forwards the console API:
+`GET /object-storage/summary`, `GET /object-storage/objects`,
+`GET /object-storage/objects/:id`, `GET /object-storage/access-logs`,
+`POST|DELETE /object-storage/objects/:id/legal-hold` and
+`POST /object-storage/maintenance/:job`. It is mounted with
+`system:storage:read`/`system:storage:admin`/`system:storage:legal-hold`
+read/write guards. `assetsRouter` additionally exposes binary
+`POST /assets/upload` (multipart `file` + `name`) and
+`GET /assets/:id/content`, forwarding raw bytes to core.
+
+## v38-v39 sandbox proxy (2026-11-13)
+
+`/api/v1/admin/sandbox/*` forwards only to `SANDBOX_CORE_BACK_URLS` (no Live fallback): overview, per-merchant overview/reset, wallet balance, global reset and Fake Rails accounts/clearing/scenarios/transactions/webhooks/statements. `/mirror/*` raw-forwards to `/internal/admin/*` for the Live-parity pages; report-engine mirror bodies use the 24 MB parser. The staff session is mirrored by the sandbox core. The Studio routes are open to signed-in staff; the sandbox data is isolated. An unconfigured sandbox node answers `503 SANDBOX_NODE_UNAVAILABLE`.

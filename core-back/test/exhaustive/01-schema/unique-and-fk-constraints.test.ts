@@ -74,6 +74,12 @@ for (const model of schema.models) {
   if (model.tableName === "audit_chain_anchors") {
     continue;
   }
+  // The execution-plane lock is deliberately a singleton (CHECK id = 1), so a
+  // generic second row cannot exist; the singleton constraint is proven by the
+  // check-constraint suite and by sandboxPlane.test.ts.
+  if (model.tableName === "system_execution_plane") {
+    continue;
+  }
   for (const fields of model.idBlocks) {
     uniqueConstraints.push({
       model: model.name,

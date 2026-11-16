@@ -2065,7 +2065,8 @@ const checks: Record<string, Check> = {
     expect(merchantSource).toContain("x-upload-size");
     expect(merchantSource).toContain("assertUploadSignature(raw, declaredMime)");
     expect(merchantSource).toContain("scanKybBytes(raw)");
-    expect(merchantSource).toContain("contentCiphertext: await vault.encryptSecret");
+    expect(merchantSource).toContain('namespace: "KYB_DOCUMENTS"');
+    expect(merchantSource).toContain("storageObjectId: staged.objectId");
     expect(adminSource).toContain("KYB_DOCUMENT_NOT_SCANNED");
     expect(adminSource).toContain('document.avStatus !== "CLEAN"');
     expect(adminSource).toContain("scanKybBytes(raw)");

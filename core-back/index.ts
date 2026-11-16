@@ -13,8 +13,10 @@ import {
 import { defaultWorkerHealthRegistry, type WorkerHealthRegistry } from "./engine/workers/workerRuntime";
 import { env } from "./lib/env";
 import { ApiError, isApiError, toErrorEnvelope } from "./lib/error";
+import { BlobStoreUnavailableError, ObjectStorageError } from "./lib/objectStorageSdk";
 import { REPORT_ENGINE_JSON_LIMIT } from "./api/internal/adminReportEngine";
 import { reconcileReportChromeDefaults } from "./engine/reportStudio/reconcileChromeDefaults";
+import { verifyExecutionPlaneFenceOnBoot } from "./engine/PlaneFenceGuard";
 
 /** Admin report-engine routes: authoring bodies carry the asset zip. */
 export const REPORT_ENGINE_BODY_PATH = /^\/internal\/(admin|merchant)\/report-engine(\/|$)/;
@@ -133,6 +135,8 @@ export const createApp = (options: CreateAppOptions = {}) => {
       msg: degraded ? "DEGRADED" : "OK",
       status: degraded ? "degraded" : "ok",
       service: "core-back",
+      release: process.env.APP_RELEASE ?? null,
+      commit: process.env.APP_COMMIT ?? null,
       leader,
       queue: {
         enabled: workersEnabled,
@@ -162,17 +166,23 @@ export const createApp = (options: CreateAppOptions = {}) => {
       }
 
       const requestId = request.requestId;
-      if (!isApiError(error)) {
-        const message = error instanceof Error ? error.message : "unknown error";
+      // Storage denials must keep their public meaning (403 tenant/authority,
+      // 404 missing, 409 state, 413 size, 415 MIME, 423 quarantine, 503 vault
+      // unavailable) on every domain route, not become a generic 500.
+      const mapped = error instanceof ObjectStorageError || error instanceof BlobStoreUnavailableError
+        ? new ApiError(error.httpStatus, error.code, error.message)
+        : error;
+      if (!isApiError(mapped)) {
+        const message = mapped instanceof Error ? mapped.message : "unknown error";
         console.error(`[${requestId}] ${message}`);
       }
 
-      const statusCode = isApiError(error)
-        ? error.statusCode
-        : error instanceof SyntaxError
+      const statusCode = isApiError(mapped)
+        ? mapped.statusCode
+        : mapped instanceof SyntaxError
           ? 400
           : 500;
-      response.status(statusCode).json(toErrorEnvelope(error, requestId));
+      response.status(statusCode).json(toErrorEnvelope(mapped, requestId));
     },
   );
 
@@ -281,6 +291,9 @@ const configureRedisInvalidation = async (): Promise<(() => Promise<void>)> => {
 };
 
 export const start = async () => {
+  // The execution plane is a property of the process and its database. Prove
+  // they match before Express listens or a worker ticks (v38).
+  await verifyExecutionPlaneFenceOnBoot();
   // The statement upload and the dispute intake are queue-only routes: the
   // service refuses to boot if nothing can drain the durable jobs.
   assertBackgroundJobQueueDrainable({

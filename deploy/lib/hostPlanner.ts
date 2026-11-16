@@ -4,8 +4,10 @@ import {
   applicationCredentials,
   effectiveDatabase,
   leaderElectionDatabaseUrl,
+  objectStorageConfigured,
   parseNodeList,
   pgStorageConfigured,
+  sandboxDatabase,
   withIpv6Loopback,
   type DeployConfig,
   type DeployRole,
@@ -23,7 +25,7 @@ import {
 
 export type ServiceName = string;
 export type NginxSiteName = "admin-lan" | "merchant-public" | "checkout-public" | "merchant-lan" | "checkout-lan" | "fake-rails";
-export type CertBundle = "core-server" | "admin-client" | "merchant-client" | "checkout-client" | "fake-rails-server" | "backup-server" | "backup-client" | "wal-archive-client" | "pg-client" | "redis-client" | "audit-db-client" | "log-db-client";
+export type CertBundle = "core-server" | "admin-client" | "merchant-client" | "checkout-client" | "fake-rails-server" | "backup-server" | "backup-client" | "wal-archive-client" | "pg-client" | "redis-client" | "audit-db-client" | "log-db-client" | "object-storage-server" | "object-storage-client";
 
 export interface SshTarget {
   host: string;
@@ -115,6 +117,7 @@ export interface StoragePlan {
   auditDb: StorageNodePlan | null;
   logDb: StorageNodePlan | null;
   backup: StorageNodePlan | null;
+  objectStorage: StorageNodePlan | null;
   "pg-primary": StorageNodePlan | null;
   "pg-replica": StorageNodePlan[];
   pgbouncer: StorageNodePlan[];
@@ -177,6 +180,7 @@ const ROLE_ORDER: Record<HostRole, number> = {
   "audit-db": 1,
   "log-db": 1,
   backup: 1,
+  "object-storage": 1,
   core: 2,
   "fake-rails": 3,
   admin: 4,
@@ -198,6 +202,7 @@ const ROLE_LABEL: Record<HostRole, string> = {
   "audit-db": "audit database",
   "log-db": "log database",
   backup: "backup daemon",
+  "object-storage": "shared object storage daemon",
 };
 
 const sshKey = (ssh: { host: string; port: number }): string => `${ssh.host}:${ssh.port}`;
@@ -243,6 +248,45 @@ const allEdgePrivateIps = (config: DeployConfig): string[] => {
 
 const backupPrivateIp = (config: DeployConfig): string | null =>
   parseNodeList(config.BACKUP_NODE)[0]?.privateIp ?? null;
+
+const objectStorageSpec = (config: DeployConfig): NodeSpec | null =>
+  parseNodeList(config.OBJECT_STORAGE_NODE)[0] ?? null;
+
+const objectStoragePrivateIp = (config: DeployConfig): string | null =>
+  objectStorageSpec(config)?.privateIp ?? null;
+
+const objectStoragePort = (config: DeployConfig): number =>
+  objectStorageSpec(config)?.servicePort ?? config.OBJECT_STORAGE_DAEMON_PORT;
+
+/**
+ * core-back's object-storage-daemon client settings and cryptographic keyring.
+ * Relative `shared/certs/...` paths are rewritten to `${remote}/shared/certs/...`
+ * by `absoluteEnv()` in `deploy.ts`, matching `backupCoreEnv()`.
+ */
+export const objectStorageCoreEnv = (config: DeployConfig): Record<string, string> => {
+  const coreNodeCount = Math.max(1, parseNodeList(config.CORE_NODES).length);
+  const base: Record<string, string> = {
+    CLUSTER_CORE_NODE_COUNT: String(coreNodeCount),
+    OBJECT_STORAGE_ROOT_DIR: config.OBJECT_STORAGE_ROOT_DIR,
+    ...(config.OBJECT_STORAGE_KEK_KEYRING
+      ? { OBJECT_STORAGE_KEK_KEYRING: config.OBJECT_STORAGE_KEK_KEYRING }
+      : {}),
+    OBJECT_STORAGE_ACTIVE_KEK_VERSION: String(config.OBJECT_STORAGE_ACTIVE_KEK_VERSION),
+    OBJECT_STORAGE_TRASH_RETENTION_DAYS: String(config.OBJECT_STORAGE_TRASH_RETENTION_DAYS),
+    OBJECT_STORAGE_GC_GRACE_HOURS: String(config.OBJECT_STORAGE_GC_GRACE_HOURS),
+    OBJECT_STORAGE_ALLOW_INSECURE_HTTP: config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP ? "true" : "false",
+  };
+  if (!objectStorageConfigured(config)) return base;
+  const scheme = config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP ? "http" : "https";
+  return {
+    ...base,
+    OBJECT_STORAGE_DAEMON_URL: `${scheme}://${objectStoragePrivateIp(config) ?? "127.0.0.1"}:${objectStoragePort(config)}`,
+    OBJECT_STORAGE_TLS_CA_PATH: "shared/certs/internal-ca.crt",
+    OBJECT_STORAGE_TLS_CLIENT_CERT_PATH: "shared/certs/object-storage-client.crt",
+    OBJECT_STORAGE_TLS_CLIENT_KEY_PATH: "shared/certs/object-storage-client.key",
+    OBJECT_STORAGE_DAEMON_TIMEOUT_MS: String(config.OBJECT_STORAGE_DAEMON_TIMEOUT_MS),
+  };
+};
 
 /**
  * core-back's backup-daemon client settings. Independent of the PostgreSQL
@@ -313,6 +357,21 @@ const storageEnv = (config: DeployConfig): Record<string, string> => {
  */
 export const directTlsQuery = (managedByDeploy: boolean): string => (managedByDeploy ? "?sslmode=no-verify" : "");
 
+const sandboxCorePrivateIp = (config: DeployConfig): string | null =>
+  parseNodeList(config.SANDBOX_NODE)[0]?.privateIp
+  ?? parseNodeList(config.CORE_NODES)[0]?.privateIp
+  ?? config.CORE_PRIVATE_IP
+  ?? null;
+
+const sandboxCoreUrls = (config: DeployConfig): string[] => {
+  if (!config.SANDBOX_ENABLED) return [];
+  if (config.SANDBOX_CORE_BACK_URLS && config.SANDBOX_CORE_BACK_URLS.trim().length > 0) {
+    return config.SANDBOX_CORE_BACK_URLS.split(",").map((entry) => entry.trim()).filter(Boolean);
+  }
+  const ip = sandboxCorePrivateIp(config);
+  return ip ? [`https://${ip}:${config.SANDBOX_CORE_PORT}`] : [];
+};
+
 const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> => {
   const database = effectiveDatabase(config);
   const redisNodes = parseNodeList(config.REDIS_NODES);
@@ -338,6 +397,11 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
     TRUST_PROXY: "false",
     LOG_LEVEL: "info",
     WORKER_ENABLED: "true",
+    EXECUTION_PLANE: "LIVE",
+    // The Fake Rails emulator belongs to the Sandbox plane. A development
+    // deployment may keep using it on the Live plane; production never can.
+    PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE:
+      config.FAKE_RAILS_ENABLED && config.DEPLOY_ENV !== "production" ? "true" : "false",
     ...(redisUrl ? { REDIS_URL: redisUrl } : {}),
     ...storageEnv(config),
     // An explicit session endpoint for an external database / custom pooler
@@ -346,6 +410,7 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
       ? { LEADER_ELECTION_DATABASE_URL: config.LEADER_ELECTION_DATABASE_URL }
       : {}),
     ...backupCoreEnv(config),
+    ...objectStorageCoreEnv(config),
     FAKE_RAILS_ENABLED: config.FAKE_RAILS_ENABLED ? "true" : "false",
     FAKE_RAILS_ALLOW_IN_PRODUCTION: config.FAKE_RAILS_ALLOW_IN_PRODUCTION ? "true" : "false",
     IS_TEST_SERVER: config.IS_TEST_SERVER ? "true" : "false",
@@ -355,6 +420,8 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
           ALLOW_FAKE_RAILS_HOSTS: "true",
           FAKE_RAILS_ALLOWED_HOSTS: fakeRailsAllowedHosts(config).join(","),
           FAKE_RAILS_SEEDER_TOKEN: config.FAKE_RAILS_SEEDER_TOKEN ?? "",
+          FAKE_RAILS_CONTROL_URL: `http://${fakeRailsNodeSpec(config)?.privateIp ?? config.FAKE_RAILS_PRIVATE_IP ?? "127.0.0.1"}:${fakeRailsNodeSpec(config)?.servicePort ?? config.FAKE_RAILS_BACK_PORT}`,
+          ...(config.FAKE_RAILS_CONTROL_TOKEN ? { FAKE_RAILS_CONTROL_TOKEN: config.FAKE_RAILS_CONTROL_TOKEN } : {}),
           ...(config.FAKE_RAILS_SSL
             ? { NODE_EXTRA_CA_CERTS: "shared/certs/internal-ca.crt" }
             : {}),
@@ -396,6 +463,7 @@ const fakeRailsEnv = (config: DeployConfig): Record<string, string> => ({
   FAKE_RAILS_ADMIN_PASSWORD: config.FAKE_RAILS_ADMIN_PASSWORD ?? "",
   FAKE_RAILS_JWT_SECRET: config.FAKE_RAILS_JWT_SECRET ?? "",
   FAKE_RAILS_SEEDER_TOKEN: config.FAKE_RAILS_SEEDER_TOKEN ?? "",
+  ...(config.FAKE_RAILS_CONTROL_TOKEN ? { FAKE_RAILS_CONTROL_TOKEN: config.FAKE_RAILS_CONTROL_TOKEN } : {}),
   // The local nginx proxies to the backend from loopback. Even when an operator
   // narrows the client allowlist, the proxy peer must remain reachable or every
   // legitimate user is refused.
@@ -433,6 +501,12 @@ const edgeEnv = (
     // the nginx host (IP allowlists, rate limits and audit rows all saw one address).
     TRUSTED_PROXY_CIDRS: ["127.0.0.1/32", "::1/128", ...(node ? [`${node.privateIp}/32`] : [])].join(","),
     ...(node ? { NODE_ID: node.nodeId, NODE_PRIVATE_IP: node.privateIp } : {}),
+    ...(sandboxCoreUrls(config).length > 0
+      ? {
+          SANDBOX_CORE_BACK_URLS: sandboxCoreUrls(config).join(","),
+          SANDBOX_CORE_BACK_URL: sandboxCoreUrls(config)[0]!,
+        }
+      : {}),
   };
   switch (role) {
     case "admin":
@@ -536,6 +610,79 @@ const buildFakeRailsService = (config: DeployConfig): ServicePlan => ({
   envFileName: ".env",
   releaseSuffix: "",
   currentLink: `${config.FAKE_RAILS_REMOTE_DIR}/current`,
+});
+
+const sandboxNode = (config: DeployConfig, coreNodes: NodePlan[]): NodePlan | null => {
+  if (!config.SANDBOX_ENABLED) return null;
+  const spec = parseNodeList(config.SANDBOX_NODE)[0] ?? null;
+  const base = coreNodes[0];
+  const sshHost = spec?.sshHost ?? base?.ssh.host ?? config.CORE_SSH_HOST;
+  const sshPort = spec?.sshPort ?? base?.ssh.port ?? config.CORE_SSH_PORT;
+  const privateIp = spec?.privateIp ?? base?.privateIp ?? config.CORE_PRIVATE_IP;
+  if (!sshHost || !privateIp) return null;
+  const ssh: SshTarget = {
+    host: sshHost,
+    port: sshPort,
+    user: base?.ssh.user ?? config.CORE_SSH_USER,
+    keyPath: base?.ssh.keyPath ?? config.CORE_SSH_KEY_PATH ?? "",
+    sudoPassword: base?.ssh.sudoPassword ?? config.CORE_SUDO_PASSWORD,
+  };
+  return {
+    nodeId: "sandbox-1",
+    id: "sandbox-1",
+    role: "core",
+    ssh,
+    host: sshHost,
+    privateIp,
+    port: spec?.servicePort ?? config.SANDBOX_CORE_PORT,
+    servicePort: spec?.servicePort ?? config.SANDBOX_CORE_PORT,
+    serviceName: "pg-core-sandbox",
+    hostKey: sshKey(ssh),
+  };
+};
+
+const sandboxCoreEnv = (config: DeployConfig, node: NodePlan): Record<string, string> => {
+  const database = sandboxDatabase(config);
+  const fakeRailsIp = fakeRailsNodeSpec(config)?.privateIp ?? config.FAKE_RAILS_PRIVATE_IP ?? "127.0.0.1";
+  const fakeRailsPort = fakeRailsNodeSpec(config)?.servicePort ?? config.FAKE_RAILS_BACK_PORT;
+  const env: Record<string, string> = {
+    ...coreEnv(config, node),
+    EXECUTION_PLANE: "SANDBOX",
+    PORT: String(node.port),
+    NODE_ID: "sandbox-1",
+    DATABASE_URL: database.url ?? "",
+    SANDBOX_DB_NAME: database.name,
+    ...(database.sessionUrl ? { LEADER_ELECTION_DATABASE_URL: database.sessionUrl } : {}),
+    FAKE_RAILS_ENABLED: "true",
+    ALLOW_FAKE_RAILS_HOSTS: "true",
+    PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE: "false",
+    FAKE_RAILS_CONTROL_URL: `${config.FAKE_RAILS_SSL ? "https" : "http"}://${fakeRailsIp}:${fakeRailsPort}`,
+    FAKE_RAILS_SEEDER_TOKEN: config.FAKE_RAILS_SEEDER_TOKEN ?? "",
+    ...(config.FAKE_RAILS_CONTROL_TOKEN ? { FAKE_RAILS_CONTROL_TOKEN: config.FAKE_RAILS_CONTROL_TOKEN } : {}),
+  };
+  delete env.DATABASE_REPLICA_URLS;
+  delete env.AUDIT_DATABASE_URL;
+  delete env.LOG_DATABASE_URL;
+  delete env.RUN_SYNTHETIC_HISTORY_SEED;
+  delete env.PLANE_FENCE_STRICT;
+  delete env.BACKUP_DAEMON_URL;
+  delete env.BACKUP_ENABLED;
+  delete env.BACKUP_S3_ALLOW_INSECURE_HTTP;
+  return env;
+};
+
+const buildSandboxService = (config: DeployConfig, node: NodePlan): ServicePlan => ({
+  name: "pg-core-sandbox",
+  role: "core",
+  sourceDir: "core-back",
+  remoteDir: config.SANDBOX_REMOTE_DIR,
+  port: node.port,
+  env: sandboxCoreEnv(config, node),
+  nodeId: "sandbox-1",
+  privateIp: node.privateIp,
+  envFileName: ".env",
+  releaseSuffix: "",
+  currentLink: `${config.SANDBOX_REMOTE_DIR}/current`,
 });
 
 type ComputeNodeMap = Partial<Record<ComputeNodeRole, NodePlan[]>>;
@@ -673,6 +820,7 @@ const buildCertBundles = (role: HostRole, config?: DeployConfig): CertBundle[] =
   // backup-client (core-back -> backup daemon) must reach core whenever backups
   // are on, also when the database itself is externally managed (DB_*).
   if (config?.BACKUP_ENABLED) storageCerts.push("backup-client");
+  if (config && objectStorageConfigured(config)) storageCerts.push("object-storage-client");
   // Least privilege: only the hosts whose PostgreSQL archives WAL get the WAL ingest client.
   const walCerts: CertBundle[] = config?.BACKUP_ENABLED ? ["wal-archive-client"] : [];
   switch (role) {
@@ -687,7 +835,14 @@ const buildCertBundles = (role: HostRole, config?: DeployConfig): CertBundle[] =
     case "fake-rails":
       return ["fake-rails-server"];
     case "backup":
-      return ["backup-server", "backup-client", "pg-client"];
+      return [
+        "backup-server",
+        "backup-client",
+        "pg-client",
+        ...(config && objectStorageConfigured(config) ? ["object-storage-client" as const] : []),
+      ];
+    case "object-storage":
+      return ["object-storage-server", "object-storage-client"];
     case "pg-primary":
       return ["pg-client", ...walCerts];
     case "pg-replica":
@@ -752,7 +907,18 @@ const buildStoragePlan = (config: DeployConfig): StoragePlan => {
   const auditDb = auditSpec ? storageNode({ config, role: "audit-db", spec: auditSpec, user: config.AUDIT_DB_SSH_USER, keyPath: config.AUDIT_DB_SSH_KEY_PATH, sudoPassword: config.AUDIT_DB_SUDO_PASSWORD }) : null;
   const logDb = logSpec ? storageNode({ config, role: "log-db", spec: logSpec, user: config.LOG_DB_SSH_USER, keyPath: config.LOG_DB_SSH_KEY_PATH, sudoPassword: config.LOG_DB_SUDO_PASSWORD }) : null;
   const backup = backupSpec ? storageNode({ config, role: "backup", spec: backupSpec, user: config.BACKUP_SSH_USER, keyPath: config.BACKUP_SSH_KEY_PATH, sudoPassword: config.BACKUP_SUDO_PASSWORD }) : null;
-  const nodes = [pgPrimary, ...pgReplicas, ...pgbouncer, ...redis, auditDb, logDb, backup].filter((node): node is StorageNodePlan => node !== null);
+  const objectStorageSpecValue = parseSingleNode(config.OBJECT_STORAGE_NODE, "OBJECT_STORAGE_NODE");
+  const objectStorage = objectStorageSpecValue
+    ? storageNode({
+        config,
+        role: "object-storage",
+        spec: objectStorageSpecValue,
+        user: config.OBJECT_STORAGE_SSH_USER,
+        keyPath: config.OBJECT_STORAGE_SSH_KEY_PATH,
+        sudoPassword: config.OBJECT_STORAGE_SUDO_PASSWORD,
+      })
+    : null;
+  const nodes = [pgPrimary, ...pgReplicas, ...pgbouncer, ...redis, auditDb, logDb, backup, objectStorage].filter((node): node is StorageNodePlan => node !== null);
   return {
     nodes,
     postgres: { primary: pgPrimary, replicas: pgReplicas, pgbouncer, version: config.PG_VERSION },
@@ -760,6 +926,7 @@ const buildStoragePlan = (config: DeployConfig): StoragePlan => {
     auditDb,
     logDb,
     backup,
+    objectStorage,
     "pg-primary": pgPrimary,
     "pg-replica": pgReplicas,
     pgbouncer,
@@ -914,6 +1081,16 @@ const buildStorageFirewall = (config: DeployConfig, node: StorageNodePlan, allSt
           ...(allStorage.auditDb ? [allStorage.auditDb.privateIp] : []),
         ])], comment: "backup-daemon mTLS from core nodes + WAL archive push from PostgreSQL hosts" },
       ];
+    case "object-storage":
+      return [
+        sshRule,
+        {
+          port: node.servicePort || config.OBJECT_STORAGE_DAEMON_PORT,
+          proto: "tcp",
+          fromCidrs: [...new Set([...coreIps, ...(backupIp ? [backupIp] : [])])],
+          comment: "object-storage-daemon mTLS from core + backup nodes",
+        },
+      ];
     default:
       return [sshRule];
   }
@@ -967,6 +1144,7 @@ const storageTargets = (config: DeployConfig, storage: StoragePlan): RoleTarget[
     [storage.auditDb, config.AUDIT_DB_MANAGE_VIA_SSH],
     [storage.logDb, config.LOG_DB_MANAGE_VIA_SSH],
     [storage.backup, config.BACKUP_ENABLED],
+    [storage.objectStorage, objectStorageConfigured(config)],
   ];
   const seen = new Set<string>();
   for (const [node, enabled] of managed) {
@@ -1003,6 +1181,27 @@ const allTargets = (config: DeployConfig): RoleTarget[] => {
         privateIp: node.privateIp,
       });
     }
+  }
+  const sandbox = sandboxNode(config, nodes.core);
+  if (sandbox) {
+    targets.push({
+      role: "core",
+      ssh: sandbox.ssh,
+      service: buildSandboxService(config, sandbox),
+      nginx: [],
+      firewall: [
+        ...buildComputeFirewall(config, "core", { sshPort: sandbox.ssh.port, servicePort: sandbox.port, privateIp: sandbox.privateIp }),
+        {
+          port: sandbox.port,
+          proto: "tcp",
+          fromCidrs: allEdgePrivateIps(config),
+          comment: "Sandbox mTLS core only from the edge hosts",
+        },
+      ],
+      certs: buildCertBundles("core", config),
+      nodeId: "sandbox-1",
+      privateIp: sandbox.privateIp,
+    });
   }
   targets.push(...legacyRoleTargets(config));
   targets.push(...storageTargets(config, storage));
@@ -1081,7 +1280,7 @@ export const planHosts = (config: DeployConfig): DeployPlan => {
   const roles = {} as Record<DeployRole, string>;
   for (const host of hosts) {
     for (const role of host.roles) {
-      if (role === "pg-primary" || role === "pg-replica" || role === "pgbouncer" || role === "redis" || role === "audit-db" || role === "log-db" || role === "backup") continue;
+      if (role === "pg-primary" || role === "pg-replica" || role === "pgbouncer" || role === "redis" || role === "audit-db" || role === "log-db" || role === "backup" || role === "object-storage") continue;
       if (!roles[role]) roles[role] = host.ssh.host;
     }
   }

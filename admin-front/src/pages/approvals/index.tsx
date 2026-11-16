@@ -344,6 +344,8 @@ const ApprovalsPage = dc(() => {
                 return { name: "AmlReportingStudio", query: { open: row.subjectId } };
             case "REGULATORY_REPORT":
                 return { name: "AmlReports", query: { open: row.subjectId } };
+            case "STORAGE_LEGAL_HOLD":
+                return { name: "SystemObjectStorage", query: { open: row.subjectId } };
             default:
                 return null;
         }

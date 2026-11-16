@@ -488,7 +488,7 @@ const AmlReportsPage = dc(() => {
             const url = URL.createObjectURL(blob);
             const anchor = document.createElement("a");
             anchor.href = url;
-            anchor.download = `${selected.value.reportRef}.${format === "XML" ? "xml" : "xlsx"}`;
+            anchor.download = `${selected.value.reportRef}.${format === "XML" ? "xml" : format === "DOCX" ? "docx" : "xlsx"}`;
             anchor.click();
             URL.revokeObjectURL(url);
             showSnackBar({ type: "success", message: `${format} ${t("downloaded")}` });

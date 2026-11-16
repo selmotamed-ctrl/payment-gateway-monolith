@@ -3,7 +3,7 @@ id: edge.checkout
 title: Checkout Edge BFF
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-13
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/lib/realtimeBus.ts
@@ -20,6 +20,7 @@ design_sources:
   - design/01-platform-architecture/payment_gateway_final_design-v5.md#161-checkout-back-public-api-apiv1pay--apiv1inbound---forwards-to-core-back-internalcheckout
   - design/02-storage-and-performance/storage_driver_postgres18_backup_and_scaling_architecture.md#62-edge-to-core-mtls-upstream-load-balancer--health-failover-admin-back-merchant-back-checkout-back
 tests:
+  - checkout-back/test/sandbox-routing.test.ts
   - core-back/test/storage-engine/telemetry-and-realtime.test.ts
   - checkout-back/test/checkout-zero-trust.test.ts
   - checkout-back/test/core-internal-client.test.ts
@@ -279,3 +280,7 @@ The suites are local and do not require PostgreSQL/Redis. A live gateway webhook
 ## Gap resolutions (2026-11-05)
 
 - The checkout upstream client uses the same `CORE_FAILURE_THRESHOLD = 3` consecutive-failure threshold before a core node leaves rotation (GAP-021). Checkout sessions use the `payment-gateway-checkout` audience (GAP-020).
+
+## v38 sandbox checkout (2026-11-13)
+
+`sbx_*` link keys and `SANDBOX` inbound environments select `SANDBOX_CORE_BACK_URLS`; `pl_*` and LIVE inbound stay on the Live pool. The inspector routes list accounts, patch an account balance/status and reveal/simulate an attempt; all refuse a non-`sbx_` key with `403`. An unconfigured sandbox node is `503 SANDBOX_NODE_UNAVAILABLE`, never a silent Live fallback.

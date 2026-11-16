@@ -48,6 +48,25 @@
     document.head.appendChild(style);
   }
 
+  /**
+   * Paged.js unwraps author @media print rules and applies them to the screen
+   * preview. Inject the print-only reset after pagination so the preview keeps
+   * its themed canvas, page separation and shadow while the printed document
+   * returns to plain white pages.
+   */
+  function ensurePreviewPrintResetRules() {
+    if (document.getElementById("report-preview-print-reset")) return;
+    var style = document.createElement("style");
+    style.id = "report-preview-print-reset";
+    style.setAttribute("media", "print");
+    style.textContent = [
+      "html, body { background: #FFFFFF !important; }",
+      ".pagedjs_pages { padding: 0 !important; gap: 0 !important; background: transparent !important; display: block !important; }",
+      ".pagedjs_page { border: 0 !important; box-shadow: none !important; }",
+    ].join("\n");
+    document.head.appendChild(style);
+  }
+
   function headerSignature(thead) {
     return Array.prototype.map
       .call(thead.querySelectorAll("th"), function (cell) {
@@ -112,6 +131,7 @@
 
   function afterRender() {
     ensurePrintPageRules();
+    ensurePreviewPrintResetRules();
     repeatTableHeaders();
     count();
   }
@@ -128,6 +148,7 @@
   window.addEventListener("message", function (event) {
     if (event && event.data && event.data.type === "report:print") {
       ensurePrintPageRules();
+      ensurePreviewPrintResetRules();
       repeatTableHeaders();
       var print = function () {
         try {

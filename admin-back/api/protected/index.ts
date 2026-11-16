@@ -28,6 +28,8 @@ import { systemRouter } from "./system";
 import { inboundEventsRouter, transactionsRouter } from "./transactions";
 import { walletsRouter } from "./wallets";
 import { reportEngineRouter } from "./reportEngine";
+import { objectStorageRouter } from "./objectStorage";
+import { sandboxProxyRouter } from "../sandboxProxy";
 
 const router = express.Router();
 
@@ -63,6 +65,10 @@ const gatewayGuard = guard({ read: ["gateway:read"], write: ["gateway:write", "g
 
 router.use("/search", searchRouter);
 router.use("/academy", academyRouter);
+// v38: the Sandbox plane is a separate database; staff control never falls back to Live.
+// Sandbox control and mirror routes are staff-only and authority-checked in core;
+// the edge cannot express every mirrored authority (gateways, settings, finance).
+router.use("/sandbox", sandboxProxyRouter);
 router.use(
   "/users",
   guard({ read: ["user:read", "security:read"], write: ["user:write", "security:write"] }),
@@ -129,6 +135,14 @@ router.use("/options", optionsRouter);
 router.use("/stats", statsRouter);
 router.use("/audit-logs", guard({ read: ["security:read"], write: ["security:read"] }), auditLogsRouter);
 router.use("/kyb-documents", kybGuard, kybReviewRouter);
+router.use(
+  "/object-storage",
+  guard({
+    read: ["system:storage:read", "system:storage:admin", "system:storage:legal-hold"],
+    write: ["system:storage:admin", "system:storage:legal-hold"],
+  }),
+  objectStorageRouter,
+);
 router.use("/system/backups", backupsRouter);
 router.use("/system", guard({ read: ["security:read"], write: ["security:write"] }), systemRouter);
 router.use(

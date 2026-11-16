@@ -9,6 +9,10 @@ export default defineConfig({
     },
     test: {
         environment: "node",
-        include: ["src/components/ui/__tests__/**/*.test.ts", "src/lib/reportEngineSdk/__tests__/**/*.test.ts"],
+        include: [
+            "src/components/ui/__tests__/**/*.test.ts",
+            "src/lib/reportEngineSdk/__tests__/**/*.test.ts",
+            "src/pages/**/__tests__/**/*.test.ts",
+        ],
     },
 });

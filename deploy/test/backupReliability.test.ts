@@ -40,6 +40,9 @@ KMS_MASTER_KEY="kms-Q7x9Lm2Zr4Vb8Nc1Wd5Tg3Hy6Jp0Sa2"
 BACKUP_ENABLED="true"
 BACKUP_SSH_KEY_PATH="~/.ssh/backup"
 BACKUP_ENCRYPTION_KEY_HEX="9f3a7c1e5b2d84f06a1c3e7b9d2f4a8c5e0b6d1a3f7c9e2b4d8a0c6e1f5b3a79"
+OBJECT_STORAGE_NODE="obj-1@10.10.13.10:22:10.10.13.10:4095"
+OBJECT_STORAGE_SSH_KEY_PATH="~/.ssh/backup"
+OBJECT_STORAGE_KEK_KEYRING="v1:7e1f4b9a3c6d2058e1a7b4c9d3f6082a5b1c8e4d7a0f3b6c9e2d5a8f1b4c7e03"
 `;
 
 /** Externally managed database (DB_*): no PG_* storage nodes at all. */
@@ -376,6 +379,7 @@ describe("daemon env contract", () => {
     expect(env.PG_REPLICATION_PASSWORD).toBe("ultra-strong-repl-K7p2Zq9w");
     expect(env.PG_REPLICATION_SLOT).toBe("pg_backup_core");
     expect(env.PG_SSLMODE).toBe("require");
+    expect(env.PG_AUDIT_DATA_DIR).toBe("/var/lib/postgresql/18/audit");
     expect(env.PG_LOG_DB_NAME).toBe("pg_logs_db");
     expect(env.BACKUP_WAL_CLIENT_CNS).toBe("wal-archive-client");
     expect(env.BACKUP_ALLOWED_CLIENT_CNS).toBe("backup-client");
@@ -385,6 +389,7 @@ describe("daemon env contract", () => {
     const shared = load(`${PG_MODE}\nBACKUP_ENGINE_MODE="pg-native"\nAUDIT_DB_NODE="audit-db@10.10.10.10:22:10.10.10.10:5432"\nLOG_DB_NODE=""\nLOG_DB_MANAGE_VIA_SSH="false"`);
     const env = backupDaemonEnv(shared);
     expect(env.PG_AUDIT_HOST).toBe("");
+    expect(env.PG_AUDIT_DATA_DIR).toBe("");
     expect(env.PG_LOG_DB_NAME).toBe("");
   });
 

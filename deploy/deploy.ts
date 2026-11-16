@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { backupS3Configured, clamdManaged, effectiveDatabase, loadDeployConfig, pgAppRoleEnabled, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole } from "./lib/configSchema";
+import { backupS3Configured, clamdManaged, effectiveDatabase, loadDeployConfig, objectStorageConfigured, pgAppRoleEnabled, resolveBackupS3Mode, withIpv6Loopback, parseNodeList, pgStorageConfigured, type DeployConfig, type DeployRole, sandboxDatabase } from "./lib/configSchema";
 import { findSshConflicts, planHosts, renderTopology, type DeployPlan, type HostPlan, type ServicePlan } from "./lib/hostPlanner";
 import { buildPki, certFilesForHost, checkPkiExpiry, pkiRenewalReport, readMaterial, verifyPki, WAL_ARCHIVE_CLIENT } from "./lib/pkiManager";
 import {
@@ -15,6 +15,8 @@ import {
   certbotRenewalTimer,
 } from "./lib/certRenewal";
 import { collectSecretValues, effectiveTargetHome, effectiveTargetUser, SshRunner, shellQuote } from "./lib/sshRunner";
+import { deploymentUnits, isFullDeployment, normalizeOnlyRole, shouldRun, shouldRunStorage, type OnlyRole } from "./lib/selection";
+import { buildPreflightPlan, renderPreflightReport, runPreflight } from "./lib/preflight";
 import { dollarTag, pgpassField, sqlIdent, sqlLiteral } from "./lib/quoting";
 import { applyFirewall, readFirewallStatus } from "./lib/firewallConfigurator";
 import { probeCoreService, probeEdgeService, renderVerification, verifyDeployment } from "./lib/healthVerifier";
@@ -27,6 +29,12 @@ import { provisionRedis } from "./provisioners/redisProvisioner";
 import { provisionClamav } from "./provisioners/clamavProvisioner";
 import { provisionAuditAndLogDb } from "./provisioners/auditAndLogDbProvisioner";
 import { backupDaemonUser, provisionBackupEngine, STORAGE_CERT_DIR } from "./provisioners/backupEngineProvisioner";
+import {
+  OBJECT_STORAGE_INSTALL_DIR,
+  OBJECT_STORAGE_SERVICE_USER,
+  provisionObjectStorageEngine,
+} from "./provisioners/objectStorageProvisioner";
+import { cleanFreshStorage, probeFreshStorage } from "./lib/freshStorage";
 
 /**
  * The multi-host deployment orchestrator.
@@ -42,9 +50,6 @@ import { backupDaemonUser, provisionBackupEngine, STORAGE_CERT_DIR } from "./pro
  */
 
 const REPO_ROOT = resolve(import.meta.dirname, "..");
-
-type StorageOnlyRole = "pg" | "pg-primary" | "pg-replica" | "pgbouncer" | "redis" | "audit-db" | "log-db" | "backup" | "storage";
-type OnlyRole = DeployRole | StorageOnlyRole;
 
 interface CliOptions {
   envPath: string;
@@ -64,12 +69,16 @@ interface CliOptions {
   forceRestart: boolean;
   /** Ignore the frontend build cache and rebuild every SPA. */
   rebuild: boolean;
+  /** Run only the read-only preflight and exit. */
+  preflightOnly: boolean;
+  /** Skip the preflight gate (emergency use). */
+  skipPreflight: boolean;
+  /** Allow the preflight to stop safe same-repo dev listeners. */
+  stopUnmanaged: boolean;
   keepReleases?: number;
   rollingBatch?: number;
   nodes?: Set<string>;
 }
-
-const ONLY_ROLES: OnlyRole[] = ["db", "core", "admin", "merchant", "checkout", "fake-rails", "pg", "pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup", "storage"];
 
 /** Splits an ordered node list into rolling batches without reordering it. */
 export const rollingBatches = <T>(nodes: readonly T[], batchSize: number): T[][] => {
@@ -97,6 +106,9 @@ const parseArgs = (argv: string[]): CliOptions => {
     checkCerts: false,
     forceRestart: false,
     rebuild: false,
+    preflightOnly: false,
+    skipPreflight: false,
+    stopUnmanaged: false,
   };
   for (const raw of argv) {
     if (raw === "--dry-run") options.dryRun = true;
@@ -110,14 +122,13 @@ const parseArgs = (argv: string[]): CliOptions => {
     else if (raw === "--check-certs") options.checkCerts = true;
     else if (raw === "--force-restart") options.forceRestart = true;
     else if (raw === "--rebuild") options.rebuild = true;
+    else if (raw === "--preflight-only") options.preflightOnly = true;
+    else if (raw === "--skip-preflight") options.skipPreflight = true;
+    else if (raw === "--stop-unmanaged") options.stopUnmanaged = true;
     else if (raw.startsWith("--env=")) options.envPath = resolve(REPO_ROOT, raw.slice(6));
     else if (raw.startsWith("--only=")) {
       for (const role of raw.slice(7).split(",")) {
-        const normalized = role.trim().toLowerCase();
-        if (!ONLY_ROLES.includes(normalized as OnlyRole)) {
-          throw new Error(`Unknown --only role '${role}'`);
-        }
-        options.only.add(normalized as OnlyRole);
+        options.only.add(normalizeOnlyRole(role));
       }
     } else if (raw.startsWith("--keep=")) options.keepReleases = Number(raw.slice(7));
     else if (raw.startsWith("--rolling-batch=")) {
@@ -133,6 +144,15 @@ const parseArgs = (argv: string[]): CliOptions => {
 };
 
 const log = (message = ""): void => console.log(message);
+
+/** Short commit used in health payloads and the final audit summary. */
+const deployCommit = (): string => {
+  try {
+    return execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+  } catch {
+    return "unknown";
+  }
+};
 const stepTimes: Array<{ index: number; title: string; startedAt: number }> = [];
 const step = (index: number, title: string): void => {
   stepTimes.push({ index, title, startedAt: Date.now() });
@@ -157,7 +177,7 @@ const timestamp = (): string => new Date().toISOString().replace(/[-:T]/g, "").s
 
 
 const isStorageRole = (role: string): boolean =>
-  ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup"].includes(role);
+  ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup", "object-storage"].includes(role);
 
 export const uploadStorageCertificates = (
   runner: SshRunner,
@@ -166,34 +186,62 @@ export const uploadStorageCertificates = (
   config: DeployConfig,
   dryRun: boolean,
 ): void => {
+  const coreCertDir = `${config.CORE_REMOTE_DIR}/shared/certs`;
   for (const host of plan.hosts.filter((candidate) => candidate.roles.some(isStorageRole))) {
-    const directory = host.roles.includes("backup")
-      ? config.BACKUP_DAEMON_CERT_DIR
-      : STORAGE_CERT_DIR;
     const materials = certFilesForHost(pki, host.roles);
-    // The WAL ingest client (and the CA that verifies the daemon) always live in
-    // STORAGE_CERT_DIR on the PostgreSQL host, where archive_command reads them,
-    // even when that host is also the backup node (whose daemon uses its own dir).
-    const walClient = materials.find((material) => material.name === WAL_ARCHIVE_CLIENT);
-    const directoryFor = (material: { name: string }): string =>
-      material.name === WAL_ARCHIVE_CLIENT ? STORAGE_CERT_DIR : directory;
-    for (const material of materials) {
-      const target = directoryFor(material);
-      if (dryRun) {
-        runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.crt`, content: "", mode: 0o644, sudo: true });
-        continue;
+    const has = (role: string) => (host.roles as readonly string[]).includes(role);
+
+    // Certificate placement is per consumer, never by "the first role on the
+    // host". A co-located storage/core/backup host must not let the storage
+    // service read core or edge private keys (and vice versa).
+    const directoriesFor = (material: { name: string; kind: string }): string[] => {
+      const dirs = new Set<string>();
+      if (material.kind === "ca") {
+        if (has("object-storage")) dirs.add(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
+        if (has("backup")) dirs.add(config.BACKUP_DAEMON_CERT_DIR);
+        if (has("pg-primary") || has("pg-replica") || has("audit-db")) dirs.add(STORAGE_CERT_DIR);
       }
-      const content = readMaterial(material);
-      runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.crt`, content: content.cert, mode: 0o644, sudo: true });
-      if (content.key) {
-        runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.key`, content: content.key, mode: 0o600, sudo: true });
+      if (material.name === "object-storage-daemon" && has("object-storage")) {
+        dirs.add(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
+      }
+      if (material.name === "object-storage-client") {
+        if (has("core")) dirs.add(coreCertDir);
+        if (has("backup")) dirs.add(config.BACKUP_DAEMON_CERT_DIR);
+        // An object-storage-only host has no consumer for the client leaf; the
+        // CA + server leaf are sufficient. Keep it only when it is the sole role
+        // for compatibility with the standalone daemon checks.
+        if (has("object-storage") && !has("core") && !has("backup")) {
+          dirs.add(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
+        }
+      }
+      if ((material.name === "backup-daemon" || material.name === "backup-client") && has("backup")) {
+        dirs.add(config.BACKUP_DAEMON_CERT_DIR);
+      }
+      if (material.name === "pg-client") {
+        if (has("backup")) dirs.add(config.BACKUP_DAEMON_CERT_DIR);
+        if (has("pg-primary") || has("pg-replica") || has("pgbouncer") || has("audit-db")) dirs.add(STORAGE_CERT_DIR);
+      }
+      if (material.name === WAL_ARCHIVE_CLIENT) dirs.add(STORAGE_CERT_DIR);
+      return [...dirs];
+    };
+
+    const written = new Set<string>();
+    for (const material of materials) {
+      const content = dryRun ? null : readMaterial(material);
+      for (const target of directoriesFor(material)) {
+        if (written.has(`${target}/${material.name}`)) continue;
+        written.add(`${target}/${material.name}`);
+        if (dryRun) {
+          runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.crt`, content: "", mode: 0o644, sudo: true });
+          continue;
+        }
+        runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.crt`, content: content!.cert, mode: 0o644, sudo: true });
+        if (content!.key) {
+          runner.writeRemoteFile({ target: host.ssh, path: `${target}/${material.name}.key`, content: content!.key, mode: 0o600, sudo: true });
+        }
       }
     }
-    if (walClient && !dryRun) {
-      if (directory !== STORAGE_CERT_DIR) {
-        const ca = materials.find((material) => material.kind === "ca");
-        if (ca) runner.writeRemoteFile({ target: host.ssh, path: `${STORAGE_CERT_DIR}/${ca.name}.crt`, content: readMaterial(ca).cert, mode: 0o644, sudo: true });
-      }
+    if (materials.some((material) => material.name === WAL_ARCHIVE_CLIENT) && !dryRun) {
       // archive_command runs as the postgres OS user: it must read the WAL
       // client key, and nothing else in this directory is made group-readable.
       const dir = shellQuote(STORAGE_CERT_DIR);
@@ -203,15 +251,22 @@ export const uploadStorageCertificates = (
         { sudo: true },
       );
     }
-    if (host.roles.includes("backup") && !dryRun) {
+    if (has("backup") && !dryRun) {
       // The daemon (pgbackup, or postgres when co-located in wal-g mode) must own its mTLS material.
       const owner = shellQuote(`${backupDaemonUser(config)}:${backupDaemonUser(config)}`);
-      const dir = shellQuote(directory);
+      const dir = shellQuote(config.BACKUP_DAEMON_CERT_DIR);
       runner.run(
         host.ssh,
-        `chown ${owner} ${dir} && chmod 0750 ${dir} && { chown ${owner} ${dir}/*.crt ${dir}/*.key 2>/dev/null; chmod 0640 ${dir}/*.crt 2>/dev/null; chmod 0600 ${dir}/*.key 2>/dev/null; true; } || true`,
+        `chown ${owner} ${dir} 2>/dev/null && chmod 0750 ${dir} 2>/dev/null && { chown ${owner} ${dir}/*.crt ${dir}/*.key 2>/dev/null; chmod 0640 ${dir}/*.crt 2>/dev/null; chmod 0600 ${dir}/*.key 2>/dev/null; true; } || true`,
         { sudo: true },
       );
+    }
+    if (has("object-storage") && !dryRun) {
+      // The user is created in step 5, after this step on a fresh host. Keep the
+      // directory root-owned here; the provisioner hands the dedicated cert
+      // files to pgobjstore after the account exists.
+      const dir = shellQuote(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
+      runner.run(host.ssh, `install -d -m 0750 -o root -g root ${dir}`, { sudo: true });
     }
   }
 };
@@ -514,7 +569,7 @@ const deployService = (input: {
   }
 
   // 3. The least-privilege certificates of this host.
-  for (const material of certFilesForHost(pki, host.roles)) {
+  for (const material of certFilesForHost(pki, [service.role])) {
     if (runner.dryRun) {
       log(`[dry-run] upload ${material.name}.crt${material.kind === "ca" ? "" : ` + ${material.name}.key`} -> ${remote}/shared/certs/`);
       continue;
@@ -528,7 +583,10 @@ const deployService = (input: {
 
   // 4. The environment. It lives in `shared/` and is symlinked into the release
   //    so a release always reads the current configuration.
-  const env = absoluteEnv(service.env, remote);
+  const env = absoluteEnv(
+    { ...service.env, APP_RELEASE: releaseTimestamp, APP_COMMIT: deployCommit() },
+    remote,
+  );
   const envPath = `${remote}/shared/${service.envFileName ?? ".env"}`;
   runner.writeRemoteFile({ target: host.ssh, path: envPath, content: renderEnvFile(env), mode: 0o600, sudo: false });
   runner.run(host.ssh, `ln -sfn ${shellQuote(envPath)} ${shellQuote(`${appDir}/.env`)}`, { sudo: false });
@@ -538,7 +596,21 @@ const deployService = (input: {
   runner.run(host.ssh, `${bun} install --frozen-lockfile`, { cwd: appDir, sudo: false });
   if (service.role === "core") {
     runner.run(host.ssh, `${bun}x prisma generate`, { cwd: appDir, sudo: false });
-    if (input.migration?.firstCoreNode) {
+    const isSandboxCore = service.name === "pg-core-sandbox";
+    if (isSandboxCore) {
+      const sandboxOwnerUrl = sandboxDatabase(config).ownerUrl;
+      if (!sandboxOwnerUrl) throw new Error("The Sandbox database endpoint is not configured (SANDBOX_ENABLED requires a managed database)");
+      runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
+        runner.run(host.ssh, `${bun} ${flag} run migrate-deploy`.replace("  ", " "), { cwd: appDir, sudo: false }), sandboxOwnerUrl);
+      if (config.RUN_PRISMA_SEED) {
+        runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
+          runner.run(host.ssh, `${bun} ${flag} run db-seed`.replace("  ", " "), { cwd: appDir, sudo: false }), sandboxOwnerUrl);
+      }
+      if (config.SEED_FAKE_RAILS_BLUEPRINTS) {
+        runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
+          runner.run(host.ssh, `${bun} ${flag} run seed-fake-rails`.replace("  ", " "), { cwd: appDir, sudo: false, timeoutMs: 30 * 60_000 }), sandboxOwnerUrl);
+      }
+    } else if (input.migration?.firstCoreNode) {
       const state = probeMigrationState({ runner, config, host, appDir, releaseTimestamp });
       const migrationPlan = planMigrations({
         fresh: input.migration.fresh,
@@ -559,7 +631,7 @@ const deployService = (input: {
         log("  no pending migrations");
       }
     }
-    if (config.RUN_PRISMA_SEED) {
+    if (!isSandboxCore && config.RUN_PRISMA_SEED) {
       const seedStarted = Date.now();
       runAsDatabaseOwner(runner, host, appDir, config, (flag) => () =>
         runner.run(host.ssh, `${bun} ${flag} run db-seed`.replace("  ", " "), { cwd: appDir, sudo: false }));
@@ -649,12 +721,36 @@ export const deployBackupDaemon = (input: {
   // Ownership and dependencies only need work when the source changed (or the
   // dependency tree is missing).
   runner.run(host.ssh, bunInstallCommand(config), { sudo: true });
+  const nodeModules = shellQuote(`${installDir}/node_modules`);
+  // The dependency tree is deliberately excluded from the recursive chown (a multi-GB node_modules is expensive),
+  // but switching the daemon account (for example wal-g/postgres -> pg-native/pgbackup) would leave the old owner's
+  // files in place and `bun install` fails with "Failed to link <pkg>: EEXIST". Detect a foreign-owned tree and
+  // reinstall it as the current account instead; with the tree removed the install condition below always runs.
+  const foreignNodeModules = `if [ -d ${nodeModules} ] && [ -n "$(find ${nodeModules} ! -user ${shellQuote(daemonUser)} -print -quit 2>/dev/null)" ]; then rm -rf ${nodeModules}; fi`;
   runner.run(
     host.ssh,
-    `${chownSource(daemonOwner)}; install -d -m 0755 -o ${shellQuote(daemonUser)} -g ${shellQuote(daemonUser)} ${shellQuote(bunCacheDir)}; if [ ${synced.changed ? 1 : 0} = 1 ] || [ ! -d ${shellQuote(`${installDir}/node_modules`)} ]; then install -d -o ${shellQuote(daemonUser)} -g ${shellQuote(daemonUser)} ${shellQuote(`${installDir}/node_modules`)} && cd ${shellQuote(installDir)} && runuser -u ${shellQuote(daemonUser)} -- env HOME=/var/lib/pg-backup BUN_INSTALL_CACHE_DIR=${shellQuote(bunCacheDir)} /usr/local/bin/bun install --frozen-lockfile; fi`,
+    `${chownSource(daemonOwner)}; install -d -m 0755 -o ${shellQuote(daemonUser)} -g ${shellQuote(daemonUser)} ${shellQuote(bunCacheDir)}; ${foreignNodeModules}; if [ ${synced.changed ? 1 : 0} = 1 ] || [ ! -d ${nodeModules} ]; then install -d -o ${shellQuote(daemonUser)} -g ${shellQuote(daemonUser)} ${nodeModules} && cd ${shellQuote(installDir)} && runuser -u ${shellQuote(daemonUser)} -- env HOME=/var/lib/pg-backup BUN_INSTALL_CACHE_DIR=${shellQuote(bunCacheDir)} /usr/local/bin/bun install --frozen-lockfile; fi`,
     { sudo: true },
   );
-  const restart = input.forceRestart === true || synced.changed || input.configChanged !== false;
+  // A previous run can leave the unit file/env updated on disk while the old
+  // process keeps running (for example a deploy that failed after rsync but
+  // before the restart, or an engine switch from wal-g/postgres to
+  // pg-native/pgbackup). File-content convergence alone would see "unchanged"
+  // and skip the restart, so also compare the running process account and
+  // systemd's reload state.
+  const runningUser = runner.capture(
+    host.ssh,
+    `pid=$(systemctl show -p MainPID --value pg-backup-daemon 2>/dev/null); if [ -n "$pid" ] && [ "$pid" != 0 ]; then ps -o user= -p "$pid" 2>/dev/null | tr -d ' '; fi`,
+  ).trim();
+  const unitDirty = runner.capture(
+    host.ssh,
+    `systemctl show -p NeedDaemonReload --value pg-backup-daemon 2>/dev/null || true`,
+  ).trim() === "yes";
+  const restart = input.forceRestart === true
+    || synced.changed
+    || input.configChanged !== false
+    || unitDirty
+    || (runningUser !== "" && runningUser !== daemonUser);
   const outcome = parseApplyOutcome(runner.capture(
     host.ssh,
     `systemctl daemon-reload && systemctl enable pg-backup-daemon >/dev/null 2>&1
@@ -665,6 +761,59 @@ ${daemonReadinessWait()}`,
     { sudo: true },
   ));
   log(`  backup daemon ${outcome === "unknown" ? "applied" : outcome} -> ${host.ssh.host}:${installDir} (BACKUP_DAEMON_PORT=${config.BACKUP_DAEMON_PORT})`);
+};
+
+/**
+ * Copies the shared object-storage daemon source to OBJECT_STORAGE_NODE and
+ * brings its systemd unit up. The daemon has no runtime dependencies, so the
+ * deploy does not run a package install on the storage host. It is restarted
+ * only when its source, environment or unit changed (or on --force-restart).
+ */
+export const deployObjectStorageDaemon = (input: {
+  runner: SshRunner;
+  config: DeployConfig;
+  host: HostPlan;
+  configChanged?: boolean;
+  forceRestart?: boolean;
+}): void => {
+  const { runner, config, host } = input;
+  const installDir = OBJECT_STORAGE_INSTALL_DIR;
+  const sourceDir = join(REPO_ROOT, "deploy", "object-storage-daemon");
+  const targetUser = effectiveTargetUser(host.ssh);
+  const daemonUser = OBJECT_STORAGE_SERVICE_USER;
+  const daemonOwner = `${daemonUser}:${daemonUser}`;
+  const chownSource = (owner: string): string =>
+    `find ${shellQuote(installDir)} -path ${shellQuote(`${installDir}/node_modules`)} -prune -o -exec chown ${shellQuote(owner)} {} +`;
+  // The daemon unit runs the pinned /usr/local/bin/bun. A fresh storage host
+  // has no bun unless this step installs it, including the documented
+  // --update --only=object-storage path.
+  runner.run(host.ssh, bunInstallCommand(config), { sudo: true });
+  runner.run(
+    host.ssh,
+    `install -d -m 0755 -o ${shellQuote(targetUser)} -g ${shellQuote(targetUser)} ${shellQuote(installDir)} && ${chownSource(`${targetUser}:${targetUser}`)}`,
+    { sudo: true },
+  );
+  const synced = runner.sync({
+    target: host.ssh,
+    local: sourceDir,
+    remote: installDir,
+    delete: true,
+    excludes: ["node_modules", ".git", "dist", "test", "*.log", ".env", "bun.lock"],
+  });
+  runner.run(host.ssh, `${chownSource(daemonOwner)}`, { sudo: true });
+  const restart = input.forceRestart === true || synced.changed || input.configChanged !== false;
+  const outcome = parseApplyOutcome(
+    runner.capture(
+      host.ssh,
+      `systemctl daemon-reload && systemctl enable pg-object-storage-daemon >/dev/null 2>&1
+if ! systemctl is-active --quiet pg-object-storage-daemon; then systemctl start pg-object-storage-daemon; echo __PG_APPLY__=started
+elif [ ${restart ? 1 : 0} = 1 ]; then systemctl restart pg-object-storage-daemon; echo __PG_APPLY__=restarted
+else echo __PG_APPLY__=unchanged; fi
+${daemonReadinessWait("pg-object-storage-daemon")}`,
+      { sudo: true },
+    ),
+  );
+  log(`  object-storage daemon ${outcome === "unknown" ? "applied" : outcome} -> ${host.ssh.host}:${installDir}`);
 };
 
 /**
@@ -753,11 +902,13 @@ export const preMigrationBackup = (
 const OWNER_ENV_FILE = ".env.owner";
 
 /**
- * Runs `build(flag)` with the database OWNER's credentials when the application has its own non-owner role
- * (`PG_APP_PASSWORD`). The runtime `.env` then carries only the application role; the owner's URL exists only in a
- * temporary `.env.owner` (mode 0600) that is created for the one command and removed afterwards, even on failure,
- * so a compromised service process cannot read the owner's credentials from its environment or from disk.
- * `flag` is `--env-file=.env.owner` (Bun layers it over `.env`) or empty in the legacy single-role mode.
+ * Runs `build(flag)` with the database OWNER's credentials when the migration/seed connection differs from the
+ * runtime one. That happens when the application has its own non-owner role (`PG_APP_PASSWORD`) and also in the
+ * legacy single-role mode when PgBouncer is enabled: migrations must use the session-safe endpoint (pgw_session or
+ * the explicit leader URL), while the runtime `DATABASE_URL` stays transaction-pooled. The owner's URL exists only
+ * in a temporary `.env.owner` (mode 0600) that is created for the one command and removed afterwards, even on
+ * failure, so a compromised service process cannot read it from its environment or from disk.
+ * `flag` is `--env-file=.env.owner` (Bun layers it over `.env`) or empty when the runtime URL is already safe.
  */
 export const runAsDatabaseOwner = <T>(
   runner: SshRunner,
@@ -765,12 +916,16 @@ export const runAsDatabaseOwner = <T>(
   appDir: string,
   config: DeployConfig,
   build: (envFlag: string) => () => T,
+  ownerUrlOverride?: string | null,
 ): T => {
-  if (!pgAppRoleEnabled(config)) return build("")();
-  const ownerUrl = effectiveDatabase(config).ownerUrl;
-  if (!ownerUrl) throw new Error("The owner database URL could not be derived; set the PostgreSQL storage fields");
+  const database = effectiveDatabase(config);
+  const ownerUrl = ownerUrlOverride ?? database.ownerUrl;
+  if (!ownerUrl || ownerUrl === database.url) return build("")();
   const envPath = `${appDir}/${OWNER_ENV_FILE}`;
-  runner.writeRemoteFile({ target: host.ssh, path: envPath, content: `DATABASE_URL="${ownerUrl}"\n`, mode: 0o600, sudo: false });
+  // The owner URL is session-pooled (pgw_session) so Prisma's advisory lock survives. Migrations and seeders do not
+  // start workers, so disable them here: the core loader otherwise rejects a session-pooled DATABASE_URL that has
+  // the same endpoint as LEADER_ELECTION_DATABASE_URL (that check assumes DATABASE_URL is the transaction pool).
+  runner.writeRemoteFile({ target: host.ssh, path: envPath, content: `DATABASE_URL="${ownerUrl}"\nWORKER_ENABLED="false"\n`, mode: 0o600, sudo: false });
   try {
     return build(`--env-file=${OWNER_ENV_FILE}`)();
   } finally {
@@ -976,24 +1131,6 @@ const frontendsToBuild = (config: DeployConfig, options: CliOptions): string[] =
   return wanted.filter(([role]) => shouldRun(options, role)).map(([, frontend]) => frontend);
 };
 
-const shouldRun = (options: CliOptions, role: DeployRole): boolean =>
-  options.only.size === 0 || options.only.has(role);
-
-const shouldRunStorage = (options: CliOptions, roles: StorageOnlyRole[]): boolean =>
-  options.only.size === 0 || options.only.has("storage") || roles.some((role) => options.only.has(role));
-
-const deploymentUnits = (
-  plan: DeployPlan,
-  role: DeployRole,
-  nodes?: Set<string>,
-): Array<{ host: HostPlan; service: ServicePlan }> =>
-  plan.hosts.flatMap((host) =>
-    host.services
-      .filter((service) => service.role === role)
-      .filter((service) => !nodes || (service.nodeId !== undefined && nodes.has(service.nodeId)))
-      .map((service) => ({ host, service })),
-  );
-
 /** One line per managed service: what the convergence did (started / restarted / reloaded / unchanged). */
 const logOutcomes = (outcomes: Record<string, string> | undefined): void => {
   const entries = Object.entries(outcomes ?? {});
@@ -1016,6 +1153,16 @@ const main = async (): Promise<void> => {
     throw new Error(`Invalid deploy.env:\n- ${loaded.problems.join("\n- ")}`);
   }
   const config = loaded.config;
+  if (!objectStorageConfigured(config)) {
+    warn("OBJECT_STORAGE_NODE is not configured: the platform will boot, but every storage-backed feature (KYB, reconciliation, reports, disputes, AML evidence, brand assets) will return 503 until the shared vault is configured.");
+  }
+  if (config.PGBOUNCER_ENABLED && !config.PG_MANAGE_VIA_SSH && !config.LEADER_ELECTION_DATABASE_URL) {
+    warn(
+      "PgBouncer is externally managed and LEADER_ELECTION_DATABASE_URL is not set: the deploy assumes a session-pooled " +
+        "database alias named 'pgw_session' on the pooler. If your session route has another name or uses a direct " +
+        "PostgreSQL URL, set LEADER_ELECTION_DATABASE_URL; migrations and seeders reuse it with the owner credentials.",
+    );
+  }
   const conflicts = findSshConflicts(config);
   if (conflicts.length > 0) {
     throw new Error(`Invalid host topology:\n- ${conflicts.join("\n- ")}`);
@@ -1023,7 +1170,7 @@ const main = async (): Promise<void> => {
   if (options.checkCerts) {
     // AUTO-28: read-only expiry report for cron / an alert hook; exit 1 when anything needs attention.
     const window = config.MTLS_RENEW_WITHIN_DAYS > 0 ? config.MTLS_RENEW_WITHIN_DAYS : 30;
-    const report = checkPkiExpiry(buildPki({ config, dryRun: true }), window);
+    const report = checkPkiExpiry(buildPki({ config, dryRun: true }), window, new Date(), objectStorageConfigured(config));
     log(report.lines.join("\n"));
     log(report.ok ? `\nAll certificates are valid for at least ${window} days.` : `\nAttention: leaves are re-issued by the next deploy; a CA near expiry needs --rotate-certs.`);
     process.exit(report.ok ? 0 : 1);
@@ -1038,6 +1185,37 @@ const main = async (): Promise<void> => {
   // Mask every credential value (pgpass lines, connection URLs...) in logs and errors.
   runner.addSecrets(collectSecretValues(config));
   activeRunner = runner;
+
+  const fresh = options.fresh || (options.update ? false : config.DEPLOY_MODE === "fresh");
+  // `auto` (the default) decides PER HOST: a host with gaps is bootstrapped, a complete one is left alone.
+  const autoProbe = !fresh && !options.update && config.DEPLOY_MODE === "auto";
+
+  // ---- Preflight (read-only; before builds, PKI, bootstrap or any mutation) ----
+  if (options.preflightOnly || !options.skipPreflight) {
+    const preflightOptions = {
+      only: options.only,
+      nodes: options.nodes,
+      fresh,
+      deployMode: config.DEPLOY_MODE,
+      dryRun: options.dryRun,
+      stopUnmanaged: options.stopUnmanaged,
+    };
+    const preflightPlan = buildPreflightPlan(config, plan, preflightOptions);
+    const report = runPreflight(runner, config, plan, preflightOptions);
+    for (const line of renderPreflightReport(report, preflightPlan)) log(line);
+    if (options.preflightOnly) {
+      runner.close();
+      process.exit(report.blocking.length > 0 ? 1 : 0);
+    }
+    if (report.blocking.length > 0) {
+      throw new Error(
+        `Preflight failed with ${report.blocking.length} blocking issue(s). Nothing was built or changed. ` +
+          "Fix the issues above (or use --stop-unmanaged for a safe same-repo dev listener).",
+      );
+    }
+  } else {
+    warn("Preflight skipped (--skip-preflight): port ownership, SSH/sudo, dependency and release checks were not run.");
+  }
 
   // ---- Step 2: build the SPAs locally ------------------------------------
   // Started in the background (content-addressed cache, parallel): the builds
@@ -1082,13 +1260,10 @@ const main = async (): Promise<void> => {
     }
   }
   uploadStorageCertificates(runner, plan, pki, config, options.dryRun);
+  const certRefresh = options.rotateCerts || (pki.renewed ?? []).length > 0;
 
   // ---- Step 4: bootstrap the unique hosts -------------------------------
   step(4, "Bootstrap the target hosts and apply the firewall");
-  const fresh = options.fresh || (options.update ? false : config.DEPLOY_MODE === "fresh");
-  // `auto` (the default) decides PER HOST: a host with gaps is bootstrapped, a complete one is left alone. It used
-  // to behave like update mode, so a bare host only failed late, after core had been migrated and switched.
-  const autoProbe = !fresh && !options.update && config.DEPLOY_MODE === "auto";
   if (fresh || options.enforceFirewall || autoProbe) {
     for (const host of plan.hosts) {
       if (!options.dryRun) {
@@ -1128,6 +1303,49 @@ const main = async (): Promise<void> => {
   }
   const releaseTimestamp = timestamp();
 
+  // A `--fresh` deploy is only safe when the storage engines it is about to
+  // provision are empty. Probe before installing/migrating anything, so a
+  // populated PostgreSQL/Redis/vault is never silently reused. A typed
+  // --force-fresh is the explicit destructive opt-in; it clears those stores
+  // before the provisioners recreate their schemas. Backup repositories are
+  // deliberately preserved (they are the recovery path, not application data).
+  const freshStorageOptions = {
+    runner,
+    config,
+    plan,
+    includePostgres: pgStorageConfigured(config) && shouldRunStorage(options, ["pg", "pg-primary", "pgbouncer"]),
+    includeRedis: config.REDIS_MANAGE_VIA_SSH && shouldRunStorage(options, ["redis"]),
+    includeAuditLog: (config.AUDIT_DB_MANAGE_VIA_SSH || config.LOG_DB_MANAGE_VIA_SSH)
+      && shouldRunStorage(options, ["audit-db", "log-db"]),
+    includeObjectStorage: objectStorageConfigured(config) && shouldRunStorage(options, ["object-storage"]),
+    includeFakeRails: config.FAKE_RAILS_ENABLED && shouldRun(options, "fake-rails"),
+  };
+  if (fresh && !options.dryRun && (freshStorageOptions.includePostgres || freshStorageOptions.includeRedis || freshStorageOptions.includeAuditLog || freshStorageOptions.includeObjectStorage || freshStorageOptions.includeFakeRails)) {
+    const storageState = probeFreshStorage(freshStorageOptions);
+    const occupied = storageState.nonEmpty || storageState.unknown.length > 0;
+    if (occupied && !options.forceFresh) {
+      throw new Error(
+        [
+          "--fresh refused: existing storage-engine data was found.",
+          ...storageState.details.map((line) => `- ${line}`),
+          ...storageState.unknown.map((line) => `- ${line}`),
+          "Re-run with --force-fresh (or DEPLOY_FORCE_FRESH=1) only if you intend to erase it. A pre-clean dump of the Live PostgreSQL database is taken first.",
+        ].join("\n"),
+      );
+    }
+    if (options.forceFresh) {
+      if (storageState.details.some((line) => line.startsWith("PostgreSQL/Live"))) {
+        // Cleanup happens before the core migration step, so take the safety
+        // dump now rather than after the database has been dropped.
+        backupDatabase({ runner, config, host: coreHost, releaseTimestamp });
+      }
+      if (storageState.details.length > 0) log(`  cleaning storage: ${storageState.details.join("; ")}`);
+      for (const line of cleanFreshStorage(freshStorageOptions)) log(`  cleaned: ${line}`);
+    } else if (storageState.unknown.length > 0) {
+      warn(`  storage emptiness could not be proven: ${storageState.unknown.join("; ")}`);
+    }
+  }
+
   if (config.PG_MANAGE_VIA_SSH && shouldRunStorage(options, ["pg", "pg-primary", "pg-replica", "pgbouncer"])) {
     const report = provisionPostgres18({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });
     log(`  PostgreSQL ${config.PG_VERSION} primary/replicas: ${report.nodes.join(", ") || "none"}`);
@@ -1158,13 +1376,35 @@ const main = async (): Promise<void> => {
     log(`  Audit/log databases: ${report.nodes.join(", ") || "none"}`);
     logOutcomes(report.outcomes);
   }
+  if (objectStorageConfigured(config) && shouldRunStorage(options, ["object-storage"])) {
+    const report = provisionObjectStorageEngine({
+      runner,
+      config,
+      dryRun: options.dryRun,
+      forceRestart: options.forceRestart,
+    });
+    log(`  Object storage engine on: ${report.nodes.join(", ") || "none"}`);
+    logOutcomes(report.outcomes);
+    const objectStorageHost = plan.hosts.find((host) => host.roles.includes("object-storage"));
+    if (objectStorageHost) {
+      deployObjectStorageDaemon({
+        runner,
+        config,
+        host: objectStorageHost,
+        configChanged: report.daemonConfigChanged,
+        forceRestart: options.forceRestart || certRefresh,
+      });
+    } else {
+      warn("object storage is configured but the plan has no object-storage host; the daemon was not deployed");
+    }
+  }
   if (config.BACKUP_ENABLED && shouldRunStorage(options, ["backup"])) {
     const report = provisionBackupEngine({ runner, config, dryRun: options.dryRun, forceRestart: options.forceRestart });
     log(`  Backup engine (${config.BACKUP_ENGINE_MODE}) on: ${report.nodes.join(", ") || "none"}; object store: ${backupS3Configured(config) ? resolveBackupS3Mode(config) : "none (local repo)"}`);
     logOutcomes(report.outcomes);
     const backupHost = plan.hosts.find((host) => host.roles.includes("backup"));
     if (backupHost) {
-      deployBackupDaemon({ runner, config, host: backupHost, configChanged: report.daemonConfigChanged, forceRestart: options.forceRestart });
+      deployBackupDaemon({ runner, config, host: backupHost, configChanged: report.daemonConfigChanged, forceRestart: options.forceRestart || certRefresh });
     } else {
       warn("BACKUP_ENABLED but the plan has no backup host; the daemon was not deployed");
     }
@@ -1235,8 +1475,8 @@ const main = async (): Promise<void> => {
       if (options.dryRun) continue;
       for (const unit of batch) {
         const probe = target.role === "core"
-          ? probeCoreService(runner, unit.host, unit.service, config)
-          : probeEdgeService(runner, unit.host, unit.service);
+          ? probeCoreService(runner, unit.host, unit.service, config, releaseTimestamp)
+          : probeEdgeService(runner, unit.host, unit.service, releaseTimestamp);
         if (!probe.ok) {
           throw new Error(
             runner.scrub(`Rolling batch ${batchIndex + 1} failed health check on ${probe.host} ${probe.check}: ${probe.detail}`),
@@ -1257,7 +1497,13 @@ const main = async (): Promise<void> => {
   if (options.skipVerify || options.dryRun) {
     log("  skipped");
   } else {
-    const verification = verifyDeployment(runner, plan, config);
+    // Step 7 already checks APP_RELEASE on every unit this run deployed.
+    // Only a full deploy may require every (possibly unchanged) service to
+    // advertise the new global release; a partial deploy intentionally leaves
+    // the other tiers on their previous release.
+    const releaseToVerify = isFullDeployment(options) ? releaseTimestamp : undefined;
+    if (!releaseToVerify) log("  release identity checked per deployed unit in step 7; unchanged services are health-checked only");
+    const verification = verifyDeployment(runner, plan, config, releaseToVerify);
     log(runner.scrub(renderVerification(verification)));
     if (!verification.ok) {
       throw new Error("Deployment verification failed. There is no automatic rollback and no rollback command: the previous release is still on disk (KEEP_RELEASES), but `current` already points at the new one and the database schema was already migrated and is NOT reverted. To go back, re-point <remote dir>/current to the previous release on each host, restart the PM2 services, and only then decide about the schema.");
@@ -1307,12 +1553,7 @@ const main = async (): Promise<void> => {
 
   // ---- Step 14: audit summary -------------------------------------------
   step(14, "Deployment audit summary");
-  let commit = "unknown";
-  try {
-    commit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).trim();
-  } catch {
-    // git may be unavailable on the operator machine; the summary is still useful
-  }
+  const commit = deployCommit();
   log(`  commit:     ${commit}`);
   log(`  release:    ${releaseTimestamp}`);
   log(`  topology:   ${plan.topology} (${plan.hosts.length} host(s))`);

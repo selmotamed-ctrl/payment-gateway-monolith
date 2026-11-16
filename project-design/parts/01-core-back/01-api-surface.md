@@ -3,9 +3,10 @@ id: core.api
 title: Core API Surface
 status: partial
 confidence: high
-last_verified: 2026-11-08
+last_verified: 2026-11-13
 verified_against: 5a24f6f+working-tree
 code:
+  - core-back/api/internal/sandboxControl.ts
   - core-back/api/index.ts
   - core-back/api/internal/admin.ts
   - core-back/api/internal/merchant.ts
@@ -39,6 +40,7 @@ design_sources:
   - design/90-archive/superseded-architecture/payment-gateway-refined-design-v4.1.md#154-the-four-eyes-action-matrix
   - design/10-fixes/_0001_operator_cases.md
 tests:
+  - core-back/test/sandboxPlane.test.ts
   - core-back/test/internal-routes.test.ts
   - core-back/test/list-query.test.ts
   - core-back/test/approval-queue.test.ts
@@ -240,8 +242,8 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `POST /rails`, `PATCH /rails/:id`, `PUT /rails/:id/fields` | `gateway:write` |
 | `GET /routes`, `/export`, `/summary`, `/summary/export`, `GET /routes/:id` | `gateway:read` |
 | `POST /routes`, `PATCH /routes/:id`, `POST /routes/:id/state` | `gateway:write` |
-| `GET /assets`, `GET /assets/:id` | `gateway:read` |
-| `POST /assets` | `gateway:write` |
+| `GET /assets`, `GET /assets/:id`, `GET /assets/:id/content` | `gateway:read` |
+| `POST /assets`, `POST /assets/upload`, `DELETE /assets/:id` | `gateway:write` |
 
 #### Reconciliation
 
@@ -327,6 +329,7 @@ Authentication behavior:
 - API tokens are bound to a merchant and to one application (enforced on the external routes since 2026-11-12); the token hash, revocation and CIDR checks happen in core.
 - Merchant authorities are enforced per route in core with `assertMerchantAuthority` (the closed catalogue in `lib/auth/merchantAuthorities.ts`); the portal and the edges only project them. Reads: wallets, `/wallets/:id`, `/balance`, `/statements` and `GET /applications*` need `merchant:read` or `merchant:write`; the statement export needs `merchant:write` (the portal's `statements.export`); `GET /links*` needs `link:read`; `GET /payments` and `GET /stats/overview` need `payment:read`; `GET /disputes*` needs `payment:read` or `dispute:respond`. `merchant:read`/`merchant:write` imply `payment:read` and `link:read`, so a payment-only user can read payments but never balances or statements. Before 2026-11-08 these read routes only checked the merchant, so any merchant user could read balances and the 50,000-row export. Writes keep their fine-grained authorities. API tokens only reach `/external/*`.
 - **Application scope (`users.app_scope_ids`).** A session principal carries `appScopeIds`, read from the user row on every request (a change takes effect without a new login). Empty means unscoped. For a scoped user the application, link, payment, dispute and statement lists are narrowed to those applications, by-id reads/cancels/evidence of another application answer `403 APP_SCOPE_VIOLATION`, `POST /links` refuses another application and defaults to the oldest application inside the scope, and the merchant-wide `GET /stats/overview` (it mixes merchant-wide wallet and cash-out figures) answers `403 APP_SCOPE_RESTRICTED`. Since 2026-11-12 the restriction also holds for team management and tokens: `POST /users` gives the new user the creator's `app_scope_ids` (it used to create an UNRESTRICTED user whose password the creator chose and could activate), `PATCH /users` and `PATCH /users/:id` answer `403 APP_SCOPE_VIOLATION` unless the target user is restricted to a subset of the caller's applications (never an unrestricted user), `POST /tokens` refuses another application and defaults to the oldest application inside the scope (it used to pick any application of the merchant), and the token list, `PUT /tokens/:id/ips` and `DELETE /tokens/:id` are narrowed the same way. Not scoped yet: POS terminals, wallets themselves and cash-outs.
+- **Dispute attachments honour the application scope (2026-11-16).** `GET /disputes/:id/attachments`, `GET /disputes/:id/attachments/:attachmentId/content` and `DELETE /disputes/:id/attachments/:attachmentId` arrived from `master` checking the merchant only, so a user restricted to some applications could list, download and delete the evidence files of a dispute in another application. They now resolve the dispute through `disputeInCallerScope` (merchant and application scope; `404 DISPUTE_NOT_FOUND` outside it) before they read an attachment, as `POST /disputes/:id/attachments` and the other dispute routes already did. Pinned by `test/merchant-dispute-attachment-scope.test.ts`.
 - Audit rows added 2026-11-08 (before this, these state changes left no trail): merchant `PUT /tokens/:id/ips` (`ACCESS_TOKEN_IP_ALLOWLIST_CHANGED`, with before/after CIDRs, in the same transaction as the change) and `DELETE /tokens/:id` (`ACCESS_TOKEN_REVOKED`); merchant and admin credential sets `POST` (`CREDENTIAL_SET_CREATED`), `PUT` rotate (`CREDENTIAL_SET_ROTATED`) and `POST .../verify` (`CREDENTIAL_SET_VERIFIED`), recording entry KEY names and versions only, never a secret value or ciphertext; admin `POST /assets` (`ASSET_REGISTERED`); backup `POST /trigger` (`BACKUP_TRIGGERED`) and `POST /drill` (`BACKUP_DRILL_TRIGGERED`, written best effort after the daemon accepted the job: a failed audit write never turns an already-started job into an error).
 - `POST /onboarding/kyb-documents` reports `duplicateDocuments` for the uploader's OWN earlier copies only; matches in other merchants are kept in the staff-only audit row (`KYB_DOCUMENT_UPLOADED.afterJson.duplicateDocuments`) and in the join-request duplicate flags, never returned to the merchant (tipping-off).
 - Sensitive application changes (`assignedWalletId`, `railWhitelist`, `redirectDomainAllowlist`) create an `APPLICATION` approval instead of applying directly.
@@ -720,3 +723,16 @@ Core adds these internal admin routes under `/internal/admin` (all confidential 
 - Filing adapter `POST`, `PATCH` and `DELETE` now return 202 with `approvalRequestId`; the checker executes `FILING_ADAPTER` through `GovernanceExecution`. `GET` responses redact secret-looking `configJson` keys.
 - `POST /aml/reports/:id/file` creates a PENDING `ExternalSubmission` before dispatch, blocks duplicate PENDING/SUBMITTED attempts, records failure details, and passes the authoritative status change through the normal submission gate. Manual submissions create a MANUAL adapter and submission history.
 - Template upload/update URLs reject non-XLSX schemas and any unsafe/invalid workbook; DOCX validation/simulation uses the narrative schema renderer; clone copies the XLSX template binding.
+
+
+Object-storage routes include the admin summary/object/access-log/legal-hold/maintenance surface, dispute attachments (admin and merchant), AML case evidence, reconciliation statement download, and brand-asset upload/content/delete. The admin object list accepts `page`, `pageSize`, `namespace`, `status`, `statuses`, `bucket`, `ownerMerchantId`, `legalHold`, `sha256Hex`, `search`, `sortKey` and `sortDirection`. Legal-hold lift returns `202` for a second checker; place is immediate.
+
+## Sandbox Studio read models (2026-11-13)
+
+The sandbox control router adds merchant read endpoints under `/internal/sandbox/merchant/studio`: overview, wallets (list/summary/detail), applications (list/summary/detail), links (list/summary/detail), payments (list/summary) and tokens (list/summary/detail). Lists use the shared `buildListQuery`/`listResponse` contract with server pagination, sorting, search and filters, and expose relation labels (wallet/application/rail/gateway) plus computed counts and balances. `PATCH /merchant/wallets/:id/status` freezes/activates a sandbox wallet and records a `sandbox_sync_audits` row.
+
+The admin router adds paginated `/admin/merchants` and `/admin/merchants/summary`, sandbox merchant detail (`/admin/merchants/:id`), `/admin/audits`, and `/admin/fake-rails/accounts/summary`. Fake Rails transaction lists accept `page`/`pageSize` as well as `limit`/`offset`; statements and webhook lists remain bounded. Admin endpoints require a staff principal.
+
+## v38-v39 `/internal/sandbox` (2026-11-13)
+
+A new internal router, reachable from merchant-back and admin-back and mounted only on the SANDBOX plane, exposes the merchant sandbox overview, wallet detail/ledger/balance/simulated cash-out, payment detail/refund/dispute simulation and resolution, demo seed and 20-payment history seed, reset, Fake Rails account proxy/control (paginated, merchant-scoped, preset clone/restore), reconciliation import, webhook test ping, clearing pools/statement/settle, and staff overview, merchant list/overview, global reset, Fake Rails scenarios/transactions/webhooks/statements. Checkout adds `GET/POST /pay/:linkKey/sandbox-accounts`, account movements, `PATCH /pay/:linkKey/sandbox-accounts/:accountId`, `GET /pay/:linkKey/logs/:attemptId/sandbox-inspector` and `POST /pay/:linkKey/logs/:attemptId/sandbox-simulate`; all of them refuse a non-`sbx_` key with `403 SANDBOX_INSPECTOR_FORBIDDEN_ON_LIVE_LINK`.

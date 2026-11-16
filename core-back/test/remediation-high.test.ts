@@ -609,7 +609,7 @@ describe("F12: the unreachable journal entries", () => {
         windowEnd: new Date("2026-10-31T00:00:00.000Z"),
         fileHash: "hash-1",
         fileName: "statement.csv",
-        fileContent: Buffer.from(statement, "utf8"),
+        storageObjectId: "obj-1",
         ingestedAt: null,
       },
     });
@@ -619,6 +619,19 @@ describe("F12: the unreachable journal entries", () => {
       repositories,
       ledgerPoster,
       clock: () => new Date("2026-10-27T00:00:00.000Z"),
+      objectStorage: {
+        workerClient: {
+          readInternal: async () => ({
+            objectId: "obj-1",
+            detectedMimeType: "text/csv",
+            originalFilename: "statement.csv",
+            byteSize: BigInt(Buffer.byteLength(statement)),
+            sha256Hex: "",
+            bytes: Buffer.from(statement, "utf8"),
+            stream: () => new ReadableStream<Uint8Array>(),
+          }),
+        },
+      } as never,
     });
     const job = {
       id: "job-1",

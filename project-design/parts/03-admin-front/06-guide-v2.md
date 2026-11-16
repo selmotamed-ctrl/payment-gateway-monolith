@@ -39,7 +39,7 @@ implemented. The earlier 12-book embedded-content page has been replaced.
 
 Delivered:
 
-- 14 books, 125 articles, 151 glossary terms, 22 safeguard cards (99 checks), 29 situations, 8 reading paths, 58 quick answers, 19 error codes and the 140-case catalog.
+- 14 books, 137 articles, 154 glossary terms, 26 safeguard cards (115 checks), 32 situations, 8 reading paths, 60 quick answers, 19 error codes and the 140-case catalog.
 - A deterministic extractor and committed JSON under `src/content/guide/generated/`.
 - Eight guide routes: home, book, article, glossary, tools, playbook, cards and edge cases.
 - Markdown reader with callouts, diagram fences, tables, stable heading ids, safe article/card/situation/glossary links and first-occurrence glossary popovers.

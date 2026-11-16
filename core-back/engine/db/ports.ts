@@ -460,7 +460,7 @@ export interface ReconciliationRunRow {
   fileHash: string;
   statsJson: unknown;
   fileName?: string | null;
-  fileContent?: unknown;
+  storageObjectId?: string | null;
   ingestedAt?: Date | null;
 }
 
@@ -783,7 +783,7 @@ export interface ReconciliationRepository {
     fileHash: string;
     statsJson: unknown;
     fileName?: string | null;
-    fileContent?: unknown;
+    storageObjectId?: string | null;
   }): Promise<ReconciliationRunRow>;
   updateRunStats(tx: Tx, id: string, stats: unknown): Promise<void>;
   /**

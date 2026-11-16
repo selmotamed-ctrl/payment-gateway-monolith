@@ -6,7 +6,7 @@ Generated from: `checkout-ui.flow`, `checkout-ui.help`.
 
 ## Checkout Payer Flow
 
-> Status: `partial` · Last verified: 2026-11-09
+> Status: `partial` · Last verified: 2026-11-13
 
 ## 1. Purpose and scope
 
@@ -325,6 +325,10 @@ The Playwright/live suites require the running stack; the redirect unit test is 
 ## Dark teleported overlays (2026-11-10)
 
 Checkout dialogs/drawers use the shared overlay text-color rule (`color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`), keeping custom modal content readable in dark mode.
+
+## v38 sandbox checkout inspector (2026-11-13)
+
+On an `sbx_` link (summary `env: "SANDBOX"`) the payer page renders `SandboxCheckoutInspector`: Fake Rails test-account picker with auto-fill, live balances/holds/daily limits, PIN/CVV/expiry, freeze/drain/set-exact controls, the live OTP with auto-confirm, and the push/QR approve/decline/variance/duplicate/tampered-webhook simulator. It is never rendered on a Live `pl_*` checkout.
 
 ## Checkout Help Center
 

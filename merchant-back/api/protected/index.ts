@@ -15,6 +15,7 @@ import { usersRouter } from "./users";
 import { walletsRouter } from "./wallets";
 import { webhooksRouter } from "./webhooks";
 import { reportEngineRouter } from "./reportEngine";
+import { sandboxProxyRouter } from "../sandboxProxy";
 
 const router = express.Router();
 
@@ -47,5 +48,7 @@ router.use("/users", usersRouter);
 router.use("/stats", statsRouter);
 router.use("/webhooks", webhooksRouter);
 router.use("/report-engine", reportEngineRouter);
+// v38: a dedicated namespace; the proxy never falls back to the Live core.
+router.use("/sandbox", sandboxProxyRouter);
 
 export const protectedRouter = router;

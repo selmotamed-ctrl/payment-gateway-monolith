@@ -3,7 +3,7 @@ id: merchant-ui.reports
 title: Merchant Reports
 status: implemented
 confidence: high
-last_verified: 2026-11-11
+last_verified: 2026-11-12
 verified_against: working-tree
 code:
   - merchant-front/src/pages/reports/index.tsx
@@ -71,7 +71,7 @@ Every execution:
 
 ## 5. Staff oversight
 
-`admin-front` `/reports/merchant-reports` lists merchant-authored reports per merchant with their execution history and a `SUSPEND`/`RESUME` Studio action (`security:write`, audited). The merchant registry, usage rows and execution audit are separate tables (introduced in schema version 33; current schema 36).
+`admin-front` `/reports/merchant-reports` lists merchant-authored reports per merchant with their execution history and a `SUSPEND`/`RESUME` Studio action (`security:write`, audited). The merchant registry, usage rows and execution audit are separate tables (introduced in schema version 33; current schema 40).
 
 ## Run form layout (2026-11-10)
 
@@ -87,6 +87,10 @@ The merchant transcript example now lowers `periodRange.validation.max_range_day
 
 The merchant portal receives the same client SDK mirror as the admin portal, so merchant previews/prints now use the hardened A4 layout: max 3 KPI columns, centered chart rows and wrapping HTML legends, compact table typography and chips, repeated table headers, no-data chart states, and true landscape pages in print. The merchant Studio mock/live preview uses the same renderer and is covered by the SDK mirror test.
 
+## Shared preview canvas (2026-11-12)
+
+The merchant client SDK mirror receives the same theme-aware Paged.js preview as the admin portal: `#F1F5F9`/`#18181C` canvases for light/dark, white paper pages with theme-specific separation, 24 px gaps, 32 px vertical padding, and an iframe background that matches `--pg-bg-surface-subtle`. Theme changes update the iframe's `data-report-preview-theme` attribute without re-pagination. The bridge injects the print-only canvas/page reset after Paged.js pagination, so merchant PDFs remain white and print-accurate.
+
 ## Shared chrome layout and accent bands (2026-11-11)
 
 The merchant portal client SDK mirror receives the same chrome root-fill, `accent_band`, `defaultCurrency` and localized chrome-variable changes as the admin portal. Merchant prints using platform chrome therefore get the same full-height header/footer and multi-color band.
@@ -97,3 +101,10 @@ The merchant portal client SDK mirror receives the same chrome root-fill, `accen
 Merchants own a separate `merchant_report_chrome_specs` registry. The branding page exposes only the merchant's own chrome: AI transcript, JSON, optional logo bundle, A4 preview, verify/save/publish, archive and one default header/footer per merchant. Platform chrome lists and specs are never returned to merchant clients.
 
 Merchant-owned reports using `GLOBAL_DEFAULT` resolve the merchant default first and the platform global default second; platform-provided templates continue to use platform chrome. If a merchant default is archived or becomes incompatible, the engine clears it and records the revocation. Own reports then fall back to platform chrome; if the platform default is also missing the report is blocked. The migration page explains the fallback, offers copy/download prompts and opens the branding editor with the raw JSON prefilled. Merchant chrome previews load the real uploaded logo assets.
+
+## Shared object storage
+
+Merchant report bundles and generated outputs are stored in the shared encrypted
+vault (`REPORT_STUDIO_ASSETS`/`REGULATORY_REPORTS`), locked by
+`REPORT_ASSET_ENTRY`/`REG_REPORT_OUTPUT`; the portal never receives asset bytes
+from local disk. The full engine is `parts/01-core-back/13-object-storage.md`.

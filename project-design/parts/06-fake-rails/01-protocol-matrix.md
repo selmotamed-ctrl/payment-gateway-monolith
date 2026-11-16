@@ -329,3 +329,7 @@ Only the outbound webhook path computes signatures (`FakeCryptoSigner` plus six 
 ## 10. Change history
 
 - 2026-11-03: initial canonical part. Verified against `5a24f6f+working-tree`.
+
+## v2 account outcomes (2026-11-13)
+
+Every rail route now consults the stateful account ledger: INITIATE reserves, SUBMIT captures, CANCEL/DECLINE releases and REFUND credits back. The raw customer identifier (not the masked one) binds the transaction to the account; a frozen, expired or blocked account declines before the gateway handler runs with `ACCOUNT_FROZEN`/`ACCOUNT_EXPIRED`/`ACCOUNT_BLOCKED`, and the low-balance/limit personas return `INSUFFICIENT_FUNDS`/`LIMIT_EXCEEDED`. A static OTP on the account overrides the deterministic OTP.

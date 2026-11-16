@@ -30,10 +30,13 @@ export function buildPagedMediaHtmlDocument(params: {
   renderedSectionsHtml: string;
   renderedHeaderHtml: string;
   renderedFooterHtml: string;
+  /** Theme of the preview canvas; the printed report always stays white. */
+  previewTheme?: "light" | "dark";
   /** Override the same-origin base used for report font URLs (tests/SSR). */
   assetOrigin?: string;
 }): string {
   const { bundle, locale, renderedSectionsHtml, renderedHeaderHtml, renderedFooterHtml } = params;
+  const previewTheme = params.previewTheme === "dark" ? "dark" : "light";
   const { page_layout } = bundle.spec;
   const isRtl = locale === "ar" || locale.startsWith("ar-") || locale === "he" || locale === "fa";
   const dir = isRtl ? "rtl" : "ltr";
@@ -46,7 +49,7 @@ export function buildPagedMediaHtmlDocument(params: {
     params.assetOrigin ?? (typeof window !== "undefined" ? window.location.origin : "");
 
   return `<!DOCTYPE html>
-<html lang="${locale}" dir="${dir}">
+<html lang="${locale}" dir="${dir}" data-report-preview-theme="${previewTheme}">
 <head>
   <meta charset="utf-8" />
   <title>${escapeHtml(bundle.spec.i18n.locales[locale]?.["report.title"] ?? bundle.spec.report.code)}</title>
@@ -76,18 +79,39 @@ export function buildPagedMediaHtmlDocument(params: {
       @bottom-center { content: element(report-running-footer); }
     }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html {
+      --report-preview-canvas: #F1F5F9;
+      --report-preview-page-border: #E2E8F0;
+      --report-preview-page-shadow: 0 12px 30px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.05);
+      background: var(--report-preview-canvas);
+    }
+    html[data-report-preview-theme="dark"] {
+      --report-preview-canvas: #18181C;
+      --report-preview-page-border: rgba(255, 255, 255, 0.10);
+      --report-preview-page-shadow: 0 18px 44px rgba(0, 0, 0, 0.58), 0 4px 12px rgba(0, 0, 0, 0.38);
+    }
     body {
       margin: 0; padding: 0;
+      background: var(--report-preview-canvas);
       font-family: ${isRtl ? "'Report Arabic', 'Cairo', 'Amiri', sans-serif" : "'Report Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif"};
       font-size: 9pt; line-height: 1.4; color: #0F172A; direction: ${dir};
     }
     code, pre, .report-mono { font-family: "Report Mono", ui-monospace, SFMono-Regular, monospace; }
-    .pagedjs_pages { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 18px; background: #E2E8F0; }
-    .pagedjs_page { background: #FFFFFF; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16); }
+    .pagedjs_pages {
+      display: flex; flex-direction: column; align-items: center;
+      gap: 24px; padding: 32px 20px;
+      background: var(--report-preview-canvas);
+    }
+    .pagedjs_page {
+      background: #FFFFFF;
+      border: 1px solid var(--report-preview-page-border);
+      box-shadow: var(--report-preview-page-shadow);
+    }
+    @media (max-width: 640px) {
+      .pagedjs_pages { gap: 18px; padding: 20px 12px; }
+    }
     @media print {
-      .pagedjs_pages { padding: 0; gap: 0; background: transparent; display: block !important; }
       .pagedjs_page {
-        box-shadow: none;
         break-before: page !important;
         page-break-before: always !important;
         break-after: auto !important;

@@ -3,9 +3,10 @@ id: admin-ui.routes
 title: Admin Route and Page Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-10
+last_verified: 2026-11-13
 verified_against: 5a24f6f+working-tree
 code:
+  - admin-front/src/pages/sandbox/**
   - admin-front/src/router/index.ts
   - admin-front/src/layouts/sections.tsx
   - admin-front/src/pages/**
@@ -27,6 +28,7 @@ design_sources:
   - design/10-fixes/_0001_operator_cases.md
   - design/07-guides-and-academy/guide_system_design_and_content.md
 tests:
+  - tests/unit/guide-content.test.ts
   - tests/e2e/admin/shell.spec.ts
   - tests/e2e/admin/wallet-details.spec.ts
   - tests/unit/wallet-details.test.ts
@@ -85,7 +87,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 
 | # | Path | Name | UI authority / role | Help | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | `/dashboard` | `Dashboard` | `[]` (authenticated only) | 1 / 1.1 | Live platform health, volume, queues, recent activity, snapshot export. |
+| 1 | `/dashboard` | `Dashboard` | `[]` (authenticated only) | 1 / 1.1 | Live platform health, attempts/volume-by-state bar charts, queues, recent activity, snapshot export. |
 | 2 | `/join-requests` | `JoinRequests` | `joinrequests.review` | 9 / 9.1 | Onboarding application queue, SLA health, summary export. |
 | 3 | `/join-requests/new` | `JoinRequestNew` | `joinrequests.review` | 9 / 9.1 via parent | Admin-assisted onboarding package creation. |
 | 4 | `/join-requests/:id` | `JoinRequestDetail` | `joinrequests.review` | 9 / 9.1 | Review profile, owners, documents, checklist, decisions, audit. |
@@ -323,3 +325,18 @@ All three routes are gated by `aml.read_confidential` at the edge/UI; writes are
 - `Incidents` now uses the shared `ApiTable`/`TableRowActions` surface with server pagination, search, status/severity/category filters, correct server summary metrics, row actions, refresh and confidential badge. The detail drawer resets transient state, preserves the active tab on refresh, supports editing incident facts, commander/reporter names, affected merchant/attempt IDs, regulator notification, link removal, responder acknowledgement/release, full action status changes, communication bodies, postmortem due date and a link to the drafted report.
 - `FilingAdapters` uses the shared table surface and exposes edit, re-enable/disable approval requests, secret-present state, endpoint display, confirmation and maker-checker messaging. The create/edit form never sends a blank secret (so an existing secret is kept).
 - `AmlReports` filters include INCIDENT, the generic draft dialog no longer offers INCIDENT, and the drawer shows `filingChannel`, external submission history, adapter filing confirmation and reset-safe adapter selection. `AmlReportingStudio` labels DOCX correctly, preserves template analysis after upload, and offers analyze/download/remove plus narrative, total and prototype-row mappings.
+
+## Object & Asset Storage route
+
+| Route | Name | Page | Authorities |
+| :--- | :--- | :--- | :--- |
+| `/system/object-storage` | `SystemObjectStorage` | `pages/system/object-storage/index.tsx` | `system:storage:read`, `system:storage:admin`, `system:storage:legal-hold` | Operations |
+
+The nav entry is under **Operations** ("Object & Asset Storage") and the route-authority
+aliases normalize the colon names to `system.storage` for the UI guard. The page has server-paginated/filtered object and access-log tables, a real quarantine query, a full detail drawer, legal-hold approval requests and maintenance confirmation/results.
+
+## v38-v39 sandbox pages (2026-11-13)
+
+New routes and a "Sandbox & Fake Rails" sidebar section: `/sandbox/overview` (plane/Fake Rails health, reference readiness, sync audits, per-merchant reset and global reset), `/sandbox/merchants` (portfolio table with summary, filters and seed/reset actions), `/sandbox/merchants/:id` (sandbox merchant detail with wallets, applications, links, payments, cash-outs, disputes, Fake Rails accounts and audits) and `/sandbox/fake-rails` (tabbed accounts, clearing pools/statements, chaos scenarios and transaction tables). All use the amber sandbox banner, standard tables/filters/drawers/export and call `/api/v1/admin/sandbox/*` only.
+
+A "Sandbox Live Mirror" section maps `/sandbox/mirror/*` to the real admin pages: merchants, wallets, applications, transactions, approvals, audit log, operator cases, disputes, adjustments, cash-outs, reconciliation, pricing/profitability/liquidity, journal entries, invariant, credential sets, gateways/routes, reports, platform settings, jobs/outbox and object storage. Mirror pages are open to any signed-in staff member (the sandbox data is isolated), use the same `SandboxBanner`, and Exit sandbox returns to the Live page. The Guide context map's `Sandbox` screen covers the Studio and all mirror routes.

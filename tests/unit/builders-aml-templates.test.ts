@@ -149,12 +149,12 @@ describe("notification template variables", () => {
 });
 
 describe("rail logo assets", () => {
-  test("only png/svg up to 2 MB are accepted", () => {
+  test("only png/svg up to 5 MB are accepted", () => {
     expect(validateLogoFile({ name: "a.png", type: "image/png", size: 100 })).toBeNull();
     expect(validateLogoFile({ name: "a.svg", type: "image/svg+xml; charset=utf-8", size: 100 })).toBeNull();
     expect(validateLogoFile({ name: "a.jpg", type: "image/jpeg", size: 100 })).toBe("TYPE");
     expect(validateLogoFile({ name: "a.png", type: "image/png", size: 0 })).toBe("EMPTY");
-    expect(validateLogoFile({ name: "a.png", type: "image/png", size: 2_000_001 })).toBe("TOO_LARGE");
+    expect(validateLogoFile({ name: "a.png", type: "image/png", size: 5_000_001 })).toBe("TOO_LARGE");
   });
 
   test("storage keys are slugged", () => {

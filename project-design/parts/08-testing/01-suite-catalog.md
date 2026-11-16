@@ -3,9 +3,10 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-11
-verified_against: d695518+working-tree
+last_verified: 2026-11-13
+verified_against: 19d6a54+working-tree
 code:
+  - core-back/test/sandboxPlane.test.ts
   - core-back/test/exhaustive/**
   - core-back/test/storage-engine/**
   - core-back/test/storage-engine/performance/ledger-query-pruning-and-accuracy.test.ts
@@ -16,6 +17,7 @@ code:
   - fake-rails-back/test/**
   - deploy/test/**
   - deploy/backup-daemon/test/**
+  - deploy/object-storage-daemon/test/**
 design_sources:
   - design/05-testing/master_exhaustive_test_plan_for_opencode.md#1-master-test-volume-coverage-matrix-38500-assertions
   - design/05-testing/master_exhaustive_test_plan_for_opencode.md#2-suite-01-database-schema-66-models-100-enums-fks-triggers-indexes-2200-tests
@@ -45,7 +47,10 @@ tests:
   - merchant-back/test/security-regressions.test.ts
   - checkout-back/test/security-regressions.test.ts
   - deploy/test/security-regressions.test.ts
+  - deploy/test/preflight.test.ts
   - deploy/backup-daemon/test/mtlsAuthorization.test.ts
+  - deploy/object-storage-daemon/test/mtls.test.ts
+  - deploy/object-storage-daemon/test/sdk-mtls.test.ts
   - fake-rails-back/test/security.test.ts
   - tests/unit/frontend-security-admin.test.ts
   - tests/unit/frontend-security-checkout.test.ts
@@ -219,6 +224,13 @@ There is **no** `core-back/test/exhaustive/09-storage-backup` directory. The run
 - `core-back/test/hardening-gap-regressions.test.ts` covers the leader-election environment guard, backend-PID/`pg_locks` ownership checks, refused unlocks, the session-safety probe and the durable `inbound_events` claim lease.
 - `core-back/test/backup-admin` — backup routes and control client.
 - `deploy/backup-daemon/test` — 71 declarations across 8 files.
+- `deploy/test/preflight.test.ts` — selection by `--only`/`--nodes` and aliases, dry-run no-connect behavior, and port classification (free, managed PM2 current/orphan, same-repo dev, foreign, Nginx, expected PostgreSQL data directory).
+- `core-back/test/worker-runtime-health.test.ts` — `/health` advertises `APP_RELEASE`/`APP_COMMIT`.
+- `deploy/test/healthVerifierScale.test.ts` — verification rejects a health payload from a different release.
+- `admin-front/src/pages/system/jobs-outbox/components/__tests__/MonitorTable.test.ts` — the Jobs & Outbox table declares its `dc` props and never builds a filter query from an undefined list.
+- `tests/e2e/admin/jobs-outbox.spec.ts` — all four Jobs & Outbox tabs render with mocked APIs without the previous `reduce` error.
+- `tests/e2e/admin/object-storage-style.spec.ts` — `/system/object-storage` uses the shared page/table surfaces: one `ApiTable` card, the built-in filter grid with Namespace/Status/Bucket/Legal hold/Owner/SHA-256 fields, and no nested table card, against mocked storage APIs.
+- `deploy/object-storage-daemon/test` — HTTP surface plus real mTLS: allowed/denied/missing/untrusted client certificates, TLS 1.3 enforcement, a PUT/GET over the TLS-to-HTTP bridge, and `RemoteMtlsBlobStore` health/put/get/stat/list over mTLS. The openssl-backed cases skip if the CLI is unavailable.
 
 Some files skip without PostgreSQL or Redis. The design's dedicated fixture names (`uow-outbox-audit-atomicity.test.ts`, `gl-shards-and-lsn-routing.test.ts`, `audit-chain-and-log-backpressure.test.ts`, `backup-control-and-drills.test.ts`, `backup-restore-matrix.test.ts`) do not exist.
 
@@ -260,12 +272,13 @@ The seeder checks live in suite 10, and the deploy matrix lives in `deploy/test/
 | `fake-rails-back/test` | 53 |
 | `deploy/test` | 119 |
 | `deploy/backup-daemon/test` | 71 |
+| `deploy/object-storage-daemon/test` | 7 literal + 9 `live` (16 executed) |
 | `tests/e2e` | 65 |
 | `tests/e2e-live` | 6 |
 | `tests/unit` | 26 |
-| **Total** | **1,807** |
+| **Total** | **1,814** |
 
-This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations, so the executed test count is higher, especially in suites 01-04. It is far below the 38,500 claim. The stale-claims register records 1,778; the working tree has about 29 more declarations.
+This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations and the `live` alias used by the openssl-backed object-storage mTLS cases, so the executed test count is higher, especially in suites 01-04. It is far below the 38,500 claim. The stale-claims register records 1,778; the working tree has about 36 more declarations.
 
 ### 3.14 Report engine SDK tests
 
@@ -273,7 +286,7 @@ This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations, so t
 
 ### 3.15 Report engine and merchant report tests
 
-`core-back/test/reportEngineSdk/**` now covers the original RE-T01..RE-T22 matrix plus PII masking, confidential AML denial/bypass, merchant scope (including OR-bypass), semantic AST diagnostics, asset validation, chrome resolution and SDK decoupling, and the remediation suites: AuthorityAndCatalog (referenced-column PII, relation parsing, sensitivity/AML domains), MerchantReportLine (allow-list, identity injection/row assertion, tier limits), SeedChrome (seed idempotence), ExecuteAndRedaction (bundle comparison assets, aggregate/truncation), and the A08/A09/A10/A11/A12/A14/A15/A16/A17 regression cases. `merchant-back/test/core-forwarding.test.ts` covers the merchant catalog/execute/autocomplete proxy and the merchant Studio proxies. `core-back/test/admin-slice/admin-report-engine.test.ts` (DB-gated) covers version persistence, publish supersede, archive promotion, audience tabs and the merchant mount/authority; `admin-back/test/report-engine-edge.test.ts` covers the 24 MB parser, edge execute/list permissions and the publish proxy. `tests/unit/report-engine-sdk-mirror.test.ts` asserts the admin/merchant client SDK copies are identical; `tests/unit/report-ui-styles.test.ts` pins the shared report input grid/preview CSS in both portals; `tests/unit/builders-settings-parser.test.ts` covers the `merchant_reports.policy` Platform Setting editor. Core unit tests `report-engine-body-path.test.ts` and `MerchantReportPolicy.test.ts` cover the merchant body parser prefix and the staff-managed policy defaults/cache/assets gate. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers the client renderer, chrome variables, enum translation, vector canvas and paged-media contract. The Guide content test was updated for the new Reports screen/article.
+`core-back/test/reportEngineSdk/**` now covers the original RE-T01..RE-T22 matrix plus PII masking, confidential AML denial/bypass, merchant scope (including OR-bypass), semantic AST diagnostics, asset validation, chrome resolution and SDK decoupling, and the remediation suites: AuthorityAndCatalog (referenced-column PII, relation parsing, sensitivity/AML domains), MerchantReportLine (allow-list, identity injection/row assertion, tier limits), SeedChrome (seed idempotence), ExecuteAndRedaction (bundle comparison assets, aggregate/truncation), and the A08/A09/A10/A11/A12/A14/A15/A16/A17 regression cases. `merchant-back/test/core-forwarding.test.ts` covers the merchant catalog/execute/autocomplete proxy and the merchant Studio proxies. `core-back/test/admin-slice/admin-report-engine.test.ts` (DB-gated) covers version persistence, publish supersede, archive promotion, audience tabs and the merchant mount/authority; `admin-back/test/report-engine-edge.test.ts` covers the 24 MB parser, edge execute/list permissions and the publish proxy. `tests/unit/report-engine-sdk-mirror.test.ts` asserts the admin/merchant client SDK copies are identical; `tests/unit/report-ui-styles.test.ts` pins the shared report input grid/preview CSS in both portals; `tests/unit/report-preview-print-reset.test.ts` pins the post-pagination print reset and asserts the two preview bridges are byte-identical; `tests/unit/builders-settings-parser.test.ts` covers the `merchant_reports.policy` Platform Setting editor. Core unit tests `report-engine-body-path.test.ts` and `MerchantReportPolicy.test.ts` cover the merchant body parser prefix and the staff-managed policy defaults/cache/assets gate. `admin-front/src/lib/reportEngineSdk/__tests__/**` covers the client renderer, chrome variables, enum translation, vector canvas and paged-media contract, including the theme-aware preview canvas, page separation and print reset. The Guide content test was updated for the new Reports screen/article.
 
 ## 4. Contracts and invariants
 
@@ -288,7 +301,7 @@ This count matches `\b(test|it)\s*\(`. It excludes dynamic loop iterations, so t
 - Core suites: `core-back/test/exhaustive/**`.
 - Edge suites: `admin-back/test`, `merchant-back/test`, `checkout-back/test`.
 - Fake-rails suites: `fake-rails-back/test`.
-- Deploy suites: `deploy/test`, `deploy/backup-daemon/test`.
+- Deploy suites: `deploy/test`, `deploy/backup-daemon/test`, `deploy/object-storage-daemon/test`.
 - UI suites: `tests/e2e`, `tests/e2e-live`, `tests/unit`.
 - Runner: `scripts/run-exhaustive-suite.sh`.
 
@@ -412,6 +425,7 @@ This catalog is derived by counting literal declarations and inspecting the suit
 | `merchant-back/test/security-regressions.test.ts` | token creation, uploads, limiter |
 | `checkout-back/test/security-regressions.test.ts` | inbound limiter, body limits, error mapping |
 | `deploy/test/security-regressions.test.ts` | quoting, config hardening, migration planning |
+| `deploy/test/preflight.test.ts` | selection/aliases, dry-run, port ownership classes, expected PostgreSQL data dirs |
 | `deploy/backup-daemon/test/mtlsAuthorization.test.ts` | CN/SAN authorization |
 | `fake-rails-back/test/security.test.ts` | token compare, CIDR, lockout |
 | `tests/unit/frontend-security-{admin,checkout,merchant}.test.ts` | frontend allow-lists, guards, validation |
@@ -503,3 +517,41 @@ These are development/CI tests only; no production-time test job or test endpoin
 - Route-order suites (`core-back/test/reportEngineSdk/RouteOrder.test.ts`, `admin-back/test/report-engine-route-order.test.ts`, `merchant-back/test/report-engine-route-order.test.ts`) assert that every new static migration/transcript route is registered before a dynamic id route and that the expected endpoints exist.
 - `admin-back/test/report-engine-edge.test.ts` and `merchant-back/test/core-forwarding.test.ts` cover migration list pagination/search query forwarding, prompts, Chrome detail, reconciliation, merchant branding and Studio prefill routes.
 - Frontend type checks cover the new admin/merchant migration pages, branding editor and Studio query prefill; the existing i18n and SDK mirror gates cover Arabic catalogue completeness and client mirror equality.
+
+## Object storage suites
+
+- `core-back/test/objectStorageEngine.test.ts` — T01–T28 (DB-gated) and DB-free
+  pgos1/sniff edge cases; includes no-lock activation, retention-once, GC claim,
+  access-log append-only, abandoned quarantine and held discard; runs against a
+  real PostgreSQL 18 + Redis.
+- `core-back/test/runtime/raw-body.test.ts` — raw-body capture and per-route
+  budgets for assets, dispute/AML evidence, reconciliation, KYB and checkout.
+- `deploy/test/objectStorageDeploy.test.ts` — T21 topology/PKI/firewall/guard,
+  per-consumer certificate placement, safe-path/KEK validation and T22
+  parity/escrow/drill, plus the shared `blobStore.ts` drift guard.
+- `deploy/object-storage-daemon/test/server.test.ts` — HTTP round-trip, checksum
+  mismatch, path traversal, trash/purge and unknown bucket/route refusals.
+- `admin-back/test/object-storage-forwarding.test.ts` — verifies page/filter/
+  sort/search/access-log forwarding and the legal-hold request path.
+- Route/UI coverage still needs a live Playwright pass for the four storage tabs
+  and the dispute/AML/reconciliation attachment surfaces.
+
+## v38 sandbox suites (2026-11-13)
+
+- `core-back/test/sandboxPlane.test.ts`: plane resolution, token prefixes, boot fence, strict Live/Sandbox DB fence in both directions, Fake Rails gateway/environment fence, development opt-in.
+- `core-back/test/fake-rails-control-client.test.ts`: control URL/token, error mapping, merchant scope, unreachable emulator, helper/simulator.
+- `fake-rails-back/test/accountsAndInspector.test.ts` and the v2 cases in `api.test.ts`: personas, reserve/capture/release/refund, over-reserve, auto-enrolment, merchant reset, clearing statement, control plane and checkout helper.
+- `merchant-back/test/sandbox-routing.test.ts`, `admin-back/test/sandbox-routing.test.ts`, `checkout-back/test/sandbox-routing.test.ts`: pool selection, fail-closed 503 and token prefixes.
+- `merchant-back/test/sandbox-proxy.test.ts` and `checkout-back/test/sandbox-checkout-forward.test.ts`: real forwarding through the sandbox pool for control/resources, `pg_test_` external tokens, `sbx_` summary/inspector routes and the Live-link inspector refusal.
+- `core-back/test/security-regressions/commerce-status-enforcement.test.ts` and `test/engine/attempt-guard-pipeline.test.ts` assert the removed OD-10 fallback.
+
+## v39 Sandbox Studio and mirror suites (2026-11-13)
+
+- `core-back/test/sandboxPlane.test.ts` now runs the schema-local fence functions and passes on v39; `core-back/test/phase1-mtls-and-schema.test.ts` expects `20261114090000_v39_sandbox_studio` as the newest migration and schema version 39.
+- `fake-rails-back/test/accountsAndInspector.test.ts` and `test/api.test.ts` cover merchant-owned account copies, daily business-date reset, hold expiry, capture variance guards, clearing references and statement inclusion.
+- `merchant-back/test/sandbox-proxy.test.ts` covers control routes (`overview`, `seed-demo`, `studio/*`, wallet/payment detail, refund, reconciliation), Live-router resource lists/creates, Fake Rails control routes and `pg_test_` external tokens. `merchant-back/test/sandbox-routing.test.ts` covers the fail-closed pool.
+- `admin-back/test/sandbox-routing.test.ts` also asserts the Studio path mapping for `/merchants`, `/merchants/summary`, merchant detail and `/audits` so the admin control center cannot silently fall back to the Live namespace.
+- `admin-back/test/sandbox-routing.test.ts` covers admin sandbox pool selection; the admin sandbox API forwards Fake Rails accounts, scenarios, transactions, webhooks and statements.
+- Root `tests/unit/frontend-security-admin.test.ts` requires every Sandbox mirror route to be explicitly allowed for authenticated staff; `tests/unit/guide-content.test.ts` requires the generated context map to cover them; `tests/unit/i18n-catalogue.test.ts` requires Arabic entries for every new Studio/mirror label.
+- Deploy tests cover `sandboxDatabase()`, `pgw_sandbox`/`pgw_sandbox_session`, sandbox database creation, the second `pg-core-sandbox` service plan, firewall/PKI SAN, and backup exclusion; `./deploy.sh --dry-run` is the integration smoke check.
+- Not yet covered end to end: a live two-database deploy, a live reconciliation import through the real Fake Rails server, and a Playwright pass over the Studio/mirror pages. The `seed-history` route and ledger postings are typechecked and reviewed but have no DB-backed automated test yet.

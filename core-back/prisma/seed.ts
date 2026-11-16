@@ -80,13 +80,6 @@ const platformSettings = [
     },
   },
   {
-    key: "OD-10",
-    valueJson: {
-      sandboxBeforeApproval: true,
-      description: "Pending merchants may use sandbox rails before approval.",
-    },
-  },
-  {
     key: "merchant_reports.policy",
     valueJson: {
       enabled: true,
@@ -173,7 +166,7 @@ const adminUsers = [
   {
     email: "security-admin@payment-gateway.internal",
     role: "SECURITY_ADMIN",
-    authorities: ["security:read", "security:write", "credential:write", "report_engine:run"],
+    authorities: ["security:read", "security:write", "credential:write", "system:storage:read", "system:storage:admin", "system:storage:legal-hold", "report_engine:run"],
     isMaker: true,
     isChecker: true,
   },

@@ -169,7 +169,8 @@
     "moduleIds": [
       "m4",
       "m5",
-      "m7"
+      "m7",
+      "m10"
     ],
     "lessonIds": [
       "l-m4-2",
@@ -177,7 +178,8 @@
       "l-m5-1",
       "l-m7-2",
       "l-m7-3",
-      "l-m7-4"
+      "l-m7-4",
+      "l-m10-5"
     ],
     "labIds": [
       "lab-kyb-desk",
@@ -238,7 +240,8 @@
       "l-m9-1",
       "l-m9-2",
       "l-m10-3",
-      "l-m10-4"
+      "l-m10-4",
+      "l-m10-5"
     ],
     "labIds": [
       "lab-runbook-drill",
@@ -270,7 +273,8 @@
       "l-m9-1",
       "l-m9-2",
       "l-m10-3",
-      "l-m10-4"
+      "l-m10-4",
+      "l-m10-5"
     ],
     "labIds": [
       "lab-runbook-drill",

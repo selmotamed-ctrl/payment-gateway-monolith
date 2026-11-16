@@ -136,6 +136,33 @@ export const useSections = () => {
             ],
         },
         {
+            title: t("Sandbox Studio (Testing & Training)"),
+            icon: "mdi-flask-outline",
+            routes: [
+                { label: t("Sandbox Overview & Seeder"), name: "SandboxOverview", icon: "mdi-view-dashboard-outline" },
+                { label: t("Sandbox Wallets"), name: "SandboxWallets", icon: "mdi-wallet-outline" },
+                { label: t("Sandbox Applications"), name: "SandboxApplications", icon: "mdi-apps" },
+                { label: t("Sandbox Checkout Links"), name: "SandboxLinks", icon: "mdi-link-variant" },
+                { label: t("Sandbox Payments & Ledger"), name: "SandboxPayments", icon: "mdi-credit-card-outline" },
+                { label: t("Fake Rails Test Accounts"), name: "SandboxAccounts", icon: "mdi-bank-outline" },
+                { label: t("Sandbox API Keys & Webhooks"), name: "SandboxTokens", icon: "mdi-key-variant" },
+            ],
+        },
+        {
+            title: t("Sandbox Live Mirror"),
+            icon: "mdi-monitor-multiple",
+            routes: [
+                { label: t("Sandbox Cash-Outs"), name: "SandboxMirrorCashouts", icon: "mdi-cash-fast" },
+                { label: t("Sandbox Disputes"), name: "SandboxMirrorDisputes", icon: "mdi-scale-balance" },
+                { label: t("Sandbox POS"), name: "SandboxMirrorPos", icon: "mdi-point-of-sale" },
+                { label: t("Sandbox Credential Sets"), name: "SandboxMirrorCredentials", icon: "mdi-key-chain-variant" },
+                { label: t("Sandbox Team & Roles"), name: "SandboxMirrorTeam", icon: "mdi-account-group-outline" },
+                { label: t("Sandbox Webhooks"), name: "SandboxMirrorWebhooks", icon: "mdi-webhook" },
+                { label: t("Sandbox Reports"), name: "SandboxMirrorReports", icon: "mdi-file-chart-outline" },
+                { label: t("Sandbox Statements"), name: "SandboxMirrorStatements", icon: "mdi-file-document-outline" },
+            ],
+        },
+        {
             title: t("Developer"),
             icon: "mdi-code-braces",
             routes: [

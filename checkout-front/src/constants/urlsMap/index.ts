@@ -12,6 +12,16 @@ export const urlsMap = {
     payResend: (linkKey: string, attemptId: string) => `v1/pay/${linkKey}/logs/${attemptId}/resend`,
     payCancel: (linkKey: string, attemptId: string) => `v1/pay/${linkKey}/logs/${attemptId}/cancel`,
     payClientEvent: (linkKey: string, attemptId: string) => `v1/pay/${linkKey}/logs/${attemptId}/client-event`,
+    sandboxAccounts: (linkKey: string, railCode?: string | null) =>
+        `v1/pay/${linkKey}/sandbox-accounts${railCode ? `?railCode=${encodeURIComponent(railCode)}` : ""}`,
+    sandboxAccount: (linkKey: string, accountId: string) =>
+        `v1/pay/${linkKey}/sandbox-accounts/${encodeURIComponent(accountId)}`,
+    sandboxAccountMovements: (linkKey: string, accountId: string) =>
+        `v1/pay/${linkKey}/sandbox-accounts/${encodeURIComponent(accountId)}/movements`,
+    sandboxInspector: (linkKey: string, attemptId: string) =>
+        `v1/pay/${linkKey}/logs/${attemptId}/sandbox-inspector`,
+    sandboxSimulate: (linkKey: string, attemptId: string) =>
+        `v1/pay/${linkKey}/logs/${attemptId}/sandbox-simulate`,
 } as const;
 
 export type UrlsMap = typeof urlsMap;

@@ -119,14 +119,16 @@ const SIGNATURE_PROFILES: Record<string, SignatureProfile> = {
   },
 };
 
-const profileFor = (gatewayCode: string): SignatureProfile =>
-  SIGNATURE_PROFILES[gatewayCode] ?? {
+const profileFor = (gatewayCode: string): SignatureProfile => {
+  const canonical = gatewayCode === "cbl_lypay" ? "ly_pay" : gatewayCode === "evo_pay" ? "evopay" : gatewayCode;
+  return SIGNATURE_PROFILES[canonical] ?? {
     algorithm: "HMAC_SHA256",
     canonicalizationMode: "SORTED_KEY_VALUE_AMP",
     outputEncoding: "HEX_LOWER",
     secretEncoding: "UTF8",
     signatureHeader: "X-Fake-Rails-Signature",
   };
+};
 
 const recipeFor = (gatewayCode: string, corrupt: boolean): SigningRecipe => {
   const profile = profileFor(gatewayCode);
@@ -142,7 +144,7 @@ const recipeFor = (gatewayCode: string, corrupt: boolean): SigningRecipe => {
 
 const defaultUrlFor = (transaction: FakeTransactionRow): string | null => {
   if (transaction.webhook_url) return transaction.webhook_url;
-  return `${env.CORE_INBOUND_BASE_URL.replace(/\/$/, "")}/webhook/${transaction.gateway_code}/${transaction.env.toLowerCase()}/${transaction.gateway_code}-webhook`;
+  return `${env.CORE_INBOUND_BASE_URL.replace(/\/$/, "")}/${encodeURIComponent(transaction.gateway_code)}/${transaction.env.toLowerCase()}/${encodeURIComponent(`${transaction.gateway_code}-webhook`)}`;
 };
 
 const activeTimers = new Map<string, ReturnType<typeof setTimeout>>();

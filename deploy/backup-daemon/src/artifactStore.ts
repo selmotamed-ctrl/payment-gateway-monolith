@@ -654,6 +654,42 @@ export class ArtifactRepository {
     return null;
   }
 
+  /** Reads a buffer from the first tier whose copy passes `verify` (e.g. authenticated decryption). */
+  public async getBufferVerified(key: string, verify: (value: Buffer) => Promise<void> | void): Promise<Buffer | null> {
+    const errors: string[] = [];
+    for (const store of this.stores) {
+      try {
+        const value = await store.getBuffer(key);
+        if (!value) continue;
+        await verify(value);
+        return value;
+      } catch (error) {
+        errors.push(`${store.id}: ${errorMessage(error).slice(0, 160)}`);
+      }
+    }
+    if (errors.length > 0) {
+      throw new Error(`artifact ${key} is missing or failed verification on every storage tier (${errors.join("; ")})`);
+    }
+    return null;
+  }
+
+  /** Tier ids that do not currently hold `key` (used to repair a 3-2-1 repository). */
+  public async missingStores(key: string): Promise<string[]> {
+    const missing: string[] = [];
+    await Promise.all(this.stores.map(async (store) => {
+      try {
+        if (!(await store.exists(key))) missing.push(store.id);
+      } catch {
+        missing.push(store.id);
+      }
+    }));
+    return missing;
+  }
+
+  public get requiredStoreIds(): string[] {
+    return [...this.requiredIds];
+  }
+
   /** Union of keys across tiers. */
   public async list(prefix: string): Promise<string[]> {
     const keys = new Set<string>();

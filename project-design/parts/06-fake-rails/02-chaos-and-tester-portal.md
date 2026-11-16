@@ -380,3 +380,7 @@ fake-rails-front: the postMessage target is `VITE_CHECKOUT_ORIGIN`, otherwise th
 ## Dark teleported overlays (2026-11-10)
 
 The Fake Rails tester portal applies the same overlay text-color rule as the other portals, fixing black-on-dark custom dialog/drawer content in dark mode.
+
+## v2 tester surfaces (2026-11-13)
+
+The portal gains account and checkout-helper routes: `GET/POST/PATCH /portal-api/accounts*`, `GET /portal-api/checkout-helper/:reference` and `POST /portal-api/checkout-helper/:reference/simulate-action`. They expose balances, holds, daily limits, statuses, OTPs and the push/QR approve/decline/variance/duplicate/tampered actions. The same routes are mounted at `/control/*` for the Sandbox core, protected by `x-fake-rails-control-token` when configured; production refuses the control plane without the token.

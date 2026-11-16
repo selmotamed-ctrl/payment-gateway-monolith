@@ -6,7 +6,7 @@ Generated from: `admin-ui.system`, `admin-ui.routes`, `admin-ui.tables`, `admin-
 
 ## Admin UI System
 
-> Status: `partial` · Last verified: 2026-11-09
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -307,9 +307,25 @@ These are browser or unit checks; they do not require PostgreSQL or Redis.
 
 Vuetify teleports dialogs, menus and drawers under a `.v-overlay__content` / `.v-navigation-drawer` element that receives the theme class and CSS variables but not a base text color. Custom surface components (`FormModal`, `SlideOverDrawer`, SafeguardDialog, the guide search surface, and any raw dialog content) therefore inherited the body's black text while sitting on the dark surface. `fintech-minimal.css` now sets `color: rgb(var(--v-theme-on-surface))` on `.v-overlay__content` and `.v-navigation-drawer__content`; component-specific text colors and status tones still override it. The same rule is mirrored in the merchant, checkout and Fake Rails portals, and `tests/unit/dark-overlay-colors.test.ts` guards all four stylesheets.
 
+## Object & Asset Storage page
+
+`/system/object-storage` (`pages/system/object-storage/index.tsx`) uses the shared
+`ScreenContainer`, `PageHeader`, `MetricStrip`, `SegmentedTabs`, `SurfaceCard`,
+`ApiTable` (with the built-in `TableFilters` toolbar), `TableRowActions`,
+`SlideOverDrawer`, `DescriptionList` and `FormModal` primitives. The root uses
+the standard 18 px section gap, the table cards are the `ApiTable` surfaces
+(no nested `SurfaceCard`), and the page-header end slot carries the object,
+quarantine and legal-hold summary badges beside Refresh. It has four tabs:
+cluster/daemon health with maintenance jobs in a titled `SurfaceCard` and the
+result in the shared `.pg-code-block`; object explorer with active locks;
+quarantine/AV queue; and the access audit trail. Authority-gated actions:
+`system:storage:read` (view), `system:storage:admin`
+(maintenance/rewrap/GC/scrub/AV scan), `system:storage:legal-hold`
+(place/lift hold with a written reason).
+
 ## Admin Route and Page Catalog
 
-> Status: `partial` · Last verified: 2026-11-10
+> Status: `partial` · Last verified: 2026-11-13
 
 ## 1. Purpose and scope
 
@@ -350,7 +366,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 
 | # | Path | Name | UI authority / role | Help | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | `/dashboard` | `Dashboard` | `[]` (authenticated only) | 1 / 1.1 | Live platform health, volume, queues, recent activity, snapshot export. |
+| 1 | `/dashboard` | `Dashboard` | `[]` (authenticated only) | 1 / 1.1 | Live platform health, attempts/volume-by-state bar charts, queues, recent activity, snapshot export. |
 | 2 | `/join-requests` | `JoinRequests` | `joinrequests.review` | 9 / 9.1 | Onboarding application queue, SLA health, summary export. |
 | 3 | `/join-requests/new` | `JoinRequestNew` | `joinrequests.review` | 9 / 9.1 via parent | Admin-assisted onboarding package creation. |
 | 4 | `/join-requests/:id` | `JoinRequestDetail` | `joinrequests.review` | 9 / 9.1 | Review profile, owners, documents, checklist, decisions, audit. |
@@ -589,9 +605,24 @@ All three routes are gated by `aml.read_confidential` at the edge/UI; writes are
 - `FilingAdapters` uses the shared table surface and exposes edit, re-enable/disable approval requests, secret-present state, endpoint display, confirmation and maker-checker messaging. The create/edit form never sends a blank secret (so an existing secret is kept).
 - `AmlReports` filters include INCIDENT, the generic draft dialog no longer offers INCIDENT, and the drawer shows `filingChannel`, external submission history, adapter filing confirmation and reset-safe adapter selection. `AmlReportingStudio` labels DOCX correctly, preserves template analysis after upload, and offers analyze/download/remove plus narrative, total and prototype-row mappings.
 
+## Object & Asset Storage route
+
+| Route | Name | Page | Authorities |
+| :--- | :--- | :--- | :--- |
+| `/system/object-storage` | `SystemObjectStorage` | `pages/system/object-storage/index.tsx` | `system:storage:read`, `system:storage:admin`, `system:storage:legal-hold` | Operations |
+
+The nav entry is under **Operations** ("Object & Asset Storage") and the route-authority
+aliases normalize the colon names to `system.storage` for the UI guard. The page has server-paginated/filtered object and access-log tables, a real quarantine query, a full detail drawer, legal-hold approval requests and maintenance confirmation/results.
+
+## v38-v39 sandbox pages (2026-11-13)
+
+New routes and a "Sandbox & Fake Rails" sidebar section: `/sandbox/overview` (plane/Fake Rails health, reference readiness, sync audits, per-merchant reset and global reset), `/sandbox/merchants` (portfolio table with summary, filters and seed/reset actions), `/sandbox/merchants/:id` (sandbox merchant detail with wallets, applications, links, payments, cash-outs, disputes, Fake Rails accounts and audits) and `/sandbox/fake-rails` (tabbed accounts, clearing pools/statements, chaos scenarios and transaction tables). All use the amber sandbox banner, standard tables/filters/drawers/export and call `/api/v1/admin/sandbox/*` only.
+
+A "Sandbox Live Mirror" section maps `/sandbox/mirror/*` to the real admin pages: merchants, wallets, applications, transactions, approvals, audit log, operator cases, disputes, adjustments, cash-outs, reconciliation, pricing/profitability/liquidity, journal entries, invariant, credential sets, gateways/routes, reports, platform settings, jobs/outbox and object storage. Mirror pages are open to any signed-in staff member (the sandbox data is isolated), use the same `SandboxBanner`, and Exit sandbox returns to the Live page. The Guide context map's `Sandbox` screen covers the Studio and all mirror routes.
+
 ## Tables Filters and Exports
 
-> Status: `partial` · Last verified: 2026-11-07
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -613,6 +644,8 @@ The v2 design intends tables to look operational rather than decorative:
 8. **Actions are always reachable.** The action column is sticky to the inline end, so the visible primary action and the overflow trigger never require horizontal scrolling. A row-level context menu offers the same actions at the pointer (right-click) and from the keyboard (`Shift+F10`); the menu lists the primary action first, then the overflow items. The sticky trigger remains the touch path and the accessible baseline; links and form fields keep their native context menu.
 
 ## 3. As-built architecture
+
+- The shared `MonitorTable` used by Jobs & Outbox declares every prop it reads in its `dc(...)` call (`title`, `url`, `listKey`, `headers`, `filters`, `initialFilters`, `refreshSignal`, `rowColor`, `searchable`) and uses `props.filters ?? []` before `buildFilterQuery`; a missing props declaration previously made `filters` undefined and crashed the page with `undefined.reduce`. The contract is pinned by `admin-front/src/pages/system/jobs-outbox/components/__tests__/MonitorTable.test.ts` and `tests/e2e/admin/jobs-outbox.spec.ts`.
 
 ### 3.1 Components
 
@@ -879,7 +912,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 This part owns two employee learning products in `admin-front`:
 
-- The Admin Interactive Guide at `/guide/**`: 14 books, 135 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
+- The Admin Interactive Guide at `/guide/**`: 14 books, 137 articles, glossary, safeguard cards, situation playbook, 140-case catalog, five simulators, reading paths, search palette, contextual help and read tracking.
 - The Employee Academy under `/academy/**`: eight tracks, lessons with practice checks, simulated labs, server-graded certification exams, 12-month badges, certificates and a `SECURITY_ADMIN` team view.
 
 It does not own the merchant guide or the checkout help center. The future-guide design is now implemented; its detailed implementation notes live in `06-guide-v2.md`.
@@ -893,21 +926,21 @@ The canonical content is `design/07-guides-and-academy/guide_system_design_and_c
 | Artifact | Count / notes |
 | :--- | :--- |
 | `books.json` | 14 books |
-| `articles.en.json` | 135 articles with headings, plain text, roles, UI status and related ids |
-| `glossary.en.json` | 151 terms with aliases, Arabic term and related slugs |
-| `cards.en.json` | 25 cards and 112 required checklist items |
+| `articles.en.json` | 137 articles with headings, plain text, roles, UI status and related ids |
+| `glossary.en.json` | 154 terms with aliases, Arabic term and related slugs |
+| `cards.en.json` | 26 cards and 115 required checklist items |
 | `playbook.en.json` | 32 situations with screens, cases and articles |
 | `paths.json` | 8 reading paths (`ALL` plus seven staff roles) |
-| `faq.en.json` | 58 quick answers |
+| `faq.en.json` | 60 quick answers |
 | `data.json` | `ledger-events`, `visible-rails`, `attempt-transitions` |
-| `context-map.json` | 29 screens (including `Wallets`, `SystemBackups`, `AmlReportingStudio`, `Incidents`, `FilingAdapters` and `Reports`), the last being the `General` fallback |
+| `context-map.json` | 30 screens (including `Wallets`, `SystemBackups`, `SystemObjectStorage`, `AmlReportingStudio`, `Incidents`, `FilingAdapters` and `Reports`), the last being the `General` fallback |
 | `error-codes.en.json` | 19 codes parsed from `b13-01` |
 | `edge-cases.en.json` | 140 rows parsed from the v4.1 design |
 | `meta.json` | `contentVersion`, deterministic `generatedAt`, counts and source SHA-256 |
 
 The extractor output is deterministic and byte-stable. The content test re-runs it into a temporary directory and fails on drift, count changes, unresolved links, empty bodies, external URLs, missing context-map routes, missing widgets or a gzip total above 400 KB.
 
-`scripts/overhaul-guide-and-academy-clarity.ts` is the content clarity gate. It labels every bare inline `[[a:…]]` / `[[c:…]]` / `[[s:…]]` / `[[g:…]]` token outside tables with a short natural title, skips code fences, table rows and already-labelled links, and supports `--check` (used by `guide-content.test.ts`). Table cells stay unlabelled because a `|` inside a link label would split the markdown cell; the readers shorten bare table links at render time instead. Parenthetical reference dumps are removed at render time (see §3), so the canonical prose preserves the links. The clarity overhaul (2026-11-07) rewrote 101 Guide articles (Books 2 and 4–12; Books 0, 1, 3 and 13 untouched) so each opens with a `:::summary` "In plain words" callout and a plain-language opening, and rewrote 40 Academy lessons as self-contained 350–600 word tutorials (all 50 lessons are now in that form); it also added short labels on bare references. Counts, ids, headings, check ids, quiz structure and table rows are unchanged. Each rewrite was validated mechanically and then reviewed independently against the old text and the code; the factual corrections that review found are listed in `design/07-guides-and-academy/guide_content_fixes.md` and `academy_content_fixes.md`. The authoring standard is §10.
+`scripts/overhaul-guide-and-academy-clarity.ts` is the content clarity gate. It labels every bare inline `[[a:…]]` / `[[c:…]]` / `[[s:…]]` / `[[g:…]]` token outside tables with a short natural title, skips code fences, table rows and already-labelled links, and supports `--check` (used by `guide-content.test.ts`). Table cells stay unlabelled because a `|` inside a link label would split the markdown cell; the readers shorten bare table links at render time instead. Parenthetical reference dumps are removed at render time (see §3), so the canonical prose preserves the links. The clarity overhaul (2026-11-07) rewrote 101 Guide articles (Books 2 and 4–12; Books 0, 1, 3 and 13 untouched) so each opens with a `:::summary` "In plain words" callout and a plain-language opening, and rewrote 40 Academy lessons as self-contained 350–600 word tutorials (all 51 lessons are now in that form); it also added short labels on bare references. Counts, ids, headings, check ids, quiz structure and table rows are unchanged. Each rewrite was validated mechanically and then reviewed independently against the old text and the code; the factual corrections that review found are listed in `design/07-guides-and-academy/guide_content_fixes.md` and `academy_content_fixes.md`. The authoring standard is §10.
 
 ## 3. Guide reader and navigation
 
@@ -983,10 +1016,10 @@ Specification: `design/07-guides-and-academy/academy_system_design_and_content.m
 | Output | Content | Audience |
 | :--- | :--- | :--- |
 | `admin-front/src/content/academy/generated/` | `meta`, `tracks`, `modules`, `lessons.en` (markdown `body`, rendered `html`, `plainText`), `checks.en` (100 practice questions WITH keys), `labs.en` (WITH keys), `drills.en`, `pages.en`, `lab-vectors`, `exam-blueprints.public` (no question ids) | browser |
-| `core-back/content/academy/exam-bank.json` | 223 exam-pool questions WITH keys + 8 blueprints | server only, never served |
+| `core-back/content/academy/exam-bank.json` | 224 exam-pool questions WITH keys + 8 blueprints | server only, never served |
 | `core-back/content/academy/catalog.json` | tracks → lesson/lab/exam ids, lesson/lab titles, badge ids; no questions | server (eligibility, team view) |
 
-Counts (asserted by `academy-content.test.ts`): 8 tracks, 11 modules, 50 lessons (20 Foundation + 30 role), 100 checks, 223 exam-pool questions (208 single, 13 number, 2 order; 43 critical), 16 labs / 92 tasks, 8 exams, 11 drills, 7 pages (+ `lab-vectors`). Generated output is ~75 KB gzipped (budget 600 KB). Exam-pool question ids never appear under `admin-front/src/content/academy/generated/`.
+Counts (asserted by `academy-content.test.ts`): 8 tracks, 11 modules, 51 lessons, 102 checks, 224 exam-pool questions (209 single, 13 number, 2 order; 44 critical), 16 labs / 92 tasks, 8 exams, 11 drills, 7 pages (+ `lab-vectors`). Generated output is ~75 KB gzipped (budget 600 KB). Exam-pool question ids never appear under `admin-front/src/content/academy/generated/`.
 
 ### 7.2 Tracks, badges, routes
 
@@ -1111,7 +1144,7 @@ Every new or edited Guide article and Academy lesson follows this standard. Read
 
 **Lessons.** Six headings in order (`You will be able to`, `Key ideas`, `A worked example`, `Common mistakes`, `Read now`, `Check yourself`); 350–600 words that a learner can pass without opening the Guide; every correct answer and the reason each wrong option is wrong is taught in the lesson; check ids and Read-now links unchanged.
 
-**Review before merging.** A mechanical diff (header, link targets, widgets, dropped numbers and code terms) is not enough: the rewrite of 101 articles and 50 lessons found 21 high-severity and about 67 medium problems (invented behaviour, wrong example roles, misleading analogies) only when a second reader compared old text, new text and the code.
+**Review before merging.** A mechanical diff (header, link targets, widgets, dropped numbers and code terms) is not enough: the rewrite of 101 articles and 51 lessons found 21 high-severity and about 67 medium problems (invented behaviour, wrong example roles, misleading analogies) only when a second reader compared old text, new text and the code.
 
 ## Backup and disaster-recovery content (2026-11-06)
 
@@ -1119,13 +1152,25 @@ Added from `design/02-storage-and-performance/backup_engine_reliability_architec
 
 Corrections to the draft: the exam question ids `q-m10-004..008` collided with existing questions and were renumbered; the extractor requires exactly two checks per lesson, so the third moved into the exam pool; `@@map` takes a JSON block, not the draft's one-liner; the real route is `SystemBackups` (not `AdminSystemBackups`); the menu path is Operations -> Backups; the drill has three invariant checks, not five gates; unverified claims (cron gap minimums, hard-coded retention defaults, a 30-second tick) were removed. Content stays English-only like the rest of the Guide/Academy bodies. The three new cards are content only: they are not wired into `pages/system/backups/index.tsx` with `useSafeguard`.
 
+## Object storage content
+
+Guide Book 12 adds `b12-12` "Shared Object & Asset Storage: how files, locks,
+quarantine and retention work" and `b12-13` "Operating the Object & Asset Storage
+screen: legal holds, KEK rotation and maintenance jobs", plus card
+`sg-place-legal-hold`, terms `object-storage-vault`/`storage-object-lock`/
+`legal-hold`, FAQ `q-059`/`q-060` and context-map screen `SystemObjectStorage`.
+Academy module 10 adds lesson `l-m10-5`, checks `c-l-m10-5-1/2` and exam
+question `q-m10-118`. Counts are 137 articles, 154 terms, 26 cards, 51
+lessons, 102 checks and 224 exam-pool questions. Generated Guide/Academy and
+Companion snapshots were regenerated.
+
 ## Contextual Help
 
 > Status: `implemented` · Last verified: 2026-11-04
 
 ## 1. Purpose and scope
 
-This part owns the admin contextual-help button and drawer, the 25-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
+This part owns the admin contextual-help button and drawer, the 30-screen context map, and the safeguard dialog that appears before risky actions. The merchant portal drawer and payer checkout help are separate products; this part only records their boundary.
 
 ## 2. As-built architecture
 
@@ -1137,7 +1182,7 @@ The accessible name is "How this page works".
 
 ### 2.2 Context map
 
-`context-map.json` is generated from `@@map id=context-map` in the guide design. It contains `fallbackScreenId` plus 23 `ContextScreen` entries with `screenId`, `routeNames`, `pageDir`, `summary`, `articles`, `cards` and `situations`.
+`context-map.json` is generated from `@@map id=context-map` in the guide design. It contains `fallbackScreenId` plus 30 `ContextScreen` entries with `screenId`, `routeNames`, `pageDir`, `summary`, `articles`, `cards` and `situations`.
 
 Resolution rules:
 

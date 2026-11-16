@@ -1,9 +1,9 @@
 /**
  * Rail logo assets (core `Asset` model + `POST /assets`, admin-back `toCoreAssetCreate`):
- * PNG or SVG, 1 byte .. 2 MB, a lowercase hex SHA-256, a storage key.
+ * PNG or SVG, 1 byte .. 5 MB, a lowercase hex SHA-256, a storage key.
  */
 export const LOGO_MIMES = ["image/png", "image/svg+xml"] as const;
-export const LOGO_MAX_BYTES = 2_000_000;
+export const LOGO_MAX_BYTES = 5_000_000;
 export const LOGO_ASSET_ERRORS = ["TYPE", "EMPTY", "TOO_LARGE", "NAME"] as const;
 export type LogoFileError = (typeof LOGO_ASSET_ERRORS)[number];
 

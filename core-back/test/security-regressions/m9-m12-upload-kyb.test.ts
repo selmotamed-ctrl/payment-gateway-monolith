@@ -4,6 +4,22 @@ import { scanKybBytes } from "../../lib/kybScan";
 
 type Audit = { actorId: string; role: string; action: string };
 
+const fakeObjectStorage = {
+  routeClient: {
+    stageUpload: async (input: { data: Uint8Array }) => ({
+      objectId: "00000000-0000-4000-8000-000000000001",
+      bucket: "HOT",
+      storageKey: "recon_statements/shared/2026/11/statement.v1.enc",
+      sha256Hex: "",
+      byteSize: BigInt(input.data.byteLength),
+      detectedMimeType: "text/csv",
+      requiresAsyncAvScan: false,
+    }),
+    bind: async () => undefined,
+    discardStaged: async () => undefined,
+  },
+} as never;
+
 const buildUpload = (existingRun: Record<string, unknown> | null = null) => {
   const audits: Audit[] = [];
   const db: any = {
@@ -18,7 +34,7 @@ const buildUpload = (existingRun: Record<string, unknown> | null = null) => {
     },
     jobs: { findLiveJobForReference: async () => null, enqueueJob: async () => ({ id: "job1" }) },
   };
-  const handler = createReconciliationUploadHandler({ db, repositories });
+  const handler = createReconciliationUploadHandler({ db, repositories, objectStorage: fakeObjectStorage });
   const call = async (principal: unknown, headers: Record<string, string> = {}) => {
     const meta = Buffer.from(JSON.stringify({ actorId: "FORGED-CFO-ID", actorRole: "MLRO", checklist: ["x"] })).toString("base64url");
     const request: any = {

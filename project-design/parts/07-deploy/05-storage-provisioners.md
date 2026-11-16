@@ -3,7 +3,7 @@ id: deploy.storage
 title: Storage Provisioners
 status: partial
 confidence: high
-last_verified: 2026-11-07
+last_verified: 2026-11-12
 verified_against: d695518+working-tree
 code:
   - deploy/test/testMatrix.test.ts
@@ -123,7 +123,7 @@ The slots are created on the primary by `primaryBootstrapSql()`. Replication is 
 
 When `PGBOUNCER_ENABLED=true`, PgBouncer is installed and configured on the primary and every replica. `/etc/pgbouncer/pgbouncer.ini` sets `listen_addr=0.0.0.0`, `listen_port=6432`, transaction pooling for the application database, `server_tls_sslmode=require`, the configured client/pool limits, reserve 10, prepared statements, SCRAM auth and `/etc/pgbouncer/userlist.txt`. The userlist contains the application and replication users with plaintext passwords, mode 0600. PgBouncer is applied by reload, or restarted only when needed (section 16).
 
-The `[databases]` section also contains a session-scoped alias, `pgw_session`, mapping to the same real database with `pool_mode=session` and `pool_size = max(8, 2 × core nodes + 4)`. It exists solely for the singleton-worker advisory-lock leader election (`LEADER_ELECTION_DATABASE_URL`): PostgreSQL session locks do not survive transaction pooling. The ordinary `PG_DB_NAME` entry stays transaction-pooled for application traffic. After PgBouncer is applied, the provisioner proves a login through both the application database and `pgw_session`; if the alias is not yet served after a reload, it restarts PgBouncer once and retries, so core never starts against a missing session route.
+The `[databases]` section also contains a session-scoped alias, `pgw_session`, mapping to the same real database with `pool_mode=session` and `pool_size = max(8, 2 × core nodes + 4)`. It carries the two advisory-lock consumers: the singleton-worker leader election (`LEADER_ELECTION_DATABASE_URL`) and the owner/migration URL used by `migrate deploy` and the seeders. Prisma Migrate takes a session advisory lock (`pg_advisory_lock(72707369)`); on a transaction-pooled route the lock can be left on a pooled backend and the next migration times out with P1002. The ordinary `PG_DB_NAME` entry stays transaction-pooled for application traffic. After PgBouncer is applied, the provisioner proves a login through both the application database and `pgw_session`; if the alias is not yet served after a reload, it restarts PgBouncer once and retries, so core never starts against a missing session route.
 
 After writing both files, the provisioner resolves the service account from `systemctl show -p User --value pgbouncer` (falling back to `pgbouncer`, then `postgres`) and applies `0640` to the ini and `0600` to the userlist. This is required because Ubuntu's unit runs as `postgres` and does not create a `pgbouncer` system user; a root-owned `0640` file otherwise fails with `could not load file "/etc/pgbouncer/pgbouncer.ini": Permission denied`.
 
@@ -131,6 +131,7 @@ Important as-built facts:
 
 - The `[databases]` section maps `PG_DB_NAME` to `127.0.0.1:<primaryPort>` with `PG_DB_USER` and its password, so a client connecting to `:6432` with that database name reaches the local PostgreSQL primary.
 - `pgw_session` is a second alias to the same database with `pool_mode=session`; deploy writes `LEADER_ELECTION_DATABASE_URL=postgresql://…@<primary>:6432/pgw_session` into the core environment (or a direct PostgreSQL URL with `sslmode=no-verify` when PgBouncer is disabled). An explicit `LEADER_ELECTION_DATABASE_URL` in the deploy env overrides the derived value for an external database/pooler.
+- The owner URL in the temporary `.env.owner` uses the same session endpoint as the leader election: the explicit `LEADER_ELECTION_DATABASE_URL` when set (including an external pooler), otherwise the deploy-managed `pgw_session` alias, otherwise the direct primary. It applies to the legacy single-role mode too; the runtime `DATABASE_URL` stays transaction-pooled, so Prisma's migration advisory lock and the seeders keep one backend for the whole session. An external pooler must allow the owner on its session route; the deploy warns when no explicit `LEADER_ELECTION_DATABASE_URL` is configured.
 - `server_tls_sslmode = require` encrypts the PgBouncer-to-PostgreSQL leg; it does not verify the server certificate (`verify-full` would) and supplies no client certificate.
 - There is no `client_tls_sslmode`, `client_tls_cert_file` or `client_tls_key_file`; clients are not required to present a certificate.
 - `listen_addr = 0.0.0.0` is protected by UFW only; the plan opens 6432 to core sources.
@@ -490,3 +491,21 @@ Not covered:
 - PgBouncer authenticates each client as its own user (per-client userlist entry for `PG_APP_USER`) instead of forcing the owner, and terminates TLS on the client leg (`client_tls_sslmode`, self-signed certificate); `DATABASE_URL` carries `sslmode=no-verify` whenever the deploy manages the cluster (encrypted, not identity-verified; certificate verification remains open).
 - The bootstrap SQL creates the app login role as a member of `pgw_app` with no UPDATE/DELETE/TRUNCATE on the ledger and audit tables and no DDL. Validated end to end on a TLS PostgreSQL 18 with a real PgBouncer (owner migrations, app-role privilege probes, core's Prisma client). It has not run on a multi-host lab (GAP-057 stays partial).
 - Redis (`redisProvisioner.ts`): `maxmemory-policy volatile-ttl` plus AOF, so only keys with a TTL are evictable and a restart does not lose revoke flags; every durable key must carry a TTL.
+
+## Object storage provisioner (v36)
+
+`deploy/provisioners/objectStorageProvisioner.ts` creates the `pgobjstore`
+system user, `/var/lib/pg-object-storage` and the vault subdirectories
+(`hot`, `cold`, `quarantine`, `tmp`, `.trash`), writes
+`/etc/pg-object-storage/object-storage.env` and
+`pg-object-storage-daemon.service` (Bun, `ProtectSystem=strict`,
+`PrivateTmp=true`, `ReadWritePaths` for the vault and cert directories).
+`deployObjectStorageDaemon` installs pinned Bun, syncs `deploy/object-storage-daemon` to
+`/opt/pg-object-storage-daemon` and starts/restarts it only on change. The
+provisioner creates the user first, hands only the dedicated certificate files
+to `pgobjstore`, and refuses multiple core nodes without a configured
+object-storage node. Storage roots and cert directories are restricted to
+`/var/lib/pg-object-storage/`.
+
+
+The fresh-host sequence is tested with a fake runner; the real two-host lab remains manual.

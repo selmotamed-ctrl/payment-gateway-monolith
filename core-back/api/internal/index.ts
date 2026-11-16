@@ -1,6 +1,7 @@
 import { adminInternalRouter } from "./admin";
 import { checkoutInternalRouter } from "./checkout";
 import { merchantInternalRouter } from "./merchant";
+import sandboxInternalRouter from "./sandboxControl";
 
 /**
  * The internal channel routers.
@@ -9,4 +10,4 @@ import { merchantInternalRouter } from "./merchant";
  * namespace to the client certificate that may call it. This module only
  * exports the channel routers themselves.
  */
-export { adminInternalRouter, checkoutInternalRouter, merchantInternalRouter };
+export { adminInternalRouter, checkoutInternalRouter, merchantInternalRouter, sandboxInternalRouter };

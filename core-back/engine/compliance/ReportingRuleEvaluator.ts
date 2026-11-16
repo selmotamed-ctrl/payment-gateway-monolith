@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { PrismaLike } from "../db/ports";
 import { decimal, type DecimalInput } from "../ledger/LedgerPoster";
 import { ReportGenerationService } from "./reporting/ReportGenerationService";
+import { createObjectStorageSdkForClient } from "../../lib/objectStorageSdk/runtime";
 import { ensureBaselineReportingSchemas } from "./reporting/baselineSchemas";
 import type { ReportOutputFormat } from "./reporting/types";
 
@@ -277,7 +278,7 @@ export class ReportingRuleEvaluator {
 
 export class PrismaReportingRuleSource implements ReportingRuleSource {
   private readonly client: PrismaLike;
-  private readonly generation = new ReportGenerationService();
+  private generationInstance: ReportGenerationService | undefined;
   private baselineReady = false;
 
   constructor(client: PrismaLike) {
@@ -316,7 +317,11 @@ export class PrismaReportingRuleSource implements ReportingRuleSource {
     }
     const report = await db.regulatoryReport.findUnique({ where: { id: reportId } });
     if (!report) return;
-    await this.generation.generate(db, {
+    const generation = (this.generationInstance ??= new ReportGenerationService(
+      undefined,
+      createObjectStorageSdkForClient(this.client) ?? undefined,
+    ));
+    await generation.generate(db, {
       report: {
         id: String(report.id),
         reportType: String(report.reportType),

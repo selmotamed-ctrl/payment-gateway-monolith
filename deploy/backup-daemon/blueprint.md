@@ -6,7 +6,7 @@ Generated from: `deploy.backup`.
 
 ## Backup Daemon
 
-> Status: `partial` · Last verified: 2026-11-06
+> Status: `partial` · Last verified: 2026-11-12
 
 ## 1. Purpose and scope
 
@@ -34,7 +34,7 @@ The original design called for a Bun service wrapping WAL-G (same host) or Barma
 | `wal-g` | same host as the primary (reads `PGDATA`, peer auth as `postgres`) | `wal-g`, S3 |
 | `barman` | dedicated backup host | `barman`, `barman-cloud-backup`, S3 |
 
-**Cluster topology** (`config.ts`): `isAuditDedicatedCluster()` is true when `PG_AUDIT_DATA_DIR` is set or `PG_AUDIT_HOST` differs from `PG_PRIMARY_HOST`. `PG_AUDIT_PORT` is deliberately not used (it defaults to 5434 and would make every shared deployment look dedicated). `target=all` expands to `postgres_core`, `audit_db` (when an audit database is configured) and `redis` (when `REDIS_URL` is set). In a shared cluster `audit_db` is a logical dump plus signed manifest (skipped for `all` when the database is absent, an error for an explicit request); in a dedicated cluster it is a physical backup plus a dump. This applies to all three engines, so `PG_AUDIT_DATA_DIR is required` no longer occurs.
+**Cluster topology** (`config.ts`): `isAuditDedicatedCluster()` is true when `PG_AUDIT_DATA_DIR` is set or `PG_AUDIT_HOST` differs from `PG_PRIMARY_HOST`. `PG_AUDIT_PORT` is deliberately not used (it defaults to 5434 and would make every shared deployment look dedicated). `target=all` expands to `postgres_core`, `audit_db` (when an audit database is configured) and `redis` (when `REDIS_URL` is set). In a shared cluster `audit_db` is a logical dump plus signed manifest (skipped for `all` when the database is absent, an error for an explicit request); in a dedicated cluster it is a physical backup plus a dump. This applies to all three engines, so `PG_AUDIT_DATA_DIR is required` no longer occurs. `backupDaemonEnv()` leaves `PG_AUDIT_DATA_DIR` empty when the audit node resolves to the primary's own cluster (same SSH host and service port), so the shared-cluster logical-dump path is actually selected; a dedicated audit node or an explicit `PG_AUDIT_DATA_DIR` still selects the physical audit backup. On Arch-family hosts the daemon's `PG_BIN_DIR` (`/usr/lib/postgresql/<version>/bin`, a Debian layout) must resolve to the PostgreSQL tools; the single-box local setup aliases it to `/usr/bin`.
 
 **pg-native backups**
 
@@ -227,3 +227,15 @@ Not covered: the dedicated-backup-host and host-loss topologies on real machines
 - 2026-11-06: two-host lab pass: "latest" recovery, primary-clock manifests, stream lag health, `AbortError` handling, reserved default role names (`PG_DB_USER`, `PG_REPLICATION_USER`), real-copy bun install, the lab itself.
 - 2026-11-06: gap-closure pass: idle lag, restart state and instance lock, tablespace guard, drill role mapping, cron fallback drill, reserved default role names, least-privilege live coverage.
 - 2026-11-06: backup engine reliability implementation (previous revision): pg-native engine, three-tier encrypted repository, signed manifests and catalog mirror, WAL ingest over mTLS plus streaming, shared job queue and idempotency, per-role mTLS, topology-aware audit handling, drill fixes, deploy wiring fixes; section 9 lists where the design was corrected.
+
+## Object storage parity, escrow and drill
+
+`deploy/backup-daemon/src/objectStorageBackup.ts` copies new HOT/COLD
+`.v1.enc` blobs into `object-blobs/{bucket}/{storageKey}` (immutable, so the
+copy is incremental), fails with `OBJECT_STORAGE_BACKUP_PARITY_ERROR` when an
+ACTIVE row has no blob on every required tier, repairs missing tier copies, and writes per-KEK-version escrows plus the legacy `object-storage/kek-escrow.enc` (AES-256-GCM
+under the backup master key). The restore drill samples up to
+`OBJECT_STORAGE_DRILL_SAMPLE` ACTIVE rows, decrypts them with the escrowed
+keyring and compares the SHA-256; the report's `checks.objectStorage` carries the
+result; the drill tries every tier and the escrow for the row's KEK version. The daemon receives the object-storage URL/client certs/KEK keyring from
+the deploy engine.

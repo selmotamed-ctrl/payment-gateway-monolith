@@ -14,6 +14,7 @@ import { scanKybBytes } from "../../lib/kybScan";
 import { buildListQuery, countUnlessSkipped, listResponse } from "../../lib/listQuery";
 import { buildMerchantUserInfo } from "../../lib/auth/uiAuthorities";
 import { generateAccessToken, hashAccessToken, hashPassword, signSession, verifyPasswordOrDummy } from "../../lib/auth";
+import { accessTokenPrefixForPlane, getExecutionPlane } from "../../lib/executionPlane";
 import { issueMfaChallenge, verifyMfaChallenge } from "../../lib/auth/mfaChallenges";
 import {
   assertLoginAllowed,
@@ -57,6 +58,7 @@ import {
 } from "../middleware/authDoubleCheck";
 import { publishRealtimePos, subscribeRealtimeAttempt, subscribeRealtimePos } from "../../lib/realtimeBus";
 import { writeAudit } from "../../lib/audit/writeAudit";
+import { getObjectStorageSdk } from "../../lib/objectStorageSdk/runtime";
 import { env } from "../../lib/env";
 import { WebhookEndpointService } from "../../engine/webhooks/WebhookEndpointService";
 import { WEBHOOK_EVENT_TYPES, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_MS } from "../../engine/webhooks/events";
@@ -64,7 +66,7 @@ import { WEBHOOK_EVENT_TYPES, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_MS } fr
 const router = express.Router();
 
 router.get("/health", (_request, response) => {
-  response.json({ status: "ok", channel: "merchant" });
+  response.json({ status: "ok", channel: "merchant", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null });
 });
 
 
@@ -1186,7 +1188,6 @@ router.post("/onboarding/kyb-documents", async (request: Request, response: Resp
     .filter((entry) => entry.merchantId === merchantId)
     .map((entry) => entry.id);
   const sizeBytes = Number(request.headers["x-upload-size"] ?? raw.byteLength);
-  const storageKey = `kyb/${merchantId}/${sha256}`;
   const joinRequest = revalidation
     ? null
     : await client.joinRequest.findFirst({
@@ -1212,69 +1213,108 @@ router.post("/onboarding/kyb-documents", async (request: Request, response: Resp
   const expiresOn = typeof metadata.expiresAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(metadata.expiresAt)
     ? new Date(metadata.expiresAt)
     : null;
-  const document = await client.$transaction(async (tx) => {
-    const created = await tx.kybDocument.create({
-      data: {
+  const objectStorage = getObjectStorageSdk();
+  const document = await objectStorage.routeClient.withStagedUpload(
+    {
+      namespace: "KYB_DOCUMENTS",
+      data: raw,
+      originalFilename: originalFileName,
+      claimedMimeType: mime,
+      ownerMerchantId: merchantId,
+      actor: {
+        actorType: "MERCHANT_USER",
+        actorId: principal.userId ?? "merchant-upload",
         merchantId,
-        joinRequestId: joinRequest?.id ?? null,
-        subjectType: "MERCHANT",
-        subjectId: merchantId,
-        docType: docType as never,
-        storageKey,
-        originalFileName,
-        contentCiphertext: await vault.encryptSecret(raw.toString("base64"), "kyb-document"),
-        sha256,
-        mime,
-        sizeBytes,
-        avStatus,
-        status: avStatus === "INFECTED" ? "REJECTED" : "UPLOADED",
-        uploadedById: principal.userId ?? null,
-        expiresOn,
-        statusChangedAt: now,
+        authorities: principal.authorities ?? [],
+        ipAddress: clientIp(request),
       },
-    });
-    if (revalidation && avStatus !== "INFECTED") {
-      await tx.kybRevalidationRequest.update({
-        where: { id: revalidation.id },
-        data: {
-          status: "FULFILLED",
-          fulfilledAt: now,
-          fulfilledDocumentId: created.id,
-          resolutionNotes: originalFileName,
-        },
-      });
-      await tx.merchant.update({
-        where: { id: merchantId },
-        data: { kybStatus: "PENDING" },
-      });
-    }
-    const auditActorId = principal.userId
-      ?? (await tx.user.findFirst({
-        where: { merchantId, role: "MERCHANT_ADMIN" },
-        select: { id: true },
-      }))?.id;
-    if (auditActorId) {
-      await writeAudit(tx, {
-        data: {
-          actorId: auditActorId,
-          role: principal.role ?? "MERCHANT_ADMIN",
-          action: revalidation ? "KYB_REVALIDATION_DOCUMENT_UPLOADED" : "KYB_DOCUMENT_UPLOADED",
-          entityType: "KYB_DOCUMENT",
-          entityId: created.id,
-          beforeJson: {},
-          afterJson: {
+      metadata: { merchantId, docType, revalidationRequestId: revalidation?.id ?? null },
+    },
+    async (staged) => {
+      const created = await client.$transaction(async (tx) => {
+        const row = await tx.kybDocument.create({
+          data: {
             merchantId,
-            docType,
-            sha256,
+            joinRequestId: joinRequest?.id ?? null,
+            subjectType: "MERCHANT",
+            subjectId: merchantId,
+            docType: docType as never,
+            storageKey: staged.storageKey,
+            originalFileName,
+            storageObjectId: staged.objectId,
+            sha256: staged.sha256Hex,
+            mime: staged.detectedMimeType,
+            sizeBytes: Number(staged.byteSize),
             avStatus,
-            revalidationRequestId: revalidation?.id ?? null,
-            duplicateDocuments: existingDocument.map((entry) => entry.id),
+            status: avStatus === "INFECTED" ? "REJECTED" : "UPLOADED",
+            uploadedById: principal.userId ?? null,
+            expiresOn,
+            statusChangedAt: now,
           },
-        },
+        });
+        await objectStorage.routeClient.bind(tx as never, {
+          objectId: staged.objectId,
+          holderType: "KYB_DOCUMENT",
+          holderId: row.id,
+          actorId: principal.userId ?? "merchant-upload",
+          reason: revalidation ? "KYB_REVALIDATION_DOCUMENT_UPLOAD" : "KYB_DOCUMENT_UPLOAD",
+          // KYB documents always wait for the AV worker unless the upload
+          // gate itself already found active content (then they are rejected).
+          autoPromoteIfNoAvRequired: false,
+        });
+        if (revalidation && avStatus !== "INFECTED") {
+          await tx.kybRevalidationRequest.update({
+            where: { id: revalidation.id },
+            data: {
+              status: "FULFILLED",
+              fulfilledAt: now,
+              fulfilledDocumentId: row.id,
+              resolutionNotes: originalFileName,
+            },
+          });
+          await tx.merchant.update({
+            where: { id: merchantId },
+            data: { kybStatus: "PENDING" },
+          });
+        }
+        const auditActorId = principal.userId
+          ?? (await tx.user.findFirst({
+            where: { merchantId, role: "MERCHANT_ADMIN" },
+            select: { id: true },
+          }))?.id;
+        if (auditActorId) {
+          await writeAudit(tx, {
+            data: {
+              actorId: auditActorId,
+              role: principal.role ?? "MERCHANT_ADMIN",
+              action: revalidation ? "KYB_REVALIDATION_DOCUMENT_UPLOADED" : "KYB_DOCUMENT_UPLOADED",
+              entityType: "KYB_DOCUMENT",
+              entityId: row.id,
+              beforeJson: {},
+              afterJson: {
+                merchantId,
+                docType,
+                sha256: staged.sha256Hex,
+                avStatus,
+                revalidationRequestId: revalidation?.id ?? null,
+                duplicateDocuments: existingDocument.map((entry) => entry.id),
+              },
+            },
+          });
+        }
+        return row;
       });
-    }
-    return created;
-  });
+      return created;
+    },
+  );
+  if (avStatus === "INFECTED") {
+    // The upload-time content gate already rejected it: release the domain
+    // lock and quarantine the object immediately instead of leaving it
+    // PENDING until a scanner examines bytes that are known to be unsafe.
+    await objectStorage.workerClient
+      .applyScanVerdict({ objectId: document.storageObjectId!, verdict: "INFECTED", signature: "ACTIVE_CONTENT_AT_UPLOAD" })
+      .catch(() => undefined);
+  }
   if (joinRequest) {
     const merchant = await client.merchant.findUnique({ where: { id: merchantId } });
     const owners = await client.beneficialOwner.findMany({
@@ -1493,7 +1533,15 @@ router.post("/wallets", async (request: Request, response: Response) => {
       },
     });
     return tx.wallet.create({
-      data: { merchantId, glAccountId: glAccount.id, currency: body.currency.toUpperCase(), status: "PENDING" },
+      data: {
+        merchantId,
+        glAccountId: glAccount.id,
+        currency: body.currency.toUpperCase(),
+        name: body.label?.trim() || null,
+        // Sandbox entities are immediately usable for testing. Live wallets keep
+        // the approval-driven PENDING lifecycle.
+        status: getExecutionPlane() === "SANDBOX" ? "ACTIVE" : "PENDING",
+      },
     });
   });
   response.status(201).json({ id: wallet.id, currency: wallet.currency, status: wallet.status });
@@ -1654,7 +1702,7 @@ router.post("/applications", async (request: Request, response: Response) => {
       assignedWalletId: wallet.id,
       railWhitelist: jsonOptional(body.railWhitelist),
       redirectDomainAllowlist: jsonOptional(body.redirectDomainAllowlist),
-      status: "PENDING",
+      status: getExecutionPlane() === "SANDBOX" ? "ACTIVE" : "PENDING",
     },
   });
   response.status(201).json({ id: application.id, name: application.name, status: application.status });
@@ -1685,6 +1733,7 @@ router.patch("/applications/:id", async (request: Request, response: Response) =
         assignedWalletId: z.string().min(1).max(64).optional(),
         railWhitelist: z.array(z.string().min(1).max(64)).min(1).optional(),
         redirectDomainAllowlist: z.array(z.string().min(1).max(200)).min(1).optional(),
+        status: z.enum(["ACTIVE", "SUSPENDED"]).optional(),
       })
       .strict(),
     request.body,
@@ -1694,10 +1743,20 @@ router.patch("/applications/:id", async (request: Request, response: Response) =
     throw new ApiError(404,APPLICATION_NOT_FOUND_CODE, "The application does not exist");
   }
   assertApplicationInScope(request, application.id);
+  const plane = getExecutionPlane();
+  if (plane !== "SANDBOX" && body.status !== undefined) {
+    throw new ApiError(
+      400,
+      "APPLICATION_STATUS_LIVE_MANAGED",
+      "An application status is changed by the platform review flow on Live",
+    );
+  }
   const sensitive = body.assignedWalletId !== undefined
     || body.railWhitelist !== undefined
     || body.redirectDomainAllowlist !== undefined;
-  if (sensitive) {
+  // Sandbox testing is self-service: a sensitive edit is applied immediately and
+  // audited instead of entering the Live maker-checker queue.
+  if (sensitive && plane !== "SANDBOX") {
     const principal = principalOf(request);
     const approval = await client.approvalRequest.create({
       data: {
@@ -1713,13 +1772,39 @@ router.patch("/applications/:id", async (request: Request, response: Response) =
     response.status(202).json({ status: "PENDING_REVIEW", approvalRequestId: approval.id });
     return;
   }
-  const updated = await client.application.update({
-    where: { id: application.id },
-    data: {
-      name: body.name,
-      businessUseDescription: body.businessUseDescription,
-      expectedMonthlyVolume: body.expectedMonthlyVolume ? new Prisma.Decimal(body.expectedMonthlyVolume) : undefined,
-    },
+  const updated = await client.$transaction(async (tx) => {
+    const row = await tx.application.update({
+      where: { id: application.id },
+      data: {
+        name: body.name,
+        businessUseDescription: body.businessUseDescription,
+        expectedMonthlyVolume: body.expectedMonthlyVolume ? new Prisma.Decimal(body.expectedMonthlyVolume) : undefined,
+        assignedWalletId: body.assignedWalletId,
+        railWhitelist: body.railWhitelist !== undefined ? jsonOptional(body.railWhitelist) : undefined,
+        redirectDomainAllowlist: body.redirectDomainAllowlist !== undefined ? jsonOptional(body.redirectDomainAllowlist) : undefined,
+        status: body.status,
+      },
+    });
+    if (plane === "SANDBOX") {
+      await auditMerchantAction(tx, request, {
+        action: "SANDBOX_APPLICATION_UPDATED",
+        entityType: "APPLICATION",
+        entityId: row.id,
+        before: {
+          status: application.status,
+          assignedWalletId: application.assignedWalletId,
+          railWhitelist: application.railWhitelist,
+          redirectDomainAllowlist: application.redirectDomainAllowlist,
+        },
+        after: {
+          status: row.status,
+          assignedWalletId: row.assignedWalletId,
+          railWhitelist: row.railWhitelist,
+          redirectDomainAllowlist: row.redirectDomainAllowlist,
+        },
+      });
+    }
+    return row;
   });
   response.json({ id: updated.id, name: updated.name, status: updated.status });
 });
@@ -1752,6 +1837,7 @@ const linkCreateSchema = z
     infiniteUse: z.boolean().optional(),
     activeSlots: z.number().int().min(1).max(100_000).optional(),
     allowedRails: z.array(z.string().min(1).max(64)).max(50).optional(),
+    redirectUrl: z.string().trim().max(1000).url().optional(),
     metadata: z.record(z.string().max(64), z.unknown()).optional(),
     idempotencyKey: z.string().min(8).max(128).optional(),
   })
@@ -1789,16 +1875,45 @@ const createLink = async (
   if (!merchant) {
     throw new ApiError(404, "MERCHANT_NOT_FOUND", "The merchant does not exist");
   }
-  // A suspended application or a frozen wallet can not take in new payment links.
+  // v38: the link belongs to the process plane, never to a merchant status.
+  // Sandbox links are created only by pg-core-sandbox in the separate sandbox
+  // database; a non-ACTIVE merchant on the Live plane is refused.
+  const env = getExecutionPlane();
   assertCommerceActive({
+    merchantStatus: env === "LIVE" ? merchant.status : "ACTIVE",
     applicationStatus: application.status,
     walletStatus: wallet.status,
-    env: merchant.status === "ACTIVE" ? "LIVE" : "SANDBOX",
+    env,
   });
-  const key = `pl_${randomBytes(12).toString("base64url")}`;
+  if (body.redirectUrl) {
+    const allowlist = asStringArray(application.redirectDomainAllowlist) ?? [];
+    if (allowlist.length > 0) {
+      const redirectHost = new URL(body.redirectUrl).hostname.toLowerCase();
+      const allowed = allowlist.some((entry) => {
+        const value = entry.trim().toLowerCase();
+        try {
+          return new URL(value).hostname === redirectHost;
+        } catch {
+          return value === redirectHost;
+        }
+      });
+      if (!allowed) {
+        throw new ApiError(
+          409,
+          "REDIRECT_DOMAIN_NOT_ALLOWED",
+          "The redirect URL host is not on the application redirect allowlist",
+        );
+      }
+    }
+  }
+  const key = env === "SANDBOX"
+    ? `sbx_${randomBytes(12).toString("base64url")}`
+    : `pl_${randomBytes(12).toString("base64url")}`;
   const link = await client.paymentLink.create({
     data: {
       key,
+      title: body.title.trim(),
+      description: body.description?.trim() || null,
       applicationId: application.id,
       walletId: wallet.id,
       amount: new Prisma.Decimal(body.amount),
@@ -1806,8 +1921,9 @@ const createLink = async (
       feeBearer: normalizeFeeBearer(body.feeBearer),
       infiniteUse: body.infiniteUse ?? false,
       useCount: body.infiniteUse ? 1_000_000 : body.maxUses ?? 1,
-      redirectUrl: null,
+      redirectUrl: body.redirectUrl ?? null,
       railWhitelist: jsonOptional(body.allowedRails),
+      env,
       state: "PENDING",
       expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
     },
@@ -1828,7 +1944,7 @@ const createLink = async (
       railWhitelist: asStringArray(link.railWhitelist),
     },
     channel: "WEB",
-    env: merchant.status === "ACTIVE" ? "LIVE" : "SANDBOX",
+    env,
   });
   return { link, visible };
 };
@@ -2049,6 +2165,173 @@ router.post("/disputes/:id/evidence", async (request: Request, response: Respons
     throw new ApiError(409, "DISPUTE_NOT_ACCEPTING_EVIDENCE", "The dispute is not accepting evidence");
   }
   response.json({ id: dispute.id, status: "EVIDENCE_SUBMITTED" });
+});
+
+/**
+ * The dispute, only if it belongs to the merchant AND to an application the caller may see. Every dispute
+ * route narrows by the caller's application scope (`app_scope_ids`); the attachment routes must too, or a
+ * user restricted to some applications could list, download and delete the evidence of the others.
+ */
+const disputeInCallerScope = async (request: Request, merchantId: string, id: string) => {
+  const scope = appScopeOf(request);
+  const dispute = await client.dispute.findFirst({
+    where: { id, attempt: { merchantId, ...(scope ? { applicationId: { in: [...scope] } } : {}) } },
+  });
+  if (!dispute) throw new ApiError(404, "DISPUTE_NOT_FOUND", "The dispute does not exist");
+  return dispute;
+};
+
+const disputeAttachmentRow = (row: Record<string, any>) => ({
+  id: row.id,
+  disputeId: row.disputeId,
+  label: row.label,
+  uploadedById: row.uploadedById,
+  createdAt: row.createdAt,
+  fileName: row.storageObject?.originalFilename ?? null,
+  mimeType: row.storageObject?.detectedMimeType ?? null,
+  byteSize: row.storageObject?.byteSize?.toString?.() ?? null,
+  sha256: row.storageObject?.sha256Hex ?? null,
+  status: row.storageObject?.status ?? null,
+  avScanStatus: row.storageObject?.avScanStatus ?? null,
+});
+
+router.get("/disputes/:id/attachments", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["payment:read", "dispute:respond"]);
+  const merchantId = merchantIdOf(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  await disputeInCallerScope(request, merchantId, id);
+  const attachments = await client.disputeAttachment.findMany({
+    where: { disputeId: id, merchantId },
+    orderBy: { createdAt: "desc" },
+    include: { storageObject: true },
+  });
+  response.json({ attachments: attachments.map(disputeAttachmentRow) });
+});
+
+router.post("/disputes/:id/attachments", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["dispute:respond"]);
+  const merchantId = merchantIdOf(request);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const dispute = await client.dispute.findFirst({
+    where: { id, attempt: { merchantId, ...(appScopeOf(request) ? { applicationId: { in: [...appScopeOf(request)!] } } : {}) } },
+  });
+  if (!dispute) throw new ApiError(404, "DISPUTE_NOT_FOUND", "The dispute does not exist");
+  const raw = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+  if (raw.byteLength === 0) throw new ApiError(400, "UPLOAD_REQUIRED", "An evidence file is required");
+  let metadata: Record<string, unknown> = {};
+  const metadataHeader = request.headers["x-upload-metadata"];
+  if (typeof metadataHeader === "string") {
+    try {
+      metadata = JSON.parse(Buffer.from(metadataHeader, "base64url").toString("utf8")) as Record<string, unknown>;
+    } catch {
+      throw new ApiError(400, "UPLOAD_METADATA_INVALID", "The upload metadata is not valid JSON");
+    }
+  }
+  const fileName = typeof request.headers["x-upload-filename"] === "string"
+    ? decodeURIComponent(String(request.headers["x-upload-filename"]))
+    : "evidence";
+  const label = String(metadata.label ?? fileName).slice(0, 255);
+  const objectStorage = getObjectStorageSdk();
+  const attachment = await objectStorage.routeClient.withStagedUpload(
+    {
+      namespace: "DISPUTE_EVIDENCE",
+      data: raw,
+      originalFilename: fileName,
+      claimedMimeType: typeof request.headers["x-upload-content-type"] === "string"
+        ? String(request.headers["x-upload-content-type"])
+        : null,
+      ownerMerchantId: merchantId,
+      actor: {
+        actorType: "MERCHANT_USER",
+        actorId: principal.userId ?? merchantId,
+        merchantId,
+        authorities: principal.authorities ?? [],
+        ipAddress: clientIp(request),
+      },
+      metadata: { disputeId: dispute.id, label },
+    },
+    async (staged) => client.$transaction(async (tx) => {
+      const row = await tx.disputeAttachment.create({
+        data: {
+          disputeId: dispute.id,
+          merchantId,
+          storageObjectId: staged.objectId,
+          label,
+          uploadedById: principal.userId ?? merchantId,
+        },
+        include: { storageObject: true },
+      });
+      await objectStorage.routeClient.bind(tx as never, {
+        objectId: staged.objectId,
+        holderType: "DISPUTE_ATTACHMENT",
+        holderId: row.id,
+        actorId: principal.userId ?? merchantId,
+        reason: "DISPUTE_EVIDENCE_UPLOAD",
+        autoPromoteIfNoAvRequired: false,
+      });
+      return row;
+    }),
+  );
+  response.status(201).json({ attachment: disputeAttachmentRow(attachment as never) });
+});
+
+router.get("/disputes/:id/attachments/:attachmentId/content", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["payment:read", "dispute:respond"]);
+  const merchantId = merchantIdOf(request);
+  const { id, attachmentId } = parseOrThrow(
+    z.object({ id: z.string().min(1).max(64), attachmentId: z.string().min(1).max(64) }).strict(),
+    request.params,
+  );
+  await disputeInCallerScope(request, merchantId, id);
+  const attachment = await client.disputeAttachment.findFirst({
+    where: { id: attachmentId, disputeId: id, merchantId },
+  });
+  if (!attachment) throw new ApiError(404, "DISPUTE_ATTACHMENT_NOT_FOUND", "The dispute attachment does not exist");
+  const stored = await getObjectStorageSdk().routeClient.readAuthorized({
+    objectId: attachment.storageObjectId,
+    actor: {
+      actorType: "MERCHANT_USER",
+      actorId: principal.userId ?? merchantId,
+      merchantId,
+      authorities: principal.authorities ?? [],
+      ipAddress: clientIp(request),
+    },
+    holderContext: { holderType: "DISPUTE_ATTACHMENT", holderId: attachment.id },
+  });
+  response.setHeader("Content-Type", stored.detectedMimeType);
+  response.setHeader("Content-Disposition", `attachment; filename="${(stored.originalFilename ?? "evidence").replace(/["\r\n]/g, "_")}"`);
+  response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
+  response.setHeader("Cache-Control", "private, no-store");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.send(Buffer.from(stored.bytes));
+});
+
+router.delete("/disputes/:id/attachments/:attachmentId", async (request: Request, response: Response) => {
+  const principal = principalOf(request);
+  assertMerchantAuthority(principal, ["dispute:respond"]);
+  const merchantId = merchantIdOf(request);
+  const { id, attachmentId } = parseOrThrow(
+    z.object({ id: z.string().min(1).max(64), attachmentId: z.string().min(1).max(64) }).strict(),
+    request.params,
+  );
+  await disputeInCallerScope(request, merchantId, id);
+  const attachment = await client.disputeAttachment.findFirst({
+    where: { id: attachmentId, disputeId: id, merchantId },
+  });
+  if (!attachment) throw new ApiError(404, "DISPUTE_ATTACHMENT_NOT_FOUND", "The dispute attachment does not exist");
+  await client.$transaction(async (tx) => {
+    await tx.disputeAttachment.delete({ where: { id: attachment.id } });
+    await getObjectStorageSdk().routeClient.release(tx as never, {
+      objectId: attachment.storageObjectId,
+      holderType: "DISPUTE_ATTACHMENT",
+      holderId: attachment.id,
+      actorId: principal.userId ?? merchantId,
+      reason: "DISPUTE_ATTACHMENT_DELETED",
+    });
+  });
+  response.json({ id: attachment.id, deleted: true });
 });
 
 router.get("/cashouts", async (request: Request, response: Response) => {
@@ -2316,14 +2599,19 @@ router.post("/tokens", async (request: Request, response: Response) => {
   if (!application) {
     throw new ApiError(409, "APPLICATION_REQUIRED", "An application is required to issue an access token");
   }
+  const tokenPlane = getExecutionPlane();
   const plaintext = generateAccessToken();
+  const prefixed = tokenPlane === "SANDBOX"
+    ? `${accessTokenPrefixForPlane("SANDBOX")}${plaintext.slice("pg_live_".length)}`
+    : plaintext;
   const created = await client.accessToken.create({
     data: {
       merchantId,
       applicationId: application.id,
       name: body.name,
-      tokenHash: hashAccessToken(plaintext),
-      lastFour: plaintext.slice(-4),
+      env: tokenPlane,
+      tokenHash: hashAccessToken(prefixed),
+      lastFour: prefixed.slice(-4),
       scopes: tokenScopes,
       expiresAt: tokenExpiresAt,
       ipWhitelistEnabled: Boolean(body.allowedCidrs?.length),
@@ -2345,7 +2633,7 @@ router.post("/tokens", async (request: Request, response: Response) => {
   });
   response.status(201).json({
     id: created.id,
-    token: plaintext,
+    token: prefixed,
     lastFour: created.lastFour,
     warning: "This token is shown once and cannot be retrieved again",
   });

@@ -4,44 +4,44 @@
     "schema": 1,
     "appId": "ly.paymentgateway.companion",
     "contentVersion": "1.0.0",
-    "contentHash": "48eef81bb959ade1c5ed34eaaad0a8fdea1c9517078cd293908a2f510e28366e",
-    "guideSourceSha256": "d2fb67d48f0ee69230abb791df64960f5118e1dc90d49f8e5cb150b090354c10",
-    "academyContentHash": "5702a80cc0cae8650606fa2f6d670d973c851c11f73478a06388e7823cde4043",
+    "contentHash": "76275768402b4c670d25ccbec5d2b73a6b2781bd879df35ed64dd454842ff908",
+    "guideSourceSha256": "5a2b48aceeaf1db1a41ee020ab5631c684b79dafde29a1b16f944f1e5a3c206a",
+    "academyContentHash": "82d06e5520be414f8bfe552386296317e512880a2eaec57dd60240f8c8b89369",
     "generatedAt": "1970-01-01T00:00:00.000Z",
     "counts": {
       "books": 14,
-      "articles": 135,
-      "glossaryTerms": 151,
-      "safeguardCards": 25,
-      "safeguardChecklistItems": 112,
+      "articles": 137,
+      "glossaryTerms": 154,
+      "safeguardCards": 26,
+      "safeguardChecklistItems": 115,
       "situations": 32,
       "readingPaths": 8,
-      "quickAnswers": 58,
+      "quickAnswers": 60,
       "dataBlocks": 3,
-      "contextMapScreens": 29,
+      "contextMapScreens": 31,
       "errorCodes": 19,
       "edgeCases": 140,
       "tracks": 8,
       "modules": 11,
-      "lessons": 50,
-      "lessonChecks": 100,
-      "examPoolQuestions": 223,
-      "examPoolSingle": 208,
+      "lessons": 51,
+      "lessonChecks": 102,
+      "examPoolQuestions": 224,
+      "examPoolSingle": 209,
       "examPoolNumber": 13,
       "examPoolOrder": 2,
-      "criticalExamPoolQuestions": 43,
+      "criticalExamPoolQuestions": 44,
       "labs": 16,
       "labTasks": 92,
       "exams": 8,
       "drills": 11,
       "pages": 7,
-      "guideArticles": 135,
-      "guideGlossaryTerms": 151,
-      "guideCards": 25,
+      "guideArticles": 137,
+      "guideGlossaryTerms": 154,
+      "guideCards": 26,
       "guideEdgeCases": 140,
-      "academyLessons": 50,
+      "academyLessons": 51,
       "academyLabs": 16,
-      "academyChecks": 100
+      "academyChecks": 102
     }
   },
   "guide": {
@@ -836,7 +836,7 @@
           "b03-07",
           "b13-02"
         ],
-        "body": ":::summary Big picture in 20 seconds\nThe menu on the left groups every Back Office screen into seven sections: Overview, Onboarding, Governance, Operations, Finance, Gateways and Learning. You only see the screens your authorities allow, so your menu is shorter than this article. Use the tables below to find out what a screen is for, who normally uses it, and which article explains it in full.\n:::\n\n### How the menu works\n* **The menu is personal.** A screen appears only if your account holds the authority to open it. A missing screen is not an error. If you need one, see [[a:b03-07|When a button is missing or an action is refused]].\n* **A section with no visible screens disappears.** For example, a `SUPPORT` account has no Finance section at all.\n* **The menu is only a door.** Even if a screen opens, every button on it is checked again by the core. Opening a screen never means you may change things on it.\n* **Every screen has a \"?\" button** in its header. It opens a short explanation of the screen and links to the right articles.\n* **Press Ctrl+K (Cmd+K on a Mac)** to search for a screen, an article or a glossary term.\n\nThe \"Typically used by\" column describes the usual job, not a rule. What you can really do is decided by your authorities ([[a:b03-02|Your account]]).\n\n### Overview\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Dashboard** | health of the platform at a glance | everyone | [[a:b03-05]] |\n\n### Onboarding\nThis section is about merchants: who they are, where their money lands and where they take payments.\n\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Join Requests** | review businesses applying to join | OPERATOR, COMPLIANCE | [[a:b05-03]] |\n| **KYB Review** | check uploaded documents and beneficial owners | COMPLIANCE, OPERATOR | [[a:b05-04]] |\n| **Merchants** | look up, edit, suspend, reinstate | OPERATOR, COMPLIANCE, SUPPORT (read) | [[a:b05-08]] |\n| **Wallets** | every merchant's balance, shards and statement; freeze a wallet | OPERATOR, COMPLIANCE, SUPPORT (read) | [[a:b03-09]] |\n| **Applications & Channels** | applications, payment links and POS terminals; allow-lists and tokens | OPERATOR, COMPLIANCE, SUPPORT (read) | [[a:b03-10]] |\n\n### Governance\nThis section is about control: who decides, who is on the team and what is recorded.\n\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Approvals** | decide requests made by others | checkers | [[a:b04-03]] |\n| **Audit Log** | search and export the audit trail | SECURITY_ADMIN | [[a:b04-07]] |\n| **Admin Users** | staff accounts, roles, authorities, maker/checker flags | SECURITY_ADMIN | [[a:b03-02]] |\n| **AML Cases** | investigate suspicious activity | COMPLIANCE, MLRO | [[a:b09-05]] |\n| **AML Screenings** | decide matches against sanctions and watch lists | COMPLIANCE, MLRO | [[a:b09-03]] |\n| **AML Rules** | the rules that raise alerts | COMPLIANCE, MLRO | [[a:b09-04]] |\n| **AML Reports** | regulatory reports | COMPLIANCE, MLRO | [[a:b09-07]] |\n\n### Operations\nThis section is about the day-to-day running of payments and of the platform itself.\n\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Transactions & Webhooks** | every payment attempt and every message a partner sent us | OPERATOR, SUPPORT (limited view) | [[a:b03-11]] |\n| **Operator Cases** | stuck, conflicting or odd payments | OPERATOR | [[a:b07-04]] |\n| **Inquiry Schedule** | when the platform asks a partner for a payment's status | OPERATOR | [[a:b07-09]] |\n| **Disputes** | chargebacks and disputes | FINANCE | [[a:b08-09]] |\n| **Adjustments** | refunds, chargebacks, corrections | FINANCE | [[a:b08-08]] |\n| **Cash-Outs** | merchant payouts | FINANCE | [[a:b08-07]] |\n| **Reconciliation** | match partner statements to our books | FINANCE | [[a:b08-06]] |\n| **Backups** | backup engine, WAL archive lag, storage targets, schedule, last backup and restore drill | SECURITY_ADMIN | [[a:b12-10]] |\n| **Jobs & Outbox** | delivery health of background work: outbox, audit outbox, jobs, notifications | SECURITY_ADMIN | [[a:b03-14]] |\n| **Platform Settings** | versioned platform settings, export and restore | SECURITY_ADMIN, GATEWAY_ADMIN | [[a:b12-07]] |\n| **Checkout Help** | the help payers see at checkout | admins | [[a:b07-10]] |\n\n### Finance\nThis section is about the money itself and whether the books are right.\n\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Pricing & Limits** | commission profiles and velocity rules | FINANCE | [[a:b08-03]] |\n| **Profitability** | what the platform earns | FINANCE | [[a:b08-11]] |\n| **Liquidity** | whether there is enough cash to cover payouts | FINANCE | [[a:b08-11]] |\n| **Journal Entries** | read every double-entry posting and its balance check | FINANCE | [[a:b03-13]] |\n| **Ledger Audit & Invariant** | ledger integrity checks, per-account shards and checkpoints | FINANCE | [[a:b08-11]] |\n\n### Gateways\nThis section is about the connections to payment partners.\n\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Gateways** | partner connections, versions and go-live | GATEWAY_ADMIN | [[a:b06-01]] |\n| **Credential Sets** | the vault of login details we hold for each partner | GATEWAY_ADMIN | [[a:b03-12]] |\n| **Rails** | the payment methods a customer can pick | GATEWAY_ADMIN | [[a:b06-11]] |\n| **Routes** | which gateway serves which rail, in what order | GATEWAY_ADMIN | [[a:b06-11]] |\n\n### Learning\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Interactive Guide** | this guide | everyone | [[a:b00-02]] |\n| **Employee Academy** | training, labs and exams | everyone | [[a:b13-04]] |\n\nInside the Academy, `SECURITY_ADMIN` also sees a **Team** tab that shows everyone's training progress. It has no menu entry of its own and is read-only.\n\n### Screens you reach from another screen\nSome screens have no menu entry. You open them from a row or a button:\n* **Merchant detail**, from **Merchants** ([[a:b05-08|The Merchants screen]]).\n* **Join request detail** and **new join request**, from **Join Requests** ([[a:b05-03|Working the Join Requests queue, step by step]]).\n* **KYB document review**, from **KYB Review** ([[a:b05-04|KYB documents and beneficial owners]]).\n* **Operator case detail**, from **Operator Cases** ([[a:b07-04|The Operator Cases screen]]).\n* **Admin user detail**, from **Admin Users** ([[a:b03-02|Your account]]).\n* **The Add-a-Gateway wizard** and **Smart AI Integration**, from **Gateways** ([[a:b06-13|The Add-a-Gateway wizard]], [[a:b06-14|Smart AI Integration]]).\n\n:::note A screen that is missing is not a fault\nIf a screen is missing from *your* menu, your account does not hold its authority. Do not ask a colleague to do it \"from their account\". Ask your manager, and the Security Admin will change permissions under two-person control.\n:::",
+        "body": ":::summary Big picture in 20 seconds\nThe menu on the left groups every Back Office screen into eight sections: Overview, Reporting, Onboarding, Governance, Operations, Finance, Gateways and Learning. You only see the screens your authorities allow, so your menu is shorter than this article. Use the tables below to find out what a screen is for, who normally uses it, and which article explains it in full.\n:::\n\n### How the menu works\n* **The menu is personal.** A screen appears only if your account holds the authority to open it. A missing screen is not an error. If you need one, see [[a:b03-07|When a button is missing or an action is refused]].\n* **A section with no visible screens disappears.** For example, a `SUPPORT` account has no Finance section at all.\n* **The menu is only a door.** Even if a screen opens, every button on it is checked again by the core. Opening a screen never means you may change things on it.\n* **Every screen has a \"?\" button** in its header. It opens a short explanation of the screen and links to the right articles.\n* **Press Ctrl+K (Cmd+K on a Mac)** to search for a screen, an article or a glossary term.\n\nThe \"Typically used by\" column describes the usual job, not a rule. What you can really do is decided by your authorities ([[a:b03-02|Your account]]).\n\n### Overview\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Dashboard** | health of the platform at a glance | everyone | [[a:b03-05]] |\n\n### Reporting\nThis section is about the reports the platform can generate.\n\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Report Catalog** | run published reports | report_engine:run, report reviewers | [[a:b03-15]] |\n| **Report Studio** | author, verify and preview reports | report authors, SECURITY_ADMIN | [[a:b03-15]] |\n| **Report Headers & Footers** | manage the printed chrome | report authors, SECURITY_ADMIN | [[a:b03-15]] |\n| **Needs Migration** | find reports and chrome built for an older engine | report authors, SECURITY_ADMIN | [[a:b03-15]] |\n| **Merchant Reports** | review merchant-owned reports | COMPLIANCE, SECURITY_ADMIN | [[a:b03-15]] |\n\n### Onboarding\nThis section is about merchants: who they are, where their money lands and where they take payments.\n\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Join Requests** | review businesses applying to join | OPERATOR, COMPLIANCE | [[a:b05-03]] |\n| **KYB Review** | check uploaded documents and beneficial owners | COMPLIANCE, OPERATOR | [[a:b05-04]] |\n| **Merchants** | look up, edit, suspend, reinstate | OPERATOR, COMPLIANCE, SUPPORT (read) | [[a:b05-08]] |\n| **Wallets** | every merchant's balance, shards and statement; freeze a wallet | OPERATOR, COMPLIANCE, SUPPORT (read) | [[a:b03-09]] |\n| **Applications & Channels** | applications, payment links and POS terminals; allow-lists and tokens | OPERATOR, COMPLIANCE, SUPPORT (read) | [[a:b03-10]] |\n\n### Governance\nThis section is about control: who decides, who is on the team and what is recorded.\n\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Approvals** | decide requests made by others | checkers | [[a:b04-03]] |\n| **Audit Log** | search and export the audit trail | SECURITY_ADMIN | [[a:b04-07]] |\n| **Admin Users** | staff accounts, roles, authorities, maker/checker flags | SECURITY_ADMIN | [[a:b03-02]] |\n| **AML Cases** | investigate suspicious activity | COMPLIANCE, MLRO | [[a:b09-05]] |\n| **AML Screenings** | decide matches against sanctions and watch lists | COMPLIANCE, MLRO | [[a:b09-03]] |\n| **AML Rules** | the rules that raise alerts | COMPLIANCE, MLRO | [[a:b09-04]] |\n| **AML Reports** | regulatory reports | COMPLIANCE, MLRO | [[a:b09-07]] |\n\n### Operations\nThis section is about the day-to-day running of payments and of the platform itself.\n\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Transactions & Webhooks** | every payment attempt and every message a partner sent us | OPERATOR, SUPPORT (limited view) | [[a:b03-11]] |\n| **Operator Cases** | stuck, conflicting or odd payments | OPERATOR | [[a:b07-04]] |\n| **Inquiry Schedule** | when the platform asks a partner for a payment's status | OPERATOR | [[a:b07-09]] |\n| **Disputes** | chargebacks and disputes | FINANCE | [[a:b08-09]] |\n| **Adjustments** | refunds, chargebacks, corrections | FINANCE | [[a:b08-08]] |\n| **Cash-Outs** | merchant payouts | FINANCE | [[a:b08-07]] |\n| **Reconciliation** | match partner statements to our books | FINANCE | [[a:b08-06]] |\n| **Backups** | backup engine, WAL archive lag, storage targets, schedule, last backup and restore drill | SECURITY_ADMIN | [[a:b12-10]] |\n| **Object & Asset Storage** | shared vault health, objects, locks, quarantine, legal holds and access audit | SECURITY_ADMIN, COMPLIANCE | [[a:b12-13]] |\n| **Jobs & Outbox** | delivery health of background work: outbox, audit outbox, jobs, notifications | SECURITY_ADMIN | [[a:b03-14]] |\n| **Platform Settings** | versioned platform settings, export and restore | SECURITY_ADMIN, GATEWAY_ADMIN | [[a:b12-07]] |\n| **Checkout Help** | the help payers see at checkout | admins | [[a:b07-10]] |\n\n### Finance\nThis section is about the money itself and whether the books are right.\n\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Pricing & Limits** | commission profiles and velocity rules | FINANCE | [[a:b08-03]] |\n| **Profitability** | what the platform earns | FINANCE | [[a:b08-11]] |\n| **Liquidity** | whether there is enough cash to cover payouts | FINANCE | [[a:b08-11]] |\n| **Journal Entries** | read every double-entry posting and its balance check | FINANCE | [[a:b03-13]] |\n| **Ledger Audit & Invariant** | ledger integrity checks, per-account shards and checkpoints | FINANCE | [[a:b08-11]] |\n\n### Gateways\nThis section is about the connections to payment partners.\n\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Gateways** | partner connections, versions and go-live | GATEWAY_ADMIN | [[a:b06-01]] |\n| **Credential Sets** | the vault of login details we hold for each partner | GATEWAY_ADMIN | [[a:b03-12]] |\n| **Rails** | the payment methods a customer can pick | GATEWAY_ADMIN | [[a:b06-11]] |\n| **Routes** | which gateway serves which rail, in what order | GATEWAY_ADMIN | [[a:b06-11]] |\n\n### Learning\n| Screen | What it is for | Typically used by | Read more |\n| :--- | :--- | :--- | :--- |\n| **Interactive Guide** | this guide | everyone | [[a:b00-02]] |\n| **Employee Academy** | training, labs and exams | everyone | [[a:b13-04]] |\n\nInside the Academy, `SECURITY_ADMIN` also sees a **Team** tab that shows everyone's training progress. It has no menu entry of its own and is read-only.\n\n### Screens you reach from another screen\nSome screens have no menu entry. You open them from a row or a button:\n* **Merchant detail**, from **Merchants** ([[a:b05-08|The Merchants screen]]).\n* **Join request detail** and **new join request**, from **Join Requests** ([[a:b05-03|Working the Join Requests queue, step by step]]).\n* **KYB document review**, from **KYB Review** ([[a:b05-04|KYB documents and beneficial owners]]).\n* **Operator case detail**, from **Operator Cases** ([[a:b07-04|The Operator Cases screen]]).\n* **Admin user detail**, from **Admin Users** ([[a:b03-02|Your account]]).\n* **The Add-a-Gateway wizard** and **Smart AI Integration**, from **Gateways** ([[a:b06-13|The Add-a-Gateway wizard]], [[a:b06-14|Smart AI Integration]]).\n\n:::note A screen that is missing is not a fault\nIf a screen is missing from *your* menu, your account does not hold its authority. Do not ask a colleague to do it \"from their account\". Ask your manager, and the Security Admin will change permissions under two-person control.\n:::",
         "headings": [
           {
             "id": "how-the-menu-works",
@@ -846,6 +846,11 @@
           {
             "id": "overview",
             "text": "Overview",
+            "level": 3
+          },
+          {
+            "id": "reporting",
+            "text": "Reporting",
             "level": 3
           },
           {
@@ -884,7 +889,7 @@
             "level": 3
           }
         ],
-        "plainText": "Big picture in 20 seconds\nThe menu on the left groups every Back Office screen into seven sections: Overview, Onboarding, Governance, Operations, Finance, Gateways and Learning. You only see the screens your authorities allow, so your menu is shorter than this article. Use the tables below to find out what a screen is for, who normally uses it, and which article explains it in full.\nHow the menu works\nThe menu is personal. A screen appears only if your account holds the authority to open it. A missing screen is not an error. If you need one, see [[a:b03-07 When a button is missing or an action is refused]].\nA section with no visible screens disappears. For example, a SUPPORT account has no Finance section at all.\nThe menu is only a door. Even if a screen opens, every button on it is checked again by the core. Opening a screen never means you may change things on it.\nEvery screen has a \"?\" button in its header. It opens a short explanation of the screen and links to the right articles.\nPress Ctrl+K (Cmd+K on a Mac) to search for a screen, an article or a glossary term.\n\nThe \"Typically used by\" column describes the usual job, not a rule. What you can really do is decided by your authorities ([[a:b03-02 Your account]]).\nOverview\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nDashboard health of the platform at a glance everyone The Dashboard: every tile explained\nOnboarding\nThis section is about merchants: who they are, where their money lands and where they take payments.\n\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nJoin Requests review businesses applying to join OPERATOR, COMPLIANCE Working the Join Requests queue, step by step\nKYB Review check uploaded documents and beneficial owners COMPLIANCE, OPERATOR KYB documents and beneficial owners\nMerchants look up, edit, suspend, reinstate OPERATOR, COMPLIANCE, SUPPORT (read) The Merchants screen: look up, edit, suspend and reinstate\nWallets every merchant's balance, shards and statement; freeze a wallet OPERATOR, COMPLIANCE, SUPPORT (read) The Wallets screen and the wallet page: balances, statements, shards and freezing\nApplications & Channels applications, payment links and POS terminals; allow-lists and tokens OPERATOR, COMPLIANCE, SUPPORT (read) The Applications & Channels screen: applications, payment links and POS terminals\nGovernance\nThis section is about control: who decides, who is on the team and what is recorded.\n\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nApprovals decide requests made by others checkers The life of an approval request\nAudit Log search and export the audit trail SECURITY_ADMIN Audit trails: what is recorded about every action\nAdmin Users staff accounts, roles, authorities, maker/checker flags SECURITY_ADMIN Your account: roles, authorities and the maker and checker switches\nAML Cases investigate suspicious activity COMPLIANCE, MLRO Cases: lifecycle, severity, deadlines and what money does\nAML Screenings decide matches against sanctions and watch lists COMPLIANCE, MLRO Screening: lists, matches and how to decide them\nAML Rules the rules that raise alerts COMPLIANCE, MLRO Rules: velocity limits, AML rules and how they change\nAML Reports regulatory reports COMPLIANCE, MLRO Regulatory reporting: large-transaction and suspicious-activity reports\nOperations\nThis section is about the day-to-day running of payments and of the platform itself.\n\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nTransactions & Webhooks every payment attempt and every message a partner sent us OPERATOR, SUPPORT (limited view) The Transactions & Webhooks screen: attempts, step logs and partner messages\nOperator Cases stuck, conflicting or odd payments OPERATOR The Operator Cases screen: kinds, priorities, deadlines and resolutions\nInquiry Schedule when the platform asks a partner for a payment's status OPERATOR Inquiry: how to ask a partner safely, and rails that cannot be asked\nDisputes chargebacks and disputes FINANCE Disputes and chargebacks\nAdjustments refunds, chargebacks, corrections FINANCE Adjustments: refunds, chargebacks, manual entries and corrections\nCash-Outs merchant payouts FINANCE Cash-outs: paying a merchant its balance\nReconciliation match partner statements to our books FINANCE Reconciliation: matching partner statements to our books\nBackups backup engine, WAL archive lag, storage targets, schedule, last backup and restore drill SECURITY_ADMIN The Backups screen: every tile, target, LSN and restore drill check\nJobs & Outbox delivery health of background work: outbox, audit outbox, jobs, notifications SECURITY_ADMIN The Jobs & Outbox screen: is background work keeping up?\nPlatform Settings versioned platform settings, export and restore SECURITY_ADMIN, GATEWAY_ADMIN Releases, rollback, backups and health checks\nCheckout Help the help payers see at checkout admins Checkout Help: what payers see and what you can configure\nFinance\nThis section is about the money itself and whether the books are right.\n\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nPricing & Limits commission profiles and velocity rules FINANCE Commission, fee bearers and rounding, with worked numbers\nProfitability what the platform earns FINANCE Profitability, liquidity and the invariant screens\nLiquidity whether there is enough cash to cover payouts FINANCE Profitability, liquidity and the invariant screens\nJournal Entries read every double-entry posting and its balance check FINANCE The Journal Entries screen: reading the ledger line by line\nLedger Audit & Invariant ledger integrity checks, per-account shards and checkpoints FINANCE Profitability, liquidity and the invariant screens\nGateways\nThis section is about the connections to payment partners.\n\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nGateways partner connections, versions and go-live GATEWAY_ADMIN Gateways in depth: kinds, statuses, versions and the Gateways screen\nCredential Sets the vault of login details we hold for each partner GATEWAY_ADMIN The Credential Sets screen: the vault of partner logins\nRails the payment methods a customer can pick GATEWAY_ADMIN Rails and Routes: priority, cost, limits, health, scope and the circuit breaker\nRoutes which gateway serves which rail, in what order GATEWAY_ADMIN Rails and Routes: priority, cost, limits, health, scope and the circuit breaker\nLearning\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nInteractive Guide this guide everyone How to use this guide\nEmployee Academy training, labs and exams everyone About this guide: version, updates and the Academy\n\nInside the Academy, SECURITY_ADMIN also sees a Team tab that shows everyone's training progress. It has no menu entry of its own and is read-only.\nScreens you reach from another screen\nSome screens have no menu entry. You open them from a row or a button:\nMerchant detail, from Merchants ([[a:b05-08 The Merchants screen]]).\nJoin request detail and new join request, from Join Requests ([[a:b05-03 Working the Join Requests queue, step by step]]).\nKYB document review, from KYB Review ([[a:b05-04 KYB documents and beneficial owners]]).\nOperator case detail, from Operator Cases ([[a:b07-04 The Operator Cases screen]]).\nAdmin user detail, from Admin Users ([[a:b03-02 Your account]]).\nThe Add-a-Gateway wizard and Smart AI Integration, from Gateways ([[a:b06-13 The Add-a-Gateway wizard]], [[a:b06-14 Smart AI Integration]]).\n\nA screen that is missing is not a fault\nIf a screen is missing from your menu, your account does not hold its authority. Do not ask a colleague to do it \"from their account\". Ask your manager, and the Security Admin will change permissions under two-person control."
+        "plainText": "Big picture in 20 seconds\nThe menu on the left groups every Back Office screen into eight sections: Overview, Reporting, Onboarding, Governance, Operations, Finance, Gateways and Learning. You only see the screens your authorities allow, so your menu is shorter than this article. Use the tables below to find out what a screen is for, who normally uses it, and which article explains it in full.\nHow the menu works\nThe menu is personal. A screen appears only if your account holds the authority to open it. A missing screen is not an error. If you need one, see [[a:b03-07 When a button is missing or an action is refused]].\nA section with no visible screens disappears. For example, a SUPPORT account has no Finance section at all.\nThe menu is only a door. Even if a screen opens, every button on it is checked again by the core. Opening a screen never means you may change things on it.\nEvery screen has a \"?\" button in its header. It opens a short explanation of the screen and links to the right articles.\nPress Ctrl+K (Cmd+K on a Mac) to search for a screen, an article or a glossary term.\n\nThe \"Typically used by\" column describes the usual job, not a rule. What you can really do is decided by your authorities ([[a:b03-02 Your account]]).\nOverview\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nDashboard health of the platform at a glance everyone The Dashboard: every tile explained\nReporting\nThis section is about the reports the platform can generate.\n\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nReport Catalog run published reports report_engine:run, report reviewers Reports: the catalog, the studio and shared headers and footers\nReport Studio author, verify and preview reports report authors, SECURITY_ADMIN Reports: the catalog, the studio and shared headers and footers\nReport Headers & Footers manage the printed chrome report authors, SECURITY_ADMIN Reports: the catalog, the studio and shared headers and footers\nNeeds Migration find reports and chrome built for an older engine report authors, SECURITY_ADMIN Reports: the catalog, the studio and shared headers and footers\nMerchant Reports review merchant-owned reports COMPLIANCE, SECURITY_ADMIN Reports: the catalog, the studio and shared headers and footers\nOnboarding\nThis section is about merchants: who they are, where their money lands and where they take payments.\n\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nJoin Requests review businesses applying to join OPERATOR, COMPLIANCE Working the Join Requests queue, step by step\nKYB Review check uploaded documents and beneficial owners COMPLIANCE, OPERATOR KYB documents and beneficial owners\nMerchants look up, edit, suspend, reinstate OPERATOR, COMPLIANCE, SUPPORT (read) The Merchants screen: look up, edit, suspend and reinstate\nWallets every merchant's balance, shards and statement; freeze a wallet OPERATOR, COMPLIANCE, SUPPORT (read) The Wallets screen and the wallet page: balances, statements, shards and freezing\nApplications & Channels applications, payment links and POS terminals; allow-lists and tokens OPERATOR, COMPLIANCE, SUPPORT (read) The Applications & Channels screen: applications, payment links and POS terminals\nGovernance\nThis section is about control: who decides, who is on the team and what is recorded.\n\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nApprovals decide requests made by others checkers The life of an approval request\nAudit Log search and export the audit trail SECURITY_ADMIN Audit trails: what is recorded about every action\nAdmin Users staff accounts, roles, authorities, maker/checker flags SECURITY_ADMIN Your account: roles, authorities and the maker and checker switches\nAML Cases investigate suspicious activity COMPLIANCE, MLRO Cases: lifecycle, severity, deadlines and what money does\nAML Screenings decide matches against sanctions and watch lists COMPLIANCE, MLRO Screening: lists, matches and how to decide them\nAML Rules the rules that raise alerts COMPLIANCE, MLRO Rules: velocity limits, AML rules and how they change\nAML Reports regulatory reports COMPLIANCE, MLRO Regulatory reporting: large-transaction and suspicious-activity reports\nOperations\nThis section is about the day-to-day running of payments and of the platform itself.\n\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nTransactions & Webhooks every payment attempt and every message a partner sent us OPERATOR, SUPPORT (limited view) The Transactions & Webhooks screen: attempts, step logs and partner messages\nOperator Cases stuck, conflicting or odd payments OPERATOR The Operator Cases screen: kinds, priorities, deadlines and resolutions\nInquiry Schedule when the platform asks a partner for a payment's status OPERATOR Inquiry: how to ask a partner safely, and rails that cannot be asked\nDisputes chargebacks and disputes FINANCE Disputes and chargebacks\nAdjustments refunds, chargebacks, corrections FINANCE Adjustments: refunds, chargebacks, manual entries and corrections\nCash-Outs merchant payouts FINANCE Cash-outs: paying a merchant its balance\nReconciliation match partner statements to our books FINANCE Reconciliation: matching partner statements to our books\nBackups backup engine, WAL archive lag, storage targets, schedule, last backup and restore drill SECURITY_ADMIN The Backups screen: every tile, target, LSN and restore drill check\nObject & Asset Storage shared vault health, objects, locks, quarantine, legal holds and access audit SECURITY_ADMIN, COMPLIANCE Operating the Object & Asset Storage screen: legal holds, KEK rotation and maintenance jobs\nJobs & Outbox delivery health of background work: outbox, audit outbox, jobs, notifications SECURITY_ADMIN The Jobs & Outbox screen: is background work keeping up?\nPlatform Settings versioned platform settings, export and restore SECURITY_ADMIN, GATEWAY_ADMIN Releases, rollback, backups and health checks\nCheckout Help the help payers see at checkout admins Checkout Help: what payers see and what you can configure\nFinance\nThis section is about the money itself and whether the books are right.\n\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nPricing & Limits commission profiles and velocity rules FINANCE Commission, fee bearers and rounding, with worked numbers\nProfitability what the platform earns FINANCE Profitability, liquidity and the invariant screens\nLiquidity whether there is enough cash to cover payouts FINANCE Profitability, liquidity and the invariant screens\nJournal Entries read every double-entry posting and its balance check FINANCE The Journal Entries screen: reading the ledger line by line\nLedger Audit & Invariant ledger integrity checks, per-account shards and checkpoints FINANCE Profitability, liquidity and the invariant screens\nGateways\nThis section is about the connections to payment partners.\n\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nGateways partner connections, versions and go-live GATEWAY_ADMIN Gateways in depth: kinds, statuses, versions and the Gateways screen\nCredential Sets the vault of login details we hold for each partner GATEWAY_ADMIN The Credential Sets screen: the vault of partner logins\nRails the payment methods a customer can pick GATEWAY_ADMIN Rails and Routes: priority, cost, limits, health, scope and the circuit breaker\nRoutes which gateway serves which rail, in what order GATEWAY_ADMIN Rails and Routes: priority, cost, limits, health, scope and the circuit breaker\nLearning\nScreen What it is for Typically used by Read more\n:--- :--- :--- :---\nInteractive Guide this guide everyone How to use this guide\nEmployee Academy training, labs and exams everyone About this guide: version, updates and the Academy\n\nInside the Academy, SECURITY_ADMIN also sees a Team tab that shows everyone's training progress. It has no menu entry of its own and is read-only.\nScreens you reach from another screen\nSome screens have no menu entry. You open them from a row or a button:\nMerchant detail, from Merchants ([[a:b05-08 The Merchants screen]]).\nJoin request detail and new join request, from Join Requests ([[a:b05-03 Working the Join Requests queue, step by step]]).\nKYB document review, from KYB Review ([[a:b05-04 KYB documents and beneficial owners]]).\nOperator case detail, from Operator Cases ([[a:b07-04 The Operator Cases screen]]).\nAdmin user detail, from Admin Users ([[a:b03-02 Your account]]).\nThe Add-a-Gateway wizard and Smart AI Integration, from Gateways ([[a:b06-13 The Add-a-Gateway wizard]], [[a:b06-14 Smart AI Integration]]).\n\nA screen that is missing is not a fault\nIf a screen is missing from your menu, your account does not hold its authority. Do not ask a colleague to do it \"from their account\". Ask your manager, and the Security Admin will change permissions under two-person control."
       },
       {
         "id": "b03-04",
@@ -5541,6 +5546,81 @@
         "body": "| What | Value |\n| :--- | :--- |\n| Decimal places for money in the books | 4 (LYD shown with 3) |\n| Wrong OTP tries (default) | 3 |\n| OTP payment time ceiling | 20 minutes |\n| Redirect payment ceiling | 30 minutes |\n| QR and push ceiling | 15 minutes |\n| Late-confirmation grace (default) | 24 hours |\n| Webhook timestamp tolerance | 5 minutes |\n| Webhook duplicate memory | 7 days |\n| Approval request lifetime | 7 days |\n| Emergency suspension ratification | 24 hours |\n| Join request inactive expiry | 30 days |\n| Join review deadline | 2 business days (`LOW`/`STANDARD`), 5 (`HIGH`) |\n| Beneficial owner threshold (default) | 25% |\n| AML case deadlines (default) | `CRITICAL` 4 h, `HIGH` 1 day, `MEDIUM` 3 days, `LOW` 5 days |\n| POS screen idle limit | 15 minutes |\n| Outbound call limits | 10 s (auth, status), 15 s (start, confirm, refund) |\n| Maximum response size | 2 MB |\n| Retention (default) | 5 years after the relationship ends |\n| KYB refresh | `HIGH` yearly, `STANDARD` 2 years, `LOW` 3 years |\n| Document expiry notices | 30 and 7 days before |\n| Go-live gates | 12 |\n| Automatic sandbox scenarios | 15 |\n| Database tables | 64 |\n| Edge cases catalogued | 140 |",
         "headings": [],
         "plainText": "What Value\n:--- :---\nDecimal places for money in the books 4 (LYD shown with 3)\nWrong OTP tries (default) 3\nOTP payment time ceiling 20 minutes\nRedirect payment ceiling 30 minutes\nQR and push ceiling 15 minutes\nLate-confirmation grace (default) 24 hours\nWebhook timestamp tolerance 5 minutes\nWebhook duplicate memory 7 days\nApproval request lifetime 7 days\nEmergency suspension ratification 24 hours\nJoin request inactive expiry 30 days\nJoin review deadline 2 business days (LOW/STANDARD), 5 (HIGH)\nBeneficial owner threshold (default) 25%\nAML case deadlines (default) CRITICAL 4 h, HIGH 1 day, MEDIUM 3 days, LOW 5 days\nPOS screen idle limit 15 minutes\nOutbound call limits 10 s (auth, status), 15 s (start, confirm, refund)\nMaximum response size 2 MB\nRetention (default) 5 years after the relationship ends\nKYB refresh HIGH yearly, STANDARD 2 years, LOW 3 years\nDocument expiry notices 30 and 7 days before\nGo-live gates 12\nAutomatic sandbox scenarios 15\nDatabase tables 64\nEdge cases catalogued 140"
+      },
+      {
+        "id": "b12-12",
+        "book": 12,
+        "order": 12,
+        "title": "Shared Object & Asset Storage: how files, locks, quarantine and retention work",
+        "roles": [
+          "SECURITY_ADMIN",
+          "GATEWAY_ADMIN",
+          "COMPLIANCE",
+          "FINANCE"
+        ],
+        "minutes": 4,
+        "ui": "AVAILABLE",
+        "related": [
+          "b12-09",
+          "b12-10",
+          "b12-13"
+        ],
+        "body": ":::summary Big picture in 20 seconds\nEvery uploaded document, statement, report output and brand logo lives in the encrypted Shared Object Storage vault (`OBJECT_STORAGE_NODE`), never inside PostgreSQL table rows and never on individual core nodes.\n:::\n\n### Why files never live on core nodes or inside PostgreSQL\nIn a multi-node deployment, several `core-back` servers and a dedicated `backup-daemon` server work together. If `core-1` saved a KYB PDF on its own disk, `core-2` and `backup-1` could not read it. Therefore:\n* The platform requires a shared **Object Storage Node** (`OBJECT_STORAGE_NODE`, running `pg-object-storage-daemon` over mTLS on port `4095`). A multi-node deployment refuses to start without it (`MULTI_NODE_SHARED_STORAGE_REQUIRED`). A single-host production process stays bootable but every storage-backed feature returns `503 STORAGE_UNAVAILABLE` rather than writing to local disk; configure the vault before using those features.\n* Every file is encrypted in 64 KiB `AES-256-GCM` chunks (`pgos1`) with its own 256-bit Data Encryption Key (DEK) wrapped by the Key Encryption Keyring (`OBJECT_STORAGE_KEK_KEYRING`).\n* PostgreSQL stores only the small control-plane ledger: `storage_objects`, `storage_object_locks` and `storage_object_access_logs`.\n\n### Shared multi-record locks (`storage_object_locks`)\nOne file can be locked by more than one record at the same time. For example, a payment rail logo uploaded into the Asset Catalog (`CATALOG_ASSET`) and assigned to two payment rails (`RAIL_LOGO`) has three active locks.\n* Database trigger `storage_objects_guard_trg` forbids deleting rows from `storage_objects` and forbids transitioning an object to `PURGED` while **any** active lock (`released_at IS NULL`) exists, while `legal_hold = true`, or while `retain_until` is in the future.\n* When the last active lock is released, the object enters a 24-hour grace window (`gc_eligible_at`). After 24 hours (and after `retain_until` expires), the object-storage maintenance worker claims the row, moves the ciphertext file to `.trash/YYYY-MM-DD/` for 7 days, and only then marks it `PURGED`. A concurrent lock, legal hold or retention boundary cancels the claim before anything moves.\n\n### Two-stage retention and malware quarantine\nWhen a merchant or operator uploads a KYB document, dispute attachment or AML evidence file:\n1. It is staged and bound in `QUARANTINE_PENDING_AV` state with `retain_until = NULL`. While in quarantine, nobody can download it (`423 STORAGE_OBJECT_QUARANTINED`).\n2. `KybScanWorker` (KYB) or the object-storage maintenance worker (dispute/AML evidence) scans the file. If clean, it promotes the object to `ACTIVE` and stamps its compliance retention window **once** (`retain_until`). Re-binds and CLEAN re-scans do not extend that clock. If infected, it releases the lock and marks the object `QUARANTINE_REJECTED` so malware never receives a compliance lock.",
+        "headings": [
+          {
+            "id": "why-files-never-live-on-core-nodes-or-inside-postgresql",
+            "text": "Why files never live on core nodes or inside PostgreSQL",
+            "level": 3
+          },
+          {
+            "id": "shared-multi-record-locks-storage-object-locks",
+            "text": "Shared multi-record locks (storage_object_locks)",
+            "level": 3
+          },
+          {
+            "id": "two-stage-retention-and-malware-quarantine",
+            "text": "Two-stage retention and malware quarantine",
+            "level": 3
+          }
+        ],
+        "plainText": "Big picture in 20 seconds\nEvery uploaded document, statement, report output and brand logo lives in the encrypted Shared Object Storage vault (OBJECT_STORAGE_NODE), never inside PostgreSQL table rows and never on individual core nodes.\nWhy files never live on core nodes or inside PostgreSQL\nIn a multi-node deployment, several core-back servers and a dedicated backup-daemon server work together. If core-1 saved a KYB PDF on its own disk, core-2 and backup-1 could not read it. Therefore:\nThe platform requires a shared Object Storage Node (OBJECT_STORAGE_NODE, running pg-object-storage-daemon over mTLS on port 4095). A multi-node deployment refuses to start without it (MULTI_NODE_SHARED_STORAGE_REQUIRED). A single-host production process stays bootable but every storage-backed feature returns 503 STORAGE_UNAVAILABLE rather than writing to local disk; configure the vault before using those features.\nEvery file is encrypted in 64 KiB AES-256-GCM chunks (pgos1) with its own 256-bit Data Encryption Key (DEK) wrapped by the Key Encryption Keyring (OBJECT_STORAGE_KEK_KEYRING).\nPostgreSQL stores only the small control-plane ledger: storage_objects, storage_object_locks and storage_object_access_logs.\nShared multi-record locks (storage_object_locks)\nOne file can be locked by more than one record at the same time. For example, a payment rail logo uploaded into the Asset Catalog (CATALOG_ASSET) and assigned to two payment rails (RAIL_LOGO) has three active locks.\nDatabase trigger storage_objects_guard_trg forbids deleting rows from storage_objects and forbids transitioning an object to PURGED while any active lock (released_at IS NULL) exists, while legal_hold = true, or while retain_until is in the future.\nWhen the last active lock is released, the object enters a 24-hour grace window (gc_eligible_at). After 24 hours (and after retain_until expires), the object-storage maintenance worker claims the row, moves the ciphertext file to .trash/YYYY-MM-DD/ for 7 days, and only then marks it PURGED. A concurrent lock, legal hold or retention boundary cancels the claim before anything moves.\nTwo-stage retention and malware quarantine\nWhen a merchant or operator uploads a KYB document, dispute attachment or AML evidence file:\nIt is staged and bound in QUARANTINE_PENDING_AV state with retain_until = NULL. While in quarantine, nobody can download it (423 STORAGE_OBJECT_QUARANTINED).\nKybScanWorker (KYB) or the object-storage maintenance worker (dispute/AML evidence) scans the file. If clean, it promotes the object to ACTIVE and stamps its compliance retention window once (retain_until). Re-binds and CLEAN re-scans do not extend that clock. If infected, it releases the lock and marks the object QUARANTINE_REJECTED so malware never receives a compliance lock."
+      },
+      {
+        "id": "b12-13",
+        "book": 12,
+        "order": 13,
+        "title": "Operating the Object & Asset Storage screen: legal holds, KEK rotation and maintenance jobs",
+        "roles": [
+          "SECURITY_ADMIN",
+          "GATEWAY_ADMIN",
+          "COMPLIANCE"
+        ],
+        "minutes": 3,
+        "ui": "AVAILABLE",
+        "related": [
+          "b12-12",
+          "b12-10",
+          "b12-11"
+        ],
+        "body": ":::summary Big picture in 20 seconds\nUse **Operations → Object & Asset Storage** (`/system/object-storage`) to inspect shared storage health, filter and page objects, check locks, review quarantine, place a legal hold, request a hold lift for a second checker, and run maintenance jobs (`GC`, `Blob Sweep`, `Integrity Scrub`, `Lock Reconcile`, `KEK Rewrap`, `AV Scan`).\n:::\n\n### Who may do what on `/system/object-storage`\n* **View health, objects, locks and access logs:** `system:storage:read`.\n* **Place a Legal Hold:** `system:storage:legal-hold` (Security Admin / Compliance).\n* **Request a Legal Hold lift:** `system:storage:legal-hold`; a different authorized checker must approve it under **Approvals**.\n* **Trigger maintenance jobs (`gc`, `sweep`, `scrub`, `reconcile-locks`, `rewrap`, `av-scan`):** `system:storage:admin`.\n\n### Placing and lifting a Legal Hold\nDuring an investigation, dispute or audit, a Compliance or Security Admin can place a **Legal Hold** on any object with a mandatory written reason. While `legal_hold = true`, database trigger `storage_objects_guard_trg` and the maintenance worker refuse to purge the object even if all domain locks are released and `retain_until` has passed. Lifting a hold is a loosening action: the request goes to **Approvals** and a different authorized checker must approve it. Checklist: [[c:sg-place-legal-hold|Place or lift a storage legal hold]].\n\n### Zero-downtime KEK key rotation (Object Storage Maintenance Worker)\nWhen IT rotates `OBJECT_STORAGE_KEK_KEYRING` from `v1` to `v2`, the encrypted `.v1.enc` files on disk do not need to be rewritten. Running the **KEK Rewrap** job unwraps each object's 32-byte DEK with `v1` and re-wraps it with `v2` in `storage_objects`.",
+        "headings": [
+          {
+            "id": "who-may-do-what-on-system-object-storage",
+            "text": "Who may do what on /system/object-storage",
+            "level": 3
+          },
+          {
+            "id": "placing-and-lifting-a-legal-hold",
+            "text": "Placing and lifting a Legal Hold",
+            "level": 3
+          },
+          {
+            "id": "zero-downtime-kek-key-rotation-object-storage-maintenance-worker",
+            "text": "Zero-downtime KEK key rotation (Object Storage Maintenance Worker)",
+            "level": 3
+          }
+        ],
+        "plainText": "Big picture in 20 seconds\nUse Operations → Object & Asset Storage (/system/object-storage) to inspect shared storage health, filter and page objects, check locks, review quarantine, place a legal hold, request a hold lift for a second checker, and run maintenance jobs (GC, Blob Sweep, Integrity Scrub, Lock Reconcile, KEK Rewrap, AV Scan).\nWho may do what on /system/object-storage\nView health, objects, locks and access logs: system:storage:read.\nPlace a Legal Hold: system:storage:legal-hold (Security Admin / Compliance).\nRequest a Legal Hold lift: system:storage:legal-hold; a different authorized checker must approve it under Approvals.\nTrigger maintenance jobs (gc, sweep, scrub, reconcile-locks, rewrap, av-scan): system:storage:admin.\nPlacing and lifting a Legal Hold\nDuring an investigation, dispute or audit, a Compliance or Security Admin can place a Legal Hold on any object with a mandatory written reason. While legal_hold = true, database trigger storage_objects_guard_trg and the maintenance worker refuse to purge the object even if all domain locks are released and retain_until has passed. Lifting a hold is a loosening action: the request goes to Approvals and a different authorized checker must approve it. Checklist: [[c:sg-place-legal-hold Place or lift a storage legal hold]].\nZero-downtime KEK key rotation (Object Storage Maintenance Worker)\nWhen IT rotates OBJECT_STORAGE_KEK_KEYRING from v1 to v2, the encrypted .v1.enc files on disk do not need to be rewritten. Running the KEK Rewrap job unwraps each object's 32-byte DEK with v1 and re-wraps it with v2 in storage_objects."
       }
     ],
     "glossary": [
@@ -7419,6 +7499,47 @@
         ],
         "short": "A sample request and answer used to check a result offline.",
         "ar": "مثال اختبار"
+      },
+      {
+        "slug": "object-storage-vault",
+        "term": "Object Storage Vault",
+        "aliases": [
+          "OBJECT_STORAGE_NODE",
+          "pg-object-storage-daemon"
+        ],
+        "related": [
+          "storage-object-lock",
+          "legal-hold"
+        ],
+        "short": "The dedicated mTLS service (`pg-object-storage-daemon`) that stores chunk-encrypted (`pgos1`) files shared across all core-back nodes and backup-daemon.",
+        "ar": "خزنة تخزين الكائنات"
+      },
+      {
+        "slug": "storage-object-lock",
+        "term": "Storage Object Lock",
+        "aliases": [
+          "storage_object_locks",
+          "holder lock"
+        ],
+        "related": [
+          "object-storage-vault",
+          "legal-hold"
+        ],
+        "short": "An append-only reference in `storage_object_locks` binding a business record (such as `KYB_DOCUMENT` or `RAIL_LOGO`) to a `StorageObject` so it cannot be purged while in use.",
+        "ar": "قفل كائن التخزين"
+      },
+      {
+        "slug": "legal-hold",
+        "term": "Legal Hold",
+        "aliases": [
+          "legal_hold"
+        ],
+        "related": [
+          "object-storage-vault",
+          "storage-object-lock"
+        ],
+        "short": "A compliance flag on `storage_objects` that freezes an asset against garbage collection or purging regardless of lock count or retention expiry.",
+        "ar": "حجز قانوني"
       }
     ],
     "cards": [
@@ -7782,6 +7903,19 @@
           "Retention is not lowered: shorter retention can destroy the history we need for recovery or an investigation.",
           "The **Alert lag threshold** is not raised just to hide a warning.",
           "I will ask a different Security Admin to review the `BACKUP_POLICY` request on **Approvals** ([[a:b12-11|Operating backups safely]])."
+        ]
+      },
+      {
+        "id": "sg-place-legal-hold",
+        "title": "Place or lift a storage legal hold",
+        "screen": "SystemObjectStorage",
+        "risk": "HIGH",
+        "irreversible": false,
+        "body": "**What this does**\nFreezes or unfreezes a stored object against garbage collection and purging.\n\n**Check first**\n- [ ] Confirm the exact `objectId` and inspect its active `storage_object_locks` holders first.\n- [ ] Record the case reference or regulatory request ID in the legal hold reason.\n- [ ] Confirm that the requester has the `system:storage:legal-hold` authority.\n\n**Never**\n- Never place a hold without a written reason and a case reference.\n- Never lift a hold while the investigation or court order is still open.\n\n**If you made a mistake**\nRequest the lift with a correcting reason. A different authorized checker approves it, and the audit trail keeps both actions.",
+        "checklist": [
+          "Confirm the exact `objectId` and inspect its active `storage_object_locks` holders first.",
+          "Record the case reference or regulatory request ID in the legal hold reason.",
+          "Confirm that the requester has the `system:storage:legal-hold` authority."
         ]
       }
     ],
@@ -8843,6 +8977,18 @@
         "article": "b00-03",
         "question": "What are the most serious breaches?",
         "answer": "Sharing credentials, guessing on UNKNOWN and tipping-off."
+      },
+      {
+        "id": "q-059",
+        "article": "b12-12",
+        "question": "Can two core-back servers store uploaded files on their own local disks?",
+        "answer": "No. Multi-node deployments must configure `OBJECT_STORAGE_NODE` so every core server and backup daemon reads and writes to the shared mTLS storage vault."
+      },
+      {
+        "id": "q-060",
+        "article": "b12-13",
+        "question": "Why can't I download a newly uploaded KYB document right away?",
+        "answer": "It is in `QUARANTINE_PENDING_AV` until the antivirus scan worker verifies it is clean and promotes it to `ACTIVE`."
       }
     ],
     "data": {
@@ -11301,17 +11447,17 @@
       "contentVersion": "1.0.0",
       "recertifyFrom": "1.0.0",
       "generatedAt": "1970-01-01T00:00:00.000Z",
-      "contentHash": "5702a80cc0cae8650606fa2f6d670d973c851c11f73478a06388e7823cde4043",
+      "contentHash": "82d06e5520be414f8bfe552386296317e512880a2eaec57dd60240f8c8b89369",
       "counts": {
         "tracks": 8,
         "modules": 11,
-        "lessons": 50,
-        "lessonChecks": 100,
-        "examPoolQuestions": 223,
-        "examPoolSingle": 208,
+        "lessons": 51,
+        "lessonChecks": 102,
+        "examPoolQuestions": 224,
+        "examPoolSingle": 209,
         "examPoolNumber": 13,
         "examPoolOrder": 2,
-        "criticalExamPoolQuestions": 43,
+        "criticalExamPoolQuestions": 44,
         "labs": 16,
         "labTasks": 92,
         "exams": 8,
@@ -11490,7 +11636,8 @@
         "moduleIds": [
           "m4",
           "m5",
-          "m7"
+          "m7",
+          "m10"
         ],
         "lessonIds": [
           "l-m4-2",
@@ -11498,7 +11645,8 @@
           "l-m5-1",
           "l-m7-2",
           "l-m7-3",
-          "l-m7-4"
+          "l-m7-4",
+          "l-m10-5"
         ],
         "labIds": [
           "lab-kyb-desk",
@@ -11559,7 +11707,8 @@
           "l-m9-1",
           "l-m9-2",
           "l-m10-3",
-          "l-m10-4"
+          "l-m10-4",
+          "l-m10-5"
         ],
         "labIds": [
           "lab-runbook-drill",
@@ -11591,7 +11740,8 @@
           "l-m9-1",
           "l-m9-2",
           "l-m10-3",
-          "l-m10-4"
+          "l-m10-4",
+          "l-m10-5"
         ],
         "labIds": [
           "lab-runbook-drill",
@@ -11769,7 +11919,8 @@
           "l-m10-1",
           "l-m10-2",
           "l-m10-3",
-          "l-m10-4"
+          "l-m10-4",
+          "l-m10-5"
         ],
         "labIds": [
           "lab-security-desk",
@@ -12889,6 +13040,29 @@
         "checkIds": [
           "c-l-m10-4-1",
           "c-l-m10-4-2"
+        ]
+      },
+      {
+        "id": "l-m10-5",
+        "module": "m10",
+        "order": 5,
+        "title": "Shared Object & Asset Storage: multi-node vault, locks, quarantine and legal holds",
+        "minutes": 20,
+        "tracks": [
+          "GATEWAY_ADMIN",
+          "SECURITY_ADMIN",
+          "COMPLIANCE"
+        ],
+        "reading": [
+          "b12-12",
+          "b12-13"
+        ],
+        "body": "### You will be able to\n- Explain why uploaded files are stored in the shared `pg-object-storage-daemon` vault (`OBJECT_STORAGE_NODE`) rather than inside PostgreSQL or on individual core nodes.\n- Explain how `storage_object_locks`, `retain_until` and `legal_hold` work together to prevent premature deletion.\n- Explain why `QUARANTINE_PENDING_AV` objects have `retain_until = NULL` until the malware scan succeeds.\n\n### Key ideas\n- **Storage is always shared across nodes.** Every `core-back` node and `backup-daemon` connects over mTLS to `OBJECT_STORAGE_NODE` (`pg-object-storage-daemon`). Configuring multiple core nodes without `OBJECT_STORAGE_NODE` is rejected by deployment validation (`MULTI_NODE_SHARED_STORAGE_REQUIRED`).\n- **One upload = one encrypted `.v1.enc` envelope (`pgos1`).** Files are encrypted in 64 KiB `AES-256-GCM` chunks with a unique per-object DEK wrapped by `OBJECT_STORAGE_KEK_KEYRING`.\n- **Multiple records can lock the same object.** `storage_object_locks` tracks every domain holder (`KYB_DOCUMENT`, `RECON_RUN`, `REG_REPORT_OUTPUT`, `REPORT_ASSET_ENTRY`, `CATALOG_ASSET`, `RAIL_LOGO`, `DISPUTE_ATTACHMENT`, `AML_CASE_EVIDENCE`). PostgreSQL trigger `storage_objects_guard_trg` blocks purging while any active lock exists.\n- **Quarantine comes before compliance retention.** Untrusted uploads start in `QUARANTINE_PENDING_AV` with `retain_until = NULL`. Only after `AvScanWorker` marks the file `CLEAN` does `promote()` activate the object and stamp `retain_until`.\n- **Backups verify object parity and KEK decryption.** `backup-daemon` syncs immutable `.v1.enc` blobs over mTLS, checks manifest parity against `ACTIVE` database rows, and tests decryption using the escrowed KEK keyring during weekly restore drills.\n\n### A worked example\n1. An admin uploads a bank logo on `core-1` (`CATALOG_ASSET` lock) and assigns it to two payment rails (`RAIL_LOGO` locks).\n2. `core-2` serves the logo immediately over mTLS from `obj-1`.\n3. Later, an admin tries to purge the logo while one rail still uses it. PostgreSQL trigger `storage_objects_guard_trg` rejects the purge (`STORAGE_OBJECT_LOCKED`) because an active `RAIL_LOGO` lock remains.\n\n### Common mistakes\n- Leaving `OBJECT_STORAGE_NODE` empty when scaling `CORE_NODES` past one server.\n- Expecting a `QUARANTINE_PENDING_AV` KYB file to be downloadable before `AvScanWorker` finishes.\n\n### Read now\n- [[a:b12-12|Shared Object & Asset Storage: how files, locks, quarantine and retention work]]\n- [[a:b12-13|Operating the Object & Asset Storage screen]]\n\n### Check yourself\nQuestions: c-l-m10-5-1, c-l-m10-5-2",
+        "html": "<h3>You will be able to</h3>\n<ul>\n<li>Explain why uploaded files are stored in the shared <code>pg-object-storage-daemon</code> vault (<code>OBJECT_STORAGE_NODE</code>) rather than inside PostgreSQL or on individual core nodes.</li>\n<li>Explain how <code>storage_object_locks</code>, <code>retain_until</code> and <code>legal_hold</code> work together to prevent premature deletion.</li>\n<li>Explain why <code>QUARANTINE_PENDING_AV</code> objects have <code>retain_until = NULL</code> until the malware scan succeeds.</li>\n</ul>\n<h3>Key ideas</h3>\n<ul>\n<li><strong>Storage is always shared across nodes.</strong> Every <code>core-back</code> node and <code>backup-daemon</code> connects over mTLS to <code>OBJECT_STORAGE_NODE</code> (<code>pg-object-storage-daemon</code>). Configuring multiple core nodes without <code>OBJECT_STORAGE_NODE</code> is rejected by deployment validation (<code>MULTI_NODE_SHARED_STORAGE_REQUIRED</code>).</li>\n<li><strong>One upload = one encrypted <code>.v1.enc</code> envelope (<code>pgos1</code>).</strong> Files are encrypted in 64 KiB <code>AES-256-GCM</code> chunks with a unique per-object DEK wrapped by <code>OBJECT_STORAGE_KEK_KEYRING</code>.</li>\n<li><strong>Multiple records can lock the same object.</strong> <code>storage_object_locks</code> tracks every domain holder (<code>KYB_DOCUMENT</code>, <code>RECON_RUN</code>, <code>REG_REPORT_OUTPUT</code>, <code>REPORT_ASSET_ENTRY</code>, <code>CATALOG_ASSET</code>, <code>RAIL_LOGO</code>, <code>DISPUTE_ATTACHMENT</code>, <code>AML_CASE_EVIDENCE</code>). PostgreSQL trigger <code>storage_objects_guard_trg</code> blocks purging while any active lock exists.</li>\n<li><strong>Quarantine comes before compliance retention.</strong> Untrusted uploads start in <code>QUARANTINE_PENDING_AV</code> with <code>retain_until = NULL</code>. Only after <code>AvScanWorker</code> marks the file <code>CLEAN</code> does <code>promote()</code> activate the object and stamp <code>retain_until</code>.</li>\n<li><strong>Backups verify object parity and KEK decryption.</strong> <code>backup-daemon</code> syncs immutable <code>.v1.enc</code> blobs over mTLS, checks manifest parity against <code>ACTIVE</code> database rows, and tests decryption using the escrowed KEK keyring during weekly restore drills.</li>\n</ul>\n<h3>A worked example</h3>\n<ol>\n<li>An admin uploads a bank logo on <code>core-1</code> (<code>CATALOG_ASSET</code> lock) and assigns it to two payment rails (<code>RAIL_LOGO</code> locks).</li>\n<li><code>core-2</code> serves the logo immediately over mTLS from <code>obj-1</code>.</li>\n<li>Later, an admin tries to purge the logo while one rail still uses it. PostgreSQL trigger <code>storage_objects_guard_trg</code> rejects the purge (<code>STORAGE_OBJECT_LOCKED</code>) because an active <code>RAIL_LOGO</code> lock remains.</li>\n</ol>\n<h3>Common mistakes</h3>\n<ul>\n<li>Leaving <code>OBJECT_STORAGE_NODE</code> empty when scaling <code>CORE_NODES</code> past one server.</li>\n<li>Expecting a <code>QUARANTINE_PENDING_AV</code> KYB file to be downloadable before <code>AvScanWorker</code> finishes.</li>\n</ul>\n<h3>Read now</h3>\n<ul>\n<li><a href=\"/guide/a/b12-12\">Shared Object &amp; Asset Storage: how files, locks, quarantine and retention work</a></li>\n<li><a href=\"/guide/a/b12-13\">Operating the Object &amp; Asset Storage screen</a></li>\n</ul>\n<h3>Check yourself</h3>\n<p>Questions: c-l-m10-5-1, c-l-m10-5-2</p>\n",
+        "plainText": "You will be able to Explain why uploaded files are stored in the shared pg-object-storage-daemon vault (OBJECTSTORAGENODE) rather than inside PostgreSQL or on individual core nodes. Explain how storageobjectlocks, retainuntil and legalhold work together to prevent premature deletion. Explain why QUARANTINEPENDINGAV objects have retainuntil = NULL until the malware scan succeeds. Key ideas Storage is always shared across nodes. Every core-back node and backup-daemon connects over mTLS to OBJECTSTORAGENODE (pg-object-storage-daemon). Configuring multiple core nodes without OBJECTSTORAGENODE is rejected by deployment validation (MULTINODESHAREDSTORAGEREQUIRED). One upload = one encrypted .v1.enc envelope (pgos1). Files are encrypted in 64 KiB AES-256-GCM chunks with a unique per-object DEK wrapped by OBJECTSTORAGEKEKKEYRING. Multiple records can lock the same object. storageobjectlocks tracks every domain holder (KYBDOCUMENT, RECONRUN, REGREPORTOUTPUT, REPORTASSETENTRY, CATALOGASSET, RAILLOGO, DISPUTEATTACHMENT, AMLCASEEVIDENCE). PostgreSQL trigger storageobjectsguardtrg blocks purging while any active lock exists. Quarantine comes before compliance retention. Untrusted uploads start in QUARANTINEPENDINGAV with retainuntil = NULL. Only after AvScanWorker marks the file CLEAN does promote() activate the object and stamp retainuntil. Backups verify object parity and KEK decryption. backup-daemon syncs immutable .v1.enc blobs over mTLS, checks manifest parity against ACTIVE database rows, and tests decryption using the escrowed KEK keyring during weekly restore drills. A worked example 1. An admin uploads a bank logo on core-1 (CATALOGASSET lock) and assigns it to two payment rails (RAILLOGO locks). 2. core-2 serves the logo immediately over mTLS from obj-1. 3. Later, an admin tries to purge the logo while one rail still uses it. PostgreSQL trigger storageobjectsguardtrg rejects the purge (STORAGEOBJECTLOCKED) because an active RAILLOGO lock remains. Common mistakes Leaving OBJECTSTORAGENODE empty when scaling CORENODES past one server. Expecting a QUARANTINEPENDINGAV KYB file to be downloadable before AvScanWorker finishes. Read now Shared Object & Asset Storage: how files, locks, quarantine and retention work Operating the Object & Asset Storage screen Check yourself Questions: c-l-m10-5-1, c-l-m10-5-2",
+        "checkIds": [
+          "c-l-m10-5-1",
+          "c-l-m10-5-2"
         ]
       }
     ],
@@ -15892,6 +16066,67 @@
           }
         ],
         "why": "The drill runs exactly these three invariant checks, signs the report and destroys the scratch cluster."
+      },
+      {
+        "id": "c-l-m10-5-1",
+        "module": "m10",
+        "type": "single",
+        "difficulty": 1,
+        "critical": false,
+        "lesson": "l-m10-5",
+        "refs": [
+          "b12-12"
+        ],
+        "stem": "What happens if an operator configures two `CORE_NODES` in `deploy.env` and leaves `OBJECT_STORAGE_NODE` empty?",
+        "options": [
+          {
+            "id": "o1",
+            "text": "Deployment validation fails with `MULTI_NODE_SHARED_STORAGE_REQUIRED` because core nodes are forbidden from storing blobs on their own local disks.",
+            "correct": true
+          },
+          {
+            "id": "o2",
+            "text": "Each core node stores half of the uploaded files on its own local disk.",
+            "correct": false
+          },
+          {
+            "id": "o3",
+            "text": "Files are stored inside PostgreSQL `BYTEA` columns instead.",
+            "correct": false
+          }
+        ],
+        "why": "Every multi-node deployment must point all core nodes and the backup daemon at the shared `OBJECT_STORAGE_NODE` server."
+      },
+      {
+        "id": "c-l-m10-5-2",
+        "module": "m10",
+        "type": "single",
+        "difficulty": 2,
+        "critical": false,
+        "lesson": "l-m10-5",
+        "refs": [
+          "b12-12",
+          "b12-13"
+        ],
+        "stem": "When is the multi-year compliance `retain_until` timestamp stamped on a newly uploaded KYB document?",
+        "options": [
+          {
+            "id": "o1",
+            "text": "Only when `promote()` activates the object after the antivirus scan passes (`CLEAN`).",
+            "correct": true
+          },
+          {
+            "id": "o2",
+            "text": "Before the file is scanned for malware.",
+            "correct": false
+          },
+          {
+            "id": "o3",
+            "text": "Only when a Legal Hold is placed.",
+            "correct": false
+          }
+        ],
+        "why": "Stamping compliance retention before AV scanning would make malware undeletable; retention is stamped at promotion time."
       }
     ],
     "labs": [

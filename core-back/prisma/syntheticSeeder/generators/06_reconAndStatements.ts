@@ -73,7 +73,7 @@ export const generateReconciliation = (ctx: SeederContext): void => {
       const run = {
         id: runId, createdAt: ingestedAt, updatedAt: ingestedAt, statementSourceId: source.id, windowStart, windowEnd,
         fileHash: sha256Like(ctx, `recon:${source.id}:${windowEnd.toISOString()}`), statsJson: stats, fileName,
-        fileContent: Buffer.from(""), ingestedAt,
+        ingestedAt,
       };
       ctx.dataset.reconciliationRuns.push(run);
 
@@ -142,7 +142,7 @@ export const generateReconciliation = (ctx: SeederContext): void => {
           postTemplate(ctx, { ...template, refId }, { gatewayId: info.gatewayId }, ingestedAt);
         }
       }
-      run.fileContent = Buffer.from(`${csv.join("\n")}\n`);
+      void csv;
     }
   }
   void ctx.dataset.reconciliationItems.length;

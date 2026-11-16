@@ -56,6 +56,7 @@ bun scripts/project-design/build.ts --check
 cd core-back && bun run typecheck && bun test
 cd deploy && bun run typecheck && bun test
 cd deploy/backup-daemon && bun run typecheck && bun test
+cd deploy/object-storage-daemon && bun run typecheck && bun test
 cd admin-back && bun run typecheck && bun test
 cd merchant-back && bun run typecheck && bun test
 cd checkout-back && bun run typecheck && bun test

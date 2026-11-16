@@ -49,6 +49,9 @@ const UI_PROJECTION: Record<string, readonly string[]> = {
   "security:read": ["approvals.approve", "approvals.reject"],
   "security:write": ["approvals.approve", "approvals.reject", "users_admin.propose"],
   "credential:write": ["credentials.manage"],
+  "system:storage:read": ["system.storage"],
+  "system:storage:admin": ["system.storage"],
+  "system:storage:legal-hold": ["system.storage"],
 };
 
 export const buildUiAuthoritiesMap = (authorities: readonly string[]): Record<string, boolean> => {

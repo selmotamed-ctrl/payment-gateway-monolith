@@ -263,14 +263,13 @@ describeDb("Suite 01 · boundary round-trips", () => {
     expect(stored.equals(payload)).toBe(true);
   });
 
-  test("reconciliation_runs.file_content stores a 1.5 MB binary buffer byte-for-byte", async () => {
-    const payload = Buffer.alloc(1_572_864, 7);
-    const row = await createRow("reconciliation_runs", { file_content: payload });
-    const rows = (await db.$queryRawUnsafe(
-      'SELECT "file_content" FROM "reconciliation_runs" WHERE "id" = $1',
-      row.id,
-    )) as Array<{ file_content: Buffer }>;
-    expect(Buffer.from(rows[0]?.file_content ?? []).equals(payload)).toBe(true);
+  test("reconciliation_runs stores statement bytes in the shared vault, not in a row column", () => {
+    const reconciliationColumns = byTable.get("reconciliation_runs") ?? [];
+    expect(reconciliationColumns.some((column) => column.columnName === "file_content")).toBe(false);
+    expect(reconciliationColumns.some((column) => column.columnName === "storage_object_id")).toBe(true);
+    const storageColumns = byTable.get("storage_objects") ?? [];
+    expect(storageColumns.some((column) => column.columnName === "sha256_hex")).toBe(true);
+    expect(storageColumns.some((column) => column.columnName === "wrapped_dek")).toBe(true);
   });
 
   test("TEXT columns store 10,000 Arabic and English characters without truncation", async () => {

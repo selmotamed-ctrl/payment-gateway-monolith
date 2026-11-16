@@ -132,6 +132,13 @@ const designModelNames = [
   "MerchantReportStudioStatus",
   // Report engine versioning and merchant-owned chrome (schema version 35).
   "MerchantReportChromeSpecRecord",
+  // Shared Object & Asset Storage Engine (schema version 36).
+  "StorageObject",
+  "StorageObjectLock",
+  "StorageObjectAccessLog",
+  "ReportAssetBundleEntry",
+  "DisputeAttachment",
+  "AmlCaseEvidence",
   "OutboxEvent",
   "AuditOutbox",
   "BackupCatalogRun",
@@ -139,6 +146,9 @@ const designModelNames = [
   // CQRS read models.
   "RmMerchantDailyStat",
   "RmRouteDailyVolume",
+  // v38: strict Live/Sandbox execution plane and sandbox control audit.
+  "SystemExecutionPlane",
+  "SandboxSyncAudit",
 ];
 
 describe("prisma schema", () => {
@@ -200,15 +210,21 @@ describe("prisma schema", () => {
     // The automation plan adds one migration per item; the ledger query/index optimisation is applied after them
     // (schema version 25) so its partition function carries both the automation security hardening and the
     // append-only autovacuum settings. The newest migration must be well-formed and set the required version.
-    // The newest migration (schema version 36) makes the merchant header/footer table tenant-safe and sets the
-    // one version the two merged branches agree on. Before it: the journal partition fix (35: fillfactor on
-    // new partitions, safe for concurrent callers), the plan branch's merchant report chrome (35) and report
-    // engine versioning (34), and the report tenant and filing integrity fix (34). The four share two numbers
-    // because they were written on two branches; none is edited (each may already be applied somewhere).
-    expect(ordered.at(-1)).toBe("20261112100000_merchant_chrome_tenant_integrity");
-    const chromeIntegrity = fs.readFileSync(path.join(migrationsDirectory, "20261112100000_merchant_chrome_tenant_integrity", "migration.sql"), "utf8");
+    // The newest migration (schema version 40) makes the merchant header/footer table tenant-safe and sets the
+    // one version the merged branches agree on. The branches numbered their migrations independently
+    // (claude-fixes 34 and 35, the plan branch 34 and 35, master 36 to 39); none is edited (each may already be
+    // applied somewhere), so the value they leave behind depends on which branch a database saw first. The
+    // newest migration is new to every database, runs last and sets 40.
+    expect(ordered.at(-1)).toBe("20261116090000_merchant_chrome_tenant_integrity");
+    const chromeIntegrity = fs.readFileSync(path.join(migrationsDirectory, "20261116090000_merchant_chrome_tenant_integrity", "migration.sql"), "utf8");
     expect(chromeIntegrity).toContain('FOREIGN KEY ("asset_bundle_id", "merchant_id")');
     expect(chromeIntegrity).toContain('REFERENCES "merchant_report_asset_bundles" ("id", "merchant_id")');
+    // The name it had before master was merged must not come back: it would run before master's migrations.
+    expect(ordered).not.toContain("20261112100000_merchant_chrome_tenant_integrity");
+    expect(ordered).toContain("20261114090000_v39_sandbox_studio");
+    expect(ordered).toContain("20261113120000_v38_sandbox_execution_plane");
+    expect(ordered).toContain("20261113090000_storage_engine_hardening");
+    expect(ordered).toContain("20261112000000_v36_enterprise_object_storage_engine");
     expect(ordered).toContain("20261111120000_report_engine_versioning");
     expect(ordered).toContain("20261111130000_merchant_report_chrome");
     expect(ordered).toContain("20261112090000_journal_partition_storage_and_race");
@@ -250,7 +266,7 @@ describe("prisma schema", () => {
     expect(guard).not.toContain("schema_versions");
     const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
     expect(newest).toMatch(new RegExp(`UPDATE "schema_versions"\\s+SET "version" = ${REQUIRED_SCHEMA_VERSION}\\b`));
-    expect(REQUIRED_SCHEMA_VERSION).toBe(36);
+    expect(REQUIRED_SCHEMA_VERSION).toBe(40);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),

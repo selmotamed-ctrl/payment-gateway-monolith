@@ -65,6 +65,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  delete process.env.CORE_BACK_URLS; // CLEANUP_CORE_BACK_URLS
+
   await new Promise<void>((resolve) => edgeServer.close(() => resolve()));
   await core.close();
 });

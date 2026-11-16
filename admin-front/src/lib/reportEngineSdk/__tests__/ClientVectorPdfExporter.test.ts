@@ -45,7 +45,7 @@ describe("RE-T19: paged media document builder", () => {
       renderedFooterHtml: "<div>footer</div>",
       assetOrigin: "https://admin.test",
     });
-    expect(html).toContain('<html lang="ar" dir="rtl">');
+    expect(html).toContain('<html lang="ar" dir="rtl" data-report-preview-theme="light">');
     expect(html).toContain("@page");
     expect(html).toContain("@top-center { content: element(report-running-header); }");
     expect(html).toContain("@bottom-center { content: element(report-running-footer); }");
@@ -58,5 +58,37 @@ describe("RE-T19: paged media document builder", () => {
     // must therefore be absolute same-origin URLs.
     expect(html).toMatch(/src: url\("https?:\/\/[^"]+\/report-engine\/fonts\/plus-jakarta-sans-400-normal\.ttf"\)/);
     expect(html).not.toContain('url("/report-engine/fonts/');
+  });
+
+  it("renders a themed preview canvas with separated, centered paper pages", () => {
+    const html = buildPagedMediaHtmlDocument({
+      bundle,
+      locale: "en",
+      renderedSectionsHtml: "<p>Body</p>",
+      renderedHeaderHtml: "",
+      renderedFooterHtml: "",
+      assetOrigin: "https://admin.test",
+    });
+    expect(html).toContain('data-report-preview-theme="light"');
+    expect(html).toContain("--report-preview-canvas: #F1F5F9");
+    expect(html).toContain("align-items: center");
+    expect(html).toContain("gap: 24px; padding: 32px 20px");
+    expect(html).toContain("border: 1px solid var(--report-preview-page-border)");
+  });
+
+  it("uses a dark preview canvas while keeping printed pages white", () => {
+    const html = buildPagedMediaHtmlDocument({
+      bundle,
+      locale: "en",
+      renderedSectionsHtml: "<p>Body</p>",
+      renderedHeaderHtml: "",
+      renderedFooterHtml: "",
+      previewTheme: "dark",
+      assetOrigin: "https://admin.test",
+    });
+    expect(html).toContain('data-report-preview-theme="dark"');
+    expect(html).toContain("--report-preview-canvas: #18181C");
+    expect(html).toContain("background: #FFFFFF");
+    expect(html).toContain("border: 1px solid var(--report-preview-page-border)");
   });
 });

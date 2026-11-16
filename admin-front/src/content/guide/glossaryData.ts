@@ -3306,5 +3306,15 @@ export const ERROR_CODE_GLOSSARY: GlossaryEntry[] = [
         "code": "TERMINAL_DECLINE",
         "meaningEn": "A definitive decline that must not be retried automatically. The customer needs a different instrument or a new journey.",
         "meaningAr": "رفض قاطع لا يجوز إعادة محاولته تلقائياً. يحتاج العميل أداة مختلفة أو رحلة جديدة."
+    },
+    {
+        "code": "MULTI_NODE_SHARED_STORAGE_REQUIRED",
+        "meaningEn": "The deployment has more than one core node (or a backup daemon on another host) but no OBJECT_STORAGE_NODE. The deploy refuses to run: files must go to the shared vault, never to a core node's local disk.",
+        "meaningAr": "النشر يضم أكثر من عقدة نواة (أو خدمة نسخ احتياطي على مضيف آخر) دون OBJECT_STORAGE_NODE. يرفض النشر العمل: يجب أن تذهب الملفات إلى الخزنة المشتركة لا إلى قرص عقدة النواة."
+    },
+    {
+        "code": "STORAGE_OBJECT_QUARANTINED",
+        "meaningEn": "The file is still in QUARANTINE_PENDING_AV (or was rejected by the scanner). Nobody can download it until the antivirus worker promotes it to ACTIVE.",
+        "meaningAr": "الملف ما زال في QUARANTINE_PENDING_AV (أو رفضه الفاحص). لا يمكن لأحد تنزيله حتى يرقّيه عامل مكافحة الفيروسات إلى ACTIVE."
     }
 ];
