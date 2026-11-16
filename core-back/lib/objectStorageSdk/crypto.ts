@@ -44,8 +44,14 @@ export class InMemoryKeyProvider {
         throw new Error('OBJECT_STORAGE_KEK_KEYRING did not contain a single v<N>:<64-hex> entry')
       }
     } else {
-      // Development-only deterministic fallback. A production deployment must
-      // set OBJECT_STORAGE_KEK_KEYRING through the deploy engine.
+      // A deterministic fallback is a development convenience only. In
+      // production the KEK must be supplied by the deploy engine; otherwise a
+      // leaked DATABASE_URL plus a blob would unwrap every tenant's data.
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+          'OBJECT_STORAGE_KEK_KEYRING must be set in production; refusing the development fallback KEK',
+        )
+      }
       const fallback = createHash('sha256')
         .update(process.env.DATABASE_URL ?? 'pg-monolith-default-dev-kek-v1')
         .digest()

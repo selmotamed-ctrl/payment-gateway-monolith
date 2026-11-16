@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { compileDatasetQueryToSql } from "../../lib/reportEngineSdk/compiler/QueryAstToSqlCompiler";
 import { MERCHANT_REPORT_MODEL_ALLOWLIST, getMerchantReportHostConfig } from "../../engine/reportStudio/merchantHostConfig";
 import { merchantCacheKey } from "../../engine/reportStudio/merchantReportEngine";
+import { buildPaymentGatewayAutocompleteProviders } from "../../engine/reportStudio/autocompleteProviders";
 import { baseReportSpec } from "./helpers";
 
 /**
@@ -104,6 +105,48 @@ describe("the merchant execute route", () => {
     expect(source).toMatch(/merchantScope: \{\s+merchantId,\s+applicationIds,/);
     // An API token is bound to one application by the token itself: only a session carries app_scope_ids.
     expect(source).toContain('if (principal.kind !== "session") return undefined;');
+  });
+});
+
+describe("merchant report autocomplete", () => {
+  // The input pickers of a report (application, payment link, POS terminal) searched the whole merchant: a
+  // user restricted to some applications could look up the names and ids of the others.
+  const capture = () => {
+    const calls: Array<{ sql: string; values: unknown[] }> = [];
+    const db = {
+      executeReadOnlyQuery: async (params: { sql: string; values: unknown[] }) => {
+        calls.push({ sql: params.sql, values: params.values });
+        return { rows: [] };
+      },
+    };
+    return { calls, providers: buildPaymentGatewayAutocompleteProviders(db as never) };
+  };
+  const actor = { userId: "u", role: "MERCHANT_STAFF", authorities: [], merchantId: MERCHANT_ID } as never;
+  const APP_A = "22222222-2222-4222-8222-222222222222";
+
+  test.each([
+    ["applications", "AND id = ANY($3::uuid[])"],
+    ["payment_links", "AND a.id = ANY($3::uuid[])"],
+    ["pos_terminals", "AND a.id = ANY($3::uuid[])"],
+  ])("%s is narrowed to the caller's applications when a scope is given", async (source, clause) => {
+    const { calls, providers } = capture();
+    await providers[source]!.search({ query: "x", limit: 10, actor, dependentValues: { merchantId: MERCHANT_ID, applicationIds: [APP_A] } });
+    expect(calls[0]!.sql).toContain(clause);
+    expect(calls[0]!.values).toEqual(["%x%", MERCHANT_ID, [APP_A], 10]);
+  });
+
+  test("without a scope (or with an empty list) the search covers the whole merchant, as before", async () => {
+    for (const dependentValues of [{ merchantId: MERCHANT_ID }, { merchantId: MERCHANT_ID, applicationIds: [] }]) {
+      const { calls, providers } = capture();
+      await providers.payment_links!.search({ query: "x", limit: 10, actor, dependentValues });
+      expect(calls[0]!.sql).not.toContain("ANY(");
+      expect(calls[0]!.values).toEqual(["%x%", MERCHANT_ID, 10]);
+    }
+  });
+
+  test("the route sets the merchant and the scope itself, after the client's own parameters", async () => {
+    const source = (await Bun.file(new URL("../../api/internal/merchantReportEngine.ts", import.meta.url)).text()).split("\r\n").join("\n");
+    expect(source).toContain("dependentValues: { ...(dependentValues ?? {}), merchantId, applicationIds: applicationScopeOf(request) ?? [] },");
   });
 });
 

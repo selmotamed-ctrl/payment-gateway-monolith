@@ -3,8 +3,8 @@ id: platform.security
 title: Security and mTLS
 status: partial
 confidence: high
-last_verified: 2026-11-13
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-16
+verified_against: 55fcedd+working-tree
 code:
   - core-back/index.ts
   - core-back/api/middleware/mtlsGuard.ts
@@ -58,7 +58,7 @@ tests:
 gaps:
   - Session JWTs are stateless; there is no session revocation table and no per-call MFA claim enforcement.
   - API-token scopes are stored but not enforced per merchant endpoint.
-  - Merchant internal routes do not use per-route authority guards.
+  - Merchant internal routes use per-route authority guards on the sensitive surfaces (2026-11-16 review); API-token scopes are only enforced on `/external/*`.
   - Google OIDC login returns 501.
   - Storage mTLS certificates are generated but not consumed by PostgreSQL/Redis.
   - The backup daemon certificate environment names are not aligned with core.
@@ -194,7 +194,9 @@ Not every authenticated admin route has a specific authority. `GET /stats/overvi
 
 The admin edge's `requireAuthorities` parses unverified JWT claims only to hide/deny screens early. It normalizes a small role-to-authority alias map for `COMPLIANCE`/`MLRO`. Core is the authority.
 
-Merchant internal routes do not call `requireAuthorities`. They authenticate, require a `merchantId` binding, and use `merchantIdOf(request)` to scope queries. API-token scopes are stored but not checked per endpoint. `requireMerchantScope` is exported from the merchant router but has no production caller. This is a material authorization gap relative to the design.
+Merchant internal routes authenticate, require a `merchantId` binding, and use `merchantIdOf(request)` to scope queries. The sensitive surfaces now call `assertMerchantAuthority` per route (wallets, applications, links, payments, disputes, cash-outs, users, tokens, credential sets, POS, onboarding, webhooks and the report engine), and application-scoped users are narrowed with `withAppScope` / `assertApplicationInScope`. API-token scopes are still a separate, narrower catalogue enforced on `/external/*`; `requireMerchantScope` remains exported for compatibility but has no production caller. As of 2026-11-16, all merchant reads and writes reviewed in the security sweep carry a route guard; new routes must follow the deny-by-default pattern.
+
+The 2026-11-16 sweep also tightened the staff surface: AML mutations (match disposition, case evidence, case proposal, rule creation) require `aml:write` / `compliance:write` (or the COMPLIANCE/MLRO role) rather than the read-level confidential guard, gateway-version configuration writes require the version to be `DRAFT`, operator-case bodies are redacted before they leave core, credential-set and gateway responses no longer select ciphertext columns, and the object-storage KEK has no deterministic production fallback.
 
 Checkout internal routes are intentionally unauthenticated: the long link key and attempt id are capabilities, and the payer must not need an account. The checkout edge validates the shape and forbids monetary fields; core re-validates and resolves the amount from `payment_links.amount`.
 

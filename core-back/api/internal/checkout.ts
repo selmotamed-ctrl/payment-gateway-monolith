@@ -1908,6 +1908,7 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
           .map(([key, value]) => [key.toLowerCase(), value as string]),
       ),
       sourceIp,
+      environment,
     });
     verified = true;
     processingResult = result.status;

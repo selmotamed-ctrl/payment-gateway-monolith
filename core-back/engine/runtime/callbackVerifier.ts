@@ -13,6 +13,11 @@ export interface InboundCallbackRequest {
   rawBody: Buffer;
   headers: Record<string, string>;
   sourceIp: string;
+  /**
+   * The environment of the inbound URL that received the callback. When set,
+   * a callback is accepted only for an attempt in the same environment.
+   */
+  environment?: "LIVE" | "SANDBOX";
 }
 
 interface CredentialEntry {
@@ -108,11 +113,10 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
     const payload = parsePayload(request.rawBody, String(channel.bodyFormat ?? "JSON"));
     const verifyMethod = String(channel.verifyMethod ?? "NONE_PLUS_INQUIRY");
     const keyedMethod = verifyMethod !== "IP_ONLY" && verifyMethod !== "NONE_PLUS_INQUIRY";
+    const profile = channel.cryptoProfile as Record<string, unknown> | null;
     const toleranceRaw = Number(channel.timestampToleranceSec ?? 300);
     const tolerance = Number.isFinite(toleranceRaw) ? toleranceRaw : 300;
-    const canonicalization = String(
-      (channel.cryptoProfile as Record<string, unknown> | null)?.canonicalizationMode ?? "RAW_BODY",
-    );
+    const canonicalization = String(profile?.canonicalizationMode ?? "RAW_BODY");
     const timestamp = this.readTimestamp(payload, request.headers, channel, canonicalization);
     if (timestamp !== null) {
       if (tolerance > 0) {
@@ -146,7 +150,22 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
       return { verified: false, reason: "INBOUND_ATTEMPT_UNKNOWN" };
     }
 
+    // The inbound URL names the environment. Binding the callback to it means
+    // a LIVE-signed body posted to the SANDBOX URL (or the reverse) is refused
+    // even when the same rail signing material is used by both.
+    if (request.environment && attempt.env !== request.environment) {
+      return { verified: false, reason: "INBOUND_ENVIRONMENT_MISMATCH" };
+    }
+
     if (verifyMethod === "IP_ONLY") {
+      // An IP-only channel with no allowlist would accept every source. Fail
+      // closed: the operator must name the rail's egress addresses.
+      const allowlist = Array.isArray(channel.ipAllowlist)
+        ? (channel.ipAllowlist as unknown[]).map((entry) => String(entry)).filter(Boolean)
+        : [];
+      if (allowlist.length === 0) {
+        return { verified: false, reason: "INBOUND_IP_ALLOWLIST_MISSING" };
+      }
       return {
         verified: true,
         attemptId: attempt.id,
@@ -168,13 +187,18 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
       return { verified: false, reason: "INBOUND_SIGNATURE_MISSING" };
     }
 
-    const profile = channel.cryptoProfile as Record<string, unknown> | null;
-    const secrets = await this.resolveSecrets(attempt.credentialSetId);
-    if (secrets.length === 0) {
+    // Verify with the key the crypto profile names, not with every entry the
+    // (possibly merchant-supplied) credential set contains. Without a name the
+    // legacy behaviour tries every entry.
+    const secretKeyRef = typeof profile?.secretKeyRef === "string" && profile.secretKeyRef.length > 0
+      ? profile.secretKeyRef
+      : null;
+    const resolved = await this.resolveSecrets(attempt.credentialSetId, secretKeyRef);
+    if (resolved.entries.length === 0) {
       return { verified: false, reason: "INBOUND_CREDENTIAL_MISSING" };
     }
 
-    const verified = secrets.some((secret) =>
+    const verified = resolved.entries.some((secret) =>
       this.verifyWithSecret({
         secret,
         profile,
@@ -197,15 +221,19 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
       reference: correlation,
       amount: this.deriveAmount(payload),
       currency: this.deriveCurrency(payload),
-      environment: attempt.env,
+      environment: request.environment ?? attempt.env,
     };
 
     return {
       verified: true,
       attemptId: attempt.id,
       evidence,
-      // Safer default: when the channel does not say, ask the gateway.
-      mustInquire: channel.mustInquire === undefined || channel.mustInquire === null
+      // Safer default: when the channel does not say, ask the gateway. A
+      // merchant-owned credential set can be signed by the merchant itself, so
+      // it also forces an independent inquiry before any settlement decision.
+      mustInquire: (resolved.merchantOwned
+        || channel.mustInquire === undefined
+        || channel.mustInquire === null)
         ? true
         : Boolean(channel.mustInquire),
     };
@@ -286,12 +314,15 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
     }
   }
 
-  private async resolveSecrets(credentialSetId: string): Promise<CredentialEntry[]> {
+  private async resolveSecrets(
+    credentialSetId: string,
+    secretKeyRef: string | null = null,
+  ): Promise<{ entries: CredentialEntry[]; merchantOwned: boolean }> {
     const credentialSet = await this.client.credentialSet.findUnique({
       where: { id: credentialSetId },
     });
     if (!credentialSet) {
-      return [];
+      return { entries: [], merchantOwned: false };
     }
     const entries = Array.isArray(credentialSet.entriesCiphertext)
       ? credentialSet.entriesCiphertext as CredentialEntry[]
@@ -299,6 +330,9 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
     const resolved: CredentialEntry[] = [];
     for (const entry of entries) {
       if (!entry || typeof entry.value !== "string") {
+        continue;
+      }
+      if (secretKeyRef && entry.key !== secretKeyRef) {
         continue;
       }
       let value = entry.value;
@@ -311,7 +345,10 @@ export class PrismaCallbackVerifier implements CallbackVerifier {
       }
       resolved.push({ ...entry, value });
     }
-    return resolved;
+    return {
+      entries: resolved,
+      merchantOwned: String(credentialSet.ownerType ?? "") === "MERCHANT",
+    };
   }
 
   private readSignature(

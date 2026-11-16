@@ -247,6 +247,24 @@ const assertConfidential = (request: Request): void => {
   }
 };
 
+/**
+ * Reading confidential AML material needs `aml:read`; changing it (a match
+ * disposition, an evidence upload, a rule) needs a write authority. The
+ * confidential guard alone is read-level and must never authorize a mutation.
+ */
+const assertAmlWrite = (request: Request): void => {
+  assertConfidential(request);
+  const principal = principalOf(request);
+  const role = (principal.role ?? "").toUpperCase();
+  if (role === "COMPLIANCE" || role === "MLRO") {
+    return;
+  }
+  if (principal.authorities.some((authority) => authority === "*" || authority === "aml:write" || authority === "compliance:write")) {
+    return;
+  }
+  throw new ApiError(403, "AML_WRITE_AUTHORITY_REQUIRED", "Changing AML material requires a compliance write authority");
+};
+
 const reportingPayloadCipher = new VaultContextCipher(vault, "reporting-payload");
 const reportingXmlCipher = new VaultContextCipher(vault, "reporting-xml");
 const reportingXlsxCipher = new VaultContextCipher(vault, "reporting-xlsx");
@@ -7287,7 +7305,7 @@ router.get("/aml/screenings/:id", async (request: Request, response: Response) =
 });
 
 router.post("/aml/matches/:id/disposition", async (request: Request, response: Response) => {
-  assertConfidential(request);
+  assertAmlWrite(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
     z
@@ -7642,7 +7660,7 @@ router.get("/aml/cases/:id", async (request: Request, response: Response) => {
 });
 
 router.post("/aml/cases/:id/propose", async (request: Request, response: Response) => {
-  assertConfidential(request);
+  assertAmlWrite(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
     z.object({
@@ -7706,7 +7724,7 @@ router.get("/aml/cases/:id/evidence", async (request: Request, response: Respons
 });
 
 router.post("/aml/cases/:id/evidence", async (request: Request, response: Response) => {
-  assertConfidential(request);
+  assertAmlWrite(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const amlCase = await client.amlCase.findUnique({ where: { id }, select: { id: true, subjectType: true, subjectId: true } });
   if (!amlCase) throw new ApiError(404, "AML_CASE_NOT_FOUND", "The AML case does not exist");
@@ -7953,7 +7971,7 @@ router.get("/aml/rules/summary/export", async (request: Request, response: Respo
 
 
 router.post("/aml/rules", async (request: Request, response: Response) => {
-  assertConfidential(request);
+  assertAmlWrite(request);
   const body = parseOrThrow(
     z
       .object({
@@ -10418,18 +10436,21 @@ const operatorCaseReference = (entry: {
   return { value: entry.id, source: "CASE_ID" };
 };
 
-const bytesPreview = (value: unknown, limit = 64 * 1024): string => {
+/** A short, redacted preview of an untrusted inbound body (never the raw PAN/PII). */
+const bytesPreview = (value: unknown, limit = 2048): string => {
   if (!value) return "";
+  let buffer: Buffer;
   if (value instanceof Uint8Array) {
-    return Buffer.from(value).toString("utf8").slice(0, limit);
+    buffer = Buffer.from(value);
+  } else if (Buffer.isBuffer(value)) {
+    buffer = value;
+  } else if (Array.isArray(value)) {
+    buffer = Buffer.from(Uint8Array.from(value as number[]));
+  } else {
+    buffer = Buffer.from(String(value), "utf8");
   }
-  if (Buffer.isBuffer(value)) {
-    return value.toString("utf8").slice(0, limit);
-  }
-  if (Array.isArray(value)) {
-    return Buffer.from(Uint8Array.from(value as number[])).toString("utf8").slice(0, limit);
-  }
-  return String(value).slice(0, limit);
+  const text = buffer.subarray(0, limit).toString("utf8");
+  return Buffer.from(vault.redactText(text), "utf8").subarray(0, limit).toString("utf8");
 };
 
 const flattenOperatorCase = (entry: any): Record<string, unknown> => {
@@ -12110,12 +12131,44 @@ router.get("/gateways/:id", async (request: Request, response: Response) => {
   const { id } = parseOrThrow(idSchema, request.params);
   const gateway = await client.gateway.findUnique({
     where: { id },
-    include: { versions: true, credentialSets: true },
+    include: {
+      // The snapshot ciphertext and the credential ciphertext are secrets;
+      // selecting the scalars explicitly keeps them out of this response.
+      versions: {
+        select: {
+          id: true,
+          createdAt: true,
+          updatedAt: true,
+          gatewayId: true,
+          versionNumber: true,
+          contentHash: true,
+          state: true,
+          createdById: true,
+          approvalRequestId: true,
+          changeNote: true,
+          rollbackVersionId: true,
+        },
+      },
+      credentialSets: {
+        select: {
+          id: true,
+          env: true,
+          ownerType: true,
+          ownerMerchantId: true,
+          externalMerchantId: true,
+          settlementTarget: true,
+          status: true,
+          lastVerifiedAt: true,
+          expiresAt: true,
+          gateway: { select: { code: true } },
+        },
+      },
+    },
   });
   if (!gateway) {
     throw new ApiError(404, "GATEWAY_NOT_FOUND", "The gateway does not exist");
   }
-  response.json({ gateway });
+  response.json({ gateway: { ...gateway, credentialSets: gateway.credentialSets.map((entry) => credentialSetView(entry)) } });
 });
 
 router.post("/gateways", async (request: Request, response: Response) => {
@@ -12656,10 +12709,29 @@ router.get("/credential-sets", async (request: Request, response: Response) => {
     defaultSort: { createdAt: "desc" },
   });
   const [credentialSets, total] = await Promise.all([
-    client.credentialSet.findMany({ where: built.where as never, orderBy: built.orderBy as never, include: { gateway: { select: { code: true } } }, skip: built.skip, take: built.take }),
+    client.credentialSet.findMany({
+      where: built.where as never,
+      orderBy: built.orderBy as never,
+      // Never select the ciphertext columns: the secrets are write-only and the
+      // list view is the same one the detail route uses.
+      select: {
+        id: true,
+        env: true,
+        ownerType: true,
+        ownerMerchantId: true,
+        externalMerchantId: true,
+        settlementTarget: true,
+        status: true,
+        lastVerifiedAt: true,
+        expiresAt: true,
+        gateway: { select: { code: true } },
+      },
+      skip: built.skip,
+      take: built.take,
+    }),
     client.credentialSet.count({ where: built.where as never }),
   ]);
-  response.json(listResponse("credentialSets", credentialSets, total, built));
+  response.json(listResponse("credentialSets", credentialSets.map((entry) => credentialSetView(entry)), total, built));
 });
 
 router.get("/credential-sets/:id", async (request: Request, response: Response) => {
@@ -12881,6 +12953,23 @@ const loadVersion = async (versionId: string) => {
     throw new ApiError(404, "GATEWAY_VERSION_NOT_FOUND", "The gateway version does not exist");
   }
   return version;
+};
+
+/**
+ * A version's configuration may only change while it is a DRAFT. Editing a
+ * LIVE (or submitted) row in place would apply un-gated changes immediately and
+ * would invalidate the evidence the checker approved; the wizard clones a DRAFT
+ * instead.
+ */
+const assertVersionEditable = (version: { id: string; state: string }): void => {
+  if (version.state !== "DRAFT") {
+    throw new ApiError(
+      409,
+      "GATEWAY_VERSION_NOT_EDITABLE",
+      "Only a DRAFT gateway version can be edited; clone it as a new version",
+      { state: version.state },
+    );
+  }
 };
 
 const asStringArray = (value: unknown): string[] =>
@@ -13222,7 +13311,7 @@ router.get("/gateway-versions/:vid", async (request: Request, response: Response
 router.put("/gateway-versions/:vid/environments", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:write"]);
   const { vid } = parseOrThrow(versionParamsSchema, request.params);
-  await loadVersion(vid);
+  assertVersionEditable(await loadVersion(vid));
   const body = parseOrThrow(
     z
       .object({
@@ -13261,7 +13350,7 @@ router.put("/gateway-versions/:vid/environments", async (request: Request, respo
 router.put("/gateway-versions/:vid/auth", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:write", "credential:write"]);
   const { vid } = parseOrThrow(versionParamsSchema, request.params);
-  await loadVersion(vid);
+  assertVersionEditable(await loadVersion(vid));
   const body = parseOrThrow(
     z
       .object({
@@ -13305,7 +13394,7 @@ router.put("/gateway-versions/:vid/auth", async (request: Request, response: Res
 router.put("/gateway-versions/:vid/settings", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:write"]);
   const { vid } = parseOrThrow(versionParamsSchema, request.params);
-  await loadVersion(vid);
+  assertVersionEditable(await loadVersion(vid));
   const body = parseOrThrow(
     z
       .object({
@@ -13342,7 +13431,7 @@ router.put("/gateway-versions/:vid/settings", async (request: Request, response:
 router.put("/gateway-versions/:vid/crypto-profiles", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:write", "security:write"]);
   const { vid } = parseOrThrow(versionParamsSchema, request.params);
-  await loadVersion(vid);
+  assertVersionEditable(await loadVersion(vid));
   const body = parseOrThrow(
     z
       .object({
@@ -13606,7 +13695,7 @@ export const saveGatewayVersionFlows = async (
 router.put("/gateway-versions/:vid/flows", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:write"]);
   const { vid } = parseOrThrow(versionParamsSchema, request.params);
-  await loadVersion(vid);
+  assertVersionEditable(await loadVersion(vid));
   const body = parseOrThrow(gatewayFlowsSchema, request.body);
   const flows = await saveGatewayVersionFlows(vid, body.flows);
   response.json({ flows });
@@ -13615,7 +13704,7 @@ router.put("/gateway-versions/:vid/flows", async (request: Request, response: Re
 router.put("/gateway-versions/:vid/channels", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:write", "security:write"]);
   const { vid } = parseOrThrow(versionParamsSchema, request.params);
-  await loadVersion(vid);
+  assertVersionEditable(await loadVersion(vid));
   const body = parseOrThrow(
     z
       .object({
@@ -13692,7 +13781,7 @@ router.put("/gateway-versions/:vid/channels", async (request: Request, response:
 router.put("/gateway-versions/:vid/status-rules", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:write"]);
   const { vid } = parseOrThrow(versionParamsSchema, request.params);
-  await loadVersion(vid);
+  assertVersionEditable(await loadVersion(vid));
   const body = parseOrThrow(
     z
       .object({
@@ -13745,7 +13834,7 @@ router.put("/gateway-versions/:vid/status-rules", async (request: Request, respo
 router.put("/gateway-versions/:vid/error-maps", async (request: Request, response: Response) => {
   requireAuthorities(request, ["gateway:write"]);
   const { vid } = parseOrThrow(versionParamsSchema, request.params);
-  await loadVersion(vid);
+  assertVersionEditable(await loadVersion(vid));
   const body = parseOrThrow(
     z
       .object({
@@ -14605,6 +14694,7 @@ router.put("/gateway-versions/:vid/rollback-version", async (request: Request, r
   requireAuthorities(request, ["gateway:write"]);
   const { vid } = parseOrThrow(versionParamsSchema, request.params);
   const version = await loadVersion(vid);
+  assertVersionEditable(version);
   const body = parseOrThrow(
     z.object({ versionId: z.string().min(1).max(64) }).strict(),
     request.body,

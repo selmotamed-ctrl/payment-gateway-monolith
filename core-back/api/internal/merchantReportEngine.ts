@@ -756,7 +756,9 @@ router.get("/report-engine/autocomplete/:sourceKey", async (request: Request, re
     query: String(request.query.q ?? ""),
     limit: Math.min(Number(request.query.limit ?? 20) || 20, 50),
     actor: await actorOf(request),
-    dependentValues: { ...(dependentValues ?? {}), merchantId },
+    // Both keys are set by the server, after the client's `dependent`: the merchant is the caller's, and a
+    // user restricted to some applications only finds those (their links and terminals included).
+    dependentValues: { ...(dependentValues ?? {}), merchantId, applicationIds: applicationScopeOf(request) ?? [] },
   });
   response.json({ items });
 });
