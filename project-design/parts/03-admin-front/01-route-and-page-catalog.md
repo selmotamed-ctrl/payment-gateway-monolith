@@ -87,7 +87,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 
 | # | Path | Name | UI authority / role | Help | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | `/dashboard` | `Dashboard` | `[]` (authenticated only) | 1 / 1.1 | Live platform health, attempts/volume-by-state bar charts, queues, recent activity, snapshot export. |
+| 1 | `/dashboard` | `Dashboard` | `[]` (authenticated only) | 1 / 1.1 | Live platform health, attempts/volume-by-state bar charts, queues, recent activity, snapshot export; Open Action Queues and Unknown Backlog are all-time, not period-filtered. |
 | 2 | `/join-requests` | `JoinRequests` | `joinrequests.review` | 9 / 9.1 | Onboarding application queue, SLA health, summary export. |
 | 3 | `/join-requests/new` | `JoinRequestNew` | `joinrequests.review` | 9 / 9.1 via parent | Admin-assisted onboarding package creation. |
 | 4 | `/join-requests/:id` | `JoinRequestDetail` | `joinrequests.review` | 9 / 9.1 | Review profile, owners, documents, checklist, decisions, audit. |
@@ -344,3 +344,7 @@ A "Sandbox Live Mirror" section maps `/sandbox/mirror/*` to the real admin pages
 ## Dashboard gross volume metric (2026-11-16)
 
 The Dashboard **Gross Volume** card sums `payment_attempts.total_charged_amount` only for attempts created in the selected period with `status = SUCCEEDED` and `currency = LYD`. The card sub-label now shows the number of succeeded LYD attempts behind that figure. The snapshot export carries the same `gross_volume` value plus `gross_volume_attempts`. Before this change the metric summed every attempt in the success status set (`SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `DISPUTED`) across every currency while the card always displayed “LYD”. Success Rate, the Attempts By State chart and the Volume chart keep their existing definitions (`core-back/api/internal/admin.ts` `GET /stats/overview`).
+
+## Dashboard all-time queue metrics (2026-11-16)
+
+**Open Action Queues** is a current-state count, not a period count: pending approvals (`DRAFT`/`PENDING_REVIEW`), open operator cases (`OPEN`/`IN_PROGRESS`/`PENDING_CHECKER`), open join requests and open AML cases (`OPEN`/`IN_REVIEW`/`PENDING_CHECKER`/`FROZEN`/`ESCALATED_STR`). Its sub-label now names all four sources and carries **All time (not period-filtered)**. **Unknown Backlog** counts every `UNKNOWN` payment attempt, so its sub-label carries the same all-time note before the oldest age. Only Gross Volume, Success Rate, the Attempts By State chart, the Volume chart and Reconciliation use the selected period.

@@ -22,6 +22,7 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatPlainNumber } from "@/utils/money";
 import { showSnackBar } from "@/utils/snackBar";
+import { buildOpenActionQueueSubLabel, buildUnknownBacklogSubLabel } from "./metricLabels";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetaPill } from "@/components/ui/MetaPill";
@@ -290,7 +291,15 @@ const DashboardPage = dc(() => {
                 key: "queues",
                 label: t("Open Action Queues"),
                 value: formatPlainNumber(openQueues),
-                subLabel: `${formatPlainNumber(data?.approvalPending ?? 0)} ${t("approvals")} · ${formatPlainNumber(data?.operatorOpen ?? 0)} ${t("operator cases")}`,
+                subLabel: buildOpenActionQueueSubLabel(
+                    {
+                        approvals: data?.approvalPending ?? 0,
+                        operatorCases: data?.operatorOpen ?? 0,
+                        joinRequests: data?.joinRequestOpen ?? 0,
+                        amlCases: data?.amlOpen ?? 0,
+                    },
+                    t,
+                ),
             },
             {
                 key: "unknown",
@@ -298,7 +307,7 @@ const DashboardPage = dc(() => {
                 value: formatPlainNumber(data?.unknownBacklog ?? 0),
                 badge: (data?.unknownBacklog ?? 0) > 0 ? t("Needs review") : t("Clear"),
                 badgeTone: (data?.unknownBacklog ?? 0) > 0 ? "warning" : "success",
-                subLabel: `${formatDuration(data?.unknownOldestAgeSeconds ?? 0)} ${t("oldest")}`,
+                subLabel: buildUnknownBacklogSubLabel(formatDuration(data?.unknownOldestAgeSeconds ?? 0), t),
             },
         ];
     });

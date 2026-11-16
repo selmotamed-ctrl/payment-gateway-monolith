@@ -53,6 +53,7 @@ tests:
   - deploy/object-storage-daemon/test/sdk-mtls.test.ts
   - fake-rails-back/test/security.test.ts
   - admin-front/src/pages/disputes/__tests__/queryFilters.test.ts
+  - admin-front/src/pages/dashboard/__tests__/metricLabels.test.ts
   - tests/unit/frontend-security-admin.test.ts
   - tests/unit/frontend-security-checkout.test.ts
   - tests/unit/frontend-security-merchant.test.ts
@@ -549,6 +550,10 @@ These are development/CI tests only; no production-time test job or test endpoin
 ## Disputes attempt-link regression (2026-11-16)
 
 - `admin-front/src/pages/disputes/__tests__/queryFilters.test.ts` — route query normalization (including repeated keys), attempt/merchant deep-link seeding, merchant-only seeding, and Open/Resolved/All scope preservation.
+
+## Dashboard all-time metric-label regression (2026-11-16)
+
+- `admin-front/src/pages/dashboard/__tests__/metricLabels.test.ts` — Open Action Queues names pending approvals, operator cases, join requests and AML cases followed by the all-time note; Unknown Backlog carries the all-time note before the oldest age.
 
 ## v39 Sandbox Studio and mirror suites (2026-11-13)
 

@@ -500,6 +500,7 @@ export const appCatalogue: Record<string, [string, string]> = {
     "Light": ["Light", "فاتح"],
     "Dark": ["Dark", "داكن"],
     "Unknown Backlog": ["Unknown Backlog", "قائمة الحالات غير المعروفة"],
+    "All time (not period-filtered)": ["All time (not period-filtered)", "كل الأوقات (غير مرتبطة بالفترة المحددة)"],
     "Webhook Inbox Lag": ["Webhook Inbox Lag", "تأخر صندوق الويب هوك"],
     "A verification code was sent to your phone. You can sign in once it is confirmed.": ["A verification code was sent to your phone. You can sign in once it is confirmed.", "تم إرسال رمز تحقق إلى هاتفك. يمكنك تسجيل الدخول بعد تأكيده."],
     "Accept OTP, redirect, QR, wallet and card rails through a single integration with transparent pricing and instant settlement visibility.": ["Accept OTP, redirect, QR, wallet and card rails through a single integration with transparent pricing and instant settlement visibility.", "استقبل مسارات التحقق والبطاقات والمحفظة ورموز QR عبر تكامل واحد بأسعار شفافة ورؤية فورية للتسوية."],
