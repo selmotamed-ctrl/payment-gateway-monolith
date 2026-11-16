@@ -60,6 +60,7 @@ type Overview = {
     attemptsSucceeded?: number;
     successRate?: number;
     grossVolume?: string;
+    grossVolumeAttempts?: number;
     unknownBacklog?: number;
     unknownOldestAgeSeconds?: number;
     openCircuitBreakers?: number;
@@ -207,6 +208,7 @@ const DashboardPage = dc(() => {
                 ["period", String(data.period ?? period.value)],
                 ["since", String(data.since ?? "")],
                 ["gross_volume", String(data.grossVolume ?? "0.0000")],
+                ["gross_volume_attempts", String(data.grossVolumeAttempts ?? 0)],
                 ["attempts_total", String(data.attemptsTotal ?? 0)],
                 ["attempts_succeeded", String(data.attemptsSucceeded ?? 0)],
                 ["success_rate_percent", String(data.successRate ?? 0)],
@@ -274,7 +276,7 @@ const DashboardPage = dc(() => {
                 label: t("Gross Volume"),
                 moneyAmount: data?.grossVolume ?? "0",
                 currency: "LYD",
-                subLabel: `${formatPlainNumber(data?.attemptsTotal ?? 0)} ${t("attempts")}`,
+                subLabel: `${formatPlainNumber(data?.grossVolumeAttempts ?? 0)} ${t("succeeded")} · LYD`,
             },
             {
                 key: "success",

@@ -1075,6 +1075,7 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     merchantsActive,
     merchantsPending,
     attemptsByStateRows,
+    grossVolumeAggregate,
     unknownAggregate,
     approvalPendingRows,
     joinRequestOpen,
@@ -1093,6 +1094,11 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     client.paymentAttempt.groupBy({
       by: ["status"],
       where: { createdAt: { gte: since } },
+      _count: { _all: true },
+      _sum: { totalChargedAmount: true },
+    }),
+    client.paymentAttempt.aggregate({
+      where: { createdAt: { gte: since }, status: "SUCCEEDED", currency: "LYD" },
       _count: { _all: true },
       _sum: { totalChargedAmount: true },
     }),
@@ -1135,7 +1141,8 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
   const volumeByState: Record<string, string> = {};
   let attemptsTotal = 0;
   let attemptsSucceeded = 0;
-  let grossVolume = decimal(0);
+  const grossVolume = decimal(grossVolumeAggregate._sum.totalChargedAmount ?? 0);
+  const grossVolumeAttempts = grossVolumeAggregate._count._all;
   const successStatuses = new Set<string>(merchantSuccessStatuses);
   for (const row of attemptsByStateRows) {
     const count = row._count._all;
@@ -1145,7 +1152,6 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     volumeByState[String(row.status)] = charged.toFixed(4);
     if (successStatuses.has(String(row.status))) {
       attemptsSucceeded += count;
-      grossVolume = grossVolume.plus(charged);
     }
   }
 
@@ -1192,6 +1198,7 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     attemptsSucceeded,
     successRate: attemptsTotal === 0 ? 0 : Number(((attemptsSucceeded / attemptsTotal) * 100).toFixed(2)),
     grossVolume: grossVolume.toFixed(4),
+    grossVolumeAttempts,
     unknownBacklog: (unknownAggregate._count as { _all: number })._all,
     unknownOldestAgeSeconds: unknownOldest
       ? Math.max(0, Math.round((now.getTime() - unknownOldest.getTime()) / 1000))
