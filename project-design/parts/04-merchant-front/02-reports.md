@@ -3,7 +3,7 @@ id: merchant-ui.reports
 title: Merchant Reports
 status: implemented
 confidence: high
-last_verified: 2026-11-12
+last_verified: 2026-11-16
 verified_against: working-tree
 code:
   - merchant-front/src/pages/reports/index.tsx
@@ -94,6 +94,8 @@ The merchant client SDK mirror receives the same theme-aware Paged.js preview as
 ## Shared chrome layout and accent bands (2026-11-11)
 
 The merchant portal client SDK mirror receives the same chrome root-fill, `accent_band`, `defaultCurrency` and localized chrome-variable changes as the admin portal. Merchant prints using platform chrome therefore get the same full-height header/footer and multi-color band.
+
+The shared paged-media builder also adds a 4 mm page-content vertical comfort pad when the running header and/or footer is rendered: the top/bottom `@page` margins grow by 4 mm (top for a header, bottom for a footer, both when both are rendered), so Paged.js applies the gap on every page. A first page that hides the chrome through `show_on_first_page=false` restores the unpadded margin with `@page :first`; no chrome keeps the spec's exact margins. This is the byte-identical admin/mirror code.
 
 
 ## 9. Merchant branding chrome and migration (2026-11-11)

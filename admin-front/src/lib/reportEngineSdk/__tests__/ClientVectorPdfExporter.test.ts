@@ -91,4 +91,51 @@ describe("RE-T19: paged media document builder", () => {
     expect(html).toContain("background: #FFFFFF");
     expect(html).toContain("border: 1px solid var(--report-preview-page-border)");
   });
+
+  it("adds page-content vertical padding when a header and footer are rendered", () => {
+    const html = buildPagedMediaHtmlDocument({
+      bundle,
+      locale: "en",
+      renderedSectionsHtml: "<p>Body</p>",
+      renderedHeaderHtml: "<div>Header</div>",
+      renderedFooterHtml: "<div>Footer</div>",
+      assetOrigin: "https://admin.test",
+    });
+    // 26mm top + 4mm comfort pad, 24mm bottom + 4mm comfort pad.
+    expect(html).toContain("margin: 30mm 14mm 28mm 14mm;");
+    expect(html).toContain('data-report-margin-top="30"');
+    expect(html).toContain('data-report-margin-bottom="28"');
+  });
+
+  it("keeps the original page margins when no chrome is rendered", () => {
+    const html = buildPagedMediaHtmlDocument({
+      bundle,
+      locale: "en",
+      renderedSectionsHtml: "<p>Body</p>",
+      renderedHeaderHtml: "",
+      renderedFooterHtml: "",
+      assetOrigin: "https://admin.test",
+    });
+    expect(html).toContain("margin: 26mm 14mm 24mm 14mm;");
+    expect(html).toContain('data-report-margin-top="26"');
+    expect(html).toContain('data-report-margin-bottom="24"');
+  });
+
+  it("restores the unpadded margin on a first page that hides the chrome", () => {
+    const hiddenOnFirstPage = {
+      ...bundle,
+      resolvedHeaderChrome: { chrome: { show_on_first_page: false }, template: { scoped_css: "" } },
+      resolvedFooterChrome: { chrome: { show_on_first_page: false }, template: { scoped_css: "" } },
+    } as unknown as ReportExecutionBundle;
+    const html = buildPagedMediaHtmlDocument({
+      bundle: hiddenOnFirstPage,
+      locale: "en",
+      renderedSectionsHtml: "<p>Body</p>",
+      renderedHeaderHtml: "<div>Header</div>",
+      renderedFooterHtml: "<div>Footer</div>",
+      assetOrigin: "https://admin.test",
+    });
+    expect(html).toContain("@page :first { margin-top: 26mm; @top-center { content: none; } }");
+    expect(html).toContain("@page :first { margin-bottom: 24mm; @bottom-center { content: none; } }");
+  });
 });
