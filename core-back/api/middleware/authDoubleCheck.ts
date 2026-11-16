@@ -157,18 +157,90 @@ interface MirrorUserRecord {
   merchantId: string | null;
   authoritiesMap: unknown;
   appScopeIds: unknown;
+  updatedAt: Date;
 }
 
+const MIRROR_CHECKER_ROLES = new Set(["SECURITY_ADMIN", "FINANCE", "MLRO", "COMPLIANCE"]);
+
+export interface SandboxMirrorClaims {
+  role: string;
+  merchantId: string | null;
+  authorities: string[];
+  appScopeIds: string[];
+  issuedAt?: number | null;
+}
+
+export interface SandboxMirrorSnapshot {
+  status: string;
+  role: string;
+  merchantId: string | null;
+  authoritiesMap: unknown;
+  appScopeIds: unknown;
+  updatedAt: Date;
+}
+
+/**
+ * A mirror row is refreshed only from a token issued after the row was last
+ * written, and only while the local row is active. This lets a new login apply
+ * changed authorities without allowing an older token to overwrite a newer
+ * mirror (for example the stale token that exposed this bug).
+ */
+export const shouldRefreshSandboxMirror = (
+  existing: SandboxMirrorSnapshot,
+  claims: SandboxMirrorClaims,
+): boolean => {
+  const issuedAtMs = typeof claims.issuedAt === "number" ? claims.issuedAt * 1000 : 0;
+  if (issuedAtMs <= existing.updatedAt.getTime()) return false;
+  if (existing.status !== "ACTIVE") return false;
+  const authorities = parseAuthorities(existing.authoritiesMap);
+  const appScopeIds = Array.isArray(existing.appScopeIds) ? existing.appScopeIds.map(String) : [];
+  const sameAuthorities = authorities.length === claims.authorities.length
+    && authorities.every((authority, index) => authority === claims.authorities[index]);
+  const sameScopes = appScopeIds.length === claims.appScopeIds.length
+    && appScopeIds.every((scope, index) => scope === claims.appScopeIds[index]);
+  return existing.role !== claims.role
+    || existing.merchantId !== claims.merchantId
+    || !sameAuthorities
+    || !sameScopes;
+};
+
+/**
+ * The Sandbox plane is a separate database, so it keeps a local mirror of the
+ * staff/merchant identity. The first Sandbox request creates the mirror from the
+ * signed session claims; later requests must refresh it when the user signs in
+ * again with a newer token. Without this refresh a mirror created from a token
+ * issued before an authority change keeps the old authorities forever, even
+ * though the Live core re-reads its user table.
+ *
+ * Only a token issued after the mirror row's `updatedAt` may replace the local
+ * values. A stale token therefore cannot downgrade a mirror that was already
+ * refreshed from a newer login.
+ */
 const ensureSandboxMirrorUser = async (claims: {
   sub: string;
   role: string;
   merchantId: string | null;
   authorities: string[];
   appScopeIds: string[];
+  issuedAt?: number | null;
 }): Promise<MirrorUserRecord | null> => {
   if (!isSandboxPlane()) return null;
   const existing = await client.user.findUnique({ where: { id: claims.sub } });
-  if (existing) return existing as MirrorUserRecord;
+  if (existing) {
+    if (!shouldRefreshSandboxMirror(existing, claims)) return existing as MirrorUserRecord;
+    const updated = await client.user.update({
+      where: { id: existing.id },
+      data: {
+        role: claims.role as never,
+        merchantId: claims.merchantId,
+        authoritiesMap: claims.authorities as never,
+        appScopeIds: claims.appScopeIds as never,
+        isMaker: true,
+        isChecker: MIRROR_CHECKER_ROLES.has(claims.role),
+      } as never,
+    });
+    return updated as MirrorUserRecord;
+  }
   return client.$transaction(async (tx) => {
     if (claims.merchantId) {
       const merchant = await tx.merchant.findUnique({ where: { id: claims.merchantId } });
@@ -196,7 +268,7 @@ const ensureSandboxMirrorUser = async (claims: {
         authoritiesMap: claims.authorities as never,
         appScopeIds: claims.appScopeIds as never,
         isMaker: true,
-        isChecker: ["SECURITY_ADMIN", "FINANCE", "MLRO", "COMPLIANCE"].includes(claims.role),
+        isChecker: MIRROR_CHECKER_ROLES.has(claims.role),
         mfaRequired: false,
         status: "ACTIVE",
       } as never,
@@ -214,8 +286,9 @@ const resolveSessionPrincipal = async (token: string): Promise<Principal> => {
   if (await isSessionRevoked(claims.jti)) {
     throw new ApiError(401, "SESSION_REVOKED", "The session has been revoked");
   }
-  const user = await client.user.findUnique({ where: { id: claims.sub } })
-    ?? await ensureSandboxMirrorUser(claims);
+  const user = isSandboxPlane()
+    ? await ensureSandboxMirrorUser(claims)
+    : await client.user.findUnique({ where: { id: claims.sub } });
   if (!user) {
     throw new ApiError(401, "SESSION_USER_MISSING", "The session principal no longer exists");
   }

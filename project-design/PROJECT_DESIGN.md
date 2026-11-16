@@ -2063,12 +2063,12 @@ Mounted at `/internal/sandbox` for the merchant and admin edges only, and guarde
 | `GET /admin/overview`, `GET /admin/merchants`, `GET /admin/merchants/:id/overview`, `POST /admin/reset` | Staff inspection and scoped/global reset (staff principal required). |
 | `GET/PUT /admin/fake-rails/scenarios*`, `GET/POST /admin/fake-rails/transactions*`, `GET/POST /admin/fake-rails/webhooks*`, `GET/POST /admin/fake-rails/statements*` | Staff Fake Rails control center: chaos profiles, transaction actions, webhook replay/fire, tester statements. |
 
-The core trusts the edge identity (mTLS) and the signed session. On the SANDBOX plane, a merchant or staff session minted by Live is mirrored into the sandbox database on first use (merchant envelope + user with the signed authorities), so no second login is needed and a pending Live merchant can train immediately.
+The core trusts the edge identity (mTLS) and the signed session. On the SANDBOX plane, a merchant or staff session minted by Live is mirrored into the sandbox database on first use (merchant envelope + user with the signed authorities), so no second login is needed and a pending Live merchant can train immediately. The mirror is refreshed from a **newer signed token** (`iat` after the local row's `updatedAt`): role, merchant binding, authorities and application scopes are replaced, while an older token can never overwrite a newer mirror. This matters when staff authorities are corrected after a first Sandbox request; the Live core re-reads its user table on every request, but the Sandbox mirror would otherwise keep the old authorities forever.
 
 ## 5. Edge routing
 
 - **merchant-back:** `/api/v1/merchant/sandbox/*` → `SANDBOX_CORE_BACK_URLS` via `api/sandboxProxy.ts`. `/overview`, `/seed-demo`, `/seed-history`, `/reset`, `/wallets/:id/*`, `/payments/:id/*`, `/disputes/:id/resolve`, `/reconciliation/*`, `/fake-rails/*` and `/webhooks/test-ping` map to the sandbox control routes; list/create resources (`/wallets`, `/applications`, `/links`, `/payments`, `/tokens`) map to the sandbox core's `/internal/merchant/*` (same router, separate database). `/mirror/*` is a raw forward to `/internal/merchant/*` for Live-parity pages. The external API accepts both `pg_live_*` and `pg_test_*` and selects the pool from the prefix.
-- **admin-back:** `/api/v1/admin/sandbox/*` → sandbox core only (`overview`, merchant overview/reset, wallet balance, fake-rails accounts/clearing/scenarios/transactions/webhooks/statements). `/mirror/*` raw-forwards to `/internal/admin/*` for Live-parity pages.
+- **admin-back:** `/api/v1/admin/sandbox/*` → sandbox core only (`overview`, merchant overview/reset, wallet balance, fake-rails accounts/clearing/scenarios/transactions/webhooks/statements). `/mirror/*` raw-forwards to `/internal/admin/*` for Live-parity pages, except the reconciliation run summary/export which maps to the core `/reconciliation/summary[/export]` routes (the core has no `/reconciliation/runs/summary` route).
 - **checkout-back:** `sbx_*` links and `SANDBOX` inbound webhook environments → sandbox core. `pl_*` and LIVE inbound → Live core. The inspector routes (`sandbox-accounts`, `sandbox-inspector`, `sandbox-simulate`) refuse a non-`sbx_` key with `403 SANDBOX_INSPECTOR_FORBIDDEN_ON_LIVE_LINK`.
 - All three edges keep one connection pool per URL set; a failure inside the sandbox pool never fails over to Live (and the reverse). An unconfigured sandbox node answers `503 SANDBOX_NODE_UNAVAILABLE`.
 
@@ -2099,7 +2099,7 @@ The Sandbox database is a second object-storage control plane while the vault is
 
 - Core: `sandboxPlane.test.ts` (plane resolution, token prefixes, boot fence, strict DB fence both directions, Fake Rails gateway fence), `fake-rails-control-client.test.ts`, `phase1-mtls-and-schema.test.ts` (v39 migration is newest), commerce/guard regressions.
 - Fake Rails: `accountsAndInspector.test.ts` (personas, reserve/capture/release/refund/over-reserve, auto-enrolment, merchant reset, clearing statement) and the v2 control/inspector tests in `api.test.ts`.
-- Edges: `sandbox-routing.test.ts` in merchant-back and admin-back, merchant `sandbox-proxy.test.ts` (control vs resource vs mirror routing). checkout-back routes are covered by its sandbox routing suite.
+- Edges: `sandbox-routing.test.ts` in merchant-back and admin-back, merchant `sandbox-proxy.test.ts` (control vs resource vs mirror routing), and `core-back/test/sandbox-mirror-refresh.test.ts` for the newer-token mirror-refresh guard. The admin-back routing test covers the reconciliation summary/export exception. checkout-back routes are covered by its sandbox routing suite.
 - Deploy: 708 tests including sandbox database creation, PgBouncer aliases, host planning and PKI SAN; `./deploy.sh --dry-run` shows `pg-core-sandbox :4005`.
 - Root unit: guide context map, route-authority coverage and i18n catalogues include the sandbox screens/keys.
 
@@ -9029,7 +9029,7 @@ read/write guards. `assetsRouter` additionally exposes binary
 
 ## v38-v39 sandbox proxy (2026-11-13)
 
-`/api/v1/admin/sandbox/*` forwards only to `SANDBOX_CORE_BACK_URLS` (no Live fallback): overview, per-merchant overview/reset, wallet balance, global reset and Fake Rails accounts/clearing/scenarios/transactions/webhooks/statements. `/mirror/*` raw-forwards to `/internal/admin/*` for the Live-parity pages; report-engine mirror bodies use the 24 MB parser. The staff session is mirrored by the sandbox core. The Studio routes are open to signed-in staff; the sandbox data is isolated. An unconfigured sandbox node answers `503 SANDBOX_NODE_UNAVAILABLE`.
+`/api/v1/admin/sandbox/*` forwards only to `SANDBOX_CORE_BACK_URLS` (no Live fallback): overview, per-merchant overview/reset, wallet balance, global reset and Fake Rails accounts/clearing/scenarios/transactions/webhooks/statements. `/mirror/*` raw-forwards to `/internal/admin/*` for the Live-parity pages, except `/mirror/reconciliation/runs/summary` and `/summary/export`, which target the core `/internal/admin/reconciliation/summary[/export]` routes; report-engine mirror bodies use the 24 MB parser. The staff session is mirrored by the sandbox core, and an existing mirror is refreshed from a newer signed session token. The Studio routes are open to signed-in staff; the sandbox data is isolated. An unconfigured sandbox node answers `503 SANDBOX_NODE_UNAVAILABLE`.
 
 ## Route health forwarding (2026-11-16)
 

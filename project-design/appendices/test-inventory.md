@@ -200,6 +200,7 @@
 | `core-back/test/runtime/production-adapters.test.ts` | 569 | 16 |
 | `core-back/test/runtime/raw-body.test.ts` | 127 | 6 |
 | `core-back/test/runtime/rotating-refresh-token.test.ts` | 106 | 2 |
+| `core-back/test/sandbox-mirror-refresh.test.ts` | 38 | 4 |
 | `core-back/test/sandboxPlane.test.ts` | 287 | 7 |
 | `core-back/test/screening-and-caps.test.ts` | 515 | 13 |
 | `core-back/test/security-regressions/c1-forged-success.test.ts` | 119 | 8 |
@@ -257,7 +258,7 @@
 | `admin-back/test/object-storage-forwarding.test.ts` | 95 | 3 |
 | `admin-back/test/report-engine-edge.test.ts` | 185 | 8 |
 | `admin-back/test/report-engine-route-order.test.ts` | 52 | 2 |
-| `admin-back/test/sandbox-routing.test.ts` | 60 | 3 |
+| `admin-back/test/sandbox-routing.test.ts` | 63 | 3 |
 | `admin-back/test/search.test.ts` | 83 | 2 |
 | `admin-back/test/security-regressions.test.ts` | 512 | 31 |
 | `admin-back/test/session-cookie-and-logout.test.ts` | 133 | 6 |
@@ -432,5 +433,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **427**
-- Total literal test declarations: **4228**
+- Total files: **428**
+- Total literal test declarations: **4232**

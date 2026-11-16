@@ -34,6 +34,9 @@ describe("admin sandbox routing", () => {
     expect(targetPath(request("/merchants/summary"))).toBe("/internal/sandbox/admin/merchants/summary");
     expect(targetPath(request("/merchants/11111111-1111-4111-8111-111111111111"))).toBe("/internal/sandbox/admin/merchants/11111111-1111-4111-8111-111111111111");
     expect(targetPath(request("/audits"))).toBe("/internal/sandbox/admin/audits");
+    expect(targetPath(request("/mirror/reconciliation/runs/summary"))).toBe("/internal/admin/reconciliation/summary");
+    expect(targetPath(request("/mirror/reconciliation/runs/summary/export"))).toBe("/internal/admin/reconciliation/summary/export");
+    expect(targetPath(request("/mirror/reconciliation/runs/run-1"))).toBe("/internal/admin/reconciliation/runs/run-1");
   });
   test("uses the sandbox core pool and never falls back to Live", () => {
     expect(pools.requireSandboxCoreBackUrls()).toEqual(["https://core.sandbox.internal:4005"]);

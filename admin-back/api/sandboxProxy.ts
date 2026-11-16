@@ -12,6 +12,12 @@ const router = express.Router();
 const merchantParams = z.object({ merchantId: z.string().uuid() });
 
 export const targetPath = (request: Request): string => {
+  if (request.path === "/mirror/reconciliation/runs/summary") {
+    return "/internal/admin/reconciliation/summary";
+  }
+  if (request.path === "/mirror/reconciliation/runs/summary/export") {
+    return "/internal/admin/reconciliation/summary/export";
+  }
   if (request.path === "/mirror" || request.path.startsWith("/mirror/")) {
     return `/internal/admin${request.path.slice("/mirror".length) || "/"}`;
   }

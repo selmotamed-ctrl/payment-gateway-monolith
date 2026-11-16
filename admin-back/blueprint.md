@@ -584,7 +584,7 @@ read/write guards. `assetsRouter` additionally exposes binary
 
 ## v38-v39 sandbox proxy (2026-11-13)
 
-`/api/v1/admin/sandbox/*` forwards only to `SANDBOX_CORE_BACK_URLS` (no Live fallback): overview, per-merchant overview/reset, wallet balance, global reset and Fake Rails accounts/clearing/scenarios/transactions/webhooks/statements. `/mirror/*` raw-forwards to `/internal/admin/*` for the Live-parity pages; report-engine mirror bodies use the 24 MB parser. The staff session is mirrored by the sandbox core. The Studio routes are open to signed-in staff; the sandbox data is isolated. An unconfigured sandbox node answers `503 SANDBOX_NODE_UNAVAILABLE`.
+`/api/v1/admin/sandbox/*` forwards only to `SANDBOX_CORE_BACK_URLS` (no Live fallback): overview, per-merchant overview/reset, wallet balance, global reset and Fake Rails accounts/clearing/scenarios/transactions/webhooks/statements. `/mirror/*` raw-forwards to `/internal/admin/*` for the Live-parity pages, except `/mirror/reconciliation/runs/summary` and `/summary/export`, which target the core `/internal/admin/reconciliation/summary[/export]` routes; report-engine mirror bodies use the 24 MB parser. The staff session is mirrored by the sandbox core, and an existing mirror is refreshed from a newer signed session token. The Studio routes are open to signed-in staff; the sandbox data is isolated. An unconfigured sandbox node answers `503 SANDBOX_NODE_UNAVAILABLE`.
 
 ## Route health forwarding (2026-11-16)
 

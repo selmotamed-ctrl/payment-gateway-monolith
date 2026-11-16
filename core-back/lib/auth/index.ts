@@ -44,6 +44,8 @@ export interface SessionClaims {
   jti: string | null;
   /** Expiry as epoch seconds. */
   exp: number | null;
+  /** Issued-at epoch seconds; used to refresh the Sandbox user mirror only from a newer token. */
+  issuedAt?: number | null;
   /** Channel the token was minted for (derived from the audience). */
   channel: SessionChannel | null;
 }
@@ -130,6 +132,7 @@ export const verifySessionToken = (token: string, channel?: SessionChannel): Ses
     mfa: payload.mfa === true,
     jti: typeof payload.jti === "string" ? payload.jti : null,
     exp: typeof payload.exp === "number" ? payload.exp : null,
+    issuedAt: typeof payload.iat === "number" ? payload.iat : null,
     channel: tokenChannel,
   };
 };
