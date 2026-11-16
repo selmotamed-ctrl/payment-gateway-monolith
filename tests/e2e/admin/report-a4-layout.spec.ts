@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 /**
  * A4/print regression gate for the real client renderer + Paged.js.
@@ -23,6 +23,8 @@ const PASS = process.env.PG_ADMIN_PASSWORD ?? "Mayallahhelpme@96";
 const SPEC_PATH = process.env.REPORT_LAYOUT_SPEC ?? "/tmp/layout-wide.json";
 const ZIP_PATH = process.env.REPORT_LAYOUT_ZIP;
 const PREVIEW_MODE = (process.env.REPORT_LAYOUT_MODE === "LIVE" ? "LIVE" : "MOCK") as "MOCK" | "LIVE";
+if (!process.env.PG_API_URL) test.skip(true, "set PG_API_URL (and the admin credentials, or PG_TOKEN) to run this live API test");
+if (!existsSync(SPEC_PATH)) test.skip(true, `set REPORT_LAYOUT_SPEC to a report spec file (looked at ${SPEC_PATH})`);
 
 async function session(request: import("@playwright/test").APIRequestContext): Promise<string> {
   if (process.env.PG_TOKEN) return process.env.PG_TOKEN;

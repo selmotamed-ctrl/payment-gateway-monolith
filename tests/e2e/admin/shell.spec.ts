@@ -191,8 +191,8 @@ test.describe("admin shell", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/dashboard");
     await expect(page.locator(".pg-drawer a").first()).toBeVisible();
-    await expect(page.locator(".pg-drawer a", { hasText: "Operator Cases" })).toHaveCount(0);
-    await expect(page.locator(".pg-drawer a", { hasText: "Disputes" })).toHaveCount(0);
+    await expect(page.locator(".pg-drawer").getByRole("link", { name: "Operator Cases", exact: true })).toHaveCount(0);
+    await expect(page.locator(".pg-drawer").getByRole("link", { name: "Disputes", exact: true })).toHaveCount(0);
   });
 
   test("an operator with case:read sees Operator Cases but not Disputes", async ({ page }) => {
@@ -205,8 +205,8 @@ test.describe("admin shell", () => {
     );
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/dashboard");
-    await expect(page.locator(".pg-drawer a", { hasText: "Operator Cases" })).toBeVisible();
-    await expect(page.locator(".pg-drawer a", { hasText: "Disputes" })).toHaveCount(0);
+    await expect(page.locator(".pg-drawer").getByRole("link", { name: "Operator Cases", exact: true })).toBeVisible();
+    await expect(page.locator(".pg-drawer").getByRole("link", { name: "Disputes", exact: true })).toHaveCount(0);
   });
 
   test("a finance user with dispute:read sees Disputes but not Operator Cases", async ({ page }) => {
@@ -219,8 +219,8 @@ test.describe("admin shell", () => {
     );
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/dashboard");
-    await expect(page.locator(".pg-drawer a", { hasText: "Disputes" })).toBeVisible();
-    await expect(page.locator(".pg-drawer a", { hasText: "Operator Cases" })).toHaveCount(0);
+    await expect(page.locator(".pg-drawer").getByRole("link", { name: "Disputes", exact: true })).toBeVisible();
+    await expect(page.locator(".pg-drawer").getByRole("link", { name: "Operator Cases", exact: true })).toHaveCount(0);
   });
 
   test("direct access to a page the role cannot use is redirected", async ({ page }) => {

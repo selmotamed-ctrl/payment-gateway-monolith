@@ -44,7 +44,7 @@
 | `core-back/test/automation/regulatory-reports.test.ts` | 400 | 11 |
 | `core-back/test/automation/runtime-wiring.test.ts` | 170 | 12 |
 | `core-back/test/automation/stale-unknown-attempts.test.ts` | 273 | 11 |
-| `core-back/test/automation/statement-schedule.test.ts` | 208 | 11 |
+| `core-back/test/automation/statement-schedule.test.ts` | 213 | 11 |
 | `core-back/test/automation/worker-health-registry.test.ts` | 237 | 12 |
 | `core-back/test/background-jobs.test.ts` | 675 | 11 |
 | `core-back/test/backup-admin/backup-admin-routes.test.ts` | 838 | 19 |
@@ -375,7 +375,7 @@
 | `tests/e2e/admin/academy-team.spec.ts` | 98 | 3 |
 | `tests/e2e/admin/auth.spec.ts` | 50 | 2 |
 | `tests/e2e/admin/backups.spec.ts` | 126 | 2 |
-| `tests/e2e/admin/chrome-layout.spec.ts` | 174 | 1 |
+| `tests/e2e/admin/chrome-layout.spec.ts` | 176 | 1 |
 | `tests/e2e/admin/chrome-preview.spec.ts` | 94 | 1 |
 | `tests/e2e/admin/commerce-governance.spec.ts` | 132 | 4 |
 | `tests/e2e/admin/create.spec.ts` | 155 | 5 |
@@ -387,9 +387,9 @@
 | `tests/e2e/admin/guide-safeguard.spec.ts` | 104 | 1 |
 | `tests/e2e/admin/jobs-outbox.spec.ts` | 57 | 2 |
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
-| `tests/e2e/admin/object-storage-style.spec.ts` | 72 | 1 |
+| `tests/e2e/admin/object-storage-style.spec.ts` | 81 | 1 |
 | `tests/e2e/admin/operator-cases.spec.ts` | 319 | 3 |
-| `tests/e2e/admin/report-a4-layout.spec.ts` | 280 | 1 |
+| `tests/e2e/admin/report-a4-layout.spec.ts` | 282 | 1 |
 | `tests/e2e/admin/shell.spec.ts` | 254 | 17 |
 | `tests/e2e/admin/table-and-padding-geometry.spec.ts` | 235 | 3 |
 | `tests/e2e/admin/table-row-context-menu.spec.ts` | 217 | 8 |

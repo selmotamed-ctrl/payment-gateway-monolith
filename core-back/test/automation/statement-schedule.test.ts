@@ -113,7 +113,12 @@ describeDb("statement schedule (live PostgreSQL)", () => {
     const states = Object.fromEntries((await cases(id)).map((row) => [row.subjectKey!.split(":").slice(2).join(":"), row.state]));
     expect(states).toEqual({ "2026-11-07T04:00:00.000Z": "OPEN", "2026-11-08T04:00:00.000Z": "OPEN", "2026-11-09T04:00:00.000Z": "RESOLVED" });
     const resolved = (await cases(id)).find((row) => row.state === "RESOLVED")!;
-    expect(resolved.resolutionNotes).toMatch(/AUTO-RESOLVED.*statement arrived/);
+    // The original finding stays in resolutionNotes; the append-only timeline
+    // (and resolutionSummary) records the source-clear.
+    expect(resolved.resolutionCode).toBe("SOURCE_CLEARED");
+    expect(resolved.resolutionSummary).toContain("statement arrived");
+    const clearEvents = await client.operatorCaseEvent.findMany({ where: { caseId: resolved.id, eventType: "SOURCE_CLEARED" } });
+    expect(clearEvents).toHaveLength(1);
   });
 
   test("a statement counts for its own slot, not for the previous ones (one upload does not hide yesterday's miss)", async () => {

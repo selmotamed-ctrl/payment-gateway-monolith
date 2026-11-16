@@ -9,6 +9,8 @@ import { expect, test } from "@playwright/test";
 const API = process.env.PG_API_URL ?? "http://127.0.0.1:4101";
 const USER = process.env.PG_ADMIN_IDENTIFIER ?? "admin@pg.dev";
 const PASS = process.env.PG_ADMIN_PASSWORD ?? "Mayallahhelpme@96";
+const LIVE_API = Boolean(process.env.PG_API_URL);
+if (!LIVE_API) test.skip(true, "set PG_API_URL (and the admin credentials, or PG_TOKEN) to run this live API test");
 
 async function token(request: import("@playwright/test").APIRequestContext): Promise<string> {
   if (process.env.PG_TOKEN) return process.env.PG_TOKEN;

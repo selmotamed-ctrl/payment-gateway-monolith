@@ -35,11 +35,17 @@ test("object storage uses shared page surfaces and filter toolbar", async ({ pag
         "system:storage:read": true,
         "system:storage:admin": true,
         "system:storage:legal-hold": true,
+        // The admin guard checks the projected portal key; the server sends both.
+        "system.storage": true,
       },
     },
   });
-  await page.route("**/api/v1/admin/object-storage/**", async (route) => {
+  await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
+    if (!url.pathname.includes("/object-storage/")) {
+      await route.fulfill(json(200, {}));
+      return;
+    }
     if (url.pathname.endsWith("/summary")) {
       await route.fulfill(json(200, {
         health: { ok: true, mode: "FS_LOCAL", rootDirOrUrl: "/var/lib/pg", freeBytes: 1024, latencyMs: 2 },
@@ -61,9 +67,12 @@ test("object storage uses shared page surfaces and filter toolbar", async ({ pag
     }
     await route.fulfill(json(200, { accessLogs: [], total: 0 }));
   });
-  await page.goto("/system/object-storage");
+  // Open the object tab through its URL query. This is the supported deep link
+  // and avoids clicking a tab while the summary request re-renders its label
+  // with the object counts.
+  await page.goto("/system/object-storage?tab=objects");
   await expect(page.getByRole("heading", { name: "Object & Asset Storage" })).toBeVisible();
-  await page.getByRole("tab", { name: "Object explorer" }).click();
+  await expect(page.getByRole("tab", { name: "Object explorer" })).toBeVisible();
   await expect(page.getByRole("table", { name: "Storage objects" })).toBeVisible();
   await expect(page.locator(".pg-table-card")).toHaveCount(1);
   await expect(page.locator(".pg-table-filters__grid")).toBeVisible();
