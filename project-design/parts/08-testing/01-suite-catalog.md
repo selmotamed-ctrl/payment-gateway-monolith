@@ -54,6 +54,7 @@ tests:
   - fake-rails-back/test/security.test.ts
   - admin-front/src/pages/disputes/__tests__/queryFilters.test.ts
   - admin-front/src/pages/dashboard/__tests__/metricLabels.test.ts
+  - core-back/test/attempt-outcomes.test.ts
   - tests/unit/frontend-security-admin.test.ts
   - tests/unit/frontend-security-checkout.test.ts
   - tests/unit/frontend-security-merchant.test.ts
@@ -553,7 +554,8 @@ These are development/CI tests only; no production-time test job or test endpoin
 
 ## Dashboard all-time metric-label regression (2026-11-16)
 
-- `admin-front/src/pages/dashboard/__tests__/metricLabels.test.ts` — Open Action Queues names pending approvals, operator cases, join requests and AML cases followed by the all-time note; Unknown Backlog carries the all-time note before the oldest age.
+- `admin-front/src/pages/dashboard/__tests__/metricLabels.test.ts` — Open Action Queues names pending approvals, operator cases, join requests and AML cases followed by the all-time note; Unknown Backlog carries the all-time note before the oldest age; Success Rate shows succeeded / counted.
+- `core-back/test/attempt-outcomes.test.ts` — success and post-success statuses, problematic `FAILED`/`UNKNOWN`, ignored pending and deliberate `CANCELLED`/`EXPIRED`/`BLOCKED` outcomes, one classification per attempt status, and the success-rate denominator.
 
 ## v39 Sandbox Studio and mirror suites (2026-11-13)
 

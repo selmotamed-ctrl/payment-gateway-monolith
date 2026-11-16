@@ -3118,6 +3118,10 @@ A new internal router, reachable from merchant-back and admin-back and mounted o
 
 `GET /internal/admin/stats/overview` returns `grossVolume` (and `grossVolumeAttempts`) as the sum and count of `totalChargedAmount` for attempts created in the selected period with `status = SUCCEEDED` and `currency = LYD`. Previously `grossVolume` summed the whole success status set (`SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `DISPUTED`) across all currencies. `successRate` and `attemptsByState`/`volumeByState` are unchanged.
 
+## Dashboard success-rate denominator (2026-11-16)
+
+`GET /internal/admin/stats/overview` returns `attemptsCounted` and computes `successRate = attemptsSucceeded / attemptsCounted`. `attemptsSucceeded` counts `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` (the payment was processed successfully; a later refund or dispute is not a processing failure). `attemptsCounted` adds `FAILED` and `UNKNOWN` only. Pending/in-flight states (`CREATED`, `INITIATING`, `AWAITING_CUSTOMER`, `AUTHORIZING`, `VERIFYING`) and deliberate/no-processing outcomes (`CANCELLED`, `EXPIRED`, `BLOCKED`) are excluded from both sides of the rate. `attemptsTotal` remains every attempt created in the period for the distribution chart and snapshot export.
+
 ---
 
 <a id="coreengine"></a>
@@ -10167,6 +10171,10 @@ The Dashboard **Gross Volume** card sums `payment_attempts.total_charged_amount`
 ## Dashboard all-time queue metrics (2026-11-16)
 
 **Open Action Queues** is a current-state count, not a period count: pending approvals (`DRAFT`/`PENDING_REVIEW`), open operator cases (`OPEN`/`IN_PROGRESS`/`PENDING_CHECKER`), open join requests and open AML cases (`OPEN`/`IN_REVIEW`/`PENDING_CHECKER`/`FROZEN`/`ESCALATED_STR`). Its sub-label now names all four sources and carries **All time (not period-filtered)**. **Unknown Backlog** counts every `UNKNOWN` payment attempt, so its sub-label carries the same all-time note before the oldest age. Only Gross Volume, Success Rate, the Attempts By State chart, the Volume chart and Reconciliation use the selected period.
+
+## Dashboard success-rate denominator (2026-11-16)
+
+The **Success Rate** card is `attemptsSucceeded / attemptsCounted`. Successes are `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED`; counted attempts add `FAILED` and `UNKNOWN`. Pending/in-flight attempts and deliberate/no-processing outages (`CANCELLED`, `EXPIRED`, `BLOCKED`) are excluded from the denominator, so the rate measures payment-processing outcomes rather than the whole attempt volume. The card sub-label shows `N succeeded / M counted`; the Attempts By State chart and the snapshot's `attempts_total` still include every attempt created in the selected period. The API returns `attemptsCounted` with `successRate`.
 
 ## Route health drawer (2026-11-16)
 
@@ -17350,7 +17358,8 @@ These are development/CI tests only; no production-time test job or test endpoin
 
 ## Dashboard all-time metric-label regression (2026-11-16)
 
-- `admin-front/src/pages/dashboard/__tests__/metricLabels.test.ts` — Open Action Queues names pending approvals, operator cases, join requests and AML cases followed by the all-time note; Unknown Backlog carries the all-time note before the oldest age.
+- `admin-front/src/pages/dashboard/__tests__/metricLabels.test.ts` — Open Action Queues names pending approvals, operator cases, join requests and AML cases followed by the all-time note; Unknown Backlog carries the all-time note before the oldest age; Success Rate shows succeeded / counted.
+- `core-back/test/attempt-outcomes.test.ts` — success and post-success statuses, problematic `FAILED`/`UNKNOWN`, ignored pending and deliberate `CANCELLED`/`EXPIRED`/`BLOCKED` outcomes, one classification per attempt status, and the success-rate denominator.
 
 ## v39 Sandbox Studio and mirror suites (2026-11-13)
 

@@ -22,7 +22,7 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatPlainNumber } from "@/utils/money";
 import { showSnackBar } from "@/utils/snackBar";
-import { buildOpenActionQueueSubLabel, buildUnknownBacklogSubLabel } from "./metricLabels";
+import { buildOpenActionQueueSubLabel, buildSuccessRateSubLabel, buildUnknownBacklogSubLabel } from "./metricLabels";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetaPill } from "@/components/ui/MetaPill";
@@ -59,6 +59,7 @@ type Overview = {
     volumeByState?: Record<string, string>;
     attemptsTotal?: number;
     attemptsSucceeded?: number;
+    attemptsCounted?: number;
     successRate?: number;
     grossVolume?: string;
     grossVolumeAttempts?: number;
@@ -212,6 +213,7 @@ const DashboardPage = dc(() => {
                 ["gross_volume_attempts", String(data.grossVolumeAttempts ?? 0)],
                 ["attempts_total", String(data.attemptsTotal ?? 0)],
                 ["attempts_succeeded", String(data.attemptsSucceeded ?? 0)],
+                ["attempts_counted", String(data.attemptsCounted ?? 0)],
                 ["success_rate_percent", String(data.successRate ?? 0)],
                 ["active_merchants", String(data.merchantsActive ?? 0)],
                 ["pending_merchants", String(data.merchantsPending ?? 0)],
@@ -285,10 +287,10 @@ const DashboardPage = dc(() => {
             {
                 key: "success",
                 label: t("Success Rate"),
-                value: `${formatPlainNumber(successRate)}%`,
+                value: `${formatPlainNumber(successRate, 2)}%`,
                 badge: successRate >= 90 ? t("Healthy") : successRate >= 70 ? t("Watch") : t("Critical"),
                 badgeTone: successRate >= 90 ? "success" : successRate >= 70 ? "warning" : "danger",
-                subLabel: `${formatPlainNumber(data?.attemptsSucceeded ?? 0)} ${t("succeeded")}`,
+                subLabel: buildSuccessRateSubLabel(data?.attemptsSucceeded ?? 0, data?.attemptsCounted, t),
             },
             {
                 key: "queues",

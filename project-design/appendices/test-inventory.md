@@ -18,6 +18,7 @@
 | `core-back/test/admin-slice/report-engine-migration.test.ts` | 248 | 3 |
 | `core-back/test/aml-resolution-finalization.test.ts` | 300 | 7 |
 | `core-back/test/approval-queue.test.ts` | 86 | 4 |
+| `core-back/test/attempt-outcomes.test.ts` | 67 | 5 |
 | `core-back/test/automation/aml-event-rescreening.test.ts` | 182 | 4 |
 | `core-back/test/automation/audit-chain-anchor.test.ts` | 212 | 10 |
 | `core-back/test/automation/backup-monitor.test.ts` | 191 | 9 |
@@ -430,5 +431,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **425**
-- Total literal test declarations: **4218**
+- Total files: **426**
+- Total literal test declarations: **4223**

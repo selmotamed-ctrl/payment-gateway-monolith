@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildOpenActionQueueSubLabel, buildUnknownBacklogSubLabel } from "../metricLabels";
+import { buildOpenActionQueueSubLabel, buildSuccessRateSubLabel, buildUnknownBacklogSubLabel } from "../metricLabels";
 
 const translate = (key: string) => `[${key}]`;
 
@@ -18,5 +18,10 @@ describe("dashboard all-time metric labels", () => {
         expect(buildUnknownBacklogSubLabel("12h", translate)).toBe(
             "[All time (not period-filtered)] · 12h [oldest]",
         );
+    });
+
+    test("the success rate sub-label shows the succeeded and counted attempts", () => {
+        expect(buildSuccessRateSubLabel(468, 955, translate)).toBe("468 [succeeded] / 955 [counted]");
+        expect(buildSuccessRateSubLabel(468, undefined, translate)).toBe("468 [succeeded]");
     });
 });

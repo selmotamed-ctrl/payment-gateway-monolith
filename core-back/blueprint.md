@@ -1008,6 +1008,10 @@ A new internal router, reachable from merchant-back and admin-back and mounted o
 
 `GET /internal/admin/stats/overview` returns `grossVolume` (and `grossVolumeAttempts`) as the sum and count of `totalChargedAmount` for attempts created in the selected period with `status = SUCCEEDED` and `currency = LYD`. Previously `grossVolume` summed the whole success status set (`SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `DISPUTED`) across all currencies. `successRate` and `attemptsByState`/`volumeByState` are unchanged.
 
+## Dashboard success-rate denominator (2026-11-16)
+
+`GET /internal/admin/stats/overview` returns `attemptsCounted` and computes `successRate = attemptsSucceeded / attemptsCounted`. `attemptsSucceeded` counts `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` (the payment was processed successfully; a later refund or dispute is not a processing failure). `attemptsCounted` adds `FAILED` and `UNKNOWN` only. Pending/in-flight states (`CREATED`, `INITIATING`, `AWAITING_CUSTOMER`, `AUTHORIZING`, `VERIFYING`) and deliberate/no-processing outcomes (`CANCELLED`, `EXPIRED`, `BLOCKED`) are excluded from both sides of the rate. `attemptsTotal` remains every attempt created in the period for the distribution chart and snapshot export.
+
 ## Core Engine
 
 > Status: `partial` · Last verified: 2026-11-13

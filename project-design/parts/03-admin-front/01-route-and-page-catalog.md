@@ -349,6 +349,10 @@ The Dashboard **Gross Volume** card sums `payment_attempts.total_charged_amount`
 
 **Open Action Queues** is a current-state count, not a period count: pending approvals (`DRAFT`/`PENDING_REVIEW`), open operator cases (`OPEN`/`IN_PROGRESS`/`PENDING_CHECKER`), open join requests and open AML cases (`OPEN`/`IN_REVIEW`/`PENDING_CHECKER`/`FROZEN`/`ESCALATED_STR`). Its sub-label now names all four sources and carries **All time (not period-filtered)**. **Unknown Backlog** counts every `UNKNOWN` payment attempt, so its sub-label carries the same all-time note before the oldest age. Only Gross Volume, Success Rate, the Attempts By State chart, the Volume chart and Reconciliation use the selected period.
 
+## Dashboard success-rate denominator (2026-11-16)
+
+The **Success Rate** card is `attemptsSucceeded / attemptsCounted`. Successes are `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED`; counted attempts add `FAILED` and `UNKNOWN`. Pending/in-flight attempts and deliberate/no-processing outages (`CANCELLED`, `EXPIRED`, `BLOCKED`) are excluded from the denominator, so the rate measures payment-processing outcomes rather than the whole attempt volume. The card sub-label shows `N succeeded / M counted`; the Attempts By State chart and the snapshot's `attempts_total` still include every attempt created in the selected period. The API returns `attemptsCounted` with `successRate`.
+
 ## Route health drawer (2026-11-16)
 
 The **Routes** table's primary row action opens a 760 px health drawer instead

@@ -28,6 +28,12 @@ import { moneyToString } from "../../engine/db/money";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { buildListQuery, listResponse } from "../../lib/listQuery";
 import {
+  isProblematicAttemptStatus,
+  isSuccessAttemptStatus,
+  merchantSuccessStatuses,
+  successRatePercent,
+} from "../../lib/attemptOutcomes";
+import {
   APPROVAL_DOMAIN_SUBJECT_TYPES,
   APPROVAL_PENDING_STATES,
   approvalAgeHours,
@@ -1155,17 +1161,21 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
   const volumeByState: Record<string, string> = {};
   let attemptsTotal = 0;
   let attemptsSucceeded = 0;
+  let attemptsCounted = 0;
   const grossVolume = decimal(grossVolumeAggregate._sum.totalChargedAmount ?? 0);
   const grossVolumeAttempts = grossVolumeAggregate._count._all;
-  const successStatuses = new Set<string>(merchantSuccessStatuses);
   for (const row of attemptsByStateRows) {
+    const status = String(row.status);
     const count = row._count._all;
-    attemptsByState[String(row.status)] = count;
+    attemptsByState[status] = count;
     attemptsTotal += count;
     const charged = decimal(row._sum.totalChargedAmount ?? 0);
-    volumeByState[String(row.status)] = charged.toFixed(4);
-    if (successStatuses.has(String(row.status))) {
+    volumeByState[status] = charged.toFixed(4);
+    if (isSuccessAttemptStatus(status)) {
       attemptsSucceeded += count;
+      attemptsCounted += count;
+    } else if (isProblematicAttemptStatus(status)) {
+      attemptsCounted += count;
     }
   }
 
@@ -1214,7 +1224,8 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     volumeByState,
     attemptsTotal,
     attemptsSucceeded,
-    successRate: attemptsTotal === 0 ? 0 : Number(((attemptsSucceeded / attemptsTotal) * 100).toFixed(2)),
+    attemptsCounted,
+    successRate: successRatePercent(attemptsSucceeded, attemptsCounted),
     grossVolume: grossVolume.toFixed(4),
     grossVolumeAttempts,
     unknownBacklog: (unknownAggregate._count as { _all: number })._all,
@@ -5395,8 +5406,6 @@ const merchantMaskedJson = (value: unknown): Record<string, unknown> => {
   }
   return result;
 };
-
-const merchantSuccessStatuses = ["SUCCEEDED", "PARTIALLY_REFUNDED", "REFUNDED", "DISPUTED"] as const;
 
 router.get("/merchants/:id/transactions", async (request: Request, response: Response) => {
   requireAuthorities(request, ["merchant:read"]);

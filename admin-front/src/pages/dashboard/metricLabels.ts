@@ -20,3 +20,8 @@ export const buildOpenActionQueueSubLabel = (counts: OpenQueueCounts, t: Transla
 
 export const buildUnknownBacklogSubLabel = (oldestLabel: string, t: Translate): string =>
     [t("All time (not period-filtered)"), `${oldestLabel} ${t("oldest")}`].join(" · ");
+
+export const buildSuccessRateSubLabel = (succeeded: number, counted: number | undefined, t: Translate): string =>
+    counted === undefined
+        ? `${formatPlainNumber(succeeded)} ${t("succeeded")}`
+        : `${formatPlainNumber(succeeded)} ${t("succeeded")} / ${formatPlainNumber(counted)} ${t("counted")}`;
