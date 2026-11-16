@@ -586,3 +586,7 @@ current coverage is the pure policy/routing/probe tests plus the existing
 migration-shape and admin-back forwarding tests. `core.route-health` lists
 the migration. The “Fake Rails chaos drives a route to DEGRADED and back”
 acceptance run remains a gap.
+
+## Post-merge test determinism (2026-11-16)
+
+The full core suite runs against PostgreSQL 18 + Redis (25,316 tests, 0 failures). The statement-schedule test now asserts the case `SOURCE_CLEARED` resolution summary/event instead of the retired `AUTO-RESOLVED` note. Admin table tests target the live Disputes/Operator Cases links by exact accessible name, because the Sandbox mirror adds “Sandbox Disputes”. The object-storage style test seeds both the raw and projected storage authority and mocks all admin calls so the page cannot fall back to the login screen. `chrome-layout.spec.ts` and `report-a4-layout.spec.ts` are live API gates and skip unless `PG_API_URL` (and `REPORT_LAYOUT_SPEC` for A4) is set.
