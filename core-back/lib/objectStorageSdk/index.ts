@@ -56,6 +56,17 @@ function buildStorageKey(namespace: StorageNamespace, ownerMerchantId: string | 
   return `${namespace.toLowerCase()}/${tenantSegment}/${yyyy}/${mm}/${objectId}.v1.enc`
 }
 
+/**
+ * Orphan-blob sweeping is only safe when this control-plane database is the
+ * only owner of the vault. The Sandbox plane has its own database but shares
+ * the vault, so its sweep sees every Live blob as an orphan (and vice versa).
+ * The deploy disables the sweep in both planes when SANDBOX_ENABLED=true; the
+ * SANDBOX plane always skips it. The per-row GC, scrub, lock reconciliation
+ * and trash retention remain enabled.
+ */
+export const orphanBlobSweepAllowed = (env: NodeJS.ProcessEnv = process.env): boolean =>
+  env.OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED !== 'false' && env.EXECUTION_PLANE !== 'SANDBOX';
+
 export interface ObjectStorageSdkOptions {
   prisma: PrismaClient
   blobStore?: BlobStore
@@ -848,31 +859,37 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
     async runBlobSweep(params?: { minAgeMs?: number; trashRetentionDays?: number }): Promise<{
       trashedOrphans: string[]
       purgedTrashFolders: number
+      orphanSweepSkipped?: boolean
     }> {
       const minAgeMs = params?.minAgeMs ?? 3600 * 1000
       const trashRetentionDays =
         params?.trashRetentionDays ?? Number(process.env.OBJECT_STORAGE_TRASH_RETENTION_DAYS ?? '7')
       const cutoffMs = Date.now() - minAgeMs
       const trashedOrphans: string[] = []
+      const sweepOrphans = orphanBlobSweepAllowed()
 
-      for (const bucket of ['HOT', 'COLD', 'QUARANTINE'] as StorageBucketTier[]) {
-        const files = await blobStore.list(bucket)
-        for (const file of files) {
-          if (file.mtimeMs > cutoffMs) continue
-          const row = await prisma.storageObject.findUnique({
-            where: { bucket_storageKey: { bucket, storageKey: file.relPath } },
-            select: { id: true, status: true },
-          })
-          if (!row || row.status === 'PURGED') {
-            await blobStore.moveToTrash(bucket, file.relPath)
-            trashedOrphans.push(`${bucket}:${file.relPath}`)
+      if (sweepOrphans) {
+        for (const bucket of ['HOT', 'COLD', 'QUARANTINE'] as StorageBucketTier[]) {
+          const files = await blobStore.list(bucket)
+          for (const file of files) {
+            if (file.mtimeMs > cutoffMs) continue
+            const row = await prisma.storageObject.findUnique({
+              where: { bucket_storageKey: { bucket, storageKey: file.relPath } },
+              select: { id: true, status: true },
+            })
+            if (!row || row.status === 'PURGED') {
+              await blobStore.moveToTrash(bucket, file.relPath)
+              trashedOrphans.push(`${bucket}:${file.relPath}`)
+            }
           }
         }
       }
 
       const cutoffDateIso = new Date(Date.now() - trashRetentionDays * 86400 * 1000).toISOString().slice(0, 10)
       const purgedTrashFolders = await blobStore.purgeTrashOlderThan(cutoffDateIso)
-      return { trashedOrphans, purgedTrashFolders }
+      return sweepOrphans
+        ? { trashedOrphans, purgedTrashFolders }
+        : { trashedOrphans, purgedTrashFolders, orphanSweepSkipped: true }
     },
 
     async runIntegrityScrubBatch(batchSize = 50): Promise<{
@@ -893,7 +910,9 @@ export function createObjectStorageSdk(options: ObjectStorageSdkOptions) {
           await decryptObject(obj)
           await prisma.storageObject.update({
             where: { id: obj.id },
-            data: { lastScrubbedAt: new Date() },
+            // A successful scrub clears a previous transient/corruption count so
+            // the monitor does not keep alerting on a restored blob.
+            data: { lastScrubbedAt: new Date(), scrubErrorCount: 0 },
           })
           verifiedCount++
         } catch {

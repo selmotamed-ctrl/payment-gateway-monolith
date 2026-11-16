@@ -1999,7 +1999,7 @@ Redaction was extended to PII keys (email, phone, msisdn, iban, account number, 
 
 <a id="platformsandbox"></a>
 
-> **Part ID:** `platform.sandbox` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `working-tree`
+> **Part ID:** `platform.sandbox` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `working-tree`
 
 # Parallel Sandbox Execution Plane
 
@@ -2087,6 +2087,8 @@ The core trusts the edge identity (mTLS) and the signed session. On the SANDBOX 
 ## 8. Deploy configuration
 
 `deploy/lib/configSchema.ts` adds `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT` (4005), `SANDBOX_DB_NAME` (`payment_gateway_sandbox`), `SANDBOX_REMOTE_DIR`, `SANDBOX_CORE_BACK_URLS` and `FAKE_RAILS_CONTROL_TOKEN`; validation requires Fake Rails, a distinct database/remote dir/port and HTTPS edge URLs. `sandboxDatabase()` derives the transaction (`pgw_sandbox`) and session (`pgw_sandbox_session`) PgBouncer aliases. `postgres18Provisioner` creates the database and writes both aliases; `hostPlanner` emits a second core `ServicePlan` (`pg-core-sandbox`, port 4005, own release tree, sandbox `DATABASE_URL`/`LEADER_ELECTION_DATABASE_URL`, Fake Rails enabled, backups disabled) on `SANDBOX_NODE` or the first core node, with its own firewall rule and core certificate SAN. `deployService` migrates/seeds that database with the direct sandbox owner URL carrying `app.execution_plane=SANDBOX` (PgBouncer rejects custom startup options, so migrations deliberately bypass the pooler); the seed path runs `db-seed` and `seed-fake-rails`, and the Fake Rails seeder stamps an existing sandbox database row as SANDBOX only when `current_database()` equals `SANDBOX_DB_NAME`. Edges receive the sandbox URL list when enabled. The sandbox database and Fake Rails SQLite are deliberately not backup targets.
+
+The Sandbox database is a second object-storage control plane while the vault is shared with Live. The deploy therefore emits `OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false` in both core environments, and the Sandbox plane always skips the orphan-blob sweep through `EXECUTION_PLANE=SANDBOX`; otherwise one plane's sweep would treat the other plane's blobs as orphans and move them to `.trash`. Per-row GC, scrub, lock reconcile and trash retention remain enabled. See `01-core-back/13-object-storage.md` section 7.
 
 ## 9. Verification
 
@@ -7928,7 +7930,7 @@ storage object. The full engine is `parts/01-core-back/13-object-storage.md`.
 
 <a id="coreobject-storage"></a>
 
-> **Part ID:** `core.object-storage` · **Status:** `implemented` · **Last verified:** 2026-11-13 · **Verified against:** `working-tree`
+> **Part ID:** `core.object-storage` · **Status:** `implemented` · **Last verified:** 2026-11-16 · **Verified against:** `working-tree`
 
 # Shared Object & Asset Storage Engine
 
@@ -8083,6 +8085,21 @@ interval/batch env) is a cluster singleton. It runs the generic AV fallback
 lock reconcile, periodic blob sweep and KEK rewrap. A single leader avoids two
 nodes scanning the same quarantine row and avoids every node walking the vault.
 
+**Shared-vault orphan-sweep guard.** The singleton is per control-plane
+database. The orphan-blob sweep lists every file in the vault and compares it
+with `storage_objects` in **its own** database, so it is only safe when that
+database is the sole owner of the vault. The Sandbox plane has a separate
+`payment_gateway_sandbox` control plane but shares the vault; its sweep would
+move every Live blob to `.trash` (and the Live sweep would move the Sandbox
+blobs). When `SANDBOX_ENABLED=true` the deploy emits
+`OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false` in both core environments, and the
+Sandbox plane always skips the orphan sweep through `EXECUTION_PLANE=SANDBOX`.
+The SDK's `orphanBlobSweepAllowed()` is the single enforcement point, including
+the admin maintenance `sweep`. Per-row GC, integrity scrub (which resets
+`scrub_error_count` on success), lock reconcile, KEK rewrap and trash retention
+stay enabled; only the destructive orphan trashing is suppressed. The sweep is
+safe again when one control-plane database is the only owner of the vault.
+
 `createObjectStorageMonitorCheck` (`object_storage`) raises keyed findings for
 an unreachable vault (P1), scrub errors (P1) and quarantine uploads older than
 30 minutes (P2).
@@ -8106,6 +8123,10 @@ the SHA-256.
   unit; `deployObjectStorageDaemon` syncs and starts the daemon.
 - PKI mints `object-storage-daemon.crt` (SANs: storage private IP, 127.0.0.1,
   `object-storage-daemon.internal`) and `object-storage-client.crt`.
+- `hostPlanner.objectStorageCoreEnv()` emits
+  `OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false` when `SANDBOX_ENABLED=true`; the
+  core env default is `true` for a single-plane owner. The admin maintenance
+  `sweep` job honours the same guard and still purges expired trash folders.
 - Firewall opens 4095 only to core and backup private IPs.
 - Health probes run `systemctl is-active` on the storage host and
   `/v1/health` over mTLS from every core host and the backup host.

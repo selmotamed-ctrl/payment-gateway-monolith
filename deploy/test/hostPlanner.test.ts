@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { loadDeployConfig, parseDeployEnv } from "../lib/configSchema";
-import { findSshConflicts, planHosts, renderTopology } from "../lib/hostPlanner";
+import { loadDeployConfig, parseDeployEnv, type DeployConfig } from "../lib/configSchema";
+import { findSshConflicts, objectStorageCoreEnv, planHosts, renderTopology } from "../lib/hostPlanner";
 
 const base = `
 DB_MANAGE_VIA_SSH="true"
@@ -337,5 +337,32 @@ CHECKOUT_HTTPS_PORT="9443"
     const result = loadDeployConfig(withOverrides(`MERCHANT_HTTPS_PORT="8081"`));
     expect(result.ok).toBe(false);
     expect(result.problems.join(" ")).toContain("must differ");
+  });
+});
+
+describe("shared object storage vault", () => {
+  const sharedVaultConfig = (sandboxEnabled: boolean): DeployConfig =>
+    ({
+      CORE_NODES: "core-1@10.10.0.20:22:10.10.0.20:4000",
+      SANDBOX_ENABLED: sandboxEnabled,
+      OBJECT_STORAGE_ENABLED: true,
+      OBJECT_STORAGE_MANAGE_VIA_SSH: true,
+      OBJECT_STORAGE_NODE: "obj-1@10.10.0.60:22:10.10.0.60:4095",
+      OBJECT_STORAGE_ROOT_DIR: "/var/lib/pg-object-storage/vault",
+      OBJECT_STORAGE_DAEMON_PORT: 4095,
+      OBJECT_STORAGE_DAEMON_TIMEOUT_MS: 30_000,
+      OBJECT_STORAGE_KEK_KEYRING: `v1:${"a".repeat(64)}`,
+      OBJECT_STORAGE_ACTIVE_KEK_VERSION: 1,
+      OBJECT_STORAGE_TRASH_RETENTION_DAYS: 7,
+      OBJECT_STORAGE_GC_GRACE_HOURS: 24,
+      OBJECT_STORAGE_ALLOW_INSECURE_HTTP: false,
+    }) as unknown as DeployConfig;
+
+  test("disables the orphan sweep while the Sandbox plane shares the vault", () => {
+    expect(objectStorageCoreEnv(sharedVaultConfig(true)).OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED).toBe("false");
+  });
+
+  test("keeps the orphan sweep for a single control-plane deployment", () => {
+    expect(objectStorageCoreEnv(sharedVaultConfig(false)).OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED).toBe("true");
   });
 });

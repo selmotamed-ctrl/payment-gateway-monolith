@@ -274,6 +274,11 @@ export const objectStorageCoreEnv = (config: DeployConfig): Record<string, strin
     OBJECT_STORAGE_ACTIVE_KEK_VERSION: String(config.OBJECT_STORAGE_ACTIVE_KEK_VERSION),
     OBJECT_STORAGE_TRASH_RETENTION_DAYS: String(config.OBJECT_STORAGE_TRASH_RETENTION_DAYS),
     OBJECT_STORAGE_GC_GRACE_HOURS: String(config.OBJECT_STORAGE_GC_GRACE_HOURS),
+    // The Live and Sandbox cores have separate storage_objects tables but share
+    // one vault. An orphan sweep in either plane would trash the other plane's
+    // blobs, so it is disabled in both while the Sandbox is enabled. Per-row GC,
+    // scrub, lock reconciliation and trash retention stay on.
+    OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED: config.SANDBOX_ENABLED ? "false" : "true",
     OBJECT_STORAGE_ALLOW_INSECURE_HTTP: config.OBJECT_STORAGE_ALLOW_INSECURE_HTTP ? "true" : "false",
   };
   if (!objectStorageConfigured(config)) return base;

@@ -113,6 +113,12 @@ export const envSchema = z.strictObject({
   OBJECT_STORAGE_ACTIVE_KEK_VERSION: z.coerce.number().int().positive().default(1),
   OBJECT_STORAGE_TRASH_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
   OBJECT_STORAGE_GC_GRACE_HOURS: z.coerce.number().int().min(1).max(720).default(24),
+  /**
+   * The orphan-blob sweep is only safe when this control-plane database is the
+   * sole owner of the vault. The deploy sets this to false when the Sandbox
+   * plane shares the vault; the SANDBOX plane always skips it.
+   */
+  OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED: booleanFromEnvironment.default(true),
   CLUSTER_CORE_NODE_COUNT: z.coerce.number().int().positive().max(1000).default(1),
   MTLS_CA_CERT_PATH: filePath("MTLS_CA_CERT_PATH"),
   MTLS_SERVER_CERT_PATH: filePath("MTLS_SERVER_CERT_PATH"),
@@ -576,6 +582,7 @@ const resolveEnvironment = (): CoreEnv => {
     OBJECT_STORAGE_ACTIVE_KEK_VERSION: 1,
     OBJECT_STORAGE_TRASH_RETENTION_DAYS: 7,
     OBJECT_STORAGE_GC_GRACE_HOURS: 24,
+    OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED: true,
     CLUSTER_CORE_NODE_COUNT: 1,
     MTLS_CA_CERT_PATH: "./certs/internal-ca.crt",
     MTLS_SERVER_CERT_PATH: "./certs/core-back.crt",

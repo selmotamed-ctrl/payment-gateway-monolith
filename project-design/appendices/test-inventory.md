@@ -148,6 +148,7 @@
 | `core-back/test/merchant-webhooks-api.test.ts` | 234 | 9 |
 | `core-back/test/notifications-and-gl-accounts.test.ts` | 526 | 20 |
 | `core-back/test/objectStorageEngine.test.ts` | 803 | 31 |
+| `core-back/test/objectStorageOrphanSweepGuard.test.ts` | 24 | 3 |
 | `core-back/test/onboarding-four-eyes.test.ts` | 200 | 18 |
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/partition-truncate-guard.test.ts` | 86 | 5 |
@@ -305,7 +306,7 @@
 | `deploy/test/frontendBuild.test.ts` | 171 | 12 |
 | `deploy/test/gap-hardening.test.ts` | 114 | 10 |
 | `deploy/test/healthVerifierScale.test.ts` | 154 | 5 |
-| `deploy/test/hostPlanner.test.ts` | 342 | 25 |
+| `deploy/test/hostPlanner.test.ts` | 369 | 27 |
 | `deploy/test/hostPlannerScale.test.ts` | 161 | 6 |
 | `deploy/test/hostProbe.test.ts` | 40 | 5 |
 | `deploy/test/ipv6Loopback.test.ts` | 37 | 2 |
@@ -428,5 +429,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **423**
-- Total literal test declarations: **4195**
+- Total files: **424**
+- Total literal test declarations: **4200**

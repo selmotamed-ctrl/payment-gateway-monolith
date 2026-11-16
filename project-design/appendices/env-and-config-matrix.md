@@ -288,6 +288,7 @@
 | `core-back/lib/env/index.ts` | `OBJECT_STORAGE_ACTIVE_KEK_VERSION` |
 | `core-back/lib/env/index.ts` | `OBJECT_STORAGE_TRASH_RETENTION_DAYS` |
 | `core-back/lib/env/index.ts` | `OBJECT_STORAGE_GC_GRACE_HOURS` |
+| `core-back/lib/env/index.ts` | `OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED` |
 | `core-back/lib/env/index.ts` | `CLUSTER_CORE_NODE_COUNT` |
 | `core-back/lib/env/index.ts` | `MTLS_CA_CERT_PATH` |
 | `core-back/lib/env/index.ts` | `MTLS_SERVER_CERT_PATH` |
