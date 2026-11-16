@@ -33,4 +33,4 @@ make sure that log partitioning runs on workers leader like the journal lines pa
 - opening disputes from payment attempt details drawer does not work, the filter is probably missing
 - queue needing attention in dashboard needs to be fixed the numbers does not show always 0
 - running report shows error that the zip asset file is missing from the vault, fix using the error code on the test-server opencode session make sure to track the root cause 3e525d00-9bb9-40ea-9e28-9c32aa5999ba
-    - running report shows error that the zip asset file is missing from the vault
+    - running report shows error that the zip asset file is missing from the vault, the run is on the running test server, it was running correctly yesterday, something must happened the report code is "gateway-performance-intelligence" the object id is " 3e525d00-9bb9-40ea-9e28-9c32aa5999ba"
