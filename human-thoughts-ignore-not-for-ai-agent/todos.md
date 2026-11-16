@@ -26,3 +26,6 @@ Not built or partial
 - what does merchant tab show in the report catalog
 
 - reporting engine should track the version and any breaking change due to version changing (major version means previous reports specs wont work and must be regenerated and migrated with a proposed migration prompt), broken reports should not ever throw 500 error (currently that what happens) and should not allow runs and should be marked as needing migration and colored red, and there should be page of these reports, the catalog page should only show working reports, also there should be documentation on how to version transcripts for the ai agents that will develop changes on the report engine --
+
+
+make sure that log partitioning runs on workers leader like the journal lines patitioning basedon "Time-bounded: monthly partitions created/dropped by ensure_log_partitions / LOG_RETENTION_MONTHS cron"
