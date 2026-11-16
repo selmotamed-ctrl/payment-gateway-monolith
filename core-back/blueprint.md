@@ -340,7 +340,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 ## Core API Surface
 
-> Status: `partial` · Last verified: 2026-11-13
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -507,6 +507,9 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `POST /rails`, `PATCH /rails/:id`, `PUT /rails/:id/fields` | `gateway:write` |
 | `GET /routes`, `/export`, `/summary`, `/summary/export`, `GET /routes/:id` | `gateway:read` |
 | `POST /routes`, `PATCH /routes/:id`, `POST /routes/:id/state` | `gateway:write` |
+| `GET /routes/:id/health` | `gateway:read` |
+| `POST /routes/:id/health/probe` | `gateway:test` or `gateway:write` |
+| `POST /routes/:id/health/override`, `POST /routes/:id/health/override/clear` | `gateway:write` (force `HEALTHY` and a healthier clear return `202` pending approval) |
 | `GET /assets`, `GET /assets/:id`, `GET /assets/:id/content` | `gateway:read` |
 | `POST /assets`, `POST /assets/upload`, `DELETE /assets/:id` | `gateway:write` |
 
@@ -525,6 +528,8 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | :--- | :--- |
 | `GET /disputes`, `/export`, `/summary`, `/summary/export`, `GET /disputes/:id` | `dispute:read` |
 | `POST /disputes/:id/evidence`, `POST /disputes` | `dispute:write` |
+
+`GET /disputes` and `/disputes/export` combine the standard list filters with `merchantId` (the attempt's merchant) and `attemptId` (one payment attempt), so the admin payment-attempt drawer can deep-link to the attempt's dispute(s).
 | `GET /adjustments`, `/export`, `/summary`, `/summary/export`, `GET /adjustments/:id` | `finance:read` |
 | `POST /adjustments` | `finance:write`; creates an `ADJUSTMENT` approval and a `PENDING_REVIEW` adjustment |
 | `GET /cashouts`, `/export`, `/summary`, `/summary/export`, `GET /cashouts/:id` | `cashout:read` |
@@ -963,6 +968,7 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 ### Rail logo, route policy and commission tiers (2026-11-06)
 
 - `PATCH /rails/:id` accepts `logoAssetId` (uuid, or `null` to clear). A uuid must reference a registered `Asset` (`404 ASSET_NOT_FOUND`); the audit row records the before/after logo. The edge schema and `toCoreRailUpdate` forward it. `POST /assets` still registers metadata only (name, type, size, SHA-256, storage key): it does not store image bytes, which remains a gap.
+- `POST /routes/:id/health/override` accepts `HEALTHY`, `DEGRADED` or `OPEN_BREAKER`, a reason of 10–500 characters, an optional ISO `expiresAt` (default 7 days, maximum 30) and optional evidence. `HEALTHY` creates a `ROUTE_HEALTH_OVERRIDE` approval; the other states apply immediately. `POST /routes/:id/health/override/clear` applies immediately unless the computed state is healthier than the forced state, in which case it returns `202` for a second approval.
 - `PATCH /routes/:id` accepts `mismatchPolicy` (object; only `tolerance_amount`/`toleranceAmount` is read by the settlement engine, other keys are kept as stored; a malformed tolerance is `400 MISMATCH_TOLERANCE_INVALID`) and `maintenanceWindows` (`[{ start, end }]`, max 50, absolute instants; `end <= start` or an unparsable instant is `400 MAINTENANCE_WINDOW_INVALID`; `[]` clears). Omitted fields are left untouched; the edge forwards empty values so an operator can clear them.
 - **Commission tiers were broken end to end and are fixed.** The admin edge persisted UI tiers as an index-keyed object (`{"0": {...}}`) and core's create schema (`z.record`) could not take an array, while the fee calculator (`commissionForProfile`, `checkout.ts`) only reads `tiersJson` when it is an array: a TIERED profile created through the UI silently priced at its minimum fee. Now `POST /commission-profiles` accepts an ordered array (or the legacy object), the edge forwards the array, and `commissionTiers()` normalises both shapes (object keys ordered numerically), which also reprices already-stored legacy rows correctly. Tier keys are `upTo`, `flat`, `percent` (a fraction). **Behaviour change for existing data:** a legacy TIERED profile now prices by its tiers instead of the minimum fee. The edge also forwards `minFee`, `maxFee`, `feeBearerDefault`, `roundingMode`, `merchantId`, `applicationId` (core already accepted them; the strict edge schema dropped them). Note `percentageRate` is a **fraction** (`0.0300` = 3%), as the seed data stores it; the form now says so.
 
@@ -1000,6 +1006,14 @@ The admin router adds paginated `/admin/merchants` and `/admin/merchants/summary
 ## v38-v39 `/internal/sandbox` (2026-11-13)
 
 A new internal router, reachable from merchant-back and admin-back and mounted only on the SANDBOX plane, exposes the merchant sandbox overview, wallet detail/ledger/balance/simulated cash-out, payment detail/refund/dispute simulation and resolution, demo seed and 20-payment history seed, reset, Fake Rails account proxy/control (paginated, merchant-scoped, preset clone/restore), reconciliation import, webhook test ping, clearing pools/statement/settle, and staff overview, merchant list/overview, global reset, Fake Rails scenarios/transactions/webhooks/statements. Checkout adds `GET/POST /pay/:linkKey/sandbox-accounts`, account movements, `PATCH /pay/:linkKey/sandbox-accounts/:accountId`, `GET /pay/:linkKey/logs/:attemptId/sandbox-inspector` and `POST /pay/:linkKey/logs/:attemptId/sandbox-simulate`; all of them refuse a non-`sbx_` key with `403 SANDBOX_INSPECTOR_FORBIDDEN_ON_LIVE_LINK`.
+
+## Dashboard overview gross volume (2026-11-16)
+
+`GET /internal/admin/stats/overview` returns `grossVolume` (and `grossVolumeAttempts`) as the sum and count of `totalChargedAmount` for attempts created in the selected period with `status = SUCCEEDED` and `currency = LYD`. Previously `grossVolume` summed the whole success status set (`SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `DISPUTED`) across all currencies. `successRate` and `attemptsByState`/`volumeByState` are unchanged.
+
+## Dashboard success-rate denominator (2026-11-16)
+
+`GET /internal/admin/stats/overview` returns `attemptsCounted` and computes `successRate = attemptsSucceeded / attemptsCounted`. `attemptsSucceeded` counts `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` (the payment was processed successfully; a later refund or dispute is not a processing failure). `attemptsCounted` adds `FAILED` and `UNKNOWN` only. Pending/in-flight states (`CREATED`, `INITIATING`, `AWAITING_CUSTOMER`, `AUTHORIZING`, `VERIFYING`) and deliberate/no-processing outcomes (`CANCELLED`, `EXPIRED`, `BLOCKED`) are excluded from both sides of the rate. `attemptsTotal` remains every attempt created in the period for the distribution chart and snapshot export.
 
 ## Core Engine
 
@@ -2463,7 +2477,7 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 
 ## Background Workers and Outboxes
 
-> Status: `partial` · Last verified: 2026-11-10
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -2925,6 +2939,19 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 - `OutboxNotificationWorker` opens the Vault-encrypted `codeCiphertext` of SMS MFA notifications at send time; `notifications.payload_json` no longer carries the plaintext code.
 - **Multi-node claiming and leader election (GAP-012, RESOLVED 2026-11-05).** Every `FOR UPDATE SKIP LOCKED` claim now runs inside a transaction (`BaseWorker.inTransaction`, 15 s timeout, 5 s max wait; a test double without `$transaction` runs the callback directly), because a SKIP LOCKED lock taken outside a transaction is released the instant the statement ends. `PollWorker` (`payment_attempts.next_check_at`) and `OutboxNotificationWorker` (`notifications.next_attempt_at`) claim and lease in ONE statement: the claimed rows are updated to `now + claimLeaseSeconds` (`WorkerOptions.claimLeaseSeconds`, default 120 s) before the lock is released at commit, the inquiry/delivery then runs outside the transaction (a held row lock would deadlock the engine, which updates the same attempt on another connection), every outcome rewrites the schedule column, and a crashed node's rows become due again when the lease expires. `ExpirySweeperWorker` has no lease column and is a cluster singleton whose exclusivity comes from leader election (the conditional terminal transition remains the last line of defence). `InboundInboxWorker` is also a singleton, but since 2026-11-07 it additionally owns a durable `claimed_at`/`claimed_by` lease, so even a brief leadership overlap cannot process a webhook twice. Singleton workers (`BaseWorker.singleton`): `ExpirySweeper`, `InboundInbox`, `JoinRequestExpiry`, `KybExpiry`, `LedgerInvariant`, `PeriodicScreening` and `Retention`. Their tick runs only on the node that holds the PostgreSQL advisory lock for `worker:<name>` (`PgAdvisoryLeaderElection`, `core-back/lib/storageEngine/leaderElection.ts`; the lock name is `<namespace>:worker:<name>`, default namespace `pgw`, hashed with `hashtextextended`). It uses `pg_try_advisory_lock` on ONE dedicated, session-stable connection (`application_name=pg-core-back-leader`). Since 2026-11-07 the storage engine creates the election from `LEADER_ELECTION_DATABASE_URL` (falling back to `DATABASE_URL` only when PgBouncer is disabled), and a leader re-validates on every tick with a combined backend-PID + `pg_locks` ownership probe; a change, a missing lock row, a refused unlock or a dropped connection clears the held keys and the singleton skips the tick (fail closed). Boot runs `verifySessionSafety()`: a second client must not be able to acquire the probe key and the backend PID must stay stable, otherwise core refuses to start. Deploy generates a `pgw_session` PgBouncer alias with `pool_mode=session`; the transaction-pooled `DATABASE_URL` is rejected by the environment guard when `PGBOUNCER_ENABLED=true`. `createProductionWorkerRuntime` passes the election to the workers and registers the expected singleton keys on it for `/health`. Without an election (unit tests, single-process) workers behave as before.
 - The re-finalize guard for terminal attempts in `verifyCallback`/`finalizeSuccess` is implemented in the engine (GAP-016, RESOLVED 2026-11-05; see `core.engine`). `PollWorker`/`ExpirySweeper` still never settle an AML-held attempt (`AML_HOLD` substatus).
+
+## Route health worker (AUTO-09)
+
+`GatewayHealthWorker` is a cluster singleton (`worker:gateway-health`, interval
+`WORKER_ROUTE_HEALTH_INTERVAL_MS`, default 60 s). It reads terminal payment
+attempts from the last hour, rebuilds five-minute outcome buckets, upserts
+`gateway_health_samples`, advances `health_computed_state` from the
+`route_health.policy` Platform Setting and runs read-only recovery probes for
+degraded/open routes when due. It keeps the effective state under an admin
+override, opens keyed operator cases for unhealthy/conflicting routes, writes
+`route_health_events` and audit rows, and clears expired overrides. It is
+registered in `productionRuntime` and participates in expected leader keys.
+See `core.route-health`.
 
 ## Storage Engine
 
@@ -3416,7 +3443,7 @@ fallback) and the `object_storage` Platform Monitor check cover operations.
 
 ## Data Schema and Migrations
 
-> Status: `partial` · Last verified: 2026-11-13
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -3426,7 +3453,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 39 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 41 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -3481,7 +3508,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 40`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 41`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -3502,7 +3529,7 @@ installs the two append-only guard triggers. See
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116090000_merchant_chrome_tenant_integrity`, schema version 40). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116130000_schema_version_agreement`, schema version 41). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -3679,7 +3706,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The seeders will reject a schema version other than 37.
+- Apply migrations before starting a new core build. The seeders will reject a schema version other than 40.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -3797,7 +3824,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 40 (`REQUIRED_SCHEMA_VERSION = 40`; model count 114). The schema migrations since version 10 are:
+The current schema version is 41 (`REQUIRED_SCHEMA_VERSION = 41`; model count 116). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -3816,6 +3843,8 @@ The current schema version is 40 (`REQUIRED_SCHEMA_VERSION = 40`; model count 11
 - `20261111130000_merchant_report_chrome` (version 35, written on the plan branch): creates `merchant_report_chrome_specs` (unique `(merchant_id, code, version)`, one published default per merchant and chrome type, a foreign key to the merchant asset bundle).
 - `20261112090000_journal_partition_storage_and_race` (version 35, no table shape change): redefines `ensure_journal_line_partitions` again. (1) The 2026-11-10 revision set only the insert-autovacuum parameters on a new monthly partition and dropped the explicit `fillfactor = 100` of the original body; it is restored, and set once (`SHARE UPDATE EXCLUSIVE`, no write blocking) on every monthly partition created without it. (2) The same revision replaced `CREATE TABLE IF NOT EXISTS` with a `to_regclass` check and a plain `CREATE TABLE`, so two callers at once (the partition worker on two nodes, or the worker and a deploy) both saw a month missing and the second aborted with `duplicate_table` (measured: 3 of 4 concurrent callers failed); `duplicate_table` / `unique_violation` from a concurrent creator are now accepted, and the truncate-guard install tolerates `duplicate_object`. The version is bumped because the newest migration sets `REQUIRED_SCHEMA_VERSION` (checked by `phase1-mtls-and-schema.test.ts`) and the seeders' equality guard then refuses a database without it; core HTTP start does not check the version. Test: `ledger-query-pruning-and-accuracy.test.ts` EC-15 (storage parameters) and EC-15b (four concurrent callers on a dropped empty month).
 - `20261116090000_merchant_chrome_tenant_integrity` (version 40, no new table; the newest migration): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merges.** The branches numbered their migrations independently: `20261111090000` = 34 and `20261112090000` = 35 (`claude-fixes`), `20261111120000` = 34 and `20261111130000` = 35 (plan branch), `20261112000000` = 36, `20261113090000` = 37, `20261113120000` = 38 and `20261114090000` = 39 (`master`). None is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first (a database that followed `master` to 39 and then receives the `claude-fixes` migrations would be left at 35). This migration is new to every database, runs last and sets 40. It was first written as `20261112100000` with version 36 when only the plan branch had been merged; that name was never pushed or deployed and was renamed on 2026-11-16 so that it also runs after `master`'s migrations. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, `master` first, `claude-fixes` first) and applied from empty on PostgreSQL 18.6: each ends at 40 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
+- `20261116120000_route_health_automation` (version 40, from `master`): route health and the circuit breaker: `rail_routes` health computed/override columns, first-terminal and first-unknown markers on `payment_attempts`, `route_health_events` and `route_health_probes`, a trigger that keeps the markers current, and a unique `(route_id, window_start)` on `gateway_health_samples`. Owned by `core.route-health`.
+- `20261116130000_schema_version_agreement` (version 41, no structure): the agreed version after both 40s. Runs last, so a database at 41 has both `20261116090000` and `20261116120000` applied.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -3953,7 +3982,18 @@ Schema version 38 adds `system_execution_plane` (singleton `id=1`, `plane`, `all
 
 ## v39 schema (2026-11-13)
 
-`20261114090000_v39_sandbox_studio` adds nullable `wallets.name` (`VARCHAR(120)`) and `payment_links.title` (`VARCHAR(160)`)/`description` (`TEXT`). The columns already appeared in portal and checkout contracts but were discarded before v39. Existing rows and the Live flow are unaffected. The required schema version is **39**.
+`20261114090000_v39_sandbox_studio` adds nullable `wallets.name` (`VARCHAR(120)`) and `payment_links.title` (`VARCHAR(160)`)/`description` (`TEXT`). The columns already appeared in portal and checkout contracts but were discarded before v39. Existing rows and the Live flow are unaffected. The required schema version was **39**; v40 below supersedes it.
+
+## v40 schema (2026-11-16)
+
+`20261116120000_route_health_automation` adds the route-health fields, attempt
+first-terminal/unknown markers, `gateway_health_samples.ignored_outcomes` and
+the unique `(route_id, window_start)` index, plus `route_health_events` and
+`route_health_probes`. The migration backfills computed health from effective
+health, first-terminal from `terminal_at`, first-unknown from `updated_at` for
+unresolved `UNKNOWN` attempts, canonical error from `substatus`, deduplicates
+legacy health samples before the unique index and writes one `MIGRATION`
+health event per route. The required schema version is **40**.
 
 ## Global Search
 

@@ -3,11 +3,12 @@ id: platform.sandbox
 title: Parallel Sandbox Execution Plane
 status: partial
 confidence: high
-last_verified: 2026-11-13
+last_verified: 2026-11-16
 verified_against: working-tree
 code:
   - core-back/lib/executionPlane.ts
   - core-back/lib/commerceStatus.ts
+  - core-back/lib/objectStorageSdk/index.ts
   - core-back/engine/PlaneFenceGuard.ts
   - core-back/api/internal/sandboxControl.ts
   - core-back/api/internal/checkout.ts
@@ -39,6 +40,7 @@ design_sources:
 tests:
   - core-back/test/sandboxPlane.test.ts
   - core-back/test/fake-rails-control-client.test.ts
+  - core-back/test/objectStorageOrphanSweepGuard.test.ts
   - core-back/test/phase1-mtls-and-schema.test.ts
   - core-back/test/security-regressions/commerce-status-enforcement.test.ts
   - core-back/test/engine/attempt-guard-pipeline.test.ts
@@ -142,6 +144,8 @@ The core trusts the edge identity (mTLS) and the signed session. On the SANDBOX 
 ## 8. Deploy configuration
 
 `deploy/lib/configSchema.ts` adds `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT` (4005), `SANDBOX_DB_NAME` (`payment_gateway_sandbox`), `SANDBOX_REMOTE_DIR`, `SANDBOX_CORE_BACK_URLS` and `FAKE_RAILS_CONTROL_TOKEN`; validation requires Fake Rails, a distinct database/remote dir/port and HTTPS edge URLs. `sandboxDatabase()` derives the transaction (`pgw_sandbox`) and session (`pgw_sandbox_session`) PgBouncer aliases. `postgres18Provisioner` creates the database and writes both aliases; `hostPlanner` emits a second core `ServicePlan` (`pg-core-sandbox`, port 4005, own release tree, sandbox `DATABASE_URL`/`LEADER_ELECTION_DATABASE_URL`, Fake Rails enabled, backups disabled) on `SANDBOX_NODE` or the first core node, with its own firewall rule and core certificate SAN. `deployService` migrates/seeds that database with the direct sandbox owner URL carrying `app.execution_plane=SANDBOX` (PgBouncer rejects custom startup options, so migrations deliberately bypass the pooler); the seed path runs `db-seed` and `seed-fake-rails`, and the Fake Rails seeder stamps an existing sandbox database row as SANDBOX only when `current_database()` equals `SANDBOX_DB_NAME`. Edges receive the sandbox URL list when enabled. The sandbox database and Fake Rails SQLite are deliberately not backup targets.
+
+The Sandbox database is a second object-storage control plane while the vault is shared with Live. The deploy therefore emits `OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false` in both core environments, and the Sandbox plane always skips the orphan-blob sweep through `EXECUTION_PLANE=SANDBOX`; otherwise one plane's sweep would treat the other plane's blobs as orphans and move them to `.trash`. Per-row GC, scrub, lock reconcile and trash retention remain enabled. See `01-core-back/13-object-storage.md` section 7.
 
 ## 9. Verification
 

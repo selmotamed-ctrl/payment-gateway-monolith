@@ -322,6 +322,7 @@ export interface PaymentAttemptRow {
   subMode: string | null;
   status: string;
   substatus: string | null;
+  canonicalError?: string | null;
   gatewayReference: string | null;
   providerReference: string | null;
   networkReference: string | null;

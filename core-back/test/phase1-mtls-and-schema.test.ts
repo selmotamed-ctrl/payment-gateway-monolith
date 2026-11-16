@@ -149,6 +149,9 @@ const designModelNames = [
   // v38: strict Live/Sandbox execution plane and sandbox control audit.
   "SystemExecutionPlane",
   "SandboxSyncAudit",
+  // Route health automation (schema version 40).
+  "RouteHealthEvent",
+  "RouteHealthProbe",
 ];
 
 describe("prisma schema", () => {
@@ -210,15 +213,17 @@ describe("prisma schema", () => {
     // The automation plan adds one migration per item; the ledger query/index optimisation is applied after them
     // (schema version 25) so its partition function carries both the automation security hardening and the
     // append-only autovacuum settings. The newest migration must be well-formed and set the required version.
-    // The newest migration (schema version 40) makes the merchant header/footer table tenant-safe and sets the
-    // one version the merged branches agree on. The branches numbered their migrations independently
-    // (claude-fixes 34 and 35, the plan branch 34 and 35, master 36 to 39); none is edited (each may already be
-    // applied somewhere), so the value they leave behind depends on which branch a database saw first. The
-    // newest migration is new to every database, runs last and sets 40.
-    expect(ordered.at(-1)).toBe("20261116090000_merchant_chrome_tenant_integrity");
+    // The newest migration (schema version 41) sets the version that means "both 40s applied": the merchant
+    // header/footer tenant fix (claude-fixes) and the route health automation (master). Neither 40 may be
+    // edited, and the agreement migration runs after both.
+    expect(ordered.at(-1)).toBe("20261116130000_schema_version_agreement");
     const chromeIntegrity = fs.readFileSync(path.join(migrationsDirectory, "20261116090000_merchant_chrome_tenant_integrity", "migration.sql"), "utf8");
     expect(chromeIntegrity).toContain('FOREIGN KEY ("asset_bundle_id", "merchant_id")');
     expect(chromeIntegrity).toContain('REFERENCES "merchant_report_asset_bundles" ("id", "merchant_id")');
+    expect(ordered).toContain("20261116120000_route_health_automation");
+    const routeHealth = fs.readFileSync(path.join(migrationsDirectory, "20261116120000_route_health_automation", "migration.sql"), "utf8");
+    expect(routeHealth).toContain("payment_attempts_health_markers");
+    expect(routeHealth).toContain("set_payment_attempt_health_markers");
     // The name it had before master was merged must not come back: it would run before master's migrations.
     expect(ordered).not.toContain("20261112100000_merchant_chrome_tenant_integrity");
     expect(ordered).toContain("20261114090000_v39_sandbox_studio");
@@ -266,17 +271,19 @@ describe("prisma schema", () => {
     expect(guard).not.toContain("schema_versions");
     const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
     expect(newest).toMatch(new RegExp(`UPDATE "schema_versions"\\s+SET "version" = ${REQUIRED_SCHEMA_VERSION}\\b`));
-    expect(REQUIRED_SCHEMA_VERSION).toBe(40);
+    expect(REQUIRED_SCHEMA_VERSION).toBe(41);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),
         "utf8",
       );
-      // Every migration changes the schema; an ALTER-only migration (e.g. a new enum value) is valid too.
-      expect(sql).toMatch(/\b(CREATE|ALTER)\b/);
+      // Every migration changes the schema; an ALTER-only migration (e.g. a new enum value) is valid too. The one
+      // exception is a version-agreement migration whose only statement sets schema_versions (no structure).
+      const executable = sql.split("\n").filter((line) => !line.trimStart().startsWith("--")).join("\n");
+      const versionOnly = /^UPDATE "schema_versions" SET "version" = \d+;$/.test(executable.replace(/\s+/g, " ").trim());
+      if (!versionOnly) expect(sql).toMatch(/\b(CREATE|ALTER)\b/);
       expect(sql.toLowerCase()).not.toContain("engine=innodb");
       // MySQL identifier quoting is forbidden in executable SQL; a backtick inside a `--` comment is just prose.
-      const executable = sql.split("\n").filter((line) => !line.trimStart().startsWith("--")).join("\n");
       expect(executable).not.toContain("`");
     }
   });

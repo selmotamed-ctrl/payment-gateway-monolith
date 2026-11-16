@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useLocale, useTheme } from "vuetify";
+import { useRoute, useRouter } from "vue-router";
 import { areChecklistsVisible } from "@/constants/env";
 import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -56,6 +57,7 @@ import {
     type RouteScopeState,
 } from "@/components/builders/model";
 import { toCapView, type RouteCapRow, type RouteCapView } from "@/pages/finance/liquidity/routeCaps";
+import RouteHealthDrawer from "./components/RouteHealthDrawer";
 const SUMMARY_EXPORT_CHECKS = [
     { key: "ROUTE_SCOPE_VERIFIED", label: "Route portfolio scope verified" },
     { key: "STATUS_HEALTH_REVIEWED", label: "Status and health reviewed" },
@@ -83,8 +85,13 @@ type GatewayRoute = {
     minAmount: string;
     maxAmount: string;
     dailyCapAmount: string;
+    limitCurrency?: string | null;
     status: string;
     healthState: string;
+    healthComputedState?: string | null;
+    healthOverrideState?: string | null;
+    healthOverrideReason?: string | null;
+    healthOverrideExpiresAt?: string | null;
     scope: unknown;
     mismatchPolicy?: unknown;
     maintenanceWindows?: unknown;
@@ -104,6 +111,8 @@ type RouteSummary = {
 const RoutesPage = dc(() => {
     const { t } = useLocale();
     const theme = useTheme();
+    const currentRoute = useRoute();
+    const router = useRouter();
     const showChecklists = areChecklistsVisible();
     const toneColor = (tone: "error" | "warning"): string =>
         (theme.current.value.colors as Record<string, string>)[tone] ?? "";
@@ -123,6 +132,8 @@ const RoutesPage = dc(() => {
     let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
     const dialogOpen = ref(false);
+    const healthOpen = ref(false);
+    const healthRoute = ref<GatewayRoute | null>(null);
     const routeEditChecklist = ref<Record<string, boolean>>({});
     const editingRoute = ref<GatewayRoute | null>(null);
     const actionLoading = ref(false);
@@ -146,6 +157,20 @@ const RoutesPage = dc(() => {
     const gatewayOptions = ref<{ title: string; value: string }[]>([]);
 
     const filterDefinitions = computed(() => tableRegistry.GatewayRoutes?.filters ?? []);
+
+    const openHealthFromQuery = () => {
+        const requested = typeof currentRoute.query.health === "string" ? currentRoute.query.health : "";
+        if (!requested) return;
+        const row = routes.value.find((entry) => entry.id === requested);
+        if (!row) return;
+        healthRoute.value = row;
+        healthOpen.value = true;
+        const query = { ...currentRoute.query };
+        delete query.health;
+        void router.replace({ query });
+    };
+    watch(() => currentRoute.query.health, openHealthFromQuery, { immediate: true });
+    watch(routes, openHealthFromQuery);
 
     const loadSummary = async () => {
         try {
@@ -510,21 +535,21 @@ const RoutesPage = dc(() => {
             value: (row) => `${row.minAmount ?? ""} - ${row.maxAmount ?? ""}`,
             Value: ({ row }: { row: GatewayRoute }) => (
                 <div style={{ display: "flex", gap: "4px", alignItems: "center", flexWrap: "nowrap" }}>
-                    <MoneyDisplay amount={row.minAmount ?? "0"} currency={"LYD"} size="sm" />
+                    <MoneyDisplay amount={row.minAmount ?? "0"} currency={row.limitCurrency ?? "LYD"} size="sm" />
                     <span style={{ color: "var(--pg-ink-faint)" }}>–</span>
-                    <MoneyDisplay amount={row.maxAmount ?? "0"} currency={"LYD"} size="sm" />
+                    <MoneyDisplay amount={row.maxAmount ?? "0"} currency={row.limitCurrency ?? "LYD"} size="sm" />
                 </div>
             ),
         },
         {
             key: "dailyCapAmount",
-            label: "Amount Due",
+            label: "Daily cap",
             value: (row) => row.dailyCapAmount,
             Value: ({ row }: { row: GatewayRoute }) => {
                 const cap = routeCaps.value[row.id];
                 return (
                     <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                        <MoneyDisplay amount={row.dailyCapAmount ?? "0"} currency={"LYD"} size="sm" />
+                        <MoneyDisplay amount={row.dailyCapAmount ?? "0"} currency={row.limitCurrency ?? "LYD"} size="sm" />
                         {cap?.capped && (
                             <StatusBadge
                                 status={cap.exhausted ? "DAILY_CAP_EXCEEDED" : "CAP_USED"}
@@ -544,9 +569,14 @@ const RoutesPage = dc(() => {
         },
         {
             key: "healthState",
-            label: "Invariant Status",
+            label: t("Health"),
             Value: ({ row }: { row: GatewayRoute }) => (
-                <StatusBadge status={row.healthState} toneOverride={healthTone(row.healthState) === "error" ? "danger" : (healthTone(row.healthState) as any)} />
+                <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                    <StatusBadge status={row.healthState} toneOverride={healthTone(row.healthState) === "error" ? "danger" : (healthTone(row.healthState) as any)} />
+                    {row.healthOverrideState && (!row.healthOverrideExpiresAt || new Date(row.healthOverrideExpiresAt).getTime() > Date.now()) && (
+                        <StatusBadge status="FORCED" label={t("Forced")} toneOverride="warning" showDot={false} />
+                    )}
+                </div>
             ),
         },
         {
@@ -555,10 +585,21 @@ const RoutesPage = dc(() => {
             Value: ({ row }: { row: GatewayRoute }) => (
                 <TableRowActions
                     primaryAction={{
-                        label: t("Edit"),
-                        icon: "mdi-pencil-outline",
-                        onClick: () => openEditRoute(row),
+                        label: t("Health"),
+                        icon: "mdi-heart-pulse",
+                        onClick: () => {
+                            healthRoute.value = row;
+                            healthOpen.value = true;
+                        },
                     }}
+                    items={[
+                        {
+                            key: "edit",
+                            label: t("Edit"),
+                            icon: "mdi-pencil-outline",
+                            onClick: () => openEditRoute(row),
+                        },
+                    ]}
                 />
             ),
         },
@@ -654,6 +695,20 @@ const RoutesPage = dc(() => {
                     )}
                 />
             </ThemedView>
+
+            <RouteHealthDrawer
+                modelValue={healthOpen.value}
+                onUpdate:modelValue={(open: boolean) => {
+                    healthOpen.value = open;
+                    if (!open) healthRoute.value = null;
+                }}
+                routeId={healthRoute.value?.id ?? null}
+                routeLabel={[healthRoute.value?.railCode, "→", healthRoute.value?.gatewayCode].filter(Boolean).join(" · ")}
+                onChanged={() => {
+                    refreshAll();
+                    refreshHook.value?.refreshAsIs();
+                }}
+            />
 
             <FormModal
                 modelValue={dialogOpen.value}

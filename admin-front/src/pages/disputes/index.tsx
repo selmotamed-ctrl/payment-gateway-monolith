@@ -1,8 +1,8 @@
 import { dc } from "kt-dc";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { VAlert, VBtn, VFileInput, VProgressCircular, VTextarea, VTextField } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -48,6 +48,7 @@ import {
     type EvidenceError,
     type EvidenceForm,
 } from "./evidenceModel";
+import { disputeViewFilters, initialDisputeFilters, queryString, type DisputeView } from "./queryFilters";
 type Dispute = {
     id: string;
     externalDisputeRef: string;
@@ -108,8 +109,6 @@ type DisputeSummary = {
     earliestEvidenceDueAt: string | null;
 };
 
-type DisputeView = "open" | "resolved" | "all";
-
 const SUMMARY_EXPORT_CHECKS = [
     { key: "OPEN_SCOPE_VERIFIED", label: "Open dispute scope verified" },
     { key: "DUE_DATE_REVIEWED", label: "Evidence due dates reviewed" },
@@ -123,9 +122,6 @@ const EVIDENCE_CHECKS = [
     { key: "EVIDENCE_WINDOW_VERIFIED", label: "Evidence deadline and window verified" },
     { key: "SUMMARY_REVIEWED", label: "Evidence summary reviewed" },
 ] as const;
-
-const OPEN_STATES = ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED"];
-const RESOLVED_STATES = ["WON", "LOST", "EXPIRED", "WITHDRAWN"];
 
 const badgeTone = (value: string): BadgeTone => {
     const tone = statusTone(value);
@@ -148,13 +144,16 @@ const formatHours = (hours: number | null): string => {
 const DisputesPage = dc(() => {
     const { t } = useLocale();
     const showChecklists = areChecklistsVisible();
+    const route = useRoute();
     const router = useRouter();
+    const initialAttemptId = queryString(route.query.attemptId);
+    const initialMerchantId = queryString(route.query.merchantId);
     const rows = ref<Dispute[]>([]);
     const total = ref(0);
     const summary = ref<DisputeSummary | null>(null);
     const search = ref<string | null>(null);
-    const activeView = ref<DisputeView>("open");
-    const filters = ref<FilterValues>({ status: [...OPEN_STATES] });
+    const activeView = ref<DisputeView>(initialAttemptId ? "all" : "open");
+    const filters = ref<FilterValues>(initialDisputeFilters(initialAttemptId, initialMerchantId));
     const pageSize = ref(20);
     const refreshHook = ref<{
         reset: () => void;
@@ -194,30 +193,55 @@ const DisputesPage = dc(() => {
 
     void loadSummary();
 
+    const removeRouteQuery = (...keys: string[]) => {
+        let changed = false;
+        const nextQuery = { ...route.query };
+        for (const key of keys) {
+            if (key in nextQuery) {
+                delete nextQuery[key];
+                changed = true;
+            }
+        }
+        if (changed) void router.replace({ query: nextQuery });
+    };
+
     const onFiltersChanged = (key: string, value: unknown) => {
         filters.value = { ...filters.value, [key]: value };
+        if (key === "attemptId" && !queryString(value)) {
+            removeRouteQuery("attemptId", "merchantId");
+        }
         if (filterTimer) clearTimeout(filterTimer);
         filterTimer = setTimeout(() => refreshHook.value?.reset(), 300);
     };
 
     const onFiltersCleared = () => {
-        filters.value = activeView.value === "open"
-            ? { status: [...OPEN_STATES] }
-            : activeView.value === "resolved"
-              ? { status: [...RESOLVED_STATES] }
-              : {};
+        filters.value = disputeViewFilters(activeView.value);
+        removeRouteQuery("attemptId", "merchantId");
         refreshHook.value?.reset();
     };
 
     const setView = (view: DisputeView) => {
         activeView.value = view;
-        filters.value = view === "open"
-            ? { status: [...OPEN_STATES] }
-            : view === "resolved"
-              ? { status: [...RESOLVED_STATES] }
-              : {};
+        filters.value = disputeViewFilters(view, filters.value);
         refreshHook.value?.reset();
     };
+
+    watch(
+        () => [queryString(route.query.attemptId), queryString(route.query.merchantId)] as const,
+        ([attemptId, merchantId]) => {
+            if (!attemptId) {
+                if (queryString(filters.value.attemptId)) {
+                    filters.value = disputeViewFilters(activeView.value);
+                    refreshHook.value?.reset();
+                }
+                return;
+            }
+            if (queryString(filters.value.attemptId) === attemptId && queryString(filters.value.merchantId) === merchantId) return;
+            activeView.value = "all";
+            filters.value = initialDisputeFilters(attemptId, merchantId);
+            refreshHook.value?.reset();
+        },
+    );
 
     const exportExcel = async () => {
         if (exportLoading.value) return;

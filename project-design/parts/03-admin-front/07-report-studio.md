@@ -3,7 +3,7 @@ id: admin-ui.report-studio
 title: Report Catalog, Studio and Chrome
 status: implemented
 confidence: high
-last_verified: 2026-11-12
+last_verified: 2026-11-16
 verified_against: working-tree
 code:
   - admin-front/src/pages/reports/**
@@ -115,6 +115,10 @@ The shared paged-media stylesheet now enforces A4 containment: fixed-layout data
 The Studio preview and print path now enforce the A4 print contract: KPI grids max 3 columns with bottom-anchored values and length-aware font scaling, chart rows centered with HTML legends that wrap without hiding entries, pie/donut labels suppressed in favor of the legend, table typography reduced for wide tables, long chips shrunk instead of broken, repeated table headers across Paged.js fragments, compact table sections kept together, and true landscape pages in the exported PDF. The shared bridge injects print page rules after Paged.js rendering because Paged.js removes the author `@page` rules; without this pass Chrome printed all pages portrait.
 
 The A4 regression spec (`tests/e2e/admin/report-a4-layout.spec.ts`) now measures the sheet, not just the content box, and asserts table headers, KPI limits, chart-row centering, orphan titles, vertical overflow and orientation. It can also export the paginated PDF for visual review.
+
+## Page content vertical padding (2026-11-16)
+
+When a running header and/or footer is rendered, `buildPagedMediaHtmlDocument` adds a 4 mm comfort pad to the page content by increasing the top/bottom `@page` margins: top when a header is present, bottom when a footer is present, both when both are present. It is an `@page` margin rather than a first/last content fragment padding, so Paged.js reflows the gap on every page. A first page that hides the chrome through `show_on_first_page=false` restores the original margin with `@page :first`; with no chrome the spec's exact margins are kept. The merchant SDK mirror has the same behavior. The builder test covers both-chrome, no-chrome and first-page-hidden cases.
 
 ## Chrome layout and A4 preview (2026-11-11)
 

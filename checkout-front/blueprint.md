@@ -6,7 +6,7 @@ Generated from: `checkout-ui.flow`, `checkout-ui.help`.
 
 ## Checkout Payer Flow
 
-> Status: `partial` · Last verified: 2026-11-13
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -329,6 +329,15 @@ Checkout dialogs/drawers use the shared overlay text-color rule (`color: rgb(var
 ## v38 sandbox checkout inspector (2026-11-13)
 
 On an `sbx_` link (summary `env: "SANDBOX"`) the payer page renders `SandboxCheckoutInspector`: Fake Rails test-account picker with auto-fill, live balances/holds/daily limits, PIN/CVV/expiry, freeze/drain/set-exact controls, the live OTP with auto-confirm, and the push/QR approve/decline/variance/duplicate/tampered-webhook simulator. It is never rendered on a Live `pl_*` checkout.
+
+## Degraded-route canary (2026-11-16)
+
+Visible-rail resolution now passes the payment link's stable key and the
+`route_health.policy` canary percent/optional amount cap. A `DEGRADED` route is
+excluded for normal links (`ROUTE_DEGRADED_CANARY_EXCLUDED`), while the same
+route+link cohort is allowed and tried first; `OPEN_BREAKER` is never visible.
+The payer UI does not know about health states: it simply receives the reduced
+or canary `visibleRails` list from core. See `core.route-health`.
 
 ## Checkout Help Center
 

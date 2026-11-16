@@ -18,6 +18,7 @@
 | `core-back/test/admin-slice/report-engine-migration.test.ts` | 248 | 3 |
 | `core-back/test/aml-resolution-finalization.test.ts` | 300 | 7 |
 | `core-back/test/approval-queue.test.ts` | 86 | 4 |
+| `core-back/test/attempt-outcomes.test.ts` | 67 | 5 |
 | `core-back/test/automation/aml-event-rescreening.test.ts` | 182 | 4 |
 | `core-back/test/automation/audit-chain-anchor.test.ts` | 212 | 10 |
 | `core-back/test/automation/backup-monitor.test.ts` | 191 | 9 |
@@ -73,7 +74,7 @@
 | `core-back/test/engine/guards-and-workers.test.ts` | 254 | 21 |
 | `core-back/test/engine/ledger.test.ts` | 529 | 30 |
 | `core-back/test/engine/operator-cases-and-broadcast.test.ts` | 208 | 4 |
-| `core-back/test/engine/pre-initiate.test.ts` | 149 | 4 |
+| `core-back/test/engine/pre-initiate.test.ts` | 164 | 5 |
 | `core-back/test/engine/repositories.test.ts` | 256 | 13 |
 | `core-back/test/engine/shard-scaler.test.ts` | 611 | 57 |
 | `core-back/test/engine/step-executor.test.ts` | 325 | 19 |
@@ -148,10 +149,11 @@
 | `core-back/test/merchant-webhooks-api.test.ts` | 234 | 9 |
 | `core-back/test/notifications-and-gl-accounts.test.ts` | 526 | 20 |
 | `core-back/test/objectStorageEngine.test.ts` | 803 | 31 |
+| `core-back/test/objectStorageOrphanSweepGuard.test.ts` | 24 | 3 |
 | `core-back/test/onboarding-four-eyes.test.ts` | 200 | 18 |
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/partition-truncate-guard.test.ts` | 86 | 5 |
-| `core-back/test/phase1-mtls-and-schema.test.ts` | 443 | 14 |
+| `core-back/test/phase1-mtls-and-schema.test.ts` | 448 | 14 |
 | `core-back/test/phase2-ledger-and-governance.test.ts` | 281 | 11 |
 | `core-back/test/phase3-dynamic-engine-and-blueprints.test.ts` | 273 | 12 |
 | `core-back/test/phase4-onboarding-aml-disputes-recon.test.ts` | 237 | 16 |
@@ -193,6 +195,7 @@
 | `core-back/test/reporting-template.test.ts` | 113 | 5 |
 | `core-back/test/reporting-xsd-xlsx.test.ts` | 289 | 11 |
 | `core-back/test/retention-worker.test.ts` | 504 | 17 |
+| `core-back/test/route-health.test.ts` | 289 | 17 |
 | `core-back/test/runtime/production-adapters.test.ts` | 569 | 16 |
 | `core-back/test/runtime/raw-body.test.ts` | 127 | 6 |
 | `core-back/test/runtime/rotating-refresh-token.test.ts` | 106 | 2 |
@@ -239,7 +242,7 @@
 | `core-back/test/worker-runtime-health.test.ts` | 153 | 8 |
 | `admin-back/test/academy-progress.test.ts` | 240 | 13 |
 | `admin-back/test/admin-surface.test.ts` | 1423 | 58 |
-| `admin-back/test/admin-ui-completion.test.ts` | 443 | 29 |
+| `admin-back/test/admin-ui-completion.test.ts` | 447 | 29 |
 | `admin-back/test/auth-account-limiters.test.ts` | 97 | 3 |
 | `admin-back/test/backups.test.ts` | 457 | 21 |
 | `admin-back/test/core-contract.test.ts` | 1650 | 58 |
@@ -305,7 +308,7 @@
 | `deploy/test/frontendBuild.test.ts` | 171 | 12 |
 | `deploy/test/gap-hardening.test.ts` | 114 | 10 |
 | `deploy/test/healthVerifierScale.test.ts` | 154 | 5 |
-| `deploy/test/hostPlanner.test.ts` | 342 | 25 |
+| `deploy/test/hostPlanner.test.ts` | 369 | 27 |
 | `deploy/test/hostPlannerScale.test.ts` | 161 | 6 |
 | `deploy/test/hostProbe.test.ts` | 40 | 5 |
 | `deploy/test/ipv6Loopback.test.ts` | 37 | 2 |
@@ -428,5 +431,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **423**
-- Total literal test declarations: **4195**
+- Total files: **426**
+- Total literal test declarations: **4223**

@@ -113,6 +113,12 @@ export const envSchema = z.strictObject({
   OBJECT_STORAGE_ACTIVE_KEK_VERSION: z.coerce.number().int().positive().default(1),
   OBJECT_STORAGE_TRASH_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
   OBJECT_STORAGE_GC_GRACE_HOURS: z.coerce.number().int().min(1).max(720).default(24),
+  /**
+   * The orphan-blob sweep is only safe when this control-plane database is the
+   * sole owner of the vault. The deploy sets this to false when the Sandbox
+   * plane shares the vault; the SANDBOX plane always skips it.
+   */
+  OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED: booleanFromEnvironment.default(true),
   CLUSTER_CORE_NODE_COUNT: z.coerce.number().int().positive().max(1000).default(1),
   MTLS_CA_CERT_PATH: filePath("MTLS_CA_CERT_PATH"),
   MTLS_SERVER_CERT_PATH: filePath("MTLS_SERVER_CERT_PATH"),
@@ -289,6 +295,9 @@ export const envSchema = z.strictObject({
    * degraded queue. The default is five minutes.
    */
   WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS: z.coerce.number().int().positive().default(300_000),
+  /** AUTO-09: route health sampling, breaker transitions, canary eligibility and half-open probes. */
+  WORKER_ROUTE_HEALTH_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_ROUTE_HEALTH_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
   /**
    * The platform monitor (AUTO-03) evaluates the health of the platform every minute on the cluster leader (worker
    * staleness, checkpoint, outbox, audit outbox and job queue age, the default journal partition, certificate expiry,
@@ -576,6 +585,7 @@ const resolveEnvironment = (): CoreEnv => {
     OBJECT_STORAGE_ACTIVE_KEK_VERSION: 1,
     OBJECT_STORAGE_TRASH_RETENTION_DAYS: 7,
     OBJECT_STORAGE_GC_GRACE_HOURS: 24,
+    OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED: true,
     CLUSTER_CORE_NODE_COUNT: 1,
     MTLS_CA_CERT_PATH: "./certs/internal-ca.crt",
     MTLS_SERVER_CERT_PATH: "./certs/core-back.crt",
@@ -654,6 +664,8 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_BACKGROUND_JOBS_BATCH_SIZE: 10,
     WORKER_BACKGROUND_JOBS_LEASE_SECONDS: 300,
     WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS: 300_000,
+    WORKER_ROUTE_HEALTH_ENABLED: true,
+    WORKER_ROUTE_HEALTH_INTERVAL_MS: 60_000,
     WORKER_PLATFORM_MONITOR_ENABLED: true,
     WORKER_PLATFORM_MONITOR_INTERVAL_MS: 60_000,
     PLATFORM_MONITOR_WORKER_STALE_MULTIPLIER: 3,

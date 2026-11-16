@@ -1846,7 +1846,26 @@ model RailRoute {
   maxAmount          Decimal?         @map("max_amount") @db.Decimal(18, 4)
   dailyCapAmount     Decimal?         @map("daily_cap_amount") @db.Decimal(18, 4)
   status             RouteStatus      @default(ACTIVE)
+  /// Effective health used by routing: healthOverrideState when an override is active, otherwise healthComputedState.
   healthState        HealthState      @default(HEALTHY) @map("health_state")
+  /// The automation's last measured state. Kept up to date even while an admin override is active.
+  healthComputedState  HealthState    @default(HEALTHY) @map("health_computed_state")
+  healthComputedReason String?        @map("health_computed_reason") @db.Text
+  healthComputedAt     DateTime?      @map("health_computed_at")
+  /// Admin-forced effective state; null means no active override.
+  healthOverrideState HealthState?    @map("health_override_state")
+  healthOverrideReason String?        @map("health_override_reason") @db.Text
+  healthOverrideSetAt  DateTime?      @map("health_override_set_at")
+  healthOverrideSetBy  String?        @map("health_override_set_by") @db.Uuid
+  healthOverrideExpiresAt DateTime?   @map("health_override_expires_at")
+  healthOverrideApprovalId String?    @map("health_override_approval_id") @db.Uuid
+  healthReason        String?         @map("health_reason") @db.Text
+  healthChangedAt     DateTime?       @map("health_changed_at")
+  healthConsecutiveFailures Int       @default(0) @map("health_consecutive_failures")
+  healthProbeSuccesses Int            @default(0) @map("health_probe_successes")
+  healthProbeFailures  Int            @default(0) @map("health_probe_failures")
+  healthLastProbeAt    DateTime?      @map("health_last_probe_at")
+  healthNextProbeAt    DateTime?      @map("health_next_probe_at")
   maintenanceWindows Json?            @map("maintenance_windows")
   scope              Json
 
@@ -1856,12 +1875,16 @@ model RailRoute {
   widgetDefinitions    WidgetDefinition[]
   redirectDefinitions  RedirectDefinition[]
   gatewayHealthSamples GatewayHealthSample[]
+  healthEvents         RouteHealthEvent[]
+  healthProbes         RouteHealthProbe[]
   confirmationChannels ConfirmationChannel[]
   paymentAttempts      PaymentAttempt[]
 
   @@unique([railId, gatewayId, credentialPolicy])
   @@index([status, healthState])
   @@index([credentialPolicy])
+  @@index([healthOverrideState])
+  @@index([healthNextProbeAt])
   @@map("rail_routes")
 }
 
@@ -2197,6 +2220,12 @@ model PaymentAttempt {
   nextCheckAt              DateTime?              @map("next_check_at")
   ledgerEntryId            String?                @unique @map("ledger_entry_id") @db.Uuid
   terminalAt               DateTime?              @map("terminal_at")
+  /// First time the attempt reached any terminal state. Never overwritten; drives route health sampling.
+  firstTerminalAt          DateTime?              @map("first_terminal_at")
+  /// First time the attempt became UNKNOWN. Cleared for sampling once firstTerminalAt exists.
+  firstUnknownAt           DateTime?              @map("first_unknown_at")
+  /// Canonical error stored separately from the overloaded substatus for breaker classification.
+  canonicalError           String?                @map("canonical_error") @db.Text
 
   link                PaymentLink              @relation(fields: [linkId], references: [id], onDelete: Restrict)
   attemptGroup        AttemptGroup             @relation(fields: [attemptGroupId], references: [id], onDelete: Restrict)
@@ -2232,6 +2261,8 @@ model PaymentAttempt {
   @@index([status, createdAt])
   @@index([railId, createdAt])
   @@index([applicationId, createdAt])
+  @@index([firstTerminalAt, routeId])
+  @@index([firstUnknownAt, routeId])
   @@map("payment_attempts")
 }
 
@@ -2457,6 +2488,7 @@ model GatewayHealthSample {
   definitiveFailures Int      @default(0) @map("definitive_failures")
   ambiguousUnknowns  Int      @default(0) @map("ambiguous_unknowns")
   rateLimits429      Int      @default(0) @map("rate_limits_429")
+  ignoredOutcomes    Int      @default(0) @map("ignored_outcomes")
   successes          Int      @default(0)
   p50Ms              Int?     @map("p50_ms")
   p95Ms              Int?     @map("p95_ms")
@@ -2464,8 +2496,67 @@ model GatewayHealthSample {
 
   route RailRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
 
-  @@index([routeId, windowStart])
+  @@unique([routeId, windowStart])
   @@map("gateway_health_samples")
+}
+
+enum RouteHealthEventSource {
+  TRAFFIC
+  PROBE
+  CREDENTIAL
+  OVERRIDE
+  EXPIRY
+  SHADOW
+  INITIAL
+  MIGRATION
+}
+
+enum RouteHealthProbeMethod {
+  CREDENTIAL_CHECK
+  BASE_URL
+  NONE
+}
+
+enum RouteHealthProbeStatus {
+  PASSED
+  FAILED
+  SKIPPED
+}
+
+model RouteHealthEvent {
+  id                String                 @id @default(uuid(7)) @db.Uuid
+  createdAt         DateTime               @default(now()) @map("created_at")
+  routeId           String                 @map("route_id") @db.Uuid
+  fromState         HealthState?           @map("from_state")
+  toState           HealthState            @map("to_state")
+  source            RouteHealthEventSource
+  reason            String?                @db.Text
+  evidenceJson      Json?                  @map("evidence_json")
+  actorUserId       String?                @map("actor_user_id") @db.Uuid
+  approvalRequestId String?                @map("approval_request_id") @db.Uuid
+
+  route RailRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@index([routeId, createdAt])
+  @@map("route_health_events")
+}
+
+model RouteHealthProbe {
+  id               String                 @id @default(uuid(7)) @db.Uuid
+  createdAt        DateTime               @default(now()) @map("created_at")
+  routeId          String                 @map("route_id") @db.Uuid
+  credentialSetId  String?                @map("credential_set_id") @db.Uuid
+  gatewayVersionId String?                @map("gateway_version_id") @db.Uuid
+  method           RouteHealthProbeMethod
+  status           RouteHealthProbeStatus
+  reason           String?                @db.Text
+  httpStatus       Int?                   @map("http_status")
+  latencyMs        Int?                   @map("latency_ms")
+
+  route RailRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@index([routeId, createdAt])
+  @@map("route_health_probes")
 }
 
 model DetailChangeLog {

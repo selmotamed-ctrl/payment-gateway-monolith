@@ -56,7 +56,7 @@ export const SlideOverDrawer = defineComponent({
                 temporary
                 width={props.width}
                 class="pg-slide-over"
-                style={zIndex.value === undefined ? undefined : { zIndex: zIndex.value }}
+                style={{ maxWidth: "100vw", ...(zIndex.value === undefined ? {} : { zIndex: zIndex.value }) }}
                 tag="aside"
                 aria-labelledby={titleId}
             >

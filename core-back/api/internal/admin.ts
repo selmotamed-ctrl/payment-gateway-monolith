@@ -16,6 +16,10 @@ import { adminSystemRouter } from "./adminSystem";
 import { adminReportEngineRouter } from "./adminReportEngine";
 import { objectStorageAdminRouter } from "./objectStorage";
 import { invalidateMerchantReportPolicyCache } from "../../engine/reportStudio/merchantReportEngine";
+import { RouteHealthProbeService } from "../../engine/routeHealth/RouteHealthProbeService";
+import { applyRouteHealthOverride, clearRouteHealthOverride, overrideExpiryDate, routeHealthRank } from "../../engine/routeHealth/override";
+import { invalidateRouteHealthPolicyCache, readRouteHealthPolicy } from "../../engine/routeHealth/policy";
+import { getExecutionPlane } from "../../lib/executionPlane";
 import { publicProgress } from "../../engine/academy/progress";
 import { loadCatalog } from "../../engine/academy/catalog";
 import { getPlatformRuntime } from "../../engine/runtime";
@@ -24,6 +28,12 @@ import { moneyToString } from "../../engine/db/money";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { contentDisposition } from "../../lib/contentDisposition";
 import { buildListQuery, listResponse } from "../../lib/listQuery";
+import {
+  isProblematicAttemptStatus,
+  isSuccessAttemptStatus,
+  merchantSuccessStatuses,
+  successRatePercent,
+} from "../../lib/attemptOutcomes";
 import {
   APPROVAL_DOMAIN_SUBJECT_TYPES,
   APPROVAL_PENDING_STATES,
@@ -145,7 +155,7 @@ import {
   executeCashout,
   type GovernanceExecutionContext,
 } from "../../engine/governance/GovernanceExecution";
-import { evaluateRouteDailyCap } from "../../engine/flow/VisibleRailsResolver";
+import { effectiveRouteHealth, evaluateRouteDailyCap } from "../../engine/flow/VisibleRailsResolver";
 import { dayWindowInTimeZone, resolveGatewayTimezone } from "../../engine/flow/DailyRouteVolume";
 import { PrismaRepositories } from "../../engine/db/repositories";
 import {
@@ -1094,6 +1104,7 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     merchantsActive,
     merchantsPending,
     attemptsByStateRows,
+    grossVolumeAggregate,
     unknownAggregate,
     approvalPendingRows,
     joinRequestOpen,
@@ -1104,6 +1115,7 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     operatorP1,
     operatorSlaBreaches,
     routeHealthRows,
+    routeHealthOverrideRows,
     oldestUnprocessedInbound,
     reconciliationRows,
   ] = await Promise.all([
@@ -1112,6 +1124,11 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     client.paymentAttempt.groupBy({
       by: ["status"],
       where: { createdAt: { gte: since } },
+      _count: { _all: true },
+      _sum: { totalChargedAmount: true },
+    }),
+    client.paymentAttempt.aggregate({
+      where: { createdAt: { gte: since }, status: "SUCCEEDED", currency: "LYD" },
       _count: { _all: true },
       _sum: { totalChargedAmount: true },
     }),
@@ -1137,7 +1154,16 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     client.operatorCase.count({
       where: { state: { in: openOperatorStatuses as never }, slaDueAt: { lt: now } },
     }),
-    client.railRoute.groupBy({ by: ["healthState"], _count: { _all: true } }),
+    client.railRoute.findMany({
+      select: { healthState: true, healthComputedState: true, healthOverrideState: true, healthOverrideExpiresAt: true },
+    }),
+    client.railRoute.findMany({
+      where: {
+        healthOverrideState: { not: null },
+        OR: [{ healthOverrideExpiresAt: null }, { healthOverrideExpiresAt: { gt: now } }],
+      },
+      select: { healthState: true, healthComputedState: true },
+    }),
     client.inboundEvent.findFirst({
       where: { processedAt: null },
       orderBy: { receivedAt: "asc" },
@@ -1154,17 +1180,21 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
   const volumeByState: Record<string, string> = {};
   let attemptsTotal = 0;
   let attemptsSucceeded = 0;
-  let grossVolume = decimal(0);
-  const successStatuses = new Set<string>(merchantSuccessStatuses);
+  let attemptsCounted = 0;
+  const grossVolume = decimal(grossVolumeAggregate._sum.totalChargedAmount ?? 0);
+  const grossVolumeAttempts = grossVolumeAggregate._count._all;
   for (const row of attemptsByStateRows) {
+    const status = String(row.status);
     const count = row._count._all;
-    attemptsByState[String(row.status)] = count;
+    attemptsByState[status] = count;
     attemptsTotal += count;
     const charged = decimal(row._sum.totalChargedAmount ?? 0);
-    volumeByState[String(row.status)] = charged.toFixed(4);
-    if (successStatuses.has(String(row.status))) {
+    volumeByState[status] = charged.toFixed(4);
+    if (isSuccessAttemptStatus(status)) {
       attemptsSucceeded += count;
-      grossVolume = grossVolume.plus(charged);
+      attemptsCounted += count;
+    } else if (isProblematicAttemptStatus(status)) {
+      attemptsCounted += count;
     }
   }
 
@@ -1186,8 +1216,12 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
 
   const routeHealth: Record<string, number> = {};
   for (const row of routeHealthRows) {
-    routeHealth[String(row.healthState)] = row._count._all;
+    const state = effectiveRouteHealth(row, now);
+    routeHealth[state] = (routeHealth[state] ?? 0) + 1;
   }
+  const routeHealthConflicts = routeHealthOverrideRows.filter(
+    (row) => row.healthState !== row.healthComputedState,
+  ).length;
 
   let reconciliationMatched = 0;
   let reconciliationItems = 0;
@@ -1209,8 +1243,10 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     volumeByState,
     attemptsTotal,
     attemptsSucceeded,
-    successRate: attemptsTotal === 0 ? 0 : Number(((attemptsSucceeded / attemptsTotal) * 100).toFixed(2)),
+    attemptsCounted,
+    successRate: successRatePercent(attemptsSucceeded, attemptsCounted),
     grossVolume: grossVolume.toFixed(4),
+    grossVolumeAttempts,
     unknownBacklog: (unknownAggregate._count as { _all: number })._all,
     unknownOldestAgeSeconds: unknownOldest
       ? Math.max(0, Math.round((now.getTime() - unknownOldest.getTime()) / 1000))
@@ -1220,6 +1256,8 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
       healthy: routeHealth.HEALTHY ?? 0,
       degraded: routeHealth.DEGRADED ?? 0,
       openBreaker: routeHealth.OPEN_BREAKER ?? 0,
+      forced: routeHealthOverrideRows.length,
+      conflicts: routeHealthConflicts,
     },
     webhookInboxLagSeconds: oldestUnprocessedInbound
       ? Math.max(0, Math.round((now.getTime() - oldestUnprocessedInbound.receivedAt.getTime()) / 1000))
@@ -4583,7 +4621,7 @@ const approvalCheckBlockReason = async (
     makerUserId: string;
     payloadDiffJson: unknown;
   },
-  actor: { userId: string; role: string | null },
+  actor: { userId: string; role: string | null; authorities?: readonly string[] },
 ): Promise<string | null> => {
   if (!["PENDING_REVIEW", "DRAFT"].includes(approval.state)) return "APPROVAL_NOT_PENDING";
   if (approval.makerUserId === actor.userId) return "MAKER_CANNOT_CHECK";
@@ -4596,6 +4634,9 @@ const approvalCheckBlockReason = async (
   }
   if (subjectType === "MERCHANT" && !merchantApprovalCheckerAllowed(actor.role, approval.payloadDiffJson)) {
     return "MERCHANT_CHECKER_DOMAIN_FORBIDDEN";
+  }
+  if (subjectType === "ROUTE_HEALTH_OVERRIDE" && !(actor.authorities ?? []).includes("gateway:write")) {
+    return "ROUTE_HEALTH_CHECKER_AUTHORITY_REQUIRED";
   }
   return null;
 };
@@ -4679,6 +4720,23 @@ const approvalSubjectContext = async (subjectType: string, subjectId: string): P
         select: { id: true, status: true, severity: true, triggerReason: true, slaDueAt: true, subjectType: true, subjectId: true },
       });
       return row ? { contextType: "AML_CASE", ...row } : null;
+    }
+    case "ROUTE_HEALTH_OVERRIDE": {
+      const row = await client.railRoute.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          healthState: true,
+          healthComputedState: true,
+          healthComputedReason: true,
+          healthOverrideState: true,
+          healthOverrideReason: true,
+          healthOverrideExpiresAt: true,
+          rail: { select: { code: true, nameEn: true } },
+          gateway: { select: { code: true, name: true } },
+        },
+      });
+      return row ? { contextType: "ROUTE_HEALTH_OVERRIDE", ...row } : null;
     }
     case "GATEWAY_VERSION": {
       const row = await client.gatewayVersion.findUnique({
@@ -5369,8 +5427,6 @@ const merchantMaskedJson = (value: unknown): Record<string, unknown> => {
   }
   return result;
 };
-
-const merchantSuccessStatuses = ["SUCCEEDED", "PARTIALLY_REFUNDED", "REFUNDED", "DISPUTED"] as const;
 
 router.get("/merchants/:id/transactions", async (request: Request, response: Response) => {
   requireAuthorities(request, ["merchant:read"]);
@@ -6633,7 +6689,11 @@ router.get("/approvals/:id", async (request: Request, response: Response) => {
   const actor = principalOf(request);
   const [subjectContext, checkBlockedReason] = await Promise.all([
     approvalSubjectContext(approval.subjectType, approval.subjectId),
-    approvalCheckBlockReason(approval as never, { userId: actor.userId ?? "", role: actor.role ?? null }),
+    approvalCheckBlockReason(approval as never, {
+      userId: actor.userId ?? "",
+      role: actor.role ?? null,
+      authorities: actor.authorities,
+    }),
   ]);
   response.json({
     approval: {
@@ -6695,6 +6755,13 @@ router.post("/approvals/:id/approve", async (request: Request, response: Respons
     throw new ApiError(404, "APPROVAL_REQUEST_NOT_FOUND", "The approval request does not exist");
   }
   const subjectType = normalizeApprovalSubjectType(approval.subjectType);
+  if (subjectType === "ROUTE_HEALTH_OVERRIDE" && !principalOf(request).authorities.includes("gateway:write")) {
+    throw new ApiError(
+      403,
+      "ROUTE_HEALTH_CHECKER_AUTHORITY_REQUIRED",
+      "The checker needs gateway:write authority for a route-health override",
+    );
+  }
   assertCheckerIsNotMaker(approval.makerUserId, actor.userId);
   if (approval.state !== "PENDING_REVIEW" && approval.state !== "DRAFT") {
     throw new ApiError(409, "APPROVAL_NOT_PENDING", "The approval request is not pending review");
@@ -6876,6 +6943,13 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
     throw new ApiError(404, "APPROVAL_REQUEST_NOT_FOUND", "The approval request does not exist");
   }
   const subjectType = normalizeApprovalSubjectType(approval.subjectType);
+  if (subjectType === "ROUTE_HEALTH_OVERRIDE" && !principalOf(request).authorities.includes("gateway:write")) {
+    throw new ApiError(
+      403,
+      "ROUTE_HEALTH_CHECKER_AUTHORITY_REQUIRED",
+      "The checker needs gateway:write authority for a route-health override",
+    );
+  }
   assertCheckerIsNotMaker(approval.makerUserId, actor.userId);
   if (subjectType === "JOIN_REQUEST") {
     const joinRequest = await client.joinRequest.findUnique({ where: { id: approval.subjectId } });
@@ -15188,10 +15262,12 @@ router.get("/routes", async (request: Request, response: Response) => {
     }),
     client.railRoute.count({ where: built.where as never }),
   ]);
+  const routeHealthNow = new Date();
   response.json(listResponse(
     "routes",
     routes.map((route) => ({
       ...route,
+      healthState: effectiveRouteHealth(route, routeHealthNow),
       railCode: route.rail?.code ?? "",
       railName: route.rail?.nameEn ?? "",
       gatewayCode: route.gateway?.code ?? "",
@@ -15237,9 +15313,11 @@ router.get("/routes/export", async (request: Request, response: Response) => {
       afterJson: { total, exported: routes.length, filters: JSON.stringify(request.query ?? {}) },
     },
   });
+  const routeHealthNow = new Date();
   response.json({
     routes: routes.map((route) => ({
       ...route,
+      healthState: effectiveRouteHealth(route, routeHealthNow),
       railCode: route.rail?.code ?? "",
       railName: route.rail?.nameEn ?? "",
       gatewayCode: route.gateway?.code ?? "",
@@ -15254,14 +15332,25 @@ router.get("/routes/export", async (request: Request, response: Response) => {
 const buildRouteSummary = async () => {
   const [statusRows, healthRows, pairRows, total] = await Promise.all([
     client.railRoute.groupBy({ by: ["status"], _count: { _all: true } }),
-    client.railRoute.groupBy({ by: ["healthState"], _count: { _all: true } }),
+    client.railRoute.findMany({
+      select: {
+        healthState: true,
+        healthComputedState: true,
+        healthOverrideState: true,
+        healthOverrideExpiresAt: true,
+      },
+    }),
     client.railRoute.groupBy({ by: ["railId", "gatewayId"], _count: { _all: true } }),
     client.railRoute.count(),
   ]);
   const byStatus: Record<string, number> = {};
   for (const row of statusRows) byStatus[row.status] = row._count._all;
   const byHealth: Record<string, number> = {};
-  for (const row of healthRows) byHealth[row.healthState] = row._count._all;
+  const routeHealthNow = new Date();
+  for (const row of healthRows) {
+    const state = effectiveRouteHealth(row, routeHealthNow);
+    byHealth[state] = (byHealth[state] ?? 0) + 1;
+  }
   return {
     total,
     byStatus,
@@ -15429,6 +15518,228 @@ router.patch("/routes/:id", async (request: Request, response: Response) => {
     },
   });
   response.json({ id: updated.id, priority: updated.priority });
+});
+
+router.get("/routes/:id/health", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:read"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const route = await client.railRoute.findUnique({
+    where: { id },
+    include: { rail: { select: { code: true, name: true } }, gateway: { select: { code: true, name: true } } },
+  });
+  if (!route) throw new ApiError(404, "ROUTE_NOT_FOUND", "The route does not exist");
+  const overrideSetByUser = route.healthOverrideSetBy
+    ? await client.user.findUnique({ where: { id: route.healthOverrideSetBy }, select: { email: true, name: true } })
+    : null;
+  const [samples, probes, events, policy] = await Promise.all([
+    client.gatewayHealthSample.findMany({ where: { routeId: id }, orderBy: { windowStart: "desc" }, take: 100 }),
+    client.routeHealthProbe.findMany({ where: { routeId: id }, orderBy: { createdAt: "desc" }, take: 20 }),
+    client.routeHealthEvent.findMany({ where: { routeId: id }, orderBy: { createdAt: "desc" }, take: 20 }),
+    readRouteHealthPolicy(client as never),
+  ]);
+  response.json({
+    routeId: id,
+    rail: route.rail,
+    gateway: route.gateway,
+    health: {
+      effectiveState: route.healthState,
+      computedState: route.healthComputedState,
+      computedReason: route.healthComputedReason,
+      computedAt: route.healthComputedAt,
+      overrideState: route.healthOverrideState,
+      overrideReason: route.healthOverrideReason,
+      overrideSetAt: route.healthOverrideSetAt,
+      overrideSetBy: route.healthOverrideSetBy,
+      overrideSetByName: overrideSetByUser?.name ?? overrideSetByUser?.email ?? null,
+      overrideExpiresAt: route.healthOverrideExpiresAt,
+      overrideApprovalId: route.healthOverrideApprovalId,
+      reason: route.healthReason,
+      changedAt: route.healthChangedAt,
+      consecutiveFailures: route.healthConsecutiveFailures,
+      probeSuccesses: route.healthProbeSuccesses,
+      probeFailures: route.healthProbeFailures,
+      lastProbeAt: route.healthLastProbeAt,
+      nextProbeAt: route.healthNextProbeAt,
+    },
+    canary: { percent: policy.canaryPercent, maxAmount: policy.canaryMaxAmount },
+    policy: {
+      sampleBucketSeconds: policy.sampleBucketSeconds,
+      overrideDefaultExpiryDays: policy.overrideDefaultExpiryDays,
+      overrideMaxExpiryDays: policy.overrideMaxExpiryDays,
+      overrideReviewHours: policy.overrideReviewHours,
+    },
+    samples,
+    probes,
+    events,
+  });
+});
+
+router.post("/routes/:id/health/probe", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:test", "gateway:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const route = await client.railRoute.findUnique({
+    where: { id },
+    select: { id: true, healthComputedState: true, healthOverrideState: true, healthOverrideExpiresAt: true },
+  });
+  if (!route) throw new ApiError(404, "ROUTE_NOT_FOUND", "The route does not exist");
+  const platform = getPlatformRuntime(client as never);
+  const probe = new RouteHealthProbeService(client as never, platform.credentialCheck, getExecutionPlane());
+  const result = await probe.probe(id);
+  const overrideActive = Boolean(route.healthOverrideState)
+    && (!route.healthOverrideExpiresAt || route.healthOverrideExpiresAt.getTime() > Date.now());
+  const nextProbeAt = route.healthComputedState === "HEALTHY" && !overrideActive ? null : new Date();
+  await client.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(
+      `INSERT INTO route_health_probes
+         (id, created_at, route_id, credential_set_id, gateway_version_id, method, status, reason, http_status, latency_ms)
+       VALUES (gen_random_uuid(), now(), $1::uuid, $2::uuid, $3::uuid, $4::"RouteHealthProbeMethod",
+               $5::"RouteHealthProbeStatus", $6, $7, $8)`,
+      id,
+      result.credentialSetId,
+      result.gatewayVersionId,
+      result.method,
+      result.status,
+      result.reason,
+      result.httpStatus,
+      result.latencyMs,
+    );
+    await tx.railRoute.update({
+      where: { id },
+      data: {
+        healthLastProbeAt: new Date(),
+        healthNextProbeAt: nextProbeAt,
+        ...(result.status === "PASSED"
+          ? { healthProbeSuccesses: { increment: 1 }, healthProbeFailures: 0 }
+          : result.status === "FAILED"
+            ? { healthProbeSuccesses: 0, healthProbeFailures: { increment: 1 } }
+            : {}),
+      },
+    });
+  });
+  const actor = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "ROUTE_HEALTH_PROBE_RUN",
+      entityType: "RAIL_ROUTE",
+      entityId: id,
+      beforeJson: {},
+      afterJson: { status: result.status, method: result.method, reason: result.reason, httpStatus: result.httpStatus },
+    },
+  });
+  response.json(result);
+});
+
+const routeHealthOverrideSchema = z.object({
+  state: z.enum(["HEALTHY", "DEGRADED", "OPEN_BREAKER"]),
+  reason: z.string().trim().min(10).max(500),
+  expiresAt: z.string().datetime().optional(),
+  evidence: z.unknown().optional(),
+}).strict();
+
+router.post("/routes/:id/health/override", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(routeHealthOverrideSchema, request.body);
+  const actor = actorFromRequest(request);
+  const route = await client.railRoute.findUnique({
+    where: { id },
+    select: { id: true, healthOverrideState: true },
+  });
+  if (!route) throw new ApiError(404, "ROUTE_NOT_FOUND", "The route does not exist");
+  const policy = await readRouteHealthPolicy(client as never);
+  const expiresAt = overrideExpiryDate(body.expiresAt, new Date(), {
+    defaultDays: policy.overrideDefaultExpiryDays,
+    maxDays: policy.overrideMaxExpiryDays,
+  });
+  if (body.state !== "HEALTHY") {
+    const applied = await applyRouteHealthOverride(client as never, {
+      routeId: id,
+      state: body.state,
+      reason: body.reason,
+      actorUserId: actor.userId,
+      actorRole: actor.role ?? "UNKNOWN",
+      expiresAt,
+      evidence: body.evidence ?? null,
+      defaultExpiryDays: policy.overrideDefaultExpiryDays,
+      maxExpiryDays: policy.overrideMaxExpiryDays,
+      expectedOverrideState: route.healthOverrideState ?? null,
+    });
+    response.json(applied);
+    return;
+  }
+  const approval = await client.approvalRequest.create({
+    data: {
+      subjectType: "ROUTE_HEALTH_OVERRIDE",
+      subjectId: id,
+      payloadDiffJson: {
+        action: "SET",
+        state: body.state,
+        reason: body.reason,
+        expiresAt: expiresAt.toISOString(),
+        evidence: body.evidence ?? null,
+        expectedOverrideState: route.healthOverrideState ?? null,
+      } as Prisma.InputJsonValue,
+      makerReason: body.reason,
+      mode: "STANDARD",
+      makerUserId: actor.userId,
+      state: "PENDING_REVIEW",
+      expiresAt: new Date(Date.now() + policy.overrideDefaultExpiryDays * 86_400_000),
+    },
+  });
+  response.status(202).json({ status: "PENDING_REVIEW", approvalRequestId: approval.id, expiresAt });
+});
+
+router.post("/routes/:id/health/override/clear", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["gateway:write"]);
+  const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(z.object({ reason: z.string().trim().min(10).max(500) }).strict(), request.body);
+  const actor = actorFromRequest(request);
+  const route = await client.railRoute.findUnique({
+    where: { id },
+    select: {
+      healthState: true,
+      healthComputedState: true,
+      healthOverrideState: true,
+      healthOverrideExpiresAt: true,
+    },
+  });
+  if (!route) throw new ApiError(404, "ROUTE_NOT_FOUND", "The route does not exist");
+  if (!route.healthOverrideState) throw new ApiError(409, "OVERRIDE_NOT_ACTIVE", "The route has no active override");
+  const overrideExpired = route.healthOverrideExpiresAt !== null
+    && route.healthOverrideExpiresAt.getTime() <= Date.now();
+  const currentEffective = overrideExpired ? route.healthComputedState : route.healthState;
+  const healthier = !overrideExpired && routeHealthRank[route.healthComputedState] > routeHealthRank[currentEffective];
+  if (healthier) {
+    const approval = await client.approvalRequest.create({
+      data: {
+        subjectType: "ROUTE_HEALTH_OVERRIDE",
+        subjectId: id,
+        payloadDiffJson: {
+          action: "CLEAR",
+          reason: body.reason,
+          expectedOverrideState: route.healthOverrideState,
+        } as Prisma.InputJsonValue,
+        makerReason: body.reason,
+        mode: "STANDARD",
+        makerUserId: actor.userId,
+        state: "PENDING_REVIEW",
+        expiresAt: new Date(Date.now() + 7 * 86_400_000),
+      },
+    });
+    response.status(202).json({ status: "PENDING_REVIEW", approvalRequestId: approval.id });
+    return;
+  }
+  const cleared = await clearRouteHealthOverride(client as never, {
+    routeId: id,
+    reason: body.reason,
+    actorUserId: actor.userId,
+    actorRole: actor.role ?? "UNKNOWN",
+    requireApprovalIfHealthier: true,
+    expectedOverrideState: route.healthOverrideState,
+  });
+  response.json(cleared);
 });
 
 router.post("/routes/:id/state", async (request: Request, response: Response) => {
@@ -16216,6 +16527,10 @@ router.get("/disputes", async (request: Request, response: Response) => {
   if (merchantId) {
     conditions.push({ attempt: { merchantId } });
   }
+  const attemptId = typeof query.attemptId === "string" && query.attemptId.trim() ? query.attemptId.trim() : "";
+  if (attemptId) {
+    conditions.push({ attemptId });
+  }
   const where = conditions.length === 1 ? conditions[0] : { AND: conditions };
   const [disputes, total] = await Promise.all([
     client.dispute.findMany({
@@ -16270,6 +16585,8 @@ router.get("/disputes/export", async (request: Request, response: Response) => {
   const conditions: Record<string, unknown>[] = [built.where];
   const merchantId = typeof query.merchantId === "string" && query.merchantId.trim() ? query.merchantId.trim() : "";
   if (merchantId) conditions.push({ attempt: { merchantId } });
+  const attemptId = typeof query.attemptId === "string" && query.attemptId.trim() ? query.attemptId.trim() : "";
+  if (attemptId) conditions.push({ attemptId });
   const where = conditions.length === 1 ? conditions[0] : { AND: conditions };
   const take = 5000;
   const [disputes, total] = await Promise.all([
@@ -18847,6 +19164,7 @@ router.post("/settings/restore-apply", async (request: Request, response: Respon
     return written;
   });
   invalidateMerchantReportPolicyCache();
+  invalidateRouteHealthPolicyCache();
   response.json({ applied: applied.length, settings: applied });
 });
 
@@ -19009,6 +19327,7 @@ router.put("/settings", async (request: Request, response: Response) => {
     },
   });
   invalidateMerchantReportPolicyCache();
+  invalidateRouteHealthPolicyCache();
   response.json({ settings: written });
 });
 

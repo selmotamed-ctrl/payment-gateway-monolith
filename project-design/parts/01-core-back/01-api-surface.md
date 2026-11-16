@@ -3,8 +3,8 @@ id: core.api
 title: Core API Surface
 status: partial
 confidence: high
-last_verified: 2026-11-13
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-16
+verified_against: 1dcc0f2+working-tree
 code:
   - core-back/api/internal/sandboxControl.ts
   - core-back/api/index.ts
@@ -242,6 +242,9 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `POST /rails`, `PATCH /rails/:id`, `PUT /rails/:id/fields` | `gateway:write` |
 | `GET /routes`, `/export`, `/summary`, `/summary/export`, `GET /routes/:id` | `gateway:read` |
 | `POST /routes`, `PATCH /routes/:id`, `POST /routes/:id/state` | `gateway:write` |
+| `GET /routes/:id/health` | `gateway:read` |
+| `POST /routes/:id/health/probe` | `gateway:test` or `gateway:write` |
+| `POST /routes/:id/health/override`, `POST /routes/:id/health/override/clear` | `gateway:write` (force `HEALTHY` and a healthier clear return `202` pending approval) |
 | `GET /assets`, `GET /assets/:id`, `GET /assets/:id/content` | `gateway:read` |
 | `POST /assets`, `POST /assets/upload`, `DELETE /assets/:id` | `gateway:write` |
 
@@ -260,6 +263,8 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | :--- | :--- |
 | `GET /disputes`, `/export`, `/summary`, `/summary/export`, `GET /disputes/:id` | `dispute:read` |
 | `POST /disputes/:id/evidence`, `POST /disputes` | `dispute:write` |
+
+`GET /disputes` and `/disputes/export` combine the standard list filters with `merchantId` (the attempt's merchant) and `attemptId` (one payment attempt), so the admin payment-attempt drawer can deep-link to the attempt's dispute(s).
 | `GET /adjustments`, `/export`, `/summary`, `/summary/export`, `GET /adjustments/:id` | `finance:read` |
 | `POST /adjustments` | `finance:write`; creates an `ADJUSTMENT` approval and a `PENDING_REVIEW` adjustment |
 | `GET /cashouts`, `/export`, `/summary`, `/summary/export`, `GET /cashouts/:id` | `cashout:read` |
@@ -700,6 +705,7 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 ### Rail logo, route policy and commission tiers (2026-11-06)
 
 - `PATCH /rails/:id` accepts `logoAssetId` (uuid, or `null` to clear). A uuid must reference a registered `Asset` (`404 ASSET_NOT_FOUND`); the audit row records the before/after logo. The edge schema and `toCoreRailUpdate` forward it. `POST /assets` still registers metadata only (name, type, size, SHA-256, storage key): it does not store image bytes, which remains a gap.
+- `POST /routes/:id/health/override` accepts `HEALTHY`, `DEGRADED` or `OPEN_BREAKER`, a reason of 10–500 characters, an optional ISO `expiresAt` (default 7 days, maximum 30) and optional evidence. `HEALTHY` creates a `ROUTE_HEALTH_OVERRIDE` approval; the other states apply immediately. `POST /routes/:id/health/override/clear` applies immediately unless the computed state is healthier than the forced state, in which case it returns `202` for a second approval.
 - `PATCH /routes/:id` accepts `mismatchPolicy` (object; only `tolerance_amount`/`toleranceAmount` is read by the settlement engine, other keys are kept as stored; a malformed tolerance is `400 MISMATCH_TOLERANCE_INVALID`) and `maintenanceWindows` (`[{ start, end }]`, max 50, absolute instants; `end <= start` or an unparsable instant is `400 MAINTENANCE_WINDOW_INVALID`; `[]` clears). Omitted fields are left untouched; the edge forwards empty values so an operator can clear them.
 - **Commission tiers were broken end to end and are fixed.** The admin edge persisted UI tiers as an index-keyed object (`{"0": {...}}`) and core's create schema (`z.record`) could not take an array, while the fee calculator (`commissionForProfile`, `checkout.ts`) only reads `tiersJson` when it is an array: a TIERED profile created through the UI silently priced at its minimum fee. Now `POST /commission-profiles` accepts an ordered array (or the legacy object), the edge forwards the array, and `commissionTiers()` normalises both shapes (object keys ordered numerically), which also reprices already-stored legacy rows correctly. Tier keys are `upTo`, `flat`, `percent` (a fraction). **Behaviour change for existing data:** a legacy TIERED profile now prices by its tiers instead of the minimum fee. The edge also forwards `minFee`, `maxFee`, `feeBearerDefault`, `roundingMode`, `merchantId`, `applicationId` (core already accepted them; the strict edge schema dropped them). Note `percentageRate` is a **fraction** (`0.0300` = 3%), as the seed data stores it; the form now says so.
 
@@ -737,3 +743,11 @@ The admin router adds paginated `/admin/merchants` and `/admin/merchants/summary
 ## v38-v39 `/internal/sandbox` (2026-11-13)
 
 A new internal router, reachable from merchant-back and admin-back and mounted only on the SANDBOX plane, exposes the merchant sandbox overview, wallet detail/ledger/balance/simulated cash-out, payment detail/refund/dispute simulation and resolution, demo seed and 20-payment history seed, reset, Fake Rails account proxy/control (paginated, merchant-scoped, preset clone/restore), reconciliation import, webhook test ping, clearing pools/statement/settle, and staff overview, merchant list/overview, global reset, Fake Rails scenarios/transactions/webhooks/statements. Checkout adds `GET/POST /pay/:linkKey/sandbox-accounts`, account movements, `PATCH /pay/:linkKey/sandbox-accounts/:accountId`, `GET /pay/:linkKey/logs/:attemptId/sandbox-inspector` and `POST /pay/:linkKey/logs/:attemptId/sandbox-simulate`; all of them refuse a non-`sbx_` key with `403 SANDBOX_INSPECTOR_FORBIDDEN_ON_LIVE_LINK`.
+
+## Dashboard overview gross volume (2026-11-16)
+
+`GET /internal/admin/stats/overview` returns `grossVolume` (and `grossVolumeAttempts`) as the sum and count of `totalChargedAmount` for attempts created in the selected period with `status = SUCCEEDED` and `currency = LYD`. Previously `grossVolume` summed the whole success status set (`SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `DISPUTED`) across all currencies. `successRate` and `attemptsByState`/`volumeByState` are unchanged.
+
+## Dashboard success-rate denominator (2026-11-16)
+
+`GET /internal/admin/stats/overview` returns `attemptsCounted` and computes `successRate = attemptsSucceeded / attemptsCounted`. `attemptsSucceeded` counts `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` (the payment was processed successfully; a later refund or dispute is not a processing failure). `attemptsCounted` adds `FAILED` and `UNKNOWN` only. Pending/in-flight states (`CREATED`, `INITIATING`, `AWAITING_CUSTOMER`, `AUTHORIZING`, `VERIFYING`) and deliberate/no-processing outcomes (`CANCELLED`, `EXPIRED`, `BLOCKED`) are excluded from both sides of the rate. `attemptsTotal` remains every attempt created in the period for the distribution chart and snapshot export.

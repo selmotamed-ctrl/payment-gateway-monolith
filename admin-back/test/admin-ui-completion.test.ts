@@ -106,6 +106,7 @@ const READ_ROUTES: ReadRoute[] = [
   { path: "/system/audit-outbox", core: "/internal/admin/system/audit-outbox", authority: "security:read" },
   { path: "/system/notifications", core: "/internal/admin/system/notifications", authority: "security:read" },
   { path: "/settings/notification-templates", core: "/internal/admin/settings/notification-templates", authority: "settings:read" },
+  { path: `/routes/${ID}/health`, core: `/internal/admin/routes/${ID}/health`, authority: "gateway:read" },
 ];
 
 describe("new admin read routes", () => {
@@ -203,6 +204,9 @@ const WRITE_ROUTES: WriteRoute[] = [
   { name: "owner edit", method: "PATCH", path: `/merchants/${ID}/beneficial-owners/${OWNER_ID}`, core: `/internal/admin/merchants/${ID}/beneficial-owners/${OWNER_ID}`, body: { ownershipPercent: "30" }, authority: "kyb:write", readOnly: "merchant:read" },
   { name: "owner deactivate", method: "DELETE", path: `/merchants/${ID}/beneficial-owners/${OWNER_ID}`, core: `/internal/admin/merchants/${ID}/beneficial-owners/${OWNER_ID}`, authority: "merchant:write", readOnly: "merchant:read" },
   { name: "revalidation request", method: "POST", path: `/merchants/${ID}/revalidations`, core: `/internal/admin/merchants/${ID}/revalidations`, body: { docType: "COMMERCIAL_REGISTRY", dueAt: "2026-12-31", message: "Please upload a fresh copy" }, authority: "kyb:write", readOnly: "kyb:read" },
+  { name: "route health probe", method: "POST", path: `/routes/${ID}/health/probe`, core: `/internal/admin/routes/${ID}/health/probe`, authority: "gateway:test", readOnly: "gateway:read" },
+  { name: "route health override", method: "POST", path: `/routes/${ID}/health/override`, core: `/internal/admin/routes/${ID}/health/override`, body: { state: "DEGRADED", reason: REASON }, authority: "gateway:write", readOnly: "gateway:read" },
+  { name: "route health override clear", method: "POST", path: `/routes/${ID}/health/override/clear`, core: `/internal/admin/routes/${ID}/health/override/clear`, body: { reason: REASON }, authority: "gateway:write", readOnly: "gateway:read" },
 ];
 
 describe("new admin mutation routes", () => {

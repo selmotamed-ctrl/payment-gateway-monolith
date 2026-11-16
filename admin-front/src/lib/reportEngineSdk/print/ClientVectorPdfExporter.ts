@@ -42,6 +42,21 @@ export function buildPagedMediaHtmlDocument(params: {
   const dir = isRtl ? "rtl" : "ltr";
   const pageSizeCss = `${page_layout.paper_size} ${page_layout.orientation.toLowerCase()}`;
   const m = page_layout.margins_mm;
+  const hasHeader = renderedHeaderHtml.trim().length > 0;
+  const hasFooter = renderedFooterHtml.trim().length > 0;
+  // Comfort pad for the page content that sits between the running header and
+  // footer. Increasing the top/bottom @page margins (rather than padding the
+  // first/last content fragment) makes Paged.js add the gap on every page and
+  // reflow the flow correctly.
+  const pageContentPaddingMm = 4;
+  const contentMarginTop = m.top + (hasHeader ? pageContentPaddingMm : 0);
+  const contentMarginBottom = m.bottom + (hasFooter ? pageContentPaddingMm : 0);
+  const firstPageHeaderHidden = Boolean(
+    bundle.resolvedHeaderChrome && !bundle.resolvedHeaderChrome.chrome.show_on_first_page,
+  );
+  const firstPageFooterHidden = Boolean(
+    bundle.resolvedFooterChrome && !bundle.resolvedFooterChrome.chrome.show_on_first_page,
+  );
   // Paged.js resolves CSS url() values against the srcdoc document URL
   // (`about:srcdoc`), so relative paths are invalid. Use absolute same-origin
   // URLs for the report fonts.
@@ -74,7 +89,7 @@ export function buildPagedMediaHtmlDocument(params: {
     }
     @page {
       size: ${pageSizeCss};
-      margin: ${m.top}mm ${m.right}mm ${m.bottom}mm ${m.left}mm;
+      margin: ${contentMarginTop}mm ${m.right}mm ${contentMarginBottom}mm ${m.left}mm;
       @top-center { content: element(report-running-header); }
       @bottom-center { content: element(report-running-footer); }
     }
@@ -283,14 +298,14 @@ export function buildPagedMediaHtmlDocument(params: {
     .report-running-header > div, .report-running-footer > div { max-width: 100%; min-width: 0; flex-wrap: wrap; }
     /* Paged.js wraps page content in an anonymous block; keep it inside the content box. */
     .pagedjs_page_content > div { max-width: 100%; min-width: 0; }
-    ${bundle.resolvedHeaderChrome && !bundle.resolvedHeaderChrome.chrome.show_on_first_page ? "@page :first { @top-center { content: none; } }" : ""}
-    ${bundle.resolvedFooterChrome && !bundle.resolvedFooterChrome.chrome.show_on_first_page ? "@page :first { @bottom-center { content: none; } }" : ""}
+    ${firstPageHeaderHidden ? `@page :first { margin-top: ${m.top}mm; @top-center { content: none; } }` : ""}
+    ${firstPageFooterHidden ? `@page :first { margin-bottom: ${m.bottom}mm; @bottom-center { content: none; } }` : ""}
     ${bundle.resolvedHeaderChrome?.template.scoped_css ?? ""}
     ${bundle.resolvedFooterChrome?.template.scoped_css ?? ""}
     ${page_layout.global_scoped_css ?? ""}
   </style>
 </head>
-<body data-report-paper="${page_layout.paper_size}" data-report-paper-width="${page_layout.paper_size === "LETTER" ? "215.9" : page_layout.paper_size === "LEGAL" ? "215.9" : "210"}" data-report-paper-height="${page_layout.paper_size === "LETTER" ? "279.4" : page_layout.paper_size === "LEGAL" ? "355.6" : "297"}" data-report-margin-top="${m.top}" data-report-margin-right="${m.right}" data-report-margin-bottom="${m.bottom}" data-report-margin-left="${m.left}">
+<body data-report-paper="${page_layout.paper_size}" data-report-paper-width="${page_layout.paper_size === "LETTER" ? "215.9" : page_layout.paper_size === "LEGAL" ? "215.9" : "210"}" data-report-paper-height="${page_layout.paper_size === "LETTER" ? "279.4" : page_layout.paper_size === "LEGAL" ? "355.6" : "297"}" data-report-margin-top="${contentMarginTop}" data-report-margin-right="${m.right}" data-report-margin-bottom="${contentMarginBottom}" data-report-margin-left="${m.left}">
   ${renderedHeaderHtml ? `<header class="report-running-header">${renderedHeaderHtml}</header>` : ""}
   ${renderedFooterHtml ? `<footer class="report-running-footer">${renderedFooterHtml}</footer>` : ""}
   <main class="report-body-container">${renderedSectionsHtml}</main>

@@ -276,7 +276,7 @@ Applies to all three copies of the client:
 
 ## Admin Edge BFF
 
-> Status: `partial` · Last verified: 2026-11-13
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -585,3 +585,12 @@ read/write guards. `assetsRouter` additionally exposes binary
 ## v38-v39 sandbox proxy (2026-11-13)
 
 `/api/v1/admin/sandbox/*` forwards only to `SANDBOX_CORE_BACK_URLS` (no Live fallback): overview, per-merchant overview/reset, wallet balance, global reset and Fake Rails accounts/clearing/scenarios/transactions/webhooks/statements. `/mirror/*` raw-forwards to `/internal/admin/*` for the Live-parity pages; report-engine mirror bodies use the 24 MB parser. The staff session is mirrored by the sandbox core. The Studio routes are open to signed-in staff; the sandbox data is isolated. An unconfigured sandbox node answers `503 SANDBOX_NODE_UNAVAILABLE`.
+
+## Route health forwarding (2026-11-16)
+
+`admin-back/api/protected/rails.ts` forwards `GET /routes/:id/health`,
+`POST /routes/:id/health/probe`, `POST /routes/:id/health/override` and
+`POST /routes/:id/health/override/clear` to core behind the existing
+`gatewayGuard` (`gateway:read`, `gateway:write`/`gateway:test`). The edge
+validates the state/reason/expiry shape only; core remains the authority for
+maker-checker, expiry and probe execution.

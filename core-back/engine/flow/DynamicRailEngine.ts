@@ -32,6 +32,7 @@ export type DynamicAttempt = AdapterAttempt & {
   contextCiphertext?: string;
   publicOutputs?: Record<string, unknown>;
   substatus?: string;
+  canonicalError?: string;
 };
 
 export interface DynamicAttemptPatch {
@@ -434,7 +435,7 @@ export class DynamicRailEngine {
       const preExecution = await this.executeSteps("PRE_INITIATE", current, normalized, preInitiateSteps);
       await this.persistOutputs(current, preExecution);
       if (preExecution.status === "FAILED" || preExecution.status === "BLOCKED") {
-        await this.transition(current, preExecution.status);
+        await this.transition(current, preExecution.status, this.executionErrorPatch(preExecution));
         if (options.slotReserved === true) {
           await this.releaseSlot(current, preExecution.status);
         }
@@ -459,9 +460,9 @@ export class DynamicRailEngine {
       const execution = await this.executePhase("INITIATE", current, normalized);
       await this.persistOutputs(current, execution);
       if (execution.status === "UNKNOWN") {
-        await this.transition(current, "UNKNOWN");
+        await this.transition(current, "UNKNOWN", this.executionErrorPatch(execution));
       } else if (execution.status === "FAILED" || execution.status === "BLOCKED") {
-        await this.transition(current, execution.status);
+        await this.transition(current, execution.status, this.executionErrorPatch(execution));
         await this.releaseSlot(current, execution.status);
       } else {
         await this.transition(current, "AWAITING_CUSTOMER", {
@@ -528,14 +529,14 @@ export class DynamicRailEngine {
     const execution = await this.executePhase("SUBMIT", current, allowListedCustomerInput(evidence));
     await this.persistOutputs(current, execution);
     if (execution.status === "UNKNOWN") {
-      await this.transition(current, "UNKNOWN");
+      await this.transition(current, "UNKNOWN", this.executionErrorPatch(execution));
       return this.toResult(current, execution);
     }
     if (execution.status === "AWAITING_CUSTOMER" && isRetryableOtp(execution.canonicalError)) {
       return this.handleRetryableOtp(current, execution);
     }
     if (execution.status === "FAILED") {
-      await this.transition(current, "FAILED");
+      await this.transition(current, "FAILED", this.executionErrorPatch(execution));
       await this.releaseSlot(current, "FAILED");
       return this.toResult(current, execution);
     }
@@ -656,7 +657,7 @@ export class DynamicRailEngine {
     const execution = await this.executePhase("VERIFY", current, {});
     await this.persistOutputs(current, execution);
     if (execution.status === "UNKNOWN") {
-      await this.transition(current, "UNKNOWN");
+      await this.transition(current, "UNKNOWN", this.executionErrorPatch(execution));
       return this.toResult(current, execution);
     }
     if (execution.status === "FAILED") {
@@ -679,7 +680,7 @@ export class DynamicRailEngine {
           outputs: execution.outputs.public,
         });
       }
-      await this.transition(current, "FAILED");
+      await this.transition(current, "FAILED", this.executionErrorPatch(execution));
       await this.releaseSlot(current, "INQUIRY_FAILED");
       return this.toResult(current, execution);
     }
@@ -1123,7 +1124,10 @@ export class DynamicRailEngine {
     const nextAttempts = (attempt.otpAttempts ?? 0) + 1;
     const maximum = attempt.maxOtpAttempts ?? 3;
     if (nextAttempts >= maximum) {
-      await this.transition(attempt, "FAILED", { otpAttempts: nextAttempts });
+      await this.transition(attempt, "FAILED", {
+        otpAttempts: nextAttempts,
+        ...this.executionErrorPatch(execution),
+      });
       await this.releaseSlot(attempt, "FAILED");
       return this.toResult(attempt, {
         status: "FAILED",
@@ -1479,6 +1483,13 @@ export class DynamicRailEngine {
       }
     }
     return `${channel}:${attemptId}`;
+  }
+
+  private executionErrorPatch(execution: { substatus?: string; canonicalError?: string }): DynamicAttemptPatch {
+    return {
+      ...(execution.substatus ? { substatus: execution.substatus } : {}),
+      ...(execution.canonicalError ? { canonicalError: execution.canonicalError } : {}),
+    };
   }
 
   private toResult(

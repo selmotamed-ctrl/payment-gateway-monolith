@@ -3,8 +3,8 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-13
-verified_against: 19d6a54+working-tree
+last_verified: 2026-11-16
+verified_against: 1dcc0f2+working-tree
 code:
   - core-back/test/sandboxPlane.test.ts
   - core-back/test/exhaustive/**
@@ -52,6 +52,9 @@ tests:
   - deploy/object-storage-daemon/test/mtls.test.ts
   - deploy/object-storage-daemon/test/sdk-mtls.test.ts
   - fake-rails-back/test/security.test.ts
+  - admin-front/src/pages/disputes/__tests__/queryFilters.test.ts
+  - admin-front/src/pages/dashboard/__tests__/metricLabels.test.ts
+  - core-back/test/attempt-outcomes.test.ts
   - tests/unit/frontend-security-admin.test.ts
   - tests/unit/frontend-security-checkout.test.ts
   - tests/unit/frontend-security-merchant.test.ts
@@ -545,6 +548,15 @@ These are development/CI tests only; no production-time test job or test endpoin
 - `merchant-back/test/sandbox-proxy.test.ts` and `checkout-back/test/sandbox-checkout-forward.test.ts`: real forwarding through the sandbox pool for control/resources, `pg_test_` external tokens, `sbx_` summary/inspector routes and the Live-link inspector refusal.
 - `core-back/test/security-regressions/commerce-status-enforcement.test.ts` and `test/engine/attempt-guard-pipeline.test.ts` assert the removed OD-10 fallback.
 
+## Disputes attempt-link regression (2026-11-16)
+
+- `admin-front/src/pages/disputes/__tests__/queryFilters.test.ts` — route query normalization (including repeated keys), attempt/merchant deep-link seeding, merchant-only seeding, and Open/Resolved/All scope preservation.
+
+## Dashboard all-time metric-label regression (2026-11-16)
+
+- `admin-front/src/pages/dashboard/__tests__/metricLabels.test.ts` — Open Action Queues names pending approvals, operator cases, join requests and AML cases followed by the all-time note; Unknown Backlog carries the all-time note before the oldest age; Success Rate shows succeeded / counted.
+- `core-back/test/attempt-outcomes.test.ts` — success and post-success statuses, problematic `FAILED`/`UNKNOWN`, ignored pending and deliberate `CANCELLED`/`EXPIRED`/`BLOCKED` outcomes, one classification per attempt status, and the success-rate denominator.
+
 ## v39 Sandbox Studio and mirror suites (2026-11-13)
 
 - `core-back/test/sandboxPlane.test.ts` now runs the schema-local fence functions and passes on v39; `core-back/test/phase1-mtls-and-schema.test.ts` expects `20261114090000_v39_sandbox_studio` as the newest migration and schema version 39.
@@ -555,3 +567,15 @@ These are development/CI tests only; no production-time test job or test endpoin
 - Root `tests/unit/frontend-security-admin.test.ts` requires every Sandbox mirror route to be explicitly allowed for authenticated staff; `tests/unit/guide-content.test.ts` requires the generated context map to cover them; `tests/unit/i18n-catalogue.test.ts` requires Arabic entries for every new Studio/mirror label.
 - Deploy tests cover `sandboxDatabase()`, `pgw_sandbox`/`pgw_sandbox_session`, sandbox database creation, the second `pg-core-sandbox` service plan, firewall/PKI SAN, and backup exclusion; `./deploy.sh --dry-run` is the integration smoke check.
 - Not yet covered end to end: a live two-database deploy, a live reconciliation import through the real Fake Rails server, and a Playwright pass over the Studio/mirror pages. The `seed-history` route and ledger postings are typechecked and reviewed but have no DB-backed automated test yet.
+
+## Route health (2026-11-16)
+
+`core-back/test/route-health.test.ts` covers outcome classification, error-map
+precedence, breaker thresholds, degraded/open recovery, policy clamping,
+stable canary membership, override expiry limits and degraded-canary routing
+(including one-open-breaker exclusion). The existing visible-rails matrix and
+routing/failover suites remain green. DB-backed worker, override-approval and API suites are not written yet; the
+current coverage is the pure policy/routing/probe tests plus the existing
+migration-shape and admin-back forwarding tests. `core.route-health` lists
+the migration. The “Fake Rails chaos drives a route to DEGRADED and back”
+acceptance run remains a gap.

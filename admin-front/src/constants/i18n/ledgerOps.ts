@@ -241,7 +241,7 @@ export const ledgerOpsCatalogue: Record<string, [string, string]> = {
     "This gateway has no rail routes yet, so there is no telemetry to show.": ["This gateway has no rail routes yet, so there is no telemetry to show.", "ليس لهذه البوابة مسارات قنوات بعد، لذا لا توجد بيانات قياس لعرضها."],
     "Success rate (24h)": ["Success rate (24h)", "معدل النجاح (24 ساعة)"],
     "No traffic": ["No traffic", "لا توجد حركة"],
-    "Degraded": ["Degraded", "متدهورة"],
+    "Degraded": ["Degraded", "متدهور"],
     "Unhealthy": ["Unhealthy", "غير سليمة"],
     "p95 latency (24h)": ["p95 latency (24h)", "زمن الاستجابة p95 (24 ساعة)"],
     "per health window": ["per health window", "لكل نافذة قياس"],

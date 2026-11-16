@@ -46,7 +46,7 @@ describe("generic json helpers", () => {
 
 describe("typed platform setting editors", () => {
   test("resolves the seeded decision-register keys and the go-live family", () => {
-    for (const key of ["OD-1", "OD-2", "OD-3", "OD-4", "OD-5", "OD-6", "OD-7", "OD-8", "OD-9", "OD-10", "OD-11", "onboarding.required_documents", "join_request.volume_threshold", "kyb.refresh_policy", "screening.watchlist", "screening.fail_closed", "SELF_PAYMENT_POLICY", "merchant_reports.policy"]) {
+    for (const key of ["OD-1", "OD-2", "OD-3", "OD-4", "OD-5", "OD-6", "OD-7", "OD-8", "OD-9", "OD-10", "OD-11", "onboarding.required_documents", "join_request.volume_threshold", "kyb.refresh_policy", "screening.watchlist", "screening.fail_closed", "SELF_PAYMENT_POLICY", "merchant_reports.policy", "route_health.policy"]) {
       expect(resolveSettingNamespace(key), key).not.toBeNull();
     }
     expect(resolveSettingNamespace("gateway.go_live.neompay.sla")?.fields).toEqual([]);

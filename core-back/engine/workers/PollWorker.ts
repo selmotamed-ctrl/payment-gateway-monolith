@@ -260,6 +260,12 @@ export class PollWorker extends BaseWorker {
       if (!transitioned) {
         return;
       }
+      if (outcome.substatus || outcome.canonicalError) {
+        await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
+          substatus: outcome.substatus ?? undefined,
+          canonicalError: outcome.canonicalError ?? undefined,
+        });
+      }
       if (outcome.settledAmount !== undefined && outcome.settledAmount !== null) {
         await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
           settledAmount: outcome.settledAmount,
@@ -277,6 +283,7 @@ export class PollWorker extends BaseWorker {
       await this.updateOpenAttempt(attempt.id, {
         status: outcome.status,
         substatus: outcome.substatus ?? attempt.substatus ?? null,
+        canonicalError: outcome.canonicalError ?? undefined,
         nextCheckAt,
       });
       if (schedule) {
@@ -296,21 +303,16 @@ export class PollWorker extends BaseWorker {
   /** Writes a non-terminal poll result, only while the attempt is still open. */
   private async updateOpenAttempt(
     attemptId: string,
-    patch: { status: string; substatus?: string | null; nextCheckAt: Date },
+    patch: { status: string; substatus?: string | null; canonicalError?: string; nextCheckAt: Date },
   ): Promise<void> {
-    if (patch.substatus === undefined) {
-      await this.db.$executeRawUnsafe(
-        'UPDATE payment_attempts SET status = $1::"AttemptStatus", next_check_at = $2, updated_at = now() WHERE id = $3::uuid AND terminal_at IS NULL',
-        patch.status,
-        patch.nextCheckAt,
-        attemptId,
-      );
-      return;
-    }
+    // substatus is left alone unless the poll answered with one; canonical_error keeps the last canonical
+    // gateway error an open attempt reported (route health reads it), so an unset value never erases it.
     await this.db.$executeRawUnsafe(
-      'UPDATE payment_attempts SET status = $1::"AttemptStatus", substatus = $2, next_check_at = $3, updated_at = now() WHERE id = $4::uuid AND terminal_at IS NULL',
+      'UPDATE payment_attempts SET status = $1::"AttemptStatus", substatus = CASE WHEN $2::boolean THEN $3::text ELSE substatus END, canonical_error = COALESCE($4::text, canonical_error), next_check_at = $5, updated_at = now() WHERE id = $6::uuid AND terminal_at IS NULL',
       patch.status,
-      patch.substatus,
+      patch.substatus !== undefined,
+      patch.substatus ?? null,
+      patch.canonicalError ?? null,
       patch.nextCheckAt,
       attemptId,
     );

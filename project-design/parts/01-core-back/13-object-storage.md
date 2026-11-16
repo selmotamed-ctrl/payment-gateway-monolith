@@ -3,7 +3,7 @@ id: core.object-storage
 title: Shared Object & Asset Storage Engine
 status: implemented
 confidence: high
-last_verified: 2026-11-13
+last_verified: 2026-11-16
 verified_against: working-tree
 code:
   - core-back/lib/objectStorageSdk/**
@@ -19,6 +19,7 @@ code:
   - admin-front/src/pages/system/object-storage/index.tsx
 tests:
   - core-back/test/objectStorageEngine.test.ts
+  - core-back/test/objectStorageOrphanSweepGuard.test.ts
   - core-back/test/runtime/raw-body.test.ts
   - deploy/test/objectStorageDeploy.test.ts
   - deploy/object-storage-daemon/test/server.test.ts
@@ -185,6 +186,21 @@ interval/batch env) is a cluster singleton. It runs the generic AV fallback
 lock reconcile, periodic blob sweep and KEK rewrap. A single leader avoids two
 nodes scanning the same quarantine row and avoids every node walking the vault.
 
+**Shared-vault orphan-sweep guard.** The singleton is per control-plane
+database. The orphan-blob sweep lists every file in the vault and compares it
+with `storage_objects` in **its own** database, so it is only safe when that
+database is the sole owner of the vault. The Sandbox plane has a separate
+`payment_gateway_sandbox` control plane but shares the vault; its sweep would
+move every Live blob to `.trash` (and the Live sweep would move the Sandbox
+blobs). When `SANDBOX_ENABLED=true` the deploy emits
+`OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false` in both core environments, and the
+Sandbox plane always skips the orphan sweep through `EXECUTION_PLANE=SANDBOX`.
+The SDK's `orphanBlobSweepAllowed()` is the single enforcement point, including
+the admin maintenance `sweep`. Per-row GC, integrity scrub (which resets
+`scrub_error_count` on success), lock reconcile, KEK rewrap and trash retention
+stay enabled; only the destructive orphan trashing is suppressed. The sweep is
+safe again when one control-plane database is the only owner of the vault.
+
 `createObjectStorageMonitorCheck` (`object_storage`) raises keyed findings for
 an unreachable vault (P1), scrub errors (P1) and quarantine uploads older than
 30 minutes (P2).
@@ -208,6 +224,10 @@ the SHA-256.
   unit; `deployObjectStorageDaemon` syncs and starts the daemon.
 - PKI mints `object-storage-daemon.crt` (SANs: storage private IP, 127.0.0.1,
   `object-storage-daemon.internal`) and `object-storage-client.crt`.
+- `hostPlanner.objectStorageCoreEnv()` emits
+  `OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false` when `SANDBOX_ENABLED=true`; the
+  core env default is `true` for a single-plane owner. The admin maintenance
+  `sweep` job honours the same guard and still purges expired trash folders.
 - Firewall opens 4095 only to core and backup private IPs.
 - Health probes run `systemctl is-active` on the storage host and
   `/v1/health` over mTLS from every core host and the backup host.

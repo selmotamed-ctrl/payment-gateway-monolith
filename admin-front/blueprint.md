@@ -325,7 +325,7 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 
 ## Admin Route and Page Catalog
 
-> Status: `partial` · Last verified: 2026-11-13
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -366,7 +366,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 
 | # | Path | Name | UI authority / role | Help | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | `/dashboard` | `Dashboard` | `[]` (authenticated only) | 1 / 1.1 | Live platform health, attempts/volume-by-state bar charts, queues, recent activity, snapshot export. |
+| 1 | `/dashboard` | `Dashboard` | `[]` (authenticated only) | 1 / 1.1 | Live platform health, attempts/volume-by-state bar charts, queues, recent activity, snapshot export; Open Action Queues and Unknown Backlog are all-time, not period-filtered. |
 | 2 | `/join-requests` | `JoinRequests` | `joinrequests.review` | 9 / 9.1 | Onboarding application queue, SLA health, summary export. |
 | 3 | `/join-requests/new` | `JoinRequestNew` | `joinrequests.review` | 9 / 9.1 via parent | Admin-assisted onboarding package creation. |
 | 4 | `/join-requests/:id` | `JoinRequestDetail` | `joinrequests.review` | 9 / 9.1 | Review profile, owners, documents, checklist, decisions, audit. |
@@ -386,7 +386,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 18 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | UNKNOWN/conflict/reconciliation operator queue. |
 | 19 | `/operator-cases/inquiries` | `GatewayInquirySchedules` | `case:read` or `operator:read` | 7 / 7.2 | Gateway inquiry schedule monitoring, run/retry/cancel. |
 | 20 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case evidence, step logs, inbound events, maker-checker resolution. |
-| 21 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage. |
+| 21 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage; an attempt-detail link starts on All scoped by `attemptId` and `merchantId`. |
 | 22 | `/adjustments` | `Adjustments` | `adjustments.propose` | 11 / 11.2 | Refund/manual adjustment drafting and review. |
 | 23 | `/cashouts` | `CashOuts` | `cashout.process` | 12 / 12.1 | Cash-out processing with wallet, destination and AML checks. |
 | 24 | `/reconciliation` | `Reconciliation` | `reconciliation.run` or `reconciliation.resolve` | 8 / 8.2 | Statement upload, run monitoring and variance resolution. |
@@ -620,9 +620,34 @@ New routes and a "Sandbox & Fake Rails" sidebar section: `/sandbox/overview` (pl
 
 A "Sandbox Live Mirror" section maps `/sandbox/mirror/*` to the real admin pages: merchants, wallets, applications, transactions, approvals, audit log, operator cases, disputes, adjustments, cash-outs, reconciliation, pricing/profitability/liquidity, journal entries, invariant, credential sets, gateways/routes, reports, platform settings, jobs/outbox and object storage. Mirror pages are open to any signed-in staff member (the sandbox data is isolated), use the same `SandboxBanner`, and Exit sandbox returns to the Live page. The Guide context map's `Sandbox` screen covers the Studio and all mirror routes.
 
+## Dashboard gross volume metric (2026-11-16)
+
+The Dashboard **Gross Volume** card sums `payment_attempts.total_charged_amount` only for attempts created in the selected period with `status = SUCCEEDED` and `currency = LYD`. The card sub-label now shows the number of succeeded LYD attempts behind that figure. The snapshot export carries the same `gross_volume` value plus `gross_volume_attempts`. Before this change the metric summed every attempt in the success status set (`SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `DISPUTED`) across every currency while the card always displayed “LYD”. Success Rate, the Attempts By State chart and the Volume chart keep their existing definitions (`core-back/api/internal/admin.ts` `GET /stats/overview`).
+
+## Dashboard all-time queue metrics (2026-11-16)
+
+**Open Action Queues** is a current-state count, not a period count: pending approvals (`DRAFT`/`PENDING_REVIEW`), open operator cases (`OPEN`/`IN_PROGRESS`/`PENDING_CHECKER`), open join requests and open AML cases (`OPEN`/`IN_REVIEW`/`PENDING_CHECKER`/`FROZEN`/`ESCALATED_STR`). Its sub-label now names all four sources and carries **All time (not period-filtered)**. **Unknown Backlog** counts every `UNKNOWN` payment attempt, so its sub-label carries the same all-time note before the oldest age. Only Gross Volume, Success Rate, the Attempts By State chart, the Volume chart and Reconciliation use the selected period.
+
+## Dashboard success-rate denominator (2026-11-16)
+
+The **Success Rate** card is `attemptsSucceeded / attemptsCounted`. Successes are `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED`; counted attempts add `FAILED` and `UNKNOWN`. Pending/in-flight attempts and deliberate/no-processing outages (`CANCELLED`, `EXPIRED`, `BLOCKED`) are excluded from the denominator, so the rate measures payment-processing outcomes rather than the whole attempt volume. The card sub-label shows `N succeeded / M counted`; the Attempts By State chart and the snapshot's `attempts_total` still include every attempt created in the selected period. The API returns `attemptsCounted` with `successRate`.
+
+## Route health drawer (2026-11-16)
+
+The **Routes** table's primary row action opens a 760 px health drawer instead
+of opening the editor. The drawer separates effective, computed and override
+state; shows canary percent/maximum, consecutive failures, probe counters,
+last/next probe, override reason/expiry/actor, recent sample windows, probe
+history and the newest state transitions. It can run a read-only probe, request a
+forced `HEALTHY` (second approval), force `DEGRADED`/`OPEN_BREAKER` immediately,
+or clear an override (second approval when the computed state is healthier).
+The table Health cell marks a forced route. Edit is now the overflow action.
+The Dashboard Route health card shows forced and conflict counts. See
+`core.route-health`.
+
 ## Tables Filters and Exports
 
-> Status: `partial` · Last verified: 2026-11-12
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -706,12 +731,14 @@ The v2 design intends tables to look operational rather than decorative:
 | `AmlReports` | `reports` | 5 |
 | `Adjustments` | `adjustments` | 6 |
 | `CashOuts` | `cashouts` | 5 |
-| `Disputes` | `disputes` | 7 |
+| `Disputes` | `disputes` | 8 |
 | `OperatorCases` | `cases` | 9 |
 | `GatewayInquiries` | `schedules` | 8 |
 | `Reconciliation` | `sources` | 1, with storage key `pg.admin.reconciliation.sources` |
 
 `referenceOptions.ts` caches option lookups per `kind:search` key and requests `/options/:kind` with a search string and `limit=50`.
+
+`Disputes` also exposes the `attemptId` text filter (`Attempt ID`, placeholder `Attempt UUID`). The attempt detail drawer deep-links `/disputes?attemptId=…&merchantId=…`; the page starts on All with those filters, keeps the attempt/merchant scope when switching Open/Resolved, and removes the route scope when filters are cleared.
 
 ### 3.4 Session persistence
 
@@ -906,7 +933,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ## Admin Guide and Academy
 
-> Status: `partial` · Last verified: 2026-11-10
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -1163,6 +1190,18 @@ Academy module 10 adds lesson `l-m10-5`, checks `c-l-m10-5-1/2` and exam
 question `q-m10-118`. Counts are 137 articles, 154 terms, 26 cards, 51
 lessons, 102 checks and 224 exam-pool questions. Generated Guide/Academy and
 Companion snapshots were regenerated.
+
+## Route health content (2026-11-16)
+
+Guide `b06-11` and `b06-12` now describe the automatic outcome-based circuit
+breaker, the `DEGRADED` canary exception in condition 5, read-only probes and
+the effective/computed/override split. `b10-02` (RB-01) and the Dashboard
+screen article (`b03-05`) describe the Routes health drawer, forced/conflict
+counts, probe action and the maker-checker force-HEALTHY path. Academy
+`l-m8-1`, `l-m8-5` and `l-m9-1` were updated with the same facts. Counts and
+exam structure are unchanged (137 articles, 154 terms, 26 cards, 51 lessons,
+224 pool questions); the generated Guide/Academy and Companion snapshot were
+regenerated.
 
 ## Contextual Help
 

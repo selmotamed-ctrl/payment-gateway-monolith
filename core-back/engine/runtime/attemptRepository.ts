@@ -9,6 +9,7 @@ export interface AttemptRow {
   gatewayReference: string | null;
   status: string;
   substatus: string | null;
+  canonicalError?: string | null;
   env: string;
   mode: string;
   subMode: string | null;
@@ -103,7 +104,9 @@ const toAttempt = (row: AttemptRow): DynamicAttempt => {
     reference: row.reference,
     gatewayReference: row.gatewayReference ?? undefined,
     status: row.status as DynamicAttempt["status"],
-    substatus: row.substatus ?? undefined,    env: row.env,
+    substatus: row.substatus ?? undefined,
+    canonicalError: row.canonicalError ?? undefined,
+    env: row.env,
     mode: row.mode,
     subMode: row.subMode ?? undefined,
     currency: row.currency,
@@ -216,7 +219,10 @@ export class PrismaAttemptRepository implements AttemptRepository {
     if (patch.status !== undefined) data.status = patch.status;
     if (patch.substatus !== undefined) data.substatus = patch.substatus;
     if (patch.clearSubstatus) data.substatus = null;
-    if (patch.canonicalError !== undefined) data.substatus = patch.canonicalError;
+    if (patch.canonicalError !== undefined) {
+      data.canonicalError = patch.canonicalError;
+      if (patch.substatus === undefined) data.substatus = patch.canonicalError;
+    }
     if (patch.otpAttempts !== undefined) data.otpAttempts = patch.otpAttempts;
     if (patch.ledgerEntryId !== undefined) data.ledgerEntryId = patch.ledgerEntryId;
     if (patch.contextCiphertext !== undefined) data.contextCiphertext = patch.contextCiphertext;
@@ -227,9 +233,9 @@ export class PrismaAttemptRepository implements AttemptRepository {
     if (patch.gatewayFeeAmount !== undefined) data.gatewayFeeAmount = patch.gatewayFeeAmount;
     if (patch.pointOfNoReturn !== undefined) data.pointOfNoReturn = patch.pointOfNoReturn;
 
+    const terminalStatuses = ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED", "BLOCKED", "REFUNDED", "PARTIALLY_REFUNDED", "DISPUTED"];
     if (data.status !== undefined) {
-      const terminal = ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED", "BLOCKED", "REFUNDED"];
-      if (terminal.includes(String(data.status))) {
+      if (terminalStatuses.includes(String(data.status))) {
         data.terminalAt = new Date();
         data.nextCheckAt = null;
       }
@@ -256,8 +262,25 @@ export class PrismaAttemptRepository implements AttemptRepository {
     } else {
       row = await target.paymentAttempt.update({ where: { id: attemptId }, data, include }) as AttemptRow;
     }
-    const terminal = ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED", "BLOCKED", "REFUNDED"];
-    if (data.status !== undefined && terminal.includes(String(data.status))) {
+    // First terminal/unknown markers are monotonic. `terminal_at` keeps its existing "last terminal" meaning,
+    // while route health sampling needs the first time the attempt reached either state.
+    if (data.status !== undefined && typeof target.$executeRawUnsafe === "function") {
+      const nextStatus = String(data.status);
+      if (terminalStatuses.includes(nextStatus)) {
+        await target.$executeRawUnsafe(
+          `UPDATE payment_attempts SET first_terminal_at = COALESCE(first_terminal_at, $2) WHERE id = $1::uuid`,
+          attemptId,
+          new Date(),
+        );
+      } else if (nextStatus === "UNKNOWN") {
+        await target.$executeRawUnsafe(
+          `UPDATE payment_attempts SET first_unknown_at = COALESCE(first_unknown_at, $2) WHERE id = $1::uuid`,
+          attemptId,
+          new Date(),
+        );
+      }
+    }
+    if (data.status !== undefined && terminalStatuses.includes(String(data.status))) {
       await enqueueOutboxEvent(target, {
         topic: "attempt.transitioned",
         aggregateType: "PAYMENT_ATTEMPT",

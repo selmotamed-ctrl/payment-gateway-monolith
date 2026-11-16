@@ -11,6 +11,7 @@ import { getExecutionPlane, isSandboxPlane } from "../../lib/executionPlane";
 import { FakeRailsControlClient } from "../../engine/rails/FakeRailsControlClient";
 import { VisibleRailsResolver, evaluateRouteDailyCap, type RailRecord, type RailRouteRecord, type CredentialSetRecord, type CommissionProfileRecord } from "../../engine/flow/VisibleRailsResolver";
 import { loadRailCatalog, asStringArray } from "../../engine/flow/VisibleRailsCatalog";
+import { readRouteHealthPolicy } from "../../engine/routeHealth/policy";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { getPlatformRuntime } from "../../engine/runtime";
 import { inboundRouteFailureOutcome } from "../../engine/workers/callbackInboundHandler";
@@ -272,8 +273,9 @@ const assertPlaneMatchesLink = (link: LoadedLink): void => {
   }
 };
 
-const visibleRailsFor = (link: LoadedLink, catalog: Catalog, env: "SANDBOX" | "LIVE") => {
+const visibleRailsFor = async (link: LoadedLink, catalog: Catalog, env: "SANDBOX" | "LIVE") => {
   const resolver = new VisibleRailsResolver();
+  const policy = await readRouteHealthPolicy(client as never);
   return resolver.resolve({
     application: {
       id: link.applicationId,
@@ -292,6 +294,9 @@ const visibleRailsFor = (link: LoadedLink, catalog: Catalog, env: "SANDBOX" | "L
     routes: catalog.routes,
     credentialSets: catalog.credentialSets,
     commissionProfiles: catalog.commissionProfiles,
+    canaryKey: link.key,
+    canaryPercent: policy.enabled ? policy.canaryPercent : 0,
+    canaryMaxAmount: policy.canaryMaxAmount,
   });
 };
 
@@ -1107,7 +1112,7 @@ route.get("/pay/:linkKey", async (request: Request, response: Response) => {
   assertPlaneMatchesLink(link);
   const env = resolveEnvironment();
   const catalog = await loadCatalog();
-  const visible = visibleRailsFor(link, catalog, env);
+  const visible = await visibleRailsFor(link, catalog, env);
   const railFields = await client.railField.findMany({
     where: { railId: { in: visible.rails.map((entry) => entry.rail.id) } },
     orderBy: { orderIndex: "asc" },
@@ -1250,7 +1255,7 @@ route.post("/pay/:linkKey/initiate", async (request: Request, response: Response
   assertPlaneMatchesLink(link);
   const env = resolveEnvironment();
   const catalog = await loadCatalog();
-  const visible = visibleRailsFor(link, catalog, env);
+  const visible = await visibleRailsFor(link, catalog, env);
   const visibleRail = visible.rails.find((entry) => entry.rail.code === body.railCode);
   if (!visibleRail) {
     throw new ApiError(404, "RAIL_NOT_AVAILABLE", "The requested rail is not available for this payment link");

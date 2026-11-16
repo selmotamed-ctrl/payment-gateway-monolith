@@ -61,3 +61,23 @@ Architecture and documentation decisions are recorded here. Add a dated ADR entr
 - **Decision:** PostgreSQL session advisory locks may only be taken over a session-stable connection. Deploy generates a PgBouncer database alias `pgw_session` (`pool_mode=session`, same port) and exports `LEADER_ELECTION_DATABASE_URL` to core; ordinary application traffic stays on the transaction-pooled `DATABASE_URL`. Without PgBouncer the leader URL is a direct PostgreSQL connection. Core refuses to boot when `PGBOUNCER_ENABLED=true` and the leader URL is missing or the same database endpoint as `DATABASE_URL`, verifies the session at boot (a second client must not acquire the probe key; stable backend PID; unlock succeeds) and re-proves backend PID + `pg_locks` ownership on every singleton tick (fail closed).
 - **Rationale:** Transaction pooling assigns a backend per transaction. Advisory locks then become reentrant across clients, can vanish when PgBouncer recycles a backend, or cannot be released. That is a silent split-brain for expiry sweeps, webhook draining and ledger checkpointing. A lease table would work through pooling but is weaker under process pauses unless every side effect is fenced; the session endpoint keeps PostgreSQL's own crash semantics. The session alias adds no port, firewall rule or API surface.
 - **Consequences:** PgBouncer config now has a second database alias and a small persistent server connection per core node (pool sized `max(8, 2 × core nodes + 4)`). `InboundInboxWorker` also stores `claimed_at`/`claimed_by` so duplicate webhook handling is impossible even during a brief handover. A direct-PostgreSQL URL remains supported for external databases via an explicit deploy-env override. This decision must be revisited if PgBouncer is ever replaced by a pooler without per-database pool modes.
+
+## ADR-0007: Route health uses passive outcomes, a degraded canary and expiring admin overrides
+
+- Status: accepted (2026-11-16)
+- Context: routes had a manual `HEALTHY`/`DEGRADED`/`OPEN_BREAKER` field and no
+  automatic measurement. A failing partner could stay in normal rotation.
+- Decision: `GatewayHealthWorker` measures terminal payment outcomes and
+  drives `health_computed_state`; `health_state` remains the effective routing
+  value. `DEGRADED` routes are eligible only for a stable per-link canary
+  cohort (default 5%, optional amount cap). `OPEN_BREAKER` is never routable.
+  Recovery probes are read-only and never update credential verdicts. Force
+  `HEALTHY` is maker-checker (`ROUTE_HEALTH_OVERRIDE`) with a mandatory reason
+  and expiry (default 7 days, maximum 30); force `DEGRADED`/`OPEN_BREAKER` is
+  immediate and audited. Clearing an override is immediate when it is more
+  restrictive, otherwise approved. The automation keeps computing and probing
+  under an override and exposes conflicts.
+- Consequences: thresholds are staff-managed in `route_health.policy`; the
+  worker is a singleton; the UI must show effective/computed/override
+  separately; probe coverage depends on a platform credential or a declared
+  `CREDENTIAL_CHECK` flow, so merchant-owned credentials remain manual.

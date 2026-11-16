@@ -27,8 +27,15 @@ Not built or partial
 
 - reporting engine should track the version and any breaking change due to version changing (major version means previous reports specs wont work and must be regenerated and migrated with a proposed migration prompt), broken reports should not ever throw 500 error (currently that what happens) and should not allow runs and should be marked as needing migration and colored red, and there should be page of these reports, the catalog page should only show working reports, also there should be documentation on how to version transcripts for the ai agents that will develop changes on the report engine --
 
+make sure that log partitioning runs on workers leader like the journal lines patitioning basedon "Time-bounded: monthly partitions created/dropped by ensure_log_partitions / LOG_RETENTION_MONTHS cron"
+
 - convert thea attempt by state charts from line to bar --
-- opening disputes from payment attempt details drawer does not work, the filter is probably missing
+- opening disputes from payment attempt details drawer does not work, the filter for the attemp uuid in the dispute table is probably missing 
 - queue needing attention in dashboard needs to be fixed the numbers does not show always 0
-- running report shows error that the zip asset file is missing from the vault, fix using the error code on the test-server opencode session make sure to track the root cause 3e525d00-9bb9-40ea-9e28-9c32aa5999ba
+- running report shows error that the zip asset file is missing from the vault, fix using the error code on the test-server opencode  session make sure to track the root cause 3e525d00-9bb9-40ea-9e28-9c32aa5999ba --
+
+
+- for `Gross Volume — sum of totalChargedAmount for attempts created in the selected period whose status is SUCCEEDED, PARTIALLY_REFUNDED, REFUNDED or DISPUTED (admin.ts:1139-1149). It is gross payer-charged amount (base + surcharge), not net wallet credit, not commission, and not all attempt amounts. The sub-label is all attempts created in the period. Caveat: the sum is not grouped by currency, while the card hard-codes “LYD”, so a mixed-currency dataset would be misleading.` fix gross volume metric in dashboard page, as of what i understand its the sum of totalChargedAmount for any type of currency on payment attempts whose state is success, partially refunded, refunded, disputed, it should be only for succeeded and for LYD currency only --
+
+- in dashboard page metrics, "Open Action Queues" — a current-state count, not period-filtered. Actual value = pending approvals (DRAFT/PENDING_REVIEW) + open operator cases (OPEN/IN_PROGRESS/PENDING_CHECKER) + open join requests + open AML cases (OPEN/IN_REVIEW/PENDING_CHECKER/FROZEN/ESCALATED_STR) (index.tsx:265-269). The sub-label only names approvals and operator cases, so the card under-describes what the number includes, please also add a note that this is for all time not just for the selected period (the all time label should be added to the  Unknown Backlog metric since its all time not periodic)
 

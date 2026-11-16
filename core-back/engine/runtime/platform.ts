@@ -492,8 +492,9 @@ export class CredentialCheckService {
    */
   async verify(
     credentialSetId: string,
-    options: { gatewayVersionId?: string } = {},
+    options: { gatewayVersionId?: string; persist?: boolean } = {},
   ): Promise<CredentialCheckResult> {
+    const persist = options.persist !== false;
     const db = this.options.db;
     const credentialSet = await db.credentialSet.findUnique({
       where: { id: credentialSetId },
@@ -505,7 +506,7 @@ export class CredentialCheckService {
     const env = String(credentialSet.env);
     const version = await this.resolveGatewayVersion(gatewayId, options.gatewayVersionId);
     if (!version) {
-      return this.record(credentialSetId, {
+      return this.recordResult(credentialSetId, persist, {
         credentialSetId,
         gatewayId,
         gatewayVersionId: options.gatewayVersionId ?? null,
@@ -534,9 +535,9 @@ export class CredentialCheckService {
 
     const steps = await this.options.flowProvider.getCredentialCheckSteps(attempt);
     if (steps.length > 0) {
-      return this.runFlowCheck(credentialSetId, attempt, steps);
+      return this.runFlowCheck(credentialSetId, attempt, steps, persist);
     }
-    return this.runProbeCheck(credentialSetId, attempt, version.id);
+    return this.runProbeCheck(credentialSetId, attempt, version.id, persist);
   }
 
   /**
@@ -574,6 +575,15 @@ export class CredentialCheckService {
         { credentialSetId, method: result.method },
       );
     }
+  }
+
+  private async recordResult(
+    credentialSetId: string,
+    persist: boolean,
+    result: CredentialCheckResult,
+  ): Promise<CredentialCheckResult> {
+    if (!persist) return result;
+    return this.record(credentialSetId, result);
   }
 
   private async resolveGatewayVersion(
@@ -615,6 +625,7 @@ export class CredentialCheckService {
     credentialSetId: string,
     attempt: DynamicAttempt,
     steps: readonly { id: string }[],
+    persist: boolean,
   ): Promise<CredentialCheckResult> {
     const credentials = await resolveCredentialValues(
       this.options.db,
@@ -630,7 +641,7 @@ export class CredentialCheckService {
         },
       );
       if (result.status === "FAILED" || result.status === "UNKNOWN") {
-        return this.record(credentialSetId, {
+        return this.recordResult(credentialSetId, persist, {
           credentialSetId,
           gatewayId: String(attempt.gatewayId ?? ""),
           gatewayVersionId: attempt.gatewayVersionId ?? null,
@@ -642,7 +653,7 @@ export class CredentialCheckService {
         });
       }
     }
-    return this.record(credentialSetId, {
+    return this.recordResult(credentialSetId, persist, {
       credentialSetId,
       gatewayId: String(attempt.gatewayId ?? ""),
       gatewayVersionId: attempt.gatewayVersionId ?? null,
@@ -665,6 +676,7 @@ export class CredentialCheckService {
     credentialSetId: string,
     attempt: DynamicAttempt,
     gatewayVersionId: string,
+    persist: boolean,
   ): Promise<CredentialCheckResult> {
     const gatewayId = String(attempt.gatewayId ?? "");
     const env = String(attempt.env ?? "");
@@ -685,7 +697,7 @@ export class CredentialCheckService {
         gatewayVersionId,
       });
     } catch (error) {
-      return this.record(credentialSetId, {
+      return this.recordResult(credentialSetId, persist, {
         ...base,
         status: "FAILING",
         reason: error instanceof Error ? error.message : "The outbound consumer could not be built",
@@ -697,7 +709,7 @@ export class CredentialCheckService {
     const baseUrls = (environment?.baseUrls ?? {}) as Record<string, string>;
     const baseUrl = baseUrls.api ?? baseUrls.checkout ?? Object.values(baseUrls)[0];
     if (!baseUrl) {
-      return this.record(credentialSetId, {
+      return this.recordResult(credentialSetId, persist, {
         ...base,
         status: "FAILING",
         reason: "The gateway environment has no base URL to probe",
@@ -711,7 +723,7 @@ export class CredentialCheckService {
         retryPolicy: "NEVER",
       });
       if (response.status === 401 || response.status === 403) {
-        return this.record(credentialSetId, {
+        return this.recordResult(credentialSetId, persist, {
           ...base,
           status: "FAILING",
           httpStatus: response.status,
@@ -719,14 +731,14 @@ export class CredentialCheckService {
         });
       }
       if (response.status >= 500) {
-        return this.record(credentialSetId, {
+        return this.recordResult(credentialSetId, persist, {
           ...base,
           status: "FAILING",
           httpStatus: response.status,
           reason: `The gateway answered with HTTP ${response.status}`,
         });
       }
-      return this.record(credentialSetId, {
+      return this.recordResult(credentialSetId, persist, {
         ...base,
         status: "VERIFIED",
         httpStatus: response.status,
@@ -734,7 +746,7 @@ export class CredentialCheckService {
       });
     } catch (error) {
       const status = error instanceof ApiConsumerError ? error.status : undefined;
-      return this.record(credentialSetId, {
+      return this.recordResult(credentialSetId, persist, {
         ...base,
         status: "FAILING",
         ...(status ? { httpStatus: status } : {}),

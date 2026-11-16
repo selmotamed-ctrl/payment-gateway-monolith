@@ -19,6 +19,9 @@ import { KybExpiryWorker } from "./KybExpiryWorker";
 import { RetentionWorker } from "./RetentionWorker";
 import { BackgroundJobWorker } from "./BackgroundJobWorker";
 import { PlatformMonitorWorker } from "./PlatformMonitorWorker";
+import { GatewayHealthWorker } from "../routeHealth/GatewayHealthWorker";
+import { RouteHealthProbeService } from "../routeHealth/RouteHealthProbeService";
+import { getExecutionPlane } from "../../lib/executionPlane";
 import { createStandardPlatformChecks, type CertificateFile } from "./platformMonitorChecks";
 import { createStaleUnknownMonitorCheck, createUnscheduledRefundMonitorCheck } from "./moneyPathMonitorChecks";
 import { createBackupMonitorCheck } from "./backupMonitorChecks";
@@ -78,6 +81,9 @@ export interface ProductionWorkerRuntimeOptions {
   ledgerShardScalerEnabled?: boolean;
   ledgerShardScalerIntervalMs?: number;
   ledgerShardScalerDryRun?: boolean;
+  /** AUTO-09 route health worker (falls back to WORKER_ROUTE_HEALTH_*). */
+  routeHealthEnabled?: boolean;
+  routeHealthIntervalMs?: number;
   ledgerShardUpLinesPerSec?: number;
   ledgerShardMaxWidth?: number;
   ledgerShardCooldownMs?: number;
@@ -337,6 +343,8 @@ export const createProductionWorkerRuntime = (
       const result = await platform.engine.inquire(attempt as never);
       return {
         status: result.status,
+        substatus: result.substatus,
+        canonicalError: result.canonicalError,
         definitive: result.status === "SUCCEEDED" || result.status === "FAILED",
         settledAmount: result.attempt.settledAmount,
         providerFee: result.attempt.gatewayFeeAmount,
@@ -713,6 +721,17 @@ export const createProductionWorkerRuntime = (
             dryRun: options.commissionNettingDryRun ?? env.COMMISSION_NETTING_DRY_RUN,
             dailyCron: options.commissionNettingCron ?? env.COMMISSION_NETTING_CRON,
             agingDays: options.commissionReceivableAgingDays ?? env.COMMISSION_RECEIVABLE_AGING_DAYS,
+          }),
+        ]
+      : []),
+    // AUTO-09: measure real outcomes, open/probe the breaker and keep the canary policy current.
+    ...((options.routeHealthEnabled ?? env.WORKER_ROUTE_HEALTH_ENABLED)
+      ? [
+          new GatewayHealthWorker({
+            ...workerOptions,
+            intervalMs: options.routeHealthIntervalMs ?? env.WORKER_ROUTE_HEALTH_INTERVAL_MS,
+            env: getExecutionPlane(),
+            probeService: new RouteHealthProbeService(options.db, platform.credentialCheck, getExecutionPlane()),
           }),
         ]
       : []),

@@ -27,6 +27,7 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Tests and Benchmarks](#coretests) — `partial`
 - [Dynamic Report Engine SDK and Report Studio Host](#corereport-engine) — `implemented`
 - [Shared Object & Asset Storage Engine](#coreobject-storage) — `implemented`
+- [Route Health and Circuit Breaker](#coreroute-health) — `partial`
 - [Shared Core Upstream Client](#edgeshared) — `implemented`
 - [Admin Edge BFF](#edgeadmin) — `partial`
 - [Merchant Edge BFF](#edgemerchant) — `partial`
@@ -1064,7 +1065,7 @@ Done on top of `7cc40cf` (the remediation described above), after re-reading the
 
 <a id="platformruntime"></a>
 
-> **Part ID:** `platform.runtime` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `19d6a54+working-tree`
+> **Part ID:** `platform.runtime` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `19d6a54+working-tree`
 
 # Runtime and Configuration
 
@@ -1284,7 +1285,7 @@ The storage engine is constructed before `listen`, but after the server object i
 SELECT "version" FROM "schema_versions" WHERE "id" = 1
 ```
 
-and throws if the version is not 37. The check is invoked by `prisma/seed.ts`, `prisma/seedFakeRails.ts` and `prisma/syntheticSeeder/index.ts`. It is **not** invoked by `core-back/index.ts`, so the API can boot against a stale schema and fail later at query time. Migration deployment is an external deploy step (`bunx prisma migrate deploy`).
+and throws if the version is not 40. The check is invoked by `prisma/seed.ts`, `prisma/seedFakeRails.ts` and `prisma/syntheticSeeder/index.ts`. It is **not** invoked by `core-back/index.ts`, so the API can boot against a stale schema and fail later at query time. Migration deployment is an external deploy step (`bunx prisma migrate deploy`).
 
 ### 3.6 Worker composition
 
@@ -1373,6 +1374,9 @@ The deploy engine injects admin UI flags rather than requiring a committed front
 
 These are deploy/frontend flags; they are not core-back env keys.
 
+- `route_health.policy` (Platform Settings) controls the route breaker: `enabled`, `mode` (`OFF`/`SHADOW`/`ENFORCE`), sample/window sizes, thresholds, probe cadence, degraded-canary percentage/amount cap and override expiry/review limits. Missing or malformed fields fall back to the defaults in `core.route-health`.
+- `merchant_reports.policy` (Platform Settings, `settings:write`) is the staff-managed merchant reporting switch. `enabled` controls the runner/Studio; `assetsEnabled` controls merchant asset bundles. Missing values fall back to enabled/allowed.
+
 ## 4. Contracts and invariants
 
 1. **Invalid production config does not boot.** The env loader exits with code 1 and prints only the failing key names.
@@ -1382,7 +1386,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 5. **The raw body is preserved before JSON parsing.** Webhook signatures and uploaded document bytes must be exact.
 6. **A request id is always returned.** Invalid or missing client values are replaced with a UUID.
 7. **Redis is never authoritative for money.** When Redis is unavailable the cache/velocity adapter falls back to memory and invalidation stays local.
-8. **Schema version 37 is the contract.** Seeders enforce it; migrations are deployed separately.
+8. **Schema version 41 is the contract.** Seeders enforce it; migrations are deployed separately.
 9. **Workers are stateless across nodes.** Coordination is by database claims, not by an in-memory scheduler.
 10. **The admin UI flags are deployment-owned.** A source build uses the frontend defaults; a deployed build receives the deploy engine's values.
 
@@ -1411,7 +1415,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 | Backup daemon | No | Backup routes return 503 |
 | Notification webhook | No | Log transport reports SENT |
 | Fake Rails | No | Only required by synthetic seeding/seeding routes |
-| Schema version 37 | Yes at seed time | Seeders fail; server boot does not check |
+| Schema version 41 | Yes at seed time | Seeders fail; server boot does not check |
 
 ### 5.3 Config consumers outside the env proxy
 
@@ -2013,7 +2017,7 @@ Redaction was extended to PII keys (email, phone, msisdn, iban, account number, 
 
 <a id="platformsandbox"></a>
 
-> **Part ID:** `platform.sandbox` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `working-tree`
+> **Part ID:** `platform.sandbox` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `working-tree`
 
 # Parallel Sandbox Execution Plane
 
@@ -2103,6 +2107,8 @@ The core trusts the edge identity (mTLS) and the signed session. On the SANDBOX 
 ## 8. Deploy configuration
 
 `deploy/lib/configSchema.ts` adds `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT` (4005), `SANDBOX_DB_NAME` (`payment_gateway_sandbox`), `SANDBOX_REMOTE_DIR`, `SANDBOX_CORE_BACK_URLS` and `FAKE_RAILS_CONTROL_TOKEN`; validation requires Fake Rails, a distinct database/remote dir/port and HTTPS edge URLs. `sandboxDatabase()` derives the transaction (`pgw_sandbox`) and session (`pgw_sandbox_session`) PgBouncer aliases. `postgres18Provisioner` creates the database and writes both aliases; `hostPlanner` emits a second core `ServicePlan` (`pg-core-sandbox`, port 4005, own release tree, sandbox `DATABASE_URL`/`LEADER_ELECTION_DATABASE_URL`, Fake Rails enabled, backups disabled) on `SANDBOX_NODE` or the first core node, with its own firewall rule and core certificate SAN. `deployService` migrates/seeds that database with the direct sandbox owner URL carrying `app.execution_plane=SANDBOX` (PgBouncer rejects custom startup options, so migrations deliberately bypass the pooler); the seed path runs `db-seed` and `seed-fake-rails`, and the Fake Rails seeder stamps an existing sandbox database row as SANDBOX only when `current_database()` equals `SANDBOX_DB_NAME`. Edges receive the sandbox URL list when enabled. The sandbox database and Fake Rails SQLite are deliberately not backup targets.
+
+The Sandbox database is a second object-storage control plane while the vault is shared with Live. The deploy therefore emits `OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false` in both core environments, and the Sandbox plane always skips the orphan-blob sweep through `EXECUTION_PLANE=SANDBOX`; otherwise one plane's sweep would treat the other plane's blobs as orphans and move them to `.trash`. Per-row GC, scrub, lock reconcile and trash retention remain enabled. See `01-core-back/13-object-storage.md` section 7.
 
 ## 9. Verification
 
@@ -2458,7 +2464,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 <a id="coreapi"></a>
 
-> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `1dcc0f2+working-tree`
 
 # Core API Surface
 
@@ -2627,6 +2633,9 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `POST /rails`, `PATCH /rails/:id`, `PUT /rails/:id/fields` | `gateway:write` |
 | `GET /routes`, `/export`, `/summary`, `/summary/export`, `GET /routes/:id` | `gateway:read` |
 | `POST /routes`, `PATCH /routes/:id`, `POST /routes/:id/state` | `gateway:write` |
+| `GET /routes/:id/health` | `gateway:read` |
+| `POST /routes/:id/health/probe` | `gateway:test` or `gateway:write` |
+| `POST /routes/:id/health/override`, `POST /routes/:id/health/override/clear` | `gateway:write` (force `HEALTHY` and a healthier clear return `202` pending approval) |
 | `GET /assets`, `GET /assets/:id`, `GET /assets/:id/content` | `gateway:read` |
 | `POST /assets`, `POST /assets/upload`, `DELETE /assets/:id` | `gateway:write` |
 
@@ -2645,6 +2654,8 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | :--- | :--- |
 | `GET /disputes`, `/export`, `/summary`, `/summary/export`, `GET /disputes/:id` | `dispute:read` |
 | `POST /disputes/:id/evidence`, `POST /disputes` | `dispute:write` |
+
+`GET /disputes` and `/disputes/export` combine the standard list filters with `merchantId` (the attempt's merchant) and `attemptId` (one payment attempt), so the admin payment-attempt drawer can deep-link to the attempt's dispute(s).
 | `GET /adjustments`, `/export`, `/summary`, `/summary/export`, `GET /adjustments/:id` | `finance:read` |
 | `POST /adjustments` | `finance:write`; creates an `ADJUSTMENT` approval and a `PENDING_REVIEW` adjustment |
 | `GET /cashouts`, `/export`, `/summary`, `/summary/export`, `GET /cashouts/:id` | `cashout:read` |
@@ -3085,6 +3096,7 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 ### Rail logo, route policy and commission tiers (2026-11-06)
 
 - `PATCH /rails/:id` accepts `logoAssetId` (uuid, or `null` to clear). A uuid must reference a registered `Asset` (`404 ASSET_NOT_FOUND`); the audit row records the before/after logo. The edge schema and `toCoreRailUpdate` forward it. `POST /assets` still registers metadata only (name, type, size, SHA-256, storage key): it does not store image bytes, which remains a gap.
+- `POST /routes/:id/health/override` accepts `HEALTHY`, `DEGRADED` or `OPEN_BREAKER`, a reason of 10–500 characters, an optional ISO `expiresAt` (default 7 days, maximum 30) and optional evidence. `HEALTHY` creates a `ROUTE_HEALTH_OVERRIDE` approval; the other states apply immediately. `POST /routes/:id/health/override/clear` applies immediately unless the computed state is healthier than the forced state, in which case it returns `202` for a second approval.
 - `PATCH /routes/:id` accepts `mismatchPolicy` (object; only `tolerance_amount`/`toleranceAmount` is read by the settlement engine, other keys are kept as stored; a malformed tolerance is `400 MISMATCH_TOLERANCE_INVALID`) and `maintenanceWindows` (`[{ start, end }]`, max 50, absolute instants; `end <= start` or an unparsable instant is `400 MAINTENANCE_WINDOW_INVALID`; `[]` clears). Omitted fields are left untouched; the edge forwards empty values so an operator can clear them.
 - **Commission tiers were broken end to end and are fixed.** The admin edge persisted UI tiers as an index-keyed object (`{"0": {...}}`) and core's create schema (`z.record`) could not take an array, while the fee calculator (`commissionForProfile`, `checkout.ts`) only reads `tiersJson` when it is an array: a TIERED profile created through the UI silently priced at its minimum fee. Now `POST /commission-profiles` accepts an ordered array (or the legacy object), the edge forwards the array, and `commissionTiers()` normalises both shapes (object keys ordered numerically), which also reprices already-stored legacy rows correctly. Tier keys are `upTo`, `flat`, `percent` (a fraction). **Behaviour change for existing data:** a legacy TIERED profile now prices by its tiers instead of the minimum fee. The edge also forwards `minFee`, `maxFee`, `feeBearerDefault`, `roundingMode`, `merchantId`, `applicationId` (core already accepted them; the strict edge schema dropped them). Note `percentageRate` is a **fraction** (`0.0300` = 3%), as the seed data stores it; the form now says so.
 
@@ -3122,6 +3134,14 @@ The admin router adds paginated `/admin/merchants` and `/admin/merchants/summary
 ## v38-v39 `/internal/sandbox` (2026-11-13)
 
 A new internal router, reachable from merchant-back and admin-back and mounted only on the SANDBOX plane, exposes the merchant sandbox overview, wallet detail/ledger/balance/simulated cash-out, payment detail/refund/dispute simulation and resolution, demo seed and 20-payment history seed, reset, Fake Rails account proxy/control (paginated, merchant-scoped, preset clone/restore), reconciliation import, webhook test ping, clearing pools/statement/settle, and staff overview, merchant list/overview, global reset, Fake Rails scenarios/transactions/webhooks/statements. Checkout adds `GET/POST /pay/:linkKey/sandbox-accounts`, account movements, `PATCH /pay/:linkKey/sandbox-accounts/:accountId`, `GET /pay/:linkKey/logs/:attemptId/sandbox-inspector` and `POST /pay/:linkKey/logs/:attemptId/sandbox-simulate`; all of them refuse a non-`sbx_` key with `403 SANDBOX_INSPECTOR_FORBIDDEN_ON_LIVE_LINK`.
+
+## Dashboard overview gross volume (2026-11-16)
+
+`GET /internal/admin/stats/overview` returns `grossVolume` (and `grossVolumeAttempts`) as the sum and count of `totalChargedAmount` for attempts created in the selected period with `status = SUCCEEDED` and `currency = LYD`. Previously `grossVolume` summed the whole success status set (`SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `DISPUTED`) across all currencies. `successRate` and `attemptsByState`/`volumeByState` are unchanged.
+
+## Dashboard success-rate denominator (2026-11-16)
+
+`GET /internal/admin/stats/overview` returns `attemptsCounted` and computes `successRate = attemptsSucceeded / attemptsCounted`. `attemptsSucceeded` counts `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` (the payment was processed successfully; a later refund or dispute is not a processing failure). `attemptsCounted` adds `FAILED` and `UNKNOWN` only. Pending/in-flight states (`CREATED`, `INITIATING`, `AWAITING_CUSTOMER`, `AUTHORIZING`, `VERIFYING`) and deliberate/no-processing outcomes (`CANCELLED`, `EXPIRED`, `BLOCKED`) are excluded from both sides of the rate. `attemptsTotal` remains every attempt created in the period for the distribution chart and snapshot export.
 
 ---
 
@@ -4604,7 +4624,7 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 
 <a id="coreworkers"></a>
 
-> **Part ID:** `core.workers` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `core.workers` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `d695518+working-tree`
 
 # Background Workers and Outboxes
 
@@ -5068,6 +5088,19 @@ Database-backed suites require PostgreSQL 18; Redis-backed invalidation tests re
 - `OutboxNotificationWorker` opens the Vault-encrypted `codeCiphertext` of SMS MFA notifications at send time; `notifications.payload_json` no longer carries the plaintext code.
 - **Multi-node claiming and leader election (GAP-012, RESOLVED 2026-11-05).** Every `FOR UPDATE SKIP LOCKED` claim now runs inside a transaction (`BaseWorker.inTransaction`, 15 s timeout, 5 s max wait; a test double without `$transaction` runs the callback directly), because a SKIP LOCKED lock taken outside a transaction is released the instant the statement ends. `PollWorker` (`payment_attempts.next_check_at`) and `OutboxNotificationWorker` (`notifications.next_attempt_at`) claim and lease in ONE statement: the claimed rows are updated to `now + claimLeaseSeconds` (`WorkerOptions.claimLeaseSeconds`, default 120 s) before the lock is released at commit, the inquiry/delivery then runs outside the transaction (a held row lock would deadlock the engine, which updates the same attempt on another connection), every outcome rewrites the schedule column, and a crashed node's rows become due again when the lease expires. `ExpirySweeperWorker` has no lease column and is a cluster singleton whose exclusivity comes from leader election (the conditional terminal transition remains the last line of defence). `InboundInboxWorker` is also a singleton, but since 2026-11-07 it additionally owns a durable `claimed_at`/`claimed_by` lease, so even a brief leadership overlap cannot process a webhook twice. Singleton workers (`BaseWorker.singleton`): `ExpirySweeper`, `InboundInbox`, `JoinRequestExpiry`, `KybExpiry`, `LedgerInvariant`, `PeriodicScreening` and `Retention`. Their tick runs only on the node that holds the PostgreSQL advisory lock for `worker:<name>` (`PgAdvisoryLeaderElection`, `core-back/lib/storageEngine/leaderElection.ts`; the lock name is `<namespace>:worker:<name>`, default namespace `pgw`, hashed with `hashtextextended`). It uses `pg_try_advisory_lock` on ONE dedicated, session-stable connection (`application_name=pg-core-back-leader`). Since 2026-11-07 the storage engine creates the election from `LEADER_ELECTION_DATABASE_URL` (falling back to `DATABASE_URL` only when PgBouncer is disabled), and a leader re-validates on every tick with a combined backend-PID + `pg_locks` ownership probe; a change, a missing lock row, a refused unlock or a dropped connection clears the held keys and the singleton skips the tick (fail closed). Boot runs `verifySessionSafety()`: a second client must not be able to acquire the probe key and the backend PID must stay stable, otherwise core refuses to start. Deploy generates a `pgw_session` PgBouncer alias with `pool_mode=session`; the transaction-pooled `DATABASE_URL` is rejected by the environment guard when `PGBOUNCER_ENABLED=true`. `createProductionWorkerRuntime` passes the election to the workers and registers the expected singleton keys on it for `/health`. Without an election (unit tests, single-process) workers behave as before.
 - The re-finalize guard for terminal attempts in `verifyCallback`/`finalizeSuccess` is implemented in the engine (GAP-016, RESOLVED 2026-11-05; see `core.engine`). `PollWorker`/`ExpirySweeper` still never settle an AML-held attempt (`AML_HOLD` substatus).
+
+## Route health worker (AUTO-09)
+
+`GatewayHealthWorker` is a cluster singleton (`worker:gateway-health`, interval
+`WORKER_ROUTE_HEALTH_INTERVAL_MS`, default 60 s). It reads terminal payment
+attempts from the last hour, rebuilds five-minute outcome buckets, upserts
+`gateway_health_samples`, advances `health_computed_state` from the
+`route_health.policy` Platform Setting and runs read-only recovery probes for
+degraded/open routes when due. It keeps the effective state under an admin
+override, opens keyed operator cases for unhealthy/conflicting routes, writes
+`route_health_events` and audit rows, and clears expired overrides. It is
+registered in `productionRuntime` and participates in expected leader keys.
+See `core.route-health`.
 
 ---
 
@@ -5565,7 +5598,7 @@ fallback) and the `object_storage` Platform Monitor check cover operations.
 
 <a id="coredata"></a>
 
-> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `d695518+working-tree`
 
 # Data Schema and Migrations
 
@@ -5577,7 +5610,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 39 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 41 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -5632,7 +5665,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 40`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 41`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5653,7 +5686,7 @@ installs the two append-only guard triggers. See
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116090000_merchant_chrome_tenant_integrity`, schema version 40). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116130000_schema_version_agreement`, schema version 41). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -5830,7 +5863,7 @@ The patch exists because `schema_versions` is managed outside the Prisma datamod
 
 ## 6. Operational usage
 
-- Apply migrations before starting a new core build. The seeders will reject a schema version other than 37.
+- Apply migrations before starting a new core build. The seeders will reject a schema version other than 40.
 - Use `bun run migrate-dev` only in development. For production, review and commit the generated migration, then run `bun run migrate-deploy`.
 - After changing `schema.prisma`, run `bun run migrate-generate` before typechecking or starting the application.
 - Keep the `schema_versions` patch logic in `migrateDev/index.ts` under review. It is the only place that updates the version for newly created migrations.
@@ -5948,7 +5981,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 40 (`REQUIRED_SCHEMA_VERSION = 40`; model count 114). The schema migrations since version 10 are:
+The current schema version is 41 (`REQUIRED_SCHEMA_VERSION = 41`; model count 116). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -5967,6 +6000,8 @@ The current schema version is 40 (`REQUIRED_SCHEMA_VERSION = 40`; model count 11
 - `20261111130000_merchant_report_chrome` (version 35, written on the plan branch): creates `merchant_report_chrome_specs` (unique `(merchant_id, code, version)`, one published default per merchant and chrome type, a foreign key to the merchant asset bundle).
 - `20261112090000_journal_partition_storage_and_race` (version 35, no table shape change): redefines `ensure_journal_line_partitions` again. (1) The 2026-11-10 revision set only the insert-autovacuum parameters on a new monthly partition and dropped the explicit `fillfactor = 100` of the original body; it is restored, and set once (`SHARE UPDATE EXCLUSIVE`, no write blocking) on every monthly partition created without it. (2) The same revision replaced `CREATE TABLE IF NOT EXISTS` with a `to_regclass` check and a plain `CREATE TABLE`, so two callers at once (the partition worker on two nodes, or the worker and a deploy) both saw a month missing and the second aborted with `duplicate_table` (measured: 3 of 4 concurrent callers failed); `duplicate_table` / `unique_violation` from a concurrent creator are now accepted, and the truncate-guard install tolerates `duplicate_object`. The version is bumped because the newest migration sets `REQUIRED_SCHEMA_VERSION` (checked by `phase1-mtls-and-schema.test.ts`) and the seeders' equality guard then refuses a database without it; core HTTP start does not check the version. Test: `ledger-query-pruning-and-accuracy.test.ts` EC-15 (storage parameters) and EC-15b (four concurrent callers on a dropped empty month).
 - `20261116090000_merchant_chrome_tenant_integrity` (version 40, no new table; the newest migration): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merges.** The branches numbered their migrations independently: `20261111090000` = 34 and `20261112090000` = 35 (`claude-fixes`), `20261111120000` = 34 and `20261111130000` = 35 (plan branch), `20261112000000` = 36, `20261113090000` = 37, `20261113120000` = 38 and `20261114090000` = 39 (`master`). None is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first (a database that followed `master` to 39 and then receives the `claude-fixes` migrations would be left at 35). This migration is new to every database, runs last and sets 40. It was first written as `20261112100000` with version 36 when only the plan branch had been merged; that name was never pushed or deployed and was renamed on 2026-11-16 so that it also runs after `master`'s migrations. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, `master` first, `claude-fixes` first) and applied from empty on PostgreSQL 18.6: each ends at 40 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
+- `20261116120000_route_health_automation` (version 40, from `master`): route health and the circuit breaker: `rail_routes` health computed/override columns, first-terminal and first-unknown markers on `payment_attempts`, `route_health_events` and `route_health_probes`, a trigger that keeps the markers current, and a unique `(route_id, window_start)` on `gateway_health_samples`. Owned by `core.route-health`.
+- `20261116130000_schema_version_agreement` (version 41, no structure): the agreed version after both 40s. Runs last, so a database at 41 has both `20261116090000` and `20261116120000` applied.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -6104,7 +6139,18 @@ Schema version 38 adds `system_execution_plane` (singleton `id=1`, `plane`, `all
 
 ## v39 schema (2026-11-13)
 
-`20261114090000_v39_sandbox_studio` adds nullable `wallets.name` (`VARCHAR(120)`) and `payment_links.title` (`VARCHAR(160)`)/`description` (`TEXT`). The columns already appeared in portal and checkout contracts but were discarded before v39. Existing rows and the Live flow are unaffected. The required schema version is **39**.
+`20261114090000_v39_sandbox_studio` adds nullable `wallets.name` (`VARCHAR(120)`) and `payment_links.title` (`VARCHAR(160)`)/`description` (`TEXT`). The columns already appeared in portal and checkout contracts but were discarded before v39. Existing rows and the Live flow are unaffected. The required schema version was **39**; v40 below supersedes it.
+
+## v40 schema (2026-11-16)
+
+`20261116120000_route_health_automation` adds the route-health fields, attempt
+first-terminal/unknown markers, `gateway_health_samples.ignored_outcomes` and
+the unique `(route_id, window_start)` index, plus `route_health_events` and
+`route_health_probes`. The migration backfills computed health from effective
+health, first-terminal from `terminal_at`, first-unknown from `updated_at` for
+unresolved `UNKNOWN` attempts, canonical error from `substatus`, deduplicates
+legacy health samples before the unique index and writes one `MIGRATION`
+health event per route. The required schema version is **40**.
 
 ---
 
@@ -8013,7 +8059,7 @@ storage object. The full engine is `parts/01-core-back/13-object-storage.md`.
 
 <a id="coreobject-storage"></a>
 
-> **Part ID:** `core.object-storage` · **Status:** `implemented` · **Last verified:** 2026-11-13 · **Verified against:** `working-tree`
+> **Part ID:** `core.object-storage` · **Status:** `implemented` · **Last verified:** 2026-11-16 · **Verified against:** `working-tree`
 
 # Shared Object & Asset Storage Engine
 
@@ -8168,6 +8214,21 @@ interval/batch env) is a cluster singleton. It runs the generic AV fallback
 lock reconcile, periodic blob sweep and KEK rewrap. A single leader avoids two
 nodes scanning the same quarantine row and avoids every node walking the vault.
 
+**Shared-vault orphan-sweep guard.** The singleton is per control-plane
+database. The orphan-blob sweep lists every file in the vault and compares it
+with `storage_objects` in **its own** database, so it is only safe when that
+database is the sole owner of the vault. The Sandbox plane has a separate
+`payment_gateway_sandbox` control plane but shares the vault; its sweep would
+move every Live blob to `.trash` (and the Live sweep would move the Sandbox
+blobs). When `SANDBOX_ENABLED=true` the deploy emits
+`OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false` in both core environments, and the
+Sandbox plane always skips the orphan sweep through `EXECUTION_PLANE=SANDBOX`.
+The SDK's `orphanBlobSweepAllowed()` is the single enforcement point, including
+the admin maintenance `sweep`. Per-row GC, integrity scrub (which resets
+`scrub_error_count` on success), lock reconcile, KEK rewrap and trash retention
+stay enabled; only the destructive orphan trashing is suppressed. The sweep is
+safe again when one control-plane database is the only owner of the vault.
+
 `createObjectStorageMonitorCheck` (`object_storage`) raises keyed findings for
 an unreachable vault (P1), scrub errors (P1) and quarantine uploads older than
 30 minutes (P2).
@@ -8191,6 +8252,10 @@ the SHA-256.
   unit; `deployObjectStorageDaemon` syncs and starts the daemon.
 - PKI mints `object-storage-daemon.crt` (SANs: storage private IP, 127.0.0.1,
   `object-storage-daemon.internal`) and `object-storage-client.crt`.
+- `hostPlanner.objectStorageCoreEnv()` emits
+  `OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED=false` when `SANDBOX_ENABLED=true`; the
+  core env default is `true` for a single-plane owner. The admin maintenance
+  `sweep` job honours the same guard and still purges expired trash folders.
 - Firewall opens 4095 only to core and backup private IPs.
 - Health probes run `systemctl is-active` on the storage host and
   `/v1/health` over mTLS from every core host and the backup host.
@@ -8257,6 +8322,140 @@ Implemented end to end. Deviations recorded:
   owner for merchant bundles, and discard a content-addressed loser.
 - Added indexes for the object explorer and access-log filters, append-only
   access logs, immutable authorization/tenant columns and schema version 37.
+
+---
+
+<a id="coreroute-health"></a>
+
+> **Part ID:** `core.route-health` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `working-tree`
+
+# Route Health and Circuit Breaker
+
+## 1. Effective and computed health
+
+`rail_routes.health_state` is the effective value used by routing. It is the
+admin override when one is active, otherwise `health_computed_state`. The
+automation never overwrites the admin override: it keeps writing
+`health_computed_state`, probe counters and events, so staff can always see
+the measured state behind a forced state.
+
+States are `HEALTHY`, `DEGRADED` and `OPEN_BREAKER`. `DEGRADED` is not routable
+for normal traffic but is eligible for a stable canary cohort. `OPEN_BREAKER`
+is never routable.
+
+## 2. Outcome classification
+
+The classifier counts only partner faults:
+
+- success: `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `DISPUTED`;
+- definitive failure: `FAILED` with `ErrorMap.countsTowardBreaker=true` and
+  `GATEWAY_FAULT`, or the HTTP 5xx/timeout/network fallback;
+- ambiguous: unresolved `UNKNOWN` and trusted-fact conflicts;
+- ignored: wrong OTP, terminal declines, limits, `EXPIRED`, `CANCELLED`,
+  `BLOCKED`;
+- 429 is stored separately and never trips the breaker.
+
+Each terminal attempt stores `first_terminal_at`; an unresolved `UNKNOWN`
+stores `first_unknown_at`. `canonical_error` is stored independently from the
+overloaded `substatus`. The first markers are monotonic: a later transition
+does not rewrite the first one.
+
+## 3. Policy and sampling
+
+The worker is `GatewayHealthWorker` (singleton, `WORKER_ROUTE_HEALTH_ENABLED`,
+default 60 s). It recomputes five-minute buckets over a rolling window from
+`payment_attempts`, rebuilds `gateway_health_samples` for that window (unique
+`(route_id, window_start)`) and drives the breaker. Defaults:
+
+| Setting | Default |
+| :--- | :--- |
+| minimum outcomes | 10 |
+| degrade / open error rate | 30% / 60% |
+| consecutive failures to degrade / open | 3 / 6 |
+| window / bucket | 900 s / 300 s |
+| recovery probes from degraded / open | 2 / 3 |
+| open cooldown | 300 s |
+| probe interval / backoff max | 60 s / 900 s |
+| degraded canary | 5% |
+| override default / maximum | 7 / 30 days |
+
+The staff-managed `route_health.policy` Platform Setting overrides these
+defaults. A malformed value is ignored field-by-field and never stops the
+worker. `SHADOW` computes and records decisions without changing effective
+health; `OFF` stops measurement.
+
+## 4. Degraded canary traffic
+
+A degraded route may carry only a stable cohort of payment links:
+`canarySelected(routeId, link.key, canaryPercent)`. The cohort is stable for a
+route and link, and `canaryMaxAmount` (optional) caps the payment amount. A
+rail whose only route is degraded is visible only to its canary cohort; a
+healthy route is preferred, and a canary-eligible degraded route is tried
+first so recovery evidence is actually produced. The checkout reads the policy
+on every resolution; merchant/public previews without a link key never use the
+canary.
+
+## 5. Probes
+
+`RouteHealthProbeService` prefers the gateway's declared `CREDENTIAL_CHECK`
+flow and falls back to the authenticated base-URL probe. Probes are read-only
+and never update the credential-set verdict (`persist:false`). A route that
+requires a merchant-owned credential has no platform probe and is left to a
+person. Probe results are recorded in `route_health_probes`; consecutive
+successes recover `DEGRADED` (2) or `OPEN_BREAKER` (3). A probe failure while
+degraded/open opens the breaker. Probes continue while an override is active
+when the computed state is not healthy.
+
+## 6. Admin overrides and maker-checker
+
+- Force `HEALTHY`: creates a `ROUTE_HEALTH_OVERRIDE` approval request. The
+  checker authority and maker ≠ checker are enforced server-side. The payload
+  carries state, reason, expiry and evidence.
+- Force `DEGRADED` or `OPEN_BREAKER`: immediate, reason mandatory, audited.
+- Clearing an override that makes effective health healthier (for example
+  forced `OPEN_BREAKER` → computed `HEALTHY`) needs approval. Clearing a more
+  restrictive override is immediate.
+- Every override has a mandatory expiry: 7 days by default, 30 days maximum.
+- An active override keeps `health_computed_state` and probe evidence visible;
+  a persistent conflict opens `route.health.override_conflict:<routeId>`.
+  Degraded/open routes open `route.health:<routeId>` (P1 for open).
+
+## 7. API and UI
+
+Core routes (proxied by `admin-back`):
+
+| Method | Path | Purpose |
+| :--- | :--- | :--- |
+| GET | `/internal/admin/routes/:id/health` | effective/computed/override health, canary settings, samples, probes, events |
+| POST | `/internal/admin/routes/:id/health/probe` | run a read-only probe and record evidence |
+| POST | `/internal/admin/routes/:id/health/override` | immediate override or force-HEALTHY approval |
+| POST | `/internal/admin/routes/:id/health/override/clear` | clear, immediate or through approval |
+
+The Admin Routes page opens a health drawer from the row action. It shows the
+effective/computed/override split, canary, probe counters, sample windows,
+probe history and state history, and offers probe/override/clear. The table
+marks a forced route. The Dashboard reports forced and conflicting route
+counts alongside healthy/degraded/open.
+
+## 8. Data model
+
+Schema version 40 adds:
+
+- `rail_routes.health_computed_state/reason/at`, `health_override_state/reason/set_at/set_by/expires_at/approval_id`,
+  `health_reason/changed_at`, consecutive/probe counters, last/next probe;
+- `payment_attempts.first_terminal_at`, `first_unknown_at`, `canonical_error`
+  and supporting indexes;
+- `gateway_health_samples.ignored_outcomes` and its uniqueness constraint;
+- `route_health_events` and `route_health_probes`.
+
+The migration backfills computed health from effective health and
+`first_terminal_at` from `terminal_at`, writes one `MIGRATION` event per route,
+and installs `payment_attempts_health_markers`, a BEFORE INSERT/UPDATE trigger
+that maintains `first_terminal_at`, `first_unknown_at` and the canonical-error
+fallback for every writer (Prisma, raw SQL, poll/expiry workers, governance,
+sandbox and the seeder). Routing also treats an expired override lazily as
+inactive, so a disabled worker cannot keep a forced state in front of payers.
+The schema version is 40.
 
 ---
 
@@ -8536,7 +8735,7 @@ Applies to all three copies of the client:
 
 <a id="edgeadmin"></a>
 
-> **Part ID:** `edge.admin` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `edge.admin` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `5a24f6f+working-tree`
 
 # Admin Edge BFF
 
@@ -8847,6 +9046,15 @@ read/write guards. `assetsRouter` additionally exposes binary
 ## v38-v39 sandbox proxy (2026-11-13)
 
 `/api/v1/admin/sandbox/*` forwards only to `SANDBOX_CORE_BACK_URLS` (no Live fallback): overview, per-merchant overview/reset, wallet balance, global reset and Fake Rails accounts/clearing/scenarios/transactions/webhooks/statements. `/mirror/*` raw-forwards to `/internal/admin/*` for the Live-parity pages; report-engine mirror bodies use the 24 MB parser. The staff session is mirrored by the sandbox core. The Studio routes are open to signed-in staff; the sandbox data is isolated. An unconfigured sandbox node answers `503 SANDBOX_NODE_UNAVAILABLE`.
+
+## Route health forwarding (2026-11-16)
+
+`admin-back/api/protected/rails.ts` forwards `GET /routes/:id/health`,
+`POST /routes/:id/health/probe`, `POST /routes/:id/health/override` and
+`POST /routes/:id/health/override/clear` to core behind the existing
+`gatewayGuard` (`gateway:read`, `gateway:write`/`gateway:test`). The edge
+validates the state/reason/expiry shape only; core remains the authority for
+maker-checker, expiry and probe execution.
 
 ---
 
@@ -9746,7 +9954,7 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 
 <a id="admin-uiroutes"></a>
 
-> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `1dcc0f2+working-tree`
 
 # Admin Route and Page Catalog
 
@@ -9789,7 +9997,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 
 | # | Path | Name | UI authority / role | Help | Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | `/dashboard` | `Dashboard` | `[]` (authenticated only) | 1 / 1.1 | Live platform health, attempts/volume-by-state bar charts, queues, recent activity, snapshot export. |
+| 1 | `/dashboard` | `Dashboard` | `[]` (authenticated only) | 1 / 1.1 | Live platform health, attempts/volume-by-state bar charts, queues, recent activity, snapshot export; Open Action Queues and Unknown Backlog are all-time, not period-filtered. |
 | 2 | `/join-requests` | `JoinRequests` | `joinrequests.review` | 9 / 9.1 | Onboarding application queue, SLA health, summary export. |
 | 3 | `/join-requests/new` | `JoinRequestNew` | `joinrequests.review` | 9 / 9.1 via parent | Admin-assisted onboarding package creation. |
 | 4 | `/join-requests/:id` | `JoinRequestDetail` | `joinrequests.review` | 9 / 9.1 | Review profile, owners, documents, checklist, decisions, audit. |
@@ -9809,7 +10017,7 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 18 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | UNKNOWN/conflict/reconciliation operator queue. |
 | 19 | `/operator-cases/inquiries` | `GatewayInquirySchedules` | `case:read` or `operator:read` | 7 / 7.2 | Gateway inquiry schedule monitoring, run/retry/cancel. |
 | 20 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case evidence, step logs, inbound events, maker-checker resolution. |
-| 21 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage. |
+| 21 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage; an attempt-detail link starts on All scoped by `attemptId` and `merchantId`. |
 | 22 | `/adjustments` | `Adjustments` | `adjustments.propose` | 11 / 11.2 | Refund/manual adjustment drafting and review. |
 | 23 | `/cashouts` | `CashOuts` | `cashout.process` | 12 / 12.1 | Cash-out processing with wallet, destination and AML checks. |
 | 24 | `/reconciliation` | `Reconciliation` | `reconciliation.run` or `reconciliation.resolve` | 8 / 8.2 | Statement upload, run monitoring and variance resolution. |
@@ -10043,11 +10251,36 @@ New routes and a "Sandbox & Fake Rails" sidebar section: `/sandbox/overview` (pl
 
 A "Sandbox Live Mirror" section maps `/sandbox/mirror/*` to the real admin pages: merchants, wallets, applications, transactions, approvals, audit log, operator cases, disputes, adjustments, cash-outs, reconciliation, pricing/profitability/liquidity, journal entries, invariant, credential sets, gateways/routes, reports, platform settings, jobs/outbox and object storage. Mirror pages are open to any signed-in staff member (the sandbox data is isolated), use the same `SandboxBanner`, and Exit sandbox returns to the Live page. The Guide context map's `Sandbox` screen covers the Studio and all mirror routes.
 
+## Dashboard gross volume metric (2026-11-16)
+
+The Dashboard **Gross Volume** card sums `payment_attempts.total_charged_amount` only for attempts created in the selected period with `status = SUCCEEDED` and `currency = LYD`. The card sub-label now shows the number of succeeded LYD attempts behind that figure. The snapshot export carries the same `gross_volume` value plus `gross_volume_attempts`. Before this change the metric summed every attempt in the success status set (`SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED`, `DISPUTED`) across every currency while the card always displayed “LYD”. Success Rate, the Attempts By State chart and the Volume chart keep their existing definitions (`core-back/api/internal/admin.ts` `GET /stats/overview`).
+
+## Dashboard all-time queue metrics (2026-11-16)
+
+**Open Action Queues** is a current-state count, not a period count: pending approvals (`DRAFT`/`PENDING_REVIEW`), open operator cases (`OPEN`/`IN_PROGRESS`/`PENDING_CHECKER`), open join requests and open AML cases (`OPEN`/`IN_REVIEW`/`PENDING_CHECKER`/`FROZEN`/`ESCALATED_STR`). Its sub-label now names all four sources and carries **All time (not period-filtered)**. **Unknown Backlog** counts every `UNKNOWN` payment attempt, so its sub-label carries the same all-time note before the oldest age. Only Gross Volume, Success Rate, the Attempts By State chart, the Volume chart and Reconciliation use the selected period.
+
+## Dashboard success-rate denominator (2026-11-16)
+
+The **Success Rate** card is `attemptsSucceeded / attemptsCounted`. Successes are `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED`; counted attempts add `FAILED` and `UNKNOWN`. Pending/in-flight attempts and deliberate/no-processing outages (`CANCELLED`, `EXPIRED`, `BLOCKED`) are excluded from the denominator, so the rate measures payment-processing outcomes rather than the whole attempt volume. The card sub-label shows `N succeeded / M counted`; the Attempts By State chart and the snapshot's `attempts_total` still include every attempt created in the selected period. The API returns `attemptsCounted` with `successRate`.
+
+## Route health drawer (2026-11-16)
+
+The **Routes** table's primary row action opens a 760 px health drawer instead
+of opening the editor. The drawer separates effective, computed and override
+state; shows canary percent/maximum, consecutive failures, probe counters,
+last/next probe, override reason/expiry/actor, recent sample windows, probe
+history and the newest state transitions. It can run a read-only probe, request a
+forced `HEALTHY` (second approval), force `DEGRADED`/`OPEN_BREAKER` immediately,
+or clear an override (second approval when the computed state is healthier).
+The table Health cell marks a forced route. Edit is now the overflow action.
+The Dashboard Route health card shows forced and conflict counts. See
+`core.route-health`.
+
 ---
 
 <a id="admin-uitables"></a>
 
-> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `19d6a54+working-tree`
+> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `1dcc0f2+working-tree`
 
 # Tables Filters and Exports
 
@@ -10133,12 +10366,14 @@ The v2 design intends tables to look operational rather than decorative:
 | `AmlReports` | `reports` | 5 |
 | `Adjustments` | `adjustments` | 6 |
 | `CashOuts` | `cashouts` | 5 |
-| `Disputes` | `disputes` | 7 |
+| `Disputes` | `disputes` | 8 |
 | `OperatorCases` | `cases` | 9 |
 | `GatewayInquiries` | `schedules` | 8 |
 | `Reconciliation` | `sources` | 1, with storage key `pg.admin.reconciliation.sources` |
 
 `referenceOptions.ts` caches option lookups per `kind:search` key and requests `/options/:kind` with a search string and `limit=50`.
+
+`Disputes` also exposes the `attemptId` text filter (`Attempt ID`, placeholder `Attempt UUID`). The attempt detail drawer deep-links `/disputes?attemptId=…&merchantId=…`; the page starts on All with those filters, keeps the attempt/merchant scope when switching Open/Resolved, and removes the route scope when filters are cleared.
 
 ### 3.4 Session persistence
 
@@ -10335,7 +10570,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 <a id="admin-uiguide"></a>
 
-> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree`
+> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `working-tree`
 
 # Admin Guide and Academy
 
@@ -10594,6 +10829,18 @@ Academy module 10 adds lesson `l-m10-5`, checks `c-l-m10-5-1/2` and exam
 question `q-m10-118`. Counts are 137 articles, 154 terms, 26 cards, 51
 lessons, 102 checks and 224 exam-pool questions. Generated Guide/Academy and
 Companion snapshots were regenerated.
+
+## Route health content (2026-11-16)
+
+Guide `b06-11` and `b06-12` now describe the automatic outcome-based circuit
+breaker, the `DEGRADED` canary exception in condition 5, read-only probes and
+the effective/computed/override split. `b10-02` (RB-01) and the Dashboard
+screen article (`b03-05`) describe the Routes health drawer, forced/conflict
+counts, probe action and the maker-checker force-HEALTHY path. Academy
+`l-m8-1`, `l-m8-5` and `l-m9-1` were updated with the same facts. Counts and
+exam structure are unchanged (137 articles, 154 terms, 26 cards, 51 lessons,
+224 pool questions); the generated Guide/Academy and Companion snapshot were
+regenerated.
 
 ---
 
@@ -11027,7 +11274,7 @@ cd ../tests && bunx playwright test --project=admin e2e/admin/guide-reader.spec.
 
 <a id="admin-uireport-studio"></a>
 
-> **Part ID:** `admin-ui.report-studio` · **Status:** `implemented` · **Last verified:** 2026-11-12 · **Verified against:** `working-tree`
+> **Part ID:** `admin-ui.report-studio` · **Status:** `implemented` · **Last verified:** 2026-11-16 · **Verified against:** `working-tree`
 
 # Report Catalog, Studio and Chrome
 
@@ -11117,6 +11364,10 @@ The shared paged-media stylesheet now enforces A4 containment: fixed-layout data
 The Studio preview and print path now enforce the A4 print contract: KPI grids max 3 columns with bottom-anchored values and length-aware font scaling, chart rows centered with HTML legends that wrap without hiding entries, pie/donut labels suppressed in favor of the legend, table typography reduced for wide tables, long chips shrunk instead of broken, repeated table headers across Paged.js fragments, compact table sections kept together, and true landscape pages in the exported PDF. The shared bridge injects print page rules after Paged.js rendering because Paged.js removes the author `@page` rules; without this pass Chrome printed all pages portrait.
 
 The A4 regression spec (`tests/e2e/admin/report-a4-layout.spec.ts`) now measures the sheet, not just the content box, and asserts table headers, KPI limits, chart-row centering, orphan titles, vertical overflow and orientation. It can also export the paginated PDF for visual review.
+
+## Page content vertical padding (2026-11-16)
+
+When a running header and/or footer is rendered, `buildPagedMediaHtmlDocument` adds a 4 mm comfort pad to the page content by increasing the top/bottom `@page` margins: top when a header is present, bottom when a footer is present, both when both are present. It is an `@page` margin rather than a first/last content fragment padding, so Paged.js reflows the gap on every page. A first page that hides the chrome through `show_on_first_page=false` restores the original margin with `@page :first`; with no chrome the spec's exact margins are kept. The merchant SDK mirror has the same behavior. The builder test covers both-chrome, no-chrome and first-page-hidden cases.
 
 ## Chrome layout and A4 preview (2026-11-11)
 
@@ -11813,7 +12064,7 @@ The content test is a Bun test; the Playwright suites require the live stack.
 
 <a id="merchant-uireports"></a>
 
-> **Part ID:** `merchant-ui.reports` · **Status:** `implemented` · **Last verified:** 2026-11-12 · **Verified against:** `working-tree`
+> **Part ID:** `merchant-ui.reports` · **Status:** `implemented` · **Last verified:** 2026-11-16 · **Verified against:** `working-tree`
 
 # Merchant Reports
 
@@ -11873,6 +12124,8 @@ The merchant client SDK mirror receives the same theme-aware Paged.js preview as
 
 The merchant portal client SDK mirror receives the same chrome root-fill, `accent_band`, `defaultCurrency` and localized chrome-variable changes as the admin portal. Merchant prints using platform chrome therefore get the same full-height header/footer and multi-color band.
 
+The shared paged-media builder also adds a 4 mm page-content vertical comfort pad when the running header and/or footer is rendered: the top/bottom `@page` margins grow by 4 mm (top for a header, bottom for a footer, both when both are rendered), so Paged.js applies the gap on every page. A first page that hides the chrome through `show_on_first_page=false` restores the unpadded margin with `@page :first`; no chrome keeps the spec's exact margins. This is the byte-identical admin/mirror code.
+
 
 ## 9. Merchant branding chrome and migration (2026-11-11)
 
@@ -11891,7 +12144,7 @@ from local disk. The full engine is `parts/01-core-back/13-object-storage.md`.
 
 <a id="checkout-uiflow"></a>
 
-> **Part ID:** `checkout-ui.flow` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `checkout-ui.flow` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `5a24f6f+working-tree`
 
 # Checkout Payer Flow
 
@@ -12216,6 +12469,15 @@ Checkout dialogs/drawers use the shared overlay text-color rule (`color: rgb(var
 ## v38 sandbox checkout inspector (2026-11-13)
 
 On an `sbx_` link (summary `env: "SANDBOX"`) the payer page renders `SandboxCheckoutInspector`: Fake Rails test-account picker with auto-fill, live balances/holds/daily limits, PIN/CVV/expiry, freeze/drain/set-exact controls, the live OTP with auto-confirm, and the push/QR approve/decline/variance/duplicate/tampered-webhook simulator. It is never rendered on a Live `pl_*` checkout.
+
+## Degraded-route canary (2026-11-16)
+
+Visible-rail resolution now passes the payment link's stable key and the
+`route_health.policy` canary percent/optional amount cap. A `DEGRADED` route is
+excluded for normal links (`ROUTE_DEGRADED_CANARY_EXCLUDED`), while the same
+route+link cohort is allowed and tried first; `OPEN_BREAKER` is never visible.
+The payer UI does not know about health states: it simply receives the reduced
+or canary `visibleRails` list from core. See `core.route-health`.
 
 ---
 
@@ -16711,7 +16973,7 @@ Security regression suites exist for core-back (`test/security-regressions/`), t
 
 <a id="testingsuites"></a>
 
-> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `19d6a54+working-tree`
+> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `1dcc0f2+working-tree`
 
 # Test Suite Catalog
 
@@ -17177,6 +17439,15 @@ These are development/CI tests only; no production-time test job or test endpoin
 - `merchant-back/test/sandbox-proxy.test.ts` and `checkout-back/test/sandbox-checkout-forward.test.ts`: real forwarding through the sandbox pool for control/resources, `pg_test_` external tokens, `sbx_` summary/inspector routes and the Live-link inspector refusal.
 - `core-back/test/security-regressions/commerce-status-enforcement.test.ts` and `test/engine/attempt-guard-pipeline.test.ts` assert the removed OD-10 fallback.
 
+## Disputes attempt-link regression (2026-11-16)
+
+- `admin-front/src/pages/disputes/__tests__/queryFilters.test.ts` — route query normalization (including repeated keys), attempt/merchant deep-link seeding, merchant-only seeding, and Open/Resolved/All scope preservation.
+
+## Dashboard all-time metric-label regression (2026-11-16)
+
+- `admin-front/src/pages/dashboard/__tests__/metricLabels.test.ts` — Open Action Queues names pending approvals, operator cases, join requests and AML cases followed by the all-time note; Unknown Backlog carries the all-time note before the oldest age; Success Rate shows succeeded / counted.
+- `core-back/test/attempt-outcomes.test.ts` — success and post-success statuses, problematic `FAILED`/`UNKNOWN`, ignored pending and deliberate `CANCELLED`/`EXPIRED`/`BLOCKED` outcomes, one classification per attempt status, and the success-rate denominator.
+
 ## v39 Sandbox Studio and mirror suites (2026-11-13)
 
 - `core-back/test/sandboxPlane.test.ts` now runs the schema-local fence functions and passes on v39; `core-back/test/phase1-mtls-and-schema.test.ts` expects `20261114090000_v39_sandbox_studio` as the newest migration and schema version 39.
@@ -17187,6 +17458,18 @@ These are development/CI tests only; no production-time test job or test endpoin
 - Root `tests/unit/frontend-security-admin.test.ts` requires every Sandbox mirror route to be explicitly allowed for authenticated staff; `tests/unit/guide-content.test.ts` requires the generated context map to cover them; `tests/unit/i18n-catalogue.test.ts` requires Arabic entries for every new Studio/mirror label.
 - Deploy tests cover `sandboxDatabase()`, `pgw_sandbox`/`pgw_sandbox_session`, sandbox database creation, the second `pg-core-sandbox` service plan, firewall/PKI SAN, and backup exclusion; `./deploy.sh --dry-run` is the integration smoke check.
 - Not yet covered end to end: a live two-database deploy, a live reconciliation import through the real Fake Rails server, and a Playwright pass over the Studio/mirror pages. The `seed-history` route and ledger postings are typechecked and reviewed but have no DB-backed automated test yet.
+
+## Route health (2026-11-16)
+
+`core-back/test/route-health.test.ts` covers outcome classification, error-map
+precedence, breaker thresholds, degraded/open recovery, policy clamping,
+stable canary membership, override expiry limits and degraded-canary routing
+(including one-open-breaker exclusion). The existing visible-rails matrix and
+routing/failover suites remain green. DB-backed worker, override-approval and API suites are not written yet; the
+current coverage is the pure policy/routing/probe tests plus the existing
+migration-shape and admin-back forwarding tests. `core.route-health` lists
+the migration. The “Fake Rails chaos drives a route to DEGRADED and back”
+acceptance run remains a gap.
 
 ---
 

@@ -22,6 +22,7 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatPlainNumber } from "@/utils/money";
 import { showSnackBar } from "@/utils/snackBar";
+import { buildOpenActionQueueSubLabel, buildSuccessRateSubLabel, buildUnknownBacklogSubLabel } from "./metricLabels";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetaPill } from "@/components/ui/MetaPill";
@@ -58,12 +59,14 @@ type Overview = {
     volumeByState?: Record<string, string>;
     attemptsTotal?: number;
     attemptsSucceeded?: number;
+    attemptsCounted?: number;
     successRate?: number;
     grossVolume?: string;
+    grossVolumeAttempts?: number;
     unknownBacklog?: number;
     unknownOldestAgeSeconds?: number;
     openCircuitBreakers?: number;
-    routeHealth?: { healthy: number; degraded: number; openBreaker: number };
+    routeHealth?: { healthy: number; degraded: number; openBreaker: number; forced?: number; conflicts?: number };
     webhookInboxLagSeconds?: number;
     reconciliationMatchRate?: string;
     reconciliationItems?: number;
@@ -207,8 +210,10 @@ const DashboardPage = dc(() => {
                 ["period", String(data.period ?? period.value)],
                 ["since", String(data.since ?? "")],
                 ["gross_volume", String(data.grossVolume ?? "0.0000")],
+                ["gross_volume_attempts", String(data.grossVolumeAttempts ?? 0)],
                 ["attempts_total", String(data.attemptsTotal ?? 0)],
                 ["attempts_succeeded", String(data.attemptsSucceeded ?? 0)],
+                ["attempts_counted", String(data.attemptsCounted ?? 0)],
                 ["success_rate_percent", String(data.successRate ?? 0)],
                 ["active_merchants", String(data.merchantsActive ?? 0)],
                 ["pending_merchants", String(data.merchantsPending ?? 0)],
@@ -218,7 +223,10 @@ const DashboardPage = dc(() => {
                 ["expired_approvals", String(data.approvalExpired ?? 0)],
                 ["emergency_approvals_due", String(data.approvalEmergencyDue ?? 0)],
                 ["open_circuit_breakers", String(data.openCircuitBreakers ?? 0)],
+                ["healthy_routes", String(data.routeHealth?.healthy ?? 0)],
                 ["degraded_routes", String(data.routeHealth?.degraded ?? 0)],
+                ["forced_routes", String(data.routeHealth?.forced ?? 0)],
+                ["route_health_conflicts", String(data.routeHealth?.conflicts ?? 0)],
                 ["webhook_inbox_lag_seconds", String(data.webhookInboxLagSeconds ?? 0)],
                 ["reconciliation_match_rate_percent", String(data.reconciliationMatchRate ?? "0.0000")],
                 ["reconciliation_items", String(data.reconciliationItems ?? 0)],
@@ -274,21 +282,29 @@ const DashboardPage = dc(() => {
                 label: t("Gross Volume"),
                 moneyAmount: data?.grossVolume ?? "0",
                 currency: "LYD",
-                subLabel: `${formatPlainNumber(data?.attemptsTotal ?? 0)} ${t("attempts")}`,
+                subLabel: `${formatPlainNumber(data?.grossVolumeAttempts ?? 0)} ${t("succeeded")} · LYD`,
             },
             {
                 key: "success",
                 label: t("Success Rate"),
-                value: `${formatPlainNumber(successRate)}%`,
+                value: `${formatPlainNumber(successRate, 2)}%`,
                 badge: successRate >= 90 ? t("Healthy") : successRate >= 70 ? t("Watch") : t("Critical"),
                 badgeTone: successRate >= 90 ? "success" : successRate >= 70 ? "warning" : "danger",
-                subLabel: `${formatPlainNumber(data?.attemptsSucceeded ?? 0)} ${t("succeeded")}`,
+                subLabel: buildSuccessRateSubLabel(data?.attemptsSucceeded ?? 0, data?.attemptsCounted, t),
             },
             {
                 key: "queues",
                 label: t("Open Action Queues"),
                 value: formatPlainNumber(openQueues),
-                subLabel: `${formatPlainNumber(data?.approvalPending ?? 0)} ${t("approvals")} · ${formatPlainNumber(data?.operatorOpen ?? 0)} ${t("operator cases")}`,
+                subLabel: buildOpenActionQueueSubLabel(
+                    {
+                        approvals: data?.approvalPending ?? 0,
+                        operatorCases: data?.operatorOpen ?? 0,
+                        joinRequests: data?.joinRequestOpen ?? 0,
+                        amlCases: data?.amlOpen ?? 0,
+                    },
+                    t,
+                ),
             },
             {
                 key: "unknown",
@@ -296,7 +312,7 @@ const DashboardPage = dc(() => {
                 value: formatPlainNumber(data?.unknownBacklog ?? 0),
                 badge: (data?.unknownBacklog ?? 0) > 0 ? t("Needs review") : t("Clear"),
                 badgeTone: (data?.unknownBacklog ?? 0) > 0 ? "warning" : "success",
-                subLabel: `${formatDuration(data?.unknownOldestAgeSeconds ?? 0)} ${t("oldest")}`,
+                subLabel: buildUnknownBacklogSubLabel(formatDuration(data?.unknownOldestAgeSeconds ?? 0), t),
             },
         ];
     });
@@ -489,7 +505,7 @@ const DashboardPage = dc(() => {
                                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                                     <ThemedView style={{ gap: "3px" }}>
                                         <ThemedText type="defaultSemiBold">{t("Route health")}</ThemedText>
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("Active routes by health state")}</ThemedText>
+                                        <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("Routes by health state")}</ThemedText>
                                     </ThemedView>
                                     {[
                                         { key: "HEALTHY", label: t("Healthy"), count: overview.value?.routeHealth?.healthy ?? 0 },
@@ -501,6 +517,9 @@ const DashboardPage = dc(() => {
                                             <ThemedText style={{ fontSize: "15px", fontWeight: 700 }}>{formatPlainNumber(row.count)}</ThemedText>
                                         </ThemedView>
                                     ))}
+                                    <ThemedText style={{ fontSize: "11px", opacity: 0.7 }}>
+                                        {formatPlainNumber(overview.value?.routeHealth?.forced ?? 0)} {t("forced")} · {formatPlainNumber(overview.value?.routeHealth?.conflicts ?? 0)} {t("conflicts")}
+                                    </ThemedText>
                                     <VBtn size="small" variant="text" prependIcon="mdi-arrow-right" onClick={() => void router.push({ name: "GatewayRoutes" })}>{t("Open routes")}</VBtn>
                                 </SurfaceCardText>
                             </SurfaceCard>

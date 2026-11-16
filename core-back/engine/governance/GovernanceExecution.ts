@@ -4,6 +4,7 @@ import { ApiError } from "../../lib/error";
 import { lockWalletLedgerBalance } from "../../lib/cashoutBalance";
 import { env } from "../../lib/env";
 import { applyShardRepair } from "../ledger/ShardRepair";
+import { applyRouteHealthOverride, clearRouteHealthOverride } from "../routeHealth/override";
 import type { CashoutCommissionNetting } from "../ledger/commissionNetting";
 import { payoutAccountHash } from "../../lib/joinRequestOnboarding";
 import { nextKybReviewAt, parseKybRefreshPolicy } from "../../lib/kybReview";
@@ -4238,6 +4239,39 @@ export async function executeApprovalSubject(
       afterJson: { legalHold: false, reason, approvalRequestId: input.approval.id },
     });
     return { status: "EXECUTED", entityId: input.approval.subjectId, idempotent: false };
+  }
+  if (subjectType === "ROUTE_HEALTH_OVERRIDE") {
+    const payload = asRecord(input.approval.payloadDiffJson);
+    const reason = String(payload.reason ?? input.notes ?? "emergency route health override");
+    if (payload.action === "CLEAR") {
+      const cleared = await clearRouteHealthOverride(tx as never, {
+        routeId: input.approval.subjectId,
+        reason,
+        actorUserId: input.checkerUserId,
+        actorRole: input.checkerRole,
+        approvalRequestId: input.approval.id,
+        inTransaction: true,
+        expectedOverrideState: payload.expectedOverrideState === null
+          ? null
+          : payload.expectedOverrideState as never,
+      });
+      return { status: "EXECUTED", entityId: cleared.routeId, idempotent: false };
+    }
+    const applied = await applyRouteHealthOverride(tx as never, {
+      routeId: input.approval.subjectId,
+      state: payload.state as never,
+      reason,
+      actorUserId: input.checkerUserId,
+      actorRole: input.checkerRole,
+      approvalRequestId: input.approval.id,
+      expiresAt: payload.expiresAt ? String(payload.expiresAt) : null,
+      evidence: payload.evidence ?? null,
+      inTransaction: true,
+      expectedOverrideState: payload.expectedOverrideState === null
+        ? null
+        : payload.expectedOverrideState as never,
+    });
+    return { status: "EXECUTED", entityId: applied.routeId, idempotent: false };
   }
   if (subjectType === "GATEWAY_VERSION") {
     const activated = await activateGatewayVersionInTransaction(

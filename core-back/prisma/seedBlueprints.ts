@@ -3830,9 +3830,6 @@ const seedRoutes = async (
         minAmount: new Prisma.Decimal(route.minAmount),
         maxAmount: route.maxAmount ? new Prisma.Decimal(route.maxAmount) : null,
         dailyCapAmount: route.dailyCapAmount ? new Prisma.Decimal(route.dailyCapAmount) : null,
-        status: route.status,
-        healthState: route.healthState,
-        maintenanceWindows: json([]),
         scope: json(normalizeRouteScope(route.scope)),
       },
       create: {

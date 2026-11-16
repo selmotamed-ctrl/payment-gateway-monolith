@@ -3,7 +3,7 @@ id: admin-ui.guide
 title: Admin Guide and Academy
 status: partial
 confidence: high
-last_verified: 2026-11-10
+last_verified: 2026-11-16
 verified_against: working-tree
 code:
   - admin-front/scripts/extract-guide-content.ts
@@ -317,3 +317,15 @@ Academy module 10 adds lesson `l-m10-5`, checks `c-l-m10-5-1/2` and exam
 question `q-m10-118`. Counts are 137 articles, 154 terms, 26 cards, 51
 lessons, 102 checks and 224 exam-pool questions. Generated Guide/Academy and
 Companion snapshots were regenerated.
+
+## Route health content (2026-11-16)
+
+Guide `b06-11` and `b06-12` now describe the automatic outcome-based circuit
+breaker, the `DEGRADED` canary exception in condition 5, read-only probes and
+the effective/computed/override split. `b10-02` (RB-01) and the Dashboard
+screen article (`b03-05`) describe the Routes health drawer, forced/conflict
+counts, probe action and the maker-checker force-HEALTHY path. Academy
+`l-m8-1`, `l-m8-5` and `l-m9-1` were updated with the same facts. Counts and
+exam structure are unchanged (137 articles, 154 terms, 26 cards, 51 lessons,
+224 pool questions); the generated Guide/Academy and Companion snapshot were
+regenerated.

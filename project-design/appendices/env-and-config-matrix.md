@@ -288,6 +288,7 @@
 | `core-back/lib/env/index.ts` | `OBJECT_STORAGE_ACTIVE_KEK_VERSION` |
 | `core-back/lib/env/index.ts` | `OBJECT_STORAGE_TRASH_RETENTION_DAYS` |
 | `core-back/lib/env/index.ts` | `OBJECT_STORAGE_GC_GRACE_HOURS` |
+| `core-back/lib/env/index.ts` | `OBJECT_STORAGE_ORPHAN_SWEEP_ENABLED` |
 | `core-back/lib/env/index.ts` | `CLUSTER_CORE_NODE_COUNT` |
 | `core-back/lib/env/index.ts` | `MTLS_CA_CERT_PATH` |
 | `core-back/lib/env/index.ts` | `MTLS_SERVER_CERT_PATH` |
@@ -366,6 +367,8 @@
 | `core-back/lib/env/index.ts` | `WORKER_BACKGROUND_JOBS_BATCH_SIZE` |
 | `core-back/lib/env/index.ts` | `WORKER_BACKGROUND_JOBS_LEASE_SECONDS` |
 | `core-back/lib/env/index.ts` | `WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS` |
+| `core-back/lib/env/index.ts` | `WORKER_ROUTE_HEALTH_ENABLED` |
+| `core-back/lib/env/index.ts` | `WORKER_ROUTE_HEALTH_INTERVAL_MS` |
 | `core-back/lib/env/index.ts` | `WORKER_PLATFORM_MONITOR_ENABLED` |
 | `core-back/lib/env/index.ts` | `WORKER_PLATFORM_MONITOR_INTERVAL_MS` |
 | `core-back/lib/env/index.ts` | `PLATFORM_MONITOR_WORKER_STALE_MULTIPLIER` |
