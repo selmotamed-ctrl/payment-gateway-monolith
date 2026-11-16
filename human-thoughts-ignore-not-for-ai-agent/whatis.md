@@ -14,4 +14,4 @@
     - for the payments attempts charts what is the difference between volume  andd attempts by state
     - how is routes health measured, 
     - what is approve queue by domain, what does each mean
-    
+    - what is Recent privileged activity
