@@ -22,7 +22,7 @@ import {
 
 const router = express.Router();
 
-const payLimiter = lazyLimiter(() => rateLimiter({
+export const payLimiter = lazyLimiter(() => rateLimiter({
   windowMs: env.PAY_RATE_LIMIT_WINDOW_MS,
   max: () => env.PAY_RATE_LIMIT_MAX,
   keyGenerator: (req) => rateLimitKey(req),
@@ -35,8 +35,6 @@ const payLimiter = lazyLimiter(() => rateLimiter({
     });
   },
 }));
-
-router.use(payLimiter);
 
 const paramsSchema = z.object({
   linkKey: zLinkKey,

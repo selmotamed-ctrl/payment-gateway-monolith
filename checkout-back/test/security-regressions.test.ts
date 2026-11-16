@@ -6,6 +6,12 @@ const pki = createTestPki();
 const core = await startTestCore(pki);
 process.env.NODE_ENV = "test";
 process.env.CORE_BACK_URL = core.url;
+// The inbound tests post to `/inbound/gw/sandbox/...`, which the edge forwards to the SANDBOX core pool. There
+// is one process environment per test run, so without these two lines the pool is whatever an earlier file
+// left behind (a closed test core, or the placeholder host of sandbox-routing.test.ts) and every sandbox
+// callback answers 503.
+process.env.SANDBOX_CORE_BACK_URL = core.url;
+delete process.env.SANDBOX_CORE_BACK_URLS;
 process.env.MTLS_CLIENT_CERT_PATH = pki.clientCert;
 process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
 process.env.MTLS_CA_CERT_PATH = pki.caCert;

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { specContentSha256 } from "../../lib/reportEngineSdk/specHash";
 import { adminInternalRouter } from "../../api/internal/admin";
 import { merchantInternalRouter } from "../../api/internal/merchant";
 import { client } from "../../prisma/client";
@@ -34,6 +35,10 @@ const authorSpec = (version: number) => {
   const spec = structuredClone(exampleDescriptorSpec) as Record<string, any>;
   spec.report.code = code;
   spec.report.version = version;
+  // No header or footer: with GLOBAL_DEFAULT the catalog hides a report until a platform default chrome
+  // exists (the seeder creates one), so these tests would depend on the database having been seeded.
+  spec.page_layout.header_mode = "NONE";
+  spec.page_layout.footer_mode = "NONE";
   return spec;
 };
 
@@ -62,7 +67,8 @@ describe.skipIf(!dbAvailable)("report-engine route remediation", () => {
 
     const row = await client.reportDefinitionSpecRecord.findUniqueOrThrow({ where: { id: first.json.id } });
     expect((row.specJson as Record<string, any>).report.version).toBe(row.version);
-    expect(row.specSha256).toMatch(/^[0-9a-f]{64}$/);
+    // Recomputed from the row as read back (jsonb reorders keys): the hash is of the content.
+    expect(row.specSha256).toBe(specContentSha256(row.specJson));
     expect(row.isLatestPublished).toBe(true);
 
     const second = await save(2, true);

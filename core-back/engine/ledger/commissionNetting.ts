@@ -136,19 +136,27 @@ export const netMerchantReceivable = async (
   const none = (status: NetReceivableStatus, receivable: Decimal): NetReceivableResult => ({ status, receivable, amount: ZERO, remainder: receivable });
 
   if (await store.entryExists(tx, refId)) return none("ALREADY_NETTED", ZERO);
-  const [bucket] = await store.receivablesOf(tx, input.merchantId, { receivableAccountId: input.receivableAccountId });
-  const receivable = bucket?.receivable ?? ZERO;
-  if (!receivable.gt(0)) return none("NOTHING_OWED", receivable);
+  // A first, UNLOCKED look: it only decides whether there is anything to do and which rows to lock.
+  const [bucketBeforeLock] = await store.receivablesOf(tx, input.merchantId, { receivableAccountId: input.receivableAccountId });
+  const receivableBeforeLock = bucketBeforeLock?.receivable ?? ZERO;
+  if (!receivableBeforeLock.gt(0)) return none("NOTHING_OWED", receivableBeforeLock);
   const wallet = await store.findWallet(tx, input.merchantId, input.currency);
-  if (!wallet) return none("NO_WALLET", receivable);
-  if (wallet.status !== "ACTIVE") return none("WALLET_NOT_ACTIVE", receivable);
+  if (!wallet) return none("NO_WALLET", receivableBeforeLock);
+  if (wallet.status !== "ACTIVE") return none("WALLET_NOT_ACTIVE", receivableBeforeLock);
 
   const context = nettingContext({ ...input, walletGlAccountId: wallet.glAccountId });
   // The rows the posting will touch are locked in the global order BEFORE the wallet balance is read (the amount
   // does not change which rows: the wallet debit always goes to shard 0, the receivable shard follows the refId).
   const walletBalance = await store.lockWalletBalance(tx, wallet.glAccountId, () =>
-    options.poster.lockShardsFor(nettingTemplate(refId, receivable), context, tx as never),
+    options.poster.lockShardsFor(nettingTemplate(refId, receivableBeforeLock), context, tx as never),
   );
+  // The receivable is read AGAIN now that the wallet lock is held. Every netting of this merchant takes that
+  // lock, so this read sees whatever a concurrent netting under ANOTHER run key (the daily run and a cash-out,
+  // two cash-outs) committed while this one waited. Using the value read before the lock collected the same
+  // receivable twice: the idempotency key only stops a repeat of the SAME run.
+  const [bucket] = await store.receivablesOf(tx, input.merchantId, { receivableAccountId: input.receivableAccountId });
+  const receivable = bucket?.receivable ?? ZERO;
+  if (!receivable.gt(0)) return none("NOTHING_OWED", receivable);
   const openCashouts = await store.openCashouts(tx, wallet.walletId);
   const amount = computeNettingAmount({ receivable, walletBalance, openCashouts });
   const details = {
@@ -241,7 +249,13 @@ export const createCashoutCommissionNetting = (
           const openCashouts = await store.openCashouts(applyTx, input.walletId);
           let available = Decimal.max(ZERO, walletBalance.minus(openCashouts));
           let netted = ZERO;
-          for (const item of pending) {
+          for (const pendingItem of pending) {
+            // `prepare` read the receivable before the wallet was locked. `apply` runs under that lock, so the
+            // receivable is read again here: a netting under another run key that committed in between has
+            // already collected (part of) it, and the stale value would collect it a second time.
+            const [fresh] = await store.receivablesOf(applyTx, input.merchantId, { receivableAccountId: pendingItem.receivableAccountId });
+            const item = { ...pendingItem, receivable: fresh?.receivable ?? ZERO };
+            if (!item.receivable.gt(0)) continue;
             const amount = computeNettingAmount({ receivable: item.receivable, walletBalance: available, openCashouts: ZERO });
             if (!amount.gt(0)) break;
             const details = {

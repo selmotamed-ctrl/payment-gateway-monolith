@@ -79,11 +79,19 @@ export interface PinnedPostInput {
   maxResponseBytes?: number;
   allowInsecure?: boolean;
   resolver?: DnsResolver;
+  /** Keep the first `maxResponseBytes` of the answer in `PinnedPostResult.body` (the webhook sender discards it). */
+  captureBody?: boolean;
+  /** Hard deadline for the whole exchange, including a slow response body; `timeoutMs` is only the idle timeout. */
+  deadlineMs?: number;
+  /** Overrides the default `PaymentGateway-Webhooks/1` agent. */
+  userAgent?: string;
 }
 
 export interface PinnedPostResult {
   status: number;
   latencyMs: number;
+  /** The captured answer (UTF-8, at most `maxResponseBytes` bytes), only when `captureBody` was set. */
+  body?: string;
 }
 
 /** POSTs `body` to the pinned address of `url`. Resolves with the status of any HTTP answer; rejects for network failures. */
@@ -96,6 +104,14 @@ export const postPinned = async (input: PinnedPostInput): Promise<PinnedPostResu
   const payload = Buffer.from(input.body, "utf8");
   const maxBytes = input.maxResponseBytes ?? 4096;
   return new Promise<PinnedPostResult>((resolve, reject) => {
+    // Set when the idle timeout or the overall deadline fires. Once the response has started, the
+    // socket teardown also ends the RESPONSE ("close"), and that handler used to win the race and
+    // resolve with the status and a truncated body: a cut-off exchange reported as a complete one.
+    let timeoutFailure: WebhookEgressError | undefined;
+    const abort = (message: string): void => {
+      timeoutFailure ??= new WebhookEgressError(message, true, "TIMEOUT");
+      request.destroy(timeoutFailure);
+    };
     const request = (secure ? https : http).request(
       {
         protocol: url.protocol,
@@ -113,25 +129,45 @@ export const postPinned = async (input: PinnedPostInput): Promise<PinnedPostResu
           ...input.headers,
           "content-type": "application/json",
           "content-length": String(payload.length),
-          "user-agent": "PaymentGateway-Webhooks/1",
+          "user-agent": input.userAgent ?? "PaymentGateway-Webhooks/1",
         },
         timeout: input.timeoutMs ?? 10_000,
         agent: false,
       } as never,
       (response) => {
         let received = 0;
+        const kept: Buffer[] = [];
         response.on("data", (chunk: Buffer) => {
+          if (input.captureBody && received < maxBytes) kept.push(chunk.subarray(0, maxBytes - received));
           received += chunk.length;
-          if (received > maxBytes) response.destroy(); // the answer is not used: stop reading
+          if (received > maxBytes) response.destroy(); // the cap is reached: stop reading
         });
-        const done = () => resolve({ status: response.statusCode ?? 0, latencyMs: Date.now() - started });
+        const done = () => {
+          if (deadline) clearTimeout(deadline);
+          if (timeoutFailure) {
+            reject(timeoutFailure);
+            return;
+          }
+          resolve({
+            status: response.statusCode ?? 0,
+            latencyMs: Date.now() - started,
+            ...(input.captureBody ? { body: Buffer.concat(kept).toString("utf8") } : {}),
+          });
+        };
         response.on("end", done);
         response.on("close", done);
         response.on("error", done);
       },
     );
-    request.on("timeout", () => request.destroy(new WebhookEgressError("The endpoint did not answer in time", true, "TIMEOUT")));
-    request.on("error", (error) => reject(error instanceof WebhookEgressError ? error : new WebhookEgressError(`Connection failed: ${error.message}`.slice(0, 300), true, "NETWORK")));
+    // A slow-drip answer never trips the idle timeout above, so a total deadline bounds the whole exchange.
+    const deadline = input.deadlineMs
+      ? setTimeout(() => abort("The endpoint did not complete the exchange in time"), input.deadlineMs)
+      : undefined;
+    request.on("timeout", () => abort("The endpoint did not answer in time"));
+    request.on("error", (error) => {
+      if (deadline) clearTimeout(deadline);
+      reject(timeoutFailure ?? (error instanceof WebhookEgressError ? error : new WebhookEgressError(`Connection failed: ${error.message}`.slice(0, 300), true, "NETWORK")));
+    });
     request.write(payload);
     request.end();
   });

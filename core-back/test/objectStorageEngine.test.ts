@@ -566,13 +566,16 @@ describeDatabase("object storage engine (live PostgreSQL)", () => {
         stagingExpiresAt: new Date(Date.now() + 3600_000),
       },
     });
-    const result = await sdk.workerClient.runGcBatch(new Date(Date.now() + 2 * 24 * 3600 * 1000));
+    const gcNow = new Date(Date.now() + 2 * 24 * 3600 * 1000);
+    const result = await sdk.workerClient.runGcBatch(gcNow);
     expect(result.purgedObjectIds).toContain(objectId);
     const row = await prisma.storageObject.findUniqueOrThrow({ where: { id: objectId } });
     expect(row.status).toBe("PURGED");
-    const trashFolders = await fsp.readdir(path.join(root, ".trash"));
-    expect(trashFolders.length).toBeGreaterThan(0);
-    const trashed = await fsp.readdir(path.join(root, ".trash", trashFolders[0]!, "hot", path.dirname(storageKey)), { recursive: true });
+    // The trash folder is named after the GC run's date. An earlier test (T05) leaves a folder dated today,
+    // and directory order is sorted on NTFS but arbitrary on ext4, so "the first folder" is not this one.
+    const trashFolder = gcNow.toISOString().slice(0, 10);
+    expect(await fsp.readdir(path.join(root, ".trash"))).toContain(trashFolder);
+    const trashed = await fsp.readdir(path.join(root, ".trash", trashFolder, "hot", path.dirname(storageKey)), { recursive: true });
     expect(trashed.length).toBeGreaterThan(0);
   });
 

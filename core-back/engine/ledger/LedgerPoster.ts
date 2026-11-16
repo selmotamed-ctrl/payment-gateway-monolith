@@ -216,7 +216,8 @@ export type LedgerScenario =
   | "INTERNAL_CONFIRMATION"
   | "INTERNAL_REFUND"
   | "CHARGEBACK_INSUFFICIENT"
-  | "SUSPENSE_SETTLEMENT";
+  | "SUSPENSE_SETTLEMENT"
+  | "SUSPENSE_REFUND";
 
 export type LedgerScenarioStage =
   | "HOLD"
@@ -604,6 +605,19 @@ export function buildLedgerTemplate(
         lines: [
           ...optionalLine("DEBIT", merchantAmount, account("MERCHANT_WALLET")),
           ...optionalLine("DEBIT", commission, account("PLATFORM_INCOME")),
+          { direction: "CREDIT", amount, account: account("TREASURY") },
+        ],
+      };
+    case "SUSPENSE_REFUND":
+      // The refund of a settlement that was parked in SUSPENSE (SUSPENSE_SETTLEMENT below). The
+      // merchant was never credited for it, so the refund clears SUSPENSE and must never touch the
+      // merchant wallet or the platform income. The cash side is TREASURY, like every other refund.
+      return {
+        refType: "ADJUSTMENT",
+        refId: reference,
+        description: "Refund of a settlement held in SUSPENSE",
+        lines: [
+          { direction: "DEBIT", amount, account: account("SUSPENSE") },
           { direction: "CREDIT", amount, account: account("TREASURY") },
         ],
       };

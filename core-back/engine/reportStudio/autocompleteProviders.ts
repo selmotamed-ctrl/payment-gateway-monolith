@@ -7,6 +7,18 @@ import type {
 
 const like = (query: string): string => `%${query.trim().replace(/[%_]/g, "")}%`;
 
+/**
+ * The applications a caller is restricted to (`dependentValues.applicationIds`, set by the merchant route
+ * from the session's `app_scope_ids`, never by the client's own `dependent` parameter for widening: a list
+ * can only narrow). Null means unrestricted. Without it a merchant user limited to some applications could
+ * search the names and ids of the merchant's other applications, payment links and POS terminals.
+ */
+export const applicationIdsOf = (dependentValues: Record<string, unknown> | undefined): string[] | null => {
+  const raw = dependentValues?.applicationIds;
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  return raw.filter((value): value is string => typeof value === "string");
+};
+
 const hasConfidentialAmlAccess = (actor: ReportActorContext): boolean =>
   actor.role === "MLRO" ||
   actor.role === "COMPLIANCE" ||
@@ -58,6 +70,11 @@ export function buildPaymentGatewayAutocompleteProviders(
           values.push(merchantId);
           sql += ` AND merchant_id = $${values.length}::uuid`;
         }
+        const applicationIds = applicationIdsOf(dependentValues);
+        if (applicationIds) {
+          values.push(applicationIds);
+          sql += ` AND id = ANY($${values.length}::uuid[])`;
+        }
         values.push(Math.min(limit, 50));
         sql += ` ORDER BY name ASC LIMIT $${values.length}`;
         const res = await dbReadOnly.executeReadOnlyQuery<{
@@ -95,6 +112,11 @@ export function buildPaymentGatewayAutocompleteProviders(
           values.push(merchantId);
           sql += ` AND a.merchant_id = $${values.length}::uuid`;
         }
+        const applicationIds = applicationIdsOf(dependentValues);
+        if (applicationIds) {
+          values.push(applicationIds);
+          sql += ` AND a.id = ANY($${values.length}::uuid[])`;
+        }
         values.push(Math.min(limit, 50));
         sql += ` ORDER BY pl.created_at DESC LIMIT $${values.length}`;
         const res = await dbReadOnly.executeReadOnlyQuery<{
@@ -131,6 +153,11 @@ export function buildPaymentGatewayAutocompleteProviders(
         if (merchantId) {
           values.push(merchantId);
           sql += ` AND a.merchant_id = $${values.length}::uuid`;
+        }
+        const applicationIds = applicationIdsOf(dependentValues);
+        if (applicationIds) {
+          values.push(applicationIds);
+          sql += ` AND a.id = ANY($${values.length}::uuid[])`;
         }
         values.push(Math.min(limit, 50));
         sql += ` ORDER BY pt.name ASC LIMIT $${values.length}`;

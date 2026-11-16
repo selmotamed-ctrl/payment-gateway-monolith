@@ -71,6 +71,9 @@ The live environment is expected to be provisioned by the deploy engine, not by 
 
 `core-back/test/setup.ts` also defaults `KMS_MASTER_KEY`, the mTLS certificate paths and `LOG_LEVEL=error`. The certificate paths point at `core-back/certs/*`; the files must exist or the mTLS tests fail.
 
+**Wait budgets in the test run (2026-11-12).** The preload also sets `PG_POOL_CONNECT_TIMEOUT_MS=20000` and `PG_TX_MAX_WAIT_MS=20000` (unless already set) and raises Bun's per-test limit to 30 s (`setDefaultTimeout`, override with `TEST_TIMEOUT_MS`). Diagnosis: the concurrency suites (`exhaustive/06-concurrency/*`, `storage-engine/uow`, `ledger-shard-*`, `cashout-lock-order`, `storage-engine/ledger-shards`, the multi-node outbox and webhook workers) queue 50 transactions on pools of 10 to 40. On a busy host the single Bun process is starved and the queue wait crosses the production fail-fast budgets (`P2028` after 2 to 2.5 s, "timeout exceeded when trying to connect" after 3 to 5 s) or Bun's 5 s default, while PostgreSQL itself is idle (measured during a failing run: at most 31 connections, fresh connects under 20 ms). Reproduced by saturating the 12 cores with 14 busy processes: 6 of 73 failed before, 79 of 79 pass with the new budgets. The assertions (one winner, no deadlock, gapless sequences, exactly-once delivery) are unchanged; a real hang still fails at 30 s. The absolute performance budgets in `storage-engine/performance/*` are left strict on purpose: they pass with a wide margin on a quiet machine (UoW p95 about 130 ms against 500 ms) and fail on a saturated one, so run them on a quiet machine.
+
+
 The expected local services are PostgreSQL 18 on 55432 and Redis on 56379. The production port (5432) is not assumed by the test harness.
 
 Before a database suite can run, the test database must exist and be migrated:

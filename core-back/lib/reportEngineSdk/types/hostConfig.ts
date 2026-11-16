@@ -86,6 +86,12 @@ export interface CatalogModelDef {
   /** True if this model can be used in MERCHANT_FACING reports when filtered by merchant_id */
   merchantScopable?: {
     merchantIdColumn: string;
+    /**
+     * The column that ties a row to an application. Present only on models whose rows belong to ONE application:
+     * a merchant user restricted to some applications (`app_scope_ids`) may only report on such models, narrowed to
+     * their applications. A model without it holds merchant-wide data that cannot be narrowed.
+     */
+    applicationIdColumn?: string;
   };
   optimizationRule: ModelOptimizationRule;
 }

@@ -108,7 +108,17 @@ describe("clamd client", () => {
     const dir = mkdtempSync(join(tmpdir(), "clamd-"));
     dirs.push(dir);
     const path = await fakeClamd((command, _payload, socket) => (command === "VERSION" ? reply(socket, "ClamAV 1.0/1/x") : reply(socket, "stream: OK")), { path: join(dir, "clamd.ctl") });
-    expect((await new ClamdScanner({ endpoint: parseClamdEndpoint(path) }).scan(Buffer.from("hello"))).verdict).toBe("CLEAN");
+    // A bare path is recognised by its leading "/" (production: /run/clamav/clamd.ctl). On a Windows
+    // checkout the temp path starts with a drive letter and reads as host:port, so the test names the
+    // socket explicitly with the documented "unix:" prefix.
+    const address = path.startsWith("/") ? path : `unix:${path}`;
+    expect(parseClamdEndpoint(address)).toEqual({ socketPath: path });
+    expect((await new ClamdScanner({ endpoint: parseClamdEndpoint(address) }).scan(Buffer.from("hello"))).verdict).toBe("CLEAN");
+  });
+
+  test("a bare absolute path and the unix: prefix name the same socket", () => {
+    expect(parseClamdEndpoint("/run/clamav/clamd.ctl")).toEqual({ socketPath: "/run/clamav/clamd.ctl" });
+    expect(parseClamdEndpoint("unix:/run/clamav/clamd.ctl")).toEqual({ socketPath: "/run/clamav/clamd.ctl" });
   });
 
   test("fail closed: an ERROR reply, a size-limit reply, silence, a dropped connection and a refused connection all reject", async () => {

@@ -79,6 +79,9 @@ export const PUBLIC_FOR_AUTHENTICATED: readonly string[] = [
     "AdminGuidePlaybook",
     "AdminGuideCards",
     "AdminGuideEdgeCases",
+    // Employee Academy: every signed-in staff member (tracks, lessons, labs, exam, help).
+    // AdminAcademyTeam is listed so it passes this guard; it is still limited to
+    // SECURITY_ADMIN by `routesRoles` in layouts/sections.tsx.
     "AdminAcademy",
     "AdminAcademyTracks",
     "AdminAcademyTrack",

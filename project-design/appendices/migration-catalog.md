@@ -27,7 +27,8 @@
 | `20261109180000_audit_chain_anchors` | 42 | ============================================================================ |
 | `20261109190000_regulatory_report_automation` | 47 | ============================================================================ |
 | `20261109200000_merchant_webhooks` | 74 | ============================================================================ |
-| `20261109210000_ledger_query_and_index_optimization` | 134 | ============================================================================ |
+| `20261109210000_ledger_query_and_index_optimization` | 189 | ============================================================================ |
+| `20261110090000_resilient_journal_partitions` | 87 | ============================================================================ |
 | `20261110120000_dynamic_report_engine_sdk` | 147 | ============================================================================ |
 | `20261110130000_report_engine_merchant_and_aml` | 42 | ============================================================================ |
 | `20261110140000_declarative_regulatory_reporting` | 188 |  |
@@ -36,11 +37,15 @@
 | `20261110170000_docx_report_output` | 4 |  |
 | `20261110180000_external_filing_adapters` | 47 |  |
 | `20261110190000_merchant_report_engine` | 117 | ============================================================================ |
+| `20261111090000_report_tenant_and_filing_integrity` | 92 | ============================================================================ |
 | `20261111120000_report_engine_versioning` | 40 | Schema version 34: report/chrome compatibility provenance and default revocation. |
 | `20261111130000_merchant_report_chrome` | 40 | Schema version 35: merchant-owned report headers and footers. |
 | `20261112000000_v36_enterprise_object_storage_engine` | 311 | ============================================================================ |
+| `20261112090000_journal_partition_storage_and_race` | 122 | ============================================================================ |
 | `20261113090000_storage_engine_hardening` | 183 | Shared object & asset storage hardening (schema version 37). |
 | `20261113120000_v38_sandbox_execution_plane` | 157 | v38: strict LIVE vs SANDBOX execution-plane separation. |
 | `20261114090000_v39_sandbox_studio` | 17 | v39: Sandbox Studio parity fields. |
+| `20261116090000_merchant_chrome_tenant_integrity` | 47 | ============================================================================ |
 | `20261116120000_route_health_automation` | 156 | Route health automation, canary traffic and admin overrides (schema version 40). |
 | `20261116130000_case_management_taxonomy` | 80 | Type-aware operator case management (schema version 41). |
+| `20261116130000_schema_version_agreement` | 19 | ============================================================================ |

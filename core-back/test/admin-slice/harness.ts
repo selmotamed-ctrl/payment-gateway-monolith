@@ -51,8 +51,11 @@ export interface TestApp {
   close(): Promise<void>;
 }
 
+/** A router, or a router mounted under a path prefix (as production mounts it). */
+export type Mount = Router | readonly [string, Router];
+
 export const startApp = async (
-  routers: Router[],
+  routers: Mount[],
   options: { channelPrefixes?: boolean } = {},
 ): Promise<TestApp> => {
   let current: Principal | undefined;
@@ -62,10 +65,11 @@ export const startApp = async (
     request.principal = current;
     next();
   });
-  for (const router of routers) {
-    if (options.channelPrefixes && router === adminInternalRouter) app.use("/internal/admin", router);
-    else if (options.channelPrefixes && router === merchantInternalRouter) app.use("/internal/merchant", router);
-    else app.use(router);
+  for (const mount of routers) {
+    if (Array.isArray(mount)) app.use(mount[0] as string, mount[1] as Router);
+    else if (options.channelPrefixes && mount === adminInternalRouter) app.use("/internal/admin", mount as Router);
+    else if (options.channelPrefixes && mount === merchantInternalRouter) app.use("/internal/merchant", mount as Router);
+    else app.use(mount as Router);
   }
   app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
     if (isApiError(error)) {

@@ -218,6 +218,23 @@ describeDb("commission netting against the ledger (live PostgreSQL)", () => {
     expect(await catalog.walletBalance()).toBe("70.0000");
     expect(await catalog.receivableBalance()).toBe("0.0000");
   });
+
+  test("concurrent runs under DIFFERENT keys collect the receivable once, never twice", async () => {
+    // The idempotency key stops a repeat of the same run only. Two runs with different keys (the daily run and
+    // a cash-out, two days' runs) both read the receivable; the one that waits for the wallet lock must read it
+    // again, or it collects the same 30 a second time and leaves the receivable negative.
+    const catalog = await newCatalog();
+    await catalog.fundWallet("100.0000");
+    const attempt = await catalog.newAttempt({ commission: "30.0000" });
+    await catalog.recognizeCommission(attempt.id, "30.0000");
+    const outcomes = await Promise.allSettled(Array.from({ length: 6 }, (_, index) => netInTx(catalog, `daily:2030-02-0${index + 1}`)));
+    const statuses = outcomes.map((entry) => (entry.status === "fulfilled" ? entry.value.status : `ERROR:${(entry.reason as Error).message}`));
+    expect(statuses.filter((status) => status.startsWith("ERROR"))).toEqual([]);
+    expect(statuses.filter((status) => status === "NETTED")).toHaveLength(1);
+    expect(statuses.filter((status) => status === "NOTHING_OWED")).toHaveLength(5);
+    expect(await catalog.walletBalance()).toBe("70.0000");
+    expect(await catalog.receivableBalance()).toBe("0.0000");
+  });
 });
 
 describeDb("daily commission netting worker (live PostgreSQL)", () => {

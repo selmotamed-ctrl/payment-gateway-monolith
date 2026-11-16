@@ -14,6 +14,7 @@ import { loadRailCatalog, asStringArray } from "../../engine/flow/VisibleRailsCa
 import { readRouteHealthPolicy } from "../../engine/routeHealth/policy";
 import { decimal } from "../../engine/ledger/LedgerPoster";
 import { getPlatformRuntime } from "../../engine/runtime";
+import { inboundRouteFailureOutcome } from "../../engine/workers/callbackInboundHandler";
 import type { DynamicAttempt } from "../../engine/flow/DynamicRailEngine";
 import { fingerprint, principalOf } from "../middleware/authDoubleCheck";
 import { subscribeRealtimeAttempt } from "../../lib/realtimeBus";
@@ -947,8 +948,13 @@ export interface ConfirmClaimResult {
  * The conditional UPDATE is the single-writer guard: only one concurrent
  * confirm can move a claimable attempt to AUTHORIZING. A repeated confirm with
  * the same idempotency key is refused by the marker comparison before the
- * gateway is contacted, and an UNKNOWN attempt past the point of no return can
- * never be claimed again.
+ * gateway is contacted, and an UNKNOWN or VERIFYING attempt past the point of no
+ * return can never be claimed again: its SUBMIT (the charge) was already sent and
+ * the outcome is pending at the gateway, so a second confirm with a fresh
+ * idempotency key (a retry, a double click, a second tab) would send the charge
+ * twice. It is resolved by inquiry or a verified callback only. AWAITING_CUSTOMER
+ * stays claimable with the flag set: that is the wrong-OTP retry, where the
+ * gateway answered definitively that nothing moved.
  */
 export const claimAttemptForConfirm = async (
   db: typeof client,
@@ -972,7 +978,7 @@ export const claimAttemptForConfirm = async (
         WHERE id = $2::uuid
           AND terminal_at IS NULL
           AND status IN (${statusPlaceholders})
-          AND NOT (status = 'UNKNOWN' AND point_of_no_return = true)
+          AND NOT (status IN ('UNKNOWN', 'VERIFYING') AND point_of_no_return = true)
           AND (
             (customer_fields_masked #>> '{${CONFIRM_IDEMPOTENCY_FIELD}}') IS NULL
             OR (customer_fields_masked #>> '{${CONFIRM_IDEMPOTENCY_FIELD}}') <> ${keyPlaceholder}
@@ -1894,6 +1900,10 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
   let verified = false;
   let verificationError: string | null = null;
   let processingResult = "IGNORED";
+  // A transient failure (database blip, timeout) is not a verdict on the webhook: the event is
+  // left unprocessed for the inbox worker and the gateway gets a 503 so it redelivers. Before,
+  // it was recorded as REJECTED and acknowledged, so a real "payment succeeded" was lost.
+  let retryLater = false;
   try {
     const result = await platform.engine.verifyCallback(pathToken, {
       rawBody,
@@ -1903,12 +1913,15 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
           .map(([key, value]) => [key.toLowerCase(), value as string]),
       ),
       sourceIp,
+      environment,
     });
     verified = true;
     processingResult = result.status;
   } catch (error) {
-    verificationError = String((error as { code?: string })?.code ?? "CALLBACK_VERIFICATION_FAILED");
-    processingResult = "REJECTED";
+    const outcome = inboundRouteFailureOutcome(error);
+    verificationError = outcome.verificationError;
+    processingResult = outcome.processingResult;
+    retryLater = outcome.retryLater;
   }
 
   if (!verified && ownsCanonicalKey) {
@@ -1923,7 +1936,8 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
   const finalData = {
     verified,
     verificationError,
-    processedAt: new Date(),
+    // Left NULL for a transient failure, so the inbox worker claims and retries the event.
+    processedAt: retryLater ? null : new Date(),
     processingResult,
     ...(verified ? { rawBodyBytes: new Uint8Array(rawBody) } : {}),
   };
@@ -1942,6 +1956,13 @@ route.post("/inbound/:gateway/:env/:pathToken", async (request: Request, respons
     } else {
       throw error;
     }
+  }
+
+  if (retryLater) {
+    // No acknowledgement: a non-2xx answer is how every gateway is told to redeliver.
+    response.setHeader("Retry-After", "30");
+    response.status(503).send("");
+    return;
   }
 
   response.status(channel.ackStatus).send(

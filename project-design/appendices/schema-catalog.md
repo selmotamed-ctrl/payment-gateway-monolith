@@ -5,7 +5,7 @@
 - Models: **118**
 - Enums: **130**
 - Schema version: **41**
-- Migrations: **40**
+- Migrations: **45**
 
 ## Models
 
@@ -287,6 +287,7 @@
 - `20261109190000_regulatory_report_automation`
 - `20261109200000_merchant_webhooks`
 - `20261109210000_ledger_query_and_index_optimization`
+- `20261110090000_resilient_journal_partitions`
 - `20261110120000_dynamic_report_engine_sdk`
 - `20261110130000_report_engine_merchant_and_aml`
 - `20261110140000_declarative_regulatory_reporting`
@@ -295,11 +296,15 @@
 - `20261110170000_docx_report_output`
 - `20261110180000_external_filing_adapters`
 - `20261110190000_merchant_report_engine`
+- `20261111090000_report_tenant_and_filing_integrity`
 - `20261111120000_report_engine_versioning`
 - `20261111130000_merchant_report_chrome`
 - `20261112000000_v36_enterprise_object_storage_engine`
+- `20261112090000_journal_partition_storage_and_race`
 - `20261113090000_storage_engine_hardening`
 - `20261113120000_v38_sandbox_execution_plane`
 - `20261114090000_v39_sandbox_studio`
+- `20261116090000_merchant_chrome_tenant_integrity`
 - `20261116120000_route_health_automation`
 - `20261116130000_case_management_taxonomy`
+- `20261116130000_schema_version_agreement`

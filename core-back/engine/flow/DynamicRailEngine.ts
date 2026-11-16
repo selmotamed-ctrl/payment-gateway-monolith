@@ -1,6 +1,6 @@
 import { Decimal } from "decimal.js";
 import { invalidationBus, type InvalidationBus } from "../../lib/invalidationBus";
-import { decimal, refundScenarioFor, type DecimalInput, type LedgerPostContext, type LedgerScenario, type LedgerScenarioInput, type PaymentConfirmationInput } from "../ledger/LedgerPoster";
+import { decimal, type DecimalInput, type LedgerPostContext, type LedgerScenario, type LedgerScenarioInput, type PaymentConfirmationInput } from "../ledger/LedgerPoster";
 import { StepExecutor, type FlowStep, type StepExecutionContext, type StepExecutionResult } from "./StepExecutor";
 import type { LogSinkPort } from "../../lib/storageEngine/ports";
 import type {
@@ -31,7 +31,6 @@ export type DynamicAttempt = AdapterAttempt & {
   ledgerEntryId?: string;
   contextCiphertext?: string;
   publicOutputs?: Record<string, unknown>;
-  adjustmentState?: string;
   substatus?: string;
   canonicalError?: string;
 };
@@ -47,11 +46,15 @@ export interface DynamicAttemptPatch {
   ledgerEntryId?: string;
   contextCiphertext?: string;
   publicOutputs?: Record<string, unknown>;
-  adjustmentState?: string;
   providerReference?: string;
   networkReference?: string;
   settledAmount?: string;
   gatewayFeeAmount?: string;
+  /**
+   * Compare-and-set: apply the patch only while the attempt still has this status. A repository
+   * that honours it throws an error with code `ATTEMPT_STATE_CONFLICT` when it does not.
+   */
+  expectedStatus?: AdapterAttemptStatus;
 }
 
 export interface AttemptRepository {
@@ -269,6 +272,8 @@ const TERMINAL_RELEASING_STATES = new Set<AdapterAttemptStatus>([
 ]);
 
 const AML_HOLD_SUBSTATUS = "AML_HOLD";
+/** Set by the AML case executor when a held attempt is rejected (GovernanceExecution). */
+const AML_VOID_SUBSTATUS = "AML_VOID";
 
 /**
  * GAP-016. IDEMPOTENT: the attempt already settled once, a duplicate success
@@ -387,7 +392,38 @@ export class DynamicRailEngine {
     return this.toResult(current, execution);
   }
 
-  async initiate(
+  /**
+   * Runs a flow; when one of its status writes lost a compare-and-set race (another writer moved the
+   * attempt first), nothing further is written or released and the persisted state is returned.
+   */
+  private async persistedStateOnConflict(
+    attemptId: string,
+    run: () => Promise<DynamicRailResult>,
+  ): Promise<DynamicRailResult> {
+    try {
+      return await run();
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code !== "ATTEMPT_STATE_CONFLICT") {
+        throw error;
+      }
+      const latest = await this.getAttempt(attemptId);
+      return this.toResult(latest, {
+        status: latest.status,
+        substatus: latest.substatus,
+        outputs: { state: {}, public: latest.publicOutputs ?? {} },
+      });
+    }
+  }
+
+  initiate(
+    attempt: DynamicAttempt,
+    formData: AdapterFormData,
+    options: { slotReserved?: boolean } = {},
+  ): Promise<DynamicRailResult> {
+    return this.persistedStateOnConflict(attempt.id, () => this.runInitiate(attempt, formData, options));
+  }
+
+  private async runInitiate(
     attempt: DynamicAttempt,
     formData: AdapterFormData,
     options: { slotReserved?: boolean } = {},
@@ -444,7 +480,15 @@ export class DynamicRailEngine {
     }
   }
 
-  async confirm(
+  confirm(
+    attempt: DynamicAttempt,
+    evidence: AdapterEvidence,
+    options: ConfirmOptions = {},
+  ): Promise<DynamicRailResult> {
+    return this.persistedStateOnConflict(attempt.id, () => this.runConfirm(attempt, evidence, options));
+  }
+
+  private async runConfirm(
     attempt: DynamicAttempt,
     evidence: AdapterEvidence,
     options: ConfirmOptions = {},
@@ -577,19 +621,25 @@ export class DynamicRailEngine {
     }
     const trusted = this.verifyTrustedSuccessFacts(evidence, current);
     if (!trusted.trusted) {
-      await this.transition(current, "UNKNOWN", { canonicalError: "TRUSTED_SUCCESS_FACTS_FAILED" });
-      return {
-        attempt: current,
-        status: "UNKNOWN",
-        canonicalError: "TRUSTED_SUCCESS_FACTS_FAILED",
-        outputs: current.publicOutputs ?? {},
-      };
+      return this.persistedStateOnConflict(current.id, async () => {
+        await this.transition(current, "UNKNOWN", { canonicalError: "TRUSTED_SUCCESS_FACTS_FAILED" });
+        return {
+          attempt: current,
+          status: "UNKNOWN",
+          canonicalError: "TRUSTED_SUCCESS_FACTS_FAILED",
+          outputs: current.publicOutputs ?? {},
+        };
+      });
     }
     const finalized = await this.finalizeSuccess(current, evidence);
     return this.successResult(current, current.publicOutputs ?? {}, finalized);
   }
 
-  async inquire(attempt: DynamicAttempt): Promise<DynamicRailResult> {
+  inquire(attempt: DynamicAttempt): Promise<DynamicRailResult> {
+    return this.persistedStateOnConflict(attempt.id, () => this.runInquire(attempt));
+  }
+
+  private async runInquire(attempt: DynamicAttempt): Promise<DynamicRailResult> {
     const current = await this.getAttempt(attempt.id);
     if (current.status === "SUCCEEDED") {
       return this.toResult(current, {
@@ -664,10 +714,10 @@ export class DynamicRailEngine {
       throw engineError("REFUND_AMOUNT_EXCEEDED", "Refund amount exceeds the settled amount");
     }
     const phase: FlowPhase = current.settledAmount === undefined ? "VOID" : "REFUND";
-    await this.options.attempts.updateAttempt(current.id, { adjustmentState: "EXECUTING" });
+    // The refund's own state lives on its Adjustment row (EXECUTING / EXECUTED), owned by the
+    // governance executor: `payment_attempts` has no adjustment-state column.
     const execution = await this.executePhase(phase, current, { amount: refundAmount.toFixed(4), adjustmentId });
     if (execution.status === "UNKNOWN") {
-      await this.options.attempts.updateAttempt(current.id, { adjustmentState: "EXECUTING" });
       await this.options.reconciliationScheduler?.schedule(current.id, adjustmentId);
       return this.toResult(current, {
         status: "UNKNOWN",
@@ -676,34 +726,18 @@ export class DynamicRailEngine {
       });
     }
     if (execution.status === "FAILED") {
-      await this.options.attempts.updateAttempt(current.id, { adjustmentState: "EXECUTING" });
       await this.options.reconciliationScheduler?.schedule(current.id, adjustmentId);
       return this.toResult(current, execution);
     }
-    if (this.options.ledgerPoster?.postScenario) {
-      const split = this.refundSplit(current, refundAmount);
-      const refundScenario = refundScenarioFor(current.ownershipMode);
-      // A merchant-direct refund only reverses the commission recognition; with no commission to
-      // reverse the merchant refunds the payer from their own gateway account and nothing posts.
-      const nothingToPost = refundScenario.stage === "REFUND" && split.commission.isZero();
-      if (!nothingToPost) {
-        await this.options.ledgerPoster.postScenario(
-          refundScenario.scenario,
-          adjustmentId,
-          {
-            amount: refundAmount,
-            commissionAmount: split.commission,
-            merchantAmount: split.merchant,
-            stage: refundScenario.stage,
-          },
-          this.ledgerContext(current),
-        );
-      }
-    }
+    // The engine moves the money at the gateway and records it on the attempt; it does not book
+    // the refund. The journal is posted once, by the governance finalizer
+    // (`finalizeRefundAdjustment`), from the approved adjustment: its amount, its
+    // `reverseCommission` choice and its target account, in the same transaction that marks the
+    // adjustment EXECUTED. Posting here as well raced that finalizer on the same
+    // (ADJUSTMENT, adjustmentId) key and, landing first, booked a proportional commission
+    // reversal the checker never approved.
     const fullyRefunded = refundAmount.eq(decimal(current.totalChargedAmount));
-    await this.transition(current, fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED", {
-      adjustmentState: "EXECUTED",
-    });
+    await this.transition(current, fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED");
     return this.toResult(current, {
       status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
       outputs: execution.outputs.public,
@@ -769,8 +803,17 @@ export class DynamicRailEngine {
         409,
       );
     }
+    // The write is conditional on the status this flow observed. A flow reads the attempt, calls
+    // the gateway (seconds) and only then writes: without the condition, a timeout or a failure
+    // answer arriving after a verified webhook settled the attempt put UNKNOWN or FAILED over the
+    // committed SUCCEEDED (and released its slot). A lost race raises ATTEMPT_STATE_CONFLICT, which
+    // the public entry points turn into "return the persisted state".
+    const updated = await this.options.attempts.updateAttempt(attempt.id, {
+      status: nextStatus,
+      ...patch,
+      expectedStatus: attempt.status,
+    });
     attempt.status = nextStatus;
-    const updated = await this.options.attempts.updateAttempt(attempt.id, { status: nextStatus, ...patch });
     await this.transitionBus.publish(ATTEMPT_TRANSITION_TOPIC, {
       attemptId: attempt.id,
       status: nextStatus,
@@ -1120,10 +1163,15 @@ export class DynamicRailEngine {
     if (guard === "REFUSE") {
       throw engineError("ATTEMPT_TERMINAL", `The attempt is ${fresh.status} and can no longer be finalized`, 409);
     }
+    if (fresh.status === "FAILED" && fresh.substatus === AML_VOID_SUBSTATUS) {
+      // The AML case was rejected and the escrow was returned: a late success signal must not
+      // resurrect the attempt (its confirmation key is already used by the escrow entry).
+      throw engineError("ATTEMPT_TERMINAL", "The attempt was voided by its AML case and can no longer be finalized", 409);
+    }
     if ((fresh.substatus ?? attempt.substatus) === AML_HOLD_SUBSTATUS) {
       return this.escrowHeldCapture(fresh);
     }
-    const previousStatus = attempt.status;
+    const previousStatus = fresh.status;
     const post = async (transaction?: unknown): Promise<string> => {
       if (!this.options.ledgerPoster) {
         return `unposted:${attempt.id}`;
@@ -1401,14 +1449,6 @@ export class DynamicRailEngine {
     );
   }
 
-  private refundSplit(attempt: DynamicAttempt, amount: Decimal): { commission: Decimal; merchant: Decimal } {
-    const total = decimal(attempt.totalChargedAmount);
-    // Rounded once to the money scale; the merchant share is the exact remainder.
-    const commission = total.isZero()
-      ? new Decimal(0)
-      : this.commissionForAttempt(attempt).mul(amount).div(total).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
-    return { commission, merchant: amount.minus(commission) };
-  }
 
   private ledgerContext(attempt: DynamicAttempt): LedgerPostContext {
     return {

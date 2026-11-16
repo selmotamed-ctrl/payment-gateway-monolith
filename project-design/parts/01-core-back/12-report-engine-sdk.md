@@ -38,6 +38,8 @@ tests:
   - core-back/test/admin-slice/report-engine-migration.test.ts
   - core-back/test/admin-slice/merchant-report-chrome.test.ts
   - core-back/test/admin-slice/admin-report-engine.test.ts
+  - core-back/test/report-preview-policy.test.ts
+  - core-back/test/report-tenant-and-filing-integrity.test.ts
   - merchant-back/test/core-forwarding.test.ts
   - admin-back/test/report-engine-edge.test.ts
   - tests/unit/report-engine-sdk-mirror.test.ts
@@ -149,7 +151,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 - `report_definition_specs` (code/version, category, audience, status, latest-published flag, supported/default locales, spec JSON/SHA-256, verification report, inferred roles/authorities, conflict status, confidential AML flag, override fields, publisher);
 - `report_execution_audit` (spec, code/version, actor, locale, scoped merchant, redacted inputs, row count, duration, node, verification hash, render target).
 
-`REQUIRED_SCHEMA_VERSION` is 37. Version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. Version 33 adds the separate merchant authoring line: `merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` and `merchant_report_studio_status`, with unique `(merchant_id, code, version)` and one latest-published row per merchant/code. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
+`REQUIRED_SCHEMA_VERSION` is 40. Version 27 adds the AML bypass flag, latest-published uniqueness and the append-only execution audit. Version 33 adds the separate merchant authoring line: `merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit` (append-only trigger), `merchant_report_rate_events` and `merchant_report_studio_status`, with unique `(merchant_id, code, version)` and one latest-published row per merchant/code. The seed calls `seedDefaultChromeSpecs` after the admin users exist, so a fresh database has one published bilingual header and footer marked as global defaults.
 
 ## 7. Security invariants
 
@@ -164,7 +166,7 @@ The API maps a timeout to `408 REPORT_QUERY_TIMEOUT` and a cancelled/rolled-back
 
 `core-back/test/reportEngineSdk/**` implements the RE-T01..RE-T22 matrix (plus extra dry-run/transcript cases). `admin-front/src/lib/reportEngineSdk/__tests__/**` covers formatting, RTL vector mirroring, chrome binding, the language prompt options, the paged-media document and the client sanitizer. The exhaustive schema suite and `phase1-mtls-and-schema.test.ts` verify schema version 27 and the four new models.
 
-## 9. Merchant reporting line (introduced in schema version 33; current schema 37)
+## 9. Merchant reporting line (introduced in schema version 33; current schema 40)
 
 The merchant line is physically separate from the staff registry. It has its own tables (`merchant_report_specs`, `merchant_report_asset_bundles`, `merchant_report_execution_audit`), its own host catalog (`engine/reportStudio/merchantHostConfig.ts`) and its own transcript.
 
@@ -361,6 +363,17 @@ When changing the report engine:
 4. Regenerate or add transcript snapshots under a new version label; never overwrite a released snapshot.
 5. Update `report-spec-generator/src/base/MANIFEST.json`, `CHANGELOG.md` and the migration prompt library; refresh the eval corpus and record transcript version/hash.
 6. Update this part, the admin/merchant report docs, testing catalog and `TRACKER.md`; run the project-design gate.
+## 19. Review fixes (2026-11-11) and the merge with the plan branch (2026-11-12)
+
+- **Merge (2026-11-12): the staff preview has two modes (section 15.3), and the access policy applies to the one that reads data.** `MOCK` (the default) renders generated rows and reads no stored data, so it needs only the route's authoring or review authority and writes no audit row. `LIVE` reads data: the access-policy check and the `REPORT_SPEC_PREVIEW_EXECUTED` audit row described in the next bullet apply to it. The check sits after the MOCK branch and before `engine.executeReport`; the answer carries `mode`.
+- **Merge (2026-11-12): the merchant result cache key carries the application scope and the chrome fingerprint.** `merchantCacheKey` hashes `applicationIds` (a restricted user's result is never served to an unrestricted user) and `chromeFingerprint` (a changed header or footer is never served from cache).
+- **Merge (2026-11-12): merchant chrome is tenant-safe at the database level (schema version 40).** Migration `20261116090000_merchant_chrome_tenant_integrity` (first written as `20261112100000`, version 36; renamed before it was ever pushed so that it runs after `master`'s migrations) gives `merchant_report_chrome_specs` the composite foreign key `(asset_bundle_id, merchant_id)` and a `merchant_id` foreign key to `merchants`, the rule `20261111090000` set for merchant report specs. See `core.data` (the migration list).
+- **Merge (2026-11-12): the merchant Studio LIVE preview honours the application scope.** The plan branch's `POST /report-engine/studio/preview` executed a draft in `LIVE` mode with the merchant scope only, so a user restricted to some applications (`app_scope_ids`) could preview every application's rows. It now applies the rule of the execute route: merchant-wide models are refused (`APP_SCOPE_RESTRICTED`) and the rest is narrowed to the user's applications. `MOCK` reads no stored data.
+
+- **Staff preview obeys the access policy and is audited.** `POST /report-engine/specs/preview` executes a draft against live data. It used to require only an authoring or review authority, so an author without the ledger or audit authorities could preview a draft over those tables, and it left no trace. It now evaluates the policy inferred from the models the draft queries (`previewAccessDecision` in `api/internal/reportPreviewPolicy.ts`: a natural role, or every required authority; a security admin is always allowed; a missing inference fails closed) and answers `403 REPORT_ACCESS_DENIED` with the queried models and required authorities before executing anything. A successful preview writes `REPORT_SPEC_PREVIEW_EXECUTED` (entity `REPORT_SPEC_DRAFT`, id = the draft's SHA-256, with the queried models, row count and duration) to the audit log; the execution audit table is keyed by a saved spec, which a draft is not.
+- **Merchant reports honour a user's application scope.** A merchant session user can be restricted to some applications (`app_scope_ids`) and the other merchant routes honour it; the report engine ignored it, so such a user got every application's payments, wallets, cash-outs and daily stats. `merchantScopable.applicationIdColumn` (host config) marks the models whose rows belong to ONE application: only `payment_attempts`. For a restricted session user the execute route (1) refuses a report that reads any other model with `403 APP_SCOPE_RESTRICTED` (as the merchant overview is refused), before the budget, rate limit or execution; (2) passes `merchantScope.applicationIds`, so the compiler adds `<alias>.application_id = ANY($n::uuid[])` to every aliased table next to the merchant predicate (and throws `APP_SCOPE_MODEL_NOT_ALLOWED` for a model that cannot be narrowed); (3) keys the result cache by the scope, so a restricted user's result is never served to an unrestricted user or the reverse. An API token is bound to one application by the token itself and is unchanged. The `applications` model is also refused to a restricted user (conservative). The merchant autocomplete sources (payment link keys, POS terminal names) are still merchant-wide.
+- **Tenant-safe merchant report tables and an append-only audit without SET NULL** are migration `20261111090000` (schema version 34), see `core.data` (the migration list).
+- **The spec hash is a content hash (2026-11-12).** `report_definition_specs.spec_sha256` (staff and merchant lines) was SHA-256 of `JSON.stringify(spec)` taken before the insert. `spec_json` is `jsonb`, which reorders object keys, so the hash could never be recomputed from the stored row and proved nothing about it. It is now `specContentSha256` (`lib/reportEngineSdk/specHash.ts`): SHA-256 of the spec with every object's keys sorted, recursively, identical before the insert and after any read. Rows saved earlier keep their old hash (nothing compares spec hashes across rows). The chrome registry keeps hashing the uploaded spec text byte for byte, which is a different contract (the exact file). Test: `admin-slice/admin-report-engine.test.ts` B05/B04, which recomputes the hash from the row as read back.
 
 ## 17. Shared object storage for report assets and outputs
 

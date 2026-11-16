@@ -7,6 +7,8 @@ import { ApiError, parseOrThrow } from "../../lib/error";
 import { requireAuthorities, principalOf, isStaffPrincipal, type Principal } from "../middleware/authDoubleCheck";
 import { auditActor, auditBase } from "./adminSliceHelpers";
 import { writeAudit } from "../../lib/audit/writeAudit";
+import { previewAccessDecision } from "./reportPreviewPolicy";
+import { specContentSha256 } from "../../lib/reportEngineSdk/specHash";
 import {
   extractZipAssetFiles,
   synthesizeDefaultInputs,
@@ -784,8 +786,9 @@ function specSaveError(error: unknown): unknown {
   return error;
 }
 
+/** The spec's content hash, reproducible from the stored `spec_json` (see `specContentSha256`). */
 function sha256Of(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  return specContentSha256(value);
 }
 
 /** Loads the stored asset files a spec requires, keyed by file name (as the zip extractor does). */
@@ -959,15 +962,18 @@ router.post("/report-engine/specs/preview", async (request: Request, response: R
     chromeDefaultScope: "PLATFORM",
   });
   assertNoChromeAssetKeyCollision(parsedSpec, [previewChrome.headerEntry, previewChrome.footerEntry]);
-  try {
-    if (body.mode === "MOCK") {
+  if (body.mode === "MOCK") {
+    // A MOCK preview renders generated sample rows and reads no stored data, so it needs only the route's
+    // authoring authority: no data-access check, and no audit row for a read that did not happen.
+    let mockBundle;
+    try {
       const assetDataUrls: Record<string, string> = {};
       for (const [assetKey, asset] of Object.entries(assets)) {
         if (asset.mimeType.startsWith("image/")) {
           assetDataUrls[assetKey] = `data:${asset.mimeType};base64,${asset.buffer.toString("base64")}`;
         }
       }
-      const bundle = engine.buildMockPreviewBundle({
+      mockBundle = engine.buildMockPreviewBundle({
         spec: parsedSpec,
         locale: body.locale,
         inputsUsed: inputs,
@@ -976,10 +982,28 @@ router.post("/report-engine/specs/preview", async (request: Request, response: R
         chromeOverride: null,
         assetDataUrls,
       });
-      response.json({ verification, bundle, mode: "MOCK" });
-      return;
+    } catch (error) {
+      throw toReportExecutionError(error);
     }
-    const bundle = await engine.executeReport({
+    response.json({ verification, bundle: mockBundle, mode: "MOCK" });
+    return;
+  }
+  // A LIVE preview READS data, so it obeys the access policy a published report would get: the one inferred
+  // from the models the draft queries (a natural role, or every required authority). `report_engine:author`
+  // and `report:review` authorise authoring and reviewing, not reading every catalog model: before this check
+  // an author without the ledger or audit authorities could preview a draft over those tables. No stored
+  // override exists for a draft, so a missing inference fails closed.
+  const inference = verification.authorityInference;
+  const access = previewAccessDecision(inference, actor);
+  if (!access.allowed) {
+    throw new ApiError(403, "REPORT_ACCESS_DENIED", "You are not authorized to read the data this draft queries", {
+      queriedModels: access.queriedModels,
+      requiredAuthorities: access.requiredAuthorities,
+    });
+  }
+  let bundle;
+  try {
+    bundle = await engine.executeReport({
       spec: parsedSpec,
       inputs,
       actor,
@@ -988,10 +1012,29 @@ router.post("/report-engine/specs/preview", async (request: Request, response: R
       assets,
       allowConfidentialAmlBypass: false,
     });
-    response.json({ verification, bundle, mode: "LIVE" });
   } catch (error) {
     throw toReportExecutionError(error);
   }
+  // The execution audit table is keyed by a saved spec, which a draft is not: record the read in the audit log.
+  const specSha256 = sha256Of(parsedSpec);
+  await writeAudit(client, {
+    data: {
+      ...auditBase(auditActor(request)),
+      action: "REPORT_SPEC_PREVIEW_EXECUTED",
+      entityType: "REPORT_SPEC_DRAFT",
+      entityId: specSha256,
+      beforeJson: null,
+      afterJson: {
+        code: parsedSpec.report.code,
+        version: parsedSpec.report.version,
+        specSha256,
+        queriedModels: inference?.queriedModels ?? [],
+        rowCountTotal: bundle.rowCountTotal,
+        durationMs: bundle.durationMs,
+      },
+    } as never,
+  });
+  response.json({ verification, bundle, mode: "LIVE" });
 });
 
 router.post("/report-engine/specs", async (request: Request, response: Response) => {

@@ -1,3 +1,4 @@
+import { transactionMaxWaitMs } from "../db/waitBudgets";
 import { Prisma, type PrismaClient } from "../../generated/prisma/client";
 import type {
   AuditEnvelope,
@@ -144,7 +145,7 @@ export class PostgresUnitOfWorkAdapter implements UnitOfWorkPort {
         return { data, commitLsn };
       },
       {
-        maxWait: 2_500,
+        maxWait: transactionMaxWaitMs(2_500),
         timeout: timeoutMs,
         isolationLevel:
           options?.isolationLevel ?? Prisma.TransactionIsolationLevel.ReadCommitted,

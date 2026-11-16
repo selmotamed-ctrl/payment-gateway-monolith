@@ -20,6 +20,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Decimal } from "decimal.js";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { prismaTransactionOptions } from "../../lib/db/waitBudgets";
 import { PrismaClient } from "../../generated/prisma/client";
 import { buildPostgresPoolConfig } from "../../lib/db/connectionConfig";
 import { pinUtcInConnectionUrl } from "../../lib/storageEngine/utcSession";
@@ -40,6 +41,7 @@ export const exhaustiveClient = (): PrismaClient => {
     clientInstance = new PrismaClient({
       adapter: new PrismaPg(buildPostgresPoolConfig(pinUtcInConnectionUrl(EXHAUSTIVE_DATABASE_URL))),
       log: [],
+      ...(prismaTransactionOptions() ? { transactionOptions: prismaTransactionOptions() } : {}),
     });
   }
   return clientInstance;
@@ -54,6 +56,7 @@ export const createExhaustiveClient = (): PrismaClient =>
       }),
     ),
     log: [],
+    ...(prismaTransactionOptions() ? { transactionOptions: prismaTransactionOptions() } : {}),
   });
 
 export const disconnectExhaustiveClient = async (): Promise<void> => {

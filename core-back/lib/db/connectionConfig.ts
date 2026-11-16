@@ -1,3 +1,5 @@
+import { poolConnectTimeoutMs } from "./waitBudgets";
+
 export const isPostgresUrl = (databaseUrl: string): boolean => {
   try {
     const { protocol } = new URL(databaseUrl);
@@ -27,7 +29,7 @@ export const buildPostgresPoolConfig = (
     connectionString: databaseUrl,
     max: Number.isFinite(limit) && limit > 0 ? limit : 20,
     idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
+    connectionTimeoutMillis: poolConnectTimeoutMs(5_000),
     application_name: options.applicationName ?? "pg-core-back",
   };
 };

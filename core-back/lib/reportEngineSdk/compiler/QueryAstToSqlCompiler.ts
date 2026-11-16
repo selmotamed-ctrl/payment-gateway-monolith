@@ -24,7 +24,7 @@ export function compileDatasetQueryToSql(
   host: ReportEngineHostConfig,
   resolvedInputs: Record<string, unknown>,
   actorContext?: { userId: string; nowUtcIso: string },
-  options?: { merchantScope?: { merchantId: string } },
+  options?: { merchantScope?: { merchantId: string; applicationIds?: readonly string[] } },
 ): CompiledSqlQuery {
   const values: unknown[] = [];
   const pushParam = (val: unknown): string => {
@@ -105,6 +105,14 @@ export function compileDatasetQueryToSql(
       const column = entry.model.columns[entry.model.merchantScopable.merchantIdColumn];
       if (!column) throw new Error(`MERCHANT_SCOPE_COLUMN_MISSING: "${entry.alias}"`);
       conditions.push(`${quoteIdent(entry.alias)}.${quoteIdent(column.dbColumnName)} = ${pushParam(options.merchantScope.merchantId)}`);
+      // A user restricted to some applications: every aliased table must also be narrowed to those applications.
+      if (options.merchantScope.applicationIds && options.merchantScope.applicationIds.length > 0) {
+        const applicationColumn = entry.model.merchantScopable.applicationIdColumn
+          ? entry.model.columns[entry.model.merchantScopable.applicationIdColumn]
+          : undefined;
+        if (!applicationColumn) throw new Error(`APP_SCOPE_MODEL_NOT_ALLOWED: "${entry.model.modelName}"`);
+        conditions.push(`${quoteIdent(entry.alias)}.${quoteIdent(applicationColumn.dbColumnName)} = ANY(${pushParam([...options.merchantScope.applicationIds])}::uuid[])`);
+      }
       scopeAliases.push(entry.alias);
     }
     scopeSql = conditions.join(" AND ");

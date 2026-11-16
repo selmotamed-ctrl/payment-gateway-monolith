@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { specContentSha256 } from "../../lib/reportEngineSdk/specHash";
 import express, { type Request, type Response } from "express";
 import { z } from "zod";
 import { client } from "../../prisma/client";
@@ -64,12 +65,44 @@ import {
 } from "./adminReportEngine";
 
 /**
+ * The applications a merchant SESSION user is restricted to (`app_scope_ids`), or undefined for an unrestricted user.
+ * API tokens are bound to one application by the token itself.
+ */
+const applicationScopeOf = (request: Request): readonly string[] | undefined => {
+  const principal = principalOf(request);
+  if (principal.kind !== "session") return undefined;
+  const ids = principal.appScopeIds ?? [];
+  return ids.length > 0 ? ids : undefined;
+};
+
+/**
+ * A restricted user may only report on models whose rows belong to ONE application (payment_attempts); the engine
+ * narrows them to the user's applications. Wallets, cash-outs and the daily stats are merchant-wide and cannot be
+ * narrowed, so a report on them is refused, as the merchant overview is (APP_SCOPE_RESTRICTED). Before, the report
+ * engine ignored the restriction altogether and returned every application's rows.
+ */
+const assertSpecFitsApplicationScope = (spec: ReportDescriptorSpec, applicationIds: readonly string[] | undefined): void => {
+  if (!applicationIds) return;
+  const unsupported = [...new Set(spec.datasets.flatMap((dataset) => [dataset.from_model, ...dataset.joins.map((join) => join.target_model)]))]
+    .filter((model) => !host.models[model]?.merchantScopable?.applicationIdColumn);
+  if (unsupported.length > 0) {
+    throw new ApiError(
+      403,
+      "APP_SCOPE_RESTRICTED",
+      "This report reads merchant-wide data and is not available to a user restricted to specific applications",
+      { models: unsupported },
+    );
+  }
+};
+
+/**
  * Merchant report engine: a SEPARATE authoring/execution line. It reads and
  * writes only merchant-owned registry rows and executes on the merchant host
  * catalog, where the engine injects the authenticated merchant predicate on
  * every dataset alias and asserts every returned row (E04).
  */
 const router = express.Router();
+
 export const merchantReportEngineRouter = router;
 
 const engine = getMerchantReportEngine();
@@ -155,7 +188,8 @@ const mimeFor = (fileName: string): string => {
   return "application/octet-stream";
 };
 
-const sha256 = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+/** The spec's content hash, reproducible from the stored `spec_json` (see `specContentSha256`). */
+const sha256 = (value: unknown): string => specContentSha256(value);
 
 async function extractMerchantZip(base64: string | undefined): Promise<{
   filesByName: Map<string, Buffer>;
@@ -722,7 +756,9 @@ router.get("/report-engine/autocomplete/:sourceKey", async (request: Request, re
     query: String(request.query.q ?? ""),
     limit: Math.min(Number(request.query.limit ?? 20) || 20, 50),
     actor: await actorOf(request),
-    dependentValues: { ...(dependentValues ?? {}), merchantId },
+    // Both keys are set by the server, after the client's `dependent`: the merchant is the caller's, and a
+    // user restricted to some applications only finds those (their links and terminals included).
+    dependentValues: { ...(dependentValues ?? {}), merchantId, applicationIds: applicationScopeOf(request) ?? [] },
   });
   response.json({ items });
 });
@@ -1240,6 +1276,10 @@ router.post("/report-engine/studio/preview", async (request: Request, response: 
     response.json({ verification, bundle, mode: "MOCK" });
     return;
   }
+  // A LIVE preview reads data, so a user restricted to some applications gets the same rule as on execute:
+  // merchant-wide models are refused and the rest is narrowed to their applications. MOCK reads no stored data.
+  const previewApplicationIds = applicationScopeOf(request);
+  assertSpecFitsApplicationScope(parsedSpec, previewApplicationIds);
   const inputs = { ...(body.inputs ?? synthesizeDefaultInputs(parsedSpec)), ...(scopeKey ? { [scopeKey]: merchantId } : {}) };
   const liveChrome = engine.resolveChrome({
     spec: parsedSpec,
@@ -1258,7 +1298,7 @@ router.post("/report-engine/studio/preview", async (request: Request, response: 
       chromeDefaultScope: "MERCHANT",
       chromeVariables,
       allowConfidentialAmlBypass: false,
-      merchantScope: { merchantId },
+      merchantScope: { merchantId, applicationIds: previewApplicationIds },
     });
     response.json({ verification, bundle, mode: "LIVE" });
   } catch (error) {
@@ -1846,6 +1886,8 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
     throw new ApiError(501, "SERVER_PDF_NOT_CONFIGURED", "The optional server-side PDF renderer is not configured");
   }
 
+  const applicationIds = applicationScopeOf(request);
+  assertSpecFitsApplicationScope(spec, applicationIds);
   const chromeState = ownRow
     ? (await loadMerchantChromeState(merchantId)).combined
     : (await loadChromeRegistryState());
@@ -1880,7 +1922,7 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
     .map((entry) => `${entry.scope ?? "PLATFORM"}:${entry.spec.chrome.chrome_type}:${entry.spec.chrome.code}:v${entry.version ?? 0}:${entry.isDefaultGlobal ? 1 : 0}${entry.isDefaultForMerchant ? 1 : 0}`)
     .sort()
     .join("|");
-  const cacheKey = merchantCacheKey({ merchantId, spec, inputs: forcedInputs, chromeFingerprint });
+  const cacheKey = merchantCacheKey({ merchantId, spec, inputs: forcedInputs, applicationIds, chromeFingerprint });
   const cached = readMerchantCache<ReportExecutionBundle>(cacheKey);
   if (cached) {
     release();
@@ -1903,6 +1945,7 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
       allowConfidentialAmlBypass: false,
       merchantScope: {
         merchantId,
+        applicationIds,
         onViolation: async (info) => {
           await writeAudit(client as never, {
             data: {

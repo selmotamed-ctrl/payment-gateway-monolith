@@ -44,7 +44,7 @@ tests:
   - merchant-back/test/security-regressions.test.ts
   - checkout-back/test/security-regressions.test.ts
 gaps:
-  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 40.
+  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 41.
   - LOG_LEVEL is declared but not used by the console or access logger.
   - WORKER_CONCURRENCY and WORKER_REQUEST_TIMEOUT_MS are accepted but not passed to the production worker runtime.
   - Console request-log correlation uses a separate short id from x-request-id.
@@ -278,7 +278,7 @@ and throws if the version is not 40. The check is invoked by `prisma/seed.ts`, `
 
 - `ExpirySweeperWorker` with an inquiry port backed by `platform.engine.inquire`.
 - `PollWorker` with the same inquiry port.
-- `InboundInboxWorker` with a handler that resolves the channel and calls `platform.engine.verifyCallback`.
+- `InboundInboxWorker` with a handler (`createCallbackInboundHandler`) that resolves the channel and calls `platform.engine.verifyCallback`; transient failures are retried, everything else is skipped as before.
 - `OutboxNotificationWorker` with a notification transport (webhook or log).
 - `LedgerInvariantWorker`.
 - `JoinRequestExpiryWorker`.
@@ -371,7 +371,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 5. **The raw body is preserved before JSON parsing.** Webhook signatures and uploaded document bytes must be exact.
 6. **A request id is always returned.** Invalid or missing client values are replaced with a UUID.
 7. **Redis is never authoritative for money.** When Redis is unavailable the cache/velocity adapter falls back to memory and invalidation stays local.
-8. **Schema version 40 is the contract.** Seeders enforce it; migrations are deployed separately.
+8. **Schema version 41 is the contract.** Seeders enforce it; migrations are deployed separately.
 9. **Workers are stateless across nodes.** Coordination is by database claims, not by an in-memory scheduler.
 10. **The admin UI flags are deployment-owned.** A source build uses the frontend defaults; a deployed build receives the deploy engine's values.
 
@@ -400,7 +400,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 | Backup daemon | No | Backup routes return 503 |
 | Notification webhook | No | Log transport reports SENT |
 | Fake Rails | No | Only required by synthetic seeding/seeding routes |
-| Schema version 40 | Yes at seed time | Seeders fail; server boot does not check |
+| Schema version 41 | Yes at seed time | Seeders fail; server boot does not check |
 
 ### 5.3 Config consumers outside the env proxy
 
@@ -549,6 +549,8 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 | :--- | :--- | :--- |
 | `UPLOAD_RATE_LIMIT_MAX` | admin-back | Uploads per address per rate-limit window (default 20). |
 | `LEDGER_RAW_SQL` | core-back | `false` turns the raw-SQL ledger posting path off (default on). |
+| `PG_POOL_CONNECT_TIMEOUT_MS` | core-back | (2026-11-12) node-postgres `connectionTimeoutMillis`, the wait for a pooled connection (default 5000). Unset in production: a caller that cannot get a connection fails fast. `lib/db/waitBudgets.ts`. |
+| `PG_TX_MAX_WAIT_MS` | core-back | (2026-11-12) Prisma interactive-transaction `maxWait`, the wait to start a transaction (`P2028` when exceeded). Unset: each call site keeps its default (Prisma 2000, unit-of-work adapter 2500, workers 5000 to 10000). Set: it replaces them all and becomes the client-wide default. |
 | `FAKE_RAILS_WEBHOOK_ALLOWED_HOSTS` | fake-rails-back | Extra hosts (`host` or `host:port`) a webhook may target; the host of `CORE_INBOUND_BASE_URL` is always allowed. |
 | `PG_APP_USER`, `PG_APP_PASSWORD` | deploy | The non-owner role the deployed application connects as; setting the password enables the split (see `deploy.storage`). |
 

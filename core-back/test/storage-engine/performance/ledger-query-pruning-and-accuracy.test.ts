@@ -737,6 +737,44 @@ describeDb("Ledger query pruning, index-only scans & edge-case accuracy", () => 
     }
   });
 
+  // The 2026-11-10 revision replaced CREATE TABLE IF NOT EXISTS with a check-then-create: two
+  // callers at once (the partition worker on two nodes) both saw the month missing and the second
+  // aborted with duplicate_table. The 24th month (empty, 23 months ahead) is dropped and then
+  // ensured by four callers at once on separate connections.
+  test("EC-15b: concurrent callers all succeed and the recreated partition is complete", async () => {
+    await client.$executeRawUnsafe("SELECT ensure_journal_line_partitions(24)");
+    const [newest] = (await client.$queryRawUnsafe(
+      // The 24th month the function ensures (offset 23, UTC), not merely the newest partition:
+      // another suite may have ensured further ahead.
+      `SELECT format('journal_lines_%s', to_char((date_trunc('month', now() AT TIME ZONE 'UTC') + interval '23 months')::date, 'YYYY_MM')) AS name`,
+    )) as Array<{ name: string }>;
+    expect(newest).toBeDefined();
+    const [counted] = (await client.$queryRawUnsafe(`SELECT count(*)::int AS rows FROM "${newest!.name}"`)) as Array<{ rows: number }>;
+    const lineCount = counted?.rows;
+    expect(lineCount).toBe(0); // 24 months ahead: never written to
+    await client.$executeRawUnsafe(`DROP TABLE "${newest!.name}"`);
+
+    const { PrismaClient } = await import("../../../generated/prisma/client");
+    const { PrismaPg } = await import("@prisma/adapter-pg");
+    const callers = Array.from({ length: 4 }, () =>
+      new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL ?? "", max: 1 }), log: [] }));
+    try {
+      const outcomes = await Promise.allSettled(callers.map((caller) => caller.$executeRawUnsafe("SELECT ensure_journal_line_partitions(24)")));
+      expect(outcomes.map((outcome) => outcome.status === "rejected" ? String((outcome.reason as Error)?.message).slice(0, 160) : "ok"))
+        .toEqual(["ok", "ok", "ok", "ok"]);
+    } finally {
+      await Promise.all(callers.map((caller) => caller.$disconnect()));
+    }
+    const [recreated] = (await client.$queryRawUnsafe(
+      `SELECT c.reloptions AS options,
+              EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = c.oid AND t.tgname = 'pgw_journal_lines_no_truncate' AND NOT t.tgisinternal) AS guarded
+       FROM pg_class c WHERE c.relname = $1`,
+      newest!.name,
+    )) as Array<{ options: string[] | null; guarded: boolean }>;
+    expect((recreated?.options ?? []).join(",")).toContain("fillfactor=100");
+    expect(recreated?.guarded).toBe(true);
+  });
+
   test("EC-17: checkpoints advance every shard, repair recomputes drift and the invariant stays at zero", async () => {
     const wallet = await makeAccount("MERCHANT_WALLET", randomUUID());
     const treasury = await makeAccount("TREASURY");

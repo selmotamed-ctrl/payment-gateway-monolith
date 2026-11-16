@@ -3,8 +3,8 @@ id: platform.security
 title: Security and mTLS
 status: partial
 confidence: high
-last_verified: 2026-11-13
-verified_against: 5a24f6f+working-tree
+last_verified: 2026-11-16
+verified_against: 55fcedd+working-tree
 code:
   - core-back/index.ts
   - core-back/api/middleware/mtlsGuard.ts
@@ -58,7 +58,7 @@ tests:
 gaps:
   - Session JWTs are stateless; there is no session revocation table and no per-call MFA claim enforcement.
   - API-token scopes are stored but not enforced per merchant endpoint.
-  - Merchant internal routes do not use per-route authority guards.
+  - Merchant internal routes use per-route authority guards on the sensitive surfaces (2026-11-16 review); API-token scopes are only enforced on `/external/*`.
   - Google OIDC login returns 501.
   - Storage mTLS certificates are generated but not consumed by PostgreSQL/Redis.
   - The backup daemon certificate environment names are not aligned with core.
@@ -194,7 +194,9 @@ Not every authenticated admin route has a specific authority. `GET /stats/overvi
 
 The admin edge's `requireAuthorities` parses unverified JWT claims only to hide/deny screens early. It normalizes a small role-to-authority alias map for `COMPLIANCE`/`MLRO`. Core is the authority.
 
-Merchant internal routes do not call `requireAuthorities`. They authenticate, require a `merchantId` binding, and use `merchantIdOf(request)` to scope queries. API-token scopes are stored but not checked per endpoint. `requireMerchantScope` is exported from the merchant router but has no production caller. This is a material authorization gap relative to the design.
+Merchant internal routes authenticate, require a `merchantId` binding, and use `merchantIdOf(request)` to scope queries. The sensitive surfaces now call `assertMerchantAuthority` per route (wallets, applications, links, payments, disputes, cash-outs, users, tokens, credential sets, POS, onboarding, webhooks and the report engine), and application-scoped users are narrowed with `withAppScope` / `assertApplicationInScope`. API-token scopes are still a separate, narrower catalogue enforced on `/external/*`; `requireMerchantScope` remains exported for compatibility but has no production caller. As of 2026-11-16, all merchant reads and writes reviewed in the security sweep carry a route guard; new routes must follow the deny-by-default pattern.
+
+The 2026-11-16 sweep also tightened the staff surface: AML mutations (match disposition, case evidence, case proposal, rule creation) require `aml:write` / `compliance:write` (or the COMPLIANCE/MLRO role) rather than the read-level confidential guard, gateway-version configuration writes require the version to be `DRAFT`, operator-case bodies are redacted before they leave core, credential-set and gateway responses no longer select ciphertext columns, and the object-storage KEK has no deterministic production fallback.
 
 Checkout internal routes are intentionally unauthenticated: the long link key and attempt id are capabilities, and the payer must not need an account. The checkout edge validates the shape and forbids monetary fields; core re-validates and resolves the amount from `payment_links.amount`.
 
@@ -475,3 +477,13 @@ Fake Rails tester tokens stay in localStorage (GAP-019 residual); httpOnly cooki
 ## v38 execution-plane security (2026-11-13)
 
 API tokens are bound to a plane: `pg_live_*` is refused on SANDBOX with `401 LIVE_TOKEN_ON_SANDBOX_PLANE` and `pg_test_*` is refused on LIVE with `401 SANDBOX_TOKEN_ON_LIVE_PLANE`; core also compares the token row's `env`. A session minted by Live is accepted on the Sandbox core only after the signed claims are mirrored into the sandbox database (merchant envelope and user with the signed authorities); authorities never come from a header. The edge-to-core channel remains mTLS with the existing per-role client certificates; the sandbox pool uses the same client material but a separate URL set.
+
+## Review of 2026-11-16, second pass
+
+Done on top of `7cc40cf` (the remediation described above), after re-reading the object-storage and sandbox code that came with `master`.
+
+- **Download file names.** Six download routes put a user-supplied file name straight into `Content-Disposition` (KYB document view, AML case evidence, admin and merchant dispute attachments, asset download, reconciliation statement). HTTP header values are Latin-1, so `response.setHeader` threw `ERR_INVALID_CHAR` for any name with a character above U+00FF: a file with an Arabic name could not be downloaded (500), and the "viewed" audit row had already been written. `lib/contentDisposition.ts` builds the value for every such route: a printable-ASCII `filename` fallback (quotes, backslashes, control characters and path separators removed, so the name can neither leave the quoted string nor start a header) plus `filename*=UTF-8''...` (RFC 6266 / RFC 5987) carrying the real name. Fixed, generated names (`report-<id>.docx`, `statement-<month>.csv`) stay hand-written.
+- **Sandbox control routes enforce merchant authorities.** `/internal/sandbox/*` checked only that the caller was signed in and that the process was the SANDBOX plane. Any merchant user, a read-only one included, could wipe the merchant's sandbox (`POST /merchant/reset`), set wallet balances, post sandbox refunds and disputes, and obtain a `pg_test_` API token from `POST /merchant/seed-demo` without `token:manage`. A router-level guard (`assertSandboxControlAccess`) now requires a merchant read grant (`merchant:read`, `merchant:write`, `payment:read` or `link:read`) for a read and `merchant:write` for anything else; staff principals keep the routes' own checks. Still open: the demo seeder issues its token to a holder of `merchant:write`, not specifically `token:manage`.
+- **KYB document view.** Core's own response now carries `Content-Security-Policy: sandbox; default-src 'none'`, as the admin edge already set, so an uploaded document cannot run script for any other caller of core.
+- **Read and found sound:** the edge path guard (`assertCorePath`: no traversal, channel prefix) with core's certificate-to-channel binding (`requireEdgeIdentity`), so the sandbox proxies cannot be steered to another channel; the plane boot gate and `system_execution_plane` (the migration stamps `LIVE` by default); the attachment download headers (`attachment`, `nosniff`, sandbox CSP); the admin object-storage projections.
+- **Not reviewed in depth:** the object-storage SDK internals (GC against bind and legal hold, AAD binding, KEK rewrap) and the Fake Rails control client.

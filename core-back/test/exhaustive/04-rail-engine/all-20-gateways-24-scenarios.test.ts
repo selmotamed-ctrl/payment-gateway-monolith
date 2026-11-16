@@ -472,7 +472,8 @@ const SCENARIOS: readonly Scenario[] = [
       full.scripts.REFUND = [successStep({ status: "SUCCESS" }, "REFUND")];
       const fullResult = await full.engine.refund(full.attempt, "100.0000", "adj-full");
       expect(fullResult.status).toBe("REFUNDED");
-      expect(full.calls.ledgerScenario).toHaveLength(1);
+      // The refund is booked by the governance finalizer from the approved adjustment, not here.
+      expect(full.calls.ledgerScenario).toHaveLength(0);
 
       const partial = createHarness(gateway);
       partial.attempt.status = "SUCCEEDED";
@@ -495,7 +496,10 @@ const SCENARIOS: readonly Scenario[] = [
       h.attempt.settledAmount = "100.0000";
       const result = await h.engine.refund(h.attempt, "10.0000", "adj-unknown");
       expect(result.status).toBe("UNKNOWN");
-      expect(h.attempt.adjustmentState).toBe("EXECUTING");
+      // An unconfirmed refund leaves the attempt as it was; the adjustment stays EXECUTING
+      // on its own row until the reconciliation decides.
+      expect(h.attempt.status).toBe("SUCCEEDED");
+      expect(h.calls.ledgerScenario).toHaveLength(0);
       expect(h.calls.scheduled).toHaveLength(1);
     },
   },

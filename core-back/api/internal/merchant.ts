@@ -7,6 +7,7 @@ import { client } from "../../prisma/client";
 import { assertCommerceActive, assertPosTerminalActive } from "../../lib/commerceStatus";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { ApiError, parseOrThrow } from "../../lib/error";
+import { contentDisposition } from "../../lib/contentDisposition";
 import { detectDuplicateFlags, nationalIdHash, payoutAccountHash } from "../../lib/joinRequestOnboarding";
 import { payoutOwnerMismatch } from "../../lib/kybReview";
 import { queueKybNotification } from "../../lib/kybNotifications";
@@ -663,14 +664,32 @@ const auditMerchantAction = async (
 };
 
 /**
- * The applications a scoped merchant user (`app_scope_ids`) may touch, or `null` when the user is
- * not scoped. API tokens are bound to one application by the token itself.
+ * The applications the principal may touch, or `null` when it is not restricted.
+ * A merchant user is restricted by `app_scope_ids`. An API token is restricted to the ONE
+ * application it was issued for: the external API used to check only the merchant, so a token
+ * issued by (or for) one application could create, read and cancel the links and read the
+ * payments of every other application of the merchant.
  */
 const appScopeOf = (request: Request): readonly string[] | null => {
   const principal = principalOf(request);
+  if (principal.kind === "apiToken") {
+    return principal.applicationId ? [principal.applicationId] : null;
+  }
   if (principal.kind !== "session") return null;
   const ids = principal.appScopeIds ?? [];
   return ids.length > 0 ? ids : null;
+};
+
+const APP_SCOPE_MESSAGE = "The principal is restricted to specific applications and this one is not among them";
+
+/**
+ * True when a user row is restricted to applications that ALL lie inside `scope`. An unrestricted
+ * user (no `app_scope_ids`) is never inside a scope: a restricted manager must not be able to
+ * change, suspend or re-authorise someone who sees more of the merchant than they do.
+ */
+const userScopeWithin = (scope: readonly string[], userAppScopeIds: unknown): boolean => {
+  const ids = Array.isArray(userAppScopeIds) ? userAppScopeIds.map(String) : [];
+  return ids.length > 0 && ids.every((id) => scope.includes(id));
 };
 
 /** 403 when a scoped user addresses an application outside their scope. */
@@ -1006,6 +1025,7 @@ router.use(merchantReportEngineRouter);
 const OPTION_LIMIT = 100;
 
 router.get("/options/:kind", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["merchant:read", "merchant:write", "link:read", "payment:read"]);
   const merchantId = merchantIdOf(request);
   const kind = String(request.params.kind ?? "");
   const rawSearch = typeof request.query.search === "string" ? request.query.search.trim() : "";
@@ -1015,7 +1035,8 @@ router.get("/options/:kind", async (request: Request, response: Response) => {
 
   switch (kind) {
     case "applications": {
-      const rows = await client.application.findMany({ where: { merchantId, ...(rawSearch ? { name: contains! } : {}) }, orderBy: { name: "asc" }, take: limit, select: { id: true, name: true, status: true } });
+      const where = withAppScope(request, { merchantId, ...(rawSearch ? { name: contains! } : {}) }, "id");
+      const rows = await client.application.findMany({ where, orderBy: { name: "asc" }, take: limit, select: { id: true, name: true, status: true } });
       items = rows.map((row) => ({ value: row.id, title: row.name, subtitle: row.status }));
       break;
     }
@@ -1030,7 +1051,7 @@ router.get("/options/:kind", async (request: Request, response: Response) => {
       break;
     }
     case "rails": {
-      const rows = await client.paymentAttempt.findMany({ where: { merchantId }, select: { railId: true, rail: { select: { code: true, nameEn: true } } }, distinct: ["railId"], take: 200 });
+      const rows = await client.paymentAttempt.findMany({ where: withAppScope(request, { merchantId }), select: { railId: true, rail: { select: { code: true, nameEn: true } } }, distinct: ["railId"], take: 200 });
       const seen = new Set<string>();
       for (const row of rows) {
         const code = row.rail?.code ?? "";
@@ -1061,12 +1082,55 @@ router.get("/options/:kind", async (request: Request, response: Response) => {
 });
 
 
+/**
+ * What a merchant may see of its own join request. The row is the reviewer's working record: it also holds
+ * the screening outcome (`decisionNotes` is "…a confirmed watch list match" after a hit, `screeningId`,
+ * `lastScreenedAt`), the duplicate flags naming OTHER merchants, the proposed risk tier, the four-eyes
+ * reasons, the review checklist and the assigned reviewer. Returning the row told the merchant that it had
+ * matched a watch list (tipping-off) and leaked other tenants. Only the fields below leave core; anything
+ * new on the model stays internal until it is added here on purpose.
+ */
+const MERCHANT_JOIN_REQUEST_SELECT = {
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  status: true,
+  onboardingChannel: true,
+  submittedAt: true,
+  // The outcome and its reason CODE are the merchant's to know; the free-text notes are staff-only.
+  decision: true,
+  decisionReasonCode: true,
+  // What the reviewer asked the merchant for, and what the merchant itself entered.
+  infoRequestJson: true,
+  profileJson: true,
+  resubmissionOfId: true,
+  kybDocuments: {
+    orderBy: { createdAt: "asc" as const },
+    // No storage key or object id, no reviewer, review notes, duplicate justification or scanner detail.
+    select: {
+      id: true,
+      createdAt: true,
+      subjectType: true,
+      docType: true,
+      originalFileName: true,
+      mime: true,
+      sizeBytes: true,
+      status: true,
+      avStatus: true,
+      expiresOn: true,
+      rejectionReasonCode: true,
+      statusChangedAt: true,
+    },
+  },
+} as const;
+
 router.get("/onboarding/join-request", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["onboarding:write", "merchant:read", "merchant:write"]);
   const merchantId = merchantIdOf(request);
   const joinRequest = await client.joinRequest.findFirst({
     where: { merchantId },
     orderBy: { createdAt: "desc" },
-    include: { kybDocuments: true },
+    select: MERCHANT_JOIN_REQUEST_SELECT,
   });
   response.json({ joinRequest });
 });
@@ -1119,11 +1183,24 @@ router.put("/onboarding/join-request", async (request: Request, response: Respon
 });
 
 router.get("/onboarding/kyb-revalidations", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["onboarding:write", "merchant:read", "merchant:write"]);
   const merchantId = merchantIdOf(request);
   const requests = await client.kybRevalidationRequest.findMany({
     where: { merchantId },
     orderBy: [{ status: "asc" }, { requestedAt: "desc" }],
-    include: {
+    // The reviewer's notes and requester stay internal; the merchant sees what it was asked for and the
+    // document metadata only.
+    select: {
+      id: true,
+      createdAt: true,
+      updatedAt: true,
+      docType: true,
+      reasonCode: true,
+      message: true,
+      status: true,
+      requestedAt: true,
+      dueAt: true,
+      fulfilledAt: true,
       sourceDocument: { select: { id: true, docType: true, originalFileName: true, status: true, expiresOn: true } },
       fulfilledDocument: { select: { id: true, docType: true, status: true, avStatus: true } },
     },
@@ -1349,10 +1426,36 @@ router.post("/onboarding/kyb-documents", async (request: Request, response: Resp
   });
 });
 
+/**
+ * Beneficial owners are identity data: reading them needs the onboarding authority (or the merchant read
+ * grants), like writing them does. The row also carries the encrypted national id, its lookup hash and the
+ * owner's screening status; none of those may reach the merchant (the status of a screened owner is a
+ * tipping-off channel, exactly like the join request's notes).
+ */
+const MERCHANT_BENEFICIAL_OWNER_SELECT = {
+  id: true,
+  createdAt: true,
+  fullNameAr: true,
+  fullNameEn: true,
+  dateOfBirth: true,
+  nationality: true,
+  ownershipPercent: true,
+  role: true,
+  pepDeclared: true,
+  active: true,
+  validFrom: true,
+  validTo: true,
+} as const;
+
 router.get("/onboarding/beneficial-owners", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), ["onboarding:write", "merchant:read", "merchant:write"]);
   const merchantId = merchantIdOf(request);
-  const owners = await client.beneficialOwner.findMany({ where: { merchantId } });
-  response.json({ owners });
+  const owners = await client.beneficialOwner.findMany({
+    where: { merchantId },
+    orderBy: { createdAt: "asc" },
+    select: MERCHANT_BENEFICIAL_OWNER_SELECT,
+  });
+  response.json({ owners: owners.map((owner) => ({ ...owner, fullName: owner.fullNameAr })) });
 });
 
 router.post("/onboarding/beneficial-owners", async (request: Request, response: Response) => {
@@ -1386,7 +1489,8 @@ router.post("/onboarding/beneficial-owners", async (request: Request, response: 
       validFrom: new Date(),
     },
   });
-  response.status(201).json({ id: owner.id, fullName: owner.fullNameAr, screeningStatus: owner.screeningStatus });
+  // Screening status is an AML/tipping-off signal and stays internal.
+  response.status(201).json({ id: owner.id, fullName: owner.fullNameAr });
 });
 
 router.delete("/onboarding/beneficial-owners/:id", async (request: Request, response: Response) => {
@@ -1433,21 +1537,17 @@ router.post("/onboarding/submit", async (request: Request, response: Response) =
       503,
       "SCREENING_UNAVAILABLE",
       "The AML screening provider is unavailable; the onboarding request cannot be submitted",
-      {
-        screeningId: screening.screeningId,
-        joinRequestStatus: screening.joinRequestStatus,
-      },
+      { joinRequestStatus: screening.joinRequestStatus },
     );
   }
   if (screening.blocked) {
+    // Tip-off safe: a screening hit is never disclosed to the applicant. The
+    // case and its reasons stay in the compliance record; the merchant only
+    // learns that the request is held for review.
     throw new ApiError(
-      403,
-      "AML_CONFIRMED_MATCH",
-      "The onboarding screening produced a confirmed watch list match",
-      {
-        screeningId: screening.screeningId,
-        amlCaseId: screening.amlCaseId,
-      },
+      409,
+      "ONBOARDING_UNDER_REVIEW",
+      "The onboarding request cannot be submitted at this time; the compliance team will follow up",
     );
   }
 
@@ -1463,15 +1563,13 @@ router.post("/onboarding/submit", async (request: Request, response: Response) =
     },
   });
 
+  // The screening result, its id, the four-eyes reasons and the policy are
+  // internal risk signals: returning them would tell the applicant whether it
+  // matched a watch list and which internal escalation fired.
   response.json({
     id: joinRequest.id,
-    status: screening.joinRequestStatus,
-    slaDueAt: joinRequest.slaDueAt,
-    screeningId: screening.screeningId,
-    screeningResult: screening.result,
-    fourEyesRequired: submitted.fourEyesRequired,
-    fourEyesReasons: submitted.fourEyesReasons ?? [],
-    fourEyesPolicy: fourEyes.policy,
+    status: submitted.status,
+    slaDueAt: submitted.slaDueAt,
   });
 });
 
@@ -1725,6 +1823,15 @@ router.patch("/applications/:id", async (request: Request, response: Response) =
     throw new ApiError(404,APPLICATION_NOT_FOUND_CODE, "The application does not exist");
   }
   assertApplicationInScope(request, application.id);
+  // The wallet must be this merchant's (and the sandbox self-service path
+  // writes it directly, so it needs the same check the Live approval path
+  // performs when it executes).
+  if (body.assignedWalletId !== undefined) {
+    const wallet = await client.wallet.findFirst({ where: { id: body.assignedWalletId, merchantId } });
+    if (!wallet) {
+      throw new ApiError(404, "WALLET_NOT_FOUND", "The assigned wallet does not exist");
+    }
+  }
   const plane = getExecutionPlane();
   if (plane !== "SANDBOX" && body.status !== undefined) {
     throw new ApiError(
@@ -2149,6 +2256,20 @@ router.post("/disputes/:id/evidence", async (request: Request, response: Respons
   response.json({ id: dispute.id, status: "EVIDENCE_SUBMITTED" });
 });
 
+/**
+ * The dispute, only if it belongs to the merchant AND to an application the caller may see. Every dispute
+ * route narrows by the caller's application scope (`app_scope_ids`); the attachment routes must too, or a
+ * user restricted to some applications could list, download and delete the evidence of the others.
+ */
+const disputeInCallerScope = async (request: Request, merchantId: string, id: string) => {
+  const scope = appScopeOf(request);
+  const dispute = await client.dispute.findFirst({
+    where: { id, attempt: { merchantId, ...(scope ? { applicationId: { in: [...scope] } } : {}) } },
+  });
+  if (!dispute) throw new ApiError(404, "DISPUTE_NOT_FOUND", "The dispute does not exist");
+  return dispute;
+};
+
 const disputeAttachmentRow = (row: Record<string, any>) => ({
   id: row.id,
   disputeId: row.disputeId,
@@ -2167,8 +2288,7 @@ router.get("/disputes/:id/attachments", async (request: Request, response: Respo
   assertMerchantAuthority(principalOf(request), ["payment:read", "dispute:respond"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
-  const dispute = await client.dispute.findFirst({ where: { id, attempt: { merchantId } } });
-  if (!dispute) throw new ApiError(404, "DISPUTE_NOT_FOUND", "The dispute does not exist");
+  await disputeInCallerScope(request, merchantId, id);
   const attachments = await client.disputeAttachment.findMany({
     where: { disputeId: id, merchantId },
     orderBy: { createdAt: "desc" },
@@ -2253,6 +2373,7 @@ router.get("/disputes/:id/attachments/:attachmentId/content", async (request: Re
     z.object({ id: z.string().min(1).max(64), attachmentId: z.string().min(1).max(64) }).strict(),
     request.params,
   );
+  await disputeInCallerScope(request, merchantId, id);
   const attachment = await client.disputeAttachment.findFirst({
     where: { id: attachmentId, disputeId: id, merchantId },
   });
@@ -2269,7 +2390,7 @@ router.get("/disputes/:id/attachments/:attachmentId/content", async (request: Re
     holderContext: { holderType: "DISPUTE_ATTACHMENT", holderId: attachment.id },
   });
   response.setHeader("Content-Type", stored.detectedMimeType);
-  response.setHeader("Content-Disposition", `attachment; filename="${(stored.originalFilename ?? "evidence").replace(/["\r\n]/g, "_")}"`);
+  response.setHeader("Content-Disposition", contentDisposition("attachment", stored.originalFilename, "evidence"));
   response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
   response.setHeader("Cache-Control", "private, no-store");
   response.setHeader("X-Content-Type-Options", "nosniff");
@@ -2284,6 +2405,7 @@ router.delete("/disputes/:id/attachments/:attachmentId", async (request: Request
     z.object({ id: z.string().min(1).max(64), attachmentId: z.string().min(1).max(64) }).strict(),
     request.params,
   );
+  await disputeInCallerScope(request, merchantId, id);
   const attachment = await client.disputeAttachment.findFirst({
     where: { id: attachmentId, disputeId: id, merchantId },
   });
@@ -2314,7 +2436,24 @@ router.get("/cashouts", async (request: Request, response: Response) => {
   });
   const where = { merchantId, ...built.where } as never;
   const [cashouts, total] = await Promise.all([
-    client.cashoutRequest.findMany({ where, orderBy: built.orderBy as never, skip: built.skip, take: built.take }),
+    // The payout bank details, the idempotency key and the requesting user id
+    // are internal: a read-only merchant user must not harvest another user's
+    // payout account or replay key from the list.
+    client.cashoutRequest.findMany({
+      where,
+      orderBy: built.orderBy as never,
+      skip: built.skip,
+      take: built.take,
+      select: {
+        id: true,
+        createdAt: true,
+        updatedAt: true,
+        walletId: true,
+        amount: true,
+        state: true,
+        adjustmentId: true,
+      },
+    }),
     client.cashoutRequest.count({ where }),
   ]);
   response.json(listResponse("cashouts", cashouts.map((entry) => ({ ...entry, requestedAt: entry.createdAt })), total, built));
@@ -2501,11 +2640,12 @@ router.get("/tokens", async (request: Request, response: Response) => {
     sortable: { name: "name", lastUsedAt: "lastUsedAt", createdAt: "createdAt" },
     defaultSort: { createdAt: "desc" },
   });
-  const where = {
+  // A user restricted to some applications only sees (and below, only manages) their tokens.
+  const where = withAppScope(request, {
     merchantId,
     ...built.where,
     ...(rawRevoked === "true" ? { revokedAt: { not: null } } : rawRevoked === "false" ? { revokedAt: null } : {}),
-  } as never;
+  });
   const [tokens, total] = await Promise.all([
     client.accessToken.findMany({ where, orderBy: built.orderBy as never, include: { ips: true }, skip: built.skip, take: built.take }),
     client.accessToken.count({ where }),
@@ -2550,9 +2690,18 @@ router.post("/tokens", async (request: Request, response: Response) => {
       throw new ApiError(400, "TOKEN_EXPIRY_INVALID", "The expiry must be in the future and within two years");
     }
   }
+  // The token is bound to one application. A user restricted to some applications can only issue
+  // a token for one of them: before this check such a user obtained a token for an arbitrary
+  // application of the merchant (the default was "any application"), and the token then worked
+  // on the whole merchant.
+  const issuerScope = appScopeOf(request);
+  if (body.applicationId) assertApplicationInScope(request, body.applicationId);
   const application = body.applicationId
     ? await client.application.findFirst({ where: { id: body.applicationId, merchantId } })
-    : await client.application.findFirst({ where: { merchantId } });
+    : await client.application.findFirst({
+        where: { merchantId, ...(issuerScope ? { id: { in: [...issuerScope] } } : {}) },
+        orderBy: { createdAt: "asc" },
+      });
   if (!application) {
     throw new ApiError(409, "APPLICATION_REQUIRED", "An application is required to issue an access token");
   }
@@ -2605,6 +2754,7 @@ router.put("/tokens/:id/ips", async (request: Request, response: Response) => {
   if (!token) {
     throw new ApiError(404, "ACCESS_TOKEN_NOT_FOUND", "The access token does not exist");
   }
+  assertApplicationInScope(request, token.applicationId);
   await client.$transaction(async (tx) => {
     const previousCidrs = (await tx.accessTokenIp.findMany({ where: { tokenId: token.id }, select: { cidr: true } })).map((row) => row.cidr);
     await tx.accessTokenIp.deleteMany({ where: { tokenId: token.id } });
@@ -2636,6 +2786,7 @@ router.delete("/tokens/:id", async (request: Request, response: Response) => {
   if (!token) {
     throw new ApiError(404, "ACCESS_TOKEN_NOT_FOUND", "The access token does not exist");
   }
+  assertApplicationInScope(request, token.applicationId);
   const revokedAt = new Date();
   await client.$transaction(async (tx) => {
     await tx.accessToken.update({ where: { id: token.id }, data: { revokedAt } });
@@ -2924,6 +3075,10 @@ router.post("/users", async (request: Request, response: Response) => {
     throw new ApiError(409, "USER_ALREADY_EXISTS", "A user with this email already exists");
   }
   const passwordHash = await hashPassword(body.password);
+  // A creator restricted to some applications hands the SAME restriction to the user they create.
+  // The new user used to be unrestricted: a restricted manager created an account (choosing its
+  // password), activated it and signed in with it to see the whole merchant.
+  const creatorScope = appScopeOf(request);
   const user = await client.$transaction(async (tx) => {
     const created = await tx.user.create({
       data: {
@@ -2933,6 +3088,7 @@ router.post("/users", async (request: Request, response: Response) => {
         passwordHash,
         role: body.role,
         authoritiesMap: body.authoritiesMap,
+        ...(creatorScope ? { appScopeIds: [...creatorScope] } : {}),
         mfaRequired: true,
         status: "INVITED",
         invitedById: creator.userId,
@@ -2946,7 +3102,12 @@ router.post("/users", async (request: Request, response: Response) => {
         entityType: "USER",
         entityId: created.id,
         beforeJson: {},
-        afterJson: { role: created.role, authoritiesMap: body.authoritiesMap, status: created.status },
+        afterJson: {
+          role: created.role,
+          authoritiesMap: body.authoritiesMap,
+          status: created.status,
+          ...(creatorScope ? { appScopeIds: [...creatorScope] } : {}),
+        },
       },
     });
     return created;
@@ -2979,6 +3140,12 @@ const applyMerchantUserPatch = async (
   }
   if (user.role === "MERCHANT_ADMIN" && principal.role !== "MERCHANT_ADMIN") {
     throw new ApiError(403, "ROLE_ESCALATION_FORBIDDEN", "Only a merchant administrator can change an administrator");
+  }
+  // A manager restricted to some applications only manages users restricted to (a subset of) the
+  // same applications: never an unrestricted user, never one of another application.
+  const managerScope = appScopeOf(request);
+  if (managerScope && !userScopeWithin(managerScope, user.appScopeIds)) {
+    throw new ApiError(403, "APP_SCOPE_VIOLATION", APP_SCOPE_MESSAGE);
   }
   if (body.authoritiesMap) {
     assertKnownMerchantAuthorities(body.authoritiesMap);
@@ -3030,7 +3197,36 @@ router.patch("/users/:id", async (request: Request, response: Response) => {
   await applyMerchantUserPatch(request, response, merchantId, id, body);
 });
 
+/**
+ * A screen as the portal may see it. `authTokenHash` is the stored half of the screen's bearer secret and
+ * never leaves core (the token itself is shown once, when the screen is paired).
+ */
+const POS_SCREEN_SELECT = {
+  id: true,
+  createdAt: true,
+  screenCode: true,
+  realtimeRoomId: true,
+  lastActiveAt: true,
+} as const;
+
+/** POS reads need a POS or merchant read grant, like every other merchant read. */
+const POS_READ_AUTHORITIES = ["pos:manage", "merchant:read", "merchant:write"];
+
+/**
+ * The terminal, only inside the caller's merchant; a user restricted to some applications
+ * (`app_scope_ids`) gets `403 APP_SCOPE_VIOLATION` for a terminal of another application.
+ */
+const posTerminalInCallerScope = async (request: Request, merchantId: string, id: string) => {
+  const terminal = await client.posTerminal.findFirst({ where: { id, application: { merchantId } } });
+  if (!terminal) {
+    throw new ApiError(404, "POS_TERMINAL_NOT_FOUND", "The POS terminal does not exist");
+  }
+  assertApplicationInScope(request, terminal.applicationId);
+  return terminal;
+};
+
 router.get("/pos/terminals", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), POS_READ_AUTHORITIES);
   const merchantId = merchantIdOf(request);
   const built = buildListQuery(request.query, {
     search: ["name", "location"],
@@ -3039,9 +3235,9 @@ router.get("/pos/terminals", async (request: Request, response: Response) => {
     sortable: { name: "name", location: "location", status: "status" },
     defaultSort: { createdAt: "desc" },
   });
-  const where = { application: { merchantId }, ...built.where } as never;
+  const where = withAppScope(request, { application: { merchantId }, ...built.where });
   const [terminals, total] = await Promise.all([
-    client.posTerminal.findMany({ where, orderBy: built.orderBy as never, include: { screens: true }, skip: built.skip, take: built.take }),
+    client.posTerminal.findMany({ where, orderBy: built.orderBy as never, include: { screens: { select: POS_SCREEN_SELECT } }, skip: built.skip, take: built.take }),
     client.posTerminal.count({ where }),
   ]);
   response.json(listResponse("terminals", terminals, total, built));
@@ -3064,6 +3260,7 @@ router.post("/pos/terminals", async (request: Request, response: Response) => {
   if (!application) {
     throw new ApiError(404, "APPLICATION_NOT_FOUND", "The application does not exist");
   }
+  assertApplicationInScope(request, application.id);
   const terminal = await client.posTerminal.create({
     data: {
       applicationId: application.id,
@@ -3076,15 +3273,17 @@ router.post("/pos/terminals", async (request: Request, response: Response) => {
 });
 
 router.get("/pos/terminals/:id", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), POS_READ_AUTHORITIES);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const terminal = await client.posTerminal.findFirst({
     where: { id, application: { merchantId } },
-    include: { screens: true },
+    include: { screens: { select: POS_SCREEN_SELECT } },
   });
   if (!terminal) {
     throw new ApiError(404, "POS_TERMINAL_NOT_FOUND", "The POS terminal does not exist");
   }
+  assertApplicationInScope(request, terminal.applicationId);
   response.json({ terminal });
 });
 
@@ -3102,10 +3301,7 @@ router.patch("/pos/terminals/:id", async (request: Request, response: Response) 
       .strict(),
     request.body,
   );
-  const terminal = await client.posTerminal.findFirst({ where: { id, application: { merchantId } } });
-  if (!terminal) {
-    throw new ApiError(404, "POS_TERMINAL_NOT_FOUND", "The POS terminal does not exist");
-  }
+  const terminal = await posTerminalInCallerScope(request, merchantId, id);
   // A BLOCKED terminal is a staff decision: only an approved admin
   // reactivation lifts it, never the merchant's own PATCH.
   if (terminal.status === "BLOCKED" && body.status !== undefined && body.status !== "BLOCKED") {
@@ -3122,10 +3318,7 @@ router.post("/pos/terminals/:id/screens", async (request: Request, response: Res
   assertMerchantAuthority(principalOf(request), ["pos:manage"]);
   const merchantId = merchantIdOf(request);
   const { id } = parseOrThrow(idSchema, request.params);
-  const terminal = await client.posTerminal.findFirst({ where: { id, application: { merchantId } } });
-  if (!terminal) {
-    throw new ApiError(404, "POS_TERMINAL_NOT_FOUND", "The POS terminal does not exist");
-  }
+  const terminal = await posTerminalInCallerScope(request, merchantId, id);
   assertPosTerminalActive(terminal.status);
   const screenCode = `scr_${randomBytes(9).toString("base64url")}`;
   const authToken = randomBytes(24).toString("base64url");
@@ -3147,15 +3340,17 @@ router.post("/pos/terminals/:id/screens", async (request: Request, response: Res
 });
 
 router.get("/pos/screens/:screenCode/stream", async (request: Request, response: Response) => {
+  assertMerchantAuthority(principalOf(request), POS_READ_AUTHORITIES);
   const merchantId = merchantIdOf(request);
   const screenCode = String(request.params.screenCode ?? "");
   const screen = await client.posScreen.findFirst({
     where: { screenCode, pos: { application: { merchantId } } },
-    select: { id: true, posId: true, pos: { select: { status: true } } },
+    select: { id: true, posId: true, pos: { select: { status: true, applicationId: true } } },
   });
   if (!screen) {
     throw new ApiError(404, "POS_SCREEN_NOT_FOUND", "The POS screen does not exist");
   }
+  assertApplicationInScope(request, screen.pos.applicationId);
   // A screen of an inactive or blocked terminal does not authenticate.
   assertPosTerminalActive(screen.pos.status);
   let lastHeartbeatAt = 0;
@@ -3169,8 +3364,17 @@ router.get("/pos/screens/:screenCode/stream", async (request: Request, response:
       response.write(`event: attempts\ndata: ${JSON.stringify(attempts)}\n\n`);
     }
   };
-  const unsubscribeAttempt = subscribeRealtimeAttempt((event) => {
+  const unsubscribeAttempt = subscribeRealtimeAttempt(async (event) => {
     if (response.writableEnded || event.merchantId !== merchantId) {
+      return;
+    }
+    // The realtime event carries only the merchant id. Re-read the attempt so a
+    // screen never streams an attempt of another application of the merchant.
+    const inScreen = await client.paymentAttempt.findFirst({
+      where: { id: event.attemptId, merchantId, applicationId: screen.pos.applicationId },
+      select: { id: true },
+    });
+    if (!inScreen) {
       return;
     }
     sendAttempts([{
@@ -3181,6 +3385,9 @@ router.get("/pos/screens/:screenCode/stream", async (request: Request, response:
   });
   const unsubscribePos = subscribeRealtimePos((event) => {
     if (response.writableEnded || event.merchantId !== merchantId) {
+      return;
+    }
+    if (event.applicationId && event.applicationId !== screen.pos.applicationId) {
       return;
     }
     sendAttempts([]);
@@ -3206,7 +3413,7 @@ router.get("/pos/screens/:screenCode/stream", async (request: Request, response:
     // rather than through the applications relation, and never ship the
     // encrypted context or customer fields to the screen.
     const attempts = await client.paymentAttempt.findMany({
-      where: { merchantId },
+      where: { merchantId, applicationId: screen.pos.applicationId },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 10,
       select: merchantAttemptListSelect,
@@ -3372,7 +3579,8 @@ router.post("/external/links", async (request: Request, response: Response) => {
     throw new ApiError(403, "API_TOKEN_REQUIRED", "An API access token is required for the external API");
   }
   const body = parseOrThrow(linkCreateSchema, request.body);
-  const { link, visible } = await createLink(principal.merchantId as string, body);
+  // The token's application: the link is created in it, and naming another one is refused.
+  const { link, visible } = await createLink(principal.merchantId as string, body, appScopeOf(request));
   await publishRealtimePos({
     merchantId: principal.merchantId as string,
     applicationId: link.applicationId,
@@ -3395,8 +3603,9 @@ router.get("/external/links/:key", async (request: Request, response: Response) 
   assertMerchantAuthority(principal, ["link:read","link:write"]);
   const merchantId = requireMerchantId(principal);
   const key = String(request.params.key ?? "");
+  // Narrowed to the token's application: another application's link does not exist for this token.
   const link = await client.paymentLink.findFirst({
-    where: { key, application: { merchantId } },
+    where: withAppScope(request, { key, application: { merchantId } }),
   });
   if (!link) {
     throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
@@ -3416,8 +3625,9 @@ router.post("/external/links/:key/cancel", async (request: Request, response: Re
   assertMerchantAuthority(principal, ["link:write"]);
   const merchantId = requireMerchantId(principal);
   const key = String(request.params.key ?? "");
+  // Narrowed to the token's application: another application's link does not exist for this token.
   const link = await client.paymentLink.findFirst({
-    where: { key, application: { merchantId } },
+    where: withAppScope(request, { key, application: { merchantId } }),
   });
   if (!link) {
     throw new ApiError(404, "PAYMENT_LINK_NOT_FOUND", "The payment link does not exist");
@@ -3432,7 +3642,7 @@ router.get("/external/payments/:reference", async (request: Request, response: R
   const merchantId = requireMerchantId(principal);
   const reference = String(request.params.reference ?? "");
   const attempt = await client.paymentAttempt.findFirst({
-    where: { reference, merchantId },
+    where: withAppScope(request, { reference, merchantId }),
   });
   if (!attempt) {
     throw new ApiError(404, "PAYMENT_ATTEMPT_NOT_FOUND", "The payment attempt does not exist");
@@ -3565,11 +3775,16 @@ router.get("/webhooks/deliveries", async (request: Request, response: Response) 
 router.post("/webhooks/deliveries/:id/redeliver", async (request: Request, response: Response) => {
   assertWebhookWrite(request);
   const { id } = parseOrThrow(z.object({ id: z.string().uuid() }), request.params);
-  if (appScopeOf(request)) {
-    const deliveries = await webhookService.listDeliveries({ merchantId: merchantIdOf(request), limit: 200 });
-    const row = deliveries.find((delivery) => delivery.id === id);
-    if (row) await scopedEndpoint(request, String(row.endpointId));
+  // Resolve the delivery directly (not from a page of the latest 200), so a
+  // scoped user can never redeliver another application's delivery by id.
+  const delivery = await client.merchantWebhookDelivery.findFirst({
+    where: { id, merchantId: merchantIdOf(request) },
+    select: { endpointId: true },
+  });
+  if (!delivery) {
+    throw new ApiError(404, "WEBHOOK_DELIVERY_NOT_FOUND", "The delivery does not exist");
   }
+  await scopedEndpoint(request, delivery.endpointId);
   response.status(202).json(await webhookService.redeliver({ merchantId: merchantIdOf(request), deliveryId: id, actor: webhookActor(request) }));
 });
 

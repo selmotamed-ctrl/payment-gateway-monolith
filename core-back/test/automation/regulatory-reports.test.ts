@@ -171,13 +171,16 @@ describeDb("scheduled regulatory returns (live PostgreSQL)", () => {
     created.catalogs.push(catalog);
     const inside = new Date("2026-10-15T09:00:00.000Z");
     const outside = new Date("2026-09-15T09:00:00.000Z");
-    const a = await catalog.newAttempt({ status: "SUCCEEDED", amount: "120.5000", createdAt: inside });
-    await catalog.newAttempt({ status: "FAILED", amount: "10.0000", createdAt: inside });
-    await catalog.newAttempt({ status: "SUCCEEDED", amount: "999.0000", createdAt: outside });
+    // Regulatory returns count LIVE payments only (since the declarative engine, 2026-11-10).
+    const a = await catalog.newAttempt({ status: "SUCCEEDED", amount: "120.5000", createdAt: inside, env: "LIVE" });
+    await catalog.newAttempt({ status: "FAILED", amount: "10.0000", createdAt: inside, env: "LIVE" });
+    await catalog.newAttempt({ status: "SUCCEEDED", amount: "999.0000", createdAt: outside, env: "LIVE" });
+    // A sandbox payment inside the month is test money: never part of the return.
+    await catalog.newAttempt({ status: "SUCCEEDED", amount: "777.0000", createdAt: inside });
     expect(a.id).toBeTruthy();
-    // Regulatory returns cover LIVE attempts only; the catalog creates SANDBOX
-    // fixtures, so mark this merchant's attempts live for the return.
-    await client.$executeRawUnsafe(`UPDATE payment_attempts SET env = 'LIVE', currency = $2 WHERE merchant_id = $1::uuid`, catalog.merchantId, currency);
+    // A currency of this test's own keeps other suites' attempts out of the totals. The attempts keep the
+    // environment they were created with: three LIVE, one SANDBOX (which must stay out of the return).
+    await client.$executeRawUnsafe(`UPDATE payment_attempts SET currency = $2 WHERE merchant_id = $1::uuid`, catalog.merchantId, currency);
     await worker([ruleId], NOW, { maxPeriods: 1 }).runOnce();
     const payload = payloadOf((await reportsOf(returnCode))[0]!);
     const mine = (payload.sections.paymentsByRail as Array<Record<string, any>>).filter((row) => row.currency === currency);
@@ -187,7 +190,7 @@ describeDb("scheduled regulatory returns (live PostgreSQL)", () => {
     expect(succeededValue).toBeGreaterThanOrEqual(120.5);
     // the September attempt (999.00) is not in October's return: its value is not part of this month's total unless another suite's attempts are
     const only = await client.$queryRawUnsafe<Array<{ amount: string }>>(
-      `SELECT coalesce(sum(requested_amount), 0)::text AS amount FROM payment_attempts WHERE created_at >= '2026-09-30T22:00:00Z' AND created_at < '2026-10-31T22:00:00Z' AND status = 'SUCCEEDED' AND currency = $1`,
+      `SELECT coalesce(sum(requested_amount), 0)::text AS amount FROM payment_attempts WHERE created_at >= '2026-09-30T22:00:00Z' AND created_at < '2026-10-31T22:00:00Z' AND status = 'SUCCEEDED' AND currency = $1 AND env = 'LIVE'`,
       currency,
     );
     expect(succeededValue).toBeCloseTo(Number(only[0]!.amount), 2);
@@ -223,8 +226,8 @@ describeDb("large-transaction batches (live PostgreSQL)", () => {
     const catalog = await createAutomationCatalog(client, { label: "ltr" });
     created.catalogs.push(catalog);
     for (const [status, amount, at] of amounts) {
-      const attempt = await catalog.newAttempt({ status, amount, createdAt: at });
-      await client.$executeRawUnsafe(`UPDATE payment_attempts SET currency = $2, env = 'LIVE' WHERE id = $1::uuid`, attempt.id, currency);
+      const attempt = await catalog.newAttempt({ status, amount, createdAt: at, env: "LIVE" });
+      await client.$executeRawUnsafe(`UPDATE payment_attempts SET currency = $2 WHERE id = $1::uuid`, attempt.id, currency);
     }
     return catalog;
   };

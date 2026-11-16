@@ -210,7 +210,7 @@ describe("commission receivable balance after a merchant-direct refund", () => {
   });
 });
 
-describe("DynamicRailEngine.refund picks the template from the ownership mode", () => {
+describe("DynamicRailEngine.refund leaves the booking to the governance finalizer", () => {
   const refundStep = [{ id: "refund-step", type: "HTTP", side_effect: "MOVES_MONEY" }] as never;
   const run = async (ownershipMode: "MERCHANT_DIRECT" | "PLATFORM_CLEARING" | "INTERNAL", amount: string) => {
     const calls: Array<{ scenario: string; refId: string; input: LedgerScenarioInput }> = [];
@@ -223,22 +223,104 @@ describe("DynamicRailEngine.refund picks the template from the ownership mode", 
     return { result, calls };
   };
 
-  test("a MERCHANT_DIRECT refund posts the commission-reversal stage, not FULL_REFUND", async () => {
-    const { result, calls } = await run("MERCHANT_DIRECT", "100.0000");
-    expect(result.status).toBe("REFUNDED");
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.scenario).toBe("MERCHANT_DIRECT_CONFIRMATION");
-    expect(calls[0]?.input.stage).toBe("REFUND");
+  // The engine used to post its own proportional split on the same (ADJUSTMENT, adjustmentId)
+  // key. It ran first, so the finalizer's post became a no-op and the approved
+  // `reverseCommission` choice and target account were ignored.
+  test("a refund moves the attempt to REFUNDED and posts nothing itself, in every ownership mode", async () => {
+    for (const mode of ["MERCHANT_DIRECT", "PLATFORM_CLEARING", "INTERNAL"] as const) {
+      const { result, calls } = await run(mode, "100.0000");
+      expect(result.status).toBe("REFUNDED");
+      expect(calls).toHaveLength(0);
+    }
   });
 
-  test("a partial MERCHANT_DIRECT refund reverses the proportional commission", async () => {
-    const { calls } = await run("MERCHANT_DIRECT", "50.0000");
-    expect(calls[0]?.scenario).toBe("MERCHANT_DIRECT_CONFIRMATION");
-    expect(String(calls[0]?.input.commissionAmount)).toBe("1.5");
+  test("a partial refund moves the attempt to PARTIALLY_REFUNDED and posts nothing itself", async () => {
+    const { result, calls } = await run("MERCHANT_DIRECT", "50.0000");
+    expect(result.status).toBe("PARTIALLY_REFUNDED");
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("the approved adjustment, not the engine, decides the refund booking", () => {
+  test("reverseCommission = false on a platform-cleared refund reverses no commission", async () => {
+    const fixture = createGovernanceFixture();
+    fixture.client.adjustment.create({
+      data: {
+        id: "refund-cleared-no-reverse",
+        type: "REFUND",
+        targetGlAccountId: "acc-wallet",
+        sourceAttemptId: "attempt-1",
+        amount: new Decimal(100),
+        reverseCommission: false,
+        reason: "customer request",
+        state: "PENDING_REVIEW",
+      },
+    });
+    const engine = { refund: async () => ({ status: "REFUNDED", attempt: { ownershipMode: "PLATFORM_CLEARING" } }) };
+
+    const result = await executeAdjustment(
+      { ...fixture.context, engine },
+      fixture.client as never,
+      { adjustmentId: "refund-cleared-no-reverse", checkerUserId: "user-finance", checkerRole: "FINANCE" },
+    );
+
+    expect(result.status).toBe("EXECUTED");
+    expect(refundLines("refund-cleared-no-reverse")).toEqual([
+      { direction: "DEBIT", account: "MERCHANT_WALLET", amount: "100.0000" },
+      { direction: "CREDIT", account: "TREASURY", amount: "100.0000" },
+    ]);
+  });
+});
+
+describe("refund of a settlement that was parked in SUSPENSE", () => {
+  // A second payment on a single-use link is booked Dr GATEWAY_CLEARING / Cr SUSPENSE: the merchant
+  // is never credited, and the automatic refund draft targets the SUSPENSE account. Booking it with
+  // FULL_REFUND debited the merchant wallet for money it never received and left SUSPENSE credited.
+  const seedSuspenseRefund = (fixture: ReturnType<typeof createGovernanceFixture>, adjustmentId: string): void => {
+    fixture.client.adjustment.create({
+      data: {
+        id: adjustmentId,
+        type: "REFUND",
+        targetGlAccountId: "acc-suspense",
+        sourceAttemptId: "attempt-1",
+        draftedBySystem: true,
+        amount: new Decimal(100),
+        reverseCommission: false,
+        reason: "Automatic refund draft: the settlement was routed to SUSPENSE",
+        state: "PENDING_REVIEW",
+      },
+    });
+  };
+  const refunded = { refund: async () => ({ status: "REFUNDED", attempt: { ownershipMode: "PLATFORM_CLEARING" } }) };
+
+  test("it clears SUSPENSE against TREASURY and never touches the merchant wallet or income", async () => {
+    const fixture = createGovernanceFixture();
+    seedSuspenseRefund(fixture, "refund-suspense-1");
+
+    const result = await executeAdjustment(
+      { ...fixture.context, engine: refunded },
+      fixture.client as never,
+      { adjustmentId: "refund-suspense-1", checkerUserId: "user-finance", checkerRole: "FINANCE" },
+    );
+
+    expect(result.status).toBe("EXECUTED");
+    expect(result.template).toBe("SUSPENSE_REFUND");
+    const lines = refundLines("refund-suspense-1");
+    expect(lines).toEqual([
+      { direction: "DEBIT", account: "SUSPENSE", amount: "100.0000" },
+      { direction: "CREDIT", account: "TREASURY", amount: "100.0000" },
+    ]);
+    expect(lines?.map((line) => line.account)).not.toContain("MERCHANT_WALLET");
+    expect(lines?.map((line) => line.account)).not.toContain("PLATFORM_INCOME");
+    expect(fakeTable("adjustment").find((row) => row.id === "refund-suspense-1")?.state).toBe("EXECUTED");
   });
 
-  test("platform-cleared and internal refunds keep their templates", async () => {
-    expect((await run("PLATFORM_CLEARING", "100.0000")).calls[0]?.scenario).toBe("FULL_REFUND");
-    expect((await run("INTERNAL", "100.0000")).calls[0]?.scenario).toBe("INTERNAL_REFUND");
+  test("the template balances and is keyed by the adjustment", () => {
+    const template = buildLedgerTemplate("SUSPENSE_REFUND", { amount: "42.5000" });
+    expect(template.refType).toBe("ADJUSTMENT");
+    expect(template.lines.map((line) => [line.direction, line.account.accountType, String(line.amount)])).toEqual([
+      ["DEBIT", "SUSPENSE", "42.5"],
+      ["CREDIT", "TREASURY", "42.5"],
+    ]);
   });
 });

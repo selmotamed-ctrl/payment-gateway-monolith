@@ -1,5 +1,6 @@
 import express from "express";
 import { apiRouter, inboundRouter } from "./api";
+import { payLimiter } from "./api/public/pay";
 import { env } from "./lib/env";
 import { apiErrorHandler, notFoundHandler } from "./lib/error";
 import { requestLoggerMiddleware } from "./lib/requestLogger";
@@ -16,6 +17,9 @@ export const createApp = () => {
     res.json({ status: "ok", service: "checkout-back", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null, uptime: process.uptime() });
   });
   app.use("/api/v1/inbound", inboundRouter);
+  // The payer limiter must run before the JSON parser: an unauthenticated
+  // caller must not be able to make the edge buffer a body it will reject.
+  app.use("/api/v1/pay", payLimiter);
   app.use(express.json({ limit: env.MAX_JSON_BODY_BYTES }));
   app.use(express.urlencoded({ extended: false, limit: env.MAX_JSON_BODY_BYTES }));
   app.use("/api/v1", apiRouter);

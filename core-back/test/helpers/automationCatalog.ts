@@ -51,6 +51,8 @@ export interface AttemptOptions {
   commission?: string;
   createdAt?: Date;
   expiresAt?: Date;
+  /** SANDBOX by default. Regulatory returns count LIVE payments only. */
+  env?: "SANDBOX" | "LIVE";
 }
 
 const sha = (value: string): string => createHash("sha256").update(value).digest("hex");
@@ -263,7 +265,7 @@ export const createAutomationCatalog = async (
           credentialSetId: credentialSet.id,
           gatewayVersionId: gatewayVersion.id,
           commissionProfileId: commissionProfile.id,
-          env: "SANDBOX",
+          env: attemptOptions.env ?? "SANDBOX",
           mode: "OTP_PULL",
           status: (attemptOptions.status ?? "SUCCEEDED") as never,
           requestedAmount: new Prisma.Decimal(amount),
