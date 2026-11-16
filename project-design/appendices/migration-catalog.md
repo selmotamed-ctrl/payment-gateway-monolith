@@ -43,3 +43,4 @@
 | `20261113120000_v38_sandbox_execution_plane` | 157 | v38: strict LIVE vs SANDBOX execution-plane separation. |
 | `20261114090000_v39_sandbox_studio` | 17 | v39: Sandbox Studio parity fields. |
 | `20261116120000_route_health_automation` | 156 | Route health automation, canary traffic and admin overrides (schema version 40). |
+| `20261116130000_case_management_taxonomy` | 80 | Type-aware operator case management (schema version 41). |

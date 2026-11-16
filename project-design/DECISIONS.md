@@ -81,3 +81,11 @@ Architecture and documentation decisions are recorded here. Add a dated ADR entr
   worker is a singleton; the UI must show effective/computed/override
   separately; probe coverage depends on a platform credential or a declared
   `CREDENTIAL_CHECK` flow, so merchant-owned credentials remain manual.
+
+## ADR-0008 — Operator cases are typed by source condition, not by queue bucket
+
+- **Date:** 2026-11-16
+- **Status:** accepted
+- **Decision:** Every operator case carries a stable `case_type` from the code catalog, a human title/summary and subject, append-only events and an optional source-clear resolution. `kind` remains a compatibility queue bucket. Payment-attempt actions (`INQUIRE`, `MARK_SUCCEEDED`, `MARK_FAILED`, attempt-terminal `CLOSE_CASE`) are available only when the case has an attempt; operational cases expose `ACKNOWLEDGE`, `OPEN_SOURCE` and `CLOSE_CASE` with a resolution code and evidence reference. Source-cleared monitor/route/statement/report conditions auto-resolve; recurrence opens a new case. No case is reopened. `CLOSE_CASE` remains maker-checker; `ACKNOWLEDGE` is single-actor triage.
+- **Rationale:** The platform already encoded the real condition in the `subjectKey`, but the UI offered payment actions to backup, regulatory and route alerts. This made ordinary operational cases look like unresolved payments and buried the action that would fix the source.
+- **Consequences:** New producers must use the shared metadata/event helpers or run the backfill; the backfill is idempotent. The case-type labels and specialist context presenters are a documentation/UI surface that can grow without a database enum migration. Audit-chain and other security cases remain manual; a case does not silently disappear when its source clears, it resolves with a system event.

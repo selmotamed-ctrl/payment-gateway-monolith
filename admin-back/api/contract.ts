@@ -1394,6 +1394,10 @@ export const toCoreOperatorCaseResolve = (body: unknown): JsonRecord => {
   if (providerReference) result.providerReference = clamp(providerReference, 191);
   const settledAmount = asString(source.settledAmount);
   if (settledAmount) result.settledAmount = settledAmount;
+  const resolutionCode = asString(source.resolutionCode);
+  if (resolutionCode) result.resolutionCode = resolutionCode;
+  const reference = asString(source.reference);
+  if (reference) result.reference = clamp(reference, 191);
   if (Array.isArray(source.checklist)) {
     result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
   }

@@ -4,7 +4,7 @@ title: Tables Filters and Exports
 status: partial
 confidence: high
 last_verified: 2026-11-16
-verified_against: 1dcc0f2+working-tree
+verified_against: 53afea5+working-tree
 code:
   - admin-front/src/components/Table/**
   - admin-front/src/utils/xlsx/**
@@ -114,7 +114,7 @@ The v2 design intends tables to look operational rather than decorative:
 | `Adjustments` | `adjustments` | 6 |
 | `CashOuts` | `cashouts` | 5 |
 | `Disputes` | `disputes` | 8 |
-| `OperatorCases` | `cases` | 9 |
+| `OperatorCases` | `cases` | 9 (including `caseType`) |
 | `GatewayInquiries` | `schedules` | 8 |
 | `Reconciliation` | `sources` | 1, with storage key `pg.admin.reconciliation.sources` |
 

@@ -1,4 +1,5 @@
 import type { OperatorCaseDetail, OperatorCaseSummary } from "./types";
+import { caseTypeMeta } from "./caseTypes";
 
 export type TermHelp = {
     label: string;
@@ -232,6 +233,15 @@ export const caseNarrative = (entry: OperatorCaseSummary | OperatorCaseDetail): 
     matters: string;
     next: string;
 } => {
+    if (!entry.attemptId) {
+        const meta = caseTypeMeta(entry.caseType);
+        return {
+            title: entry.title || meta.label,
+            happened: entry.summary || meta.meaning,
+            matters: `${meta.meaning} Domain: ${entry.domain || "—"}. Source: ${entry.source || "—"}.`,
+            next: `${meta.next} Resolving this case does not by itself change the source condition; use the source link and record the evidence.`,
+        };
+    }
     const help = caseHelp(entry.kind);
     const amount = amountText(entry.chargedAmount ?? entry.statementAmount, entry.currency);
     const attempt = entry.attemptStatus ? `The linked attempt is ${entry.attemptStatus}${entry.attemptSubstatus ? ` (${entry.attemptSubstatus})` : ""}.` : "No payment attempt is linked.";
@@ -246,7 +256,7 @@ export const caseNarrative = (entry: OperatorCaseSummary | OperatorCaseDetail): 
             ? "A gateway inquiry is available. Run it first; if the gateway returns a definitive status the attempt resolves automatically."
             : `Gateway inquiry is not available right now (${entry.inquiryEligibility?.reason ?? "unknown reason"}). Use the statement or a Maker-Checker manual outcome, with evidence.`;
     return {
-        title: help.label,
+        title: entry.title || help.label,
         happened: `${help.meaning} ${attempt}`,
         matters: `Exposure: ${amount}. ${slot} ${reconstruct}`,
         next: `${next} ${help.action ?? ""}`.trim(),

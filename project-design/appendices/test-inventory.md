@@ -151,6 +151,7 @@
 | `core-back/test/objectStorageEngine.test.ts` | 803 | 31 |
 | `core-back/test/objectStorageOrphanSweepGuard.test.ts` | 24 | 3 |
 | `core-back/test/onboarding-four-eyes.test.ts` | 200 | 18 |
+| `core-back/test/operator-case-catalog.test.ts` | 56 | 4 |
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/partition-truncate-guard.test.ts` | 86 | 5 |
 | `core-back/test/phase1-mtls-and-schema.test.ts` | 448 | 14 |
@@ -371,7 +372,7 @@
 | `tests/e2e/admin/jobs-outbox.spec.ts` | 57 | 2 |
 | `tests/e2e/admin/merchants.spec.ts` | 90 | 2 |
 | `tests/e2e/admin/object-storage-style.spec.ts` | 72 | 1 |
-| `tests/e2e/admin/operator-cases.spec.ts` | 187 | 2 |
+| `tests/e2e/admin/operator-cases.spec.ts` | 319 | 3 |
 | `tests/e2e/admin/report-a4-layout.spec.ts` | 280 | 1 |
 | `tests/e2e/admin/shell.spec.ts` | 254 | 17 |
 | `tests/e2e/admin/table-and-padding-geometry.spec.ts` | 235 | 3 |
@@ -431,5 +432,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **426**
-- Total literal test declarations: **4223**
+- Total files: **427**
+- Total literal test declarations: **4228**

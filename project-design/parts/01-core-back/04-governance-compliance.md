@@ -3,8 +3,8 @@ id: core.governance
 title: Governance and Compliance
 status: partial
 confidence: high
-last_verified: 2026-11-10
-verified_against: working-tree 2026-11-10
+last_verified: 2026-11-16
+verified_against: 53afea5+working-tree
 code:
   - core-back/engine/governance/ApprovalService.ts
   - core-back/engine/governance/GovernanceExecution.ts
@@ -268,9 +268,9 @@ The admin surface includes the report payload/output endpoints, output download 
 
 ### 3.10 Operator cases and inquiry schedules
 
-`PrismaOperatorCaseSink` opens an operator case at most once per `(attemptId, kind)` while the case is `OPEN`, `IN_PROGRESS`, or `PENDING_CHECKER` (`core-back/engine/compliance/OperatorCaseSink.ts`). The engine opens cases for `LATE_SUCCESS`, `CONFLICT`, expiring attempts, and other flow findings.
+`PrismaOperatorCaseSink` opens an operator case at most once per `(attemptId, kind)` while the case is `OPEN`, `IN_PROGRESS`, or `PENDING_CHECKER` (`core-back/engine/compliance/OperatorCaseSink.ts`). The engine opens cases for `LATE_SUCCESS`, `CONFLICT`, expiring attempts, and other flow findings. Cases now carry a stable `case_type`, human title/summary, subject and append-only events; see `core.case-management`.
 
-Operator resolution is a maker action: `POST /admin/operator-cases/:id/resolve` creates an `OPERATOR_CASE` approval and sets the case to `PENDING_CHECKER`; the approval executes `MARK_SUCCEEDED`, `MARK_FAILED`, or `CLOSE_CASE`. Bulk inquiry schedules a persisted `GatewayInquirySchedule` after eligibility checks (case state, attempt status, terminal state, gateway status-check support). Cancellation, run-now, and retry update the schedule and the attempt's `nextCheckAt`; the poll worker owns execution and schedule reconciliation.
+Operator resolution is a maker action: `POST /admin/operator-cases/:id/resolve` creates an `OPERATOR_CASE` approval and sets the case to `PENDING_CHECKER`; the approval executes the case-type action. Payment-attempt cases may use `MARK_SUCCEEDED`/`MARK_FAILED`/`CLOSE_CASE`; backup, report, route and other operational cases expose only acknowledgement/close with a resolution code and evidence reference. The server validates the action against the case type and requires a resolution code for a non-payment close. `POST /operator-cases/:id/acknowledge` is single-actor triage. Source-cleared monitor/route/statement/report cases resolve automatically with a system event; a recurrence opens a new case. Bulk inquiry schedules a persisted `GatewayInquirySchedule` after eligibility checks (case state, attempt status, terminal state, gateway status-check support). Cancellation, run-now, and retry update the schedule and the attempt's `nextCheckAt`; the poll worker owns execution and schedule reconciliation.
 
 ### 3.11 Tipping-off and confidentiality
 

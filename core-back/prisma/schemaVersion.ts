@@ -1,1 +1,1 @@
-export const REQUIRED_SCHEMA_VERSION = 40;
+export const REQUIRED_SCHEMA_VERSION = 41;

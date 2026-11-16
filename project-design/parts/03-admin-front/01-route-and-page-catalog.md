@@ -4,7 +4,7 @@ title: Admin Route and Page Catalog
 status: partial
 confidence: high
 last_verified: 2026-11-16
-verified_against: 1dcc0f2+working-tree
+verified_against: 53afea5+working-tree
 code:
   - admin-front/src/pages/sandbox/**
   - admin-front/src/router/index.ts
@@ -104,9 +104,9 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 15 | `/aml/rules` | `AmlRules` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | AML rule versions, thresholds and maker-checker drafts. |
 | 16 | `/aml/reports` | `AmlReports` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Regulatory report drafting, payload/output review, generation, submission and acknowledgement. |
 | 17 | `/aml/reporting-studio` | `AmlReportingStudio` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Declarative XML/XLSX schema registry, compile/simulate, promotion and default bindings. |
-| 18 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | UNKNOWN/conflict/reconciliation operator queue. |
+| 18 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | Type-aware operator queue: case reference/title/type, subject/context, priority, state, SLA and assignee; Open is the primary action. |
 | 19 | `/operator-cases/inquiries` | `GatewayInquirySchedules` | `case:read` or `operator:read` | 7 / 7.2 | Gateway inquiry schedule monitoring, run/retry/cancel. |
-| 20 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case evidence, step logs, inbound events, maker-checker resolution. |
+| 20 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case context and source link, type-aware narrative/timeline, technical identifiers collapsed, maker-checker resolution; payment cards render only for attempt cases. |
 | 21 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage; an attempt-detail link starts on All scoped by `attemptId` and `merchantId`. |
 | 22 | `/adjustments` | `Adjustments` | `adjustments.propose` | 11 / 11.2 | Refund/manual adjustment drafting and review. |
 | 23 | `/cashouts` | `CashOuts` | `cashout.process` | 12 / 12.1 | Cash-out processing with wallet, destination and AML checks. |

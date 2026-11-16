@@ -2197,4 +2197,18 @@ export const appCatalogue: Record<string, [string, string]> = {
     'maximum': ['maximum', 'الحد الأقصى'],
     'buckets rebuilt from real payment outcomes.': ['buckets rebuilt from real payment outcomes.', 'نوافذ يُعاد بناؤها من نتائج الدفع الفعلية.'],
     'Daily cap': ["Daily cap", "السقف اليومي"],
+    "Case type": ["Case type", "نوع الحالة"],
+    "Close alert": ["Close alert", "إغلاق التنبيه"],
+    "Close case": ["Close case", "إغلاق الحالة"],
+    "Inquire gateway": ["Inquire gateway", "الاستعلام من البوابة"],
+    "Quick inspect": ["Quick inspect", "فحص سريع"],
+    "Technical identifiers": ["Technical identifiers", "المعرّفات التقنية"],
+    "Resolution outcome": ["Resolution outcome", "نتيجة المعالجة"],
+    "Select a resolution outcome": ["Select a resolution outcome", "اختر نتيجة المعالجة"],
+    "What happened to the source condition?": ["What happened to the source condition?", "ماذا حدث لحالة المصدر؟"],
+    "Optional filing, backup, report or ticket reference.": ["Optional filing, backup, report or ticket reference.", "مرجع اختياري للإيداع أو النسخ الاحتياطي أو التقرير أو التذكرة."],
+    "Raw database and audit identifiers. Start with the case context above; use these only when cross-referencing logs or support tickets.": ["Raw database and audit identifiers. Start with the case context above; use these only when cross-referencing logs or support tickets.", "معرّفات قاعدة البيانات والتدقيق الخام. ابدأ بسياق الحالة أعلاه؛ استخدمها فقط عند مطابقة السجلات أو تذاكر الدعم."],
+    "This is a ": ["This is a ", "هذه "],
+    " case. The case context, source link and evidence below are the resolution inputs; closing it does not change a payment attempt.": [" case. The case context, source link and evidence below are the resolution inputs; closing it does not change a payment attempt.", " حالة. سياق الحالة ورابط المصدر والأدلة أدناه هي مدخلات المعالجة؛ إغلاقها لا يغيّر محاولة دفع."],
+
 };

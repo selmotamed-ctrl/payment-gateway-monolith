@@ -4,7 +4,7 @@ title: Core API Surface
 status: partial
 confidence: high
 last_verified: 2026-11-16
-verified_against: 1dcc0f2+working-tree
+verified_against: 53afea5+working-tree
 code:
   - core-back/api/internal/sandboxControl.ts
   - core-back/api/index.ts
@@ -256,6 +256,10 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `POST /reconciliation/sources`, `PATCH /reconciliation/sources/:id` | `reconciliation:write` |
 | `GET /reconciliation/runs`, `GET /reconciliation/summary`, `GET /reconciliation/summary/export`, `GET /reconciliation/runs/:id`, `GET /reconciliation/runs/:id/export` | `reconciliation:read` |
 | `POST /reconciliation/upload` | `reconciliation:write`; raw multipart/body, enqueues a `RECONCILIATION_RUN` |
+
+#### Operator cases and inquiries
+
+`GET /operator-cases`, `/export`, `/summary`, `/summary/export` and `/:id` return the type-aware case fields (`caseReference`, `caseType`, title/summary, domain/source, subject, available actions) and filter by `caseType`; AML-confidential cases require `aml.read_confidential`. `/catalog` returns the code catalog, action definitions and resolution codes. `POST /:id/acknowledge` is single-actor triage; `POST /:id/resolve` remains maker-checker and validates the action against the case type (payment actions only for attempt types; operational close requires a resolution code). Source-cleared monitor/route/statement/report cases resolve with a system event.
 
 #### Disputes, adjustments, cash-outs, commissions and velocity
 

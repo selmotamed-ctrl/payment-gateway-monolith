@@ -410,6 +410,7 @@ Keys read outside the env proxy include `KMS_KEYS_JSON`, `KYB_SCANNER_MODE` (uns
 | `bun run create-dev-users` | Create or re-provision the development admin maker/checker and merchant superuser. |
 | `bun run seed-fake-rails` | Point seeded gateways at the Fake Rails emulator and derive verification secrets. |
 | `bun run seed-synthetic-history` | Run the optional multi-year synthetic history seeder. |
+| `bun run seed-operator-case-showcase` | Add representative operational operator cases for every case group after a synthetic seed (idempotent). |
 | `./scripts/prepare-databases.sh` | Create the application/test databases and apply migrations. |
 
 ### 7.1 Administrator bootstrap

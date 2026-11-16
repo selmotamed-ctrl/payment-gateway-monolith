@@ -1,5 +1,6 @@
 import type { PrismaLike } from "../db/ports";
 import { writeSystemAudit } from "../ledger/ledgerAlerts";
+import { clearKeyedCase } from "../../lib/operatorCases/caseService";
 import { openKeyedOperatorCase } from "../workers/automationCases";
 import { BaseWorker, type WorkerOptions, type WorkerTickResult } from "../workers/workerRuntime";
 import {
@@ -554,15 +555,11 @@ export class GatewayHealthWorker extends BaseWorker {
   }
 
   private async clearCase(subjectKey: string, now: Date, detail: string): Promise<void> {
-    const open = (await this.db.operatorCase.findFirst({
-      where: { kind: "MANUAL_REVIEW", subjectKey, state: { not: "RESOLVED" } },
-      select: { id: true, resolutionNotes: true },
-    })) as { id: string; resolutionNotes: string | null } | null;
-    if (!open) return;
-    const notes = `${open.resolutionNotes ?? ""}\n[CLEARED ${now.toISOString()}] ${detail}`.trim();
-    await this.db.operatorCase.update({
-      where: { id: open.id },
-      data: { state: "RESOLVED", resolutionNotes: notes.slice(0, 8000) },
+    await clearKeyedCase(this.db as never, {
+      kind: "MANUAL_REVIEW",
+      subjectKey,
+      detail,
+      now,
     });
   }
 }

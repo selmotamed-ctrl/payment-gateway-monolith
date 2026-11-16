@@ -1,4 +1,5 @@
 import type { PrismaLike } from "../db/ports";
+import { appendCaseEvent, caseMetadataFields, metaForNewCase } from "../../lib/operatorCases/caseService";
 
 /**
  * Operator escalations raised by the background automations (AUTO-19, AUTO-20).
@@ -60,6 +61,13 @@ export const openKeyedOperatorCase = async (
     }
   }
   const now = input.now ?? new Date();
+  const meta = metaForNewCase({
+    subjectKey: input.subjectKey,
+    kind: input.kind,
+    attemptId: input.attemptId,
+    reconciliationItemId: input.reconciliationItemId,
+    detail: input.notes,
+  });
   try {
     const created = await db.operatorCase.create({
       data: {
@@ -69,10 +77,17 @@ export const openKeyedOperatorCase = async (
         subjectKey: input.subjectKey,
         ...(input.attemptId ? { attemptId: input.attemptId } : {}),
         ...(input.reconciliationItemId ? { reconciliationItemId: input.reconciliationItemId } : {}),
+        ...caseMetadataFields(meta),
         resolutionNotes: input.notes.slice(0, 1000),
         slaDueAt: new Date(now.getTime() + input.slaHours * 60 * 60 * 1000),
       },
       select: { id: true },
+    });
+    await appendCaseEvent(db, String(created.id), {
+      eventType: "OPENED",
+      summary: meta.titleText,
+      detailsJson: meta.detailsJson,
+      now,
     });
     return { id: String(created.id), created: true };
   } catch (error) {

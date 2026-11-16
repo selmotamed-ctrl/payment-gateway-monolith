@@ -1033,6 +1033,7 @@ model User {
   invitedUsers              User[]                   @relation("UserInvitedBy")
   invitedBy                 User?                    @relation("UserInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
   assignedOperatorCases     OperatorCase[]           @relation("OperatorCaseAssignee")
+  resolvedOperatorCases     OperatorCase[]           @relation("OperatorCaseResolvedBy")
   scheduledGatewayInquiries GatewayInquirySchedule[] @relation("GatewayInquiryScheduledBy")
   cancelledGatewayInquiries GatewayInquirySchedule[] @relation("GatewayInquiryCancelledBy")
   detailChangeLogs          DetailChangeLog[]        @relation("DetailChangeLogActor")
@@ -2325,14 +2326,33 @@ model OperatorCase {
   id                   String               @id @default(uuid(7)) @db.Uuid
   createdAt            DateTime             @default(now()) @map("created_at")
   updatedAt            DateTime             @updatedAt @map("updated_at")
+  /// Stable human-readable case sequence. The API renders CASE-<year>-<number>.
+  caseNumber           Int                  @unique @default(autoincrement()) @map("case_number")
   attemptId            String?              @map("attempt_id") @db.Uuid
   reconciliationItemId String?              @unique @map("reconciliation_item_id") @db.Uuid
   kind                 OperatorCaseKind
+  /// Condition taxonomy. `kind` remains the compatibility/queue bucket.
+  caseType             String?              @map("case_type") @db.VarChar(64)
+  source               String?              @db.VarChar(32)
+  domain               String?              @db.VarChar(32)
+  confidentiality      String               @default("NORMAL") @db.VarChar(16)
+  titleKey             String?              @map("title_key") @db.VarChar(96)
+  titleParams          Json?                @map("title_params")
+  titleText            String?              @map("title_text") @db.Text
+  summary              String?              @db.Text
+  detailsJson          Json?                @map("details_json")
+  subjectType          String?              @map("subject_type") @db.VarChar(48)
+  subjectId            String?              @map("subject_id") @db.Text
+  subjectLabel         String?              @map("subject_label") @db.Text
   priority             OperatorCasePriority
   slaDueAt             DateTime             @map("sla_due_at")
   state                OperatorCaseState    @default(OPEN)
   assigneeUserId       String?              @map("assignee_user_id") @db.Uuid
   resolutionNotes      String?              @map("resolution_notes") @db.Text
+  resolutionCode       String?              @map("resolution_code") @db.VarChar(48)
+  resolutionSummary    String?              @map("resolution_summary") @db.Text
+  resolvedAt           DateTime?            @map("resolved_at")
+  resolvedByUserId     String?              @map("resolved_by_user_id") @db.Uuid
   approvalRequestId    String?              @map("approval_request_id") @db.Uuid
   /// De-duplication key for automated alerts, unique among unresolved cases of one kind.
   subjectKey           String?              @map("subject_key")
@@ -2340,17 +2360,60 @@ model OperatorCase {
   attempt            PaymentAttempt?          @relation(fields: [attemptId], references: [id], onDelete: SetNull)
   reconciliationItem ReconciliationItem?      @relation("OperatorCaseReconciliationItem", fields: [reconciliationItemId], references: [id], onDelete: SetNull)
   assignee           User?                    @relation("OperatorCaseAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  resolvedBy         User?                    @relation("OperatorCaseResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
   approvalRequest    ApprovalRequest?         @relation("OperatorCaseApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
   inquirySchedules   GatewayInquirySchedule[]
+  events             OperatorCaseEvent[]
+  links              OperatorCaseLink[]
 
   @@index([state, priority])
   @@index([state, createdAt])
   @@index([priority])
   @@index([kind])
+  @@index([caseType, state])
+  @@index([domain, state])
+  @@index([subjectType, subjectId])
   @@index([slaDueAt])
   @@index([assigneeUserId])
   @@index([attemptId])
   @@map("operator_cases")
+}
+
+/// Append-only case timeline. Unlike `resolution_notes`, this preserves the
+/// original finding and every later triage, source-clear and resolution event.
+model OperatorCaseEvent {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  caseId      String   @map("case_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  eventType   String   @map("event_type") @db.VarChar(48)
+  actorType   String   @default("SYSTEM") @map("actor_type") @db.VarChar(16)
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  actorEmail  String?  @map("actor_email") @db.Text
+  summary     String   @db.Text
+  detailsJson Json?    @map("details_json")
+
+  operatorCase OperatorCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, createdAt])
+  @@map("operator_case_events")
+}
+
+/// Additional subjects of one case. The primary subject stays on OperatorCase.
+model OperatorCaseLink {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  caseId     String   @map("case_id") @db.Uuid
+  linkType   String   @map("link_type") @db.VarChar(48)
+  targetId   String?  @map("target_id") @db.Text
+  labelKey   String?  @map("label_key") @db.VarChar(96)
+  labelText  String?  @map("label_text") @db.Text
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  operatorCase OperatorCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, linkType, targetId])
+  @@index([caseId])
+  @@map("operator_case_links")
 }
 
 /// A persisted gateway status-inquiry schedule.

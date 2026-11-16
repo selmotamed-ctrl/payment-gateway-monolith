@@ -187,6 +187,7 @@ export const urlsMap = {
     operatorCaseDetail: (id: string) => `v1/admin/operator-cases/${id}`,
     operatorCaseUpdate: (id: string) => `v1/admin/operator-cases/${id}`,
     operatorCaseResolve: (id: string) => `v1/admin/operator-cases/${id}/resolve`,
+    operatorCaseAcknowledge: (id: string) => `v1/admin/operator-cases/${id}/acknowledge`,
     operatorCasesBulkInquire: "v1/admin/operator-cases/bulk-inquire",
     gatewayInquiries: "v1/admin/gateway-inquiries",
     gatewayInquiriesSummary: "v1/admin/gateway-inquiries/summary",

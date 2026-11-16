@@ -93,13 +93,60 @@ export type GatewayInquiryScheduleSummary = {
     byStatus: Record<string, number>;
 };
 
+export type CaseAction = {
+    code: "ACKNOWLEDGE" | "OPEN_SOURCE" | "INQUIRE" | "MARK_SUCCEEDED" | "MARK_FAILED" | "CLOSE_CASE";
+    labelKey: string;
+    requiresApproval: boolean;
+    fields?: string[];
+};
+
+export type CaseEvent = {
+    id: string;
+    caseId: string;
+    createdAt: string;
+    eventType: string;
+    actorType: string;
+    actorUserId: string | null;
+    actorEmail: string | null;
+    summary: string;
+    detailsJson?: unknown;
+};
+
+export type CaseLink = {
+    id: string;
+    caseId: string;
+    linkType: string;
+    targetId: string | null;
+    labelKey: string | null;
+    labelText: string | null;
+    metadata?: unknown;
+};
+
 export type OperatorCaseSummary = {
     id: string;
     caseId: string;
     caseRef: string;
+    caseReference: string;
     caseReferenceSource: string;
+    subjectRef: string;
     caseType: string;
+    caseTypeLabelKey: string;
     kind: string;
+    caseGroup: string;
+    domain: string;
+    source: string;
+    confidentiality: string;
+    title: string;
+    summary: string;
+    detailsJson?: unknown;
+    subjectType: string;
+    subjectId: string | null;
+    subjectLabel: string | null;
+    availableActions: CaseAction[];
+    resolvedAt?: string | null;
+    resolvedByEmail?: string | null;
+    resolutionCode?: string | null;
+    resolutionSummary?: string | null;
     priority: string;
     state: string;
     attemptId: string | null;
@@ -279,6 +326,9 @@ export type OperatorCaseDetail = OperatorCaseSummary & {
     updatedAt: string;
     inquirySchedules?: Array<Partial<GatewayInquirySchedule> & { createdAt?: string }>;
     assignee?: { id: string; email: string; role: string } | null;
+    resolvedBy?: { id: string; email: string; role: string } | null;
+    events?: CaseEvent[];
+    links?: CaseLink[];
     attempt?: OperatorCaseAttempt | null;
     approvalRequest?: OperatorCaseApproval | null;
     reconciliationItem?: {

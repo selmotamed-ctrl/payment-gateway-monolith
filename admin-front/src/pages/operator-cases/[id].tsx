@@ -19,7 +19,6 @@ import { statusTone } from "@/components/Table/statusTone";
 import {
     CASE_REFERENCE_SOURCE_HELP,
     INQUIRY_REASON_HELP,
-    caseHelp,
     caseNarrative,
     caseStateHelp,
     formatDateTime,
@@ -28,6 +27,7 @@ import {
     slaInfo,
 } from "./operatorCaseHelp";
 import type { OperatorCaseDetail } from "./types";
+import { CASE_ACTION_LABELS, caseTypeMeta } from "./caseTypes";
 
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
@@ -86,6 +86,23 @@ const RESOLVE_CHECKS = [
     { key: "CHECKER_REQUIREMENT_CONFIRMED", label: "Checker requirement confirmed" },
 ] as const;
 
+const OPERATIONAL_RESOLVE_CHECKS = [
+    { key: "EVIDENCE_REVIEWED", label: "Source evidence reviewed" },
+    { key: "OUTCOME_DOCUMENTED", label: "Resolution outcome documented" },
+    { key: "CHECKER_REQUIREMENT_CONFIRMED", label: "Checker requirement confirmed" },
+] as const;
+
+const RESOLUTION_CODE_OPTIONS = [
+    { title: "Fixed at source", value: "FIXED_AT_SOURCE" },
+    { title: "False positive", value: "FALSE_POSITIVE" },
+    { title: "Duplicate", value: "DUPLICATE" },
+    { title: "Accepted risk", value: "ACCEPTED_RISK" },
+    { title: "Referred", value: "REFERRED" },
+    { title: "No action required", value: "NO_ACTION_REQUIRED" },
+    { title: "Source cleared", value: "SOURCE_CLEARED" },
+    { title: "Other", value: "OTHER" },
+] as const;
+
 const OperatorCaseDetailPage = dc(() => {
     const { t } = useLocale();
     const showChecklists = areChecklistsVisible();
@@ -103,6 +120,8 @@ const OperatorCaseDetailPage = dc(() => {
     const resolveChecklist = ref<Record<string, boolean>>({});
     const providerReference = ref("");
     const settledAmount = ref("");
+    const resolutionCode = ref("FIXED_AT_SOURCE");
+    const resolutionReference = ref("");
     const checkerReason = ref("");
 
     const caseId = computed(() => String(route.params.id ?? ""));
@@ -137,11 +156,41 @@ const OperatorCaseDetailPage = dc(() => {
     const inquiry = computed(() => detail.value?.inquiryEligibility);
     const sla = computed(() => slaInfo(detail.value?.slaDueAt));
     const narrative = computed(() => (detail.value ? caseNarrative(detail.value) : null));
+    const typeMeta = computed(() => caseTypeMeta(detail.value?.caseType));
+    const isAttemptCase = computed(() => Boolean(detail.value?.attemptId));
     const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
         tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
 
     const stats = computed(() => {
         const entry = detail.value;
+        if (!entry?.attemptId) {
+            return [
+                {
+                    key: "type",
+                    label: t("Case type"),
+                    value: typeMeta.value.label,
+                    subLabel: entry?.source || entry?.domain || "—",
+                    badge: entry?.priority ?? "P3",
+                    badgeTone: asBadgeTone(statusTone(entry?.priority)),
+                },
+                {
+                    key: "sla",
+                    label: t("SLA"),
+                    value: sla.value.label,
+                    subLabel: formatDateTime(entry?.slaDueAt),
+                    badge: sla.value.label,
+                    badgeTone: asBadgeTone(sla.value.tone),
+                },
+                {
+                    key: "priority",
+                    label: t("Priority"),
+                    value: entry?.priority ?? "—",
+                    subLabel: caseStateHelp(entry?.state).label,
+                    badge: entry?.priority ?? "P3",
+                    badgeTone: asBadgeTone(statusTone(entry?.priority)),
+                },
+            ];
+        }
         const currency = entry?.attempt?.currency ?? entry?.currency ?? "LYD";
         const amount = entry?.chargedAmount ?? entry?.statementAmount ?? "0";
         return [
@@ -182,20 +231,24 @@ const OperatorCaseDetailPage = dc(() => {
     });
 
     const actionOptions = computed(() => {
+        const available = detail.value?.availableActions ?? [];
+        const allowed = available
+            .filter((action) => action.code === "MARK_SUCCEEDED" || action.code === "MARK_FAILED" || action.code === "CLOSE_CASE")
+            .map((action) => ({ title: CASE_ACTION_LABELS[action.code] ?? action.code, value: action.code }));
+        if (allowed.length > 0) return allowed;
         const attempt = detail.value?.attempt;
-        const status = String(attempt?.status ?? "");
-        const terminal = Boolean(attempt?.terminalAt);
         const options: Array<{ title: string; value: string }> = [];
         if (attempt) {
+            const status = String(attempt.status ?? "");
             if (["UNKNOWN", "VERIFYING", "FAILED", "EXPIRED", "SUCCEEDED"].includes(status)) {
                 options.push({ title: t("Resolve as succeeded"), value: "MARK_SUCCEEDED" });
             }
             if (["UNKNOWN", "VERIFYING"].includes(status)) {
                 options.push({ title: t("Resolve as failed and release reservation"), value: "MARK_FAILED" });
             }
-        }
-        if (!attempt || terminal) {
-            options.push({ title: t("Close case without changing the attempt"), value: "CLOSE_CASE" });
+            if (attempt.terminalAt) options.push({ title: t("Close case"), value: "CLOSE_CASE" });
+        } else {
+            options.push({ title: t("Close alert"), value: "CLOSE_CASE" });
         }
         return options;
     });
@@ -213,6 +266,8 @@ const OperatorCaseDetailPage = dc(() => {
         resolveChecklist.value = {};
         providerReference.value = detail.value?.attempt?.providerReference ?? "";
         settledAmount.value = detail.value?.attempt?.totalChargedAmount ?? "";
+        resolutionCode.value = "FIXED_AT_SOURCE";
+        resolutionReference.value = "";
         resolveAction.value = actionOptions.value[0]?.value ?? "CLOSE_CASE";
         resolveOpen.value = true;
     };
@@ -231,7 +286,6 @@ const OperatorCaseDetailPage = dc(() => {
         try {
             await api.patch(urlsMap.operatorCaseUpdate(caseId.value), {
                 assigneeUserId: userId,
-                state: detail.value?.state === "OPEN" ? "IN_PROGRESS" : undefined,
             });
             showSnackBar({ type: "success", message: t("Assigned") });
             await refreshAfterAction();
@@ -242,11 +296,13 @@ const OperatorCaseDetailPage = dc(() => {
         }
     };
 
-    const startWork = async () => {
+    const acknowledge = async () => {
         actionLoading.value = true;
         try {
-            await api.patch(urlsMap.operatorCaseUpdate(caseId.value), { state: "IN_PROGRESS" });
-            showSnackBar({ type: "success", message: t("In progress") });
+            await api.post(urlsMap.operatorCaseAcknowledge(caseId.value), {
+                notes: "Case acknowledged from the operator workspace",
+            });
+            showSnackBar({ type: "success", message: t("Acknowledged") });
             await refreshAfterAction();
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
@@ -276,7 +332,8 @@ const OperatorCaseDetailPage = dc(() => {
         }
     };
 
-    const resolveChecklistComplete = computed(() => !showChecklists || RESOLVE_CHECKS.every((check) => resolveChecklist.value[check.key] === true));
+    const resolutionChecks = computed(() => (isAttemptCase.value ? RESOLVE_CHECKS : OPERATIONAL_RESOLVE_CHECKS));
+    const resolveChecklistComplete = computed(() => !showChecklists || resolutionChecks.value.every((check) => resolveChecklist.value[check.key] === true));
     const resolveSafeguard = useSafeguard("sg-resolve-unknown");
 
     const proposeResolution = async () => {
@@ -289,7 +346,11 @@ const OperatorCaseDetailPage = dc(() => {
             showSnackBar({ type: "warning", message: t("Complete all resolution checklist items before submitting") });
             return;
         }
-        if (!(await resolveSafeguard.confirm())) return;
+        if (resolveAction.value === "CLOSE_CASE" && !isAttemptCase.value && !resolutionCode.value) {
+            showSnackBar({ type: "warning", message: t("Select a resolution outcome") });
+            return;
+        }
+        if (isAttemptCase.value && !(await resolveSafeguard.confirm())) return;
         actionLoading.value = true;
         try {
             await api.post(urlsMap.operatorCaseResolve(caseId.value), {
@@ -299,9 +360,15 @@ const OperatorCaseDetailPage = dc(() => {
                 ...(resolveAction.value === "MARK_SUCCEEDED" && providerReference.value.trim()
                     ? { providerReference: providerReference.value.trim() }
                     : {}),
-                checklist: RESOLVE_CHECKS.filter((check) => resolveChecklist.value[check.key]).map((check) => check.key),
+                checklist: resolutionChecks.value.filter((check) => resolveChecklist.value[check.key]).map((check) => check.key),
                 ...(resolveAction.value === "MARK_SUCCEEDED" && settledAmount.value.trim()
                     ? { settledAmount: settledAmount.value.trim() }
+                    : {}),
+                ...(!isAttemptCase.value && resolveAction.value === "CLOSE_CASE"
+                    ? { resolutionCode: resolutionCode.value }
+                    : {}),
+                ...(!isAttemptCase.value && resolutionReference.value.trim()
+                    ? { reference: resolutionReference.value.trim() }
                     : {}),
             });
             resolveOpen.value = false;
@@ -397,7 +464,7 @@ const OperatorCaseDetailPage = dc(() => {
                 items: [
                     detailItem("Case ID", entry.id, "Primary key of operator_cases.", "operator_cases.id", true),
                     detailItem("Case reference", entry.caseRef, CASE_REFERENCE_SOURCE_HELP[entry.caseReferenceSource] ?? "Derived display reference.", entry.caseReferenceSource, true),
-                    detailItem("Case type", entry.caseType, caseHelp(entry.caseType).meaning, "operator_cases.kind"),
+                    detailItem("Case type", typeMeta.value.label, typeMeta.value.meaning, "operator_cases.case_type"),
                     detailItem("Priority", entry.priority, priorityHelp(entry.priority).meaning, "operator_cases.priority"),
                     detailItem("Case state", entry.state, caseStateHelp(entry.state).meaning, "operator_cases.state"),
                     detailItem("Assignee", entry.assigneeEmail, "Email of the assigned platform user.", "operator_cases.assignee_user_id → users.email"),
@@ -537,6 +604,36 @@ const OperatorCaseDetailPage = dc(() => {
         ];
     });
 
+    const visibleSections = computed(() => {
+        const entry = detail.value;
+        if (!entry) return [];
+        const context = {
+            title: t("Case context"),
+            description: typeMeta.value.next,
+            items: [
+                detailItem("Case type", typeMeta.value.label, "The condition this case represents.", "operator_cases.case_type"),
+                detailItem("Title", entry.title, "Human-readable case title.", "operator_cases.title_text"),
+                detailItem("Summary", entry.summary, "Initial finding recorded when the case was opened.", "operator_cases.summary"),
+                detailItem("Subject", [entry.subjectType, entry.subjectLabel].filter(Boolean).join(" · "), "The primary record this case is about.", "operator_cases.subject_type, subject_id"),
+                detailItem("Domain", entry.domain, "Owning operational domain.", "operator_cases.domain"),
+                detailItem("Source", entry.source, "Producer of the case.", "operator_cases.source"),
+                detailItem("Confidentiality", entry.confidentiality, "Case visibility class.", "operator_cases.confidentiality"),
+            ],
+        };
+        return [
+            context,
+            ...sections.value.filter((section) => {
+                if ([t("Merchant and application"), t("Payment attempt and money"), t("Route, gateway and slot")].includes(section.title)) {
+                    return isAttemptCase.value;
+                }
+                if (section.title === t("Reconciliation and statement")) {
+                    return Boolean(entry.reconciliationItem || entry.reconciliationItemId);
+                }
+                return true;
+            }),
+        ];
+    });
+
     const timeline = computed(() => {
         const entry = detail.value;
         if (!entry) return [];
@@ -548,6 +645,14 @@ const OperatorCaseDetailPage = dc(() => {
                 tone: "warning",
             },
         ];
+        for (const event of entry.events ?? []) {
+            items.push({
+                at: event.createdAt,
+                title: String(event.eventType).replaceAll("_", " "),
+                detail: event.summary,
+                tone: event.eventType === "RESOLVED" || event.eventType === "SOURCE_CLEARED" ? "success" : "info",
+            });
+        }
         if (entry.approvalRequest?.createdAt) {
             items.push({
                 at: entry.approvalRequest.createdAt,
@@ -605,7 +710,7 @@ const OperatorCaseDetailPage = dc(() => {
         if (!attempt) {
             return (
                 <VAlert type="info" variant="tonal">
-                    {t("This case has no linked payment attempt. It is resolved from reconciliation or manual evidence.")}
+                    {t("This is a ")}{typeMeta.value.label}{t(" case. The case context, source link and evidence below are the resolution inputs; closing it does not change a payment attempt.")}
                 </VAlert>
             );
         }
@@ -623,14 +728,19 @@ const OperatorCaseDetailPage = dc(() => {
                             <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => router.push({ name: "OperatorCases" })}>
                                 {t("Back")}
                             </VBtn>
+                            {typeMeta.value.sourceRoute && (
+                                <VBtn variant="tonal" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: typeMeta.value.sourceRoute! })}>
+                                    {t(typeMeta.value.sourceLabel ?? "Open source")}
+                                </VBtn>
+                            )}
                             {canWrite.value && !isResolved.value && !isPendingChecker.value && (
                                 <>
                                     <VBtn variant="tonal" loading={actionLoading.value} onClick={() => void assignToMe()}>
                                         {t("Assign to me")}
                                     </VBtn>
                                     {detail.value?.state === "OPEN" && (
-                                        <VBtn variant="tonal" loading={actionLoading.value} onClick={() => void startWork()}>
-                                            {t("Start working")}
+                                        <VBtn variant="tonal" loading={actionLoading.value} onClick={() => void acknowledge()}>
+                                            {t("Acknowledge")}
                                         </VBtn>
                                     )}
                                     <span title={INQUIRY_REASON_HELP[inquiry.value?.reason ?? ""] ?? t("Inquiry is not available")}>
@@ -663,14 +773,8 @@ const OperatorCaseDetailPage = dc(() => {
                 ) : (
                     <>
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                            <span title={caseHelp(detail.value.caseType).meaning}>
-                                <StatusBadge status={detail.value.caseType} label={detail.value.caseType} toneOverride={
-                                    detail.value.caseType === "CONFLICT" || detail.value.caseType === "LATE_SUCCESS"
-                                        ? "danger"
-                                        : detail.value.caseType === "UNKNOWN" || detail.value.caseType === "MISMATCH"
-                                          ? "warning"
-                                          : "info"
-                                } />
+                            <span title={typeMeta.value.meaning}>
+                                <StatusBadge status={detail.value.caseType} label={typeMeta.value.label} toneOverride={typeMeta.value.tone ?? "info"} />
                             </span>
                             <span title={priorityHelp(detail.value.priority).meaning}>
                                 <StatusBadge status={detail.value.priority} label={detail.value.priority} toneOverride={asBadgeTone(statusTone(detail.value.priority))} />
@@ -785,7 +889,7 @@ const OperatorCaseDetailPage = dc(() => {
 
                         {renderAttempt()}
 
-                        {sections.value.map((section) => (
+                        {visibleSections.value.map((section) => (
                             <SurfaceCard key={section.title}>
                                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                     <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{section.title}</ThemedText>
@@ -1024,21 +1128,17 @@ const OperatorCaseDetailPage = dc(() => {
                             </VExpansionPanel>
                         </VExpansionPanels>
 
-                        <SurfaceCard>
-                            <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>
-                                    {t("All identifiers")}
-                                </ThemedText>
-                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                                    {t("Every identifier is shown with the entity and database source it belongs to. Click an id to copy it.")}
-                                </ThemedText>
-                                <ThemedText type="defaultSemiBold" style={{ fontSize: "13px" }}>{t("Database identifiers")}</ThemedText>
-                                <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
-                                    {t("Use these exact ids when cross-referencing the database, logs or support tickets.")}
-                                </ThemedText>
-                                <DescriptionList columns={2} items={identifierItems.value} />
-                            </SurfaceCardText>
-                        </SurfaceCard>
+                        <VExpansionPanels>
+                            <VExpansionPanel value="technical-identifiers">
+                                <VExpansionPanelTitle>{t("Technical identifiers")}</VExpansionPanelTitle>
+                                <VExpansionPanelText>
+                                    <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>
+                                        {t("Raw database and audit identifiers. Start with the case context above; use these only when cross-referencing logs or support tickets.")}
+                                    </ThemedText>
+                                    <DescriptionList columns={2} items={identifierItems.value} />
+                                </VExpansionPanelText>
+                            </VExpansionPanel>
+                        </VExpansionPanels>
 
                     </>
                 )}
@@ -1087,6 +1187,23 @@ const OperatorCaseDetailPage = dc(() => {
                         </FormField>
                     </>
                 )}
+                {!isAttemptCase.value && resolveAction.value === "CLOSE_CASE" && (
+                    <>
+                        <FormField label={t("Resolution outcome")} hint={t("What happened to the source condition?")} required>
+                            <VSelect
+                                items={RESOLUTION_CODE_OPTIONS}
+                                modelValue={resolutionCode.value}
+                                onUpdate:modelValue={(value: string) => (resolutionCode.value = value)}
+                            />
+                        </FormField>
+                        <FormField label={t("Evidence reference")} hint={t("Optional filing, backup, report or ticket reference.")}>
+                            <VTextField
+                                modelValue={resolutionReference.value}
+                                onUpdate:modelValue={(value: string) => (resolutionReference.value = value)}
+                            />
+                        </FormField>
+                    </>
+                )}
                 <FormField
                     label={t("Reason")}
                     hint={t("Minimum 3 characters. This becomes part of the permanent case record.")}
@@ -1108,7 +1225,7 @@ const OperatorCaseDetailPage = dc(() => {
                 {showChecklists && (
                     <ThemedView style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                         <ThemedText style={{ fontSize: "12px", fontWeight: 700 }}>{t("Resolution checklist")}</ThemedText>
-                        {RESOLVE_CHECKS.map((check) => (
+                        {resolutionChecks.value.map((check) => (
                             <VCheckbox
                                 key={check.key}
                                 modelValue={resolveChecklist.value[check.key] === true}

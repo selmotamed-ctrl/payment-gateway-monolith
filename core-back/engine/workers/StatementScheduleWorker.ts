@@ -2,6 +2,7 @@ import { BaseWorker, sanitizeWorkerError, type WorkerOptions, type WorkerTickRes
 import { toCamelRows } from "../db/rawRows";
 import { writeSystemAudit } from "../ledger/ledgerAlerts";
 import { openKeyedOperatorCase } from "./automationCases";
+import { clearKeyedCase } from "../../lib/operatorCases/caseService";
 import { lastScheduledAtOrBefore, parseCron } from "../../lib/cron";
 import { DEFAULT_BUSINESS_TIME_ZONE } from "./deadlines/businessTime";
 
@@ -148,13 +149,12 @@ export class StatementScheduleWorker extends BaseWorker {
   }
 
   private async resolveOpenCase(subjectKey: string, now: Date): Promise<number> {
-    const changed = await this.db.$executeRawUnsafe(
-      `UPDATE operator_cases SET state = 'RESOLVED', resolution_notes = left(coalesce(resolution_notes, '') || E'\\n' || $2, 8000), updated_at = $3
-       WHERE kind = 'UNMATCHED_STATEMENT' AND subject_key = $1 AND state <> 'RESOLVED'`,
+    const cleared = await clearKeyedCase(this.db as never, {
+      kind: "UNMATCHED_STATEMENT",
       subjectKey,
-      `[AUTO-RESOLVED ${now.toISOString()}] The statement arrived.`,
+      detail: "The statement arrived.",
       now,
-    );
-    return Number(changed) > 0 ? 1 : 0;
+    });
+    return cleared ? 1 : 0;
   }
 }

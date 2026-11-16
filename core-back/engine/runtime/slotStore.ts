@@ -9,6 +9,7 @@ import type {
 import { buildLedgerTemplate, decimal, type LedgerPostContext } from "../ledger/LedgerPoster";
 import { ApiError } from "../../lib/error";
 import { createLedgerPoster } from "../../lib/storageEngine/ledgerPosterFactory";
+import { appendCaseEvent, caseMetadataFields, metaForNewCase } from "../../lib/operatorCases/caseService";
 
 /**
  * Prisma-backed slot reservation store.
@@ -272,6 +273,15 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
     if (existing) {
       return existing as { id: unknown };
     }
+    const notes =
+      `Settlement of ${amount.toFixed(4)} on link ${linkId} was routed to SUSPENSE; `
+      + "an automatic refund adjustment is waiting for review.";
+    const meta = metaForNewCase({
+      kind: "LATE_SUCCESS",
+      attemptId: attempt.id,
+      title: "Late payment success",
+      detail: notes,
+    });
     const operatorCase = await target.operatorCase.create({
       data: {
         attemptId: attempt.id,
@@ -279,10 +289,14 @@ export class PrismaSlotReservationStore implements SlotReservationStore {
         priority: "P1",
         state: "OPEN",
         slaDueAt: new Date(Date.now() + 4 * 60 * 60 * 1000),
-        resolutionNotes:
-          `Settlement of ${amount.toFixed(4)} on link ${linkId} was routed to SUSPENSE; `
-          + "an automatic refund adjustment is waiting for review.",
+        ...caseMetadataFields(meta),
+        resolutionNotes: notes,
       },
+    });
+    await appendCaseEvent(target, String(operatorCase.id), {
+      eventType: "OPENED",
+      summary: meta.titleText,
+      detailsJson: meta.detailsJson,
     });
     return operatorCase as { id: unknown };
   }

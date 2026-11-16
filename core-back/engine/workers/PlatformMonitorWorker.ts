@@ -1,5 +1,6 @@
 import { writeSystemAudit } from "../ledger/ledgerAlerts";
 import type { PrismaLike } from "../db/ports";
+import { appendCaseEvent, caseMetadataFields, clearKeyedCase, metaForNewCase } from "../../lib/operatorCases/caseService";
 import {
   BaseWorker,
   defaultWorkerHealthRegistry,
@@ -155,6 +156,12 @@ export class PrismaMonitorCaseSink implements MonitorCaseSink {
       }
       return { created: false };
     }
+    const meta = metaForNewCase({
+      subjectKey: input.subjectKey,
+      kind: this.kind,
+      title: input.title,
+      detail: input.detail,
+    });
     let createdId: string;
     try {
       const created = await this.db.operatorCase.create({
@@ -163,6 +170,7 @@ export class PrismaMonitorCaseSink implements MonitorCaseSink {
           priority: input.priority,
           state: "OPEN",
           subjectKey: input.subjectKey,
+          ...caseMetadataFields(meta),
           resolutionNotes: appendNote(null, line),
           slaDueAt: new Date(input.now.getTime() + this.slaHours[input.priority] * 60 * 60 * 1000),
         },
@@ -173,6 +181,12 @@ export class PrismaMonitorCaseSink implements MonitorCaseSink {
       if (isUniqueViolation(error)) return { created: false }; // another node raised it first
       throw error;
     }
+    await appendCaseEvent(this.db, createdId, {
+      eventType: "OPENED",
+      summary: input.title,
+      detailsJson: { detail: input.detail, subjectKey: input.subjectKey },
+      now: input.now,
+    });
     await this.audit(this.db, {
       action: "PLATFORM_MONITOR_CASE_RAISED",
       entityType: "OPERATOR_CASE",
@@ -184,11 +198,14 @@ export class PrismaMonitorCaseSink implements MonitorCaseSink {
 
   async clear(input: MonitorCaseClearInput): Promise<void> {
     const open = await this.findOpen(input.subjectKey);
-    if (!open || isClearedNotes(open.resolutionNotes)) return;
-    await this.db.operatorCase.update({
-      where: { id: open.id },
-      data: { resolutionNotes: appendNote(open.resolutionNotes, `${CLEARED_MARKER}${input.now.toISOString()}] ${input.detail}`) },
+    if (!open) return;
+    const cleared = await clearKeyedCase(this.db, {
+      kind: this.kind,
+      subjectKey: input.subjectKey,
+      detail: input.detail,
+      now: input.now,
     });
+    if (!cleared) return;
     await this.audit(this.db, {
       action: "PLATFORM_MONITOR_CLEARED",
       entityType: "OPERATOR_CASE",

@@ -15,6 +15,19 @@ export const resolveSchema = z
     notes: z.string().max(2000).optional(),
     providerReference: z.string().min(1).max(191).optional(),
     settledAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
+    resolutionCode: z
+      .enum([
+        "FIXED_AT_SOURCE",
+        "FALSE_POSITIVE",
+        "DUPLICATE",
+        "ACCEPTED_RISK",
+        "REFERRED",
+        "NO_ACTION_REQUIRED",
+        "SOURCE_CLEARED",
+        "OTHER",
+      ])
+      .optional(),
+    reference: z.string().min(1).max(191).optional(),
     checklist: z
       .array(
         z.enum([
@@ -254,6 +267,25 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/operator-cases/summary/export",
+  }),
+);
+
+router.get(
+  "/operator-cases/catalog",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/operator-cases/catalog",
+  }),
+);
+
+router.post(
+  "/operator-cases/:id/acknowledge",
+  coreForward({
+    method: "POST",
+    path: (context) =>
+      `/internal/admin/operator-cases/${encodeURIComponent(context.params.id ?? "")}/acknowledge`,
+    paramsSchema: idParamsSchema,
+    schema: z.object({ notes: z.string().max(2000).optional(), reason: z.string().max(500).optional() }).strict(),
   }),
 );
 

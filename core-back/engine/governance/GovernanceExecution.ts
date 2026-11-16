@@ -44,6 +44,7 @@ import { ATTEMPT_TRANSITION_TOPIC, type SlotReservationStore } from "../flow/Dyn
 import { attemptRowToDynamicAttempt, type AttemptRow } from "../runtime/attemptRepository";
 import type { InvalidationBus } from "../../lib/invalidationBus";
 import { enqueueOutboxEvent } from "../../lib/storageEngine/outbox";
+import { appendCaseEvent } from "../../lib/operatorCases/caseService";
 
 /**
  * Executable governance.
@@ -3481,17 +3482,37 @@ const resolveOperatorCaseRow = async (
     reason: string | null;
     notes: string | null;
     providerReference: string | null;
+    resolutionCode?: string | null;
+    reference?: string | null;
     checkerUserId: string;
     checkerRole: string;
     approvalRequestId?: string | null;
     extra?: Record<string, unknown>;
   },
 ): Promise<GovernanceExecutionResult> => {
+  const resolutionNotes = operatorCaseResolutionNotes(input);
+  const resolutionCode = input.resolutionCode ?? input.action;
   const updated = await modelOf(tx, "operatorCase").update({
     where: { id: input.operatorCaseId },
     data: {
       state: "RESOLVED",
-      resolutionNotes: operatorCaseResolutionNotes(input),
+      resolutionNotes,
+      resolutionCode,
+      resolutionSummary: resolutionNotes,
+      resolvedAt: new Date(),
+      resolvedByUserId: input.checkerUserId,
+    },
+  });
+  await appendCaseEvent(tx, input.operatorCaseId, {
+    eventType: "RESOLVED",
+    summary: `${input.action} resolved${input.resolutionCode ? ` (${input.resolutionCode})` : ""}`,
+    actorType: "USER",
+    actorUserId: input.checkerUserId,
+    detailsJson: {
+      action: input.action,
+      resolutionCode: input.resolutionCode ?? null,
+      reference: input.reference ?? null,
+      approvalRequestId: input.approvalRequestId ?? null,
     },
   });
   await writeAudit(ctx, tx, {
@@ -3528,6 +3549,8 @@ export async function executeOperatorCaseResolution(
     notes: string | null;
     providerReference: string | null;
     settledAmount: string | null;
+    resolutionCode?: string | null;
+    reference?: string | null;
     checkerUserId: string;
     checkerRole: string;
     approvalRequestId?: string | null;
@@ -3566,6 +3589,8 @@ export async function executeOperatorCaseResolution(
     reason: input.reason,
     notes: input.notes,
     providerReference: input.providerReference,
+    resolutionCode: input.resolutionCode ?? null,
+    reference: input.reference ?? null,
     checkerUserId: input.checkerUserId,
     checkerRole: input.checkerRole,
     approvalRequestId: input.approvalRequestId ?? null,
@@ -3867,6 +3892,11 @@ export async function executeApprovalSubject(
         payload.settledAmount === undefined || payload.settledAmount === null
           ? null
           : String(payload.settledAmount),
+      resolutionCode:
+        payload.resolutionCode === undefined || payload.resolutionCode === null
+          ? null
+          : String(payload.resolutionCode),
+      reference: payload.reference === undefined || payload.reference === null ? null : String(payload.reference),
       checkerUserId: input.checkerUserId,
       checkerRole: input.checkerRole,
       approvalRequestId: input.approval.id,

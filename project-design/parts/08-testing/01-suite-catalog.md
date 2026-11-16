@@ -4,7 +4,7 @@ title: Test Suite Catalog
 status: partial
 confidence: high
 last_verified: 2026-11-16
-verified_against: 1dcc0f2+working-tree
+verified_against: 53afea5+working-tree
 code:
   - core-back/test/sandboxPlane.test.ts
   - core-back/test/exhaustive/**
@@ -55,6 +55,7 @@ tests:
   - admin-front/src/pages/disputes/__tests__/queryFilters.test.ts
   - admin-front/src/pages/dashboard/__tests__/metricLabels.test.ts
   - core-back/test/attempt-outcomes.test.ts
+  - core-back/test/operator-case-catalog.test.ts
   - tests/unit/frontend-security-admin.test.ts
   - tests/unit/frontend-security-checkout.test.ts
   - tests/unit/frontend-security-merchant.test.ts
@@ -547,6 +548,12 @@ These are development/CI tests only; no production-time test job or test endpoin
 - `merchant-back/test/sandbox-routing.test.ts`, `admin-back/test/sandbox-routing.test.ts`, `checkout-back/test/sandbox-routing.test.ts`: pool selection, fail-closed 503 and token prefixes.
 - `merchant-back/test/sandbox-proxy.test.ts` and `checkout-back/test/sandbox-checkout-forward.test.ts`: real forwarding through the sandbox pool for control/resources, `pg_test_` external tokens, `sbx_` summary/inspector routes and the Live-link inspector refusal.
 - `core-back/test/security-regressions/commerce-status-enforcement.test.ts` and `test/engine/attempt-guard-pipeline.test.ts` assert the removed OD-10 fallback.
+
+## Type-aware case management regression (2026-11-16)
+
+- `core-back/test/operator-case-catalog.test.ts` covers backup/regulatory classification, payment/reconciliation source types, attempt-only actions and human references.
+- `core-back/test/automation/platform-monitor.test.ts` covers source-cleared monitor cases and recurrence.
+- `tests/e2e/admin/operator-cases.spec.ts` covers the type-aware list/detail and a backup case that exposes no payment outcome or provider/settled fields.
 
 ## Disputes attempt-link regression (2026-11-16)
 

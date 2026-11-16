@@ -2,6 +2,7 @@ import type { PrismaLike } from "../db/ports";
 import { writeAudit } from "../../lib/audit/writeAudit";
 import { ApiError } from "../../lib/error";
 import { openKeyedOperatorCase } from "../workers/automationCases";
+import { clearKeyedCase } from "../../lib/operatorCases/caseService";
 import type { RouteHealthState } from "./types";
 
 export const ROUTE_HEALTH_OVERRIDE_SUBJECT = "ROUTE_HEALTH_OVERRIDE";
@@ -171,12 +172,11 @@ export async function applyRouteHealthOverride(
     select: { id: true, resolutionNotes: true },
   });
   if (oldReview) {
-    await db.operatorCase.update({
-      where: { id: oldReview.id },
-      data: {
-        state: "RESOLVED",
-        resolutionNotes: `${oldReview.resolutionNotes ?? ""}\n[REPLACED ${now.toISOString()}] A new override was applied.`.trim().slice(0, 8000),
-      },
+    await clearKeyedCase(db, {
+      kind: "MANUAL_REVIEW",
+      subjectKey: `route.health.override_review:${input.routeId}`,
+      detail: "A new override was applied.",
+      now,
     });
   }
   if (applied.computedState !== applied.effectiveState) {
@@ -288,17 +288,11 @@ async function clearOverrideCases(db: PrismaLike, routeId: string, now: Date, re
     `route.health.override_conflict:${routeId}`,
     `route.health.override_review:${routeId}`,
   ]) {
-    const open = (await db.operatorCase.findFirst({
-      where: { kind: "MANUAL_REVIEW", subjectKey, state: { not: "RESOLVED" } },
-      select: { id: true, resolutionNotes: true },
-    })) as { id: string; resolutionNotes: string | null } | null;
-    if (!open) continue;
-    await db.operatorCase.update({
-      where: { id: open.id },
-      data: {
-        state: "RESOLVED",
-        resolutionNotes: `${open.resolutionNotes ?? ""}\n[CLEARED ${now.toISOString()}] ${reason}`.trim().slice(0, 8000),
-      },
+    await clearKeyedCase(db, {
+      kind: "MANUAL_REVIEW",
+      subjectKey,
+      detail: reason,
+      now,
     });
   }
 }

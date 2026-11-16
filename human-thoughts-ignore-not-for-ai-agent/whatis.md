@@ -15,5 +15,4 @@
     - how is routes health measured, 
     - what is approve queue by domain, what does each mean
     - what is Recent privileged activity
-
-- dashboard success rate (successRate=attempts_success_count/total_attempts_count*100) metrice needs to be fixed, the total count must not include pending attempts such as created also not include states that are cancelled or expired since its ourt decision and not failure to process payment, the main total count should include problematic attempts + succeeded attempts, i leave the decision up to you  
+ 

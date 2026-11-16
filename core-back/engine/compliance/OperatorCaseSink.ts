@@ -1,5 +1,6 @@
 import type { PrismaLike } from "../db/ports";
 import type { OperatorCaseOpenInput, OperatorCaseSink } from "../flow/DynamicRailEngine";
+import { appendCaseEvent, caseMetadataFields, metaForNewCase } from "../../lib/operatorCases/caseService";
 
 const OPEN_STATES = ["OPEN", "IN_PROGRESS", "PENDING_CHECKER"];
 
@@ -23,6 +24,12 @@ export class PrismaOperatorCaseSink implements OperatorCaseSink {
       return { id: String(existing.id), created: false };
     }
     const notes = `${input.title}: ${input.detail}`.slice(0, 1000);
+    const meta = metaForNewCase({
+      kind: input.kind,
+      attemptId: input.attemptId,
+      title: input.title,
+      detail: input.detail,
+    });
     const created = await this.client.operatorCase.create({
       data: {
         attemptId: input.attemptId,
@@ -30,8 +37,14 @@ export class PrismaOperatorCaseSink implements OperatorCaseSink {
         priority: input.priority,
         state: "OPEN",
         slaDueAt: input.slaDueAt,
+        ...caseMetadataFields(meta),
         resolutionNotes: notes,
       },
+    });
+    await appendCaseEvent(this.client, String(created.id), {
+      eventType: "OPENED",
+      summary: input.title,
+      detailsJson: { detail: input.detail },
     });
     return { id: String(created.id), created: true };
   }

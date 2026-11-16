@@ -522,6 +522,10 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `GET /reconciliation/runs`, `GET /reconciliation/summary`, `GET /reconciliation/summary/export`, `GET /reconciliation/runs/:id`, `GET /reconciliation/runs/:id/export` | `reconciliation:read` |
 | `POST /reconciliation/upload` | `reconciliation:write`; raw multipart/body, enqueues a `RECONCILIATION_RUN` |
 
+#### Operator cases and inquiries
+
+`GET /operator-cases`, `/export`, `/summary`, `/summary/export` and `/:id` return the type-aware case fields (`caseReference`, `caseType`, title/summary, domain/source, subject, available actions) and filter by `caseType`; AML-confidential cases require `aml.read_confidential`. `/catalog` returns the code catalog, action definitions and resolution codes. `POST /:id/acknowledge` is single-actor triage; `POST /:id/resolve` remains maker-checker and validates the action against the case type (payment actions only for attempt types; operational close requires a resolution code). Source-cleared monitor/route/statement/report cases resolve with a system event.
+
 #### Disputes, adjustments, cash-outs, commissions and velocity
 
 | Routes | Authority |
@@ -2066,7 +2070,7 @@ Tests: `core-back/test/ledger-raw-sql-parity.test.ts` (same entries, lines, bala
 
 ## Governance and Compliance
 
-> Status: `partial` · Last verified: 2026-11-10
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -2242,9 +2246,9 @@ The admin surface includes the report payload/output endpoints, output download 
 
 ### 3.10 Operator cases and inquiry schedules
 
-`PrismaOperatorCaseSink` opens an operator case at most once per `(attemptId, kind)` while the case is `OPEN`, `IN_PROGRESS`, or `PENDING_CHECKER` (`core-back/engine/compliance/OperatorCaseSink.ts`). The engine opens cases for `LATE_SUCCESS`, `CONFLICT`, expiring attempts, and other flow findings.
+`PrismaOperatorCaseSink` opens an operator case at most once per `(attemptId, kind)` while the case is `OPEN`, `IN_PROGRESS`, or `PENDING_CHECKER` (`core-back/engine/compliance/OperatorCaseSink.ts`). The engine opens cases for `LATE_SUCCESS`, `CONFLICT`, expiring attempts, and other flow findings. Cases now carry a stable `case_type`, human title/summary, subject and append-only events; see `core.case-management`.
 
-Operator resolution is a maker action: `POST /admin/operator-cases/:id/resolve` creates an `OPERATOR_CASE` approval and sets the case to `PENDING_CHECKER`; the approval executes `MARK_SUCCEEDED`, `MARK_FAILED`, or `CLOSE_CASE`. Bulk inquiry schedules a persisted `GatewayInquirySchedule` after eligibility checks (case state, attempt status, terminal state, gateway status-check support). Cancellation, run-now, and retry update the schedule and the attempt's `nextCheckAt`; the poll worker owns execution and schedule reconciliation.
+Operator resolution is a maker action: `POST /admin/operator-cases/:id/resolve` creates an `OPERATOR_CASE` approval and sets the case to `PENDING_CHECKER`; the approval executes the case-type action. Payment-attempt cases may use `MARK_SUCCEEDED`/`MARK_FAILED`/`CLOSE_CASE`; backup, report, route and other operational cases expose only acknowledgement/close with a resolution code and evidence reference. The server validates the action against the case type and requires a resolution code for a non-payment close. `POST /operator-cases/:id/acknowledge` is single-actor triage. Source-cleared monitor/route/statement/report cases resolve automatically with a system event; a recurrence opens a new case. Bulk inquiry schedules a persisted `GatewayInquirySchedule` after eligibility checks (case state, attempt status, terminal state, gateway status-check support). Cancellation, run-now, and retry update the schedule and the attempt's `nextCheckAt`; the poll worker owns execution and schedule reconciliation.
 
 ### 3.11 Tipping-off and confidentiality
 
@@ -2540,7 +2544,7 @@ The loop is not a distributed lock by itself. Cross-node safety comes from `FOR 
 | `ExpiryNoticeWorker` | hourly (`WORKER_EXPIRY_NOTICE_INTERVAL_MS`), leader-elected | Staged passes, each stage exactly-once through `deadline_stages` | API token and gateway credential expiry notices at 30/7/1 days, the P1 case close to a credential expiry, expired credential sets taken out of use, scheduled credential re-verification (dry run) (section 3.16). | Implemented (AUTO-08, AUTO-26) |
 | `DeadlineWorker` | every 5 min (`WORKER_DEADLINE_INTERVAL_MS`), batch 100, leader-elected | Six isolated rules, each action guarded by an exactly-once `deadline_stages` row claimed in its own transaction | Reminders, escalations and deadline outcomes for operator cases, AML cases, join requests, disputes (D1), cash-outs in Libyan business hours (D2) and unratified emergency actions (D7); section 3.16. | Implemented (AUTO-04, AUTO-22) |
 | `ExpiryHousekeepingWorker` | every 15 min (`WORKER_EXPIRY_HOUSEKEEPING_INTERVAL_MS`), batch 200, leader-elected | Six bounded, index-backed, isolated passes | Closes undecided approvals, revokes expired staff invitations, expires payment links (`link.expired`), deletes old MFA challenges and session revocations, scrubs sealed secrets of finished notifications (section 3.16). | Implemented (AUTO-05, AUTO-11) |
-| `PlatformMonitorWorker` | every 60 s (`WORKER_PLATFORM_MONITOR_INTERVAL_MS`), leader-elected | One pass over the configured checks | Evaluates the platform checks (section 3.16) and opens ONE keyed operator case per tripped condition (`platform.<check>[:<key>]`), recording the clearing on the case; a check that fails 3 times in a row raises `platform.monitor_check_failed:<id>`. | Implemented (AUTO-03) |
+| `PlatformMonitorWorker` | every 60 s (`WORKER_PLATFORM_MONITOR_INTERVAL_MS`), leader-elected | One pass over the configured checks | Evaluates the platform checks (section 3.16) and opens ONE keyed operator case per tripped condition (`platform.<check>[:<key>]`); a source-cleared condition resolves the case with a system event and a recurrence opens a new case; a check that fails 3 times in a row raises `platform.monitor_check_failed:<id>`. | Implemented (AUTO-03) |
 | `CommissionNettingWorker` | daily at `COMMISSION_NETTING_CRON` (00:30 Africa/Tripoli), polled every 60 s, leader-elected | One grouped receivable read, then a batch per tick within a time budget | Nets the merchant-direct commission receivable against the merchant wallet (section 3.16); dry run by default. | Implemented (AUTO-21), dry run |
 | `BackgroundJobWorker` | every 2 s when enabled, batch 10 | `FOR UPDATE SKIP LOCKED` claim + ONE batch `RUNNING` update + lease | Drains `RECONCILIATION_RUN`, `ADJUSTMENT_EXECUTION` and `REFUND_INQUIRY` jobs, retries with backoff, recovers expired leases. | Implemented |
 | `OutboxRelayWorker` | every 250 ms (idle back-off to 2 s), batch >= 100 | `FOR UPDATE SKIP LOCKED`, one batch ack | Projects `attempt.transitioned` into `rm_merchant_daily_stats` and `rm_route_daily_volumes`; marks `processed_at`. Other declared topics are no-ops (counted, not silent). A failing event is retried alone in a savepoint, counted in `attempts`, and PARKED after `OUTBOX_MAX_ATTEMPTS` with one operator case per topic (AUTO-02). | Partial |
@@ -2681,7 +2685,7 @@ It degrades when workers are disabled, the queue cannot be read, or the oldest q
 
 Source: `design/11-automation/background_automation_and_workers_plan.md`. Every automation below follows the plan's rules: `BaseWorker` + leader election or `SKIP LOCKED`, keyed operator cases (a repeated tick never opens a second case), system-actor audit rows, env switches, a dry run for state-changing work, and tests against live PostgreSQL.
 
-**Worker health (AUTO-03).** `WorkerHealthRegistry` (`engine/workers/workerRuntime.ts`) is filled by `BaseWorker` on every tick (start, success, error, duration, processed count) and by `OutboxRelayWorker` / `AuditShipperWorker`, which are not `BaseWorker`s and report under their class names with the idle back-off as their cadence. `PlatformMonitorWorker` runs pluggable `PlatformMonitorCheck`s every minute and turns each finding into ONE operator case `platform.<check>[:<key>]` (kind `MANUAL_REVIEW`, SLA by priority); a condition that stops is recorded on the case (`[CLEARED ...]`, audit `PLATFORM_MONITOR_CLEARED`), never auto-resolved, and a re-trip appends `[RETRIPPED ...]`. State is rebuilt from the cases after a restart. Standard checks (`platformMonitorChecks.ts`): `worker_stale`, `checkpoint_stale`, `outbox_age`, `audit_outbox_age`, `background_job_age`, `journal_default_rows`, `cert_expiry`, `redis_unreachable`; money path (`moneyPathMonitorChecks.ts`): `stale_unknown`, `refund_unscheduled`. A check that throws or times out (15 s) three times in a row raises `platform.monitor_check_failed:<id>`.
+**Worker health (AUTO-03).** `WorkerHealthRegistry` (`engine/workers/workerRuntime.ts`) is filled by `BaseWorker` on every tick (start, success, error, duration, processed count) and by `OutboxRelayWorker` / `AuditShipperWorker`, which are not `BaseWorker`s and report under their class names with the idle back-off as their cadence. `PlatformMonitorWorker` runs pluggable `PlatformMonitorCheck`s every minute and turns each finding into ONE operator case `platform.<check>[:<key>]` (kind `MANUAL_REVIEW`, SLA by priority); a condition that stops resolves the case through `clearKeyedCase` (`[SOURCE_CLEARED]` event, audit `PLATFORM_MONITOR_CLEARED`); a recurrence opens a new case instead of leaving an OPEN case with `[CLEARED]`/`[RETRIPPED]` markers. State is rebuilt from the cases after a restart. Standard checks (`platformMonitorChecks.ts`): `worker_stale`, `checkpoint_stale`, `outbox_age`, `audit_outbox_age`, `background_job_age`, `journal_default_rows`, `cert_expiry`, `redis_unreachable`; money path (`moneyPathMonitorChecks.ts`): `stale_unknown`, `refund_unscheduled`. A check that throws or times out (15 s) three times in a row raises `platform.monitor_check_failed:<id>`.
 
 **Outbox dead-lettering (AUTO-02).** A failing batch is retried row by row in savepoints; the failing row's `attempts` grows and `last_error` is kept; at `OUTBOX_MAX_ATTEMPTS` it is parked (`parked_at`, still `processed_at IS NULL`, so it keeps its partial-index slot and the relay no longer selects it) and one operator case `outbox.parked:<topic>` is raised with a `OUTBOX_EVENT_PARKED` audit row per event. A topic without a handler is acknowledged but marked `UNKNOWN_TOPIC` in `last_error` and counted.
 
@@ -3438,7 +3442,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 40 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 41 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -3493,7 +3497,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 40`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 41`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -3514,7 +3518,7 @@ installs the two append-only guard triggers. See
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116120000_route_health_automation`, schema version 40). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116120000_route_health_automation`, schema version 41). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -3809,7 +3813,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 40 (`REQUIRED_SCHEMA_VERSION = 40`; model count 116). The schema migrations since version 10 are:
+The current schema version is 40 (`REQUIRED_SCHEMA_VERSION = 41`; model count 116). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);

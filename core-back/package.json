@@ -30,7 +30,9 @@
     "create-dev-users": "bun ./scripts/create-dev-users.ts",
     "repair-journal-default-partition": "bun ./scripts/repair-journal-default-partition.ts",
     "seed-fake-rails": "bun ./prisma/seedFakeRails.ts",
-    "seed-synthetic-history": "bun ./prisma/syntheticSeeder/index.ts"
+    "seed-synthetic-history": "bun ./prisma/syntheticSeeder/index.ts",
+    "backfill-operator-cases": "bun ./scripts/backfillOperatorCases.ts",
+    "seed-operator-case-showcase": "bun ./scripts/seedOperatorCaseShowcase.ts"
   },
   "peerDependencies": {
     "typescript": "^7"

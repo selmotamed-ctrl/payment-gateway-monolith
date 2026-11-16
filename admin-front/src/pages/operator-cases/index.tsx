@@ -26,13 +26,13 @@ import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
 import {
     COLUMN_HELP,
-    caseHelp,
     caseStateHelp,
     formatDateTime,
     priorityHelp,
     slaInfo,
 } from "./operatorCaseHelp";
 import type { BulkInquiryResult, OperatorCaseSummary } from "./types";
+import { caseTypeMeta } from "./caseTypes";
 
 import { FormModal } from "@/components/ui/FormModal";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
@@ -103,7 +103,9 @@ const OperatorCasesPage = dc(() => {
     const router = useRouter();
 
     const search = ref<string | null>(null);
-    const filters = ref<FilterValues>({});
+    const filters = ref<FilterValues>({
+        state: ["OPEN", "IN_PROGRESS", "PENDING_CHECKER"],
+    });
     const rows = ref<OperatorCaseSummary[]>([]);
     const total = ref(0);
     const summary = ref<OperatorCasesSummary | null>(null);
@@ -630,30 +632,41 @@ const OperatorCasesPage = dc(() => {
                         letterSpacing: 0,
                     }}
                 >
-                    {row.caseRef}
+                    <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "2px" }}>
+                        <span>{row.caseReference || row.caseRef}</span>
+                        <span style={{ fontSize: "10px", fontWeight: 500, opacity: 0.6 }}>{row.title || caseTypeMeta(row.caseType).label}</span>
+                    </span>
                 </VBtn>
             ),
         },
         {
             key: "caseType",
             label: "Type",
-            sortKey: "kind",
+            sortKey: "caseType",
             headerTooltip: COLUMN_HELP.caseType,
             value: (row) => row.caseType,
             Value: ({ row }: { row: OperatorCaseSummary }) => {
-                const help = caseHelp(row.caseType);
+                const meta = caseTypeMeta(row.caseType);
+                return <StatusBadge status={row.caseType} label={meta.label} toneOverride={meta.tone ?? "info"} />;
+            },
+        },
+        {
+            key: "context",
+            label: "Context",
+            headerTooltip: "The human subject and the relevant context for this case type.",
+            value: (row) => [row.title, row.subjectLabel, row.merchantTradeName, row.attemptReference, row.statementAmount, row.chargedAmount].filter(Boolean).join(" "),
+            Value: ({ row }: { row: OperatorCaseSummary }) => {
+                const meta = caseTypeMeta(row.caseType);
+                const amount = row.chargedAmount ?? row.statementAmount;
                 return (
-                    <StatusBadge
-                        status={row.caseType}
-                        label={help.label}
-                        toneOverride={
-                            row.caseType === "CONFLICT" || row.caseType === "LATE_SUCCESS"
-                                ? "danger"
-                                : row.caseType === "UNKNOWN" || row.caseType === "MISMATCH"
-                                  ? "warning"
-                                  : "info"
-                        }
-                    />
+                    <ThemedView style={{ gap: "4px", minWidth: 0 }}>
+                        <ThemedText style={{ fontSize: "13px", fontWeight: 700 }}>{row.title || meta.label}</ThemedText>
+                        <ThemedText style={{ fontSize: "11px", opacity: 0.65, overflowWrap: "anywhere" }}>
+                            {row.attemptId
+                                ? [row.merchantTradeName || row.merchantLegalName, row.attemptReference, amount ? `${amount} ${row.currency ?? ""}`.trim() : null].filter(Boolean).join(" · ")
+                                : ([row.subjectLabel, row.summary].filter(Boolean).join(" · ") || meta.meaning)}
+                        </ThemedText>
+                    </ThemedView>
                 );
             },
         },
@@ -680,130 +693,6 @@ const OperatorCasesPage = dc(() => {
                     <StatusBadge status={row.state} label={row.state} toneOverride={asBadgeTone(statusTone(row.state))} />
                 </span>
             ),
-        },
-        {
-            key: "merchantName",
-            label: "Merchant",
-            sortKey: "merchantName",
-            headerTooltip: COLUMN_HELP.merchant,
-            value: (row) => row.merchantTradeName || row.merchantLegalName || "—",
-            Value: ({ row }: { row: OperatorCaseSummary }) => (
-                <ThemedView style={{ gap: "2px" }}>
-                    <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>
-                        {row.merchantTradeName || row.merchantLegalName || "—"}
-                    </ThemedText>
-                    {row.merchantLegalName && row.merchantLegalName !== row.merchantTradeName && (
-                        <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{row.merchantLegalName}</ThemedText>
-                    )}
-                </ThemedView>
-            ),
-        },
-        {
-            key: "route",
-            label: "Rail / Gateway",
-            headerTooltip: COLUMN_HELP.route,
-            value: (row) => `${row.railCode ?? ""} ${row.gatewayCode ?? ""}`.trim(),
-            Value: ({ row }: { row: OperatorCaseSummary }) => (
-                <ThemedView style={{ gap: "2px" }}>
-                    <ThemedText style={{ fontSize: "13px", fontWeight: 600 }}>{row.railCode || "—"}</ThemedText>
-                    <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>
-                        {row.gatewayCode || row.gatewayName || "—"}
-                    </ThemedText>
-                </ThemedView>
-            ),
-        },
-        {
-            key: "amount",
-            label: "Amount",
-            headerTooltip: COLUMN_HELP.amount,
-            value: (row) => String(row.chargedAmount ?? row.statementAmount ?? ""),
-            Value: ({ row }: { row: OperatorCaseSummary }) => {
-                const amount = row.chargedAmount ?? row.statementAmount;
-                const source = row.chargedAmount ? "Charged" : row.statementAmount ? "Statement" : "";
-                if (amount === null || amount === undefined) {
-                    return <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>;
-                }
-                return (
-                    <ThemedView style={{ gap: "2px" }}>
-                        <MoneyDisplay amount={amount} currency={row.currency || "LYD"} size="sm" />
-                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{source}</ThemedText>
-                    </ThemedView>
-                );
-            },
-        },
-        {
-            key: "attempt",
-            label: "Attempt",
-            headerTooltip: COLUMN_HELP.attempt,
-            value: (row) => row.attemptReference ?? "",
-            Value: ({ row }: { row: OperatorCaseSummary }) => (
-                <ThemedView style={{ gap: "3px" }}>
-                    <MonoRef value={row.attemptReference ?? ""} truncate={18} />
-                    {row.attemptStatus ? (
-                        <StatusBadge status={row.attemptStatus} label={row.attemptStatus} toneOverride={asBadgeTone(statusTone(row.attemptStatus))} />
-                    ) : (
-                        <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>No attempt</ThemedText>
-                    )}
-                    {row.attemptSubstatus && (
-                        <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{row.attemptSubstatus}</ThemedText>
-                    )}
-                </ThemedView>
-            ),
-        },
-        {
-            key: "slot",
-            label: "Link slot",
-            headerTooltip: COLUMN_HELP.slot,
-            value: (row) =>
-                row.linkSlot ? `${row.linkSlot.confirmedCount ?? 0}/${row.linkSlot.useCount ?? 0}` : "",
-            Value: ({ row }: { row: OperatorCaseSummary }) =>
-                row.linkSlot ? (
-                    <ThemedView style={{ gap: "3px" }}>
-                        <ThemedText style={{ fontSize: "12px", fontWeight: 600 }}>
-                            {row.linkSlot.confirmedCount ?? 0}/{row.linkSlot.useCount ?? 0} used
-                        </ThemedText>
-                        <ThemedText style={{ fontSize: "10px", opacity: 0.6 }}>
-                            {row.linkSlot.activeLockedCount ?? 0} locked
-                        </ThemedText>
-                    </ThemedView>
-                ) : (
-                    <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
-                ),
-        },
-        {
-            key: "providerReference",
-            label: "Provider reference",
-            headerTooltip: COLUMN_HELP.providerReference,
-            value: (row) => row.providerReference ?? "",
-            Value: ({ row }: { row: OperatorCaseSummary }) => <MonoRef value={row.providerReference ?? ""} truncate={18} />,
-        },
-        {
-            key: "reconciliation",
-            label: "Reconciliation",
-            headerTooltip: COLUMN_HELP.reconciliation,
-            value: (row) => row.reconciliationResult ?? "",
-            Value: ({ row }: { row: OperatorCaseSummary }) =>
-                row.reconciliationResult ? (
-                    <StatusBadge
-                        status={row.reconciliationResult}
-                        label={row.reconciliationResult}
-                        toneOverride={asBadgeTone(statusTone(row.reconciliationResult))}
-                    />
-                ) : (
-                    <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
-                ),
-        },
-        {
-            key: "approval",
-            label: "Approval",
-            headerTooltip: COLUMN_HELP.approval,
-            value: (row) => row.approvalState ?? "",
-            Value: ({ row }: { row: OperatorCaseSummary }) =>
-                row.approvalState ? (
-                    <StatusBadge status={row.approvalState} label={row.approvalState} toneOverride={asBadgeTone(statusTone(row.approvalState))} />
-                ) : (
-                    <ThemedText style={{ opacity: 0.55 }}>—</ThemedText>
-                ),
         },
         {
             key: "openedAt",
@@ -845,27 +734,6 @@ const OperatorCasesPage = dc(() => {
             ),
         },
         {
-            key: "inquirySchedule",
-            label: "Inquiry schedule",
-            sortable: false,
-            headerTooltip: "The latest persisted gateway inquiry schedule for this case.",
-            value: (row) => row.latestInquirySchedule?.status ?? "",
-            Value: ({ row }) => {
-                const schedule = row.latestInquirySchedule;
-                if (!schedule) {
-                    return <ThemedText style={{ fontSize: "11px", opacity: 0.5 }}>—</ThemedText>;
-                }
-                return (
-                    <ThemedView style={{ gap: "3px" }}>
-                        <StatusBadge status={String(schedule.status ?? "")} label={String(schedule.status ?? "").replaceAll("_", " ")} toneOverride={asBadgeTone(statusTone(schedule.status))} />
-                        {schedule.nextRunAt && (
-                            <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(schedule.nextRunAt)}</ThemedText>
-                        )}
-                    </ThemedView>
-                );
-            },
-        },
-        {
             key: "actions",
             label: "Actions",
             sortable: false,
@@ -883,24 +751,25 @@ const OperatorCasesPage = dc(() => {
                     >
                         <TableRowActions
                             primaryAction={{
-                                label: t("Inquire"),
-                                icon: "mdi-refresh",
-                                loading: inquiringId.value === row.id,
-                                disabled: !eligibility?.eligible || bulkLoading.value || !canInquire.value,
-                                onClick: () => void inquireOne(row),
+                                label: t("Open"),
+                                icon: "mdi-open-in-new",
+                                onClick: () => openCase(row),
                             }}
                             items={[
+                                ...(row.attemptId
+                                    ? [{
+                                        key: "inquire",
+                                        label: t("Inquire gateway"),
+                                        icon: "mdi-radar",
+                                        disabled: !eligibility?.eligible || bulkLoading.value || !canInquire.value,
+                                        onClick: () => void inquireOne(row),
+                                    }]
+                                    : []),
                                 {
                                     key: "inspect",
-                                    label: t("Inspect"),
+                                    label: t("Quick inspect"),
                                     icon: "mdi-eye-outline",
                                     onClick: () => openInspection(row),
-                                },
-                                {
-                                    key: "open",
-                                    label: t("Open"),
-                                    icon: "mdi-open-in-new",
-                                    onClick: () => openCase(row),
                                 },
                             ]}
                         />

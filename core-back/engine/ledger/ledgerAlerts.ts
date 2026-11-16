@@ -1,5 +1,6 @@
 import { SYSTEM_AUTOMATION_EMAIL } from "../governance/GovernanceExecution";
 import { writeAudit } from "../../lib/audit/writeAudit";
+import { appendCaseEvent, caseMetadataFields, metaForNewCase } from "../../lib/operatorCases/caseService";
 
 type Any = Record<string, any>;
 
@@ -25,16 +26,25 @@ export const raiseLedgerCase = async (
     select: { id: true },
   });
   if (open) return false;
+  const meta = metaForNewCase({ kind: "MISMATCH", subjectKey: input.subjectKey, detail: input.notes });
   try {
-    await db.operatorCase.create({
+    const created = await db.operatorCase.create({
       data: {
         kind: "MISMATCH",
         priority: "P1",
         state: "OPEN",
         subjectKey: input.subjectKey,
+        ...caseMetadataFields(meta),
         resolutionNotes: input.notes,
         slaDueAt: new Date((input.now ?? new Date()).getTime() + (input.slaHours ?? 4) * 60 * 60 * 1000),
       },
+      select: { id: true },
+    });
+    await appendCaseEvent(db as never, String(created.id), {
+      eventType: "OPENED",
+      summary: meta.titleText,
+      detailsJson: meta.detailsJson,
+      now: input.now,
     });
     return true;
   } catch (error) {

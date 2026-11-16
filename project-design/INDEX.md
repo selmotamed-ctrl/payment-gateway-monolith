@@ -40,6 +40,7 @@ This is the canonical entrypoint for the payment-gateway project design.
 - [Dynamic Report Engine SDK and Report Studio Host](parts/01-core-back/12-report-engine-sdk.md) — `core.report-engine` · `implemented`
 - [Shared Object & Asset Storage Engine](parts/01-core-back/13-object-storage.md) — `core.object-storage` · `implemented`
 - [Route Health and Circuit Breaker](parts/01-core-back/14-route-health-and-circuit-breaker.md) — `core.route-health` · `partial`
+- [Type-Aware Operator Case Management](parts/01-core-back/15-case-management.md) — `core.case-management` · `partial`
 
 ### 02-edge-services
 

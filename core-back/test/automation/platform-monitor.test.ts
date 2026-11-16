@@ -524,7 +524,7 @@ describe("PrismaMonitorCaseSink", () => {
 
   const raise = (key: string) => ({ subjectKey: key, title: "Outbox relay is behind", detail: "6 min", priority: "P1" as const, now: T0 });
 
-  test("opens one case per key, records clearing and re-trips on the same open case", async () => {
+  test("opens one case per key, source-clears it, and opens a new case after recurrence", async () => {
     const { rows, audits, sink } = fakeCaseDb();
     expect(await sink.raise(raise("platform.outbox_age"))).toEqual({ created: true });
     expect(await sink.raise(raise("platform.outbox_age"))).toEqual({ created: false });
@@ -536,18 +536,18 @@ describe("PrismaMonitorCaseSink", () => {
 
     await sink.clear({ subjectKey: "platform.outbox_age", detail: "ok again", now: T0 });
     await sink.clear({ subjectKey: "platform.outbox_age", detail: "ok again", now: T0 });
-    expect(rows[0]?.resolutionNotes).toContain("[CLEARED 2026-11-09T10:00:00.000Z] ok again");
-    expect(rows[0]?.state).toBe("OPEN");
+    expect(rows[0]?.state).toBe("RESOLVED");
+    expect(rows[0]?.resolutionNotes).toBe("Outbox relay is behind: 6 min");
     expect(await sink.listActiveKeys("platform.")).toEqual([]);
 
-    expect(await sink.raise(raise("platform.outbox_age"))).toEqual({ created: false });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.resolutionNotes).toContain("[RETRIPPED ");
+    expect(await sink.raise(raise("platform.outbox_age"))).toEqual({ created: true });
+    expect(rows).toHaveLength(2);
+    expect(rows[1]?.state).toBe("OPEN");
     expect(await sink.listActiveKeys("platform.")).toEqual(["platform.outbox_age"]);
     expect(audits.map((entry) => entry.action)).toEqual([
       "PLATFORM_MONITOR_CASE_RAISED",
       "PLATFORM_MONITOR_CLEARED",
-      "PLATFORM_MONITOR_RETRIPPED",
+      "PLATFORM_MONITOR_CASE_RAISED",
     ]);
   });
 

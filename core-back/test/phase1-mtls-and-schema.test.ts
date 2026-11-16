@@ -213,7 +213,7 @@ describe("prisma schema", () => {
     // The automation plan adds one migration per item; the ledger query/index optimisation is applied after them
     // (schema version 25) so its partition function carries both the automation security hardening and the
     // append-only autovacuum settings. The newest migration must be well-formed and set the required version.
-    expect(ordered.at(-1)).toBe("20261116120000_route_health_automation");
+    expect(ordered.at(-1)).toBe("20261116130000_case_management_taxonomy");
     expect(ordered).toContain("20261109200000_merchant_webhooks");
     expect(ordered).toContain("20261109210000_ledger_query_and_index_optimization");
     expect(ordered).toContain("20261109130000_journal_partition_worker");
@@ -227,7 +227,7 @@ describe("prisma schema", () => {
     expect(newest).toMatch(new RegExp(`UPDATE "schema_versions"\\s+SET "version" = ${REQUIRED_SCHEMA_VERSION}\\b`));
     expect(newest).toContain("payment_attempts_health_markers");
     expect(newest).toContain("set_payment_attempt_health_markers");
-    expect(REQUIRED_SCHEMA_VERSION).toBe(40);
+    expect(REQUIRED_SCHEMA_VERSION).toBe(41);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),

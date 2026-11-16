@@ -5,6 +5,7 @@ import { rowTone, statusTone } from "./statusTone";
 import { commerceTables } from "./registry/commerce";
 import { ledgerOpsTables } from "./registry/ledgerOps";
 import { formsTables } from "./registry/forms";
+import { CASE_TYPE_OPTIONS } from "@/pages/operator-cases/caseTypes";
 
 export type { TableServerConfig };
 
@@ -313,10 +314,10 @@ export const tableRegistry: Record<string, TableServerConfig> = {
         url: urlsMap.operatorCases,
         listKey: "cases",
         filters: [
-            { key: "caseRef", label: "Case reference", type: "text", placeholder: "PA-… or statement reference" },
+            { key: "caseRef", label: "Case reference", type: "text", placeholder: "CASE-2026-… or subject reference" },
             { key: "merchantName", label: "Merchant name", type: "text", placeholder: "Trade or legal name" },
             { key: "providerReference", label: "Provider reference", type: "text", placeholder: "Gateway reference" },
-            { key: "kind", label: "Case type", type: "data-autocomplete", options: options(OPERATOR_KIND), multiple: true },
+            { key: "caseType", label: "Case type", type: "data-autocomplete", options: CASE_TYPE_OPTIONS, multiple: true },
             { key: "state", label: "State", type: "data-autocomplete", options: options(OPERATOR_STATE), multiple: true },
             { key: "priority", label: "Priority", type: "data-autocomplete", options: options(["P1", "P2", "P3"]), multiple: true },
             { key: "assigneeUserId", label: "Assignee", type: "api-autocomplete", load: users },

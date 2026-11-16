@@ -28,6 +28,7 @@ Historical `design/**` files are source lineage only; this document and the part
 - [Dynamic Report Engine SDK and Report Studio Host](#corereport-engine) — `implemented`
 - [Shared Object & Asset Storage Engine](#coreobject-storage) — `implemented`
 - [Route Health and Circuit Breaker](#coreroute-health) — `partial`
+- [Type-Aware Operator Case Management](#corecase-management) — `partial`
 - [Shared Core Upstream Client](#edgeshared) — `implemented`
 - [Admin Edge BFF](#edgeadmin) — `partial`
 - [Merchant Edge BFF](#edgemerchant) — `partial`
@@ -2448,7 +2449,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 <a id="coreapi"></a>
 
-> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `1dcc0f2+working-tree`
+> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
 
 # Core API Surface
 
@@ -2631,6 +2632,10 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `POST /reconciliation/sources`, `PATCH /reconciliation/sources/:id` | `reconciliation:write` |
 | `GET /reconciliation/runs`, `GET /reconciliation/summary`, `GET /reconciliation/summary/export`, `GET /reconciliation/runs/:id`, `GET /reconciliation/runs/:id/export` | `reconciliation:read` |
 | `POST /reconciliation/upload` | `reconciliation:write`; raw multipart/body, enqueues a `RECONCILIATION_RUN` |
+
+#### Operator cases and inquiries
+
+`GET /operator-cases`, `/export`, `/summary`, `/summary/export` and `/:id` return the type-aware case fields (`caseReference`, `caseType`, title/summary, domain/source, subject, available actions) and filter by `caseType`; AML-confidential cases require `aml.read_confidential`. `/catalog` returns the code catalog, action definitions and resolution codes. `POST /:id/acknowledge` is single-actor triage; `POST /:id/resolve` remains maker-checker and validates the action against the case type (payment actions only for attempt types; operational close requires a resolution code). Source-cleared monitor/route/statement/report cases resolve with a system event.
 
 #### Disputes, adjustments, cash-outs, commissions and velocity
 
@@ -4186,7 +4191,7 @@ Tests: `core-back/test/ledger-raw-sql-parity.test.ts` (same entries, lines, bala
 
 <a id="coregovernance"></a>
 
-> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-10 · **Verified against:** `working-tree 2026-11-10`
+> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
 
 # Governance and Compliance
 
@@ -4364,9 +4369,9 @@ The admin surface includes the report payload/output endpoints, output download 
 
 ### 3.10 Operator cases and inquiry schedules
 
-`PrismaOperatorCaseSink` opens an operator case at most once per `(attemptId, kind)` while the case is `OPEN`, `IN_PROGRESS`, or `PENDING_CHECKER` (`core-back/engine/compliance/OperatorCaseSink.ts`). The engine opens cases for `LATE_SUCCESS`, `CONFLICT`, expiring attempts, and other flow findings.
+`PrismaOperatorCaseSink` opens an operator case at most once per `(attemptId, kind)` while the case is `OPEN`, `IN_PROGRESS`, or `PENDING_CHECKER` (`core-back/engine/compliance/OperatorCaseSink.ts`). The engine opens cases for `LATE_SUCCESS`, `CONFLICT`, expiring attempts, and other flow findings. Cases now carry a stable `case_type`, human title/summary, subject and append-only events; see `core.case-management`.
 
-Operator resolution is a maker action: `POST /admin/operator-cases/:id/resolve` creates an `OPERATOR_CASE` approval and sets the case to `PENDING_CHECKER`; the approval executes `MARK_SUCCEEDED`, `MARK_FAILED`, or `CLOSE_CASE`. Bulk inquiry schedules a persisted `GatewayInquirySchedule` after eligibility checks (case state, attempt status, terminal state, gateway status-check support). Cancellation, run-now, and retry update the schedule and the attempt's `nextCheckAt`; the poll worker owns execution and schedule reconciliation.
+Operator resolution is a maker action: `POST /admin/operator-cases/:id/resolve` creates an `OPERATOR_CASE` approval and sets the case to `PENDING_CHECKER`; the approval executes the case-type action. Payment-attempt cases may use `MARK_SUCCEEDED`/`MARK_FAILED`/`CLOSE_CASE`; backup, report, route and other operational cases expose only acknowledgement/close with a resolution code and evidence reference. The server validates the action against the case type and requires a resolution code for a non-payment close. `POST /operator-cases/:id/acknowledge` is single-actor triage. Source-cleared monitor/route/statement/report cases resolve automatically with a system event; a recurrence opens a new case. Bulk inquiry schedules a persisted `GatewayInquirySchedule` after eligibility checks (case state, attempt status, terminal state, gateway status-check support). Cancellation, run-now, and retry update the schedule and the attempt's `nextCheckAt`; the poll worker owns execution and schedule reconciliation.
 
 ### 3.11 Tipping-off and confidentiality
 
@@ -4592,7 +4597,7 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 
 <a id="coreworkers"></a>
 
-> **Part ID:** `core.workers` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `core.workers` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
 
 # Background Workers and Outboxes
 
@@ -4666,7 +4671,7 @@ The loop is not a distributed lock by itself. Cross-node safety comes from `FOR 
 | `ExpiryNoticeWorker` | hourly (`WORKER_EXPIRY_NOTICE_INTERVAL_MS`), leader-elected | Staged passes, each stage exactly-once through `deadline_stages` | API token and gateway credential expiry notices at 30/7/1 days, the P1 case close to a credential expiry, expired credential sets taken out of use, scheduled credential re-verification (dry run) (section 3.16). | Implemented (AUTO-08, AUTO-26) |
 | `DeadlineWorker` | every 5 min (`WORKER_DEADLINE_INTERVAL_MS`), batch 100, leader-elected | Six isolated rules, each action guarded by an exactly-once `deadline_stages` row claimed in its own transaction | Reminders, escalations and deadline outcomes for operator cases, AML cases, join requests, disputes (D1), cash-outs in Libyan business hours (D2) and unratified emergency actions (D7); section 3.16. | Implemented (AUTO-04, AUTO-22) |
 | `ExpiryHousekeepingWorker` | every 15 min (`WORKER_EXPIRY_HOUSEKEEPING_INTERVAL_MS`), batch 200, leader-elected | Six bounded, index-backed, isolated passes | Closes undecided approvals, revokes expired staff invitations, expires payment links (`link.expired`), deletes old MFA challenges and session revocations, scrubs sealed secrets of finished notifications (section 3.16). | Implemented (AUTO-05, AUTO-11) |
-| `PlatformMonitorWorker` | every 60 s (`WORKER_PLATFORM_MONITOR_INTERVAL_MS`), leader-elected | One pass over the configured checks | Evaluates the platform checks (section 3.16) and opens ONE keyed operator case per tripped condition (`platform.<check>[:<key>]`), recording the clearing on the case; a check that fails 3 times in a row raises `platform.monitor_check_failed:<id>`. | Implemented (AUTO-03) |
+| `PlatformMonitorWorker` | every 60 s (`WORKER_PLATFORM_MONITOR_INTERVAL_MS`), leader-elected | One pass over the configured checks | Evaluates the platform checks (section 3.16) and opens ONE keyed operator case per tripped condition (`platform.<check>[:<key>]`); a source-cleared condition resolves the case with a system event and a recurrence opens a new case; a check that fails 3 times in a row raises `platform.monitor_check_failed:<id>`. | Implemented (AUTO-03) |
 | `CommissionNettingWorker` | daily at `COMMISSION_NETTING_CRON` (00:30 Africa/Tripoli), polled every 60 s, leader-elected | One grouped receivable read, then a batch per tick within a time budget | Nets the merchant-direct commission receivable against the merchant wallet (section 3.16); dry run by default. | Implemented (AUTO-21), dry run |
 | `BackgroundJobWorker` | every 2 s when enabled, batch 10 | `FOR UPDATE SKIP LOCKED` claim + ONE batch `RUNNING` update + lease | Drains `RECONCILIATION_RUN`, `ADJUSTMENT_EXECUTION` and `REFUND_INQUIRY` jobs, retries with backoff, recovers expired leases. | Implemented |
 | `OutboxRelayWorker` | every 250 ms (idle back-off to 2 s), batch >= 100 | `FOR UPDATE SKIP LOCKED`, one batch ack | Projects `attempt.transitioned` into `rm_merchant_daily_stats` and `rm_route_daily_volumes`; marks `processed_at`. Other declared topics are no-ops (counted, not silent). A failing event is retried alone in a savepoint, counted in `attempts`, and PARKED after `OUTBOX_MAX_ATTEMPTS` with one operator case per topic (AUTO-02). | Partial |
@@ -4807,7 +4812,7 @@ It degrades when workers are disabled, the queue cannot be read, or the oldest q
 
 Source: `design/11-automation/background_automation_and_workers_plan.md`. Every automation below follows the plan's rules: `BaseWorker` + leader election or `SKIP LOCKED`, keyed operator cases (a repeated tick never opens a second case), system-actor audit rows, env switches, a dry run for state-changing work, and tests against live PostgreSQL.
 
-**Worker health (AUTO-03).** `WorkerHealthRegistry` (`engine/workers/workerRuntime.ts`) is filled by `BaseWorker` on every tick (start, success, error, duration, processed count) and by `OutboxRelayWorker` / `AuditShipperWorker`, which are not `BaseWorker`s and report under their class names with the idle back-off as their cadence. `PlatformMonitorWorker` runs pluggable `PlatformMonitorCheck`s every minute and turns each finding into ONE operator case `platform.<check>[:<key>]` (kind `MANUAL_REVIEW`, SLA by priority); a condition that stops is recorded on the case (`[CLEARED ...]`, audit `PLATFORM_MONITOR_CLEARED`), never auto-resolved, and a re-trip appends `[RETRIPPED ...]`. State is rebuilt from the cases after a restart. Standard checks (`platformMonitorChecks.ts`): `worker_stale`, `checkpoint_stale`, `outbox_age`, `audit_outbox_age`, `background_job_age`, `journal_default_rows`, `cert_expiry`, `redis_unreachable`; money path (`moneyPathMonitorChecks.ts`): `stale_unknown`, `refund_unscheduled`. A check that throws or times out (15 s) three times in a row raises `platform.monitor_check_failed:<id>`.
+**Worker health (AUTO-03).** `WorkerHealthRegistry` (`engine/workers/workerRuntime.ts`) is filled by `BaseWorker` on every tick (start, success, error, duration, processed count) and by `OutboxRelayWorker` / `AuditShipperWorker`, which are not `BaseWorker`s and report under their class names with the idle back-off as their cadence. `PlatformMonitorWorker` runs pluggable `PlatformMonitorCheck`s every minute and turns each finding into ONE operator case `platform.<check>[:<key>]` (kind `MANUAL_REVIEW`, SLA by priority); a condition that stops resolves the case through `clearKeyedCase` (`[SOURCE_CLEARED]` event, audit `PLATFORM_MONITOR_CLEARED`); a recurrence opens a new case instead of leaving an OPEN case with `[CLEARED]`/`[RETRIPPED]` markers. State is rebuilt from the cases after a restart. Standard checks (`platformMonitorChecks.ts`): `worker_stale`, `checkpoint_stale`, `outbox_age`, `audit_outbox_age`, `background_job_age`, `journal_default_rows`, `cert_expiry`, `redis_unreachable`; money path (`moneyPathMonitorChecks.ts`): `stale_unknown`, `refund_unscheduled`. A check that throws or times out (15 s) three times in a row raises `platform.monitor_check_failed:<id>`.
 
 **Outbox dead-lettering (AUTO-02).** A failing batch is retried row by row in savepoints; the failing row's `attempts` grows and `last_error` is kept; at `OUTBOX_MAX_ATTEMPTS` it is parked (`parked_at`, still `processed_at IS NULL`, so it keeps its partial-index slot and the relay no longer selects it) and one operator case `outbox.parked:<topic>` is raised with a `OUTBOX_EVENT_PARKED` audit row per event. A topic without a handler is acknowledged but marked `UNKNOWN_TOPIC` in `last_error` and counted.
 
@@ -5572,7 +5577,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 40 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 41 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -5627,7 +5632,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 40`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 41`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5648,7 +5653,7 @@ installs the two append-only guard triggers. See
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116120000_route_health_automation`, schema version 40). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116120000_route_health_automation`, schema version 41). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -5943,7 +5948,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 40 (`REQUIRED_SCHEMA_VERSION = 40`; model count 116). The schema migrations since version 10 are:
+The current schema version is 40 (`REQUIRED_SCHEMA_VERSION = 41`; model count 116). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -8372,6 +8377,72 @@ The schema version is 40.
 
 ---
 
+<a id="corecase-management"></a>
+
+> **Part ID:** `core.case-management` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
+
+# Type-Aware Operator Case Management
+
+## 1. Why this exists
+
+An operator case was a row with a seven-value `kind`, an optional attempt/reconciliation link and a free-text `resolutionNotes` field. That was enough for payment attempts, but the platform now opens cases for backups, regulatory returns, route health, credentials, KYB, ledger/checkpoints, statements, audit-chain integrity, cash-outs, disputes and platform workers. All of them were `MANUAL_REVIEW`, all rendered as UUID-heavy payment contexts, and the UI offered payment-attempt resolution choices to every case.
+
+The real taxonomy was already present in the producer `subjectKey` namespace (`platform.backup:*`, `report.overdue:*`, `route.health:*`, `ledger.shard:*`, etc.). It is now a first-class case type with a human title, summary, subject, source and timeline.
+
+## 2. Taxonomy and model
+
+`OperatorCase` keeps `kind` as the compatibility queue bucket and adds:
+
+- `case_number` and the API-derived `CASE-<year>-<number>` reference.
+- `case_type` (stable catalog code), `source`, `domain`, `confidentiality`.
+- `title_key`, `title_params`, `title_text`, `summary`, `details_json`.
+- `subject_type`, `subject_id`, `subject_label`.
+- `resolution_code`, `resolution_summary`, `resolved_at`, `resolved_by_user_id`.
+
+Two append-only tables preserve the narrative:
+
+- `operator_case_events` — opened, acknowledged, state/assignment, SLA, source cleared, retripped, resolution proposed/resolved.
+- `operator_case_links` — additional related records.
+
+The code catalog is `core-back/lib/operatorCases/caseCatalog.ts`; it is exposed at `GET /internal/admin/operator-cases/catalog` (types, actions and resolution codes). The catalog decides the source, domain, confidentiality, default priority/SLA, subject type and allowed actions. `kind` is never used as the case identity. The current sources are mapped 1:1 from their existing subject-key prefixes; unknown rows fall back to `LEGACY_UNCLASSIFIED`.
+
+## 3. Creation and lifecycle
+
+`core-back/lib/operatorCases/caseService.ts` provides the shared metadata/event helpers and `clearKeyedCase`.
+
+- `openKeyedOperatorCase`, the platform monitor sink, the engine `PrismaOperatorCaseSink`, ledger alerts and governance cases populate the new metadata.
+- `clearKeyedCase` sets `RESOLVED`, records `SOURCE_CLEARED` and an event; it does not leave a `[CLEARED]` marker on an OPEN case. A recurrence opens a new case.
+- Platform-monitor, route-health, statement-arrival and report-submission paths use the system-clear behavior. A manual `CLOSE_CASE` closes only the case; it does not fix the source.
+- Resolution overwrites the final `resolution_notes`, but the original finding remains in `summary`, `details_json` and the `OPENED` event.
+
+## 4. Actions
+
+The server exposes case-type-aware actions:
+
+- Payment-attempt types: `INQUIRE`, `MARK_SUCCEEDED`, `MARK_FAILED`, `CLOSE_CASE` (terminal attempt only) and `ACKNOWLEDGE`.
+- Operational types: `ACKNOWLEDGE`, `CLOSE_CASE` with a resolution code (`FIXED_AT_SOURCE`, `FALSE_POSITIVE`, `DUPLICATE`, `ACCEPTED_RISK`, `REFERRED`, `NO_ACTION_REQUIRED`, `SOURCE_CLEARED`, `OTHER`) and an evidence reference; `OPEN_SOURCE` is a link, not a mutation.
+- No operational type receives provider-reference, settled-amount or attempt-success controls.
+- `POST /operator-cases/:id/acknowledge` is single-actor triage (OPEN → IN_PROGRESS) with an event and audit.
+- `POST /operator-cases/:id/resolve` validates the action against the case type; `CLOSE_CASE` for a non-payment case requires a resolution code. Resolution remains maker-checker and the existing attempt/ledger execution path is unchanged.
+
+## 5. API and UI
+
+- `GET /operator-cases` returns `caseReference`, `caseType`, `title`, `summary`, `subjectType/id/label`, `domain`, `source`, `confidentiality`, `availableActions` and the old flattened payment/reconciliation context. It filters by `caseType` and hides `confidentiality=AML` without `aml.read_confidential`; the detail refuses the same.
+- `GET /operator-cases/:id` includes `events`, `links`, `resolvedBy` and the detail payload. The UI no longer treats `attempt` as mandatory.
+- Admin list: a human reference/title/type/context column, priority, state, SLA, assignee and actions. The primary action is **Open**; **Inquire** is an overflow action only for attempt cases. Raw payment/attempt/slot/reconciliation columns were removed from the default table; the type filter is catalog-driven.
+- Admin detail: **Case context** from the title/summary/subject/details, a type-specific source link, the type-aware narrative and case timeline. Merchant/payment/route cards render only for an attempt; reconciliation cards only for a reconciliation item. Technical identifiers are collapsed under **Technical identifiers**. The resolution modal shows provider/settled fields only for `MARK_SUCCEEDED`; operational cases show the resolution outcome and evidence reference.
+- Checkers receive `case:read`/`operator:read` in the seeded FINANCE/COMPLIANCE/MLRO roles, so the Approvals “Open subject” link can reach the evidence.
+
+## 6. Migration and backfill
+
+Schema version 41 (`20261116130000_case_management_taxonomy`) adds the columns and the two tables. `bun run backfill-operator-cases` classifies existing rows, creates the initial event/link and repairs the initial summary from the historical monitor/report evidence where available. The pre-migration dump is taken by the deploy engine. The migration is forward-only.
+
+## 7. Tests and open scope
+
+The catalog test covers classification, attempt-only actions, backup/regulatory readability and references; platform-monitor tests cover source-clear and recurrence; the admin Playwright suite covers the payment and backup cases; live verification covered the observed backup and PSP-M cases. The synthetic seeder and specialist live context presenters remain partial (see frontmatter gaps).
+
+---
+
 <a id="edgeshared"></a>
 
 > **Part ID:** `edge.shared` · **Status:** `implemented` · **Last verified:** 2026-11-08 · **Verified against:** `5a24f6f+working-tree`
@@ -9867,7 +9938,7 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 
 <a id="admin-uiroutes"></a>
 
-> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `1dcc0f2+working-tree`
+> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
 
 # Admin Route and Page Catalog
 
@@ -9927,9 +9998,9 @@ The authority column is the UI gate. "None" means no effective `routesAuthoritie
 | 15 | `/aml/rules` | `AmlRules` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | AML rule versions, thresholds and maker-checker drafts. |
 | 16 | `/aml/reports` | `AmlReports` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Regulatory report drafting, payload/output review, generation, submission and acknowledgement. |
 | 17 | `/aml/reporting-studio` | `AmlReportingStudio` | `aml.read_confidential` + role `COMPLIANCE`/`MLRO` | 10 / 10.1 | Declarative XML/XLSX schema registry, compile/simulate, promotion and default bindings. |
-| 18 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | UNKNOWN/conflict/reconciliation operator queue. |
+| 18 | `/operator-cases` | `OperatorCases` | `case:read` or `operator:read` | 7 / 7.2 | Type-aware operator queue: case reference/title/type, subject/context, priority, state, SLA and assignee; Open is the primary action. |
 | 19 | `/operator-cases/inquiries` | `GatewayInquirySchedules` | `case:read` or `operator:read` | 7 / 7.2 | Gateway inquiry schedule monitoring, run/retry/cancel. |
-| 20 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case evidence, step logs, inbound events, maker-checker resolution. |
+| 20 | `/operator-cases/:id` | `OperatorCaseDetail` | `case:read` or `operator:read` | 7 / 7.2 | Case context and source link, type-aware narrative/timeline, technical identifiers collapsed, maker-checker resolution; payment cards render only for attempt cases. |
 | 21 | `/disputes` | `Disputes` | `dispute:read` | 11 / 11.1 | Chargeback queue, evidence deadlines, adjustment linkage; an attempt-detail link starts on All scoped by `attemptId` and `merchantId`. |
 | 22 | `/adjustments` | `Adjustments` | `adjustments.propose` | 11 / 11.2 | Refund/manual adjustment drafting and review. |
 | 23 | `/cashouts` | `CashOuts` | `cashout.process` | 12 / 12.1 | Cash-out processing with wallet, destination and AML checks. |
@@ -10193,7 +10264,7 @@ The Dashboard Route health card shows forced and conflict counts. See
 
 <a id="admin-uitables"></a>
 
-> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `1dcc0f2+working-tree`
+> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
 
 # Tables Filters and Exports
 
@@ -10280,7 +10351,7 @@ The v2 design intends tables to look operational rather than decorative:
 | `Adjustments` | `adjustments` | 6 |
 | `CashOuts` | `cashouts` | 5 |
 | `Disputes` | `disputes` | 8 |
-| `OperatorCases` | `cases` | 9 |
+| `OperatorCases` | `cases` | 9 (including `caseType`) |
 | `GatewayInquiries` | `schedules` | 8 |
 | `Reconciliation` | `sources` | 1, with storage key `pg.admin.reconciliation.sources` |
 
@@ -16886,7 +16957,7 @@ Security regression suites exist for core-back (`test/security-regressions/`), t
 
 <a id="testingsuites"></a>
 
-> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `1dcc0f2+working-tree`
+> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
 
 # Test Suite Catalog
 
@@ -17351,6 +17422,12 @@ These are development/CI tests only; no production-time test job or test endpoin
 - `merchant-back/test/sandbox-routing.test.ts`, `admin-back/test/sandbox-routing.test.ts`, `checkout-back/test/sandbox-routing.test.ts`: pool selection, fail-closed 503 and token prefixes.
 - `merchant-back/test/sandbox-proxy.test.ts` and `checkout-back/test/sandbox-checkout-forward.test.ts`: real forwarding through the sandbox pool for control/resources, `pg_test_` external tokens, `sbx_` summary/inspector routes and the Live-link inspector refusal.
 - `core-back/test/security-regressions/commerce-status-enforcement.test.ts` and `test/engine/attempt-guard-pipeline.test.ts` assert the removed OD-10 fallback.
+
+## Type-aware case management regression (2026-11-16)
+
+- `core-back/test/operator-case-catalog.test.ts` covers backup/regulatory classification, payment/reconciliation source types, attempt-only actions and human references.
+- `core-back/test/automation/platform-monitor.test.ts` covers source-cleared monitor cases and recurrence.
+- `tests/e2e/admin/operator-cases.spec.ts` covers the type-aware list/detail and a backup case that exposes no payment outcome or provider/settled fields.
 
 ## Disputes attempt-link regression (2026-11-16)
 

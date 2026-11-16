@@ -3548,16 +3548,16 @@ The target is that **95% of `UNKNOWN` attempts are resolved within 24 hours**. A
 
 @@article id=b07-04 book=7 order=4 title="The Operator Cases screen: kinds, priorities, deadlines and resolutions" roles=OPERATOR,FINANCE,SUPPORT minutes=4 ui=AVAILABLE related=b07-03,b07-08,b07-09
 :::summary Big picture in 20 seconds
-An operator case is a task the system gives you when a payment or a statement line needs a person. Work the highest priority and nearest deadline first, and never resolve a payment case without evidence.
+An operator case is a task the system gives you when a payment, a reconciliation line, a backup, a regulatory report, a route or another platform condition needs a person. Work the highest priority and nearest deadline first; never resolve a payment case without evidence, and never assume every case is a payment.
 :::
 
 Think of Operator Cases as your task list. The system adds a task every time it cannot finish something by itself. This article explains how to read each task and what you can do with it.
 
 ### What an operator case is
-An **operator case** is a task created by the system when a payment or a statement line needs a human. Each case has a kind, a priority, a deadline and an owner.
+An **operator case** is a task created by the system when something needs a human. Each case has a **type**, a priority, a deadline, an owner and a **subject** (the payment, reconciliation item, report, backup target, route or other record it is about). The list shows the type and a human title; the case page shows the subject and the source link.
 
-### The seven kinds
-The kind tells you why the case exists. Find the kind in the first column, then read what usually triggers it and what you usually do.
+### The case types
+The case type tells you why the case exists. Payment and reconciliation cases use the kinds below; platform, backup, route, credential, KYB, ledger, audit and regulatory cases have their own types and context. Always read the **Case context** and follow its **Open source** link before acting.
 
 | Kind | Created when | Typical action |
 | :--- | :--- | :--- |
@@ -3578,9 +3578,9 @@ Every case has a priority: `P1` (highest), `P2` or `P3`. Every case also has a d
 A case moves in this order: `OPEN` → `IN_PROGRESS` → `PENDING_CHECKER` → `RESOLVED`. `PENDING_CHECKER` means the case is waiting for a second person to check it.
 
 ### The actions on the screen
-* **Inquire**: ask the partner for the status of one attempt.
+* **Inquire**: ask the partner for the status of one attempt. This is only offered for payment-attempt cases; it is not a payment action for a backup or report case.
 * **Bulk Inquiry**: ask the partner about many attempts at once, for example after an outage. Use it carefully: it sends many calls to the partner. Open the checklist [[c:sg-bulk-inquiry|Run a bulk inquiry]] first.
-* **Resolution**: record how the case ended. For an `UNKNOWN` case the choices are **Mark succeeded**, **Mark failed**, and **Release reservation**. Each needs a written reason and a second person.
+* **Resolution**: record how the case ended. The choices depend on the case type. Payment-attempt cases offer **Mark succeeded** and **Mark failed** with evidence and a second person. Backup, report, route and other operational cases offer **Close** with a resolution outcome and a reference; closing the case does not by itself fix the source condition. Use **Open source** to do the real work.
 
 ### What you do with a case
 1. **Assign the case to yourself** before working it.
@@ -3591,11 +3591,15 @@ A case moves in this order: `OPEN` → `IN_PROGRESS` → `PENDING_CHECKER` → `
    * What you see: the notes field on the case.
    * What it means: the next person can only see what you wrote.
    * What you do: add a note after each action.
-3. **Treat a resolution as a money decision.**
+3. **Check the case type first.**
+   * What you see: a title such as "Backup failed" or "Regulatory report overdue" and an **Open source** button.
+   * What it means: the case is an alert about that subject, not necessarily a payment attempt.
+   * What you do: read the context and open the source before choosing a resolution. Do not use a payment outcome on a backup or report case.
+4. **Treat a payment resolution as a money decision.**
    * What you see: the choices to resolve the case.
    * What it means: a wrong "succeeded" credits money that never arrived; a wrong "failed" can lead to a second payment.
    * What you do: choose only with evidence, and write the reason.
-4. **If evidence is missing, leave the case open** and escalate.
+5. **If evidence is missing, leave the case open** and escalate.
    * What you see: no proof from the partner yet.
    * What it means: the truth is still unknown.
    * What you do: leave it open and escalate. Leaving it open is safe; guessing is not.
