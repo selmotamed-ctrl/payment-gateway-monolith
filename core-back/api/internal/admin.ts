@@ -22,6 +22,7 @@ import { getPlatformRuntime } from "../../engine/runtime";
 import { InvariantVerifier, naturalBalance } from "../../engine/ledger/InvariantVerifier";
 import { moneyToString } from "../../engine/db/money";
 import { ApiError, parseOrThrow } from "../../lib/error";
+import { contentDisposition } from "../../lib/contentDisposition";
 import { buildListQuery, listResponse } from "../../lib/listQuery";
 import {
   APPROVAL_DOMAIN_SUBJECT_TYPES,
@@ -3165,9 +3166,11 @@ router.get("/kyb-documents/:id/content", async (request: Request, response: Resp
       afterJson: { joinRequestId: document.joinRequestId, mime: document.mime, sizeBytes: document.sizeBytes },
     },
   });
-  const fileName = (document.originalFileName ?? "document").replace(/["\r\n]/g, "_");
   response.setHeader("Content-Type", document.mime);
-  response.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+  response.setHeader("Content-Disposition", contentDisposition("inline", document.originalFileName, "document"));
+  // An uploaded document is untrusted content: it must never run script or load anything in the viewer's
+  // origin (the admin edge sets the same policy; this keeps it true for any other caller of core).
+  response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
   response.setHeader("Cache-Control", "no-store, private");
   response.setHeader("Pragma", "no-cache");
   response.setHeader("X-Content-Type-Options", "nosniff");
@@ -7822,7 +7825,7 @@ router.get("/aml/cases/:id/evidence/:evidenceId/content", async (request: Reques
     holderContext: { holderType: "AML_CASE_EVIDENCE", holderId: evidence.id },
   });
   response.setHeader("Content-Type", stored.detectedMimeType);
-  response.setHeader("Content-Disposition", `attachment; filename="${(stored.originalFilename ?? "evidence").replace(/["\r\n]/g, "_")}"`);
+  response.setHeader("Content-Disposition", contentDisposition("attachment", stored.originalFilename, "evidence"));
   response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
   response.setHeader("Cache-Control", "private, no-store");
   response.setHeader("X-Content-Type-Options", "nosniff");
@@ -15626,7 +15629,7 @@ router.get("/assets/:id/content", async (request: Request, response: Response) =
   const contentType = asset.mime === "IMAGE_SVG_XML" ? "image/svg+xml" : "image/png";
   const fileExtension = asset.mime === "IMAGE_SVG_XML" ? "svg" : "png";
   response.setHeader("Content-Type", contentType);
-  response.setHeader("Content-Disposition", `inline; filename="${asset.name.replace(/["\r\n]/g, "_")}.${fileExtension}"`);
+  response.setHeader("Content-Disposition", contentDisposition("inline", `${asset.name}.${fileExtension}`, "asset"));
   response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
   response.setHeader("Cache-Control", "private, max-age=300");
   response.setHeader("X-Content-Type-Options", "nosniff");
@@ -16061,9 +16064,8 @@ router.get("/reconciliation/runs/:id/statement", async (request: Request, respon
       afterJson: { storageObjectId: run.storageObjectId, sha256: stored.sha256Hex },
     },
   });
-  const fileName = (run.fileName ?? stored.originalFilename ?? "statement").replace(/["\r\n]/g, "_");
   response.setHeader("Content-Type", stored.detectedMimeType);
-  response.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  response.setHeader("Content-Disposition", contentDisposition("attachment", run.fileName ?? stored.originalFilename, "statement"));
   response.setHeader("X-Content-SHA256", stored.sha256Hex);
   response.setHeader("Cache-Control", "private, no-store");
   response.setHeader("X-Content-Type-Options", "nosniff");
@@ -16606,7 +16608,7 @@ router.get("/disputes/:id/attachments/:attachmentId/content", async (request: Re
     holderContext: { holderType: "DISPUTE_ATTACHMENT", holderId: attachment.id },
   });
   response.setHeader("Content-Type", stored.detectedMimeType);
-  response.setHeader("Content-Disposition", `attachment; filename="${(stored.originalFilename ?? "evidence").replace(/["\r\n]/g, "_")}"`);
+  response.setHeader("Content-Disposition", contentDisposition("attachment", stored.originalFilename, "evidence"));
   response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
   response.setHeader("Cache-Control", "private, no-store");
   response.setHeader("X-Content-Type-Options", "nosniff");

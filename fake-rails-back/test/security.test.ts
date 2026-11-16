@@ -31,7 +31,10 @@ beforeAll(async () => {
 afterAll(() => {
   server?.close();
   closeDb();
-  for (const suffix of ["", "-wal", "-shm"]) rmSync(`${dbPath}${suffix}`, { force: true });
+  // Best effort: Windows keeps the SQLite file locked for a moment after close (EBUSY); it is a temp file.
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try { rmSync(`${dbPath}${suffix}`, { force: true }); } catch { /* still locked; the OS temp cleaner removes it */ }
+  }
 });
 
 const login = (username: string, password: string, extra: Record<string, string> = {}) =>

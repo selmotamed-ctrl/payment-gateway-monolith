@@ -45,7 +45,10 @@ afterAll(() => {
   app?.close();
   victim?.close();
   closeDb();
-  for (const suffix of ["", "-wal", "-shm"]) rmSync(`${dbPath}${suffix}`, { force: true });
+  // Best effort: Windows keeps the SQLite file locked for a moment after close (EBUSY); it is a temp file.
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try { rmSync(`${dbPath}${suffix}`, { force: true }); } catch { /* still locked; the OS temp cleaner removes it */ }
+  }
 });
 
 describe("webhook target allowlist (pure)", () => {

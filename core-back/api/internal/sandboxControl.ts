@@ -5,6 +5,7 @@ import { client } from "../../prisma/client";
 import { requireAuthentication, principalOf, isStaffPrincipal } from "../middleware/authDoubleCheck";
 import { ApiError, parseOrThrow } from "../../lib/error";
 import { isSandboxPlane } from "../../lib/executionPlane";
+import { assertMerchantAuthority } from "../../lib/auth/merchantAuthorities";
 import { generateAccessToken, hashAccessToken } from "../../lib/auth";
 import { accessTokenPrefixForPlane } from "../../lib/executionPlane";
 import { loadLiveAccountBalances } from "../../lib/storageEngine/shardBalances";
@@ -43,6 +44,37 @@ router.use((_request, _response, next) => {
     return;
   }
   next();
+});
+
+/**
+ * Merchant authorities apply in the Sandbox too. The mirrored merchant routes (`/internal/merchant/*` on this
+ * process) enforce them per route; the control routes below did not, so ANY signed-in merchant user, a
+ * read-only one included, could wipe the merchant's sandbox (`/merchant/reset`), set wallet balances, post
+ * refunds and disputes, and obtain a `pg_test_` API token from `/merchant/seed-demo` without `token:manage`.
+ *
+ * The rule is the coarse one the portal already projects: a read needs a merchant read grant, anything that
+ * changes sandbox state needs `merchant:write`. Staff principals keep their own checks (`requireStaff` and
+ * the explicit merchant id).
+ */
+export const SANDBOX_CONTROL_READ_AUTHORITIES = ["merchant:read", "merchant:write", "payment:read", "link:read"] as const;
+export const SANDBOX_CONTROL_WRITE_AUTHORITIES = ["merchant:write"] as const;
+
+export const assertSandboxControlAccess = (
+  principal: Parameters<typeof assertMerchantAuthority>[0] & { merchantId?: string | null },
+  method: string,
+): void => {
+  if (isStaffPrincipal(principal as never)) return;
+  const read = ["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
+  assertMerchantAuthority(principal, [...(read ? SANDBOX_CONTROL_READ_AUTHORITIES : SANDBOX_CONTROL_WRITE_AUTHORITIES)]);
+};
+
+router.use((request, _response, next) => {
+  try {
+    assertSandboxControlAccess(principalOf(request), request.method);
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 
 const fakeRails = new FakeRailsControlClient();

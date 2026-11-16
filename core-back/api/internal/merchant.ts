@@ -7,6 +7,7 @@ import { client } from "../../prisma/client";
 import { assertCommerceActive, assertPosTerminalActive } from "../../lib/commerceStatus";
 import { invalidationBus } from "../../lib/invalidationBus";
 import { ApiError, parseOrThrow } from "../../lib/error";
+import { contentDisposition } from "../../lib/contentDisposition";
 import { detectDuplicateFlags, nationalIdHash, payoutAccountHash } from "../../lib/joinRequestOnboarding";
 import { payoutOwnerMismatch } from "../../lib/kybReview";
 import { queueKybNotification } from "../../lib/kybNotifications";
@@ -2389,7 +2390,7 @@ router.get("/disputes/:id/attachments/:attachmentId/content", async (request: Re
     holderContext: { holderType: "DISPUTE_ATTACHMENT", holderId: attachment.id },
   });
   response.setHeader("Content-Type", stored.detectedMimeType);
-  response.setHeader("Content-Disposition", `attachment; filename="${(stored.originalFilename ?? "evidence").replace(/["\r\n]/g, "_")}"`);
+  response.setHeader("Content-Disposition", contentDisposition("attachment", stored.originalFilename, "evidence"));
   response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
   response.setHeader("Cache-Control", "private, no-store");
   response.setHeader("X-Content-Type-Options", "nosniff");
