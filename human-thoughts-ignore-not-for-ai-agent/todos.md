@@ -27,5 +27,9 @@ Not built or partial
 
 - reporting engine should track the version and any breaking change due to version changing (major version means previous reports specs wont work and must be regenerated and migrated with a proposed migration prompt), broken reports should not ever throw 500 error (currently that what happens) and should not allow runs and should be marked as needing migration and colored red, and there should be page of these reports, the catalog page should only show working reports, also there should be documentation on how to version transcripts for the ai agents that will develop changes on the report engine --
 
-
 make sure that log partitioning runs on workers leader like the journal lines patitioning basedon "Time-bounded: monthly partitions created/dropped by ensure_log_partitions / LOG_RETENTION_MONTHS cron"
+
+- convert thea attempt by state charts from line to bar --
+- opening disputes from payment attempt details drawer does not work, the filter is probably missing
+- queue needing attention in dashboard needs to be fixed the numbers does not show always 0
+- running report shows error that the zip asset file is missing from the vault, fix using the error code on the test-server opencode session make sure to track the root cause 3e525d00-9bb9-40ea-9e28-9c32aa5999ba

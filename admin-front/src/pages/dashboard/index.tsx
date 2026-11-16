@@ -320,11 +320,10 @@ const DashboardPage = dc(() => {
 
     const attemptChartOption = () => ({
         color: [CHART_INDIGO],
-        tooltip: { trigger: "axis" },
+        tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
         grid: { left: "6%", right: "4%", top: "10%", bottom: "18%" },
         xAxis: {
             type: "category",
-            boundaryGap: false,
             data: attemptRows.value.map((row) => row.state),
             axisLabel: { color: CHART_TEXT, fontSize: 10, interval: 0, rotate: attemptRows.value.length > 5 ? 28 : 0 },
             axisLine: { lineStyle: { color: CHART_GRID } },
@@ -337,26 +336,20 @@ const DashboardPage = dc(() => {
         series: [
             {
                 name: t("Attempts"),
-                type: "line",
-                smooth: true,
-                symbol: "circle",
-                symbolSize: 4,
-                showSymbol: false,
+                type: "bar",
+                barMaxWidth: 36,
                 data: attemptRows.value.map((row) => row.count),
-                lineStyle: { color: CHART_INDIGO, width: 2 },
-                itemStyle: { color: CHART_INDIGO },
-                areaStyle: { color: CHART_INDIGO, opacity: 0.14 },
+                itemStyle: { color: CHART_INDIGO, borderRadius: [4, 4, 0, 0] },
             },
         ],
     });
 
     const volumeChartOption = () => ({
         color: [CHART_EMERALD],
-        tooltip: { trigger: "axis" },
+        tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
         grid: { left: "8%", right: "4%", top: "10%", bottom: "18%" },
         xAxis: {
             type: "category",
-            boundaryGap: false,
             data: attemptRows.value.map((row) => row.state),
             axisLabel: { color: CHART_TEXT, fontSize: 10, interval: 0, rotate: attemptRows.value.length > 5 ? 28 : 0 },
             axisLine: { lineStyle: { color: CHART_GRID } },
@@ -369,15 +362,10 @@ const DashboardPage = dc(() => {
         series: [
             {
                 name: t("Volume"),
-                type: "line",
-                smooth: true,
-                symbol: "circle",
-                symbolSize: 4,
-                showSymbol: false,
+                type: "bar",
+                barMaxWidth: 36,
                 data: attemptRows.value.map((row) => Number(row.amount)),
-                lineStyle: { color: CHART_EMERALD, width: 2 },
-                itemStyle: { color: CHART_EMERALD },
-                areaStyle: { color: CHART_EMERALD, opacity: 0.14 },
+                itemStyle: { color: CHART_EMERALD, borderRadius: [4, 4, 0, 0] },
             },
         ],
     });
