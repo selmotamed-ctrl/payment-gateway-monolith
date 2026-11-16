@@ -242,6 +242,9 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `POST /rails`, `PATCH /rails/:id`, `PUT /rails/:id/fields` | `gateway:write` |
 | `GET /routes`, `/export`, `/summary`, `/summary/export`, `GET /routes/:id` | `gateway:read` |
 | `POST /routes`, `PATCH /routes/:id`, `POST /routes/:id/state` | `gateway:write` |
+| `GET /routes/:id/health` | `gateway:read` |
+| `POST /routes/:id/health/probe` | `gateway:test` or `gateway:write` |
+| `POST /routes/:id/health/override`, `POST /routes/:id/health/override/clear` | `gateway:write` (force `HEALTHY` and a healthier clear return `202` pending approval) |
 | `GET /assets`, `GET /assets/:id`, `GET /assets/:id/content` | `gateway:read` |
 | `POST /assets`, `POST /assets/upload`, `DELETE /assets/:id` | `gateway:write` |
 
@@ -697,6 +700,7 @@ Four new router modules are mounted from `admin.ts` (next to `/system/backups`):
 ### Rail logo, route policy and commission tiers (2026-11-06)
 
 - `PATCH /rails/:id` accepts `logoAssetId` (uuid, or `null` to clear). A uuid must reference a registered `Asset` (`404 ASSET_NOT_FOUND`); the audit row records the before/after logo. The edge schema and `toCoreRailUpdate` forward it. `POST /assets` still registers metadata only (name, type, size, SHA-256, storage key): it does not store image bytes, which remains a gap.
+- `POST /routes/:id/health/override` accepts `HEALTHY`, `DEGRADED` or `OPEN_BREAKER`, a reason of 10–500 characters, an optional ISO `expiresAt` (default 7 days, maximum 30) and optional evidence. `HEALTHY` creates a `ROUTE_HEALTH_OVERRIDE` approval; the other states apply immediately. `POST /routes/:id/health/override/clear` applies immediately unless the computed state is healthier than the forced state, in which case it returns `202` for a second approval.
 - `PATCH /routes/:id` accepts `mismatchPolicy` (object; only `tolerance_amount`/`toleranceAmount` is read by the settlement engine, other keys are kept as stored; a malformed tolerance is `400 MISMATCH_TOLERANCE_INVALID`) and `maintenanceWindows` (`[{ start, end }]`, max 50, absolute instants; `end <= start` or an unparsable instant is `400 MAINTENANCE_WINDOW_INVALID`; `[]` clears). Omitted fields are left untouched; the edge forwards empty values so an operator can clear them.
 - **Commission tiers were broken end to end and are fixed.** The admin edge persisted UI tiers as an index-keyed object (`{"0": {...}}`) and core's create schema (`z.record`) could not take an array, while the fee calculator (`commissionForProfile`, `checkout.ts`) only reads `tiersJson` when it is an array: a TIERED profile created through the UI silently priced at its minimum fee. Now `POST /commission-profiles` accepts an ordered array (or the legacy object), the edge forwards the array, and `commissionTiers()` normalises both shapes (object keys ordered numerically), which also reprices already-stored legacy rows correctly. Tier keys are `upTo`, `flat`, `percent` (a fraction). **Behaviour change for existing data:** a legacy TIERED profile now prices by its tiers instead of the minimum fee. The edge also forwards `minFee`, `maxFee`, `feeBearerDefault`, `roundingMode`, `merchantId`, `applicationId` (core already accepted them; the strict edge schema dropped them). Note `percentageRate` is a **fraction** (`0.0300` = 3%), as the seed data stores it; the form now says so.
 

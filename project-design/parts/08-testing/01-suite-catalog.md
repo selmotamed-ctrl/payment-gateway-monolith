@@ -565,3 +565,15 @@ These are development/CI tests only; no production-time test job or test endpoin
 - Root `tests/unit/frontend-security-admin.test.ts` requires every Sandbox mirror route to be explicitly allowed for authenticated staff; `tests/unit/guide-content.test.ts` requires the generated context map to cover them; `tests/unit/i18n-catalogue.test.ts` requires Arabic entries for every new Studio/mirror label.
 - Deploy tests cover `sandboxDatabase()`, `pgw_sandbox`/`pgw_sandbox_session`, sandbox database creation, the second `pg-core-sandbox` service plan, firewall/PKI SAN, and backup exclusion; `./deploy.sh --dry-run` is the integration smoke check.
 - Not yet covered end to end: a live two-database deploy, a live reconciliation import through the real Fake Rails server, and a Playwright pass over the Studio/mirror pages. The `seed-history` route and ledger postings are typechecked and reviewed but have no DB-backed automated test yet.
+
+## Route health (2026-11-16)
+
+`core-back/test/route-health.test.ts` covers outcome classification, error-map
+precedence, breaker thresholds, degraded/open recovery, policy clamping,
+stable canary membership, override expiry limits and degraded-canary routing
+(including one-open-breaker exclusion). The existing visible-rails matrix and
+routing/failover suites remain green. DB-backed worker, override-approval and API suites are not written yet; the
+current coverage is the pure policy/routing/probe tests plus the existing
+migration-shape and admin-back forwarding tests. `core.route-health` lists
+the migration. The “Fake Rails chaos drives a route to DEGRADED and back”
+acceptance run remains a gap.

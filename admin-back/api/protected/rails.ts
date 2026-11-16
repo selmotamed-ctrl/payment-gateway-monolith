@@ -174,6 +174,20 @@ export const routePatchSchema = z
   })
   .strict();
 
+
+export const routeHealthOverrideSchema = z
+  .object({
+    state: z.enum(["HEALTHY", "DEGRADED", "OPEN_BREAKER"]),
+    reason: z.string().trim().min(10).max(500),
+    expiresAt: z.string().datetime().optional(),
+    evidence: z.unknown().optional(),
+  })
+  .strict();
+
+export const routeHealthClearSchema = z
+  .object({ reason: z.string().trim().min(10).max(500) })
+  .strict();
+
 export const routeStateSchema = z
   .object({
     status: z.enum(["ACTIVE", "PAUSED", "DRAINING"]).optional(),
@@ -351,5 +365,43 @@ routesRouter.post(
     paramsSchema: idParamsSchema,
     schema: routeStateSchema,
     bodyFrom: (_req, body) => toCoreRouteState(body),
+  }),
+);
+
+routesRouter.get(
+  "/:id/health",
+  coreForward({
+    method: "GET",
+    path: (context) => `/internal/admin/routes/${encodeURIComponent(context.params.id ?? "")}/health`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+
+routesRouter.post(
+  "/:id/health/probe",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/routes/${encodeURIComponent(context.params.id ?? "")}/health/probe`,
+    paramsSchema: idParamsSchema,
+  }),
+);
+
+routesRouter.post(
+  "/:id/health/override",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/routes/${encodeURIComponent(context.params.id ?? "")}/health/override`,
+    paramsSchema: idParamsSchema,
+    schema: routeHealthOverrideSchema,
+  }),
+);
+
+routesRouter.post(
+  "/:id/health/override/clear",
+  coreForward({
+    method: "POST",
+    path: (context) => `/internal/admin/routes/${encodeURIComponent(context.params.id ?? "")}/health/override/clear`,
+    paramsSchema: idParamsSchema,
+    schema: routeHealthClearSchema,
   }),
 );

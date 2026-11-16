@@ -628,6 +628,19 @@ The Dashboard **Gross Volume** card sums `payment_attempts.total_charged_amount`
 
 **Open Action Queues** is a current-state count, not a period count: pending approvals (`DRAFT`/`PENDING_REVIEW`), open operator cases (`OPEN`/`IN_PROGRESS`/`PENDING_CHECKER`), open join requests and open AML cases (`OPEN`/`IN_REVIEW`/`PENDING_CHECKER`/`FROZEN`/`ESCALATED_STR`). Its sub-label now names all four sources and carries **All time (not period-filtered)**. **Unknown Backlog** counts every `UNKNOWN` payment attempt, so its sub-label carries the same all-time note before the oldest age. Only Gross Volume, Success Rate, the Attempts By State chart, the Volume chart and Reconciliation use the selected period.
 
+## Route health drawer (2026-11-16)
+
+The **Routes** table's primary row action opens a 760 px health drawer instead
+of opening the editor. The drawer separates effective, computed and override
+state; shows canary percent/maximum, consecutive failures, probe counters,
+last/next probe, override reason/expiry/actor, recent sample windows, probe
+history and the newest state transitions. It can run a read-only probe, request a
+forced `HEALTHY` (second approval), force `DEGRADED`/`OPEN_BREAKER` immediately,
+or clear an override (second approval when the computed state is healthier).
+The table Health cell marks a forced route. Edit is now the overflow action.
+The Dashboard Route health card shows forced and conflict counts. See
+`core.route-health`.
+
 ## Tables Filters and Exports
 
 > Status: `partial` · Last verified: 2026-11-16
@@ -916,7 +929,7 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 ## Admin Guide and Academy
 
-> Status: `partial` · Last verified: 2026-11-10
+> Status: `partial` · Last verified: 2026-11-16
 
 ## 1. Purpose and scope
 
@@ -1173,6 +1186,18 @@ Academy module 10 adds lesson `l-m10-5`, checks `c-l-m10-5-1/2` and exam
 question `q-m10-118`. Counts are 137 articles, 154 terms, 26 cards, 51
 lessons, 102 checks and 224 exam-pool questions. Generated Guide/Academy and
 Companion snapshots were regenerated.
+
+## Route health content (2026-11-16)
+
+Guide `b06-11` and `b06-12` now describe the automatic outcome-based circuit
+breaker, the `DEGRADED` canary exception in condition 5, read-only probes and
+the effective/computed/override split. `b10-02` (RB-01) and the Dashboard
+screen article (`b03-05`) describe the Routes health drawer, forced/conflict
+counts, probe action and the maker-checker force-HEALTHY path. Academy
+`l-m8-1`, `l-m8-5` and `l-m9-1` were updated with the same facts. Counts and
+exam structure are unchanged (137 articles, 154 terms, 26 cards, 51 lessons,
+224 pool questions); the generated Guide/Academy and Companion snapshot were
+regenerated.
 
 ## Contextual Help
 

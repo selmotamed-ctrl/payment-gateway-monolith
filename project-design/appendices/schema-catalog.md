@@ -2,10 +2,10 @@
 
 <!-- GENERATED FILE. Edit core-back/prisma/schema.prisma instead. Do not hand-edit this file. -->
 
-- Models: **114**
-- Enums: **127**
-- Schema version: **39**
-- Migrations: **38**
+- Models: **116**
+- Enums: **130**
+- Schema version: **40**
+- Migrations: **39**
 
 ## Models
 
@@ -64,6 +64,8 @@
 - `BackgroundJob`
 - `ReconciliationItem`
 - `GatewayHealthSample`
+- `RouteHealthEvent`
+- `RouteHealthProbe`
 - `DetailChangeLog`
 - `AuditLog`
 - `AuditChainAnchor`
@@ -242,6 +244,9 @@
 - `NotificationLang`
 - `ConfidentialityClass`
 - `NotificationStatus`
+- `RouteHealthEventSource`
+- `RouteHealthProbeMethod`
+- `RouteHealthProbeStatus`
 - `FilingAdapterKind`
 - `FilingAdapterStatus`
 - `ExternalSubmissionStatus`
@@ -294,3 +299,4 @@
 - `20261113090000_storage_engine_hardening`
 - `20261113120000_v38_sandbox_execution_plane`
 - `20261114090000_v39_sandbox_studio`
+- `20261116120000_route_health_automation`

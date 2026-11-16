@@ -558,7 +558,7 @@ export class PrismaRepositories implements Repositories {
     },
     updateAttempt: async (tx, id, patch) => {
       const row = await model(tx, "paymentAttempt").update({ where: { id }, data: patch }) as PaymentAttemptRow;
-      const terminal = ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED", "BLOCKED", "REFUNDED"];
+      const terminal = ["SUCCEEDED", "FAILED", "EXPIRED", "CANCELLED", "BLOCKED", "REFUNDED", "PARTIALLY_REFUNDED", "DISPUTED"];
       if (patch.status !== undefined && terminal.includes(String(patch.status))) {
         await enqueueOutboxEvent(tx as never, {
           topic: "attempt.transitioned",

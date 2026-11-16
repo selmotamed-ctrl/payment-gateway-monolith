@@ -104,6 +104,7 @@ describe("PRE_INITIATE execution", () => {
     expect(result.status).toBe("FAILED");
     expect(result.canonicalError).toBe("INELIGIBLE");
     expect(harness.attempt.status).toBe("FAILED");
+    expect(harness.attempt.canonicalError).toBe("INELIGIBLE");
     expect(harness.reserved).toEqual([]);
     expect(harness.executed).toEqual([PRE_STEP.id]);
   });
@@ -120,8 +121,22 @@ describe("PRE_INITIATE execution", () => {
 
     expect(result.status).toBe("BLOCKED");
     expect(harness.attempt.status).toBe("BLOCKED");
+    expect(harness.attempt.canonicalError).toBe("SUBSCRIBER_BLOCKED");
     expect(harness.reserved).toEqual([]);
     expect(harness.executed).toEqual([PRE_STEP.id]);
+  });
+
+
+  test("a failed INITIATE persists the gateway error for the breaker", async () => {
+    const harness = createHarness({
+      executor: () => ({ status: "FAILED", canonicalError: "HTTP 503", output: { state: {}, public: {} } }),
+    });
+
+    const result = await harness.engine.initiate(harness.attempt, {});
+
+    expect(result.status).toBe("FAILED");
+    expect(harness.attempt.status).toBe("FAILED");
+    expect(harness.attempt.canonicalError).toBe("HTTP 503");
   });
 
   test("a successful PRE_INITIATE lets the initiation continue", async () => {

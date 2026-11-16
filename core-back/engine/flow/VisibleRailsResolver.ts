@@ -1,5 +1,6 @@
 import { Decimal } from "decimal.js";
 import { decimal, type DecimalInput } from "../ledger/LedgerPoster";
+import { canarySelected } from "../routeHealth/decision";
 
 export type RouteStatus = "ACTIVE" | "PAUSED" | "DRAINING";
 export type RouteHealthState = "HEALTHY" | "DEGRADED" | "OPEN_BREAKER";
@@ -49,6 +50,11 @@ export interface RailRouteRecord {
   dailyCapAmount?: DecimalInput | null;
   status: RouteStatus;
   healthState: RouteHealthState;
+  /** Automation's measured state; optional for old fixtures. */
+  healthComputedState?: RouteHealthState | null;
+  /** Admin override, effective only until healthOverrideExpiresAt. */
+  healthOverrideState?: RouteHealthState | null;
+  healthOverrideExpiresAt?: Date | string | null;
   maintenanceWindows?: readonly MaintenanceWindow[] | null;
   scope?: RouteScope | null;
   dailyProcessedAmount?: DecimalInput;
@@ -105,8 +111,26 @@ export interface VisibleRailsInput {
   routes: readonly RailRouteRecord[];
   credentialSets: readonly CredentialSetRecord[];
   commissionProfiles: readonly CommissionProfileRecord[];
+  /** Stable cohort key (the checkout uses the link key). Omit it to disable canary traffic. */
+  canaryKey?: string | null;
+  /** Percentage of links allowed to use a DEGRADED route (0..100). */
+  canaryPercent?: number;
+  /** Optional amount ceiling for DEGRADED canary traffic. */
+  canaryMaxAmount?: DecimalInput | null;
   now?: Date;
 }
+
+/** Lazy expiry: routing never honours an expired override, even before the worker clears it. */
+export const effectiveRouteHealth = (
+  route: Pick<RailRouteRecord, "healthState" | "healthComputedState" | "healthOverrideState" | "healthOverrideExpiresAt">,
+  now: Date,
+): RouteHealthState => {
+  if (route.healthOverrideState) {
+    const expiresAt = route.healthOverrideExpiresAt ? new Date(route.healthOverrideExpiresAt) : null;
+    if (!expiresAt || expiresAt.getTime() > now.getTime()) return route.healthOverrideState;
+  }
+  return route.healthComputedState ?? route.healthState;
+};
 
 export interface RankedRoute {
   route: RailRouteRecord;
@@ -134,6 +158,7 @@ export type RouteExclusionReason =
   | "NO_VERIFIED_CREDENTIAL_SET"
   | "ROUTE_NOT_ACTIVE"
   | "ROUTE_NOT_HEALTHY"
+  | "ROUTE_DEGRADED_CANARY_EXCLUDED"
   | "AMOUNT_BELOW_MINIMUM"
   | "AMOUNT_ABOVE_MAXIMUM"
   | "DAILY_CAP_EXCEEDED"
@@ -290,7 +315,11 @@ export class VisibleRailsResolver {
         continue;
       }
       const ranked = this.rankRoutes(candidates, amount);
-      visible.push({ rail, commissionProfile, routes: ranked });
+      const degraded = ranked.filter((entry) => effectiveRouteHealth(entry.route, now) === "DEGRADED");
+      const ordered = degraded.length > 0
+        ? [...degraded, ...ranked.filter((entry) => effectiveRouteHealth(entry.route, now) !== "DEGRADED")]
+        : ranked;
+      visible.push({ rail, commissionProfile, routes: ordered });
     }
 
     visible.sort((left, right) => {
@@ -361,6 +390,10 @@ export class VisibleRailsResolver {
     return platform ?? matching[0];
   }
 
+  private canaryFor(input: VisibleRailsInput, routeId: string): boolean {
+    return canarySelected(routeId, input.canaryKey, input.canaryPercent ?? 0);
+  }
+
   private routeExclusion(
     route: RailRouteRecord,
     input: VisibleRailsInput,
@@ -370,8 +403,24 @@ export class VisibleRailsResolver {
     if (route.status !== "ACTIVE") {
       return { reason: "ROUTE_NOT_ACTIVE", detail: { status: route.status } };
     }
-    if (route.healthState !== "HEALTHY") {
-      return { reason: "ROUTE_NOT_HEALTHY", detail: { healthState: route.healthState } };
+    const healthState = effectiveRouteHealth(route, now);
+    if (healthState === "OPEN_BREAKER") {
+      return { reason: "ROUTE_NOT_HEALTHY", detail: { healthState } };
+    }
+    if (healthState === "DEGRADED") {
+      const canary = this.canaryFor(input, route.id);
+      if (!canary) {
+        return {
+          reason: (input.canaryPercent ?? 0) > 0 ? "ROUTE_DEGRADED_CANARY_EXCLUDED" : "ROUTE_NOT_HEALTHY",
+          detail: { healthState },
+        };
+      }
+      if (input.canaryMaxAmount !== null && input.canaryMaxAmount !== undefined && amount.gt(decimal(input.canaryMaxAmount))) {
+        return { reason: "ROUTE_DEGRADED_CANARY_EXCLUDED", detail: { healthState, canaryMaxAmount: decimal(input.canaryMaxAmount).toFixed(4) } };
+      }
+    }
+    if (healthState !== "HEALTHY" && healthState !== "DEGRADED") {
+      return { reason: "ROUTE_NOT_HEALTHY", detail: { healthState } };
     }
     if (amount.lt(decimal(route.minAmount))) {
       return {

@@ -295,6 +295,9 @@ export const envSchema = z.strictObject({
    * degraded queue. The default is five minutes.
    */
   WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS: z.coerce.number().int().positive().default(300_000),
+  /** AUTO-09: route health sampling, breaker transitions, canary eligibility and half-open probes. */
+  WORKER_ROUTE_HEALTH_ENABLED: booleanFromEnvironment.default(true),
+  WORKER_ROUTE_HEALTH_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
   /**
    * The platform monitor (AUTO-03) evaluates the health of the platform every minute on the cluster leader (worker
    * staleness, checkpoint, outbox, audit outbox and job queue age, the default journal partition, certificate expiry,
@@ -661,6 +664,8 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_BACKGROUND_JOBS_BATCH_SIZE: 10,
     WORKER_BACKGROUND_JOBS_LEASE_SECONDS: 300,
     WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS: 300_000,
+    WORKER_ROUTE_HEALTH_ENABLED: true,
+    WORKER_ROUTE_HEALTH_INTERVAL_MS: 60_000,
     WORKER_PLATFORM_MONITOR_ENABLED: true,
     WORKER_PLATFORM_MONITOR_INTERVAL_MS: 60_000,
     PLATFORM_MONITOR_WORKER_STALE_MULTIPLIER: 3,

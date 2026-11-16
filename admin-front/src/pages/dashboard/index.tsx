@@ -65,7 +65,7 @@ type Overview = {
     unknownBacklog?: number;
     unknownOldestAgeSeconds?: number;
     openCircuitBreakers?: number;
-    routeHealth?: { healthy: number; degraded: number; openBreaker: number };
+    routeHealth?: { healthy: number; degraded: number; openBreaker: number; forced?: number; conflicts?: number };
     webhookInboxLagSeconds?: number;
     reconciliationMatchRate?: string;
     reconciliationItems?: number;
@@ -221,7 +221,10 @@ const DashboardPage = dc(() => {
                 ["expired_approvals", String(data.approvalExpired ?? 0)],
                 ["emergency_approvals_due", String(data.approvalEmergencyDue ?? 0)],
                 ["open_circuit_breakers", String(data.openCircuitBreakers ?? 0)],
+                ["healthy_routes", String(data.routeHealth?.healthy ?? 0)],
                 ["degraded_routes", String(data.routeHealth?.degraded ?? 0)],
+                ["forced_routes", String(data.routeHealth?.forced ?? 0)],
+                ["route_health_conflicts", String(data.routeHealth?.conflicts ?? 0)],
                 ["webhook_inbox_lag_seconds", String(data.webhookInboxLagSeconds ?? 0)],
                 ["reconciliation_match_rate_percent", String(data.reconciliationMatchRate ?? "0.0000")],
                 ["reconciliation_items", String(data.reconciliationItems ?? 0)],
@@ -500,7 +503,7 @@ const DashboardPage = dc(() => {
                                 <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                                     <ThemedView style={{ gap: "3px" }}>
                                         <ThemedText type="defaultSemiBold">{t("Route health")}</ThemedText>
-                                        <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("Active routes by health state")}</ThemedText>
+                                        <ThemedText style={{ fontSize: "11px", opacity: 0.6 }}>{t("Routes by health state")}</ThemedText>
                                     </ThemedView>
                                     {[
                                         { key: "HEALTHY", label: t("Healthy"), count: overview.value?.routeHealth?.healthy ?? 0 },
@@ -512,6 +515,9 @@ const DashboardPage = dc(() => {
                                             <ThemedText style={{ fontSize: "15px", fontWeight: 700 }}>{formatPlainNumber(row.count)}</ThemedText>
                                         </ThemedView>
                                     ))}
+                                    <ThemedText style={{ fontSize: "11px", opacity: 0.7 }}>
+                                        {formatPlainNumber(overview.value?.routeHealth?.forced ?? 0)} {t("forced")} · {formatPlainNumber(overview.value?.routeHealth?.conflicts ?? 0)} {t("conflicts")}
+                                    </ThemedText>
                                     <VBtn size="small" variant="text" prependIcon="mdi-arrow-right" onClick={() => void router.push({ name: "GatewayRoutes" })}>{t("Open routes")}</VBtn>
                                 </SurfaceCardText>
                             </SurfaceCard>

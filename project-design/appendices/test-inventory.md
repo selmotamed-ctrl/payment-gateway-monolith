@@ -73,7 +73,7 @@
 | `core-back/test/engine/guards-and-workers.test.ts` | 254 | 21 |
 | `core-back/test/engine/ledger.test.ts` | 529 | 30 |
 | `core-back/test/engine/operator-cases-and-broadcast.test.ts` | 208 | 4 |
-| `core-back/test/engine/pre-initiate.test.ts` | 149 | 4 |
+| `core-back/test/engine/pre-initiate.test.ts` | 164 | 5 |
 | `core-back/test/engine/repositories.test.ts` | 256 | 13 |
 | `core-back/test/engine/shard-scaler.test.ts` | 611 | 57 |
 | `core-back/test/engine/step-executor.test.ts` | 325 | 19 |
@@ -152,7 +152,7 @@
 | `core-back/test/onboarding-four-eyes.test.ts` | 200 | 18 |
 | `core-back/test/operator-cases.test.ts` | 87 | 5 |
 | `core-back/test/partition-truncate-guard.test.ts` | 86 | 5 |
-| `core-back/test/phase1-mtls-and-schema.test.ts` | 443 | 14 |
+| `core-back/test/phase1-mtls-and-schema.test.ts` | 448 | 14 |
 | `core-back/test/phase2-ledger-and-governance.test.ts` | 281 | 11 |
 | `core-back/test/phase3-dynamic-engine-and-blueprints.test.ts` | 273 | 12 |
 | `core-back/test/phase4-onboarding-aml-disputes-recon.test.ts` | 237 | 16 |
@@ -194,6 +194,7 @@
 | `core-back/test/reporting-template.test.ts` | 113 | 5 |
 | `core-back/test/reporting-xsd-xlsx.test.ts` | 289 | 11 |
 | `core-back/test/retention-worker.test.ts` | 504 | 17 |
+| `core-back/test/route-health.test.ts` | 289 | 17 |
 | `core-back/test/runtime/production-adapters.test.ts` | 569 | 16 |
 | `core-back/test/runtime/raw-body.test.ts` | 127 | 6 |
 | `core-back/test/runtime/rotating-refresh-token.test.ts` | 106 | 2 |
@@ -240,7 +241,7 @@
 | `core-back/test/worker-runtime-health.test.ts` | 153 | 8 |
 | `admin-back/test/academy-progress.test.ts` | 240 | 13 |
 | `admin-back/test/admin-surface.test.ts` | 1423 | 58 |
-| `admin-back/test/admin-ui-completion.test.ts` | 443 | 29 |
+| `admin-back/test/admin-ui-completion.test.ts` | 447 | 29 |
 | `admin-back/test/auth-account-limiters.test.ts` | 97 | 3 |
 | `admin-back/test/backups.test.ts` | 457 | 21 |
 | `admin-back/test/core-contract.test.ts` | 1650 | 58 |
@@ -429,5 +430,5 @@
 | `tests/unit/ui-authorities.test.ts` | 97 | 9 |
 | `tests/unit/wallet-details.test.ts` | 85 | 11 |
 
-- Total files: **424**
-- Total literal test declarations: **4200**
+- Total files: **425**
+- Total literal test declarations: **4218**

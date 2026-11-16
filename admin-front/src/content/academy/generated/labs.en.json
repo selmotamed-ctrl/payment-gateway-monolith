@@ -1473,7 +1473,7 @@
             "title": "Dashboard",
             "rows": [
               [
-                "Open Circuit Breakers",
+                "Route health · Open breaker",
                 "1"
               ],
               [

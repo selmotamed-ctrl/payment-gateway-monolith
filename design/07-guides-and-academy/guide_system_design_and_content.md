@@ -1198,7 +1198,7 @@ Exports contain personal and financial data. Save them only where company policy
 | **Active Merchants** | merchants currently allowed to take payments | none; context |
 | **Pending** | applications or approvals waiting | work the queue; see Join Requests / Approvals |
 | **Unknown Backlog** and **Oldest** | number of payments in `UNKNOWN` and the age of the oldest | rising numbers or old items: Book 7, article on `UNKNOWN`; runbook RB-03 |
-| **Open Circuit Breakers** | payment routes automatically switched off because the partner is failing | runbook RB-01; tell the Gateway Admin |
+| **Route health** | healthy, degraded and open routes, plus forced overrides and conflicts | a forced route is not the same as a healthy one; open Routes → Health; `OPEN_BREAKER`: runbook RB-01 |
 | **Join Request SLA** | onboarding reviews at risk of being late | assign and review |
 | **AML SLA** | compliance cases near or past their deadline | compliance team; escalate to MLRO |
 | **Webhook Inbox Lag** | delay between receiving a partner's message and processing it | if high: tell Engineering; RB-02 if signatures fail |
@@ -1832,7 +1832,7 @@ Role names such as `FINANCE` and `MLRO` are explained in [[a:b03-02|Your account
 | Join request decision | OPERATOR or COMPLIANCE | per the four-eyes policy (see Merchants) | merchant activated or rejected |
 | Merchant suspension | OPERATOR, COMPLIANCE | emergency: immediate, ratified within 24 h by MLRO or another COMPLIANCE | merchant suspended |
 | Merchant reinstatement | OPERATOR, COMPLIANCE | COMPLIANCE or MLRO (different), never emergency | merchant active |
-| Gateway version going LIVE; credentials, routes, payout-bank edits | GATEWAY_ADMIN | SECURITY_ADMIN | version promoted, security alert |
+| Gateway version going LIVE; credentials, payout-bank edits | GATEWAY_ADMIN | SECURITY_ADMIN | version promoted, security alert |
 | Staff account / role / authority change | SECURITY_ADMIN | a different SECURITY_ADMIN | permissions re-read on the next request; a disabled account is refused |
 | Compliance platform settings | COMPLIANCE, FINANCE | MLRO or SECURITY_ADMIN | new setting version |
 
@@ -3017,17 +3017,23 @@ The same happens if route A's health becomes `OPEN_BREAKER`: it drops out and ro
 ### The circuit breaker
 A circuit breaker is a safety switch, like the one in a home electrical panel. It cuts a failing path so the damage does not spread.
 
-The platform measures each route continuously: successes, definite failures, ambiguous results, rate-limit errors and response times. When a partner is failing, the **circuit breaker opens** automatically. Then:
+The platform measures each route continuously: successes, definite failures, ambiguous results, rate-limit errors and response times. A health decision is made from real payment outcomes, not from a person changing a label. The default rule uses a 15-minute window. A route moves to `DEGRADED` after at least 10 outcomes with 30% partner faults, or after three partner faults in a row. It moves to `OPEN_BREAKER` at 60% partner faults, or after six partner faults in a row. The thresholds are the staff-managed `route_health.policy` setting.
 
-1. The route's health becomes `OPEN_BREAKER`.
+When a partner is failing, the **circuit breaker opens** automatically:
+
+1. The route's computed health becomes `OPEN_BREAKER`.
 2. Customers stop seeing the route.
 3. New payments use the next healthy route.
-4. A small test call is repeated until the partner recovers.
+4. A small **recovery probe** runs in the background until the partner recovers.
 
-Only partner faults count; customer mistakes do not. The procedure for staff is [[a:b10-02|RB-01 Gateway outage and the circuit breaker]].
+A `DEGRADED` route is a middle state. It is not used for normal traffic, but a small, stable **canary** share of links (5% by default) may still try it. That is how the platform gets real evidence before returning the route to everyone. The canary is stable for a link and route, so the same customer does not flip between paths. An optional amount cap keeps large payments away from a degraded route.
+
+Only partner faults count; customer mistakes do not. A probe is read-only: it tests the partner and records the result, but it never changes a credential set's verdict. A route that needs a merchant's own login has no platform probe, so its recovery needs a person.
+
+The procedure for staff is [[a:b10-02|RB-01 Gateway outage and the circuit breaker]]. The **Routes** screen opens a health drawer for each route. It shows the effective state (what routing uses), the computed state (what the automation measured) and any admin override. A Gateway Admin can run a probe. Forcing `HEALTHY` needs a second officer and an expiry; forcing `DEGRADED` or `OPEN_BREAKER` is immediate but always recorded with a reason. An override never hides the computed state.
 
 ### Routes change money behaviour
-Editing a route can change fees, limits and who sees a payment method. Route edits are guarded by a checklist, so open [[c:sg-edit-route|the checklist for creating or changing a route]] first. Credential, route and payout-bank edits need `SECURITY_ADMIN` approval.
+Editing a route can change fees, limits and who sees a payment method. Route edits are guarded by a checklist, so open [[c:sg-edit-route|the checklist for creating or changing a route]] first. Credential and payout-bank edits need `SECURITY_ADMIN` approval; a route edit uses the safeguard checklist and a reason.
 @@end
 
 @@article id=b06-12 book=6 order=12 title="The visible-rails formula: why a customer does or does not see a payment method" roles=ALL minutes=4 ui=AVAILABLE related=b02-06,b05-06,b07-12
@@ -3046,7 +3052,7 @@ A rail is shown only if **every one** of these conditions is true. Read the tabl
 | 2 | The link allows the rail | The link's own list includes it (or has none). |
 | 3 | A live commission profile covers it | We have an agreed fee for this merchant/application and rail at this amount. |
 | 4 | At least one route is `ACTIVE` | The route is switched on. A `PAUSED` or `DRAINING` route does not count. |
-| 5 | That route is `HEALTHY` | The circuit breaker is not open and it is not degraded. |
+| 5 | That route is `HEALTHY`, or it is `DEGRADED` and this link is in its canary cohort | A healthy route is used normally. A degraded route is hidden from most customers but may be tried by a small, stable share of links. An open breaker is never used. |
 | 6 | The amount is inside the route's limits | Minimum, maximum, and the daily cap is not exceeded. |
 | 7 | Not in a maintenance window, and the route's scope includes this merchant, application, risk tier and channel | The route is not switched off for maintenance, and it is allowed for this merchant, application, risk tier and channel. |
 | 8 | The route's credential set is `VERIFIED` | The credentials the route uses have been tested and are good. |
@@ -3062,6 +3068,8 @@ Noon Mart sends Layla a link for 25.500 LYD. The Sadad rail has one route. Its l
 **Case 2: the amount is too large.** The link is for 150.000 LYD. Condition 6 fails, because 150.000 is above the maximum of 100.000. Sadad is hidden.
 
 **Case 3: the daily cap.** The route has already processed 990.000 LYD today. A new 25.500 LYD link would bring the day to 990.000 + 25.500 = 1,015.500 LYD, which is above the cap of 1,000.000. Condition 6 fails again, although the amount alone is inside the limits.
+
+**Case 3b: the route is degraded.** The route is `DEGRADED`. Most links no longer see it. One link in the configured canary share (5% by default) still sees it, and its payment is the evidence that may recover the route. The same link keeps the same answer on a retry. If the amount is above the optional canary cap, even that link does not see it.
 
 **Case 4: no single route passes.** Imagine a different rail that has two routes. Route 1 is `ACTIVE` but its circuit breaker is open, so it fails condition 5. Route 2 is `HEALTHY` but `PAUSED`, so it fails condition 4. Each condition is true for some route, but no one route passes all of them. That rail is hidden.
 
@@ -4992,24 +5000,24 @@ Use this runbook when a payment method disappears or a route shows `OPEN_BREAKER
 Think of a circuit breaker in a house. When something is wrong, it switches the power off so the damage does not spread. Our platform does the same for a partner that keeps failing. Unlike a house breaker, ours tests the partner again in the background and closes by itself. The partner is the payment company that really moves the money.
 
 ### What you see
-The dashboard tile **Open Circuit Breakers** is above zero. Customers report that a payment method is missing. A route's health shows `OPEN_BREAKER`.
+The **Route health** card shows an `OPEN_BREAKER` count above zero and the forced/conflict counts. Customers report that a payment method is missing. A route's health shows `OPEN_BREAKER`; a degraded route may show `DEGRADED`.
 
 ### What the platform did by itself
-After repeated partner faults the **circuit breaker opened**. The route is hidden. New payments move to the next healthy route (for example from a direct route to an aggregator). Small recovery tests repeat in the background.
+After repeated partner faults the **circuit breaker opened**. The route is hidden from normal traffic. New payments move to the next healthy route (for example from a direct route to an aggregator). A degraded route is still tried by a small, stable canary share of links so the platform can collect recovery evidence. Small read-only recovery probes repeat in the background.
 
 ### What you do
-1. **Confirm it is real.** Open the route and look at its health measures. Check the environment.
-2. **Tell the Gateway Admin** and your manager.
-3. **Do not re-enable the route by hand** while the partner is still failing.
+1. **Confirm it is real.** Open **Routes → Health** and look at the computed state, the last sample windows and the probes. Check the environment.
+2. **Tell the Gateway Admin** and your manager. Do not force `HEALTHY` just to make the tile green: force `HEALTHY` needs a second officer, an expiry and a written reason, and the computed state stays visible.
+3. **Run a probe** from the health drawer if a Gateway Admin asks for fresh evidence. A probe is read-only; it does not overwrite credentials.
 4. **Expect** payments already running to finish on their original settings, and some to become `UNKNOWN`.
 5. When the breaker closes, check the **Unknown Backlog** tile. If it grew, run [[a:b10-04|RB-03 A backlog of UNKNOWN payments]].
 6. **Tell merchants** (through your manager) only that a payment method is temporarily unavailable.
 
 ### Gateway Admin follow-up
-Contact the partner and check whether the problem is on their side. If the route must stay off for a long time, pause it deliberately and record why. Pausing is a risk-reducing action and may be immediate. Resuming goes through the normal review.
+Contact the partner and check whether the problem is on their side. If the route must stay off for a long time, pause it deliberately and record why. Pausing is a risk-reducing action and may be immediate. Resuming goes through the normal review. For a maintenance action, force `DEGRADED` or `OPEN_BREAKER` with a reason and expiry instead of editing the gateway settings.
 
 ### What not to do
-Do not edit gateway settings to "try something" during an outage. Do not ask customers to retry repeatedly.
+Do not edit gateway settings to "try something" during an outage. Do not use force `HEALTHY` as a substitute for fixing the partner. Do not ask customers to retry repeatedly.
 @@end
 
 @@article id=b10-03 book=10 order=3 title="RB-02 Partner changed its signature or sender address" roles=GATEWAY_ADMIN,SECURITY_ADMIN,OPERATOR minutes=2 ui=AVAILABLE related=b06-06,b07-05,b10-02

@@ -6,6 +6,7 @@ import { BaseWorker, type WorkerOptions } from "./workerRuntime";
 export interface InquiryOutcome {
   status: string;
   substatus?: string | null;
+  canonicalError?: string | null;
   settledAmount?: unknown;
   providerFee?: unknown;
   definitive: boolean;
@@ -128,6 +129,12 @@ export class ExpirySweeperWorker extends BaseWorker {
       if (!transitioned) {
         return;
       }
+      if (outcome.substatus || outcome.canonicalError) {
+        await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
+          substatus: outcome.substatus ?? undefined,
+          canonicalError: outcome.canonicalError ?? undefined,
+        });
+      }
       if (outcome.settledAmount !== undefined && outcome.settledAmount !== null) {
         await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
           settledAmount: outcome.settledAmount,
@@ -142,6 +149,7 @@ export class ExpirySweeperWorker extends BaseWorker {
       await this.repositories.payments.updateAttempt(this.db as Tx, attempt.id, {
         status: outcome.status,
         substatus: outcome.substatus ?? attempt.substatus ?? null,
+        canonicalError: outcome.canonicalError ?? undefined,
       });
     }
     if (terminal && RELEASE_SLOT_STATUSES.includes(outcome.status)) {

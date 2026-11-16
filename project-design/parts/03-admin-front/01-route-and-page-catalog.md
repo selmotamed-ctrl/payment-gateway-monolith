@@ -348,3 +348,16 @@ The Dashboard **Gross Volume** card sums `payment_attempts.total_charged_amount`
 ## Dashboard all-time queue metrics (2026-11-16)
 
 **Open Action Queues** is a current-state count, not a period count: pending approvals (`DRAFT`/`PENDING_REVIEW`), open operator cases (`OPEN`/`IN_PROGRESS`/`PENDING_CHECKER`), open join requests and open AML cases (`OPEN`/`IN_REVIEW`/`PENDING_CHECKER`/`FROZEN`/`ESCALATED_STR`). Its sub-label now names all four sources and carries **All time (not period-filtered)**. **Unknown Backlog** counts every `UNKNOWN` payment attempt, so its sub-label carries the same all-time note before the oldest age. Only Gross Volume, Success Rate, the Attempts By State chart, the Volume chart and Reconciliation use the selected period.
+
+## Route health drawer (2026-11-16)
+
+The **Routes** table's primary row action opens a 760 px health drawer instead
+of opening the editor. The drawer separates effective, computed and override
+state; shows canary percent/maximum, consecutive failures, probe counters,
+last/next probe, override reason/expiry/actor, recent sample windows, probe
+history and the newest state transitions. It can run a read-only probe, request a
+forced `HEALTHY` (second approval), force `DEGRADED`/`OPEN_BREAKER` immediately,
+or clear an override (second approval when the computed state is healthier).
+The table Health cell marks a forced route. Edit is now the overflow action.
+The Dashboard Route health card shows forced and conflict counts. See
+`core.route-health`.

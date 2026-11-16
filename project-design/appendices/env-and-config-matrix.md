@@ -367,6 +367,8 @@
 | `core-back/lib/env/index.ts` | `WORKER_BACKGROUND_JOBS_BATCH_SIZE` |
 | `core-back/lib/env/index.ts` | `WORKER_BACKGROUND_JOBS_LEASE_SECONDS` |
 | `core-back/lib/env/index.ts` | `WORKER_BACKGROUND_JOBS_MAX_QUEUE_AGE_MS` |
+| `core-back/lib/env/index.ts` | `WORKER_ROUTE_HEALTH_ENABLED` |
+| `core-back/lib/env/index.ts` | `WORKER_ROUTE_HEALTH_INTERVAL_MS` |
 | `core-back/lib/env/index.ts` | `WORKER_PLATFORM_MONITOR_ENABLED` |
 | `core-back/lib/env/index.ts` | `WORKER_PLATFORM_MONITOR_INTERVAL_MS` |
 | `core-back/lib/env/index.ts` | `PLATFORM_MONITOR_WORKER_STALE_MULTIPLIER` |

@@ -346,6 +346,8 @@ const ApprovalsPage = dc(() => {
                 return { name: "AmlReports", query: { open: row.subjectId } };
             case "STORAGE_LEGAL_HOLD":
                 return { name: "SystemObjectStorage", query: { open: row.subjectId } };
+            case "ROUTE_HEALTH_OVERRIDE":
+                return { name: "GatewayRoutes", query: { health: row.subjectId } };
             default:
                 return null;
         }
@@ -586,6 +588,10 @@ const ApprovalsPage = dc(() => {
         push(t("AML severity"), context.severity);
         push(t("Trigger"), context.triggerReason);
         push(t("Version"), context.versionNumber);
+        push(t("Effective state"), context.healthState);
+        push(t("Computed state"), context.healthComputedState);
+        push(t("Override state"), context.healthOverrideState);
+        push(t("Override expires"), context.healthOverrideExpiresAt ? formatDateTime(String(context.healthOverrideExpiresAt)) : null);
         push(t("Gateway"), context.gateway && typeof context.gateway === "object" ? `${(context.gateway as Record<string, unknown>).code ?? ""} ${(context.gateway as Record<string, unknown>).name ?? ""}`.trim() : null);
         push(t("Role"), context.role);
         push(t("Setting key"), context.key);
