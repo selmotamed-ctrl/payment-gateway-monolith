@@ -410,6 +410,7 @@
 | `core-back/lib/env/index.ts` | `CREDENTIAL_REVERIFY_DRY_RUN` |
 | `core-back/lib/env/index.ts` | `WORKER_COMMISSION_NETTING_ENABLED` |
 | `core-back/lib/env/index.ts` | `WORKER_COMMISSION_NETTING_INTERVAL_MS` |
+| `core-back/lib/env/index.ts` | `BASE_CURRENCY` |
 | `core-back/lib/env/index.ts` | `COMMISSION_NETTING_DRY_RUN` |
 | `core-back/lib/env/index.ts` | `COMMISSION_NETTING_CRON` |
 | `core-back/lib/env/index.ts` | `COMMISSION_RECEIVABLE_AGING_DAYS` |

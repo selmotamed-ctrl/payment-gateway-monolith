@@ -267,23 +267,25 @@ const velocityScopeKey = (
     clientIp: string | null;
     clientPhone: string | null;
     cardAlias: string | null;
+    currency: string;
   },
 ): string | null => {
+  const suffix = `:${scope.currency}`;
   switch (scopeType) {
     case "MERCHANT":
-      return scope.merchantId;
+      return `${scope.merchantId}${suffix}`;
     case "APPLICATION":
-      return scope.applicationId;
+      return `${scope.applicationId}${suffix}`;
     case "LINK":
-      return scope.linkId;
+      return `${scope.linkId}${suffix}`;
     case "RAIL":
-      return scope.railCode;
+      return `${scope.railCode}${suffix}`;
     case "END_CLIENT_IP":
-      return scope.clientIp;
+      return scope.clientIp ? `${scope.clientIp}${suffix}` : null;
     case "END_CLIENT_PHONE":
-      return scope.clientPhone;
+      return scope.clientPhone ? `${scope.clientPhone}${suffix}` : null;
     case "END_CLIENT_CARD":
-      return scope.cardAlias;
+      return scope.cardAlias ? `${scope.cardAlias}${suffix}` : null;
     default:
       return null;
   }
@@ -427,7 +429,7 @@ export class AttemptGuardPipeline {
           env: request.env,
         });
 
-      const posture = await this.merchantPosture(tx, merchant, request.env, now, settlementTarget);
+      const posture = await this.merchantPosture(tx, merchant, request.env, now, settlementTarget, currency);
       if (!posture.allowed) {
         // A merchant that may not pay is blocked the same way a rejected
         // velocity rule is blocked: a terminal attempt keeps the refusal
@@ -610,6 +612,7 @@ export class AttemptGuardPipeline {
         clientIp,
         clientPhone,
         cardAlias,
+        currency,
         now,
       });
       const rejectedRules = velocityEvaluations.filter((evaluation) => evaluation.exceeded && evaluation.rule.action === "REJECT");
@@ -651,6 +654,7 @@ export class AttemptGuardPipeline {
       const amlRules = await engine.loadRules();
       const windowStats = await this.repositories.payments.collectWindowStats(tx, {
         merchantId: merchant.id,
+        currency,
         applicationId: link.applicationId,
         since: new Date(now.getTime() - 24 * 60 * 60 * 1000),
         amountBands: structuringBands(amlRules, now),
@@ -973,6 +977,7 @@ export class AttemptGuardPipeline {
     env: Environment,
     now: Date,
     settlementTarget?: SettlementTarget | null,
+    currency?: string | null,
   ): Promise<{ allowed: boolean; reason: string }> {
     void now;
     const statusPosture = await this.merchantStatusPosture(tx, merchant, env);
@@ -989,6 +994,7 @@ export class AttemptGuardPipeline {
       merchant.id,
       settlementTarget ?? null,
       merchant,
+      currency ?? null,
     );
     if (receivable.decision === "PAUSE") {
       return { allowed: false, reason: receivable.reason };
@@ -1166,6 +1172,7 @@ export class AttemptGuardPipeline {
       clientIp: string | null;
       clientPhone: string | null;
       cardAlias: string | null;
+      currency: string;
       now: Date;
     },
   ): Promise<VelocityEvaluation[]> {
@@ -1203,6 +1210,7 @@ export class AttemptGuardPipeline {
           clientIp: input.clientIp,
           clientPhone: input.clientPhone,
           cardAlias: input.cardAlias,
+          currency: input.currency,
         });
         if (scopeKey) {
           const evaluation = await this.velocityStore.incrWindowCounter(
@@ -1238,6 +1246,7 @@ export class AttemptGuardPipeline {
         clientIp: input.clientIp,
         clientPhone: input.clientPhone,
         cardAlias: input.cardAlias,
+        currency: input.currency,
         since,
       });
       const countExceeded = maxCount !== null && stats.count >= maxCount;
@@ -1271,12 +1280,14 @@ export class AttemptGuardPipeline {
       clientIp: string | null;
       clientPhone: string | null;
       cardAlias: string | null;
+      currency: string;
       since: Date;
     },
   ): Promise<AttemptWindowStats> {
     const where: Record<string, unknown> = {
       createdAt: { gte: scope.since },
       status: { in: ACTIVE_ATTEMPT_STATUSES },
+      currency: scope.currency,
     };
     switch (scope.scopeType) {
       case "MERCHANT":

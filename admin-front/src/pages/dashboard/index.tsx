@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
-import { VBtn, VCheckbox, VIcon, VProgressLinear } from "vuetify/components";
+import { VBtn, VCheckbox, VIcon, VProgressLinear, VSelect } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -22,6 +22,7 @@ import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { formatPlainNumber } from "@/utils/money";
 import { showSnackBar } from "@/utils/snackBar";
+import { maskEmail } from "@/utils/privacy";
 import { buildOpenActionQueueSubLabel, buildSuccessRateSubLabel, buildUnknownBacklogSubLabel } from "./metricLabels";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
@@ -55,6 +56,9 @@ type RecentActivity = {
 type Overview = {
     period: string;
     since: string;
+    currency?: string;
+    byCurrency?: Array<{ currency: string; attempts: number; succeeded: number; counted: number; volumeByState: Record<string, string> }>;
+    mixedCurrency?: boolean;
     attemptsByState?: Record<string, number>;
     volumeByState?: Record<string, string>;
     attemptsTotal?: number;
@@ -122,6 +126,9 @@ const DashboardPage = dc(() => {
     const loading = ref(true);
     const error = ref<string | null>(null);
     const period = ref("24h");
+    const currency = ref("LYD");
+    const currencyOptions = ["LYD", "USD", "EUR"].map((code) => ({ title: code, value: code }));
+    const lastUpdatedAt = ref<Date | null>(null);
     const exportLoading = ref(false);
     const exportChecklist = ref<Record<string, boolean>>({});
     const recentActivity = ref<RecentActivity[]>([]);
@@ -187,12 +194,48 @@ const DashboardPage = dc(() => {
         loading.value = true;
         error.value = null;
         try {
-            const response = await api.get(urlsMap.dashboardOverview, { params: { period: period.value } });
+            const response = await api.get(urlsMap.dashboardOverview, { params: { period: period.value, currency: currency.value } });
             overview.value = (response.data?.data ?? response.data ?? {}) as Overview;
+            lastUpdatedAt.value = new Date();
         } catch (e) {
             error.value = extractApiErrorMessage(e);
         } finally {
             loading.value = false;
+        }
+    };
+
+    const copyStatusSummary = async () => {
+        const snapshot = overview.value;
+        if (!snapshot) return;
+        const summary = {
+            period: period.value,
+            updatedAt: lastUpdatedAt.value?.toISOString() ?? null,
+            attempts: {
+                total: snapshot.attemptsTotal ?? 0,
+                succeeded: snapshot.attemptsSucceeded ?? 0,
+                counted: snapshot.attemptsCounted ?? 0,
+                successRate: snapshot.successRate ?? null,
+            },
+            grossVolume: snapshot.grossVolume ?? null,
+            grossVolumeAttempts: snapshot.grossVolumeAttempts ?? 0,
+            unknownBacklog: snapshot.unknownBacklog ?? 0,
+            openCircuitBreakers: snapshot.openCircuitBreakers ?? 0,
+            routeHealth: snapshot.routeHealth ?? null,
+            webhookInboxLagSeconds: snapshot.webhookInboxLagSeconds ?? null,
+            reconciliation: { matchRate: snapshot.reconciliationMatchRate ?? null, items: snapshot.reconciliationItems ?? 0 },
+            queues: {
+                approvals: snapshot.approvalPending ?? 0,
+                operatorCases: snapshot.operatorOpen ?? 0,
+                joinRequests: snapshot.joinRequestOpen ?? 0,
+                amlCases: snapshot.amlOpen ?? 0,
+            },
+            recentActivity: recentActivity.value.slice(0, 5).map((event) => ({ action: event.action, actor: maskEmail(event.actorEmail), at: event.createdAt })),
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Dashboard summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
         }
     };
 
@@ -204,7 +247,7 @@ const DashboardPage = dc(() => {
         }
         exportLoading.value = true;
         try {
-            const response = await api.get(urlsMap.dashboardExport, { params: { period: period.value } });
+            const response = await api.get(urlsMap.dashboardExport, { params: { period: period.value, currency: currency.value } });
             const data = (response.data?.data ?? response.data ?? {}) as Overview;
             const rows: Array<[string, string]> = [
                 ["period", String(data.period ?? period.value)],
@@ -264,7 +307,7 @@ const DashboardPage = dc(() => {
         }
     };
 
-    watch(period, () => void load());
+    watch([period, currency], () => void load());
     void load();
     void loadRecentActivity();
 
@@ -412,8 +455,23 @@ const DashboardPage = dc(() => {
                                 tabs={periodTabs}
                                 onUpdate:modelValue={(value: string) => (period.value = value)}
                             />
+                            <VSelect
+                                modelValue={currency.value}
+                                onUpdate:modelValue={(value: string) => (currency.value = value)}
+                                items={currencyOptions}
+                                density="compact"
+                                variant="outlined"
+                                hideDetails
+                                style={{ maxWidth: "110px" }}
+                            />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => { void load(); void loadRecentActivity(); }}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!overview.value} onClick={() => void copyStatusSummary()}>{t("Copy summary")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} disabled={!exportChecklistComplete.value} onClick={() => void exportSnapshot()}>{t("Export snapshot")}</VBtn>
+                            {lastUpdatedAt.value && (
+                                <MetaPill color="info" variant="tonal" size="small">
+                                    {t("Updated")} {lastUpdatedAt.value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                </MetaPill>
+                            )}
                             <MetaPill color="primary" variant="tonal" size="small">{t("Operational")}</MetaPill>
                         </ThemedView>
                     )}
@@ -490,7 +548,7 @@ const DashboardPage = dc(() => {
                                                 <tr key={row.state}>
                                                     <td><StatusBadge status={row.state} /></td>
                                                     <td class="pg-tabular" style={{ textAlign: "end" }}>{formatPlainNumber(row.count)}</td>
-                                                    <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.amount} currency="LYD" size="sm" /></td>
+                                                    <td style={{ textAlign: "end" }}><MoneyDisplay amount={row.amount} currency={overview.value?.currency ?? "LYD"} size="sm" /></td>
                                                     <td class="pg-tabular" style={{ textAlign: "end" }}>{formatPlainNumber(row.percent, 1)}%</td>
                                                 </tr>
                                             ))}

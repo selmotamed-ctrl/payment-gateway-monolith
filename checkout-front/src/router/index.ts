@@ -14,6 +14,11 @@ const router = createRouter({
             component: () => import("@/pages/pay/[linkKey]/index"),
         },
         {
+            path: "/verify/certificate/:publicId",
+            name: "VerifyCertificate",
+            component: () => import("@/pages/public/verify-certificate/index"),
+        },
+        {
             path: "/:pathMatch(.*)*",
             name: "NotFound",
             component: () => import("@/pages/public/not-found/index"),

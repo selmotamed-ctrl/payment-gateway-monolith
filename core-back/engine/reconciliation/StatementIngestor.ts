@@ -26,6 +26,8 @@ export interface StatementParserConfig {
   dateFormat?: string;
   timezone?: string;
   supportsBatchNet?: boolean;
+  /** Source-level fallback when the row has no currency column. */
+  currency?: string | null;
 }
 
 export interface StatementRow {
@@ -34,7 +36,7 @@ export interface StatementRow {
   batchReference: string | null;
   amount: Money;
   fee: Money;
-  currency: string;
+  currency: string | null;
   occurredAt: Date | null;
   type: StatementRowType;
   raw: Record<string, unknown>;
@@ -59,6 +61,10 @@ export interface FeeVariancePosting {
   accruedFee: Money;
   variance: Money;
   occurredAt: Date | null;
+  runId?: string | null;
+  currency: string | null;
+  env: string | null;
+  credentialSetId: string | null;
 }
 
 export interface FeeVariancePoster {
@@ -358,6 +364,19 @@ export class StatementIngestor {
    * The whole matching, the report items and the fee variance posting share
    * one transaction, so a run is either fully ingested or not ingested at all.
    */
+  private itemContext(
+    source: { gatewayId: string; currency?: string | null; env?: string | null; credentialSetId?: string | null },
+    row: StatementRow,
+    attempt: { currency?: string | null; env?: string | null; credentialSetId?: string | null } | null,
+  ): { currency: string | null; gatewayId: string | null; env: string | null; credentialSetId: string | null } {
+    return {
+      currency: row.currency ?? attempt?.currency ?? source.currency ?? null,
+      gatewayId: source.gatewayId ?? null,
+      env: attempt?.env ?? source.env ?? null,
+      credentialSetId: attempt?.credentialSetId ?? source.credentialSetId ?? null,
+    };
+  }
+
   private async matchStatement(
     tx: Tx,
     input: {
@@ -422,6 +441,7 @@ export class StatementIngestor {
           statementFee: moneyToString(row.fee),
           rowType: row.type,
           result: "DUPLICATE",
+          ...this.itemContext(source, row, null),
         });
         items.push({
           id: item.id,
@@ -446,6 +466,7 @@ export class StatementIngestor {
           statementFee: moneyToString(row.fee),
           rowType: row.type,
           result: "MISSING_AT_GATEWAY",
+          ...this.itemContext(source, row, null),
         });
         items.push({
           id: item.id,
@@ -470,6 +491,7 @@ export class StatementIngestor {
         statementFee: moneyToString(row.fee),
         rowType: row.type,
         result,
+        ...this.itemContext(source, row, attempt),
       });
       items.push({
         id: item.id,
@@ -496,6 +518,10 @@ export class StatementIngestor {
           accruedFee,
           variance,
           occurredAt: row.occurredAt,
+          runId,
+          currency: this.itemContext(source, row, attempt).currency,
+          env: attempt.env ?? source.env ?? null,
+          credentialSetId: attempt.credentialSetId ?? source.credentialSetId ?? null,
         });
         feeVariances += 1;
       }
@@ -513,6 +539,10 @@ export class StatementIngestor {
         statementAmount: moneyToString(0n),
         statementFee: moneyToString(0n),
         result: "MISSING_LOCALLY",
+        currency: attempt.currency ?? source.currency ?? null,
+        gatewayId: source.gatewayId ?? null,
+        env: attempt.env ?? source.env ?? null,
+        credentialSetId: attempt.credentialSetId ?? source.credentialSetId ?? null,
       });
       items.push({
         id: item.id,
@@ -595,6 +625,7 @@ export class StatementIngestor {
     const headerRow = config.headerRow ?? config.header_row;
     const dateFormat = config.dateFormat ?? config.date_format;
     const supportsBatchNet = config.supportsBatchNet ?? config.supports_batch_net;
+    const currency = typeof config.currency === "string" ? config.currency.trim().toUpperCase() : null;
     return {
       format,
       encoding: isBufferEncoding(encoding) ? encoding : "utf8",
@@ -604,6 +635,7 @@ export class StatementIngestor {
       dateFormat: typeof dateFormat === "string" ? dateFormat : undefined,
       timezone: typeof config.timezone === "string" ? config.timezone : "Africa/Tripoli",
       supportsBatchNet: Boolean(supportsBatchNet),
+      currency: currency && /^[A-Z]{3}$/.test(currency) ? currency : null,
     };
   }
 
@@ -680,7 +712,7 @@ export class StatementIngestor {
       batchReference: logicalValue("batchReference") || null,
       amount,
       fee,
-      currency: logicalValue("currency").toUpperCase() || "LYD",
+      currency: logicalValue("currency").toUpperCase() || config.currency || null,
       occurredAt: occurredText ? parseStatementDate(occurredText, config.dateFormat) : null,
       type: detectRowType(logicalValue("type")),
       raw,

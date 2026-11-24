@@ -80,6 +80,12 @@ type CashoutSummary = {
 
 type CashoutView = "open" | "history" | "all";
 
+const EXPORT_CHECKS = [
+    { key: "CASHOUT_SCOPE_VERIFIED", label: "Cash-out scope verified" },
+    { key: "BALANCE_AND_HOLDS_REVIEWED", label: "Wallet balances and holds reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const SUMMARY_EXPORT_CHECKS = [
     { key: "OPEN_SCOPE_VERIFIED", label: "Open cash-out scope verified" },
     { key: "AMOUNT_TOTALS_REVIEWED", label: "Amount totals reviewed" },
@@ -153,6 +159,9 @@ const CashoutsPage = dc(() => {
     const actionLoading = ref(false);
     const checklist = ref<Record<string, boolean>>({});
     const exportLoading = ref(false);
+    const exportOpen = ref(false);
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
     const summaryExportLoading = ref(false);
     const summaryExportChecklist = ref<Record<string, boolean>>({});
 
@@ -195,14 +204,49 @@ const CashoutsPage = dc(() => {
         refreshHook.value?.reset();
     };
 
+    const copyCashoutSummary = async () => {
+        const row = selected.value;
+        if (!row) return;
+        const summary = {
+            id: row.id,
+            state: row.state,
+            amount: row.amount,
+            currency: row.currency,
+            merchantId: row.merchantId,
+            merchantName: row.merchantName,
+            merchantLegalName: row.merchantLegalName,
+            walletId: row.walletId,
+            walletStatus: row.walletStatus,
+            walletBalance: row.walletBalance,
+            destination: row.destination,
+            requestedAt: row.requestedAt,
+            updatedAt: row.updatedAt,
+            ageHours: row.ageHours,
+            adjustmentState: row.adjustmentState,
+            adjustmentAmount: row.adjustmentAmount,
+            adjustmentJournalEntryId: row.adjustmentJournalEntryId,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Cash-out summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const exportExcel = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const response = await api.get(urlsMap.cashoutsExport, {
                 params: {
                     ...(search.value ? { search: search.value } : {}),
                     ...buildFilterQuery(filterDefinitions.value, filters.value),
+                    checklist: EXPORT_CHECKS.filter((check) => exportChecklist.value[check.key]).map((check) => check.key).join(","),
                 },
             });
             const payload = response.data?.data ?? response.data ?? {};
@@ -236,6 +280,8 @@ const CashoutsPage = dc(() => {
                 title: `cashouts-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            exportOpen.value = false;
+            exportChecklist.value = {};
             showSnackBar({
                 type: payload.truncated ? "warning" : "success",
                 message: payload.truncated
@@ -491,7 +537,7 @@ const CashoutsPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -601,6 +647,7 @@ const CashoutsPage = dc(() => {
                             {selected.value?.canProcess && (
                                 <VBtn color="primary" onClick={() => { actionError.value = ""; processOpen.value = true; }}>{t("Process")}</VBtn>
                             )}
+                            {selected.value && <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyCashoutSummary()}>{t("Copy summary")}</VBtn>}
                             <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
                         </ThemedView>
                     ),
@@ -657,6 +704,27 @@ const CashoutsPage = dc(() => {
                     </>
                 )}
             </SlideOverDrawer>
+
+            <FormModal
+                modelValue={exportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                title={t("Export cash-outs")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportExcel()}
+            >
+                <VAlert type="warning" variant="tonal">{t("The export contains merchant, wallet, amount and approval-state details. Handle it as confidential financial evidence.")}</VAlert>
+                <FormChecklist
+                    checks={[...EXPORT_CHECKS]}
+                    modelValue={exportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Cash-out export checklist")}
+                    complete={exportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
 
             <FormModal
                 modelValue={processOpen.value}

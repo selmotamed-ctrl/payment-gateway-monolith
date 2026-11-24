@@ -1,16 +1,25 @@
-import { defineComponent, ref, type PropType, type VNodeChild } from "vue";
+import { computed, defineComponent, ref, type PropType, type VNodeChild } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { VBtn } from "vuetify/components";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { notifyOutcome, reportCommerceError, runGoverned } from "../governedRequest";
 import type { MerchantCredentialSet, MerchantToken, MerchantUser } from "../types";
 import ReasonModal from "./ReasonModal";
 import { MiniTable, formatDateTime, toBadgeTone } from "./commerceBits";
+
+const ACCESS_ACTION_CHECKS = [
+    { key: "ENTITY_SCOPE_VERIFIED", label: "Merchant and token scope verified" },
+    { key: "ACCESS_IMPACT_REVIEWED", label: "Payment and integration impact reviewed" },
+    { key: "REASON_CONFIRMED", label: "Reason confirmed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Authority to revoke access confirmed" },
+] as const;
 
 /**
  * Merchant users, API tokens and credential sets as navigable rows: users open
@@ -32,14 +41,22 @@ export const MerchantAccessCard = defineComponent({
         const revoking = ref<MerchantToken | null>(null);
         const submitting = ref(false);
         const modalError = ref("");
+        const showChecklists = areChecklistsVisible();
+        const checklist = ref<Record<string, boolean>>({});
+        const checklistComplete = computed(() => !showChecklists || ACCESS_ACTION_CHECKS.every((check) => checklist.value[check.key] === true));
 
         const revoke = async (reason: string) => {
             const token = revoking.value;
             if (!token) return;
+            if (!checklistComplete.value) {
+                modalError.value = t("Complete all access action checklist items before submitting");
+                return;
+            }
             submitting.value = true;
             modalError.value = "";
             try {
-                const outcome = await runGoverned(() => api.post(urlsMap.applicationRevokeToken(token.applicationId, token.id), { reason }));
+                const keys = ACCESS_ACTION_CHECKS.filter((check) => checklist.value[check.key]).map((check) => check.key);
+                const outcome = await runGoverned(() => api.post(urlsMap.applicationRevokeToken(token.applicationId, token.id), { reason, checklist: keys }));
                 notifyOutcome(outcome, "Access token revoked");
                 revoking.value = null;
                 emit("changed");
@@ -114,6 +131,7 @@ export const MerchantAccessCard = defineComponent({
                                                 prependIcon="mdi-key-remove"
                                                 onClick={() => {
                                                     modalError.value = "";
+                                                    checklist.value = {};
                                                     revoking.value = row;
                                                 }}
                                             >
@@ -171,7 +189,17 @@ export const MerchantAccessCard = defineComponent({
                     loading={submitting.value}
                     errorMessage={modalError.value}
                     onSubmit={(reason: string) => void revoke(reason)}
-                />
+                >
+                    <FormChecklist
+                        checks={[...ACCESS_ACTION_CHECKS]}
+                        modelValue={checklist.value}
+                        onUpdate:modelValue={(value: Record<string, boolean>) => (checklist.value = value)}
+                        show={showChecklists}
+                        title={t("Access action checklist")}
+                        complete={checklistComplete.value}
+                        incompleteMessage={t("Complete all access action checklist items before submitting")}
+                    />
+                </ReasonModal>
             </SurfaceCard>
         );
     },

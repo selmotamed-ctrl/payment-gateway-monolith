@@ -134,6 +134,8 @@ export const reportsCatalogue: Record<string, [string, string]> = {
     "Save the spec as verified first so the override can be attached": ["Save the spec as verified first so the override can be attached", "احفظ المواصفات كموثقة أولاً لتتمكن من إرفاق التجاوز"],
     "Security Admin Authority Override": ["Security Admin Authority Override", "تجاوز صلاحيات مسؤول الأمان"],
     "Set global default": ["Set global default", "تعيين كافتراضي عام"],
+    "Clear global default": ["Clear global default", "إلغاء الافتراضي العام"],
+    "Exported {exported} of {total} migration items; narrow the search to export the rest.": ["Exported {exported} of {total} migration items; narrow the search to export the rest.", "تم تصدير {exported} من {total} عنصراً للترحيل؛ ضيّق البحث لتصدير الباقي."],
     "Spec JSON": ["Spec JSON", "JSON المواصفات"],
     "Standalone JSON or JSON paired with an assets .zip": ["Standalone JSON or JSON paired with an assets .zip", "JSON مستقل أو JSON مع أصول .zip"],
     "Step 1 — AI Authoring Transcript": ["Step 1 — AI Authoring Transcript", "الخطوة 1 — نص الإنشاء للذكاء الاصطناعي"],

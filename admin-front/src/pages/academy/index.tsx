@@ -16,6 +16,7 @@ import { useEligibility } from "@/components/academy/useEligibility";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { showSnackBar } from "@/utils/snackBar";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { roleTrackFor, type TrackId } from "@/content/academy";
 import type { AcademyBadge } from "@/content/academy/apiTypes";
@@ -116,6 +117,27 @@ export const AdminAcademyPage = defineComponent({
             }
             if (s.kind === "exam") return s.locked ? null : <p class="ac-learner-next">{t("Everything else is done — the exam is next.")}</p>;
             return <p class="ac-learner-next">{t("You have passed this track's exam.")}</p>;
+        };
+
+        const copyLearningSummary = async () => {
+            if (!track.value || !step.value || !stats.value) return;
+            const summary = {
+                activeTrack: track.value.id,
+                title: track.value.title,
+                nextStep: { kind: step.value.kind, id: step.value.id, locked: step.value.locked },
+                lessons: `${stats.value.lessonsDone}/${stats.value.lessonsTotal}`,
+                labs: `${stats.value.labsPassed}/${stats.value.labsTotal}`,
+                examPassed: stats.value.examPassed,
+                badgeState: academy.badgeState(track.value.id, recertifyFrom.value),
+                badgeExpiresAt: academy.badgeFor(track.value.id)?.expiresAt ?? null,
+                url: window.location.href,
+            };
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+                showSnackBar({ type: "success", message: t("Learning summary copied") });
+            } catch {
+                showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+            }
         };
 
         return () => {
@@ -276,7 +298,17 @@ export const AdminAcademyPage = defineComponent({
             };
             return (
                 <AcademyShell
-                    header={() => <PageHeader title={t("My learning")} subtitle={t("Learn, check, do, prove: one next step at a time.")} />}
+                    header={() => (
+                        <PageHeader
+                            title={t("My learning")}
+                            subtitle={t("Learn, check, do, prove: one next step at a time.")}
+                            end={() => (
+                                <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyLearningSummary()}>
+                                    {t("Copy learning summary")}
+                                </VBtn>
+                            )}
+                        />
+                    )}
                 >
                     {body()}
                 </AcademyShell>

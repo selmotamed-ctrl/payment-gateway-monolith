@@ -74,7 +74,7 @@ Historical `design/**` files are source lineage only; this document and the part
 
 <a id="platformoverview"></a>
 
-> **Part ID:** `platform.overview` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `platform.overview` · **Status:** `partial` · **Last verified:** 2026-11-24 · **Verified against:** `5a24f6f+working-tree`
 
 # Platform Overview
 
@@ -145,7 +145,7 @@ The product scope implemented in code includes:
 
 - Payment links with single-use and multi-use slots, link cancellation, visible rails and fee breakdowns.
 - A universal rail engine with seven runtime phases, a separate credential-check phase, 39 transforms, crypto profiles and a scoped SSRF guard.
-- A PostgreSQL 18 schema with 76 models and 105 enums at schema version 11, and eight migrations: baseline, storage engine, CQRS read models, storage hardening, DB read/write optimisation, MFA challenges, append-only ledger guards and statement source/file-hash uniqueness.
+- A PostgreSQL 18 schema with 119 models at schema version 44, and the full migration chain from the baseline through ledger sharding, automation, compliance reporting, object storage, route health and opaque Academy certificates.
 - A double-entry ledger, 17 `LedgerScenario` values and 11 GL account types, with sharded system GL accounts.
 - Merchant onboarding, KYB documents, beneficial owners, screening, AML rules/cases, regulatory reports, disputes, adjustments, cash-outs and reconciliation.
 - Admin and merchant authentication with password login, optional MFA challenge, session JWTs and merchant `pg_live_` API tokens.
@@ -171,7 +171,7 @@ The platform-level non-negotiables are:
 7. **Atomic critical writes.** The ledger, outbox and audit outbox are written in one transaction on the critical path; the storage engine's `UnitOfWork` owns the commit LSN.
 8. **Secrets and confidential data never reach logs.** Vault redaction covers sensitive field names, literal decrypted secrets and Luhn-valid PANs. Edge services never receive the KMS key or database credentials.
 9. **Bilingual catalogues stay in sync.** User-facing text is maintained in English and Arabic.
-10. **Deploy-time UI flags are runtime-controlled.** The deploy engine writes `showChecklists`/`showSnapshotExportChecklist` and `showHelpPanels` into the admin runtime config and injects the matching `VITE_*` build constants; source builds fall back to the documented defaults.
+10. **Deploy-time UI flags are runtime-controlled.** The deploy engine writes `showChecklists`/`showSnapshotExportChecklist`, `showHelpPanels` and the public `academyCertificateVerifyUrl` into the admin runtime config and injects the matching `VITE_*` build constants; source builds fall back to the documented defaults.
 
 ## 5. Data / API / config / deployment surface
 
@@ -218,7 +218,7 @@ Production operation uses `deploy/deploy.ts` with `deploy/deploy.env`. The engin
 ### Implemented
 
 - Seven-service split with database exclusivity and mTLS channel binding.
-- PostgreSQL 18 storage engine, schema version 11, migrations, replica reads, Redis cache/velocity, audit and log adapters.
+- PostgreSQL 18 storage engine, schema version 44, migrations, replica reads, Redis cache/velocity, audit and log adapters.
 - Dynamic rail engine, transform library, crypto profiles, visible-rails formula and the core API namespaces.
 - Merchant onboarding, KYB, AML, disputes, adjustments, cash-outs, reconciliation and ledger scenarios.
 - Admin back office and merchant portal foundations, hosted checkout, and optional Fake Rails.
@@ -639,7 +639,7 @@ The topology gains a second, isolated core process, `pg-core-sandbox`, on port 4
 
 <a id="platformsecurity"></a>
 
-> **Part ID:** `platform.security` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `55fcedd+working-tree`
+> **Part ID:** `platform.security` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `55fcedd+working-tree`
 
 # Security and mTLS
 
@@ -1062,11 +1062,15 @@ Done on top of `7cc40cf` (the remediation described above), after re-reading the
 - **Read and found sound:** the edge path guard (`assertCorePath`: no traversal, channel prefix) with core's certificate-to-channel binding (`requireEdgeIdentity`), so the sandbox proxies cannot be steered to another channel; the plane boot gate and `system_execution_plane` (the migration stamps `LIVE` by default); the attachment download headers (`attachment`, `nosniff`, sandbox CSP); the admin object-storage projections.
 - **Not reviewed in depth:** the object-storage SDK internals (GC against bind and legal hold, AAD binding, KEK rewrap) and the Fake Rails control client.
 
+## Admin MFA resend (2026-11-23)
+
+`POST /internal/admin/auth/mfa/resend` (admin edge `POST /api/v1/admin/auth/mfa/resend`) accepts only an opaque `challengeId` UUID. It requires a live, unconsumed, unexpired `ADMIN` challenge whose user is `ACTIVE`, `mfaRequired`, back-office, and issues a fresh challenge under a per-user row lock. The old challenge is superseded and its queued `LOGIN_MFA` notification is set to `SUPPRESSED`, so a late SMS cannot deliver the old code after the new one. Issuance keeps the existing 5-per-15-minute window, 5-minute TTL and 5-attempt/15-minute lock. Core writes `ADMIN_MFA_CHALLENGE_RESENT` with the old/new challenge IDs and request IP (never the code or phone). Invalid/consumed/expired challenges are counted by the shared MFA IP throttle. The client shows a 30-second resend cooldown and restarts it on failure.
+
 ---
 
 <a id="platformruntime"></a>
 
-> **Part ID:** `platform.runtime` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `19d6a54+working-tree`
+> **Part ID:** `platform.runtime` · **Status:** `partial` · **Last verified:** 2026-11-24 · **Verified against:** `19d6a54+working-tree`
 
 # Runtime and Configuration
 
@@ -1280,7 +1284,7 @@ The storage engine is constructed before `listen`, but after the server object i
 
 ### 3.5 Schema version check
 
-`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 40`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
+`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 44`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
 
 ```sql
 SELECT "version" FROM "schema_versions" WHERE "id" = 1
@@ -1370,7 +1374,7 @@ The deploy engine injects admin UI flags rather than requiring a committed front
 - `ADMIN_SHOW_CHECKLISTS` (optional) and `ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST` (default true) control checklist visibility. `adminChecklistsVisible()` prefers the former.
 - `ADMIN_SHOW_HELP_PANELS` (default true) controls help panels.
 - Build constants `VITE_SHOW_CHECKLISTS`, `VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST` and `VITE_SHOW_HELP_PANELS` are injected into the `admin-front` build.
-- Runtime config `showChecklists`, `showSnapshotExportChecklist` and `showHelpPanels` is written into the deployed admin release and takes precedence at boot.
+- Runtime config `showChecklists`, `showSnapshotExportChecklist`, `showHelpPanels` and (when `CHECKOUT_DOMAIN` is set) `academyCertificateVerifyUrl` are written into the deployed admin release and take precedence at boot.
 - `APP_RELEASE` and `APP_COMMIT` are injected by `deployService()` into every core/edge/Fake Rails environment. `/health` exposes `release`/`commit`; the deploy batch and final verification require the expected release so a stale listener cannot pass health checks. They are additive response fields and are not part of the core/edge env schemas.
 
 These are deploy/frontend flags; they are not core-back env keys.
@@ -1387,7 +1391,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 5. **The raw body is preserved before JSON parsing.** Webhook signatures and uploaded document bytes must be exact.
 6. **A request id is always returned.** Invalid or missing client values are replaced with a UUID.
 7. **Redis is never authoritative for money.** When Redis is unavailable the cache/velocity adapter falls back to memory and invalidation stays local.
-8. **Schema version 41 is the contract.** Seeders enforce it; migrations are deployed separately.
+8. **Schema version 44 is the contract.** Seeders enforce it; migrations are deployed separately.
 9. **Workers are stateless across nodes.** Coordination is by database claims, not by an in-memory scheduler.
 10. **The admin UI flags are deployment-owned.** A source build uses the frontend defaults; a deployed build receives the deploy engine's values.
 
@@ -1416,7 +1420,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 | Backup daemon | No | Backup routes return 503 |
 | Notification webhook | No | Log transport reports SENT |
 | Fake Rails | No | Only required by synthetic seeding/seeding routes |
-| Schema version 41 | Yes at seed time | Seeders fail; server boot does not check |
+| Schema version 44 | Yes at seed time | Seeders fail; server boot does not check |
 
 ### 5.3 Config consumers outside the env proxy
 
@@ -1554,7 +1558,7 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 
 ## 11. Security hardening config changes (2026-11-05)
 
-- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 40`.
+- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 44`.
 - Edges: `TRUSTED_PROXY_CIDRS` default loopback only; `MAX_INBOUND_BODY_BYTES` default 1 MiB; `CORS_ALLOWED_ORIGINS` (no CORS headers on admin/merchant when unset); newly wired rate-limit window envs `AUTH_/ADMIN_/API_/EXTERNAL_/PAY_/INBOUND_RATE_LIMIT_WINDOW_MS`; `CORE_MAX_RESPONSE_BYTES` (64 MiB), `CORE_TOTAL_DEADLINE_MS` (300000), `MAX_STREAMS_PER_IP` (5), `ADMIN_AUTHORITY_HINTS` (default empty, restrict-only), merchant `TOKEN_MAX_SCOPES`, `TOKEN_MAX_TTL_DAYS`, `TOKEN_DEFAULT_TTL_DAYS`, `UPLOAD_RATE_LIMIT_MAX`, admin `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
 - Frontends: `VITE_CHECKOUT_BASE_URL`, `VITE_IDENTITY_HOSTS` (merchant), `VITE_CHECKOUT_ORIGIN` (fake-rails). Real `.env` files in the frontends are no longer tracked; copy `.env.example` to `.env` on a fresh clone.
 - Deploy and daemon keys are listed in the deploy parts.
@@ -1573,6 +1577,16 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 ## v38 sandbox configuration (2026-11-13)
 
 New core keys: `EXECUTION_PLANE` (`LIVE`|`SANDBOX`, default `LIVE`), `PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE` (development escape hatch, default false), `FAKE_RAILS_CONTROL_URL` and `FAKE_RAILS_CONTROL_TOKEN`. The edges add `SANDBOX_CORE_BACK_URL`/`SANDBOX_CORE_BACK_URLS`; an empty pair means the sandbox is not configured and the sandbox routes answer `503 SANDBOX_NODE_UNAVAILABLE`. Deploy adds `SANDBOX_ENABLED`, `SANDBOX_NODE`, `SANDBOX_CORE_PORT` (4005), `SANDBOX_DB_NAME` (`payment_gateway_sandbox`), `SANDBOX_REMOTE_DIR` and `SANDBOX_CORE_BACK_URLS`. The deploy planner emits a second core service `pg-core-sandbox` with `EXECUTION_PLANE=SANDBOX`, sandbox `DATABASE_URL`/session leader URL, Fake Rails control URL/token, backups disabled and its own release tree; the PostgreSQL provisioner creates the database and `pgw_sandbox`/`pgw_sandbox_session` PgBouncer aliases.
+
+### 3.12 Multi-currency runtime settings (2026-11-24)
+
+- `BASE_CURRENCY` (default `LYD`) is the reporting/display default; ledger books remain per-currency and no FX conversion is implied.
+- `LEDGER_STRICT_CONTEXT=true` is written by the deploy engine so a currency-scoped account lookup without a currency fails with `MISSING_LEDGER_CURRENCY` instead of falling back to the first currency.
+
+### 3.12 Multi-currency runtime settings (2026-11-24)
+
+- `BASE_CURRENCY` (default `LYD`) is the reporting/display default; ledger books remain per-currency and no FX conversion is implied.
+- `LEDGER_STRICT_CONTEXT=true` is written by the deploy engine so a currency-scoped account lookup without a currency fails with `MISSING_LEDGER_CURRENCY` instead of falling back to the first currency.
 
 ---
 
@@ -2018,7 +2032,7 @@ Redaction was extended to PII keys (email, phone, msisdn, iban, account number, 
 
 <a id="platformsandbox"></a>
 
-> **Part ID:** `platform.sandbox` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `working-tree`
+> **Part ID:** `platform.sandbox` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `working-tree`
 
 # Parallel Sandbox Execution Plane
 
@@ -2123,11 +2137,15 @@ The Sandbox database is a second object-storage control plane while the vault is
 
 See the frontmatter. Deployment now provisions/migrates/seeds the second core and database, and the synthetic clearing statement is ingested through `StatementIngestor`. Remaining: Live-to-sandbox sync of operator-customised reference data (GAP-070), a dedicated Fake Rails challenge table, and sandbox role preview. Both deployment and the full Live mirror require a live two-database run that has not been performed in this workspace.
 
+## Sandbox safeguard checklists (2026-11-23)
+
+Sandbox merchant reset, demo/history seeding, Fake Rails account reset, scenario update, transaction action and global reset accept a checklist. Core allow-lists the keys per action and records them in `sandbox_sync_audits.summaryJson`; the checklist is never forwarded to Fake Rails. Merchant reset now requires `confirm: "RESET"` (the admin proxy forwards `confirm` and `checklist`). Sandbox audit rows use `actorId = principal.userId ?? null` and never the literal `"SYSTEM"` in the UUID column. The admin seed checklist is sent for demo/history seed; the detail and list pages both open the checklist modal.
+
 ---
 
 <a id="corefoundations"></a>
 
-> **Part ID:** `core.foundations` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `core.foundations` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `5a24f6f+working-tree`
 
 # Core Foundations
 
@@ -2366,7 +2384,7 @@ TCP + TLS 1.3 handshake (client cert required)
 1. Generate certs.
 2. Set `DATABASE_URL`.
 3. Apply migrations.
-4. Seed (this also checks schema version 11).
+4. Seed (this also checks schema version 44).
 5. `bun run start`.
 6. Probe `/health` over mTLS with a client cert.
 
@@ -2465,7 +2483,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 <a id="coreapi"></a>
 
-> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
+> **Part ID:** `core.api` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `53afea5+working-tree`
 
 # Core API Surface
 
@@ -2516,7 +2534,7 @@ The edge maps its public paths to these prefixes:
 
 ### 3.2 Admin namespace
 
-The admin router is the largest surface. `/health`, `/auth/login`, `/auth/mfa` and `/auth/me` are registered before `router.use(requireAuthentication)`. Every route after that line requires a valid bearer credential. `GET /auth/me` is before the guard and returns static platform data.
+The admin router is the largest surface. `/health`, `/auth/login`, `/auth/mfa`, `/auth/mfa/resend` and `/auth/me` are registered before `router.use(requireAuthentication)`. Every route after that line requires a valid bearer credential. `GET /auth/me` is before the guard and returns static platform data.
 
 The domain groups below list every route in `api/internal/admin.ts`. The authority column is the guard used by the group; where a group mixes read/write, the split is shown.
 
@@ -2524,7 +2542,7 @@ The domain groups below list every route in `api/internal/admin.ts`. The authori
 
 | Routes | Authority |
 | :--- | :--- |
-| `POST /auth/login`, `POST /auth/mfa` | none (before auth) |
+| `POST /auth/login`, `POST /auth/mfa`, `POST /auth/mfa/resend` | none (before auth) |
 | `GET /auth/me` | none (before auth) |
 | `POST /search` | authenticated; no explicit authority |
 | `GET /stats/recent-activity`, `GET /stats/recent-activity/export` | `security:read` |
@@ -2653,6 +2671,8 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 
 `GET /operator-cases`, `/export`, `/summary`, `/summary/export` and `/:id` return the type-aware case fields (`caseReference`, `caseType`, title/summary, domain/source, subject, available actions) and filter by `caseType`; AML-confidential cases require `aml.read_confidential`. `/catalog` returns the code catalog, action definitions and resolution codes. `POST /:id/acknowledge` is single-actor triage; `POST /:id/resolve` remains maker-checker and validates the action against the case type (payment actions only for attempt types; operational close requires a resolution code). Source-cleared monitor/route/statement/report cases resolve with a system event.
 
+**Safeguard checklist evidence.** Sensitive mutations and exports accept an optional `checklist` string array (or comma-separated query for GET exports). Core allow-lists the keys per action, records the accepted list in the audit `afterJson` (and approval payloads where the action is maker-checker), and never logs a code, secret or phone. The list is advisory: the server does not require completeness except the join-request approval gate and explicit destructive confirmations. New audited summary exports: `GET /transactions/summary/export`, `GET /finance/journal-entries/summary/export`, `GET /gateway-inquiries/summary/export`, `GET /incidents/summary/export` and `GET /incidents/export` (5,000-row cap with `total`/`truncated`). The checkout channel exposes `GET /academy/certificates/:publicId` for public certificate verification; it returns only holder name, track, badge, dates, status and content version. Issuances are durable `academy_certificates` rows (opaque `publicId`, unique per user/track/earnedAt); status is `valid`, `expired` or `revoked`, and user deletion cascades to a 404.
+
 #### Disputes, adjustments, cash-outs, commissions and velocity
 
 | Routes | Authority |
@@ -2680,8 +2700,10 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `GET /settings/checkout-support`, `/history`, `/summary`, `/summary/export` | `settings:read` |
 | `PUT /settings/checkout-support` | `settings:write`; direct versioned write |
 | `GET /academy/progress`, `PUT /academy/progress` | authenticated back-office user; current user only (`{ baseRev, patch }`, `rev`, 409 on stale) |
+| `GET /academy/certificates/:trackId/verification` | authenticated back-office user; returns the opaque `publicId` and short `displayId` for an earned badge |
+| `POST /academy/certificates/:identifier/revoke` | role `SECURITY_ADMIN`; accepts the opaque `publicId` or the short `displayId`, revokes idempotently and audits `ACADEMY_CERTIFICATE_REVOKED` |
 | `GET /academy/exams/:examId/eligibility`, `POST /academy/exams/:examId/start`, `POST /academy/exams/:examId/submit` | authenticated back-office user; server-graded (see `03-admin-front/03-guide-and-academy.md` §7.4) |
-| `GET /academy/team` | role `SECURITY_ADMIN`; audited `ACADEMY_TEAM_VIEWED` |
+| `GET /academy/team`, `GET /academy/team/export` | role `SECURITY_ADMIN`; audited `ACADEMY_TEAM_VIEWED` / `ACADEMY_TEAM_EXPORTED` |
 | `GET /audit-logs`, `/export`, `/summary`, `/summary/export`, `GET /audit-logs/:id` | `security:read` |
 | `GET /settings` | `settings:read` |
 | `POST /settings/restore-preview` | `settings:read` |
@@ -2882,7 +2904,7 @@ The inbound worker also exists and can drain unprocessed inbox rows, but the liv
 
 | Edge path | Core path | Edge file |
 | :--- | :--- | :--- |
-| `POST /api/v1/admin/auth/login`, `/mfa`; `GET /me` | `/internal/admin/auth/*` | `admin-back/api/public/auth.ts` |
+| `POST /api/v1/admin/auth/login`, `/mfa`, `/mfa/resend`; `GET /me` | `/internal/admin/auth/*` | `admin-back/api/public/auth.ts` |
 | `/api/v1/admin/*` | `/internal/admin/*` | `admin-back/api/protected/**` |
 | `/api/v1/admin/system/backups/*` | `/internal/admin/system/backups/*` | `admin-back/api/protected/backups.ts` |
 | `/api/v1/merchant/auth/*` | `/internal/merchant/auth/*` | `merchant-back/api/public/auth.ts` |
@@ -3147,6 +3169,14 @@ A new internal router, reachable from merchant-back and admin-back and mounted o
 ## Dashboard success-rate denominator (2026-11-16)
 
 `GET /internal/admin/stats/overview` returns `attemptsCounted` and computes `successRate = attemptsSucceeded / attemptsCounted`. `attemptsSucceeded` counts `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` (the payment was processed successfully; a later refund or dispute is not a processing failure). `attemptsCounted` adds `FAILED` and `UNKNOWN` only. Pending/in-flight states (`CREATED`, `INITIATING`, `AWAITING_CUSTOMER`, `AUTHORIZING`, `VERIFYING`) and deliberate/no-processing outcomes (`CANCELLED`, `EXPIRED`, `BLOCKED`) are excluded from both sides of the rate. `attemptsTotal` remains every attempt created in the period for the distribution chart and snapshot export.
+
+## 20. Currency-aware aggregate responses (2026-11-24)
+
+Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/cashout summaries and route caps accept an optional `currency` (default `BASE_CURRENCY`, normally LYD). Existing scalar monetary fields mean the selected currency; responses add `currency`, `byCurrency` where the endpoint supports a breakdown, and `mixedCurrency`. A mixed total is never labelled as a single currency. Reconciliation source/upload accepts `currency`, `autoPost`, and optional source `env`/`credentialSetId`; the upload metadata remains limited to checklist, period, currency and autoPost.
+
+## 20. Currency-aware aggregate responses (2026-11-24)
+
+Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/cashout summaries and route caps accept an optional `currency` (default `BASE_CURRENCY`, normally LYD). Existing scalar monetary fields mean the selected currency; responses add `currency`, `byCurrency` where the endpoint supports a breakdown, and `mixedCurrency`. A mixed total is never labelled as a single currency. Reconciliation source/upload accepts `currency`, `autoPost`, and optional source `env`/`credentialSetId`; upload metadata remains limited to checklist, period, currency and autoPost.
 
 ---
 
@@ -3793,6 +3823,8 @@ No build or test was run for this documentation change. Tests that require Postg
 
 OD-10 and `resolveEnvironment(merchantStatus)` are removed. Checkout and merchant link creation resolve the environment from the process plane; Live requires an ACTIVE merchant, application and wallet. Sandbox uses the same strict status rules, but its merchant envelope is created ACTIVE, so a pending Live merchant can train without a Live approval. `AttemptGuardPipeline` no longer reads the OD-10 setting and applies the same status posture on both planes.
 
+- **Link currency integrity (2026-11-24).** A new payment link is rejected with `LINK_WALLET_CURRENCY_MISMATCH` when its currency differs from the settlement wallet currency. Existing links are not rewritten; the attempt still resolves the wallet by merchant+currency, so a historical mismatch is a residual.
+
 ---
 
 <a id="coreledger"></a>
@@ -4217,11 +4249,19 @@ Measured on the test host (single Bun process, local PostgreSQL 18, 16 shards): 
 
 Tests: `core-back/test/ledger-raw-sql-parity.test.ts` (same entries, lines, balances and gapless shard sequences as the ORM path for five templates; returned records match storage; idempotent replay in both modes; whole-posting rollback when the shard writer fails; cache semantics).
 
+## 17. Posting context and currency (2026-11-24)
+
+Every currency-scoped account resolution requires a currency. `LedgerPostContext` carries `currency` plus, for a gateway clearing account, `gatewayId`/`env`/`credentialSetId`. Missing context is a hard failure when `LEDGER_STRICT_CONTEXT=true` (the deploy engine sets it); otherwise the legacy platform-wide fallback remains. Settlement sweeps and fee variances now pass the full attempt/source context, and a USD/EUR posting never silently uses the first-created LYD account heap. `CASHOUT` carries the wallet currency so the treasury leg is correct. The append-only `(ref_type, ref_id)` idempotency key is unchanged; only the ref scheme for grouped batches and per-run fee variances changed, with legacy detection.
+
+## 17. Posting context and currency (2026-11-24)
+
+Every currency-scoped account resolution requires a currency. `LedgerPostContext` carries `currency` plus, for a gateway clearing account, `gatewayId`/`env`/`credentialSetId`. Missing context is a hard failure when `LEDGER_STRICT_CONTEXT=true` (the deploy engine sets it); otherwise the legacy platform-wide fallback remains. Settlement sweeps and fee variances now pass the full attempt/source context, and a USD/EUR posting never silently uses the first-created LYD account. `CASHOUT` carries the wallet currency so the treasury leg is correct. The append-only `(ref_type, ref_id)` idempotency key is unchanged; only the ref scheme for grouped batches and per-run fee variances changed, with legacy detection.
+
 ---
 
 <a id="coregovernance"></a>
 
-> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
+> **Part ID:** `core.governance` · **Status:** `partial` · **Last verified:** 2026-11-24 · **Verified against:** `53afea5+working-tree`
 
 # Governance and Compliance
 
@@ -4310,7 +4350,7 @@ The actual admin approve route (`core-back/api/internal/admin.ts:6014`) is more 
 
 Other subject types that appear in the queue/domain map but have no `executeApprovalSubject` branch are `KYB_DOCUMENT`, `GATEWAY`, and `CREDENTIAL_SET`. `BACKUP_POLICY` is handled by a special branch in the approve route rather than by the dispatcher.
 
-The dispatcher enforces maker ≠ checker and rejects system automation, but it does not re-check a domain-specific role for AML, regulatory reporting, user administration, or gateway version go-live. Within the dispatcher, only chargeback execution checks that the checker is a finance checker (`assertFinanceChecker` in `GovernanceExecution.ts`).
+The dispatcher enforces maker ≠ checker, rejects system automation, and checks the domain role of the checker (`DOMAIN_CHECKER_ROLES`): adjustments/commission/repairs/wallet are FINANCE; AML case/rule and regulatory reports are MLRO; reporting schemas/rules also accept COMPLIANCE; users and gateway versions are SECURITY_ADMIN; merchant/join requests are COMPLIANCE/MLRO/OPERATOR; and the remaining subjects use their documented role set. A generic `approval:check` alone is no longer sufficient. Chargeback execution and adjustment rejection additionally call `assertFinanceChecker`.
 
 ### 3.4 Detail change log
 
@@ -4330,6 +4370,10 @@ The join-request state machine is implemented in `core-back/api/internal/admin.t
 - `JoinRequestExpiryWorker` expires abandoned drafts and overdue reviews.
 
 Readiness (`core-back/lib/joinRequestOnboarding.ts:249`) requires the canonical checklist, required accepted and unexpired documents, active beneficial owners meeting the ownership threshold, owner screening status, a non-blocked screening result, and a payout bank; it reports `approvalPending` separately rather than adding it to `blockers`. Duplicate detection compares tax id, registration, phone, and e-mail and hashes the payout account, owner national id, and document SHA-256 (`joinRequestOnboarding.ts:84`).
+
+Approval of a join request now requires every canonical review-checklist item to be `true`; a partial checklist returns `409 JOIN_REQUEST_CHECKLIST_INCOMPLETE` with `missingChecklistItems`. Withdrawal records the supplied reason and allow-listed checklist in `JOIN_REQUEST_WITHDRAWN`, and the reason is used as the superseded-approval rejection reason.
+
+Safeguard checklist evidence is recorded across admin mutations and exports (wallet/application/link/POS actions, KYB documents, credential sets, commission/velocity lifecycle, reporting rules/schemas, filing adapters, incidents, backups, object-storage legal holds and maintenance, report-engine publish/suspend/reconcile, academy exams and team export, sandbox resets/scenarios/transactions). Core allow-lists the keys per action, stores them in the audit `afterJson` or the approval payload, and does not treat the list as authorization. Incident transitions store the checklist in the timeline `detailJson` and the audit; incident communications are audited with their checklist. Approval subject context now resolves `WALLET`, `APPLICATION` and `POS_TERMINAL` for the Approvals drawer, alongside the existing subjects.
 
 The four-eyes decision (`core-back/api/internal/merchant.ts:358`) reads `join_request.four_eyes_policy` and supports `ALWAYS`, `RISK_BASED`, and `NEVER`. Risk-based triggers include high risk tier, any screening match list, PEP owners, large ownership share, high-risk category, previous rejection, duplicate/related flags, payout owner mismatch, and expected volume above threshold.
 
@@ -4376,7 +4420,7 @@ Dispute intake is exposed as `POST /admin/disputes`; the route queues an `ADJUST
 
 There is no webhook or statement dispute-intake wiring in `DynamicRailEngine` or reconciliation; the admin manual route is the implemented intake path.
 
-Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` holds the adjustment and opens an operator case. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id. The refund template follows the ownership mode of the payment (`refundScenarioFor`, see `core.ledger`): a `MERCHANT_DIRECT` refund only reverses the commission recognition (`Dr PLATFORM_INCOME` / `Cr COMMISSION_RECEIVABLE`) and never debits the wallet or credits treasury; with nothing to reverse the adjustment is `EXECUTED` with no journal entry.
+Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` on a LOST outcome, computed on the posting-currency wallet balance, holds the adjustment and opens an operator case. When a non-merchant-direct reserve was already posted, a LOST outcome posts only `CHARGEBACK_RESERVE_AND_LOST` (reserve to treasury), not a second wallet debit; a merchant-direct LOST reverses only the commission, while a merchant-direct WON posts no journal. Rejecting a chargeback releases an existing reserve once and is idempotent; a chargeback rejection with no reserve posts nothing. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id. The refund template follows the ownership mode of the payment (`refundScenarioFor`, see `core.ledger`): a `MERCHANT_DIRECT` refund only reverses the commission recognition (`Dr PLATFORM_INCOME` / `Cr COMMISSION_RECEIVABLE`) and never debits the wallet or credits treasury; with nothing to reverse the adjustment is `EXECUTED` with no journal entry.
 
 ### 3.8 Cash-outs
 
@@ -4624,6 +4668,14 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 - **DOCX is a first-class schema format.** `buildSchemaValidation`, DRAFT schema `PUT`, `simulate` and `clone` now use `parseDocxNarrativeSchema` and `renderRegulatoryDocx`; cloning copies the XLSX template binding. Simulation of a template-backed XLSX schema decrypts the template instead of silently rendering generated mode.
 - **Incidents are operationally complete.** List/detail responses resolve commander, reporter, timeline actor, action owner and communication sender names from the referenced users. The list returns server-side summary counts and filters/pagination are forwarded by the edge. Child writes are audited; transitions and postmortem edits lock the incident row; report drafting takes an advisory lock so concurrent requests cannot create two reports. Incident reporting is intentionally allowed from any lifecycle state (the owner decision), with the UI confirmation.
 - **Filing adapters are maker-checker.** Create, update and disable produce `FILING_ADAPTER` approvals; the adapter row stays `DISABLED` until a checker applies the encrypted secret/endpoint/status changes. `configJson` rejects secret-looking keys and is redacted on output; HTTP endpoints remain public-HTTPS-only. `POST /reports/:id/file` creates a PENDING submission before dispatch, records failure, blocks duplicate PENDING/SUBMITTED attempts and audits a reconciliation case if the report state cannot be advanced after a successful external send. Manual submissions now record a `MANUAL` `ExternalSubmission` and appear in the same history.
+
+## 19. Multi-currency ceilings and aggregate rules (2026-11-24)
+
+`commissionReceivableCeiling` and `negativeBalanceCeiling` are evaluated per posting currency; a scalar never mixes LYD/USD/EUR. The admission guard passes the link currency, `merchantOpenCashoutTotal` is wallet-currency scoped, the receivable SQL filters all three branches (attempt, adjustment, merchant-level netting), and the netting worker evaluates each currency bucket separately with per-currency aged cases and notices. The generic approval dispatcher now enforces domain checker roles; `approval:check` alone is insufficient.
+
+## 19. Multi-currency ceilings and aggregate rules (2026-11-24)
+
+`commissionReceivableCeiling` and `negativeBalanceCeiling` are evaluated per posting currency; a scalar never mixes LYD/USD/EUR. The admission guard passes the link currency, `merchantOpenCashoutTotal` is wallet-currency scoped, the receivable SQL filters all three branches (attempt, adjustment, merchant-level netting), and the netting worker evaluates each currency bucket separately with per-currency aged cases and notices. The generic approval dispatcher now enforces domain checker roles; `approval:check` alone is insufficient.
 
 ---
 
@@ -5106,6 +5158,14 @@ override, opens keyed operator cases for unhealthy/conflicting routes, writes
 `route_health_events` and audit rows, and clears expired overrides. It is
 registered in `productionRuntime` and participates in expected leader keys.
 See `core.route-health`.
+
+## 20. Reconciliation settlement context (2026-11-24)
+
+`RECONCILIATION_RUN` persists the statement currency and `autoPost` flag and copies the matched attempt context (currency, gateway, env, credential set) onto each item. Settlement sweeps group by `(batch, gateway, env, credential set, currency)`, post with the full `LedgerPostContext`, and skip an unresolved item instead of choosing an arbitrary account. `autoPost=false` suppresses sweeps with an audit trail. Fee variances carry the attempt context and use a per-run ref when a run id is available, with legacy-key compatibility. Statement chargebacks use the item/attempt currency, never a hard-coded LYD.
+
+## 20. Reconciliation settlement context (2026-11-24)
+
+`RECONCILIATION_RUN` persists the statement currency and `autoPost` flag and copies the matched attempt context (currency, gateway, env, credential set) onto each item. Settlement sweeps group by `(batch, gateway, env, credential set, currency)`, post with the full `LedgerPostContext`, and skip an unresolved item instead of choosing an arbitrary account. `autoPost=false` suppresses sweeps with an audit trail. Fee variances carry the attempt context and use a per-run ref when a run id is available, with legacy-key compatibility. Statement chargebacks use the item/attempt currency, never a hard-coded LYD.
 
 ---
 
@@ -5603,7 +5663,7 @@ fallback) and the `object_storage` Platform Monitor check cover operations.
 
 <a id="coredata"></a>
 
-> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `core.data` · **Status:** `partial` · **Last verified:** 2026-11-24 · **Verified against:** `d695518+working-tree`
 
 # Data Schema and Migrations
 
@@ -5615,7 +5675,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 41 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 44 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -5636,8 +5696,8 @@ The historical design treats PostgreSQL 18 as the only runtime database and the 
 
 The blueprint's stale counts are corrected here:
 
-- the schema is not 64 models and 100 enums; it is 76 models and 105 enums;
-- the schema version is 14, not 5 or 6;
+- the schema is not the historical 64 models and 100 enums; it is 119 models at schema version 44;
+- the schema version is 44, not 5 or 6;
 - there is not one migration that creates shards, outboxes and all tables. The baseline creates the tables, the storage migration adds indexes, the CQRS migration adds read models, and the hardening migration adds partitions, checks and search indexes;
 - `rm_merchant_dashboard_stats` and `rm_wallet_statements` do not exist. The actual read models are `rm_merchant_daily_stats` and `rm_route_daily_volumes`.
 
@@ -5670,7 +5730,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 41`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 44`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -5691,7 +5751,7 @@ installs the two append-only guard triggers. See
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116130000_schema_version_agreement` after the case-management taxonomy migration, schema version 41). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261124150000_currency_context_and_aggregates`, schema version 44). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -5986,7 +6046,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 41 (`REQUIRED_SCHEMA_VERSION = 41`; model count 118). The schema migrations since version 10 are:
+The current schema version is 44 (`REQUIRED_SCHEMA_VERSION = 44`; model count 119). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -6004,9 +6064,12 @@ The current schema version is 41 (`REQUIRED_SCHEMA_VERSION = 41`; model count 11
 - `20261111120000_report_engine_versioning` (version 34, written on the plan branch): adds `engine_version`, `spec_schema_version` and `authoring_transcript_version` to `report_definition_specs`, `merchant_report_specs` and `report_chrome_specs`, `engine_version` and `spec_schema_version` to both execution audit tables, and `default_revoked_at` / `default_revoked_reason` to `report_chrome_specs`; it backfills `spec_schema_version` from `spec_json.spec_version`. See `core.report-engine` section 18.
 - `20261111130000_merchant_report_chrome` (version 35, written on the plan branch): creates `merchant_report_chrome_specs` (unique `(merchant_id, code, version)`, one published default per merchant and chrome type, a foreign key to the merchant asset bundle).
 - `20261112090000_journal_partition_storage_and_race` (version 35, no table shape change): redefines `ensure_journal_line_partitions` again. (1) The 2026-11-10 revision set only the insert-autovacuum parameters on a new monthly partition and dropped the explicit `fillfactor = 100` of the original body; it is restored, and set once (`SHARE UPDATE EXCLUSIVE`, no write blocking) on every monthly partition created without it. (2) The same revision replaced `CREATE TABLE IF NOT EXISTS` with a `to_regclass` check and a plain `CREATE TABLE`, so two callers at once (the partition worker on two nodes, or the worker and a deploy) both saw a month missing and the second aborted with `duplicate_table` (measured: 3 of 4 concurrent callers failed); `duplicate_table` / `unique_violation` from a concurrent creator are now accepted, and the truncate-guard install tolerates `duplicate_object`. The version is bumped because the newest migration sets `REQUIRED_SCHEMA_VERSION` (checked by `phase1-mtls-and-schema.test.ts`) and the seeders' equality guard then refuses a database without it; core HTTP start does not check the version. Test: `ledger-query-pruning-and-accuracy.test.ts` EC-15 (storage parameters) and EC-15b (four concurrent callers on a dropped empty month).
-- `20261116090000_merchant_chrome_tenant_integrity` (version 40, no new table; the newest migration): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merges.** The branches numbered their migrations independently: `20261111090000` = 34 and `20261112090000` = 35 (`claude-fixes`), `20261111120000` = 34 and `20261111130000` = 35 (plan branch), `20261112000000` = 36, `20261113090000` = 37, `20261113120000` = 38 and `20261114090000` = 39 (`master`). None is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first (a database that followed `master` to 39 and then receives the `claude-fixes` migrations would be left at 35). This migration is new to every database, runs last and sets 40. It was first written as `20261112100000` with version 36 when only the plan branch had been merged; that name was never pushed or deployed and was renamed on 2026-11-16 so that it also runs after `master`'s migrations. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, `master` first, `claude-fixes` first) and applied from empty on PostgreSQL 18.6: each ends at 40 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
+- `20261116090000_merchant_chrome_tenant_integrity` (version 40, no new table; it runs before the version 41/42 migrations): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merges.** The branches numbered their migrations independently: `20261111090000` = 34 and `20261112090000` = 35 (`claude-fixes`), `20261111120000` = 34 and `20261111130000` = 35 (plan branch), `20261112000000` = 36, `20261113090000` = 37, `20261113120000` = 38 and `20261114090000` = 39 (`master`). None is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first (a database that followed `master` to 39 and then receives the `claude-fixes` migrations would be left at 35). This migration is new to every database, runs last and sets 40. It was first written as `20261112100000` with version 36 when only the plan branch had been merged; that name was never pushed or deployed and was renamed on 2026-11-16 so that it also runs after `master`'s migrations. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, `master` first, `claude-fixes` first) and applied from empty on PostgreSQL 18.6: each ends at 40 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
 - `20261116120000_route_health_automation` (version 40, from `master`): route health and the circuit breaker: `rail_routes` health computed/override columns, first-terminal and first-unknown markers on `payment_attempts`, `route_health_events` and `route_health_probes`, a trigger that keeps the markers current, and a unique `(route_id, window_start)` on `gateway_health_samples`. Owned by `core.route-health`.
 - `20261116130000_schema_version_agreement` (version 41, no structure): the agreed version after both 40s. Runs last, so a database at 41 has both `20261116090000` and `20261116120000` applied.
+- `20261124150000_currency_context_and_aggregates` (version 44): adds nullable reconciliation context (`reconciliation_runs.currency/auto_post`, `reconciliation_items.currency/gateway_id/env/credential_set_id`, `statement_sources.currency/env/credential_set_id`) and backfills matched items from their attempts/routes. Settlement sweeps and fee variances post with the full currency/gateway/env/credential context; the ledger guard fails closed on a missing currency where enabled.
+- `20261124120000_append_only_case_and_storage_guards` (version 43): adds the remaining append-only history guards for `operator_case_events`, `gl_shard_repairs`, `storage_object_access_logs`, `audit_chain_anchors` and a TRUNCATE guard on `storage_objects`; the bypass requires both `pgw.append_only_maintenance` and a superuser/migration-role membership. See `core.governance` and `core.object-storage`.
+- `20261123100000_opaque_academy_certificates` (version 42): adds `AcademyCertificateStatus` and `academy_certificates` (opaque `public_id`, short `display_id`, user/track/badge snapshot, earned/expiry, content version, status, revocation fields; unique `(user_id, track_id, earned_at)`), backfills current per-user badges from `academy_progress_json`, adds `report_execution_audit.checklist_json`, and adds the partial MFA-notification suppression index. Public certificate verification reads this table; user deletion cascades, recertification supersedes, and revocation is explicit.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -6156,6 +6219,12 @@ health, first-terminal from `terminal_at`, first-unknown from `updated_at` for
 unresolved `UNKNOWN` attempts, canonical error from `substatus`, deduplicates
 legacy health samples before the unique index and writes one `MIGRATION`
 health event per route. The required schema version is **40**.
+
+
+**Pre-v36 evidence guard (GAP-074).** `core-back/scripts/checkLegacyEvidence.ts` (`bun run legacy-evidence:check`) refuses an upgrade when `kyb_documents.content_ciphertext` or `reconciliation_runs.file_content` still contain rows. The guard detects the condition; bytes already dropped by v36 cannot be recreated and must come from the pre-upgrade dump.
+
+
+**SQL-only schema guard (GAP-076).** `core-back/prisma/sql-only-objects.allowlist.json` lists the 57 objects Prisma cannot model (composite tenant FKs, trigram/covering indexes, SQL defaults and `schema_versions`). `bun run schema:sql-only-check` runs `prisma migrate diff` and fails if a new object would be dropped or a reviewed object is missing. CI runs it after migrations. Definition changes that keep the same object name are not fingerprinted yet.
 
 ---
 
@@ -6564,7 +6633,7 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 
 <a id="corebackup"></a>
 
-> **Part ID:** `core.backup` · **Status:** `partial` · **Last verified:** 2026-11-08 · **Verified against:** `747d9bc+working-tree`
+> **Part ID:** `core.backup` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `747d9bc+working-tree`
 
 # Backup Control
 
@@ -6862,7 +6931,7 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 - For a policy change, submit without an approval id, then have a different `security:write` user submit with the returned id.
 - Watch `archiveLagSeconds` against `BACKUP_ALERT_LAG_SECONDS`. A non-zero lag with a healthy bucket usually means archive_command, credentials or the archive process is failing.
 - Inspect `backup_catalog_runs` and `backup_restore_drills` for the local copy and the daemon catalog for the in-process view. A failed drill's three checks identify double-entry, parity or audit-chain failure.
-- After a real restore, verify schema version 11, the ledger invariant, shard parity and audit chain.
+- After a real restore, verify schema version 44, the ledger invariant, shard parity and audit chain.
 - Do not rely on policy `fullRetentionDays` for WAL-G pruning; WAL-G uses `BACKUP_RETENTION_FULL_COUNT` and Barman uses its server-side policy.
 
 ## 7. Status and deviations
@@ -7731,7 +7800,7 @@ To run them against a private, throwaway cluster (never the live databases): `in
 
 <a id="corereport-engine"></a>
 
-> **Part ID:** `core.report-engine` · **Status:** `implemented` · **Last verified:** 2026-11-11 · **Verified against:** `working-tree`
+> **Part ID:** `core.report-engine` · **Status:** `implemented` · **Last verified:** 2026-11-23 · **Verified against:** `working-tree`
 
 # Dynamic Report Engine SDK and Report Studio Host
 
@@ -8060,11 +8129,15 @@ generated XML/XLSX/DOCX outputs (`RegulatoryReportOutput.storageObjectId`,
 writing `contentCiphertext`/`templateCiphertext` and all readers prefer the
 storage object. The full engine is `parts/01-core-back/13-object-storage.md`.
 
+## 20. Safeguard checklists on report-engine actions (2026-11-23)
+
+Report execution, saves, publishes, chrome set-default/reconcile-defaults and merchant-report suspension accept an optional `checklist` string array. The report run keys (`REPORT_SCOPE_VERIFIED`, `INPUTS_AND_PERIOD_REVIEWED`, `CONFIDENTIALITY_ACKNOWLEDGED`) are stored in `report_execution_audit.checklist_json`; the publish/chrome/reconcile/suspend actions use their own key sets. The admin edge forwards it; core allow-lists the four publish keys (`SPEC_VERIFIED`, `AUTHORITIES_REVIEWED`, `PREVIEW_REVIEWED`, `PUBLISH_AUTHORITY_CONFIRMED`), stores the accepted list in the audit `afterJson` (`REPORT_SPEC_SAVED`, `REPORT_SPEC_PUBLISHED`, `REPORT_CHROME_SAVED`, `REPORT_CHROME_DEFAULT_CHANGED`, `REPORT_CHROME_DEFAULTS_RECONCILED`, `MERCHANT_REPORT_STUDIO_SUSPENDED`), and never treats it as authorization. The Studio and Chrome publish dialogs and the migration page submit the same keys; the version row "Publish" and chrome "Set/Clear global default" now open the checklist modal instead of bypassing it. Public certificate verification for the Academy is documented in `03-admin-front/03-guide-and-academy.md` and `02-edge-services/03-checkout-back.md`.
+
 ---
 
 <a id="coreobject-storage"></a>
 
-> **Part ID:** `core.object-storage` · **Status:** `implemented` · **Last verified:** 2026-11-16 · **Verified against:** `working-tree`
+> **Part ID:** `core.object-storage` · **Status:** `implemented` · **Last verified:** 2026-11-24 · **Verified against:** `working-tree`
 
 # Shared Object & Asset Storage Engine
 
@@ -8242,11 +8315,13 @@ an unreachable vault (P1), scrub errors (P1) and quarantine uploads older than
 
 The backup daemon copies new HOT/COLD `.v1.enc` files into
 `object-blobs/{bucket}/{storageKey}` in the artifact repository, verifies every
-ACTIVE row has its blob (`OBJECT_STORAGE_BACKUP_PARITY_ERROR`), writes the KEK
-keyring as an AES-256-GCM escrow (`object-storage/kek-escrow.enc`) under the
-backup master key, and samples up to `OBJECT_STORAGE_DRILL_SAMPLE` ACTIVE rows
-in the restore drill, decrypting them with the escrowed keyring and comparing
-the SHA-256.
+ACTIVE row has its blob (`OBJECT_STORAGE_BACKUP_PARITY_ERROR`), writes an
+`object-storage/active-manifest.json` snapshot of the ACTIVE set (ids, bucket,
+storage key, SHA-256, size), writes the KEK keyring as an AES-256-GCM escrow
+(`object-storage/kek-escrow.enc`) under the backup master key, and in the
+restore drill compares the full restored ACTIVE set with that manifest (missing,
+extra and changed rows fail), then samples up to `OBJECT_STORAGE_DRILL_SAMPLE`
+ACTIVE rows and decrypts them with the escrowed keyring to compare the SHA-256.
 
 ## 9. Deploy and operations
 
@@ -8806,7 +8881,7 @@ Applies to all three copies of the client:
 
 <a id="edgeadmin"></a>
 
-> **Part ID:** `edge.admin` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `edge.admin` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `5a24f6f+working-tree`
 
 # Admin Edge BFF
 
@@ -8880,6 +8955,8 @@ The listener binds to `ADMIN_BIND_HOST` (default `127.0.0.1`). The deploy engine
 
 Routes that can become asynchronous or return a non-200 outcome use `relayStatus: true` (merchant suspension/reinstatement/close, approvals, join-request decisions, gateway submit-approval, AML proposals, backup trigger/drill/policy, reconciliation and operator actions). Creation routes generally declare 201 explicitly. `splitBodyFrom` exists in the forwarder but is not used by the current admin routers.
 
+Safeguard checklists are forwarded on sensitive mutations and exports. Multipart reconciliation uploads receive `checklist` as a JSON-encoded form field; the edge parses it to an array before `uploadSchema` and forwards it in `x-upload-metadata`. Every checklist-bearing route uses an explicit allow-list in core; the edge only validates shape. New summary-export query schemas (`summaryExportQuerySchema`) accept a comma-separated `checklist`. Report-engine spec/chrome publish, reconcile-defaults and merchant suspend accept the checklist body; the route tables and tests list the exact paths.
+
 `forwardUpload()` streams a multipart file to the core as raw bytes with `x-upload-filename`, `x-upload-content-type`, `x-upload-sha256`, `x-upload-size` and base64url `x-upload-metadata`. The reconciliation route uses this path with a longer `RECONCILIATION_TIMEOUT_MS`.
 
 ### 3.4 Route map
@@ -8888,9 +8965,9 @@ All routes are prefixed with `/api/v1/admin`. The auth routes are inside the LAN
 
 | Area | Routes |
 | :--- | :--- |
-| Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/mfa` |
+| Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/mfa`, `POST /auth/mfa/resend` |
 | Search | `POST /search` |
-| Academy | `GET, PUT /academy/progress`, `GET /academy/exams/:examId/eligibility`, `POST /academy/exams/:examId/start`, `POST /academy/exams/:examId/submit`, `GET /academy/team` (`SECURITY_ADMIN`); 60 requests/minute per user |
+| Academy | `GET, PUT /academy/progress`, `GET /academy/exams/:examId/eligibility`, `POST /academy/exams/:examId/start`, `POST /academy/exams/:examId/submit`, `GET /academy/certificates/:trackId/verification`, `GET /academy/team`, `GET /academy/team/export` (`SECURITY_ADMIN`); 60 requests/minute per user |
 | Users | `GET, POST, PATCH /users`, `GET /users/:id`, `PATCH /users/:id`, `GET /users/export`, `GET /users/summary`, `GET /users/summary/export` |
 | Join requests | `GET /join-requests`, `GET /join-requests/:id`, `POST /join-requests/admin-assisted`, `PATCH /join-requests/:id/profile`, `POST /join-requests/:id/beneficial-owners`, `PATCH, DELETE /join-requests/:id/beneficial-owners/:ownerId`, `POST, DELETE /join-requests/:id/kyb-documents[/:docId]`, `POST /join-requests/:id/submit`, `POST /join-requests/:id/withdraw`, `PATCH /join-requests/:id/checklist`, `POST /join-requests/:id/screening/retry`, `POST /join-requests/:id/assign`, `POST /join-requests/:id/request-info`, `POST /join-requests/:id/decide` |
 | KYB documents | `GET /kyb-documents`, `GET /kyb-documents/:id`, `GET /kyb-documents/:id/content`, `POST /kyb-documents/:id/review`, `POST /kyb-documents/:id/request-replacement`, `POST /kyb-documents/:id/request-revalidation`, plus export/summary variants |
@@ -8902,14 +8979,15 @@ All routes are prefixed with `/api/v1/admin`. The auth routes are inside the LAN
 | Credential sets | `GET, POST /credential-sets`, `GET, PUT /credential-sets/:id`, `POST /credential-sets/:id/verify`, `POST /credential-sets/:id/revoke` |
 | Rails and routes | `GET, POST /rails`, `GET, PATCH /rails/:id`, `PUT /rails/:id/fields`, `GET, POST /routes`, `GET, PATCH /routes/:id`, `POST /routes/:id/state`, plus export/summary variants |
 | Assets | `GET, POST /assets`, `GET /assets/:id` |
-| Operations | `GET /gateway-inquiries`, `GET /gateway-inquiries/:id`, `POST /gateway-inquiries/:id/cancel`, `/run-now`, `/retry`, `GET /operator-cases`, `GET, PATCH /operator-cases/:id`, `POST /operator-cases/:id/resolve`, `POST /operator-cases/bulk-inquire`, `/bulk-assign`, `/bulk-state`, `POST /attempts/:id/inquire`, `GET /attempts/:id`, plus export/summary variants |
+| Operations | `GET /gateway-inquiries`, `GET /gateway-inquiries/:id`, `/summary`, `/summary/export`, `POST /gateway-inquiries/:id/cancel`, `/run-now`, `/retry`, `GET /operator-cases`, `GET, PATCH /operator-cases/:id`, `POST /operator-cases/:id/resolve`, `POST /operator-cases/bulk-inquire`, `/bulk-assign`, `/bulk-state`, `POST /attempts/:id/inquire`, `GET /attempts/:id`, plus export/summary variants |
 | Reconciliation | `GET, POST /reconciliation/sources`, `PATCH /reconciliation/sources/:id`, `POST /reconciliation/upload`, `GET /reconciliation/runs`, `GET /reconciliation/runs/:id`, `GET /reconciliation/runs/:id/export`, `GET /reconciliation/runs/summary`, `GET /reconciliation/runs/summary/export` |
-| Finance | `GET, POST /disputes`, `GET /disputes/:id`, `POST /disputes/:id/evidence`, `GET, POST /adjustments`, `GET /adjustments/:id`, `GET /cashouts`, `GET /cashouts/:id`, `POST /cashouts/:id/process`, `GET, POST /commission-profiles`, `POST /commission-profiles/:id/expire`, `GET /commission-profiles/:id/history`, `GET, POST /velocity-rules`, `POST /velocity-rules/:id/deactivate`, `GET /velocity-rules/:id/history`, `GET /finance/profitability`, `GET /finance/liquidity`, `GET /finance/invariant-check`, plus export/summary variants |
+| Finance | `GET /transactions`, `/transactions/summary`, `/transactions/summary/export`, `GET, POST /disputes`, `GET /disputes/:id`, `POST /disputes/:id/evidence`, `GET, POST /adjustments`, `GET /adjustments/:id`, `GET /cashouts`, `GET /cashouts/:id`, `POST /cashouts/:id/process`, `GET, POST /commission-profiles`, `POST /commission-profiles/:id/expire`, `GET /commission-profiles/:id/history`, `GET, POST /velocity-rules`, `POST /velocity-rules/:id/deactivate`, `GET /velocity-rules/:id/history`, `GET /finance/profitability`, `GET /finance/liquidity`, `GET /finance/invariant-check`, `GET /finance/journal-entries/summary/export`, plus export/summary variants |
 | Settings | `GET, PUT /settings`, `POST /settings/restore-preview`, `POST /settings/restore-apply`, `GET /settings/export`, `GET /settings/summary`, `GET /settings/summary/export`, `GET, PUT /settings/checkout-support`, `GET /settings/checkout-support/history`, `GET /settings/checkout-support/summary`, `GET /settings/checkout-support/summary/export` |
 | Options | `GET /options/:kind` |
 | Stats | `GET /stats/overview`, `GET /stats/recent-activity`, `GET /stats/export`, `POST /stats/export-audit`, plus export variants |
 | Audit logs | `GET /audit-logs`, `GET /audit-logs/:id`, `GET /audit-logs/export`, `GET /audit-logs/summary`, `GET /audit-logs/summary/export` |
 | System backups | `GET /system/backups/overview`, `GET /system/backups/catalog`, `POST /system/backups/trigger`, `POST /system/backups/drill`, `PUT /system/backups/policy` |
+| Incidents | `GET /aml/incidents`, `/summary/export`, `/export`, `GET, POST, PATCH /aml/incidents/:id`, timeline/responders/actions/links/communications/report transitions |
 
 The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` to every AML route. The backup router applies `security:read`/`gateway:read` to the overview and catalog and `security:write` to trigger, drill and policy. The remaining routes rely on `requireSession` plus core-side authority enforcement.
 
@@ -9449,7 +9527,7 @@ The edge validates the catalog query shape and the public execute shape (`inputs
 
 <a id="edgecheckout"></a>
 
-> **Part ID:** `edge.checkout` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `edge.checkout` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `5a24f6f+working-tree`
 
 # Checkout Edge BFF
 
@@ -9544,6 +9622,7 @@ Browser return `GET|POST /return/:attemptToken`:
 | POST | `/api/v1/pay/:linkKey/logs/:attemptId/client-event` | `POST /internal/checkout/pay/:linkKey/logs/:attemptId/client-event` |
 | ANY | `/api/v1/inbound/:gateway/:env/:pathToken` | `ANY /internal/checkout/inbound/:gateway/:env/:pathToken` (raw bytes) |
 | GET, POST | `/api/v1/return/:attemptToken` | `GET, POST /internal/checkout/return/:attemptToken` |
+| GET | `/api/v1/verify/certificate/:publicId` | `GET /internal/checkout/academy/certificates/:publicId` |
 
 ## 4. Contracts and invariants
 
@@ -9556,6 +9635,8 @@ Browser return `GET|POST /return/:attemptToken`:
 - Client event aliases (`COMPLETE_CALLBACK`, `ERROR_CALLBACK`, widget aliases) are normalized to `completeCallback`, `errorCallback`, `widgetEvent` and `returnHint`.
 - The return redirect destination comes only from configured `CHECKOUT_FRONT_BASE_URL` and `CHECKOUT_FRONT_STATUS_PATH`, not from client input.
 - SSE responses must disable buffering; Nginx sets `proxy_buffering off` for the status route.
+- The public certificate verifier accepts only an opaque Academy `publicId` (16–64 characters), is rate-limited by the payer budget with a separate `certificate` bucket, and returns `no-store`. It forwards no session, body or payer data, and core returns only holder name, track, badge, dates, status (`valid`/`expired`/`revoked`) and content version. The path segment is redacted in the request log.
+
 
 ## 5. Data / API / config / deployment surface
 
@@ -10025,7 +10106,7 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 
 <a id="admin-uiroutes"></a>
 
-> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
+> **Part ID:** `admin-ui.routes` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `53afea5+working-tree`
 
 # Admin Route and Page Catalog
 
@@ -10347,11 +10428,25 @@ The table Health cell marks a forced route. Edit is now the overflow action.
 The Dashboard Route health card shows forced and conflict counts. See
 `core.route-health`.
 
+## Safeguard checklist and UX pass (2026-11-23)
+
+- **Login** adds “Resend code” with a 30-second cooldown (restarted on success or failure), a new challenge ID, and “Copy sign-in diagnostics”. Accept-invitation shows password visibility, the 12-character/phone/match readiness list, and the country-code hint.
+- **Approvals** links `WALLET` to the wallet page, `APPLICATION` to `Applications?open=<id>`, and `POS_TERMINAL` to `Applications?tab=pos&search=<id>`; the Applications page now watches `?tab` and seeds the POS search from `?search`. The maker name links to the user detail. The subject-type filter includes `BACKUP_POLICY`, `STORAGE_LEGAL_HOLD` and `GL_SHARD_REPAIR`.
+- **Exports and destructive actions** across users, merchants, AML, incidents, gateways/rails/routes, finance, reconciliation, disputes, adjustments, cash-outs, operator cases/inquiries, backups, object storage, settings, report engine, sandbox and academy use the shared `FormChecklist`; most also submit the checked keys for audit. The checklist is an advisory UI gate; `ADMIN_SHOW_CHECKLISTS=false` hides it and sends no keys.
+- **Copy summaries** were added across the same pages. Clipboard summaries mask email identifiers and omit object-storage bucket/key paths; they remain client-side actions (not server-audited).
+- **Incidents** gained audited list and summary exports (with the 5,000-row truncation warning) and transition/communication checklists.
+- **Report Catalog/Studio/Chrome** gained run, publish, reconcile and suspension checklists; version-row publish and chrome set/clear default open the publish checklist instead of bypassing it. The migration queue exports with a checklist.
+- **Academy** adds lab draft persistence (per user and lab, content-version checked, cleared on completion/reset), an exam briefing with three explicit acknowledgements, certificate copy ID/verification/share actions, a team progress export and copy summary. The certificate page fetches the opaque `publicId`/`displayId` issuance identifier from `GET /academy/certificates/:trackId/verification` and builds the public URL from `academyCertificateVerifyUrl`; Security Admins can revoke an issuance by its display ID from Team progress.
+- **Sandbox** reset, seed, scenario and transaction actions use checklists; the merchant reset requires `confirm: "RESET"`.
+- **Guide** adds a reading-progress bar, copy-link actions, version-aware read counts and edge-case deep-link scrolling.
+
+- **Currency selector (2026-11-24).** Dashboard and merchant 360 monetary cards follow the selected reporting currency; the dashboard sends `currency` to `/stats/overview` and `/stats/export`, and merchant 360 uses the stats response currency instead of the first wallet.
+
 ---
 
 <a id="admin-uitables"></a>
 
-> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
+> **Part ID:** `admin-ui.tables` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `53afea5+working-tree`
 
 # Tables Filters and Exports
 
@@ -10637,11 +10732,20 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 `components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`.
 
+## Safeguard/export extension (2026-11-23)
+
+- **Summary exports added:** `GET /v1/admin/transactions/summary/export`, `/finance/journal-entries/summary/export`, `/gateway-inquiries/summary/export`, `/aml/incidents/summary/export`, `/aml/incidents/export` and `/academy/team/export` (the last is the first server-side Academy export; the old Academy CSV path remains client-side). The incidents export is capped at 5,000 rows and the UI warns when `truncated` is true.
+- **Checklists on list exports:** every audited list export now receives the checked keys as a comma-separated `checklist` query; the backend allow-lists and audits them. Summary export cards keep the same contract.
+- **Client-side exports/copies:** user access record, KYB review record, merchant execution history, report migration queue and sandbox summaries are generated client-side through the shared XLSX pipeline. Their checklists are UI-only and they write no server audit. Clipboard summaries mask email identifiers; object-storage copies omit the bucket/key path. These remain explicit residuals (GAP-073).
+- **Hidden mode:** `ADMIN_SHOW_CHECKLISTS=false` hides the checklists, forces completeness true and sends an empty/absent checklist; core accepts the action and records an empty list. Visibility is not authorization.
+
+- **Currency filters (2026-11-24).** Disputes/adjustments/cashouts summaries and finance profitability/liquidity accept `?currency=`. Reconciliation uploads send `currency`/`autoPost` and show the statement currency.
+
 ---
 
 <a id="admin-uiguide"></a>
 
-> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `working-tree`
+> **Part ID:** `admin-ui.guide` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `working-tree`
 
 # Admin Guide and Academy
 
@@ -10913,6 +11017,13 @@ exam structure are unchanged (137 articles, 154 terms, 26 cards, 51 lessons,
 224 pool questions); the generated Guide/Academy and Companion snapshot were
 regenerated.
 
+## Certificate verification and lab drafts (2026-11-23)
+
+- **Lab drafts.** `LabRunner` persists `{stage,index,draft,submitted,checked,hintShown,version}` per user and lab in `localStorage` (`labDraftStore.ts`). The key is scoped by `userId`; drafts are skipped without a signed-in user. The task-id fingerprint is the version: an older/unknown fingerprint is discarded and loaded keys are filtered to the current lab, so removed tasks cannot inflate progress. Completion clears the draft; Reset suppresses the watcher and clears it through `nextTick`. Drafts remain browser-local and tamperable; they are convenience state, not evidence.
+- **Exam briefing.** Starting an exam requires three acknowledgements (integrity, no outside help, time limit) and sends `checklist` keys `EXAM_INTEGRITY_ACCEPTED`, `EXAM_NO_OUTSIDE_HELP`, `EXAM_TIME_LIMIT_ACKNOWLEDGED`; core audits `ACADEMY_EXAM_STARTED_WITH_CHECKLIST`. The keys remain advisory server-side.
+- **Certificate.** The page fetches `GET /academy/certificates/:trackId/verification`, which returns the issuance `publicId` and short `displayId`. The public verification URL is `academyCertificateVerifyUrl` (deploy writes the checkout public origin plus `/verify/certificate`). The public page is `checkout-front /verify/certificate/:publicId`; checkout-back calls `GET /internal/checkout/academy/certificates/:publicId`. Issuance is a durable `academy_certificates` row with an opaque `publicId`, unique per user/track/earnedAt; verification reads the row and the holder's live badge and returns `valid`, `expired` or `revoked` plus holder/track/badge/dates/content version. No email, role or employment status is returned. A new badge supersedes the previous issuance; `SECURITY_ADMIN` can revoke via `POST /academy/certificates/:identifier/revoke` (opaque `publicId` or short `displayId`) from Team progress. Disabled/deleted users do not expose a valid credential. No HMAC token or user UUID appears in the URL.
+- **Team export.** `GET /academy/team/export` requires `SECURITY_ADMIN`, accepts the three team checklist keys, and audits `ACADEMY_TEAM_EXPORTED`. The page-level XLSX export uses the shared pipeline; the in-table CSV and the new “Copy team summary” remain client-side (the copy masks emails).
+
 ---
 
 <a id="admin-uihelp"></a>
@@ -11001,7 +11112,7 @@ The integration points are the 22 action areas named in the guide design: approv
 
 <a id="admin-uioperations"></a>
 
-> **Part ID:** `admin-ui.operations` · **Status:** `partial` · **Last verified:** 2026-11-05 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `admin-ui.operations` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `5a24f6f+working-tree`
 
 # Backups Settings and Operations
 
@@ -11294,6 +11405,10 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 ## Security hardening (2026-11-05)
 
 Backups page: actions are disabled unless backups are configured and the daemon is reachable; a full backup of all targets needs an extra confirmation; trigger and drill send an `Idempotency-Key` header (required by admin-back); policy form validation mirrors the edge rules (cron, minimum gaps, retention floors); server error text is sanitized and clipped.
+
+## Safeguard checklists (2026-11-23)
+
+Backup trigger, restore drill and policy changes now require the shared checklist before submission. Trigger keys: `BACKUP_TARGET_VERIFIED`, `LOAD_IMPACT_REVIEWED`, `AUTHORITY_CONFIRMED`; drill keys: `DRILL_SCOPE_VERIFIED`, `SCRATCH_ISOLATION_REVIEWED`, `AUTHORITY_CONFIRMED`; policy keys: `POLICY_SCOPE_REVIEWED`, `RETENTION_IMPACT_REVIEWED`, `APPROVAL_PATH_CONFIRMED`. The drill is now a checklist modal instead of an immediate confirm. Core filters the keys and records them in `BACKUP_TRIGGERED` / `BACKUP_DRILL_TRIGGERED` (including deduplicated retries) and the policy approval payload. Jobs/Outbox retries, notification retries, object-storage legal holds/maintenance, notification-template edits and settings/checkout-help exports use the same pattern. `ADMIN_SHOW_CHECKLISTS` hides the UI gate without changing the server path.
 
 ---
 
@@ -11857,6 +11972,8 @@ A separate "Sandbox Studio (Testing & Training)" section adds `/sandbox/overview
 
 A "Sandbox Live Mirror" section reuses the Live pages under `/sandbox/mirror/*` (cash-outs, disputes, POS, credentials, team, webhooks, tokens, statements, reports). The Axios interceptor rewrites Live API paths to `/sandbox/mirror/*` and the router aliases Live navigation into the mirror; Exit sandbox removes `?live=1` and returns to Live. Wallet detail shows the sharded ledger, balance controller, pending cash-outs and a real sandbox cash-out; payment detail shows charged/settled/fee/commission/net, refundable amount, refund, dispute simulation/resolution, checkout inspector secrets and journal lines.
 
+- **Dashboard currency (2026-11-24).** The overview accepts `?currency=` and renders volume, commission, net and wallet totals for the selected currency; `byCurrency` carries the per-currency breakdown. Wallet statements are filtered by the link wallet as well as currency.
+
 ---
 
 <a id="merchant-uiguide"></a>
@@ -12215,7 +12332,7 @@ from local disk. The full engine is `parts/01-core-back/13-object-storage.md`.
 
 <a id="checkout-uiflow"></a>
 
-> **Part ID:** `checkout-ui.flow` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `5a24f6f+working-tree`
+> **Part ID:** `checkout-ui.flow` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `5a24f6f+working-tree`
 
 # Checkout Payer Flow
 
@@ -12549,6 +12666,10 @@ excluded for normal links (`ROUTE_DEGRADED_CANARY_EXCLUDED`), while the same
 route+link cohort is allowed and tried first; `OPEN_BREAKER` is never visible.
 The payer UI does not know about health states: it simply receives the reduced
 or canary `visibleRails` list from core. See `core.route-health`.
+
+## Public certificate verification (2026-11-23)
+
+`/verify/certificate/:publicId` is a public checkout route (no payer session, no attempt, no link key). It calls `GET /api/v1/verify/certificate/:publicId`, renders a valid/expired/revoked certificate card with holder, track, badge, certificate ID, earned/expiry dates and content version, and shows a generic “could not be verified” state for unknown public IDs; a revoked or superseded issuance returns a distinct revoked state. It does not expose email, role or employment data. The route is outside the checkout attempt lifecycle and uses the public checkout layout; the link is generated by the admin Academy certificate page from the issuance `publicId` and `academyCertificateVerifyUrl`.
 
 ---
 
@@ -14119,7 +14240,7 @@ Core's outbound URL compile now fails closed on an empty `allowed_hosts` (`HOST_
 
 <a id="deploytopology"></a>
 
-> **Part ID:** `deploy.topology` · **Status:** `partial` · **Last verified:** 2026-11-13 · **Verified against:** `19d6a54+working-tree`
+> **Part ID:** `deploy.topology` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `19d6a54+working-tree`
 
 # Deploy Topology and Configuration
 
@@ -14443,6 +14564,10 @@ New keys: `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT`
 
 `sandboxDatabase()` derives `pgw_sandbox` (transaction) and `pgw_sandbox_session` (session) PgBouncer aliases; the PostgreSQL provisioner creates `payment_gateway_sandbox` and both aliases. `hostPlanner` emits a second core `ServicePlan` named `pg-core-sandbox` on `SANDBOX_NODE` (or the first core node) with its own release tree, sandbox `DATABASE_URL`/`LEADER_ELECTION_DATABASE_URL`, `EXECUTION_PLANE=SANDBOX`, Fake Rails enabled, backups removed from its env, a firewall rule on 4005 and a core certificate SAN that includes the sandbox IP. `deployService` migrates the sandbox database with the direct sandbox owner URL carrying `app.execution_plane=SANDBOX` (the pooler rejects custom startup options), then `db-seed` and `seed-fake-rails` when seeding is enabled. The seeder stamps an existing sandbox row only when the connected database name matches `SANDBOX_DB_NAME`. Edges receive `SANDBOX_CORE_BACK_URLS`; a sandbox pool failure never falls back to Live. Sandbox and Fake Rails data are deliberately not backup targets.
 
+## Backup and object-storage input hardening (2026-11-23)
+
+`BUN_VERSION` defaults to the tested 1.4.x line (1.4.4) because the committed lockfiles are version 2. `BACKUP_PRIMARY_S3_ENDPOINT` must be an http(s) URL without whitespace or shell metacharacters; `BACKUP_PRIMARY_S3_BUCKET` accepts an S3 bucket/path (optional `s3://`) using safe characters only; `BACKUP_MINIO_VERSION` and `BACKUP_MINIO_BINARY_URL` are restricted to safe tags/URLs; `BACKUP_MINIO_DATA_DIR` uses the safe absolute-path schema and rejects system directories. `BACKUP_ALLOW_INSECURE_HTTP` remains a documented availability option and is rejected only where the object-storage production guard applies. The object-storage and backup certificate directories must be separate and non-nested.
+
 ---
 
 <a id="deployplanner"></a>
@@ -14738,7 +14863,7 @@ The planner's config validation now rejects weak secrets and restricts charsets 
 
 <a id="deploypki"></a>
 
-> **Part ID:** `deploy.pki` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `6765e90+working-tree`
+> **Part ID:** `deploy.pki` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `6765e90+working-tree`
 
 # Internal PKI and mTLS Certificates
 
@@ -15049,6 +15174,10 @@ configured, the `object-storage-client` client certificate. `certFilesForHost`
 gives the storage host its server + client material; core hosts and the backup
 host receive `internal-ca.crt` and `object-storage-client.*`. Certificate placement is per consumer: a co-located core/backup host does not receive the object-storage server key, and the backup host receives the client leaf in its own cert directory. Renewal/SAN drift
 handling includes the object-storage server leaf.
+
+## Certificate ownership on later deploys (2026-11-23)
+
+`uploadStorageCertificates` no longer leaves the object-storage certificate directory root-owned forever on a partial/later deploy. When `pgobjstore` exists, the deploy runs `install -d -m 0750 -o pgobjstore -g pgobjstore <dir>`, `chown -hR` (no symlink following), then `find <dir> -maxdepth 1 -type f -name '*.crt' -exec chmod 0640`, and the same for `*.key` at 0600. `install`/`chown` failures now fail the deploy; only the `find`/`chmod` steps are tolerant of an empty directory. The command is exported as `objectStorageCertOwnershipCommand` and covered by `deploy/test/objectStorageDeploy.test.ts`. `BACKUP_DAEMON_CERT_DIR` and `OBJECT_STORAGE_DAEMON_CERT_DIR` must differ (config validation).
 
 ---
 
@@ -15715,7 +15844,7 @@ host are configured without `OBJECT_STORAGE_NODE`.
 
 <a id="deploystorage"></a>
 
-> **Part ID:** `deploy.storage` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `d695518+working-tree`
+> **Part ID:** `deploy.storage` · **Status:** `partial` · **Last verified:** 2026-11-23 · **Verified against:** `d695518+working-tree`
 
 # Storage Provisioners
 
@@ -16185,11 +16314,15 @@ object-storage node. Storage roots and cert directories are restricted to
 
 The fresh-host sequence is tested with a fake runner; the real two-host lab remains manual.
 
+## Object-storage certificate ownership (2026-11-23)
+
+The storage certificate upload step hands the object-storage cert directory and files to `pgobjstore` on every deploy where the account exists, so a partial `--only=admin` or later update cannot leave the daemon unable to read its mTLS material. The command uses `find -type f` (no symlink-following globs) and only the empty-directory `chmod`/`find` tail is tolerant; directory creation and ownership failures fail the deploy. The backup and object-storage cert directories are validated as distinct.
+
 ---
 
 <a id="deploybackup"></a>
 
-> **Part ID:** `deploy.backup` · **Status:** `partial` · **Last verified:** 2026-11-12 · **Verified against:** `1000189+working-tree`
+> **Part ID:** `deploy.backup` · **Status:** `partial` · **Last verified:** 2026-11-24 · **Verified against:** `1000189+working-tree`
 
 # Backup Daemon
 
@@ -16283,7 +16416,7 @@ The original design called for a Bun service wrapping WAL-G (same host) or Barma
 2. Makes the data directory startable: a physical backup holds `PGDATA` only and Debian-style clusters keep `postgresql.conf`/`pg_hba.conf` outside it, so a minimal config is generated, sized from `pg_controldata` (hot standby refuses to start below the primary's `max_connections` and related settings).
 3. Appends the recovery settings and forces archiving off (`archive_mode=off`, `archive_command=''`, no slot/standby names, `ssl=off`). The restored `postgresql.auto.conf` carries the production `archive_command`; without this a promoted scratch cluster pushed `00000002.history` and timeline-2 WAL into the production archive in the live test and every later restore failed.
 4. Starts on loopback and waits for recovery to finish and promote (`pg_is_in_recovery() = f`, up to `BACKUP_RECOVERY_TIMEOUT_MS`); a failed start includes the server-log tail.
-5. Runs three checks: double-entry zero drift, sharded balance parity, and the audit hash chain. Core queries run as `PG_PRIMARY_USER`; audit queries always run as `PG_AUDIT_USER` (the primary role when unset), because only the audit role is granted on the audit database and a dedicated audit cluster does not have the core application role.
+5. Runs three checks: double-entry zero drift, sharded balance parity, and the audit hash chain. When object storage is configured it also compares the full restored ACTIVE object set with the `object-storage/active-manifest.json` captured by the backup, then decrypts a bounded sample. Core queries run as `PG_PRIMARY_USER`; audit queries always run as `PG_AUDIT_USER` (the primary role when unset), because only the audit role is granted on the audit database and a dedicated audit cluster does not have the core application role.
 6. Signs the report with HMAC-SHA256 and destroys the scratch cluster.
 
 The audit chain accepts either canonical form: the database's own `before_json::text`/`after_json::text` with the timestamp formatted as the trigger formats it (what the trigger hashes), or the application's stable-JSON form; `seq_no` must be gap-free so a deleted row is detected. In a shared cluster a missing audit database is restored from the newest logical dump into the same scratch cluster.
@@ -17044,7 +17177,7 @@ Security regression suites exist for core-back (`test/security-regressions/`), t
 
 <a id="testingsuites"></a>
 
-> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-16 · **Verified against:** `53afea5+working-tree`
+> **Part ID:** `testing.suites` · **Status:** `partial` · **Last verified:** 2026-11-24 · **Verified against:** `53afea5+working-tree`
 
 # Test Suite Catalog
 
@@ -17527,7 +17660,7 @@ These are development/CI tests only; no production-time test job or test endpoin
 
 ## v39 Sandbox Studio and mirror suites (2026-11-13)
 
-- `core-back/test/sandboxPlane.test.ts` now runs the schema-local fence functions and passes on v39; `core-back/test/phase1-mtls-and-schema.test.ts` expects `20261114090000_v39_sandbox_studio` as the newest migration and schema version 39.
+- `core-back/test/sandboxPlane.test.ts` now runs the schema-local fence functions and passes on v39; `core-back/test/phase1-mtls-and-schema.test.ts` expects `20261124150000_currency_context_and_aggregates` as the newest migration and schema version 44.
 - `fake-rails-back/test/accountsAndInspector.test.ts` and `test/api.test.ts` cover merchant-owned account copies, daily business-date reset, hold expiry, capture variance guards, clearing references and statement inclusion.
 - `merchant-back/test/sandbox-proxy.test.ts` covers control routes (`overview`, `seed-demo`, `studio/*`, wallet/payment detail, refund, reconciliation), Live-router resource lists/creates, Fake Rails control routes and `pg_test_` external tokens. `merchant-back/test/sandbox-routing.test.ts` covers the fail-closed pool.
 - `admin-back/test/sandbox-routing.test.ts` also asserts the Studio path mapping for `/merchants`, `/merchants/summary`, merchant detail and `/audits` so the admin control center cannot silently fall back to the Live namespace.
@@ -17551,6 +17684,33 @@ acceptance run remains a gap.
 ## Post-merge test determinism (2026-11-16)
 
 The full core suite runs against PostgreSQL 18 + Redis (25,316 tests, 0 failures). The statement-schedule test now asserts the case `SOURCE_CLEARED` resolution summary/event instead of the retired `AUTO-RESOLVED` note. Admin table tests target the live Disputes/Operator Cases links by exact accessible name, because the Sandbox mirror adds “Sandbox Disputes”. The object-storage style test seeds both the raw and projected storage authority and mocks all admin calls so the page cannot fall back to the login screen. `chrome-layout.spec.ts` and `report-a4-layout.spec.ts` are live API gates and skip unless `PG_API_URL` (and `REPORT_LAYOUT_SPEC` for A4) is set.
+
+## Safeguard and certificate tests (2026-11-23)
+
+- `core-back/test/academy-certificate.test.ts` — opaque public/display identifier generation and uniqueness (no database).
+- `core-back/test/academy-certificate-lifecycle.test.ts` — idempotent issuance, recertification supersede, revocation by display ID and revoked status (database).
+- `core-back/test/security-regressions/c2-mfa.test.ts` — added the resend SMS-suppression case (the previous queued `LOGIN_MFA` notification becomes `SUPPRESSED`).
+- `admin-back/test/report-engine-edge.test.ts` — report publish, chrome publish, chrome reconcile, merchant suspend and chrome set-default checklist forwarding.
+- `admin-back/test/admin-surface.test.ts` — token-revoke checklist, commission-profile expiry checklist, reconciliation multipart checklist parsing, academy certificate verification/revocation forwarding, plus the existing summary-export/forwarding cases.
+- `checkout-back/test/sandbox-checkout-forward.test.ts` — public certificate verification forwarding (new mock route in `test/helpers/core.ts`).
+- `deploy/test/objectStorageDeploy.test.ts` — the object-storage certificate ownership command (`install`, `chown -hR`, `find -type f`, user-missing branch).
+- `tests/unit/checklist-labels.test.ts` — every static checklist label has an Arabic catalogue entry.
+- `tests/unit/lab-draft-store.test.ts` — per-user draft round-trip, corruption and clear.
+- `tests/e2e/checkout/certificate-verify.spec.ts` — public valid/invalid certificate pages.
+- Updated existing e2e: `admin/backups.spec.ts`, `admin/commerce-governance.spec.ts` and `admin/academy-exam.spec.ts` tick the new checklists.
+
+## CI gates (2026-11-23)
+
+`.github/workflows/ci.yml` runs the design check, `scripts/project-design/check.ts`, `git diff --check`, the full core suite against PostgreSQL 18 + Redis with a `[1-9][0-9]* skip` guard, the backend matrix, admin/merchant `test:unit`, the root `tests` Vitest suite, and the portal builds. Playwright remains a manual/live gate because it needs browsers and a deployed stack.
+
+- GAP-075: `core-back/test/hardening-gap-regressions.test.ts` asserts the schema-43 append-only guards and the two-key maintenance bypass; the full database suite exercises the migration.
+- Object backup manifest: `deploy/backup-daemon/test/objectStorageManifest.test.ts` covers exact restored-set comparison, missing/extra rows and key/hash changes.
+- AML/manual terminal events: `core-back/test/aml-resolution-finalization.test.ts` and `core-back/test/governance-execution.test.ts` assert the `attempt.transitioned` outbox row.
+- `bun run schema:sql-only-check` (core-back, CI after migrations) runs `prisma migrate diff` and enforces the reviewed SQL-only object allowlist.
+
+- `core-back/test/remediation-high.test.ts` now covers a USD settlement sweep, the USD account selection and `autoPost=false` suppressing the sweep.
+- `core-back/test/governance-execution.test.ts` covers per-currency commission-receivable filtering and domain checker roles.
+- `core-back/test/automation/commission-netting.test.ts` asserts per-currency aged cases.
 
 ---
 

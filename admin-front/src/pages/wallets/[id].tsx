@@ -30,6 +30,9 @@ import { notifyOutcome, reportCommerceError, runGoverned } from "@/pages/merchan
 import { ApplicationDetailDrawer } from "@/pages/merchants/components/ApplicationDetailDrawer";
 import MerchantResourceTable from "@/pages/merchants/components/MerchantResourceTable";
 import ReasonModal from "@/pages/merchants/components/ReasonModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { showSnackBar } from "@/utils/snackBar";
+import { areChecklistsVisible } from "@/constants/env";
 import {
     ApprovalSubmittedNotice,
     MiniTable,
@@ -41,6 +44,13 @@ import {
 import { walletActionsFor, type WalletAction } from "./walletActions";
 import { WALLET_TABS, parseWalletTab, postedSinceCheckpoint, shardIntegrity, shardTotalNatural, statusChangeOf, type WalletTab } from "./walletModel";
 import type { WalletAuditEvent, WalletDetail } from "./types";
+
+const WALLET_ACTION_CHECKS = [
+    { key: "WALLET_SCOPE_VERIFIED", label: "Wallet and merchant scope verified" },
+    { key: "BALANCE_AND_CASHOUT_REVIEWED", label: "Balance and pending cash-outs reviewed" },
+    { key: "REASON_CONFIRMED", label: "Reason confirmed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Authority to change containment confirmed" },
+] as const;
 
 const AUDIT_ACTIONS = ["WALLET_FROZEN", "WALLET_UNFROZEN"];
 
@@ -62,6 +72,9 @@ const WalletDetailPage = dc(() => {
     const error = ref<string | null>(null);
     const notice = ref<{ approvalRequestId: string | null } | null>(null);
     const pendingAction = ref<WalletAction | null>(null);
+    const showChecklists = areChecklistsVisible();
+    const actionChecklist = ref<Record<string, boolean>>({});
+    const actionChecklistComplete = computed(() => !showChecklists || WALLET_ACTION_CHECKS.every((check) => actionChecklist.value[check.key] === true));
     const submitting = ref(false);
     const modalError = ref("");
     const glAccountId = ref<string | null>(null);
@@ -106,6 +119,34 @@ const WalletDetailPage = dc(() => {
         { immediate: true },
     );
 
+    const copyWalletSummary = async () => {
+        const entry = wallet.value;
+        if (!entry) return;
+        const summary = {
+            walletId: entry.id,
+            merchantId: entry.merchantId,
+            merchant: entry.merchant,
+            currency: entry.currency,
+            status: entry.status,
+            liveBalance: entry.liveBalance,
+            checkpointBalance: entry.checkpointBalance,
+            checkpointAt: entry.glAccount.checkpointAt,
+            shardCount: entry.glAccount.shardCount ?? entry.shards.length,
+            pendingCashouts: entry.pendingCashoutCount,
+            applications: entry.applicationCount,
+            paymentLinks: entry.paymentLinkCount,
+            pendingApprovals: entry.pendingApprovals.length,
+            redactedFields: entry.redactedFields,
+            url: window.location.href,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Wallet summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const refreshAll = () => {
         void load(walletId.value, true);
         statement.value?.refresh();
@@ -121,10 +162,18 @@ const WalletDetailPage = dc(() => {
         const action = pendingAction.value;
         const current = wallet.value;
         if (!action || !current) return;
+        if (!actionChecklistComplete.value) {
+            modalError.value = t("Complete all wallet action checklist items before submitting");
+            return;
+        }
         submitting.value = true;
         modalError.value = "";
         try {
-            const outcome = await runGoverned(() => api.post(urlsMap.walletStatus(current.id), { status: action.targetStatus, reason }));
+            const outcome = await runGoverned(() => api.post(urlsMap.walletStatus(current.id), {
+                status: action.targetStatus,
+                reason,
+                checklist: WALLET_ACTION_CHECKS.filter((check) => actionChecklist.value[check.key]).map((check) => check.key),
+            }));
             notifyOutcome(outcome, "Wallet frozen");
             notice.value = outcome.kind === "approval" ? { approvalRequestId: outcome.approvalRequestId } : null;
             pendingAction.value = null;
@@ -474,6 +523,7 @@ const WalletDetailPage = dc(() => {
                                         {...{ title: action.disabledReason ? t(action.disabledReason) : undefined }}
                                         onClick={() => {
                                             modalError.value = "";
+                                            actionChecklist.value = {};
                                             pendingAction.value = action;
                                         }}
                                     >
@@ -482,6 +532,7 @@ const WalletDetailPage = dc(() => {
                                 ))}
                                 <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "Wallets" })}>{t("Back to wallets")}</VBtn>
                                 <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={refreshAll}>{t("Refresh")}</VBtn>
+                                <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!current} onClick={() => void copyWalletSummary()}>{t("Copy summary")}</VBtn>
                             </ThemedView>
                         )}
                     />
@@ -540,7 +591,17 @@ const WalletDetailPage = dc(() => {
                     loading={submitting.value}
                     errorMessage={modalError.value}
                     onSubmit={(reason: string) => void submit(reason)}
-                />
+                >
+                    <FormChecklist
+                        checks={[...WALLET_ACTION_CHECKS]}
+                        modelValue={actionChecklist.value}
+                        onUpdate:modelValue={(value: Record<string, boolean>) => (actionChecklist.value = value)}
+                        show={showChecklists}
+                        title={t("Wallet action checklist")}
+                        complete={actionChecklistComplete.value}
+                        incompleteMessage={t("Complete all wallet action checklist items before submitting")}
+                    />
+                </ReasonModal>
 
                 <GlAccountDrawer accountId={glAccountId.value} onClose={() => (glAccountId.value = null)} onChanged={refreshAll} />
                 <JournalEntryDrawer entryId={entryId.value} onClose={() => (entryId.value = null)} />

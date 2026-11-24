@@ -10,6 +10,8 @@ import { StateView } from "@/components/StateView";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
@@ -123,6 +125,13 @@ const APPLIED_MESSAGE: Record<PendingTarget["kind"], string> = {
  * deactivate/block a terminal) are immediate and need a reason; loosening
  * actions (reactivate, policy edit, POS reactivation) become approval requests.
  */
+const ACCESS_ACTION_CHECKS = [
+    { key: "ENTITY_SCOPE_VERIFIED", label: "Application, link or terminal scope verified" },
+    { key: "ACCESS_IMPACT_REVIEWED", label: "Payment and token impact reviewed" },
+    { key: "REASON_CONFIRMED", label: "Reason confirmed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Authority to change access confirmed" },
+] as const;
+
 export const ApplicationDetailDrawer = defineComponent({
     name: "ApplicationDetailDrawer",
     props: {
@@ -139,6 +148,9 @@ export const ApplicationDetailDrawer = defineComponent({
         const notice = ref<{ approvalRequestId: string | null } | null>(null);
         const pendingTarget = ref<PendingTarget | null>(null);
         const policyOpen = ref(false);
+        const showChecklists = areChecklistsVisible();
+        const actionChecklist = ref<Record<string, boolean>>({});
+        const actionChecklistComplete = computed(() => !showChecklists || ACCESS_ACTION_CHECKS.every((check) => actionChecklist.value[check.key] === true));
         const submitting = ref(false);
         const modalError = ref("");
         let sequence = 0;
@@ -207,6 +219,7 @@ export const ApplicationDetailDrawer = defineComponent({
                 return;
             }
             modalError.value = "";
+            actionChecklist.value = {};
             pendingTarget.value = { kind: "application", action };
         };
 
@@ -220,16 +233,21 @@ export const ApplicationDetailDrawer = defineComponent({
             const target = pendingTarget.value;
             const current = application.value;
             if (!target || !current) return;
+            if (!actionChecklistComplete.value) {
+                modalError.value = t("Complete all access action checklist items before submitting");
+                return;
+            }
+            const checklist = ACCESS_ACTION_CHECKS.filter((check) => actionChecklist.value[check.key]).map((check) => check.key);
             submitting.value = true;
             modalError.value = "";
             try {
                 const outcome = await runGoverned(() => {
                     if (target.kind === "application") {
-                        return api.patch(urlsMap.applicationDetail(current.id), { status: target.action.target, reason });
+                        return api.patch(urlsMap.applicationDetail(current.id), { status: target.action.target, reason, checklist });
                     }
-                    if (target.kind === "token") return api.post(urlsMap.applicationRevokeToken(current.id, target.id), { reason });
-                    if (target.kind === "link") return api.post(urlsMap.paymentLinkState(target.id), { state: "CANCELLED", reason });
-                    return api.post(urlsMap.posTerminalStatus(target.id), { status: target.action.target, reason });
+                    if (target.kind === "token") return api.post(urlsMap.applicationRevokeToken(current.id, target.id), { reason, checklist });
+                    if (target.kind === "link") return api.post(urlsMap.paymentLinkState(target.id), { state: "CANCELLED", reason, checklist });
+                    return api.post(urlsMap.posTerminalStatus(target.id), { status: target.action.target, reason, checklist });
                 });
                 notifyOutcome(outcome, APPLIED_MESSAGE[target.kind]);
                 pendingTarget.value = null;
@@ -254,6 +272,7 @@ export const ApplicationDetailDrawer = defineComponent({
                         disabled: action.disabled,
                         onClick: () => {
                             modalError.value = "";
+                            actionChecklist.value = {};
                             pendingTarget.value = toTarget(action);
                         },
                     }))}
@@ -523,7 +542,17 @@ export const ApplicationDetailDrawer = defineComponent({
                         loading={submitting.value}
                         errorMessage={modalError.value}
                         onSubmit={(reason: string) => void submit(reason)}
-                    />
+                    >
+                        <FormChecklist
+                            checks={[...ACCESS_ACTION_CHECKS]}
+                            modelValue={actionChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (actionChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Access action checklist")}
+                            complete={actionChecklistComplete.value}
+                            incompleteMessage={t("Complete all access action checklist items before submitting")}
+                        />
+                    </ReasonModal>
 
                     <ApplicationPolicyModal
                         modelValue={policyOpen.value}

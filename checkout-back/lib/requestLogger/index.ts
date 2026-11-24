@@ -12,7 +12,7 @@ const SENSITIVE_KEY_PATTERN =
  * Path segments that carry a capability (attempt tokens, link keys, channel path tokens) are
  * replaced before a URL is logged. Rules capture the secret segment in group 1.
  */
-const SENSITIVE_PATH_RULES: RegExp[] = [/\/inbound\/[^/?]+\/[^/?]+\/([^/?]+)/, /\/pay\/([^/?]+)/, /\/return\/([^/?]+)/, /\/logs\/([^/?]+)/];
+const SENSITIVE_PATH_RULES: RegExp[] = [/\/inbound\/[^/?]+\/[^/?]+\/([^/?]+)/, /\/pay\/([^/?]+)/, /\/return\/([^/?]+)/, /\/logs\/([^/?]+)/, /\/verify\/certificate\/([^/?]+)/];
 
 export const redactUrl = (url: string): string => {
   const queryIndex = url.indexOf("?");

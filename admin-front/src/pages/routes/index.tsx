@@ -58,6 +58,12 @@ import {
 } from "@/components/builders/model";
 import { toCapView, type RouteCapRow, type RouteCapView } from "@/pages/finance/liquidity/routeCaps";
 import RouteHealthDrawer from "./components/RouteHealthDrawer";
+const EXPORT_CHECKS = [
+    { key: "ROUTE_SCOPE_VERIFIED", label: "Route scope verified" },
+    { key: "ROUTE_HEALTH_REVIEWED", label: "Route health and circuit-breaker posture reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const SUMMARY_EXPORT_CHECKS = [
     { key: "ROUTE_SCOPE_VERIFIED", label: "Route portfolio scope verified" },
     { key: "STATUS_HEALTH_REVIEWED", label: "Status and health reviewed" },
@@ -122,6 +128,9 @@ const RoutesPage = dc(() => {
     const filters = ref<FilterValues>({});
     const pageSize = ref(20);
     const exportLoading = ref(false);
+    const exportOpen = ref(false);
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
     const summaryExportLoading = ref(false);
     const summaryExportChecklist = ref<Record<string, boolean>>({});
     const refreshHook = ref<{
@@ -182,14 +191,45 @@ const RoutesPage = dc(() => {
         }
     };
 
+    const copyRouteSummary = async (row: GatewayRoute) => {
+        const summary = {
+            id: row.id,
+            railCode: row.railCode,
+            gatewayCode: row.gatewayCode,
+            credentialPolicy: row.credentialPolicy,
+            priority: row.priority,
+            weight: row.weight,
+            minAmount: row.minAmount,
+            maxAmount: row.maxAmount,
+            dailyCapAmount: row.dailyCapAmount,
+            status: row.status,
+            healthState: row.healthState,
+            computedHealth: row.healthComputedState ?? null,
+            overrideHealth: row.healthOverrideState ?? null,
+            overrideExpiresAt: row.healthOverrideExpiresAt ?? null,
+            maintenanceWindows: row.maintenanceWindows ?? null,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Route summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const exportExcel = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const response = await api.get(urlsMap.routesExport, {
                 params: {
                     ...(search.value ? { search: search.value } : {}),
                     ...buildFilterQuery(filterDefinitions.value, filters.value),
+                    checklist: EXPORT_CHECKS.filter((check) => exportChecklist.value[check.key]).map((check) => check.key).join(","),
                 },
             });
             const payload = response.data?.data ?? response.data ?? {};
@@ -226,6 +266,8 @@ const RoutesPage = dc(() => {
                 title: `routes-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            exportOpen.value = false;
+            exportChecklist.value = {};
             showSnackBar({
                 type: payload.truncated ? "warning" : "success",
                 message: payload.truncated
@@ -599,6 +641,12 @@ const RoutesPage = dc(() => {
                             icon: "mdi-pencil-outline",
                             onClick: () => openEditRoute(row),
                         },
+                        {
+                            key: "copy",
+                            label: t("Copy summary"),
+                            icon: "mdi-content-copy",
+                            onClick: () => void copyRouteSummary(row),
+                        },
                     ]}
                 />
             ),
@@ -613,7 +661,7 @@ const RoutesPage = dc(() => {
                     subtitle={t("Routing priority, limits, and circuit-breaker health.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                             <VBtn color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => void openCreateRoute()}>
                                 {t("Add Route")}
                             </VBtn>
@@ -709,6 +757,27 @@ const RoutesPage = dc(() => {
                     refreshHook.value?.refreshAsIs();
                 }}
             />
+
+            <FormModal
+                modelValue={exportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                title={t("Export routes")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportExcel()}
+            >
+                <VAlert type="warning" variant="tonal">{t("The export contains route priorities, limits and health states. Handle it as confidential operational evidence.")}</VAlert>
+                <FormChecklist
+                    checks={[...EXPORT_CHECKS]}
+                    modelValue={exportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Route export checklist")}
+                    complete={exportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
 
             <FormModal
                 modelValue={dialogOpen.value}

@@ -10,7 +10,9 @@ import { ThemedText } from "@/components/ThemedText";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { type MetricItem } from "@/components/ui/MetricStrip";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { FormModal } from "@/components/ui/FormModal";
@@ -24,6 +26,8 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { showConfirm } from "@/utils/confirm";
+import { areChecklistsVisible } from "@/constants/env";
+import { xlsxUIPipeline } from "@/utils/xlsx";
 
 type Incident = {
     id: string;
@@ -66,6 +70,32 @@ type ActionItem = { id: string; title: string; priority: number; status: string;
 type IncidentLink = { id: string; linkType: string; targetId: string; label: string | null };
 type Communication = { id: string; channel: string; audience: string; subject: string; body: string; sentAt: string | null; sentByName?: string | null };
 type IncidentSummary = { open: number; high: number; postmortemDue: number; total: number };
+
+const COMMUNICATION_CHECKS = [
+    { key: "COMMUNICATION_SCOPE_VERIFIED", label: "Communication scope verified" },
+    { key: "AUDIENCE_AND_CHANNEL_REVIEWED", label: "Audience and channel reviewed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Communication authority confirmed" },
+] as const;
+
+const TRANSITION_CHECKS = [
+    { key: "INCIDENT_STATE_VERIFIED", label: "Incident state and gates verified" },
+    { key: "IMPACT_REVIEWED", label: "Impact and affected scope reviewed" },
+    { key: "COMMUNICATIONS_REVIEWED", label: "Communications posture reviewed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Transition authority confirmed" },
+] as const;
+
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "INCIDENT_SCOPE_VERIFIED", label: "Incident scope verified" },
+    { key: "SEVERITY_STATUS_REVIEWED", label: "Severity and status breakdown reviewed" },
+    { key: "POSTMORTEM_BACKLOG_REVIEWED", label: "Postmortem backlog reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const INCIDENT_EXPORT_CHECKS = [
+    { key: "INCIDENT_SCOPE_VERIFIED", label: "Incident queue scope verified" },
+    { key: "INCIDENT_DATA_REVIEWED", label: "Confidential incident data reviewed" },
+    { key: "EXPORT_AUTHORITY_CONFIRMED", label: "Export authority confirmed" },
+] as const;
 
 const SEVERITIES = ["SEV1", "SEV2", "SEV3", "SEV4"];
 const STATUSES = ["DETECTED", "TRIAGED", "DECLARED", "CONTAINED", "MONITORING", "RESOLVED", "POSTMORTEM", "CLOSED"];
@@ -115,6 +145,8 @@ const IncidentsPage = dc(() => {
     const activeTab = ref("overview");
     const transitionTo = ref<string | null>(null);
     const transitionNote = ref("");
+    const transitionChecklist = ref<Record<string, boolean>>({});
+    const transitionChecklistComplete = computed(() => !showChecklists || TRANSITION_CHECKS.every((check) => transitionChecklist.value[check.key] === true));
     const timelineNote = ref("");
     const actionTitle = ref("");
     const actionDue = ref("");
@@ -128,7 +160,17 @@ const IncidentsPage = dc(() => {
     const commAudience = ref("Merchants");
     const commSubject = ref("");
     const commBody = ref("");
+    const commChecklist = ref<Record<string, boolean>>({});
+    const commChecklistComplete = computed(() => !showChecklists || COMMUNICATION_CHECKS.every((check) => commChecklist.value[check.key] === true));
     const working = ref(false);
+    const showChecklists = areChecklistsVisible();
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+    const listExportOpen = ref(false);
+    const listExportLoading = ref(false);
+    const listExportChecklist = ref<Record<string, boolean>>({});
+    const listExportChecklistComplete = computed(() => !showChecklists || INCIDENT_EXPORT_CHECKS.every((check) => listExportChecklist.value[check.key] === true));
     const edit = ref(emptyEdit());
     const form = ref({ title: "", summary: "", category: "OTHER", severity: "SEV3", impactScope: "PLATFORM", detectedAt: "", commanderUserId: "", affectedServices: "", affectedMerchantIds: "", affectedAttemptIds: "" });
     const tabs = computed(() => [
@@ -200,6 +242,7 @@ const IncidentsPage = dc(() => {
     const resetTransient = () => {
         transitionTo.value = null;
         transitionNote.value = "";
+        transitionChecklist.value = {};
         timelineNote.value = "";
         actionTitle.value = "";
         actionDue.value = "";
@@ -213,6 +256,7 @@ const IncidentsPage = dc(() => {
         commAudience.value = "Merchants";
         commSubject.value = "";
         commBody.value = "";
+        commChecklist.value = {};
     };
     const loadSelected = async (id: string) => {
         const response = await api.get(urlsMap.incident(id));
@@ -253,6 +297,95 @@ const IncidentsPage = dc(() => {
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
     };
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.incidentSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const snapshot = (response.data?.data ?? response.data ?? {}) as IncidentSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const lines = ["metric,value", ...([
+                ["total", snapshot.total],
+                ["open", snapshot.open],
+                ["sev1_sev2_open", snapshot.high],
+                ["postmortem_due", snapshot.postmortemDue],
+                ["filtered_total", total.value],
+            ] as Array<[string, unknown]>).map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({ title: `incident-summary-${new Date().toISOString().slice(0, 10)}.xlsx`, lines });
+            showSnackBar({ type: "success", message: t("Incident summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
+    };
+
+    const exportIncidents = async () => {
+        if (listExportLoading.value) return;
+        if (!listExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
+        listExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.incidentsExport, {
+                params: {
+                    ...(search.value ? { search: search.value } : {}),
+                    ...(statusFilter.value ? { status: statusFilter.value } : {}),
+                    ...(severityFilter.value ? { severity: severityFilter.value } : {}),
+                    ...(categoryFilter.value ? { category: categoryFilter.value } : {}),
+                    checklist: INCIDENT_EXPORT_CHECKS.filter((check) => listExportChecklist.value[check.key]).map((check) => check.key).join(","),
+                },
+            });
+            const payload = response.data?.data ?? response.data ?? {};
+            const rowsData = (payload.incidents ?? []) as Incident[];
+            if (rowsData.length === 0) {
+                showSnackBar({ type: "warning", message: t("No incidents match the current filters.") });
+                return;
+            }
+            const truncated = payload.truncated === true;
+            const exportedTotal = Number(payload.total ?? rowsData.length);
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const columns = ["id", "reference", "title", "severity", "status", "category", "impactScope", "detectedAt", "commander", "postmortemRequired", "regulatorsNotified", "affectedServices"];
+            const lines = [
+                columns.map(escape).join(","),
+                ...rowsData.map((row) => [
+                    row.id,
+                    row.reference,
+                    row.title,
+                    row.severity,
+                    row.status,
+                    row.category,
+                    row.impactScope,
+                    row.detectedAt,
+                    row.commanderName ?? row.commanderUserId ?? "",
+                    row.postmortemRequired,
+                    row.regulatorsNotified,
+                    (row.affectedServices ?? []).join(";"),
+                ].map(escape).join(",")),
+            ];
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({ title: `incidents-${new Date().toISOString().slice(0, 10)}.xlsx`, lines });
+            listExportOpen.value = false;
+            listExportChecklist.value = {};
+            showSnackBar({
+                type: truncated ? "warning" : "success",
+                message: truncated
+                    ? t("Exported {exported} of {total} incidents; narrow the filters to export the rest.", { exported: rowsData.length, total: exportedTotal })
+                    : t("Incidents exported"),
+            });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            listExportLoading.value = false;
+        }
+    };
+
     const createIncident = async () => {
         creating.value = true;
         createError.value = "";
@@ -306,12 +439,21 @@ const IncidentsPage = dc(() => {
     };
     const transition = async () => {
         if (!selected.value || !transitionTo.value) return;
+        if (!transitionChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all transition checklist items before continuing") });
+            return;
+        }
         if (transitionTo.value === "CLOSED" && !(await showConfirm({ title: t("Close incident"), message: t("Closing the incident is irreversible."), type: "error" }))) return;
         working.value = true;
         try {
-            await api.post(urlsMap.incidentTransition(selected.value.id), { status: transitionTo.value, note: transitionNote.value || undefined });
+            await api.post(urlsMap.incidentTransition(selected.value.id), {
+                status: transitionTo.value,
+                note: transitionNote.value || undefined,
+                checklist: TRANSITION_CHECKS.filter((check) => transitionChecklist.value[check.key]).map((check) => check.key),
+            });
             transitionTo.value = null;
             transitionNote.value = "";
+            transitionChecklist.value = {};
             showSnackBar({ type: "success", message: t("Incident status updated") });
             await refreshSelected();
             refreshAll();
@@ -427,9 +569,19 @@ const IncidentsPage = dc(() => {
     };
     const addCommunication = async () => {
         if (!selected.value || !commSubject.value.trim() || !commBody.value.trim()) return;
+        if (!commChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all communication checklist items before recording") });
+            return;
+        }
         working.value = true;
         try {
-            await api.post(urlsMap.incidentCommunications(selected.value.id), { channel: commChannel.value, audience: commAudience.value, subject: commSubject.value, body: commBody.value });
+            await api.post(urlsMap.incidentCommunications(selected.value.id), {
+                channel: commChannel.value,
+                audience: commAudience.value,
+                subject: commSubject.value,
+                body: commBody.value,
+                checklist: COMMUNICATION_CHECKS.filter((check) => commChecklist.value[check.key]).map((check) => check.key),
+            });
             commSubject.value = "";
             commBody.value = "";
             await refreshSelected();
@@ -464,15 +616,29 @@ const IncidentsPage = dc(() => {
                 end={() => (
                     <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                         <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
+                        <VBtn variant="tonal" prependIcon="mdi-download" loading={listExportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         <VBtn color="primary" prependIcon="mdi-plus" onClick={() => (createOpen.value = true)}>{t("Open incident")}</VBtn>
                     </ThemedView>
                 )}
             />
-            <MetricStrip items={metrics.value} />
+            <SummaryExportCard
+                title={t("Incident health")}
+                metrics={metrics.value}
+                checks={[...SUMMARY_EXPORT_CHECKS]}
+                checklist={summaryExportChecklist.value}
+                onUpdate:checklist={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                showChecklists={showChecklists}
+                checklistComplete={summaryExportChecklistComplete.value}
+                exportLoading={summaryExportLoading.value}
+                exportDisabled={!summaryExportChecklistComplete.value}
+                exportLabel={t("Export summary")}
+                onExport={() => void exportSummary()}
+            />
             <ApiTable<Incident>
                 title={t("Incident queue")}
                 url={urlsMap.incidents}
                 localSearch={false}
+                xlsx={false}
                 showNumber={true}
                 numberOfItemsPerPage={pageSize.value}
                 numberOfItemsPerPageChoices={[{ label: "10", value: 10 }, { label: "20", value: 20 }, { label: "50", value: 50 }]}
@@ -518,6 +684,28 @@ const IncidentsPage = dc(() => {
                 )}
             />
 
+            <FormModal
+                modelValue={listExportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (listExportOpen.value = value)}
+                title={t("Export incidents")}
+                size="md"
+                loading={listExportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportIncidents()}
+            >
+                <VAlert type="error" variant="tonal">
+                    {t("Incident exports contain confidential operational and regulatory data. Confirm scope, handling and authority before exporting.")}
+                </VAlert>
+                <FormChecklist
+                    checks={[...INCIDENT_EXPORT_CHECKS]}
+                    modelValue={listExportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (listExportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Incident export checklist")}
+                    complete={listExportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
             <FormModal modelValue={createOpen.value} onUpdate:modelValue={(value: boolean) => (createOpen.value = value)} title={t("Open incident")} size="lg" loading={creating.value} submitLabel={t("Open incident")} onSubmit={() => void createIncident()}>
                 {createError.value && <VAlert type="error" variant="tonal" class="mb-4">{createError.value}</VAlert>}
                 <FormField label={t("Title")} required><VTextField modelValue={form.value.title} onUpdate:modelValue={(value: string) => (form.value.title = value)} hideDetails /></FormField>
@@ -543,7 +731,18 @@ const IncidentsPage = dc(() => {
                         <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                             <VSelect items={(TRANSITIONS[selected.value.status] ?? []).map((value) => ({ title: value, value }))} modelValue={transitionTo.value} onUpdate:modelValue={(value: string | null) => (transitionTo.value = value)} label={t("Next status")} hideDetails density="compact" style={{ maxWidth: "220px" }} />
                             <VTextField modelValue={transitionNote.value} onUpdate:modelValue={(value: string) => (transitionNote.value = value)} label={t("Transition note")} hideDetails density="compact" style={{ maxWidth: "320px" }} />
-                            <VBtn size="small" color="primary" disabled={!transitionTo.value} loading={working.value} onClick={() => void transition()}>{t("Transition")}</VBtn>
+                            <VBtn size="small" color="primary" disabled={!transitionTo.value || !transitionChecklistComplete.value} loading={working.value} onClick={() => void transition()}>{t("Transition")}</VBtn>
+                        </ThemedView>
+                        <FormChecklist
+                            checks={[...TRANSITION_CHECKS]}
+                            modelValue={transitionChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (transitionChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Transition checklist")}
+                            complete={transitionChecklistComplete.value}
+                            incompleteMessage={t("Complete all transition checklist items before continuing")}
+                        />
+                        <ThemedView style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                             {!selected.value.regulatoryReportId && <VBtn size="small" variant="tonal" loading={working.value} onClick={() => void draftReport()}>{t("Draft regulatory report")}</VBtn>}
                             {selected.value.regulatoryReportId && <VBtn size="small" variant="text" prependIcon="mdi-open-in-new" onClick={() => void router.push({ name: "AmlReports", query: { open: selected.value?.regulatoryReportId } })}>{t("Open regulatory report")}</VBtn>}
                         </ThemedView>
@@ -637,7 +836,16 @@ const IncidentsPage = dc(() => {
                                 </ThemedView>
                                 <VTextField modelValue={commSubject.value} onUpdate:modelValue={(value: string) => (commSubject.value = value)} label={t("Subject")} hideDetails density="compact" />
                                 <VTextarea modelValue={commBody.value} onUpdate:modelValue={(value: string) => (commBody.value = value)} label={t("Message")} rows={4} hideDetails />
-                                <VBtn size="small" variant="tonal" onClick={() => void addCommunication()}>{t("Record communication")}</VBtn>
+                                <FormChecklist
+                                    checks={[...COMMUNICATION_CHECKS]}
+                                    modelValue={commChecklist.value}
+                                    onUpdate:modelValue={(value: Record<string, boolean>) => (commChecklist.value = value)}
+                                    show={showChecklists}
+                                    title={t("Communication checklist")}
+                                    complete={commChecklistComplete.value}
+                                    incompleteMessage={t("Complete all communication checklist items before recording")}
+                                />
+                                <VBtn size="small" variant="tonal" disabled={!commChecklistComplete.value} onClick={() => void addCommunication()}>{t("Record communication")}</VBtn>
                                 {(selected.value.communications ?? []).length === 0 ? <EmptyState title={t("No communications")} /> : (selected.value.communications ?? []).map((communication) => (
                                     <ThemedView key={communication.id} style={{ borderTop: "1px solid var(--pg-border-subtle)", padding: "10px 0" }}>
                                         <ThemedText style={{ fontSize: "12px", opacity: 0.65 }}>{communication.channel} · {communication.audience} · {formatDateTime(communication.sentAt)}</ThemedText>

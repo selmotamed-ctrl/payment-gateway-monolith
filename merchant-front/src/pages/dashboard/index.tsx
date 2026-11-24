@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale, useTheme } from "vuetify";
+import { VSelect } from "vuetify/components";
 
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -49,13 +50,15 @@ const DashboardPage = dc(() => {
     const loading = ref(true);
     const error = ref<string | null>(null);
     const period = ref("last_30d");
+    const selectedCurrency = ref("LYD");
+    const currencyOptions = ["LYD", "USD", "EUR"].map((code) => ({ title: code, value: code }));
 
     const load = async () => {
         loading.value = true;
         error.value = null;
         try {
             const response = await api.get(urlsMap.statsOverview, {
-                params: { period: period.value },
+                params: { period: period.value, currency: selectedCurrency.value },
             });
             overview.value = (response.data?.data ?? response.data ?? {}) as Overview;
         } catch (e) {
@@ -167,14 +170,28 @@ const DashboardPage = dc(() => {
                     title={t("Dashboard")}
                     subtitle={t("Your wallet, payment volume, and settlement posture.")}
                     end={() => (
-                        <SegmentedTabs
-                            modelValue={period.value}
-                            tabs={periodTabs}
-                            onUpdate:modelValue={(value: string) => {
-                                period.value = value;
-                                void load();
-                            }}
-                        />
+                        <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                            <SegmentedTabs
+                                modelValue={period.value}
+                                tabs={periodTabs}
+                                onUpdate:modelValue={(value: string) => {
+                                    period.value = value;
+                                    void load();
+                                }}
+                            />
+                            <VSelect
+                                modelValue={selectedCurrency.value}
+                                onUpdate:modelValue={(value: string) => {
+                                    selectedCurrency.value = value;
+                                    void load();
+                                }}
+                                items={currencyOptions}
+                                density="compact"
+                                variant="outlined"
+                                hideDetails
+                                style={{ maxWidth: "110px" }}
+                            />
+                        </ThemedView>
                     )}
                 />
 

@@ -68,7 +68,7 @@ export const cookieSession: RequestHandler = (req: Request, _res: Response, next
   }
   // Login/MFA are not authenticated by the cookie; a stale cookie must not
   // force the CSRF header on them (login would otherwise fail with 403).
-  if (/(?:^|\/)(?:auth\/)?(?:login|mfa)$/.test(req.path)) {
+  if (/(?:^|\/)(?:auth\/)?(?:login|mfa|mfa\/resend|mfa\/verify|accept-invitation|register|verify-identity|google)$/.test(req.path)) {
     next();
     return;
   }

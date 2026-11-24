@@ -39,6 +39,7 @@ import type {
 
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { DescriptionList, type DescriptionItem } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
@@ -125,6 +126,12 @@ const clean = (value: string): string | undefined => (value.trim().length > 0 ? 
 const auditChangeSummary = (entry: { beforeJson?: unknown; afterJson?: unknown }): string =>
     describeAuditChange(entry.beforeJson, entry.afterJson);
 
+const WITHDRAW_CHECKS = [
+    { key: "REQUEST_SCOPE_VERIFIED", label: "Join request scope verified" },
+    { key: "APPROVAL_CANCEL_UNDERSTOOD", label: "Pending approval cancellation understood" },
+    { key: "AUTHORITY_CONFIRMED", label: "Withdrawal authority confirmed" },
+] as const;
+
 const JoinRequestDetailPage = dc(() => {
     const { t } = useLocale();
     const showChecklists = areChecklistsVisible();
@@ -182,6 +189,9 @@ const JoinRequestDetailPage = dc(() => {
     const decisionRiskTier = ref("STANDARD");
 
     const withdrawOpen = ref(false);
+    const withdrawReason = ref("");
+    const withdrawChecklist = ref<Record<string, boolean>>({});
+    const withdrawChecklistComplete = computed(() => !showChecklists || WITHDRAW_CHECKS.every((check) => withdrawChecklist.value[check.key] === true));
     const checkerNotes = ref("");
 
     const requestId = computed(() => String(route.params.id ?? ""));
@@ -284,9 +294,22 @@ const JoinRequestDetailPage = dc(() => {
     }, t("Submitted for review"));
 
     const withdraw = () => {
+        if (!withdrawChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all withdrawal checklist items before continuing") });
+            return;
+        }
+        if (withdrawReason.value.trim().length < 3) {
+            showSnackBar({ type: "warning", message: t("A withdrawal reason is required") });
+            return;
+        }
         withdrawOpen.value = false;
         void run(async () => {
-            await api.post(urlsMap.joinRequestWithdraw(requestId.value), {});
+            await api.post(urlsMap.joinRequestWithdraw(requestId.value), {
+                reason: withdrawReason.value.trim(),
+                checklist: WITHDRAW_CHECKS.filter((check) => withdrawChecklist.value[check.key]).map((check) => check.key),
+            });
+            withdrawReason.value = "";
+            withdrawChecklist.value = {};
         }, t("Join request withdrawn"));
     };
 
@@ -332,6 +355,10 @@ const JoinRequestDetailPage = dc(() => {
             showSnackBar({ type: "warning", message: t("All approval blockers must be cleared before approval.") });
             return;
         }
+        if (decision.value === "APPROVED" && !checklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete and save the review checklist before approval.") });
+            return;
+        }
         if (decision.value === "REJECTED" && decisionNotes.value.trim().length < 3) {
             showSnackBar({ type: "warning", message: t("A rejection note is required") });
             return;
@@ -339,6 +366,11 @@ const JoinRequestDetailPage = dc(() => {
         if (!(await (decision.value === "APPROVED" ? approveJoinSafeguard : rejectJoinSafeguard).confirm())) return;
         actionLoading.value = true;
         try {
+            if (decision.value === "APPROVED") {
+                await api.patch(urlsMap.joinRequestChecklist(requestId.value), {
+                    items: Object.fromEntries((detail.value?.checklistKeys ?? []).map((key) => [key, Boolean(checklist.value[key])])),
+                });
+            }
             const response = await api.post(urlsMap.joinRequestDecide(requestId.value), {
                 decision: decision.value,
                 reasonCode: decisionReason.value,
@@ -1124,7 +1156,7 @@ const JoinRequestDetailPage = dc(() => {
                                         </>
                                     )}
                                     {canWithdraw.value && (
-                                        <VBtn variant="text" color="error" onClick={() => (withdrawOpen.value = true)}>
+                                        <VBtn variant="text" color="error" onClick={() => { withdrawReason.value = ""; withdrawChecklist.value = {}; withdrawOpen.value = true; }}>
                                             {t("Withdraw")}
                                         </VBtn>
                                     )}
@@ -1344,13 +1376,25 @@ const JoinRequestDetailPage = dc(() => {
                     onUpdate:modelValue={(value: boolean) => (withdrawOpen.value = value)}
                     title={t("Withdraw join request")}
                     size="sm"
-                    onSubmit={withdraw}
+                    onSubmit={() => void withdraw()}
                     submitLabel={t("Withdraw")}
                     cancelLabel={t("Cancel")}
                     loading={actionLoading.value}
                     danger
                 >
                     <ThemedText>{t("The request will be closed as withdrawn. A pending checker approval is cancelled.")}</ThemedText>
+                    <FormField label={t("Withdrawal reason")} required>
+                        <VTextarea modelValue={withdrawReason.value} onUpdate:modelValue={(value: string) => (withdrawReason.value = value)} rows={3} autoGrow />
+                    </FormField>
+                    <FormChecklist
+                        checks={[...WITHDRAW_CHECKS]}
+                        modelValue={withdrawChecklist.value}
+                        onUpdate:modelValue={(value: Record<string, boolean>) => (withdrawChecklist.value = value)}
+                        show={showChecklists}
+                        title={t("Withdrawal checklist")}
+                        complete={withdrawChecklistComplete.value}
+                        incompleteMessage={t("Complete all withdrawal checklist items before continuing")}
+                    />
                 </FormModal>
             </ScreenContainer>
         );

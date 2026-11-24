@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
 import { VAlert, VBtn, VSelect } from "vuetify/components";
+import { areChecklistsVisible } from "@/constants/env";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { ApiTable } from "@/components/Table/ApiTable";
@@ -73,6 +75,12 @@ const AUDIENCE_LABEL_KEYS: Record<string, string> = {
   BOTH: "Merchant & Backoffice",
 };
 
+const RUN_CHECKS = [
+  { key: "REPORT_SCOPE_VERIFIED", label: "Report and audience scope verified" },
+  { key: "INPUTS_AND_PERIOD_REVIEWED", label: "Inputs, period and filters reviewed" },
+  { key: "CONFIDENTIALITY_ACKNOWLEDGED", label: "Output confidentiality acknowledged" },
+] as const;
+
 const ReportsCatalogPage = dc(() => {
   const { t } = useLocale();
   const router = useRouter();
@@ -90,6 +98,9 @@ const ReportsCatalogPage = dc(() => {
   const footerCode = ref<string | null>(null);
   const generating = ref(false);
   const bundle = ref<ReportExecutionBundle | null>(null);
+  const showChecklists = areChecklistsVisible();
+  const runChecklist = ref<Record<string, boolean>>({});
+  const runChecklistComplete = computed(() => !showChecklists || RUN_CHECKS.every((check) => runChecklist.value[check.key] === true));
   const languagePrompt = ref(false);
   const drawerOpen = ref(false);
   const previewRef = ref<{
@@ -266,6 +277,7 @@ const ReportsCatalogPage = dc(() => {
     footerCode.value = report.spec.page_layout.footer_chrome_code ?? null;
     bundle.value = null;
     previewPages.value = 1;
+    runChecklist.value = {};
     drawerOpen.value = true;
   };
 
@@ -326,6 +338,10 @@ const ReportsCatalogPage = dc(() => {
 
   const runGenerate = async (chosenLocale: string) => {
     if (!selected.value) return;
+    if (!runChecklistComplete.value) {
+      showSnackBar({ message: t("Complete all report checklist items before generating"), type: "warning" });
+      return;
+    }
     if (inputFormRef.value?.validate && !inputFormRef.value.validate()) {
       showSnackBar({ message: t("Fix the highlighted inputs before generating"), type: "warning" });
       return;
@@ -337,6 +353,7 @@ const ReportsCatalogPage = dc(() => {
       const response = await api.post(urlsMap.reportEngineExecute(selected.value.code), {
         inputs: inputs.value,
         locale: chosenLocale,
+        checklist: RUN_CHECKS.filter((check) => runChecklist.value[check.key]).map((check) => check.key),
         ...(selected.value.spec.page_layout.allow_runtime_chrome_selection
           ? {
               chromeOverride: {
@@ -594,7 +611,7 @@ const ReportsCatalogPage = dc(() => {
                     <VBtn variant="text" onClick={resetInputs}>{t("Reset inputs")}</VBtn>
                     <VBtn variant="text" onClick={clearSelection}>{t("Clear selection")}</VBtn>
                   </div>
-                  <VBtn color="primary" prependIcon="mdi-file-chart" loading={generating.value} onClick={requestGenerate}>
+                  <VBtn color="primary" prependIcon="mdi-file-chart" loading={generating.value} disabled={!runChecklistComplete.value} onClick={requestGenerate}>
                     {t("Generate Report")}
                   </VBtn>
                 </div>
@@ -699,6 +716,15 @@ const ReportsCatalogPage = dc(() => {
                   </div>
                 </section>
               )}
+              <FormChecklist
+                checks={[...RUN_CHECKS]}
+                modelValue={runChecklist.value}
+                onUpdate:modelValue={(value: Record<string, boolean>) => (runChecklist.value = value)}
+                show={showChecklists}
+                title={t("Report run checklist")}
+                complete={runChecklistComplete.value}
+                incompleteMessage={t("Complete all report checklist items before generating")}
+              />
             </div>
           )}
         </SlideOverDrawer>

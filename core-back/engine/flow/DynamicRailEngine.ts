@@ -145,7 +145,7 @@ export interface PaymentLedgerPoster {
     input: PaymentConfirmationInput,
     context: LedgerPostContext,
     transaction?: unknown,
-  ): Promise<{ entry: { id: string } }>;
+  ): Promise<{ entry: { id: string } } | null>;
   postScenario?(
     scenario: LedgerScenario,
     refId: string,
@@ -1172,9 +1172,9 @@ export class DynamicRailEngine {
       return this.escrowHeldCapture(fresh);
     }
     const previousStatus = fresh.status;
-    const post = async (transaction?: unknown): Promise<string> => {
+    const post = async (transaction?: unknown): Promise<string | undefined> => {
       if (!this.options.ledgerPoster) {
-        return `unposted:${attempt.id}`;
+        return undefined;
       }
       // The base amount is the requested amount; the surcharge is added on
       // top of it by the payer-surcharge templates.
@@ -1209,7 +1209,7 @@ export class DynamicRailEngine {
         this.ledgerContext(attempt),
         transaction,
       );
-      return result.entry.id;
+      return result?.entry.id;
     };
 
     const claim = this.options.attempts.claimFinalize;
@@ -1253,9 +1253,9 @@ export class DynamicRailEngine {
       await this.options.attempts.updateAttempt(attempt.id, {
         status: "SUCCEEDED",
         clearSubstatus: true,
-        ledgerEntryId,
+        ...(ledgerEntryId ? { ledgerEntryId } : {}),
       }, transaction);
-      return { outcome: "COMMITTED", journalEntryId: ledgerEntryId };
+      return { outcome: "COMMITTED", ...(ledgerEntryId ? { journalEntryId: ledgerEntryId } : {}) };
     };
 
     const runner = this.options.transactionRunner;

@@ -21,6 +21,9 @@ import { subscribeRealtimeAttempt } from "../../lib/realtimeBus";
 import { json } from "./json";
 import { postgresPlaceholders } from "../../engine/db/rawRows";
 import { getAuthStateStore } from "../../lib/auth/sharedState";
+import { isBadgeValid, loadCatalog as loadAcademyCatalog } from "../../engine/academy/catalog";
+import { parseStoredProgress } from "../../engine/academy/progress";
+import { findAcademyCertificate } from "../../engine/academy/certificate";
 
 const PLATFORM_TTL_CEILINGS: Record<string, number> = {
   OTP_PULL: 1200,
@@ -38,6 +41,55 @@ const route = express.Router();
 
 route.get("/health", (_request, response) => {
   response.json({ status: "ok", channel: "checkout", release: process.env.APP_RELEASE ?? null, commit: process.env.APP_COMMIT ?? null });
+});
+
+const ACADEMY_TRACK_TITLES: Record<string, string> = {
+  FOUNDATION: "Foundation (everyone)",
+  OPERATOR: "Operator",
+  SUPPORT: "Support agent",
+  FINANCE: "Finance officer",
+  COMPLIANCE: "Compliance analyst",
+  MLRO: "Money Laundering Reporting Officer",
+  GATEWAY_ADMIN: "Gateway administrator",
+  SECURITY_ADMIN: "Security administrator",
+};
+
+route.get("/academy/certificates/:publicId", async (request, response) => {
+  const { publicId } = parseOrThrow(z.object({ publicId: z.string().min(16).max(64) }).strict(), request.params);
+  const certificate = await findAcademyCertificate(publicId);
+  if (!certificate) {
+    throw new ApiError(404, "CERTIFICATE_NOT_FOUND", "The certificate could not be verified");
+  }
+  const catalog = loadAcademyCatalog();
+  const { progress } = parseStoredProgress(certificate.user?.academyProgressJson, catalog, new Date());
+  const badge = progress.badges.find(
+    (entry) => entry.track === certificate.trackId && Date.parse(entry.earnedAt) === certificate.earnedAt.getTime(),
+  );
+  const active = certificate.status === "ACTIVE" && certificate.user?.status === "ACTIVE";
+  const status = !active || !badge
+    ? "revoked"
+    : isBadgeValid(badge, catalog, new Date())
+      ? "valid"
+      : "expired";
+  const track = catalog.tracks.find((entry) => entry.id === certificate.trackId);
+  const trackTitle = ACADEMY_TRACK_TITLES[certificate.trackId]
+    ?? certificate.trackId
+      .toLowerCase()
+      .split("_")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  response.json({
+    certificateId: certificate.displayId,
+    publicId: certificate.publicId,
+    status,
+    holderName: certificate.holderName,
+    trackId: certificate.trackId,
+    trackTitle,
+    badgeCode: track?.badge ?? certificate.badgeCode,
+    earnedAt: certificate.earnedAt.toISOString(),
+    expiresAt: certificate.expiresAt.toISOString(),
+    contentVersion: certificate.contentVersion,
+  });
 });
 
 const linkParamsSchema = z.object({ linkKey: z.string().min(6).max(64).regex(/^[A-Za-z0-9_-]+$/) });

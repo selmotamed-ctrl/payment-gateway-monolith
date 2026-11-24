@@ -12,6 +12,7 @@ import { Prisma, type PrismaClient } from "../../generated/prisma/client";
 import { LedgerPoster, type JournalTemplate } from "../../engine/ledger/LedgerPoster";
 import { createLedgerPoster } from "../../lib/storageEngine/ledgerPosterFactory";
 import { clearShardWidthCache } from "../../lib/storageEngine/shardRouting";
+import { deleteWithAppendOnlyMaintenance } from "./appendOnlyMaintenance";
 
 export interface AutomationCatalog {
   label: string;
@@ -337,7 +338,8 @@ export const createAutomationCatalog = async (
 /** Removes the rows of a catalog that other suites must not see: its operator cases, queued jobs and notifications. */
 export const cleanupAutomationCatalog = async (client: PrismaClient, catalogs: readonly AutomationCatalog[]): Promise<void> => {
   for (const catalog of catalogs) {
-    await client.$executeRawUnsafe(
+    await deleteWithAppendOnlyMaintenance(
+      client,
       `DELETE FROM operator_cases WHERE subject_key LIKE $1 OR attempt_id IN (SELECT id FROM payment_attempts WHERE merchant_id = $2::uuid)`,
       `%${catalog.merchantId}%`,
       catalog.merchantId,

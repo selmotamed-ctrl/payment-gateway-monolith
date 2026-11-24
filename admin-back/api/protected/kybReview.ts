@@ -11,7 +11,7 @@ import {
 } from "../../lib/mtlsClient";
 import { parseCidrList, resolveClientIp } from "../../lib/net";
 import { resolveRequestId } from "../../lib/requestLogger";
-import { coreForward } from "../forward";
+import { coreForward, summaryExportQuerySchema } from "../forward";
 import {
   toCoreKybDocumentReplacement,
   toCoreKybDocumentRevalidation,
@@ -95,6 +95,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/kyb-documents/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 

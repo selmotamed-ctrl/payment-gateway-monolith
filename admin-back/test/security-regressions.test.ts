@@ -43,6 +43,7 @@ const setEnv = () => {
   process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
   process.env.MTLS_CA_CERT_PATH = pki.caCert;
   process.env.CORE_REQUEST_TIMEOUT_MS = "5000";
+  process.env.BACKUP_JOB_RATE_LIMIT_MAX = "1000000";
   resetEnvCache();
   resetCoreAgent();
 };

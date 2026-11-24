@@ -99,6 +99,7 @@ export const naturalShardBalance = (
 export interface LiveAccountBalanceRow {
   id: string;
   accountType: string;
+  currency: string;
   /** Natural-sign balance (credit-normal accounts positive when in credit). */
   balance: string;
   /** Always "shards": every account has its shard rows (the `gl_accounts_create_shards` trigger). */
@@ -126,6 +127,7 @@ export const loadLiveAccountBalances = async (
   const rows = await db.$queryRawUnsafe(
     `SELECT g.id::text AS id,
             g.account_type::text AS "accountType",
+            g.currency::text AS currency,
             COALESCE(s.total, 0)::text AS raw
      FROM gl_accounts g
      LEFT JOIN (
@@ -138,10 +140,11 @@ export const loadLiveAccountBalances = async (
     ...(filtered ? [accountIds] : []),
   );
   return (Array.isArray(rows) ? rows : []).map((row) => {
-    const record = row as { id: string; accountType: string; raw: string | null };
+    const record = row as { id: string; accountType: string; currency: string; raw: string | null };
     return {
       id: record.id,
       accountType: record.accountType,
+      currency: String(record.currency ?? "LYD").trim(),
       balance: naturalShardBalance(record.accountType, record.raw ?? "0"),
       source: "shards" as const,
     };

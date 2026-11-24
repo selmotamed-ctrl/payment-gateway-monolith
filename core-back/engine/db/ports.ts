@@ -451,6 +451,9 @@ export interface StatementSourceRow {
   parserConfig: unknown;
   settlementLagDays: number;
   dedupeKeyTemplate: string | null;
+  currency?: string | null;
+  env?: string | null;
+  credentialSetId?: string | null;
 }
 
 export interface ReconciliationRunRow {
@@ -463,6 +466,8 @@ export interface ReconciliationRunRow {
   fileName?: string | null;
   storageObjectId?: string | null;
   ingestedAt?: Date | null;
+  currency?: string | null;
+  autoPost?: boolean | null;
 }
 
 /**
@@ -503,10 +508,15 @@ export interface ReconciliationItemRow {
   operatorCaseId: string | null;
   /** The statement row type, when the item came from a statement row (AUTO-23). */
   rowType?: string | null;
+  currency?: string | null;
+  gatewayId?: string | null;
+  env?: string | null;
+  credentialSetId?: string | null;
 }
 
 export interface AttemptWindowFilter {
   merchantId: string;
+  currency?: string | null;
   applicationId?: string | null;
   linkId?: string | null;
   railCode?: string | null;
@@ -580,7 +590,7 @@ export interface MerchantRepository {
     contactPhone?: string | null;
     contactEmail?: string | null;
   }): Promise<MerchantRow[]>;
-  getWalletBalance(tx: Tx, merchantId: string): Promise<Money>;
+  getWalletBalance(tx: Tx, merchantId: string, currency?: string | null): Promise<Money>;
   getNegativeBalanceCeiling(tx: Tx, merchantId: string): Promise<Money>;
   /**
    * The merchant's outstanding COMMISSION_RECEIVABLE balance (design §7.1).
@@ -590,7 +600,7 @@ export interface MerchantRepository {
    * The method is optional only so older in-memory repository fakes keep
    * compiling; every production repository implements it.
    */
-  getCommissionReceivableBalance?(tx: Tx, merchantId: string): Promise<Money>;
+  getCommissionReceivableBalance?(tx: Tx, merchantId: string, currency?: string | null): Promise<Money>;
 }
 
 export interface OnboardingRepository {
@@ -785,6 +795,8 @@ export interface ReconciliationRepository {
     statsJson: unknown;
     fileName?: string | null;
     storageObjectId?: string | null;
+    currency?: string | null;
+    autoPost?: boolean | null;
   }): Promise<ReconciliationRunRow>;
   updateRunStats(tx: Tx, id: string, stats: unknown): Promise<void>;
   /**

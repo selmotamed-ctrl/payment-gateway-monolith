@@ -10,7 +10,7 @@ import {
   toCoreAmlReportingRule,
   toCoreAmlRule,
 } from "../contract";
-import { coreForward, coreForwardRaw } from "../forward";
+import { coreForward, coreForwardRaw, summaryExportQuerySchema } from "../forward";
 import { forwardUpload, uploadGuards, uploadSingle } from "../upload";
 import { ApiError, parseOrThrow } from "../../lib/error";
 
@@ -168,6 +168,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/aml/screenings/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -224,6 +225,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/aml/cases/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -252,6 +254,7 @@ router.post(
         notes: typeof req.body?.notes === "string" ? req.body.notes : undefined,
       },
       status: 201,
+      allowedMimes: ["image/png", "image/jpeg", "application/pdf"],
     });
   },
 );
@@ -319,6 +322,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/aml/rules/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -361,7 +365,7 @@ router.post(
   }),
 );
 
-const reportingRulePromoteSchema = z.object({}).strict();
+const reportingRulePromoteSchema = z.object({ checklist: z.array(z.string().max(64)).max(10).optional() }).strict();
 
 router.post(
   "/reporting-rules/:id/promote",
@@ -407,6 +411,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/aml/reports/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -505,7 +510,10 @@ const reportSchemaUploadSchema = z
   })
   .strict();
 
-const reportSchemaPromoteSchema = z.object({ setAsDefault: z.boolean().default(true) }).strict();
+const reportSchemaPromoteSchema = z.object({
+  setAsDefault: z.boolean().default(true),
+  checklist: z.array(z.string().max(64)).max(10).optional(),
+}).strict();
 const reportSchemaDefaultSchema = z
   .object({
     authority: z.string().min(2).max(64).default("CBL"),
@@ -513,6 +521,7 @@ const reportSchemaDefaultSchema = z
     reportCode: z.string().max(40).default(""),
     format: z.enum(["XML", "XLSX", "DOCX"]),
     schemaId: zIdentifier,
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 const reportSimulateSchema = z.object({ context: zJsonObject }).strict();
@@ -854,13 +863,21 @@ const incidentResponderSchema = z.object({ userId: zIdentifier.optional(), name:
 const incidentActionSchema = z.object({ title: z.string().min(1).max(500), ownerUserId: zIdentifier.optional(), priority: z.number().int().min(1).max(4).default(3), dueAt: z.string().max(64).optional(), notes: z.string().max(5000).optional() }).strict();
 const incidentActionPatchSchema = z.object({ title: z.string().min(1).max(500).optional(), ownerUserId: zIdentifier.nullable().optional(), priority: z.number().int().min(1).max(4).optional(), status: z.enum(["OPEN", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"]).optional(), dueAt: z.string().max(64).nullable().optional(), notes: z.string().max(5000).nullable().optional() }).strict();
 const incidentLinkSchema = z.object({ linkType: incidentLinkTypeSchema, targetId: z.string().min(1).max(200), label: z.string().max(300).optional() }).strict();
-const incidentCommunicationSchema = z.object({ channel: z.enum(["STATUS_PAGE", "EMAIL", "SMS", "REGULATOR", "INTERNAL"]), audience: z.string().min(1).max(500), subject: z.string().min(1).max(500), body: z.string().min(1).max(50_000) }).strict();
+const incidentCommunicationSchema = z.object({
+  channel: z.enum(["STATUS_PAGE", "EMAIL", "SMS", "REGULATOR", "INTERNAL"]),
+  audience: z.string().min(1).max(500),
+  subject: z.string().min(1).max(500),
+  body: z.string().min(1).max(50_000),
+  checklist: z.array(z.string().max(64)).max(10).optional(),
+}).strict();
 
+router.get("/incidents/summary/export", coreForward({ method: "GET", path: () => "/internal/admin/incidents/summary/export", querySchema: summaryExportQuerySchema }));
+router.get("/incidents/export", coreForward({ method: "GET", path: () => "/internal/admin/incidents/export", querySchema: incidentQuerySchema.omit({ page: true, pageSize: true }).extend({ checklist: z.string().max(1000).optional() }) }));
 router.get("/incidents", coreForward({ method: "GET", path: () => "/internal/admin/incidents", querySchema: incidentQuerySchema }));
 router.post("/incidents", coreForward({ method: "POST", path: () => "/internal/admin/incidents", schema: incidentCreateSchema, relayStatus: true }));
 router.get("/incidents/:id", coreForward({ method: "GET", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}`, paramsSchema: incidentIdParams }));
 router.patch("/incidents/:id", coreForward({ method: "PATCH", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}`, paramsSchema: incidentIdParams, schema: incidentPatchSchema, relayStatus: true }));
-router.post("/incidents/:id/transition", coreForward({ method: "POST", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/transition`, paramsSchema: incidentIdParams, schema: z.object({ status: incidentStatusSchema, note: z.string().max(5000).optional() }).strict(), relayStatus: true }));
+router.post("/incidents/:id/transition", coreForward({ method: "POST", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/transition`, paramsSchema: incidentIdParams, schema: z.object({ status: incidentStatusSchema, note: z.string().max(5000).optional(), checklist: z.array(z.string().max(64)).max(10).optional() }).strict(), relayStatus: true }));
 router.post("/incidents/:id/timeline", coreForward({ method: "POST", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/timeline`, paramsSchema: incidentIdParams, schema: incidentTimelineSchema, relayStatus: true }));
 router.post("/incidents/:id/responders", coreForward({ method: "POST", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/responders`, paramsSchema: incidentIdParams, schema: incidentResponderSchema, relayStatus: true }));
 router.patch("/incidents/:id/responders/:childId", coreForward({ method: "PATCH", path: (context) => `/internal/admin/incidents/${encodeURIComponent(context.params.id ?? "")}/responders/${encodeURIComponent(context.params.childId ?? "")}`, paramsSchema: incidentChildParams, schema: z.object({ acknowledged: z.boolean().optional(), released: z.boolean().optional() }).strict(), relayStatus: true }));
@@ -883,6 +900,7 @@ const filingAdapterSchema = z.object({
   authSecret: z.string().min(4).max(4000).nullable().optional(),
   timeoutSeconds: z.number().int().min(5).max(120).optional(),
   configJson: zJsonObject.nullable().optional(),
+  checklist: z.array(z.string().max(64)).max(10).optional(),
 }).strict();
 
 router.get("/filing-adapters", coreForward({ method: "GET", path: () => "/internal/admin/aml/filing-adapters" }));

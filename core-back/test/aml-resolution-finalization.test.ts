@@ -209,6 +209,9 @@ describe("F-NEW-3: an AML resolution finalises the attempt and the link slot", (
     const transition = fixture.events[0];
     expect(transition?.topic).toBe("attempt:transition");
     expect(transition ? (transition.payload as { status?: string }).status : undefined).toBe("SUCCEEDED");
+    const outbox = fakeTable("outboxEvent").filter((row) => row.topic === "attempt.transitioned");
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]?.aggregateId).toBe(String(attempt?.id));
   });
 
   test("REJECT fails the attempt, releases the slot and posts AML_VOID", async () => {

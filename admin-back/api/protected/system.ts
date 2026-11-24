@@ -1,10 +1,16 @@
 import express from "express";
 import { zListQuery } from "../../lib/zReady";
 import { coreForward } from "../forward";
-import { encode, reasonOnlySchema, uuidParamsSchema } from "./mutationSchemas";
+import { z } from "zod";
+import { encode, uuidParamsSchema, zMutationReason } from "./mutationSchemas";
 
 /** Background jobs, outbox, audit outbox and failed notification monitor (core: `security:*`). */
 const router = express.Router();
+const jobActionSchema = z.object({
+  reason: zMutationReason,
+  checklist: z.array(z.string().max(64)).max(10).optional(),
+}).strict();
+
 
 router.get(
   "/jobs-outbox/summary",
@@ -29,7 +35,7 @@ router.post(
     method: "POST",
     path: (context) => `/internal/admin/system/jobs/${encode(context.params.id)}/requeue`,
     paramsSchema: uuidParamsSchema,
-    schema: reasonOnlySchema,
+    schema: jobActionSchema,
     relayStatus: true,
   }),
 );
@@ -68,7 +74,7 @@ router.post(
     method: "POST",
     path: (context) => `/internal/admin/system/notifications/${encode(context.params.id)}/retry`,
     paramsSchema: uuidParamsSchema,
-    schema: reasonOnlySchema,
+    schema: jobActionSchema,
     relayStatus: true,
   }),
 );

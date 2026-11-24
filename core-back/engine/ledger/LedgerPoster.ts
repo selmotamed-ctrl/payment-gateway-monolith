@@ -188,6 +188,8 @@ export interface LedgerPosterOptions {
   rawSql?: boolean;
   /** How long a resolved most-specific account id is remembered (default 60 s). */
   accountCacheTtlMs?: number;
+  /** Require a currency whenever a currency-scoped account is resolved (no silent first-currency fallback). */
+  requireCurrency?: boolean;
 }
 
 const ACCOUNT_CACHE_TTL_MS = 60_000;
@@ -404,23 +406,33 @@ export function buildLedgerTemplate(
       };
     }
     case "FEE_VARIANCE_TRUE_UP": {
-      const variance = input.varianceAmount === undefined
+      const signed = input.varianceAmount === undefined
         ? new Decimal("0.1")
-        : requirePositive(input.varianceAmount, "Fee variance amount");
+        : decimal(input.varianceAmount);
+      if (!signed.isFinite()) throw moneyError("INVALID_LEDGER_AMOUNT", "Fee variance amount must be finite");
+      const variance = signed.abs();
+      if (variance.isZero()) {
+        return { refType: "FEE_VARIANCE", refId: reference, description: "Gateway settlement fee variance true-up", lines: [] };
+      }
       return {
         refType: "FEE_VARIANCE",
         refId: reference,
         description: "Gateway settlement fee variance true-up",
-        lines: [
-          { direction: "DEBIT", amount: variance, account: account("GATEWAY_FEE_EXPENSE") },
-          { direction: "CREDIT", amount: variance, account: account("GATEWAY_FEE_ACCRUAL") },
-        ],
+        lines: signed.isNegative()
+          ? [
+            { direction: "DEBIT", amount: variance, account: account("GATEWAY_FEE_ACCRUAL") },
+            { direction: "CREDIT", amount: variance, account: account("GATEWAY_FEE_EXPENSE") },
+          ]
+          : [
+            { direction: "DEBIT", amount: variance, account: account("GATEWAY_FEE_EXPENSE") },
+            { direction: "CREDIT", amount: variance, account: account("GATEWAY_FEE_ACCRUAL") },
+          ],
       };
     }
     case "PAYER_SURCHARGE_CONFIRMATION": {
       const surcharge = input.surchargeAmount === undefined
         ? commission
-        : requirePositive(input.surchargeAmount, "Payer surcharge amount");
+        : requireNonNegative(input.surchargeAmount, "Payer surcharge amount");
       const charged = amount.plus(surcharge);
       return {
         refType: "PAYMENT_ATTEMPT",
@@ -442,7 +454,7 @@ export function buildLedgerTemplate(
     case "SPLIT_SURCHARGE_CONFIRMATION": {
       const surcharge = input.surchargeAmount === undefined
         ? commission
-        : requirePositive(input.surchargeAmount, "Payer surcharge amount");
+        : requireNonNegative(input.surchargeAmount, "Payer surcharge amount");
       const charged = amount.plus(surcharge);
       return {
         refType: "PAYMENT_ATTEMPT",
@@ -744,6 +756,7 @@ export class LedgerPoster {
   private readonly transactionRunner: LedgerTransactionRunner;
 
   private readonly rawSql: boolean;
+  private readonly requireCurrency: boolean;
   private readonly accountCacheTtlMs: number;
   /** Positive, most-specific account resolutions only (see `resolveAccountIds`). */
   private readonly accountCache = new Map<string, { id: string; expiresAt: number }>();
@@ -759,6 +772,7 @@ export class LedgerPoster {
     // `$queryRawUnsafe` for other queries must keep the ORM-shaped path they emulate.
     this.rawSql = options.rawSql === true && typeof client.$transaction === "function";
     this.accountCacheTtlMs = options.accountCacheTtlMs ?? ACCOUNT_CACHE_TTL_MS;
+    this.requireCurrency = options.requireCurrency === true;
     this.client = client;
     this.transactionRunner = transactionRunner
       ?? (client.$transaction
@@ -1030,9 +1044,10 @@ export class LedgerPoster {
     input: PaymentConfirmationInput,
     context: LedgerPostContext = {},
     transaction?: LedgerPrismaClient,
-  ): Promise<LedgerPostResult> {
+  ): Promise<LedgerPostResult | null> {
     const template = buildPaymentConfirmationTemplate(input);
     template.refId = refId;
+    if (template.lines.length === 0) return null;
     return this.post(template, context, transaction);
   }
 
@@ -1074,6 +1089,9 @@ export class LedgerPoster {
     context: LedgerPostContext,
   ): Promise<string[]> {
     const plans = lines.map((line) => this.accountLookupPlan(line.account, context));
+    if (this.requireCurrency && !context.currency && plans.some((plan) => plan.kind === "lookup")) {
+      throw moneyError("MISSING_LEDGER_CURRENCY", "A currency is required to resolve the journal accounts");
+    }
     const now = Date.now();
     // A fresh most-specific resolution is final: no later account can be MORE specific than the scoped match, and
     // ties resolve to the lowest id, which never changes. Platform-wide FALLBACK results are never remembered (a
@@ -1250,6 +1268,9 @@ export class LedgerPoster {
     const mapped = context.accounts?.[selector.accountType];
     if (mapped) {
       return mapped;
+    }
+    if (this.requireCurrency && !selector.currency && !context.currency) {
+      throw moneyError("MISSING_LEDGER_CURRENCY", `A currency is required to resolve ${selector.accountType}`);
     }
     // The chart of accounts has three kinds of account (design §7.1):
     //   - a merchant wallet belongs to ONE merchant,

@@ -701,3 +701,5 @@ No build or test was run for this documentation change. Tests that require Postg
 ## v38 strict plane status (2026-11-13)
 
 OD-10 and `resolveEnvironment(merchantStatus)` are removed. Checkout and merchant link creation resolve the environment from the process plane; Live requires an ACTIVE merchant, application and wallet. Sandbox uses the same strict status rules, but its merchant envelope is created ACTIVE, so a pending Live merchant can train without a Live approval. `AttemptGuardPipeline` no longer reads the OD-10 setting and applies the same status posture on both planes.
+
+- **Link currency integrity (2026-11-24).** A new payment link is rejected with `LINK_WALLET_CURRENCY_MISMATCH` when its currency differs from the settlement wallet currency. Existing links are not rewritten; the attempt still resolves the wallet by merchant+currency, so a historical mismatch is a residual.

@@ -301,7 +301,7 @@ describeDb("daily commission netting worker (live PostgreSQL)", () => {
     expect(await auditCount("COMMISSION_RECEIVABLE_OVER_CEILING", catalog.merchantId)).toBeGreaterThanOrEqual(1);
     const notices = await client.notification.findMany({ where: { recipientMerchantId: catalog.merchantId, templateCode: "COMMISSION_RECEIVABLE_SETTLEMENT_DUE" } });
     expect(notices.map((row) => row.channel).sort()).toEqual(["EMAIL", "IN_APP"]); // one per channel, never repeated
-    const cases = await client.operatorCase.findMany({ where: { subjectKey: `commission.receivable.aged:${catalog.merchantId}` } });
+    const cases = await client.operatorCase.findMany({ where: { subjectKey: { startsWith: `commission.receivable.aged:${catalog.merchantId}:` } } });
     expect(cases).toHaveLength(1);
     expect(cases[0]!.priority).toBe("P1");
     expect(await catalog.receivableBalance()).toBe("30.0000");

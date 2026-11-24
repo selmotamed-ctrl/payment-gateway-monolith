@@ -3,7 +3,7 @@ id: deploy.pki
 title: Internal PKI and mTLS Certificates
 status: partial
 confidence: high
-last_verified: 2026-11-12
+last_verified: 2026-11-23
 verified_against: 6765e90+working-tree
 code:
   - deploy/lib/pkiManager.ts
@@ -345,3 +345,7 @@ configured, the `object-storage-client` client certificate. `certFilesForHost`
 gives the storage host its server + client material; core hosts and the backup
 host receive `internal-ca.crt` and `object-storage-client.*`. Certificate placement is per consumer: a co-located core/backup host does not receive the object-storage server key, and the backup host receives the client leaf in its own cert directory. Renewal/SAN drift
 handling includes the object-storage server leaf.
+
+## Certificate ownership on later deploys (2026-11-23)
+
+`uploadStorageCertificates` no longer leaves the object-storage certificate directory root-owned forever on a partial/later deploy. When `pgobjstore` exists, the deploy runs `install -d -m 0750 -o pgobjstore -g pgobjstore <dir>`, `chown -hR` (no symlink following), then `find <dir> -maxdepth 1 -type f -name '*.crt' -exec chmod 0640`, and the same for `*.key` at 0600. `install`/`chown` failures now fail the deploy; only the `find`/`chmod` steps are tolerant of an empty directory. The command is exported as `objectStorageCertOwnershipCommand` and covered by `deploy/test/objectStorageDeploy.test.ts`. `BACKUP_DAEMON_CERT_DIR` and `OBJECT_STORAGE_DAEMON_CERT_DIR` must differ (config validation).

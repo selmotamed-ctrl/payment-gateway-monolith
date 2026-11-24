@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
 import { VAlert, VBtn } from "vuetify/components";
+import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
@@ -16,10 +17,18 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { FormModal } from "@/components/ui/FormModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
 import { adminSandbox, type AdminSandboxMerchantDetail } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+
+const SEED_CHECKS = [
+    { key: "MERCHANT_SCOPE_VERIFIED", label: "Sandbox merchant scope verified" },
+    { key: "DEMO_DATA_UNDERSTOOD", label: "Demo data behavior understood" },
+    { key: "NO_LIVE_IMPACT_CONFIRMED", label: "No Live-data impact confirmed" },
+] as const;
 
 type Tab = "OVERVIEW" | "WALLETS" | "APPLICATIONS" | "LINKS" | "PAYMENTS" | "CASHOUTS" | "DISPUTES" | "ACCOUNTS" | "AUDITS";
 
@@ -33,6 +42,11 @@ const AdminSandboxMerchantDetailPage = dc(() => {
     const tab = ref<Tab>("OVERVIEW");
     const busy = ref<string | null>(null);
     const merchantId = () => String(route.params.id ?? "");
+    const showChecklists = areChecklistsVisible();
+    const seedOpen = ref(false);
+    const seedHistoryMode = ref(false);
+    const seedChecklist = ref<Record<string, boolean>>({});
+    const seedChecklistComplete = computed(() => !showChecklists || SEED_CHECKS.every((check) => seedChecklist.value[check.key] === true));
     const load = async () => {
         loading.value = true;
         error.value = null;
@@ -110,10 +124,48 @@ const AdminSandboxMerchantDetailPage = dc(() => {
         { key: "createdAt", label: "Date", value: (row) => row.createdAt },
     ];
 
-    const seed = async (history = false) => {
+    const openSeed = (history: boolean) => {
+        seedHistoryMode.value = history;
+        seedChecklist.value = {};
+        seedOpen.value = true;
+    };
+
+    const copySandboxMerchantSummary = async () => {
+        const data = detail.value;
+        if (!data) return;
+        const summary = {
+            merchant: data.merchant,
+            counts: {
+                wallets: data.wallets.length,
+                applications: data.applications.length,
+                links: data.links.length,
+                payments: data.payments.length,
+                cashouts: data.cashouts.length,
+                disputes: data.disputes.length,
+                fakeRailsAccounts: data.accounts.length,
+            },
+            wallets: data.wallets.map((wallet) => ({ id: wallet.id, name: wallet.name, status: wallet.status, availableBalance: wallet.availableBalance, currency: wallet.currency })),
+            url: window.location.href,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Sandbox merchant summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
+    const seed = async () => {
+        const history = seedHistoryMode.value;
+        if (!seedChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all seed checklist items before continuing") });
+            return;
+        }
+        const checklist = SEED_CHECKS.filter((check) => seedChecklist.value[check.key]).map((check) => check.key);
         busy.value = history ? "history" : "seed";
         try {
-            if (history) await adminSandbox.seedHistory(merchantId()); else await adminSandbox.seedMerchant(merchantId());
+            if (history) await adminSandbox.seedHistory(merchantId(), 20, checklist); else await adminSandbox.seedMerchant(merchantId(), checklist);
+            seedOpen.value = false;
             showSnackBar({ type: "success", message: history ? t("Sandbox history created") : t("Sandbox demo workspace ready") });
             await load();
         } catch (e) {
@@ -123,7 +175,7 @@ const AdminSandboxMerchantDetailPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={detail.value?.merchant.tradeName ?? t("Sandbox Merchant")} subtitle={detail.value?.merchant.id ?? merchantId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Merchants"), to: "/sandbox/merchants" }, { label: detail.value?.merchant.tradeName ?? merchantId() }]} end={() => <div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-play" loading={busy.value === "seed"} onClick={() => void seed()}>{t("Seed demo")}</VBtn><VBtn variant="tonal" prependIcon="mdi-history" loading={busy.value === "history"} onClick={() => void seed(true)}>{t("Seed history")}</VBtn><VBtn variant="tonal" prependIcon="mdi-storefront-outline" onClick={() => void router.push("/sandbox/merchants")}>{t("Back")}</VBtn></div>} />
+            <PageHeader title={detail.value?.merchant.tradeName ?? t("Sandbox Merchant")} subtitle={detail.value?.merchant.id ?? merchantId()} badge="SANDBOX" badgeTone="warning" breadcrumbs={[{ label: t("Sandbox Merchants"), to: "/sandbox/merchants" }, { label: detail.value?.merchant.tradeName ?? merchantId() }]} end={() => <div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!detail.value} onClick={() => void copySandboxMerchantSummary()}>{t("Copy summary")}</VBtn><VBtn variant="tonal" prependIcon="mdi-play" loading={busy.value === "seed"} onClick={() => openSeed(false)}>{t("Seed demo")}</VBtn><VBtn variant="tonal" prependIcon="mdi-history" loading={busy.value === "history"} onClick={() => openSeed(true)}>{t("Seed history")}</VBtn><VBtn variant="tonal" prependIcon="mdi-storefront-outline" onClick={() => void router.push("/sandbox/merchants")}>{t("Back")}</VBtn></div>} />
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value} minHeight="220px">
@@ -148,6 +200,25 @@ const AdminSandboxMerchantDetailPage = dc(() => {
                     {tab.value === "AUDITS" ? <DataTable title={t("Sandbox audits")} data={detail.value.audits} headers={auditHeaders} loading={false} showNumber={true} xlsx={false} noElevation={true} numberOfItemsPerPage={20} /> : null}
                 </div> : <EmptyState title={t("Merchant not found")} />}
             </StateView>
+            <FormModal
+                modelValue={seedOpen.value}
+                onUpdate:modelValue={(value: boolean) => (seedOpen.value = value)}
+                title={seedHistoryMode.value ? t("Seed sandbox payment history") : t("Seed sandbox demo workspace")}
+                size="sm"
+                loading={busy.value !== null}
+                submitLabel={seedHistoryMode.value ? t("Seed history") : t("Seed demo")}
+                onSubmit={() => void seed()}
+            >
+                <FormChecklist
+                    checks={[...SEED_CHECKS]}
+                    modelValue={seedChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (seedChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Seed checklist")}
+                    complete={seedChecklistComplete.value}
+                    incompleteMessage={t("Complete all seed checklist items before continuing")}
+                />
+            </FormModal>
         </ScreenContainer>
     );
 });

@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale, useTheme } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
-import { VAutocomplete, VBtn, VCheckbox, VDivider, VSelect, VTextField } from "vuetify/components";
+import { VAlert, VAutocomplete, VBtn, VCheckbox, VDivider, VSelect, VTextField } from "vuetify/components";
 import { useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -66,6 +66,12 @@ const reasonText = (reason: string | undefined): string => {
     return reason.replaceAll("_", " ").toLowerCase();
 };
 
+const EXPORT_CHECKS = [
+    { key: "CASE_SCOPE_VERIFIED", label: "Case scope and filters verified" },
+    { key: "SENSITIVE_FIELDS_REVIEWED", label: "Sensitive case fields reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const SUMMARY_EXPORT_CHECKS = [
     { key: "OPEN_SCOPE_VERIFIED", label: "Open case scope verified" },
     { key: "SLA_REVIEWED", label: "SLA status reviewed" },
@@ -110,6 +116,9 @@ const OperatorCasesPage = dc(() => {
     const total = ref(0);
     const summary = ref<OperatorCasesSummary | null>(null);
     const exportLoading = ref(false);
+    const exportOpen = ref(false);
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
     const summaryExportLoading = ref(false);
     const summaryExportChecklist = ref<Record<string, boolean>>({});
     const pageSize = ref(20);
@@ -152,12 +161,17 @@ const OperatorCasesPage = dc(() => {
 
     const exportExcel = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const response = await api.get(urlsMap.operatorCasesExport, {
                 params: {
                     ...(search.value ? { search: search.value } : {}),
                     ...buildFilterQuery(filterDefinitions, filters.value),
+                    checklist: EXPORT_CHECKS.filter((check) => exportChecklist.value[check.key]).map((check) => check.key).join(","),
                 },
             });
             const payload = response.data?.data ?? response.data ?? {};
@@ -202,6 +216,8 @@ const OperatorCasesPage = dc(() => {
                 title: `operator-cases-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            exportOpen.value = false;
+            exportChecklist.value = {};
             showSnackBar({
                 type: payload.truncated ? "warning" : "success",
                 message: payload.truncated
@@ -796,7 +812,7 @@ const OperatorCasesPage = dc(() => {
                             <StatusBadge status="selected" label={`${selectedCount.value} ${t("selected")}`} toneOverride={selectedCount.value > 0 ? "info" : "neutral"} showDot={false} />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-radar" onClick={() => void router.push({ name: "GatewayInquirySchedules" })}>{t("Inquiry Schedule")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -1012,6 +1028,27 @@ const OperatorCasesPage = dc(() => {
                     </ThemedView>
                 )}
             </SlideOverDrawer>
+
+            <FormModal
+                modelValue={exportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                title={t("Export operator cases")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportExcel()}
+            >
+                <VAlert type="warning" variant="tonal">{t("The export contains merchant, attempt and resolution details. Handle the file as confidential operational evidence.")}</VAlert>
+                <FormChecklist
+                    checks={[...EXPORT_CHECKS]}
+                    modelValue={exportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Case export checklist")}
+                    complete={exportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
 
             <FormModal
                 modelValue={inquiryOpen.value}

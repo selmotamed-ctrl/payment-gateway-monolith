@@ -3,7 +3,7 @@ id: core.report-engine
 title: Dynamic Report Engine SDK and Report Studio Host
 status: implemented
 confidence: high
-last_verified: 2026-11-11
+last_verified: 2026-11-23
 verified_against: working-tree
 code:
   - core-back/lib/reportEngineSdk/**
@@ -387,3 +387,7 @@ generated XML/XLSX/DOCX outputs (`RegulatoryReportOutput.storageObjectId`,
 `REG_REPORT_OUTPUT` lock) are stored in `REGULATORY_REPORTS`; new writes stop
 writing `contentCiphertext`/`templateCiphertext` and all readers prefer the
 storage object. The full engine is `parts/01-core-back/13-object-storage.md`.
+
+## 20. Safeguard checklists on report-engine actions (2026-11-23)
+
+Report execution, saves, publishes, chrome set-default/reconcile-defaults and merchant-report suspension accept an optional `checklist` string array. The report run keys (`REPORT_SCOPE_VERIFIED`, `INPUTS_AND_PERIOD_REVIEWED`, `CONFIDENTIALITY_ACKNOWLEDGED`) are stored in `report_execution_audit.checklist_json`; the publish/chrome/reconcile/suspend actions use their own key sets. The admin edge forwards it; core allow-lists the four publish keys (`SPEC_VERIFIED`, `AUTHORITIES_REVIEWED`, `PREVIEW_REVIEWED`, `PUBLISH_AUTHORITY_CONFIRMED`), stores the accepted list in the audit `afterJson` (`REPORT_SPEC_SAVED`, `REPORT_SPEC_PUBLISHED`, `REPORT_CHROME_SAVED`, `REPORT_CHROME_DEFAULT_CHANGED`, `REPORT_CHROME_DEFAULTS_RECONCILED`, `MERCHANT_REPORT_STUDIO_SUSPENDED`), and never treats it as authorization. The Studio and Chrome publish dialogs and the migration page submit the same keys; the version row "Publish" and chrome "Set/Clear global default" now open the checklist modal instead of bypassing it. Public certificate verification for the Academy is documented in `03-admin-front/03-guide-and-academy.md` and `02-edge-services/03-checkout-back.md`.

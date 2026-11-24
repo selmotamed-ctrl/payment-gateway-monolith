@@ -27,7 +27,10 @@ if (dbAvailable) beforeAll(async () => {
   app.setPrincipal(writer());
 });
 if (dbAvailable) afterAll(async () => {
-  await client.glShardRepair.deleteMany({ where: { reason: { startsWith: "api-test" } } });
+  await client.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SELECT set_config('pgw.append_only_maintenance', 'on', true)");
+    await tx.glShardRepair.deleteMany({ where: { reason: { startsWith: "api-test" } } });
+  });
   await neutraliseLedgerSince(startedAt);
   await app.close();
   await client.$disconnect();

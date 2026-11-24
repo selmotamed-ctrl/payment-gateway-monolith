@@ -3,7 +3,7 @@ id: platform.security
 title: Security and mTLS
 status: partial
 confidence: high
-last_verified: 2026-11-16
+last_verified: 2026-11-23
 verified_against: 55fcedd+working-tree
 code:
   - core-back/index.ts
@@ -56,7 +56,7 @@ tests:
   - core-back/test/security-regressions/m10-ssrf.test.ts
   - deploy/backup-daemon/test/mtlsAuthorization.test.ts
 gaps:
-  - Session JWTs are stateless; there is no session revocation table and no per-call MFA claim enforcement.
+  - Session JWTs are stateless for normal requests, with a durable `session_revocations` table and optional Redis check; there is still no per-call MFA claim enforcement.
   - API-token scopes are stored but not enforced per merchant endpoint.
   - Merchant internal routes use per-route authority guards on the sensitive surfaces (2026-11-16 review); API-token scopes are only enforced on `/external/*`.
   - Google OIDC login returns 501.
@@ -487,3 +487,7 @@ Done on top of `7cc40cf` (the remediation described above), after re-reading the
 - **KYB document view.** Core's own response now carries `Content-Security-Policy: sandbox; default-src 'none'`, as the admin edge already set, so an uploaded document cannot run script for any other caller of core.
 - **Read and found sound:** the edge path guard (`assertCorePath`: no traversal, channel prefix) with core's certificate-to-channel binding (`requireEdgeIdentity`), so the sandbox proxies cannot be steered to another channel; the plane boot gate and `system_execution_plane` (the migration stamps `LIVE` by default); the attachment download headers (`attachment`, `nosniff`, sandbox CSP); the admin object-storage projections.
 - **Not reviewed in depth:** the object-storage SDK internals (GC against bind and legal hold, AAD binding, KEK rewrap) and the Fake Rails control client.
+
+## Admin MFA resend (2026-11-23)
+
+`POST /internal/admin/auth/mfa/resend` (admin edge `POST /api/v1/admin/auth/mfa/resend`) accepts only an opaque `challengeId` UUID. It requires a live, unconsumed, unexpired `ADMIN` challenge whose user is `ACTIVE`, `mfaRequired`, back-office, and issues a fresh challenge under a per-user row lock. The old challenge is superseded and its queued `LOGIN_MFA` notification is set to `SUPPRESSED`, so a late SMS cannot deliver the old code after the new one. Issuance keeps the existing 5-per-15-minute window, 5-minute TTL and 5-attempt/15-minute lock. Core writes `ADMIN_MFA_CHALLENGE_RESENT` with the old/new challenge IDs and request IP (never the code or phone). Invalid/consumed/expired challenges are counted by the shared MFA IP throttle. The client shows a 30-second resend cooldown and restarts it on failure.

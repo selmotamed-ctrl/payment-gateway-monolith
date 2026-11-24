@@ -37,6 +37,12 @@ describe("admin sandbox routing", () => {
     expect(targetPath(request("/mirror/reconciliation/runs/summary"))).toBe("/internal/admin/reconciliation/summary");
     expect(targetPath(request("/mirror/reconciliation/runs/summary/export"))).toBe("/internal/admin/reconciliation/summary/export");
     expect(targetPath(request("/mirror/reconciliation/runs/run-1"))).toBe("/internal/admin/reconciliation/runs/run-1");
+    expect(targetPath(request("/fake-rails/scenarios"))).toBe("/internal/sandbox/admin/fake-rails/scenarios");
+    expect(targetPath(request("/fake-rails/transactions"))).toBe("/internal/sandbox/admin/fake-rails/transactions");
+    expect(targetPath(request("/fake-rails/webhooks"))).toBe("/internal/sandbox/admin/fake-rails/webhooks");
+    expect(targetPath(request("/fake-rails/statements"))).toBe("/internal/sandbox/admin/fake-rails/statements");
+    expect(targetPath(request("/fake-rails/accounts/summary"))).toBe("/internal/sandbox/admin/fake-rails/accounts/summary");
+    expect(targetPath(request("/fake-rails/accounts"))).toBe("/internal/sandbox/fake-rails/accounts");
   });
   test("uses the sandbox core pool and never falls back to Live", () => {
     expect(pools.requireSandboxCoreBackUrls()).toEqual(["https://core.sandbox.internal:4005"]);

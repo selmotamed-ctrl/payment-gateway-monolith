@@ -10,6 +10,7 @@ import { createRetentionFake } from "../helpers/retentionFake";
 import { createFakeRepositories } from "../helpers/fakeRepositories";
 import { withLedgerMaintenance } from "../helpers/ledgerMaintenance";
 import { createPrisma, databaseIsReachable, seedGlAccount } from "../storage-engine/helpers/db";
+import { deleteWithAppendOnlyMaintenance } from "../helpers/appendOnlyMaintenance";
 
 const quiet = { info: () => undefined, warn: () => undefined, error: () => undefined };
 const inspection = (overrides: Partial<PartitionInspection> = {}): PartitionInspection => ({
@@ -152,7 +153,7 @@ afterAll(async () => {
         }
       }
     }
-    await client.$executeRawUnsafe(`DELETE FROM operator_cases WHERE subject_key LIKE 'ledger.partition.%'`);
+    await deleteWithAppendOnlyMaintenance(client, `DELETE FROM operator_cases WHERE subject_key LIKE 'ledger.partition.%'`);
   }
   await client.$disconnect();
 });

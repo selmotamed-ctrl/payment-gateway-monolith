@@ -11,6 +11,7 @@ import { emptyRepositories } from "../helpers/fakeRepositories";
 import { createFakePrisma, fakeTable, resetFakeDatabase } from "../helpers/governanceFake";
 import { openKeyedOperatorCase } from "../../engine/workers/automationCases";
 import { createPrisma, describeDatabase, uniqueId } from "../storage-engine/helpers/db";
+import { withAppendOnlyMaintenance } from "../helpers/appendOnlyMaintenance";
 
 const quietLogger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 const NOW = new Date("2026-11-09T12:00:00Z");
@@ -243,7 +244,7 @@ describeDatabase("AUTO-19 against PostgreSQL", () => {
       expect(first.created).toBe(true);
       expect(second).toEqual({ id: first.id, created: false });
     } finally {
-      await prisma.operatorCase.deleteMany({ where: { subjectKey } }).catch(() => undefined);
+      await withAppendOnlyMaintenance(prisma, (tx) => tx.operatorCase.deleteMany({ where: { subjectKey } })).catch(() => undefined);
       await prisma.$disconnect();
     }
   });

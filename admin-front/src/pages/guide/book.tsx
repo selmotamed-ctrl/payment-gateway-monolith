@@ -7,6 +7,7 @@ import { useGuideLocale } from "@/components/guide/widgets/useGuideLocale";
 import {
     loadArticles,
     loadBooks,
+    loadMeta,
     articleAllowsRole,
     type Article,
     type Book,
@@ -21,12 +22,14 @@ export const AdminGuideBookPage = defineComponent({
         const progress = useGuideProgress();
         const books = ref<Book[]>([]);
         const articles = ref<Article[]>([]);
+        const contentVersion = ref("");
         const loading = ref(true);
 
         onMounted(async () => {
-            const [loadedBooks, loadedArticles] = await Promise.all([loadBooks(), loadArticles("en")]);
+            const [loadedBooks, loadedArticles, meta] = await Promise.all([loadBooks(), loadArticles("en"), loadMeta()]);
             books.value = loadedBooks;
             articles.value = loadedArticles;
+            contentVersion.value = meta.contentVersion;
             await progress.loadGuideProgress();
             loading.value = false;
         });
@@ -39,7 +42,20 @@ export const AdminGuideBookPage = defineComponent({
                 .filter((article) => article.book === bookId.value)
                 .sort((left, right) => left.order - right.order),
         );
-        const readCount = computed(() => progress.readCount(bookArticles.value.map((article) => article.id)));
+        const readCount = computed(() =>
+            progress.readCount(bookArticles.value.map((article) => article.id), contentVersion.value || undefined),
+        );
+        const linkCopied = ref(false);
+        const copyBookLink = async () => {
+            try {
+                await navigator.clipboard.writeText(window.location.href);
+                linkCopied.value = true;
+                window.setTimeout(() => (linkCopied.value = false), 2500);
+            } catch {
+                linkCopied.value = false;
+            }
+        };
+
         const percent = computed(() =>
             bookArticles.value.length > 0 ? Math.round((readCount.value / bookArticles.value.length) * 100) : 0,
         );
@@ -60,6 +76,11 @@ export const AdminGuideBookPage = defineComponent({
                         { label: L("Guide", "الدليل"), to: "/guide" },
                         { label: book.value ? `Book ${book.value.id}` : String(route.params.bookId) },
                     ]}
+                    end={() => book.value ? (
+                        <button type="button" class="guide-secondary-button" onClick={() => void copyBookLink()}>
+                            {linkCopied.value ? L("Link copied", "تم نسخ الرابط") : L("Copy link", "نسخ الرابط")}
+                        </button>
+                    ) : null}
                 />
                 {loading.value ? (
                     <p class="guide-page-loading">{L("Loading…", "جارٍ التحميل…")}</p>
@@ -83,7 +104,7 @@ export const AdminGuideBookPage = defineComponent({
                         </section>
                         <ol class="guide-article-list">
                             {bookArticles.value.map((article) => {
-                                const read = progress.isRead(article.id);
+                                const read = progress.isRead(article.id, contentVersion.value || undefined);
                                 const recommended =
                                     article.roles === "ALL" || article.roles.includes(role.value as never);
                                 return (

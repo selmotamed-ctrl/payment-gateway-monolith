@@ -96,6 +96,19 @@ const formatDateTime = (value: string | null | undefined): string => {
     if (Number.isNaN(date.getTime())) return "—";
     return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
 };
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "RULE_SCOPE_VERIFIED", label: "AML rule scope verified" },
+    { key: "ACTIVE_INACTIVE_REVIEWED", label: "Active and inactive rules reviewed" },
+    { key: "PENDING_APPROVAL_REVIEWED", label: "Pending approvals reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const RULE_EXPORT_CHECKS = [
+    { key: "RULE_SCOPE_VERIFIED", label: "AML rule scope verified" },
+    { key: "RULE_DATA_REVIEWED", label: "Confidential rule data reviewed" },
+    { key: "EXPORT_AUTHORITY_CONFIRMED", label: "Export authority confirmed" },
+] as const;
+
 const RULE_CHECKS = [
     { key: "RULE_LOGIC_REVIEWED", label: "Rule logic reviewed" },
     { key: "THRESHOLDS_VERIFIED", label: "Thresholds verified" },
@@ -135,6 +148,10 @@ const AmlRulesPage = dc(() => {
     const ruleChecklist = ref<Record<string, boolean>>({});
     const exportLoading = ref(false);
     const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
+    const listExportOpen = ref(false);
+    const listExportChecklist = ref<Record<string, boolean>>({});
+    const listExportChecklistComplete = computed(() => !showChecklists || RULE_EXPORT_CHECKS.every((check) => listExportChecklist.value[check.key] === true));
     const detailsOpen = ref(false);
     const selected = ref<AmlRuleDetail | null>(null);
     const detailLoading = ref(false);
@@ -160,12 +177,17 @@ const AmlRulesPage = dc(() => {
     };
     const exportExcel = async () => {
         if (exportLoading.value) return;
+        if (!listExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const response = await api.get(urlsMap.amlRulesExport, {
                 params: {
                     ...(search.value ? { search: search.value } : {}),
                     ...buildFilterQuery(filterDefinitions.value, filters.value),
+                    checklist: RULE_EXPORT_CHECKS.filter((check) => listExportChecklist.value[check.key]).map((check) => check.key).join(","),
                 },
             });
             const payload = response.data?.data ?? response.data ?? {};
@@ -201,6 +223,8 @@ const AmlRulesPage = dc(() => {
                 title: `aml-rules-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            listExportOpen.value = false;
+            listExportChecklist.value = {};
             showSnackBar({
                 type: payload.truncated ? "warning" : "success",
                 message: payload.truncated
@@ -320,11 +344,19 @@ const AmlRulesPage = dc(() => {
             actionLoading.value = false;
         }
     };
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
         summaryExportLoading.value = true;
         try {
-            const response = await api.get(urlsMap.amlRulesSummaryExport);
+            const response = await api.get(urlsMap.amlRulesSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
             const snapshot = (response.data?.data ?? response.data ?? {}) as RuleSummary;
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
             const rows: Array<[string, unknown]> = [
@@ -444,7 +476,7 @@ const AmlRulesPage = dc(() => {
                     end={() => tab.value !== "rules" ? null : (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                             <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Draft rule")}</VBtn>
                         </ThemedView>
                     )}
@@ -471,8 +503,18 @@ const AmlRulesPage = dc(() => {
                         metrics={summaryMetrics.value}
                         exportLoading={summaryExportLoading.value}
                         exportLabel={t("Export summary")}
+                        exportDisabled={!summaryExportChecklistComplete.value}
                         onExport={() => void exportSummary()}
                     >
+                        <FormChecklist
+                            checks={[...SUMMARY_EXPORT_CHECKS]}
+                            modelValue={summaryExportChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Summary export checklist")}
+                            complete={summaryExportChecklistComplete.value}
+                            incompleteMessage={t("Complete all summary export checklist items before exporting")}
+                        />
                         <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                             {Object.entries(summary.value.byType ?? {}).map(([type, count]) => (
                                 <StatusBadge key={type} status={type} label={`${type}: ${count}`} toneOverride="neutral" />
@@ -599,6 +641,28 @@ const AmlRulesPage = dc(() => {
                     </>
                 )}
             </SlideOverDrawer>
+            <FormModal
+                modelValue={listExportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (listExportOpen.value = value)}
+                title={t("Export AML rules")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportExcel()}
+            >
+                <VAlert type="error" variant="tonal">
+                    {t("AML rule exports contain confidential thresholds and scope. Confirm handling and authority before exporting.")}
+                </VAlert>
+                <FormChecklist
+                    checks={[...RULE_EXPORT_CHECKS]}
+                    modelValue={listExportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (listExportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Rule export checklist")}
+                    complete={listExportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
             <FormModal
                 modelValue={createOpen.value}
                 onUpdate:modelValue={(value: boolean) => (createOpen.value = value)}

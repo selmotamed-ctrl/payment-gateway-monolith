@@ -9,7 +9,7 @@ import {
   toCoreDisputeCreate,
   toCoreVelocityRuleCreate,
 } from "../contract";
-import { coreForward, coreForwardRaw } from "../forward";
+import { coreForward, coreForwardRaw, summaryExportQuerySchema } from "../forward";
 import { forwardUpload, uploadGuards, uploadSingle } from "../upload";
 import { encode, reasonOnlySchema, uuidParamsSchema, zMutationReason } from "./mutationSchemas";
 
@@ -138,6 +138,7 @@ export const commissionProfileSchema = z
     active: z.boolean().optional(),
     // core binds every commission profile to a rail code that the public API does not carry.
     railCode: z.string().min(1).max(64).optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -169,6 +170,7 @@ export const velocityRuleSchema = z
         "LINK",
       ])
       .optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -198,7 +200,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/disputes/export",
-    querySchema: zPaginationQuery,
+    querySchema: zPaginationQuery.extend({ checklist: z.string().max(1000).optional() }),
   }),
 );
 
@@ -216,6 +218,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/disputes/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -240,6 +243,7 @@ router.post(
       fileField: "file",
       metadata: { label: (typeof req.body?.label === "string" ? req.body.label : req.file.originalname).slice(0, 255) },
       status: 201,
+      allowedMimes: ["image/png", "image/jpeg", "application/pdf"],
     });
   },
 );
@@ -295,7 +299,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/adjustments/export",
-    querySchema: zPaginationQuery,
+    querySchema: zPaginationQuery.extend({ checklist: z.string().max(1000).optional() }),
   }),
 );
 
@@ -313,6 +317,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/adjustments/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -350,7 +355,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/cashouts/export",
-    querySchema: zPaginationQuery,
+    querySchema: zPaginationQuery.extend({ checklist: z.string().max(1000).optional() }),
   }),
 );
 
@@ -368,6 +373,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/cashouts/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -422,6 +428,7 @@ export const commissionProfileExpireSchema = z
   .object({
     effectiveTo: z.string().max(64).optional(),
     reason: z.string().max(500).optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -454,7 +461,7 @@ router.get(
 );
 
 export const velocityRuleDeactivateSchema = z
-  .object({ reason: z.string().max(500).optional() })
+  .object({ reason: z.string().max(500).optional(), checklist: z.array(z.string().max(64)).max(10).optional() })
   .strict();
 
 router.get(
@@ -510,7 +517,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/finance/profitability/export",
-    querySchema: financePeriodQuerySchema,
+    querySchema: financePeriodQuerySchema.extend({ checklist: z.string().max(1000).optional() }),
   }),
 );
 
@@ -528,7 +535,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/finance/liquidity/export",
-    querySchema: financePeriodQuerySchema,
+    querySchema: financePeriodQuerySchema.extend({ checklist: z.string().max(1000).optional() }),
   }),
 );
 
@@ -537,6 +544,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/finance/invariant-check/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -572,6 +580,15 @@ router.get(
     method: "GET",
     path: () => "/internal/admin/finance/journal-entries/summary",
     querySchema: zListQuery,
+  }),
+);
+
+router.get(
+  "/finance/journal-entries/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/finance/journal-entries/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -655,7 +672,7 @@ router.post(
     method: "POST",
     path: (context) => `/internal/admin/finance/gl-accounts/${encode(context.params.id)}/checkpoint`,
     paramsSchema: uuidParamsSchema,
-    schema: reasonOnlySchema,
+    schema: z.object({ reason: zMutationReason, checklist: z.array(z.string().max(64)).max(10).optional() }).strict(),
     relayStatus: true,
   }),
 );

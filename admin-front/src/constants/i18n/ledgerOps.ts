@@ -152,7 +152,7 @@ export const ledgerOpsCatalogue: Record<string, [string, string]> = {
     "Amounts and references": ["Amounts and references", "المبالغ والمراجع"],
     "Customer fields (masked)": ["Customer fields (masked)", "بيانات العميل (مقنّعة)"],
     "No customer fields recorded": ["No customer fields recorded", "لا توجد بيانات عميل مسجّلة"],
-    "Operator cases": ["Operator cases", "حالات العمليات"],
+    "Operator cases": ["Operator cases", "حالات المشغل"],
     "No operator case linked": ["No operator case linked", "لا توجد حالة عمليات مرتبطة"],
     "No dispute linked": ["No dispute linked", "لا يوجد نزاع مرتبط"],
     "Open dispute": ["Open dispute", "فتح النزاع"],

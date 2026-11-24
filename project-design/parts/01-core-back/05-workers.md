@@ -546,3 +546,11 @@ override, opens keyed operator cases for unhealthy/conflicting routes, writes
 `route_health_events` and audit rows, and clears expired overrides. It is
 registered in `productionRuntime` and participates in expected leader keys.
 See `core.route-health`.
+
+## 20. Reconciliation settlement context (2026-11-24)
+
+`RECONCILIATION_RUN` persists the statement currency and `autoPost` flag and copies the matched attempt context (currency, gateway, env, credential set) onto each item. Settlement sweeps group by `(batch, gateway, env, credential set, currency)`, post with the full `LedgerPostContext`, and skip an unresolved item instead of choosing an arbitrary account. `autoPost=false` suppresses sweeps with an audit trail. Fee variances carry the attempt context and use a per-run ref when a run id is available, with legacy-key compatibility. Statement chargebacks use the item/attempt currency, never a hard-coded LYD.
+
+## 20. Reconciliation settlement context (2026-11-24)
+
+`RECONCILIATION_RUN` persists the statement currency and `autoPost` flag and copies the matched attempt context (currency, gateway, env, credential set) onto each item. Settlement sweeps group by `(batch, gateway, env, credential set, currency)`, post with the full `LedgerPostContext`, and skip an unresolved item instead of choosing an arbitrary account. `autoPost=false` suppresses sweeps with an audit trail. Fee variances carry the attempt context and use a per-run ref when a run id is available, with legacy-key compatibility. Statement chargebacks use the item/attempt currency, never a hard-coded LYD.

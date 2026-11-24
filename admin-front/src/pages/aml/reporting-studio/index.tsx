@@ -12,6 +12,8 @@ import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
@@ -93,6 +95,19 @@ type SchemaDetail = {
 type DefaultBinding = { id: string; authority: string; reportType: string; reportCode: string; format: "XML" | "XLSX" | "DOCX"; schemaId: string; schema?: Schema };
 type Issue = { severity: "error" | "warning"; path: string; message: string };
 
+const PROMOTION_CHECKS = [
+    { key: "SCHEMA_REVIEWED", label: "Schema definition reviewed" },
+    { key: "MAPPING_VALIDATED", label: "Mapping validated in the simulator" },
+    { key: "TEMPLATE_VERIFIED", label: "Workbook template verified" },
+    { key: "APPROVAL_PATH_CONFIRMED", label: "Four-eyes approval path confirmed" },
+] as const;
+
+const DEFAULT_BINDING_CHECKS = [
+    { key: "SCHEMA_CONFIRMED", label: "Schema is confirmed and current" },
+    { key: "BINDING_MATCH_VERIFIED", label: "Authority, report type and format match" },
+    { key: "APPROVAL_PATH_CONFIRMED", label: "Four-eyes approval path confirmed" },
+] as const;
+
 const REPORT_TYPES = ["LARGE_TRANSACTION", "SUSPICIOUS_ACTIVITY", "PERIODIC_RETURN", "INCIDENT"];
 const FORMATS = ["XML", "XLSX", "DOCX"] as const;
 const SOURCE_KINDS = ["CONTEXT_PATH", "CONSTANT", "CODE_MAP", "TEMPLATE"] as const;
@@ -111,6 +126,13 @@ const AmlReportingStudioPage = dc(() => {
     const cloneName = ref("");
     const cloneVersion = ref<number | null>(null);
     const actionLoading = ref(false);
+    const showChecklists = areChecklistsVisible();
+    const promoting = ref<Schema | null>(null);
+    const promotionChecklist = ref<Record<string, boolean>>({});
+    const promotionChecklistComplete = computed(() => !showChecklists || PROMOTION_CHECKS.every((check) => promotionChecklist.value[check.key] === true));
+    const defaulting = ref<Schema | null>(null);
+    const defaultChecklist = ref<Record<string, boolean>>({});
+    const defaultChecklistComplete = computed(() => !showChecklists || DEFAULT_BINDING_CHECKS.every((check) => defaultChecklist.value[check.key] === true));
     const studioOpen = ref(false);
     const detail = ref<SchemaDetail | null>(null);
     const detailLoading = ref(false);
@@ -556,10 +578,25 @@ const AmlReportingStudioPage = dc(() => {
         }
     };
 
-    const promote = async (schema: Schema) => {
+    const openPromote = (schema: Schema) => {
+        promoting.value = schema;
+        promotionChecklist.value = {};
+    };
+
+    const promote = async () => {
+        const schema = promoting.value;
+        if (!schema) return;
+        if (!promotionChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all promotion checklist items before submitting") });
+            return;
+        }
         actionLoading.value = true;
         try {
-            await api.post(urlsMap.amlReportSchemaPromote(schema.id), { setAsDefault: true });
+            await api.post(urlsMap.amlReportSchemaPromote(schema.id), {
+                setAsDefault: true,
+                checklist: PROMOTION_CHECKS.filter((check) => promotionChecklist.value[check.key]).map((check) => check.key),
+            });
+            promoting.value = null;
             showSnackBar({ type: "success", message: t("Promotion submitted for four-eyes approval") });
             await load();
         } catch (promoteError) {
@@ -589,16 +626,29 @@ const AmlReportingStudioPage = dc(() => {
         }
     };
 
-    const setDefault = async (schema: Schema, binding?: DefaultBinding) => {
+    const openDefault = (schema: Schema) => {
+        defaulting.value = schema;
+        defaultChecklist.value = {};
+    };
+
+    const setDefault = async () => {
+        const schema = defaulting.value;
+        if (!schema) return;
+        if (!defaultChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all default binding checklist items before submitting") });
+            return;
+        }
         actionLoading.value = true;
         try {
             await api.put(urlsMap.amlReportSchemaDefaults, {
+                checklist: DEFAULT_BINDING_CHECKS.filter((check) => defaultChecklist.value[check.key]).map((check) => check.key),
                 authority: schema.authority,
                 reportType: schema.reportType,
                 reportCode: schema.reportCode,
                 format: schema.format,
                 schemaId: schema.id,
             });
+            defaulting.value = null;
             showSnackBar({ type: "success", message: t("Default binding submitted for approval") });
             await load();
         } catch (defaultError) {
@@ -695,8 +745,8 @@ const AmlReportingStudioPage = dc(() => {
                             </SurfaceCardText>
                             <ThemedView style={{ display: "flex", flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <VBtn size="small" variant="tonal" onClick={() => void openStudio(schema)}>{t("Open studio")}</VBtn>
-                                {schema.status === "CONFIRMED" && <VBtn size="small" variant="text" onClick={() => void setDefault(schema)}>{t("Set default")}</VBtn>}
-                                {schema.status === "DRAFT" && <VBtn size="small" variant="text" onClick={() => void promote(schema)}>{t("Promote")}</VBtn>}
+                                {schema.status === "CONFIRMED" && <VBtn size="small" variant="text" onClick={() => openDefault(schema)}>{t("Set default")}</VBtn>}
+                                {(schema.status === "DRAFT" || schema.status === "PROVISIONAL") && <VBtn size="small" variant="text" onClick={() => openPromote(schema)}>{t("Promote")}</VBtn>}
                             </ThemedView>
                         </ThemedView>
                     </SurfaceCard>
@@ -974,8 +1024,8 @@ const AmlReportingStudioPage = dc(() => {
                         {activeTab.value === "bindings" && (
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText>{t("Default binding key")}: {detail.value.schema.authority} / {detail.value.schema.reportType} / {detail.value.schema.reportCode} / {detail.value.schema.format}</ThemedText>
-                                {detail.value.capabilities.setDefault && <VBtn size="small" color="primary" onClick={() => void setDefault(detail.value!.schema)}>{t("Set as default")}</VBtn>}
-                                <VBtn size="small" variant="tonal" onClick={() => void promote(detail.value!.schema)} disabled={!detail.value.capabilities.promote}>{t("Promote")}</VBtn>
+                                {detail.value.capabilities.setDefault && <VBtn size="small" color="primary" onClick={() => openDefault(detail.value!.schema)}>{t("Set as default")}</VBtn>}
+                                <VBtn size="small" variant="tonal" onClick={() => openPromote(detail.value!.schema)} disabled={!detail.value.capabilities.promote}>{t("Promote")}</VBtn>
                                 <ThemedText style={{ opacity: 0.7 }}>{t("Schema versions")}: {schemas.value.filter((schema) => schema.schemaCode === detail.value?.schema.schemaCode).map((schema) => `v${schema.version} (${schema.status})`).join(", ")}</ThemedText>
                             <ThemedView style={{ display: "flex", flexDirection: "column", gap: "10px", borderTop: "1px solid var(--pg-border-subtle)", paddingTop: "12px" }}>
                                 <ThemedText type="defaultSemiBold">{t("Rule schema overrides")}</ThemedText>
@@ -1021,6 +1071,41 @@ const AmlReportingStudioPage = dc(() => {
                 <FormField label={t("Version")} required><VTextField type="number" modelValue={form.value.version} onUpdate:modelValue={(value: string) => (form.value.version = Number(value) || 1)} hideDetails /></FormField>
                 <FormField label={form.value.format === "XML" ? t("XSD XML") : form.value.format === "DOCX" ? t("DOCX narrative JSON") : t("Workbook JSON")} required><VTextarea modelValue={form.value.definitionText} onUpdate:modelValue={(value: string) => (form.value.definitionText = value)} rows={10} hideDetails /></FormField>
                 <FormField label={t("Mapping blueprint JSON")} required><VTextarea modelValue={form.value.mappingBlueprint} onUpdate:modelValue={(value: string) => (form.value.mappingBlueprint = value)} rows={6} hideDetails /></FormField>
+            </FormModal>
+            <FormModal
+                modelValue={defaulting.value !== null}
+                onUpdate:modelValue={(value: boolean) => { if (!value) defaulting.value = null; }}
+                title={t("Set default reporting schema")}
+                subtitle={defaulting.value ? `${defaulting.value.schemaCode} · v${defaulting.value.version}` : ""}
+                size="md"
+                loading={actionLoading.value}
+                submitLabel={t("Submit for approval")}
+                onSubmit={() => void setDefault()}
+            >
+                <VAlert type="info" variant="tonal">
+                    {t("Changing the default binding is submitted for four-eyes approval. Only a confirmed schema that matches the binding key can be selected.")}
+                </VAlert>
+                <FormChecklist
+                    checks={[...DEFAULT_BINDING_CHECKS]}
+                    modelValue={defaultChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (defaultChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Default binding checklist")}
+                    complete={defaultChecklistComplete.value}
+                    incompleteMessage={t("Complete all default binding checklist items before submitting")}
+                />
+            </FormModal>
+            <FormModal modelValue={promoting.value !== null} onUpdate:modelValue={(value: boolean) => { if (!value) promoting.value = null; }} title={t("Promote reporting schema")} subtitle={promoting.value ? `${promoting.value.schemaCode} · v${promoting.value.version}` : ""} size="md" loading={actionLoading.value} submitLabel={t("Submit for approval")} onSubmit={() => void promote()}>
+                <VAlert type="info" variant="tonal">{t("Promotion creates a four-eyes approval request. The schema stays DRAFT until a different checker approves it.")}</VAlert>
+                <FormChecklist
+                    checks={[...PROMOTION_CHECKS]}
+                    modelValue={promotionChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (promotionChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Promotion checklist")}
+                    complete={promotionChecklistComplete.value}
+                    incompleteMessage={t("Complete all promotion checklist items before submitting")}
+                />
             </FormModal>
             <FormModal modelValue={cloneOpen.value} onUpdate:modelValue={(value: boolean) => (cloneOpen.value = value)} title={t("Clone schema as new version")} size="sm" loading={actionLoading.value} submitLabel={t("Clone")} onSubmit={() => void cloneSchema()}>
                 <FormField label={t("Name")}><VTextField modelValue={cloneName.value} onUpdate:modelValue={(value: string) => (cloneName.value = value)} hideDetails /></FormField>

@@ -9,6 +9,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { loadMeta, loadPages, loadTracks, type Track } from "@/content/academy";
+import { academyCertificateVerifyUrl } from "@/constants/env";
+import { urlsMap } from "@/constants/urlsMap";
+import { api } from "@/state/api";
 import { user } from "@/state/user";
 
 const CertificatePage = dc(() => {
@@ -20,8 +23,14 @@ const CertificatePage = dc(() => {
     const tracks = ref<Track[]>([]);
     const template = ref("");
     const recertifyFrom = ref("1.0.0");
+    const verification = ref<{ publicId: string; displayId: string; certificateId: string; status?: string } | null>(null);
 
     const badge = computed(() => academy.progress.value.badges.find((b) => b.id === String(route.params.badgeId ?? "")));
+    const verifyUrl = computed(() => {
+        const base = academyCertificateVerifyUrl();
+        const publicId = verification.value?.publicId;
+        return base && publicId ? `${base}/${encodeURIComponent(publicId)}` : "";
+    });
     const holderName = computed(() => {
         const info = user.value?.userInfo;
         const email = info?.email ?? "";
@@ -34,6 +43,23 @@ const CertificatePage = dc(() => {
             tracks.value = loadedTracks;
             template.value = pages.find((p) => p.id === "page-certificate")?.markdown ?? "";
             recertifyFrom.value = meta.recertifyFrom;
+            const current = badge.value;
+            if (current) {
+                try {
+                    const response = await api.get(urlsMap.academyCertificateVerification(current.track));
+                    const payload = response.data?.data ?? response.data ?? {};
+                    if (typeof payload.publicId === "string" && typeof payload.certificateId === "string") {
+                        verification.value = {
+                            publicId: payload.publicId,
+                            displayId: typeof payload.displayId === "string" ? payload.displayId : payload.certificateId,
+                            certificateId: payload.certificateId,
+                            status: typeof payload.status === "string" ? payload.status : undefined,
+                        };
+                    }
+                } catch {
+                    verification.value = null;
+                }
+            }
         } finally {
             ready.value = true;
         }
@@ -66,7 +92,16 @@ const CertificatePage = dc(() => {
                         />
                     </SurfaceCard>
                 ) : (
-                    <CertificateView badge={b} trackTitle={trackTitle} holderName={holderName.value} template={template.value} state={badgeStateOf(b, recertifyFrom.value)} />
+                    <CertificateView
+                        badge={b}
+                        trackTitle={trackTitle}
+                        holderName={holderName.value}
+                        template={template.value}
+                        state={badgeStateOf(b, recertifyFrom.value)}
+                        verifyUrl={verifyUrl.value}
+                        certificateId={verification.value?.certificateId}
+                        issuanceStatus={verification.value?.status as "ACTIVE" | "SUPERSEDED" | "REVOKED" | undefined}
+                    />
                 )}
             </AcademyShell>
         );

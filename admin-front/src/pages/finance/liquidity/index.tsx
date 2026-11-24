@@ -2,6 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn, VProgressLinear } from "vuetify/components";
+import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -17,10 +18,18 @@ import { showSnackBar } from "@/utils/snackBar";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { MetricStrip } from "@/components/ui/MetricStrip";
+import { FormModal } from "@/components/ui/FormModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { buildCapViews, type CapTone, type RouteCapRow } from "./routeCaps";
+const EXPORT_CHECKS = [
+    { key: "LIQUIDITY_SCOPE_VERIFIED", label: "Liquidity scope verified" },
+    { key: "COVER_AND_OBLIGATIONS_REVIEWED", label: "Cover ratio, obligations and aging reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 type Liquidity = {
     currency?: string;
     treasuryBalance?: string;
@@ -45,6 +54,10 @@ const LiquidityPage = dc(() => {
     const loading = ref(true);
     const error = ref<string | null>(null);
     const exportLoading = ref(false);
+    const exportOpen = ref(false);
+    const showChecklists = areChecklistsVisible();
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
 
     const load = async () => {
         loading.value = true;
@@ -84,9 +97,15 @@ const LiquidityPage = dc(() => {
 
     const exportSnapshot = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
-            const response = await api.get(urlsMap.financeLiquidityExport);
+            const response = await api.get(urlsMap.financeLiquidityExport, {
+                params: { checklist: EXPORT_CHECKS.filter((check) => exportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
             const snapshot = (response.data?.data ?? response.data ?? {}) as Liquidity;
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
             const rows: Array<[string, unknown]> = [
@@ -122,6 +141,8 @@ const LiquidityPage = dc(() => {
                 title: `liquidity-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            exportOpen.value = false;
+            exportChecklist.value = {};
             showSnackBar({ type: "success", message: t("Liquidity snapshot exported") });
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
@@ -144,7 +165,7 @@ const LiquidityPage = dc(() => {
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Updated")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSnapshot()}>{t("Export snapshot")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -332,6 +353,27 @@ const LiquidityPage = dc(() => {
                     </ThemedView>
                 )}
             </ThemedView>
+            <FormModal
+                modelValue={exportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                title={t("Export liquidity snapshot")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportSnapshot()}
+            >
+                <VAlert type="warning" variant="tonal">{t("The export contains treasury, clearing, obligations and aging figures. Handle it as confidential financial evidence.")}</VAlert>
+                <FormChecklist
+                    checks={[...EXPORT_CHECKS]}
+                    modelValue={exportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Liquidity export checklist")}
+                    complete={exportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
+
         </ScreenContainer>
     );
 });

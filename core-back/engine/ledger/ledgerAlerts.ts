@@ -60,9 +60,9 @@ export const inTransaction = async <T>(db: Any, fn: (tx: Any) => Promise<T>): Pr
 /**
  * The id of the disabled system automation user that the automated ledger alerts and scaling act as.
  *
- * `ensureSystemAutomationUser` cannot be used against PostgreSQL: it stores the literal id "SYSTEM_AUTOMATION" in
- * `users.id`, which is a UUID column. The row is therefore located (and created) by its unique e-mail, and the
- * database assigns the UUID. The user is DISABLED, carries no authority and is never a maker or checker.
+ * The automation row is located (and created) by its canonical e-mail, so the database assigns the UUID; the
+ * legacy string "SYSTEM_AUTOMATION" is not a valid UUID and is rejected by every maker/checker guard. The user
+ * is DISABLED, carries no authority and is never a maker or checker.
  */
 export const ensureLedgerSystemActor = async (db: Any): Promise<string> => {
   const find = () => db.user.findFirst({ where: { email: SYSTEM_AUTOMATION_EMAIL }, select: { id: true } });

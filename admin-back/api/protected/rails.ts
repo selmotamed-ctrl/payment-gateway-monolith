@@ -9,7 +9,7 @@ import {
   toCoreRouteState,
   toCoreRouteUpdate,
 } from "../contract";
-import { coreForward } from "../forward";
+import { coreForward, summaryExportQuerySchema } from "../forward";
 
 const router = express.Router();
 
@@ -236,7 +236,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/rails/export",
-    querySchema: zPaginationQuery,
+    querySchema: zPaginationQuery.extend({ checklist: z.string().max(1000).optional() }),
   }),
 );
 
@@ -254,6 +254,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/rails/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -327,7 +328,7 @@ routesRouter.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/routes/export",
-    querySchema: zPaginationQuery,
+    querySchema: zPaginationQuery.extend({ checklist: z.string().max(1000).optional() }),
   }),
 );
 
@@ -345,6 +346,7 @@ routesRouter.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/routes/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import express, { type Request, type Response } from "express";
 import { z } from "zod";
-import { Prisma, type ContentType } from "../../generated/prisma/client";
+import { ApprovalMode, ApprovalState, Prisma, type ContentType } from "../../generated/prisma/client";
 import { canTransitionIncident, incidentPostmortemDueAt, incidentReportPayload, incidentRequiresPostmortem, incidentTimestampField } from "../../engine/compliance/incidents";
 import { client } from "../../prisma/client";
 import { getObjectStorageSdk } from "../../lib/objectStorageSdk/runtime";
@@ -132,7 +132,7 @@ import { getConfiguredAuditStore, readThroughReplicaOrPrimary } from "../../lib/
 import { executeBackupPolicyApproval } from "./backups";
 import { loadAccountCheckpointSummary, loadLiveAccountBalances, naturalShardBalance } from "../../lib/storageEngine/shardBalances";
 import type { Decimal } from "decimal.js";
-import { decimal } from "../../engine/ledger/LedgerPoster";
+import { buildLedgerTemplate, decimal } from "../../engine/ledger/LedgerPoster";
 import { LedgerPoster } from "../../engine/ledger/LedgerPoster";
 import {
   GoLiveGateValidator,
@@ -189,6 +189,7 @@ import {
 } from "../middleware/authDoubleCheck";
 import { actorFromRequest, assertCheckerAuthority, assertCheckerIsNotMaker, SYSTEM_AUTOMATION_PRINCIPAL } from "../middleware/makerCheckerGuard";
 import { env } from "../../lib/env";
+import { resolveReportingCurrency } from "../../lib/reportingCurrency";
 import { writeAudit } from "../../lib/audit/writeAudit";
 
 const router = express.Router();
@@ -772,7 +773,7 @@ export const acknowledgeRegulatoryReport = async (
 
 export const proposeReportingRulePromotion = async (
   db: typeof client,
-  input: { ruleId: string; actorUserId: string; actorRole: string | null },
+  input: { ruleId: string; actorUserId: string; actorRole: string | null; checklist?: string[] },
 ): Promise<{ approvalRequestId: string; status: string }> => {
   const rule = await db.reportingRule.findUnique({ where: { id: input.ruleId } });
   if (!rule) {
@@ -820,7 +821,7 @@ export const proposeReportingRulePromotion = async (
         entityType: "REPORTING_RULE",
         entityId: rule.id,
         beforeJson: { status: rule.status },
-        afterJson: { status: rule.status, requestedStatus: "CONFIRMED" },
+        afterJson: { status: rule.status, requestedStatus: "CONFIRMED", checklist: input.checklist ?? [] },
         approvalRequestId: approval.id,
       },
     });
@@ -929,6 +930,67 @@ router.post("/auth/mfa", async (request: Request, response: Response) => {
     expiresInSeconds: 12 * 60 * 60,
     userInfo: buildAdminUserInfo(user, authorities),
   });
+});
+
+router.post("/auth/mfa/resend", async (request: Request, response: Response) => {
+  const body = parseOrThrow(
+    z.object({ challengeId: z.string().uuid() }).strict(),
+    request.body,
+  );
+  const ip = clientIp(request);
+  await assertMfaAllowed(ip);
+  const challenge = await client.mfaChallenge.findUnique({
+    where: { id: body.challengeId },
+    select: { id: true, userId: true, channel: true, consumedAt: true, expiresAt: true },
+  });
+  if (
+    !challenge
+    || challenge.channel !== "ADMIN"
+    || challenge.consumedAt
+    || challenge.expiresAt.getTime() <= Date.now()
+  ) {
+    await recordMfaFailure(ip);
+    throw new ApiError(400, "MFA_CHALLENGE_INVALID", "The verification challenge is no longer valid. Sign in again");
+  }
+  const user = await client.user.findUnique({
+    where: { id: challenge.userId },
+    select: { id: true, phone: true, mfaRequired: true, status: true, merchantId: true, role: true },
+  });
+  if (
+    !user
+    || !user.mfaRequired
+    || user.status !== "ACTIVE"
+    || user.merchantId !== null
+    || String(user.role).startsWith("MERCHANT_")
+  ) {
+    await recordMfaFailure(ip);
+    throw new ApiError(400, "MFA_CHALLENGE_INVALID", "The verification challenge is no longer valid. Sign in again");
+  }
+  const { challengeId } = await client.$transaction(async (tx) => {
+    // Serialise issuance per user: two concurrent resends must not both pass
+    // the per-window issue check and leave two live challenges.
+    await tx.$queryRawUnsafe("SELECT id FROM users WHERE id = $1::uuid FOR UPDATE", user.id);
+    const issued = await issueMfaChallenge(tx as never, {
+      userId: user.id,
+      channel: "ADMIN",
+      phone: user.phone,
+      phoneLast4: (user.phone ?? "").slice(-4),
+      ip,
+    });
+    await writeAudit(tx, {
+      data: {
+        actorId: user.id,
+        role: String(user.role),
+        action: "ADMIN_MFA_CHALLENGE_RESENT",
+        entityType: "USER",
+        entityId: user.id,
+        beforeJson: { challengeId: challenge.id },
+        afterJson: { challengeId: issued.challengeId, ip },
+      },
+    });
+    return issued;
+  });
+  response.json({ mfaRequired: true, challengeId });
 });
 
 router.get("/auth/me", (_request: Request, response: Response) => {
@@ -1116,6 +1178,7 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
   const now = new Date();
   const period = merchantPeriodLabel(request.query.period);
   const since = merchantStatsSince(period);
+  const requestedCurrency = resolveReportingCurrency(request.query.currency);
   const openJoinStatuses = ["DRAFT", "SUBMITTED", "IN_REVIEW", "INFO_REQUESTED", "PENDING_CHECKER"];
   const openAmlStatuses = ["OPEN", "IN_REVIEW", "PENDING_CHECKER", "FROZEN", "ESCALATED_STR"];
   const openOperatorStatuses = ["OPEN", "IN_PROGRESS", "PENDING_CHECKER"];
@@ -1141,7 +1204,7 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     client.merchant.count({ where: { status: "ACTIVE" } }),
     client.merchant.count({ where: { status: "PENDING" } }),
     client.paymentAttempt.groupBy({
-      by: ["status"],
+      by: ["status", "currency"],
       where: { createdAt: { gte: since } },
       _count: { _all: true },
       _sum: { totalChargedAmount: true },
@@ -1200,15 +1263,34 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
   let attemptsTotal = 0;
   let attemptsSucceeded = 0;
   let attemptsCounted = 0;
+  const perCurrency = new Map<string, {
+    currency: string;
+    attempts: number;
+    succeeded: number;
+    counted: number;
+    volumeByState: Record<string, string>;
+  }>();
   const grossVolume = decimal(grossVolumeAggregate._sum.totalChargedAmount ?? 0);
   const grossVolumeAttempts = grossVolumeAggregate._count._all;
   for (const row of attemptsByStateRows) {
     const status = String(row.status);
+    const currency = String(row.currency ?? "").trim() || "UNKNOWN";
     const count = row._count._all;
+    const chargedText = decimal(row._sum.totalChargedAmount ?? 0).toFixed(4);
+    const aggregate = perCurrency.get(currency) ?? { currency, attempts: 0, succeeded: 0, counted: 0, volumeByState: {} };
+    aggregate.attempts += count;
+    aggregate.volumeByState[status] = chargedText;
+    if (isSuccessAttemptStatus(status)) {
+      aggregate.succeeded += count;
+      aggregate.counted += count;
+    } else if (isProblematicAttemptStatus(status)) {
+      aggregate.counted += count;
+    }
+    perCurrency.set(currency, aggregate);
+    if (currency !== requestedCurrency) continue;
     attemptsByState[status] = count;
     attemptsTotal += count;
-    const charged = decimal(row._sum.totalChargedAmount ?? 0);
-    volumeByState[status] = charged.toFixed(4);
+    volumeByState[status] = chargedText;
     if (isSuccessAttemptStatus(status)) {
       attemptsSucceeded += count;
       attemptsCounted += count;
@@ -1258,6 +1340,9 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     since,
     merchantsActive,
     merchantsPending,
+    currency: requestedCurrency,
+    byCurrency: [...perCurrency.values()].sort((a, b) => a.currency.localeCompare(b.currency)),
+    mixedCurrency: perCurrency.size > 1,
     attemptsByState,
     volumeByState,
     attemptsTotal,
@@ -1473,6 +1558,9 @@ router.get("/users", async (request: Request, response: Response) => {
 
 router.get("/users/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["user:read", "security:read"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => ["USER_SCOPE_REVIEWED", "ACCESS_DATA_REVIEWED", "EXPORT_AUTHORITY_CONFIRMED"].includes(entry));
   const built = buildListQuery(request.query, {
     search: ["email", "phone"],
     in: { status: "status" }, equals: {role: "role", merchantId: "merchantId"},
@@ -1500,7 +1588,7 @@ router.get("/users/export", async (request: Request, response: Response) => {
       entityType: "USER",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: users.length, filters: JSON.stringify(request.query ?? {}) },
+      afterJson: { total, exported: users.length, filters: JSON.stringify(request.query ?? {}), checklist },
     },
   });
   response.json({
@@ -1681,6 +1769,12 @@ const STAFF_ROLES = [
  * No self-escalation: a staff user can only hand out authorities they hold
  * themselves. The wildcard can only be granted by a holder of the wildcard.
  */
+const assertGrantableStaffRole = (principal: { role?: string | null }, requested: string): void => {
+  if (principal.role === "SECURITY_ADMIN" || principal.role === requested) return;
+  if (requested === "SUPPORT" || requested === "OPERATOR") return;
+  throw new ApiError(403, "ROLE_ESCALATION_FORBIDDEN", "Only a security administrator can grant this staff role", { role: requested });
+};
+
 const assertGrantableAuthorities = (principal: { authorities: readonly string[] }, requested: readonly string[]): void => {
   const held = new Set(principal.authorities);
   const holdsWildcard = held.has("*");
@@ -1715,6 +1809,7 @@ router.post("/users", async (request: Request, response: Response) => {
     request.body,
   );
   const creator = principalOf(request);
+  assertGrantableStaffRole(creator, body.role);
   assertGrantableAuthorities(creator, body.authoritiesMap);
   const actor = actorFromRequest(request);
   // The maker/checker flags are never granted at creation: the user is created
@@ -1784,6 +1879,12 @@ router.post("/users", async (request: Request, response: Response) => {
 router.post("/users/:id/invite", async (request: Request, response: Response) => {
   requireAuthorities(request, ["user:write", "security:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      checklist: z.array(z.enum(["IDENTITY_VERIFIED", "INVITATION_EXPIRY_REVIEWED", "DELIVERY_CHANNEL_CONFIRMED"])).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
   const user = await loadManagedStaffUser(request, id);
   if (user.status !== "INVITED") {
     throw new ApiError(409, "USER_NOT_INVITED", "Only a user that has not been activated can be invited again");
@@ -1799,7 +1900,7 @@ router.post("/users/:id/invite", async (request: Request, response: Response) =>
         entityType: "USER",
         entityId: user.id,
         beforeJson: { credentialsSet: Boolean(user.passwordHash) },
-        afterJson: { invitationExpiresAt: issued.expiresAt.toISOString() },
+        afterJson: { invitationExpiresAt: issued.expiresAt.toISOString(), checklist: body.checklist ?? [] },
       },
     });
     return issued;
@@ -3347,6 +3448,13 @@ router.post("/join-requests/:id/submit", async (request: Request, response: Resp
 router.post("/join-requests/:id/withdraw", async (request: Request, response: Response) => {
   requireAuthorities(request, ["kyb:write", "compliance:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      reason: z.string().trim().min(3).max(500).optional(),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
   const actor = actorFromRequest(request);
   const joinRequest = await client.joinRequest.findUnique({ where: { id } });
   if (!joinRequest) {
@@ -3355,8 +3463,15 @@ router.post("/join-requests/:id/withdraw", async (request: Request, response: Re
   if (["APPROVED", "REJECTED", "WITHDRAWN", "EXPIRED"].includes(joinRequest.status)) {
     throw new ApiError(409, "JOIN_REQUEST_NOT_WITHDRAWABLE", "The join request is no longer open");
   }
+  const allowedChecklist = new Set([
+    "REQUEST_SCOPE_VERIFIED",
+    "APPROVAL_CANCEL_UNDERSTOOD",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
+  const withdrawalReason = body.reason?.trim() || "SUPERSEDED_BY_WITHDRAWAL";
   await client.$transaction(async (tx) => {
-    await invalidatePendingJoinApproval(tx, joinRequest, "SUPERSEDED_BY_WITHDRAWAL");
+    await invalidatePendingJoinApproval(tx, joinRequest, withdrawalReason);
     await tx.joinRequest.update({
       where: { id },
       data: { status: "WITHDRAWN", approvalRequestId: null },
@@ -3369,7 +3484,7 @@ router.post("/join-requests/:id/withdraw", async (request: Request, response: Re
         entityType: "JOIN_REQUEST",
         entityId: id,
         beforeJson: { status: joinRequest.status },
-        afterJson: { status: "WITHDRAWN" },
+        afterJson: { status: "WITHDRAWN", reason: body.reason?.trim() ?? null, checklist },
       },
     });
   });
@@ -3505,6 +3620,13 @@ router.post("/join-requests/:id/request-info", async (request: Request, response
   response.json({ id: updated.id, status: updated.status, slaPausedAt: updated.slaPausedAt });
 });
 
+export const missingJoinRequestChecklistItems = (saved: unknown): string[] => {
+  const record = saved && typeof saved === "object" && !Array.isArray(saved)
+    ? saved as Record<string, unknown>
+    : {};
+  return JOIN_REQUEST_CHECKLIST_KEYS.filter((key) => record[key] !== true);
+};
+
 router.post("/join-requests/:id/decide", async (request: Request, response: Response) => {
   requireAuthorities(request, ["kyb:write", "compliance:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
@@ -3542,6 +3664,15 @@ router.post("/join-requests/:id/decide", async (request: Request, response: Resp
     );
   }
   if (body.decision === "APPROVED") {
+    const missingChecklistItems = missingJoinRequestChecklistItems(joinRequest.reviewChecklistJson);
+    if (missingChecklistItems.length > 0) {
+      throw new ApiError(
+        409,
+        "JOIN_REQUEST_CHECKLIST_INCOMPLETE",
+        "The review checklist must be completed before approval",
+        { missingChecklistItems },
+      );
+    }
     const readiness = await computeJoinRequestReadiness(client, id);
     if (!readiness.ready) {
       throw new ApiError(
@@ -4112,11 +4243,19 @@ router.post("/kyb-documents/:id/review", async (request: Request, response: Resp
         notes: z.string().max(2000).optional(),
         duplicateJustification: z.string().max(4000).optional(),
         expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        checklist: z.array(z.string().max(160)).max(50).optional(),
       })
       .strict(),
     request.body,
   );
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "DOCUMENT_IDENTITY_VERIFIED",
+    "FILE_INTEGRITY_REVIEWED",
+    "EXPIRY_REVIEWED",
+    "DECISION_AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const document = await client.kybDocument.findUnique({
     where: { id },
     select: kybDocumentContextSelect,
@@ -4196,6 +4335,7 @@ router.post("/kyb-documents/:id/review", async (request: Request, response: Resp
           reasonCode: body.reasonCode ?? null,
           expiresOn: saved.expiresOn?.toISOString() ?? null,
           duplicateMerchantIds,
+          checklist,
         },
       },
     });
@@ -4757,6 +4897,50 @@ const approvalSubjectContext = async (subjectType: string, subjectId: string): P
       });
       return row ? { contextType: "ROUTE_HEALTH_OVERRIDE", ...row } : null;
     }
+    case "WALLET": {
+      const row = await client.wallet.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          merchantId: true,
+          currency: true,
+          status: true,
+          glAccountId: true,
+          name: true,
+          merchant: { select: { id: true, tradeName: true, legalName: true, status: true } },
+        },
+      });
+      return row ? { contextType: "WALLET", ...row } : null;
+    }
+    case "APPLICATION": {
+      const row = await client.application.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          name: true,
+          merchantId: true,
+          status: true,
+          assignedWalletId: true,
+          expectedMonthlyVolume: true,
+          merchant: { select: { id: true, tradeName: true, legalName: true, status: true } },
+        },
+      });
+      return row ? { contextType: "APPLICATION", ...row } : null;
+    }
+    case "POS_TERMINAL": {
+      const row = await client.posTerminal.findUnique({
+        where: { id: subjectId },
+        select: {
+          id: true,
+          name: true,
+          location: true,
+          status: true,
+          applicationId: true,
+          application: { select: { id: true, name: true, merchantId: true, merchant: { select: { id: true, tradeName: true, legalName: true } } } },
+        },
+      });
+      return row ? { contextType: "POS_TERMINAL", ...row } : null;
+    }
     case "GATEWAY_VERSION": {
       const row = await client.gatewayVersion.findUnique({
         where: { id: subjectId },
@@ -5220,6 +5404,15 @@ router.get("/merchants/:id/summary/export", async (request: Request, response: R
   ]);
   const summary = serializeMerchantSummary(merchant as never, flags, pendingApprovalCount);
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "MERCHANT_SCOPE_VERIFIED",
+    "FINANCIAL_VISIBILITY_REVIEWED",
+    "RISK_AML_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -5234,6 +5427,7 @@ router.get("/merchants/:id/summary/export", async (request: Request, response: R
         openDisputes,
         pendingCashouts,
         openAmlCases,
+        checklist,
       },
     },
   });
@@ -5970,8 +6164,13 @@ router.get("/merchants/:id/stats", async (request: Request, response: Response) 
   if (!flags.canFinancial) throw new ApiError(403, "MERCHANT_FINANCIAL_ACCESS_REQUIRED", "Financial access is required to view merchant statistics");
   const period = merchantPeriodLabel(request.query.period);
   const since = merchantStatsSince(period);
+  const requestedCurrency = resolveReportingCurrency(request.query.currency);
+  const walletIdsForCurrency = await client.wallet.findMany({
+    where: { merchantId: id, currency: requestedCurrency },
+    select: { id: true },
+  });
   const statusRows = await client.paymentAttempt.groupBy({
-    by: ["status"],
+    by: ["status", "currency"],
     where: { merchantId: id, createdAt: { gte: since } },
     _count: { _all: true },
     _sum: { totalChargedAmount: true, netMerchantAmount: true, platformCommissionAmount: true },
@@ -5986,8 +6185,34 @@ router.get("/merchants/:id/stats", async (request: Request, response: Response) 
   let expiredCount = 0;
   let blockedCount = 0;
   let unknownCount = 0;
+  const perCurrency = new Map<string, {
+    currency: string;
+    attemptCount: number;
+    successfulCount: number;
+    grossVolume: ReturnType<typeof decimal>;
+    netCredited: ReturnType<typeof decimal>;
+    commission: ReturnType<typeof decimal>;
+  }>();
   for (const row of statusRows) {
+    const currency = String(row.currency ?? "").trim() || "UNKNOWN";
     const count = row._count._all;
+    const aggregate = perCurrency.get(currency) ?? {
+      currency,
+      attemptCount: 0,
+      successfulCount: 0,
+      grossVolume: decimal(0),
+      netCredited: decimal(0),
+      commission: decimal(0),
+    };
+    aggregate.attemptCount += count;
+    if (success.has(row.status)) {
+      aggregate.successfulCount += count;
+      aggregate.grossVolume = aggregate.grossVolume.plus(decimal(row._sum.totalChargedAmount ?? 0));
+      aggregate.netCredited = aggregate.netCredited.plus(decimal(row._sum.netMerchantAmount ?? 0));
+      aggregate.commission = aggregate.commission.plus(decimal(row._sum.platformCommissionAmount ?? 0));
+    }
+    perCurrency.set(currency, aggregate);
+    if (currency !== requestedCurrency) continue;
     attemptCount += count;
     if (success.has(row.status)) {
       successfulCount += count;
@@ -6001,9 +6226,13 @@ router.get("/merchants/:id/stats", async (request: Request, response: Response) 
     if (row.status === "UNKNOWN") unknownCount += count;
   }
   const [balance, pendingCashouts, openDisputes, pendingApprovals] = await Promise.all([
-    merchantWalletBalance(client, id),
+    merchantWalletBalance(client, id, requestedCurrency),
     client.cashoutRequest.aggregate({
-      where: { merchantId: id, state: { in: ["PENDING", "PROCESSING"] } },
+      where: {
+        merchantId: id,
+        state: { in: ["PENDING", "PROCESSING"] },
+        ...(walletIdsForCurrency.length > 0 ? { walletId: { in: walletIdsForCurrency.map((wallet) => wallet.id) } } : { id: "__none__" }),
+      },
       _count: { _all: true },
       _sum: { amount: true },
     }),
@@ -6015,6 +6244,16 @@ router.get("/merchants/:id/stats", async (request: Request, response: Response) 
   response.json({
     period,
     since,
+    currency: requestedCurrency,
+    byCurrency: [...perCurrency.values()].map((entry) => ({
+      currency: entry.currency,
+      attemptCount: entry.attemptCount,
+      successfulCount: entry.successfulCount,
+      grossVolume: entry.grossVolume.toFixed(4),
+      netCredited: entry.netCredited.toFixed(4),
+      commission: entry.commission.toFixed(4),
+    })),
+    mixedCurrency: perCurrency.size > 1,
     totals: {
       attemptCount,
       successfulCount,
@@ -6028,11 +6267,13 @@ router.get("/merchants/:id/stats", async (request: Request, response: Response) 
       blockedCount,
       unknownCount,
     },
-    statuses: statusRows.map((row) => ({
-      status: row.status,
-      count: row._count._all,
-      chargedAmount: merchantMoney(row._sum.totalChargedAmount),
-    })),
+    statuses: statusRows
+      .filter((row) => String(row.currency ?? "").trim() === requestedCurrency)
+      .map((row) => ({
+        status: row.status,
+        count: row._count._all,
+        chargedAmount: merchantMoney(row._sum.totalChargedAmount),
+      })),
     walletBalance: balance,
     negativeBalanceCeiling: merchantMoney(merchant.negativeBalanceCeiling),
     pendingCashouts: { count: pendingCashouts._count._all, amount: merchantMoney(pendingCashouts._sum.amount) },
@@ -6363,9 +6604,11 @@ router.post("/merchants/:id/close", async (request: Request, response: Response)
     }),
     client.cashoutRequest.count({ where: { merchantId: id, state: { in: ["PENDING", "PROCESSING"] } } }),
   ]);
-  if (!decimal(balance.balance).isZero()) {
-    throw new ApiError(409, "MERCHANT_BALANCE_NOT_ZERO", "The merchant wallet balance must be zero before closing", {
-      balance: balance.balance,
+  const nonZeroWallet = balance.byCurrency.find((entry) => !decimal(entry.balance).isZero());
+  if (nonZeroWallet) {
+    throw new ApiError(409, "MERCHANT_BALANCE_NOT_ZERO", "Every merchant wallet must be zero before closing", {
+      balance: nonZeroWallet.balance,
+      currency: nonZeroWallet.currency,
     });
   }
   if (openDisputes > 0) {
@@ -6479,9 +6722,29 @@ router.get("/merchants/:id/detail-changes", async (request: Request, response: R
   response.json(listResponse("detailChanges", logs.map((entry) => redactDetailChange(entry, flags)), total, built));
 });
 
+const APPROVAL_FILTER_STATES = new Set<string>(Object.values(ApprovalState));
+const APPROVAL_FILTER_MODES = new Set<string>(Object.values(ApprovalMode));
+const assertApprovalFilterEnums = (query: Record<string, unknown>): void => {
+  for (const [key, allowed, label] of [
+    ["state", APPROVAL_FILTER_STATES, "state"],
+    ["mode", APPROVAL_FILTER_MODES, "mode"],
+  ] as const) {
+    const raw = query[key];
+    if (typeof raw !== "string" || !raw.trim()) continue;
+    const values = raw.split(",").map((value) => value.trim()).filter(Boolean);
+    const invalid = values.find((value) => !allowed.has(value));
+    if (invalid) {
+      throw new ApiError(400, "INVALID_FILTER", `The '${label}' filter value '${invalid}' is invalid`, {
+        allowed: [...allowed],
+      });
+    }
+  }
+};
+
 router.get("/approvals", async (request: Request, response: Response) => {
   requireAuthorities(request, ["approval:read"]);
   const query = (request.query ?? {}) as Record<string, unknown>;
+  assertApprovalFilterEnums(query);
   const built = buildListQuery(request.query, {
     search: ["subjectId", "subjectType", "maker.email", "checker.email"],
     in: { state: "state", mode: "mode" },
@@ -6540,6 +6803,7 @@ router.get("/approvals", async (request: Request, response: Response) => {
 router.get("/approvals/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["approval:read"]);
   const query = (request.query ?? {}) as Record<string, unknown>;
+  assertApprovalFilterEnums(query);
   const built = buildListQuery(request.query, {
     search: ["subjectId", "subjectType", "maker.email", "checker.email"],
     in: { state: "state", mode: "mode" },
@@ -6987,9 +7251,13 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
       "The principal's role cannot check this merchant change",
     );
   }
+  if (subjectType === "ADJUSTMENT" && String(actor.role) !== "FINANCE") {
+    throw new ApiError(403, "ADJUSTMENT_CHECKER_DOMAIN_FORBIDDEN", "Only a finance checker can reject a money adjustment");
+  }
   if (approval.state !== "PENDING_REVIEW" && approval.state !== "DRAFT") {
     throw new ApiError(409, "APPROVAL_NOT_PENDING", "The approval request is not pending review");
   }
+  const platform = getPlatformRuntime(client as never);
   const updated = await client.$transaction(async (tx) => {
     await claimPendingApproval(tx as never, id, actor.userId);
     const row = await tx.approvalRequest.update({
@@ -7091,6 +7359,67 @@ router.post("/approvals/:id/reject", async (request: Request, response: Response
           approvalRequestId: row.id,
         },
       });
+    }
+    if (subjectType === "ADJUSTMENT") {
+      const adjustment = await tx.adjustment.findUnique({ where: { id: row.subjectId } });
+      if (adjustment) {
+        const priorState = String(adjustment.state);
+        const claimedAdjustment = await tx.adjustment.updateMany({
+          where: { id: row.subjectId, state: "PENDING_REVIEW" },
+          data: { state: "REJECTED" },
+        });
+        let reversalJournalEntryId: string | null = null;
+        if (
+          claimedAdjustment.count === 1
+          && adjustment.type === "CHARGEBACK"
+          && adjustment.disputeId
+          && adjustment.sourceAttemptId
+        ) {
+          const reserve = await tx.journalEntry.findFirst({
+            where: { refType: "DISPUTE_OUTCOME", refId: String(adjustment.disputeId) },
+            select: { id: true },
+          });
+          const sourceAttempt = await tx.paymentAttempt.findUnique({ where: { id: String(adjustment.sourceAttemptId) } });
+          if (reserve && sourceAttempt && String(sourceAttempt.settlementTarget ?? "PLATFORM_CLEARING") !== "MERCHANT_DIRECT") {
+            const sourceRoute = await tx.railRoute.findUnique({ where: { id: sourceAttempt.routeId }, select: { gatewayId: true } });
+            const amount = decimal(adjustment.amount);
+            const platformCommission = decimal(sourceAttempt.platformCommissionAmount ?? 0);
+            const commission = platformCommission.gt(amount) ? amount : platformCommission;
+            const merchantAmount = amount.minus(commission);
+            const template = buildLedgerTemplate("CHARGEBACK_WON", {
+              amount,
+              commissionAmount: commission,
+              merchantAmount,
+            });
+            template.refId = String(adjustment.id);
+            const reversal = await platform.ledgerPoster.post(
+              template,
+              {
+                merchantId: String(sourceAttempt.merchantId),
+                gatewayId: sourceRoute?.gatewayId ? String(sourceRoute.gatewayId) : undefined,
+                credentialSetId: sourceAttempt.credentialSetId ? String(sourceAttempt.credentialSetId) : undefined,
+                env: String(sourceAttempt.env),
+                currency: String(sourceAttempt.currency),
+              },
+              tx as never,
+            );
+            reversalJournalEntryId = reversal.entry.id;
+            await tx.adjustment.update({ where: { id: row.subjectId }, data: { journalEntryId: reversalJournalEntryId } });
+          }
+        }
+        await writeAudit(tx, {
+          data: {
+            actorId: actor.userId,
+            role: actor.role,
+            action: "ADJUSTMENT_APPROVAL_REJECTED",
+            entityType: "ADJUSTMENT",
+            entityId: row.subjectId,
+            beforeJson: { state: priorState },
+            afterJson: { state: "REJECTED", rejectionReason: body.reason, reversalJournalEntryId },
+            approvalRequestId: row.id,
+          },
+        });
+      }
     }
     if (subjectType === "MERCHANT") {
       const kind = merchantApprovalKind(row.payloadDiffJson);
@@ -7269,6 +7598,9 @@ router.get("/aml/screenings", async (request: Request, response: Response) => {
 router.get("/aml/screenings/export", async (request: Request, response: Response) => {
   assertConfidential(request);
   const query = (request.query ?? {}) as Record<string, unknown>;
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => ["SCREENING_SCOPE_VERIFIED", "MATCH_DATA_REVIEWED", "EXPORT_AUTHORITY_CONFIRMED"].includes(entry));
   const built = buildListQuery(request.query, {
     search: ["subjectId", "providerCode", "providerRequestRef"],
     in: { result: "result", subjectType: "subjectType", trigger: "trigger" },
@@ -7298,7 +7630,7 @@ router.get("/aml/screenings/export", async (request: Request, response: Response
       entityType: "AML_SCREENING",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: screenings.length, filters: JSON.stringify(query) },
+      afterJson: { total, exported: screenings.length, filters: JSON.stringify(query), checklist },
     },
   });
   response.json({
@@ -7342,6 +7674,15 @@ router.get("/aml/screenings/summary/export", async (request: Request, response: 
   assertConfidential(request);
   const summary = await buildAmlScreeningSummary();
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "SCREENING_SCOPE_VERIFIED",
+    "RESULT_TRIGGER_REVIEWED",
+    "UNRESOLVED_MATCH_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -7354,6 +7695,7 @@ router.get("/aml/screenings/summary/export", async (request: Request, response: 
         total: summary.total,
         screened24h: summary.screened24h,
         unresolvedMatches: summary.unresolvedMatches,
+        checklist,
       },
     },
   });
@@ -7576,6 +7918,9 @@ router.get("/aml/cases", async (request: Request, response: Response) => {
 router.get("/aml/cases/export", async (request: Request, response: Response) => {
   assertConfidential(request);
   const query = (request.query ?? {}) as Record<string, unknown>;
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => ["AML_SCOPE_VERIFIED", "CASE_DATA_REVIEWED", "EXPORT_AUTHORITY_CONFIRMED"].includes(entry));
   const built = buildListQuery(request.query, {
     search: ["triggerReason", "subjectId", "rule.code", "rule.name", "assignedReviewer.email"],
     in: { status: "status", severity: "severity", subjectType: "subjectType" },
@@ -7612,7 +7957,7 @@ router.get("/aml/cases/export", async (request: Request, response: Response) => 
       entityType: "AML_CASE",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: cases.length, filters: JSON.stringify(query) },
+      afterJson: { total, exported: cases.length, filters: JSON.stringify(query), checklist },
     },
   });
   response.json({
@@ -7968,6 +8313,9 @@ router.get("/aml/rules", async (request: Request, response: Response) => {
 router.get("/aml/rules/export", async (request: Request, response: Response) => {
   assertConfidential(request);
   const query = (request.query ?? {}) as Record<string, unknown>;
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => ["RULE_SCOPE_VERIFIED", "RULE_DATA_REVIEWED", "EXPORT_AUTHORITY_CONFIRMED"].includes(entry));
   const built = buildListQuery(request.query, {
     search: ["code", "name"],
     equals: { ruleType: "ruleType", action: "action", baseSeverity: "baseSeverity" },
@@ -8003,7 +8351,7 @@ router.get("/aml/rules/export", async (request: Request, response: Response) => 
       entityType: "AML_RULE",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: rules.length, filters: JSON.stringify(query) },
+      afterJson: { total, exported: rules.length, filters: JSON.stringify(query), checklist },
     },
   });
   response.json({
@@ -8046,6 +8394,15 @@ router.get("/aml/rules/summary/export", async (request: Request, response: Respo
   assertConfidential(request);
   const summary = await buildAmlRuleSummary();
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "RULE_SCOPE_VERIFIED",
+    "ACTIVE_INACTIVE_REVIEWED",
+    "PENDING_APPROVAL_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -8059,6 +8416,7 @@ router.get("/aml/rules/summary/export", async (request: Request, response: Respo
         active: summary.active,
         inactive: summary.inactive,
         pendingApprovals: summary.pendingApprovals,
+        checklist,
       },
     },
   });
@@ -8232,11 +8590,23 @@ router.post("/aml/reporting-rules", async (request: Request, response: Response)
 router.post("/aml/reporting-rules/:id/promote", async (request: Request, response: Response) => {
   assertReportingAuthority(request);
   const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({ checklist: z.array(z.string().max(64)).max(10).optional() }).strict(),
+    request.body ?? {},
+  );
+  const allowedChecklist = new Set([
+    "RULE_SCOPE_VERIFIED",
+    "EFFECTIVE_DATE_VERIFIED",
+    "APPROVAL_PATH_VERIFIED",
+    "PROMOTION_ACKNOWLEDGED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const actor = actorFromRequest(request);
   const result = await proposeReportingRulePromotion(client, {
     ruleId: id,
     actorUserId: actor.userId,
     actorRole: actor.role,
+    checklist,
   });
   response.status(202).json(result);
 });
@@ -9241,7 +9611,20 @@ router.post("/aml/report-schemas/:id/simulate", async (request: Request, respons
 router.post("/aml/report-schemas/:id/promote", async (request: Request, response: Response) => {
   assertReportingAuthority(request);
   const { id } = parseOrThrow(idSchema, request.params);
-  const body = parseOrThrow(z.object({ setAsDefault: z.boolean().default(true) }).strict(), request.body ?? {});
+  const body = parseOrThrow(
+    z.object({
+      setAsDefault: z.boolean().default(true),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
+  const allowedChecklist = new Set([
+    "SCHEMA_REVIEWED",
+    "MAPPING_VALIDATED",
+    "TEMPLATE_VERIFIED",
+    "APPROVAL_PATH_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const schema = await client.regulatoryReportSchema.findUnique({ where: { id } });
   if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
   if (schema.status === "CONFIRMED") {
@@ -9282,7 +9665,7 @@ router.post("/aml/report-schemas/:id/promote", async (request: Request, response
         entityType: "REGULATORY_REPORT_SCHEMA",
         entityId: schema.id,
         beforeJson: { status: schema.status },
-        afterJson: { status: "PENDING_APPROVAL", approvalRequestId: created.id, setAsDefault: body.setAsDefault },
+        afterJson: { status: "PENDING_APPROVAL", approvalRequestId: created.id, setAsDefault: body.setAsDefault, checklist },
         approvalRequestId: created.id,
       },
     });
@@ -9432,9 +9815,16 @@ router.put("/aml/report-schema-defaults", async (request: Request, response: Res
       reportCode: z.string().max(40).default(""),
       format: z.enum(["XML", "XLSX", "DOCX"]),
       schemaId: z.string().min(1).max(64),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
     }).strict(),
     request.body ?? {},
   );
+  const allowedChecklist = new Set([
+    "SCHEMA_CONFIRMED",
+    "BINDING_MATCH_VERIFIED",
+    "APPROVAL_PATH_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const schema = await client.regulatoryReportSchema.findUnique({ where: { id: body.schemaId } });
   if (!schema) throw new ApiError(404, "REPORT_SCHEMA_NOT_FOUND", "The reporting schema does not exist");
   if (schema.status !== "CONFIRMED") {
@@ -9490,7 +9880,7 @@ router.put("/aml/report-schema-defaults", async (request: Request, response: Res
         entityType: "REGULATORY_REPORT_SCHEMA",
         entityId: schema.id,
         beforeJson: {},
-        afterJson: { approvalRequestId: created.id, ...body },
+        afterJson: { approvalRequestId: created.id, ...body, checklist },
         approvalRequestId: created.id,
       },
     });
@@ -9901,6 +10291,9 @@ router.get("/aml/reports", async (request: Request, response: Response) => {
 router.get("/aml/reports/export", async (request: Request, response: Response) => {
   assertConfidential(request);
   const query = (request.query ?? {}) as Record<string, unknown>;
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => ["REPORT_SCOPE_VERIFIED", "REPORT_DATA_REVIEWED", "EXPORT_AUTHORITY_CONFIRMED"].includes(entry));
   const built = buildListQuery(request.query, {
     search: ["subjectId", "submissionRef", "amlCaseId"],
     in: { status: "status", reportType: "reportType" },
@@ -9949,7 +10342,7 @@ router.get("/aml/reports/export", async (request: Request, response: Response) =
       entityType: "REGULATORY_REPORT",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: reports.length, filters: JSON.stringify(query) },
+      afterJson: { total, exported: reports.length, filters: JSON.stringify(query), checklist },
     },
   });
   response.json({
@@ -9996,6 +10389,15 @@ router.get("/aml/reports/summary/export", async (request: Request, response: Res
   assertConfidential(request);
   const summary = await buildAmlReportSummary();
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "REPORT_SCOPE_VERIFIED",
+    "STATUS_BREAKDOWN_REVIEWED",
+    "SUBMISSION_DEADLINE_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -10009,6 +10411,7 @@ router.get("/aml/reports/summary/export", async (request: Request, response: Res
         submittedThisMonth: summary.submittedThisMonth,
         pendingChecker: summary.pendingChecker,
         drafts: summary.drafts,
+        checklist,
       },
     },
   });
@@ -11007,6 +11410,10 @@ router.get("/operator-cases/export", async (request: Request, response: Response
     client.operatorCase.count({ where: visibleWhere as never }),
   ]);
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["CASE_SCOPE_VERIFIED", "SENSITIVE_FIELDS_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -11015,7 +11422,7 @@ router.get("/operator-cases/export", async (request: Request, response: Response
       entityType: "OPERATOR_CASE",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: cases.length, filters: JSON.stringify(request.query ?? {}) },
+      afterJson: { total, exported: cases.length, filters: JSON.stringify(request.query ?? {}), checklist },
     },
   });
   response.json({
@@ -11176,8 +11583,7 @@ router.get("/gateway-inquiries", async (request: Request, response: Response) =>
   response.json(listResponse("schedules", schedules.map(flattenGatewayInquiry), total, built));
 });
 
-router.get("/gateway-inquiries/summary", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["case:read", "operator:read"]);
+const buildGatewayInquirySummary = async () => {
   const now = new Date();
   const grouped = await client.gatewayInquirySchedule.groupBy({
     by: ["status"],
@@ -11193,20 +11599,50 @@ router.get("/gateway-inquiries/summary", async (request: Request, response: Resp
       nextRunAt: { lte: now },
     },
   });
-  response.json({
-    summary: {
-      total: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
-      scheduled: byStatus.SCHEDULED ?? 0,
-      running: byStatus.RUNNING ?? 0,
-      retrying: byStatus.RETRYING ?? 0,
-      completed: byStatus.COMPLETED ?? 0,
-      failed: byStatus.FAILED ?? 0,
-      cancelled: byStatus.CANCELLED ?? 0,
-      expired: byStatus.EXPIRED ?? 0,
-      overdue,
-      byStatus,
+  return {
+    total: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
+    scheduled: byStatus.SCHEDULED ?? 0,
+    running: byStatus.RUNNING ?? 0,
+    retrying: byStatus.RETRYING ?? 0,
+    completed: byStatus.COMPLETED ?? 0,
+    failed: byStatus.FAILED ?? 0,
+    cancelled: byStatus.CANCELLED ?? 0,
+    expired: byStatus.EXPIRED ?? 0,
+    overdue,
+    byStatus,
+  };
+};
+
+router.get("/gateway-inquiries/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["case:read", "operator:read"]);
+  response.json({ summary: await buildGatewayInquirySummary() });
+});
+
+router.get("/gateway-inquiries/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["case:read", "operator:read"]);
+  const summary = await buildGatewayInquirySummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "INQUIRY_SCOPE_VERIFIED",
+    "SCHEDULE_STATUS_REVIEWED",
+    "OVERDUE_BACKLOG_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "GATEWAY_INQUIRY_SUMMARY_EXPORTED",
+      entityType: "GATEWAY_INQUIRY",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: { ...summary, checklist },
     },
   });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
 });
 
 router.get("/gateway-inquiries/:id", async (request: Request, response: Response) => {
@@ -12027,6 +12463,19 @@ router.post("/operator-cases/:id/resolve", async (request: Request, response: Re
 router.post("/attempts/:id/inquire", async (request: Request, response: Response) => {
   requireAuthorities(request, ["attempt:inquire"]);
   const { id } = parseOrThrow(idSchema, request.params);
+  const body = parseOrThrow(
+    z.object({
+      reason: z.string().trim().min(10).max(500).optional(),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
+  const allowedChecklist = new Set([
+    "INQUIRY_ELIGIBILITY_VERIFIED",
+    "PAYMENT_STATE_REVIEWED",
+    "GATEWAY_CONTACT_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const attempt = await client.paymentAttempt.findUnique({
     where: { id },
     include: {
@@ -12076,7 +12525,7 @@ router.post("/attempts/:id/inquire", async (request: Request, response: Response
         entityType: "PAYMENT_ATTEMPT",
         entityId: id,
         beforeJson: { status: attempt.status },
-        afterJson: { status: "VERIFYING", nextCheckAt: nextCheckAt.toISOString() },
+        afterJson: { status: "VERIFYING", nextCheckAt: nextCheckAt.toISOString(), reason: body.reason, checklist },
       },
     });
     return tx.paymentAttempt.findUnique({ where: { id }, select: { id: true, status: true } });
@@ -12316,6 +12765,10 @@ router.get("/gateways/export", async (request: Request, response: Response) => {
     healthMap.set(row.gatewayId, current);
   }
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["GATEWAY_SCOPE_VERIFIED", "VERIFICATION_STATUS_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -12324,7 +12777,7 @@ router.get("/gateways/export", async (request: Request, response: Response) => {
       entityType: "GATEWAY",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: gateways.length, filters: JSON.stringify(request.query ?? {}) },
+      afterJson: { total, exported: gateways.length, filters: JSON.stringify(request.query ?? {}), checklist },
     },
   });
   response.json({
@@ -12963,6 +13416,7 @@ const credentialSetSchema = z
     externalMerchantId: z.string().min(2).max(120).optional(),
     settlementTarget: z.enum(["PLATFORM_CLEARING", "MERCHANT_DIRECT", "PROVIDER_HELD"]),
     entries: z.array(credentialEntrySchema).min(1).max(40),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -13066,6 +13520,13 @@ router.get("/credential-sets/:id", async (request: Request, response: Response) 
 router.post("/credential-sets", async (request: Request, response: Response) => {
   requireAuthorities(request, ["credential:write", "gateway:write"]);
   const body = parseOrThrow(credentialSetSchema, request.body);
+  const allowedChecklist = new Set([
+    "CREDENTIAL_SET_SCOPE_VERIFIED",
+    "SECRET_HANDLING_CONFIRMED",
+    "ENVIRONMENT_AND_OWNER_REVIEWED",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const gateway = await client.gateway.findUnique({ where: { code: body.gatewayCode } });
   if (!gateway) {
     throw new ApiError(404, "GATEWAY_NOT_FOUND", "The gateway does not exist");
@@ -13119,6 +13580,7 @@ router.post("/credential-sets", async (request: Request, response: Response) => 
         ownerMerchantId: body.ownerType === "MERCHANT" ? body.ownerMerchantId : null,
         settlementTarget: body.settlementTarget,
         entryKeys: body.entries.map((entry) => entry.key),
+        checklist,
       },
     },
   });
@@ -13129,9 +13591,19 @@ router.put("/credential-sets/:id", async (request: Request, response: Response) 
   requireAuthorities(request, ["credential:write", "gateway:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ entries: z.array(credentialEntrySchema).min(1).max(40) }).strict(),
+    z.object({
+      entries: z.array(credentialEntrySchema).min(1).max(40),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
     request.body,
   );
+  const allowedChecklist = new Set([
+    "CREDENTIAL_SET_SCOPE_VERIFIED",
+    "SECRET_HANDLING_CONFIRMED",
+    "ENVIRONMENT_AND_OWNER_REVIEWED",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const credentialSet = await client.credentialSet.findUnique({ where: { id } });
   if (!credentialSet) {
     throw new ApiError(404, "CREDENTIAL_SET_NOT_FOUND", "The credential set does not exist");
@@ -13160,7 +13632,7 @@ router.put("/credential-sets/:id", async (request: Request, response: Response) 
       entityType: "CREDENTIAL_SET",
       entityId: updated.id,
       beforeJson: { status: credentialSet.status },
-      afterJson: { status: updated.status, entryKeys: body.entries.map((entry) => entry.key), secretVersion: 2 },
+      afterJson: { status: updated.status, entryKeys: body.entries.map((entry) => entry.key), secretVersion: 2, checklist },
     },
   });
   response.json({ id: updated.id, status: updated.status });
@@ -13223,9 +13695,19 @@ router.post("/credential-sets/:id/revoke", async (request: Request, response: Re
   requireAuthorities(request, ["credential:write", "gateway:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ reason: z.string().min(2).max(500).optional() }).strict(),
+    z.object({
+      reason: z.string().min(2).max(500).optional(),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
     request.body ?? {},
   );
+  const allowedChecklist = new Set([
+    "CREDENTIAL_SET_SCOPE_VERIFIED",
+    "SECRET_HANDLING_CONFIRMED",
+    "ENVIRONMENT_AND_OWNER_REVIEWED",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const credentialSet = await client.credentialSet.findUnique({ where: { id } });
   if (!credentialSet) {
     throw new ApiError(404, "CREDENTIAL_SET_NOT_FOUND", "The credential set does not exist");
@@ -13244,7 +13726,7 @@ router.post("/credential-sets/:id/revoke", async (request: Request, response: Re
       entityType: "CREDENTIAL_SET",
       entityId: updated.id,
       beforeJson: { status: credentialSet.status },
-      afterJson: { status: updated.status, reason: body.reason ?? null },
+      afterJson: { status: updated.status, reason: body.reason ?? null, checklist },
     },
   });
   response.json({ id: updated.id, status: updated.status });
@@ -15124,6 +15606,10 @@ router.get("/rails/export", async (request: Request, response: Response) => {
     healthMap.set(row.railId, current);
   }
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["RAIL_SCOPE_VERIFIED", "COLLECTION_MODE_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -15132,7 +15618,7 @@ router.get("/rails/export", async (request: Request, response: Response) => {
       entityType: "RAIL",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: rails.length, filters: JSON.stringify(request.query ?? {}) },
+      afterJson: { total, exported: rails.length, filters: JSON.stringify(request.query ?? {}), checklist },
     },
   });
   response.json({
@@ -15530,6 +16016,10 @@ router.get("/routes/export", async (request: Request, response: Response) => {
     client.railRoute.count({ where: built.where as never }),
   ]);
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["ROUTE_SCOPE_VERIFIED", "ROUTE_HEALTH_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -15538,7 +16028,7 @@ router.get("/routes/export", async (request: Request, response: Response) => {
       entityType: "RAIL_ROUTE",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: routes.length, filters: JSON.stringify(request.query ?? {}) },
+      afterJson: { total, exported: routes.length, filters: JSON.stringify(request.query ?? {}), checklist },
     },
   });
   const routeHealthNow = new Date();
@@ -16227,7 +16717,9 @@ const reconciliationSourceRow = (source: Record<string, any>) => {
     type: source.type,
     format: typeof parser.format === "string" ? parser.format : source.type,
     delimiter: typeof parser.delimiter === "string" ? parser.delimiter : ",",
-    currency: typeof parser.currency === "string" ? parser.currency : "LYD",
+    currency: source.currency ?? (typeof parser.currency === "string" ? parser.currency : "LYD"),
+    env: source.env ?? null,
+    credentialSetId: source.credentialSetId ?? null,
     scheduleCron: source.scheduleCron,
     settlementLagDays: source.settlementLagDays,
     dedupeKeyTemplate: source.dedupeKeyTemplate,
@@ -16265,6 +16757,9 @@ router.post("/reconciliation/sources", async (request: Request, response: Respon
         parserConfig: z.record(z.string().max(64), z.unknown()),
         settlementLagDays: z.number().int().min(0).max(365).default(0),
         dedupeKeyTemplate: z.string().max(200).optional(),
+        currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+        env: z.string().max(16).optional(),
+        credentialSetId: z.string().uuid().optional(),
       })
       .strict(),
     request.body,
@@ -16277,6 +16772,9 @@ router.post("/reconciliation/sources", async (request: Request, response: Respon
       parserConfig: json(body.parserConfig),
       settlementLagDays: body.settlementLagDays,
       dedupeKeyTemplate: body.dedupeKeyTemplate,
+      ...(body.currency ? { currency: body.currency } : {}),
+      ...(body.env ? { env: body.env } : {}),
+      ...(body.credentialSetId ? { credentialSetId: body.credentialSetId } : {}),
     },
   });
   response.status(201).json({ id: source.id, type: source.type });
@@ -16293,6 +16791,9 @@ router.patch("/reconciliation/sources/:id", async (request: Request, response: R
         dedupeKeyTemplate: z.string().max(200).nullable().optional(),
         parserConfig: z.record(z.string().max(64), z.unknown()).optional(),
         active: z.boolean().optional(),
+        currency: z.string().regex(/^[A-Z]{3}$/).nullable().optional(),
+        env: z.string().max(16).nullable().optional(),
+        credentialSetId: z.string().uuid().nullable().optional(),
         checklist: z.array(z.enum([
           "PARSER_CONFIG_REVIEWED",
           "SCHEDULE_LAG_VERIFIED",
@@ -16307,7 +16808,10 @@ router.patch("/reconciliation/sources/:id", async (request: Request, response: R
           value.settlementLagDays !== undefined ||
           value.dedupeKeyTemplate !== undefined ||
           value.parserConfig !== undefined ||
-          value.active !== undefined,
+          value.active !== undefined ||
+          value.currency !== undefined ||
+          value.env !== undefined ||
+          value.credentialSetId !== undefined,
         { message: "At least one field is required" },
       ),
     request.body ?? {},
@@ -16330,6 +16834,9 @@ router.patch("/reconciliation/sources/:id", async (request: Request, response: R
         ...(body.scheduleCron !== undefined ? { scheduleCron: body.scheduleCron } : {}),
         ...(body.settlementLagDays !== undefined ? { settlementLagDays: body.settlementLagDays } : {}),
         ...(body.dedupeKeyTemplate !== undefined ? { dedupeKeyTemplate: body.dedupeKeyTemplate } : {}),
+        ...(body.currency !== undefined ? { currency: body.currency } : {}),
+        ...(body.env !== undefined ? { env: body.env } : {}),
+        ...(body.credentialSetId !== undefined ? { credentialSetId: body.credentialSetId } : {}),
         parserConfig: json(nextParser),
       },
     });
@@ -16647,6 +17154,10 @@ router.get("/reconciliation/runs/:id/export", async (request: Request, response:
     client.reconciliationItem.count({ where: where as never }),
   ]);
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["RUN_SCOPE_VERIFIED", "ITEMS_FILTER_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -16655,7 +17166,7 @@ router.get("/reconciliation/runs/:id/export", async (request: Request, response:
       entityType: "RECONCILIATION_RUN",
       entityId: id,
       beforeJson: {},
-      afterJson: { total, exported: items.length, result: resultFilter || null },
+      afterJson: { total, exported: items.length, result: resultFilter || null, checklist },
     },
   });
   response.json({
@@ -16840,6 +17351,10 @@ router.get("/disputes/export", async (request: Request, response: Response) => {
     client.dispute.count({ where: where as never }),
   ]);
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["DISPUTE_SCOPE_VERIFIED", "EVIDENCE_DEADLINE_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof query.checklist === "string" ? query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -16848,7 +17363,7 @@ router.get("/disputes/export", async (request: Request, response: Response) => {
       entityType: "DISPUTE",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: disputes.length, filters: JSON.stringify(query) },
+      afterJson: { total, exported: disputes.length, filters: JSON.stringify(query), checklist },
     },
   });
   response.json({
@@ -16859,24 +17374,24 @@ router.get("/disputes/export", async (request: Request, response: Response) => {
   });
 });
 
-const buildDisputeSummary = async () => {
+const buildDisputeSummary = async (currency: string) => {
   const now = new Date();
   const soon = new Date(now.getTime() + 48 * 60 * 60 * 1000);
   const [statusRows, openAggregate, overdue, dueSoon, earliestDue] = await Promise.all([
-    client.dispute.groupBy({ by: ["status"], _count: { _all: true } }),
+    client.dispute.groupBy({ by: ["status"], where: { currency }, _count: { _all: true } }),
     client.dispute.aggregate({
-      where: { status: { in: [...DISPUTE_OPEN_STATUSES] as never } },
+      where: { currency, status: { in: [...DISPUTE_OPEN_STATUSES] as never } },
       _count: { _all: true },
       _sum: { amount: true },
     }),
     client.dispute.count({
-      where: { status: { in: [...DISPUTE_EVIDENCE_PENDING_STATUSES] as never }, evidenceDueAt: { lt: now } },
+      where: { currency, status: { in: [...DISPUTE_EVIDENCE_PENDING_STATUSES] as never }, evidenceDueAt: { lt: now } },
     }),
     client.dispute.count({
-      where: { status: { in: [...DISPUTE_EVIDENCE_PENDING_STATUSES] as never }, evidenceDueAt: { gte: now, lte: soon } },
+      where: { currency, status: { in: [...DISPUTE_EVIDENCE_PENDING_STATUSES] as never }, evidenceDueAt: { gte: now, lte: soon } },
     }),
     client.dispute.findFirst({
-      where: { status: { in: [...DISPUTE_EVIDENCE_PENDING_STATUSES] as never }, evidenceDueAt: { not: null } },
+      where: { currency, status: { in: [...DISPUTE_EVIDENCE_PENDING_STATUSES] as never }, evidenceDueAt: { not: null } },
       orderBy: { evidenceDueAt: "asc" },
       select: { evidenceDueAt: true },
     }),
@@ -16886,6 +17401,7 @@ const buildDisputeSummary = async () => {
   const openCount = (openAggregate._count as { _all: number })._all;
   const openAmount = (openAggregate._sum as { amount: unknown } | undefined)?.amount;
   return {
+    currency,
     totalOpen: openCount,
     openAmount: merchantMoney(openAmount),
     byStatus,
@@ -16897,12 +17413,12 @@ const buildDisputeSummary = async () => {
 
 router.get("/disputes/summary", async (request: Request, response: Response) => {
   requireAuthorities(request, ["dispute:read"]);
-  response.json(await buildDisputeSummary());
+  response.json(await buildDisputeSummary(resolveReportingCurrency(request.query.currency)));
 });
 
 router.get("/disputes/summary/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["dispute:read"]);
-  const summary = await buildDisputeSummary();
+  const summary = await buildDisputeSummary(resolveReportingCurrency(request.query.currency));
   const actor = actorFromRequest(request);
   const allowedChecklist = new Set([
     "OPEN_SCOPE_VERIFIED",
@@ -17387,6 +17903,10 @@ router.get("/adjustments/export", async (request: Request, response: Response) =
     }
   }
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["ADJUSTMENT_SCOPE_VERIFIED", "APPROVAL_STATE_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof query.checklist === "string" ? query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -17395,7 +17915,7 @@ router.get("/adjustments/export", async (request: Request, response: Response) =
       entityType: "ADJUSTMENT",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: adjustments.length, filters: JSON.stringify(query) },
+      afterJson: { total, exported: adjustments.length, filters: JSON.stringify(query), checklist },
     },
   });
   response.json({
@@ -17406,17 +17926,17 @@ router.get("/adjustments/export", async (request: Request, response: Response) =
   });
 });
 
-const buildAdjustmentSummary = async () => {
+const buildAdjustmentSummary = async (currency: string) => {
   const [stateRows, typeRows, openAggregate, executedAggregate] = await Promise.all([
-    client.adjustment.groupBy({ by: ["state"], _count: { _all: true }, _sum: { amount: true } }),
-    client.adjustment.groupBy({ by: ["type"], _count: { _all: true }, _sum: { amount: true } }),
+    client.adjustment.groupBy({ by: ["state"], where: { targetGlAccount: { currency } }, _count: { _all: true }, _sum: { amount: true } }),
+    client.adjustment.groupBy({ by: ["type"], where: { targetGlAccount: { currency } }, _count: { _all: true }, _sum: { amount: true } }),
     client.adjustment.aggregate({
-      where: { state: { in: [...ADJUSTMENT_OPEN_STATES] as never } },
+      where: { targetGlAccount: { currency }, state: { in: [...ADJUSTMENT_OPEN_STATES] as never } },
       _count: { _all: true },
       _sum: { amount: true },
     }),
     client.adjustment.aggregate({
-      where: { state: { in: [...ADJUSTMENT_EXECUTED_STATES] as never } },
+      where: { targetGlAccount: { currency }, state: { in: [...ADJUSTMENT_EXECUTED_STATES] as never } },
       _count: { _all: true },
       _sum: { amount: true },
     }),
@@ -17434,6 +17954,7 @@ const buildAdjustmentSummary = async () => {
     amountByType[row.type] = merchantMoney(row._sum.amount);
   }
   return {
+    currency,
     totalOpen: (openAggregate._count as { _all: number })._all,
     openAmount: merchantMoney((openAggregate._sum as { amount?: unknown } | undefined)?.amount),
     executedCount: (executedAggregate._count as { _all: number })._all,
@@ -17447,12 +17968,12 @@ const buildAdjustmentSummary = async () => {
 
 router.get("/adjustments/summary", async (request: Request, response: Response) => {
   requireAuthorities(request, ["finance:read"]);
-  response.json(await buildAdjustmentSummary());
+  response.json(await buildAdjustmentSummary(resolveReportingCurrency(request.query.currency)));
 });
 
 router.get("/adjustments/summary/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["finance:read"]);
-  const summary = await buildAdjustmentSummary();
+  const summary = await buildAdjustmentSummary(resolveReportingCurrency(request.query.currency));
   const actor = actorFromRequest(request);
   const allowedChecklist = new Set([
     "OPEN_SCOPE_VERIFIED",
@@ -17673,6 +18194,10 @@ router.get("/cashouts/export", async (request: Request, response: Response) => {
     client.cashoutRequest.count({ where: built.where as never }),
   ]);
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["CASHOUT_SCOPE_VERIFIED", "BALANCE_AND_HOLDS_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -17681,7 +18206,7 @@ router.get("/cashouts/export", async (request: Request, response: Response) => {
       entityType: "CASHOUT_REQUEST",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: cashouts.length, filters: JSON.stringify(request.query ?? {}) },
+      afterJson: { total, exported: cashouts.length, filters: JSON.stringify(request.query ?? {}), checklist },
     },
   });
   response.json({
@@ -17692,17 +18217,17 @@ router.get("/cashouts/export", async (request: Request, response: Response) => {
   });
 });
 
-const buildCashoutSummary = async () => {
+const buildCashoutSummary = async (currency: string) => {
   const now = new Date();
   const [statusRows, openAggregate, oldestPending] = await Promise.all([
-    client.cashoutRequest.groupBy({ by: ["state"], _count: { _all: true }, _sum: { amount: true } }),
+    client.cashoutRequest.groupBy({ by: ["state"], where: { wallet: { currency } }, _count: { _all: true }, _sum: { amount: true } }),
     client.cashoutRequest.aggregate({
-      where: { state: { in: [...CASHOUT_OPEN_STATES] as never } },
+      where: { wallet: { currency }, state: { in: [...CASHOUT_OPEN_STATES] as never } },
       _count: { _all: true },
       _sum: { amount: true },
     }),
     client.cashoutRequest.findFirst({
-      where: { state: "PENDING" },
+      where: { wallet: { currency }, state: "PENDING" },
       orderBy: { createdAt: "asc" },
       select: { createdAt: true },
     }),
@@ -17714,6 +18239,7 @@ const buildCashoutSummary = async () => {
     amountByState[row.state] = merchantMoney(row._sum.amount);
   }
   return {
+    currency,
     totalOpen: (openAggregate._count as { _all: number })._all,
     openAmount: merchantMoney((openAggregate._sum as { amount?: unknown } | undefined)?.amount),
     pendingCount: byState.PENDING ?? 0,
@@ -17729,12 +18255,12 @@ const buildCashoutSummary = async () => {
 
 router.get("/cashouts/summary", async (request: Request, response: Response) => {
   requireAuthorities(request, ["cashout:read"]);
-  response.json(await buildCashoutSummary());
+  response.json(await buildCashoutSummary(resolveReportingCurrency(request.query.currency)));
 });
 
 router.get("/cashouts/summary/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["cashout:read"]);
-  const summary = await buildCashoutSummary();
+  const summary = await buildCashoutSummary(resolveReportingCurrency(request.query.currency));
   const actor = actorFromRequest(request);
   const allowedChecklist = new Set([
     "OPEN_SCOPE_VERIFIED",
@@ -17923,10 +18449,13 @@ router.post("/commission-profiles", async (request: Request, response: Response)
         feeBearerDefault: z.enum(["MERCHANT_ABSORBS", "PAYER_SURCHARGE", "SPLIT"]).default("MERCHANT_ABSORBS"),
         roundingMode: z.string().max(32).default("HALF_UP"),
         effectiveFrom: z.string().max(64).optional(),
+        checklist: z.array(z.string().max(64)).max(10).optional(),
       })
       .strict(),
     request.body,
   );
+  const allowedChecklist = new Set(["PRICING_SCOPE_VERIFIED", "FEE_OR_THRESHOLD_REVIEWED", "SCOPE_IMPACT_REVIEWED", "AUTHORITY_CONFIRMED"]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const profile = await client.commissionProfile.create({
     data: {
       merchantId: body.merchantId,
@@ -17957,6 +18486,7 @@ router.post("/commission-profiles", async (request: Request, response: Response)
         merchantId: profile.merchantId,
         applicationId: profile.applicationId,
         version: profile.version,
+        checklist,
       },
     },
   });
@@ -17994,6 +18524,7 @@ router.post("/commission-profiles/:id/expire", async (request: Request, response
       .object({
         effectiveTo: z.string().max(64).optional(),
         reason: z.string().max(500).optional(),
+        checklist: z.array(z.string().max(64)).max(10).optional(),
       })
       .strict(),
     request.body ?? {},
@@ -18019,6 +18550,7 @@ router.post("/commission-profiles/:id/expire", async (request: Request, response
       approvalRequestId: pendingCommissionApproval.id,
     });
   }
+  const checklist = (body.checklist ?? []).filter((entry) => ["LIFECYCLE_SCOPE_REVIEWED", "EFFECTIVE_DATE_REVIEWED", "APPROVAL_PATH_CONFIRMED"].includes(entry));
   const effectiveTo = body.effectiveTo ? new Date(body.effectiveTo) : now;
   if (Number.isNaN(effectiveTo.getTime())) {
     throw new ApiError(400, "INVALID_EFFECTIVE_TO", "effectiveTo must be a valid date");
@@ -18032,6 +18564,7 @@ router.post("/commission-profiles/:id/expire", async (request: Request, response
         action: "EXPIRE",
         effectiveTo: effectiveTo.toISOString(),
         reason: body.reason ?? null,
+        checklist,
       },
       makerReason: body.reason ?? null,
       mode: "STANDARD",
@@ -18088,9 +18621,13 @@ router.post("/velocity-rules/:id/deactivate", async (request: Request, response:
   requireAuthorities(request, ["velocity:write", "compliance:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ reason: z.string().max(500).optional() }).strict(),
+    z.object({
+      reason: z.string().max(500).optional(),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
     request.body ?? {},
   );
+  const checklist = (body.checklist ?? []).filter((entry) => ["LIFECYCLE_SCOPE_REVIEWED", "EFFECTIVE_DATE_REVIEWED", "APPROVAL_PATH_CONFIRMED"].includes(entry));
   const rule = await client.velocityRule.findUnique({ where: { id } });
   if (!rule) {
     throw new ApiError(404, "VELOCITY_RULE_NOT_FOUND", "The velocity rule does not exist");
@@ -18116,7 +18653,7 @@ router.post("/velocity-rules/:id/deactivate", async (request: Request, response:
     data: {
       subjectType: "VELOCITY_RULE",
       subjectId: rule.id,
-      payloadDiffJson: { action: "DEACTIVATE", reason: body.reason ?? null },
+      payloadDiffJson: { action: "DEACTIVATE", reason: body.reason ?? null, checklist },
       makerReason: body.reason ?? null,
       mode: "STANDARD",
       makerUserId: actor.userId,
@@ -18170,10 +18707,13 @@ router.post("/velocity-rules", async (request: Request, response: Response) => {
         maxCount: z.number().int().min(1).max(1_000_000),
         maxAmount: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
         action: z.enum(["REJECT", "FLAG"]),
+        checklist: z.array(z.string().max(64)).max(10).optional(),
       })
       .strict(),
     request.body,
   );
+  const allowedChecklist = new Set(["PRICING_SCOPE_VERIFIED", "FEE_OR_THRESHOLD_REVIEWED", "SCOPE_IMPACT_REVIEWED", "AUTHORITY_CONFIRMED"]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const rule = await client.velocityRule.create({
     data: {
       scopeType: body.scopeType,
@@ -18199,6 +18739,7 @@ router.post("/velocity-rules", async (request: Request, response: Response) => {
         windowSeconds: rule.windowSeconds,
         maxCount: rule.maxCount,
         version: rule.version,
+        checklist,
       },
     },
   });
@@ -18212,12 +18753,13 @@ router.post("/velocity-rules", async (request: Request, response: Response) => {
  * posted after the checkpoint. Summing every line would double count the
  * window the checkpoint already covers.
  */
-const loadLedgerBalances = async (): Promise<Map<string, Decimal>> => {
+const loadLedgerBalances = async (currency?: string | null): Promise<Map<string, Decimal>> => {
   // One grouped statement (shard totals, or checkpoint + post-checkpoint
   // lines) instead of one journal_lines query per account without shards.
   const live = await loadLiveAccountBalances(client as never);
   const balances = new Map<string, Decimal>();
   for (const account of live) {
+    if (currency && account.currency !== currency) continue;
     balances.set(
       account.accountType,
       (balances.get(account.accountType) ?? decimal(0)).plus(decimal(account.balance)),
@@ -18232,6 +18774,7 @@ const profitabilityQuerySchema = z
     from: z.string().max(64).optional(),
     to: z.string().max(64).optional(),
     currency: z.string().length(3).optional(),
+    checklist: z.string().max(1000).optional(),
   })
   .strict();
 
@@ -18255,9 +18798,10 @@ const buildProfitabilitySnapshot = async (rawQuery: Request["query"]) => {
     1,
     Math.ceil((windowEnd.getTime() - since.getTime()) / (24 * 60 * 60 * 1000)),
   );
+  const requestedCurrency = resolveReportingCurrency(query.currency);
 
   const attempts = await client.paymentAttempt.findMany({
-    where: { createdAt: until ? { gte: since, lte: until } : { gte: since } },
+    where: { currency: requestedCurrency, createdAt: until ? { gte: since, lte: until } : { gte: since } },
     select: {
       status: true,
       totalChargedAmount: true,
@@ -18323,7 +18867,7 @@ const buildProfitabilitySnapshot = async (rawQuery: Request["query"]) => {
     byGateway.set(gatewayCode, gatewayEntry);
   }
 
-  const balances = await loadLedgerBalances();
+  const balances = await loadLedgerBalances(requestedCurrency);
   // The natural balance of an account: positive for a debit-normal account
   // (assets and expenses) and positive for a credit-normal account
   // (liabilities and income).
@@ -18340,11 +18884,11 @@ const buildProfitabilitySnapshot = async (rawQuery: Request["query"]) => {
   const netContribution = netRevenue.minus(chargebackLosses);
   const [chargebackPeriod, refundCommissionPeriod] = await Promise.all([
     client.adjustment.aggregate({
-      where: { type: "CHARGEBACK", state: "EXECUTED", updatedAt: { gte: since, lte: windowEnd } },
+      where: { type: "CHARGEBACK", state: "EXECUTED", targetGlAccount: { currency: requestedCurrency }, updatedAt: { gte: since, lte: windowEnd } },
       _sum: { amount: true },
     }),
     client.adjustment.aggregate({
-      where: { type: "REFUND", reverseCommission: true, state: "EXECUTED", updatedAt: { gte: since, lte: windowEnd } },
+      where: { type: "REFUND", reverseCommission: true, state: "EXECUTED", targetGlAccount: { currency: requestedCurrency }, updatedAt: { gte: since, lte: windowEnd } },
       _sum: { amount: true },
     }),
   ]);
@@ -18370,7 +18914,7 @@ const buildProfitabilitySnapshot = async (rawQuery: Request["query"]) => {
     denominator.isZero() ? "0.0000" : numerator.div(denominator).mul(100).toFixed(4);
   return {
     period,
-    currency: query.currency?.toUpperCase() ?? "LYD",
+    currency: requestedCurrency,
     windowDays,
     windowStart: since.toISOString(),
     windowEnd: windowEnd.toISOString(),
@@ -18409,6 +18953,10 @@ router.get("/finance/profitability/export", async (request: Request, response: R
   requireAuthorities(request, ["finance:read"]);
   const snapshot = await buildProfitabilitySnapshot(request.query);
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["PROFITABILITY_SCOPE_VERIFIED", "MARGIN_AND_COST_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -18423,6 +18971,7 @@ router.get("/finance/profitability/export", async (request: Request, response: R
         windowEnd: snapshot.windowEnd,
         grossVolume: snapshot.grossVolume,
         netContribution: snapshot.netContribution,
+        checklist,
       },
     },
   });
@@ -18464,6 +19013,7 @@ router.get("/finance/route-caps", async (request: Request, response: Response) =
     return {
       routeId: route.id,
       railCode: route.rail.code,
+      currency: route.rail.currency,
       gatewayId: route.gatewayId,
       dailyCapAmount: cap.cap?.toFixed(4) ?? null,
       dailyProcessedAmount: cap.processed.toFixed(4),
@@ -18477,8 +19027,9 @@ router.get("/finance/route-caps", async (request: Request, response: Response) =
     };
   });
 
+  const routeCurrencies = new Set(rows.map((row) => row.currency));
   response.json({
-    currency: "LYD",
+    currency: routeCurrencies.size === 1 ? [...routeCurrencies][0] : routeCurrencies.size > 1 ? "MIXED" : resolveReportingCurrency(request.query.currency),
     timeZone,
     businessDay: {
       since: window.since.toISOString(),
@@ -18488,8 +19039,8 @@ router.get("/finance/route-caps", async (request: Request, response: Response) =
   });
 });
 
-const buildLiquiditySnapshot = async () => {
-  const balances = await loadLedgerBalances();
+const buildLiquiditySnapshot = async (currency: string) => {
+  const balances = await loadLedgerBalances(currency);
   const debitPositive = (type: string): Decimal => balances.get(type) ?? decimal(0);
   const creditPositive = (type: string): Decimal => naturalBalance(type, balances.get(type) ?? decimal(0));
 
@@ -18499,6 +19050,7 @@ const buildLiquiditySnapshot = async () => {
   const coverRatio = clearing.isZero() ? decimal(1) : treasury.div(clearing);
 
   const cashouts = await client.cashoutRequest.findMany({
+    where: { wallet: { currency } },
     select: { state: true, amount: true, createdAt: true },
   });
   const pending = cashouts.filter((cashout) => cashout.state === "PENDING");
@@ -18519,14 +19071,14 @@ const buildLiquiditySnapshot = async () => {
     : 0;
 
   const unsettled = await client.paymentAttempt.findMany({
-    where: { status: "SUCCEEDED", createdAt: { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) } },
+    where: { status: "SUCCEEDED", currency, createdAt: { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) } },
     select: { createdAt: true, settledAmount: true, totalChargedAmount: true, routeId: true },
   });
   const routeGateways = new Map(
     (await client.railRoute.findMany({ select: { id: true, gatewayId: true } })).map((route) => [route.id, route.gatewayId]),
   );
   const clearingAccounts = await client.glAccount.findMany({
-    where: { accountType: "GATEWAY_CLEARING" },
+    where: { accountType: "GATEWAY_CLEARING", currency },
     select: { id: true, gatewayId: true },
   });
   const clearingAccountIds = clearingAccounts.map((account) => account.id);
@@ -18611,7 +19163,7 @@ const buildLiquiditySnapshot = async () => {
   };
 
   return {
-    currency: "LYD",
+    currency,
     checkedAt: new Date().toISOString(),
     treasuryBalance: treasury.toFixed(4),
     clearingBalances: clearing.toFixed(4),
@@ -18643,13 +19195,17 @@ const buildLiquiditySnapshot = async () => {
 
 router.get("/finance/liquidity", async (request: Request, response: Response) => {
   requireAuthorities(request, ["finance:read"]);
-  response.json(await buildLiquiditySnapshot());
+  response.json(await buildLiquiditySnapshot(resolveReportingCurrency(request.query.currency)));
 });
 
 router.get("/finance/liquidity/export", async (request: Request, response: Response) => {
   requireAuthorities(request, ["finance:read"]);
-  const snapshot = await buildLiquiditySnapshot();
+  const snapshot = await buildLiquiditySnapshot(resolveReportingCurrency(request.query.currency));
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["LIQUIDITY_SCOPE_VERIFIED", "COVER_AND_OBLIGATIONS_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -18663,6 +19219,7 @@ router.get("/finance/liquidity/export", async (request: Request, response: Respo
         treasuryBalance: snapshot.treasuryBalance,
         clearingBalances: snapshot.clearingBalances,
         gatewayCount: snapshot.clearingByGateway.length,
+        checklist,
       },
     },
   });
@@ -18737,6 +19294,10 @@ router.get("/finance/invariant-check/export", async (request: Request, response:
   requireAuthorities(request, ["finance:read"]);
   const snapshot = await buildInvariantSnapshot();
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["LEDGER_SCOPE_VERIFIED", "INVARIANT_RESULT_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -18751,6 +19312,7 @@ router.get("/finance/invariant-check/export", async (request: Request, response:
         leftSide: snapshot.leftSide,
         rightSide: snapshot.rightSide,
         accounts: snapshot.accounts.length,
+        checklist,
       },
     },
   });
@@ -18868,6 +19430,10 @@ router.get("/settings/checkout-support/summary/export", async (request: Request,
   requireAuthorities(request, ["settings:read"]);
   const snapshot = await buildCheckoutSupportSummary();
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["CHECKOUT_SCOPE_VERIFIED", "FAQ_AND_CHANNELS_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -18882,6 +19448,7 @@ router.get("/settings/checkout-support/summary/export", async (request: Request,
         currentVersion: snapshot.summary.currentVersion,
         faqItems: snapshot.summary.faqItems,
         channelCount: snapshot.summary.channelCount,
+        checklist,
       },
     },
   });
@@ -19101,6 +19668,10 @@ router.get("/audit-logs/export", async (request: Request, response: Response) =>
     total = legacyTotal;
   }
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["DATE_RANGE_VERIFIED", "SENSITIVE_FIELDS_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await client.auditOutbox.create({
     data: {
       actorId: actor.userId,
@@ -19109,7 +19680,7 @@ router.get("/audit-logs/export", async (request: Request, response: Response) =>
       entityType: "AUDIT_LOG",
       entityId: "export",
       beforeJson: {},
-      afterJson: { total, exported: rows.length, filters: JSON.stringify(request.query ?? {}) },
+      afterJson: { total, exported: rows.length, filters: JSON.stringify(request.query ?? {}), checklist },
     },
   });
   response.json({
@@ -19408,6 +19979,10 @@ router.get("/settings/export", async (request: Request, response: Response) => {
   }
   const exportedAt = new Date().toISOString();
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["SETTINGS_SCOPE_VERIFIED", "SENSITIVE_VALUES_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
   await writeAudit(client, {
     data: {
       actorId: actor.userId,
@@ -19416,7 +19991,7 @@ router.get("/settings/export", async (request: Request, response: Response) => {
       entityType: "PLATFORM_SETTING",
       entityId: "export",
       beforeJson: {},
-      afterJson: { keys: latest.size, versions: rows.length, exportedAt },
+      afterJson: { keys: latest.size, versions: rows.length, exportedAt, checklist },
     },
   });
   response.json({
@@ -19571,6 +20146,7 @@ const filingAdapterSchema = z.object({
   authSecret: z.string().min(4).max(4000).nullable().optional(),
   timeoutSeconds: z.number().int().min(5).max(120).default(30),
   configJson: z.record(z.string().max(64), z.unknown()).nullable().optional(),
+  checklist: z.array(z.string().max(64)).max(10).optional(),
 }).strict();
 
 const SECRET_CONFIG_KEY = /(secret|token|password|api[_-]?key|authorization|private[_-]?key|credential)/i;
@@ -19632,7 +20208,27 @@ const pendingAdapterApproval = async (adapterId: string) =>
 router.get("/aml/filing-adapters", async (request: Request, response: Response) => {
   assertConfidential(request);
   const rows = await client.externalFilingAdapter.findMany({ orderBy: [{ authority: "asc" }, { name: "asc" }] });
-  response.json({ adapters: rows.map(filingAdapterView) });
+  const pending = rows.length === 0
+    ? []
+    : await client.approvalRequest.findMany({
+        where: {
+          subjectType: "FILING_ADAPTER",
+          subjectId: { in: rows.map((row) => row.id) },
+          state: { in: ["DRAFT", "PENDING_REVIEW"] },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, subjectId: true },
+      });
+  const pendingByAdapter = new Map<string, string>();
+  for (const approval of pending) {
+    if (!pendingByAdapter.has(approval.subjectId)) pendingByAdapter.set(approval.subjectId, approval.id);
+  }
+  response.json({
+    adapters: rows.map((row) => ({
+      ...filingAdapterView(row),
+      pendingApprovalId: pendingByAdapter.get(row.id) ?? null,
+    })),
+  });
 });
 
 router.post("/aml/filing-adapters", async (request: Request, response: Response) => {
@@ -19642,6 +20238,8 @@ router.post("/aml/filing-adapters", async (request: Request, response: Response)
   assertAdapterAuthHeader(body.authHeaderName);
   assertSafeAdapterConfig(body.configJson);
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["ADAPTER_SCOPE_VERIFIED", "ENDPOINT_VERIFIED", "SECRET_HANDLING_CONFIRMED", "APPROVAL_PATH_CONFIRMED"]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const secretCiphertext = body.authSecret ? await filingAdapterCipher.encrypt(body.authSecret) : null;
   try {
     const result = await client.$transaction(async (tx) => {
@@ -19676,6 +20274,7 @@ router.post("/aml/filing-adapters", async (request: Request, response: Response)
               timeoutSeconds: body.timeoutSeconds,
               configJson: body.configJson ?? null,
             },
+            checklist,
           } as Prisma.InputJsonValue,
           mode: "STANDARD",
           makerUserId: actor.userId,
@@ -19684,7 +20283,7 @@ router.post("/aml/filing-adapters", async (request: Request, response: Response)
           expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
         },
       });
-      await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "FILING_ADAPTER_PROPOSED", entityType: "EXTERNAL_FILING_ADAPTER", entityId: adapter.id, beforeJson: {}, afterJson: { approvalRequestId: approval.id, name: adapter.name, authority: adapter.authority, kind: adapter.kind }, approvalRequestId: approval.id } });
+      await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "FILING_ADAPTER_PROPOSED", entityType: "EXTERNAL_FILING_ADAPTER", entityId: adapter.id, beforeJson: {}, afterJson: { approvalRequestId: approval.id, name: adapter.name, authority: adapter.authority, kind: adapter.kind, checklist }, approvalRequestId: approval.id } });
       return { adapter, approval };
     });
     response.status(202).json({ adapter: filingAdapterView(result.adapter), approvalRequestId: result.approval.id, status: "PENDING_REVIEW" });
@@ -19707,6 +20306,8 @@ router.patch("/aml/filing-adapters/:id", async (request: Request, response: Resp
   assertAdapterAuthHeader(body.authHeaderName === undefined ? existing.authHeaderName : body.authHeaderName);
   assertSafeAdapterConfig(body.configJson);
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["ADAPTER_SCOPE_VERIFIED", "ENDPOINT_VERIFIED", "SECRET_HANDLING_CONFIRMED", "APPROVAL_PATH_CONFIRMED", "DISABLE_IMPACT_ACKNOWLEDGED", "REPORTING_CHANNEL_VERIFIED"]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const changes = {
     ...(body.name !== undefined ? { name: body.name } : {}),
     ...(body.authority !== undefined ? { authority: body.authority } : {}),
@@ -19731,7 +20332,7 @@ router.patch("/aml/filing-adapters/:id", async (request: Request, response: Resp
         expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
       },
     });
-    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "FILING_ADAPTER_CHANGE_PROPOSED", entityType: "EXTERNAL_FILING_ADAPTER", entityId: id, beforeJson: { name: existing.name, status: existing.status }, afterJson: { approvalRequestId: created.id, changes: Object.keys(changes) }, approvalRequestId: created.id } });
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "FILING_ADAPTER_CHANGE_PROPOSED", entityType: "EXTERNAL_FILING_ADAPTER", entityId: id, beforeJson: { name: existing.name, status: existing.status }, afterJson: { approvalRequestId: created.id, changes: Object.keys(changes), checklist }, approvalRequestId: created.id } });
     return created;
   });
   response.status(202).json({ adapter: filingAdapterView(existing), approvalRequestId: approval.id, status: "PENDING_REVIEW" });
@@ -19976,6 +20577,7 @@ const incidentCommunicationSchema = z.object({
   audience: z.string().min(1).max(500),
   subject: z.string().min(1).max(500),
   body: z.string().min(1).max(50_000),
+  checklist: z.array(z.string().max(64)).max(10).optional(),
 }).strict();
 
 const incidentView = (incident: any, detail = false) => ({
@@ -20059,6 +20661,71 @@ const incidentRef = (): string => {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   return `INC-${date}-${randomBytes(3).toString("hex").toUpperCase()}`;
 };
+
+router.get("/incidents/summary/export", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const summary = await incidentSummary();
+  const actor = actorFromRequest(request);
+  const allowedChecklist = new Set([
+    "INCIDENT_SCOPE_VERIFIED",
+    "SEVERITY_STATUS_REVIEWED",
+    "POSTMORTEM_BACKLOG_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "INCIDENT_SUMMARY_EXPORTED",
+      entityType: "INCIDENT",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: { ...summary, checklist },
+    },
+  });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
+});
+
+router.get("/incidents/export", async (request: Request, response: Response) => {
+  assertConfidential(request);
+  const query = parseOrThrow(z.object({
+    status: incidentStatusSchema.optional(),
+    severity: incidentSeveritySchema.optional(),
+    category: incidentCategorySchema.optional(),
+    search: z.string().max(200).optional(),
+    checklist: z.string().max(1000).optional(),
+  }).strict(), request.query ?? {});
+  const checklist = (query.checklist ? query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => ["INCIDENT_SCOPE_VERIFIED", "INCIDENT_DATA_REVIEWED", "EXPORT_AUTHORITY_CONFIRMED"].includes(entry));
+  const where: Prisma.IncidentWhereInput = {
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.severity ? { severity: query.severity } : {}),
+    ...(query.category ? { category: query.category } : {}),
+    ...(query.search ? { OR: [{ reference: { contains: query.search, mode: "insensitive" } }, { title: { contains: query.search, mode: "insensitive" } }, { summary: { contains: query.search, mode: "insensitive" } }] } : {}),
+  };
+  const take = 5000;
+  const [total, rows] = await Promise.all([
+    client.incident.count({ where }),
+    client.incident.findMany({ where, orderBy: { detectedAt: "desc" }, take }),
+  ]);
+  const actor = actorFromRequest(request);
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId,
+      role: actor.role ?? "UNKNOWN",
+      action: "INCIDENTS_EXPORTED",
+      entityType: "INCIDENT",
+      entityId: "export",
+      beforeJson: {},
+      afterJson: { total, exported: rows.length, filters: JSON.stringify({ ...query, checklist: undefined }), checklist },
+    },
+  });
+  response.json({ incidents: await incidentViews(rows), total, exported: rows.length, truncated: total > rows.length });
+});
 
 router.get("/incidents", async (request: Request, response: Response) => {
   assertConfidential(request);
@@ -20158,7 +20825,21 @@ router.patch("/incidents/:id", async (request: Request, response: Response) => {
 router.post("/incidents/:id/transition", async (request: Request, response: Response) => {
   assertReportingAuthority(request);
   const { id } = parseOrThrow(idSchema, request.params);
-  const body = parseOrThrow(z.object({ status: incidentStatusSchema, note: z.string().max(5000).optional() }).strict(), request.body ?? {});
+  const body = parseOrThrow(
+    z.object({
+      status: incidentStatusSchema,
+      note: z.string().max(5000).optional(),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
+  const allowedChecklist = new Set([
+    "INCIDENT_STATE_VERIFIED",
+    "IMPACT_REVIEWED",
+    "COMMUNICATIONS_REVIEWED",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const at = new Date();
   const actor = actorFromRequest(request);
   const updated = await client.$transaction(async (tx) => {
@@ -20182,12 +20863,12 @@ router.post("/incidents/:id/transition", async (request: Request, response: Resp
         ...(timestampField ? { [timestampField]: at } : {}),
         ...(body.status === "RESOLVED" ? { postmortemRequired: incidentRequiresPostmortem({ severity: existing.severity, category: existing.category }), postmortemDueAt } : {}),
         ...(body.status === "CLOSED" ? { closedByUserId: actor.userId } : {}),
-        timeline: { create: { occurredAt: at, type: "STATUS_CHANGE", actorUserId: actor.userId, summary: body.note ?? `Status changed from ${existing.status} to ${body.status}`, detailJson: { from: existing.status, to: body.status } } },
+        timeline: { create: { occurredAt: at, type: "STATUS_CHANGE", actorUserId: actor.userId, summary: body.note ?? `Status changed from ${existing.status} to ${body.status}`, detailJson: { from: existing.status, to: body.status, checklist } } },
       },
       include: incidentInclude,
     });
     await writeAudit(tx, {
-      data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_STATUS_CHANGED", entityType: "INCIDENT", entityId: id, beforeJson: { status: existing.status }, afterJson: { status: body.status, note: body.note ?? null } },
+      data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_STATUS_CHANGED", entityType: "INCIDENT", entityId: id, beforeJson: { status: existing.status }, afterJson: { status: body.status, note: body.note ?? null, checklist } },
     });
     return incident;
   });
@@ -20318,13 +20999,19 @@ router.post("/incidents/:id/communications", async (request: Request, response: 
   assertReportingAuthority(request);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(incidentCommunicationSchema, request.body ?? {});
+  const allowedChecklist = new Set([
+    "COMMUNICATION_SCOPE_VERIFIED",
+    "AUDIENCE_AND_CHANNEL_REVIEWED",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const actor = actorFromRequest(request);
   const communication = await client.$transaction(async (tx) => {
     const incident = await tx.incident.findUnique({ where: { id } });
     if (!incident) throw new ApiError(404, "INCIDENT_NOT_FOUND", "The incident does not exist");
     const created = await tx.incidentCommunication.create({ data: { incidentId: id, channel: body.channel, audience: body.audience, subject: body.subject, body: body.body, sentAt: new Date(), sentByUserId: actor.userId } });
     await tx.incidentTimelineEntry.create({ data: { incidentId: id, occurredAt: new Date(), type: "COMMUNICATION", actorUserId: actor.userId, summary: `Communication sent via ${body.channel}` } });
-    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_COMMUNICATION_RECORDED", entityType: "INCIDENT", entityId: id, beforeJson: {}, afterJson: { communicationId: created.id, channel: created.channel, audience: created.audience } } });
+    await writeAudit(tx, { data: { actorId: actor.userId, role: actor.role ?? "SYSTEM", action: "INCIDENT_COMMUNICATION_RECORDED", entityType: "INCIDENT", entityId: id, beforeJson: {}, afterJson: { communicationId: created.id, channel: created.channel, audience: created.audience, checklist } } });
     return created;
   });
   response.status(201).json({ communication });

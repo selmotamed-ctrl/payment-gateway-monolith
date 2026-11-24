@@ -13,6 +13,11 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { areHelpPanelsVisible } from "@/constants/env";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
+import { xlsxUIPipeline } from "@/utils/xlsx";
+import { FormModal } from "@/components/ui/FormModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import {
     COLUMN_HELP,
     avStatusHelp,
@@ -35,6 +40,12 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { describeAuditChange } from "@/utils/auditSummary";
+const EXPORT_CHECKS = [
+    { key: "KYB_SCOPE_VERIFIED", label: "KYB document scope verified" },
+    { key: "DOCUMENT_AND_SCAN_REVIEWED", label: "Document and scan status reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const parse = (payload: unknown): KybDocumentDetail => {
     const source = (payload ?? {}) as Record<string, unknown>;
     return (source.kybDocument ?? source) as KybDocumentDetail;
@@ -61,6 +72,11 @@ const KybReviewDetailPage = dc(() => {
     const loading = ref(true);
     const error = ref<string | null>(null);
     const reviewOpen = ref(false);
+    const showChecklists = areChecklistsVisible();
+    const exportOpen = ref(false);
+    const exportLoading = ref(false);
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
     const reviewDecision = ref<"ACCEPTED" | "REJECTED">("ACCEPTED");
     const actionOpen = ref(false);
     const actionMode = ref<KybActionMode>("REPLACEMENT");
@@ -83,6 +99,49 @@ const KybReviewDetailPage = dc(() => {
 
     watch(documentId, () => void load());
     void load();
+
+    const exportRecord = async () => {
+        const entry = document.value;
+        if (!entry || exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
+        exportLoading.value = true;
+        try {
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["document_id", entry.id],
+                ["merchant_id", entry.merchantId],
+                ["merchant", entry.merchantName],
+                ["doc_type", entry.docType],
+                ["file_name", entry.originalFileName],
+                ["mime", entry.mime],
+                ["size_bytes", entry.sizeBytes],
+                ["sha256", entry.sha256],
+                ["status", entry.status],
+                ["av_status", entry.avStatus],
+                ["expiry_state", entry.expiryState],
+                ["expires_on", entry.expiresOn ?? ""],
+                ["reviewed_by", entry.reviewedBy?.email ?? ""],
+                ["reviewed_at", entry.reviewedAt ?? ""],
+                ["rejection_reason", entry.rejectionReasonCode ?? ""],
+                ["review_notes", entry.reviewNotes ?? ""],
+                ["duplicate_merchant_count", entry.duplicateMerchantCount ?? 0],
+                ["join_request_id", entry.joinRequestId ?? ""],
+                ["created_at", entry.createdAt],
+            ];
+            const lines = ["field,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({ title: `kyb-document-${entry.id}-${new Date().toISOString().slice(0, 10)}.xlsx`, lines });
+            exportOpen.value = false;
+            exportChecklist.value = {};
+            showSnackBar({ type: "success", message: t("KYB review record exported") });
+        } catch (cause) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
 
     const openReview = (decision: "ACCEPTED" | "REJECTED") => {
         reviewDecision.value = decision;
@@ -185,7 +244,7 @@ const KybReviewDetailPage = dc(() => {
             return (
                 <ScreenContainer>
                     <StateView loading onRetry={() => void load()} />
-                </ScreenContainer>
+        </ScreenContainer>
             );
         }
         if (error.value || !document.value) {
@@ -210,6 +269,9 @@ const KybReviewDetailPage = dc(() => {
                             <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                                 <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "KybReview" })}>
                                     {t("Queue")}
+                                </VBtn>
+                                <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>
+                                    {t("Export record")}
                                 </VBtn>
                                 <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>
                                     {t("Refresh")}
@@ -497,6 +559,25 @@ const KybReviewDetailPage = dc(() => {
                     onUpdate={(value) => (actionOpen.value = value)}
                     onDone={() => void load()}
                 />
+                <FormModal
+                    modelValue={exportOpen.value}
+                    onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                    title={t("Export KYB review record")}
+                    size="md"
+                    loading={exportLoading.value}
+                    submitLabel={t("Export")}
+                    onSubmit={() => void exportRecord()}
+                >
+                    <FormChecklist
+                        checks={[...EXPORT_CHECKS]}
+                        modelValue={exportChecklist.value}
+                        onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                        show={showChecklists}
+                        title={t("KYB export checklist")}
+                        complete={exportChecklistComplete.value}
+                        incompleteMessage={t("Complete all export checklist items before exporting")}
+                    />
+                </FormModal>
             </ScreenContainer>
         );
     };

@@ -3,7 +3,7 @@ id: platform.runtime
 title: Runtime and Configuration
 status: partial
 confidence: high
-last_verified: 2026-11-16
+last_verified: 2026-11-24
 verified_against: 19d6a54+working-tree
 code:
   - core-back/index.ts
@@ -44,7 +44,7 @@ tests:
   - merchant-back/test/security-regressions.test.ts
   - checkout-back/test/security-regressions.test.ts
 gaps:
-  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 41.
+  - core-back startup does not call ensureSchemaVersion; only seeders enforce schema version 44.
   - LOG_LEVEL is declared but not used by the console or access logger.
   - WORKER_CONCURRENCY and WORKER_REQUEST_TIMEOUT_MS are accepted but not passed to the production worker runtime.
   - Console request-log correlation uses a separate short id from x-request-id.
@@ -264,7 +264,7 @@ The storage engine is constructed before `listen`, but after the server object i
 
 ### 3.5 Schema version check
 
-`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 40`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
+`core-back/prisma/schemaVersion.ts` defines `REQUIRED_SCHEMA_VERSION = 44`. `core-back/prisma/client/index.ts` exports `ensureSchemaVersion()` which connects, runs:
 
 ```sql
 SELECT "version" FROM "schema_versions" WHERE "id" = 1
@@ -354,7 +354,7 @@ The deploy engine injects admin UI flags rather than requiring a committed front
 - `ADMIN_SHOW_CHECKLISTS` (optional) and `ADMIN_SHOW_SNAPSHOT_EXPORT_CHECKLIST` (default true) control checklist visibility. `adminChecklistsVisible()` prefers the former.
 - `ADMIN_SHOW_HELP_PANELS` (default true) controls help panels.
 - Build constants `VITE_SHOW_CHECKLISTS`, `VITE_SHOW_SNAPSHOT_EXPORT_CHECKLIST` and `VITE_SHOW_HELP_PANELS` are injected into the `admin-front` build.
-- Runtime config `showChecklists`, `showSnapshotExportChecklist` and `showHelpPanels` is written into the deployed admin release and takes precedence at boot.
+- Runtime config `showChecklists`, `showSnapshotExportChecklist`, `showHelpPanels` and (when `CHECKOUT_DOMAIN` is set) `academyCertificateVerifyUrl` are written into the deployed admin release and take precedence at boot.
 - `APP_RELEASE` and `APP_COMMIT` are injected by `deployService()` into every core/edge/Fake Rails environment. `/health` exposes `release`/`commit`; the deploy batch and final verification require the expected release so a stale listener cannot pass health checks. They are additive response fields and are not part of the core/edge env schemas.
 
 These are deploy/frontend flags; they are not core-back env keys.
@@ -371,7 +371,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 5. **The raw body is preserved before JSON parsing.** Webhook signatures and uploaded document bytes must be exact.
 6. **A request id is always returned.** Invalid or missing client values are replaced with a UUID.
 7. **Redis is never authoritative for money.** When Redis is unavailable the cache/velocity adapter falls back to memory and invalidation stays local.
-8. **Schema version 41 is the contract.** Seeders enforce it; migrations are deployed separately.
+8. **Schema version 44 is the contract.** Seeders enforce it; migrations are deployed separately.
 9. **Workers are stateless across nodes.** Coordination is by database claims, not by an in-memory scheduler.
 10. **The admin UI flags are deployment-owned.** A source build uses the frontend defaults; a deployed build receives the deploy engine's values.
 
@@ -400,7 +400,7 @@ These are deploy/frontend flags; they are not core-back env keys.
 | Backup daemon | No | Backup routes return 503 |
 | Notification webhook | No | Log transport reports SENT |
 | Fake Rails | No | Only required by synthetic seeding/seeding routes |
-| Schema version 41 | Yes at seed time | Seeders fail; server boot does not check |
+| Schema version 44 | Yes at seed time | Seeders fail; server boot does not check |
 
 ### 5.3 Config consumers outside the env proxy
 
@@ -538,7 +538,7 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 
 ## 11. Security hardening config changes (2026-11-05)
 
-- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 40`.
+- Core: `ALLOW_EMPTY_OUTBOUND_HOST_ALLOWLIST` (default false); the deploy engine sets `KYB_SCANNER_MODE` (default `eicar`, the built-in content gate; `disabled` leaves documents PENDING; `clamd` scans with ClamAV: with `KYB_CLAMD_ADDRESS` empty the deploy engine installs and configures clamd and freshclam on every core host (loopback `127.0.0.1:3310`), with an address it uses that daemon and installs nothing); `REQUIRED_SCHEMA_VERSION = 44`.
 - Edges: `TRUSTED_PROXY_CIDRS` default loopback only; `MAX_INBOUND_BODY_BYTES` default 1 MiB; `CORS_ALLOWED_ORIGINS` (no CORS headers on admin/merchant when unset); newly wired rate-limit window envs `AUTH_/ADMIN_/API_/EXTERNAL_/PAY_/INBOUND_RATE_LIMIT_WINDOW_MS`; `CORE_MAX_RESPONSE_BYTES` (64 MiB), `CORE_TOTAL_DEADLINE_MS` (300000), `MAX_STREAMS_PER_IP` (5), `ADMIN_AUTHORITY_HINTS` (default empty, restrict-only), merchant `TOKEN_MAX_SCOPES`, `TOKEN_MAX_TTL_DAYS`, `TOKEN_DEFAULT_TTL_DAYS`, `UPLOAD_RATE_LIMIT_MAX`, admin `BACKUP_JOB_RATE_LIMIT_MAX` (6 per 10 minutes).
 - Frontends: `VITE_CHECKOUT_BASE_URL`, `VITE_IDENTITY_HOSTS` (merchant), `VITE_CHECKOUT_ORIGIN` (fake-rails). Real `.env` files in the frontends are no longer tracked; copy `.env.example` to `.env` on a fresh clone.
 - Deploy and daemon keys are listed in the deploy parts.
@@ -557,3 +557,13 @@ No test run was performed for this documentation change. PostgreSQL/Redis-backed
 ## v38 sandbox configuration (2026-11-13)
 
 New core keys: `EXECUTION_PLANE` (`LIVE`|`SANDBOX`, default `LIVE`), `PLANE_FENCE_ALLOW_FAKE_RAILS_ON_LIVE` (development escape hatch, default false), `FAKE_RAILS_CONTROL_URL` and `FAKE_RAILS_CONTROL_TOKEN`. The edges add `SANDBOX_CORE_BACK_URL`/`SANDBOX_CORE_BACK_URLS`; an empty pair means the sandbox is not configured and the sandbox routes answer `503 SANDBOX_NODE_UNAVAILABLE`. Deploy adds `SANDBOX_ENABLED`, `SANDBOX_NODE`, `SANDBOX_CORE_PORT` (4005), `SANDBOX_DB_NAME` (`payment_gateway_sandbox`), `SANDBOX_REMOTE_DIR` and `SANDBOX_CORE_BACK_URLS`. The deploy planner emits a second core service `pg-core-sandbox` with `EXECUTION_PLANE=SANDBOX`, sandbox `DATABASE_URL`/session leader URL, Fake Rails control URL/token, backups disabled and its own release tree; the PostgreSQL provisioner creates the database and `pgw_sandbox`/`pgw_sandbox_session` PgBouncer aliases.
+
+### 3.12 Multi-currency runtime settings (2026-11-24)
+
+- `BASE_CURRENCY` (default `LYD`) is the reporting/display default; ledger books remain per-currency and no FX conversion is implied.
+- `LEDGER_STRICT_CONTEXT=true` is written by the deploy engine so a currency-scoped account lookup without a currency fails with `MISSING_LEDGER_CURRENCY` instead of falling back to the first currency.
+
+### 3.12 Multi-currency runtime settings (2026-11-24)
+
+- `BASE_CURRENCY` (default `LYD`) is the reporting/display default; ledger books remain per-currency and no FX conversion is implied.
+- `LEDGER_STRICT_CONTEXT=true` is written by the deploy engine so a currency-scoped account lookup without a currency fails with `MISSING_LEDGER_CURRENCY` instead of falling back to the first currency.

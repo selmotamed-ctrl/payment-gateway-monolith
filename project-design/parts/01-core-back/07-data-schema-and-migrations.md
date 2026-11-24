@@ -3,7 +3,7 @@ id: core.data
 title: Data Schema and Migrations
 status: partial
 confidence: high
-last_verified: 2026-11-16
+last_verified: 2026-11-24
 verified_against: d695518+working-tree
 code:
   - core-back/prisma/migrations/20261113120000_v38_sandbox_execution_plane
@@ -38,7 +38,7 @@ tests:
 gaps:
   - Core tables use `TIMESTAMP(3)` while storage-engine tables use `TIMESTAMPTZ(3)`.
   - The migration history is forward-only; there are no down migrations.
-  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 41.
+  - Core HTTP start does not call `ensureSchemaVersion()`; only the seeders assert schema version 44.
   - `journal_lines` partition maintenance depends on an external deploy cron.
   - The generated schema catalog appendix is produced by the project-design generator and is not hand-maintained.
 ---
@@ -53,7 +53,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 41 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 44 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -74,8 +74,8 @@ The historical design treats PostgreSQL 18 as the only runtime database and the 
 
 The blueprint's stale counts are corrected here:
 
-- the schema is not 64 models and 100 enums; it is 76 models and 105 enums;
-- the schema version is 14, not 5 or 6;
+- the schema is not the historical 64 models and 100 enums; it is 119 models at schema version 44;
+- the schema version is 44, not 5 or 6;
 - there is not one migration that creates shards, outboxes and all tables. The baseline creates the tables, the storage migration adds indexes, the CQRS migration adds read models, and the hardening migration adds partitions, checks and search indexes;
 - `rm_merchant_dashboard_stats` and `rm_wallet_statements` do not exist. The actual read models are `rm_merchant_daily_stats` and `rm_route_daily_volumes`.
 
@@ -108,7 +108,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 41`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 44`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -129,7 +129,7 @@ installs the two append-only guard triggers. See
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116130000_schema_version_agreement` after the case-management taxonomy migration, schema version 41). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261124150000_currency_context_and_aggregates`, schema version 44). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -424,7 +424,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 41 (`REQUIRED_SCHEMA_VERSION = 41`; model count 118). The schema migrations since version 10 are:
+The current schema version is 44 (`REQUIRED_SCHEMA_VERSION = 44`; model count 119). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -442,9 +442,12 @@ The current schema version is 41 (`REQUIRED_SCHEMA_VERSION = 41`; model count 11
 - `20261111120000_report_engine_versioning` (version 34, written on the plan branch): adds `engine_version`, `spec_schema_version` and `authoring_transcript_version` to `report_definition_specs`, `merchant_report_specs` and `report_chrome_specs`, `engine_version` and `spec_schema_version` to both execution audit tables, and `default_revoked_at` / `default_revoked_reason` to `report_chrome_specs`; it backfills `spec_schema_version` from `spec_json.spec_version`. See `core.report-engine` section 18.
 - `20261111130000_merchant_report_chrome` (version 35, written on the plan branch): creates `merchant_report_chrome_specs` (unique `(merchant_id, code, version)`, one published default per merchant and chrome type, a foreign key to the merchant asset bundle).
 - `20261112090000_journal_partition_storage_and_race` (version 35, no table shape change): redefines `ensure_journal_line_partitions` again. (1) The 2026-11-10 revision set only the insert-autovacuum parameters on a new monthly partition and dropped the explicit `fillfactor = 100` of the original body; it is restored, and set once (`SHARE UPDATE EXCLUSIVE`, no write blocking) on every monthly partition created without it. (2) The same revision replaced `CREATE TABLE IF NOT EXISTS` with a `to_regclass` check and a plain `CREATE TABLE`, so two callers at once (the partition worker on two nodes, or the worker and a deploy) both saw a month missing and the second aborted with `duplicate_table` (measured: 3 of 4 concurrent callers failed); `duplicate_table` / `unique_violation` from a concurrent creator are now accepted, and the truncate-guard install tolerates `duplicate_object`. The version is bumped because the newest migration sets `REQUIRED_SCHEMA_VERSION` (checked by `phase1-mtls-and-schema.test.ts`) and the seeders' equality guard then refuses a database without it; core HTTP start does not check the version. Test: `ledger-query-pruning-and-accuracy.test.ts` EC-15 (storage parameters) and EC-15b (four concurrent callers on a dropped empty month).
-- `20261116090000_merchant_chrome_tenant_integrity` (version 40, no new table; the newest migration): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merges.** The branches numbered their migrations independently: `20261111090000` = 34 and `20261112090000` = 35 (`claude-fixes`), `20261111120000` = 34 and `20261111130000` = 35 (plan branch), `20261112000000` = 36, `20261113090000` = 37, `20261113120000` = 38 and `20261114090000` = 39 (`master`). None is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first (a database that followed `master` to 39 and then receives the `claude-fixes` migrations would be left at 35). This migration is new to every database, runs last and sets 40. It was first written as `20261112100000` with version 36 when only the plan branch had been merged; that name was never pushed or deployed and was renamed on 2026-11-16 so that it also runs after `master`'s migrations. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, `master` first, `claude-fixes` first) and applied from empty on PostgreSQL 18.6: each ends at 40 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
+- `20261116090000_merchant_chrome_tenant_integrity` (version 40, no new table; it runs before the version 41/42 migrations): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merges.** The branches numbered their migrations independently: `20261111090000` = 34 and `20261112090000` = 35 (`claude-fixes`), `20261111120000` = 34 and `20261111130000` = 35 (plan branch), `20261112000000` = 36, `20261113090000` = 37, `20261113120000` = 38 and `20261114090000` = 39 (`master`). None is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first (a database that followed `master` to 39 and then receives the `claude-fixes` migrations would be left at 35). This migration is new to every database, runs last and sets 40. It was first written as `20261112100000` with version 36 when only the plan branch had been merged; that name was never pushed or deployed and was renamed on 2026-11-16 so that it also runs after `master`'s migrations. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, `master` first, `claude-fixes` first) and applied from empty on PostgreSQL 18.6: each ends at 40 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
 - `20261116120000_route_health_automation` (version 40, from `master`): route health and the circuit breaker: `rail_routes` health computed/override columns, first-terminal and first-unknown markers on `payment_attempts`, `route_health_events` and `route_health_probes`, a trigger that keeps the markers current, and a unique `(route_id, window_start)` on `gateway_health_samples`. Owned by `core.route-health`.
 - `20261116130000_schema_version_agreement` (version 41, no structure): the agreed version after both 40s. Runs last, so a database at 41 has both `20261116090000` and `20261116120000` applied.
+- `20261124150000_currency_context_and_aggregates` (version 44): adds nullable reconciliation context (`reconciliation_runs.currency/auto_post`, `reconciliation_items.currency/gateway_id/env/credential_set_id`, `statement_sources.currency/env/credential_set_id`) and backfills matched items from their attempts/routes. Settlement sweeps and fee variances post with the full currency/gateway/env/credential context; the ledger guard fails closed on a missing currency where enabled.
+- `20261124120000_append_only_case_and_storage_guards` (version 43): adds the remaining append-only history guards for `operator_case_events`, `gl_shard_repairs`, `storage_object_access_logs`, `audit_chain_anchors` and a TRUNCATE guard on `storage_objects`; the bypass requires both `pgw.append_only_maintenance` and a superuser/migration-role membership. See `core.governance` and `core.object-storage`.
+- `20261123100000_opaque_academy_certificates` (version 42): adds `AcademyCertificateStatus` and `academy_certificates` (opaque `public_id`, short `display_id`, user/track/badge snapshot, earned/expiry, content version, status, revocation fields; unique `(user_id, track_id, earned_at)`), backfills current per-user badges from `academy_progress_json`, adds `report_execution_audit.checklist_json`, and adds the partial MFA-notification suppression index. Public certificate verification reads this table; user deletion cascades, recertification supersedes, and revocation is explicit.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -594,3 +597,9 @@ health, first-terminal from `terminal_at`, first-unknown from `updated_at` for
 unresolved `UNKNOWN` attempts, canonical error from `substatus`, deduplicates
 legacy health samples before the unique index and writes one `MIGRATION`
 health event per route. The required schema version is **40**.
+
+
+**Pre-v36 evidence guard (GAP-074).** `core-back/scripts/checkLegacyEvidence.ts` (`bun run legacy-evidence:check`) refuses an upgrade when `kyb_documents.content_ciphertext` or `reconciliation_runs.file_content` still contain rows. The guard detects the condition; bytes already dropped by v36 cannot be recreated and must come from the pre-upgrade dump.
+
+
+**SQL-only schema guard (GAP-076).** `core-back/prisma/sql-only-objects.allowlist.json` lists the 57 objects Prisma cannot model (composite tenant FKs, trigram/covering indexes, SQL defaults and `schema_versions`). `bun run schema:sql-only-check` runs `prisma migrate diff` and fails if a new object would be dropped or a reviewed object is missing. CI runs it after migrations. Definition changes that keep the same object name are not fingerprinted yet.

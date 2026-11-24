@@ -86,8 +86,7 @@ const totalsOf = (
   };
 };
 
-router.get("/finance/journal-entries/summary", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["finance:read"]);
+const buildJournalEntrySummary = async () => {
   const now = Date.now();
   const since24h = new Date(now - 24 * 3600 * 1000);
   const sinceWindow = new Date(now - UNBALANCED_WINDOW_DAYS * 24 * 3600 * 1000);
@@ -112,13 +111,39 @@ router.get("/finance/journal-entries/summary", async (request: Request, response
       sinceWindow,
     ) as Promise<Array<{ count: number }>>,
   ]);
-  response.json({
+  return {
     totalEntries,
     entries24h,
     volume24hByCurrency: volumeRows.map((row) => ({ currency: row.currency, total: money4(row.total) })),
     unbalancedEntries: Number(unbalancedRows[0]?.count ?? 0),
     window: `${UNBALANCED_WINDOW_DAYS}d`,
+  };
+};
+
+router.get("/finance/journal-entries/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["finance:read"]);
+  response.json(await buildJournalEntrySummary());
+});
+
+router.get("/finance/journal-entries/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["finance:read"]);
+  const snapshot = await buildJournalEntrySummary();
+  const actor = auditActor(request);
+  const allowedChecklist = new Set(["JOURNAL_SCOPE_VERIFIED", "BALANCE_AND_VOLUME_REVIEWED", "EXPORT_APPROVAL_CONFIRMED"]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await writeAudit(client, {
+    data: {
+      ...auditBase(actor),
+      action: "JOURNAL_ENTRY_SUMMARY_EXPORTED",
+      entityType: "JOURNAL_ENTRY",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: { ...snapshot, checklist },
+    } as never,
   });
+  response.json({ ...snapshot, exportedAt: new Date().toISOString() });
 });
 
 router.get("/finance/journal-entries", async (request: Request, response: Response) => {
@@ -320,7 +345,10 @@ router.get("/finance/gl-accounts/:id", async (request: Request, response: Respon
   response.json(await glAccountSnapshot(id));
 });
 
-const checkpointBodySchema = z.object({ reason: reasonSchema });
+const checkpointBodySchema = z.object({
+  reason: reasonSchema,
+  checklist: z.array(z.string().max(64)).max(10).optional(),
+});
 
 /**
  * "Checkpoint now": captures every shard of the account with the same verified, O(delta) routine the
@@ -362,6 +390,7 @@ router.post("/finance/gl-accounts/:id/checkpoint", async (request: Request, resp
         accountType: account.accountType,
         currency: account.currency,
         reason: body.reason,
+        checklist: body.checklist ?? [],
       },
     } as never,
   });

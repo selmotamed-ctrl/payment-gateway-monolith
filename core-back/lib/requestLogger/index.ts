@@ -112,7 +112,8 @@ const createRequestLogger = (request: Request, response: Response): RequestLogge
 
     const end = () => {
         const durationMs = Number(process.hrtime.bigint() - startNs) / 1_000_000;
-        const { method, path: requestPath, ip } = request;
+        const { method, ip } = request;
+        const requestPath = request.path.replace(/\/academy\/certificates\/[^/]+/, "/academy/certificates/[REDACTED]");
         const { statusCode } = response;
         const contentLength = response.getHeader("content-length");
 

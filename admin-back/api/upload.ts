@@ -85,13 +85,14 @@ export const forwardUpload = async (
     status?: number;
     body?: unknown;
     headers?: Record<string, string>;
+    allowedMimes?: readonly string[];
   },
 ): Promise<void> => {
   const file = req.file as Express.Multer.File | undefined;
   if (!file) {
     throw new ApiError(400, "UPLOAD_REQUIRED", `A statement file is required in the ${options.fileField} field`);
   }
-  const allowedMimes = env.UPLOAD_ALLOWED_MIME.split(",")
+  const allowedMimes = (options.allowedMimes ?? env.UPLOAD_ALLOWED_MIME.split(","))
     .map((value) => value.trim().toLowerCase())
     .filter((value) => value.length > 0);
   const detected = assertAllowedUpload(file.buffer, file.mimetype, allowedMimes, env.MAX_UPLOAD_BYTES);

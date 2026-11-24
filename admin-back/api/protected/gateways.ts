@@ -18,7 +18,7 @@ import {
   toCoreGatewayVersionSettings,
   toCoreGatewayVersionStatusRules,
 } from "../contract";
-import { coreForward } from "../forward";
+import { coreForward, summaryExportQuerySchema } from "../forward";
 import { encode } from "./mutationSchemas";
 
 const router = express.Router();
@@ -342,7 +342,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/gateways/export",
-    querySchema: zListQuery,
+    querySchema: zListQuery.extend({ checklist: z.string().max(1000).optional() }),
   }),
 );
 
@@ -380,6 +380,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/gateways/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 

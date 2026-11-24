@@ -172,14 +172,24 @@ const unixUser = z.string().trim().min(1).max(64).regex(/^[A-Za-z_][A-Za-z0-9_-]
 /** Absolute path made only of path-safe characters (safe to place in shell commands and unit files, still quoted at use). */
 export const SAFE_ABS_PATH = /^\/[A-Za-z0-9._+@/-]*$/;
 const noDotDot = (value: string) => !value.split("/").includes("..");
-const safeDir = (max = 200) => z.string().trim().min(1).max(max).regex(SAFE_ABS_PATH, "must be an absolute path using only [A-Za-z0-9._+@/-]").refine(noDotDot, "must not contain '..'");
+export const normalizePosixPath = (value: string): string => {
+  const parts: string[] = [];
+  for (const part of value.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return `/${parts.join("/")}`;
+};
+const normalizedPath = (value: string) => normalizePosixPath(value) === value;
+const safeDir = (max = 200) => z.string().trim().min(1).max(max).regex(SAFE_ABS_PATH, "must be an absolute path using only [A-Za-z0-9._+@/-]").refine(noDotDot, "must not contain '..'").refine(normalizedPath, "must be a normalized absolute path");
 /** Object-storage paths are privileged: keep them inside the dedicated vault base. */
 const objectStorageDir = (max = 300) => safeDir(max).refine(
   (value) => value.startsWith("/var/lib/pg-object-storage/") && value !== "/var/lib/pg-object-storage/",
   "must be under /var/lib/pg-object-storage/ (not a system path)",
 );
-const optionalSafeDir = (max = 300) => z.string().trim().max(max).refine((value) => value === "" || (SAFE_ABS_PATH.test(value) && noDotDot(value)), "must be empty or an absolute path using only [A-Za-z0-9._+@/-]");
-const optionalSafeFile = (max = 300) => z.string().trim().max(max).refine((value) => value === "" || (SAFE_ABS_PATH.test(value) && noDotDot(value)), "must be an absolute path using only [A-Za-z0-9._+@/-]").optional();
+const optionalSafeDir = (max = 300) => z.string().trim().max(max).refine((value) => value === "" || (SAFE_ABS_PATH.test(value) && noDotDot(value) && normalizedPath(value)), "must be empty or a normalized absolute path using only [A-Za-z0-9._+@/-]");
+const optionalSafeFile = (max = 300) => z.string().trim().max(max).refine((value) => value === "" || (SAFE_ABS_PATH.test(value) && noDotDot(value) && normalizedPath(value)), "must be empty or a normalized absolute path using only [A-Za-z0-9._+@/-]").optional();
 const cronExpr = z.string().trim().min(1).max(120).regex(/^[0-9A-Za-z*/,@ -]+$/, "must be a cron expression (letters, digits and * / , - @ only)");
 const hostLike = z.string().trim().max(253).regex(/^[A-Za-z0-9._:@/~,[\] *-]*$/, "contains characters that are not allowed in a host/target");
 const binName = z.string().trim().min(1).max(300).regex(/^[A-Za-z0-9._+@/-]+$/, "must be a command name or path ([A-Za-z0-9._+@/-])");
@@ -520,19 +530,63 @@ const base = z.strictObject({
     .regex(/^[0-9a-fA-F]{64}$/, "must be exactly 64 hexadecimal characters")
     .or(z.literal(""))
     .default(""),
-  BACKUP_PRIMARY_S3_ENDPOINT: z.string().trim().max(500).default(""),
+  BACKUP_PRIMARY_S3_ENDPOINT: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(
+      (value) => {
+        if (value === "") return true;
+        try {
+          const url = new URL(value);
+          return (url.protocol === "http:" || url.protocol === "https:")
+            && !/[\s'"`$;&|<>(){}\\]/.test(value);
+        } catch {
+          return false;
+        }
+      },
+      "must be empty or an http(s) URL without whitespace or shell metacharacters",
+    )
+    .default(""),
   // Who runs the S3 object store: "external" (R2/AWS/an existing MinIO, never
   // touched), "managed-minio" (the engine installs/configures MinIO on the
   // backup host when missing) or "auto" (managed when the endpoint resolves to
   // the backup host / loopback, external otherwise).
   BACKUP_S3_MODE: z.enum(["auto", "external", "managed-minio"]).default("auto"),
-  BACKUP_MINIO_DATA_DIR: z.string().trim().min(1).max(300).default("/var/lib/minio/data"),
+  BACKUP_MINIO_DATA_DIR: safeDir(300)
+    .refine((value) => {
+      if (value === "/var/lib/minio" || value.startsWith("/var/lib/minio/")) return true;
+      return !["/etc", "/usr", "/bin", "/sbin", "/boot", "/dev", "/proc", "/sys", "/var", "/var/lib", "/var/log", "/home", "/root"].some(
+        (prefix) => value === prefix || value.startsWith(`${prefix}/`),
+      );
+    }, "must be a dedicated data directory, not a system path")
+    .default("/var/lib/minio/data"),
   BACKUP_MINIO_CONSOLE_PORT: port.default(9001),
   // MinIO no longer publishes binaries. Optional http(s):// or file:// URL of a
   // MinIO binary you host; otherwise the engine builds it with Go (needs `go`).
-  BACKUP_MINIO_BINARY_URL: z.string().trim().max(500).default(""),
-  BACKUP_MINIO_VERSION: z.string().trim().max(64).default("latest"),
-  BACKUP_PRIMARY_S3_BUCKET: z.string().trim().max(500).default(""),
+  BACKUP_MINIO_BINARY_URL: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(
+      (value) => value === "" || /^(?:https?:|file:)\/\/[^\s'"`$;|&<>()]+$/.test(value),
+      "must be empty or an http(s):// or file:// URL without shell metacharacters",
+    )
+    .default(""),
+  BACKUP_MINIO_VERSION: z.string().trim().regex(/^[A-Za-z0-9._-]{1,64}$/, "must be a safe version tag").default("latest"),
+  BACKUP_PRIMARY_S3_BUCKET: z
+    .string()
+    .trim()
+    .max(255)
+    .refine(
+      (value) => {
+        if (value === "") return true;
+        const raw = value.startsWith("s3://") ? value.slice("s3://".length) : value;
+        return /^[A-Za-z0-9][A-Za-z0-9._/-]{0,200}$/.test(raw) && !raw.includes("//") && !raw.includes("..");
+      },
+      "must be empty or an S3 bucket/path (optionally s3://) using safe characters",
+    )
+    .default(""),
   BACKUP_PRIMARY_S3_ACCESS_KEY: optionalSecret,
   BACKUP_PRIMARY_S3_SECRET_KEY: optionalSecret,
   BACKUP_CORE_S3_PREFIX: z.string().trim().max(1000).default(""),
@@ -572,7 +626,7 @@ const base = z.strictObject({
   BACKUP_BARMAN_VERSION: z.string().trim().regex(/^[0-9]+\.[0-9]+(\.[0-9]+)?$/, "must be a barman release such as 3.10.1").default("3.10.1"),
   // Bun on the deployed hosts: pinned release verified by SHA-256 (no curl | bash). Without BUN_SHA256 an
   // already installed bun is used and a missing one fails the deploy.
-  BUN_VERSION: z.string().trim().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/, "must be a Bun release such as 1.3.5").default("1.3.5"),
+  BUN_VERSION: z.string().trim().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/, "must be a Bun release such as 1.4.4").default("1.4.4"),
   BUN_SHA256: z.string().trim().regex(/^[0-9a-fA-F]{64}$/, "must be a 64 hex character SHA-256 of bun-linux-x64.zip").or(z.literal("")).default(""),
   BACKUP_BARMAN_BIN: binName.default("barman"),
   BACKUP_BARMAN_CLOUD_BIN: binName.default("barman-cloud-backup"),
@@ -1440,8 +1494,20 @@ export const validateDeployConfig = (config: DeployConfig): string[] => {
       }
     }
   }
+  if (config.BACKUP_ENABLED && config.BACKUP_ALLOW_INSECURE_HTTP && config.DEPLOY_ENV === "production") {
+    problems.push("BACKUP_ALLOW_INSECURE_HTTP=true is forbidden in a production deployment");
+  }
   if (config.MERCHANT_DOMAIN === config.CHECKOUT_DOMAIN) {
     problems.push("MERCHANT_DOMAIN and CHECKOUT_DOMAIN must differ (two public vhosts on the edge host)");
+  }
+  const backupCertDir = normalizePosixPath(config.BACKUP_DAEMON_CERT_DIR);
+  const objectCertDir = normalizePosixPath(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
+  if (
+    backupCertDir === objectCertDir
+    || backupCertDir.startsWith(`${objectCertDir}/`)
+    || objectCertDir.startsWith(`${backupCertDir}/`)
+  ) {
+    problems.push("BACKUP_DAEMON_CERT_DIR and OBJECT_STORAGE_DAEMON_CERT_DIR must be separate, non-nested directories");
   }
 
   if (config.CORE_PORT === config.ADMIN_BACK_PORT

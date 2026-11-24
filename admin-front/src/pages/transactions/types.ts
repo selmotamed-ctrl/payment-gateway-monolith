@@ -26,6 +26,7 @@ export interface TransactionRow {
     networkReference: string | null;
     ledgerEntryId: string | null;
     hasOpenCase: boolean;
+    inquiryEligible?: boolean;
     redactedFields: string[];
 }
 
@@ -67,6 +68,9 @@ export interface StepLogRow {
 }
 
 export interface AttemptDetail {
+    /** Gateway capability and the server's inquiry decision for this attempt. */
+    gatewaySupportsStatusCheck?: boolean;
+    inquiryEligibility?: { eligible: boolean; reason?: string };
     /** The raw attempt row (ciphertext stripped; money as 4-decimal strings, `null` for SUPPORT). */
     attempt: {
         id: string;

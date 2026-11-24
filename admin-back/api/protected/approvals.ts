@@ -7,7 +7,7 @@ import { parseCidrList, resolveClientIp } from "../../lib/net";
 import { resolveRequestId } from "../../lib/requestLogger";
 import { zIdentifier, zPaginationQuery, zReason } from "../../lib/zReady";
 import { toCoreApprovalApprove, toCoreApprovalReject } from "../contract";
-import { coreForward } from "../forward";
+import { coreForward, summaryExportQuerySchema } from "../forward";
 
 const router = express.Router();
 
@@ -126,6 +126,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/approvals/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import { ApiError } from "../../lib/error";
-import { coreForward } from "../forward";
+import { coreForward, summaryExportQuerySchema } from "../forward";
 import { extractAuthorityHints } from "../middleware/authorityGuard";
 
 /**
@@ -102,7 +102,10 @@ const progressPutSchema = z.object({
 });
 
 const examParams = z.object({ examId: z.string().min(1).max(64) });
-const startSchema = z.object({ integrityAccepted: z.boolean().optional() });
+const startSchema = z.object({
+    integrityAccepted: z.boolean().optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
+});
 const submitSchema = z.object({
     sessionId: z.string().min(1).max(80),
     answers: z.record(z.string().min(1).max(40), z.union([z.string().max(40), z.array(z.string().max(40)).max(20)])),
@@ -146,6 +149,34 @@ router.post(
     }),
 );
 
+router.get(
+    "/certificates/:trackId/verification",
+    coreForward({
+        method: "GET",
+        paramsSchema: z.object({ trackId: z.string().min(1).max(64) }).strict(),
+        path: ({ params }) => `/internal/admin/academy/certificates/${encodeURIComponent(params.trackId ?? "")}/verification`,
+    }),
+);
 router.get("/team", requireSecurityAdmin, coreForward({ method: "GET", path: () => "/internal/admin/academy/team" }));
+router.post(
+    "/certificates/:identifier/revoke",
+    requireSecurityAdmin,
+    coreForward({
+        method: "POST",
+        paramsSchema: z.object({ identifier: z.string().trim().min(8).max(64) }).strict(),
+        schema: z.object({ reason: z.string().trim().min(5).max(500) }).strict(),
+        path: ({ params }) => `/internal/admin/academy/certificates/${encodeURIComponent(params.identifier ?? "")}/revoke`,
+    }),
+);
+
+router.get(
+  "/team/export",
+  requireSecurityAdmin,
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/academy/team/export",
+    querySchema: summaryExportQuerySchema,
+  }),
+);
 
 export const academyRouter = router;

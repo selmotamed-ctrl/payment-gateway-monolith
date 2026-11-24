@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VSelect, VTextarea, VTextField } from "vuetify/components";
 import { ThemedText } from "@/components/ThemedText";
+import { areChecklistsVisible } from "@/constants/env";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -13,6 +14,14 @@ import type { KybDocumentSummary } from "../types";
 import { FormModal } from "@/components/ui/FormModal";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+const REVIEW_CHECKS = [
+    { key: "DOCUMENT_IDENTITY_VERIFIED", label: "Document identity and merchant matched" },
+    { key: "FILE_INTEGRITY_REVIEWED", label: "File integrity and malware status reviewed" },
+    { key: "EXPIRY_REVIEWED", label: "Expiry posture reviewed" },
+    { key: "DECISION_AUTHORITY_CONFIRMED", label: "Decision authority confirmed" },
+] as const;
+
 const KybReviewDialog = dc(
     (props: {
         open: boolean;
@@ -29,6 +38,9 @@ const KybReviewDialog = dc(
         const expiresOn = ref("");
         const error = ref<string | null>(null);
         const saving = ref(false);
+        const showChecklists = areChecklistsVisible();
+        const checklist = ref<Record<string, boolean>>({});
+        const checklistComplete = computed(() => !showChecklists || REVIEW_CHECKS.every((check) => checklist.value[check.key] === true));
 
         const duplicate = computed(() => Boolean(props.document && props.document.duplicateMerchantCount > 0));
         const requiresJustification = computed(
@@ -44,6 +56,7 @@ const KybReviewDialog = dc(
                 notes.value = "";
                 duplicateJustification.value = "";
                 expiresOn.value = props.document?.expiresOn?.slice(0, 10) ?? "";
+                checklist.value = {};
                 error.value = null;
             },
             { immediate: true },
@@ -59,6 +72,10 @@ const KybReviewDialog = dc(
                 error.value = t("A written duplicate justification of at least 10 characters is required");
                 return;
             }
+            if (!checklistComplete.value) {
+                error.value = t("Complete all document review checklist items before saving");
+                return;
+            }
             saving.value = true;
             error.value = null;
             try {
@@ -68,6 +85,7 @@ const KybReviewDialog = dc(
                     notes: notes.value.trim() || undefined,
                     duplicateJustification: decision.value === "ACCEPTED" ? duplicateJustification.value.trim() || undefined : undefined,
                     expiresOn: expiresOn.value || undefined,
+                    checklist: REVIEW_CHECKS.filter((check) => checklist.value[check.key]).map((check) => check.key),
                 });
                 showSnackBar({
                     type: "success",
@@ -130,6 +148,15 @@ const KybReviewDialog = dc(
                         <FormField label={t("Reviewer notes")}>
                             <VTextarea v-model={notes.value} rows={3} autoGrow />
                         </FormField>
+                        <FormChecklist
+                            checks={[...REVIEW_CHECKS]}
+                            modelValue={checklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (checklist.value = value)}
+                            show={showChecklists}
+                            title={t("Document review checklist")}
+                            complete={checklistComplete.value}
+                            incompleteMessage={t("Complete all document review checklist items before saving")}
+                        />
             </FormModal>
         );
     },

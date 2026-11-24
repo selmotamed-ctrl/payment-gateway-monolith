@@ -110,7 +110,7 @@ export const sandboxFakeRails = {
     createAccount: (body: Record<string, unknown>) => sandboxPost("/fake-rails/accounts", body),
     restoreAccount: (id: string) => sandboxPost(`/fake-rails/accounts/${encodeURIComponent(id)}/restore`),
     movements: (id: string) => sandboxGet<{ movements: Array<Record<string, unknown>>; holds: Array<Record<string, unknown>> }>(`/fake-rails/accounts/${encodeURIComponent(id)}/movements`),
-    resetAccounts: () => sandboxPost("/fake-rails/accounts/reset", {}),
+    resetAccounts: (checklist: string[] = []) => sandboxPost("/fake-rails/accounts/reset", { checklist }),
     scenarios: () => sandboxGet<{ rails: unknown[]; scenarios: FakeRailsScenario[] }>("/fake-rails/scenarios"),
     updateScenario: (railCode: string, body: Record<string, unknown>) => sandboxPut(`/fake-rails/scenarios/${encodeURIComponent(railCode)}`, body),
     preset: (railCode: string, preset: string) => sandboxPost(`/fake-rails/scenarios/preset/${encodeURIComponent(railCode)}/${encodeURIComponent(preset)}`, {}),
@@ -129,7 +129,7 @@ export const sandboxFakeRails = {
     settleClearing: (body: Record<string, unknown>) => sandboxPost("/fake-rails/clearing/settle", body),
     globalReset: (confirm = "RESET SANDBOX") => sandboxPost("/global-reset", { confirm }),
     merchantOverview: (merchantId: string) => sandboxGet<MerchantSandboxOverview>(`/merchants/${encodeURIComponent(merchantId)}/overview`),
-    resetMerchant: (merchantId: string) => sandboxPost("/reset", { merchantId, confirm: "RESET" }),
+    resetMerchant: (merchantId: string, checklist: string[] = []) => sandboxPost("/reset", { merchantId, confirm: "RESET", checklist }),
     seedMerchant: (merchantId: string) => sandboxPost("/seed-demo", { merchantId }),
 };
 
@@ -176,9 +176,9 @@ export const adminSandbox = {
     merchantsSummary: () => sandboxGet<{ summary: Record<string, unknown> }>("/merchants/summary"),
     merchants: (params: Record<string, unknown>) => sandboxGet<{ merchants: AdminSandboxMerchantRow[]; total: number }>("/merchants", params),
     merchant: (merchantId: string) => sandboxGet<AdminSandboxMerchantDetail>(`/merchants/${encodeURIComponent(merchantId)}`),
-    seedMerchant: (merchantId: string) => sandboxPost(`/merchants/${encodeURIComponent(merchantId)}/seed`, {}),
-    seedHistory: (merchantId: string, count = 20) => sandboxPost(`/merchants/${encodeURIComponent(merchantId)}/seed-history`, { count }),
-    resetMerchant: (merchantId: string) => sandboxPost("/reset", { merchantId }),
+    seedMerchant: (merchantId: string, checklist: string[] = []) => sandboxPost(`/merchants/${encodeURIComponent(merchantId)}/seed`, { checklist }),
+    seedHistory: (merchantId: string, count = 20, checklist: string[] = []) => sandboxPost(`/merchants/${encodeURIComponent(merchantId)}/seed-history`, { count, checklist }),
+    resetMerchant: (merchantId: string, checklist: string[] = []) => sandboxPost("/reset", { merchantId, confirm: "RESET", checklist }),
     audits: (params: Record<string, unknown>) => sandboxGet<{ audits: AdminSandboxAuditRow[]; total: number }>("/audits", params),
     fakeAccountsSummary: () => sandboxGet<{ summary: Record<string, unknown> }>("/fake-rails/accounts/summary"),
 };

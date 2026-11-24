@@ -37,7 +37,7 @@ describe("GAP-014 CI and legacy deploy workflows", () => {
       expect(job).toContain(step);
     }
     // A skipped database suite is green in bun, so the job has to fail on it explicitly.
-    expect(job).toMatch(/grep -Eq '\^\[\[:space:\]\]\*\[0-9\]\+ skip'/);
+    expect(job).toMatch(/grep -Eq '\^\[\[:space:\]\]\*\[1-9\]\[0-9\]\* skip'/);
     expect(job).toContain("exit 1");
     // The matrix must not run core-back a second time without the services.
     const matrix = ci.slice(ci.indexOf("\n  backend:"), ci.indexOf("\n  frontend:"));

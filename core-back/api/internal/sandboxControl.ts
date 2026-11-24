@@ -344,10 +344,13 @@ router.post("/merchant/seed-history", async (request, response) => {
     z.object({
       count: z.coerce.number().int().min(1).max(100).default(20),
       amountLyd: z.string().regex(/^\d{1,14}(\.\d{1,4})?$/).optional(),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
     }).strict(),
     request.body ?? {},
   );
   const principal = principalOf(request);
+  const allowedChecklist = new Set(["MERCHANT_SCOPE_VERIFIED", "DEMO_DATA_UNDERSTOOD", "NO_LIVE_IMPACT_CONFIRMED"]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   await ensureSandboxMerchantEnvelope({ merchantId });
   const link = await client.paymentLink.findFirst({
     where: { application: { merchantId } },
@@ -468,7 +471,7 @@ router.post("/merchant/seed-history", async (request, response) => {
       merchantId,
       actorId: principal.userId ?? merchantId,
       actorRole: isStaffPrincipal(principal) ? "ADMIN" : "MERCHANT",
-      summaryJson: { attempts: created.length, railCode: route.rail.code, gatewayCode: route.gateway.code },
+      summaryJson: { attempts: created.length, railCode: route.rail.code, gatewayCode: route.gateway.code, checklist },
     },
   });
   response.status(201).json({ ok: true, created: created.length, attemptIds: created });
@@ -476,6 +479,12 @@ router.post("/merchant/seed-history", async (request, response) => {
 
 router.post("/merchant/seed-demo", async (request, response) => {
   const merchantId = resolveMerchantId(request);
+  const body = parseOrThrow(
+    z.object({ checklist: z.array(z.string().max(64)).max(10).optional() }).strict(),
+    request.body ?? {},
+  );
+  const allowedChecklist = new Set(["MERCHANT_SCOPE_VERIFIED", "DEMO_DATA_UNDERSTOOD", "NO_LIVE_IMPACT_CONFIRMED"]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   await ensureSandboxMerchantEnvelope({
     merchantId,
     businessName: request.header("x-merchant-name"),
@@ -602,6 +611,7 @@ router.post("/merchant/seed-demo", async (request, response) => {
         walletId: created.wallet.id,
         applicationId: created.application.id,
         linkKeys: created.links.map((link) => link.key),
+        checklist,
       },
     },
   });
@@ -685,12 +695,22 @@ router.post("/merchant/reset", async (request, response) => {
   const merchantId = resolveMerchantId(request);
   const principal = principalOf(request);
   const body = parseOrThrow(
-    z.object({ confirm: z.string().max(32).optional() }).strict(),
+    z.object({
+      confirm: z.string().max(32).optional(),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
     request.body ?? {},
   );
-  if (body.confirm !== undefined && body.confirm !== "RESET") {
+  if (body.confirm !== "RESET") {
     throw new ApiError(400, "SANDBOX_RESET_CONFIRMATION_REQUIRED", "Type RESET to confirm the sandbox reset");
   }
+  const allowedChecklist = new Set([
+    "MERCHANT_SCOPE_VERIFIED",
+    "LIVE_ISOLATION_CONFIRMED",
+    "RESET_IMPACT_ACKNOWLEDGED",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const summary = await resetMerchantSandbox(merchantId);
   await client.sandboxSyncAudit.create({
     data: {
@@ -698,7 +718,7 @@ router.post("/merchant/reset", async (request, response) => {
       merchantId,
       actorId: principal.userId ?? merchantId,
       actorRole: isStaffPrincipal(principal) ? "ADMIN" : "MERCHANT",
-      summaryJson: { resetAt: new Date().toISOString(), ...summary },
+      summaryJson: { resetAt: new Date().toISOString(), checklist, ...summary },
     },
   });
   response.json({
@@ -1278,7 +1298,24 @@ router.patch("/fake-rails/accounts/:accountId/state", async (request, response) 
 router.post("/fake-rails/accounts/reset", async (request, response) => {
   const merchantId = merchantScopeForAccounts(request, false);
   if (!merchantId) requireStaff(request);
-  response.json(await fakeRails.resetAccounts({ merchantId: merchantId ?? undefined }));
+  const body = parseOrThrow(
+    z.object({ checklist: z.array(z.string().max(64)).max(10).optional() }).strict(),
+    request.body ?? {},
+  );
+  const principal = principalOf(request);
+  const allowedChecklist = new Set(["ACCOUNT_SCOPE_VERIFIED", "RESET_IMPACT_ACKNOWLEDGED", "SANDBOX_ONLY_CONFIRMED"]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
+  const result = await fakeRails.resetAccounts({ merchantId: merchantId ?? undefined });
+  await client.sandboxSyncAudit.create({
+    data: {
+      syncType: "FAKE_RAILS_ACCOUNTS_RESET",
+      merchantId: merchantId ?? null,
+      actorId: principal.userId ?? null,
+      actorRole: isStaffPrincipal(principal) ? "ADMIN" : "MERCHANT",
+      summaryJson: { checklist },
+    },
+  });
+  response.json(result);
 });
 
 router.post("/merchant/webhooks/test-ping", async (request, response) => {
@@ -2058,7 +2095,22 @@ router.get("/admin/fake-rails/scenarios", async (request, response) => {
 
 router.put("/admin/fake-rails/scenarios/:railCode", async (request, response) => {
   requireStaff(request);
-  response.json({ scenario: await fakeRails.updateScenario(String(request.params.railCode), request.body ?? {}) });
+  const body = typeof request.body === "object" && request.body !== null ? { ...(request.body as Record<string, unknown>) } : {};
+  const rawChecklist = Array.isArray(body.checklist) ? body.checklist : [];
+  delete body.checklist;
+  const allowedChecklist = new Set(["SCENARIO_SCOPE_VERIFIED", "CHAOS_IMPACT_ACKNOWLEDGED", "SANDBOX_ONLY_CONFIRMED"]);
+  const checklist = rawChecklist.filter((entry): entry is string => typeof entry === "string" && allowedChecklist.has(entry)).slice(0, 10);
+  const scenario = await fakeRails.updateScenario(String(request.params.railCode), body);
+  const principal = principalOf(request);
+  await client.sandboxSyncAudit.create({
+    data: {
+      syncType: "FAKE_RAILS_SCENARIO_UPDATED",
+      actorId: principal.userId ?? null,
+      actorRole: "ADMIN",
+      summaryJson: { railCode: String(request.params.railCode), checklist },
+    },
+  });
+  response.json({ scenario });
 });
 
 router.post("/admin/fake-rails/scenarios/preset/:railCode/:preset", async (request, response) => {
@@ -2115,10 +2167,28 @@ router.post("/admin/fake-rails/transactions/:transactionId/action", async (reque
       action: z.enum(["APPROVE", "REJECT", "APPROVE_MISMATCH", "APPROVE_LATE", "FORCE_OUTCOME", "CANCEL"]),
       phase: z.string().max(32).optional(),
       failureMode: z.string().max(80).optional(),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
     }).strict(),
     request.body ?? {},
   );
-  response.json(await fakeRails.transactionAction(String(request.params.transactionId), body));
+  const principal = principalOf(request);
+  const allowedChecklist = new Set(["TRANSACTION_SCOPE_VERIFIED", "ACTION_IMPACT_ACKNOWLEDGED", "SANDBOX_ONLY_CONFIRMED"]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
+  const forwardBody = {
+    action: body.action,
+    ...(body.phase ? { phase: body.phase } : {}),
+    ...(body.failureMode ? { failureMode: body.failureMode } : {}),
+  };
+  const result = await fakeRails.transactionAction(String(request.params.transactionId), forwardBody);
+  await client.sandboxSyncAudit.create({
+    data: {
+      syncType: "FAKE_RAILS_TRANSACTION_ACTION",
+      actorId: principal.userId ?? null,
+      actorRole: "ADMIN",
+      summaryJson: { transactionId: String(request.params.transactionId), action: body.action, checklist },
+    },
+  });
+  response.json(result);
 });
 
 router.get("/admin/fake-rails/webhooks", async (request, response) => {
@@ -2171,8 +2241,20 @@ router.post("/admin/fake-rails/statements/generate", async (request, response) =
 
 router.post("/admin/reset", async (request, response) => {
   const principal = requireStaff(request);
-  const body = parseOrThrow(z.object({ confirm: z.literal("RESET SANDBOX") }).strict(), request.body ?? {});
-  void body;
+  const body = parseOrThrow(
+    z.object({
+      confirm: z.literal("RESET SANDBOX"),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
+  const allowedChecklist = new Set([
+    "SANDBOX_SCOPE_VERIFIED",
+    "LIVE_ISOLATION_CONFIRMED",
+    "RESET_IMPACT_ACKNOWLEDGED",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const merchants = await client.merchant.findMany({ select: { id: true } });
   const summaries: Array<Record<string, unknown>> = [];
   for (const merchant of merchants) {
@@ -2189,7 +2271,7 @@ router.post("/admin/reset", async (request, response) => {
       syncType: "GLOBAL_RESET",
       actorId: principal.userId,
       actorRole: "ADMIN",
-      summaryJson: { merchants: summaries.length },
+      summaryJson: { merchants: summaries.length, checklist },
     },
   });
   response.json({ ok: true, merchants: summaries, fakeRails: fakeReset });

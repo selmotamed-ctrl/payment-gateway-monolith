@@ -29,9 +29,16 @@ const AcceptInvitationPage = dc(() => {
     const loading = ref(false);
     const done = ref(false);
     const error = ref<string | null>(null);
+    const showPassword = ref(false);
+    const showConfirmation = ref(false);
 
     const mismatch = computed(() => confirmation.value.length > 0 && confirmation.value !== password.value);
     const phoneValid = computed(() => /^\+?[0-9 ()-]{6,20}$/.test(phone.value.trim()));
+    const passwordChecks = computed(() => [
+        { key: "length", label: t("At least 12 characters"), ok: password.value.length >= MIN_PASSWORD_LENGTH },
+        { key: "match", label: t("Passwords match"), ok: password.value.length > 0 && password.value === confirmation.value },
+        { key: "phone", label: t("Phone number can receive sign-in codes"), ok: phoneValid.value },
+    ]);
     const canSubmit = computed(
         () =>
             token.value.trim().length >= 16 &&
@@ -102,8 +109,10 @@ const AcceptInvitationPage = dc(() => {
                             <FormField label={t("New password")} required hint={t("At least 12 characters")}>
                                 <VTextField
                                     aria-label={t("New password")}
-                                    type="password"
+                                    type={showPassword.value ? "text" : "password"}
                                     autocomplete="new-password"
+                                    appendInnerIcon={showPassword.value ? "mdi-eye-off-outline" : "mdi-eye-outline"}
+                                    onClick:appendInner={() => (showPassword.value = !showPassword.value)}
                                     modelValue={password.value}
                                     onUpdate:modelValue={(value: string) => (password.value = value)}
                                     hideDetails
@@ -112,15 +121,17 @@ const AcceptInvitationPage = dc(() => {
                             <FormField label={t("Confirm password")} required>
                                 <VTextField
                                     aria-label={t("Confirm password")}
-                                    type="password"
+                                    type={showConfirmation.value ? "text" : "password"}
                                     autocomplete="new-password"
+                                    appendInnerIcon={showConfirmation.value ? "mdi-eye-off-outline" : "mdi-eye-outline"}
+                                    onClick:appendInner={() => (showConfirmation.value = !showConfirmation.value)}
                                     modelValue={confirmation.value}
                                     onUpdate:modelValue={(value: string) => (confirmation.value = value)}
                                     error={mismatch.value}
                                     hideDetails
                                 />
                             </FormField>
-                            <FormField label={t("Phone for sign-in codes")} required>
+                            <FormField label={t("Phone for sign-in codes")} required hint={t("Include the country code; this phone receives every sign-in code")}>
                                 <VTextField
                                     aria-label={t("Phone for sign-in codes")}
                                     autocomplete="tel"
@@ -129,6 +140,14 @@ const AcceptInvitationPage = dc(() => {
                                     hideDetails
                                 />
                             </FormField>
+                            <div aria-live="polite" style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                {passwordChecks.value.map((check) => (
+                                    <div key={check.key} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: check.ok ? "var(--pg-status-success-text)" : "var(--pg-ink-muted)" }}>
+                                        <span aria-hidden="true">{check.ok ? "✓" : "○"}</span>
+                                        <span>{check.label}</span>
+                                    </div>
+                                ))}
+                            </div>
                             <VBtn block size="large" loading={loading.value} disabled={!canSubmit.value} onClick={() => void submit()}>
                                 {t("Accept invitation")}
                             </VBtn>

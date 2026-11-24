@@ -1,7 +1,7 @@
 import express from "express";
 import { z } from "zod";
 import { zPaginationQuery } from "../../lib/zReady";
-import { coreForward } from "../forward";
+import { coreForward, summaryExportQuerySchema } from "../forward";
 
 const router = express.Router();
 
@@ -10,7 +10,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/audit-logs",
-    querySchema: zPaginationQuery,
+    querySchema: zPaginationQuery.extend({ checklist: z.string().max(1000).optional() }),
   }),
 );
 
@@ -28,6 +28,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/audit-logs/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 

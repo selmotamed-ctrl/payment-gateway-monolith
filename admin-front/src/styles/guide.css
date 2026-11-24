@@ -138,6 +138,34 @@
   border-color: var(--pg-border-focus);
 }
 
+.guide-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-block-start: 14px;
+    max-inline-size: 420px;
+}
+
+.guide-progress__track {
+    block-size: 7px;
+    border-radius: 999px;
+    background: var(--pg-bg-surface-subtle);
+    overflow: hidden;
+}
+
+.guide-progress__fill {
+    display: block;
+    block-size: 100%;
+    border-radius: inherit;
+    background: var(--pg-accent-primary, #4f46e5);
+    transition: inline-size 180ms ease;
+}
+
+.guide-progress small {
+    color: var(--pg-ink-muted);
+    font-size: 12px;
+}
+
 .guide-content-version {
   font-size: 11px;
   color: var(--pg-ink-muted);
@@ -1213,6 +1241,19 @@
   font-size: 24px;
 }
 
+.guide-glossary-detail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.guide-glossary-detail-heading h2 {
+  margin: 0;
+}
+
 .guide-glossary-arabic {
   margin: 0 0 10px;
   font-size: 18px;
@@ -1280,6 +1321,27 @@
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 10px;
+}
+
+.guide-playbook-detail__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.guide-playbook-detail__heading h2 {
+  margin: 0;
+}
+
+.guide-card-detail__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .guide-risk-badge {

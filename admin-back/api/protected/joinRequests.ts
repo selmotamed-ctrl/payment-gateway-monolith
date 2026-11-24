@@ -7,7 +7,7 @@ import {
   toCoreJoinRequestDecide,
   toCoreJoinRequestRequestInfo,
 } from "../contract";
-import { coreForward } from "../forward";
+import { coreForward, summaryExportQuerySchema } from "../forward";
 import { callCoreResponse } from "../../lib/mtlsClient";
 import { env } from "../../lib/env";
 import { parseCidrList, resolveClientIp } from "../../lib/net";
@@ -118,6 +118,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/join-requests/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 

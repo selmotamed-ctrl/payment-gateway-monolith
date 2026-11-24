@@ -993,30 +993,32 @@ model Merchant {
 }
 
 model User {
-  id                  String     @id @default(uuid(7)) @db.Uuid
-  createdAt           DateTime   @default(now()) @map("created_at")
-  updatedAt           DateTime   @updatedAt @map("updated_at")
-  merchantId          String?    @map("merchant_id") @db.Uuid
-  email               String     @unique
+  id                  String               @id @default(uuid(7)) @db.Uuid
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  merchantId          String?              @map("merchant_id") @db.Uuid
+  email               String               @unique
   phone               String?
-  passwordHash        String?    @map("password_hash") @db.Text
+  passwordHash        String?              @map("password_hash") @db.Text
   role                UserRole
-  authoritiesMap      Json       @map("authorities_map")
-  appScopeIds         Json?      @map("app_scope_ids")
-  isMaker             Boolean    @default(false) @map("is_maker")
-  isChecker           Boolean    @default(false) @map("is_checker")
-  mfaRequired         Boolean    @default(true) @map("mfa_required")
-  mfaSecretCiphertext String?    @map("mfa_secret_ciphertext") @db.Text
-  invitationTokenHash String?    @map("invitation_token_hash") @db.Char(64)
-  invitationExpiresAt DateTime?  @map("invitation_expires_at")
-  invitedById         String?    @map("invited_by") @db.Uuid
-  status              UserStatus @default(INVITED)
+  authoritiesMap      Json                 @map("authorities_map")
+  appScopeIds         Json?                @map("app_scope_ids")
+  isMaker             Boolean              @default(false) @map("is_maker")
+  isChecker           Boolean              @default(false) @map("is_checker")
+  mfaRequired         Boolean              @default(true) @map("mfa_required")
+  mfaSecretCiphertext String?              @map("mfa_secret_ciphertext") @db.Text
+  invitationTokenHash String?              @map("invitation_token_hash") @db.Char(64)
+  invitationExpiresAt DateTime?            @map("invitation_expires_at")
+  invitedById         String?              @map("invited_by") @db.Uuid
+  status              UserStatus           @default(INVITED)
   /**
    * The Employee Academy progress of this user: completed module ids, quiz
    * scores, completed sandbox labs and the earned role badges. Administered by
    * `GET/PUT /internal/admin/academy/progress`.
    */
-  academyProgressJson Json?      @map("academy_progress_json")
+  academyProgressJson Json?                @map("academy_progress_json")
+  academyCertificates AcademyCertificate[] @relation("AcademyCertificateHolder")
+  academyCertificatesRevoked AcademyCertificate[] @relation("AcademyCertificateRevokedBy")
 
   merchant                  Merchant?                @relation("MerchantUsers", fields: [merchantId], references: [id], onDelete: SetNull)
   identities                UserIdentity[]
@@ -1187,21 +1189,21 @@ model Wallet {
 }
 
 model AccessToken {
-  id                 String    @id @default(uuid(7)) @db.Uuid
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-  merchantId         String    @map("merchant_id") @db.Uuid
-  applicationId      String    @map("application_id") @db.Uuid
-  name               String    @db.Text
-  tokenHash          String    @unique @map("token_hash") @db.Char(64)
-  lastFour           String    @map("last_four") @db.Char(4)
+  id                 String                 @id @default(uuid(7)) @db.Uuid
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  merchantId         String                 @map("merchant_id") @db.Uuid
+  applicationId      String                 @map("application_id") @db.Uuid
+  name               String                 @db.Text
+  tokenHash          String                 @unique @map("token_hash") @db.Char(64)
+  lastFour           String                 @map("last_four") @db.Char(4)
   scopes             Json
   /// Execution plane of the token (`v38`). The plaintext prefix (`pg_live_`/`pg_test_`) is checked against the plane.
   env                GatewayEnvironmentType @default(LIVE)
-  ipWhitelistEnabled Boolean   @default(false) @map("ip_whitelist_enabled")
-  revokedAt          DateTime? @map("revoked_at")
-  lastUsedAt         DateTime? @map("last_used_at")
-  expiresAt          DateTime? @map("expires_at")
+  ipWhitelistEnabled Boolean                @default(false) @map("ip_whitelist_enabled")
+  revokedAt          DateTime?              @map("revoked_at")
+  lastUsedAt         DateTime?              @map("last_used_at")
+  expiresAt          DateTime?              @map("expires_at")
 
   merchant    Merchant        @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   application Application     @relation(fields: [applicationId], references: [id], onDelete: Restrict)
@@ -1228,29 +1230,29 @@ model AccessTokenIp {
 }
 
 model PaymentLink {
-  id                String           @id @default(uuid(7)) @db.Uuid
-  createdAt         DateTime         @default(now()) @map("created_at")
-  updatedAt         DateTime         @updatedAt @map("updated_at")
-  key               String           @unique
+  id                String                 @id @default(uuid(7)) @db.Uuid
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+  key               String                 @unique
   /// Human-readable label for the payment link (not used as a key).
-  title             String?          @db.VarChar(160)
-  description       String?          @db.Text
-  applicationId     String           @map("application_id") @db.Uuid
-  walletId          String           @map("wallet_id") @db.Uuid
-  amount            Decimal          @db.Decimal(18, 4)
-  currency          String           @db.Char(3)
-  feeBearer         FeeBearer        @map("fee_bearer")
-  splitRatioJson    Json?            @map("split_ratio_json")
-  infiniteUse       Boolean          @default(false) @map("infinite_use")
-  useCount          Int              @default(1) @map("use_count")
-  confirmedCount    Int              @default(0) @map("confirmed_count")
-  activeLockedCount Int              @default(0) @map("active_locked_count")
-  redirectUrl       String?          @map("redirect_url") @db.Text
-  railWhitelist     Json?            @map("rail_whitelist")
+  title             String?                @db.VarChar(160)
+  description       String?                @db.Text
+  applicationId     String                 @map("application_id") @db.Uuid
+  walletId          String                 @map("wallet_id") @db.Uuid
+  amount            Decimal                @db.Decimal(18, 4)
+  currency          String                 @db.Char(3)
+  feeBearer         FeeBearer              @map("fee_bearer")
+  splitRatioJson    Json?                  @map("split_ratio_json")
+  infiniteUse       Boolean                @default(false) @map("infinite_use")
+  useCount          Int                    @default(1) @map("use_count")
+  confirmedCount    Int                    @default(0) @map("confirmed_count")
+  activeLockedCount Int                    @default(0) @map("active_locked_count")
+  redirectUrl       String?                @map("redirect_url") @db.Text
+  railWhitelist     Json?                  @map("rail_whitelist")
   /// Execution plane of the link (`v38`): LIVE on payment_gateway_prod, SANDBOX on payment_gateway_sandbox.
   env               GatewayEnvironmentType @default(LIVE)
-  state             PaymentLinkState @default(PENDING)
-  expiresAt         DateTime?        @map("expires_at")
+  state             PaymentLinkState       @default(PENDING)
+  expiresAt         DateTime?              @map("expires_at")
 
   application     Application      @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   wallet          Wallet           @relation(fields: [walletId], references: [id], onDelete: Restrict)
@@ -1832,43 +1834,43 @@ model RailField {
 }
 
 model RailRoute {
-  id                 String           @id @default(uuid(7)) @db.Uuid
-  createdAt          DateTime         @default(now()) @map("created_at")
-  updatedAt          DateTime         @updatedAt @map("updated_at")
-  railId             String           @map("rail_id") @db.Uuid
-  gatewayId          String           @map("gateway_id") @db.Uuid
-  credentialPolicy   CredentialPolicy @map("credential_policy")
-  priority           Int              @default(0)
-  routingStrategy    RoutingStrategy  @default(EFFECTIVE_COST) @map("routing_strategy")
-  weight             Int              @default(100)
-  costModel          Json             @map("cost_model")
-  mismatchPolicy     Json             @map("mismatch_policy")
-  minAmount          Decimal          @default(0) @map("min_amount") @db.Decimal(18, 4)
-  maxAmount          Decimal?         @map("max_amount") @db.Decimal(18, 4)
-  dailyCapAmount     Decimal?         @map("daily_cap_amount") @db.Decimal(18, 4)
-  status             RouteStatus      @default(ACTIVE)
+  id                        String           @id @default(uuid(7)) @db.Uuid
+  createdAt                 DateTime         @default(now()) @map("created_at")
+  updatedAt                 DateTime         @updatedAt @map("updated_at")
+  railId                    String           @map("rail_id") @db.Uuid
+  gatewayId                 String           @map("gateway_id") @db.Uuid
+  credentialPolicy          CredentialPolicy @map("credential_policy")
+  priority                  Int              @default(0)
+  routingStrategy           RoutingStrategy  @default(EFFECTIVE_COST) @map("routing_strategy")
+  weight                    Int              @default(100)
+  costModel                 Json             @map("cost_model")
+  mismatchPolicy            Json             @map("mismatch_policy")
+  minAmount                 Decimal          @default(0) @map("min_amount") @db.Decimal(18, 4)
+  maxAmount                 Decimal?         @map("max_amount") @db.Decimal(18, 4)
+  dailyCapAmount            Decimal?         @map("daily_cap_amount") @db.Decimal(18, 4)
+  status                    RouteStatus      @default(ACTIVE)
   /// Effective health used by routing: healthOverrideState when an override is active, otherwise healthComputedState.
-  healthState        HealthState      @default(HEALTHY) @map("health_state")
+  healthState               HealthState      @default(HEALTHY) @map("health_state")
   /// The automation's last measured state. Kept up to date even while an admin override is active.
-  healthComputedState  HealthState    @default(HEALTHY) @map("health_computed_state")
-  healthComputedReason String?        @map("health_computed_reason") @db.Text
-  healthComputedAt     DateTime?      @map("health_computed_at")
+  healthComputedState       HealthState      @default(HEALTHY) @map("health_computed_state")
+  healthComputedReason      String?          @map("health_computed_reason") @db.Text
+  healthComputedAt          DateTime?        @map("health_computed_at")
   /// Admin-forced effective state; null means no active override.
-  healthOverrideState HealthState?    @map("health_override_state")
-  healthOverrideReason String?        @map("health_override_reason") @db.Text
-  healthOverrideSetAt  DateTime?      @map("health_override_set_at")
-  healthOverrideSetBy  String?        @map("health_override_set_by") @db.Uuid
-  healthOverrideExpiresAt DateTime?   @map("health_override_expires_at")
-  healthOverrideApprovalId String?    @map("health_override_approval_id") @db.Uuid
-  healthReason        String?         @map("health_reason") @db.Text
-  healthChangedAt     DateTime?       @map("health_changed_at")
-  healthConsecutiveFailures Int       @default(0) @map("health_consecutive_failures")
-  healthProbeSuccesses Int            @default(0) @map("health_probe_successes")
-  healthProbeFailures  Int            @default(0) @map("health_probe_failures")
-  healthLastProbeAt    DateTime?      @map("health_last_probe_at")
-  healthNextProbeAt    DateTime?      @map("health_next_probe_at")
-  maintenanceWindows Json?            @map("maintenance_windows")
-  scope              Json
+  healthOverrideState       HealthState?     @map("health_override_state")
+  healthOverrideReason      String?          @map("health_override_reason") @db.Text
+  healthOverrideSetAt       DateTime?        @map("health_override_set_at")
+  healthOverrideSetBy       String?          @map("health_override_set_by") @db.Uuid
+  healthOverrideExpiresAt   DateTime?        @map("health_override_expires_at")
+  healthOverrideApprovalId  String?          @map("health_override_approval_id") @db.Uuid
+  healthReason              String?          @map("health_reason") @db.Text
+  healthChangedAt           DateTime?        @map("health_changed_at")
+  healthConsecutiveFailures Int              @default(0) @map("health_consecutive_failures")
+  healthProbeSuccesses      Int              @default(0) @map("health_probe_successes")
+  healthProbeFailures       Int              @default(0) @map("health_probe_failures")
+  healthLastProbeAt         DateTime?        @map("health_last_probe_at")
+  healthNextProbeAt         DateTime?        @map("health_next_probe_at")
+  maintenanceWindows        Json?            @map("maintenance_windows")
+  scope                     Json
 
   rail                 Rail                  @relation(fields: [railId], references: [id], onDelete: Restrict)
   gateway              Gateway               @relation(fields: [gatewayId], references: [id], onDelete: Restrict)
@@ -2132,11 +2134,16 @@ model StatementSource {
   parserConfig      Json                @map("parser_config")
   settlementLagDays Int                 @default(0) @map("settlement_lag_days")
   dedupeKeyTemplate String?             @map("dedupe_key_template") @db.Text
+  /// Optional source-level context for statement lines that have no matched attempt.
+  currency          String?             @db.Char(3)
+  env               String?             @db.VarChar(16)
+  credentialSetId   String?             @map("credential_set_id") @db.Uuid
 
   gateway            Gateway             @relation(fields: [gatewayId], references: [id], onDelete: Cascade)
   reconciliationRuns ReconciliationRun[]
 
   @@index([gatewayId])
+  @@index([currency])
   @@map("statement_sources")
 }
 
@@ -2400,14 +2407,14 @@ model OperatorCaseEvent {
 
 /// Additional subjects of one case. The primary subject stays on OperatorCase.
 model OperatorCaseLink {
-  id         String   @id @default(uuid(7)) @db.Uuid
-  caseId     String   @map("case_id") @db.Uuid
-  linkType   String   @map("link_type") @db.VarChar(48)
-  targetId   String?  @map("target_id") @db.Text
-  labelKey   String?  @map("label_key") @db.VarChar(96)
-  labelText  String?  @map("label_text") @db.Text
-  metadata   Json?
-  createdAt  DateTime @default(now()) @map("created_at")
+  id        String   @id @default(uuid(7)) @db.Uuid
+  caseId    String   @map("case_id") @db.Uuid
+  linkType  String   @map("link_type") @db.VarChar(48)
+  targetId  String?  @map("target_id") @db.Text
+  labelKey  String?  @map("label_key") @db.VarChar(96)
+  labelText String?  @map("label_text") @db.Text
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
 
   operatorCase OperatorCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
@@ -2474,6 +2481,10 @@ model ReconciliationRun {
   /// idempotency marker of the ingestion: a retried job never matches the
   /// same statement twice.
   ingestedAt        DateTime?      @map("ingested_at")
+  /// Reporting currency of the uploaded statement. NULL on legacy runs.
+  currency          String?        @db.Char(3)
+  /// NULL = legacy behaviour (auto-post). New uploads persist an explicit value.
+  autoPost          Boolean?       @map("auto_post")
 
   statementSource StatementSource      @relation(fields: [statementSourceId], references: [id], onDelete: Restrict)
   items           ReconciliationItem[]
@@ -2485,6 +2496,7 @@ model ReconciliationRun {
   @@index([ingestedAt])
   @@index([createdAt])
   @@index([statementSourceId, createdAt])
+  @@index([currency])
   @@map("reconciliation_runs")
 }
 
@@ -2531,12 +2543,19 @@ model ReconciliationItem {
   operatorCaseId    String?              @map("operator_case_id")
   /// The statement row type (SETTLEMENT, CHARGEBACK, FEE, REVERSAL, UNKNOWN); null before AUTO-23.
   rowType           String?              @map("row_type")
+  /// Context snapshot used to post the settlement sweep when an attempt exists.
+  currency          String?              @db.Char(3)
+  gatewayId         String?              @map("gateway_id") @db.Uuid
+  env               String?              @db.VarChar(16)
+  credentialSetId   String?              @map("credential_set_id") @db.Uuid
 
   run          ReconciliationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
   attempt      PaymentAttempt?   @relation(fields: [attemptId], references: [id], onDelete: SetNull)
   operatorCase OperatorCase?     @relation("OperatorCaseReconciliationItem")
 
   @@index([runId, createdAt])
+  @@index([runId, currency])
+  @@index([gatewayId, currency])
   @@index([result])
   @@index([createdAt])
   @@map("reconciliation_items")
@@ -3757,6 +3776,7 @@ model ReportExecutionAuditRecord {
   durationMs         Int                        @map("duration_ms")
   servedByNode       String                     @map("served_by_node") @db.VarChar(64)
   verificationSha256 String                     @map("verification_sha256") @db.VarChar(64)
+  checklistJson      Json?                      @map("checklist_json")
   renderTarget       String                     @default("CLIENT_PAGED_VECTOR") @map("render_target") @db.VarChar(32)
   createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
 
@@ -4147,4 +4167,36 @@ model SandboxSyncAudit {
   @@index([merchantId, createdAt(sort: Desc)], map: "idx_sandbox_sync_audit_merchant_created")
   @@index([syncType, createdAt(sort: Desc)], map: "idx_sandbox_sync_audit_type_created")
   @@map("sandbox_sync_audits")
+}
+
+enum AcademyCertificateStatus {
+  ACTIVE
+  SUPERSEDED
+  REVOKED
+}
+
+model AcademyCertificate {
+  id               String                   @id @default(uuid(7)) @db.Uuid
+  publicId         String                   @unique @map("public_id") @db.VarChar(64)
+  displayId        String                   @unique @map("display_id") @db.VarChar(32)
+  userId           String                   @map("user_id") @db.Uuid
+  user             User                     @relation("AcademyCertificateHolder", fields: [userId], references: [id], onDelete: Cascade)
+  trackId          String                   @map("track_id") @db.VarChar(64)
+  badgeCode        String                   @map("badge_code") @db.VarChar(64)
+  holderName       String                   @map("holder_name") @db.VarChar(120)
+  earnedAt         DateTime                 @map("earned_at") @db.Timestamptz(3)
+  expiresAt        DateTime                 @map("expires_at") @db.Timestamptz(3)
+  contentVersion   String                   @map("content_version") @db.VarChar(20)
+  status           AcademyCertificateStatus @default(ACTIVE)
+  revokedAt        DateTime?                @map("revoked_at") @db.Timestamptz(3)
+  revokedByUserId  String?                  @map("revoked_by_user_id") @db.Uuid
+  revokedBy        User?                    @relation("AcademyCertificateRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+  revocationReason String?                  @map("revocation_reason") @db.VarChar(500)
+  createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([userId, trackId, earnedAt], map: "academy_certificates_issuance_key")
+  @@index([userId, trackId], map: "idx_academy_certificates_user_track")
+  @@index([status, expiresAt], map: "idx_academy_certificates_status_expiry")
+  @@map("academy_certificates")
 }

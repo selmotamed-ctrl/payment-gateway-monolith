@@ -1,0 +1,234 @@
+{
+  "version": 1,
+  "description": "Objects Prisma cannot represent. `bun run schema:sql-only-check` fails if prisma migrate diff would drop any other SQL-only object, or if one of these objects is absent.",
+  "objects": [
+    {
+      "kind": "CONSTRAINT",
+      "name": "merchant_report_asset_bundles_merchant_id_fkey"
+    },
+    {
+      "kind": "CONSTRAINT",
+      "name": "merchant_report_chrome_specs_asset_bundle_tenant_fkey"
+    },
+    {
+      "kind": "CONSTRAINT",
+      "name": "merchant_report_chrome_specs_merchant_id_fkey"
+    },
+    {
+      "kind": "CONSTRAINT",
+      "name": "merchant_report_execution_audit_merchant_id_fkey"
+    },
+    {
+      "kind": "CONSTRAINT",
+      "name": "merchant_report_execution_audit_spec_tenant_fkey"
+    },
+    {
+      "kind": "CONSTRAINT",
+      "name": "merchant_report_rate_events_merchant_id_fkey"
+    },
+    {
+      "kind": "CONSTRAINT",
+      "name": "merchant_report_specs_asset_bundle_tenant_fkey"
+    },
+    {
+      "kind": "CONSTRAINT",
+      "name": "merchant_report_specs_merchant_id_fkey"
+    },
+    {
+      "kind": "CONSTRAINT",
+      "name": "merchant_report_studio_status_merchant_id_fkey"
+    },
+    {
+      "kind": "INDEX",
+      "name": "adjustments_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "aml_cases_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "aml_rules_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "aml_screenings_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "approval_requests_trgm_subject_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "idx_assets_storage_object"
+    },
+    {
+      "kind": "INDEX",
+      "name": "audit_log_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "disputes_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "gateway_inquiry_schedules_trgm_reason_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "gateways_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "join_requests_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "journal_entries_created_at_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "journal_entries_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "journal_lines_account_id_cov_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "journal_lines_created_brin_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "journal_lines_entry_id_created_at_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "journal_lines_shard_seq_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "idx_kyb_documents_storage_object"
+    },
+    {
+      "kind": "INDEX",
+      "name": "kyb_documents_trgm_file_name_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "idx_merchant_report_asset_bundles_storage_object"
+    },
+    {
+      "kind": "INDEX",
+      "name": "merchants_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "outbox_events_created_brin_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "payment_attempts_created_brin_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "payment_attempts_merchant_keyset_cov_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "payment_attempts_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "idx_payment_links_env_created"
+    },
+    {
+      "kind": "INDEX",
+      "name": "rails_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "idx_reconciliation_runs_storage_object"
+    },
+    {
+      "kind": "INDEX",
+      "name": "reconciliation_runs_trgm_file_name_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "idx_reg_report_outputs_storage_object"
+    },
+    {
+      "kind": "INDEX",
+      "name": "idx_reg_report_schemas_template_object"
+    },
+    {
+      "kind": "INDEX",
+      "name": "regulatory_reports_trgm_search_idx"
+    },
+    {
+      "kind": "INDEX",
+      "name": "idx_report_asset_bundles_storage_object"
+    },
+    {
+      "kind": "INDEX",
+      "name": "idx_storage_objects_filename_trgm"
+    },
+    {
+      "kind": "INDEX",
+      "name": "idx_storage_objects_key_trgm"
+    },
+    {
+      "kind": "INDEX",
+      "name": "users_trgm_search_idx"
+    },
+    {
+      "kind": "TABLE",
+      "name": "schema_versions"
+    },
+    {
+      "kind": "DEFAULT",
+      "name": "academy_certificates.updated_at"
+    },
+    {
+      "kind": "DEFAULT",
+      "name": "aml_case_evidence.id"
+    },
+    {
+      "kind": "DEFAULT",
+      "name": "dispute_attachments.id"
+    },
+    {
+      "kind": "DEFAULT",
+      "name": "gl_account_shards.shard_id"
+    },
+    {
+      "kind": "DEFAULT",
+      "name": "report_asset_bundle_entries.id"
+    },
+    {
+      "kind": "DEFAULT",
+      "name": "rm_merchant_daily_stats.updated_at"
+    },
+    {
+      "kind": "DEFAULT",
+      "name": "rm_route_daily_volumes.updated_at"
+    },
+    {
+      "kind": "DEFAULT",
+      "name": "storage_object_access_logs.id"
+    },
+    {
+      "kind": "DEFAULT",
+      "name": "storage_object_locks.id"
+    },
+    {
+      "kind": "DEFAULT",
+      "name": "storage_objects.id"
+    },
+    {
+      "kind": "DEFAULT",
+      "name": "storage_objects.updated_at"
+    }
+  ]
+}

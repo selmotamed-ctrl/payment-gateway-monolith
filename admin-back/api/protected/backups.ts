@@ -14,10 +14,11 @@ export const backupTriggerSchema = z
   .object({
     target: z.enum(["all", "postgres_core", "audit_db", "redis"]),
     kind: z.enum(["full", "delta"]),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
-export const backupDrillSchema = z.object({}).strict();
+export const backupDrillSchema = z.object({ checklist: z.array(z.string().max(64)).max(10).optional() }).strict();
 
 const CRON_FIELDS = [
   { name: "minute", min: 0, max: 59 },
@@ -102,6 +103,7 @@ export const backupPolicySchema = z
     walRetentionDays: z.number().int().min(1).max(3650),
     alertLagSeconds: z.number().int().min(1).max(86400),
     approvalRequestId: zIdentifier.optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 // Retention is deliberately NOT floored at the edge: every policy change is

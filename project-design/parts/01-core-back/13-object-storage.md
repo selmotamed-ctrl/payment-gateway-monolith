@@ -3,7 +3,7 @@ id: core.object-storage
 title: Shared Object & Asset Storage Engine
 status: implemented
 confidence: high
-last_verified: 2026-11-16
+last_verified: 2026-11-24
 verified_against: working-tree
 code:
   - core-back/lib/objectStorageSdk/**
@@ -209,11 +209,13 @@ an unreachable vault (P1), scrub errors (P1) and quarantine uploads older than
 
 The backup daemon copies new HOT/COLD `.v1.enc` files into
 `object-blobs/{bucket}/{storageKey}` in the artifact repository, verifies every
-ACTIVE row has its blob (`OBJECT_STORAGE_BACKUP_PARITY_ERROR`), writes the KEK
-keyring as an AES-256-GCM escrow (`object-storage/kek-escrow.enc`) under the
-backup master key, and samples up to `OBJECT_STORAGE_DRILL_SAMPLE` ACTIVE rows
-in the restore drill, decrypting them with the escrowed keyring and comparing
-the SHA-256.
+ACTIVE row has its blob (`OBJECT_STORAGE_BACKUP_PARITY_ERROR`), writes an
+`object-storage/active-manifest.json` snapshot of the ACTIVE set (ids, bucket,
+storage key, SHA-256, size), writes the KEK keyring as an AES-256-GCM escrow
+(`object-storage/kek-escrow.enc`) under the backup master key, and in the
+restore drill compares the full restored ACTIVE set with that manifest (missing,
+extra and changed rows fail), then samples up to `OBJECT_STORAGE_DRILL_SAMPLE`
+ACTIVE rows and decrypts them with the escrowed keyring to compare the SHA-256.
 
 ## 9. Deploy and operations
 

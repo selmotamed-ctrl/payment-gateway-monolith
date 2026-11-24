@@ -225,8 +225,13 @@ const storageEnabled = (config: DeployConfig): boolean =>
 
 const allCorePrivateIps = (config: DeployConfig): string[] => {
   const nodes = parseNodeList(config.CORE_NODES);
-  if (nodes.length > 0) return nodes.map((node) => node.privateIp);
-  return config.CORE_PRIVATE_IP ? [config.CORE_PRIVATE_IP] : [];
+  const sandbox = config.SANDBOX_ENABLED ? parseNodeList(config.SANDBOX_NODE)[0]?.privateIp : undefined;
+  const core = nodes.length > 0
+    ? nodes.map((node) => node.privateIp)
+    : config.CORE_PRIVATE_IP
+      ? [config.CORE_PRIVATE_IP]
+      : [];
+  return [...new Set([...core, ...(sandbox ? [sandbox] : [])])];
 };
 
 const allEdgePrivateIps = (config: DeployConfig): string[] => {
@@ -395,6 +400,8 @@ const coreEnv = (config: DeployConfig, node?: NodePlan): Record<string, string> 
     MTLS_SERVER_KEY_PATH: "shared/certs/core-back.key",
     KMS_MASTER_KEY: config.KMS_MASTER_KEY,
     STORAGE_SHARD_COUNT: String(config.STORAGE_SHARD_COUNT),
+    LEDGER_STRICT_CONTEXT: "true",
+    BASE_CURRENCY: config.BASE_CURRENCY,
     READ_REPLICA_MAX_LAG_MS: String(config.READ_REPLICA_MAX_LAG_MS),
     KYB_SCANNER_MODE: config.KYB_SCANNER_MODE,
     ...(config.KYB_SCANNER_MODE === "clamd" ? { KYB_CLAMD_ADDRESS: config.KYB_CLAMD_ADDRESS || CLAMD_LOCAL_ADDRESS } : {}),

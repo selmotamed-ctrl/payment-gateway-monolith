@@ -60,13 +60,14 @@ export const extractApiError = (_error: any): ApiError | null => {
         }),
     ) as any;
 
-    const errorStatus: number | undefined = normalized?.status;
+    const responseStatus = typeof _error?.response?.status === "number" ? _error.response.status : undefined;
+    const errorStatus: number | undefined = typeof normalized?.status === "number" ? normalized.status : responseStatus;
     const errorMessage: string | undefined = normalized?.error ?? normalized?.message;
     const errorCode: string | undefined = normalized?.code;
 
     if (errorCode && errorStatus && errorMessage) {
         return {
-            code: normalized.code,
+            code: errorCode,
             error: errorMessage,
             errors: normalized.errors ?? [],
             status: errorStatus,

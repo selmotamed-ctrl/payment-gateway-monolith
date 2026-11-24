@@ -7,7 +7,7 @@ import { parseCidrList, resolveClientIp } from "../../lib/net";
 import { resolveRequestId } from "../../lib/requestLogger";
 import { zAdminRole, zBaseVersion, zEmail, zIdentifier, zPaginationQuery } from "../../lib/zReady";
 import { toCoreUserCreate, toCoreUserUpdate, toCoreUserUpdates } from "../contract";
-import { coreForward } from "../forward";
+import { coreForward, summaryExportQuerySchema } from "../forward";
 
 const router = express.Router();
 
@@ -124,6 +124,7 @@ router.post(
     method: "POST",
     path: (context) => `/internal/admin/users/${encodeURIComponent(context.params.id ?? "")}/invite`,
     paramsSchema: userParamsSchema,
+    schema: z.object({ checklist: z.array(z.enum(["IDENTITY_VERIFIED", "INVITATION_EXPIRY_REVIEWED", "DELIVERY_CHANNEL_CONFIRMED"])).max(10).optional() }).strict(),
   }),
 );
 
@@ -175,6 +176,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/users/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 

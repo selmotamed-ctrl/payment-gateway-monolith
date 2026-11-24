@@ -44,6 +44,7 @@ export const backupPolicySchema = z
     walRetentionDays: z.coerce.number().int().min(1).max(3_650),
     alertLagSeconds: z.coerce.number().int().min(1).max(86_400),
     approvalRequestId: z.string().min(1).max(64).optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -51,6 +52,7 @@ export const backupTriggerSchema = z
   .object({
     target: z.enum(BACKUP_TARGETS).default("all"),
     kind: z.enum(BACKUP_KINDS).default("full"),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -277,6 +279,8 @@ router.post("/trigger", async (request: Request, response: Response) => {
     );
   }
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["BACKUP_TARGET_VERIFIED", "LOAD_IMPACT_REVIEWED", "AUTHORITY_CONFIRMED"]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const accepted = await getBackupControlClient().triggerBackup(
     body.target,
     body.kind,
@@ -285,6 +289,17 @@ router.post("/trigger", async (request: Request, response: Response) => {
   );
   if (accepted.deduplicated) {
     // A retry of an already accepted request: the daemon returned the original job, nothing new was queued.
+    await writeAudit(client, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "UNKNOWN",
+        action: "BACKUP_TRIGGERED",
+        entityType: "BACKUP_JOB",
+        entityId: accepted.backupJobId,
+        beforeJson: {},
+        afterJson: { target: body.target, kind: body.kind, deduplicated: true, checklist },
+      },
+    }).catch((error) => console.error("backup trigger audit failed", error instanceof Error ? error.message : error));
     response.status(202).json({
       backupJobId: accepted.backupJobId,
       acceptedAt: accepted.acceptedAt,
@@ -318,9 +333,9 @@ router.post("/trigger", async (request: Request, response: Response) => {
       entityType: "BACKUP_JOB",
       entityId: accepted.backupJobId,
       beforeJson: {},
-      afterJson: { target: body.target, kind: body.kind },
+      afterJson: { target: body.target, kind: body.kind, checklist },
     },
-  }).catch(() => undefined);
+  }).catch((error) => console.error("backup trigger audit failed", error instanceof Error ? error.message : error));
   response.status(202).json({
     backupJobId: accepted.backupJobId,
     acceptedAt: accepted.acceptedAt,
@@ -331,6 +346,10 @@ router.post("/trigger", async (request: Request, response: Response) => {
 
 router.post("/drill", async (request: Request, response: Response) => {
   requireAuthorities(request, ["security:write"]);
+  const body = parseOrThrow(
+    z.object({ checklist: z.array(z.string().max(64)).max(10).optional() }).strict(),
+    request.body ?? {},
+  );
   if (!isBackupDaemonConfigured()) {
     throw new ApiError(
       503,
@@ -339,8 +358,21 @@ router.post("/drill", async (request: Request, response: Response) => {
     );
   }
   const actor = actorFromRequest(request);
+  const allowedChecklist = new Set(["DRILL_SCOPE_VERIFIED", "SCRATCH_ISOLATION_REVIEWED", "AUTHORITY_CONFIRMED"]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const accepted = await getBackupControlClient().runDrill(actor.userId ?? undefined, idempotencyKeyOf(request));
   if (accepted.deduplicated) {
+    await writeAudit(client, {
+      data: {
+        actorId: actor.userId,
+        role: actor.role ?? "UNKNOWN",
+        action: "BACKUP_DRILL_TRIGGERED",
+        entityType: "BACKUP_DRILL",
+        entityId: accepted.drillId,
+        beforeJson: {},
+        afterJson: { deduplicated: true, checklist },
+      },
+    }).catch((error) => console.error("backup drill audit failed", error instanceof Error ? error.message : error));
     response.status(202).json({ drillId: accepted.drillId, acceptedAt: accepted.acceptedAt, deduplicated: true });
     return;
   }
@@ -365,9 +397,9 @@ router.post("/drill", async (request: Request, response: Response) => {
       entityType: "BACKUP_DRILL",
       entityId: accepted.drillId,
       beforeJson: {},
-      afterJson: {},
+      afterJson: { checklist },
     },
-  }).catch(() => undefined);
+  }).catch((error) => console.error("backup drill audit failed", error instanceof Error ? error.message : error));
   response.status(202).json({
     drillId: accepted.drillId,
     acceptedAt: accepted.acceptedAt,
@@ -418,7 +450,7 @@ export const executeBackupPolicyApproval = async (input: {
       "The backup daemon is not configured for this deployment",
     );
   }
-  const payload = backupPolicySchema.omit({ approvalRequestId: true }).parse(approval.payloadDiffJson ?? {});
+  const payload = backupPolicySchema.omit({ approvalRequestId: true, checklist: true }).parse(approval.payloadDiffJson ?? {});
   const policy: BackupPolicy = {
     fullCron: payload.fullCron,
     deltaCron: payload.deltaCron,
@@ -499,13 +531,14 @@ router.put("/policy", async (request: Request, response: Response) => {
     walRetentionDays: body.walRetentionDays,
     alertLagSeconds: body.alertLagSeconds,
   };
+  const checklist = (body.checklist ?? []).filter((entry) => ["POLICY_SCOPE_REVIEWED", "RETENTION_IMPACT_REVIEWED", "APPROVAL_PATH_CONFIRMED"].includes(entry));
 
   if (!body.approvalRequestId) {
     const approval = await client.approvalRequest.create({
       data: {
         subjectType: "BACKUP_POLICY",
         subjectId: "backup-policy",
-        payloadDiffJson: policy as unknown as Prisma.InputJsonValue,
+        payloadDiffJson: { ...policy, checklist } as unknown as Prisma.InputJsonValue,
         mode: "STANDARD",
         makerUserId: actor.userId,
         state: "PENDING_REVIEW",

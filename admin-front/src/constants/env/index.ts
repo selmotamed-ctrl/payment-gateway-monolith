@@ -21,6 +21,13 @@ export const areChecklistsVisible = () => {
     );
 };
 
+/** Public checkout URL that hosts `/verify/certificate/<publicId>`; empty when not configured. */
+export const academyCertificateVerifyUrl = (): string => {
+    const runtimeConfig = typeof window === "undefined" ? undefined : window.__PG_RUNTIME_CONFIG__;
+    const configured = runtimeConfig?.academyCertificateVerifyUrl;
+    return typeof configured === "string" ? configured.trim().replace(/\/+$/, "") : "";
+};
+
 export const areHelpPanelsVisible = () => {
     const runtimeConfig = typeof window === "undefined" ? undefined : window.__PG_RUNTIME_CONFIG__;
     if (typeof runtimeConfig?.showHelpPanels === "boolean") return runtimeConfig.showHelpPanels;

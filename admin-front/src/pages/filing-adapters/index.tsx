@@ -1,7 +1,9 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
+import { useRouter } from "vue-router";
 import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
+import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -11,6 +13,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { ApiTable } from "@/components/Table/ApiTable";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
@@ -18,7 +21,6 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
-import { showConfirm } from "@/utils/confirm";
 
 type Adapter = {
     id: string;
@@ -31,12 +33,27 @@ type Adapter = {
     hasSecret: boolean;
     timeoutSeconds: number;
     lastUsedAt: string | null;
+    pendingApprovalId: string | null;
 };
+
+const CHANGE_CHECKS = [
+    { key: "ADAPTER_SCOPE_VERIFIED", label: "Adapter scope and authority verified" },
+    { key: "ENDPOINT_VERIFIED", label: "HTTPS endpoint verified" },
+    { key: "SECRET_HANDLING_CONFIRMED", label: "Secret handling confirmed" },
+    { key: "APPROVAL_PATH_CONFIRMED", label: "Maker-checker approval path confirmed" },
+] as const;
+
+const STATUS_CHECKS = [
+    { key: "REPORTING_CHANNEL_VERIFIED", label: "Reporting channel impact verified" },
+    { key: "DISABLE_IMPACT_ACKNOWLEDGED", label: "Activation/disable impact acknowledged" },
+    { key: "APPROVAL_PATH_CONFIRMED", label: "Maker-checker approval path confirmed" },
+] as const;
 
 const emptyForm = () => ({ name: "", authority: "CBL", kind: "HTTP", status: "ACTIVE", endpointUrl: "", authHeaderName: "X-Api-Key", authSecret: "", timeoutSeconds: 30 });
 
 const FilingAdaptersPage = dc(() => {
     const { t } = useLocale();
+    const router = useRouter();
     const rows = ref<Adapter[]>([]);
     const formOpen = ref(false);
     const saving = ref(false);
@@ -44,6 +61,13 @@ const FilingAdaptersPage = dc(() => {
     const editingId = ref<string | null>(null);
     const refreshHook = ref<{ refreshAsIs: () => void } | null>(null);
     const form = ref(emptyForm());
+    const showChecklists = areChecklistsVisible();
+    const changeChecklist = ref<Record<string, boolean>>({});
+    const changeChecklistComplete = computed(() => !showChecklists || CHANGE_CHECKS.every((check) => changeChecklist.value[check.key] === true));
+    const statusTarget = ref<Adapter | null>(null);
+    const statusNext = ref<"ACTIVE" | "DISABLED">("DISABLED");
+    const statusChecklist = ref<Record<string, boolean>>({});
+    const statusChecklistComplete = computed(() => !showChecklists || STATUS_CHECKS.every((check) => statusChecklist.value[check.key] === true));
     const headers = computed<TableHeader<Adapter>[]>(() => [
         {
             key: "name",
@@ -74,8 +98,9 @@ const FilingAdaptersPage = dc(() => {
                 <TableRowActions
                     primaryAction={{ label: t("Edit"), icon: "mdi-pencil-outline", onClick: () => openEdit(row) }}
                     items={[
-                        ...(row.status === "DISABLED" ? [{ key: "enable", label: t("Request re-enable"), icon: "mdi-play-circle-outline", onClick: () => void setStatus(row, "ACTIVE") }] : []),
-                        ...(row.status === "ACTIVE" ? [{ key: "disable", label: t("Request disable"), icon: "mdi-pause-circle-outline", danger: true, onClick: () => void disable(row) }] : []),
+                        ...(row.pendingApprovalId ? [{ key: "approval", label: t("View pending approval"), icon: "mdi-open-in-new", onClick: () => void router.push({ name: "Approvals", query: { open: row.pendingApprovalId! } }) }] : []),
+                        ...(row.status === "DISABLED" ? [{ key: "enable", label: t("Request re-enable"), icon: "mdi-play-circle-outline", onClick: () => openStatus(row, "ACTIVE") }] : []),
+                        ...(row.status === "ACTIVE" ? [{ key: "disable", label: t("Request disable"), icon: "mdi-pause-circle-outline", danger: true, onClick: () => openStatus(row, "DISABLED") }] : []),
                     ]}
                 />
             ),
@@ -85,6 +110,7 @@ const FilingAdaptersPage = dc(() => {
         editingId.value = null;
         form.value = emptyForm();
         formError.value = "";
+        changeChecklist.value = {};
         formOpen.value = true;
     };
     const openEdit = (adapter: Adapter) => {
@@ -100,9 +126,14 @@ const FilingAdaptersPage = dc(() => {
             timeoutSeconds: adapter.timeoutSeconds,
         };
         formError.value = "";
+        changeChecklist.value = {};
         formOpen.value = true;
     };
     const save = async () => {
+        if (!changeChecklistComplete.value) {
+            formError.value = t("Complete all adapter change checklist items before submitting");
+            return;
+        }
         saving.value = true;
         formError.value = "";
         try {
@@ -115,6 +146,7 @@ const FilingAdaptersPage = dc(() => {
                 authHeaderName: form.value.authHeaderName || null,
                 ...(form.value.authSecret ? { authSecret: form.value.authSecret } : {}),
                 timeoutSeconds: form.value.timeoutSeconds,
+                checklist: CHANGE_CHECKS.filter((check) => changeChecklist.value[check.key]).map((check) => check.key),
             };
             if (editingId.value) {
                 await api.patch(urlsMap.filingAdapter(editingId.value), payload);
@@ -130,19 +162,24 @@ const FilingAdaptersPage = dc(() => {
             saving.value = false;
         }
     };
-    const setStatus = async (adapter: Adapter, status: string) => {
-        try {
-            await api.patch(urlsMap.filingAdapter(adapter.id), { status });
-            showSnackBar({ type: "success", message: t("Filing adapter change submitted for approval") });
-            refreshHook.value?.refreshAsIs();
-        } catch (error) {
-            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
-        }
+    const openStatus = (adapter: Adapter, status: "ACTIVE" | "DISABLED") => {
+        statusTarget.value = adapter;
+        statusNext.value = status;
+        statusChecklist.value = {};
     };
-    const disable = async (adapter: Adapter) => {
-        if (!(await showConfirm({ title: t("Disable filing adapter"), message: t("Disabling the adapter stops new filings through it. A second person must approve the change."), type: "error" }))) return;
+    const setStatus = async () => {
+        const adapter = statusTarget.value;
+        if (!adapter) return;
+        if (!statusChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all status checklist items before submitting") });
+            return;
+        }
         try {
-            await api.delete(urlsMap.filingAdapter(adapter.id));
+            await api.patch(urlsMap.filingAdapter(adapter.id), {
+                status: statusNext.value,
+                checklist: STATUS_CHECKS.filter((check) => statusChecklist.value[check.key]).map((check) => check.key),
+            });
+            statusTarget.value = null;
             showSnackBar({ type: "success", message: t("Filing adapter change submitted for approval") });
             refreshHook.value?.refreshAsIs();
         } catch (error) {
@@ -189,6 +226,29 @@ const FilingAdaptersPage = dc(() => {
                 {form.value.kind === "HTTP" && <FormField label={t("Auth header")}><VTextField modelValue={form.value.authHeaderName} onUpdate:modelValue={(value: string) => (form.value.authHeaderName = value)} hideDetails /></FormField>}
                 {form.value.kind === "HTTP" && <FormField label={t("Auth secret")}><VTextField type="password" autocomplete="new-password" modelValue={form.value.authSecret} onUpdate:modelValue={(value: string) => (form.value.authSecret = value)} placeholder={editingId.value ? t("Leave blank to keep the existing secret") : ""} hideDetails /></FormField>}
                 <FormField label={t("Timeout seconds")}><VTextField type="number" modelValue={form.value.timeoutSeconds} onUpdate:modelValue={(value: string) => (form.value.timeoutSeconds = Number(value) || 30)} hideDetails /></FormField>
+                <FormChecklist
+                    checks={[...CHANGE_CHECKS]}
+                    modelValue={changeChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (changeChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Adapter change checklist")}
+                    complete={changeChecklistComplete.value}
+                    incompleteMessage={t("Complete all adapter change checklist items before submitting")}
+                />
+            </FormModal>
+            <FormModal modelValue={statusTarget.value !== null} onUpdate:modelValue={(value: boolean) => { if (!value) statusTarget.value = null; }} title={statusNext.value === "DISABLED" ? t("Disable filing adapter") : t("Re-enable filing adapter")} subtitle={statusTarget.value?.name ?? ""} size="md" loading={saving.value} submitLabel={t("Submit for approval")} onSubmit={() => void setStatus()}>
+                <VAlert type={statusNext.value === "DISABLED" ? "warning" : "info"} variant="tonal">
+                    {statusNext.value === "DISABLED" ? t("Disabling the adapter stops new filings through it. A second person must approve the change.") : t("Re-enabling restores this filing channel after approval. A second person must approve the change.")}
+                </VAlert>
+                <FormChecklist
+                    checks={[...STATUS_CHECKS]}
+                    modelValue={statusChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (statusChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Status change checklist")}
+                    complete={statusChecklistComplete.value}
+                    incompleteMessage={t("Complete all status checklist items before submitting")}
+                />
             </FormModal>
         </ScreenContainer>
     );

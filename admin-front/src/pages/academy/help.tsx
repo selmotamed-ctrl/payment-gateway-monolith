@@ -1,6 +1,6 @@
 import { computed, defineComponent, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
-import { VIcon } from "vuetify/components";
+import { VBtn, VIcon } from "vuetify/components";
 import { AcademyShell, Skeleton } from "@/components/academy/AcademyShell";
 import { Callout } from "@/components/academy/ui/Callout";
 import { MarkdownView } from "@/components/guide/MarkdownView";
@@ -32,7 +32,27 @@ export const AdminAcademyHelpPage = defineComponent({
         const shown = computed(() => PAGE_IDS.map((id) => pages.value.find((p) => p.id === id)).filter((p): p is AcademyPage => Boolean(p)));
         const current = computed(() => shown.value.find((p) => p.id === selectedId.value) ?? shown.value[0]);
 
-        const header = () => <PageHeader title={t("Help")} subtitle={t("How the Academy works, how scoring works, and common questions.")} />;
+        const linkCopied = ref(false);
+        const copyHelpLink = async () => {
+            try {
+                await navigator.clipboard.writeText(window.location.href);
+                linkCopied.value = true;
+                window.setTimeout(() => (linkCopied.value = false), 2500);
+            } catch {
+                linkCopied.value = false;
+            }
+        };
+        const header = () => (
+            <PageHeader
+                title={t("Help")}
+                subtitle={t("How the Academy works, how scoring works, and common questions.")}
+                end={() => (
+                    <VBtn variant="tonal" prependIcon="mdi-link-variant" onClick={() => void copyHelpLink()}>
+                        {linkCopied.value ? t("Link copied") : t("Copy help link")}
+                    </VBtn>
+                )}
+            />
+        );
 
         const rail = () => (
             <nav class="ac-help__rail" aria-label={t("Help topics")}>

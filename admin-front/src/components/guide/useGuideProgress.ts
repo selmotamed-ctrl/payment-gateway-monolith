@@ -79,8 +79,10 @@ export const useGuideProgress = () => {
         lastReadEntry,
         loadGuideProgress,
         setGuideRead,
-        isRead: (articleId: string) => Boolean(read.value[articleId]),
-        readCount: (articleIds: string[]) => articleIds.filter((id) => Boolean(read.value[id])).length,
+        isRead: (articleId: string, version?: string) =>
+            Boolean(read.value[articleId]) && (!version || read.value[articleId]?.v === version),
+        readCount: (articleIds: string[], version?: string) =>
+            articleIds.filter((id) => Boolean(read.value[id]) && (!version || read.value[id]?.v === version)).length,
         isCurrentVersion: (articleId: string, version: string) => read.value[articleId]?.v === version,
     };
 };

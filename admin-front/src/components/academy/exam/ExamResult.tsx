@@ -10,6 +10,7 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { showSnackBar } from "@/utils/snackBar";
 import type { ExamResult as ExamResultPayload, ExamResultItem } from "@/content/academy/apiTypes";
 import { fmtDate, fmtDateTime } from "../format";
 import { Callout } from "../ui/Callout";
@@ -33,6 +34,32 @@ export const ExamResult = dc((props: Props) => {
     const filter = ref<Filter>("all");
 
     const indexed = computed(() => props.result.items.map((item, index) => ({ item, index })));
+
+    const copyExamResult = async () => {
+        const r = props.result;
+        const summary = {
+            examId: r.examId,
+            track: props.trackTitle,
+            passed: r.passed,
+            scorePercent: r.scorePercent,
+            passPercent: r.passPercent,
+            criticalMissed: r.criticalMissed,
+            attemptNumber: r.attemptNumber,
+            durationSeconds: r.durationSeconds,
+            expired: r.expired,
+            reviewRequired: r.reviewRequired,
+            badgeId: r.badge?.id ?? null,
+            cooldownUntil: r.cooldownUntil ?? null,
+            moduleScores: r.moduleScores,
+            url: window.location.href,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Exam result copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
     const counts = computed(() => ({
         all: props.result.items.length,
         incorrect: props.result.items.filter((item) => !item.correct).length,
@@ -177,6 +204,9 @@ export const ExamResult = dc((props: Props) => {
                             <p class="ac-exam-verdict__sub">{t("Your percentage was high enough, but a critical question was missed.")}</p>
                         )}
                         {!r.passed && <p class="ac-exam-verdict__sub">{t("This is part of learning. Review the topics below and try again when you are ready.")}</p>}
+                        <VBtn size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyExamResult()}>
+                            {t("Copy exam result")}
+                        </VBtn>
                     </div>
                 </div>
 

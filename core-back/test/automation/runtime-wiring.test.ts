@@ -12,12 +12,13 @@ import { defaultWorkerHealthRegistry } from "../../engine/workers/workerRuntime"
 import { createPrisma, databaseIsReachable } from "../storage-engine/helpers/db";
 import { DedicatedAuditDatabaseDriver } from "../../lib/storageEngine/auditAndLogAdapters";
 import { createRetentionFake } from "../helpers/retentionFake";
+import { deleteWithAppendOnlyMaintenance } from "../helpers/appendOnlyMaintenance";
 
 const client = createPrisma({ max: 5 });
 const describeDb = databaseIsReachable ? describe : describe.skip;
 
 afterAll(async () => {
-  await client.$executeRawUnsafe(`DELETE FROM operator_cases WHERE subject_key LIKE 'platform.%'`);
+  await deleteWithAppendOnlyMaintenance(client, `DELETE FROM operator_cases WHERE subject_key LIKE 'platform.%'`);
   await client.$disconnect();
 });
 

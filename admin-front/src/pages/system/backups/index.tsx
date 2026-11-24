@@ -2,6 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
+import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -15,6 +16,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { DataTable } from "@/components/Table/DataTable";
 import type { TableHeader } from "@/components/Table/types";
 import { api } from "@/state/api";
@@ -30,6 +32,24 @@ import {
     newIdempotencyKey,
     validatePolicyForm,
 } from "@/utils/backupsGuard";
+
+const TRIGGER_CHECKS = [
+    { key: "BACKUP_TARGET_VERIFIED", label: "Backup target and kind verified" },
+    { key: "LOAD_IMPACT_REVIEWED", label: "Production database load impact reviewed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Security write authority confirmed" },
+] as const;
+
+const POLICY_CHECKS = [
+    { key: "POLICY_SCOPE_REVIEWED", label: "Policy scope and cron schedule reviewed" },
+    { key: "RETENTION_IMPACT_REVIEWED", label: "Retention and storage impact reviewed" },
+    { key: "APPROVAL_PATH_CONFIRMED", label: "Four-eyes approval path confirmed" },
+] as const;
+
+const DRILL_CHECKS = [
+    { key: "DRILL_SCOPE_VERIFIED", label: "Restore drill scope verified" },
+    { key: "SCRATCH_ISOLATION_REVIEWED", label: "Scratch-instance isolation reviewed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Security write authority confirmed" },
+] as const;
 
 type WalState = {
     archiveLagSeconds?: number | null;
@@ -203,10 +223,19 @@ const SystemBackupsPage = dc(() => {
     const triggerOpen = ref(false);
     const triggering = ref(false);
     const triggerForm = ref<{ target: string; kind: string }>({ target: "all", kind: "full" });
+    const showChecklists = areChecklistsVisible();
+    const triggerChecklist = ref<Record<string, boolean>>({});
+    const triggerChecklistComplete = computed(() => !showChecklists || TRIGGER_CHECKS.every((check) => triggerChecklist.value[check.key] === true));
+    const drillOpen = ref(false);
+    const drillLoading = ref(false);
+    const drillChecklist = ref<Record<string, boolean>>({});
+    const drillChecklistComplete = computed(() => !showChecklists || DRILL_CHECKS.every((check) => drillChecklist.value[check.key] === true));
 
     const policyOpen = ref(false);
     const savingPolicy = ref(false);
     const policyError = ref<string | null>(null);
+    const policyChecklist = ref<Record<string, boolean>>({});
+    const policyChecklistComplete = computed(() => !showChecklists || POLICY_CHECKS.every((check) => policyChecklist.value[check.key] === true));
     const policyForm = ref({
         fullCron: "",
         deltaCron: "",
@@ -406,11 +435,16 @@ const SystemBackupsPage = dc(() => {
     const openTrigger = () => {
         triggerForm.value = { target: "all", kind: "full" };
         triggerKey = newIdempotencyKey();
+        triggerChecklist.value = {};
         triggerOpen.value = true;
     };
 
     const submitTrigger = async () => {
         if (triggering.value || !actionsReady.value) return;
+        if (!triggerChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all backup checklist items before continuing") });
+            return;
+        }
         if (needsExtraConfirm(triggerForm.value)) {
             const confirmed = await showConfirm({
                 title: t("Run backup now"),
@@ -428,6 +462,7 @@ const SystemBackupsPage = dc(() => {
                 {
                     target: triggerForm.value.target,
                     kind: triggerForm.value.kind,
+                    checklist: TRIGGER_CHECKS.filter((check) => triggerChecklist.value[check.key]).map((check) => check.key),
                 },
                 { headers: { "Idempotency-Key": triggerKey } },
             );
@@ -448,33 +483,44 @@ const SystemBackupsPage = dc(() => {
         }
     };
 
-    const runDrill = async () => {
+    const openDrill = () => {
         if (!canWrite.value || !actionsReady.value) return;
+        drillChecklist.value = {};
+        drillOpen.value = true;
+    };
+
+    const runDrill = async () => {
+        if (!canWrite.value || !actionsReady.value || drillLoading.value) return;
+        if (!drillChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all drill checklist items before continuing") });
+            return;
+        }
         const drillKey = newIdempotencyKey();
-        await showConfirm({
-            title: t("Run restore drill"),
-            message: t(
-                "This launches an isolated scratch PostgreSQL instance, restores the latest backup, and verifies the three ledger invariants. It can take several minutes.",
-            ),
-            submitButtonLabel: t("Run restore drill"),
-            type: "warning",
-            onConfirm: async () => {
-                const response = await api.post(urlsMap.systemBackupsDrill, {}, { headers: { "Idempotency-Key": drillKey } });
-                const payload = (response.data?.data ?? response.data ?? {}) as { drillId?: string };
-                showSnackBar({
-                    type: "success",
-                    message: payload.drillId
-                        ? `${t("Restore drill triggered")} · ${payload.drillId}`
-                        : t("Restore drill triggered"),
-                });
-                void load();
-            },
-        });
+        drillLoading.value = true;
+        try {
+            const response = await api.post(urlsMap.systemBackupsDrill, {
+                checklist: DRILL_CHECKS.filter((check) => drillChecklist.value[check.key]).map((check) => check.key),
+            }, { headers: { "Idempotency-Key": drillKey } });
+            const payload = (response.data?.data ?? response.data ?? {}) as { drillId?: string };
+            drillOpen.value = false;
+            showSnackBar({
+                type: "success",
+                message: payload.drillId
+                    ? `${t("Restore drill triggered")} · ${payload.drillId}`
+                    : t("Restore drill triggered"),
+            });
+            void load();
+        } catch (cause) {
+            showSnackBar({ type: "error", message: clipServerText(extractApiErrorMessage(cause)) });
+        } finally {
+            drillLoading.value = false;
+        }
     };
 
     const openPolicy = () => {
         if (!actionsReady.value) return;
         policyError.value = null;
+        policyChecklist.value = {};
         policyForm.value = {
             fullCron: schedule.value.fullCron ?? "",
             deltaCron: schedule.value.deltaCron ?? "",
@@ -503,10 +549,17 @@ const SystemBackupsPage = dc(() => {
             policyError.value = t("Complete every policy field with a valid value.");
             return;
         }
+        if (!policyChecklistComplete.value) {
+            policyError.value = t("Complete all policy checklist items before submitting.");
+            return;
+        }
         policyError.value = null;
         savingPolicy.value = true;
         try {
-            const response = await api.put(urlsMap.systemBackupsPolicy, validated.value);
+            const response = await api.put(urlsMap.systemBackupsPolicy, {
+                ...validated.value,
+                checklist: POLICY_CHECKS.filter((check) => policyChecklist.value[check.key]).map((check) => check.key),
+            });
             const payload = (response.data?.data ?? response.data ?? {}) as {
                 status?: string;
                 approvalRequestId?: string;
@@ -563,7 +616,7 @@ const SystemBackupsPage = dc(() => {
                                     disabled={!actionsReady.value}
                                     variant="tonal"
                                     prependIcon="mdi-restore"
-                                    onClick={() => void runDrill()}
+                                    onClick={openDrill}
                                 >
                                     {t("Run restore drill")}
                                 </VBtn>
@@ -929,6 +982,39 @@ const SystemBackupsPage = dc(() => {
                 <VAlert type="info" variant="tonal">
                     {t("The backup runs asynchronously. Monitor the scheduled backups table for its result.")}
                 </VAlert>
+                <FormChecklist
+                    checks={[...TRIGGER_CHECKS]}
+                    modelValue={triggerChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (triggerChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Backup run checklist")}
+                    complete={triggerChecklistComplete.value}
+                    incompleteMessage={t("Complete all backup checklist items before continuing")}
+                />
+            </FormModal>
+
+            <FormModal
+                modelValue={drillOpen.value}
+                onUpdate:modelValue={(value: boolean) => (drillOpen.value = value)}
+                title={t("Run restore drill")}
+                subtitle={t("Restore the latest backup into an isolated scratch instance and verify the ledger invariants.")}
+                size="md"
+                submitLabel={t("Run restore drill")}
+                loading={drillLoading.value}
+                onSubmit={() => void runDrill()}
+            >
+                <VAlert type="warning" variant="tonal">
+                    {t("This launches an isolated scratch PostgreSQL instance, restores the latest backup, and verifies the three ledger invariants. It can take several minutes.")}
+                </VAlert>
+                <FormChecklist
+                    checks={[...DRILL_CHECKS]}
+                    modelValue={drillChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (drillChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Restore drill checklist")}
+                    complete={drillChecklistComplete.value}
+                    incompleteMessage={t("Complete all drill checklist items before continuing")}
+                />
             </FormModal>
 
             <FormModal
@@ -978,6 +1064,15 @@ const SystemBackupsPage = dc(() => {
                         }
                     />
                 </FormField>
+                <FormChecklist
+                    checks={[...POLICY_CHECKS]}
+                    modelValue={policyChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (policyChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Backup policy checklist")}
+                    complete={policyChecklistComplete.value}
+                    incompleteMessage={t("Complete all policy checklist items before submitting.")}
+                />
                 <FormField label={t("Alert lag threshold")} required>
                     <VTextField
                         type="number"

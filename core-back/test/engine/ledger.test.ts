@@ -188,6 +188,35 @@ describe("all 16 journal entry templates", () => {
     expect(template.lines[1]?.account.accountType).toBe("GATEWAY_FEE_ACCRUAL");
   });
 
+  test("a negative fee variance reverses the accrual/expense direction", () => {
+    const template = buildLedgerTemplate("FEE_VARIANCE_TRUE_UP", { amount: "100", varianceAmount: "-0.1" });
+    expect(template.lines).toHaveLength(2);
+    expect(template.lines[0]?.account.accountType).toBe("GATEWAY_FEE_ACCRUAL");
+    expect(template.lines[0]?.direction).toBe("DEBIT");
+    expect(template.lines[1]?.account.accountType).toBe("GATEWAY_FEE_EXPENSE");
+    expect(template.lines[1]?.direction).toBe("CREDIT");
+  });
+
+  test("a zero payer surcharge is valid and does not change the clearing amount", () => {
+    const template = buildLedgerTemplate("PAYER_SURCHARGE_CONFIRMATION", {
+      amount: "100",
+      commissionAmount: "0",
+      surchargeAmount: "0",
+      gatewayFeeAmount: "0",
+    });
+    const clearing = template.lines.find((line) => line.account.accountType === "GATEWAY_CLEARING");
+    expect(String(clearing?.amount)).toBe("100");
+  });
+
+  test("a zero-commission merchant-direct confirmation needs no journal", () => {
+    const template = buildLedgerTemplate("MERCHANT_DIRECT_CONFIRMATION", {
+      amount: "100",
+      commissionAmount: "0",
+      merchantAmount: "100",
+    });
+    expect(template.lines).toEqual([]);
+  });
+
   test("scenario 5 payer surcharge charges the surcharge on top of the link amount", () => {
     const template = buildLedgerTemplate("PAYER_SURCHARGE_CONFIRMATION", {
       amount: "100",

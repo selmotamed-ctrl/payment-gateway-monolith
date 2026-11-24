@@ -19,6 +19,7 @@ import { StateView } from "@/components/StateView";
 import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
 import { sandboxGet, sandboxPost, type SandboxStudioOverview } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showConfirm } from "@/utils/confirm";
 import { showSnackBar } from "@/utils/snackBar";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 
@@ -74,9 +75,16 @@ const SandboxOverviewPage = dc(() => {
     };
 
     const reset = async () => {
+        const confirmed = await showConfirm({
+            title: t("Reset my sandbox data?"),
+            message: t("This deletes your sandbox wallets, applications, links, payments and Fake Rails test accounts. Live data is never touched."),
+            submitButtonLabel: t("Reset"),
+            type: "warning",
+        });
+        if (!confirmed) return;
         busy.value = "reset";
         try {
-            await sandboxPost("/reset");
+            await sandboxPost("/reset", { confirm: "RESET" });
             showSnackBar({ type: "success", message: t("Sandbox data reset") });
             await load();
         } catch (e) {

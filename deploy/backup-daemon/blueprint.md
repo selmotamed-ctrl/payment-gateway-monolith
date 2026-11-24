@@ -6,7 +6,7 @@ Generated from: `deploy.backup`.
 
 ## Backup Daemon
 
-> Status: `partial` · Last verified: 2026-11-12
+> Status: `partial` · Last verified: 2026-11-24
 
 ## 1. Purpose and scope
 
@@ -98,7 +98,7 @@ The original design called for a Bun service wrapping WAL-G (same host) or Barma
 2. Makes the data directory startable: a physical backup holds `PGDATA` only and Debian-style clusters keep `postgresql.conf`/`pg_hba.conf` outside it, so a minimal config is generated, sized from `pg_controldata` (hot standby refuses to start below the primary's `max_connections` and related settings).
 3. Appends the recovery settings and forces archiving off (`archive_mode=off`, `archive_command=''`, no slot/standby names, `ssl=off`). The restored `postgresql.auto.conf` carries the production `archive_command`; without this a promoted scratch cluster pushed `00000002.history` and timeline-2 WAL into the production archive in the live test and every later restore failed.
 4. Starts on loopback and waits for recovery to finish and promote (`pg_is_in_recovery() = f`, up to `BACKUP_RECOVERY_TIMEOUT_MS`); a failed start includes the server-log tail.
-5. Runs three checks: double-entry zero drift, sharded balance parity, and the audit hash chain. Core queries run as `PG_PRIMARY_USER`; audit queries always run as `PG_AUDIT_USER` (the primary role when unset), because only the audit role is granted on the audit database and a dedicated audit cluster does not have the core application role.
+5. Runs three checks: double-entry zero drift, sharded balance parity, and the audit hash chain. When object storage is configured it also compares the full restored ACTIVE object set with the `object-storage/active-manifest.json` captured by the backup, then decrypts a bounded sample. Core queries run as `PG_PRIMARY_USER`; audit queries always run as `PG_AUDIT_USER` (the primary role when unset), because only the audit role is granted on the audit database and a dedicated audit cluster does not have the core application role.
 6. Signs the report with HMAC-SHA256 and destroys the scratch cluster.
 
 The audit chain accepts either canonical form: the database's own `before_json::text`/`after_json::text` with the timestamp formatted as the trigger formats it (what the trigger hashes), or the application's stable-JSON form; `seq_no` must be gap-free so a deleted row is detected. In a shared cluster a missing audit database is restored from the newest logical dump into the same scratch cluster.

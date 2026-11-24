@@ -1,8 +1,8 @@
 import express from "express";
 import { z } from "zod";
-import { zIdentifier, zJsonObject, zPaginationQuery, zReason } from "../../lib/zReady";
+import { zIdentifier, zPaginationQuery, zReason } from "../../lib/zReady";
 import { toCoreOperatorCaseResolve } from "../contract";
-import { coreForward } from "../forward";
+import { coreForward, summaryExportQuerySchema } from "../forward";
 
 const router = express.Router();
 
@@ -121,9 +121,8 @@ export const operatorCasePatchSchema = z
 
 const inquireSchema = z
   .object({
-    force: z.boolean().optional(),
-    reason: z.string().max(500).optional(),
-    metadata: zJsonObject.optional(),
+    reason: z.string().trim().min(10).max(500).optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -141,6 +140,15 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/gateway-inquiries/summary",
+  }),
+);
+
+router.get(
+  "/gateway-inquiries/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/gateway-inquiries/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -200,7 +208,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/operator-cases/export",
-    querySchema: zPaginationQuery,
+    querySchema: zPaginationQuery.extend({ checklist: z.string().max(1000).optional() }),
   }),
 );
 
@@ -267,6 +275,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/operator-cases/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 

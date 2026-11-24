@@ -3,7 +3,7 @@ id: edge.checkout
 title: Checkout Edge BFF
 status: partial
 confidence: high
-last_verified: 2026-11-13
+last_verified: 2026-11-23
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/lib/realtimeBus.ts
@@ -131,6 +131,7 @@ Browser return `GET|POST /return/:attemptToken`:
 | POST | `/api/v1/pay/:linkKey/logs/:attemptId/client-event` | `POST /internal/checkout/pay/:linkKey/logs/:attemptId/client-event` |
 | ANY | `/api/v1/inbound/:gateway/:env/:pathToken` | `ANY /internal/checkout/inbound/:gateway/:env/:pathToken` (raw bytes) |
 | GET, POST | `/api/v1/return/:attemptToken` | `GET, POST /internal/checkout/return/:attemptToken` |
+| GET | `/api/v1/verify/certificate/:publicId` | `GET /internal/checkout/academy/certificates/:publicId` |
 
 ## 4. Contracts and invariants
 
@@ -143,6 +144,8 @@ Browser return `GET|POST /return/:attemptToken`:
 - Client event aliases (`COMPLETE_CALLBACK`, `ERROR_CALLBACK`, widget aliases) are normalized to `completeCallback`, `errorCallback`, `widgetEvent` and `returnHint`.
 - The return redirect destination comes only from configured `CHECKOUT_FRONT_BASE_URL` and `CHECKOUT_FRONT_STATUS_PATH`, not from client input.
 - SSE responses must disable buffering; Nginx sets `proxy_buffering off` for the status route.
+- The public certificate verifier accepts only an opaque Academy `publicId` (16–64 characters), is rate-limited by the payer budget with a separate `certificate` bucket, and returns `no-store`. It forwards no session, body or payer data, and core returns only holder name, track, badge, dates, status (`valid`/`expired`/`revoked`) and content version. The path segment is redacted in the request log.
+
 
 ## 5. Data / API / config / deployment surface
 

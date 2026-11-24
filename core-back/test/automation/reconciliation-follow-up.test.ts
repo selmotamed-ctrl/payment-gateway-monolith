@@ -9,6 +9,7 @@ import { PrismaRepositories } from "../../engine/db/repositories";
 import { runReconciliationFollowUp } from "../../engine/workers/ReconciliationFollowUp";
 import { cleanupAutomationCatalog, createAutomationCatalog, type AutomationCatalog } from "../helpers/automationCatalog";
 import { createPrisma, databaseIsReachable } from "../storage-engine/helpers/db";
+import { deleteWithAppendOnlyMaintenance } from "../helpers/appendOnlyMaintenance";
 
 const client = createPrisma({ max: 10 });
 const describeDb = databaseIsReachable ? describe : describe.skip;
@@ -18,7 +19,7 @@ const created = { runs: [] as string[], sources: [] as string[], jobs: [] as str
 afterAll(async () => {
   if (databaseIsReachable) {
     const runs = created.runs;
-    await client.$executeRawUnsafe(`DELETE FROM operator_cases WHERE reconciliation_item_id IN (SELECT id FROM reconciliation_items WHERE run_id = ANY($1::uuid[])) OR subject_key LIKE ANY($2::text[])`, runs, runs.map((id) => `recon.overflow:${id}`));
+    await deleteWithAppendOnlyMaintenance(client, `DELETE FROM operator_cases WHERE reconciliation_item_id IN (SELECT id FROM reconciliation_items WHERE run_id = ANY($1::uuid[])) OR subject_key LIKE ANY($2::text[])`, runs, runs.map((id) => `recon.overflow:${id}`));
     await client.$executeRawUnsafe(`DELETE FROM reconciliation_items WHERE run_id = ANY($1::uuid[])`, runs);
     await client.$executeRawUnsafe(`DELETE FROM reconciliation_runs WHERE id = ANY($1::uuid[])`, runs);
     await client.$executeRawUnsafe(`DELETE FROM statement_sources WHERE id = ANY($1::uuid[])`, created.sources);

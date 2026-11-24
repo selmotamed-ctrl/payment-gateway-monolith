@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { VBtn } from "vuetify/components";
+import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -22,6 +23,7 @@ import { MonoRef } from "@/components/ui/MonoRef";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { GlAccountDrawer } from "@/components/ledger/GlAccountDrawer";
 import ReasonModal from "@/pages/merchants/components/ReasonModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import {
     ApprovalSubmittedNotice,
     MoneyOrRestricted,
@@ -57,6 +59,13 @@ type WalletSummary = {
     redactedFields?: string[];
 };
 
+const WALLET_ACTION_CHECKS = [
+    { key: "WALLET_SCOPE_VERIFIED", label: "Wallet and merchant scope verified" },
+    { key: "BALANCE_AND_CASHOUT_REVIEWED", label: "Balance and pending cash-outs reviewed" },
+    { key: "REASON_CONFIRMED", label: "Reason confirmed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Authority to change containment confirmed" },
+] as const;
+
 const WalletsPage = dc(() => {
     const { t } = useLocale();
     const router = useRouter();
@@ -78,6 +87,9 @@ const WalletsPage = dc(() => {
     const target = ref<{ wallet: WalletRow; action: WalletAction } | null>(null);
     const submitting = ref(false);
     const modalError = ref("");
+    const showChecklists = areChecklistsVisible();
+    const actionChecklist = ref<Record<string, boolean>>({});
+    const actionChecklistComplete = computed(() => !showChecklists || WALLET_ACTION_CHECKS.every((check) => actionChecklist.value[check.key] === true));
 
     const filterDefinitions = computed(() => tableRegistry.Wallets?.filters ?? []);
 
@@ -118,10 +130,18 @@ const WalletsPage = dc(() => {
     const submit = async (reason: string) => {
         const current = target.value;
         if (!current) return;
+        if (!actionChecklistComplete.value) {
+            modalError.value = t("Complete all wallet action checklist items before submitting");
+            return;
+        }
         submitting.value = true;
         modalError.value = "";
         try {
-            const outcome = await runGoverned(() => api.post(urlsMap.walletStatus(current.wallet.id), { status: current.action.targetStatus, reason }));
+            const outcome = await runGoverned(() => api.post(urlsMap.walletStatus(current.wallet.id), {
+                status: current.action.targetStatus,
+                reason,
+                checklist: WALLET_ACTION_CHECKS.filter((check) => actionChecklist.value[check.key]).map((check) => check.key),
+            }));
             notifyOutcome(outcome, "Wallet frozen");
             notice.value = outcome.kind === "approval" ? { approvalRequestId: outcome.approvalRequestId } : null;
             target.value = null;
@@ -245,6 +265,7 @@ const WalletsPage = dc(() => {
                             onClick: () => {
                                 modalError.value = "";
                                 target.value = { wallet: row, action };
+                                actionChecklist.value = {};
                             },
                         })),
                     ]}
@@ -339,7 +360,17 @@ const WalletsPage = dc(() => {
                 loading={submitting.value}
                 errorMessage={modalError.value}
                 onSubmit={(reason: string) => void submit(reason)}
-            />
+            >
+                <FormChecklist
+                    checks={[...WALLET_ACTION_CHECKS]}
+                    modelValue={actionChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (actionChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Wallet action checklist")}
+                    complete={actionChecklistComplete.value}
+                    incompleteMessage={t("Complete all wallet action checklist items before submitting")}
+                />
+            </ReasonModal>
         </ScreenContainer>
     );
 });

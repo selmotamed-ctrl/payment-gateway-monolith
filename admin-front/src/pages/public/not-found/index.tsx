@@ -11,6 +11,7 @@ const NotFoundPage = dc(() => {
     const route = useRoute();
     const router = useRouter();
     const copied = ref(false);
+    const diagnosticsCopied = ref(false);
 
     const copyAddress = async () => {
         const address = window.location.href;
@@ -32,6 +33,23 @@ const NotFoundPage = dc(() => {
         }
         copied.value = true;
         window.setTimeout(() => (copied.value = false), 2000);
+    };
+
+    const copyDiagnostics = async () => {
+        const diagnostics = {
+            path: route.fullPath,
+            url: window.location.href,
+            referrer: document.referrer || null,
+            occurredAt: new Date().toISOString(),
+            userAgent: navigator.userAgent,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+            diagnosticsCopied.value = true;
+            window.setTimeout(() => (diagnosticsCopied.value = false), 2000);
+        } catch {
+            diagnosticsCopied.value = false;
+        }
     };
 
     return () => (
@@ -71,10 +89,21 @@ const NotFoundPage = dc(() => {
                         <VBtn variant="text" prependIcon={copied.value ? "mdi-check" : "mdi-content-copy"} onClick={() => void copyAddress()}>
                             {copied.value ? t("Copied") : t("Copy address")}
                         </VBtn>
+                        <VBtn variant="text" prependIcon={diagnosticsCopied.value ? "mdi-check" : "mdi-bug-outline"} onClick={() => void copyDiagnostics()}>
+                            {diagnosticsCopied.value ? t("Copied") : t("Copy diagnostics")}
+                        </VBtn>
                         {!isAuthenticated() && (
                             <VBtn variant="text" prependIcon="mdi-login" onClick={() => void router.push({ name: "Login" })}>
                                 {t("Sign in")}
                             </VBtn>
+                        )}
+                        {isAuthenticated() && (
+                            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "center", borderTop: "1px solid var(--pg-border-subtle)", paddingTop: "12px", inlineSize: "100%" }}>
+                                <span style={{ fontSize: "11px", opacity: 0.6, inlineSize: "100%" }}>{t("Or continue with a common screen")}</span>
+                                <VBtn size="small" variant="text" prependIcon="mdi-storefront-outline" onClick={() => void router.push({ name: "Merchants" })}>{t("Merchants")}</VBtn>
+                                <VBtn size="small" variant="text" prependIcon="mdi-clipboard-alert-outline" onClick={() => void router.push({ name: "OperatorCases" })}>{t("Operator cases")}</VBtn>
+                                <VBtn size="small" variant="text" prependIcon="mdi-shield-search" onClick={() => void router.push({ name: "AuditLog" })}>{t("Audit log")}</VBtn>
+                            </div>
                         )}
                     </div>
                 </SurfaceCardText>

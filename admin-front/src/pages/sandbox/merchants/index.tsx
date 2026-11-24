@@ -19,6 +19,8 @@ import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import { SectionFields } from "@/components/SectionFields";
 import { adminSandbox, type AdminSandboxMerchantRow } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -27,6 +29,25 @@ import { copyToClipboard } from "@/utils/common";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 
 const STATUSES = ["PENDING", "ACTIVE", "SUSPENDED", "REJECTED", "CLOSED"];
+
+const RESET_CHECKS = [
+    { key: "MERCHANT_SCOPE_VERIFIED", label: "Sandbox merchant verified" },
+    { key: "LIVE_ISOLATION_CONFIRMED", label: "Live data isolation confirmed" },
+    { key: "RESET_IMPACT_ACKNOWLEDGED", label: "Sandbox-only destructive impact acknowledged" },
+    { key: "AUTHORITY_CONFIRMED", label: "Sandbox admin authority confirmed" },
+] as const;
+
+const EXPORT_CHECKS = [
+    { key: "SANDBOX_SCOPE_VERIFIED", label: "Sandbox merchant scope verified" },
+    { key: "PORTFOLIO_REVIEWED", label: "Portfolio and balances reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const SEED_CHECKS = [
+    { key: "MERCHANT_SCOPE_VERIFIED", label: "Sandbox merchant scope verified" },
+    { key: "DEMO_DATA_UNDERSTOOD", label: "Demo data behavior understood" },
+    { key: "NO_LIVE_IMPACT_CONFIRMED", label: "No Live-data impact confirmed" },
+] as const;
 
 const AdminSandboxMerchantsPage = dc(() => {
     const { t } = useLocale();
@@ -42,7 +63,15 @@ const AdminSandboxMerchantsPage = dc(() => {
     const busy = ref<string | null>(null);
     const resetTarget = ref<AdminSandboxMerchantRow | null>(null);
     const resetConfirm = ref("");
+    const seedTarget = ref<{ row: AdminSandboxMerchantRow; history: boolean } | null>(null);
+    const seedChecklist = ref<Record<string, boolean>>({});
     const exportLoading = ref(false);
+    const showChecklists = areChecklistsVisible();
+    const seedChecklistComplete = computed(() => !showChecklists || SEED_CHECKS.every((check) => seedChecklist.value[check.key] === true));
+    const resetChecklist = ref<Record<string, boolean>>({});
+    const resetChecklistComplete = computed(() => !showChecklists || RESET_CHECKS.every((check) => resetChecklist.value[check.key] === true));
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const filterDefs = computed<TableFilter[]>(() => [
@@ -87,11 +116,25 @@ const AdminSandboxMerchantsPage = dc(() => {
         ];
     });
 
-    const seed = async (row: AdminSandboxMerchantRow, history = false) => {
+    const openSeed = (row: AdminSandboxMerchantRow, history: boolean) => {
+        seedTarget.value = { row, history };
+        seedChecklist.value = {};
+    };
+
+    const seed = async () => {
+        const target = seedTarget.value;
+        if (!target) return;
+        if (!seedChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all seed checklist items before continuing") });
+            return;
+        }
+        const { row, history } = target;
+        const checklist = SEED_CHECKS.filter((check) => seedChecklist.value[check.key]).map((check) => check.key);
         busy.value = row.id;
         try {
-            if (history) await adminSandbox.seedHistory(row.id);
-            else await adminSandbox.seedMerchant(row.id);
+            if (history) await adminSandbox.seedHistory(row.id, 20, checklist);
+            else await adminSandbox.seedMerchant(row.id, checklist);
+            seedTarget.value = null;
             showSnackBar({ type: "success", message: history ? t("Sandbox history created") : t("Sandbox demo workspace ready") });
             hook.value?.refreshAsIs();
             await loadSummary();
@@ -104,9 +147,16 @@ const AdminSandboxMerchantsPage = dc(() => {
 
     const reset = async () => {
         if (!resetTarget.value || resetConfirm.value !== "RESET") return;
+        if (!resetChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all reset checklist items before continuing") });
+            return;
+        }
         busy.value = resetTarget.value.id;
         try {
-            await adminSandbox.resetMerchant(resetTarget.value.id);
+            await adminSandbox.resetMerchant(
+                resetTarget.value.id,
+                RESET_CHECKS.filter((check) => resetChecklist.value[check.key]).map((check) => check.key),
+            );
             resetTarget.value = null;
             resetConfirm.value = "";
             showSnackBar({ type: "success", message: t("Merchant sandbox reset") });
@@ -132,10 +182,33 @@ const AdminSandboxMerchantsPage = dc(() => {
             <TableRowActions
                 primaryAction={{ label: t("Open"), icon: "mdi-open-in-new", onClick: () => void router.push(`/sandbox/merchants/${row.id}`) }}
                 items={[
-                    { key: "seed", label: t("Seed demo workspace"), icon: "mdi-play", onClick: () => void seed(row) },
-                    { key: "history", label: t("Seed 20 payments"), icon: "mdi-history", onClick: () => void seed(row, true) },
-                    { key: "reset", label: t("Reset sandbox"), icon: "mdi-restore", danger: true, onClick: () => { resetTarget.value = row; resetConfirm.value = ""; } },
+                    { key: "seed", label: t("Seed demo workspace"), icon: "mdi-play", onClick: () => openSeed(row, false) },
+                    { key: "history", label: t("Seed 20 payments"), icon: "mdi-history", onClick: () => openSeed(row, true) },
+                    { key: "reset", label: t("Reset sandbox"), icon: "mdi-restore", danger: true, onClick: () => { resetTarget.value = row; resetConfirm.value = ""; resetChecklist.value = {}; } },
                     { key: "copy", label: t("Copy merchant ID"), icon: "mdi-content-copy", onClick: () => { copyToClipboard(row.id); showSnackBar({ type: "success", message: t("Copied") }); } },
+                    {
+                        key: "copy-summary",
+                        label: t("Copy summary"),
+                        icon: "mdi-content-copy",
+                        onClick: () => {
+                            copyToClipboard(JSON.stringify({
+                                id: row.id,
+                                tradeName: row.tradeName,
+                                legalName: row.legalName,
+                                displayName: row.displayName ?? null,
+                                status: row.status,
+                                onboardingChannel: row.onboardingChannel,
+                                country: row.country,
+                                createdAt: row.createdAt,
+                                wallets: row.wallets,
+                                applications: row.applications,
+                                payments: row.payments,
+                                cashouts: row.cashouts,
+                                availableBalance: row.availableBalance,
+                            }, null, 2));
+                            showSnackBar({ type: "success", message: t("Sandbox merchant summary copied") });
+                        },
+                    },
                 ]}
             />
         ) },
@@ -143,6 +216,10 @@ const AdminSandboxMerchantsPage = dc(() => {
 
     const exportSummary = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
@@ -162,7 +239,7 @@ const AdminSandboxMerchantsPage = dc(() => {
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value && !summary.value} minHeight="180px">
                 <div class="d-flex flex-column ga-4">
-                    <SummaryExportCard title={t("Sandbox merchant health")} metrics={metrics.value} exportLoading={exportLoading.value} exportLabel={t("Export summary")} onExport={() => void exportSummary()} />
+                    <SummaryExportCard title={t("Sandbox merchant health")} metrics={metrics.value} checks={[...EXPORT_CHECKS]} checklist={exportChecklist.value} onUpdate:checklist={(value: Record<string, boolean>) => (exportChecklist.value = value)} showChecklists={showChecklists} checklistComplete={exportChecklistComplete.value} exportLoading={exportLoading.value} exportDisabled={!exportChecklistComplete.value} exportLabel={t("Export summary")} onExport={() => void exportSummary()} />
                     <ApiTable<AdminSandboxMerchantRow>
                         title={t("Sandbox merchants")}
                         url="/v1/admin/sandbox/merchants"
@@ -186,11 +263,39 @@ const AdminSandboxMerchantsPage = dc(() => {
                     />
                 </div>
             </StateView>
+            <FormModal
+                modelValue={Boolean(seedTarget.value)}
+                onUpdate:modelValue={(v: any) => { if (!v) seedTarget.value = null; }}
+                title={seedTarget.value?.history ? t("Seed sandbox payment history") : t("Seed sandbox demo workspace")}
+                size="sm"
+                loading={Boolean(busy.value)}
+                submitLabel={seedTarget.value?.history ? t("Seed history") : t("Seed demo")}
+                onSubmit={() => void seed()}
+            >
+                <FormChecklist
+                    checks={[...SEED_CHECKS]}
+                    modelValue={seedChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (seedChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Seed checklist")}
+                    complete={seedChecklistComplete.value}
+                    incompleteMessage={t("Complete all seed checklist items before continuing")}
+                />
+            </FormModal>
             <FormModal modelValue={Boolean(resetTarget.value)} onUpdate:modelValue={(v: any) => { if (!v) resetTarget.value = null; }} title={t("Reset merchant sandbox")} size="sm" loading={Boolean(busy.value)} submitLabel={t("Reset sandbox")} onSubmit={() => void reset()}>
                 <SectionFields title={t("Confirmation")}>
                     <FormField label={t("Type RESET to confirm")} required><VTextField modelValue={resetConfirm.value} onUpdate:modelValue={(v: string) => (resetConfirm.value = v)} hideDetails /></FormField>
                     <p class="text-caption text-medium-emphasis">{t("This resets")} {resetTarget.value?.tradeName}. {t("Live data is never touched.")}</p>
                 </SectionFields>
+                <FormChecklist
+                    checks={[...RESET_CHECKS]}
+                    modelValue={resetChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (resetChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Merchant reset checklist")}
+                    complete={resetChecklistComplete.value}
+                    incompleteMessage={t("Complete all reset checklist items before continuing")}
+                />
             </FormModal>
         </ScreenContainer>
     );

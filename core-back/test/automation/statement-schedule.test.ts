@@ -10,6 +10,7 @@ import { StatementScheduleWorker, statementMissingSubjectKey } from "../../engin
 import { lastScheduledAtOrBefore, parseCron } from "../../lib/cron";
 import { cleanupAutomationCatalog, createAutomationCatalog, type AutomationCatalog } from "../helpers/automationCatalog";
 import { createPrisma, databaseIsReachable } from "../storage-engine/helpers/db";
+import { deleteWithAppendOnlyMaintenance } from "../helpers/appendOnlyMaintenance";
 
 const client = createPrisma({ max: 10 });
 const describeDb = databaseIsReachable ? describe : describe.skip;
@@ -20,12 +21,12 @@ const iso = (date: Date): string => date.toISOString();
 
 afterAll(async () => {
   for (const id of sourceIds) {
-    await client.$executeRawUnsafe(`DELETE FROM operator_cases WHERE subject_key LIKE $1`, `statement.%:${id}%`);
+    await deleteWithAppendOnlyMaintenance(client, `DELETE FROM operator_cases WHERE subject_key LIKE $1`, `statement.%:${id}%`);
     await client.$executeRawUnsafe(`DELETE FROM reconciliation_runs WHERE statement_source_id = $1::uuid`, id);
     await client.$executeRawUnsafe(`DELETE FROM statement_sources WHERE id = $1::uuid`, id);
   }
   for (const catalog of catalogs) {
-    await client.$executeRawUnsafe(`DELETE FROM operator_cases WHERE subject_key = $1`, `link.slot_drift:${catalog.linkId}`);
+    await deleteWithAppendOnlyMaintenance(client, `DELETE FROM operator_cases WHERE subject_key = $1`, `link.slot_drift:${catalog.linkId}`);
   }
   await cleanupAutomationCatalog(client, catalogs);
   await client.$disconnect();

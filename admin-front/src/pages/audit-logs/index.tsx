@@ -1,5 +1,6 @@
 import { dc } from "kt-dc";
 import { computed, ref } from "vue";
+import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { areChecklistsVisible } from "@/constants/env";
 import { VAlert, VBtn, VDivider } from "vuetify/components";
@@ -45,6 +46,12 @@ type AuditLog = {
     approvalRequestId: string | null;
 };
 
+const EXPORT_CHECKS = [
+    { key: "DATE_RANGE_VERIFIED", label: "Date range and filters verified" },
+    { key: "SENSITIVE_FIELDS_REVIEWED", label: "Sensitive payload fields reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const SUMMARY_EXPORT_CHECKS = [
     { key: "ACTIVITY_SCOPE_VERIFIED", label: "Activity scope verified" },
     { key: "ACTION_BREAKDOWN_REVIEWED", label: "Action breakdown reviewed" },
@@ -75,6 +82,7 @@ const formatDateTime = (value: string | null | undefined): string => {
 
 const AuditLogsPage = dc(() => {
     const { t } = useLocale();
+    const router = useRouter();
     const showChecklists = areChecklistsVisible();
     const rows = ref<AuditLog[]>([]);
     const total = ref(0);
@@ -83,6 +91,9 @@ const AuditLogsPage = dc(() => {
     const filters = ref<FilterValues>({});
     const pageSize = ref(20);
     const exportLoading = ref(false);
+    const exportOpen = ref(false);
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
     const summaryExportLoading = ref(false);
     const summaryExportChecklist = ref<Record<string, boolean>>({});
     const refreshHook = ref<{
@@ -122,12 +133,17 @@ const AuditLogsPage = dc(() => {
 
     const exportExcel = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const response = await api.get(urlsMap.auditLogsExport, {
                 params: {
                     ...(search.value ? { search: search.value } : {}),
                     ...buildFilterQuery(filterDefinitions.value, filters.value),
+                    checklist: EXPORT_CHECKS.filter((check) => exportChecklist.value[check.key]).map((check) => check.key).join(","),
                 },
             });
             const payload = response.data?.data ?? response.data ?? {};
@@ -161,6 +177,8 @@ const AuditLogsPage = dc(() => {
                 title: `audit-logs-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            exportOpen.value = false;
+            exportChecklist.value = {};
             showSnackBar({
                 type: payload.truncated ? "warning" : "success",
                 message: payload.truncated
@@ -250,6 +268,30 @@ const AuditLogsPage = dc(() => {
         void clearOpenQueryParam();
     };
 
+    const copyEventJson = async () => {
+        const row = selected.value;
+        if (!row) return;
+        const payload = {
+            id: row.id,
+            createdAt: row.createdAt,
+            actorId: row.actorId,
+            actorEmail: row.actorEmail,
+            role: row.role,
+            action: row.action,
+            entityType: row.entityType,
+            entityId: row.entityId,
+            approvalRequestId: row.approvalRequestId,
+            before: row.beforeJson,
+            after: row.afterJson,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+            showSnackBar({ type: "success", message: t("Audit event copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const headers = computed<TableHeader<AuditLog>[]>(() => [
         {
             key: "createdAt",
@@ -329,7 +371,7 @@ const AuditLogsPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -418,6 +460,27 @@ const AuditLogsPage = dc(() => {
             </ThemedView>
 
             <FormModal
+                modelValue={exportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                title={t("Export audit events")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportExcel()}
+            >
+                <VAlert type="warning" variant="tonal">{t("The export contains actor identities and before/after payloads. Handle the file as confidential evidence.")}</VAlert>
+                <FormChecklist
+                    checks={[...EXPORT_CHECKS]}
+                    modelValue={exportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Audit export checklist")}
+                    complete={exportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
+
+            <FormModal
                 modelValue={detailOpen.value}
                 onUpdate:modelValue={(value: boolean) => {
                     detailOpen.value = value;
@@ -427,7 +490,10 @@ const AuditLogsPage = dc(() => {
                 size="lg"
                 v-slots={{
                     footer: () => (
-                        <VBtn variant="outlined" onClick={closeDetails}>{t("Close")}</VBtn>
+                        <>
+                            <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyEventJson()}>{t("Copy event JSON")}</VBtn>
+                            <VBtn variant="outlined" onClick={closeDetails}>{t("Close")}</VBtn>
+                        </>
                     ),
                 }}
             >
@@ -444,7 +510,15 @@ const AuditLogsPage = dc(() => {
                                 { label: t("Actor"), value: selected.value.actorEmail || selected.value.actorId },
                                 { label: t("Entity type"), value: selected.value.entityType },
                                 { label: t("Entity ID"), value: <MonoRef value={selected.value.entityId} truncate={24} /> },
-                                { label: t("Approval request"), value: selected.value.approvalRequestId ? <MonoRef value={selected.value.approvalRequestId} truncate={18} /> : "—" },
+                                {
+                                    label: t("Approval request"),
+                                    value: selected.value.approvalRequestId ? (
+                                        <ThemedView style={{ flexDirection: "row", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                                            <MonoRef value={selected.value.approvalRequestId} truncate={18} />
+                                            <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "Approvals", query: { open: selected.value!.approvalRequestId! } })}>{t("Open")}</VBtn>
+                                        </ThemedView>
+                                    ) : "—",
+                                },
                             ]}
                         />
                         <VDivider />

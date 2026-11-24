@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn, VTextarea } from "vuetify/components";
+import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -23,12 +24,26 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import { GlAccountDrawer } from "@/components/ledger/GlAccountDrawer";
 import { LedgerRefLink } from "@/components/ledger/LedgerRefLink";
 import { isValidReason, normalizeReason } from "@/components/ledger/mutationReason";
 import { errorCodeOf, errorDetailsOf } from "@/components/ledger/format";
 import { hasOneOfAuthorities } from "@/state/user";
+const EXPORT_CHECKS = [
+    { key: "LEDGER_SCOPE_VERIFIED", label: "Ledger scope verified" },
+    { key: "INVARIANT_RESULT_REVIEWED", label: "Invariant result and drift reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const ROLLUP_CHECKS = [
+    { key: "ACCOUNT_SCOPE_VERIFIED", label: "GL account and shard scope verified" },
+    { key: "JOURNAL_PARITY_REVIEWED", label: "Journal parity expectations reviewed" },
+    { key: "IMPACT_ACKNOWLEDGED", label: "Rollup advances checkpoints only" },
+    { key: "AUTHORITY_CONFIRMED", label: "Finance write authority confirmed" },
+] as const;
+
 type InvariantResult = {
     ok?: boolean;
     drift?: string;
@@ -59,6 +74,12 @@ const InvariantPage = dc(() => {
     const loading = ref(true);
     const error = ref<string | null>(null);
     const exportLoading = ref(false);
+    const exportOpen = ref(false);
+    const showChecklists = areChecklistsVisible();
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
+    const rollupChecklist = ref<Record<string, boolean>>({});
+    const rollupChecklistComplete = computed(() => !showChecklists || ROLLUP_CHECKS.every((check) => rollupChecklist.value[check.key] === true));
     const inspectAccountId = ref<string | null>(null);
     const canRollup = computed(() => hasOneOfAuthorities(["finance:write"]));
     const rollupAccountId = ref<string | null>(null);
@@ -70,6 +91,7 @@ const InvariantPage = dc(() => {
         rollupAccountId.value = accountId;
         rollupReason.value = "";
         rollupError.value = "";
+        rollupChecklist.value = {};
     };
 
     const runRollup = async () => {
@@ -79,10 +101,17 @@ const InvariantPage = dc(() => {
             rollupError.value = t("Reason is required (at least 10 characters)");
             return;
         }
+        if (!rollupChecklistComplete.value) {
+            rollupError.value = t("Complete all rollup checklist items before running");
+            return;
+        }
         rollupLoading.value = true;
         rollupError.value = "";
         try {
-            await api.post(urlsMap.financeGlAccountCheckpoint(accountId), { reason: normalizeReason(rollupReason.value) });
+            await api.post(urlsMap.financeGlAccountCheckpoint(accountId), {
+                reason: normalizeReason(rollupReason.value),
+                checklist: ROLLUP_CHECKS.filter((check) => rollupChecklist.value[check.key]).map((check) => check.key),
+            });
             rollupAccountId.value = null;
             showSnackBar({ type: "success", message: t("Checkpoint rollup completed") });
             void load();
@@ -118,9 +147,15 @@ const InvariantPage = dc(() => {
 
     const exportSnapshot = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
-            const response = await api.get(urlsMap.financeInvariantExport);
+            const response = await api.get(urlsMap.financeInvariantExport, {
+                params: { checklist: EXPORT_CHECKS.filter((check) => exportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
             const snapshot = (response.data?.data ?? response.data ?? {}) as InvariantResult;
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
             const rows: Array<[string, unknown]> = [
@@ -145,6 +180,8 @@ const InvariantPage = dc(() => {
                 title: `invariant-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            exportOpen.value = false;
+            exportChecklist.value = {};
             showSnackBar({ type: "success", message: t("Invariant snapshot exported") });
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
@@ -167,7 +204,7 @@ const InvariantPage = dc(() => {
                         <ThemedView style={{ flexDirection: "row", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                             {data.value?.checkedAt && <ThemedText style={{ fontSize: "11px", opacity: 0.55 }}>{t("Last run")} {new Date(data.value.checkedAt).toLocaleTimeString()}</ThemedText>}
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSnapshot()}>{t("Export snapshot")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -287,6 +324,27 @@ const InvariantPage = dc(() => {
             </ThemedView>
             <GlAccountDrawer accountId={inspectAccountId.value} onClose={() => (inspectAccountId.value = null)} onChanged={() => void load()} />
             <FormModal
+                modelValue={exportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                title={t("Export invariant snapshot")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportSnapshot()}
+            >
+                <VAlert type="warning" variant="tonal">{t("The export contains ledger balances, drift and account checkpoints. Handle it as confidential financial evidence.")}</VAlert>
+                <FormChecklist
+                    checks={[...EXPORT_CHECKS]}
+                    modelValue={exportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Invariant export checklist")}
+                    complete={exportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
+
+            <FormModal
                 modelValue={rollupAccountId.value !== null}
                 onUpdate:modelValue={(value: boolean) => {
                     if (!value) rollupAccountId.value = null;
@@ -305,6 +363,15 @@ const InvariantPage = dc(() => {
                 <FormField label={t("Reason")} required hint={t("At least 10 characters; written to the audit log")}>
                     <VTextarea modelValue={rollupReason.value} onUpdate:modelValue={(value: string) => void (rollupReason.value = value)} rows={3} autoGrow {...{ maxlength: 500 }} />
                 </FormField>
+                <FormChecklist
+                    checks={[...ROLLUP_CHECKS]}
+                    modelValue={rollupChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (rollupChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Rollup checklist")}
+                    complete={rollupChecklistComplete.value}
+                    incompleteMessage={t("Complete all rollup checklist items before running")}
+                />
             </FormModal>
         </ScreenContainer>
     );

@@ -109,6 +109,12 @@ type DisputeSummary = {
     earliestEvidenceDueAt: string | null;
 };
 
+const EXPORT_CHECKS = [
+    { key: "DISPUTE_SCOPE_VERIFIED", label: "Dispute scope verified" },
+    { key: "EVIDENCE_DEADLINE_REVIEWED", label: "Evidence deadlines reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const SUMMARY_EXPORT_CHECKS = [
     { key: "OPEN_SCOPE_VERIFIED", label: "Open dispute scope verified" },
     { key: "DUE_DATE_REVIEWED", label: "Evidence due dates reviewed" },
@@ -176,6 +182,9 @@ const DisputesPage = dc(() => {
     const journalEntryId = ref<string | null>(null);
     const evidenceChecklist = ref<Record<string, boolean>>({});
     const exportLoading = ref(false);
+    const exportOpen = ref(false);
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
     const summaryExportLoading = ref(false);
     const summaryExportChecklist = ref<Record<string, boolean>>({});
 
@@ -243,14 +252,50 @@ const DisputesPage = dc(() => {
         },
     );
 
+    const copyDisputeSummary = async () => {
+        const row = selected.value;
+        if (!row) return;
+        const summary = {
+            id: row.id,
+            disputeRef: row.disputeRef,
+            externalDisputeRef: row.externalDisputeRef,
+            status: row.status,
+            source: row.source,
+            amount: row.amount,
+            currency: row.currency,
+            merchantId: row.merchantId,
+            attemptReference: row.attemptReference,
+            railCode: row.railCode,
+            gatewayCode: row.gatewayCode,
+            openedAt: row.openedAt,
+            evidenceDueAt: row.evidenceDueAt,
+            evidenceSubmittedAt: row.evidenceSubmittedAt,
+            evidenceOverdue: row.evidenceOverdue,
+            evidenceBlockedReason: row.evidenceBlockedReason,
+            attachments: attachments.value.map((attachment) => ({ id: attachment.id, label: attachment.label, status: attachment.status, avScanStatus: attachment.avScanStatus })),
+            url: window.location.href,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Dispute summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const exportExcel = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const response = await api.get(urlsMap.disputesExport, {
                 params: {
                     ...(search.value ? { search: search.value } : {}),
                     ...buildFilterQuery(filterDefinitions.value, filters.value),
+                    checklist: EXPORT_CHECKS.filter((check) => exportChecklist.value[check.key]).map((check) => check.key).join(","),
                 },
             });
             const payload = response.data?.data ?? response.data ?? {};
@@ -288,6 +333,8 @@ const DisputesPage = dc(() => {
                 title: `disputes-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            exportOpen.value = false;
+            exportChecklist.value = {};
             showSnackBar({
                 type: payload.truncated ? "warning" : "success",
                 message: payload.truncated
@@ -634,7 +681,7 @@ const DisputesPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -748,6 +795,7 @@ const DisputesPage = dc(() => {
                             {selected.value?.canSubmitEvidence && (
                                 <VBtn color="primary" onClick={() => { actionError.value = ""; evidenceOpen.value = true; }}>{t("Submit evidence")}</VBtn>
                             )}
+                            {selected.value && <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyDisputeSummary()}>{t("Copy summary")}</VBtn>}
                             <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
                         </ThemedView>
                     ),
@@ -867,6 +915,27 @@ const DisputesPage = dc(() => {
                     </>
                 )}
             </SlideOverDrawer>
+
+            <FormModal
+                modelValue={exportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                title={t("Export disputes")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportExcel()}
+            >
+                <VAlert type="warning" variant="tonal">{t("The export contains dispute references, amounts and evidence deadlines. Handle it as confidential operational evidence.")}</VAlert>
+                <FormChecklist
+                    checks={[...EXPORT_CHECKS]}
+                    modelValue={exportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Dispute export checklist")}
+                    complete={exportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
 
             <FormModal
                 modelValue={evidenceOpen.value}

@@ -405,6 +405,7 @@ describe("F4: actionable approval subjects", () => {
       subjectType: "USER",
       subjectId: "user-target",
       payloadDiffJson: { authoritiesMap: ["merchant:read", "merchant:write"], role: "OPERATOR" },
+      checkerRole: "SECURITY_ADMIN",
     });
 
     expect(result.status).toBe("EXECUTED");
@@ -467,6 +468,7 @@ describe("F4: actionable approval subjects", () => {
       subjectType: "GATEWAY_VERSION",
       subjectId: "version-1",
       payloadDiffJson: {},
+      checkerRole: "SECURITY_ADMIN",
     });
 
     expect(result.status).toBe("EXECUTED");
@@ -592,6 +594,7 @@ describe("F12: the unreachable journal entries", () => {
         id: "source-1",
         gatewayId: "gateway-1",
         type: "UPLOAD",
+        currency: "LYD",
         parserConfig: {
           format: "CSV",
           headerRow: true,
@@ -665,7 +668,67 @@ describe("F12: the unreachable journal entries", () => {
     expect(jobTable("journalEntry").filter((row) => row.refType === "SETTLEMENT_SWEEP")).toHaveLength(1);
   });
 
-  test("a chargeback inside the negative balance ceiling posts CHARGEBACK_INSUFFICIENT", async () => {
+  test("a USD batch sweep posts to the USD accounts and a disabled autoPost posts nothing", async () => {
+    const run = async (autoPost: boolean) => {
+      resetJobDatabase();
+      const client = createJobFake();
+      const repositories = new PrismaRepositories(client as never);
+      const ledgerPoster = new LedgerPoster(client as never);
+      const statement = [
+        "our_ref,amount,fee,currency",
+        "PA-USD-1,100.0000,0.8000,USD",
+      ].join("\n");
+      client.glAccount.create({ data: { id: "acc-usd-treasury", accountType: "TREASURY", currency: "USD" } });
+      client.glAccount.create({ data: { id: "acc-usd-clearing", accountType: "GATEWAY_CLEARING", gatewayId: "gateway-1", currency: "USD" } });
+      client.glAccount.create({ data: { id: "acc-usd-accrual", accountType: "GATEWAY_FEE_ACCRUAL", currency: "USD" } });
+      client.glAccount.create({ data: { id: "acc-lyd-treasury", accountType: "TREASURY", currency: "LYD" } });
+      client.statementSource.create({
+        data: {
+          id: "source-1",
+          gatewayId: "gateway-1",
+          type: "UPLOAD",
+          currency: "USD",
+          parserConfig: { format: "CSV", headerRow: true, supportsBatchNet: true, columnsMap: { ourReference: "our_ref", amount: "amount", fee: "fee", currency: "currency" } },
+          settlementLagDays: 2,
+        },
+      });
+      client.reconciliationRun.create({
+        data: {
+          id: "run-1", statementSourceId: "source-1",
+          windowStart: new Date("2026-10-01T00:00:00.000Z"), windowEnd: new Date("2026-10-31T00:00:00.000Z"),
+          fileHash: "hash-usd-1", fileName: "statement.csv", storageObjectId: "obj-1", ingestedAt: null,
+          currency: "USD", autoPost,
+        },
+      });
+      const handler = createReconciliationJobHandler({
+        db: client as never,
+        repositories,
+        ledgerPoster,
+        clock: () => new Date("2026-10-27T00:00:00.000Z"),
+        objectStorage: { workerClient: { readInternal: async () => ({
+          objectId: "obj-1", detectedMimeType: "text/csv", originalFilename: "statement.csv",
+          byteSize: BigInt(Buffer.byteLength(statement)), sha256Hex: "", bytes: Buffer.from(statement, "utf8"),
+          stream: () => new ReadableStream<Uint8Array>(),
+        }) } } as never,
+      });
+      await handler.handle({ id: "job-1", jobType: "RECONCILIATION_RUN", referenceType: "RECONCILIATION_RUN", referenceId: "run-1", payloadJson: {}, state: "QUEUED", attempts: 0, maxAttempts: 3, availableAt: new Date(), lockedAt: null, lastError: null, completedAt: null } as never);
+      return jobTable("journalEntry").filter((row) => row.refType === "SETTLEMENT_SWEEP");
+    };
+
+    const entries = await run(true);
+    expect(entries).toHaveLength(1);
+    const lines = jobTable("journalLine").filter((row) => row.entryId === entries[0]?.id);
+    const byAccount = new Map(lines.map((row) => [String(row.glAccountId), row]));
+    expect(byAccount.has("acc-usd-treasury")).toBe(true);
+    expect(byAccount.has("acc-usd-clearing")).toBe(true);
+    expect(byAccount.has("acc-usd-accrual")).toBe(true);
+    expect(byAccount.has("acc-lyd-treasury")).toBe(false);
+
+    const disabled = await run(false);
+    expect(disabled).toHaveLength(0);
+  });
+
+  test("a chargeback inside the negative balance ceiling uses the posted reserve", async () => {
     const fixture = buildFixture();
     await fixture.client.merchant.update({
       where: { id: "merchant-1" },
@@ -701,7 +764,7 @@ describe("F12: the unreachable journal entries", () => {
     });
 
     expect(result.status).toBe("EXECUTED");
-    expect(result.template).toBe("CHARGEBACK_INSUFFICIENT");
+    expect(result.template).toBe("CHARGEBACK_RESERVE_AND_LOST");
     const adjustment = governanceTable("adjustment").find((row) => row.id === intake.adjustmentId!);
     expect(adjustment?.state).toBe("EXECUTED");
     expect(governanceTable("operatorCase")).toHaveLength(0);

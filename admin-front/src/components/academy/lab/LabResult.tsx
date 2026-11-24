@@ -5,6 +5,7 @@ import { VBtn } from "vuetify/components";
 import type { Lab, LabTask } from "@/content/academy";
 import { loadArticles } from "@/content/guide";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { showSnackBar } from "@/utils/snackBar";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { Callout } from "../ui/Callout";
 import { IconTile } from "../ui/IconTile";
@@ -60,6 +61,34 @@ export const LabResult = defineComponent({
                 {titles.value[id] ?? id}
             </RouterLink>
         );
+        const copyResult = async () => {
+            const { result, lab } = props;
+            const summary = {
+                lab: lab.id,
+                title: lab.title,
+                score: result.score,
+                passed: result.passed,
+                passPercent: lab.passPercent,
+                earned: result.earned,
+                possible: result.possible,
+                criticalErrors: result.criticalErrors,
+                tasks: result.tasks.map((task, index) => ({
+                    index,
+                    correct: task.correct,
+                    score: task.score,
+                    maxScore: task.maxScore,
+                    criticalError: task.criticalError,
+                })),
+                url: window.location.href,
+            };
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+                showSnackBar({ type: "success", message: t("Lab result copied") });
+            } catch {
+                showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+            }
+        };
+
         return () => {
             const { result, lab } = props;
             const criticalFail = result.criticalErrors > 0;
@@ -88,6 +117,9 @@ export const LabResult = defineComponent({
                                     tone={result.passed ? "success" : criticalFail ? "danger" : "warning"}
                                 />
                                 {belowMark ? <p class="ac-text">{t("You need at least the pass mark to pass. Review the notes below and try again.")}</p> : null}
+                                <VBtn size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyResult()}>
+                                    {t("Copy result")}
+                                </VBtn>
                             </div>
                         </div>
                     </SurfaceCard>

@@ -61,11 +61,11 @@ const ExamPage = dc(() => {
         return open && Date.parse(open.expiresAt) > Date.now() ? open : null;
     });
 
-    const startExam = async () => {
+    const startExam = async (checklist: string[] = []) => {
         starting.value = true;
         startError.value = null;
         try {
-            const response = await api.post(urlsMap.academyExamStart(examId.value), { integrityAccepted: true });
+            const response = await api.post(urlsMap.academyExamStart(examId.value), { integrityAccepted: true, checklist });
             const payload = unwrap<ExamStartResponse>(response.data);
             if (!payload || !Array.isArray(payload.questions) || !payload.sessionId) throw new Error("bad-response");
             session.value = payload;
@@ -168,7 +168,7 @@ const ExamPage = dc(() => {
                         open={openSession.value}
                         starting={starting.value}
                         startError={startError.value}
-                        onStart={() => void startExam()}
+                        onStart={(checklist) => void startExam(checklist)}
                     />
                 )}
             </AcademyShell>

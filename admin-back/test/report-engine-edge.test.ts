@@ -182,3 +182,40 @@ describe("migration and chrome forwarding", () => {
     expect(core.requests.at(-1)?.url).toBe(`/internal/admin/report-engine/merchant-reports/${id}/migration-prompt`);
   });
 });
+
+const forwardedBody = (): Record<string, unknown> => {
+  const body = core.requests.at(-1)?.body;
+  return body ? JSON.parse(body.toString("utf8")) as Record<string, unknown> : {};
+};
+
+describe("report-engine checklist forwarding", () => {
+  test("publish, chrome, reconcile and merchant suspend forward the checklist", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const checklist = ["SPEC_VERIFIED", "AUTHORITIES_REVIEWED", "PREVIEW_REVIEWED", "PUBLISH_AUTHORITY_CONFIRMED"];
+    const publish = await request("POST", `/api/v1/admin/report-engine/specs/${id}/publish`, fullStaffToken(), { checklist });
+    expect(publish.status).toBe(200);
+    expect(forwardedBody()).toMatchObject({ checklist });
+    const chrome = await request("POST", "/api/v1/admin/report-engine/chrome", fullStaffToken(), {
+      specJson: {},
+      publish: true,
+      checklist,
+    });
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/report-engine/chrome");
+    expect(forwardedBody()).toMatchObject({ checklist });
+    const reconcile = await request("POST", "/api/v1/admin/report-engine/chrome/reconcile-defaults", fullStaffToken(), { checklist });
+    expect(reconcile.status).toBe(200);
+    expect(forwardedBody()).toMatchObject({ checklist });
+    const suspend = await request("POST", `/api/v1/admin/report-engine/merchant-reports/${id}/suspend`, fullStaffToken(), {
+      reason: "Repeated policy violations",
+      checklist,
+    });
+    expect(suspend.status).toBe(200);
+    expect(forwardedBody()).toMatchObject({ reason: "Repeated policy violations", checklist });
+    const setDefault = await request("POST", `/api/v1/admin/report-engine/chrome/${id}/set-default`, fullStaffToken(), {
+      isDefault: true,
+      checklist,
+    });
+    expect(setDefault.status).toBe(200);
+    expect(forwardedBody()).toMatchObject({ isDefault: true, checklist });
+  });
+});

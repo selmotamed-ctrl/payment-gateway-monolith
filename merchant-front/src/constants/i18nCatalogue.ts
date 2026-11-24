@@ -1068,4 +1068,6 @@ export const appCatalogue: Record<string, [string, string]> = {
     'payments': ['payments', 'payments'],
     'pg_test_ tokens reach only the sandbox core; pg_live_ tokens are refused.': ['pg_test_ tokens reach only the sandbox core; pg_live_ tokens are refused.', 'pg_test_ tokens reach only the sandbox core; pg_live_ tokens are refused.'],
     'sandbox payment history rows': ['sandbox payment history rows', 'sandbox payment history rows'],
+    'Reset my sandbox data?': ['Reset my sandbox data?', 'إعادة تعيين بيانات البيئة التجريبية؟'],
+    'This deletes your sandbox wallets, applications, links, payments and Fake Rails test accounts. Live data is never touched.': ['This deletes your sandbox wallets, applications, links, payments and Fake Rails test accounts. Live data is never touched.', 'يحذف هذا محافظك وتطبيقاتك وروابطك ومدفوعاتك وحسابات اختبار السكك الوهمية في البيئة التجريبية. لا تُمس البيانات الحقيقية أبداً.'],
 };

@@ -330,3 +330,55 @@ describeDb("Suite 01 · live referential actions", () => {
     expect(rejected).toBe(true);
   });
 });
+
+describeDb("SQL-only integrity objects (GAP-076)", () => {
+  test("the tenant/composite constraints and partial unique indexes survive migrate", async () => {
+    const expectedConstraints = [
+      "merchant_report_asset_bundles_id_merchant_key",
+      "merchant_report_specs_id_merchant_key",
+      "merchant_report_specs_asset_bundle_tenant_fkey",
+      "merchant_report_specs_asset_bundle_id_fkey",
+      "merchant_report_execution_audit_merchant_spec_id_fkey",
+      "merchant_report_execution_audit_spec_tenant_fkey",
+      "merchant_report_chrome_specs_asset_bundle_tenant_fkey",
+      "merchant_report_chrome_specs_asset_bundle_id_fkey",
+    ];
+    const constraints = (await db.$queryRawUnsafe(
+      `SELECT conname FROM pg_constraint WHERE conname = ANY($1::text[])`,
+      expectedConstraints,
+    )) as Array<{ conname: string }>;
+    const names = new Set(constraints.map((row) => row.conname));
+    for (const name of expectedConstraints) expect(names.has(name)).toBe(true);
+
+    const expectedIndexes = [
+      "external_submissions_open_report_adapter_key",
+      "academy_certificates_one_active_key",
+    ];
+    const indexesFound = (await db.$queryRawUnsafe(
+      `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1::text[])`,
+      expectedIndexes,
+    )) as Array<{ indexname: string }>;
+    const indexNames = new Set(indexesFound.map((row) => row.indexname));
+    for (const name of expectedIndexes) expect(indexNames.has(name)).toBe(true);
+  });
+});
+
+describeDb("append-only history triggers (GAP-075)", () => {
+  test("the case, shard-repair and storage history triggers are installed", async () => {
+    const names = [
+      "pgw_operator_case_events_append_only",
+      "pgw_operator_case_events_no_truncate",
+      "pgw_gl_shard_repairs_append_only",
+      "pgw_gl_shard_repairs_no_truncate",
+      "pgw_storage_object_access_logs_no_truncate",
+      "pgw_audit_chain_anchors_no_truncate",
+      "pgw_storage_objects_no_truncate",
+    ];
+    const rows = (await db.$queryRawUnsafe(
+      `SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname = ANY($1::text[])`,
+      names,
+    )) as Array<{ tgname: string }>;
+    const found = new Set(rows.map((row) => row.tgname));
+    for (const name of names) expect(found.has(name)).toBe(true);
+  });
+});

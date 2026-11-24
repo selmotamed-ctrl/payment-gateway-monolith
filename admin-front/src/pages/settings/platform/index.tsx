@@ -77,6 +77,12 @@ const restoreTone = (status: string): "success" | "warning" | "danger" | "neutra
     return "neutral";
 };
 
+const BACKUP_EXPORT_CHECKS = [
+    { key: "SETTINGS_SCOPE_VERIFIED", label: "Settings scope verified" },
+    { key: "SENSITIVE_VALUES_REVIEWED", label: "Sensitive values reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const SUMMARY_EXPORT_CHECKS = [
     { key: "SETTINGS_SCOPE_VERIFIED", label: "Settings scope verified" },
     { key: "VERSIONS_REVIEWED", label: "Version counts reviewed" },
@@ -115,6 +121,9 @@ const PlatformSettingsPage = dc(() => {
     const editChecklist = ref<Record<string, boolean>>({});
     const saving = ref(false);
     const exportLoading = ref(false);
+    const backupExportOpen = ref(false);
+    const backupExportChecklist = ref<Record<string, boolean>>({});
+    const backupExportChecklistComplete = computed(() => !showChecklists || BACKUP_EXPORT_CHECKS.every((check) => backupExportChecklist.value[check.key] === true));
     const summaryExportLoading = ref(false);
     const summaryExportChecklist = ref<Record<string, boolean>>({});
     const history = ref<PlatformSetting[]>([]);
@@ -236,9 +245,15 @@ const PlatformSettingsPage = dc(() => {
 
     const exportBackup = async () => {
         if (exportLoading.value) return;
+        if (!backupExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all backup export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
-            const response = await api.get(urlsMap.settingsExport);
+            const response = await api.get(urlsMap.settingsExport, {
+                params: { checklist: BACKUP_EXPORT_CHECKS.filter((check) => backupExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
             const payload = response.data?.data ?? response.data ?? {};
             const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
             const url = URL.createObjectURL(blob);
@@ -249,6 +264,8 @@ const PlatformSettingsPage = dc(() => {
             link.click();
             link.remove();
             URL.revokeObjectURL(url);
+            backupExportOpen.value = false;
+            backupExportChecklist.value = {};
             showSnackBar({ type: "success", message: t("Settings backup exported") });
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
@@ -354,6 +371,15 @@ const PlatformSettingsPage = dc(() => {
         history.value = [];
         compareRow.value = null;
         dialogOpen.value = true;
+    };
+
+    const copySettingValue = async (entry: { key: string; latest: PlatformSetting }) => {
+        try {
+            await navigator.clipboard.writeText(JSON.stringify({ key: entry.key, version: entry.latest.version, value: entry.latest.valueJson }, null, 2));
+            showSnackBar({ type: "success", message: t("Setting value copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
     };
 
     const openEdit = (entry: { key: string; versions: PlatformSetting[] }) => {
@@ -531,6 +557,7 @@ const PlatformSettingsPage = dc(() => {
                                     </ThemedView>
                                     <SettingValueView settingKey={entry.key} value={entry.latest.valueJson} maxRows={8} />
                                     <ThemedView style={{ flexDirection: "row", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap" }}>
+                                        <VBtn size="small" variant="text" prependIcon="mdi-content-copy" onClick={() => void copySettingValue(entry)}>{t("Copy value")}</VBtn>
                                         <VBtn size="small" variant="tonal" onClick={() => openEdit(entry)}>{t("History & edit")}</VBtn>
                                     </ThemedView>
                                 </SurfaceCardText>
@@ -541,6 +568,27 @@ const PlatformSettingsPage = dc(() => {
                     </>
                 )}
             </ThemedView>
+
+            <FormModal
+                modelValue={backupExportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (backupExportOpen.value = value)}
+                title={t("Export settings backup")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportBackup()}
+            >
+                <VAlert type="warning" variant="tonal">{t("The backup contains versioned platform settings and may contain sensitive operational values. Handle it as confidential.")}</VAlert>
+                <FormChecklist
+                    checks={[...BACKUP_EXPORT_CHECKS]}
+                    modelValue={backupExportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (backupExportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Backup export checklist")}
+                    complete={backupExportChecklistComplete.value}
+                    incompleteMessage={t("Complete all backup export checklist items before exporting")}
+                />
+            </FormModal>
 
             <FormModal
                 modelValue={restoreOpen.value}

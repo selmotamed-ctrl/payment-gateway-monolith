@@ -3,7 +3,7 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-16
+last_verified: 2026-11-24
 verified_against: 53afea5+working-tree
 code:
   - core-back/test/sandboxPlane.test.ts
@@ -566,7 +566,7 @@ These are development/CI tests only; no production-time test job or test endpoin
 
 ## v39 Sandbox Studio and mirror suites (2026-11-13)
 
-- `core-back/test/sandboxPlane.test.ts` now runs the schema-local fence functions and passes on v39; `core-back/test/phase1-mtls-and-schema.test.ts` expects `20261114090000_v39_sandbox_studio` as the newest migration and schema version 39.
+- `core-back/test/sandboxPlane.test.ts` now runs the schema-local fence functions and passes on v39; `core-back/test/phase1-mtls-and-schema.test.ts` expects `20261124150000_currency_context_and_aggregates` as the newest migration and schema version 44.
 - `fake-rails-back/test/accountsAndInspector.test.ts` and `test/api.test.ts` cover merchant-owned account copies, daily business-date reset, hold expiry, capture variance guards, clearing references and statement inclusion.
 - `merchant-back/test/sandbox-proxy.test.ts` covers control routes (`overview`, `seed-demo`, `studio/*`, wallet/payment detail, refund, reconciliation), Live-router resource lists/creates, Fake Rails control routes and `pg_test_` external tokens. `merchant-back/test/sandbox-routing.test.ts` covers the fail-closed pool.
 - `admin-back/test/sandbox-routing.test.ts` also asserts the Studio path mapping for `/merchants`, `/merchants/summary`, merchant detail and `/audits` so the admin control center cannot silently fall back to the Live namespace.
@@ -590,3 +590,30 @@ acceptance run remains a gap.
 ## Post-merge test determinism (2026-11-16)
 
 The full core suite runs against PostgreSQL 18 + Redis (25,316 tests, 0 failures). The statement-schedule test now asserts the case `SOURCE_CLEARED` resolution summary/event instead of the retired `AUTO-RESOLVED` note. Admin table tests target the live Disputes/Operator Cases links by exact accessible name, because the Sandbox mirror adds “Sandbox Disputes”. The object-storage style test seeds both the raw and projected storage authority and mocks all admin calls so the page cannot fall back to the login screen. `chrome-layout.spec.ts` and `report-a4-layout.spec.ts` are live API gates and skip unless `PG_API_URL` (and `REPORT_LAYOUT_SPEC` for A4) is set.
+
+## Safeguard and certificate tests (2026-11-23)
+
+- `core-back/test/academy-certificate.test.ts` — opaque public/display identifier generation and uniqueness (no database).
+- `core-back/test/academy-certificate-lifecycle.test.ts` — idempotent issuance, recertification supersede, revocation by display ID and revoked status (database).
+- `core-back/test/security-regressions/c2-mfa.test.ts` — added the resend SMS-suppression case (the previous queued `LOGIN_MFA` notification becomes `SUPPRESSED`).
+- `admin-back/test/report-engine-edge.test.ts` — report publish, chrome publish, chrome reconcile, merchant suspend and chrome set-default checklist forwarding.
+- `admin-back/test/admin-surface.test.ts` — token-revoke checklist, commission-profile expiry checklist, reconciliation multipart checklist parsing, academy certificate verification/revocation forwarding, plus the existing summary-export/forwarding cases.
+- `checkout-back/test/sandbox-checkout-forward.test.ts` — public certificate verification forwarding (new mock route in `test/helpers/core.ts`).
+- `deploy/test/objectStorageDeploy.test.ts` — the object-storage certificate ownership command (`install`, `chown -hR`, `find -type f`, user-missing branch).
+- `tests/unit/checklist-labels.test.ts` — every static checklist label has an Arabic catalogue entry.
+- `tests/unit/lab-draft-store.test.ts` — per-user draft round-trip, corruption and clear.
+- `tests/e2e/checkout/certificate-verify.spec.ts` — public valid/invalid certificate pages.
+- Updated existing e2e: `admin/backups.spec.ts`, `admin/commerce-governance.spec.ts` and `admin/academy-exam.spec.ts` tick the new checklists.
+
+## CI gates (2026-11-23)
+
+`.github/workflows/ci.yml` runs the design check, `scripts/project-design/check.ts`, `git diff --check`, the full core suite against PostgreSQL 18 + Redis with a `[1-9][0-9]* skip` guard, the backend matrix, admin/merchant `test:unit`, the root `tests` Vitest suite, and the portal builds. Playwright remains a manual/live gate because it needs browsers and a deployed stack.
+
+- GAP-075: `core-back/test/hardening-gap-regressions.test.ts` asserts the schema-43 append-only guards and the two-key maintenance bypass; the full database suite exercises the migration.
+- Object backup manifest: `deploy/backup-daemon/test/objectStorageManifest.test.ts` covers exact restored-set comparison, missing/extra rows and key/hash changes.
+- AML/manual terminal events: `core-back/test/aml-resolution-finalization.test.ts` and `core-back/test/governance-execution.test.ts` assert the `attempt.transitioned` outbox row.
+- `bun run schema:sql-only-check` (core-back, CI after migrations) runs `prisma migrate diff` and enforces the reviewed SQL-only object allowlist.
+
+- `core-back/test/remediation-high.test.ts` now covers a USD settlement sweep, the USD account selection and `autoPost=false` suppressing the sweep.
+- `core-back/test/governance-execution.test.ts` covers per-currency commission-receivable filtering and domain checker roles.
+- `core-back/test/automation/commission-netting.test.ts` asserts per-currency aged cases.

@@ -318,12 +318,16 @@ const walletLedgerContext = async (
   merchantId: string | null | undefined,
   extra?: Record<string, string>,
   attemptId?: string | null,
+  currency?: string | null,
 ): Promise<LedgerPostContext> => {
   const accounts: Record<string, string> = { ...extra };
-  if (merchantId) {
-    accounts.MERCHANT_WALLET = await resolveMerchantWalletGlAccountId(tx, merchantId, attemptId);
+  if (merchantId && !accounts.MERCHANT_WALLET) {
+    accounts.MERCHANT_WALLET = await resolveMerchantWalletGlAccountId(tx, merchantId, attemptId, currency);
   }
-  return Object.keys(accounts).length > 0 ? { accounts } : {};
+  return {
+    ...(Object.keys(accounts).length > 0 ? { accounts } : {}),
+    ...(currency ? { currency } : {}),
+  };
 };
 
 /**
@@ -334,14 +338,13 @@ const walletLedgerContext = async (
  */
 export const ensureSystemAutomationUser = async (tx: Tx): Promise<string> => {
   const users = modelOf(tx, "user");
-  const existing = await users.findFirst({ where: { id: SYSTEM_AUTOMATION_USER_ID } });
-  if (existing) {
-    return SYSTEM_AUTOMATION_USER_ID;
+  const existing = await users.findFirst({ where: { email: SYSTEM_AUTOMATION_EMAIL } });
+  if (existing?.id) {
+    return String(existing.id);
   }
   try {
-    await users.create({
+    const created = await users.create({
       data: {
-        id: SYSTEM_AUTOMATION_USER_ID,
         email: SYSTEM_AUTOMATION_EMAIL,
         role: "OPERATOR",
         authoritiesMap: {},
@@ -352,13 +355,12 @@ export const ensureSystemAutomationUser = async (tx: Tx): Promise<string> => {
         status: "DISABLED",
       },
     });
+    return String(created.id);
   } catch (error) {
-    const raced = await users.findFirst({ where: { id: SYSTEM_AUTOMATION_USER_ID } });
-    if (!raced) {
-      throw error;
-    }
+    const raced = await users.findFirst({ where: { email: SYSTEM_AUTOMATION_EMAIL } });
+    if (raced?.id) return String(raced.id);
+    throw error;
   }
-  return SYSTEM_AUTOMATION_USER_ID;
 };
 
 const writeAudit = async (
@@ -425,14 +427,15 @@ const resolveMerchantWalletGlAccountId = async (
   tx: Tx,
   merchantId: string,
   attemptId?: string | null,
+  currency?: string | null,
 ): Promise<string> => {
   const wallets = modelOf(tx, "wallet");
-  const wallet = await wallets.findFirst({ where: { merchantId } });
+  const wallet = await wallets.findFirst({ where: { merchantId, ...(currency ? { currency } : {}) } });
   if (wallet && wallet.glAccountId) {
     return String(wallet.glAccountId);
   }
   const glAccounts = modelOf(tx, "glAccount");
-  const account = await glAccounts.findFirst({ where: { accountType: "MERCHANT_WALLET", ownerId: merchantId } });
+  const account = await glAccounts.findFirst({ where: { accountType: "MERCHANT_WALLET", ownerId: merchantId, ...(currency ? { currency } : {}) } });
   if (account) {
     return String(account.id);
   }
@@ -511,11 +514,25 @@ export const decideCommissionReceivableCeiling = (input: {
 };
 
 /** The merchant's open cash-out requests (they already reserve wallet balance). Zero without the model (fakes). */
-const merchantOpenCashoutTotal = async (tx: Tx, merchantId: string): Promise<Decimal> => {
+const merchantOpenCashoutTotal = async (tx: Tx, merchantId: string, currency?: string | null): Promise<Decimal> => {
   const cashouts = (tx as any)?.cashoutRequest;
   if (!cashouts || typeof cashouts.findMany !== "function") return new Decimal(0);
+  let walletFilter: { walletId: { in: string[] } } | undefined;
+  if (currency) {
+    const wallets = (tx as any)?.wallet;
+    if (wallets && typeof wallets.findMany === "function") {
+      const rows = await wallets.findMany({ where: { merchantId, currency }, select: { id: true } });
+      const walletIds = rows.map((row: { id: unknown }) => String(row.id));
+      if (walletIds.length === 0) return new Decimal(0);
+      walletFilter = { walletId: { in: walletIds } };
+    }
+  }
   const rows = (await cashouts.findMany({
-    where: { merchantId, state: { in: ["PENDING", "PROCESSING"] } },
+    where: {
+      merchantId,
+      state: { in: ["PENDING", "PROCESSING"] },
+      ...(walletFilter ?? {}),
+    },
     select: { amount: true },
   })) as Array<{ amount: unknown }>;
   return rows.reduce<Decimal>((total, row) => total.plus(toDecimal(row.amount)), new Decimal(0));
@@ -528,6 +545,7 @@ export const evaluateCommissionReceivableCeiling = async (
   settlementTarget?: string | null,
   /** The merchant row the caller already loaded (the guard loads it once per attempt). */
   loadedMerchant?: MerchantRow | null,
+  currency?: string | null,
 ): Promise<CommissionReceivableCeilingEvaluation> => {
   const merchant = loadedMerchant !== undefined
     ? loadedMerchant
@@ -548,13 +566,13 @@ export const evaluateCommissionReceivableCeiling = async (
 
   const receivableQuery = ctx.repositories.merchants.getCommissionReceivableBalance;
   const receivable = receivableQuery
-    ? moneyToDecimal(await receivableQuery(tx, merchantId))
+    ? moneyToDecimal(await receivableQuery(tx, merchantId, currency))
     : new Decimal(0);
   // Only a merchant-direct attempt over the ceiling needs to know whether netting can still collect (decision D8).
   let nettable: Decimal | null = null;
   if (settlementTarget === "MERCHANT_DIRECT" && ceiling !== null && receivable.gt(ceiling)) {
-    const wallet = moneyToDecimal(await ctx.repositories.merchants.getWalletBalance(tx, merchantId));
-    nettable = Decimal.max(0, wallet.minus(await merchantOpenCashoutTotal(tx, merchantId)));
+    const wallet = moneyToDecimal(await ctx.repositories.merchants.getWalletBalance(tx, merchantId, currency));
+    nettable = Decimal.max(0, wallet.minus(await merchantOpenCashoutTotal(tx, merchantId, currency)));
   }
   return decideCommissionReceivableCeiling({
     merchantId,
@@ -572,10 +590,10 @@ export const evaluateCommissionReceivableCeiling = async (
  * its transaction ends: a check-then-debit (the chargeback ceiling) can no longer race another debit of the
  * same wallet, and no journal line is loaded into memory.
  */
-const resolveMerchantWalletBalance = async (tx: Tx, merchantId: string): Promise<Decimal> => {
+const resolveMerchantWalletBalance = async (tx: Tx, merchantId: string, currency?: string | null): Promise<Decimal> => {
   const glAccounts = modelOf(tx, "glAccount");
   const accounts = await glAccounts.findMany({
-    where: { accountType: "MERCHANT_WALLET", ownerId: merchantId },
+    where: { accountType: "MERCHANT_WALLET", ownerId: merchantId, ...(currency ? { currency } : {}) },
     orderBy: { id: "asc" },
   });
   let balance = new Decimal(0);
@@ -1614,6 +1632,9 @@ const assertFinanceChecker = async (tx: Tx, checkerUserId: string): Promise<void
   if (!user) {
     return;
   }
+  if (user.email === SYSTEM_AUTOMATION_EMAIL) {
+    throw new ApiError(403, "AUTOMATION_CANNOT_ACT_AS_CHECKER", "System automation can never act as a checker");
+  }
   if (user.status !== "ACTIVE") {
     throw new ApiError(403, "ACCOUNT_NOT_ACTIVE", "The checker account is not active");
   }
@@ -1781,6 +1802,34 @@ const releaseAmlLinkSlot = async (tx: Tx, linkId: string): Promise<void> => {
   });
 };
 
+const enqueueAttemptTerminalOutbox = async (
+  tx: Tx,
+  attempt: any,
+  status: "SUCCEEDED" | "FAILED",
+  substatus: string,
+): Promise<void> => {
+  await enqueueOutboxEvent(tx as never, {
+    topic: "attempt.transitioned",
+    aggregateType: "PAYMENT_ATTEMPT",
+    aggregateId: String(attempt.id),
+    merchantId: attempt.merchantId ? String(attempt.merchantId) : null,
+    payload: {
+      event: "terminal",
+      attemptId: String(attempt.id),
+      merchantId: attempt.merchantId ? String(attempt.merchantId) : null,
+      routeId: attempt.routeId ? String(attempt.routeId) : null,
+      currency: String(attempt.currency ?? "LYD"),
+      status,
+      substatus,
+      totalChargedAmount: String(attempt.totalChargedAmount ?? "0"),
+      netMerchantAmount: attempt.netMerchantAmount === null || attempt.netMerchantAmount === undefined
+        ? null
+        : String(attempt.netMerchantAmount),
+      occurredAt: new Date().toISOString(),
+    },
+  });
+};
+
 /**
  * Finalises the payment attempt of an AML case.
  *
@@ -1834,6 +1883,12 @@ const finalizeAmlAttempt = async (
       merchantId: attempt.merchantId ? String(attempt.merchantId) : undefined,
     });
   }
+  await enqueueAttemptTerminalOutbox(
+    tx,
+    attempt,
+    input.status,
+    input.action === "RELEASE" ? "AML_RELEASED" : "AML_VOID",
+  );
   return true;
 };
 
@@ -1949,7 +2004,7 @@ export async function executeAmlCaseResolution(
       journal.refId = refId;
       const posted = await ctx.ledgerPoster.post(
         journal,
-        await walletLedgerContext(tx, merchantId),
+        await walletLedgerContext(tx, merchantId, undefined, undefined, attempt?.currency),
         tx as never,
       );
       journalEntryId = posted.entry.id;
@@ -2180,7 +2235,7 @@ export async function openDisputeWithDraftedAdjustment(
     };
   }
 
-  const targetGlAccountId = await resolveMerchantWalletGlAccountId(tx, merchantId, input.attemptId);
+  const targetGlAccountId = await resolveMerchantWalletGlAccountId(tx, merchantId, input.attemptId, currency);
   const adjustment = await modelOf(tx, "adjustment").create({
     data: {
       type: "CHARGEBACK",
@@ -2231,7 +2286,7 @@ export async function openDisputeWithDraftedAdjustment(
     journal.refId = String(dispute.id);
     const posted = await ctx.ledgerPoster.post(
       journal,
-      await walletLedgerContext(tx, merchantId),
+      await walletLedgerContext(tx, merchantId, undefined, undefined, lockedAttempt.currency),
       tx as never,
     );
     journalEntryId = posted.entry.id;
@@ -2555,7 +2610,7 @@ const finalizeRefundAdjustment = async (
       : await ctx.ledgerPoster.post(
         journal,
         // A SUSPENSE refund never resolves (or touches) the merchant wallet.
-        fromSuspense ? { accounts } : await walletLedgerContext(tx, merchantId, accounts),
+        fromSuspense ? { accounts } : await walletLedgerContext(tx, merchantId, accounts, sourceAttempt?.id, sourceAttempt?.currency),
         tx as never,
       );
     await adjustments.update({
@@ -2792,9 +2847,18 @@ export async function executeAdjustment(
   const sourceAttempt = adjustment.sourceAttemptId
     ? await modelOf(tx, "paymentAttempt").findUnique({ where: { id: String(adjustment.sourceAttemptId) } })
     : null;
+  const disputeAttempt = !sourceAttempt && adjustment.disputeId
+    ? await (async () => {
+      const dispute = await modelOf(tx, "dispute").findUnique({ where: { id: String(adjustment.disputeId) } });
+      return dispute?.attemptId
+        ? modelOf(tx, "paymentAttempt").findUnique({ where: { id: String(dispute.attemptId) } })
+        : null;
+    })()
+    : null;
+  const effectiveAttempt = sourceAttempt ?? disputeAttempt;
   const reverseCommission = adjustment.reverseCommission === true;
-  const commission = reverseCommission
-    ? Decimal.min(toDecimal(sourceAttempt?.platformCommissionAmount), amount)
+  const commission = type === "CHARGEBACK" || reverseCommission
+    ? Decimal.min(toDecimal(effectiveAttempt?.platformCommissionAmount), amount)
     : new Decimal(0);
   const merchantAmount = amount.minus(commission);
   if (merchantAmount.lt(0)) {
@@ -2848,16 +2912,20 @@ export async function executeAdjustment(
     // that pushes the wallet below the ceiling is held for review instead of
     // being executed (design §19.5).
     const ceiling = await resolveNegativeBalanceCeiling(tx, merchantId);
-    const balance = await resolveMerchantWalletBalance(tx, merchantId);
+    const balance = await resolveMerchantWalletBalance(
+      tx,
+      merchantId,
+      effectiveAttempt?.currency ? String(effectiveAttempt.currency) : targetAccount?.currency ? String(targetAccount.currency) : null,
+    );
     const reservePosted = dispute
       ? await modelOf(tx, "journalEntry").findFirst({
         where: { refType: "DISPUTE_OUTCOME", refId: String(dispute.id) },
       })
       : null;
-    const preReserveBalance = reservePosted ? balance.plus(merchantAmount) : balance;
-    const netImpact = disputeOutcome === "WON" ? new Decimal(0) : merchantAmount.negated();
-    const projected = preReserveBalance.plus(netImpact);
-    if (projected.lt(ceiling.negated())) {
+    const merchantDirect = String(effectiveAttempt?.settlementTarget ?? "PLATFORM_CLEARING") === "MERCHANT_DIRECT";
+    const netImpact = reservePosted ? new Decimal(0) : merchantAmount.negated();
+    const projected = balance.plus(netImpact);
+    if (!merchantDirect && disputeOutcome === "LOST" && projected.lt(ceiling.negated())) {
       const operatorCaseId = await openOperatorCase(ctx, tx, {
         kind: "HELD",
         priority: "P1",
@@ -2889,24 +2957,39 @@ export async function executeAdjustment(
       };
     }
 
-    if (disputeOutcome === "WON") {
+    if (merchantDirect) {
+      const reversalCommission = disputeOutcome === "LOST" ? commission : new Decimal(0);
+      journal = buildLedgerTemplate("MERCHANT_DIRECT_CONFIRMATION", {
+        amount,
+        commissionAmount: reversalCommission,
+        merchantAmount: amount.minus(reversalCommission),
+        stage: "REFUND",
+      });
+      templateName = "MERCHANT_DIRECT_CHARGEBACK";
+    } else if (disputeOutcome === "WON") {
+      if (!reservePosted) {
+        const operatorCaseId = await openOperatorCase(ctx, tx, {
+          kind: "MANUAL_REVIEW",
+          priority: "P1",
+          attemptId: adjustment.sourceAttemptId ? String(adjustment.sourceAttemptId) : null,
+          approvalRequestId: input.approvalRequestId ?? null,
+          notes: `Chargeback adjustment ${adjustment.id} is WON but no intake reserve was posted`,
+          slaHours: 4,
+        });
+        return {
+          status: "HELD",
+          reason: "CHARGEBACK_RESERVE_MISSING",
+          entityId: String(adjustment.id),
+          operatorCaseId,
+        };
+      }
       journal = buildLedgerTemplate("CHARGEBACK_WON", {
         amount,
         commissionAmount: commission,
         merchantAmount,
       });
       templateName = "CHARGEBACK_WON";
-    } else if (projected.lt(0)) {
-      // The wallet goes negative but stays inside the merchant's recovery
-      // net: book the chargeback against the insufficient wallet (design
-      // §11.3 entry 15) instead of holding it.
-      journal = buildLedgerTemplate("CHARGEBACK_INSUFFICIENT", {
-        amount,
-        commissionAmount: commission,
-        merchantAmount,
-      });
-      templateName = "CHARGEBACK_INSUFFICIENT";
-    } else {
+    } else if (reservePosted) {
       journal = buildLedgerTemplate("CHARGEBACK_RESERVE_AND_LOST", {
         amount,
         commissionAmount: commission,
@@ -2914,6 +2997,13 @@ export async function executeAdjustment(
         stage: "LOST",
       });
       templateName = "CHARGEBACK_RESERVE_AND_LOST";
+    } else {
+      journal = buildLedgerTemplate("CHARGEBACK_INSUFFICIENT", {
+        amount,
+        commissionAmount: commission,
+        merchantAmount,
+      });
+      templateName = "CHARGEBACK_INSUFFICIENT";
     }
   } else if (type === "CORRECTION") {
     journal = buildLedgerTemplate("FEE_VARIANCE_TRUE_UP", { amount, varianceAmount: amount });
@@ -2940,15 +3030,17 @@ export async function executeAdjustment(
     journal.refType = "ADJUSTMENT";
   }
 
-  const posted = await ctx.ledgerPoster.post(
-    journal,
-    await walletLedgerContext(tx, merchantId, accounts),
-    tx as never,
-  );
+  const posted = journal.lines.length === 0
+    ? null
+    : await ctx.ledgerPoster.post(
+      journal,
+      await walletLedgerContext(tx, merchantId, accounts, effectiveAttempt?.id, effectiveAttempt?.currency ?? targetAccount?.currency),
+      tx as never,
+    );
 
   await adjustments.update({
     where: { id: String(adjustment.id) },
-    data: { state: "EXECUTED", journalEntryId: posted.entry.id },
+    data: { state: "EXECUTED", journalEntryId: posted?.entry.id ?? null },
   });
 
   if (disputeOutcome && adjustment.disputeId) {
@@ -2986,7 +3078,7 @@ export async function executeAdjustment(
       state: "EXECUTED",
       type,
       template: templateName,
-      journalEntryId: posted.entry.id,
+      journalEntryId: posted?.entry.id ?? null,
       amount: amount.toFixed(4),
       outcome: disputeOutcome,
     },
@@ -2997,8 +3089,8 @@ export async function executeAdjustment(
     status: "EXECUTED",
     entityId: String(adjustment.id),
     template: templateName,
-    journalEntryId: posted.entry.id,
-    idempotent: posted.idempotent,
+    journalEntryId: posted?.entry.id ?? null,
+    idempotent: posted?.idempotent ?? false,
   };
 }
 
@@ -3152,7 +3244,10 @@ export async function executeCashout(
   // The journal reference is the cash-out id: a stable idempotency key, so the ledger itself
   // refuses a second payout of the same request.
   journal.refId = String(cashout.id);
-  const journalContext = { accounts: { MERCHANT_WALLET: String(wallet.glAccountId) } };
+  const journalContext = {
+    accounts: { MERCHANT_WALLET: String(wallet.glAccountId) },
+    currency: String(wallet.currency ?? "LYD").trim(),
+  };
 
   // Merchant-direct commission netting (AUTO-21, decision D8): before the cash-out is paid, the merchant's commission
   // receivable is netted from the wallet balance that no open cash-out reserves. This cash-out is already PROCESSING,
@@ -3235,7 +3330,7 @@ export async function executeCashout(
       state: updated.state,
       amount: amount.toFixed(4),
       adjustmentId: String(adjustment.id),
-      journalEntryId: posted.entry.id,
+      journalEntryId: posted?.entry.id ?? null,
     },
   });
 
@@ -3243,8 +3338,8 @@ export async function executeCashout(
     status: "EXECUTED",
     entityId: String(updated.id),
     template: "CASHOUT",
-    journalEntryId: posted.entry.id,
-    idempotent: posted.idempotent,
+    journalEntryId: posted?.entry.id ?? null,
+    idempotent: posted?.idempotent ?? false,
   };
 }
 
@@ -3777,18 +3872,20 @@ export async function executeOperatorCaseResolution(
         gatewayFeeAmount: gatewayFee,
         providerFeeAmount: gatewayFee,
       });
-      const result = await ctx.ledgerPoster.post(
-        { ...template, refId: String(attempt.id) },
-        {
-          merchantId: String(attempt.merchantId),
-          gatewayId: dynamicAttempt.gatewayId,
-          credentialSetId: attempt.credentialSetId ? String(attempt.credentialSetId) : undefined,
-          env: String(attempt.env),
-          currency: String(attempt.currency),
-        } as LedgerPostContext,
-        tx as never,
-      );
-      ledgerEntryId = result.entry.id;
+      if (template.lines.length > 0) {
+        const result = await ctx.ledgerPoster.post(
+          { ...template, refId: String(attempt.id) },
+          {
+            merchantId: String(attempt.merchantId),
+            gatewayId: dynamicAttempt.gatewayId,
+            credentialSetId: attempt.credentialSetId ? String(attempt.credentialSetId) : undefined,
+            env: String(attempt.env),
+            currency: String(attempt.currency),
+          } as LedgerPostContext,
+          tx as never,
+        );
+        ledgerEntryId = result.entry.id;
+      }
     }
     await modelOf(tx, "paymentAttempt").update({
       where: { id: attempt.id },
@@ -3808,6 +3905,7 @@ export async function executeOperatorCaseResolution(
         merchantId: attempt.merchantId ? String(attempt.merchantId) : undefined,
       });
     }
+    await enqueueAttemptTerminalOutbox(tx, attempt, "SUCCEEDED", finalSubstatus);
     return resolveOperatorCaseRow(ctx, tx, {
       ...common,
       extra: {
@@ -3889,6 +3987,7 @@ export async function executeOperatorCaseResolution(
       merchantId: attempt.merchantId ? String(attempt.merchantId) : undefined,
     });
   }
+  await enqueueAttemptTerminalOutbox(tx, attempt, "FAILED", "OPERATOR_RESOLVED_FAILED");
   return resolveOperatorCaseRow(ctx, tx, {
     ...common,
     extra: {
@@ -3899,6 +3998,52 @@ export async function executeOperatorCaseResolution(
   });
 }
 
+
+/**
+ * Domain-specific checker roles (design §18-19 role matrix). `approval:check`
+ * is necessary but not sufficient: the checker must also hold the role that
+ * owns the subject. Unknown subject types remain governed by the generic
+ * approval authority until a domain rule is added.
+ */
+const DOMAIN_CHECKER_ROLES: Record<string, readonly string[]> = {
+  ADJUSTMENT: ["FINANCE"],
+  AML_CASE: ["MLRO"],
+  OPERATOR_CASE: ["FINANCE", "OPERATOR", "COMPLIANCE", "SECURITY_ADMIN"],
+  REGULATORY_REPORT: ["MLRO"],
+  FILING_ADAPTER: ["MLRO"],
+  REPORTING_RULE_SCHEMA_BINDING: ["MLRO", "COMPLIANCE"],
+  REPORTING_RULE: ["MLRO", "COMPLIANCE"],
+  REGULATORY_REPORT_SCHEMA: ["MLRO", "COMPLIANCE"],
+  AML_RULE: ["MLRO"],
+  JOIN_REQUEST: ["OPERATOR", "COMPLIANCE", "MLRO"],
+  MERCHANT: ["COMPLIANCE", "FINANCE", "MLRO"],
+  COMMISSION_PROFILE: ["FINANCE", "SECURITY_ADMIN"],
+  VELOCITY_RULE: ["SECURITY_ADMIN", "FINANCE"],
+  GL_SHARD_REPAIR: ["FINANCE"],
+  WALLET: ["FINANCE"],
+  APPLICATION: ["OPERATOR", "COMPLIANCE", "FINANCE"],
+  POS_TERMINAL: ["OPERATOR", "COMPLIANCE", "FINANCE"],
+  USER: ["SECURITY_ADMIN"],
+  STORAGE_LEGAL_HOLD: ["SECURITY_ADMIN", "COMPLIANCE"],
+  ROUTE_HEALTH_OVERRIDE: ["SECURITY_ADMIN"],
+  BACKUP_POLICY: ["SECURITY_ADMIN", "FINANCE"],
+  PLATFORM_SETTING: ["MLRO", "SECURITY_ADMIN", "COMPLIANCE"],
+  GATEWAY_VERSION: ["SECURITY_ADMIN"],
+  BENEFICIAL_OWNER: ["COMPLIANCE"],
+};
+
+const assertDomainChecker = (subjectType: string, checkerRole: string): void => {
+  const allowed = DOMAIN_CHECKER_ROLES[subjectType];
+  if (!allowed) return;
+  if (!allowed.includes(checkerRole)) {
+    throw new ApiError(
+      403,
+      "DOMAIN_CHECKER_REQUIRED",
+      `A ${subjectType} approval requires one of: ${allowed.join(", ")}`,
+      { subjectType, checkerRole, allowedRoles: allowed },
+    );
+  }
+};
 
 export async function executeApprovalSubject(
   ctx: GovernanceExecutionContext,
@@ -3914,6 +4059,10 @@ export async function executeApprovalSubject(
   if (input.checkerUserId === SYSTEM_AUTOMATION_USER_ID) {
     throw new ApiError(403, "AUTOMATION_CANNOT_ACT_AS_CHECKER", "System automation can never act as a checker");
   }
+  const systemChecker = await modelOf(tx, "user").findFirst({ where: { id: input.checkerUserId, email: SYSTEM_AUTOMATION_EMAIL } });
+  if (systemChecker) {
+    throw new ApiError(403, "AUTOMATION_CANNOT_ACT_AS_CHECKER", "System automation can never act as a checker");
+  }
   if (!input.checkerUserId) {
     throw new ApiError(400, "APPROVAL_CHECKER_MISSING", "A checker is required before execution");
   }
@@ -3922,6 +4071,7 @@ export async function executeApprovalSubject(
   }
 
   const subjectType = normalizeApprovalSubjectType(input.approval.subjectType);
+  assertDomainChecker(subjectType, input.checkerRole);
   if (subjectType === "AML_CASE") {
     return executeAmlCaseResolution(ctx, tx, {
       amlCaseId: input.approval.subjectId,

@@ -181,13 +181,14 @@ export const assertMerchantClosable = (status: string): void => {
 export const merchantWalletBalance = async (
   db: PrismaClient,
   merchantId: string,
-): Promise<{ balance: string; wallets: Array<{ id: string; walletId: string; currency: string; status: string; balance: string }> }> => {
+  currency?: string | null,
+): Promise<{ balance: string; byCurrency: Array<{ currency: string; balance: string }>; wallets: Array<{ id: string; walletId: string; currency: string; status: string; balance: string }> }> => {
   const wallets = await db.wallet.findMany({
-    where: { merchantId },
+    where: { merchantId, ...(currency ? { currency } : {}) },
     orderBy: { createdAt: "asc" },
     select: { id: true, currency: true, status: true, glAccountId: true },
   });
-  if (wallets.length === 0) return { balance: "0.0000", wallets: [] };
+  if (wallets.length === 0) return { balance: "0.0000", byCurrency: [], wallets: [] };
   const walletAccountIds = wallets.map((wallet) => wallet.glAccountId);
   const live = await loadLiveAccountBalances(db as never, walletAccountIds);
   const shardBalance = new Map(live.map((row) => [row.id, decimal(row.balance)]));
@@ -199,7 +200,11 @@ export const merchantWalletBalance = async (
     balance: (shardBalance.get(wallet.glAccountId) ?? decimal(0)).toFixed(4),
   }));
   const total = rows.reduce((sum, row) => sum.plus(decimal(row.balance)), decimal(0));
-  return { balance: total.toFixed(4), wallets: rows };
+  const byCurrency = [...new Map(rows.map((row) => [row.currency, decimal(0)])).keys()].map((code) => ({
+    currency: code,
+    balance: rows.filter((row) => row.currency === code).reduce((sum, row) => sum.plus(decimal(row.balance)), decimal(0)).toFixed(4),
+  }));
+  return { balance: total.toFixed(4), byCurrency, wallets: rows };
 };
 
 export const queueMerchantLifecycleNotification = async (

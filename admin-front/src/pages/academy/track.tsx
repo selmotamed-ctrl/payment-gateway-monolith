@@ -16,6 +16,7 @@ import { useEligibility } from "@/components/academy/useEligibility";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { showSnackBar } from "@/utils/snackBar";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 
@@ -60,6 +61,31 @@ export const AdminAcademyTrackPage = defineComponent({
             });
             return step.kind === "lesson" || step.kind === "lab" ? step.id : undefined;
         });
+
+        const copyTrackSummary = async () => {
+            const tr = track.value;
+            if (!tr) return;
+            const stats = trackStats(tr, academy.progress.value);
+            const summary = {
+                track: tr.id,
+                title: tr.title,
+                lessons: `${stats.lessonsDone}/${stats.lessonsTotal}`,
+                labs: `${stats.labsPassed}/${stats.labsTotal}`,
+                examPassed: stats.examPassed,
+                examId: tr.examId,
+                examReady: ready.value,
+                missing: missing.value,
+                badgeState: academy.badgeState(tr.id, data.meta.value?.recertifyFrom ?? "0.0"),
+                badgeExpiresAt: academy.badgeFor(tr.id)?.expiresAt ?? null,
+                url: window.location.href,
+            };
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+                showSnackBar({ type: "success", message: t("Track summary copied") });
+            } catch {
+                showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+            }
+        };
 
         return () => {
             const tr = track.value;
@@ -209,6 +235,11 @@ export const AdminAcademyTrackPage = defineComponent({
                                 { label: t("Tracks"), to: router.resolve({ name: "AdminAcademyTracks" }).fullPath },
                                 { label: tr?.title ?? t("Track") },
                             ]}
+                            end={() => (
+                                <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyTrackSummary()}>
+                                    {t("Copy track summary")}
+                                </VBtn>
+                            )}
                         />
                     )}
                 >

@@ -276,7 +276,7 @@ Applies to all three copies of the client:
 
 ## Admin Edge BFF
 
-> Status: `partial` · Last verified: 2026-11-16
+> Status: `partial` · Last verified: 2026-11-23
 
 ## 1. Purpose and scope
 
@@ -348,6 +348,8 @@ The listener binds to `ADMIN_BIND_HOST` (default `127.0.0.1`). The deploy engine
 
 Routes that can become asynchronous or return a non-200 outcome use `relayStatus: true` (merchant suspension/reinstatement/close, approvals, join-request decisions, gateway submit-approval, AML proposals, backup trigger/drill/policy, reconciliation and operator actions). Creation routes generally declare 201 explicitly. `splitBodyFrom` exists in the forwarder but is not used by the current admin routers.
 
+Safeguard checklists are forwarded on sensitive mutations and exports. Multipart reconciliation uploads receive `checklist` as a JSON-encoded form field; the edge parses it to an array before `uploadSchema` and forwards it in `x-upload-metadata`. Every checklist-bearing route uses an explicit allow-list in core; the edge only validates shape. New summary-export query schemas (`summaryExportQuerySchema`) accept a comma-separated `checklist`. Report-engine spec/chrome publish, reconcile-defaults and merchant suspend accept the checklist body; the route tables and tests list the exact paths.
+
 `forwardUpload()` streams a multipart file to the core as raw bytes with `x-upload-filename`, `x-upload-content-type`, `x-upload-sha256`, `x-upload-size` and base64url `x-upload-metadata`. The reconciliation route uses this path with a longer `RECONCILIATION_TIMEOUT_MS`.
 
 ### 3.4 Route map
@@ -356,9 +358,9 @@ All routes are prefixed with `/api/v1/admin`. The auth routes are inside the LAN
 
 | Area | Routes |
 | :--- | :--- |
-| Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/mfa` |
+| Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/mfa`, `POST /auth/mfa/resend` |
 | Search | `POST /search` |
-| Academy | `GET, PUT /academy/progress`, `GET /academy/exams/:examId/eligibility`, `POST /academy/exams/:examId/start`, `POST /academy/exams/:examId/submit`, `GET /academy/team` (`SECURITY_ADMIN`); 60 requests/minute per user |
+| Academy | `GET, PUT /academy/progress`, `GET /academy/exams/:examId/eligibility`, `POST /academy/exams/:examId/start`, `POST /academy/exams/:examId/submit`, `GET /academy/certificates/:trackId/verification`, `GET /academy/team`, `GET /academy/team/export` (`SECURITY_ADMIN`); 60 requests/minute per user |
 | Users | `GET, POST, PATCH /users`, `GET /users/:id`, `PATCH /users/:id`, `GET /users/export`, `GET /users/summary`, `GET /users/summary/export` |
 | Join requests | `GET /join-requests`, `GET /join-requests/:id`, `POST /join-requests/admin-assisted`, `PATCH /join-requests/:id/profile`, `POST /join-requests/:id/beneficial-owners`, `PATCH, DELETE /join-requests/:id/beneficial-owners/:ownerId`, `POST, DELETE /join-requests/:id/kyb-documents[/:docId]`, `POST /join-requests/:id/submit`, `POST /join-requests/:id/withdraw`, `PATCH /join-requests/:id/checklist`, `POST /join-requests/:id/screening/retry`, `POST /join-requests/:id/assign`, `POST /join-requests/:id/request-info`, `POST /join-requests/:id/decide` |
 | KYB documents | `GET /kyb-documents`, `GET /kyb-documents/:id`, `GET /kyb-documents/:id/content`, `POST /kyb-documents/:id/review`, `POST /kyb-documents/:id/request-replacement`, `POST /kyb-documents/:id/request-revalidation`, plus export/summary variants |
@@ -370,14 +372,15 @@ All routes are prefixed with `/api/v1/admin`. The auth routes are inside the LAN
 | Credential sets | `GET, POST /credential-sets`, `GET, PUT /credential-sets/:id`, `POST /credential-sets/:id/verify`, `POST /credential-sets/:id/revoke` |
 | Rails and routes | `GET, POST /rails`, `GET, PATCH /rails/:id`, `PUT /rails/:id/fields`, `GET, POST /routes`, `GET, PATCH /routes/:id`, `POST /routes/:id/state`, plus export/summary variants |
 | Assets | `GET, POST /assets`, `GET /assets/:id` |
-| Operations | `GET /gateway-inquiries`, `GET /gateway-inquiries/:id`, `POST /gateway-inquiries/:id/cancel`, `/run-now`, `/retry`, `GET /operator-cases`, `GET, PATCH /operator-cases/:id`, `POST /operator-cases/:id/resolve`, `POST /operator-cases/bulk-inquire`, `/bulk-assign`, `/bulk-state`, `POST /attempts/:id/inquire`, `GET /attempts/:id`, plus export/summary variants |
+| Operations | `GET /gateway-inquiries`, `GET /gateway-inquiries/:id`, `/summary`, `/summary/export`, `POST /gateway-inquiries/:id/cancel`, `/run-now`, `/retry`, `GET /operator-cases`, `GET, PATCH /operator-cases/:id`, `POST /operator-cases/:id/resolve`, `POST /operator-cases/bulk-inquire`, `/bulk-assign`, `/bulk-state`, `POST /attempts/:id/inquire`, `GET /attempts/:id`, plus export/summary variants |
 | Reconciliation | `GET, POST /reconciliation/sources`, `PATCH /reconciliation/sources/:id`, `POST /reconciliation/upload`, `GET /reconciliation/runs`, `GET /reconciliation/runs/:id`, `GET /reconciliation/runs/:id/export`, `GET /reconciliation/runs/summary`, `GET /reconciliation/runs/summary/export` |
-| Finance | `GET, POST /disputes`, `GET /disputes/:id`, `POST /disputes/:id/evidence`, `GET, POST /adjustments`, `GET /adjustments/:id`, `GET /cashouts`, `GET /cashouts/:id`, `POST /cashouts/:id/process`, `GET, POST /commission-profiles`, `POST /commission-profiles/:id/expire`, `GET /commission-profiles/:id/history`, `GET, POST /velocity-rules`, `POST /velocity-rules/:id/deactivate`, `GET /velocity-rules/:id/history`, `GET /finance/profitability`, `GET /finance/liquidity`, `GET /finance/invariant-check`, plus export/summary variants |
+| Finance | `GET /transactions`, `/transactions/summary`, `/transactions/summary/export`, `GET, POST /disputes`, `GET /disputes/:id`, `POST /disputes/:id/evidence`, `GET, POST /adjustments`, `GET /adjustments/:id`, `GET /cashouts`, `GET /cashouts/:id`, `POST /cashouts/:id/process`, `GET, POST /commission-profiles`, `POST /commission-profiles/:id/expire`, `GET /commission-profiles/:id/history`, `GET, POST /velocity-rules`, `POST /velocity-rules/:id/deactivate`, `GET /velocity-rules/:id/history`, `GET /finance/profitability`, `GET /finance/liquidity`, `GET /finance/invariant-check`, `GET /finance/journal-entries/summary/export`, plus export/summary variants |
 | Settings | `GET, PUT /settings`, `POST /settings/restore-preview`, `POST /settings/restore-apply`, `GET /settings/export`, `GET /settings/summary`, `GET /settings/summary/export`, `GET, PUT /settings/checkout-support`, `GET /settings/checkout-support/history`, `GET /settings/checkout-support/summary`, `GET /settings/checkout-support/summary/export` |
 | Options | `GET /options/:kind` |
 | Stats | `GET /stats/overview`, `GET /stats/recent-activity`, `GET /stats/export`, `POST /stats/export-audit`, plus export variants |
 | Audit logs | `GET /audit-logs`, `GET /audit-logs/:id`, `GET /audit-logs/export`, `GET /audit-logs/summary`, `GET /audit-logs/summary/export` |
 | System backups | `GET /system/backups/overview`, `GET /system/backups/catalog`, `POST /system/backups/trigger`, `POST /system/backups/drill`, `PUT /system/backups/policy` |
+| Incidents | `GET /aml/incidents`, `/summary/export`, `/export`, `GET, POST, PATCH /aml/incidents/:id`, timeline/responders/actions/links/communications/report transitions |
 
 The AML router applies `requireAuthorities("COMPLIANCE", "MLRO", "aml:read", "aml:write")` to every AML route. The backup router applies `security:read`/`gateway:read` to the overview and catalog and `security:write` to trigger, drill and policy. The remaining routes rely on `requireSession` plus core-side authority enforcement.
 

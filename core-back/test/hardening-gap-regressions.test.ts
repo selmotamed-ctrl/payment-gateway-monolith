@@ -586,6 +586,33 @@ describe("GAP-013 append-only guards", () => {
 });
 
 /* -------------------------------------------------------------------------- */
+/* GAP-075 remaining append-only histories                                     */
+/* -------------------------------------------------------------------------- */
+
+describe("GAP-075 append-only case and storage histories", () => {
+  const migrationsDir = path.join(import.meta.dir, "..", "prisma", "migrations");
+  const dir = readdirSync(migrationsDir).find((name) => name.endsWith("_append_only_case_and_storage_guards"));
+  const sql = dir ? readFileSync(path.join(migrationsDir, dir, "migration.sql"), "utf8") : "";
+
+  test("the migration exists and guards the four histories", () => {
+    expect(dir).toBeDefined();
+    for (const table of ["operator_case_events", "gl_shard_repairs", "storage_object_access_logs", "audit_chain_anchors"]) {
+      expect(sql).toContain(table);
+    }
+    expect(sql).toContain("BEFORE UPDATE OR DELETE ON \"operator_case_events\"");
+    expect(sql).toContain("BEFORE UPDATE OR DELETE ON \"gl_shard_repairs\"");
+    expect(sql).toContain("BEFORE TRUNCATE ON \"storage_objects\"");
+  });
+
+  test("the bypass requires both the GUC and a privileged role", () => {
+    expect(sql).toContain("pgw.append_only_maintenance");
+    expect(sql).toContain("pgw_append_only_maintenance_allowed");
+    expect(sql).toContain("r.rolsuper");
+    expect(sql).toContain("pg_has_role(session_user, m.oid, 'MEMBER')");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
 /* GAP-030 timezone                                                            */
 /* -------------------------------------------------------------------------- */
 

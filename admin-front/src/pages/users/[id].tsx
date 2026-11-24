@@ -2,7 +2,7 @@ import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute, useRouter } from "vue-router";
-import { VBtn } from "vuetify/components";
+import { VAlert, VBtn } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -14,12 +14,30 @@ import { DescriptionList, type DescriptionItem } from "@/components/ui/Descripti
 import { MonoRef } from "@/components/ui/MonoRef";
 import { statusTone } from "@/components/Table/statusTone";
 import { api } from "@/state/api";
+import { areChecklistsVisible } from "@/constants/env";
+import { showSnackBar } from "@/utils/snackBar";
+import { maskEmail } from "@/utils/privacy";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetaPill } from "@/components/ui/MetaPill";
 import { describeAuditChange } from "@/utils/auditSummary";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { FormModal } from "@/components/ui/FormModal";
+import { xlsxUIPipeline } from "@/utils/xlsx";
+const ACCESS_EXPORT_CHECKS = [
+    { key: "USER_SCOPE_VERIFIED", label: "User and role scope verified" },
+    { key: "ACCESS_HISTORY_REVIEWED", label: "Access and approval history reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const RESEND_INVITATION_CHECKS = [
+    { key: "IDENTITY_VERIFIED", label: "User identity verified" },
+    { key: "INVITATION_EXPIRY_REVIEWED", label: "Invitation expiry and status reviewed" },
+    { key: "DELIVERY_CHANNEL_CONFIRMED", label: "Delivery channel confirmed" },
+] as const;
+
 type UserDetail = {
     id: string;
     createdAt: string;
@@ -141,8 +159,102 @@ const UserDetailPage = dc(() => {
     const auditTrail = ref<AuditRow[]>([]);
     const loading = ref(true);
     const error = ref<string | null>(null);
+    const resendingInvitation = ref(false);
+    const resendChecklist = ref<Record<string, boolean>>({});
+    const showChecklists = areChecklistsVisible();
+    const exportOpen = ref(false);
+    const exportLoading = ref(false);
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || ACCESS_EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
+    const resendChecklistComplete = computed(() => !showChecklists || RESEND_INVITATION_CHECKS.every((check) => resendChecklist.value[check.key] === true));
 
     const userId = computed(() => String(route.params.id ?? ""));
+
+    const exportAccessRecord = async () => {
+        const entry = user.value;
+        if (!entry || exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
+        exportLoading.value = true;
+        try {
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["user_id", entry.id],
+                ["email", entry.email],
+                ["phone", entry.phone ?? ""],
+                ["role", entry.role],
+                ["status", entry.status],
+                ["maker", entry.isMaker],
+                ["checker", entry.isChecker],
+                ["mfa_required", entry.mfaRequired],
+                ["merchant_id", entry.merchantId ?? ""],
+                ["invited_by", entry.invitedById ?? ""],
+                ["invitation_expires", entry.invitationExpiresAt ?? ""],
+                ["created_at", entry.createdAt],
+                ["updated_at", entry.updatedAt],
+                ["authorities", authorityList.value.join("; ")],
+                ["approvals", approvals.value.length],
+                ["audit_events", auditTrail.value.length],
+            ];
+            const lines = ["field,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({ title: `admin-user-${entry.id}-${new Date().toISOString().slice(0, 10)}.xlsx`, lines });
+            exportOpen.value = false;
+            exportChecklist.value = {};
+            showSnackBar({ type: "success", message: t("Access record exported") });
+        } catch (cause) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
+        } finally {
+            exportLoading.value = false;
+        }
+    };
+
+    const copyAccessSummary = async () => {
+        const entry = user.value;
+        if (!entry) return;
+        const summary = {
+            userId: entry.id,
+            email: maskEmail(entry.email),
+            role: entry.role,
+            status: entry.status,
+            mfaRequired: entry.mfaRequired,
+            maker: entry.isMaker,
+            checker: entry.isChecker,
+            authorities: authorityList.value,
+            appScopeIds: Array.isArray(entry.appScopeIds) ? entry.appScopeIds : [],
+            invitedById: entry.invitedById,
+            createdAt: entry.createdAt,
+            updatedAt: entry.updatedAt,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Access summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
+    const resendInvitation = async () => {
+        if (!user.value || resendingInvitation.value) return;
+        if (!resendChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all invitation checklist items before resending") });
+            return;
+        }
+        resendingInvitation.value = true;
+        try {
+            await api.post(urlsMap.userInvite(user.value.id), {
+                checklist: RESEND_INVITATION_CHECKS.filter((check) => resendChecklist.value[check.key]).map((check) => check.key),
+            });
+            resendChecklist.value = {};
+            showSnackBar({ type: "success", message: t("Invitation sent") });
+            await load();
+        } catch (resendError) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(resendError) });
+        } finally {
+            resendingInvitation.value = false;
+        }
+    };
 
     const load = async () => {
         loading.value = true;
@@ -211,6 +323,8 @@ const UserDetailPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="text" prependIcon="mdi-arrow-left" onClick={() => void router.push({ name: "AdminUsers" })}>{t("Back to users")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyAccessSummary()}>{t("Copy access summary")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export access record")}</VBtn>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
                         </ThemedView>
                     )}
@@ -241,6 +355,27 @@ const UserDetailPage = dc(() => {
                             </SurfaceCardText>
                         </SurfaceCard>
 
+                        {user.value.status === "INVITED" && (
+                            <SurfaceCard>
+                                <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                    <ThemedText type="defaultSemiBold" style={{ fontSize: "15px" }}>{t("Pending invitation")}</ThemedText>
+                                    <VAlert type="warning" variant="tonal" density="compact">{t("The invitee has not set a password yet. Re-issuing the invitation discards any earlier credential and sends a new single-use code.")}</VAlert>
+                                    <FormChecklist
+                                        checks={[...RESEND_INVITATION_CHECKS]}
+                                        modelValue={resendChecklist.value}
+                                        onUpdate:modelValue={(value: Record<string, boolean>) => (resendChecklist.value = value)}
+                                        show={showChecklists}
+                                        title={t("Resend invitation checklist")}
+                                        complete={resendChecklistComplete.value}
+                                        incompleteMessage={t("Complete all invitation checklist items before resending")}
+                                    />
+                                    <VBtn size="small" variant="outlined" loading={resendingInvitation.value} disabled={!resendChecklistComplete.value} onClick={() => void resendInvitation()}>
+                                        {t("Resend invitation")}
+                                    </VBtn>
+                                </SurfaceCardText>
+                            </SurfaceCard>
+                        )}
+
                         <SurfaceCard>
                             <SurfaceCardText style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                                 <ThemedText type="defaultSemiBold" style={{ fontSize: "16px" }}>{t("Authorities")}</ThemedText>
@@ -266,6 +401,7 @@ const UserDetailPage = dc(() => {
                                             <ThemedText style={{ fontSize: "12px", fontWeight: 600, direction: "ltr" }}>{approval.subjectType}</ThemedText>
                                             <StatusBadge status={approval.state} toneOverride={statusTone(approval.state) === "error" ? "danger" : (statusTone(approval.state) as any)} showDot={false} />
                                             <MetaPill size="x-small" variant="tonal">{approval.mode}</MetaPill>
+                                            <VBtn size="x-small" variant="text" onClick={() => void router.push({ name: "Approvals", query: { open: approval.id } })}>{t("Open")}</VBtn>
                                             <div style={{ flex: 1 }} />
                                             <ThemedText style={{ fontSize: "10px", opacity: 0.55 }}>{formatDateTime(approval.createdAt)}</ThemedText>
                                         </ThemedView>
@@ -327,6 +463,25 @@ const UserDetailPage = dc(() => {
                     </>
                 ) : null}
             </ThemedView>
+            <FormModal
+                modelValue={exportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                title={t("Export admin user access record")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportAccessRecord()}
+            >
+                <FormChecklist
+                    checks={[...ACCESS_EXPORT_CHECKS]}
+                    modelValue={exportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Access export checklist")}
+                    complete={exportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
         </ScreenContainer>
     );
 });

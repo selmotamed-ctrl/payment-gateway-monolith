@@ -591,7 +591,7 @@ describe.skipIf(!reachable)("applications and access tokens", () => {
     expect((await admin(path, "reader", "POST", { reason: REASON })).status).toBe(403);
     expect((await admin(`/applications/${commerce.applicationId}/tokens/${randomUUID()}/revoke`, "maker", "POST", { reason: REASON })).status).toBe(404);
 
-    const revoked = await admin(path, "maker", "POST", { reason: REASON });
+    const revoked = await admin(path, "maker", "POST", { reason: REASON, checklist: ["ACCESS_IMPACT_REVIEWED"] });
     expect(revoked.status).toBe(200);
     expect(revoked.body.token.status).toBe("REVOKED");
     expect(revoked.raw).not.toContain(commerce.tokenHash);
@@ -600,6 +600,7 @@ describe.skipIf(!reachable)("applications and access tokens", () => {
     expect(row.revokedAt).not.toBeNull();
     const audit = await client.auditLog.findFirstOrThrow({ where: { entityId: commerce.tokenId, action: "ACCESS_TOKEN_REVOKED" } });
     expect(JSON.stringify(audit)).not.toContain(commerce.tokenHash);
+    expect((audit.afterJson as Record<string, unknown>).checklist).toEqual(["ACCESS_IMPACT_REVIEWED"]);
 
     const again = await admin(path, "maker", "POST", { reason: REASON });
     expect(again.status).toBe(409);

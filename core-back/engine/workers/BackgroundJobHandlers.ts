@@ -4,6 +4,7 @@ import type { BackgroundJobRow, PrismaLike, Repositories, Tx } from "../db/ports
 import {
   executeApprovalSubject,
   openDisputeWithDraftedAdjustment,
+  SYSTEM_AUTOMATION_EMAIL,
   SYSTEM_AUTOMATION_USER_ID,
   type GovernanceExecutionContext,
   type ReconciliationSchedulerLike,
@@ -76,10 +77,15 @@ export const createFeeVariancePoster = (ledgerPoster: LedgerPoster): FeeVariance
     }
     const result = await ledgerPoster.postScenario(
       "FEE_VARIANCE_TRUE_UP",
-      posting.attemptId ?? `fee-variance:${posting.statementSourceId}`,
+      posting.attemptId
+        ? `fee-variance:${posting.attemptId}${posting.runId ? `:${posting.runId}` : ""}`
+        : `fee-variance:${posting.statementSourceId}`,
       { amount: "0.0001", varianceAmount: variance },
       {
         gatewayId: posting.gatewayId,
+        env: posting.env ?? undefined,
+        credentialSetId: posting.credentialSetId ?? undefined,
+        currency: posting.currency ?? undefined,
       },
     );
     return { journalEntryId: result.entry.id };
@@ -117,8 +123,12 @@ const isBatchSettlementSource = (
  */
 const postSettlementSweeps = async (
   deps: ReconciliationJobHandlerDeps,
-  run: { id: string; statementSourceId: string },
+  run: { id: string; statementSourceId: string; autoPost?: boolean | null },
 ): Promise<number> => {
+  if (run.autoPost === false) {
+    deps.logger?.info("BackgroundJobWorker: settlement sweep suppressed by autoPost=false", { runId: run.id });
+    return 0;
+  }
   const source = await deps.repositories.reconciliation.findStatementSourceById(
     deps.db as Tx,
     run.statementSourceId,
@@ -133,37 +143,80 @@ const postSettlementSweeps = async (
     return 0;
   }
   const poster = deps.ledgerPoster ?? createLedgerPoster(deps.db as never);
-  const seen = new Set<string>();
-  let posted = 0;
+  const groups = new Map<string, {
+    refId: string;
+    gross: ReturnType<typeof decimal>;
+    fee: ReturnType<typeof decimal>;
+    context: { gatewayId: string; env?: string; credentialSetId?: string; currency: string };
+    itemIds: string[];
+  }>();
   for (const item of candidates) {
     if (item.result === "DUPLICATE") {
       continue;
     }
     const gross = decimal(item.statementAmount as never);
     const fee = decimal(item.statementFee as never);
-    if (!gross.gt(0)) {
+    if (!gross.gt(0)) continue;
+    const currency = item.currency ?? source.currency ?? null;
+    const gatewayId = item.gatewayId ?? source.gatewayId ?? null;
+    if (!currency || !gatewayId) {
+      deps.logger?.info("BackgroundJobWorker: settlement item has no currency/gateway context", {
+        runId: run.id,
+        itemId: item.id,
+        currency,
+        gatewayId,
+      });
       continue;
     }
-    const settled = gross.minus(fee);
-    if (!settled.gt(0)) {
+    const env = item.env ?? source.env ?? null;
+    const credentialSetId = item.credentialSetId ?? source.credentialSetId ?? null;
+    const contextKey = [item.batchReference ?? item.id, gatewayId, env ?? "", credentialSetId ?? "", currency].join("|");
+    const existing = groups.get(contextKey);
+    if (existing) {
+      existing.gross = existing.gross.plus(gross);
+      existing.fee = existing.fee.plus(fee);
+      existing.itemIds.push(item.id);
       continue;
     }
-    const refId = item.batchReference
-      ? `settlement:${item.batchReference}`
-      : `settlement:${item.id}`;
-    if (seen.has(refId)) {
-      continue;
+    groups.set(contextKey, {
+      refId: item.batchReference
+        ? `settlement:${item.batchReference}:${gatewayId}:${env ?? "-"}:${credentialSetId ?? "-"}:${currency}`
+        : `settlement:${item.id}`,
+      gross,
+      fee,
+      context: { gatewayId, ...(env ? { env } : {}), ...(credentialSetId ? { credentialSetId } : {}), currency },
+      itemIds: [item.id],
+    });
+  }
+  let posted = 0;
+  for (const [contextKey, group] of groups.entries()) {
+    const settled = group.gross.minus(group.fee);
+    if (!settled.gt(0)) continue;
+    const batchReference = contextKey.split("|")[0];
+    if (batchReference && batchReference !== group.itemIds[0]) {
+      const legacyRef = `settlement:${batchReference}`;
+      const existing = await (deps.db as any)?.journalEntry?.findFirst?.({
+        where: { refType: "SETTLEMENT_SWEEP", refId: legacyRef },
+        select: { id: true },
+      });
+      if (existing) {
+        deps.logger?.info("BackgroundJobWorker: legacy batch sweep already posted; new grouped sweep skipped", {
+          runId: run.id,
+          batchReference,
+          legacyRef,
+        });
+        continue;
+      }
     }
-    seen.add(refId);
     await poster.postScenario(
       "SETTLEMENT_SWEEP",
-      refId,
+      group.refId,
       {
-        amount: gross.toFixed(4),
-        gatewayFeeAmount: fee.toFixed(4),
+        amount: group.gross.toFixed(4),
+        gatewayFeeAmount: group.fee.toFixed(4),
         settledAmount: settled.toFixed(4),
       },
-      { gatewayId: String(source.gatewayId) },
+      group.context,
     );
     posted += 1;
   }
@@ -427,6 +480,9 @@ const executeApprovedAdjustment = async (
       throw new ApiError(403, "AUTOMATION_CANNOT_ACT_AS_CHECKER", "System automation can never act as a checker");
     }
     const checker = await deps.repositories.identity.findUserById(tx, checkerUserId);
+    if (checker?.email === SYSTEM_AUTOMATION_EMAIL) {
+      throw new ApiError(403, "AUTOMATION_CANNOT_ACT_AS_CHECKER", "System automation can never act as a checker");
+    }
     const checkerRole = checker?.role ?? payload.checkerRole ?? null;
     const result = await executeApprovalSubject(context, tx as never, {
       approval: {

@@ -371,6 +371,9 @@ export type MerchantAuditEvent = {
 export type MerchantStats = {
     period: string;
     since: string;
+    currency?: string;
+    byCurrency?: Array<{ currency: string; attemptCount: number; successfulCount: number; grossVolume: string; netCredited: string; commission: string }>;
+    mixedCurrency?: boolean;
     totals: {
         attemptCount: number;
         successfulCount: number;
@@ -385,7 +388,7 @@ export type MerchantStats = {
         unknownCount: number;
     };
     statuses: Array<{ status: string; count: number; chargedAmount: string }>;
-    walletBalance: { balance: string; wallets: Array<{ id: string; walletId: string; currency: string; status: string; balance: string }> };
+    walletBalance: { balance: string; byCurrency?: Array<{ currency: string; balance: string }>; wallets: Array<{ id: string; walletId: string; currency: string; status: string; balance: string }> };
     negativeBalanceCeiling: string;
     pendingCashouts: { count: number; amount: string };
     openDisputes: number;

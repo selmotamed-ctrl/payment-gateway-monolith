@@ -3,7 +3,7 @@ id: core.governance
 title: Governance and Compliance
 status: partial
 confidence: high
-last_verified: 2026-11-16
+last_verified: 2026-11-24
 verified_against: 53afea5+working-tree
 code:
   - core-back/engine/governance/ApprovalService.ts
@@ -82,7 +82,6 @@ gaps:
   - "`PUT /admin/settings` writes platform settings directly without an approval request or maker-checker."
   - "Cash-out processing is a direct single-actor route; no `CASHOUT_REQUEST` approval row is created."
   - "The approval lifecycle deviates from the design because proposals go straight to `PENDING_REVIEW`, rejection ends in `REJECTED` rather than returning to `DRAFT`, and emergency ratification does not re-execute through a checker."
-  - "Per-domain checker enforcement is incomplete; `approval:check` is not domain-scoped, and AML approvals are not gated by the confidential-AML check."
   - "`DetailChangeService` is not wired into the admin routes; changes are written directly and coverage is narrow."
   - "AML layer L4 deferred/batch monitoring, rule dry-run, and emergency tightening with 24-hour ratification are not implemented."
   - "Retention is opt-in and does not cover AML cases, screenings, KYB documents, or regulatory reports."
@@ -181,7 +180,7 @@ The actual admin approve route (`core-back/api/internal/admin.ts:6014`) is more 
 
 Other subject types that appear in the queue/domain map but have no `executeApprovalSubject` branch are `KYB_DOCUMENT`, `GATEWAY`, and `CREDENTIAL_SET`. `BACKUP_POLICY` is handled by a special branch in the approve route rather than by the dispatcher.
 
-The dispatcher enforces maker ≠ checker and rejects system automation, but it does not re-check a domain-specific role for AML, regulatory reporting, user administration, or gateway version go-live. Within the dispatcher, only chargeback execution checks that the checker is a finance checker (`assertFinanceChecker` in `GovernanceExecution.ts`).
+The dispatcher enforces maker ≠ checker, rejects system automation, and checks the domain role of the checker (`DOMAIN_CHECKER_ROLES`): adjustments/commission/repairs/wallet are FINANCE; AML case/rule and regulatory reports are MLRO; reporting schemas/rules also accept COMPLIANCE; users and gateway versions are SECURITY_ADMIN; merchant/join requests are COMPLIANCE/MLRO/OPERATOR; and the remaining subjects use their documented role set. A generic `approval:check` alone is no longer sufficient. Chargeback execution and adjustment rejection additionally call `assertFinanceChecker`.
 
 ### 3.4 Detail change log
 
@@ -201,6 +200,10 @@ The join-request state machine is implemented in `core-back/api/internal/admin.t
 - `JoinRequestExpiryWorker` expires abandoned drafts and overdue reviews.
 
 Readiness (`core-back/lib/joinRequestOnboarding.ts:249`) requires the canonical checklist, required accepted and unexpired documents, active beneficial owners meeting the ownership threshold, owner screening status, a non-blocked screening result, and a payout bank; it reports `approvalPending` separately rather than adding it to `blockers`. Duplicate detection compares tax id, registration, phone, and e-mail and hashes the payout account, owner national id, and document SHA-256 (`joinRequestOnboarding.ts:84`).
+
+Approval of a join request now requires every canonical review-checklist item to be `true`; a partial checklist returns `409 JOIN_REQUEST_CHECKLIST_INCOMPLETE` with `missingChecklistItems`. Withdrawal records the supplied reason and allow-listed checklist in `JOIN_REQUEST_WITHDRAWN`, and the reason is used as the superseded-approval rejection reason.
+
+Safeguard checklist evidence is recorded across admin mutations and exports (wallet/application/link/POS actions, KYB documents, credential sets, commission/velocity lifecycle, reporting rules/schemas, filing adapters, incidents, backups, object-storage legal holds and maintenance, report-engine publish/suspend/reconcile, academy exams and team export, sandbox resets/scenarios/transactions). Core allow-lists the keys per action, stores them in the audit `afterJson` or the approval payload, and does not treat the list as authorization. Incident transitions store the checklist in the timeline `detailJson` and the audit; incident communications are audited with their checklist. Approval subject context now resolves `WALLET`, `APPLICATION` and `POS_TERMINAL` for the Approvals drawer, alongside the existing subjects.
 
 The four-eyes decision (`core-back/api/internal/merchant.ts:358`) reads `join_request.four_eyes_policy` and supports `ALWAYS`, `RISK_BASED`, and `NEVER`. Risk-based triggers include high risk tier, any screening match list, PEP owners, large ownership share, high-risk category, previous rejection, duplicate/related flags, payout owner mismatch, and expected volume above threshold.
 
@@ -247,7 +250,7 @@ Dispute intake is exposed as `POST /admin/disputes`; the route queues an `ADJUST
 
 There is no webhook or statement dispute-intake wiring in `DynamicRailEngine` or reconciliation; the admin manual route is the implemented intake path.
 
-Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` holds the adjustment and opens an operator case. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id. The refund template follows the ownership mode of the payment (`refundScenarioFor`, see `core.ledger`): a `MERCHANT_DIRECT` refund only reverses the commission recognition (`Dr PLATFORM_INCOME` / `Cr COMMISSION_RECEIVABLE`) and never debits the wallet or credits treasury; with nothing to reverse the adjustment is `EXECUTED` with no journal entry.
+Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` on a LOST outcome, computed on the posting-currency wallet balance, holds the adjustment and opens an operator case. When a non-merchant-direct reserve was already posted, a LOST outcome posts only `CHARGEBACK_RESERVE_AND_LOST` (reserve to treasury), not a second wallet debit; a merchant-direct LOST reverses only the commission, while a merchant-direct WON posts no journal. Rejecting a chargeback releases an existing reserve once and is idempotent; a chargeback rejection with no reserve posts nothing. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id. The refund template follows the ownership mode of the payment (`refundScenarioFor`, see `core.ledger`): a `MERCHANT_DIRECT` refund only reverses the commission recognition (`Dr PLATFORM_INCOME` / `Cr COMMISSION_RECEIVABLE`) and never debits the wallet or credits treasury; with nothing to reverse the adjustment is `EXECUTED` with no journal entry.
 
 ### 3.8 Cash-outs
 
@@ -495,3 +498,11 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 - **DOCX is a first-class schema format.** `buildSchemaValidation`, DRAFT schema `PUT`, `simulate` and `clone` now use `parseDocxNarrativeSchema` and `renderRegulatoryDocx`; cloning copies the XLSX template binding. Simulation of a template-backed XLSX schema decrypts the template instead of silently rendering generated mode.
 - **Incidents are operationally complete.** List/detail responses resolve commander, reporter, timeline actor, action owner and communication sender names from the referenced users. The list returns server-side summary counts and filters/pagination are forwarded by the edge. Child writes are audited; transitions and postmortem edits lock the incident row; report drafting takes an advisory lock so concurrent requests cannot create two reports. Incident reporting is intentionally allowed from any lifecycle state (the owner decision), with the UI confirmation.
 - **Filing adapters are maker-checker.** Create, update and disable produce `FILING_ADAPTER` approvals; the adapter row stays `DISABLED` until a checker applies the encrypted secret/endpoint/status changes. `configJson` rejects secret-looking keys and is redacted on output; HTTP endpoints remain public-HTTPS-only. `POST /reports/:id/file` creates a PENDING submission before dispatch, records failure, blocks duplicate PENDING/SUBMITTED attempts and audits a reconciliation case if the report state cannot be advanced after a successful external send. Manual submissions now record a `MANUAL` `ExternalSubmission` and appear in the same history.
+
+## 19. Multi-currency ceilings and aggregate rules (2026-11-24)
+
+`commissionReceivableCeiling` and `negativeBalanceCeiling` are evaluated per posting currency; a scalar never mixes LYD/USD/EUR. The admission guard passes the link currency, `merchantOpenCashoutTotal` is wallet-currency scoped, the receivable SQL filters all three branches (attempt, adjustment, merchant-level netting), and the netting worker evaluates each currency bucket separately with per-currency aged cases and notices. The generic approval dispatcher now enforces domain checker roles; `approval:check` alone is insufficient.
+
+## 19. Multi-currency ceilings and aggregate rules (2026-11-24)
+
+`commissionReceivableCeiling` and `negativeBalanceCeiling` are evaluated per posting currency; a scalar never mixes LYD/USD/EUR. The admission guard passes the link currency, `merchantOpenCashoutTotal` is wallet-currency scoped, the receivable SQL filters all three branches (attempt, adjustment, merchant-level netting), and the netting worker evaluates each currency bucket separately with per-currency aged cases and notices. The generic approval dispatcher now enforces domain checker roles; `approval:check` alone is insufficient.

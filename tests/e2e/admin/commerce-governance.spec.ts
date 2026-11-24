@@ -91,8 +91,16 @@ test.describe("wallets: containment is immediate, restoring is governed", () => 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText(/takes effect immediately/i)).toBeVisible();
+    for (const label of [
+      "Wallet and merchant scope verified",
+      "Balance and pending cash-outs reviewed",
+      "Reason confirmed",
+      "Authority to change containment confirmed",
+    ]) {
+      await dialog.getByRole("checkbox", { name: label }).check();
+    }
 
-    const reason = dialog.getByLabel(/reason/i);
+    const reason = dialog.getByRole("textbox", { name: /^reason$/i });
     await reason.fill("too short");
     await dialog.getByRole("button", { name: /freeze wallet/i }).last().click();
     expect(statusCalls).toHaveLength(0); // client-side validation: nothing was sent
@@ -110,7 +118,15 @@ test.describe("wallets: containment is immediate, restoring is governed", () => 
     await page.getByText(/^Request unfreeze$/).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText(/four-eyes approval/i)).toBeVisible();
-    await dialog.getByLabel(/reason/i).fill("Investigation closed, no findings against the merchant");
+    for (const label of [
+      "Wallet and merchant scope verified",
+      "Balance and pending cash-outs reviewed",
+      "Reason confirmed",
+      "Authority to change containment confirmed",
+    ]) {
+      await dialog.getByRole("checkbox", { name: label }).check();
+    }
+    await dialog.getByRole("textbox", { name: /^reason$/i }).fill("Investigation closed, no findings against the merchant");
     await dialog.getByRole("button", { name: /request unfreeze/i }).last().click();
     await expect.poll(() => statusCalls.length).toBe(1);
     expect(statusCalls[0]!.body).toMatchObject({ status: "ACTIVE" });

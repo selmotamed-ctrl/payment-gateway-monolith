@@ -73,16 +73,15 @@ export const generateAdminAndStaff = (ctx: SeederContext): void => {
   }
 
   // The automation identity that drafts chargebacks and SUSPENSE refunds.
-  // It mirrors `ensureSystemAutomationUser` (DISABLED, never maker/checker)
-  // with a UUID id: the engine constant `SYSTEM_AUTOMATION` is not a UUID and
-  // cannot be stored in `users.id` (reported separately).
+  // It mirrors `ensureSystemAutomationUser` (DISABLED, never maker/checker,
+  // canonical system email) with a database-assigned UUID id.
   const systemId = ctx.nextId("user");
   ctx.dataset.users.push({
     id: systemId,
     createdAt: start,
     updatedAt: start,
     merchantId: null,
-    email: `system-drafter@${ctx.config.namespace}.pg.internal`,
+    email: "system-drafter@payment-gateway.internal",
     phone: null,
     passwordHash: null,
     role: "OPERATOR",

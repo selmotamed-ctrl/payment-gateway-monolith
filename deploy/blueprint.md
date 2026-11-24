@@ -6,7 +6,7 @@ Generated from: `deploy.topology`, `deploy.planner`, `deploy.pki`, `deploy.firew
 
 ## Deploy Topology and Configuration
 
-> Status: `partial` · Last verified: 2026-11-13
+> Status: `partial` · Last verified: 2026-11-23
 
 ## 1. Purpose and scope
 
@@ -328,6 +328,10 @@ New keys: `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT`
 
 `sandboxDatabase()` derives `pgw_sandbox` (transaction) and `pgw_sandbox_session` (session) PgBouncer aliases; the PostgreSQL provisioner creates `payment_gateway_sandbox` and both aliases. `hostPlanner` emits a second core `ServicePlan` named `pg-core-sandbox` on `SANDBOX_NODE` (or the first core node) with its own release tree, sandbox `DATABASE_URL`/`LEADER_ELECTION_DATABASE_URL`, `EXECUTION_PLANE=SANDBOX`, Fake Rails enabled, backups removed from its env, a firewall rule on 4005 and a core certificate SAN that includes the sandbox IP. `deployService` migrates the sandbox database with the direct sandbox owner URL carrying `app.execution_plane=SANDBOX` (the pooler rejects custom startup options), then `db-seed` and `seed-fake-rails` when seeding is enabled. The seeder stamps an existing sandbox row only when the connected database name matches `SANDBOX_DB_NAME`. Edges receive `SANDBOX_CORE_BACK_URLS`; a sandbox pool failure never falls back to Live. Sandbox and Fake Rails data are deliberately not backup targets.
 
+## Backup and object-storage input hardening (2026-11-23)
+
+`BUN_VERSION` defaults to the tested 1.4.x line (1.4.4) because the committed lockfiles are version 2. `BACKUP_PRIMARY_S3_ENDPOINT` must be an http(s) URL without whitespace or shell metacharacters; `BACKUP_PRIMARY_S3_BUCKET` accepts an S3 bucket/path (optional `s3://`) using safe characters only; `BACKUP_MINIO_VERSION` and `BACKUP_MINIO_BINARY_URL` are restricted to safe tags/URLs; `BACKUP_MINIO_DATA_DIR` uses the safe absolute-path schema and rejects system directories. `BACKUP_ALLOW_INSECURE_HTTP` remains a documented availability option and is rejected only where the object-storage production guard applies. The object-storage and backup certificate directories must be separate and non-nested.
+
 ## Host Planner
 
 > Status: `implemented` · Last verified: 2026-11-05
@@ -617,7 +621,7 @@ The planner's config validation now rejects weak secrets and restricts charsets 
 
 ## Internal PKI and mTLS Certificates
 
-> Status: `partial` · Last verified: 2026-11-12
+> Status: `partial` · Last verified: 2026-11-23
 
 ## 1. Purpose and scope
 
@@ -926,6 +930,10 @@ configured, the `object-storage-client` client certificate. `certFilesForHost`
 gives the storage host its server + client material; core hosts and the backup
 host receive `internal-ca.crt` and `object-storage-client.*`. Certificate placement is per consumer: a co-located core/backup host does not receive the object-storage server key, and the backup host receives the client leaf in its own cert directory. Renewal/SAN drift
 handling includes the object-storage server leaf.
+
+## Certificate ownership on later deploys (2026-11-23)
+
+`uploadStorageCertificates` no longer leaves the object-storage certificate directory root-owned forever on a partial/later deploy. When `pgobjstore` exists, the deploy runs `install -d -m 0750 -o pgobjstore -g pgobjstore <dir>`, `chown -hR` (no symlink following), then `find <dir> -maxdepth 1 -type f -name '*.crt' -exec chmod 0640`, and the same for `*.key` at 0600. `install`/`chown` failures now fail the deploy; only the `find`/`chmod` steps are tolerant of an empty directory. The command is exported as `objectStorageCertOwnershipCommand` and covered by `deploy/test/objectStorageDeploy.test.ts`. `BACKUP_DAEMON_CERT_DIR` and `OBJECT_STORAGE_DAEMON_CERT_DIR` must differ (config validation).
 
 ## Firewall Policy and Application
 
@@ -1582,7 +1590,7 @@ host are configured without `OBJECT_STORAGE_NODE`.
 
 ## Storage Provisioners
 
-> Status: `partial` · Last verified: 2026-11-12
+> Status: `partial` · Last verified: 2026-11-23
 
 ## 1. Purpose and scope
 
@@ -2050,9 +2058,13 @@ object-storage node. Storage roots and cert directories are restricted to
 
 The fresh-host sequence is tested with a fake runner; the real two-host lab remains manual.
 
+## Object-storage certificate ownership (2026-11-23)
+
+The storage certificate upload step hands the object-storage cert directory and files to `pgobjstore` on every deploy where the account exists, so a partial `--only=admin` or later update cannot leave the daemon unable to read its mTLS material. The command uses `find -type f` (no symlink-following globs) and only the empty-directory `chmod`/`find` tail is tolerant; directory creation and ownership failures fail the deploy. The backup and object-storage cert directories are validated as distinct.
+
 ## Backup Daemon
 
-> Status: `partial` · Last verified: 2026-11-12
+> Status: `partial` · Last verified: 2026-11-24
 
 ## 1. Purpose and scope
 
@@ -2144,7 +2156,7 @@ The original design called for a Bun service wrapping WAL-G (same host) or Barma
 2. Makes the data directory startable: a physical backup holds `PGDATA` only and Debian-style clusters keep `postgresql.conf`/`pg_hba.conf` outside it, so a minimal config is generated, sized from `pg_controldata` (hot standby refuses to start below the primary's `max_connections` and related settings).
 3. Appends the recovery settings and forces archiving off (`archive_mode=off`, `archive_command=''`, no slot/standby names, `ssl=off`). The restored `postgresql.auto.conf` carries the production `archive_command`; without this a promoted scratch cluster pushed `00000002.history` and timeline-2 WAL into the production archive in the live test and every later restore failed.
 4. Starts on loopback and waits for recovery to finish and promote (`pg_is_in_recovery() = f`, up to `BACKUP_RECOVERY_TIMEOUT_MS`); a failed start includes the server-log tail.
-5. Runs three checks: double-entry zero drift, sharded balance parity, and the audit hash chain. Core queries run as `PG_PRIMARY_USER`; audit queries always run as `PG_AUDIT_USER` (the primary role when unset), because only the audit role is granted on the audit database and a dedicated audit cluster does not have the core application role.
+5. Runs three checks: double-entry zero drift, sharded balance parity, and the audit hash chain. When object storage is configured it also compares the full restored ACTIVE object set with the `object-storage/active-manifest.json` captured by the backup, then decrypts a bounded sample. Core queries run as `PG_PRIMARY_USER`; audit queries always run as `PG_AUDIT_USER` (the primary role when unset), because only the audit role is granted on the audit database and a dedicated audit cluster does not have the core application role.
 6. Signs the report with HMAC-SHA256 and destroys the scratch cluster.
 
 The audit chain accepts either canonical form: the database's own `before_json::text`/`after_json::text` with the timestamp formatted as the trigger formats it (what the trigger hashes), or the application's stable-JSON form; `seq_no` must be gap-free so a deleted row is detected. In a shared cluster a missing audit database is restored from the newest logical dump into the same scratch cluster.

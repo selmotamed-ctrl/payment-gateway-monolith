@@ -51,6 +51,17 @@ describe("checkout sandbox forwarding", () => {
     expect(core.requests[before]?.url).toBe("/internal/checkout/pay/pl_test123");
   });
 
+  test("a public certificate verification is forwarded to the checkout core", async () => {
+    const before = core.requests.length;
+    const publicId = "opaquePublicId0123456789abcdef";
+    const response = await fetch(`${base}/api/v1/verify/certificate/${encodeURIComponent(publicId)}`);
+    expect(response.status).toBe(200);
+    expect(core.requests[before]?.url).toBe(`/internal/checkout/academy/certificates/${encodeURIComponent(publicId)}`);
+    const body = await response.json() as { status?: string; certificateId?: string };
+    expect(body.status).toBe("valid");
+    expect(body.certificateId).toBe("ABCDEF0123456789");
+  });
+
   test("the inspector is refused on a live link without touching core", async () => {
     const before = core.requests.length;
     const response = await fetch(`${base}/api/v1/pay/pl_test123/sandbox-accounts`);

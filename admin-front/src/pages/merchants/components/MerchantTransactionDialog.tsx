@@ -16,6 +16,9 @@ import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MetaPill } from "@/components/ui/MetaPill";
+import { FormModal } from "@/components/ui/FormModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
 import { LedgerRefLink } from "@/components/ledger/LedgerRefLink";
 import { formatDateTime } from "@/components/ledger/format";
@@ -44,7 +47,7 @@ const MerchantTransactionDialog = dc(
         canInquire?: boolean;
         onUpdate: (open: boolean) => void;
         /** When given and the root attempt is shown, the parent owns the inquiry (and its refresh). */
-        onInquire?: (transaction: MerchantTransaction) => void;
+        onInquire?: (transaction: MerchantTransaction, request: { checklist: string[] }) => void;
         onOpenCase?: (caseId: string) => void;
         /** Called after an action changed the attempt (inquiry scheduled). */
         onChanged?: () => void;
@@ -56,6 +59,15 @@ const MerchantTransactionDialog = dc(
         const detail = ref<AttemptDetail | null>(null);
         const loading = ref(false);
         const error = ref<string | null>(null);
+        const inquiryOpen = ref(false);
+        const inquiryChecklist = ref<Record<string, boolean>>({});
+        const showChecklists = areChecklistsVisible();
+        const inquiryChecks = [
+            { key: "INQUIRY_ELIGIBILITY_VERIFIED", label: "Attempt status and inquiry eligibility verified" },
+            { key: "PAYMENT_STATE_REVIEWED", label: "Current payment state reviewed" },
+            { key: "GATEWAY_CONTACT_CONFIRMED", label: "Gateway status inquiry confirmed" },
+        ] as const;
+        const inquiryChecklistComplete = computed(() => !showChecklists || inquiryChecks.every((check) => inquiryChecklist.value[check.key] === true));
         const tab = ref<TabKey>("summary");
         const activeId = ref<string | null>(null);
         const expandedSteps = ref<Set<string>>(new Set());
@@ -124,23 +136,37 @@ const MerchantTransactionDialog = dc(
                 canInquire: canInquirePermission.value,
                 canAdjust: hasOneOfAuthorities(["finance:write"]),
                 canDispute: hasOneOfAuthorities(["dispute:write"]),
-                inquiryEligible: isRoot.value ? props.transaction?.inquiryEligible : undefined,
+                inquiryEligible: detail.value?.inquiryEligibility?.eligible
+                    ?? (isRoot.value ? props.transaction?.inquiryEligible : undefined),
             }),
         );
 
         const close = () => props.onUpdate(false);
 
+        const openInquiry = () => {
+            if (inquiring.value) return;
+            inquiryChecklist.value = {};
+            inquiryOpen.value = true;
+        };
+
         const inquire = async () => {
             const id = activeId.value;
             if (!id || inquiring.value) return;
+            if (!inquiryChecklistComplete.value) {
+                showSnackBar({ type: "warning", message: t("Complete all inquiry checklist items before continuing") });
+                return;
+            }
+            const checklist = inquiryChecks.filter((check) => inquiryChecklist.value[check.key]).map((check) => check.key);
             if (props.onInquire && props.transaction && isRoot.value) {
-                props.onInquire(props.transaction);
+                props.onInquire(props.transaction, { checklist });
+                inquiryOpen.value = false;
                 return;
             }
             inquiring.value = true;
             try {
-                await api.post(urlsMap.attemptInquire(id), {});
+                await api.post(urlsMap.attemptInquire(id), { checklist });
                 showSnackBar({ type: "success", message: t("Attempt inquiry scheduled") });
+                inquiryOpen.value = false;
                 props.onChanged?.();
                 await load(id);
             } catch (cause) {
@@ -511,7 +537,7 @@ const MerchantTransactionDialog = dc(
                             footer: () => (
                                 <>
                                     {footerActions.value.includes("inquire") && (
-                                        <VBtn variant="tonal" prependIcon="mdi-radar" loading={inquiring.value} onClick={() => void inquire()}>
+                                        <VBtn variant="tonal" prependIcon="mdi-radar" loading={inquiring.value} onClick={openInquiry}>
                                             {t("Schedule inquiry")}
                                         </VBtn>
                                     )}
@@ -550,6 +576,25 @@ const MerchantTransactionDialog = dc(
                             }}
                         />
                     )}
+<FormModal
+                        modelValue={inquiryOpen.value}
+                        onUpdate:modelValue={(value: boolean) => (inquiryOpen.value = value)}
+                        title={t("Schedule gateway inquiry")}
+                        size="md"
+                        loading={inquiring.value}
+                        submitLabel={t("Schedule inquiry")}
+                        onSubmit={() => void inquire()}
+                    >
+                        <FormChecklist
+                            checks={[...inquiryChecks]}
+                            modelValue={inquiryChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (inquiryChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Inquiry checklist")}
+                            complete={inquiryChecklistComplete.value}
+                            incompleteMessage={t("Complete all inquiry checklist items before continuing")}
+                        />
+                    </FormModal>
                 </>
             );
         };

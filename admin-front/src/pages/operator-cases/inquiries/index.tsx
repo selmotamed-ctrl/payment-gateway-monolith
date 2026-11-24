@@ -1,6 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, ref, watch } from "vue";
 import { useLocale, useTheme } from "vuetify";
+import { areChecklistsVisible } from "@/constants/env";
 import { useRoute, useRouter } from "vue-router";
 import { VAlert, VBtn, VTextarea } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -26,14 +27,37 @@ import type {
 } from "../types";
 
 import { FormModal } from "@/components/ui/FormModal";
-import { MetricStrip } from "@/components/ui/MetricStrip";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import { xlsxUIPipeline } from "@/utils/xlsx";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { StatusBadge, type BadgeTone } from "@/components/ui/StatusBadge";
 import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { EmptyState } from "@/components/ui/EmptyState";
 const filterDefinitions = tableRegistry.GatewayInquiries?.filters ?? [];
+
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "INQUIRY_SCOPE_VERIFIED", label: "Inquiry scope verified" },
+    { key: "SCHEDULE_STATUS_REVIEWED", label: "Schedule status breakdown reviewed" },
+    { key: "OVERDUE_BACKLOG_REVIEWED", label: "Overdue backlog reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const CANCEL_CHECKS = [
+    { key: "SCHEDULE_STATE_VERIFIED", label: "Schedule state verified" },
+    { key: "ATTEMPT_IMPACT_REVIEWED", label: "Payment-attempt impact reviewed" },
+    { key: "CANCEL_REASON_VERIFIED", label: "Cancellation reason verified" },
+    { key: "ACTION_APPROVAL_CONFIRMED", label: "Action approval confirmed" },
+] as const;
+
+const RUN_CHECKS = [
+    { key: "SCHEDULE_STATE_VERIFIED", label: "Schedule state verified" },
+    { key: "ATTEMPT_STATUS_VERIFIED", label: "Payment-attempt status verified" },
+    { key: "RATE_LIMIT_REVIEWED", label: "Partner rate limit reviewed" },
+    { key: "ACTION_APPROVAL_CONFIRMED", label: "Action approval confirmed" },
+] as const;
 
 const statusLabel = (status: string): string =>
     status
@@ -144,6 +168,32 @@ const GatewayInquirySchedulesPage = dc(() => {
     const total = ref(0);
     const summary = ref<GatewayInquiryScheduleSummary | null>(null);
     const summaryLoading = ref(false);
+    const copyInquirySummary = async (row: GatewayInquirySchedule) => {
+        const summary = {
+            id: row.id,
+            scheduleId: row.id,
+            caseRef: row.caseRef,
+            operatorCaseId: row.operatorCaseId,
+            attemptReference: row.attemptReference,
+            gateway: row.gatewayName || row.gatewayCode,
+            status: row.status,
+            scheduledAt: row.scheduledAt,
+            nextRunAt: row.nextRunAt ?? null,
+            attempts: row.attempts,
+            lastResult: row.lastResult ?? null,
+            lastError: row.lastError ?? null,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Inquiry schedule summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
     const pageSize = ref(20);
     const refreshHook = ref<{
         reset: () => void;
@@ -156,6 +206,10 @@ const GatewayInquirySchedulesPage = dc(() => {
     const actionRow = ref<GatewayInquirySchedule | null>(null);
     const actionReason = ref("");
     const actionLoading = ref(false);
+    const showChecklists = areChecklistsVisible();
+    const actionChecklist = ref<Record<string, boolean>>({});
+    const actionChecks = computed(() => actionMode.value === "cancel" ? CANCEL_CHECKS : RUN_CHECKS);
+    const actionChecklistComplete = computed(() => !showChecklists || actionChecks.value.every((check) => actionChecklist.value[check.key] === true));
 
     const detailOpen = ref(false);
     const detailLoading = ref(false);
@@ -183,6 +237,41 @@ const GatewayInquirySchedulesPage = dc(() => {
     };
 
     void loadSummary();
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.gatewayInquiriesSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const snapshot = (response.data?.data ?? response.data ?? {}) as GatewayInquiryScheduleSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total", snapshot.total],
+                ["scheduled", snapshot.scheduled],
+                ["running", snapshot.running],
+                ["retrying", snapshot.retrying],
+                ["completed", snapshot.completed],
+                ["failed", snapshot.failed],
+                ["cancelled", snapshot.cancelled],
+                ["expired", snapshot.expired],
+                ["overdue", snapshot.overdue],
+            ];
+            for (const [status, count] of Object.entries(snapshot.byStatus ?? {})) rows.push([`status.${status}.count`, count]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({ title: `gateway-inquiry-summary-${new Date().toISOString().slice(0, 10)}.xlsx`, lines });
+            showSnackBar({ type: "success", message: t("Gateway inquiry summary exported") });
+        } catch (error) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(error) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
+    };
 
     const refreshAll = () => {
         refreshHook.value?.refreshAsIs();
@@ -224,12 +313,14 @@ const GatewayInquirySchedulesPage = dc(() => {
         actionMode.value = mode;
         actionRow.value = row;
         actionReason.value = "";
+        actionChecklist.value = {};
     };
 
     const closeAction = () => {
         actionMode.value = null;
         actionRow.value = null;
         actionReason.value = "";
+        actionChecklist.value = {};
     };
 
     const actionTitle = computed(() => {
@@ -254,11 +345,18 @@ const GatewayInquirySchedulesPage = dc(() => {
             showSnackBar({ type: "warning", message: t("A cancellation reason of at least 3 characters is required") });
             return;
         }
+        if (!actionChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all inquiry action checklist items before submitting") });
+            return;
+        }
         actionLoading.value = true;
         try {
-            const body = { reason: actionReason.value.trim() || undefined };
+            const body = {
+                reason: actionReason.value.trim() || undefined,
+                checklist: actionChecks.value.filter((check) => actionChecklist.value[check.key]).map((check) => check.key),
+            };
             if (mode === "cancel") {
-                await api.post(urlsMap.gatewayInquiryCancel(row.id), { reason: actionReason.value.trim() });
+                await api.post(urlsMap.gatewayInquiryCancel(row.id), { reason: actionReason.value.trim(), checklist: body.checklist });
             } else if (mode === "run-now") {
                 await api.post(urlsMap.gatewayInquiryRunNow(row.id), body);
             } else {
@@ -416,6 +514,7 @@ const GatewayInquirySchedulesPage = dc(() => {
                     }}
                     items={[
                         { key: "view", label: t("View"), icon: "mdi-eye-outline", onClick: () => void openDetail(row) },
+                        { key: "copy", label: t("Copy summary"), icon: "mdi-content-copy", onClick: () => void copyInquirySummary(row) },
                         {
                             key: "cancel",
                             label: t("Cancel"),
@@ -461,7 +560,21 @@ const GatewayInquirySchedulesPage = dc(() => {
                     {t("Schedules are created when an operator requests a gateway status inquiry. The platform poll worker performs the inquiry and updates the schedule status.")}
                 </VAlert>
 
-                {cards.value.length > 0 && <MetricStrip items={cards.value} loading={summaryLoading.value} />}
+                {cards.value.length > 0 && (
+                    <SummaryExportCard
+                        title={t("Inquiry queue health")}
+                        metrics={cards.value}
+                        checks={[...SUMMARY_EXPORT_CHECKS]}
+                        checklist={summaryExportChecklist.value}
+                        onUpdate:checklist={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                        showChecklists={showChecklists}
+                        checklistComplete={summaryExportChecklistComplete.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
+                        exportLabel={t("Export summary")}
+                        onExport={() => void exportSummary()}
+                    />
+                )}
 
                 <ApiTable<GatewayInquirySchedule>
                     title={t("Gateway Inquiry Schedule")}
@@ -544,6 +657,15 @@ const GatewayInquirySchedulesPage = dc(() => {
                         rows={3}
                     />
                 </FormField>
+                <FormChecklist
+                    checks={[...actionChecks.value]}
+                    modelValue={actionChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (actionChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Inquiry action checklist")}
+                    complete={actionChecklistComplete.value}
+                    incompleteMessage={t("Complete all inquiry action checklist items before submitting")}
+                />
             </FormModal>
 
             <SlideOverDrawer

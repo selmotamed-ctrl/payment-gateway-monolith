@@ -155,12 +155,15 @@ describe("F-D: regulatory report lifecycle and rule promotion", () => {
     await approve(fixture, created.approvalRequestId);
 
     // Promotion only happens through a maker/checker approval.
+    const checklist = ["RULE_SCOPE_VERIFIED", "EFFECTIVE_DATE_VERIFIED", "APPROVAL_PATH_VERIFIED", "PROMOTION_ACKNOWLEDGED"];
     const promotion = await proposeReportingRulePromotion(fixture.client as never, {
       ruleId: RULE_ID,
       actorUserId: MAKER,
       actorRole: "COMPLIANCE",
+      checklist,
     });
     expect(fakeTable("reportingRule").find((row) => row.id === RULE_ID)?.status).toBe("PROVISIONAL");
+    expect(fakeTable("auditLog").find((row) => row.action === "REPORTING_RULE_PROMOTION_PROPOSED")?.afterJson).toMatchObject({ checklist });
 
     await expect(approve(fixture, promotion.approvalRequestId, MAKER)).rejects.toMatchObject({
       code: "APPROVAL_MAKER_EQUALS_CHECKER",

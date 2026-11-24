@@ -1,5 +1,6 @@
 import { computed, defineComponent, onMounted, ref, type VNodeChild } from "vue";
 import { useLocale } from "vuetify";
+import { VBtn } from "vuetify/components";
 import { AcademyShell, Skeleton, useAcademyData, userRole } from "@/components/academy/AcademyShell";
 import { TrackCard } from "@/components/academy/TrackCard";
 import { trackStats } from "@/components/academy/nextStep";
@@ -7,6 +8,7 @@ import { Callout } from "@/components/academy/ui/Callout";
 import { useAcademyProgress } from "@/components/academy/useAcademyProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { showSnackBar } from "@/utils/snackBar";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { roleTrackFor, type TrackId } from "@/content/academy";
@@ -35,6 +37,27 @@ export const AdminAcademyTracksPage = defineComponent({
         });
 
         onMounted(() => void data.loadCore(false, false));
+
+        const copyTracksSummary = async () => {
+            const summary = data.tracks.value.map((track) => {
+                const stats = trackStats(track, academy.progress.value);
+                return {
+                    id: track.id,
+                    title: track.title,
+                    lessons: `${stats.lessonsDone}/${stats.lessonsTotal}`,
+                    labs: `${stats.labsPassed}/${stats.labsTotal}`,
+                    examPassed: stats.examPassed,
+                    badgeState: academy.badgeState(track.id, recertifyFrom.value),
+                    required: required.includes(track.id),
+                };
+            });
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+                showSnackBar({ type: "success", message: t("Tracks summary copied") });
+            } catch {
+                showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+            }
+        };
 
         return () => {
             const body = (): VNodeChild => {
@@ -80,7 +103,17 @@ export const AdminAcademyTracksPage = defineComponent({
             };
             return (
                 <AcademyShell
-                    header={() => <PageHeader title={t("Tracks")} subtitle={t("Everyone starts with Foundation, then takes the track for their role.")} />}
+                    header={() => (
+                        <PageHeader
+                            title={t("Tracks")}
+                            subtitle={t("Everyone starts with Foundation, then takes the track for their role.")}
+                            end={() => (
+                                <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyTracksSummary()}>
+                                    {t("Copy tracks summary")}
+                                </VBtn>
+                            )}
+                        />
+                    )}
                 >
                     {body()}
                 </AcademyShell>

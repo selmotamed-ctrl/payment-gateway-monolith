@@ -77,6 +77,8 @@ router.post(
  * Public: a staff invitee accepts the invitation emailed to them and chooses their own password and the
  * phone that receives their sign-in codes. The account stays INVITED until a checker approves activation.
  */
+const mfaResendSchema = z.object({ challengeId: z.string().uuid() }).strict();
+
 const acceptInvitationSchema = z
   .object({
     token: z.string().min(16).max(256),
@@ -91,6 +93,15 @@ router.post(
     method: "POST",
     path: () => "/internal/admin/auth/accept-invitation",
     schema: acceptInvitationSchema,
+  }),
+);
+
+router.post(
+  "/mfa/resend",
+  coreForward({
+    method: "POST",
+    path: () => "/internal/admin/auth/mfa/resend",
+    schema: mfaResendSchema,
   }),
 );
 

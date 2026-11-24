@@ -36,6 +36,7 @@ interface Window {
         showChecklists?: boolean;
         showSnapshotExportChecklist?: boolean;
         showHelpPanels?: boolean;
+        academyCertificateVerifyUrl?: string;
     };
     $confirmDialog: {
         show: (opts: ConfirmOptions) => Promise<boolean>;

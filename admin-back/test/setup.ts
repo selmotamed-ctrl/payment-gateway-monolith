@@ -1,5 +1,6 @@
 // Preloaded by bunfig.toml before any test file. See the note there.
 process.env.ADMIN_RATE_LIMIT_MAX ??= "1000000";
+process.env.BACKUP_JOB_RATE_LIMIT_MAX ??= "1000000";
 
 import { afterAll } from "bun:test";
 

@@ -442,7 +442,10 @@ export const cleanupLedger = async (
     });
   });
   if (accountIds.length > 0) {
-    await client.glShardRepair.deleteMany({ where: { glAccountId: { in: accountIds } } });
+    await client.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SELECT set_config('pgw.append_only_maintenance', 'on', true)");
+      await tx.glShardRepair.deleteMany({ where: { glAccountId: { in: accountIds } } });
+    });
     await client.glShardCheckpoint.deleteMany({ where: { glAccountId: { in: accountIds } } });
     await client.glAccountShard.deleteMany({
       where: { glAccountId: { in: accountIds } },

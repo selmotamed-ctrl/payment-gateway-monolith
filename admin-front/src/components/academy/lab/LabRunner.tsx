@@ -1,4 +1,4 @@
-import { computed, defineComponent, reactive, ref, watch, type PropType } from "vue";
+import { computed, defineComponent, nextTick, reactive, ref, watch, type PropType } from "vue";
 import { useLocale } from "vuetify";
 import { VBtn, VIcon } from "vuetify/components";
 import type { Lab, LabTask } from "@/content/academy";
@@ -16,6 +16,8 @@ import { OrderTask, initialOrder } from "./OrderTask";
 import { ChecklistTask } from "./ChecklistTask";
 import { NumericTask } from "./NumericTask";
 import { LabResult } from "./LabResult";
+import { clearLabDraft, labDraftKey, loadLabDraft, saveLabDraft } from "./labDraftStore";
+import { user } from "@/state/user";
 
 export interface LabBest {
     bestScore: number;
@@ -40,14 +42,51 @@ export const LabRunner = defineComponent({
         const hintShown = reactive<Record<string, boolean>>({});
         const result = ref<LabScore | null>(null);
         const heading = ref<HTMLElement | null>(null);
+        const userId = String(user.value?.userInfo?.id ?? "");
+        const draftStorageKey = labDraftKey(userId || "anonymous", props.lab.id);
+        const draftVersion = props.lab.tasks.map((entry) => entry.id).join("|");
+        const taskIds = new Set(props.lab.tasks.map((entry) => entry.id));
+        const restrictToTasks = <T,>(value: Record<string, T>): Record<string, T> =>
+            Object.fromEntries(Object.entries(value).filter(([key]) => taskIds.has(key)));
+        const storedDraft = userId ? loadLabDraft(window.localStorage, draftStorageKey) : null;
+        const suppressSave = ref(false);
+        if (storedDraft && (!storedDraft.version || storedDraft.version === draftVersion)) {
+            Object.assign(draft, restrictToTasks(storedDraft.draft));
+            Object.assign(submitted, restrictToTasks(storedDraft.submitted));
+            Object.assign(checked, restrictToTasks(storedDraft.checked));
+            Object.assign(hintShown, restrictToTasks(storedDraft.hintShown));
+            stage.value = storedDraft.stage;
+            index.value = Math.min(storedDraft.index, Math.max(0, props.lab.tasks.length - 1));
+        }
+        watch(
+            [stage, index, draft, submitted, checked, hintShown],
+            () => {
+                if (!userId || suppressSave.value || stage.value === "result") return;
+                saveLabDraft(window.localStorage, draftStorageKey, {
+                    stage: stage.value,
+                    index: index.value,
+                    draft: { ...draft },
+                    submitted: { ...submitted },
+                    checked: { ...checked },
+                    hintShown: { ...hintShown },
+                    version: draftVersion,
+                });
+            },
+            { deep: true },
+        );
 
         const reset = () => {
+            suppressSave.value = true;
             for (const bag of [draft, submitted, checked, hintShown] as Record<string, unknown>[]) {
                 for (const key of Object.keys(bag)) delete bag[key];
             }
             stage.value = "brief";
             index.value = 0;
             result.value = null;
+            clearLabDraft(window.localStorage, draftStorageKey);
+            void nextTick(() => {
+                suppressSave.value = false;
+            });
         };
         watch(() => props.lab.id, reset);
 
@@ -87,6 +126,7 @@ export const LabRunner = defineComponent({
             for (const key of Object.keys(hintShown)) hints[key] = Boolean(hintShown[key]);
             result.value = scoreLab(props.lab, { ...submitted }, hints);
             stage.value = "result";
+            clearLabDraft(window.localStorage, draftStorageKey);
             props.onFinish(result.value);
             focusHeading();
         };

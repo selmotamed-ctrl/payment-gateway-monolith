@@ -32,7 +32,10 @@ interface Delegate {
 /** The slice of the Prisma client (or a transaction) the challenge store needs. */
 export interface MfaStore {
   mfaChallenge: Delegate;
-  notification: { create(args: { data: Row }): Promise<Row> };
+  notification: {
+    create(args: { data: Row }): Promise<Row>;
+    updateMany?(args: { where: Row; data: Row }): Promise<{ count: number }>;
+  };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -78,11 +81,18 @@ export const issueMfaChallenge = async (
   if (recent.length >= MFA_MAX_ISSUES_PER_WINDOW) {
     throw new ApiError(429, "MFA_RATE_LIMITED", "Too many verification codes were requested. Try again later");
   }
-  // A new challenge supersedes every open one of the same user.
+  // A new challenge supersedes every open one of the same user, and any queued
+  // SMS for a superseded challenge must not be delivered after the new code.
   await db.mfaChallenge.updateMany({
     where: { userId: input.userId, consumedAt: null },
     data: { consumedAt: now },
   });
+  if (db.notification.updateMany) {
+    await db.notification.updateMany({
+      where: { recipientUserId: input.userId, templateCode: "LOGIN_MFA", status: "QUEUED" },
+      data: { status: "SUPPRESSED" },
+    });
+  }
   const code = generateMfaCode();
   const row = await db.mfaChallenge.create({
     data: {

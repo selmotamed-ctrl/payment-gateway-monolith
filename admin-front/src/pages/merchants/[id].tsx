@@ -19,6 +19,7 @@ import { areHelpPanelsVisible } from "@/constants/env";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { maskEmail } from "@/utils/privacy";
 import {
     COLUMN_HELP,
     formatDateTime,
@@ -58,6 +59,8 @@ import {
 } from "./merchantTableFilters";
 
 import { FormModal } from "@/components/ui/FormModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import { FormField } from "@/components/ui/FormField";
 import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
@@ -127,7 +130,20 @@ const readQueryString = (value: unknown): string | null => {
     return text.length > 0 ? text : null;
 };
 
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "MERCHANT_SCOPE_VERIFIED", label: "Merchant scope verified" },
+    { key: "FINANCIAL_VISIBILITY_REVIEWED", label: "Financial visibility reviewed" },
+    { key: "RISK_AML_REVIEWED", label: "Risk and AML posture reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 type MerchantDetailTab = "all" | "details" | "transactions" | "wallets" | "applications" | "finance" | "compliance" | "access";
+
+const MERCHANT_DETAIL_TABS = new Set<MerchantDetailTab>(["all", "details", "transactions", "wallets", "applications", "finance", "compliance", "access"]);
+const readMerchantDetailTab = (value: unknown): MerchantDetailTab => {
+    const tab = readQueryString(value) as MerchantDetailTab;
+    return MERCHANT_DETAIL_TABS.has(tab) ? tab : "all";
+};
 
 const MerchantDetailPage = dc(() => {
     const { t } = useLocale();
@@ -155,9 +171,13 @@ const MerchantDetailPage = dc(() => {
     const selectedTransaction = ref<MerchantTransaction | null>(null);
     const transactionRefresh = ref<(() => void) | null>(null);
     const summaryExportLoading = ref(false);
+    const summaryExportOpen = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
+    const showChecklists = areChecklistsVisible();
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
     const sectionCommand = ref<SectionCommand | null>(null);
     const sectionCommandSeq = ref(0);
-    const activeTab = ref<MerchantDetailTab>(readQueryString(route.query.tab) === "transactions" ? "transactions" : "all");
+    const activeTab = ref<MerchantDetailTab>(readMerchantDetailTab(route.query.tab));
     const reference = computed(() => readQueryString(route.query.reference));
     const openWallet = (id: string) => void router.push({ name: "WalletDetail", params: { id } });
     const openApplicationId = ref<string | null>(null);
@@ -173,9 +193,19 @@ const MerchantDetailPage = dc(() => {
     watch(
         () => readQueryString(route.query.tab),
         (tab) => {
-            if (tab === "transactions") activeTab.value = "transactions";
+            const next = readMerchantDetailTab(tab);
+            if (next !== activeTab.value) activeTab.value = next;
         },
     );
+
+    const setActiveTab = (value: string) => {
+        const tab = readMerchantDetailTab(value);
+        activeTab.value = tab;
+        const nextQuery = { ...route.query };
+        if (tab === "all") delete nextQuery.tab;
+        else nextQuery.tab = tab;
+        void router.replace({ query: nextQuery });
+    };
 
     const merchantId = computed(() => String(route.params.id ?? ""));
     const currentUserId = computed(() => user.value?.userInfo?.id ?? null);
@@ -188,15 +218,21 @@ const MerchantDetailPage = dc(() => {
     const canWriteCommerce = computed(() => hasOneOfAuthorities(["merchant:write"]));
     const statusHelp = computed(() => merchantStatusHelp(merchant.value?.status ?? ""));
     const balance = computed(() => merchant.value?.walletBalance?.balance ?? null);
-    const currency = computed(() => merchant.value?.walletBalance?.wallets?.[0]?.currency ?? "LYD");
+    const currency = computed(() => stats.value?.currency ?? merchant.value?.walletBalance?.wallets?.[0]?.currency ?? "LYD");
     const asBadgeTone = (tone: ReturnType<typeof statusTone>): BadgeTone =>
         tone === "error" ? "danger" : tone === "primary" ? "info" : tone;
 
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
         summaryExportLoading.value = true;
         try {
-            const response = await api.get(urlsMap.merchantSummaryExport(merchantId.value));
+            const response = await api.get(urlsMap.merchantSummaryExport(merchantId.value), {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
             const payload = (response.data?.data ?? response.data ?? {}) as Record<string, any>;
             const merchant = (payload.merchant ?? {}) as Record<string, any>;
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
@@ -236,6 +272,8 @@ const MerchantDetailPage = dc(() => {
                 title: `merchant-360-${merchantId.value}-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            summaryExportOpen.value = false;
+            summaryExportChecklist.value = {};
             showSnackBar({ type: "success", message: t("Merchant 360 summary exported") });
         } catch (cause) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
@@ -287,15 +325,53 @@ const MerchantDetailPage = dc(() => {
         transactionOpen.value = true;
     };
 
-    const inquireTransaction = async (transaction: MerchantTransaction) => {
+    const inquireTransaction = async (transaction: MerchantTransaction, request: { checklist: string[] }) => {
         try {
-            await api.post(urlsMap.attemptInquire(transaction.id), {});
+            await api.post(urlsMap.attemptInquire(transaction.id), request);
             showSnackBar({ type: "success", message: t("Attempt inquiry scheduled") });
             transactionOpen.value = false;
             transactionRefresh.value?.();
             await load();
         } catch (cause) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
+        }
+    };
+
+    const copyMerchantSummary = async () => {
+        const entry = merchant.value;
+        if (!entry) return;
+        const summary = {
+            id: entry.id,
+            legalName: entry.legalName,
+            tradeName: entry.tradeName,
+            displayName: entry.displayName,
+            status: entry.status,
+            kybStatus: entry.kybStatus ?? null,
+            riskTier: entry.riskTier ?? null,
+            version: entry.version,
+            contactEmail: maskEmail(entry.contactEmail),
+            country: entry.country,
+            counts: {
+                wallets: entry.walletCount,
+                applications: entry.applicationCount,
+                users: entry.userCount,
+                tokens: entry.tokenCount,
+                joinRequests: entry.joinRequestCount,
+                kybDocuments: entry.kybDocumentCount,
+                pendingApprovals: entry.pendingApprovalCount,
+            },
+            activatedAt: entry.activatedAt,
+            suspendedAt: entry.suspendedAt,
+            closedAt: entry.closedAt,
+            nextKybReviewAt: entry.nextKybReviewAt ?? null,
+            redactedFields: entry.redactedFields,
+            url: window.location.href,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Merchant summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
         }
     };
 
@@ -894,7 +970,8 @@ const MerchantDetailPage = dc(() => {
                                     </>
                                 )}
                                 <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
-                                <VBtn variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn>
+                                <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyMerchantSummary()}>{t("Copy summary")}</VBtn>
+                                <VBtn variant="tonal" prependIcon="mdi-download" loading={summaryExportLoading.value} onClick={() => { summaryExportChecklist.value = {}; summaryExportOpen.value = true; }}>{t("Export summary")}</VBtn>
                                 {canWrite.value && (
                                     <>
                                         <VBtn variant="tonal" prependIcon="mdi-pencil-outline" onClick={() => openEdit("DESCRIPTIVE")}>{t("Edit descriptive")}</VBtn>
@@ -956,7 +1033,7 @@ const MerchantDetailPage = dc(() => {
                     <SegmentedTabs
                         modelValue={activeTab.value}
                         tabs={detailTabs.value}
-                        onUpdate:modelValue={(value: string) => (activeTab.value = value as MerchantDetailTab)}
+                        onUpdate:modelValue={setActiveTab}
                     />
 
                     {activeTab.value === "all" && areHelpPanelsVisible() && <SurfaceCard><SurfaceCardText><MerchantHelpPanel /></SurfaceCardText></SurfaceCard>}
@@ -1387,7 +1464,7 @@ const MerchantDetailPage = dc(() => {
                     transaction={selectedTransaction.value}
                     canInquire={canInquire.value}
                     onUpdate={(value) => (transactionOpen.value = value)}
-                    onInquire={(transaction) => void inquireTransaction(transaction)}
+                    onInquire={(transaction, request) => void inquireTransaction(transaction, request)}
                     onOpenCase={(caseId) => {
                         transactionOpen.value = false;
                         void router.push({ name: "OperatorCaseDetail", params: { id: caseId } });
@@ -1426,6 +1503,27 @@ const MerchantDetailPage = dc(() => {
                     errorMessage={walletModalError.value}
                     onSubmit={(reason: string) => void submitWalletAction(reason)}
                 />
+                <FormModal
+                    modelValue={summaryExportOpen.value}
+                    onUpdate:modelValue={(value: boolean) => (summaryExportOpen.value = value)}
+                    title={t("Export Merchant 360 summary")}
+                    size="md"
+                    loading={summaryExportLoading.value}
+                    submitLabel={t("Export")}
+                    onSubmit={() => void exportSummary()}
+                >
+                    <VAlert type="warning" variant="tonal">{t("The summary can include balances, disputes, cash-outs and AML counts. Respect the requester's authority and the merchant's confidentiality.")}</VAlert>
+                    <FormChecklist
+                        checks={[...SUMMARY_EXPORT_CHECKS]}
+                        modelValue={summaryExportChecklist.value}
+                        onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                        show={showChecklists}
+                        title={t("Summary export checklist")}
+                        complete={summaryExportChecklistComplete.value}
+                        incompleteMessage={t("Complete all summary export checklist items before exporting")}
+                    />
+                </FormModal>
+
                 <FormModal
                     modelValue={withdrawOpen.value}
                     onUpdate:modelValue={(value: boolean) => (withdrawOpen.value = value)}

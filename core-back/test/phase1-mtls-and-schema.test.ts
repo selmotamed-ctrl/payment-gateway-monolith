@@ -155,6 +155,8 @@ const designModelNames = [
   // Type-aware operator case management (schema version 41).
   "OperatorCaseEvent",
   "OperatorCaseLink",
+  // Opaque Academy certificates (schema version 42).
+  "AcademyCertificate",
 ];
 
 describe("prisma schema", () => {
@@ -216,10 +218,10 @@ describe("prisma schema", () => {
     // The automation plan adds one migration per item; the ledger query/index optimisation is applied after them
     // (schema version 25) so its partition function carries both the automation security hardening and the
     // append-only autovacuum settings. The newest migration must be well-formed and set the required version.
-    // The newest migration (schema version 41) sets the version that means "both 40s applied": the merchant
-    // header/footer tenant fix (claude-fixes) and the route health automation (master). Neither 40 may be
-    // edited, and the agreement migration runs after both.
-    expect(ordered.at(-1)).toBe("20261116130000_schema_version_agreement");
+    // The newest migration (schema version 43) adds the remaining append-only
+    // guards for case events, shard repairs and storage histories. Version 42
+    // added opaque Academy certificates and the report-run checklist.
+    expect(ordered.at(-1)).toBe("20261124150000_currency_context_and_aggregates");
     expect(ordered).toContain("20261116130000_case_management_taxonomy");
     const caseTaxonomy = fs.readFileSync(path.join(migrationsDirectory, "20261116130000_case_management_taxonomy", "migration.sql"), "utf8");
     expect(caseTaxonomy).toContain('"operator_case_events"');
@@ -279,7 +281,7 @@ describe("prisma schema", () => {
     expect(guard).not.toContain("schema_versions");
     const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
     expect(newest).toMatch(new RegExp(`UPDATE "schema_versions"\\s+SET "version" = ${REQUIRED_SCHEMA_VERSION}\\b`));
-    expect(REQUIRED_SCHEMA_VERSION).toBe(41);
+    expect(REQUIRED_SCHEMA_VERSION).toBe(44);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),

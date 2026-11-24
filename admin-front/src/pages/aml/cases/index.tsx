@@ -140,6 +140,12 @@ const SUMMARY_EXPORT_CHECKS = [
     { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
 ] as const;
 
+const AML_EXPORT_CHECKS = [
+    { key: "AML_SCOPE_VERIFIED", label: "AML case scope verified" },
+    { key: "CASE_DATA_REVIEWED", label: "Confidential case data reviewed" },
+    { key: "EXPORT_AUTHORITY_CONFIRMED", label: "Export authority confirmed" },
+] as const;
+
 const AML_CASE_CHECKS = [
     { key: "EVIDENCE_REVIEWED", label: "Evidence reviewed" },
     { key: "SUBJECT_IDENTIFIED", label: "Subject identified and verified" },
@@ -213,6 +219,9 @@ const AmlCasesPage = dc(() => {
     const exportLoading = ref(false);
     const summaryExportLoading = ref(false);
     const summaryExportChecklist = ref<Record<string, boolean>>({});
+    const caseExportOpen = ref(false);
+    const caseExportChecklist = ref<Record<string, boolean>>({});
+    const caseExportChecklistComplete = computed(() => !showChecklists || AML_EXPORT_CHECKS.every((check) => caseExportChecklist.value[check.key] === true));
 
     const filterDefinitions = computed(() => tableRegistry.AmlCases?.filters ?? []);
 
@@ -255,12 +264,17 @@ const AmlCasesPage = dc(() => {
 
     const exportExcel = async () => {
         if (exportLoading.value) return;
+        if (!caseExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const response = await api.get(urlsMap.amlCasesExport, {
                 params: {
                     ...(search.value ? { search: search.value } : {}),
                     ...buildFilterQuery(filterDefinitions.value, filters.value),
+                    checklist: AML_EXPORT_CHECKS.filter((check) => caseExportChecklist.value[check.key]).map((check) => check.key).join(","),
                 },
             });
             const payload = response.data?.data ?? response.data ?? {};
@@ -298,6 +312,8 @@ const AmlCasesPage = dc(() => {
                 title: `aml-cases-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            caseExportOpen.value = false;
+            caseExportChecklist.value = {};
             showSnackBar({
                 type: payload.truncated ? "warning" : "success",
                 message: payload.truncated
@@ -615,7 +631,7 @@ const AmlCasesPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { caseExportChecklist.value = {}; caseExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -857,6 +873,28 @@ const AmlCasesPage = dc(() => {
                 )}
             </SlideOverDrawer>
 
+            <FormModal
+                modelValue={caseExportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (caseExportOpen.value = value)}
+                title={t("Export AML cases")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportExcel()}
+            >
+                <VAlert type="error" variant="tonal">
+                    {t("AML case exports are confidential evidence. Confirm the scope, handling rules and your authority before exporting.")}
+                </VAlert>
+                <FormChecklist
+                    checks={[...AML_EXPORT_CHECKS]}
+                    modelValue={caseExportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (caseExportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("AML case export checklist")}
+                    complete={caseExportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
             <FormModal
                 modelValue={proposeOpen.value}
                 onUpdate:modelValue={(value: boolean) => (proposeOpen.value = value)}

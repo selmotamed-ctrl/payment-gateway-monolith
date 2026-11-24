@@ -1,7 +1,8 @@
 import { dc } from "kt-dc";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { VAlert, VBtn } from "vuetify/components";
+import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -23,6 +24,14 @@ import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { DescriptionList } from "@/components/ui/DescriptionList";
+import { FormModal } from "@/components/ui/FormModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+const EXPORT_CHECKS = [
+    { key: "PROFITABILITY_SCOPE_VERIFIED", label: "Profitability period and scope verified" },
+    { key: "MARGIN_AND_COST_REVIEWED", label: "Margin, gateway cost and chargeback figures reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 type Profitability = {
     period?: string;
     currency?: string;
@@ -67,6 +76,10 @@ const ProfitabilityPage = dc(() => {
     const error = ref<string | null>(null);
     const period = ref<string>("last_30d");
     const exportLoading = ref(false);
+    const exportOpen = ref(false);
+    const showChecklists = areChecklistsVisible();
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
 
     const load = async () => {
         loading.value = true;
@@ -83,11 +96,44 @@ const ProfitabilityPage = dc(() => {
 
     void load();
 
+    const copyProfitabilitySummary = async () => {
+        const snapshot = data.value;
+        if (!snapshot) return;
+        const summary = {
+            period: period.value,
+            currency: snapshot.currency ?? "LYD",
+            window: { start: snapshot.windowStart ?? null, end: snapshot.windowEnd ?? null, days: snapshot.windowDays ?? null },
+            grossCommissionRevenue: snapshot.grossCommissionRevenue ?? null,
+            gatewayCostPeriod: snapshot.gatewayCostPeriod ?? null,
+            periodNetContribution: snapshot.periodNetContribution ?? null,
+            netMargin: snapshot.netMargin ?? null,
+            averageCommission: snapshot.averageCommission ?? null,
+            byRail: snapshot.byRail ?? [],
+            byGateway: snapshot.byGateway ?? [],
+            url: window.location.href,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Profitability summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const exportSnapshot = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
-            const response = await api.get(urlsMap.financeProfitabilityExport, { params: { period: period.value } });
+            const response = await api.get(urlsMap.financeProfitabilityExport, {
+                params: {
+                    period: period.value,
+                    checklist: EXPORT_CHECKS.filter((check) => exportChecklist.value[check.key]).map((check) => check.key).join(","),
+                },
+            });
             const snapshot = (response.data?.data ?? response.data ?? {}) as Profitability;
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
             const rows: Array<[string, unknown]> = [
@@ -137,6 +183,8 @@ const ProfitabilityPage = dc(() => {
                 title: `profitability-${period.value}-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            exportOpen.value = false;
+            exportChecklist.value = {};
             showSnackBar({ type: "success", message: t("Profitability snapshot exported") });
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
@@ -259,7 +307,8 @@ const ProfitabilityPage = dc(() => {
                                 ]}
                             />
                             <VBtn variant="tonal" prependIcon="mdi-refresh" loading={loading.value} onClick={() => void load()}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSnapshot()}>{t("Export snapshot")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!data.value} onClick={() => void copyProfitabilitySummary()}>{t("Copy summary")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export snapshot")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -351,6 +400,27 @@ const ProfitabilityPage = dc(() => {
                     </>
                 )}
             </ThemedView>
+            <FormModal
+                modelValue={exportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                title={t("Export profitability snapshot")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportSnapshot()}
+            >
+                <VAlert type="warning" variant="tonal">{t("The export contains revenue, gateway cost and margin figures. Handle it as confidential financial evidence.")}</VAlert>
+                <FormChecklist
+                    checks={[...EXPORT_CHECKS]}
+                    modelValue={exportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Profitability export checklist")}
+                    complete={exportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
+
         </ScreenContainer>
     );
 });

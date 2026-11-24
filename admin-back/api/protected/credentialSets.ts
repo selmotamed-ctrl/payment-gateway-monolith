@@ -25,12 +25,14 @@ export const credentialSetCreateSchema = z
     externalMerchantId: z.string().min(2).max(120).optional(),
     settlementTarget: z.enum(["PLATFORM_CLEARING", "MERCHANT_DIRECT", "PROVIDER_HELD"]),
     entries: z.array(credentialEntrySchema).min(1).max(40),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
 export const credentialSetUpdateSchema = z
   .object({
     entries: z.array(credentialEntrySchema).min(1).max(40),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -43,6 +45,7 @@ export const credentialSetVerifySchema = z
 export const credentialSetRevokeSchema = z
   .object({
     reason: z.string().min(2).max(500).optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 

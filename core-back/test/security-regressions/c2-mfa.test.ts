@@ -85,6 +85,15 @@ describe("C2 MFA challenge is server-side, single-use and bounded", () => {
     expect(row.maxAttempts).toBe(MFA_MAX_ATTEMPTS);
   });
 
+  test("a resend suppresses the superseded queued SMS notification", async () => {
+    await issue(store);
+    await issue(store);
+    const rows = fakeTable("notification");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.status).toBe("SUPPRESSED");
+    expect(rows[1]!.status).toBe("QUEUED");
+  });
+
   test("a correct code verifies once and the challenge cannot be replayed", async () => {
     const { challengeId } = await issue(store);
     const code = await deliveredCode();

@@ -84,6 +84,19 @@ type ScreeningSummary = {
     byTrigger: Record<string, number>;
     latestScreenedAt: string | null;
 };
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "SCREENING_SCOPE_VERIFIED", label: "Screening scope verified" },
+    { key: "RESULT_TRIGGER_REVIEWED", label: "Result and trigger breakdown reviewed" },
+    { key: "UNRESOLVED_MATCH_REVIEWED", label: "Unresolved matches reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
+const SCREENING_EXPORT_CHECKS = [
+    { key: "SCREENING_SCOPE_VERIFIED", label: "Screening scope verified" },
+    { key: "MATCH_DATA_REVIEWED", label: "Confidential match data reviewed" },
+    { key: "EXPORT_AUTHORITY_CONFIRMED", label: "Export authority confirmed" },
+] as const;
+
 const DISPOSITION_CHECKS = [
     { key: "MATCH_DETAILS_REVIEWED", label: "Match details reviewed" },
     { key: "IDENTITY_EVIDENCE_CHECKED", label: "Identity evidence checked" },
@@ -133,6 +146,10 @@ const AmlScreeningsPage = dc(() => {
     const actionLoading = ref(false);
     const exportLoading = ref(false);
     const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
+    const listExportOpen = ref(false);
+    const listExportChecklist = ref<Record<string, boolean>>({});
+    const listExportChecklistComplete = computed(() => !showChecklists || SCREENING_EXPORT_CHECKS.every((check) => listExportChecklist.value[check.key] === true));
     const filterDefinitions = computed(() => tableRegistry.AmlScreenings?.filters ?? []);
     const unresolvedMatches = computed(() => selected.value?.matches.filter((match) => match.disposition === "UNREVIEWED") ?? []);
     const loadSummary = async () => {
@@ -156,12 +173,17 @@ const AmlScreeningsPage = dc(() => {
     };
     const exportExcel = async () => {
         if (exportLoading.value) return;
+        if (!listExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const response = await api.get(urlsMap.amlScreeningsExport, {
                 params: {
                     ...(search.value ? { search: search.value } : {}),
                     ...buildFilterQuery(filterDefinitions.value, filters.value),
+                    checklist: SCREENING_EXPORT_CHECKS.filter((check) => listExportChecklist.value[check.key]).map((check) => check.key).join(","),
                 },
             });
             const payload = response.data?.data ?? response.data ?? {};
@@ -201,6 +223,8 @@ const AmlScreeningsPage = dc(() => {
                 title: `aml-screenings-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            listExportOpen.value = false;
+            listExportChecklist.value = {};
             showSnackBar({
                 type: payload.truncated ? "warning" : "success",
                 message: payload.truncated
@@ -309,11 +333,19 @@ const AmlScreeningsPage = dc(() => {
             actionLoading.value = false;
         }
     };
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
+
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
         summaryExportLoading.value = true;
         try {
-            const response = await api.get(urlsMap.amlScreeningsSummaryExport);
+            const response = await api.get(urlsMap.amlScreeningsSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
             const snapshot = (response.data?.data ?? response.data ?? {}) as ScreeningSummary;
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
             const rows: Array<[string, unknown]> = [
@@ -434,7 +466,7 @@ const AmlScreeningsPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { listExportChecklist.value = {}; listExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                         </ThemedView>
                     )}
                 />
@@ -447,8 +479,18 @@ const AmlScreeningsPage = dc(() => {
                         metrics={summaryMetrics.value}
                         exportLoading={summaryExportLoading.value}
                         exportLabel={t("Export summary")}
+                        exportDisabled={!summaryExportChecklistComplete.value}
                         onExport={() => void exportSummary()}
                     >
+                        <FormChecklist
+                            checks={[...SUMMARY_EXPORT_CHECKS]}
+                            modelValue={summaryExportChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                            show={showChecklists}
+                            title={t("Summary export checklist")}
+                            complete={summaryExportChecklistComplete.value}
+                            incompleteMessage={t("Complete all summary export checklist items before exporting")}
+                        />
                         <ThemedView style={{ flexDirection: "row", gap: "6px", flexWrap: "wrap" }}>
                             {Object.entries(summary.value.byResult ?? {}).map(([result, count]) => (
                                 <StatusBadge key={result} status={result} label={`${result}: ${count}`} toneOverride={resultTone(result)} />
@@ -605,6 +647,28 @@ const AmlScreeningsPage = dc(() => {
                 )}
             </SlideOverDrawer>
 
+            <FormModal
+                modelValue={listExportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (listExportOpen.value = value)}
+                title={t("Export AML screenings")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportExcel()}
+            >
+                <VAlert type="error" variant="tonal">
+                    {t("AML screening exports contain confidential match data. Confirm scope, handling and authority before exporting.")}
+                </VAlert>
+                <FormChecklist
+                    checks={[...SCREENING_EXPORT_CHECKS]}
+                    modelValue={listExportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (listExportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Screening export checklist")}
+                    complete={listExportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
             <FormModal
                 modelValue={dispositionOpen.value}
                 onUpdate:modelValue={(value: boolean) => (dispositionOpen.value = value)}

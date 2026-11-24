@@ -2,7 +2,7 @@ import express from "express";
 import { z } from "zod";
 import { zJsonObject, zListQuery } from "../../lib/zReady";
 import { toCoreSettingsUpdate } from "../contract";
-import { coreForward } from "../forward";
+import { coreForward, summaryExportQuerySchema } from "../forward";
 import { encode, uuidParamsSchema } from "./mutationSchemas";
 
 const router = express.Router();
@@ -95,6 +95,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/settings/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -111,6 +112,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/settings/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -194,6 +196,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/settings/checkout-support/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -219,6 +222,7 @@ export const notificationTemplateUpdateSchema = z
     subjectTemplate: z.string().max(500).nullable().optional(),
     bodyTemplate: z.string().min(1).max(10000),
     confidentialityClass: z.enum(["PUBLIC", "MERCHANT", "INTERNAL"]).optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 

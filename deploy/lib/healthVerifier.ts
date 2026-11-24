@@ -35,16 +35,27 @@ const sleepSync = (ms: number): void => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
 
-const certsDir = (host: HostPlan, config: DeployConfig): string => {
-  const remoteDir = host.roles.includes("core")
-    ? config.CORE_REMOTE_DIR
+const certsDir = (host: HostPlan, config: DeployConfig, role?: string): string => {
+  const target = role ?? (host.roles.includes("core")
+    ? "core"
     : host.roles.includes("admin")
-      ? config.ADMIN_REMOTE_DIR
+      ? "admin"
       : host.roles.includes("merchant")
-        ? config.MERCHANT_REMOTE_DIR
+        ? "merchant"
         : host.roles.includes("checkout")
-          ? config.CHECKOUT_REMOTE_DIR
+          ? "checkout"
           : host.roles.includes("fake-rails")
+            ? "fake-rails"
+            : "backup");
+  const remoteDir = target === "core"
+    ? config.CORE_REMOTE_DIR
+    : target === "admin"
+      ? config.ADMIN_REMOTE_DIR
+      : target === "merchant"
+        ? config.MERCHANT_REMOTE_DIR
+        : target === "checkout"
+          ? config.CHECKOUT_REMOTE_DIR
+          : target === "fake-rails"
             ? config.FAKE_RAILS_REMOTE_DIR
             : "/var/lib/pg-backup";
   return `${remoteDir}/shared/certs`;
@@ -230,10 +241,10 @@ export const probeEdgeToCore = (
   expectedRelease?: string,
 ): ProbeResult[] => {
   const results: ProbeResult[] = [];
-  const certs = certsDir(host, config);
   const urls = coreUrls && coreUrls.length > 0 ? coreUrls : edgeCoreUrls(config);
   for (const role of ["admin", "merchant", "checkout"] as const) {
     if (!host.roles.includes(role)) continue;
+    const certs = certsDir(host, config, role);
     const channel = role === "checkout" ? "checkout" : role;
     for (const coreUrl of urls) {
       const url = `${coreUrl.replace(/\/$/, "")}/internal/${channel}/health`;

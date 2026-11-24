@@ -3,7 +3,7 @@ id: platform.sandbox
 title: Parallel Sandbox Execution Plane
 status: partial
 confidence: high
-last_verified: 2026-11-16
+last_verified: 2026-11-23
 verified_against: working-tree
 code:
   - core-back/lib/executionPlane.ts
@@ -158,3 +158,7 @@ The Sandbox database is a second object-storage control plane while the vault is
 ## 10. Gaps
 
 See the frontmatter. Deployment now provisions/migrates/seeds the second core and database, and the synthetic clearing statement is ingested through `StatementIngestor`. Remaining: Live-to-sandbox sync of operator-customised reference data (GAP-070), a dedicated Fake Rails challenge table, and sandbox role preview. Both deployment and the full Live mirror require a live two-database run that has not been performed in this workspace.
+
+## Sandbox safeguard checklists (2026-11-23)
+
+Sandbox merchant reset, demo/history seeding, Fake Rails account reset, scenario update, transaction action and global reset accept a checklist. Core allow-lists the keys per action and records them in `sandbox_sync_audits.summaryJson`; the checklist is never forwarded to Fake Rails. Merchant reset now requires `confirm: "RESET"` (the admin proxy forwards `confirm` and `checklist`). Sandbox audit rows use `actorId = principal.userId ?? null` and never the literal `"SYSTEM"` in the UUID column. The admin seed checklist is sent for demo/history seed; the detail and list pages both open the checklist modal.

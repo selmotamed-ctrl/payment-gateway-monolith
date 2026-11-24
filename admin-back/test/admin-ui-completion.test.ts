@@ -189,10 +189,10 @@ interface WriteRoute {
 
 const WRITE_ROUTES: WriteRoute[] = [
   { name: "wallet freeze", method: "POST", path: `/wallets/${ID}/status`, core: `/internal/admin/wallets/${ID}/status`, body: { status: "FROZEN", reason: REASON }, authority: "merchant:write", readOnly: "merchant:read" },
-  { name: "application suspend", method: "PATCH", path: `/applications/${ID}`, core: `/internal/admin/applications/${ID}`, body: { status: "SUSPENDED", reason: REASON }, authority: "merchant:write", readOnly: "merchant:read" },
+  { name: "application suspend", method: "PATCH", path: `/applications/${ID}`, core: `/internal/admin/applications/${ID}`, body: { status: "SUSPENDED", reason: REASON, checklist: ["ENTITY_SCOPE_VERIFIED", "ACCESS_IMPACT_REVIEWED", "REASON_CONFIRMED", "AUTHORITY_CONFIRMED"] }, authority: "merchant:write", readOnly: "merchant:read" },
   { name: "token revoke", method: "POST", path: `/applications/${ID}/tokens/${TOKEN_ID}/revoke`, core: `/internal/admin/applications/${ID}/tokens/${TOKEN_ID}/revoke`, body: { reason: REASON }, authority: "merchant:write", readOnly: "merchant:read" },
-  { name: "payment link cancel", method: "POST", path: `/payment-links/${ID}/state`, core: `/internal/admin/payment-links/${ID}/state`, body: { state: "CANCELLED", reason: REASON }, authority: "merchant:write", readOnly: "merchant:read" },
-  { name: "pos block", method: "POST", path: `/pos-terminals/${ID}/status`, core: `/internal/admin/pos-terminals/${ID}/status`, body: { status: "BLOCKED", reason: REASON }, authority: "merchant:write", readOnly: "merchant:read" },
+  { name: "payment link cancel", method: "POST", path: `/payment-links/${ID}/state`, core: `/internal/admin/payment-links/${ID}/state`, body: { state: "CANCELLED", reason: REASON, checklist: ["ENTITY_SCOPE_VERIFIED", "ACCESS_IMPACT_REVIEWED", "REASON_CONFIRMED", "AUTHORITY_CONFIRMED"] }, authority: "merchant:write", readOnly: "merchant:read" },
+  { name: "pos block", method: "POST", path: `/pos-terminals/${ID}/status`, core: `/internal/admin/pos-terminals/${ID}/status`, body: { status: "BLOCKED", reason: REASON, checklist: ["ENTITY_SCOPE_VERIFIED", "ACCESS_IMPACT_REVIEWED", "REASON_CONFIRMED", "AUTHORITY_CONFIRMED"] }, authority: "merchant:write", readOnly: "merchant:read" },
   { name: "gl checkpoint", method: "POST", path: `/finance/gl-accounts/${ID}/checkpoint`, core: `/internal/admin/finance/gl-accounts/${ID}/checkpoint`, body: { reason: REASON }, authority: "finance:write", readOnly: "finance:read" },
   { name: "gl shard scale", method: "POST", path: `/finance/gl-accounts/${ID}/shards/scale`, core: `/internal/admin/finance/gl-accounts/${ID}/shards/scale`, body: { width: 4, reason: REASON }, authority: "finance:write", readOnly: "finance:read" },
   { name: "gl shard repair", method: "POST", path: `/finance/gl-accounts/${ID}/shards/0/repair`, core: `/internal/admin/finance/gl-accounts/${ID}/shards/0/repair`, body: { reason: REASON, planHash: "a".repeat(64) }, authority: "finance:write", readOnly: "finance:read" },
@@ -328,11 +328,14 @@ describe("new admin mutation enums and shapes", () => {
 
 describe("approval statuses are relayed", () => {
   test("unfreezing a wallet is an approval: 202 passes through, freezing stays 200", async () => {
-    const approval = await call("POST", `/wallets/${ID}/status`, staff, { status: "ACTIVE", reason: REASON });
+    const checklist = ["WALLET_SCOPE_VERIFIED", "BALANCE_AND_CASHOUT_REVIEWED", "REASON_CONFIRMED", "AUTHORITY_CONFIRMED"];
+    const approval = await call("POST", `/wallets/${ID}/status`, staff, { status: "ACTIVE", reason: REASON, checklist });
     expect(approval.status).toBe(202);
     expect(((await approval.json()) as { jobId?: string }).jobId).toBe("job-1");
-    const freeze = await call("POST", `/wallets/${ID}/status`, staff, { status: "FROZEN", reason: REASON });
+    expect(lastCore().body).toMatchObject({ status: "ACTIVE", checklist });
+    const freeze = await call("POST", `/wallets/${ID}/status`, staff, { status: "FROZEN", reason: REASON, checklist });
     expect(freeze.status).toBe(200);
+    expect(lastCore().body).toMatchObject({ status: "FROZEN", checklist });
   });
 
   test("re-activating a POS terminal is an approval, blocking is immediate", async () => {
@@ -429,10 +432,13 @@ describe("AML completion forwarding", () => {
       kind: "HTTP",
       endpointUrl: "https://fiu.example.gov/reports",
       timeoutSeconds: 30,
+      checklist: ["ADAPTER_SCOPE_VERIFIED", "ENDPOINT_VERIFIED", "SECRET_HANDLING_CONFIRMED", "APPROVAL_PATH_CONFIRMED"],
     });
     expect(created.status).toBe(202);
-    const changed = await call("PATCH", `/aml/filing-adapters/${ID}`, token, { status: "DISABLED" });
+    expect(lastCore().body).toMatchObject({ checklist: ["ADAPTER_SCOPE_VERIFIED", "ENDPOINT_VERIFIED", "SECRET_HANDLING_CONFIRMED", "APPROVAL_PATH_CONFIRMED"] });
+    const changed = await call("PATCH", `/aml/filing-adapters/${ID}`, token, { status: "DISABLED", checklist: ["REPORTING_CHANNEL_VERIFIED", "DISABLE_IMPACT_ACKNOWLEDGED", "APPROVAL_PATH_CONFIRMED"] });
     expect(changed.status).toBe(202);
+    expect(lastCore().body).toMatchObject({ status: "DISABLED", checklist: ["REPORTING_CHANNEL_VERIFIED", "DISABLE_IMPACT_ACKNOWLEDGED", "APPROVAL_PATH_CONFIRMED"] });
     const disabled = await call("DELETE", `/aml/filing-adapters/${ID}`, token);
     expect(disabled.status).toBe(202);
   });

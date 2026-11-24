@@ -655,6 +655,9 @@ describe("the fee variance true-up", () => {
       accruedFee: 1n,
       variance: 1n,
       occurredAt: null,
+      currency: "LYD",
+      env: "LIVE",
+      credentialSetId: null,
     });
     expect(posted.journalEntryId).not.toBeNull();
     expect(fakeTable("journalEntry")).toHaveLength(1);
@@ -667,6 +670,9 @@ describe("the fee variance true-up", () => {
       accruedFee: 1n,
       variance: 1n,
       occurredAt: null,
+      currency: "LYD",
+      env: "LIVE",
+      credentialSetId: null,
     });
     expect(again.journalEntryId).toBe(posted.journalEntryId);
     expect(fakeTable("journalEntry")).toHaveLength(1);

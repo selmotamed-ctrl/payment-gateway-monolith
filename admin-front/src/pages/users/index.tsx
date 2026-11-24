@@ -139,6 +139,18 @@ const BULK_STATUS_CHECKS = [
     { key: "AUTHORITY_CONFIRMED", label: "Authority to change status confirmed" },
 ] as const;
 
+const INVITE_RESEND_CHECKS = [
+    { key: "IDENTITY_VERIFIED", label: "User identity verified" },
+    { key: "INVITATION_EXPIRY_REVIEWED", label: "Invitation expiry and status reviewed" },
+    { key: "DELIVERY_CHANNEL_CONFIRMED", label: "Delivery channel confirmed" },
+] as const;
+
+const USER_EXPORT_CHECKS = [
+    { key: "USER_SCOPE_REVIEWED", label: "Exported user scope reviewed" },
+    { key: "ACCESS_DATA_REVIEWED", label: "Phone, role and authority data reviewed" },
+    { key: "EXPORT_AUTHORITY_CONFIRMED", label: "Export authority confirmed" },
+] as const;
+
 const INVITE_CHECKS = [
     { key: "EMAIL_VERIFIED", label: "Email identity verified" },
     { key: "ROLE_SCOPE_CONFIRMED", label: "Role scope confirmed" },
@@ -160,6 +172,9 @@ const UsersPage = dc(() => {
     const filters = ref<FilterValues>({});
     const pageSize = ref(20);
     const exportLoading = ref(false);
+    const userExportOpen = ref(false);
+    const userExportChecklist = ref<Record<string, boolean>>({});
+    const userExportChecklistComplete = computed(() => !showChecklists || USER_EXPORT_CHECKS.every((check) => userExportChecklist.value[check.key] === true));
     const summaryExportLoading = ref(false);
     const summaryExportChecklist = ref<Record<string, boolean>>({});
     const selectedUsers = ref<Record<string, UserRow>>({});
@@ -345,6 +360,10 @@ const UsersPage = dc(() => {
 
     const exportExcel = async () => {
         if (exportLoading.value) return;
+        if (!userExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const response = await api.get(urlsMap.usersExport, {
@@ -352,6 +371,7 @@ const UsersPage = dc(() => {
                     scope: "admin",
                     ...(search.value ? { search: search.value } : {}),
                     ...buildFilterQuery(filterDefinitions.value, filters.value),
+                    checklist: USER_EXPORT_CHECKS.filter((check) => userExportChecklist.value[check.key]).map((check) => check.key).join(","),
                 },
             });
             const payload = response.data?.data ?? response.data ?? {};
@@ -387,6 +407,8 @@ const UsersPage = dc(() => {
                 title: `admin-users-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            userExportOpen.value = false;
+            userExportChecklist.value = {};
             showSnackBar({
                 type: payload.truncated ? "warning" : "success",
                 message: payload.truncated
@@ -407,6 +429,7 @@ const UsersPage = dc(() => {
 
     const openDetail = async (row: UserRow) => {
         detailOpen.value = true;
+        resendChecklist.value = {};
         detailLoading.value = true;
         detailError.value = null;
         detail.value = null;
@@ -431,11 +454,19 @@ const UsersPage = dc(() => {
     const detailChecklistComplete = computed(() => !showChecklists || USER_EDIT_CHECKS.every((check) => detailChecklist.value[check.key] === true));
 
     const resendingInvitation = ref(false);
+    const resendChecklist = ref<Record<string, boolean>>({});
+    const resendChecklistComplete = computed(() => !showChecklists || INVITE_RESEND_CHECKS.every((check) => resendChecklist.value[check.key] === true));
     const resendInvitation = async () => {
         if (!detail.value || resendingInvitation.value) return;
+        if (!resendChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all invitation checklist items before resending") });
+            return;
+        }
         resendingInvitation.value = true;
         try {
-            await api.post(urlsMap.userInvite(detail.value.id));
+            await api.post(urlsMap.userInvite(detail.value.id), {
+                checklist: INVITE_RESEND_CHECKS.filter((check) => resendChecklist.value[check.key]).map((check) => check.key),
+            });
             showSnackBar({ type: "success", message: t("Invitation sent") });
             refreshAll();
         } catch (e) {
@@ -655,7 +686,7 @@ const UsersPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { userExportChecklist.value = {}; userExportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                             <VBtn color="primary" variant="flat" prependIcon="mdi-account-plus-outline" onClick={openCreate}>{t("Invite user")}</VBtn>
                         </ThemedView>
                     )}
@@ -766,6 +797,28 @@ const UsersPage = dc(() => {
                 />
             </ThemedView>
 
+            <FormModal
+                modelValue={userExportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (userExportOpen.value = value)}
+                title={t("Export admin users")}
+                size="md"
+                onSubmit={() => void exportExcel()}
+                submitLabel={t("Export")}
+                loading={exportLoading.value}
+            >
+                <VAlert type="warning" variant="tonal">
+                    {t("The export includes user identities, phone numbers, roles and authority keys. Respect the approved scope.")}
+                </VAlert>
+                <FormChecklist
+                    checks={[...USER_EXPORT_CHECKS]}
+                    modelValue={userExportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (userExportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("User export checklist")}
+                    complete={userExportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
             <FormModal
                 modelValue={bulkOpen.value}
                 onUpdate:modelValue={(value: boolean) => (bulkOpen.value = value)}
@@ -881,8 +934,17 @@ const UsersPage = dc(() => {
                         {detail.value.status === "INVITED" && (
                             <VAlert type="warning" variant="tonal" density="compact">
                                 {t("Invitation pending: the invitee has not set a password yet")}
-                                <div style={{ marginTop: "8px" }}>
-                                    <VBtn size="small" variant="outlined" loading={resendingInvitation.value} onClick={() => void resendInvitation()}>
+                                <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                                    <FormChecklist
+                                        checks={[...INVITE_RESEND_CHECKS]}
+                                        modelValue={resendChecklist.value}
+                                        onUpdate:modelValue={(value: Record<string, boolean>) => (resendChecklist.value = value)}
+                                        show={showChecklists}
+                                        title={t("Resend invitation checklist")}
+                                        complete={resendChecklistComplete.value}
+                                        incompleteMessage={t("Complete all invitation checklist items before resending")}
+                                    />
+                                    <VBtn size="small" variant="outlined" loading={resendingInvitation.value} disabled={!resendChecklistComplete.value} onClick={() => void resendInvitation()}>
                                         {t("Resend invitation")}
                                     </VBtn>
                                 </div>

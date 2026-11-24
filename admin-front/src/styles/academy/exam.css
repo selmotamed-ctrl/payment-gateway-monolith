@@ -655,3 +655,33 @@ html[dir="rtl"] .ac-cert-eyebrow {
 @media (max-width: 1100px) {
   .ac-exam-clock-compact { display: inline-flex; }
 }
+
+.ac-cert-sheet {
+  position: relative;
+  overflow: hidden;
+}
+
+.ac-cert-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ac-cert-watermark {
+  position: absolute;
+  inset-block-start: 42%;
+  inset-inline-start: 50%;
+  transform: translate(-50%, -50%) rotate(-20deg);
+  font-size: clamp(48px, 10vw, 120px);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: rgba(190, 18, 60, 0.12);
+  pointer-events: none;
+  z-index: 0;
+  white-space: nowrap;
+}
+
+.ac-cert-frame {
+  position: relative;
+  z-index: 1;
+}

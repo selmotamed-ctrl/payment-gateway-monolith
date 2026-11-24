@@ -3,7 +3,7 @@ id: admin-ui.guide
 title: Admin Guide and Academy
 status: partial
 confidence: high
-last_verified: 2026-11-16
+last_verified: 2026-11-23
 verified_against: working-tree
 code:
   - admin-front/scripts/extract-guide-content.ts
@@ -329,3 +329,10 @@ counts, probe action and the maker-checker force-HEALTHY path. Academy
 exam structure are unchanged (137 articles, 154 terms, 26 cards, 51 lessons,
 224 pool questions); the generated Guide/Academy and Companion snapshot were
 regenerated.
+
+## Certificate verification and lab drafts (2026-11-23)
+
+- **Lab drafts.** `LabRunner` persists `{stage,index,draft,submitted,checked,hintShown,version}` per user and lab in `localStorage` (`labDraftStore.ts`). The key is scoped by `userId`; drafts are skipped without a signed-in user. The task-id fingerprint is the version: an older/unknown fingerprint is discarded and loaded keys are filtered to the current lab, so removed tasks cannot inflate progress. Completion clears the draft; Reset suppresses the watcher and clears it through `nextTick`. Drafts remain browser-local and tamperable; they are convenience state, not evidence.
+- **Exam briefing.** Starting an exam requires three acknowledgements (integrity, no outside help, time limit) and sends `checklist` keys `EXAM_INTEGRITY_ACCEPTED`, `EXAM_NO_OUTSIDE_HELP`, `EXAM_TIME_LIMIT_ACKNOWLEDGED`; core audits `ACADEMY_EXAM_STARTED_WITH_CHECKLIST`. The keys remain advisory server-side.
+- **Certificate.** The page fetches `GET /academy/certificates/:trackId/verification`, which returns the issuance `publicId` and short `displayId`. The public verification URL is `academyCertificateVerifyUrl` (deploy writes the checkout public origin plus `/verify/certificate`). The public page is `checkout-front /verify/certificate/:publicId`; checkout-back calls `GET /internal/checkout/academy/certificates/:publicId`. Issuance is a durable `academy_certificates` row with an opaque `publicId`, unique per user/track/earnedAt; verification reads the row and the holder's live badge and returns `valid`, `expired` or `revoked` plus holder/track/badge/dates/content version. No email, role or employment status is returned. A new badge supersedes the previous issuance; `SECURITY_ADMIN` can revoke via `POST /academy/certificates/:identifier/revoke` (opaque `publicId` or short `displayId`) from Team progress. Disabled/deleted users do not expose a valid credential. No HMAC token or user UUID appears in the URL.
+- **Team export.** `GET /academy/team/export` requires `SECURITY_ADMIN`, accepts the three team checklist keys, and audits `ACADEMY_TEAM_EXPORTED`. The page-level XLSX export uses the shared pipeline; the in-table CSV and the new “Copy team summary” remain client-side (the copy masks emails).

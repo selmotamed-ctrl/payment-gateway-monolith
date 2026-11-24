@@ -22,6 +22,7 @@ const fakeObjectStorage = {
 
 const buildUpload = (existingRun: Record<string, unknown> | null = null) => {
   const audits: Audit[] = [];
+  const runs: Array<Record<string, unknown>> = [];
   const db: any = {
     auditLog: { create: async (args: { data: Audit }) => { audits.push(args.data); return { id: "a1" }; } },
     $transaction: async (fn: (tx: unknown) => unknown) => fn({ auditLog: db.auditLog }),
@@ -30,13 +31,13 @@ const buildUpload = (existingRun: Record<string, unknown> | null = null) => {
     reconciliation: {
       findStatementSourceById: async () => ({ id: "src" }),
       findRunByFileHash: async () => existingRun,
-      createRun: async () => ({ id: "run1" }),
+      createRun: async (tx: unknown, data: Record<string, unknown>) => { runs.push(data); return { id: "run1" }; },
     },
     jobs: { findLiveJobForReference: async () => null, enqueueJob: async () => ({ id: "job1" }) },
   };
   const handler = createReconciliationUploadHandler({ db, repositories, objectStorage: fakeObjectStorage });
-  const call = async (principal: unknown, headers: Record<string, string> = {}) => {
-    const meta = Buffer.from(JSON.stringify({ actorId: "FORGED-CFO-ID", actorRole: "MLRO", checklist: ["x"] })).toString("base64url");
+  const call = async (principal: unknown, headers: Record<string, string> = {}, metadata: Record<string, unknown> = {}) => {
+    const meta = Buffer.from(JSON.stringify({ actorId: "FORGED-CFO-ID", actorRole: "MLRO", checklist: ["x"], ...metadata })).toString("base64url");
     const request: any = {
       body: Buffer.from("a,b\n1,2\n"),
       headers: { "x-statement-source-id": "src", "x-upload-metadata": meta, ...headers },
@@ -50,7 +51,7 @@ const buildUpload = (existingRun: Record<string, unknown> | null = null) => {
     await handler(request, response);
     return sent;
   };
-  return { audits, call };
+  return { audits, runs, call };
 };
 
 describe("M9 reconciliation upload audit actor", () => {
@@ -67,6 +68,13 @@ describe("M9 reconciliation upload audit actor", () => {
     const { audits, call } = buildUpload();
     await expect(call(undefined)).rejects.toMatchObject({ statusCode: 401, code: "AUTH_REQUIRED" });
     expect(audits).toHaveLength(0);
+  });
+
+  test("currency and autoPost metadata are persisted on the run", async () => {
+    const { runs, call } = buildUpload();
+    const sent = await call({ userId: "real-user", role: "FINANCE" }, {}, { currency: "usd", autoPost: false });
+    expect(sent.status).toBe(202);
+    expect(runs[0]).toMatchObject({ currency: "USD", autoPost: false });
   });
 
   test("a file hash that already belongs to another statement source is never answered with that source's run", async () => {

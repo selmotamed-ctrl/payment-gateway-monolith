@@ -86,15 +86,22 @@ export const runReconciliationFollowUp = async (
   if (items.length === 0) return result;
 
   const attemptIds = [...new Set(items.map((item) => item.attemptId).filter((id): id is string => Boolean(id)))];
-  const attempts = new Map<string, { status: string; railId: string | null; merchantId: string | null }>();
+  const attempts = new Map<string, { status: string; railId: string | null; merchantId: string | null; currency: string | null; env: string | null; credentialSetId: string | null }>();
   if (attemptIds.length > 0) {
     for (const row of toCamelRows<Any>(
       await db.$queryRawUnsafe(
-        "SELECT id::text AS id, status::text AS status, rail_id::text AS rail_id, merchant_id::text AS merchant_id FROM payment_attempts WHERE id = ANY($1::uuid[])",
+        "SELECT id::text AS id, status::text AS status, rail_id::text AS rail_id, merchant_id::text AS merchant_id, currency, env::text AS env, credential_set_id::text AS credential_set_id FROM payment_attempts WHERE id = ANY($1::uuid[])",
         attemptIds,
       ),
     )) {
-      attempts.set(String(row.id), { status: String(row.status), railId: row.railId ? String(row.railId) : null, merchantId: row.merchantId ? String(row.merchantId) : null });
+      attempts.set(String(row.id), {
+        status: String(row.status),
+        railId: row.railId ? String(row.railId) : null,
+        merchantId: row.merchantId ? String(row.merchantId) : null,
+        currency: row.currency ? String(row.currency) : null,
+        env: row.env ? String(row.env) : null,
+        credentialSetId: row.credentialSetId ? String(row.credentialSetId) : null,
+      });
     }
   }
 
@@ -136,6 +143,8 @@ export const runReconciliationFollowUp = async (
       if (!attempt?.railId || !externalDisputeRef) continue;
       const amount = new Decimal(String(item.statementAmount ?? 0)).abs();
       if (!amount.gt(0)) continue;
+      const currency = item.currency ?? attempt.currency ?? source.currency ?? null;
+      if (!currency) continue;
       const referenceId = `${source.gatewayId}:${externalDisputeRef}`;
       const live = await deps.repositories.jobs.findLiveJobForReference(deps.db as Tx, "ADJUSTMENT_EXECUTION", "DISPUTE", referenceId);
       const existing = await db.dispute.findFirst({ where: { gatewayId: String(source.gatewayId), externalDisputeRef }, select: { id: true } });
@@ -153,7 +162,7 @@ export const runReconciliationFollowUp = async (
           source: "STATEMENT",
           reasonCode: "STATEMENT_CHARGEBACK",
           amount: amount.toFixed(4),
-          currency: "LYD",
+          currency,
           actorUserId: null,
           actorRole: null,
         },

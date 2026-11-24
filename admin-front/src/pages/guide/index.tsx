@@ -90,6 +90,19 @@ export const AdminGuidePage = defineComponent({
         const startHere = computed(() => articlesById.value.get("b00-01"));
         const bookArticleIds = (book: Book): string[] =>
             (articlesByBook.value.get(Number(book.id)) ?? []).map((article) => article.id);
+        const totalArticleCount = computed(() => articles.value.length);
+        const readArticleCount = computed(() =>
+            progress.readCount(articles.value.map((article) => article.id), contentVersion.value || undefined),
+        );
+        const progressPercent = computed(() =>
+            totalArticleCount.value === 0 ? 0 : Math.round((readArticleCount.value / totalArticleCount.value) * 100),
+        );
+        const completedBookCount = computed(() =>
+            books.value.filter((book) => {
+                const ids = bookArticleIds(book);
+                return ids.length > 0 && progress.readCount(ids, contentVersion.value || undefined) === ids.length;
+            }).length,
+        );
 
         return () => (
             <ScreenContainer>
@@ -136,6 +149,24 @@ export const AdminGuidePage = defineComponent({
                                             {L("Continue reading", "تابع القراءة")}: {continueArticle.value.title}
                                         </RouterLink>
                                     ) : null}
+                                </div>
+                                <div
+                                    class="guide-progress"
+                                    role="progressbar"
+                                    aria-valuemin={0}
+                                    aria-valuemax={100}
+                                    aria-valuenow={progressPercent.value}
+                                    aria-label={L("Guide reading progress", "تقدم قراءة الدليل")}
+                                >
+                                    <div class="guide-progress__track">
+                                        <span class="guide-progress__fill" style={{ inlineSize: `${progressPercent.value}%` }} />
+                                    </div>
+                                    <small>
+                                        {L(
+                                            `${readArticleCount.value} of ${totalArticleCount.value} articles read · ${completedBookCount.value} books completed`,
+                                            `تمت قراءة ${readArticleCount.value} من ${totalArticleCount.value} مقالاً · ${completedBookCount.value} كتب مكتملة`,
+                                        )}
+                                    </small>
                                 </div>
                                 <small class="guide-content-version">
                                     {L("Content version", "إصدار المحتوى")} {contentVersion.value}

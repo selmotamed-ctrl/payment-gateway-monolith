@@ -7,7 +7,10 @@ import { coreForward } from "../forward";
 const router = express.Router();
 
 const objectParamsSchema = z.object({ id: zIdentifier }).strict();
-const legalHoldSchema = z.object({ reason: z.string().trim().min(5).max(512) }).strict();
+const legalHoldSchema = z.object({
+  reason: z.string().trim().min(5).max(512),
+  checklist: z.array(z.string().max(64)).max(10).optional(),
+}).strict();
 const objectListSchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(200).optional(),
@@ -98,6 +101,7 @@ router.post(
     method: "POST",
     path: (context) => `/internal/admin/object-storage/maintenance/${encodeURIComponent(context.params.job ?? "")}`,
     paramsSchema: maintenanceSchema,
+    schema: z.object({ checklist: z.array(z.string().max(64)).max(10).optional() }).strict(),
   }),
 );
 

@@ -1,13 +1,14 @@
 import { dc } from "kt-dc";
 import { VAlert, VBtn, VTextField } from "vuetify/components";
 import { useLocale } from "vuetify";
-import { ref } from "vue";
+import { onUnmounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { setUserState, type UserState } from "@/state/user";
 import { tokenFromLoginPayload } from "@/utils/security/sessionToken";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
 import { setLocale } from "@/plugins/localization";
 import router from "@/router";
 import AuthLayout from "@/layouts/auth";
@@ -15,7 +16,7 @@ import { FormField } from "@/components/ui/FormField";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 
 const LoginPage = dc(() => {
-    const { t } = useLocale();
+    const { t, current } = useLocale();
     const route = useRoute();
     const username = ref("");
     const password = ref("");
@@ -25,6 +26,21 @@ const LoginPage = dc(() => {
     const error = ref<string | null>(null);
     const showPassword = ref(false);
     const capsLock = ref(false);
+    const resending = ref(false);
+    const resendWait = ref(0);
+    let resendTimer: ReturnType<typeof setInterval> | null = null;
+    const startResendCooldown = () => {
+        if (resendTimer) clearInterval(resendTimer);
+        resendWait.value = 30;
+        resendTimer = setInterval(() => {
+            resendWait.value -= 1;
+            if (resendWait.value <= 0 && resendTimer) {
+                clearInterval(resendTimer);
+                resendTimer = null;
+            }
+        }, 1000);
+    };
+    onUnmounted(() => { if (resendTimer) clearInterval(resendTimer); });
 
     const applySession = async (payload: any) => {
         const session: UserState = {
@@ -55,6 +71,42 @@ const LoginPage = dc(() => {
         capsLock.value = event.getModifierState?.("CapsLock") ?? false;
     };
 
+    const resendCode = async () => {
+        if (!mfaChallengeId.value || resending.value || resendWait.value > 0) return;
+        resending.value = true;
+        error.value = null;
+        try {
+            const response = await api.post(urlsMap.authMfaResend, { challengeId: mfaChallengeId.value });
+            const payload = response.data?.data ?? response.data ?? {};
+            if (!payload?.challengeId) throw new Error(t("The verification code could not be resent"));
+            mfaChallengeId.value = String(payload.challengeId);
+            mfaCode.value = "";
+            showSnackBar({ message: t("A new verification code was sent"), type: "success" });
+        } catch (caught) {
+            error.value = extractApiErrorMessage(caught);
+        } finally {
+            startResendCooldown();
+            resending.value = false;
+        }
+    };
+
+    const copySignInDiagnostics = async () => {
+        const diagnostics = {
+            page: window.location.pathname,
+            locale: current.value,
+            mfaStage: Boolean(mfaChallengeId.value),
+            error: error.value,
+            occurredAt: new Date().toISOString(),
+            userAgent: navigator.userAgent,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+            showSnackBar({ message: t("Sign-in diagnostics copied"), type: "success" });
+        } catch {
+            showSnackBar({ message: t("Could not copy. Select the text manually."), type: "error" });
+        }
+    };
+
     const submitOnEnter = (event: KeyboardEvent) => {
         if (event.key !== "Enter") return;
         event.preventDefault();
@@ -83,6 +135,7 @@ const LoginPage = dc(() => {
             const payload = response.data?.data ?? response.data;
             if (payload?.mfaRequired && payload?.challengeId) {
                 mfaChallengeId.value = String(payload.challengeId);
+                startResendCooldown();
                 return;
             }
             await applySession(payload);
@@ -151,17 +204,24 @@ const LoginPage = dc(() => {
                             >
                                 {t("Verify")}
                             </VBtn>
-                            <VBtn
-                                variant="text"
-                                size="small"
-                                onClick={() => {
-                                    mfaChallengeId.value = null;
-                                    mfaCode.value = "";
-                                    error.value = null;
-                                }}
-                            >
-                                {t("Back")}
-                            </VBtn>
+                            <div class="d-flex flex-wrap ga-2">
+                                <VBtn variant="text" size="small" loading={resending.value} disabled={resendWait.value > 0} onClick={() => void resendCode()}>
+                                    {resendWait.value > 0 ? t("Resend in {seconds}s", { seconds: resendWait.value }) : t("Resend code")}
+                                </VBtn>
+                                <VBtn
+                                    variant="text"
+                                    size="small"
+                                    onClick={() => {
+                                        mfaChallengeId.value = null;
+                                        mfaCode.value = "";
+                                        error.value = null;
+                                        resendWait.value = 0;
+                                        if (resendTimer) { clearInterval(resendTimer); resendTimer = null; }
+                                    }}
+                                >
+                                    {t("Back")}
+                                </VBtn>
+                            </div>
                         </>
                     ) : (
                         <>
@@ -222,6 +282,9 @@ const LoginPage = dc(() => {
                             English
                         </VBtn>
                     </div>
+                    <VBtn variant="text" size="small" prependIcon="mdi-content-copy" onClick={() => void copySignInDiagnostics()}>
+                        {t("Copy sign-in diagnostics")}
+                    </VBtn>
                 </div>
             </SurfaceCard>
         </AuthLayout>

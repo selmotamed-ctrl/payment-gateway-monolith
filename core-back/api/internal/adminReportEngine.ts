@@ -69,6 +69,7 @@ const specBodySchema = z
     specJson: z.union([z.string(), z.record(z.string(), z.unknown())]),
     assetsZipBase64: z.string().optional(),
     publish: z.boolean().optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -119,12 +120,18 @@ export const chromeOverrideSchema = z
     }
   });
 
+const REPORT_RUN_CHECKLIST_KEYS = new Set([
+  "REPORT_SCOPE_VERIFIED",
+  "INPUTS_AND_PERIOD_REVIEWED",
+  "CONFIDENTIALITY_ACKNOWLEDGED",
+]);
 const executeBodySchema = z
   .object({
     inputs: z.record(z.string(), z.unknown()).default({}),
     locale: z.string().max(16).optional(),
     chromeOverride: chromeOverrideSchema.optional(),
     renderMode: z.enum(["CLIENT_PAGED_VECTOR", "SERVER_PDF"]).optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -134,10 +141,35 @@ const chromeBodySchema = z
     assetsZipBase64: z.string().optional(),
     publish: z.boolean().optional(),
     makeDefault: z.boolean().optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
-const setDefaultBodySchema = z.object({ isDefault: z.boolean() }).strict();
+const publishChecklistSchema = z.array(z.string().max(64)).max(10).optional();
+const PUBLISH_CHECKLIST_KEYS = new Set([
+  "SPEC_VERIFIED",
+  "AUTHORITIES_REVIEWED",
+  "PREVIEW_REVIEWED",
+  "PUBLISH_AUTHORITY_CONFIRMED",
+]);
+const CHROME_CHECKLIST_KEYS = new Set([
+  "CHROME_VERIFIED",
+  "LAYOUT_PREVIEWED",
+  "PUBLISH_AUTHORITY_CONFIRMED",
+]);
+const RECONCILE_CHECKLIST_KEYS = new Set([
+  "CHROME_SCOPE_VERIFIED",
+  "IMPACTED_REPORTS_REVIEWED",
+  "AUTHORITY_CONFIRMED",
+]);
+const SUSPEND_CHECKLIST_KEYS = new Set([
+  "MERCHANT_SCOPE_VERIFIED",
+  "SUSPENSION_IMPACT_REVIEWED",
+  "AUTHORITY_CONFIRMED",
+]);
+const setDefaultBodySchema = z
+  .object({ isDefault: z.boolean(), checklist: publishChecklistSchema })
+  .strict();
 
 /* ------------------------------------------------------------------------ */
 /* Shared helpers (also used by the merchant report-engine router)           */
@@ -1040,6 +1072,7 @@ router.post("/report-engine/specs/preview", async (request: Request, response: R
 router.post("/report-engine/specs", async (request: Request, response: Response) => {
   requireAuthorities(request, SPEC_AUTHOR_AUTHORITIES);
   const body = parseOrThrow(specBodySchema, request.body ?? {});
+  const checklist = (body.checklist ?? []).filter((entry) => PUBLISH_CHECKLIST_KEYS.has(entry));
   const spec = parseJson(body.specJson, ReportDescriptorSpecSchema);
   const rawSpecJson = typeof body.specJson === "string" ? body.specJson : JSON.stringify(spec);
   const zipBuffer = decodeZip(body.assetsZipBase64);
@@ -1121,6 +1154,7 @@ router.post("/report-engine/specs", async (request: Request, response: Response)
             status: row.status,
             specSha256,
             assetBundleId: assetBundle.assetBundleId,
+            checklist,
           },
         } as never,
       });
@@ -1358,7 +1392,8 @@ router.get("/report-engine/specs/:id", async (request: Request, response: Respon
  */
 router.post("/report-engine/specs/:id/publish", async (request: Request, response: Response) => {
   requireAuthorities(request, SPEC_AUTHOR_AUTHORITIES);
-  parseOrThrow(z.object({}).strict(), request.body ?? {});
+  const body = parseOrThrow(z.object({ checklist: publishChecklistSchema }).strict(), request.body ?? {});
+  const checklist = (body.checklist ?? []).filter((entry) => PUBLISH_CHECKLIST_KEYS.has(entry));
   const id = String(request.params.id);
   const existing = await client.reportDefinitionSpecRecord.findUnique({ where: { id } });
   if (!existing) throw new ApiError(404, "REPORT_SPEC_NOT_FOUND", "The report spec does not exist");
@@ -1443,6 +1478,7 @@ router.post("/report-engine/specs/:id/publish", async (request: Request, respons
             authorityMode: existing.authorityMode,
             previousLatestSpecId: previousLatest?.id ?? null,
             previousLatestVersion: previousLatest?.version ?? null,
+            checklist,
           },
         } as never,
       });
@@ -1981,6 +2017,7 @@ router.get("/report-engine/autocomplete/:sourceKey", async (request: Request, re
 router.post("/report-engine/catalog/:code/execute", async (request: Request, response: Response) => {
   const actor = await actorOf(request);
   const body = parseOrThrow(executeBodySchema, request.body ?? {});
+  const checklist = (body.checklist ?? []).filter((entry) => REPORT_RUN_CHECKLIST_KEYS.has(entry));
   const code = String(request.params.code);
   const row = await client.reportDefinitionSpecRecord.findFirst({
     where: { code, status: "PUBLISHED", isLatestPublished: true },
@@ -2110,6 +2147,7 @@ router.post("/report-engine/catalog/:code/execute", async (request: Request, res
       servedByNode: bundle.servedByNode,
       verificationSha256: bundle.verificationSha256,
       renderTarget: "CLIENT_PAGED_VECTOR",
+      checklistJson: checklist as never,
     },
   });
   response.json(bundle);
@@ -2389,23 +2427,26 @@ router.get("/report-engine/chrome/:id/migration-prompt", async (request: Request
 
 router.post("/report-engine/chrome/reconcile-defaults", async (request: Request, response: Response) => {
   requireAuthorities(request, ["report:approve", "security:write"]);
+  const body = parseOrThrow(
+    z.object({ checklist: z.array(z.string().max(64)).max(10).optional() }).strict(),
+    request.body ?? {},
+  );
+  const checklist = (body.checklist ?? []).filter((entry) => RECONCILE_CHECKLIST_KEYS.has(entry));
   const actor = await actorOf(request);
   const audit = auditBase(auditActor(request));
   const revoked = await reconcileReportChromeDefaults();
-  if (revoked.length > 0) {
-    await client.$transaction(async (tx) => {
-      await writeAudit(tx, {
-        data: {
-          ...audit,
-          action: "REPORT_CHROME_DEFAULTS_RECONCILED",
-          entityType: "REPORT_CHROME_DEFAULT",
-          entityId: actor.userId,
-          beforeJson: null,
-          afterJson: { revoked },
-        } as never,
-      });
+  await client.$transaction(async (tx) => {
+    await writeAudit(tx, {
+      data: {
+        ...audit,
+        action: "REPORT_CHROME_DEFAULTS_RECONCILED",
+        entityType: "REPORT_CHROME_DEFAULT",
+        entityId: actor.userId,
+        beforeJson: null,
+        afterJson: { revoked, checklist },
+      } as never,
     });
-  }
+  });
   response.json({
     platformRevoked: revoked.filter((entry) => entry.subject === "PLATFORM").length,
     merchantRevoked: revoked.filter((entry) => entry.subject === "MERCHANT").length,
@@ -2427,6 +2468,7 @@ router.get("/report-engine/chrome/:id", async (request: Request, response: Respo
 router.post("/report-engine/chrome", async (request: Request, response: Response) => {
   requireAuthorities(request, ["report:approve", "security:write"]);
   const body = parseOrThrow(chromeBodySchema, request.body ?? {});
+  const checklist = (body.checklist ?? []).filter((entry) => CHROME_CHECKLIST_KEYS.has(entry));
   const spec = parseJson(body.specJson, ReportChromeSpecSchema);
   const rawSpecJson = typeof body.specJson === "string" ? body.specJson : JSON.stringify(spec);
   const zipBuffer = decodeZip(body.assetsZipBase64);
@@ -2521,6 +2563,7 @@ router.post("/report-engine/chrome", async (request: Request, response: Response
             status: row.status,
             isDefaultGlobal: row.isDefaultGlobal,
             specSha256,
+            checklist,
           },
         } as never,
       });
@@ -2580,6 +2623,7 @@ router.post("/report-engine/chrome/:id/archive", async (request: Request, respon
 router.post("/report-engine/chrome/:id/set-default", async (request: Request, response: Response) => {
   requireAuthorities(request, ["report:approve", "security:write"]);
   const body = parseOrThrow(setDefaultBodySchema, request.body ?? {});
+  const checklist = (body.checklist ?? []).filter((entry) => CHROME_CHECKLIST_KEYS.has(entry));
   const id = String(request.params.id);
   const existing = await client.reportChromeSpecRecord.findUnique({ where: { id } });
   if (!existing) throw new ApiError(404, "REPORT_CHROME_SPEC_NOT_FOUND", "The chrome spec does not exist");
@@ -2612,7 +2656,7 @@ router.post("/report-engine/chrome/:id/set-default", async (request: Request, re
         entityType: "REPORT_CHROME_SPEC",
         entityId: id,
         beforeJson: { isDefaultGlobal: existing.isDefaultGlobal },
-        afterJson: { isDefaultGlobal: body.isDefault, chromeType: existing.chromeType },
+        afterJson: { isDefaultGlobal: body.isDefault, chromeType: existing.chromeType, checklist },
       } as never,
     });
   });
@@ -2708,12 +2752,16 @@ router.get("/report-engine/merchant-executions", async (request: Request, respon
   });
 });
 
-const merchantStudioDecisionSchema = z.object({ reason: z.string().trim().min(5).max(500) }).strict();
+const merchantStudioDecisionSchema = z.object({
+  reason: z.string().trim().min(5).max(500),
+  checklist: z.array(z.string().max(64)).max(10).optional(),
+}).strict();
 
 router.post("/report-engine/merchant-reports/:merchantId/suspend", async (request: Request, response: Response) => {
   requireAuthorities(request, ["security:write"]);
   const merchantId = String(request.params.merchantId);
   const body = parseOrThrow(merchantStudioDecisionSchema, request.body ?? {});
+  const checklist = (body.checklist ?? []).filter((entry) => SUSPEND_CHECKLIST_KEYS.has(entry));
   const actor = await actorOf(request);
   const audit = auditBase(auditActor(request));
   const row = await client.merchantReportStudioStatus.upsert({
@@ -2734,7 +2782,7 @@ router.post("/report-engine/merchant-reports/:merchantId/suspend", async (reques
         entityType: "MERCHANT",
         entityId: merchantId,
         beforeJson: null,
-        afterJson: { reason: body.reason },
+        afterJson: { reason: body.reason, checklist },
       } as never,
     });
   });

@@ -10,6 +10,7 @@ import { LedgerPoster, type JournalTemplate } from "../engine/ledger/LedgerPoste
 import { LedgerCheckpointWorker } from "../engine/workers/LedgerCheckpointWorker";
 import { clearShardWidthCache } from "../lib/storageEngine/shardRouting";
 import { withLedgerMaintenance } from "./helpers/ledgerMaintenance";
+import { withAppendOnlyMaintenance } from "./helpers/appendOnlyMaintenance";
 import { emptyRepositories } from "./helpers/fakeRepositories";
 import { cleanupLedger, createPrisma, databaseIsReachable, seedGlAccount, uniqueId } from "./storage-engine/helpers/db";
 
@@ -20,7 +21,7 @@ const created: string[] = [];
 
 afterAll(async () => {
   if (created.length > 0) {
-    await client.operatorCase.deleteMany({ where: { OR: created.map((id) => ({ subjectKey: { startsWith: `ledger.shard:${id}:` } })) } });
+    await withAppendOnlyMaintenance(client, (tx) => tx.operatorCase.deleteMany({ where: { OR: created.map((id) => ({ subjectKey: { startsWith: `ledger.shard:${id}:` } })) } }));
     await cleanupLedger(client, created, refPrefix);
   }
   await client.$disconnect();

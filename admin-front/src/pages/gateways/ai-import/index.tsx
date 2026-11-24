@@ -14,6 +14,7 @@ import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { useSafeguard } from "@/components/guide/useSafeguard";
+import { showConfirm } from "@/utils/confirm";
 
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetaPill } from "@/components/ui/MetaPill";
@@ -429,7 +430,15 @@ const GatewayAiImportPage = dc(() => {
         void router.push({ name: "GatewayWizard", params: { id: importResult.value.gatewayId } });
     };
 
-    const startOver = () => {
+    const startOver = async () => {
+        const confirmed = await showConfirm({
+            title: t("Start the AI import over?"),
+            message: t("The current spec, verification report and checklist selections will be cleared."),
+            submitButtonLabel: t("Start over"),
+            type: "warning",
+            onConfirm: async () => undefined,
+        });
+        if (!confirmed) return;
         step.value = 1;
         spec.value = null;
         specFileModel.value = null;
@@ -1124,7 +1133,7 @@ const GatewayAiImportPage = dc(() => {
                         <VBtn color="primary" prependIcon={"mdi-open-in-new"} onClick={openGateway}>
                             {t("Open Gateway")}
                         </VBtn>
-                        <VBtn variant="tonal" onClick={startOver}>
+                        <VBtn variant="tonal" onClick={() => void startOver()}>
                             {t("Start another import")}
                         </VBtn>
                     </div>
@@ -1231,13 +1240,18 @@ const GatewayAiImportPage = dc(() => {
                     title={t("Smart AI Integration")}
                     subtitle={t("Verify an AI-generated gateway specification before binding live secrets.")}
                     end={() => (
-                        <VBtn
-                            variant="text"
-                            prependIcon={"mdi-arrow-left"}
-                            onClick={() => void router.push({ name: "Gateways" })}
-                        >
-                            {t("Back to Gateways")}
-                        </VBtn>
+                        <div class="d-flex flex-wrap ga-2">
+                            <VBtn variant="text" prependIcon="mdi-restart" onClick={() => void startOver()}>
+                                {t("Start over")}
+                            </VBtn>
+                            <VBtn
+                                variant="text"
+                                prependIcon={"mdi-arrow-left"}
+                                onClick={() => void router.push({ name: "Gateways" })}
+                            >
+                                {t("Back to Gateways")}
+                            </VBtn>
+                        </div>
                     )}
                 />
 

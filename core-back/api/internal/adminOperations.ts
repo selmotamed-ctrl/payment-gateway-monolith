@@ -4,7 +4,9 @@ import { client } from "../../prisma/client";
 import { ApiError } from "../../lib/error";
 import { buildListQuery, countUnlessSkipped, listResponse } from "../../lib/listQuery";
 import { requireAuthorities, principalOf } from "../middleware/authDoubleCheck";
+import { operatorCaseInquiryEligibility } from "../../lib/operatorCases";
 import { vault } from "../../engine/crypto/Vault";
+import { writeAudit } from "../../lib/audit/writeAudit";
 import { AttemptStatus } from "../../generated/prisma/enums";
 import {
   andWhere,
@@ -45,8 +47,7 @@ const ATTEMPT_REDACTED_FIELDS = [
   "ledgerEntryId",
 ];
 
-router.get("/transactions/summary", async (request: Request, response: Response) => {
-  requireAuthorities(request, ["attempt:read", "merchant:read", "finance:read"]);
+const buildTransactionSummary = async () => {
   const since = new Date(Date.now() - 24 * 3600 * 1000);
   const [groups, escalated24h] = await Promise.all([
     client.paymentAttempt.groupBy({
@@ -60,13 +61,45 @@ router.get("/transactions/summary", async (request: Request, response: Response)
   ]);
   const countOf = (statuses: readonly AttemptStatus[]): number =>
     groups.filter((group) => statuses.includes(group.status)).reduce((sum, group) => sum + group._count._all, 0);
-  response.json({
+  return {
     total24h: groups.reduce((sum, group) => sum + group._count._all, 0),
     settled24h: countOf(SETTLED_STATUSES),
     inFlight24h: countOf(IN_FLIGHT_STATUSES),
     failed24h: countOf(FAILED_STATUSES),
     escalated24h,
+  };
+};
+
+router.get("/transactions/summary", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["attempt:read", "merchant:read", "finance:read"]);
+  response.json(await buildTransactionSummary());
+});
+
+router.get("/transactions/summary/export", async (request: Request, response: Response) => {
+  requireAuthorities(request, ["attempt:read", "merchant:read", "finance:read"]);
+  const summary = await buildTransactionSummary();
+  const actor = principalOf(request);
+  const allowedChecklist = new Set([
+    "TRANSACTION_SCOPE_VERIFIED",
+    "STATUS_SETTLEMENT_REVIEWED",
+    "ESCALATION_REVIEWED",
+    "EXPORT_APPROVAL_CONFIRMED",
+  ]);
+  const checklist = (typeof request.query.checklist === "string" ? request.query.checklist.split(",") : [])
+    .map((entry) => entry.trim())
+    .filter((entry) => allowedChecklist.has(entry));
+  await writeAudit(client, {
+    data: {
+      actorId: actor.userId ?? actor.tokenId ?? "system",
+      role: actor.role ?? "UNKNOWN",
+      action: "TRANSACTION_SUMMARY_EXPORTED",
+      entityType: "PAYMENT_ATTEMPT",
+      entityId: "summary",
+      beforeJson: {},
+      afterJson: { ...summary, checklist },
+    },
   });
+  response.json({ ...summary, exportedAt: new Date().toISOString() });
 });
 
 router.get("/transactions", async (request: Request, response: Response) => {
@@ -116,6 +149,7 @@ router.get("/transactions", async (request: Request, response: Response) => {
         id: true,
         createdAt: true,
         status: true,
+        terminalAt: true,
         requestedAmount: true,
         currency: true,
         reference: true,
@@ -130,6 +164,7 @@ router.get("/transactions", async (request: Request, response: Response) => {
         application: { select: { id: true, name: true } },
         rail: { select: { id: true, code: true, nameEn: true } },
         route: { select: { gatewayId: true, gateway: gatewayRef } },
+        gatewayVersion: { select: { setting: { select: { supportsStatusCheck: true } } } },
         operatorCases: { where: { state: { not: "RESOLVED" } }, select: { id: true }, take: 1 },
       },
     }),
@@ -138,7 +173,15 @@ router.get("/transactions", async (request: Request, response: Response) => {
   response.json({
     ...listResponse(
       "transactions",
-      attempts.map((attempt) => ({
+      attempts.map((attempt) => {
+        const supportsStatusCheck = attempt.gatewayVersion?.setting?.supportsStatusCheck === true;
+        const inquiryEligibility = operatorCaseInquiryEligibility({
+          caseState: null,
+          attemptStatus: attempt.status,
+          terminalAt: attempt.terminalAt,
+          supportsStatusCheck,
+        });
+        return {
         id: attempt.id,
         createdAt: attempt.createdAt,
         status: attempt.status,
@@ -158,8 +201,10 @@ router.get("/transactions", async (request: Request, response: Response) => {
         networkReference: support ? null : attempt.networkReference,
         ledgerEntryId: support ? null : attempt.ledgerEntryId,
         hasOpenCase: attempt.operatorCases.length > 0,
+        inquiryEligible: inquiryEligibility.eligible,
         redactedFields: support ? ATTEMPT_REDACTED_FIELDS : [],
-      })),
+        };
+      }),
       total,
       built,
     ),
@@ -344,6 +389,7 @@ const buildAttemptDetail = async (id: string, request: Request): Promise<Record<
       application: { select: { id: true, name: true, status: true } },
       rail: { select: { id: true, code: true, nameEn: true, nameAr: true } },
       route: { select: { id: true, gatewayId: true, gateway: gatewayRef } },
+      gatewayVersion: { select: { setting: { select: { supportsStatusCheck: true } } } },
       link: { select: { id: true, key: true } },
     },
   });
@@ -411,9 +457,17 @@ const buildAttemptDetail = async (id: string, request: Request): Promise<Record<
     application,
     rail,
     route,
+    gatewayVersion,
     link,
     ...columns
   } = row as typeof row & Record<string, unknown>;
+  const supportsStatusCheck = gatewayVersion?.setting?.supportsStatusCheck === true;
+  const inquiryEligibility = operatorCaseInquiryEligibility({
+    caseState: null,
+    attemptStatus: row.status,
+    terminalAt: row.terminalAt,
+    supportsStatusCheck,
+  });
   const attempt: Record<string, unknown> = { ...columns, link };
   for (const column of ATTEMPT_SECRET_COLUMNS) {
     delete attempt[column];
@@ -437,6 +491,8 @@ const buildAttemptDetail = async (id: string, request: Request): Promise<Record<
     application,
     rail,
     gateway: route.gateway,
+    gatewaySupportsStatusCheck: supportsStatusCheck,
+    inquiryEligibility,
     stepLogs: stepLogs.map((log) => ({
       ...log,
       // Defence in depth: the columns are redacted at write time, but the

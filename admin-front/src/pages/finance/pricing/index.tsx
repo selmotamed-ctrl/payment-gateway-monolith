@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRoute } from "vue-router";
 import { VAlert, VBtn, VSelect, VTextField } from "vuetify/components";
+import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -25,9 +26,23 @@ import { showSnackBar } from "@/utils/snackBar";
 
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MetaPill } from "@/components/ui/MetaPill";
+const LIFECYCLE_CHECKS = [
+    { key: "LIFECYCLE_SCOPE_REVIEWED", label: "Profile/rule and scope reviewed" },
+    { key: "EFFECTIVE_DATE_REVIEWED", label: "Effective date and merchant impact reviewed" },
+    { key: "APPROVAL_PATH_CONFIRMED", label: "Four-eyes approval path confirmed" },
+] as const;
+
+const PRICING_CHECKS = [
+    { key: "PRICING_SCOPE_VERIFIED", label: "Pricing scope verified" },
+    { key: "FEE_OR_THRESHOLD_REVIEWED", label: "Fee or threshold reviewed" },
+    { key: "SCOPE_IMPACT_REVIEWED", label: "Merchant, application and rail impact reviewed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Authority to change pricing confirmed" },
+] as const;
+
 type CommissionProfile = {
     id: string;
     merchantId: string | null;
@@ -113,6 +128,9 @@ const PricingControlsPage = dc(() => {
     const velocitySummary = ref<VelocitySummary | null>(null);
 
     const commissionOpen = ref(false);
+    const showChecklists = areChecklistsVisible();
+    const pricingChecklist = ref<Record<string, boolean>>({});
+    const pricingChecklistComplete = computed(() => !showChecklists || PRICING_CHECKS.every((check) => pricingChecklist.value[check.key] === true));
     const commissionSaving = ref(false);
     const commissionError = ref<string | null>(null);
     const commissionForm = ref({
@@ -139,6 +157,8 @@ const PricingControlsPage = dc(() => {
     const lifecycleEffectiveTo = ref("");
     const lifecycleSaving = ref(false);
     const lifecycleError = ref<string | null>(null);
+    const lifecycleChecklist = ref<Record<string, boolean>>({});
+    const lifecycleChecklistComplete = computed(() => !showChecklists || LIFECYCLE_CHECKS.every((check) => lifecycleChecklist.value[check.key] === true));
     const historyOpen = ref(false);
     const historyLoading = ref(false);
     const historyError = ref<string | null>(null);
@@ -222,6 +242,7 @@ const PricingControlsPage = dc(() => {
         };
         commissionTiers.value = [emptyTier()];
         commissionTierErrors.value = [];
+        pricingChecklist.value = {};
         commissionOpen.value = true;
     };
 
@@ -262,6 +283,10 @@ const PricingControlsPage = dc(() => {
             }
             tiers = tiersToApi(rows);
         }
+        if (!pricingChecklistComplete.value) {
+            commissionError.value = t("Complete all pricing checklist items before saving");
+            return;
+        }
         commissionSaving.value = true;
         commissionError.value = null;
         try {
@@ -279,6 +304,7 @@ const PricingControlsPage = dc(() => {
                 roundingMode: form.roundingMode,
                 ...(form.merchantId.trim() ? { merchantId: form.merchantId.trim() } : {}),
                 ...(form.applicationId.trim() ? { applicationId: form.applicationId.trim() } : {}),
+                checklist: PRICING_CHECKS.filter((check) => pricingChecklist.value[check.key]).map((check) => check.key),
             });
             showSnackBar({ type: "success", message: t("Commission profile created") });
             commissionOpen.value = false;
@@ -301,6 +327,7 @@ const PricingControlsPage = dc(() => {
             maxAmount: "",
             action: "BLOCK",
         };
+        pricingChecklist.value = {};
         velocityOpen.value = true;
     };
 
@@ -321,6 +348,10 @@ const PricingControlsPage = dc(() => {
             velocityError.value = t("Max attempts must be between 1 and 100000.");
             return;
         }
+        if (!pricingChecklistComplete.value) {
+            velocityError.value = t("Complete all pricing checklist items before saving");
+            return;
+        }
         velocitySaving.value = true;
         velocityError.value = null;
         try {
@@ -332,6 +363,7 @@ const PricingControlsPage = dc(() => {
                 maxAttempts,
                 action: form.action,
                 ...(form.maxAmount.trim() ? { maxAmount: form.maxAmount.trim() } : {}),
+                checklist: PRICING_CHECKS.filter((check) => pricingChecklist.value[check.key]).map((check) => check.key),
             });
             showSnackBar({ type: "success", message: t("Velocity rule created") });
             velocityOpen.value = false;
@@ -368,12 +400,18 @@ const PricingControlsPage = dc(() => {
         lifecycleReason.value = "";
         lifecycleEffectiveTo.value = new Date().toISOString().slice(0, 10);
         lifecycleError.value = null;
+        lifecycleChecklist.value = {};
         lifecycleOpen.value = true;
     };
 
     const saveLifecycle = async () => {
         if (lifecycleSaving.value) return;
         if (!lifecycleTargetId.value) return;
+        if (!lifecycleChecklistComplete.value) {
+            lifecycleError.value = t("Complete all lifecycle checklist items before submitting");
+            return;
+        }
+        const checklist = LIFECYCLE_CHECKS.filter((check) => lifecycleChecklist.value[check.key]).map((check) => check.key);
         lifecycleSaving.value = true;
         lifecycleError.value = null;
         try {
@@ -381,10 +419,12 @@ const PricingControlsPage = dc(() => {
                 await api.post(urlsMap.commissionProfileExpire(lifecycleTargetId.value), {
                     ...(lifecycleEffectiveTo.value ? { effectiveTo: new Date(`${lifecycleEffectiveTo.value}T00:00:00Z`).toISOString() } : {}),
                     ...(lifecycleReason.value.trim() ? { reason: lifecycleReason.value.trim() } : {}),
+                    checklist,
                 });
             } else {
                 await api.post(urlsMap.velocityRuleDeactivate(lifecycleTargetId.value), {
                     ...(lifecycleReason.value.trim() ? { reason: lifecycleReason.value.trim() } : {}),
+                    checklist,
                 });
             }
             showSnackBar({ type: "success", message: t("Lifecycle change submitted for checker approval") });
@@ -630,6 +670,15 @@ const PricingControlsPage = dc(() => {
                         />
                     </FormField>
                 )}
+                <FormChecklist
+                    checks={[...PRICING_CHECKS]}
+                    modelValue={pricingChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (pricingChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Pricing checklist")}
+                    complete={pricingChecklistComplete.value}
+                    incompleteMessage={t("Complete all pricing checklist items before saving")}
+                />
             </FormModal>
 
             <FormModal
@@ -666,6 +715,15 @@ const PricingControlsPage = dc(() => {
                         />
                     </FormField>
                 )}
+                <FormChecklist
+                    checks={[...LIFECYCLE_CHECKS]}
+                    modelValue={lifecycleChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (lifecycleChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Lifecycle checklist")}
+                    complete={lifecycleChecklistComplete.value}
+                    incompleteMessage={t("Complete all lifecycle checklist items before submitting")}
+                />
                 <FormField label={t("Reason (optional)")} sensitiveMakerChecker>
                     <VTextField modelValue={lifecycleReason.value} onUpdate:modelValue={(value: string) => (lifecycleReason.value = value)} />
                 </FormField>
@@ -711,6 +769,15 @@ const PricingControlsPage = dc(() => {
                 <FormField label={t("Max amount (optional)")} sensitiveMakerChecker>
                     <VTextField modelValue={velocityForm.value.maxAmount} onUpdate:modelValue={(value: string) => (velocityForm.value.maxAmount = value)} />
                 </FormField>
+                <FormChecklist
+                    checks={[...PRICING_CHECKS]}
+                    modelValue={pricingChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (pricingChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Pricing checklist")}
+                    complete={pricingChecklistComplete.value}
+                    incompleteMessage={t("Complete all pricing checklist items before saving")}
+                />
             </FormModal>
         </ScreenContainer>
     );

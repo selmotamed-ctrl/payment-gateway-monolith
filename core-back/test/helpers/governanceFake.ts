@@ -216,6 +216,7 @@ export const createFakePrisma = (): FakePrisma => {
     gateway: model("gateway"),
     regulatoryReport: model("regulatoryReport"),
     reportingRule: model("reportingRule"),
+    outboxEvent: model("outboxEvent"),
   };
 
   client.$transaction = async <R>(callback: (tx: FakePrisma) => Promise<R>): Promise<R> => {

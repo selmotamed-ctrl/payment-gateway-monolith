@@ -68,8 +68,8 @@ export const createReconciliationUploadHandler = (
   deps: ReconciliationUploadDeps,
 ) => async (request: Request, response: Response): Promise<void> => {
   // The audit actor is the authenticated principal. The client controlled
-  // `x-upload-metadata` header may only carry the checklist and the period,
-  // never an identity.
+  // `x-upload-metadata` header may only carry the checklist, period, currency
+  // and autoPost flag, never an identity.
   const principal = request.principal;
   if (!principal?.userId) {
     throw new ApiError(401, "AUTH_REQUIRED", "An authenticated staff principal is required");
@@ -85,6 +85,12 @@ export const createReconciliationUploadHandler = (
   const now = deps.clock?.() ?? new Date();
   const metadata = readMetadata(request);
   const { windowStart, windowEnd } = readWindow(metadata, now);
+  const rawCurrency = typeof metadata.currency === "string" ? metadata.currency.trim().toUpperCase() : "";
+  if (rawCurrency && !/^[A-Z]{3}$/.test(rawCurrency)) {
+    throw new ApiError(400, "STATEMENT_CURRENCY_INVALID", "The statement currency must be a three-letter ISO code");
+  }
+  const currency = rawCurrency || null;
+  const autoPost = typeof metadata.autoPost === "boolean" ? metadata.autoPost : null;
   const fileName = typeof request.headers["x-upload-filename"] === "string"
     ? decodeURIComponent(String(request.headers["x-upload-filename"]))
     : null;
@@ -134,6 +140,8 @@ export const createReconciliationUploadHandler = (
         statsJson: {},
         fileName,
         storageObjectId: staged.objectId,
+        currency,
+        autoPost,
       });
       if (!existingRun) {
         await objectStorage.routeClient.bind(tx as never, {
@@ -185,7 +193,7 @@ export const createReconciliationUploadHandler = (
       entityType: "RECONCILIATION_RUN",
       entityId: resolved.runId,
       beforeJson: {},
-      afterJson: { checklist, idempotent: resolved.idempotent },
+      afterJson: { checklist, idempotent: resolved.idempotent, currency, autoPost },
     },
   });
   response.status(202).json(resolved);

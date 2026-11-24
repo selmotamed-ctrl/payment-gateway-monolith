@@ -23,6 +23,8 @@ import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import { SectionFields } from "@/components/SectionFields";
 import { sandboxFakeRails, type FakeRailsAccountRow, type FakeRailsScenario, type FakeRailsTransactionRow } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
@@ -30,6 +32,30 @@ import { showSnackBar } from "@/utils/snackBar";
 import { xlsxUIPipeline } from "@/utils/xlsx";
 
 type Tab = "ACCOUNTS" | "CLEARING" | "CHAOS" | "TRANSACTIONS" | "WEBHOOKS";
+
+const SCENARIO_CHECKS = [
+    { key: "SCENARIO_SCOPE_VERIFIED", label: "Fake Rails scenario scope verified" },
+    { key: "CHAOS_IMPACT_ACKNOWLEDGED", label: "Chaos impact acknowledged" },
+    { key: "SANDBOX_ONLY_CONFIRMED", label: "Sandbox-only scope confirmed" },
+] as const;
+
+const TRANSACTION_CHECKS = [
+    { key: "TRANSACTION_SCOPE_VERIFIED", label: "Fake Rails transaction scope verified" },
+    { key: "ACTION_IMPACT_ACKNOWLEDGED", label: "Transaction action impact acknowledged" },
+    { key: "SANDBOX_ONLY_CONFIRMED", label: "Sandbox-only scope confirmed" },
+] as const;
+
+const RESET_CHECKS = [
+    { key: "ACCOUNT_SCOPE_VERIFIED", label: "Fake Rails account scope verified" },
+    { key: "RESET_IMPACT_ACKNOWLEDGED", label: "Reset impact acknowledged" },
+    { key: "SANDBOX_ONLY_CONFIRMED", label: "Sandbox-only scope confirmed" },
+] as const;
+
+const EXPORT_CHECKS = [
+    { key: "SANDBOX_SCOPE_VERIFIED", label: "Sandbox scope verified" },
+    { key: "ACCOUNT_HEALTH_REVIEWED", label: "Account health reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
 
 const AdminFakeRailsPage = dc(() => {
     const { t } = useLocale();
@@ -60,6 +86,17 @@ const AdminFakeRailsPage = dc(() => {
     const transactionDeliveries = ref<Array<Record<string, unknown>>>([]);
     const transactionsRefresh = ref<(() => void) | null>(null);
     const exportLoading = ref(false);
+    const showChecklists = areChecklistsVisible();
+    const resetAccountsOpen = ref(false);
+    const scenarioChecklist = ref<Record<string, boolean>>({});
+    const scenarioChecklistComplete = computed(() => !showChecklists || SCENARIO_CHECKS.every((check) => scenarioChecklist.value[check.key] === true));
+    const transactionAction = ref<{ id: string; action: string; phase?: string; failureMode?: string } | null>(null);
+    const transactionChecklist = ref<Record<string, boolean>>({});
+    const transactionChecklistComplete = computed(() => !showChecklists || TRANSACTION_CHECKS.every((check) => transactionChecklist.value[check.key] === true));
+    const resetChecklist = ref<Record<string, boolean>>({});
+    const resetChecklistComplete = computed(() => !showChecklists || RESET_CHECKS.every((check) => resetChecklist.value[check.key] === true));
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
     const createOpen = ref(false);
     const creating = ref(false);
     const createError = ref("");
@@ -173,7 +210,7 @@ const AdminFakeRailsPage = dc(() => {
         { key: "latency", label: "Latency", value: (row) => `${row.latencyMs.min}–${row.latencyMs.max} ms` },
         { key: "auto", label: "Auto-approve", value: (row) => row.autoApproveAsyncAfterSec === null ? "—" : `${row.autoApproveAsyncAfterSec}s` },
         { key: "webhook", label: "Webhook", value: (row) => `${row.webhookBehavior.delaySeconds}s delay · ${row.webhookBehavior.duplicateCount} copies` },
-        { key: "actions", label: "Actions", Value: ({ row }) => <TableRowActions primaryAction={{ label: t("Edit"), icon: "mdi-pencil-outline", onClick: () => { editScenario.value = row; scenarioForm.value = { failure: String(row.overallFailureChancePercent), latencyMin: String(row.latencyMs.min), latencyMax: String(row.latencyMs.max), autoApprove: row.autoApproveAsyncAfterSec === null ? "" : String(row.autoApproveAsyncAfterSec) }; } }} items={[
+        { key: "actions", label: "Actions", Value: ({ row }) => <TableRowActions primaryAction={{ label: t("Edit"), icon: "mdi-pencil-outline", onClick: () => { editScenario.value = row; scenarioChecklist.value = {}; scenarioForm.value = { failure: String(row.overallFailureChancePercent), latencyMin: String(row.latencyMs.min), latencyMax: String(row.latencyMs.max), autoApprove: row.autoApproveAsyncAfterSec === null ? "" : String(row.autoApproveAsyncAfterSec) }; } }} items={[
             { key: "healthy", label: t("Healthy preset"), icon: "mdi-check", onClick: () => void sandboxFakeRails.preset(row.railCode, "healthy").then(loadScenarios) },
             { key: "flaky", label: t("Flaky preset"), icon: "mdi-flash", onClick: () => void sandboxFakeRails.preset(row.railCode, "flaky").then(loadScenarios) },
             { key: "outage", label: t("Outage preset"), icon: "mdi-close-octagon", danger: true, onClick: () => void sandboxFakeRails.preset(row.railCode, "outage").then(loadScenarios) },
@@ -188,12 +225,12 @@ const AdminFakeRailsPage = dc(() => {
         { key: "collection_mode", label: "Mode", value: (row) => row.collection_mode },
         { key: "created_at", label: "Created", value: (row) => row.created_at },
         { key: "actions", label: "Actions", Value: ({ row }) => <TableRowActions primaryAction={{ label: t("Inspect"), icon: "mdi-text-search", onClick: () => void openTransaction(row) }} items={[
-            { key: "approve", label: t("Approve"), icon: "mdi-check", onClick: () => void sandboxFakeRails.transactionAction(row.id, { action: "APPROVE" }).then(loadTransactions) },
-            { key: "reject", label: t("Reject"), icon: "mdi-close", danger: true, onClick: () => void sandboxFakeRails.transactionAction(row.id, { action: "REJECT" }).then(loadTransactions) },
-            { key: "mismatch", label: t("Approve mismatch"), icon: "mdi-scale-balance", onClick: () => void sandboxFakeRails.transactionAction(row.id, { action: "APPROVE_MISMATCH" }).then(loadTransactions) },
-            { key: "late", label: t("Approve late"), icon: "mdi-clock-check", onClick: () => void sandboxFakeRails.transactionAction(row.id, { action: "APPROVE_LATE" }).then(loadTransactions) },
-            { key: "force", label: t("Force decline"), icon: "mdi-flash-off", danger: true, onClick: () => void sandboxFakeRails.transactionAction(row.id, { action: "FORCE_OUTCOME", phase: "SUBMIT", failureMode: "TERMINAL_DECLINE_INSUFFICIENT_FUNDS" }).then(loadTransactions) },
-            { key: "cancel", label: t("Cancel"), icon: "mdi-cancel", onClick: () => void sandboxFakeRails.transactionAction(row.id, { action: "CANCEL" }).then(loadTransactions) },
+            { key: "approve", label: t("Approve"), icon: "mdi-check", onClick: () => openTransactionAction(row.id, "APPROVE") },
+            { key: "reject", label: t("Reject"), icon: "mdi-close", danger: true, onClick: () => openTransactionAction(row.id, "REJECT") },
+            { key: "mismatch", label: t("Approve mismatch"), icon: "mdi-scale-balance", onClick: () => openTransactionAction(row.id, "APPROVE_MISMATCH") },
+            { key: "late", label: t("Approve late"), icon: "mdi-clock-check", onClick: () => openTransactionAction(row.id, "APPROVE_LATE") },
+            { key: "force", label: t("Force decline"), icon: "mdi-flash-off", danger: true, onClick: () => openTransactionAction(row.id, "FORCE_OUTCOME", { phase: "SUBMIT", failureMode: "TERMINAL_DECLINE_INSUFFICIENT_FUNDS" }) },
+            { key: "cancel", label: t("Cancel"), icon: "mdi-cancel", onClick: () => openTransactionAction(row.id, "CANCEL") },
         ]} /> },
     ];
 
@@ -259,17 +296,95 @@ const AdminFakeRailsPage = dc(() => {
 
     const saveScenario = async () => {
         if (!editScenario.value) return;
+        if (!scenarioChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all scenario checklist items before saving") });
+            return;
+        }
         busy.value = editScenario.value.railCode;
         try {
-            await sandboxFakeRails.updateScenario(editScenario.value.railCode, { overallFailureChancePercent: Number(scenarioForm.value.failure), latencyMs: { min: Number(scenarioForm.value.latencyMin), max: Number(scenarioForm.value.latencyMax) }, autoApproveAsyncAfterSec: scenarioForm.value.autoApprove === "" ? null : Number(scenarioForm.value.autoApprove) });
+            await sandboxFakeRails.updateScenario(editScenario.value.railCode, {
+                overallFailureChancePercent: Number(scenarioForm.value.failure),
+                latencyMs: { min: Number(scenarioForm.value.latencyMin), max: Number(scenarioForm.value.latencyMax) },
+                autoApproveAsyncAfterSec: scenarioForm.value.autoApprove === "" ? null : Number(scenarioForm.value.autoApprove),
+                checklist: SCENARIO_CHECKS.filter((check) => scenarioChecklist.value[check.key]).map((check) => check.key),
+            });
             editScenario.value = null;
             await loadScenarios();
         } catch (e) { showSnackBar({ type: "error", message: extractApiErrorMessage(e) }); }
         finally { busy.value = null; }
     };
 
+    const resetAccounts = async () => {
+        if (!resetChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all reset checklist items before continuing") });
+            return;
+        }
+        busy.value = "reset-accounts";
+        try {
+            await sandboxFakeRails.resetAccounts(RESET_CHECKS.filter((check) => resetChecklist.value[check.key]).map((check) => check.key));
+            resetAccountsOpen.value = false;
+            accountsRefresh.value?.();
+            await loadAccountsSummary();
+            showSnackBar({ type: "success", message: t("Fake Rails accounts reset") });
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        } finally {
+            busy.value = null;
+        }
+    };
+
+    const openTransactionAction = (id: string, action: string, extras: { phase?: string; failureMode?: string } = {}) => {
+        transactionChecklist.value = {};
+        transactionAction.value = { id, action, ...extras };
+    };
+
+    const submitTransactionAction = async () => {
+        const current = transactionAction.value;
+        if (!current) return;
+        if (!transactionChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all transaction checklist items before continuing") });
+            return;
+        }
+        busy.value = `transaction:${current.id}`;
+        try {
+            await sandboxFakeRails.transactionAction(current.id, {
+                action: current.action,
+                ...(current.phase ? { phase: current.phase } : {}),
+                ...(current.failureMode ? { failureMode: current.failureMode } : {}),
+                checklist: TRANSACTION_CHECKS.filter((check) => transactionChecklist.value[check.key]).map((check) => check.key),
+            });
+            transactionAction.value = null;
+            await loadTransactions();
+            showSnackBar({ type: "success", message: t("Fake Rails transaction updated") });
+        } catch (e) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
+        } finally {
+            busy.value = null;
+        }
+    };
+
+    const copyFakeRailsSummary = async () => {
+        const summary = {
+            tab: tab.value,
+            accounts: accountsSummary.value,
+            clearingPools: pools.value.length,
+            generatedLines: clearingRows.value.length,
+            url: window.location.href,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Fake Rails summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const exportAccounts = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
@@ -280,15 +395,15 @@ const AdminFakeRailsPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Fake Rails Accounts & Clearing")} subtitle={t("Global test customers, balances, states, chaos and synthetic settlements.")} badge="SANDBOX" badgeTone="warning" end={() => <div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportAccounts()}>{t("Export summary")}</VBtn></div>} />
+            <PageHeader title={t("Fake Rails Accounts & Clearing")} subtitle={t("Global test customers, balances, states, chaos and synthetic settlements.")} badge="SANDBOX" badgeTone="warning" end={() => <div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!accountsSummary.value} onClick={() => void copyFakeRailsSummary()}>{t("Copy summary")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportAccounts()}>{t("Export summary")}</VBtn></div>} />
             <SandboxBanner />
             <div class="mb-4"><SegmentedTabs modelValue={tab.value} tabs={[{ label: t("Accounts"), value: "ACCOUNTS" }, { label: t("Clearing"), value: "CLEARING" }, { label: t("Chaos"), value: "CHAOS" }, { label: t("Transactions"), value: "TRANSACTIONS" }, { label: t("Webhooks"), value: "WEBHOOKS" }]} onUpdate:modelValue={(value: string) => (tab.value = value as Tab)} /></div>
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value && !accountsSummary.value} minHeight="180px">
                 {tab.value === "ACCOUNTS" ? <div class="d-flex flex-column ga-4">
-                    <SummaryExportCard title={t("Test account health")} metrics={accountMetrics.value} exportLoading={exportLoading.value} exportLabel={t("Export summary")} onExport={() => void exportAccounts()}>
+                    <SummaryExportCard title={t("Test account health")} metrics={accountMetrics.value} checks={[...EXPORT_CHECKS]} checklist={exportChecklist.value} onUpdate:checklist={(value: Record<string, boolean>) => (exportChecklist.value = value)} showChecklists={showChecklists} checklistComplete={exportChecklistComplete.value} exportLoading={exportLoading.value} exportDisabled={!exportChecklistComplete.value} exportLabel={t("Export summary")} onExport={() => void exportAccounts()}>
                         <div class="d-flex flex-wrap ga-2">
-                            <VBtn variant="tonal" onClick={() => void sandboxFakeRails.resetAccounts().then(() => { accountsRefresh.value?.(); void loadAccountsSummary(); })}>{t("Reset accounts to defaults")}</VBtn>
+                            <VBtn variant="tonal" onClick={() => { resetChecklist.value = {}; resetAccountsOpen.value = true; }}>{t("Reset accounts to defaults")}</VBtn>
                             <VBtn color="primary" prependIcon="mdi-plus" onClick={() => { createError.value = ""; createOpen.value = true; }}>{t("Create test account")}</VBtn>
                         </div>
                     </SummaryExportCard>
@@ -355,6 +470,55 @@ const AdminFakeRailsPage = dc(() => {
                     <FormField label={t("Maximum latency (ms)")}><VTextField type="number" modelValue={scenarioForm.value.latencyMax} onUpdate:modelValue={(v: string) => (scenarioForm.value.latencyMax = v)} hideDetails /></FormField>
                     <FormField label={t("Auto-approve after seconds")}><VTextField type="number" modelValue={scenarioForm.value.autoApprove} onUpdate:modelValue={(v: string) => (scenarioForm.value.autoApprove = v)} hideDetails /></FormField>
                 </SectionFields>
+                <FormChecklist
+                    checks={[...SCENARIO_CHECKS]}
+                    modelValue={scenarioChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (scenarioChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Scenario checklist")}
+                    complete={scenarioChecklistComplete.value}
+                    incompleteMessage={t("Complete all scenario checklist items before saving")}
+                />
+            </FormModal>
+            <FormModal
+                modelValue={transactionAction.value !== null}
+                onUpdate:modelValue={(value: boolean) => { if (!value) transactionAction.value = null; }}
+                title={t("Run Fake Rails transaction action")}
+                subtitle={transactionAction.value ? `${transactionAction.value.action} · ${transactionAction.value.id}` : ""}
+                size="sm"
+                loading={busy.value !== null}
+                submitLabel={t("Run action")}
+                onSubmit={() => void submitTransactionAction()}
+            >
+                <FormChecklist
+                    checks={[...TRANSACTION_CHECKS]}
+                    modelValue={transactionChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (transactionChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Transaction checklist")}
+                    complete={transactionChecklistComplete.value}
+                    incompleteMessage={t("Complete all transaction checklist items before continuing")}
+                />
+            </FormModal>
+
+            <FormModal
+                modelValue={resetAccountsOpen.value}
+                onUpdate:modelValue={(value: boolean) => (resetAccountsOpen.value = value)}
+                title={t("Reset Fake Rails accounts")}
+                size="sm"
+                loading={busy.value === "reset-accounts"}
+                submitLabel={t("Reset accounts")}
+                onSubmit={() => void resetAccounts()}
+            >
+                <FormChecklist
+                    checks={[...RESET_CHECKS]}
+                    modelValue={resetChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (resetChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Reset checklist")}
+                    complete={resetChecklistComplete.value}
+                    incompleteMessage={t("Complete all reset checklist items before continuing")}
+                />
             </FormModal>
         </ScreenContainer>
     );

@@ -4,7 +4,7 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { loadDeployConfig, objectStorageConfigured } from "../lib/configSchema";
-import { deployObjectStorageDaemon, uploadStorageCertificates } from "../deploy";
+import { deployObjectStorageDaemon, objectStorageCertOwnershipCommand, uploadStorageCertificates } from "../deploy";
 import { planHosts } from "../lib/hostPlanner";
 import { buildPki, certFilesForHost } from "../lib/pkiManager";
 import { objectStorageCoreEnv } from "../lib/hostPlanner";
@@ -76,6 +76,19 @@ describe("shared blob store copies stay identical", () => {
     const backupCopy = await fsp.readFile(path.join(root, "deploy/backup-daemon/src/shared/blobStore.ts"), "utf8");
     expect(daemonCopy).toBe(canonical);
     expect(backupCopy).toBe(canonical);
+  });
+});
+
+describe("object-storage certificate ownership", () => {
+  test("later deploys hand the daemon its certificate material without following symlinks", () => {
+    const command = objectStorageCertOwnershipCommand("/var/lib/pg-object-storage/shared/certs");
+    expect(command).toContain("install -d -m 0750 -o pgobjstore");
+    expect(command).toContain("chown -hR pgobjstore:pgobjstore");
+    expect(command).toContain("find '/var/lib/pg-object-storage/shared/certs' -maxdepth 1 -type f -name '*.crt'");
+    expect(command).toContain("find '/var/lib/pg-object-storage/shared/certs' -maxdepth 1 -type f -name '*.key'");
+    expect(command).not.toContain("chmod 0640 '/var/lib/pg-object-storage/shared/certs'/*.crt 2>/dev/null || true");
+    expect(command.startsWith("if id -u pgobjstore")).toBe(true);
+    expect(command.trim().endsWith("install -d -m 0750 -o root -g root '/var/lib/pg-object-storage/shared/certs'; fi")).toBe(true);
   });
 });
 

@@ -245,7 +245,14 @@ router.get("/objects/:id", handler(async (request, response) => {
 router.post("/objects/:id/legal-hold", handler(async (request, response) => {
   requireAny(request, ["system:storage:legal-hold"]);
   const { id } = parseOrThrow(z.object({ id: z.string().uuid() }).strict(), request.params);
-  const body = parseOrThrow(z.object({ reason: z.string().trim().min(5).max(512) }).strict(), request.body ?? {});
+  const body = parseOrThrow(
+    z.object({
+      reason: z.string().trim().min(5).max(512),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
+  const checklist = (body.checklist ?? []).filter((entry) => ["OBJECT_SCOPE_VERIFIED", "LEGAL_RETENTION_CONFIRMED", "AUTHORITY_CONFIRMED"].includes(entry));
   const actor = actorOf(request);
   const updated = await getObjectStorageSdk().routeClient.placeLegalHold({ objectId: id, adminId: actor.userId, reason: body.reason });
   await writeAudit(getObjectStorageSdk().prisma, {
@@ -256,7 +263,7 @@ router.post("/objects/:id/legal-hold", handler(async (request, response) => {
       entityType: "STORAGE_OBJECT",
       entityId: id,
       beforeJson: {},
-      afterJson: { reason: body.reason, retainUntil: updated.retainUntil?.toISOString() ?? null },
+      afterJson: { reason: body.reason, retainUntil: updated.retainUntil?.toISOString() ?? null, checklist },
     },
   });
   response.json({ object: safeObjectRow(updated as never) });
@@ -265,7 +272,14 @@ router.post("/objects/:id/legal-hold", handler(async (request, response) => {
 router.delete("/objects/:id/legal-hold", handler(async (request, response) => {
   requireAny(request, ["system:storage:legal-hold"]);
   const { id } = parseOrThrow(z.object({ id: z.string().uuid() }).strict(), request.params);
-  const body = parseOrThrow(z.object({ reason: z.string().trim().min(5).max(512) }).strict(), request.body ?? {});
+  const body = parseOrThrow(
+    z.object({
+      reason: z.string().trim().min(5).max(512),
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
+    request.body ?? {},
+  );
+  const checklist = (body.checklist ?? []).filter((entry) => ["OBJECT_SCOPE_VERIFIED", "LEGAL_RETENTION_CONFIRMED", "AUTHORITY_CONFIRMED"].includes(entry));
   const actor = actorOf(request);
   const sdk = getObjectStorageSdk();
   // Lifting a hold is a sensitive, loosening action: the maker proposes and a
@@ -278,7 +292,7 @@ router.delete("/objects/:id/legal-hold", handler(async (request, response) => {
     data: {
       subjectType: "STORAGE_LEGAL_HOLD",
       subjectId: id,
-      payloadDiffJson: { action: "LIFT", reason: body.reason } as Prisma.InputJsonValue,
+      payloadDiffJson: { action: "LIFT", reason: body.reason, checklist } as Prisma.InputJsonValue,
       makerReason: body.reason,
       mode: "STANDARD",
       makerUserId: actor.userId,
@@ -294,7 +308,7 @@ router.delete("/objects/:id/legal-hold", handler(async (request, response) => {
       entityType: "STORAGE_OBJECT",
       entityId: id,
       beforeJson: { legalHold: true },
-      afterJson: { legalHold: true, approvalRequestId: approval.id, reason: body.reason },
+      afterJson: { legalHold: true, approvalRequestId: approval.id, reason: body.reason, checklist },
     },
   });
   response.status(202).json({ status: "PENDING_CHECKER", approvalRequestId: approval.id });
@@ -350,6 +364,11 @@ const maintenanceJobs = ["gc", "sweep", "scrub", "reconcile-locks", "rewrap", "a
 router.post("/maintenance/:job", handler(async (request, response) => {
   requireAny(request, ["system:storage:admin"]);
   const { job } = parseOrThrow(z.object({ job: z.enum(maintenanceJobs) }).strict(), request.params);
+  const body = parseOrThrow(
+    z.object({ checklist: z.array(z.string().max(64)).max(10).optional() }).strict(),
+    request.body ?? {},
+  );
+  const checklist = (body.checklist ?? []).filter((entry) => ["JOB_SCOPE_VERIFIED", "VAULT_IMPACT_REVIEWED", "AUTHORITY_CONFIRMED"].includes(entry));
   const sdk = getObjectStorageSdk();
   const workers = createObjectStorageWorkers({ sdk, prisma: sdk.prisma });
   const actor = actorOf(request);
@@ -382,7 +401,7 @@ router.post("/maintenance/:job", handler(async (request, response) => {
       entityType: "STORAGE_ENGINE",
       entityId: job,
       beforeJson: {},
-      afterJson: { job, result: JSON.parse(JSON.stringify(result ?? null)) },
+      afterJson: { job, result: JSON.parse(JSON.stringify(result ?? null)), checklist },
     },
   });
   response.json({ job, result });

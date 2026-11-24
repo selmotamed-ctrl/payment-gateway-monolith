@@ -1,7 +1,7 @@
 import { dc } from "kt-dc";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useLocale } from "vuetify";
-import { useRoute, useRouter } from "vue-router";
+import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import { VAlert, VBtn } from "vuetify/components";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -13,6 +13,7 @@ import { StateView } from "@/components/StateView";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showConfirm } from "@/utils/confirm";
 import { showSnackBar } from "@/utils/snackBar";
 import { emptyDraft, type WizardDraft } from "@/components/gateway-wizard/types";
 import { StepBar } from "@/components/gateway-wizard/StepBar";
@@ -391,6 +392,17 @@ const GatewayWizardPage = dc(() => {
             saving.value = false;
         }
     };
+
+    onBeforeRouteLeave(async () => {
+        if (!dirty.value) return true;
+        return showConfirm({
+            title: t("Discard unsaved wizard changes?"),
+            message: t("This gateway version has changes that were not saved. Leaving now discards them."),
+            submitButtonLabel: t("Discard changes"),
+            type: "warning",
+            onConfirm: async () => undefined,
+        });
+    });
 
     const onChange = (next: WizardDraft) => {
         draft.value = next;

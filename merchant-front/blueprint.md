@@ -404,6 +404,8 @@ A separate "Sandbox Studio (Testing & Training)" section adds `/sandbox/overview
 
 A "Sandbox Live Mirror" section reuses the Live pages under `/sandbox/mirror/*` (cash-outs, disputes, POS, credentials, team, webhooks, tokens, statements, reports). The Axios interceptor rewrites Live API paths to `/sandbox/mirror/*` and the router aliases Live navigation into the mirror; Exit sandbox removes `?live=1` and returns to Live. Wallet detail shows the sharded ledger, balance controller, pending cash-outs and a real sandbox cash-out; payment detail shows charged/settled/fee/commission/net, refundable amount, refund, dispute simulation/resolution, checkout inspector secrets and journal lines.
 
+- **Dashboard currency (2026-11-24).** The overview accepts `?currency=` and renders volume, commission, net and wallet totals for the selected currency; `byCurrency` carries the per-currency breakdown. Wallet statements are filtered by the link wallet as well as currency.
+
 ## Merchant Guide and Developer API
 
 > Status: `partial` · Last verified: 2026-11-04

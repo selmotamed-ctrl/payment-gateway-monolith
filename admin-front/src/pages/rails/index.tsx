@@ -48,6 +48,12 @@ type RailField = {
     sensitivity: string;
 };
 
+const EXPORT_CHECKS = [
+    { key: "RAIL_SCOPE_VERIFIED", label: "Rail scope verified" },
+    { key: "COLLECTION_MODE_REVIEWED", label: "Collection mode and route health reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const SUMMARY_EXPORT_CHECKS = [
     { key: "RAIL_SCOPE_VERIFIED", label: "Rail portfolio scope verified" },
     { key: "COLLECTION_MODE_REVIEWED", label: "Collection-mode breakdown reviewed" },
@@ -182,6 +188,9 @@ const RailsPage = dc(() => {
     const filters = ref<FilterValues>({});
     const pageSize = ref(20);
     const exportLoading = ref(false);
+    const exportOpen = ref(false);
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
     const summaryExportLoading = ref(false);
     const summaryExportChecklist = ref<Record<string, boolean>>({});
     const refreshHook = ref<{
@@ -234,14 +243,44 @@ const RailsPage = dc(() => {
         }
     };
 
+    const copyRailSummary = async (row: Rail) => {
+        const summary = {
+            id: row.id,
+            code: row.code,
+            nameEn: row.nameEn,
+            nameAr: row.nameAr,
+            collectionMode: row.collectionMode,
+            currency: row.currency,
+            minAmount: row.minAmount,
+            maxAmount: row.maxAmount,
+            blocked: row.blocked,
+            displayOrder: row.displayOrder,
+            routeCount: row.routeCount ?? 0,
+            routeHealth: row.routeHealth ?? null,
+            capabilities: row.capabilities,
+            logoAssetId: row.logoAssetId ?? null,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Rail summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const exportExcel = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const response = await api.get(urlsMap.railsExport, {
                 params: {
                     ...(search.value ? { search: search.value } : {}),
                     ...buildFilterQuery(filterDefinitions.value, filters.value),
+                    checklist: EXPORT_CHECKS.filter((check) => exportChecklist.value[check.key]).map((check) => check.key).join(","),
                 },
             });
             const payload = response.data?.data ?? response.data ?? {};
@@ -285,6 +324,8 @@ const RailsPage = dc(() => {
                 title: `rails-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            exportOpen.value = false;
+            exportChecklist.value = {};
             showSnackBar({
                 type: payload.truncated ? "warning" : "success",
                 message: payload.truncated
@@ -635,6 +676,12 @@ const RailsPage = dc(() => {
                             icon: "mdi-pencil-outline",
                             onClick: () => openEditRail(row),
                         },
+                        {
+                            key: "copy",
+                            label: t("Copy summary"),
+                            icon: "mdi-content-copy",
+                            onClick: () => void copyRailSummary(row),
+                        },
                     ]}
                 />
             ),
@@ -649,7 +696,7 @@ const RailsPage = dc(() => {
                     subtitle={t("Customer payment methods, collection modes, and catalog fields.")}
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                             <VBtn color="primary" variant="flat" prependIcon={"mdi-plus"} onClick={() => openCreateRail()}>
                                 {t("Add Rail")}
                             </VBtn>
@@ -876,6 +923,27 @@ const RailsPage = dc(() => {
             </FormModal>
 
             {/* Update rail */}
+            <FormModal
+                modelValue={exportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                title={t("Export rails")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportExcel()}
+            >
+                <VAlert type="warning" variant="tonal">{t("The export contains rail configuration, limits and route-health details. Handle it as confidential operational evidence.")}</VAlert>
+                <FormChecklist
+                    checks={[...EXPORT_CHECKS]}
+                    modelValue={exportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Rail export checklist")}
+                    complete={exportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
+
             <FormModal
                 modelValue={editOpen.value}
                 onUpdate:modelValue={(v: any) => (editOpen.value = v)}

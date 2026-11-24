@@ -179,6 +179,11 @@ const timestamp = (): string => new Date().toISOString().replace(/[-:T]/g, "").s
 const isStorageRole = (role: string): boolean =>
   ["pg-primary", "pg-replica", "pgbouncer", "redis", "audit-db", "log-db", "backup", "object-storage"].includes(role);
 
+export const objectStorageCertOwnershipCommand = (dir: string): string => {
+  const quoted = shellQuote(dir);
+  return `if id -u ${OBJECT_STORAGE_SERVICE_USER} >/dev/null 2>&1; then install -d -m 0750 -o ${OBJECT_STORAGE_SERVICE_USER} -g ${OBJECT_STORAGE_SERVICE_USER} ${quoted} && chown -hR ${OBJECT_STORAGE_SERVICE_USER}:${OBJECT_STORAGE_SERVICE_USER} ${quoted} && find ${quoted} -maxdepth 1 -type f -name '*.crt' -exec chmod 0640 {} + && find ${quoted} -maxdepth 1 -type f -name '*.key' -exec chmod 0600 {} +; else install -d -m 0750 -o root -g root ${quoted}; fi`;
+};
+
 export const uploadStorageCertificates = (
   runner: SshRunner,
   plan: DeployPlan,
@@ -262,11 +267,12 @@ export const uploadStorageCertificates = (
       );
     }
     if (has("object-storage") && !dryRun) {
-      // The user is created in step 5, after this step on a fresh host. Keep the
-      // directory root-owned here; the provisioner hands the dedicated cert
-      // files to pgobjstore after the account exists.
-      const dir = shellQuote(config.OBJECT_STORAGE_DAEMON_CERT_DIR);
-      runner.run(host.ssh, `install -d -m 0750 -o root -g root ${dir}`, { sudo: true });
+      // The user may be created in step 5, after this step on a fresh host.
+      // Keep a not-yet-provisioned host root-owned, but on every later deploy
+      // hand the daemon its own certificate material: a partial deploy (or a
+      // deploy that only selects admin) must never leave the daemon unable to
+      // read its certificate files.
+      runner.run(host.ssh, objectStorageCertOwnershipCommand(config.OBJECT_STORAGE_DAEMON_CERT_DIR), { sudo: true });
     }
   }
 };
@@ -1119,6 +1125,9 @@ const frontendRuntimeConfig = (frontend: string, config: DeployConfig): Record<s
       // Legacy key read by releases built before the master checklist flag.
       showSnapshotExportChecklist: visible,
       showHelpPanels: config.ADMIN_SHOW_HELP_PANELS,
+      ...(config.CHECKOUT_DOMAIN && config.CHECKOUT_DOMAIN !== "_"
+        ? { academyCertificateVerifyUrl: `${publicOrigin(config.CHECKOUT_DOMAIN, config.CHECKOUT_SSL, config.CHECKOUT_HTTP_PORT, config.CHECKOUT_HTTPS_PORT)}/verify/certificate` }
+        : {}),
     };
   }
   return null;
@@ -1140,6 +1149,9 @@ const logOutcomes = (outcomes: Record<string, string> | undefined): void => {
 
 const main = async (): Promise<void> => {
   const options = parseArgs(process.argv.slice(2));
+  if (options.rotateCerts && !isFullDeployment(options)) {
+    throw new Error("--rotate-certs replaces the CA; run it as a full deployment (do not combine it with --only or --nodes)");
+  }
 
   // ---- Step 1: configuration and plan ------------------------------------
   step(1, "Validate deploy.env and build the execution plan");

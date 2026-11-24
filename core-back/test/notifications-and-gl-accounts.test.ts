@@ -522,4 +522,14 @@ describe("currency scoped GL accounts", () => {
       expect(account?.currency).toBe("USD");
     }
   });
+
+  test("strict context refuses a currency-scoped lookup without a currency", async () => {
+    resetFakeDatabase();
+    const prisma = createFakePrisma();
+    await seedSystemGlAccounts(prisma);
+    const poster = new LedgerPoster(prisma as never, undefined, undefined, undefined, { requireCurrency: true });
+    await expect(
+      poster.postScenario("CASHOUT", "cashout-no-currency", { amount: "10.0000" }, {}),
+    ).rejects.toThrow(/currency is required/i);
+  });
 });

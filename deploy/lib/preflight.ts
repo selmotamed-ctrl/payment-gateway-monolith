@@ -474,7 +474,7 @@ const HOST_SNAPSHOT_SCRIPT = (units: string[]): string => {
     `echo "@@PS@@"`,
     `ps -eo pid=,ppid=,user=,etimes=,args= 2>/dev/null`,
     `echo "@@NGINX@@"`,
-    `if command -v nginx >/dev/null 2>&1; then nginx -t 2>&1; fi`,
+    `if command -v nginx >/dev/null 2>&1; then (sudo -n nginx -t 2>&1 || nginx -t 2>&1); fi`,
     `echo "@@UNITS@@"`,
     `for u in ${unitList}; do printf '%s=%s\\n' "$u" "$(systemctl show -p MainPID --value "$u" 2>/dev/null)"; done`,
   ].join("\n");
@@ -661,7 +661,16 @@ const evaluateHost = (
     } else if (/test is successful|syntax is ok/i.test(snapshot.nginxTest)) {
       result({ id: `host:${host.key}:nginx`, label: `${host.label} nginx -t`, kind: "host", status: "pass", severity: "blocking", detail: "current configuration parses", host: host.label });
     } else {
-      result({ id: `host:${host.key}:nginx`, label: `${host.label} nginx -t`, kind: "host", status: "fail", severity: "blocking", detail: (snapshot.nginxTest || "nginx -t failed").slice(0, 300), host: host.label });
+      const permissionOnly = /permission denied|cannot load certificate key|cannot open|secret key/i.test(snapshot.nginxTest);
+      result({
+        id: `host:${host.key}:nginx`,
+        label: `${host.label} nginx -t`,
+        kind: "host",
+        status: permissionOnly ? "warn" : "fail",
+        severity: permissionOnly ? "warning" : "blocking",
+        detail: (snapshot.nginxTest || "nginx -t failed").slice(0, 300),
+        host: host.label,
+      });
     }
   }
   if (host.services.some((service) => service.role !== "db") && snapshot.tools.pm2 === false && !bootstrapAllowed) {

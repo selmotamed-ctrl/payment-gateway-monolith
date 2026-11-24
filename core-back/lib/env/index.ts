@@ -391,6 +391,8 @@ export const envSchema = z.strictObject({
    */
   WORKER_COMMISSION_NETTING_ENABLED: booleanFromEnvironment.default(true),
   WORKER_COMMISSION_NETTING_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  /** Reporting/display base currency. Ledger books remain per-currency; no FX conversion is implied. */
+  BASE_CURRENCY: z.string().trim().regex(/^[A-Za-z]{3}$/).default("LYD"),
   COMMISSION_NETTING_DRY_RUN: booleanFromEnvironment.default(true),
   /** Daily run time as `M H * * *` in Africa/Tripoli. */
   COMMISSION_NETTING_CRON: z.string().trim().min(1).default("30 0 * * *"),
@@ -708,6 +710,7 @@ const resolveEnvironment = (): CoreEnv => {
     WORKER_COMMISSION_NETTING_ENABLED: true,
     WORKER_COMMISSION_NETTING_INTERVAL_MS: 60_000,
     COMMISSION_NETTING_DRY_RUN: true,
+    BASE_CURRENCY: "LYD",
     COMMISSION_NETTING_CRON: "30 0 * * *",
     COMMISSION_RECEIVABLE_AGING_DAYS: 30,
     COMMISSION_NETTING_AT_CASHOUT: true,

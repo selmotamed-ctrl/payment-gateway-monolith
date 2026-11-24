@@ -9,6 +9,7 @@ import { Callout } from "@/components/academy/ui/Callout";
 import { useAcademyProgress } from "@/components/academy/useAcademyProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { showSnackBar } from "@/utils/snackBar";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { roleTrackFor } from "@/content/academy";
 
@@ -49,6 +50,29 @@ export const AdminAcademyModulePage = defineComponent({
             });
             return step.kind === "lesson" || step.kind === "lab" ? step.id : undefined;
         });
+
+        const copyModuleSummary = async () => {
+            const m = module.value;
+            if (!m) return;
+            const lessonsDone = m.lessonIds.filter((id) => academy.lessonDone(id)).length;
+            const labsPassed = m.labIds.filter((id) => Boolean(academy.labBest(id)?.passedAt)).length;
+            const summary = {
+                module: m.id,
+                title: m.title,
+                track: owner.value?.id ?? null,
+                lessons: `${lessonsDone}/${m.lessonIds.length}`,
+                labs: `${labsPassed}/${m.labIds.length}`,
+                upNext: nextId.value ?? null,
+                nextModule: neighbours.value.next?.id ?? null,
+                url: window.location.href,
+            };
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+                showSnackBar({ type: "success", message: t("Module summary copied") });
+            } catch {
+                showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+            }
+        };
 
         return () => {
             const m = module.value;
@@ -122,6 +146,11 @@ export const AdminAcademyModulePage = defineComponent({
                                           { label: m?.title ?? t("Module") },
                                       ]
                             }
+                            end={() => (
+                                <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyModuleSummary()}>
+                                    {t("Copy module summary")}
+                                </VBtn>
+                            )}
                         />
                     )}
                 >

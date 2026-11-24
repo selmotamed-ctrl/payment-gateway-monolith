@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { VAlert, VAutocomplete, VBtn, VSelect, VTextField } from "vuetify/components";
+import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -16,6 +17,7 @@ import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { ApiTable } from "@/components/Table/ApiTable";
 import { TableRowActions, type RowActionItem } from "@/components/Table/TableRowActions";
 import TableFilters from "@/components/Table/TableFilters";
@@ -88,6 +90,13 @@ const ENV_ITEMS: string[] = [...ENV_VALUES];
 const OWNER_ITEMS: string[] = [...OWNER_TYPES];
 const SETTLEMENT_ITEMS: string[] = [...SETTLEMENT_TARGETS];
 
+const CREDENTIAL_CHECKS = [
+    { key: "CREDENTIAL_SET_SCOPE_VERIFIED", label: "Credential-set scope verified" },
+    { key: "SECRET_HANDLING_CONFIRMED", label: "Secret handling confirmed" },
+    { key: "ENVIRONMENT_AND_OWNER_REVIEWED", label: "Environment and owner reviewed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Authority to change credentials confirmed" },
+] as const;
+
 const merchantsLoader = createOptionsLoader("merchants");
 
 const CredentialSetsPage = dc(() => {
@@ -136,6 +145,11 @@ const CredentialSetsPage = dc(() => {
     const revokeTarget = ref<CredentialRow | null>(null);
     const revokeLoading = ref(false);
     const revokeError = ref("");
+    const showChecklists = areChecklistsVisible();
+    const credentialChecklist = ref<Record<string, boolean>>({});
+    const credentialChecklistComplete = computed(() => !showChecklists || CREDENTIAL_CHECKS.every((check) => credentialChecklist.value[check.key] === true));
+    const revokeChecklist = ref<Record<string, boolean>>({});
+    const revokeChecklistComplete = computed(() => !showChecklists || CREDENTIAL_CHECKS.every((check) => revokeChecklist.value[check.key] === true));
     const verifyingId = ref<string | null>(null);
 
     const refreshTable = () => hook.value?.refreshAsIs();
@@ -227,6 +241,7 @@ const CredentialSetsPage = dc(() => {
         createEntries.value = [newEntry({ key: "apiKey", type: "HEADER", isSecret: true })];
         createShowErrors.value = false;
         createError.value = "";
+        credentialChecklist.value = {};
         createOpen.value = true;
         void loadGateways();
     };
@@ -237,10 +252,17 @@ const CredentialSetsPage = dc(() => {
     const submitCreate = async () => {
         createShowErrors.value = true;
         if (createDraftErrors.value.length > 0 || !createValidation.value.ok) return;
+        if (!credentialChecklistComplete.value) {
+            createError.value = t("Complete all credential checklist items before creating the set");
+            return;
+        }
         createLoading.value = true;
         createError.value = "";
         try {
-            const response = await api.post(urlsMap.credentialSetsList, toCreatePayload(createDraft.value, createEntries.value));
+            const response = await api.post(urlsMap.credentialSetsList, {
+                ...toCreatePayload(createDraft.value, createEntries.value),
+                checklist: CREDENTIAL_CHECKS.filter((check) => credentialChecklist.value[check.key]).map((check) => check.key),
+            });
             const created = (response.data?.data ?? response.data) as { id?: string };
             createOpen.value = false;
             // Drop the typed secrets from memory as soon as they were sent.
@@ -260,6 +282,7 @@ const CredentialSetsPage = dc(() => {
         rotateError.value = "";
         rotateShowErrors.value = false;
         rotateEntries.value = [];
+        credentialChecklist.value = {};
         rotateTarget.value = row;
         const loaded = detail.value?.id === row.id ? detail.value : await loadDetailFor(row.id);
         if (rotateTarget.value?.id !== row.id) return;
@@ -283,10 +306,17 @@ const CredentialSetsPage = dc(() => {
         if (!target) return;
         rotateShowErrors.value = true;
         if (!rotateValidation.value.ok) return;
+        if (!credentialChecklistComplete.value) {
+            rotateError.value = t("Complete all credential checklist items before rotating the set");
+            return;
+        }
         rotateLoading.value = true;
         rotateError.value = "";
         try {
-            await api.put(urlsMap.credentialSetDetail(target.id), { entries: toEntriesPayload(rotateEntries.value) });
+            await api.put(urlsMap.credentialSetDetail(target.id), {
+                entries: toEntriesPayload(rotateEntries.value),
+                checklist: CREDENTIAL_CHECKS.filter((check) => credentialChecklist.value[check.key]).map((check) => check.key),
+            });
             rotateTarget.value = null;
             rotateEntries.value = [];
             showSnackBar({ type: "success", message: t("Credential set rotated. It is untested until you verify it.") });
@@ -319,10 +349,17 @@ const CredentialSetsPage = dc(() => {
     const submitRevoke = async (reason: string) => {
         const target = revokeTarget.value;
         if (!target) return;
+        if (!revokeChecklistComplete.value) {
+            revokeError.value = t("Complete all credential checklist items before revoking the set");
+            return;
+        }
         revokeLoading.value = true;
         revokeError.value = "";
         try {
-            await api.post(urlsMap.credentialSetRevoke(target.id), { reason });
+            await api.post(urlsMap.credentialSetRevoke(target.id), {
+                reason,
+                checklist: CREDENTIAL_CHECKS.filter((check) => revokeChecklist.value[check.key]).map((check) => check.key),
+            });
             revokeTarget.value = null;
             showSnackBar({ type: "success", message: t("Credential set revoked") });
             refreshTable();
@@ -339,6 +376,7 @@ const CredentialSetsPage = dc(() => {
         else if (action === "rotate") void openRotate(row);
         else {
             revokeError.value = "";
+            revokeChecklist.value = {};
             revokeTarget.value = row;
         }
     };
@@ -476,6 +514,31 @@ const CredentialSetsPage = dc(() => {
         );
     };
 
+    const copyCredentialSummary = async () => {
+        const data = detail.value;
+        if (!data) return;
+        const summary = {
+            id: data.id,
+            gatewayCode: data.gatewayCode,
+            env: data.env,
+            ownerType: data.ownerType,
+            ownerMerchantId: data.ownerMerchantId,
+            externalMerchantId: data.externalMerchantId,
+            settlementTarget: data.settlementTarget,
+            status: data.status,
+            lastVerifiedAt: data.lastVerifiedAt,
+            expiresAt: data.expiresAt,
+            entries: data.entries.map((entry) => ({ key: entry.key, type: entry.type, isSecret: entry.isSecret })),
+            url: window.location.href,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Credential summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const drawerFooter = () => {
         const data = detail.value;
         const actions = data ? availableActions(data.status, canWrite.value) : [];
@@ -494,6 +557,11 @@ const CredentialSetsPage = dc(() => {
                             {actionLabel(action)}
                         </VBtn>
                     ))}
+                {data && (
+                    <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyCredentialSummary()}>
+                        {t("Copy summary")}
+                    </VBtn>
+                )}
                 <VBtn variant="text" onClick={closeDrawer}>
                     {t("Close")}
                 </VBtn>
@@ -659,6 +727,15 @@ const CredentialSetsPage = dc(() => {
                 <FormField label={t("Credential entries")} required hint={t("Secret values are encrypted at rest and can never be read back.")}>
                     <EntriesEditor modelValue={createEntries.value} onUpdate:modelValue={(value: EntryDraft[]) => (createEntries.value = value)} validation={createValidation.value} showErrors={createShowErrors.value} />
                 </FormField>
+                <FormChecklist
+                    checks={[...CREDENTIAL_CHECKS]}
+                    modelValue={credentialChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (credentialChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Credential checklist")}
+                    complete={credentialChecklistComplete.value}
+                    incompleteMessage={t("Complete all credential checklist items before creating the set")}
+                />
             </FormModal>
 
             <FormModal
@@ -681,6 +758,15 @@ const CredentialSetsPage = dc(() => {
                     {t("Rotation replaces every entry. The set becomes untested until it is verified again, so enter all values.")}
                 </VAlert>
                 <EntriesEditor modelValue={rotateEntries.value} onUpdate:modelValue={(value: EntryDraft[]) => (rotateEntries.value = value)} validation={rotateValidation.value} showErrors={rotateShowErrors.value} />
+                <FormChecklist
+                    checks={[...CREDENTIAL_CHECKS]}
+                    modelValue={credentialChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (credentialChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Credential checklist")}
+                    complete={credentialChecklistComplete.value}
+                    incompleteMessage={t("Complete all credential checklist items before rotating the set")}
+                />
             </FormModal>
 
             <ReasonModal
@@ -695,7 +781,17 @@ const CredentialSetsPage = dc(() => {
                 loading={revokeLoading.value}
                 errorMessage={revokeError.value}
                 onSubmit={(reason: string) => void submitRevoke(reason)}
-            />
+            >
+                <FormChecklist
+                    checks={[...CREDENTIAL_CHECKS]}
+                    modelValue={revokeChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (revokeChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Credential checklist")}
+                    complete={revokeChecklistComplete.value}
+                    incompleteMessage={t("Complete all credential checklist items before revoking the set")}
+                />
+            </ReasonModal>
         </ScreenContainer>
     );
 });

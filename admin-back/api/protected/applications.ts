@@ -2,7 +2,7 @@ import express from "express";
 import { z } from "zod";
 import { zListQuery, zUuid } from "../../lib/zReady";
 import { coreForward } from "../forward";
-import { encode, reasonOnlySchema, uuidParamsSchema, zMutationReason } from "./mutationSchemas";
+import { encode, uuidParamsSchema, zMutationReason } from "./mutationSchemas";
 
 const applicationsRouter = express.Router();
 const paymentLinksRouter = express.Router();
@@ -29,6 +29,7 @@ export const applicationPatchSchema = z
     railWhitelist: z.array(railCodeSchema).max(200).nullable().optional(),
     redirectDomainAllowlist: z.array(redirectDomainSchema).max(100).optional(),
     reason: zMutationReason,
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict()
   .refine(
@@ -42,10 +43,18 @@ export const applicationPatchSchema = z
 
 export const applicationTokenParamsSchema = z.object({ id: zUuid, tokenId: zUuid }).strict();
 
+export const applicationTokenRevokeSchema = z
+  .object({
+    reason: zMutationReason,
+    checklist: z.array(z.string().max(64)).max(10).optional(),
+  })
+  .strict();
+
 export const paymentLinkStateSchema = z
   .object({
     state: z.literal("CANCELLED"),
     reason: zMutationReason,
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -53,6 +62,7 @@ export const posTerminalStatusSchema = z
   .object({
     status: z.enum(["INACTIVE", "BLOCKED", "ACTIVE"]),
     reason: zMutationReason,
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -102,7 +112,7 @@ applicationsRouter.post(
     path: (context) =>
       `/internal/admin/applications/${encode(context.params.id)}/tokens/${encode(context.params.tokenId)}/revoke`,
     paramsSchema: applicationTokenParamsSchema,
-    schema: reasonOnlySchema,
+    schema: applicationTokenRevokeSchema,
     relayStatus: true,
   }),
 );

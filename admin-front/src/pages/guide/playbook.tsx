@@ -57,6 +57,16 @@ export const AdminGuidePlaybookPage = defineComponent({
         });
         const selectedId = computed(() => String(route.params.id ?? ""));
         const selected = computed(() => situations.value.find((situation) => situation.id === selectedId.value));
+        const linkCopied = ref(false);
+        const copyPlaybookLink = async () => {
+            try {
+                await navigator.clipboard.writeText(window.location.href);
+                linkCopied.value = true;
+                window.setTimeout(() => (linkCopied.value = false), 2500);
+            } catch {
+                linkCopied.value = false;
+            }
+        };
         const selectedArticles = computed(() =>
             (selected.value?.articles ?? [])
                 .map((id) => articles.value.find((article) => article.id === id))
@@ -110,7 +120,12 @@ export const AdminGuidePlaybookPage = defineComponent({
                             <article class="guide-playbook-detail" aria-live="polite">
                                 {selected.value ? (
                                     <>
-                                        <h2>{selected.value.title}</h2>
+                                        <div class="guide-playbook-detail__heading">
+                                            <h2>{selected.value.title}</h2>
+                                            <button type="button" class="guide-secondary-button" onClick={() => void copyPlaybookLink()}>
+                                                {linkCopied.value ? L("Link copied", "تم نسخ الرابط") : L("Copy link", "نسخ الرابط")}
+                                            </button>
+                                        </div>
                                         <MarkdownView source={selected.value.body} />
                                         {selectedArticles.value.length > 0 ? (
                                             <section class="guide-related">

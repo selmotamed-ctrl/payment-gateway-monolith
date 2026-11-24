@@ -49,3 +49,6 @@
 | `20261116120000_route_health_automation` | 156 | Route health automation, canary traffic and admin overrides (schema version 40). |
 | `20261116130000_case_management_taxonomy` | 80 | Type-aware operator case management (schema version 41). |
 | `20261116130000_schema_version_agreement` | 19 | ============================================================================ |
+| `20261123100000_opaque_academy_certificates` | 80 | Opaque, revocable Academy certificates (schema version 42). |
+| `20261124120000_append_only_case_and_storage_guards` | 83 | Schema version 43: close the remaining append-only gaps (GAP-075). |
+| `20261124150000_currency_context_and_aggregates` | 69 | Schema version 44: explicit reconciliation context for settlement sweeps. |

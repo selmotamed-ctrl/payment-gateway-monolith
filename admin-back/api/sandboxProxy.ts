@@ -36,6 +36,9 @@ export const targetPath = (request: Request): string => {
     const walletId = request.path.split("/").pop()!;
     return `/internal/sandbox/merchant/wallets/${encodeURIComponent(walletId)}/balance`;
   }
+  if (/^\/fake-rails\/(?:scenarios|transactions|webhooks|statements|accounts\/summary)(?:\/|$)/.test(request.path)) {
+    return `/internal/sandbox/admin${request.path}`;
+  }
   if (request.path.startsWith("/fake-rails/")) return `/internal/sandbox${request.path}`;
   if (/^\/merchants\/[^/]+\/seed$/.test(request.path)) {
     const merchantId = request.path.split("/")[2] ?? "";
@@ -94,7 +97,12 @@ router.use(async (req: Request, res: Response) => {
   }
   // Merchant reset identifies the merchant in the query; the sandbox router
   // rejects unknown body fields, so do not forward the admin-only selector.
-  const forwardBody = req.path === "/reset" && req.method === "POST" ? {} : body;
+  const forwardBody = req.path === "/reset" && req.method === "POST"
+    ? {
+        ...(typeof body?.confirm === "string" ? { confirm: body.confirm } : {}),
+        ...(Array.isArray(body?.checklist) ? { checklist: body.checklist } : {}),
+      }
+    : body;
   const response = await callCoreResponse({
     targetUrls: requireSandboxCoreBackUrls(),
     method: req.method as never,

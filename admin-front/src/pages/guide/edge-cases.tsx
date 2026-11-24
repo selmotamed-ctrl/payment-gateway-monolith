@@ -1,4 +1,4 @@
-import { computed, defineComponent, onMounted, ref } from "vue";
+import { computed, defineComponent, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { PageHeader } from "@/components/ui/PageHeader";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -39,6 +39,29 @@ export const AdminGuideEdgeCasesPage = defineComponent({
             });
         });
         const selectedCase = computed(() => Number(route.query.case ?? 0));
+        watch(
+            [selectedCase, filtered],
+            async () => {
+                if (!selectedCase.value) return;
+                await nextTick();
+                document.getElementById(`case-${selectedCase.value}`)?.scrollIntoView({ block: "center" });
+            },
+            { immediate: true },
+        );
+        const copiedCase = ref<number | null>(null);
+        const copyCaseLink = async (n: number) => {
+            try {
+                const url = new URL(window.location.pathname, window.location.origin);
+                url.searchParams.set("case", String(n));
+                await navigator.clipboard.writeText(url.toString());
+                copiedCase.value = n;
+                window.setTimeout(() => {
+                    if (copiedCase.value === n) copiedCase.value = null;
+                }, 2500);
+            } catch {
+                copiedCase.value = null;
+            }
+        };
 
         return () => (
             <ScreenContainer>
@@ -84,6 +107,7 @@ export const AdminGuideEdgeCasesPage = defineComponent({
                                         <th>{L("Scenario", "السيناريو")}</th>
                                         <th>{L("Deterministic resolution", "الحل المحدد")}</th>
                                         <th>{L("Severity", "الخطورة")}</th>
+                                        <th />
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -103,6 +127,11 @@ export const AdminGuideEdgeCasesPage = defineComponent({
                                                 <span class={`guide-severity guide-severity-${edgeCase.severity.toLowerCase()}`}>
                                                     {edgeCase.severity}
                                                 </span>
+                                            </td>
+                                            <td>
+                                                <button type="button" class="guide-secondary-button" onClick={() => void copyCaseLink(edgeCase.n)}>
+                                                    {copiedCase.value === edgeCase.n ? L("Copied", "تم النسخ") : L("Copy link", "نسخ الرابط")}
+                                                </button>
                                             </td>
                                         </tr>
                                     ))}

@@ -27,12 +27,15 @@ type Props = {
     open: OpenExamSession | null;
     starting: boolean;
     startError: string | null;
-    onStart: () => void;
+    onStart: (checklist: string[]) => void;
 };
 
 export const ExamBriefing = dc((props: Props) => {
     const { t } = useLocale();
     const accepted = ref(false);
+    const noHelp = ref(false);
+    const timeAck = ref(false);
+    const checklistComplete = computed(() => accepted.value && noHelp.value && timeAck.value);
 
     const blockers = computed(() => (props.eligibility?.missing ?? []).filter((item) => item.kind !== "open_session" && item.kind !== "cooldown"));
     const cooldownMs = computed(() => {
@@ -175,9 +178,25 @@ export const ExamBriefing = dc((props: Props) => {
                                     />
                                     <span class="ac-choice__label">{t("I have read and I agree to this integrity statement.")}</span>
                                 </label>
+                                <label class={["ac-choice", "ac-exam-accept", noHelp.value ? "ac-choice--selected" : ""]}>
+                                    <input
+                                        type="checkbox"
+                                        checked={noHelp.value}
+                                        onChange={(event: Event) => (noHelp.value = (event.target as HTMLInputElement).checked)}
+                                    />
+                                    <span class="ac-choice__label">{t("I will complete this exam without outside help or notes.")}</span>
+                                </label>
+                                <label class={["ac-choice", "ac-exam-accept", timeAck.value ? "ac-choice--selected" : ""]}>
+                                    <input
+                                        type="checkbox"
+                                        checked={timeAck.value}
+                                        onChange={(event: Event) => (timeAck.value = (event.target as HTMLInputElement).checked)}
+                                    />
+                                    <span class="ac-choice__label">{t("I understand the time limit and that the session may not be resumed after it expires.")}</span>
+                                </label>
                                 {props.startError && <Callout tone="danger">{props.startError}</Callout>}
                                 <div>
-                                    <VBtn color="primary" disabled={!accepted.value || !canStart.value || props.starting} loading={props.starting} onClick={props.onStart}>
+                                    <VBtn color="primary" disabled={!checklistComplete.value || !canStart.value || props.starting} loading={props.starting} onClick={() => props.onStart(["EXAM_INTEGRITY_ACCEPTED", ...(noHelp.value ? ["EXAM_NO_OUTSIDE_HELP"] : []), ...(timeAck.value ? ["EXAM_TIME_LIMIT_ACKNOWLEDGED"] : [])])}>
                                         {props.open ? t("Resume exam") : t("Start exam")}
                                     </VBtn>
                                 </div>

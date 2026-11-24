@@ -3,7 +3,7 @@ id: deploy.storage
 title: Storage Provisioners
 status: partial
 confidence: high
-last_verified: 2026-11-12
+last_verified: 2026-11-23
 verified_against: d695518+working-tree
 code:
   - deploy/test/testMatrix.test.ts
@@ -509,3 +509,7 @@ object-storage node. Storage roots and cert directories are restricted to
 
 
 The fresh-host sequence is tested with a fake runner; the real two-host lab remains manual.
+
+## Object-storage certificate ownership (2026-11-23)
+
+The storage certificate upload step hands the object-storage cert directory and files to `pgobjstore` on every deploy where the account exists, so a partial `--only=admin` or later update cannot leave the daemon unable to read its mTLS material. The command uses `find -type f` (no symlink-following globs) and only the empty-directory `chmod`/`find` tail is tolerant; directory creation and ownership failures fail the deploy. The backup and object-storage cert directories are validated as distinct.

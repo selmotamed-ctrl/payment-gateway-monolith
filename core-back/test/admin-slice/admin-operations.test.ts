@@ -105,7 +105,10 @@ describe.skipIf(!dbAvailable)("attempt detail", () => {
     expect(Object.keys(body)).toEqual(expect.arrayContaining([
       "attempt", "merchant", "application", "rail", "gateway", "stepLogs", "inboundEvents",
       "attemptGroup", "operatorCases", "disputes", "adjustments",
+      "gatewaySupportsStatusCheck", "inquiryEligibility",
     ]));
+    expect(typeof body.gatewaySupportsStatusCheck).toBe("boolean");
+    expect(body.inquiryEligibility).toEqual(expect.objectContaining({ eligible: expect.any(Boolean) }));
     expect(body.attempt.id).toBe(attempt.id);
     expect(body.attempt.requestedAmount).toBe("125.5000");
     expect(body.attempt.providerReference).toBe("prov-ref-1");
@@ -171,6 +174,7 @@ describe.skipIf(!dbAvailable)("transactions", () => {
     expect(byId.get(open.id as string)!.merchant).toHaveProperty("tradeName");
     expect(byId.get(open.id as string)!.gateway).toHaveProperty("code");
     expect(byId.get(open.id as string)!.rail).toHaveProperty("nameEn");
+    expect(typeof byId.get(open.id as string)!.inquiryEligible).toBe("boolean");
     expect(byId.get(resolved.id as string)!.hasOpenCase).toBe(false);
 
     const failedOnly = await app.request("GET", `/transactions?status=FAILED,EXPIRED&merchantId=${resolved.merchant_id}`);

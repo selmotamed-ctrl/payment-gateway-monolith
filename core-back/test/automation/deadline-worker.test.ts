@@ -15,6 +15,7 @@ import { DeadlineWorker } from "../../engine/workers/DeadlineWorker";
 import { cleanupAutomationCatalog, createAutomationCatalog, type AutomationCatalog } from "../helpers/automationCatalog";
 import { createFakeRepositories } from "../helpers/fakeRepositories";
 import { createPrisma, databaseIsReachable } from "../storage-engine/helpers/db";
+import { deleteWithAppendOnlyMaintenance } from "../helpers/appendOnlyMaintenance";
 
 const client = createPrisma({ max: 15 });
 const describeDb = databaseIsReachable ? describe : describe.skip;
@@ -40,7 +41,7 @@ afterAll(async () => {
     await client.$executeRawUnsafe(`DELETE FROM deadline_stages WHERE subject_id = ANY($1::text[])`, ids);
     await client.$executeRawUnsafe(`DELETE FROM notifications WHERE event_id LIKE 'notice:deadline:%' AND split_part(event_id, ':', 4) = ANY($1::text[])`, ids);
     await client.$executeRawUnsafe(`DELETE FROM notifications WHERE recipient_user_id = ANY($1::uuid[])`, created.users);
-    await client.$executeRawUnsafe(`DELETE FROM operator_cases WHERE id = ANY($1::uuid[]) OR subject_key ~ ANY($2::text[])`, created.cases, ids.map((id) => `[:]${id}`));
+    await deleteWithAppendOnlyMaintenance(client, `DELETE FROM operator_cases WHERE id = ANY($1::uuid[]) OR subject_key ~ ANY($2::text[])`, created.cases, ids.map((id) => `[:]${id}`));
     await client.$executeRawUnsafe(`DELETE FROM detail_change_logs WHERE approval_request_id = ANY($1::uuid[])`, created.approvals);
     await client.$executeRawUnsafe(`DELETE FROM disputes WHERE id = ANY($1::uuid[])`, created.disputes);
     await client.$executeRawUnsafe(`DELETE FROM cashout_requests WHERE id = ANY($1::uuid[])`, created.cashouts);

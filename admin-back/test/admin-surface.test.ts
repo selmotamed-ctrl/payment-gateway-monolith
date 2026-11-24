@@ -27,6 +27,8 @@ beforeAll(() => {
   process.env.MTLS_CLIENT_KEY_PATH = pki.clientKey;
   process.env.MTLS_CA_CERT_PATH = pki.caCert;
   process.env.ADMIN_LAN_CIDRS = "10.0.0.0/8,192.168.0.0/16,127.0.0.1/32";
+  process.env.BACKUP_JOB_RATE_LIMIT_MAX = "1000000";
+  resetEnvCache();
 });
 beforeAll(async () => {
   const app = createApp();
@@ -242,6 +244,310 @@ describe("admin asynchronous routes", () => {
     expect(core.requests.at(-1)?.url).toContain("domain=FINANCE");
   });
 
+  test("transaction summary export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/transactions/summary/export?checklist=TRANSACTION_SCOPE_VERIFIED,ESCALATION_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/transactions/summary/export");
+    expect(target.searchParams.get("checklist")).toBe("TRANSACTION_SCOPE_VERIFIED,ESCALATION_REVIEWED");
+  });
+
+  test("MFA resend forwards the challenge id to core", async () => {
+    const response = await call("POST", "/api/v1/admin/auth/mfa/resend", { body: { challengeId: "0192f6a0-1111-7111-8111-111111111111" } });
+    expect(response.status).toBe(200);
+    expect(forwardedBody()).toMatchObject({ challengeId: "0192f6a0-1111-7111-8111-111111111111" });
+  });
+
+  test("merchant 360 summary export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/merchants/mch_1/summary/export?checklist=MERCHANT_SCOPE_VERIFIED,RISK_AML_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/merchants/mch_1/summary/export");
+    expect(target.searchParams.get("checklist")).toBe("MERCHANT_SCOPE_VERIFIED,RISK_AML_REVIEWED");
+  });
+
+  test("reconciliation run export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/reconciliation/runs/run_1/export?checklist=RUN_SCOPE_VERIFIED,ITEMS_FILTER_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/reconciliation/runs/run_1/export");
+    expect(target.searchParams.get("checklist")).toBe("RUN_SCOPE_VERIFIED,ITEMS_FILTER_REVIEWED");
+  });
+
+  test("gateway inquiry summary export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/gateway-inquiries/summary/export?checklist=INQUIRY_SCOPE_VERIFIED,OVERDUE_BACKLOG_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/gateway-inquiries/summary/export");
+    expect(target.searchParams.get("checklist")).toBe("INQUIRY_SCOPE_VERIFIED,OVERDUE_BACKLOG_REVIEWED");
+  });
+
+  test("operator case export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/operator-cases/export?checklist=CASE_SCOPE_VERIFIED,EXPORT_APPROVAL_CONFIRMED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/operator-cases/export");
+    expect(target.searchParams.get("checklist")).toBe("CASE_SCOPE_VERIFIED,EXPORT_APPROVAL_CONFIRMED");
+  });
+
+  test("audit export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/audit-logs/export?checklist=DATE_RANGE_VERIFIED,EXPORT_APPROVAL_CONFIRMED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/audit-logs/export");
+    expect(target.searchParams.get("checklist")).toBe("DATE_RANGE_VERIFIED,EXPORT_APPROVAL_CONFIRMED");
+  });
+
+  test("reporting schema promotion forwards the checklist to core", async () => {
+    const response = await call("POST", "/api/v1/admin/aml/report-schemas/schema_1/promote", {
+      token: compliance,
+      body: { setAsDefault: true, checklist: ["SCHEMA_REVIEWED", "TEMPLATE_VERIFIED"] },
+    });
+    expect([200, 202]).toContain(response.status);
+    expect(forwardedBody()).toMatchObject({ setAsDefault: true, checklist: ["SCHEMA_REVIEWED", "TEMPLATE_VERIFIED"] });
+  });
+
+  test("credential-set mutations forward their checklists to core", async () => {
+    const checklist = ["CREDENTIAL_SET_SCOPE_VERIFIED", "SECRET_HANDLING_CONFIRMED", "ENVIRONMENT_AND_OWNER_REVIEWED", "AUTHORITY_CONFIRMED"];
+    const create = await call("POST", "/api/v1/admin/credential-sets", {
+      token: fullStaff,
+      body: {
+        gatewayCode: "TEST",
+        env: "SANDBOX",
+        ownerType: "PLATFORM",
+        settlementTarget: "PLATFORM_CLEARING",
+        entries: [{ key: "apiKey", type: "HEADER", value: "secret", isSecret: true }],
+        checklist,
+      },
+    });
+    expect(create.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ checklist });
+    const rotate = await call("PUT", "/api/v1/admin/credential-sets/cs_1", {
+      token: fullStaff,
+      body: { entries: [{ key: "apiKey", type: "HEADER", value: "secret2", isSecret: true }], checklist },
+    });
+    expect(rotate.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ checklist });
+    const revoke = await call("POST", "/api/v1/admin/credential-sets/cs_1/revoke", {
+      token: fullStaff,
+      body: { reason: "rotated after incident", checklist },
+    });
+    expect(revoke.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ checklist });
+  });
+
+  test("academy exam start forwards the integrity checklist to core", async () => {
+    const checklist = ["EXAM_INTEGRITY_ACCEPTED", "EXAM_NO_OUTSIDE_HELP", "EXAM_TIME_LIMIT_ACKNOWLEDGED"];
+    const response = await call("POST", "/api/v1/admin/academy/exams/exam_1/start", {
+      token: fullStaff,
+      body: { integrityAccepted: true, checklist },
+    });
+    expect(response.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ integrityAccepted: true, checklist });
+  });
+
+  test("academy certificate verification forwards the track", async () => {
+    const response = await call("GET", "/api/v1/admin/academy/certificates/FOUNDATION/verification", { token: fullStaff });
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/academy/certificates/FOUNDATION/verification");
+    expect(response.status).toBeLessThan(500);
+  });
+
+  test("academy certificate revocation forwards the display id and reason", async () => {
+    const response = await call("POST", "/api/v1/admin/academy/certificates/PG-AC-ABCDEF01/revoke", {
+      token: fullStaff,
+      body: { reason: "Issued to the wrong person" },
+    });
+    expect(core.requests.at(-1)?.url).toBe("/internal/admin/academy/certificates/PG-AC-ABCDEF01/revoke");
+    const forwarded = core.requests.at(-1)?.body;
+    const body = Buffer.isBuffer(forwarded) ? JSON.parse(forwarded.toString()) : forwarded;
+    expect(body).toMatchObject({ reason: "Issued to the wrong person" });
+    expect(response.status).toBeLessThan(500);
+  });
+
+  test("academy team export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/academy/team/export?checklist=TEAM_SCOPE_VERIFIED,PERSONAL_DATA_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/academy/team/export");
+    expect(target.searchParams.get("checklist")).toBe("TEAM_SCOPE_VERIFIED,PERSONAL_DATA_REVIEWED");
+  });
+
+  test("job and notification retries forward their checklists to core", async () => {
+    const id = "0192f6a0-1111-7111-8111-111111111111";
+    const job = await call("POST", `/api/v1/admin/system/jobs/${id}/requeue`, {
+      token: fullStaff,
+      body: { reason: "provider recovered", checklist: ["JOB_SCOPE_VERIFIED", "FAILURE_CAUSE_REVIEWED"] },
+    });
+    expect(job.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ checklist: ["JOB_SCOPE_VERIFIED", "FAILURE_CAUSE_REVIEWED"] });
+    const notification = await call("POST", `/api/v1/admin/system/notifications/${id}/retry`, {
+      token: fullStaff,
+      body: { reason: "provider recovered", checklist: ["JOB_SCOPE_VERIFIED", "RETRY_IMPACT_ACKNOWLEDGED"] },
+    });
+    expect(notification.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ checklist: ["JOB_SCOPE_VERIFIED", "RETRY_IMPACT_ACKNOWLEDGED"] });
+  });
+
+  test("object storage legal-hold and maintenance forward their checklists to core", async () => {
+    const objectId = "0192f6a0-1111-7111-8111-111111111111";
+    const storageToken = signSession({ sub: "u-storage", role: "SECURITY_ADMIN", authorities: ["system:storage:legal-hold", "system:storage:admin", "system:storage:read"] });
+    const hold = await call("POST", `/api/v1/admin/object-storage/objects/${objectId}/legal-hold`, {
+      token: storageToken,
+      body: { reason: "litigation hold", checklist: ["OBJECT_SCOPE_VERIFIED", "LEGAL_RETENTION_CONFIRMED"] },
+    });
+    expect(hold.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ checklist: ["OBJECT_SCOPE_VERIFIED", "LEGAL_RETENTION_CONFIRMED"] });
+    const maintenance = await call("POST", "/api/v1/admin/object-storage/maintenance/scrub", {
+      token: storageToken,
+      body: { checklist: ["JOB_SCOPE_VERIFIED", "VAULT_IMPACT_REVIEWED"] },
+    });
+    expect(maintenance.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ checklist: ["JOB_SCOPE_VERIFIED", "VAULT_IMPACT_REVIEWED"] });
+  });
+
+  test("backup trigger and drill forward their checklists to core", async () => {
+    const trigger = await call("POST", "/api/v1/admin/system/backups/trigger", {
+      token: fullStaff,
+      body: { target: "all", kind: "full", checklist: ["BACKUP_TARGET_VERIFIED", "LOAD_IMPACT_REVIEWED"] },
+    });
+    expect(trigger.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ checklist: ["BACKUP_TARGET_VERIFIED", "LOAD_IMPACT_REVIEWED"] });
+    const drill = await call("POST", "/api/v1/admin/system/backups/drill", {
+      token: fullStaff,
+      body: { checklist: ["DRILL_SCOPE_VERIFIED", "SCRATCH_ISOLATION_REVIEWED"] },
+    });
+    expect(drill.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ checklist: ["DRILL_SCOPE_VERIFIED", "SCRATCH_ISOLATION_REVIEWED"] });
+  });
+
+  test("checkout help summary export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/settings/checkout-support/summary/export?checklist=CHECKOUT_SCOPE_VERIFIED,FAQ_AND_CHANNELS_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/settings/checkout-support/summary/export");
+    expect(target.searchParams.get("checklist")).toBe("CHECKOUT_SCOPE_VERIFIED,FAQ_AND_CHANNELS_REVIEWED");
+  });
+
+  test("settings backup export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/settings/export?checklist=SETTINGS_SCOPE_VERIFIED,SENSITIVE_VALUES_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/settings/export");
+    expect(target.searchParams.get("checklist")).toBe("SETTINGS_SCOPE_VERIFIED,SENSITIVE_VALUES_REVIEWED");
+  });
+
+  test("journal summary export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/finance/journal-entries/summary/export?checklist=JOURNAL_SCOPE_VERIFIED,BALANCE_AND_VOLUME_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/finance/journal-entries/summary/export");
+    expect(target.searchParams.get("checklist")).toBe("JOURNAL_SCOPE_VERIFIED,BALANCE_AND_VOLUME_REVIEWED");
+  });
+
+  test("invariant export and checkpoint rollup forward their checklists to core", async () => {
+    const exportResponse = await call("GET", "/api/v1/admin/finance/invariant-check/export?checklist=LEDGER_SCOPE_VERIFIED,INVARIANT_RESULT_REVIEWED", { token: fullStaff });
+    expect(exportResponse.status).toBe(200);
+    const exportTarget = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(exportTarget.pathname).toBe("/internal/admin/finance/invariant-check/export");
+    expect(exportTarget.searchParams.get("checklist")).toBe("LEDGER_SCOPE_VERIFIED,INVARIANT_RESULT_REVIEWED");
+    const rollup = await call("POST", "/api/v1/admin/finance/gl-accounts/0192f6a0-1111-7111-8111-111111111111/checkpoint", {
+      token: fullStaff,
+      body: { reason: "monthly close verification", checklist: ["ACCOUNT_SCOPE_VERIFIED", "JOURNAL_PARITY_REVIEWED"] },
+    });
+    expect(rollup.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ checklist: ["ACCOUNT_SCOPE_VERIFIED", "JOURNAL_PARITY_REVIEWED"] });
+  });
+
+  test("liquidity export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/finance/liquidity/export?checklist=LIQUIDITY_SCOPE_VERIFIED,COVER_AND_OBLIGATIONS_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/finance/liquidity/export");
+    expect(target.searchParams.get("checklist")).toBe("LIQUIDITY_SCOPE_VERIFIED,COVER_AND_OBLIGATIONS_REVIEWED");
+  });
+
+  test("profitability export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/finance/profitability/export?period=last_30d&checklist=PROFITABILITY_SCOPE_VERIFIED,MARGIN_AND_COST_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/finance/profitability/export");
+    expect(target.searchParams.get("checklist")).toBe("PROFITABILITY_SCOPE_VERIFIED,MARGIN_AND_COST_REVIEWED");
+  });
+
+  test("pricing creates forward their checklists to core", async () => {
+    const checklist = ["PRICING_SCOPE_VERIFIED", "FEE_OR_THRESHOLD_REVIEWED", "SCOPE_IMPACT_REVIEWED", "AUTHORITY_CONFIRMED"];
+    const commission = await call("POST", "/api/v1/admin/commission-profiles", {
+      token: fullStaff,
+      body: { code: "CP1", name: "Profile one", railCode: "CARD", model: "PERCENTAGE", percentage: "0.03", checklist },
+    });
+    expect(commission.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ checklist });
+    const velocity = await call("POST", "/api/v1/admin/velocity-rules", {
+      token: fullStaff,
+      body: { code: "VR1", name: "Rule one", scope: "MERCHANT", windowSeconds: 60, maxAttempts: 10, action: "BLOCK", checklist },
+    });
+    expect(velocity.status).toBeLessThan(400);
+    expect(forwardedBody()).toMatchObject({ checklist });
+  });
+
+  test("cash-out export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/cashouts/export?checklist=CASHOUT_SCOPE_VERIFIED,BALANCE_AND_HOLDS_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/cashouts/export");
+    expect(target.searchParams.get("checklist")).toBe("CASHOUT_SCOPE_VERIFIED,BALANCE_AND_HOLDS_REVIEWED");
+  });
+
+  test("adjustment export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/adjustments/export?checklist=ADJUSTMENT_SCOPE_VERIFIED,APPROVAL_STATE_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/adjustments/export");
+    expect(target.searchParams.get("checklist")).toBe("ADJUSTMENT_SCOPE_VERIFIED,APPROVAL_STATE_REVIEWED");
+  });
+
+  test("dispute export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/disputes/export?checklist=DISPUTE_SCOPE_VERIFIED,EVIDENCE_DEADLINE_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/disputes/export");
+    expect(target.searchParams.get("checklist")).toBe("DISPUTE_SCOPE_VERIFIED,EVIDENCE_DEADLINE_REVIEWED");
+  });
+
+  test("route export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/routes/export?checklist=ROUTE_SCOPE_VERIFIED,ROUTE_HEALTH_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/routes/export");
+    expect(target.searchParams.get("checklist")).toBe("ROUTE_SCOPE_VERIFIED,ROUTE_HEALTH_REVIEWED");
+  });
+
+  test("rail export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/rails/export?checklist=RAIL_SCOPE_VERIFIED,COLLECTION_MODE_REVIEWED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/rails/export");
+    expect(target.searchParams.get("checklist")).toBe("RAIL_SCOPE_VERIFIED,COLLECTION_MODE_REVIEWED");
+  });
+
+  test("gateway export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/gateways/export?checklist=GATEWAY_SCOPE_VERIFIED,EXPORT_APPROVAL_CONFIRMED", { token: fullStaff });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/gateways/export");
+    expect(target.searchParams.get("checklist")).toBe("GATEWAY_SCOPE_VERIFIED,EXPORT_APPROVAL_CONFIRMED");
+  });
+
+  test("summary export forwards the checklist to core", async () => {
+    const response = await call("GET", "/api/v1/admin/aml/screenings/summary/export?checklist=SCREENING_SCOPE_VERIFIED,UNRESOLVED_MATCH_REVIEWED", {
+      token: compliance,
+    });
+    expect(response.status).toBe(200);
+    const target = new URL(core.requests.at(-1)?.url ?? "", "http://core");
+    expect(target.pathname).toBe("/internal/admin/aml/screenings/summary/export");
+    expect(target.searchParams.get("checklist")).toBe("SCREENING_SCOPE_VERIFIED,UNRESOLVED_MATCH_REVIEWED");
+  });
+
   test("bulk approval rejection fans out and returns per-request results", async () => {
     const response = await call("POST", "/api/v1/admin/approvals/bulk-reject", {
       token: operator,
@@ -361,12 +667,27 @@ describe("admin asynchronous routes", () => {
   });
 });
 
+describe("application token revoke checklist", () => {
+  test("forwards the checklist with the revoke reason", async () => {
+    const id = "0192f6a0-1111-7111-8111-111111111111";
+    const tokenId = "0192f6a0-3333-7333-8333-333333333333";
+    const response = await call("POST", `/api/v1/admin/applications/${id}/tokens/${tokenId}/revoke`, {
+      token: fullStaff,
+      body: { reason: "Suspected token exposure", checklist: ["ACCESS_IMPACT_REVIEWED"] },
+    });
+    expect(response.status).toBe(200);
+    expect(core.requests.at(-1)?.url).toBe(`/internal/admin/applications/${id}/tokens/${tokenId}/revoke`);
+    expect(forwardedBody()).toMatchObject({ reason: "Suspected token exposure", checklist: ["ACCESS_IMPACT_REVIEWED"] });
+  });
+});
+
 describe("admin statement upload", () => {
   test("forwards a validated csv statement to core", async () => {
     const form = new FormData();
     form.set("sourceId", "src_1");
     form.set("periodStart", "2026-01-01");
     form.set("periodEnd", "2026-01-31");
+    form.set("checklist", JSON.stringify(["SOURCE_VERIFIED", "FILE_REVIEWED"]));
     form.set("statement", new Blob([new Uint8Array(Buffer.from("txn_ref,amount\nREF-1,10.0000\n"))], { type: "text/csv" }), "statement.csv");
     const response = await fetch(`${edgeUrl}/api/v1/admin/reconciliation/upload`, {
       method: "POST",
@@ -638,10 +959,12 @@ describe("admin core contract forwarding", () => {
     }
   });
 
-  test("re-inviting a user is forwarded to core with the session", async () => {
-    const response = await call("POST", "/api/v1/admin/users/usr_9/invite", { token: operator });
+  test("re-inviting a user forwards the checklist to core", async () => {
+    const checklist = ["IDENTITY_VERIFIED", "INVITATION_EXPIRY_REVIEWED", "DELIVERY_CHANNEL_CONFIRMED"];
+    const response = await call("POST", "/api/v1/admin/users/usr_9/invite", { token: operator, body: { checklist } });
     expect(response.status).toBe(200);
     expect(core.requests.at(-1)).toMatchObject({ method: "POST", url: "/internal/admin/users/usr_9/invite" });
+    expect(forwardedBody()).toMatchObject({ checklist });
   });
 
   test("expands a bulk user patch into one core request per user", async () => {
@@ -706,11 +1029,11 @@ describe("admin core contract forwarding", () => {
   test("commission profile expiry and velocity deactivation relay the accepted status", async () => {
     const expire = await call("POST", "/api/v1/admin/commission-profiles/cp_1/expire", {
       token: operator,
-      body: { effectiveTo: "2026-12-31T00:00:00.000Z", reason: "replace pricing" },
+      body: { effectiveTo: "2026-12-31T00:00:00.000Z", reason: "replace pricing", checklist: ["LIFECYCLE_SCOPE_REVIEWED"] },
     });
     expect(expire.status).toBe(202);
     expect(core.requests.at(-1)?.url).toBe("/internal/admin/commission-profiles/cp_1/expire");
-    expect(forwardedBody()).toEqual({ effectiveTo: "2026-12-31T00:00:00.000Z", reason: "replace pricing" });
+    expect(forwardedBody()).toEqual({ effectiveTo: "2026-12-31T00:00:00.000Z", reason: "replace pricing", checklist: ["LIFECYCLE_SCOPE_REVIEWED"] });
 
     const deactivate = await call("POST", "/api/v1/admin/velocity-rules/vr_1/deactivate", {
       token: operator,
@@ -1079,19 +1402,19 @@ describe("admin forwards payloads core accepts", () => {
     {
       method: "POST",
       path: "/api/v1/admin/gateway-inquiries/giq_1/cancel",
-      body: { reason: "duplicate schedule" },
+      body: { reason: "duplicate schedule", checklist: ["SCHEDULE_STATE_VERIFIED", "ATTEMPT_IMPACT_REVIEWED", "CANCEL_REASON_VERIFIED", "ACTION_APPROVAL_CONFIRMED"] },
       contract: "POST /gateway-inquiries/:id/cancel",
     },
     {
       method: "POST",
       path: "/api/v1/admin/gateway-inquiries/giq_1/run-now",
-      body: { reason: "operator requested" },
+      body: { reason: "operator requested", checklist: ["SCHEDULE_STATE_VERIFIED", "ATTEMPT_STATUS_VERIFIED", "RATE_LIMIT_REVIEWED", "ACTION_APPROVAL_CONFIRMED"] },
       contract: "POST /gateway-inquiries/:id/run-now",
     },
     {
       method: "POST",
       path: "/api/v1/admin/gateway-inquiries/giq_1/retry",
-      body: {},
+      body: { checklist: ["SCHEDULE_STATE_VERIFIED", "ATTEMPT_STATUS_VERIFIED", "RATE_LIMIT_REVIEWED", "ACTION_APPROVAL_CONFIRMED"] },
       contract: "POST /gateway-inquiries/:id/retry",
     },
     {
@@ -1219,10 +1542,12 @@ describe("admin route surface", () => {
   const routes: { method: string; path: string; body?: unknown }[] = [
     { method: "POST", path: "/api/v1/admin/auth/login", body: { identifier: "a@b.c", password: "secret" } },
     { method: "POST", path: "/api/v1/admin/auth/mfa", body: { code: "123456" } },
+    { method: "POST", path: "/api/v1/admin/auth/mfa/resend", body: { challengeId: "0192f6a0-1111-7111-8111-111111111111" } },
+
     { method: "GET", path: "/api/v1/admin/users" },
     { method: "GET", path: "/api/v1/admin/users/summary" },
     { method: "GET", path: "/api/v1/admin/users/summary/export" },
-    { method: "GET", path: "/api/v1/admin/users/export?scope=admin&status=ACTIVE" },
+    { method: "GET", path: "/api/v1/admin/users/export?scope=admin&status=ACTIVE&checklist=USER_SCOPE_REVIEWED" },
     { method: "GET", path: "/api/v1/admin/stats/overview" },
     { method: "GET", path: "/api/v1/admin/stats/recent-activity?limit=8" },
     { method: "GET", path: "/api/v1/admin/stats/recent-activity/export?limit=200" },
@@ -1273,24 +1598,28 @@ describe("admin route surface", () => {
     { method: "GET", path: "/api/v1/admin/aml/screenings" },
     { method: "GET", path: "/api/v1/admin/aml/screenings/summary" },
     { method: "GET", path: "/api/v1/admin/aml/screenings/summary/export" },
-    { method: "GET", path: "/api/v1/admin/aml/screenings/export?result=POTENTIAL_MATCH" },
+    { method: "GET", path: "/api/v1/admin/aml/screenings/export?result=POTENTIAL_MATCH&checklist=SCREENING_SCOPE_VERIFIED" },
     { method: "POST", path: "/api/v1/admin/aml/matches/m_1/disposition", body: { disposition: "FALSE_POSITIVE", notes: "clean" } },
     { method: "GET", path: "/api/v1/admin/aml/cases" },
     { method: "GET", path: "/api/v1/admin/aml/cases/summary" },
     { method: "GET", path: "/api/v1/admin/aml/cases/summary/export" },
-    { method: "GET", path: "/api/v1/admin/aml/cases/export?status=OPEN" },
+    { method: "GET", path: "/api/v1/admin/aml/cases/export?status=OPEN&checklist=AML_SCOPE_VERIFIED" },
     { method: "POST", path: "/api/v1/admin/aml/cases/c_1/propose", body: { severity: "HIGH", action: "AML_HOLD", reason: "structuring" } },
+    { method: "POST", path: "/api/v1/admin/aml/report-schemas/schema_1/promote", body: { setAsDefault: true, checklist: ["SCHEMA_REVIEWED", "MAPPING_VALIDATED", "TEMPLATE_VERIFIED", "APPROVAL_PATH_CONFIRMED"] } },
     { method: "GET", path: "/api/v1/admin/aml/rules" },
     { method: "GET", path: "/api/v1/admin/aml/rules/summary" },
     { method: "GET", path: "/api/v1/admin/aml/rules/summary/export" },
-    { method: "GET", path: "/api/v1/admin/aml/rules/export?active=true" },
+    { method: "GET", path: "/api/v1/admin/aml/rules/export?active=true&checklist=RULE_SCOPE_VERIFIED" },
     { method: "POST", path: "/api/v1/admin/aml/rules", body: { code: "R1", name: "rule", ruleType: "SINGLE_AMOUNT", action: "BLOCK", baseSeverity: "HIGH", params: {} } },
     { method: "GET", path: "/api/v1/admin/aml/reporting-rules" },
     { method: "POST", path: "/api/v1/admin/aml/reporting-rules", body: { code: "CBL", name: "cbl", mode: "PROVISIONAL", threshold: "1000.0000", currency: "LYD", windowDays: 30 } },
+    { method: "GET", path: "/api/v1/admin/aml/incidents" },
+    { method: "GET", path: "/api/v1/admin/aml/incidents/export?severity=SEV1&checklist=INCIDENT_SCOPE_VERIFIED" },
+    { method: "GET", path: "/api/v1/admin/aml/incidents/summary/export?checklist=INCIDENT_SCOPE_VERIFIED" },
     { method: "GET", path: "/api/v1/admin/aml/reports" },
     { method: "GET", path: "/api/v1/admin/aml/reports/summary" },
     { method: "GET", path: "/api/v1/admin/aml/reports/summary/export" },
-    { method: "GET", path: "/api/v1/admin/aml/reports/export?status=DRAFT" },
+    { method: "GET", path: "/api/v1/admin/aml/reports/export?status=DRAFT&checklist=REPORT_SCOPE_VERIFIED" },
     { method: "POST", path: "/api/v1/admin/aml/reports", body: { reportingRuleId: "rr_1", periodStart: "2026-01-01", periodEnd: "2026-01-31" } },
     { method: "POST", path: "/api/v1/admin/aml/reports/rep_1/submit", body: { submissionRef: "CBL-1", checklist: ["REPORT_APPROVED_VERIFIED", "AUTHORITY_REFERENCE_VERIFIED", "DEADLINE_VERIFIED", "PAYLOAD_DIGEST_VERIFIED"] } },
     { method: "POST", path: "/api/v1/admin/aml/reports/rep_1/acknowledge", body: { status: "ACKNOWLEDGED", checklist: ["AUTHORITY_RESPONSE_VERIFIED", "DECISION_RECORDED", "REJECTION_REASON_DOCUMENTED", "REPORT_CLOSURE_CONFIRMED"] } },
@@ -1333,12 +1662,15 @@ describe("admin route surface", () => {
     { method: "POST", path: "/api/v1/admin/assets", body: { kind: "LOGO", name: "logo", contentType: "image/png", storageKey: "assets/logo.png", sizeBytes: 1024, checksumSha256: "a".repeat(64) } },
     { method: "GET", path: "/api/v1/admin/gateway-inquiries" },
     { method: "GET", path: "/api/v1/admin/gateway-inquiries/summary" },
+    { method: "GET", path: "/api/v1/admin/gateway-inquiries/summary/export?checklist=INQUIRY_SCOPE_VERIFIED,SCHEDULE_STATUS_REVIEWED,OVERDUE_BACKLOG_REVIEWED,EXPORT_APPROVAL_CONFIRMED" },
+
     { method: "GET", path: "/api/v1/admin/gateway-inquiries/giq_1" },
     { method: "POST", path: "/api/v1/admin/gateway-inquiries/giq_1/cancel", body: { reason: "duplicate schedule" } },
     { method: "POST", path: "/api/v1/admin/gateway-inquiries/giq_1/run-now", body: { reason: "operator requested" } },
     { method: "POST", path: "/api/v1/admin/gateway-inquiries/giq_1/retry", body: {} },
     { method: "GET", path: "/api/v1/admin/operator-cases" },
     { method: "GET", path: "/api/v1/admin/operator-cases/summary" },
+    { method: "GET", path: "/api/v1/admin/operator-cases/export?checklist=CASE_SCOPE_VERIFIED,SENSITIVE_FIELDS_REVIEWED,EXPORT_APPROVAL_CONFIRMED" },
     { method: "GET", path: "/api/v1/admin/operator-cases/summary/export" },
     { method: "GET", path: "/api/v1/admin/operator-cases/export?state=OPEN" },
     { method: "POST", path: "/api/v1/admin/operator-cases/bulk-assign", body: { caseIds: ["oc_1"], assigneeUserId: "usr_1", reason: "load balance" } },
@@ -1346,7 +1678,7 @@ describe("admin route surface", () => {
     { method: "POST", path: "/api/v1/admin/operator-cases/bulk-inquire", body: { caseIds: ["oc_1"], reason: "unknown backlog" } },
     { method: "PATCH", path: "/api/v1/admin/operator-cases/oc_1", body: { assigneeUserId: "user_1", state: "IN_PROGRESS" } },
     { method: "POST", path: "/api/v1/admin/operator-cases/oc_1/resolve", body: { action: "MARK_FAILED", reason: "gateway confirmed unpaid" } },
-    { method: "POST", path: "/api/v1/admin/attempts/att_1/inquire", body: { force: true } },
+    { method: "POST", path: "/api/v1/admin/attempts/att_1/inquire", body: { checklist: ["INQUIRY_ELIGIBILITY_VERIFIED"] } },
     { method: "GET", path: "/api/v1/admin/reconciliation/sources" },
     { method: "POST", path: "/api/v1/admin/reconciliation/sources", body: { code: "SRC1", name: "source", gatewayId: "gw_1", fileType: "CSV", type: "UPLOAD" } },
     { method: "GET", path: "/api/v1/admin/reconciliation/runs" },
@@ -1392,6 +1724,7 @@ describe("admin route surface", () => {
     { method: "POST", path: "/api/v1/admin/search", body: { query: "acme", limit: 5 } },
     { method: "GET", path: "/api/v1/admin/audit-logs" },
     { method: "GET", path: "/api/v1/admin/audit-logs/summary" },
+    { method: "GET", path: "/api/v1/admin/audit-logs/export?checklist=DATE_RANGE_VERIFIED,SENSITIVE_FIELDS_REVIEWED,EXPORT_APPROVAL_CONFIRMED" },
     { method: "GET", path: "/api/v1/admin/audit-logs/summary/export" },
     { method: "GET", path: "/api/v1/admin/audit-logs/export?action=APPROVAL" },
     { method: "GET", path: "/api/v1/admin/audit-logs/audit-1" },

@@ -11,6 +11,7 @@ export const walletStatusSchema = z
   .object({
     status: z.enum(["FROZEN", "ACTIVE"]),
     reason: zMutationReason,
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 

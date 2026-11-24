@@ -3,6 +3,10 @@ import { computed, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
 import { VBtn } from "vuetify/components";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { FormModal } from "@/components/ui/FormModal";
+import { areChecklistsVisible } from "@/constants/env";
+import { xlsxUIPipeline } from "@/utils/xlsx";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { ApiTable } from "@/components/Table/ApiTable";
@@ -45,6 +49,12 @@ type RefreshHook = {
   refreshAsIs: () => void;
 };
 
+const EXPORT_CHECKS = [
+  { key: "MIGRATION_SCOPE_VERIFIED", label: "Migration scope verified" },
+  { key: "PROMPT_HANDLING_REVIEWED", label: "Migration prompt handling reviewed" },
+  { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const Page = dc(() => {
   const { t } = useLocale();
   const router = useRouter();
@@ -53,6 +63,11 @@ const Page = dc(() => {
   const pageSize = ref(20);
   const refreshHook = ref<RefreshHook | null>(null);
   const busy = ref(false);
+  const exportOpen = ref(false);
+  const exportLoading = ref(false);
+  const showChecklists = areChecklistsVisible();
+  const exportChecklist = ref<Record<string, boolean>>({});
+  const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
   const canPrompt = computed(() =>
     hasOneOfAuthorities(["report_engine:author", "report:review", "report:approve", "security:write"]),
   );
@@ -175,6 +190,55 @@ const Page = dc(() => {
     },
   ]);
 
+  const exportQueue = async () => {
+    if (exportLoading.value) return;
+    if (!exportChecklistComplete.value) {
+      showSnackBar({ message: t("Complete all export checklist items before exporting"), type: "warning" });
+      return;
+    }
+    exportLoading.value = true;
+    try {
+      const rows: MigrationRow[] = [];
+      let page = 1;
+      let total = 0;
+      for (;;) {
+        const response = await api.get(urlsMap.reportEngineNeedsMigration, {
+          params: { source: source.value, page, pageSize: 200, ...(search.value ? { search: search.value } : {}) },
+        });
+        const payload = response.data ?? {};
+        const batch = (payload.specs ?? payload.data?.specs ?? []) as MigrationRow[];
+        total = Number(payload.total ?? payload.data?.total ?? batch.length);
+        rows.push(...batch);
+        if (batch.length === 0 || rows.length >= total || page >= 100) break;
+        page += 1;
+      }
+      const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+      const columns = ["id", "source", "merchantId", "code", "version", "category", "audienceScope", "status", "storedEngineVersion", "storedSpecVersion", "currentEngineVersion", "currentSpecVersion", "reasonCode", "updatedAt"];
+      const lines = [
+        columns.map(escape).join(","),
+        ...rows.map((row) => [
+          row.id, row.source, row.merchantId ?? "", row.code, row.version, row.category, row.audienceScope,
+          row.compatibility.status, row.compatibility.storedEngineVersion ?? "", row.compatibility.storedSpecVersion ?? "",
+          row.compatibility.currentEngineVersion, row.compatibility.currentSpecVersion,
+          row.compatibility.reasonCode ?? "", row.updatedAt,
+        ].map(escape).join(",")),
+      ];
+      await xlsxUIPipeline.downloadXlsxFromCsvLines({ title: `reports-needing-migration-${new Date().toISOString().slice(0, 10)}.xlsx`, lines });
+      exportOpen.value = false;
+      exportChecklist.value = {};
+      showSnackBar({
+        message: rows.length < total
+          ? t("Exported {exported} of {total} migration items; narrow the search to export the rest.", { exported: rows.length, total })
+          : t("Migration queue exported"),
+        type: rows.length < total ? "warning" : "success",
+      });
+    } catch (caught) {
+      showSnackBar({ message: extractApiErrorMessage(caught), type: "error" });
+    } finally {
+      exportLoading.value = false;
+    }
+  };
+
   const refresh = () => refreshHook.value?.refreshAsIs();
 
   const changeSource = (next: string) => {
@@ -203,6 +267,9 @@ const Page = dc(() => {
             <div class="d-flex flex-wrap ga-2">
               <VBtn variant="tonal" prependIcon="mdi-page-layout-header-footer" onClick={() => void router.push({ name: "ReportsChromeNeedsMigration" })}>
                 {t("Headers & Footers migration")}
+              </VBtn>
+              <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>
+                {t("Export queue")}
               </VBtn>
               <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refresh}>
                 {t("Refresh")}
@@ -244,6 +311,25 @@ const Page = dc(() => {
           }}
         />
       </ThemedView>
+      <FormModal
+        modelValue={exportOpen.value}
+        onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+        title={t("Export migration queue")}
+        size="md"
+        loading={exportLoading.value}
+        submitLabel={t("Export")}
+        onSubmit={() => void exportQueue()}
+      >
+        <FormChecklist
+          checks={[...EXPORT_CHECKS]}
+          modelValue={exportChecklist.value}
+          onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+          show={showChecklists}
+          title={t("Migration export checklist")}
+          complete={exportChecklistComplete.value}
+          incompleteMessage={t("Complete all export checklist items before exporting")}
+        />
+      </FormModal>
     </ScreenContainer>
   );
 });

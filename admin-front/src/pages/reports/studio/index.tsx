@@ -5,6 +5,9 @@ import { useRoute, useRouter } from "vue-router";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { VAlert, VBtn, VBtnToggle, VCol, VFileInput, VRow, VSelect } from "vuetify/components";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { FormModal } from "@/components/ui/FormModal";
+import { areChecklistsVisible } from "@/constants/env";
 import { DataTable } from "@/components/Table/DataTable";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
@@ -153,6 +156,13 @@ const specHasRequiredAssets = (json: string): boolean => {
   }
 };
 
+const PUBLISH_CHECKS = [
+  { key: "SPEC_VERIFIED", label: "Spec verified successfully" },
+  { key: "AUTHORITIES_REVIEWED", label: "Inferred authorities reviewed" },
+  { key: "PREVIEW_REVIEWED", label: "Draft preview reviewed" },
+  { key: "PUBLISH_AUTHORITY_CONFIRMED", label: "Publish authority confirmed" },
+] as const;
+
 const ReportsStudioPage = dc(() => {
   const { t } = useLocale();
   const router = useRouter();
@@ -164,6 +174,11 @@ const ReportsStudioPage = dc(() => {
   const zipError = ref("");
   const verification = ref<VerificationReport | null>(null);
   const previewBundle = ref<ReportExecutionBundle | null>(null);
+  const showChecklists = areChecklistsVisible();
+  const publishOpen = ref(false);
+  const publishRowTarget = ref<VersionRow | null>(null);
+  const publishChecklist = ref<Record<string, boolean>>({});
+  const publishChecklistComplete = computed(() => !showChecklists || PUBLISH_CHECKS.every((check) => publishChecklist.value[check.key] === true));
   const previewLocale = ref("en");
   const previewPages = ref(1);
   const previewLoading = ref(false);
@@ -402,7 +417,40 @@ const ReportsStudioPage = dc(() => {
     await loadHistory(savedSpecCode.value);
   };
 
-  const save = async (publish: boolean) => {
+  const openPublish = () => {
+    if (!canSave.value) return;
+    publishRowTarget.value = null;
+    publishChecklist.value = {};
+    publishOpen.value = true;
+  };
+
+  const publishCurrent = async () => {
+    if (!publishChecklistComplete.value) {
+      showSnackBar({ message: t("Complete all publish checklist items before publishing"), type: "warning" });
+      return;
+    }
+    const checklist = PUBLISH_CHECKS.filter((check) => publishChecklist.value[check.key]).map((check) => check.key);
+    const target = publishRowTarget.value;
+    publishOpen.value = false;
+    if (!target) {
+      await save(true, checklist);
+      return;
+    }
+    publishRowTarget.value = null;
+    busy.value = true;
+    resetFeedback();
+    try {
+      await api.post(urlsMap.reportEnginePublish(target.id), { checklist });
+      showSnackBar({ message: t("Report published"), type: "success" });
+      await loadHistory(target.code);
+    } catch (caught) {
+      fail(caught);
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  const save = async (publish: boolean, checklist: string[] = []) => {
     if (!canSave.value) return;
     busy.value = true;
     resetFeedback();
@@ -412,6 +460,7 @@ const ReportsStudioPage = dc(() => {
         specJson: specJson.value,
         assetsZipBase64,
         publish,
+        ...(checklist.length > 0 ? { checklist } : {}),
       });
       showSnackBar({ message: publish ? t("Report published") : t("Report saved as verified"), type: "success" });
       await applySaveResponse(response.data ?? {});
@@ -468,25 +517,10 @@ const ReportsStudioPage = dc(() => {
     }
   };
 
-  const publishVersion = async (row: VersionRow) => {
-    const confirmed = await showConfirm({
-      title: t("Publish this version?"),
-      message: t("{name} becomes the published version that report runners see.", { name: `${row.code} v${row.version}` }),
-      submitButtonLabel: t("Publish"),
-      type: "primary",
-    });
-    if (!confirmed) return;
-    busy.value = true;
-    resetFeedback();
-    try {
-      await api.post(urlsMap.reportEnginePublish(row.id), {});
-      showSnackBar({ message: t("Report published"), type: "success" });
-      await loadHistory(row.code);
-    } catch (caught) {
-      fail(caught);
-    } finally {
-      busy.value = false;
-    }
+  const publishVersion = (row: VersionRow) => {
+    publishRowTarget.value = row;
+    publishChecklist.value = {};
+    publishOpen.value = true;
   };
 
   const archiveVersion = async (row: VersionRow) => {
@@ -968,7 +1002,7 @@ const ReportsStudioPage = dc(() => {
               <VBtn variant="tonal" loading={busy.value} disabled={!canSave.value} onClick={() => void save(false)}>
                 {t("Save as Verified")}
               </VBtn>
-              <VBtn variant="tonal" loading={busy.value} disabled={!canSave.value} prependIcon="mdi-publish" onClick={() => void save(true)}>
+              <VBtn variant="tonal" loading={busy.value} disabled={!canSave.value} prependIcon="mdi-publish" onClick={openPublish}>
                 {t("Publish")}
               </VBtn>
               {verificationStale.value && (
@@ -1143,6 +1177,25 @@ const ReportsStudioPage = dc(() => {
           onSubmit={(payload: AuthorityOverridePayload) => void applyOverride(payload)}
         />
       </ThemedView>
+        <FormModal
+          modelValue={publishOpen.value}
+          onUpdate:modelValue={(value: boolean) => { publishOpen.value = value; if (!value) publishRowTarget.value = null; }}
+          title={t("Publish report")}
+          size="md"
+          loading={busy.value}
+          submitLabel={t("Publish")}
+          onSubmit={() => void publishCurrent()}
+        >
+          <FormChecklist
+            checks={[...PUBLISH_CHECKS]}
+            modelValue={publishChecklist.value}
+            onUpdate:modelValue={(value: Record<string, boolean>) => (publishChecklist.value = value)}
+            show={showChecklists}
+            title={t("Publish checklist")}
+            complete={publishChecklistComplete.value}
+            incompleteMessage={t("Complete all publish checklist items before publishing")}
+          />
+        </FormModal>
     </ScreenContainer>
   );
 });

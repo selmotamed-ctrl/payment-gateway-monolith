@@ -3,6 +3,7 @@ import { Decimal } from "decimal.js";
 import { PrismaRepositories } from "../engine/db/repositories";
 import { LedgerPoster, decimal } from "../engine/ledger/LedgerPoster";
 import {
+  SYSTEM_AUTOMATION_EMAIL,
   SYSTEM_AUTOMATION_USER_ID,
   executeApprovalSubject,
   executeCashout,
@@ -394,7 +395,10 @@ describe("governance execution", () => {
 
     const approval = rowsOf("approvalRequest").find((row) => row.id === result.approvalRequestId);
     expect(approval?.subjectType).toBe("ADJUSTMENT");
-    expect(approval?.makerUserId).toBe(SYSTEM_AUTOMATION_USER_ID);
+    expect(approval?.makerUserId).toBeTruthy();
+    expect(approval?.makerUserId).not.toBe(SYSTEM_AUTOMATION_USER_ID);
+    const issueMaker = rowsOf("user").find((row) => row.id === approval?.makerUserId);
+    expect(issueMaker?.email).toBe(SYSTEM_AUTOMATION_EMAIL);
     expect(approval?.state).toBe("PENDING_REVIEW");
 
     // AUTO-04: the dispute has an evidence deadline (the platform default of 14 days), and the drafted chargeback's
@@ -732,6 +736,39 @@ describe("governance execution", () => {
     expect(rowsOf("journalEntry")).toHaveLength(2);
   });
 
+  test("a generic approval checker cannot approve a subject outside their domain role", async () => {
+    await expect(
+      approve(fixture, {
+        subjectType: "AML_CASE",
+        subjectId: "aml-case-domain",
+        payloadDiffJson: { action: "RELEASE" },
+        makerUserId: "user-maker",
+        checkerUserId: "user-finance",
+        checkerRole: "FINANCE",
+      }),
+    ).rejects.toThrow(/requires one of/);
+    await expect(
+      approve(fixture, {
+        subjectType: "USER",
+        subjectId: "user-domain",
+        payloadDiffJson: { role: "SECURITY_ADMIN" },
+        makerUserId: "user-maker",
+        checkerUserId: "user-finance",
+        checkerRole: "FINANCE",
+      }),
+    ).rejects.toThrow(/requires one of/);
+    await expect(
+      approve(fixture, {
+        subjectType: "MERCHANT",
+        subjectId: "merchant-domain",
+        payloadDiffJson: { status: "SUSPENDED" },
+        makerUserId: "user-maker",
+        checkerUserId: "user-operator",
+        checkerRole: "OPERATOR",
+      }),
+    ).rejects.toThrow(/requires one of/);
+  });
+
   test("the system automation principal is a disabled service identity", async () => {
     await fixture.client.$transaction(async (tx) =>
       openDisputeWithDraftedAdjustment(fixture.context, tx as never, {
@@ -746,7 +783,7 @@ describe("governance execution", () => {
         actorRole: "FINANCE",
       }),
     );
-    const system = rowsOf("user").find((row) => row.id === SYSTEM_AUTOMATION_USER_ID);
+    const system = rowsOf("user").find((row) => row.email === SYSTEM_AUTOMATION_EMAIL);
     expect(system).toBeDefined();
     expect(system?.status).toBe("DISABLED");
     expect(system?.isChecker).toBe(false);
@@ -1064,6 +1101,9 @@ describe("governance execution", () => {
     expect(operatorCase?.state).toBe("RESOLVED");
     const audit = rowsOf("auditLog").find((row) => row.action === "OPERATOR_CASE_RESOLVED");
     expect(audit?.entityId).toBe("operator-case-success");
+    const outbox = rowsOf("outboxEvent").filter((row) => row.topic === "attempt.transitioned" && row.aggregateId === "attempt-op-success");
+    expect(outbox).toHaveLength(1);
+    expect((outbox[0]?.payloadJson as { status?: string } | undefined)?.status).toBe("SUCCEEDED");
   });
 
   test("a checker can resolve an UNKNOWN attempt as failed and release its reservation", async () => {
@@ -1228,4 +1268,33 @@ describe("governance execution", () => {
     expect(operatorCase?.state).toBe("RESOLVED");
   });
 
+});
+
+
+describe("commission receivable currency partitioning", () => {
+  test("a USD lookup excludes LYD recognition and returns only USD", async () => {
+    resetFakeDatabase();
+    const client = createFakePrisma();
+    fakeTable("glAccount").push(
+      { id: "acc-rec-usd", accountType: "COMMISSION_RECEIVABLE", currency: "USD" },
+      { id: "acc-rec-lyd", accountType: "COMMISSION_RECEIVABLE", currency: "LYD" },
+    );
+    fakeTable("paymentAttempt").push(
+      { id: "attempt-usd", merchantId: "merchant-1", currency: "USD" },
+      { id: "attempt-lyd", merchantId: "merchant-1", currency: "LYD" },
+    );
+    fakeTable("journalEntry").push(
+      { id: "entry-usd", refType: "PAYMENT_ATTEMPT", refId: "attempt-usd" },
+      { id: "entry-lyd", refType: "PAYMENT_ATTEMPT", refId: "attempt-lyd" },
+    );
+    fakeTable("journalLine").push(
+      { id: "line-usd", entryId: "entry-usd", glAccountId: "acc-rec-usd", direction: "DEBIT", amount: new Decimal("0.0010") },
+      { id: "line-lyd", entryId: "entry-lyd", glAccountId: "acc-rec-lyd", direction: "DEBIT", amount: new Decimal("0.0020") },
+    );
+    const repositories = new PrismaRepositories(client as never);
+    const usd = await repositories.merchants.getCommissionReceivableBalance!(client as never, "merchant-1", "USD");
+    const all = await repositories.merchants.getCommissionReceivableBalance!(client as never, "merchant-1");
+    expect(new Decimal(String(usd)).toFixed(4)).toBe("10.0000");
+    expect(new Decimal(String(all)).toFixed(4)).toBe("30.0000");
+  });
 });

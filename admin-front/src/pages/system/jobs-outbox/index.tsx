@@ -16,6 +16,8 @@ import { auditOutboxFilters, jobFilters, notificationFilters, outboxFilters } fr
 import type { TableHeader } from "@/components/Table/types";
 import { formatDateTime } from "@/components/ledger/format";
 import ReasonModal from "@/pages/merchants/components/ReasonModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import MonitorTable from "./components/MonitorTable";
 import {
     ageSecondsSince,
@@ -35,6 +37,13 @@ import { urlsMap } from "@/constants/urlsMap";
 import { hasOneOfAuthorities } from "@/state/user";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+
+const ACTION_CHECKS = [
+    { key: "JOB_SCOPE_VERIFIED", label: "Job or notification scope verified" },
+    { key: "FAILURE_CAUSE_REVIEWED", label: "Failure cause reviewed" },
+    { key: "RETRY_IMPACT_ACKNOWLEDGED", label: "Retry impact acknowledged" },
+    { key: "AUTHORITY_CONFIRMED", label: "Security write authority confirmed" },
+] as const;
 
 type OutboxRow = {
     id: string;
@@ -102,6 +111,9 @@ const JobsOutboxPage = dc(() => {
     const pending = ref<PendingAction>(null);
     const actionLoading = ref(false);
     const actionError = ref("");
+    const showChecklists = areChecklistsVisible();
+    const actionChecklist = ref<Record<string, boolean>>({});
+    const actionChecklistComplete = computed(() => !showChecklists || ACTION_CHECKS.every((check) => actionChecklist.value[check.key] === true));
 
     const loadSummary = async () => {
         try {
@@ -118,6 +130,16 @@ const JobsOutboxPage = dc(() => {
         void loadSummary();
     };
 
+    const copyMonitorSummary = async () => {
+        if (!summary.value) return;
+        try {
+            await navigator.clipboard.writeText(JSON.stringify({ view: tab.value, summary: summary.value }, null, 2));
+            showSnackBar({ type: "success", message: t("Monitor summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const selectTab = (value: string) => {
         tab.value = normalizeTab(value);
         void router.replace({ query: { ...route.query, tab: tab.value } });
@@ -126,14 +148,24 @@ const JobsOutboxPage = dc(() => {
     const submitAction = async (reason: string) => {
         const action = pending.value;
         if (!action) return;
+        if (!actionChecklistComplete.value) {
+            actionError.value = t("Complete all retry checklist items before continuing");
+            return;
+        }
         actionLoading.value = true;
         actionError.value = "";
         try {
             if (action.kind === "job") {
-                await api.post(urlsMap.systemJobRequeue(action.id), { reason });
+                await api.post(urlsMap.systemJobRequeue(action.id), {
+                    reason,
+                    checklist: ACTION_CHECKS.filter((check) => actionChecklist.value[check.key]).map((check) => check.key),
+                });
                 showSnackBar({ type: "success", message: t("Background job re-queued") });
             } else {
-                await api.post(urlsMap.systemNotificationRetry(action.id), { reason });
+                await api.post(urlsMap.systemNotificationRetry(action.id), {
+                    reason,
+                    checklist: ACTION_CHECKS.filter((check) => actionChecklist.value[check.key]).map((check) => check.key),
+                });
                 showSnackBar({ type: "success", message: t("Notification re-queued for delivery") });
             }
             pending.value = null;
@@ -313,7 +345,8 @@ const JobsOutboxPage = dc(() => {
                             icon: "mdi-restart",
                             onClick: () => {
                                 actionError.value = "";
-                                pending.value = { kind: "job", id: row.id };
+                                actionChecklist.value = {};
+                pending.value = { kind: "job", id: row.id };
                             },
                         }}
                     />
@@ -351,7 +384,8 @@ const JobsOutboxPage = dc(() => {
                             icon: "mdi-send-clock-outline",
                             onClick: () => {
                                 actionError.value = "";
-                                pending.value = { kind: "notification", id: row.id };
+                                actionChecklist.value = {};
+                pending.value = { kind: "notification", id: row.id };
                             },
                         }}
                     />
@@ -427,9 +461,14 @@ const JobsOutboxPage = dc(() => {
                     badge={t("Operations")}
                     badgeTone="info"
                     end={() => (
-                        <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>
-                            {t("Refresh")}
-                        </VBtn>
+                        <>
+                            <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>
+                                {t("Refresh")}
+                            </VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!summary.value} onClick={() => void copyMonitorSummary()}>
+                                {t("Copy monitor summary")}
+                            </VBtn>
+                        </>
                     )}
                 />
                 {summary.value && <MetricStrip items={metricItems.value} />}
@@ -466,7 +505,17 @@ const JobsOutboxPage = dc(() => {
                 loading={actionLoading.value}
                 errorMessage={actionError.value}
                 onSubmit={(reason: string) => void submitAction(reason)}
-            />
+            >
+                <FormChecklist
+                    checks={[...ACTION_CHECKS]}
+                    modelValue={actionChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (actionChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Retry checklist")}
+                    complete={actionChecklistComplete.value}
+                    incompleteMessage={t("Complete all retry checklist items before continuing")}
+                />
+            </ReasonModal>
         </ScreenContainer>
     );
 });

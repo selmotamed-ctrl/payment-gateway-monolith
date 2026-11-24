@@ -1,8 +1,9 @@
 import { dc } from "kt-dc";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useLocale } from "vuetify";
 import { VBtn } from "vuetify/components";
+import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
@@ -25,6 +26,8 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ApplicationDetailDrawer } from "@/pages/merchants/components/ApplicationDetailDrawer";
 import ApplicationPolicyModal, { type PolicyApplication } from "@/pages/merchants/components/ApplicationPolicyModal";
 import ReasonModal from "@/pages/merchants/components/ReasonModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { showSnackBar } from "@/utils/snackBar";
 import {
     ApprovalSubmittedNotice,
     MoneyOrRestricted,
@@ -135,6 +138,13 @@ const createTableState = () => {
     };
 };
 
+const ACCESS_ACTION_CHECKS = [
+    { key: "ENTITY_SCOPE_VERIFIED", label: "Application, link or terminal scope verified" },
+    { key: "ACCESS_IMPACT_REVIEWED", label: "Payment and token impact reviewed" },
+    { key: "REASON_CONFIRMED", label: "Reason confirmed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Authority to change access confirmed" },
+] as const;
+
 const APPLIED_MESSAGE: Record<MutationTarget["kind"], string> = {
     application: "Application suspended",
     link: "Payment link cancelled",
@@ -153,6 +163,25 @@ const ApplicationsPage = dc(() => {
     const appTable = createTableState();
     const linkTable = createTableState();
     const posTable = createTableState();
+    if (typeof route.query.search === "string" && route.query.search) {
+        posTable.search.value = route.query.search;
+    }
+    watch(
+        () => route.query.tab,
+        (tab) => {
+            const next = tab === "links" ? "links" : tab === "pos" ? "pos" : "applications";
+            if (next !== activeTab.value) activeTab.value = next;
+        },
+    );
+    watch(
+        () => route.query.search,
+        (search) => {
+            if (typeof search === "string" && search) {
+                posTable.search.value = search;
+                posTable.hook.value?.reset();
+            }
+        },
+    );
 
     const openApplicationId = ref<string | null>(null);
     const policyApplication = ref<PolicyApplication | null>(null);
@@ -160,6 +189,9 @@ const ApplicationsPage = dc(() => {
     const target = ref<MutationTarget | null>(null);
     const submitting = ref(false);
     const modalError = ref("");
+    const showChecklists = areChecklistsVisible();
+    const actionChecklist = ref<Record<string, boolean>>({});
+    const actionChecklistComplete = computed(() => !showChecklists || ACCESS_ACTION_CHECKS.every((check) => actionChecklist.value[check.key] === true));
 
     const loadSummary = async () => {
         try {
@@ -187,13 +219,18 @@ const ApplicationsPage = dc(() => {
     const submit = async (reason: string) => {
         const current = target.value;
         if (!current) return;
+        if (!actionChecklistComplete.value) {
+            modalError.value = t("Complete all access action checklist items before submitting");
+            return;
+        }
         submitting.value = true;
         modalError.value = "";
         try {
+            const checklist = ACCESS_ACTION_CHECKS.filter((check) => actionChecklist.value[check.key]).map((check) => check.key);
             const outcome = await runGoverned(() => {
-                if (current.kind === "application") return api.patch(urlsMap.applicationDetail(current.id), { status: current.action.target, reason });
-                if (current.kind === "link") return api.post(urlsMap.paymentLinkState(current.id), { state: "CANCELLED", reason });
-                return api.post(urlsMap.posTerminalStatus(current.id), { status: current.action.target, reason });
+                if (current.kind === "application") return api.patch(urlsMap.applicationDetail(current.id), { status: current.action.target, reason, checklist });
+                if (current.kind === "link") return api.post(urlsMap.paymentLinkState(current.id), { state: "CANCELLED", reason, checklist });
+                return api.post(urlsMap.posTerminalStatus(current.id), { status: current.action.target, reason, checklist });
             });
             notifyOutcome(outcome, APPLIED_MESSAGE[current.kind]);
             notice.value = outcome.kind === "approval" ? { approvalRequestId: outcome.approvalRequestId } : null;
@@ -216,6 +253,7 @@ const ApplicationsPage = dc(() => {
             dividerBefore: false,
             onClick: () => {
                 modalError.value = "";
+                actionChecklist.value = {};
                 target.value = toTarget(action);
             },
         }));
@@ -232,6 +270,32 @@ const ApplicationsPage = dc(() => {
     );
 
     const dateCell = (value: string | null) => <ThemedText style={{ fontSize: "11px" }}>{formatDateTime(value)}</ThemedText>;
+
+    const copyApplicationSummary = async (row: ApplicationRow) => {
+        const summary = {
+            id: row.id,
+            name: row.name,
+            merchantId: row.merchantId,
+            merchant: row.merchant,
+            status: row.status,
+            assignedWalletId: row.assignedWalletId,
+            assignedWallet: row.assignedWallet,
+            expectedMonthlyVolume: row.expectedMonthlyVolume,
+            railWhitelist: row.railWhitelist,
+            redirectDomains: row.redactedFields.includes("redirectDomains") ? "[restricted]" : row.redirectDomains,
+            accessTokenCount: row.accessTokenCount,
+            paymentLinkCount: row.paymentLinkCount,
+            posTerminalCount: row.posTerminalCount,
+            createdAt: row.createdAt,
+            url: window.location.href,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Application summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
 
     const applicationHeaders = computed<TableHeader<ApplicationRow>[]>(() => [
         {
@@ -304,6 +368,7 @@ const ApplicationsPage = dc(() => {
                     primaryAction={{ label: t("Inspect"), icon: "mdi-application-outline", onClick: () => { openApplicationId.value = row.id; } }}
                     items={[
                         { key: "merchant", label: t("Open merchant"), icon: "mdi-storefront-outline", onClick: () => void router.push({ name: "MerchantDetail", params: { id: row.merchantId } }) },
+                        { key: "copy", label: t("Copy summary"), icon: "mdi-content-copy", onClick: () => void copyApplicationSummary(row) },
                         ...applicationActionsFor(row.status, { canWrite: canWrite.value }).map((action): RowActionItem => ({
                             key: action.key,
                             label: t(action.label),
@@ -591,7 +656,17 @@ const ApplicationsPage = dc(() => {
                 loading={submitting.value}
                 errorMessage={modalError.value}
                 onSubmit={(reason: string) => void submit(reason)}
-            />
+            >
+                <FormChecklist
+                    checks={[...ACCESS_ACTION_CHECKS]}
+                    modelValue={actionChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (actionChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Access action checklist")}
+                    complete={actionChecklistComplete.value}
+                    incompleteMessage={t("Complete all access action checklist items before submitting")}
+                />
+            </ReasonModal>
         </ScreenContainer>
     );
 });

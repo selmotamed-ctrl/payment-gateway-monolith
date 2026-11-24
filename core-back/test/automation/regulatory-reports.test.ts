@@ -11,6 +11,7 @@ import { DeadlineWorker } from "../../engine/workers/DeadlineWorker";
 import { ReportingRuleEvaluator, type ReportingRuleRecord } from "../../engine/compliance/ReportingRuleEvaluator";
 import { cleanupAutomationCatalog, createAutomationCatalog, type AutomationCatalog } from "../helpers/automationCatalog";
 import { createPrisma, databaseIsReachable } from "../storage-engine/helpers/db";
+import { deleteWithAppendOnlyMaintenance } from "../helpers/appendOnlyMaintenance";
 
 const client = createPrisma({ max: 10 });
 const describeDb = databaseIsReachable ? describe : describe.skip;
@@ -26,7 +27,7 @@ afterAll(async () => {
     const reports = await client.$queryRawUnsafe<Array<{ id: string }>>(`SELECT id::text AS id FROM regulatory_reports WHERE report_code = $1`, code);
     for (const report of reports) {
       await client.$executeRawUnsafe(`DELETE FROM deadline_stages WHERE subject_type = 'REPORT' AND subject_id = $1`, report.id);
-      await client.$executeRawUnsafe(`DELETE FROM operator_cases WHERE subject_key = $1`, `report.overdue:${report.id}`);
+      await deleteWithAppendOnlyMaintenance(client, `DELETE FROM operator_cases WHERE subject_key = $1`, `report.overdue:${report.id}`);
       await client.$executeRawUnsafe(`DELETE FROM notifications WHERE event_id LIKE $1`, `%${report.id}%`);
     }
     await client.$executeRawUnsafe(`DELETE FROM regulatory_reports WHERE report_code = $1`, code);

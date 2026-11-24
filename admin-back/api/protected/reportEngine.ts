@@ -9,11 +9,14 @@ const idParams = z.object({ id: z.string().uuid() }).strict();
 const codeParams = z.object({ code: z.string().min(1).max(64) }).strict();
 const sourceParams = z.object({ sourceKey: z.string().min(1).max(64) }).strict();
 
+const checklistSchema = z.array(z.string().max(64)).max(10).optional();
+
 const specBody = z
   .object({
     specJson: z.union([z.string(), z.record(z.string(), z.unknown())]),
     assetsZipBase64: z.string().optional(),
     publish: z.boolean().optional(),
+    checklist: checklistSchema,
   })
   .strict();
 
@@ -47,6 +50,7 @@ const executeBody = z
       })
       .optional(),
     renderMode: z.enum(["CLIENT_PAGED_VECTOR", "SERVER_PDF"]).optional(),
+    checklist: z.array(z.string().max(64)).max(10).optional(),
   })
   .strict();
 
@@ -56,6 +60,7 @@ const chromeBody = z
     assetsZipBase64: z.string().optional(),
     publish: z.boolean().optional(),
     makeDefault: z.boolean().optional(),
+    checklist: checklistSchema,
   })
   .strict();
 
@@ -166,7 +171,7 @@ router.post(
     method: "POST",
     path: ({ params }) => `/internal/admin/report-engine/specs/${params.id}/publish`,
     paramsSchema: idParams,
-    schema: z.object({}).strict(),
+    schema: z.object({ checklist: checklistSchema }).strict(),
   }),
 );
 
@@ -306,7 +311,7 @@ router.post(
     method: "POST",
     path: ({ params }) => `/internal/admin/report-engine/chrome/${params.id}/set-default`,
     paramsSchema: idParams,
-    schema: z.object({ isDefault: z.boolean() }).strict(),
+    schema: z.object({ isDefault: z.boolean(), checklist: checklistSchema }).strict(),
   }),
 );
 
@@ -350,7 +355,7 @@ router.post(
     method: "POST",
     path: ({ params }) => `/internal/admin/report-engine/merchant-reports/${params.merchantId}/suspend`,
     paramsSchema: merchantIdParams,
-    schema: z.object({ reason: z.string().trim().min(5).max(500) }).strict(),
+    schema: z.object({ reason: z.string().trim().min(5).max(500), checklist: checklistSchema }).strict(),
   }),
 );
 
@@ -411,6 +416,6 @@ router.post(
   coreForward({
     method: "POST",
     path: () => "/internal/admin/report-engine/chrome/reconcile-defaults",
-    schema: z.object({}).strict(),
+    schema: z.object({ checklist: checklistSchema }).strict(),
   }),
 );

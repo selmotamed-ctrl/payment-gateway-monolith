@@ -9,6 +9,9 @@ import { ApiTable } from "@/components/Table/ApiTable";
 import { TableRowActions } from "@/components/Table/TableRowActions";
 import type { TableHeader } from "@/components/Table/types";
 import { DescriptionList, MetaPill, MonoRef, PageHeader, SegmentedTabs, SlideOverDrawer, StatusBadge, SurfaceCard } from "@/components/ui";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { FormModal } from "@/components/ui/FormModal";
+import { areChecklistsVisible } from "@/constants/env";
 import { ReportDiagnosticsPanel } from "@/components/reports/ReportDiagnosticsPanel";
 import { JsonSpecEditor } from "@/components/reports/JsonSpecEditor";
 import { ASSET_ZIP_TOO_LARGE_MESSAGE, diagnosticsFromApiError, friendlyApiErrorMessage } from "@/utils/reports/diagnostics";
@@ -51,6 +54,12 @@ type ChromeRefreshHook = {
 
 const pickFile = (files: File | File[] | null): File | null => (Array.isArray(files) ? (files[0] ?? null) : files);
 
+const PUBLISH_CHECKS = [
+  { key: "CHROME_VERIFIED", label: "Header/footer spec verified" },
+  { key: "LAYOUT_PREVIEWED", label: "Layout preview reviewed" },
+  { key: "PUBLISH_AUTHORITY_CONFIRMED", label: "Publish authority confirmed" },
+] as const;
+
 const ReportsChromePage = dc(() => {
   const { t } = useLocale();
   const router = useRouter();
@@ -63,6 +72,14 @@ const ReportsChromePage = dc(() => {
   const zipFile = ref<File | null>(null);
   const zipError = ref("");
   const publish = ref(true);
+  const showChecklists = areChecklistsVisible();
+  const publishOpen = ref(false);
+  const publishChecklist = ref<Record<string, boolean>>({});
+  const publishChecklistComplete = computed(() => !showChecklists || PUBLISH_CHECKS.every((check) => publishChecklist.value[check.key] === true));
+  const defaultTarget = ref<{ row: ChromeRow; isDefault: boolean } | null>(null);
+  const defaultOpen = ref(false);
+  const defaultChecklist = ref<Record<string, boolean>>({});
+  const defaultChecklistComplete = computed(() => !showChecklists || PUBLISH_CHECKS.every((check) => defaultChecklist.value[check.key] === true));
   const makeDefault = ref(false);
   /** Row loaded through "Edit" (drives the re-attach-zip hint). */
   const editingRow = ref<ChromeRow | null>(null);
@@ -175,7 +192,7 @@ const ReportsChromePage = dc(() => {
                 !canManageChrome.value ||
                 row.status !== "PUBLISHED" ||
                 (row.compatibility !== undefined && row.compatibility.status !== "COMPATIBLE"),
-              onClick: () => void setDefault(row, !row.isDefaultGlobal),
+              onClick: () => openDefault(row, !row.isDefaultGlobal),
             },
             {
               key: "archive",
@@ -301,7 +318,7 @@ const ReportsChromePage = dc(() => {
     downloadText(`${row.code}-v${row.version}.json`, JSON.stringify(row.spec, null, 2), "application/json");
   };
 
-  const saveChrome = async () => {
+  const saveChrome = async (checklist: string[] = []) => {
     if (!canSave.value) return;
     busy.value = true;
     resetFeedback();
@@ -312,6 +329,7 @@ const ReportsChromePage = dc(() => {
         assetsZipBase64,
         publish: publish.value,
         makeDefault: makeDefault.value,
+        ...(checklist.length > 0 ? { checklist } : {}),
       });
       const warnings = Array.isArray(response.data?.verification?.diagnostics) ? response.data.verification.diagnostics.length : 0;
       showSnackBar({
@@ -327,6 +345,25 @@ const ReportsChromePage = dc(() => {
     } finally {
       busy.value = false;
     }
+  };
+
+  const requestSaveChrome = () => {
+    if (!canSave.value) return;
+    if (!publish.value) {
+      void saveChrome();
+      return;
+    }
+    publishChecklist.value = {};
+    publishOpen.value = true;
+  };
+
+  const publishChrome = async () => {
+    if (!publishChecklistComplete.value) {
+      showSnackBar({ message: t("Complete all publish checklist items before publishing"), type: "error" });
+      return;
+    }
+    publishOpen.value = false;
+    await saveChrome(PUBLISH_CHECKS.filter((check) => publishChecklist.value[check.key]).map((check) => check.key));
   };
 
   const archiveRow = async (row: ChromeRow) => {
@@ -351,12 +388,27 @@ const ReportsChromePage = dc(() => {
     }
   };
 
-  const setDefault = async (row: ChromeRow, isDefault: boolean) => {
+  const openDefault = (row: ChromeRow, isDefault: boolean) => {
+    defaultTarget.value = { row, isDefault };
+    defaultChecklist.value = {};
+    defaultOpen.value = true;
+  };
+
+  const applyDefault = async () => {
+    const target = defaultTarget.value;
+    if (!target) return;
+    if (!defaultChecklistComplete.value) {
+      showSnackBar({ message: t("Complete all publish checklist items before publishing"), type: "error" });
+      return;
+    }
     busy.value = true;
     resetFeedback();
     try {
-      await api.post(urlsMap.reportEngineChromeDefault(row.id), { isDefault });
-      showSnackBar({ message: isDefault ? t("Global default updated") : t("Global default cleared"), type: "success" });
+      const checklist = PUBLISH_CHECKS.filter((check) => defaultChecklist.value[check.key]).map((check) => check.key);
+      await api.post(urlsMap.reportEngineChromeDefault(target.row.id), { isDefault: target.isDefault, checklist });
+      defaultOpen.value = false;
+      defaultTarget.value = null;
+      showSnackBar({ message: target.isDefault ? t("Global default updated") : t("Global default cleared"), type: "success" });
       refresh();
     } catch (caught) {
       fail(caught);
@@ -649,7 +701,7 @@ const ReportsChromePage = dc(() => {
                 copiedMessage={t("Chrome JSON copied")}
               />
               <div class="d-flex flex-wrap ga-4 align-center">
-                <VBtn color="primary" loading={busy.value} disabled={!canSave.value || !canManageChrome.value} onClick={() => void saveChrome()}>
+                <VBtn color="primary" loading={busy.value} disabled={!canSave.value || !canManageChrome.value} onClick={requestSaveChrome}>
                   {t("Verify & Save")}
                 </VBtn>
                 <VSwitch
@@ -715,6 +767,44 @@ const ReportsChromePage = dc(() => {
           {previewRow.value && renderPreview(previewRow.value)}
         </SlideOverDrawer>
       </ThemedView>
+      <FormModal
+        modelValue={defaultOpen.value}
+        onUpdate:modelValue={(value: boolean) => { defaultOpen.value = value; if (!value) defaultTarget.value = null; }}
+        title={defaultTarget.value?.isDefault ? t("Set global default") : t("Clear global default")}
+        size="md"
+        loading={busy.value}
+        submitLabel={defaultTarget.value?.isDefault ? t("Set default") : t("Clear default")}
+        onSubmit={() => void applyDefault()}
+      >
+        <FormChecklist
+          checks={[...PUBLISH_CHECKS]}
+          modelValue={defaultChecklist.value}
+          onUpdate:modelValue={(value: Record<string, boolean>) => (defaultChecklist.value = value)}
+          show={showChecklists}
+          title={t("Publish checklist")}
+          complete={defaultChecklistComplete.value}
+          incompleteMessage={t("Complete all publish checklist items before publishing")}
+        />
+      </FormModal>
+      <FormModal
+        modelValue={publishOpen.value}
+        onUpdate:modelValue={(value: boolean) => (publishOpen.value = value)}
+        title={t("Publish header/footer")}
+        size="md"
+        loading={busy.value}
+        submitLabel={t("Publish")}
+        onSubmit={() => void publishChrome()}
+      >
+        <FormChecklist
+          checks={[...PUBLISH_CHECKS]}
+          modelValue={publishChecklist.value}
+          onUpdate:modelValue={(value: Record<string, boolean>) => (publishChecklist.value = value)}
+          show={showChecklists}
+          title={t("Publish checklist")}
+          complete={publishChecklistComplete.value}
+          incompleteMessage={t("Complete all publish checklist items before publishing")}
+        />
+      </FormModal>
     </ScreenContainer>
   );
 });

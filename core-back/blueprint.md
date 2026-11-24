@@ -6,7 +6,7 @@ Generated from: `core.foundations`, `core.api`, `core.engine`, `core.ledger`, `c
 
 ## Core Foundations
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-23
 
 ## 1. Purpose and scope
 
@@ -243,7 +243,7 @@ TCP + TLS 1.3 handshake (client cert required)
 1. Generate certs.
 2. Set `DATABASE_URL`.
 3. Apply migrations.
-4. Seed (this also checks schema version 11).
+4. Seed (this also checks schema version 44).
 5. `bun run start`.
 6. Probe `/health` over mTLS with a client cert.
 
@@ -340,7 +340,7 @@ Schema version is now 11 (see the data part). Login and MFA throttles live in `l
 
 ## Core API Surface
 
-> Status: `partial` · Last verified: 2026-11-16
+> Status: `partial` · Last verified: 2026-11-23
 
 ## 1. Purpose and scope
 
@@ -389,7 +389,7 @@ The edge maps its public paths to these prefixes:
 
 ### 3.2 Admin namespace
 
-The admin router is the largest surface. `/health`, `/auth/login`, `/auth/mfa` and `/auth/me` are registered before `router.use(requireAuthentication)`. Every route after that line requires a valid bearer credential. `GET /auth/me` is before the guard and returns static platform data.
+The admin router is the largest surface. `/health`, `/auth/login`, `/auth/mfa`, `/auth/mfa/resend` and `/auth/me` are registered before `router.use(requireAuthentication)`. Every route after that line requires a valid bearer credential. `GET /auth/me` is before the guard and returns static platform data.
 
 The domain groups below list every route in `api/internal/admin.ts`. The authority column is the guard used by the group; where a group mixes read/write, the split is shown.
 
@@ -397,7 +397,7 @@ The domain groups below list every route in `api/internal/admin.ts`. The authori
 
 | Routes | Authority |
 | :--- | :--- |
-| `POST /auth/login`, `POST /auth/mfa` | none (before auth) |
+| `POST /auth/login`, `POST /auth/mfa`, `POST /auth/mfa/resend` | none (before auth) |
 | `GET /auth/me` | none (before auth) |
 | `POST /search` | authenticated; no explicit authority |
 | `GET /stats/recent-activity`, `GET /stats/recent-activity/export` | `security:read` |
@@ -526,6 +526,8 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 
 `GET /operator-cases`, `/export`, `/summary`, `/summary/export` and `/:id` return the type-aware case fields (`caseReference`, `caseType`, title/summary, domain/source, subject, available actions) and filter by `caseType`; AML-confidential cases require `aml.read_confidential`. `/catalog` returns the code catalog, action definitions and resolution codes. `POST /:id/acknowledge` is single-actor triage; `POST /:id/resolve` remains maker-checker and validates the action against the case type (payment actions only for attempt types; operational close requires a resolution code). Source-cleared monitor/route/statement/report cases resolve with a system event.
 
+**Safeguard checklist evidence.** Sensitive mutations and exports accept an optional `checklist` string array (or comma-separated query for GET exports). Core allow-lists the keys per action, records the accepted list in the audit `afterJson` (and approval payloads where the action is maker-checker), and never logs a code, secret or phone. The list is advisory: the server does not require completeness except the join-request approval gate and explicit destructive confirmations. New audited summary exports: `GET /transactions/summary/export`, `GET /finance/journal-entries/summary/export`, `GET /gateway-inquiries/summary/export`, `GET /incidents/summary/export` and `GET /incidents/export` (5,000-row cap with `total`/`truncated`). The checkout channel exposes `GET /academy/certificates/:publicId` for public certificate verification; it returns only holder name, track, badge, dates, status and content version. Issuances are durable `academy_certificates` rows (opaque `publicId`, unique per user/track/earnedAt); status is `valid`, `expired` or `revoked`, and user deletion cascades to a 404.
+
 #### Disputes, adjustments, cash-outs, commissions and velocity
 
 | Routes | Authority |
@@ -553,8 +555,10 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `GET /settings/checkout-support`, `/history`, `/summary`, `/summary/export` | `settings:read` |
 | `PUT /settings/checkout-support` | `settings:write`; direct versioned write |
 | `GET /academy/progress`, `PUT /academy/progress` | authenticated back-office user; current user only (`{ baseRev, patch }`, `rev`, 409 on stale) |
+| `GET /academy/certificates/:trackId/verification` | authenticated back-office user; returns the opaque `publicId` and short `displayId` for an earned badge |
+| `POST /academy/certificates/:identifier/revoke` | role `SECURITY_ADMIN`; accepts the opaque `publicId` or the short `displayId`, revokes idempotently and audits `ACADEMY_CERTIFICATE_REVOKED` |
 | `GET /academy/exams/:examId/eligibility`, `POST /academy/exams/:examId/start`, `POST /academy/exams/:examId/submit` | authenticated back-office user; server-graded (see `03-admin-front/03-guide-and-academy.md` §7.4) |
-| `GET /academy/team` | role `SECURITY_ADMIN`; audited `ACADEMY_TEAM_VIEWED` |
+| `GET /academy/team`, `GET /academy/team/export` | role `SECURITY_ADMIN`; audited `ACADEMY_TEAM_VIEWED` / `ACADEMY_TEAM_EXPORTED` |
 | `GET /audit-logs`, `/export`, `/summary`, `/summary/export`, `GET /audit-logs/:id` | `security:read` |
 | `GET /settings` | `settings:read` |
 | `POST /settings/restore-preview` | `settings:read` |
@@ -755,7 +759,7 @@ The inbound worker also exists and can drain unprocessed inbox rows, but the liv
 
 | Edge path | Core path | Edge file |
 | :--- | :--- | :--- |
-| `POST /api/v1/admin/auth/login`, `/mfa`; `GET /me` | `/internal/admin/auth/*` | `admin-back/api/public/auth.ts` |
+| `POST /api/v1/admin/auth/login`, `/mfa`, `/mfa/resend`; `GET /me` | `/internal/admin/auth/*` | `admin-back/api/public/auth.ts` |
 | `/api/v1/admin/*` | `/internal/admin/*` | `admin-back/api/protected/**` |
 | `/api/v1/admin/system/backups/*` | `/internal/admin/system/backups/*` | `admin-back/api/protected/backups.ts` |
 | `/api/v1/merchant/auth/*` | `/internal/merchant/auth/*` | `merchant-back/api/public/auth.ts` |
@@ -1020,6 +1024,14 @@ A new internal router, reachable from merchant-back and admin-back and mounted o
 ## Dashboard success-rate denominator (2026-11-16)
 
 `GET /internal/admin/stats/overview` returns `attemptsCounted` and computes `successRate = attemptsSucceeded / attemptsCounted`. `attemptsSucceeded` counts `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` (the payment was processed successfully; a later refund or dispute is not a processing failure). `attemptsCounted` adds `FAILED` and `UNKNOWN` only. Pending/in-flight states (`CREATED`, `INITIATING`, `AWAITING_CUSTOMER`, `AUTHORIZING`, `VERIFYING`) and deliberate/no-processing outcomes (`CANCELLED`, `EXPIRED`, `BLOCKED`) are excluded from both sides of the rate. `attemptsTotal` remains every attempt created in the period for the distribution chart and snapshot export.
+
+## 20. Currency-aware aggregate responses (2026-11-24)
+
+Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/cashout summaries and route caps accept an optional `currency` (default `BASE_CURRENCY`, normally LYD). Existing scalar monetary fields mean the selected currency; responses add `currency`, `byCurrency` where the endpoint supports a breakdown, and `mixedCurrency`. A mixed total is never labelled as a single currency. Reconciliation source/upload accepts `currency`, `autoPost`, and optional source `env`/`credentialSetId`; the upload metadata remains limited to checklist, period, currency and autoPost.
+
+## 20. Currency-aware aggregate responses (2026-11-24)
+
+Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/cashout summaries and route caps accept an optional `currency` (default `BASE_CURRENCY`, normally LYD). Existing scalar monetary fields mean the selected currency; responses add `currency`, `byCurrency` where the endpoint supports a breakdown, and `mixedCurrency`. A mixed total is never labelled as a single currency. Reconciliation source/upload accepts `currency`, `autoPost`, and optional source `env`/`credentialSetId`; upload metadata remains limited to checklist, period, currency and autoPost.
 
 ## Core Engine
 
@@ -1662,6 +1674,8 @@ No build or test was run for this documentation change. Tests that require Postg
 
 OD-10 and `resolveEnvironment(merchantStatus)` are removed. Checkout and merchant link creation resolve the environment from the process plane; Live requires an ACTIVE merchant, application and wallet. Sandbox uses the same strict status rules, but its merchant envelope is created ACTIVE, so a pending Live merchant can train without a Live approval. `AttemptGuardPipeline` no longer reads the OD-10 setting and applies the same status posture on both planes.
 
+- **Link currency integrity (2026-11-24).** A new payment link is rejected with `LINK_WALLET_CURRENCY_MISMATCH` when its currency differs from the settlement wallet currency. Existing links are not rewritten; the attempt still resolves the wallet by merchant+currency, so a historical mismatch is a residual.
+
 ## Double-Entry Ledger
 
 > Status: `partial` · Last verified: 2026-11-09
@@ -2082,9 +2096,17 @@ Measured on the test host (single Bun process, local PostgreSQL 18, 16 shards): 
 
 Tests: `core-back/test/ledger-raw-sql-parity.test.ts` (same entries, lines, balances and gapless shard sequences as the ORM path for five templates; returned records match storage; idempotent replay in both modes; whole-posting rollback when the shard writer fails; cache semantics).
 
+## 17. Posting context and currency (2026-11-24)
+
+Every currency-scoped account resolution requires a currency. `LedgerPostContext` carries `currency` plus, for a gateway clearing account, `gatewayId`/`env`/`credentialSetId`. Missing context is a hard failure when `LEDGER_STRICT_CONTEXT=true` (the deploy engine sets it); otherwise the legacy platform-wide fallback remains. Settlement sweeps and fee variances now pass the full attempt/source context, and a USD/EUR posting never silently uses the first-created LYD account heap. `CASHOUT` carries the wallet currency so the treasury leg is correct. The append-only `(ref_type, ref_id)` idempotency key is unchanged; only the ref scheme for grouped batches and per-run fee variances changed, with legacy detection.
+
+## 17. Posting context and currency (2026-11-24)
+
+Every currency-scoped account resolution requires a currency. `LedgerPostContext` carries `currency` plus, for a gateway clearing account, `gatewayId`/`env`/`credentialSetId`. Missing context is a hard failure when `LEDGER_STRICT_CONTEXT=true` (the deploy engine sets it); otherwise the legacy platform-wide fallback remains. Settlement sweeps and fee variances now pass the full attempt/source context, and a USD/EUR posting never silently uses the first-created LYD account. `CASHOUT` carries the wallet currency so the treasury leg is correct. The append-only `(ref_type, ref_id)` idempotency key is unchanged; only the ref scheme for grouped batches and per-run fee variances changed, with legacy detection.
+
 ## Governance and Compliance
 
-> Status: `partial` · Last verified: 2026-11-16
+> Status: `partial` · Last verified: 2026-11-24
 
 ## 1. Purpose and scope
 
@@ -2171,7 +2193,7 @@ The actual admin approve route (`core-back/api/internal/admin.ts:6014`) is more 
 
 Other subject types that appear in the queue/domain map but have no `executeApprovalSubject` branch are `KYB_DOCUMENT`, `GATEWAY`, and `CREDENTIAL_SET`. `BACKUP_POLICY` is handled by a special branch in the approve route rather than by the dispatcher.
 
-The dispatcher enforces maker ≠ checker and rejects system automation, but it does not re-check a domain-specific role for AML, regulatory reporting, user administration, or gateway version go-live. Within the dispatcher, only chargeback execution checks that the checker is a finance checker (`assertFinanceChecker` in `GovernanceExecution.ts`).
+The dispatcher enforces maker ≠ checker, rejects system automation, and checks the domain role of the checker (`DOMAIN_CHECKER_ROLES`): adjustments/commission/repairs/wallet are FINANCE; AML case/rule and regulatory reports are MLRO; reporting schemas/rules also accept COMPLIANCE; users and gateway versions are SECURITY_ADMIN; merchant/join requests are COMPLIANCE/MLRO/OPERATOR; and the remaining subjects use their documented role set. A generic `approval:check` alone is no longer sufficient. Chargeback execution and adjustment rejection additionally call `assertFinanceChecker`.
 
 ### 3.4 Detail change log
 
@@ -2191,6 +2213,10 @@ The join-request state machine is implemented in `core-back/api/internal/admin.t
 - `JoinRequestExpiryWorker` expires abandoned drafts and overdue reviews.
 
 Readiness (`core-back/lib/joinRequestOnboarding.ts:249`) requires the canonical checklist, required accepted and unexpired documents, active beneficial owners meeting the ownership threshold, owner screening status, a non-blocked screening result, and a payout bank; it reports `approvalPending` separately rather than adding it to `blockers`. Duplicate detection compares tax id, registration, phone, and e-mail and hashes the payout account, owner national id, and document SHA-256 (`joinRequestOnboarding.ts:84`).
+
+Approval of a join request now requires every canonical review-checklist item to be `true`; a partial checklist returns `409 JOIN_REQUEST_CHECKLIST_INCOMPLETE` with `missingChecklistItems`. Withdrawal records the supplied reason and allow-listed checklist in `JOIN_REQUEST_WITHDRAWN`, and the reason is used as the superseded-approval rejection reason.
+
+Safeguard checklist evidence is recorded across admin mutations and exports (wallet/application/link/POS actions, KYB documents, credential sets, commission/velocity lifecycle, reporting rules/schemas, filing adapters, incidents, backups, object-storage legal holds and maintenance, report-engine publish/suspend/reconcile, academy exams and team export, sandbox resets/scenarios/transactions). Core allow-lists the keys per action, stores them in the audit `afterJson` or the approval payload, and does not treat the list as authorization. Incident transitions store the checklist in the timeline `detailJson` and the audit; incident communications are audited with their checklist. Approval subject context now resolves `WALLET`, `APPLICATION` and `POS_TERMINAL` for the Approvals drawer, alongside the existing subjects.
 
 The four-eyes decision (`core-back/api/internal/merchant.ts:358`) reads `join_request.four_eyes_policy` and supports `ALWAYS`, `RISK_BASED`, and `NEVER`. Risk-based triggers include high risk tier, any screening match list, PEP owners, large ownership share, high-risk category, previous rejection, duplicate/related flags, payout owner mismatch, and expected volume above threshold.
 
@@ -2237,7 +2263,7 @@ Dispute intake is exposed as `POST /admin/disputes`; the route queues an `ADJUST
 
 There is no webhook or statement dispute-intake wiring in `DynamicRailEngine` or reconciliation; the admin manual route is the implemented intake path.
 
-Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` holds the adjustment and opens an operator case. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id. The refund template follows the ownership mode of the payment (`refundScenarioFor`, see `core.ledger`): a `MERCHANT_DIRECT` refund only reverses the commission recognition (`Dr PLATFORM_INCOME` / `Cr COMMISSION_RECEIVABLE`) and never debits the wallet or credits treasury; with nothing to reverse the adjustment is `EXECUTED` with no journal entry.
+Adjustment execution supports `REFUND` (three phases: claim, gateway refund, finalize), `CHARGEBACK` (won/lost/insufficient), `CORRECTION` (fee variance), `MANUAL_DEBIT`/`CASHOUT_SUBTRACTION` (cash-out template), and `MANUAL_CREDIT` (internal confirmation with zero commission). Chargebacks require a finance checker; a missing dispute outcome or a breach of `negativeBalanceCeiling` on a LOST outcome, computed on the posting-currency wallet balance, holds the adjustment and opens an operator case. When a non-merchant-direct reserve was already posted, a LOST outcome posts only `CHARGEBACK_RESERVE_AND_LOST` (reserve to treasury), not a second wallet debit; a merchant-direct LOST reverses only the commission, while a merchant-direct WON posts no journal. Rejecting a chargeback releases an existing reserve once and is idempotent; a chargeback rejection with no reserve posts nothing. Refunds are capped to the unrefunded settled amount and are idempotent on the adjustment id. The refund template follows the ownership mode of the payment (`refundScenarioFor`, see `core.ledger`): a `MERCHANT_DIRECT` refund only reverses the commission recognition (`Dr PLATFORM_INCOME` / `Cr COMMISSION_RECEIVABLE`) and never debits the wallet or credits treasury; with nothing to reverse the adjustment is `EXECUTED` with no journal entry.
 
 ### 3.8 Cash-outs
 
@@ -2485,6 +2511,14 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 - **DOCX is a first-class schema format.** `buildSchemaValidation`, DRAFT schema `PUT`, `simulate` and `clone` now use `parseDocxNarrativeSchema` and `renderRegulatoryDocx`; cloning copies the XLSX template binding. Simulation of a template-backed XLSX schema decrypts the template instead of silently rendering generated mode.
 - **Incidents are operationally complete.** List/detail responses resolve commander, reporter, timeline actor, action owner and communication sender names from the referenced users. The list returns server-side summary counts and filters/pagination are forwarded by the edge. Child writes are audited; transitions and postmortem edits lock the incident row; report drafting takes an advisory lock so concurrent requests cannot create two reports. Incident reporting is intentionally allowed from any lifecycle state (the owner decision), with the UI confirmation.
 - **Filing adapters are maker-checker.** Create, update and disable produce `FILING_ADAPTER` approvals; the adapter row stays `DISABLED` until a checker applies the encrypted secret/endpoint/status changes. `configJson` rejects secret-looking keys and is redacted on output; HTTP endpoints remain public-HTTPS-only. `POST /reports/:id/file` creates a PENDING submission before dispatch, records failure, blocks duplicate PENDING/SUBMITTED attempts and audits a reconciliation case if the report state cannot be advanced after a successful external send. Manual submissions now record a `MANUAL` `ExternalSubmission` and appear in the same history.
+
+## 19. Multi-currency ceilings and aggregate rules (2026-11-24)
+
+`commissionReceivableCeiling` and `negativeBalanceCeiling` are evaluated per posting currency; a scalar never mixes LYD/USD/EUR. The admission guard passes the link currency, `merchantOpenCashoutTotal` is wallet-currency scoped, the receivable SQL filters all three branches (attempt, adjustment, merchant-level netting), and the netting worker evaluates each currency bucket separately with per-currency aged cases and notices. The generic approval dispatcher now enforces domain checker roles; `approval:check` alone is insufficient.
+
+## 19. Multi-currency ceilings and aggregate rules (2026-11-24)
+
+`commissionReceivableCeiling` and `negativeBalanceCeiling` are evaluated per posting currency; a scalar never mixes LYD/USD/EUR. The admission guard passes the link currency, `merchantOpenCashoutTotal` is wallet-currency scoped, the receivable SQL filters all three branches (attempt, adjustment, merchant-level netting), and the netting worker evaluates each currency bucket separately with per-currency aged cases and notices. The generic approval dispatcher now enforces domain checker roles; `approval:check` alone is insufficient.
 
 ## Background Workers and Outboxes
 
@@ -2963,6 +2997,14 @@ override, opens keyed operator cases for unhealthy/conflicting routes, writes
 `route_health_events` and audit rows, and clears expired overrides. It is
 registered in `productionRuntime` and participates in expected leader keys.
 See `core.route-health`.
+
+## 20. Reconciliation settlement context (2026-11-24)
+
+`RECONCILIATION_RUN` persists the statement currency and `autoPost` flag and copies the matched attempt context (currency, gateway, env, credential set) onto each item. Settlement sweeps group by `(batch, gateway, env, credential set, currency)`, post with the full `LedgerPostContext`, and skip an unresolved item instead of choosing an arbitrary account. `autoPost=false` suppresses sweeps with an audit trail. Fee variances carry the attempt context and use a per-run ref when a run id is available, with legacy-key compatibility. Statement chargebacks use the item/attempt currency, never a hard-coded LYD.
+
+## 20. Reconciliation settlement context (2026-11-24)
+
+`RECONCILIATION_RUN` persists the statement currency and `autoPost` flag and copies the matched attempt context (currency, gateway, env, credential set) onto each item. Settlement sweeps group by `(batch, gateway, env, credential set, currency)`, post with the full `LedgerPostContext`, and skip an unresolved item instead of choosing an arbitrary account. `autoPost=false` suppresses sweeps with an audit trail. Fee variances carry the attempt context and use a per-run ref when a run id is available, with legacy-key compatibility. Statement chargebacks use the item/attempt currency, never a hard-coded LYD.
 
 ## Storage Engine
 
@@ -3454,7 +3496,7 @@ fallback) and the `object_storage` Platform Monitor check cover operations.
 
 ## Data Schema and Migrations
 
-> Status: `partial` · Last verified: 2026-11-16
+> Status: `partial` · Last verified: 2026-11-24
 
 ## 1. Purpose and scope
 
@@ -3464,7 +3506,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 41 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 44 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -3485,8 +3527,8 @@ The historical design treats PostgreSQL 18 as the only runtime database and the 
 
 The blueprint's stale counts are corrected here:
 
-- the schema is not 64 models and 100 enums; it is 76 models and 105 enums;
-- the schema version is 14, not 5 or 6;
+- the schema is not the historical 64 models and 100 enums; it is 119 models at schema version 44;
+- the schema version is 44, not 5 or 6;
 - there is not one migration that creates shards, outboxes and all tables. The baseline creates the tables, the storage migration adds indexes, the CQRS migration adds read models, and the hardening migration adds partitions, checks and search indexes;
 - `rm_merchant_dashboard_stats` and `rm_wallet_statements` do not exist. The actual read models are `rm_merchant_daily_stats` and `rm_route_daily_volumes`.
 
@@ -3519,7 +3561,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 41`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 44`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -3540,7 +3582,7 @@ installs the two append-only guard triggers. See
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261116130000_schema_version_agreement` after the case-management taxonomy migration, schema version 41). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261124150000_currency_context_and_aggregates`, schema version 44). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -3835,7 +3877,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 41 (`REQUIRED_SCHEMA_VERSION = 41`; model count 118). The schema migrations since version 10 are:
+The current schema version is 44 (`REQUIRED_SCHEMA_VERSION = 44`; model count 119). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -3853,9 +3895,12 @@ The current schema version is 41 (`REQUIRED_SCHEMA_VERSION = 41`; model count 11
 - `20261111120000_report_engine_versioning` (version 34, written on the plan branch): adds `engine_version`, `spec_schema_version` and `authoring_transcript_version` to `report_definition_specs`, `merchant_report_specs` and `report_chrome_specs`, `engine_version` and `spec_schema_version` to both execution audit tables, and `default_revoked_at` / `default_revoked_reason` to `report_chrome_specs`; it backfills `spec_schema_version` from `spec_json.spec_version`. See `core.report-engine` section 18.
 - `20261111130000_merchant_report_chrome` (version 35, written on the plan branch): creates `merchant_report_chrome_specs` (unique `(merchant_id, code, version)`, one published default per merchant and chrome type, a foreign key to the merchant asset bundle).
 - `20261112090000_journal_partition_storage_and_race` (version 35, no table shape change): redefines `ensure_journal_line_partitions` again. (1) The 2026-11-10 revision set only the insert-autovacuum parameters on a new monthly partition and dropped the explicit `fillfactor = 100` of the original body; it is restored, and set once (`SHARE UPDATE EXCLUSIVE`, no write blocking) on every monthly partition created without it. (2) The same revision replaced `CREATE TABLE IF NOT EXISTS` with a `to_regclass` check and a plain `CREATE TABLE`, so two callers at once (the partition worker on two nodes, or the worker and a deploy) both saw a month missing and the second aborted with `duplicate_table` (measured: 3 of 4 concurrent callers failed); `duplicate_table` / `unique_violation` from a concurrent creator are now accepted, and the truncate-guard install tolerates `duplicate_object`. The version is bumped because the newest migration sets `REQUIRED_SCHEMA_VERSION` (checked by `phase1-mtls-and-schema.test.ts`) and the seeders' equality guard then refuses a database without it; core HTTP start does not check the version. Test: `ledger-query-pruning-and-accuracy.test.ts` EC-15 (storage parameters) and EC-15b (four concurrent callers on a dropped empty month).
-- `20261116090000_merchant_chrome_tenant_integrity` (version 40, no new table; the newest migration): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merges.** The branches numbered their migrations independently: `20261111090000` = 34 and `20261112090000` = 35 (`claude-fixes`), `20261111120000` = 34 and `20261111130000` = 35 (plan branch), `20261112000000` = 36, `20261113090000` = 37, `20261113120000` = 38 and `20261114090000` = 39 (`master`). None is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first (a database that followed `master` to 39 and then receives the `claude-fixes` migrations would be left at 35). This migration is new to every database, runs last and sets 40. It was first written as `20261112100000` with version 36 when only the plan branch had been merged; that name was never pushed or deployed and was renamed on 2026-11-16 so that it also runs after `master`'s migrations. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, `master` first, `claude-fixes` first) and applied from empty on PostgreSQL 18.6: each ends at 40 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
+- `20261116090000_merchant_chrome_tenant_integrity` (version 40, no new table; it runs before the version 41/42 migrations): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merges.** The branches numbered their migrations independently: `20261111090000` = 34 and `20261112090000` = 35 (`claude-fixes`), `20261111120000` = 34 and `20261111130000` = 35 (plan branch), `20261112000000` = 36, `20261113090000` = 37, `20261113120000` = 38 and `20261114090000` = 39 (`master`). None is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first (a database that followed `master` to 39 and then receives the `claude-fixes` migrations would be left at 35). This migration is new to every database, runs last and sets 40. It was first written as `20261112100000` with version 36 when only the plan branch had been merged; that name was never pushed or deployed and was renamed on 2026-11-16 so that it also runs after `master`'s migrations. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, `master` first, `claude-fixes` first) and applied from empty on PostgreSQL 18.6: each ends at 40 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
 - `20261116120000_route_health_automation` (version 40, from `master`): route health and the circuit breaker: `rail_routes` health computed/override columns, first-terminal and first-unknown markers on `payment_attempts`, `route_health_events` and `route_health_probes`, a trigger that keeps the markers current, and a unique `(route_id, window_start)` on `gateway_health_samples`. Owned by `core.route-health`.
 - `20261116130000_schema_version_agreement` (version 41, no structure): the agreed version after both 40s. Runs last, so a database at 41 has both `20261116090000` and `20261116120000` applied.
+- `20261124150000_currency_context_and_aggregates` (version 44): adds nullable reconciliation context (`reconciliation_runs.currency/auto_post`, `reconciliation_items.currency/gateway_id/env/credential_set_id`, `statement_sources.currency/env/credential_set_id`) and backfills matched items from their attempts/routes. Settlement sweeps and fee variances post with the full currency/gateway/env/credential context; the ledger guard fails closed on a missing currency where enabled.
+- `20261124120000_append_only_case_and_storage_guards` (version 43): adds the remaining append-only history guards for `operator_case_events`, `gl_shard_repairs`, `storage_object_access_logs`, `audit_chain_anchors` and a TRUNCATE guard on `storage_objects`; the bypass requires both `pgw.append_only_maintenance` and a superuser/migration-role membership. See `core.governance` and `core.object-storage`.
+- `20261123100000_opaque_academy_certificates` (version 42): adds `AcademyCertificateStatus` and `academy_certificates` (opaque `public_id`, short `display_id`, user/track/badge snapshot, earned/expiry, content version, status, revocation fields; unique `(user_id, track_id, earned_at)`), backfills current per-user badges from `academy_progress_json`, adds `report_execution_audit.checklist_json`, and adds the partial MFA-notification suppression index. Public certificate verification reads this table; user deletion cascades, recertification supersedes, and revocation is explicit.
 
 The change-history line below records the original extraction numbers (75 models, version 8) and is historical. Deployments must apply these migrations before starting the new core build, because merchant cash-out, API-token expiry, MFA, the append-only guards, shard checkpoints and the inbound claim depend on them.
 
@@ -4005,6 +4050,12 @@ health, first-terminal from `terminal_at`, first-unknown from `updated_at` for
 unresolved `UNKNOWN` attempts, canonical error from `substatus`, deduplicates
 legacy health samples before the unique index and writes one `MIGRATION`
 health event per route. The required schema version is **40**.
+
+
+**Pre-v36 evidence guard (GAP-074).** `core-back/scripts/checkLegacyEvidence.ts` (`bun run legacy-evidence:check`) refuses an upgrade when `kyb_documents.content_ciphertext` or `reconciliation_runs.file_content` still contain rows. The guard detects the condition; bytes already dropped by v36 cannot be recreated and must come from the pre-upgrade dump.
+
+
+**SQL-only schema guard (GAP-076).** `core-back/prisma/sql-only-objects.allowlist.json` lists the 57 objects Prisma cannot model (composite tenant FKs, trigram/covering indexes, SQL defaults and `schema_versions`). `bun run schema:sql-only-check` runs `prisma migrate diff` and fails if a new object would be dropped or a reviewed object is missing. CI runs it after migrations. Definition changes that keep the same object name are not fingerprinted yet.
 
 ## Global Search
 
@@ -4407,7 +4458,7 @@ The core test is a unit/authority suite and does not require PostgreSQL. The Pla
 
 ## Backup Control
 
-> Status: `partial` · Last verified: 2026-11-08
+> Status: `partial` · Last verified: 2026-11-23
 
 ## 1. Purpose and scope
 
@@ -4703,7 +4754,7 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 - For a policy change, submit without an approval id, then have a different `security:write` user submit with the returned id.
 - Watch `archiveLagSeconds` against `BACKUP_ALERT_LAG_SECONDS`. A non-zero lag with a healthy bucket usually means archive_command, credentials or the archive process is failing.
 - Inspect `backup_catalog_runs` and `backup_restore_drills` for the local copy and the daemon catalog for the in-process view. A failed drill's three checks identify double-entry, parity or audit-chain failure.
-- After a real restore, verify schema version 11, the ledger invariant, shard parity and audit chain.
+- After a real restore, verify schema version 44, the ledger invariant, shard parity and audit chain.
 - Do not rely on policy `fullRetentionDays` for WAL-G pruning; WAL-G uses `BACKUP_RETENTION_FULL_COUNT` and Barman uses its server-side policy.
 
 ## 7. Status and deviations

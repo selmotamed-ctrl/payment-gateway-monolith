@@ -3,7 +3,7 @@ id: core.api
 title: Core API Surface
 status: partial
 confidence: high
-last_verified: 2026-11-16
+last_verified: 2026-11-23
 verified_against: 53afea5+working-tree
 code:
   - core-back/api/internal/sandboxControl.ts
@@ -124,7 +124,7 @@ The edge maps its public paths to these prefixes:
 
 ### 3.2 Admin namespace
 
-The admin router is the largest surface. `/health`, `/auth/login`, `/auth/mfa` and `/auth/me` are registered before `router.use(requireAuthentication)`. Every route after that line requires a valid bearer credential. `GET /auth/me` is before the guard and returns static platform data.
+The admin router is the largest surface. `/health`, `/auth/login`, `/auth/mfa`, `/auth/mfa/resend` and `/auth/me` are registered before `router.use(requireAuthentication)`. Every route after that line requires a valid bearer credential. `GET /auth/me` is before the guard and returns static platform data.
 
 The domain groups below list every route in `api/internal/admin.ts`. The authority column is the guard used by the group; where a group mixes read/write, the split is shown.
 
@@ -132,7 +132,7 @@ The domain groups below list every route in `api/internal/admin.ts`. The authori
 
 | Routes | Authority |
 | :--- | :--- |
-| `POST /auth/login`, `POST /auth/mfa` | none (before auth) |
+| `POST /auth/login`, `POST /auth/mfa`, `POST /auth/mfa/resend` | none (before auth) |
 | `GET /auth/me` | none (before auth) |
 | `POST /search` | authenticated; no explicit authority |
 | `GET /stats/recent-activity`, `GET /stats/recent-activity/export` | `security:read` |
@@ -261,6 +261,8 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 
 `GET /operator-cases`, `/export`, `/summary`, `/summary/export` and `/:id` return the type-aware case fields (`caseReference`, `caseType`, title/summary, domain/source, subject, available actions) and filter by `caseType`; AML-confidential cases require `aml.read_confidential`. `/catalog` returns the code catalog, action definitions and resolution codes. `POST /:id/acknowledge` is single-actor triage; `POST /:id/resolve` remains maker-checker and validates the action against the case type (payment actions only for attempt types; operational close requires a resolution code). Source-cleared monitor/route/statement/report cases resolve with a system event.
 
+**Safeguard checklist evidence.** Sensitive mutations and exports accept an optional `checklist` string array (or comma-separated query for GET exports). Core allow-lists the keys per action, records the accepted list in the audit `afterJson` (and approval payloads where the action is maker-checker), and never logs a code, secret or phone. The list is advisory: the server does not require completeness except the join-request approval gate and explicit destructive confirmations. New audited summary exports: `GET /transactions/summary/export`, `GET /finance/journal-entries/summary/export`, `GET /gateway-inquiries/summary/export`, `GET /incidents/summary/export` and `GET /incidents/export` (5,000-row cap with `total`/`truncated`). The checkout channel exposes `GET /academy/certificates/:publicId` for public certificate verification; it returns only holder name, track, badge, dates, status and content version. Issuances are durable `academy_certificates` rows (opaque `publicId`, unique per user/track/earnedAt); status is `valid`, `expired` or `revoked`, and user deletion cascades to a 404.
+
 #### Disputes, adjustments, cash-outs, commissions and velocity
 
 | Routes | Authority |
@@ -288,8 +290,10 @@ The spec importer route runs the four verification layers, materializes a DRAFT 
 | `GET /settings/checkout-support`, `/history`, `/summary`, `/summary/export` | `settings:read` |
 | `PUT /settings/checkout-support` | `settings:write`; direct versioned write |
 | `GET /academy/progress`, `PUT /academy/progress` | authenticated back-office user; current user only (`{ baseRev, patch }`, `rev`, 409 on stale) |
+| `GET /academy/certificates/:trackId/verification` | authenticated back-office user; returns the opaque `publicId` and short `displayId` for an earned badge |
+| `POST /academy/certificates/:identifier/revoke` | role `SECURITY_ADMIN`; accepts the opaque `publicId` or the short `displayId`, revokes idempotently and audits `ACADEMY_CERTIFICATE_REVOKED` |
 | `GET /academy/exams/:examId/eligibility`, `POST /academy/exams/:examId/start`, `POST /academy/exams/:examId/submit` | authenticated back-office user; server-graded (see `03-admin-front/03-guide-and-academy.md` §7.4) |
-| `GET /academy/team` | role `SECURITY_ADMIN`; audited `ACADEMY_TEAM_VIEWED` |
+| `GET /academy/team`, `GET /academy/team/export` | role `SECURITY_ADMIN`; audited `ACADEMY_TEAM_VIEWED` / `ACADEMY_TEAM_EXPORTED` |
 | `GET /audit-logs`, `/export`, `/summary`, `/summary/export`, `GET /audit-logs/:id` | `security:read` |
 | `GET /settings` | `settings:read` |
 | `POST /settings/restore-preview` | `settings:read` |
@@ -490,7 +494,7 @@ The inbound worker also exists and can drain unprocessed inbox rows, but the liv
 
 | Edge path | Core path | Edge file |
 | :--- | :--- | :--- |
-| `POST /api/v1/admin/auth/login`, `/mfa`; `GET /me` | `/internal/admin/auth/*` | `admin-back/api/public/auth.ts` |
+| `POST /api/v1/admin/auth/login`, `/mfa`, `/mfa/resend`; `GET /me` | `/internal/admin/auth/*` | `admin-back/api/public/auth.ts` |
 | `/api/v1/admin/*` | `/internal/admin/*` | `admin-back/api/protected/**` |
 | `/api/v1/admin/system/backups/*` | `/internal/admin/system/backups/*` | `admin-back/api/protected/backups.ts` |
 | `/api/v1/merchant/auth/*` | `/internal/merchant/auth/*` | `merchant-back/api/public/auth.ts` |
@@ -755,3 +759,11 @@ A new internal router, reachable from merchant-back and admin-back and mounted o
 ## Dashboard success-rate denominator (2026-11-16)
 
 `GET /internal/admin/stats/overview` returns `attemptsCounted` and computes `successRate = attemptsSucceeded / attemptsCounted`. `attemptsSucceeded` counts `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED` and `DISPUTED` (the payment was processed successfully; a later refund or dispute is not a processing failure). `attemptsCounted` adds `FAILED` and `UNKNOWN` only. Pending/in-flight states (`CREATED`, `INITIATING`, `AWAITING_CUSTOMER`, `AUTHORIZING`, `VERIFYING`) and deliberate/no-processing outcomes (`CANCELLED`, `EXPIRED`, `BLOCKED`) are excluded from both sides of the rate. `attemptsTotal` remains every attempt created in the period for the distribution chart and snapshot export.
+
+## 20. Currency-aware aggregate responses (2026-11-24)
+
+Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/cashout summaries and route caps accept an optional `currency` (default `BASE_CURRENCY`, normally LYD). Existing scalar monetary fields mean the selected currency; responses add `currency`, `byCurrency` where the endpoint supports a breakdown, and `mixedCurrency`. A mixed total is never labelled as a single currency. Reconciliation source/upload accepts `currency`, `autoPost`, and optional source `env`/`credentialSetId`; the upload metadata remains limited to checklist, period, currency and autoPost.
+
+## 20. Currency-aware aggregate responses (2026-11-24)
+
+Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/cashout summaries and route caps accept an optional `currency` (default `BASE_CURRENCY`, normally LYD). Existing scalar monetary fields mean the selected currency; responses add `currency`, `byCurrency` where the endpoint supports a breakdown, and `mixedCurrency`. A mixed total is never labelled as a single currency. Reconciliation source/upload accepts `currency`, `autoPost`, and optional source `env`/`credentialSetId`; upload metadata remains limited to checklist, period, currency and autoPost.

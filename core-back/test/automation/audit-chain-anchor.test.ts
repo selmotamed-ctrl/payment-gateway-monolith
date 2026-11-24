@@ -10,6 +10,7 @@ import { Vault } from "../../engine/crypto/Vault";
 import { AuditChainAnchorWorker, anchorMessage } from "../../engine/workers/AuditChainAnchorWorker";
 import type { AuditEnvelope } from "../../lib/storageEngine/ports";
 import { createAuditSandbox, createPrisma, databaseIsReachable, uniqueId, uniqueUuid, type AuditSandbox } from "../storage-engine/helpers/db";
+import { deleteWithAppendOnlyMaintenance } from "../helpers/appendOnlyMaintenance";
 
 const client = createPrisma({ max: 6 });
 const describeDb = databaseIsReachable ? describe : describe.skip;
@@ -65,13 +66,13 @@ const cases = () => client.operatorCase.findMany({ where: { subjectKey: { starts
 const disableImmutable = (sandbox: AuditSandbox) => sandbox.pool.query(`ALTER TABLE ${sandbox.table} DISABLE TRIGGER trg_audit_immutable`);
 
 beforeEach(async () => {
-  await client.$executeRawUnsafe(`DELETE FROM operator_cases WHERE subject_key LIKE 'audit.%'`);
+  await deleteWithAppendOnlyMaintenance(client, `DELETE FROM operator_cases WHERE subject_key LIKE 'audit.%'`);
 });
 
 afterAll(async () => {
   for (const sandbox of sandboxes) await sandbox.cleanup();
   for (const table of tables) await client.$executeRawUnsafe(`DROP TABLE IF EXISTS ${table}`);
-  await client.$executeRawUnsafe(`DELETE FROM operator_cases WHERE subject_key LIKE 'audit.%'`);
+  await deleteWithAppendOnlyMaintenance(client, `DELETE FROM operator_cases WHERE subject_key LIKE 'audit.%'`);
   await client.$disconnect();
 });
 

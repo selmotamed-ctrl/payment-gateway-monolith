@@ -69,6 +69,27 @@ describe("frontend runtime config", () => {
     expect(frontendRuntimeConfig("merchant-front", config)).toBeNull();
   });
 
+  test("writes the public certificate verification URL for the checkout origin", () => {
+    const config = {
+      ADMIN_SHOW_CHECKLISTS: true,
+      ADMIN_SHOW_HELP_PANELS: false,
+      CHECKOUT_DOMAIN: "pay.example.ly",
+      CHECKOUT_SSL: true,
+      CHECKOUT_HTTP_PORT: 8082,
+      CHECKOUT_HTTPS_PORT: 8443,
+    } as unknown as Parameters<typeof frontendRuntimeConfig>[1];
+    expect(frontendRuntimeConfig("admin-front", config)).toMatchObject({
+      academyCertificateVerifyUrl: "https://pay.example.ly:8443/verify/certificate",
+    });
+    const noTls = {
+      ...config,
+      CHECKOUT_SSL: false,
+    } as unknown as Parameters<typeof frontendRuntimeConfig>[1];
+    expect(frontendRuntimeConfig("admin-front", noTls)).toMatchObject({
+      academyCertificateVerifyUrl: "http://pay.example.ly:8082/verify/certificate",
+    });
+  });
+
   test("the master flag overrides the legacy snapshot flag", () => {
     const config = {
       ADMIN_SHOW_CHECKLISTS: true,

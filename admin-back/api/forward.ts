@@ -27,6 +27,8 @@ const withIdempotencyKey = (req: Request, headers: Record<string, string> | unde
   return { ...(headers ?? {}), "idempotency-key": key };
 };
 
+export const summaryExportQuerySchema = z.object({ checklist: z.string().max(1000).optional() });
+
 export interface ForwardContext {
   params: Record<string, string>;
   body: unknown;

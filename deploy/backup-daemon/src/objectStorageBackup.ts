@@ -25,6 +25,7 @@ import { decryptPgos1ToBuffer, InMemoryKeyProvider } from "./shared/crypto";
 
 export const OBJECT_BLOB_PREFIX = "object-blobs";
 export const OBJECT_STORAGE_ESCROW_KEY = "object-storage/kek-escrow.enc";
+export const OBJECT_STORAGE_MANIFEST_KEY = "object-storage/active-manifest.json";
 /** Per-version escrow keeps old backups decryptable after a version is removed from the live keyring. */
 export const objectStorageEscrowKeyForVersion = (version: number): string =>
   `object-storage/kek-escrow-v${version}.enc`;
@@ -56,6 +57,48 @@ export interface ActiveStorageObject {
   streamNoncePrefixHex: string;
 }
 
+export interface ObjectStorageManifest {
+  version: 1;
+  generatedAt: string;
+  count: number;
+  objects: Array<Pick<ActiveStorageObject, "id" | "bucket" | "storageKey" | "sha256Hex" | "byteSize">>;
+}
+
+export const buildObjectStorageManifest = (objects: readonly ActiveStorageObject[], now = new Date()): ObjectStorageManifest => ({
+  version: 1,
+  generatedAt: now.toISOString(),
+  count: objects.length,
+  objects: objects.map((object) => ({
+    id: object.id,
+    bucket: object.bucket,
+    storageKey: object.storageKey,
+    sha256Hex: object.sha256Hex,
+    byteSize: object.byteSize,
+  })),
+});
+
+/** Compare the restored active rows with the manifest captured at backup time. */
+export const compareObjectStorageManifest = (
+  manifest: ObjectStorageManifest,
+  restored: readonly Pick<ActiveStorageObject, "id" | "bucket" | "storageKey" | "sha256Hex">[],
+): { ok: boolean; detail: string } => {
+  const expected = new Map(manifest.objects.map((object) => [object.id, object]));
+  const actual = new Map(restored.map((object) => [object.id, object]));
+  const missing = [...expected.keys()].filter((id) => !actual.has(id));
+  const extra = [...actual.keys()].filter((id) => !expected.has(id));
+  const changed = [...expected.values()].filter((object) => {
+    const row = actual.get(object.id);
+    return row && (row.storageKey !== object.storageKey || row.bucket !== object.bucket || row.sha256Hex !== object.sha256Hex);
+  }).map((object) => object.id);
+  if (missing.length || extra.length || changed.length) {
+    return {
+      ok: false,
+      detail: `object manifest mismatch: missing=${missing.length} extra=${extra.length} changed=${changed.length}`,
+    };
+  }
+  return { ok: true, detail: `manifest matches ${restored.length} restored ACTIVE object(s)` };
+};
+
 const OBJECT_STORAGE_EXISTS_QUERY = "SELECT to_regclass('public.storage_objects') IS NOT NULL;";
 
 const ACTIVE_OBJECTS_QUERY =
@@ -76,6 +119,12 @@ export const objectStorageSampleQuery = (limit: number): string =>
   "encode(wrapped_dek, 'hex') AS \"wrappedDekHex\", encode(dek_nonce, 'hex') AS \"dekNonceHex\", " +
   "encode(stream_nonce_prefix, 'hex') AS \"streamNoncePrefixHex\" " +
   `FROM storage_objects WHERE status = 'ACTIVE' ORDER BY random() LIMIT ${Math.max(0, Math.floor(limit))}) t;`;
+
+/** Every ACTIVE row restored from the database backup, for manifest comparison. */
+export const restoredActiveObjectRefsQuery = (): string =>
+  "SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json)::text FROM (" +
+  "SELECT id::text AS \"id\", bucket::text AS \"bucket\", storage_key AS \"storageKey\", sha256_hex AS \"sha256Hex\" " +
+  "FROM storage_objects WHERE status = 'ACTIVE') t;";
 
 export const objectBlobKey = (bucket: string, storageKey: string): string =>
   `${OBJECT_BLOB_PREFIX}/${bucket}/${storageKey}`;
@@ -267,6 +316,11 @@ export const syncObjectStorageBackup = async (input: {
     }
   }
 
+  await repository.putBuffer(
+    OBJECT_STORAGE_MANIFEST_KEY,
+    Buffer.from(JSON.stringify(buildObjectStorageManifest(activeObjects)), "utf8"),
+  );
+
   const keyringProvider = parseObjectStorageKeyring(config);
   const keys = Object.fromEntries(
     config.OBJECT_STORAGE_KEK_KEYRING.split(",")
@@ -326,7 +380,24 @@ export const runObjectStorageDrill = async (input: {
     return { ok: false, detail: `object sample query failed: ${(sample.stderr || sample.stdout).trim().slice(0, 200)}`, sampled: 0 };
   }
   const rows = JSON.parse(sample.stdout.trim() || "[]") as ActiveStorageObject[];
-  if (rows.length === 0) return { ok: true, detail: "no ACTIVE storage objects to sample", sampled: 0 };
+  const manifestBuffer = await repository.getBuffer(OBJECT_STORAGE_MANIFEST_KEY);
+  let manifestDetail = "";
+  if (manifestBuffer) {
+    try {
+      const manifest = JSON.parse(manifestBuffer.toString("utf8")) as ObjectStorageManifest;
+      const all = await query(restoredActiveObjectRefsQuery());
+      if (all.code !== 0) {
+        return { ok: false, detail: `restored active-object query failed: ${(all.stderr || all.stdout).trim().slice(0, 200)}`, sampled: 0 };
+      }
+      const restored = JSON.parse(all.stdout.trim() || "[]") as Array<Pick<ActiveStorageObject, "id" | "bucket" | "storageKey" | "sha256Hex">>;
+      const comparison = compareObjectStorageManifest(manifest, restored);
+      if (!comparison.ok) return { ok: false, detail: comparison.detail, sampled: 0 };
+      manifestDetail = `; ${comparison.detail}`;
+    } catch (error) {
+      return { ok: false, detail: `object manifest is unreadable: ${(error as Error).message}`, sampled: 0 };
+    }
+  }
+  if (rows.length === 0) return { ok: true, detail: `no ACTIVE storage objects to sample${manifestDetail}`, sampled: 0 };
 
   const keyrings = new Map<number, InMemoryKeyProvider>();
   const keyringFor = async (version: number): Promise<InMemoryKeyProvider> => {
@@ -383,5 +454,5 @@ export const runObjectStorageDrill = async (input: {
       return { ok: false, detail: `object ${object.id} failed its decryption check: ${(error as Error).message}`, sampled: rows.length };
     }
   }
-  return { ok: true, detail: `decrypted and verified ${verified}/${rows.length} sampled object(s)`, sampled: rows.length };
+  return { ok: true, detail: `decrypted and verified ${verified}/${rows.length} sampled object(s)${manifestDetail}`, sampled: rows.length };
 };

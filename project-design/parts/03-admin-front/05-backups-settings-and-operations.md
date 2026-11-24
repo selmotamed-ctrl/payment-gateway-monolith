@@ -3,7 +3,7 @@ id: admin-ui.operations
 title: Backups Settings and Operations
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-23
 verified_against: 5a24f6f+working-tree
 code:
   - admin-front/src/pages/system/backups/**
@@ -323,3 +323,7 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 ## Security hardening (2026-11-05)
 
 Backups page: actions are disabled unless backups are configured and the daemon is reachable; a full backup of all targets needs an extra confirmation; trigger and drill send an `Idempotency-Key` header (required by admin-back); policy form validation mirrors the edge rules (cron, minimum gaps, retention floors); server error text is sanitized and clipped.
+
+## Safeguard checklists (2026-11-23)
+
+Backup trigger, restore drill and policy changes now require the shared checklist before submission. Trigger keys: `BACKUP_TARGET_VERIFIED`, `LOAD_IMPACT_REVIEWED`, `AUTHORITY_CONFIRMED`; drill keys: `DRILL_SCOPE_VERIFIED`, `SCRATCH_ISOLATION_REVIEWED`, `AUTHORITY_CONFIRMED`; policy keys: `POLICY_SCOPE_REVIEWED`, `RETENTION_IMPACT_REVIEWED`, `APPROVAL_PATH_CONFIRMED`. The drill is now a checklist modal instead of an immediate confirm. Core filters the keys and records them in `BACKUP_TRIGGERED` / `BACKUP_DRILL_TRIGGERED` (including deduplicated retries) and the policy approval payload. Jobs/Outbox retries, notification retries, object-storage legal holds/maintenance, notification-template edits and settings/checkout-help exports use the same pattern. `ADMIN_SHOW_CHECKLISTS` hides the UI gate without changing the server path.

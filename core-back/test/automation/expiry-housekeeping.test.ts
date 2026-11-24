@@ -14,6 +14,7 @@ import { MemoryAuthStateStore, setAuthStateStore } from "../../lib/auth/sharedSt
 import { resetAuthThrottles } from "../../lib/auth/throttle";
 import { isApiError, toErrorEnvelope } from "../../lib/error";
 import { createPrisma, databaseIsReachable } from "../storage-engine/helpers/db";
+import { deleteWithAppendOnlyMaintenance } from "../helpers/appendOnlyMaintenance";
 
 const client = createPrisma({ max: 10 });
 const describeDb = databaseIsReachable ? describe : describe.skip;
@@ -41,7 +42,7 @@ afterAll(async () => {
     await client.$executeRawUnsafe(`DELETE FROM mfa_challenges WHERE id = ANY($1::uuid[])`, created.challenges);
     await client.$executeRawUnsafe(`DELETE FROM session_revocations WHERE jti = ANY($1::text[])`, created.jtis);
     await client.$executeRawUnsafe(`DELETE FROM join_requests WHERE id = ANY($1::uuid[])`, created.joinRequests);
-    await client.$executeRawUnsafe(`DELETE FROM operator_cases WHERE id = ANY($1::uuid[])`, created.cases);
+    await deleteWithAppendOnlyMaintenance(client, `DELETE FROM operator_cases WHERE id = ANY($1::uuid[])`, created.cases);
     await client.$executeRawUnsafe(`DELETE FROM approval_requests WHERE id = ANY($1::uuid[])`, created.approvals);
     await client.$executeRawUnsafe(`DELETE FROM payment_links WHERE id = ANY($1::uuid[])`, created.links);
     await client.$executeRawUnsafe(`DELETE FROM users WHERE id = ANY($1::uuid[]) AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.actor_id = users.id)`, created.users).catch(() => undefined);

@@ -1,5 +1,6 @@
 import { computed, defineComponent, ref, type VNodeChild } from "vue";
 import { VAlert, VBtn } from "vuetify/components";
+import { areChecklistsVisible } from "@/constants/env";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
 import { api } from "@/state/api";
@@ -9,6 +10,7 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { StateView } from "@/components/StateView";
 import { FormModal } from "@/components/ui/FormModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { MetaPill } from "@/components/ui/MetaPill";
@@ -38,6 +40,13 @@ const TYPE_LABEL: Record<string, string> = {
     SUSPICIOUS_ACTIVITY: "Suspicious activity",
     PERIODIC_RETURN: "Periodic return",
 };
+const PROMOTION_CHECKS = [
+    { key: "RULE_SCOPE_VERIFIED", label: "Reporting rule scope verified" },
+    { key: "EFFECTIVE_DATE_VERIFIED", label: "Effective date verified" },
+    { key: "APPROVAL_PATH_VERIFIED", label: "Maker-checker approval path verified" },
+    { key: "PROMOTION_ACKNOWLEDGED", label: "Promotion does not change the rule yet" },
+] as const;
+
 const PROMOTE_AUTHORITIES = ["report:approve", "report:review", "aml:write", "compliance:write", "approval:check", "approval:write"];
 
 const formatDate = (value: string | null | undefined): string => {
@@ -60,6 +69,9 @@ export const ReportingRulesTab = defineComponent({
         const promoteLoading = ref(false);
         const promoteError = ref("");
         const submittedApproval = ref<string | null>(null);
+        const showChecklists = areChecklistsVisible();
+        const promotionChecklist = ref<Record<string, boolean>>({});
+        const promotionChecklistComplete = computed(() => !showChecklists || PROMOTION_CHECKS.every((check) => promotionChecklist.value[check.key] === true));
 
         const load = async () => {
             loading.value = true;
@@ -79,15 +91,22 @@ export const ReportingRulesTab = defineComponent({
         const openPromote = (rule: ReportingRule) => {
             promoting.value = rule;
             promoteError.value = "";
+            promotionChecklist.value = {};
         };
 
         const promote = async () => {
             const rule = promoting.value;
             if (!rule || promoteLoading.value) return;
+            if (!promotionChecklistComplete.value) {
+                showSnackBar({ type: "warning", message: t("Complete all promotion checklist items before submitting") });
+                return;
+            }
             promoteLoading.value = true;
             promoteError.value = "";
             try {
-                const response = await api.post(urlsMap.amlReportingRulePromote(rule.id), {});
+                const response = await api.post(urlsMap.amlReportingRulePromote(rule.id), {
+                    checklist: PROMOTION_CHECKS.filter((check) => promotionChecklist.value[check.key]).map((check) => check.key),
+                });
                 const payload = response.data?.data ?? response.data ?? {};
                 // 202: the promotion is only a request until a different checker approves it.
                 submittedApproval.value = typeof payload.approvalRequestId === "string" ? payload.approvalRequestId : "";
@@ -223,6 +242,15 @@ export const ReportingRulesTab = defineComponent({
                     <VAlert type="info" variant="tonal">
                         {t("This does not change the rule yet. It creates a request that a different checker must approve; only then does the rule become confirmed and start driving regulatory reports.")}
                     </VAlert>
+                    <FormChecklist
+                        checks={[...PROMOTION_CHECKS]}
+                        modelValue={promotionChecklist.value}
+                        onUpdate:modelValue={(value: Record<string, boolean>) => (promotionChecklist.value = value)}
+                        show={showChecklists}
+                        title={t("Promotion checklist")}
+                        complete={promotionChecklistComplete.value}
+                        incompleteMessage={t("Complete all promotion checklist items before submitting")}
+                    />
                 </FormModal>
             </div>
         );

@@ -577,18 +577,19 @@ describeDatabase("backup internal routes against a fake daemon (live PostgreSQL)
     const previous = principal.userId;
     principal.userId = actor.id;
     try {
-      const trigger = await postJson(app, "/system/backups/trigger", { target: "redis", kind: "delta" });
+      const trigger = await postJson(app, "/system/backups/trigger", { target: "redis", kind: "delta", checklist: ["BACKUP_TARGET_VERIFIED"] });
       expect(trigger.status).toBe(202);
       createdRuns.push(trigger.json.backupJobId as string);
-      const drill = await postJson(app, "/system/backups/drill", {});
+      const drill = await postJson(app, "/system/backups/drill", { checklist: ["DRILL_SCOPE_VERIFIED"] });
       expect(drill.status).toBe(202);
       createdDrills.push(drill.json.drillId as string);
 
       const triggerAudit = await client.auditLog.findFirst({ where: { entityId: trigger.json.backupJobId as string } });
       expect(triggerAudit).toMatchObject({ action: "BACKUP_TRIGGERED", actorId: actor.id, entityType: "BACKUP_JOB" });
-      expect(triggerAudit?.afterJson).toEqual({ target: "redis", kind: "delta" });
+      expect(triggerAudit?.afterJson).toEqual({ target: "redis", kind: "delta", checklist: ["BACKUP_TARGET_VERIFIED"] });
       const drillAudit = await client.auditLog.findFirst({ where: { entityId: drill.json.drillId as string } });
       expect(drillAudit).toMatchObject({ action: "BACKUP_DRILL_TRIGGERED", actorId: actor.id });
+      expect(drillAudit?.afterJson).toEqual({ checklist: ["DRILL_SCOPE_VERIFIED"] });
     } finally {
       principal.userId = previous;
       configureDaemon(undefined);

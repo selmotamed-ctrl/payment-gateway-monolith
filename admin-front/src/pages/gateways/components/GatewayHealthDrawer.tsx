@@ -13,6 +13,7 @@ import { LazyEChart as EChart } from "@/components/EChart/lazy";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
 import {
     buildVolumeSeries,
     formatMs,
@@ -193,6 +194,29 @@ export const GatewayHealthDrawer = defineComponent({
             );
         };
 
+        const copyHealthSummary = async () => {
+            const health = data.value;
+            if (!health) return;
+            const summary = {
+                gatewayId: props.gatewayId,
+                gatewayName: props.gatewayName,
+                successRate24h: health.summary.successRate24h,
+                p95Ms24h: health.summary.p95Ms24h,
+                routes: health.routes.map((route) => ({
+                    routeId: route.routeId,
+                    railCode: route.railCode,
+                    samples: route.samples.length,
+                })),
+                url: window.location.href,
+            };
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+                showSnackBar({ type: "success", message: t("Gateway health summary copied") });
+            } catch {
+                showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+            }
+        };
+
         return (): VNodeChild => (
             <SlideOverDrawer
                 modelValue={!!props.gatewayId}
@@ -207,6 +231,7 @@ export const GatewayHealthDrawer = defineComponent({
                     footer: () => (
                         <>
                             <VBtn variant="text" prependIcon="mdi-refresh" onClick={() => props.gatewayId && void load(props.gatewayId)}>{t("Refresh")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!data.value} onClick={() => void copyHealthSummary()}>{t("Copy summary")}</VBtn>
                             <VBtn variant="text" onClick={() => emit("close")}>{t("Close")}</VBtn>
                         </>
                     ),

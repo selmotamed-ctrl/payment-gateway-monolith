@@ -8,7 +8,9 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusBadge, formatHumanStatus } from "@/components/ui/StatusBadge";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { type MetricItem } from "@/components/ui/MetricStrip";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { ApiTable } from "@/components/Table/ApiTable";
@@ -21,7 +23,17 @@ import { JournalEntryDrawer } from "@/components/ledger/JournalEntryDrawer";
 import { LedgerRefLink } from "@/components/ledger/LedgerRefLink";
 import { formatDateTime } from "@/components/ledger/format";
 import { api } from "@/state/api";
+import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
+import { areChecklistsVisible } from "@/constants/env";
+import { xlsxUIPipeline } from "@/utils/xlsx";
 import { urlsMap } from "@/constants/urlsMap";
+
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "JOURNAL_SCOPE_VERIFIED", label: "Journal scope verified" },
+    { key: "BALANCE_AND_VOLUME_REVIEWED", label: "Balance check and posted volume reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
 
 type JournalRow = {
     id: string;
@@ -51,6 +63,10 @@ const JournalEntriesPage = dc(() => {
     const route = useRoute();
     const router = useRouter();
     const summary = ref<JournalSummary | null>(null);
+    const showChecklists = areChecklistsVisible();
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
     const search = ref<string | null>(null);
     const total = ref(0);
     const pageSize = ref(25);
@@ -92,6 +108,36 @@ const JournalEntriesPage = dc(() => {
         }
     };
     void loadSummary();
+
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.financeJournalEntriesSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const snapshot = (response.data?.data ?? response.data ?? {}) as JournalSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total_entries", snapshot.totalEntries],
+                ["entries_24h", snapshot.entries24h],
+                ["unbalanced_entries", snapshot.unbalancedEntries],
+                ["unbalanced_window", snapshot.window],
+            ];
+            for (const row of snapshot.volume24hByCurrency ?? []) rows.push([`volume_24h.${row.currency}`, row.total]);
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({ title: `journal-summary-${new Date().toISOString().slice(0, 10)}.xlsx`, lines });
+            showSnackBar({ type: "success", message: t("Journal summary exported") });
+        } catch (cause) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
+    };
 
     const onFiltersChanged = (key: string, value: unknown) => {
         filters.value = { ...filters.value, [key]: value };
@@ -216,7 +262,21 @@ const JournalEntriesPage = dc(() => {
                     )}
                 />
 
-                {summary.value && <MetricStrip items={metricItems.value} />}
+                {summary.value && (
+                    <SummaryExportCard
+                        title={t("Journal health")}
+                        metrics={metricItems.value}
+                        checks={[...SUMMARY_EXPORT_CHECKS]}
+                        checklist={summaryExportChecklist.value}
+                        onUpdate:checklist={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                        showChecklists={showChecklists}
+                        checklistComplete={summaryExportChecklistComplete.value}
+                        exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
+                        exportLabel={t("Export summary")}
+                        onExport={() => void exportSummary()}
+                    />
+                )}
 
                 <ApiTable<JournalRow>
                     title={t("Journal entries")}

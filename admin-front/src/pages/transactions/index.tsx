@@ -8,7 +8,10 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { MetricStrip, type MetricItem } from "@/components/ui/MetricStrip";
+import { type MetricItem } from "@/components/ui/MetricStrip";
+import { SummaryExportCard } from "@/components/ui/SummaryExportCard";
+import { FormModal } from "@/components/ui/FormModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { MoneyDisplay } from "@/components/ui/MoneyDisplay";
 import { SegmentedTabs } from "@/components/ui/SegmentedTabs";
@@ -32,14 +35,29 @@ import { urlsMap } from "@/constants/urlsMap";
 import { hasOneOfAuthorities } from "@/state/user";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
+import { areChecklistsVisible } from "@/constants/env";
+import { xlsxUIPipeline } from "@/utils/xlsx";
 
 type TabKey = "attempts" | "inbound";
+
+const INQUIRY_CHECKS = [
+    { key: "INQUIRY_ELIGIBILITY_VERIFIED", label: "Attempt status and inquiry eligibility verified" },
+    { key: "PAYMENT_STATE_REVIEWED", label: "Current payment state reviewed" },
+    { key: "GATEWAY_CONTACT_CONFIRMED", label: "Gateway status inquiry confirmed" },
+] as const;
 
 type TableHook = {
     reset: () => void;
     refresh: (props: { queryParams?: Record<string, unknown>; nextSkip?: number }) => Promise<void>;
     refreshAsIs: () => void;
 };
+
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "TRANSACTION_SCOPE_VERIFIED", label: "Transaction scope verified" },
+    { key: "STATUS_SETTLEMENT_REVIEWED", label: "Status and settlement breakdown reviewed" },
+    { key: "ESCALATION_REVIEWED", label: "Escalated-case posture reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
 
 const toBadgeTone = (tone: ReturnType<typeof statusTone>) => (tone === "error" ? ("danger" as const) : tone === "primary" ? ("info" as const) : tone);
 
@@ -51,6 +69,10 @@ const TransactionsPage = dc(() => {
     const tab = ref<TabKey>(route.query.tab === "inbound" ? "inbound" : "attempts");
     const summary = ref<TransactionSummary | null>(null);
     const canInquire = computed(() => hasOneOfAuthorities(["attempt:inquire"]));
+    const showChecklists = areChecklistsVisible();
+    const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
 
     // ---- attempts table
     const attemptSearch = ref<string | null>(null);
@@ -73,6 +95,10 @@ const TransactionsPage = dc(() => {
     const attemptId = ref<string | null>(typeof route.query.open === "string" && route.query.open ? route.query.open : null);
     const inboundEventId = ref<string | null>(null);
     const journalEntryId = ref<string | null>(null);
+    const inquiryRowTarget = ref<TransactionRow | null>(null);
+    const inquiryChecklist = ref<Record<string, boolean>>({});
+    const inquirySubmitting = ref(false);
+    const inquiryChecklistComplete = computed(() => !showChecklists || INQUIRY_CHECKS.every((check) => inquiryChecklist.value[check.key] === true));
 
     watch(
         () => route.query.open,
@@ -100,6 +126,36 @@ const TransactionsPage = dc(() => {
     };
     void loadSummary();
 
+    const exportSummary = async () => {
+        if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all summary export checklist items before exporting") });
+            return;
+        }
+        summaryExportLoading.value = true;
+        try {
+            const response = await api.get(urlsMap.transactionsSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
+            const snapshot = (response.data?.data ?? response.data ?? {}) as TransactionSummary;
+            const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+            const rows: Array<[string, unknown]> = [
+                ["total_24h", snapshot.total24h],
+                ["settled_24h", snapshot.settled24h],
+                ["in_flight_24h", snapshot.inFlight24h],
+                ["failed_24h", snapshot.failed24h],
+                ["escalated_24h", snapshot.escalated24h],
+            ];
+            const lines = ["metric,value", ...rows.map(([key, value]) => `${escape(key)},${escape(value)}`)];
+            await xlsxUIPipeline.downloadXlsxFromCsvLines({ title: `transaction-summary-${new Date().toISOString().slice(0, 10)}.xlsx`, lines });
+            showSnackBar({ type: "success", message: t("Transaction summary exported") });
+        } catch (cause) {
+            showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
+        } finally {
+            summaryExportLoading.value = false;
+        }
+    };
+
     const onAttemptFilter = (key: string, value: unknown) => {
         attemptFilters.value = { ...attemptFilters.value, [key]: value };
         if (attemptTimer) clearTimeout(attemptTimer);
@@ -117,13 +173,28 @@ const TransactionsPage = dc(() => {
         void loadSummary();
     };
 
-    const inquireRow = async (row: TransactionRow) => {
+    const openInquiry = (row: TransactionRow) => {
+        inquiryChecklist.value = {};
+        inquiryRowTarget.value = row;
+    };
+
+    const inquireRow = async () => {
+        const row = inquiryRowTarget.value;
+        if (!row || !inquiryChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all inquiry checklist items before continuing") });
+            return;
+        }
+        inquirySubmitting.value = true;
         try {
-            await api.post(urlsMap.attemptInquire(row.id), {});
+            const checklist = INQUIRY_CHECKS.filter((check) => inquiryChecklist.value[check.key]).map((check) => check.key);
+            await api.post(urlsMap.attemptInquire(row.id), { checklist });
             showSnackBar({ type: "success", message: t("Attempt inquiry scheduled") });
+            inquiryRowTarget.value = null;
             refreshAll();
         } catch (cause) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(cause) });
+        } finally {
+            inquirySubmitting.value = false;
         }
     };
 
@@ -217,8 +288,8 @@ const TransactionsPage = dc(() => {
                         key: "inquire",
                         label: t("Schedule inquiry"),
                         icon: "mdi-radar",
-                        hidden: !(canInquire.value && INQUIRABLE_STATUSES.includes(row.status)),
-                        onClick: () => inquireRow(row),
+                        hidden: !(canInquire.value && INQUIRABLE_STATUSES.includes(row.status) && row.inquiryEligible !== false),
+                        onClick: () => openInquiry(row),
                     },
                     {
                         key: "merchant",
@@ -297,7 +368,21 @@ const TransactionsPage = dc(() => {
 
     const attemptsView = () => (
         <>
-            {summary.value && <MetricStrip items={metricItems.value} />}
+            {summary.value && (
+                <SummaryExportCard
+                    title={t("Transaction health")}
+                    metrics={metricItems.value}
+                    checks={[...SUMMARY_EXPORT_CHECKS]}
+                    checklist={summaryExportChecklist.value}
+                    onUpdate:checklist={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                    showChecklists={showChecklists}
+                    checklistComplete={summaryExportChecklistComplete.value}
+                    exportLoading={summaryExportLoading.value}
+                    exportDisabled={!summaryExportChecklistComplete.value}
+                    exportLabel={t("Export summary")}
+                    onExport={() => void exportSummary()}
+                />
+            )}
             <ApiTable<TransactionRow>
                 title={t("Payment attempts")}
                 url={urlsMap.transactionsList}
@@ -443,6 +528,27 @@ const TransactionsPage = dc(() => {
                 }}
                 onChanged={refreshAll}
             />
+            <FormModal
+                modelValue={inquiryRowTarget.value !== null}
+                onUpdate:modelValue={(value: boolean) => {
+                    if (!value) inquiryRowTarget.value = null;
+                }}
+                title={t("Schedule gateway inquiry")}
+                size="md"
+                loading={inquirySubmitting.value}
+                submitLabel={t("Schedule inquiry")}
+                onSubmit={() => void inquireRow()}
+            >
+                <FormChecklist
+                    checks={[...INQUIRY_CHECKS]}
+                    modelValue={inquiryChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (inquiryChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Inquiry checklist")}
+                    complete={inquiryChecklistComplete.value}
+                    incompleteMessage={t("Complete all inquiry checklist items before continuing")}
+                />
+            </FormModal>
             <InboundEventDrawer
                 eventId={inboundEventId.value}
                 onClose={() => (inboundEventId.value = null)}

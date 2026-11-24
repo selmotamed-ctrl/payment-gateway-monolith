@@ -186,7 +186,10 @@ router.get("/system/jobs", async (request: Request, response: Response) => {
   response.json(listResponse("jobs", jobs.map(jobItem), total, built, jobs));
 });
 
-const reasonBodySchema = z.object({ reason: reasonSchema });
+const reasonBodySchema = z.object({
+  reason: reasonSchema,
+  checklist: z.array(z.string().max(64)).max(10).optional(),
+});
 
 router.post("/system/jobs/:id/requeue", async (request: Request, response: Response) => {
   requireAuthorities(request, ["security:write"]);
@@ -220,7 +223,7 @@ router.post("/system/jobs/:id/requeue", async (request: Request, response: Respo
           attempts: current.attempts,
           lastError: current.lastError ? current.lastError.slice(0, LAST_ERROR_LIMIT) : null,
         },
-        afterJson: { state: updated.state, attempts: updated.attempts, jobType: updated.jobType, reason: body.reason },
+        afterJson: { state: updated.state, attempts: updated.attempts, jobType: updated.jobType, reason: body.reason, checklist: body.checklist ?? [] },
       } as never,
     });
     return updated;
@@ -423,6 +426,7 @@ router.post("/system/notifications/:id/retry", async (request: Request, response
           channel: updated.channel,
           recipientMerchantId: current.recipientMerchantId,
           reason: body.reason,
+          checklist: body.checklist ?? [],
         },
       } as never,
     });
@@ -501,6 +505,7 @@ const templateUpdateSchema = z.object({
   subjectTemplate: z.string().max(2000).nullable().optional(),
   bodyTemplate: z.string().trim().min(1).max(10_000),
   confidentialityClass: z.enum(CONFIDENTIALITY_CLASSES as [ConfidentialityClass, ...ConfidentialityClass[]]).optional(),
+  checklist: z.array(z.string().max(64)).max(10).optional(),
 });
 
 router.put("/settings/notification-templates/:id", async (request: Request, response: Response) => {
@@ -508,6 +513,7 @@ router.put("/settings/notification-templates/:id", async (request: Request, resp
   const actor = auditActor(request);
   const id = requireUuidParam(request.params.id, "NOTIFICATION_TEMPLATE_NOT_FOUND", "The notification template does not exist");
   const body = parseOrThrow(templateUpdateSchema, request.body ?? {});
+  const checklist = (body.checklist ?? []).filter((entry) => ["CONTENT_REVIEWED", "PLACEHOLDERS_VERIFIED", "CONFIDENTIALITY_CLASS_CONFIRMED"].includes(entry));
   try {
     const result = await client.$transaction(async (tx) => {
       // Serialise concurrent edits of the same template row.
@@ -599,6 +605,7 @@ router.put("/settings/notification-templates/:id", async (request: Request, resp
             subjectTemplate: created.subjectTemplate,
             bodyTemplate: created.bodyTemplate,
             confidentialityClass: created.confidentialityClass,
+            checklist,
           },
         } as never,
       });

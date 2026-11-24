@@ -1,4 +1,4 @@
-import { computed, defineComponent } from "vue";
+import { computed, defineComponent, ref } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import { PageHeader } from "@/components/ui/PageHeader";
 import ScreenContainer from "@/components/ScreenContainer";
@@ -55,6 +55,16 @@ export const AdminGuideToolsPage = defineComponent({
         const selectedId = computed(() => String(route.params.tool ?? ""));
         const selected = computed(() => TOOLS.find((tool) => tool.id === selectedId.value));
         const SelectedComponent = computed(() => selected.value?.component);
+        const linkCopied = ref(false);
+        const copyToolLink = async () => {
+            try {
+                await navigator.clipboard.writeText(window.location.href);
+                linkCopied.value = true;
+                window.setTimeout(() => (linkCopied.value = false), 2500);
+            } catch {
+                linkCopied.value = false;
+            }
+        };
 
         return () => (
             <ScreenContainer>
@@ -65,6 +75,11 @@ export const AdminGuideToolsPage = defineComponent({
                         "أدوات تعليمية آمنة تعمل في المتصفح فقط. غير متصلة بأي نظام حقيقي.",
                     )}
                     breadcrumbs={[{ label: L("Guide", "الدليل"), to: "/guide" }, { label: L("Tools", "الأدوات") }]}
+                    end={() => selected.value ? (
+                        <button type="button" class="guide-secondary-button" onClick={() => void copyToolLink()}>
+                            {linkCopied.value ? L("Link copied", "تم نسخ الرابط") : L("Copy link", "نسخ الرابط")}
+                        </button>
+                    ) : null}
                 />
                 <div class="guide-tools-page">
                     <nav class="guide-tool-picker" aria-label={L("Choose a tool", "اختر أداة")}>

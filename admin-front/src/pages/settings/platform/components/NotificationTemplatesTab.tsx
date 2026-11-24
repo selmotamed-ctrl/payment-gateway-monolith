@@ -8,6 +8,8 @@ import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { StateView } from "@/components/StateView";
 import { FormModal } from "@/components/ui/FormModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import { FormField } from "@/components/ui/FormField";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MetaPill } from "@/components/ui/MetaPill";
@@ -72,6 +74,14 @@ export const NotificationTemplatesTab = defineComponent({
         const saveError = ref("");
         const unknownFromServer = ref<{ unknown: string[]; allowed: string[] } | null>(null);
         const showPreview = ref(false);
+        const showChecklists = areChecklistsVisible();
+        const templateChecks = [
+            { key: "CONTENT_REVIEWED", label: "Message content and tone reviewed" },
+            { key: "PLACEHOLDERS_VERIFIED", label: "Placeholders verified against the allowed set" },
+            { key: "CONFIDENTIALITY_CLASS_CONFIRMED", label: "Confidentiality class confirmed" },
+        ] as const;
+        const editChecklist = ref<Record<string, boolean>>({});
+        const editChecklistComplete = computed(() => !showChecklists || templateChecks.every((check) => editChecklist.value[check.key] === true));
         const bodyField = ref<{ $el?: HTMLElement } | null>(null);
 
         const load = async () => {
@@ -112,6 +122,7 @@ export const NotificationTemplatesTab = defineComponent({
             saveError.value = "";
             unknownFromServer.value = null;
             showPreview.value = false;
+            editChecklist.value = {};
             // The server accepts every placeholder any version / language / channel of this code already uses.
             const known = new Set<string>(templates.value.filter((entry) => entry.code === row.code).flatMap((entry) => entry.variables));
             allowed.value = [...known].sort();
@@ -164,12 +175,17 @@ export const NotificationTemplatesTab = defineComponent({
                 saveError.value = t("The template is identical to the active version. Change something to create a new version.");
                 return;
             }
+            if (!editChecklistComplete.value) {
+                saveError.value = t("Complete all template checklist items before saving.");
+                return;
+            }
             saving.value = true;
             try {
                 await api.put(urlsMap.notificationTemplateDetail(row.id), {
                     ...(subject.value !== (row.subjectTemplate ?? "") ? { subjectTemplate: subject.value } : {}),
                     bodyTemplate: body.value,
                     ...(confidentiality.value !== row.confidentialityClass ? { confidentialityClass: confidentiality.value } : {}),
+                    checklist: templateChecks.filter((check) => editChecklist.value[check.key]).map((check) => check.key),
                 });
                 showSnackBar({ type: "success", message: t("A new template version was saved") });
                 closeEdit();
@@ -416,6 +432,15 @@ export const NotificationTemplatesTab = defineComponent({
                             items={Object.keys(CLASS_LABEL).map((value) => ({ title: t(CLASS_LABEL[value]!), value }))}
                         />
                     </FormField>
+                    <FormChecklist
+                        checks={[...templateChecks]}
+                        modelValue={editChecklist.value}
+                        onUpdate:modelValue={(value: Record<string, boolean>) => (editChecklist.value = value)}
+                        show={showChecklists}
+                        title={t("Template edit checklist")}
+                        complete={editChecklistComplete.value}
+                        incompleteMessage={t("Complete all template checklist items before saving.")}
+                    />
                     <VSwitch modelValue={showPreview.value} onUpdate:modelValue={(value: boolean | null) => (showPreview.value = value === true)} label={t("Preview with sample values")} color="primary" density="compact" hideDetails />
                     {showPreview.value && (
                         <div style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "10px 12px", borderRadius: "var(--pg-radius-sm)", backgroundColor: "var(--pg-bg-surface-subtle)", border: "1px solid var(--pg-border-subtle)" }}>

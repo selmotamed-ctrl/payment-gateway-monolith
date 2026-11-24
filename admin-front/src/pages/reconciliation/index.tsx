@@ -53,6 +53,12 @@ const UPLOAD_CHECKS = [
     { key: "DUPLICATE_CHECK_ACKNOWLEDGED", label: "Duplicate-file behavior acknowledged" },
 ] as const;
 
+const RUN_EXPORT_CHECKS = [
+    { key: "RUN_SCOPE_VERIFIED", label: "Reconciliation run scope verified" },
+    { key: "ITEMS_FILTER_REVIEWED", label: "Item filter and result scope reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const SUMMARY_EXPORT_CHECKS = [
     { key: "RUN_SCOPE_VERIFIED", label: "Reconciliation run scope verified" },
     { key: "MATCH_RATE_REVIEWED", label: "Match rate reviewed" },
@@ -206,6 +212,8 @@ const ReconciliationPage = dc(() => {
     const defaultStart = new Date(today.getTime() - 31 * 24 * 60 * 60 * 1000);
     const periodStart = ref(defaultStart.toISOString().slice(0, 10));
     const periodEnd = ref(today.toISOString().slice(0, 10));
+    const uploadCurrency = ref("");
+    const uploadAutoPost = ref(true);
     const preview = ref<{ columns: string[]; rows: string[][] } | null>(null);
 
     const runFilters = ref<FilterValues>({});
@@ -219,6 +227,9 @@ const ReconciliationPage = dc(() => {
 
     const detailsOpen = ref(false);
     const exportLoading = ref(false);
+    const exportOpen = ref(false);
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || RUN_EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
     const summaryExportLoading = ref(false);
     const summaryExportChecklist = ref<Record<string, boolean>>({});
     const runResultFilter = ref("ALL");
@@ -326,6 +337,8 @@ const ReconciliationPage = dc(() => {
             body.append("sourceId", selectedSourceId.value);
             body.append("periodStart", periodStart.value);
             body.append("periodEnd", periodEnd.value);
+            if (uploadCurrency.value.trim()) body.append("currency", uploadCurrency.value.trim().toUpperCase());
+            body.append("autoPost", String(uploadAutoPost.value));
             body.append("checklist", JSON.stringify(UPLOAD_CHECKS.filter((check) => uploadChecklist.value[check.key]).map((check) => check.key)));
             const response = await api.post(urlsMap.reconciliationUpload, body, {
                 headers: { "Content-Type": "multipart/form-data" },
@@ -375,12 +388,50 @@ const ReconciliationPage = dc(() => {
         }
     };
 
+    const copyRunSummary = async () => {
+        const run = selectedRun.value;
+        if (!run) return;
+        const summary = {
+            id: run.id,
+            fileName: run.fileName,
+            sourceName: run.sourceName,
+            state: run.state,
+            totalRows: run.totalRows,
+            matchedRows: run.matchedRows,
+            unmatchedRows: run.unmatchedRows,
+            amountMismatch: run.amountMismatch,
+            missingAtGateway: run.missingAtGateway,
+            missingLocally: run.missingLocally,
+            duplicates: run.duplicates,
+            feeVariances: run.feeVariances,
+            matchRate: run.matchRate,
+            drift: run.drift,
+            createdAt: run.createdAt,
+            finishedAt: run.finishedAt,
+            storageObjectId: run.storageObjectId,
+            url: window.location.href,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Reconciliation run summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const exportRunItems = async () => {
         if (!selectedRun.value || exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const response = await api.get(urlsMap.reconciliationRunExport(selectedRun.value.id), {
-                params: runResultFilter.value === "ALL" ? {} : { result: runResultFilter.value },
+                params: {
+                    ...(runResultFilter.value === "ALL" ? {} : { result: runResultFilter.value }),
+                    checklist: RUN_EXPORT_CHECKS.filter((check) => exportChecklist.value[check.key]).map((check) => check.key).join(","),
+                },
             });
             const payload = response.data?.data ?? response.data ?? {};
             const items = (payload.items ?? []) as ReconciliationItem[];
@@ -799,6 +850,22 @@ const ReconciliationPage = dc(() => {
                                         <FormField label={t("Period end")} required>
                                             <VTextField type="date" modelValue={periodEnd.value} onUpdate:modelValue={(value: string) => (periodEnd.value = value)} hideDetails />
                                         </FormField>
+                                        <FormField label={t("Currency")} hint={t("Three-letter ISO code; leave blank to use the source/attempt currency.")}>
+                                            <VTextField
+                                                modelValue={uploadCurrency.value}
+                                                onUpdate:modelValue={(value: string) => { uploadCurrency.value = value.toUpperCase(); }}
+                                                placeholder="LYD"
+                                                hideDetails
+                                            />
+                                        </FormField>
+                                        <FormField label={t("Automatic")}>
+                                            <VSwitch
+                                                modelValue={uploadAutoPost.value}
+                                                onUpdate:modelValue={(value: boolean | null) => (uploadAutoPost.value = !!value)}
+                                                color="primary"
+                                                hideDetails
+                                            />
+                                        </FormField>
                                         <FormField label={t("Statement file")} required>
                                             <VFileInput modelValue={file.value} onUpdate:modelValue={(value: File | File[] | null) => void onFileChanged(value)} hideDetails />
                                         </FormField>
@@ -917,6 +984,27 @@ const ReconciliationPage = dc(() => {
             </ThemedView>
 
             <FormModal
+                modelValue={exportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                title={t("Export reconciliation items")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportRunItems()}
+            >
+                <VAlert type="warning" variant="tonal">{t("The export contains statement references, amounts and reconciliation outcomes. Handle the file as confidential evidence.")}</VAlert>
+                <FormChecklist
+                    checks={[...RUN_EXPORT_CHECKS]}
+                    modelValue={exportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Run export checklist")}
+                    complete={exportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
+
+            <FormModal
                 modelValue={sourceEditOpen.value}
                 onUpdate:modelValue={(value: boolean) => (sourceEditOpen.value = value)}
                 title={t("Edit statement source")}
@@ -976,7 +1064,8 @@ const ReconciliationPage = dc(() => {
                     footer: () => (
                         <ThemedView style={{ flexDirection: "row", gap: "10px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-file-download-outline" disabled={!selectedRun.value?.storageObjectId} onClick={() => void downloadStatement()}>{t("Download statement")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportRunItems()}>{t("Export items")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!selectedRun.value} onClick={() => void copyRunSummary()}>{t("Copy summary")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export items")}</VBtn>
                             <VBtn variant="text" onClick={closeRunDetails}>{t("Close")}</VBtn>
                         </ThemedView>
                     ),

@@ -34,6 +34,7 @@ import type {
     GlobalSearchResponse,
     SearchFilterTab,
 } from "./types";
+import { showConfirm } from "@/utils/confirm";
 
 interface FlattenedPaletteOption {
     domId: string;
@@ -138,6 +139,7 @@ export const GlobalSearchPalette = defineComponent({
                       retry: "إعادة المحاولة",
                       navigateHint: "للتنقل",
                       selectHint: "للفتح",
+                      newTabHint: "لفتحه في علامة تبويب جديدة",
                       closeHint: "للإغلاق",
                       clearQuery: "مسح البحث",
                       searchScope: "نطاق البحث",
@@ -167,6 +169,7 @@ export const GlobalSearchPalette = defineComponent({
                       retry: "Retry",
                       navigateHint: "to navigate",
                       selectHint: "to open",
+                      newTabHint: "to open in a new tab",
                       closeHint: "to close",
                       clearQuery: "Clear search query",
                       searchScope: "Search scope filters",
@@ -212,6 +215,19 @@ export const GlobalSearchPalette = defineComponent({
                 errorState.value =
                     (error as { message?: string } | null)?.message || "SEARCH_FAILED";
             }
+        };
+
+        const clearAllRecentSearches = async () => {
+            const confirmed = await showConfirm({
+                title: props.locale === "ar" ? "مسح عمليات البحث الأخيرة؟" : "Clear recent searches?",
+                message: props.locale === "ar" ? "سيتم حذف سجل البحث المحلي على هذا المتصفح." : "The local search history in this browser will be removed.",
+                submitButtonLabel: props.locale === "ar" ? "مسح" : "Clear",
+                type: "warning",
+                onConfirm: async () => undefined,
+            });
+            if (!confirmed) return;
+            clearRecentSearchQueries();
+            recentQueries.value = [];
         };
 
         const clearDebounce = () => {
@@ -466,11 +482,16 @@ export const GlobalSearchPalette = defineComponent({
             });
         };
 
-        const selectOption = (option: FlattenedPaletteOption) => {
+        const selectOption = (option: FlattenedPaletteOption, newTab = false) => {
             if (option.queryToStore && option.queryToStore.length >= 2) {
                 recentQueries.value = saveRecentSearchQuery(option.queryToStore);
             }
             updateModelValue(false);
+            if (newTab) {
+                const href = router.resolve(option.target).href;
+                window.open(href, "_blank", "noopener,noreferrer");
+                return;
+            }
             void router.push(option.target).catch(() => undefined);
         };
 
@@ -517,7 +538,7 @@ export const GlobalSearchPalette = defineComponent({
             if (event.key === "Enter") {
                 if (activeOption.value) {
                     event.preventDefault();
-                    selectOption(activeOption.value);
+                    selectOption(activeOption.value, event.ctrlKey || event.metaKey);
                 }
                 return;
             }
@@ -643,10 +664,7 @@ export const GlobalSearchPalette = defineComponent({
                                         <button
                                             type="button"
                                             class="pg-command-group__action"
-                                            onClick={() => {
-                                                clearRecentSearchQueries();
-                                                recentQueries.value = [];
-                                            }}
+                                            onClick={() => void clearAllRecentSearches()}
                                         >
                                             {t.value.clearAll}
                                         </button>
@@ -789,6 +807,11 @@ export const GlobalSearchPalette = defineComponent({
                         <div class="pg-command-footer__shortcut">
                             <kbd class="pg-command-kbd">↵</kbd>
                             <span>{t.value.selectHint}</span>
+                        </div>
+                        <div class="pg-command-footer__shortcut">
+                            <kbd class="pg-command-kbd">Ctrl</kbd>
+                            <kbd class="pg-command-kbd">↵</kbd>
+                            <span>{t.value.newTabHint}</span>
                         </div>
                         <div class="pg-command-footer__shortcut">
                             <kbd class="pg-command-kbd">ESC</kbd>

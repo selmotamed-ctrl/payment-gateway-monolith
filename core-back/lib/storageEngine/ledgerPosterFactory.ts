@@ -17,6 +17,7 @@ export interface LedgerPosterOptions {
    * in production; `LEDGER_RAW_SQL=false` is the kill switch that returns to the ORM path without a deploy.
    */
   rawSql?: boolean;
+  requireCurrency?: boolean;
 }
 
 /**
@@ -46,6 +47,9 @@ export const createLedgerPoster = (
             },
           });
         },
-    { rawSql: options.rawSql ?? process.env.LEDGER_RAW_SQL !== "false" },
+    {
+      rawSql: options.rawSql ?? process.env.LEDGER_RAW_SQL !== "false",
+      requireCurrency: options.requireCurrency ?? process.env.LEDGER_STRICT_CONTEXT === "true",
+    },
   );
 };

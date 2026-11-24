@@ -1,7 +1,7 @@
 import express from "express";
 import { z } from "zod";
 import { zListQuery, zUuid } from "../../lib/zReady";
-import { coreForward } from "../forward";
+import { coreForward, summaryExportQuerySchema } from "../forward";
 import { encode } from "./mutationSchemas";
 
 const transactionsRouter = express.Router();
@@ -22,6 +22,15 @@ transactionsRouter.get(
     method: "GET",
     path: () => "/internal/admin/transactions/summary",
     querySchema: zListQuery,
+  }),
+);
+
+transactionsRouter.get(
+  "/summary/export",
+  coreForward({
+    method: "GET",
+    path: () => "/internal/admin/transactions/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 

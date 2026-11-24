@@ -28,6 +28,12 @@ type FaqItem = {
     a_en: string;
 };
 
+const SUMMARY_EXPORT_CHECKS = [
+    { key: "CHECKOUT_SCOPE_VERIFIED", en: "Checkout support scope verified", ar: "تم التحقق من نطاق دعم الدفع" },
+    { key: "FAQ_AND_CHANNELS_REVIEWED", en: "FAQ and channels reviewed", ar: "تمت مراجعة الأسئلة والقنوات" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", en: "Export approval confirmed", ar: "تم تأكيد الموافقة على التصدير" },
+] as const;
+
 const CHECKOUT_EDIT_CHECKS = [
     { key: "SUPPORT_CHANNELS_VERIFIED", en: "Support channels verified", ar: "تم التحقق من قنوات الدعم" },
     { key: "FAQ_CONTENT_REVIEWED", en: "FAQ content reviewed", ar: "تمت مراجعة محتوى الأسئلة الشائعة" },
@@ -136,6 +142,8 @@ const AdminCheckoutHelpPage = dc(() => {
     const historyLoading = ref(false);
     const summary = ref<CheckoutSupportSummary | null>(null);
     const summaryExportLoading = ref(false);
+    const summaryExportChecklist = ref<Record<string, boolean>>({});
+    const summaryExportChecklistComplete = computed(() => !showChecklists || SUMMARY_EXPORT_CHECKS.every((check) => summaryExportChecklist.value[check.key] === true));
     const compareVersion = ref<(typeof history.value)[number] | null>(null);
 
     const formSnapshot = () => JSON.stringify(form.value);
@@ -165,6 +173,23 @@ const AdminCheckoutHelpPage = dc(() => {
 
     const isArabic = computed(() => current.value === "ar");
     const tr = (ar: string, en: string): string => (isArabic.value ? ar : en);
+
+    const copyConfiguration = async () => {
+        try {
+            const snapshot = savedSnapshot.value || formSnapshot();
+            await navigator.clipboard.writeText(JSON.stringify(JSON.parse(snapshot), null, 2));
+            showSnackBar({ type: "success", message: tr("تم نسخ الإعدادات", "Configuration copied") });
+        } catch {
+            showSnackBar({ type: "error", message: tr("تعذر النسخ إلى الحافظة", "Could not copy to the clipboard") });
+        }
+    };
+
+    const discardChanges = () => {
+        if (!savedSnapshot.value) return;
+        form.value = JSON.parse(savedSnapshot.value) as typeof form.value;
+        editChecklist.value = {};
+        showSnackBar({ type: "success", message: tr("تم تجاهل التغييرات غير المحفوظة", "Unsaved changes discarded") });
+    };
 
     const applyValue = (value: CheckoutSupportConfig | null) => {
         const data: Partial<CheckoutSupportConfig> = value ?? {};
@@ -234,9 +259,15 @@ const AdminCheckoutHelpPage = dc(() => {
 
     const exportSummary = async () => {
         if (summaryExportLoading.value) return;
+        if (!summaryExportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: tr("أكمل قائمة التحقق قبل التصدير", "Complete the export checklist before exporting") });
+            return;
+        }
         summaryExportLoading.value = true;
         try {
-            const response = await api.get(urlsMap.checkoutSupportSummaryExport);
+            const response = await api.get(urlsMap.checkoutSupportSummaryExport, {
+                params: { checklist: SUMMARY_EXPORT_CHECKS.filter((check) => summaryExportChecklist.value[check.key]).map((check) => check.key).join(",") },
+            });
             const payload = response.data?.data ?? response.data ?? {};
             const snapshot = (payload.summary ?? payload) as CheckoutSupportSummary;
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
@@ -418,6 +449,14 @@ const AdminCheckoutHelpPage = dc(() => {
                                 toneOverride={isDirty.value ? "warning" : "success"}
                                 showDot={false}
                             />
+                            <VBtn size="small" variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyConfiguration()}>
+                                {tr("نسخ الإعدادات", "Copy configuration")}
+                            </VBtn>
+                            {isDirty.value && (
+                                <VBtn size="small" variant="text" prependIcon="mdi-undo" onClick={discardChanges}>
+                                    {tr("تجاهل التغييرات", "Discard changes")}
+                                </VBtn>
+                            )}
                         </ThemedView>
                     )}
                 />
@@ -441,9 +480,20 @@ const AdminCheckoutHelpPage = dc(() => {
                         title={tr("صحة إعدادات المساعدة", "Checkout help health")}
                         metrics={summaryMetricItems.value}
                         exportLoading={summaryExportLoading.value}
+                        exportDisabled={!summaryExportChecklistComplete.value}
                         exportLabel={tr("تصدير الملخص", "Export summary")}
                         onExport={() => void exportSummary()}
-                    />
+                    >
+                        <FormChecklist
+                            checks={SUMMARY_EXPORT_CHECKS.map((check) => ({ key: check.key, label: tr(check.ar, check.en) }))}
+                            modelValue={summaryExportChecklist.value}
+                            onUpdate:modelValue={(value: Record<string, boolean>) => (summaryExportChecklist.value = value)}
+                            show={showChecklists}
+                            title={tr("قائمة التحقق من التصدير", "Summary export checklist")}
+                            complete={summaryExportChecklistComplete.value}
+                            incompleteMessage={tr("أكمل جميع عناصر قائمة التحقق قبل التصدير", "Complete all summary export checklist items before exporting")}
+                        />
+                    </SummaryExportCard>
                 )}
 
                 <ThemedView

@@ -381,7 +381,7 @@ const cases: ContractCase[] = [
     mapper: toCoreKybDocumentReview,
     publicSchema: kybReviewSchema,
     legacyPayload: { decision: "ACCEPT", checklist: ["readable"], notes: "document is fine" },
-    allowedKeys: ["decision", "reasonCode", "notes", "duplicateJustification", "expiresOn"],
+    allowedKeys: ["decision", "reasonCode", "notes", "duplicateJustification", "expiresOn", "checklist"],
     requiredKeys: ["decision"],
   },
   {
@@ -1142,10 +1142,12 @@ describe("core contract field mapping", () => {
     expect(() => toCoreJoinRequestDecide({ decision: "WITHDRAW", reason: "nope" })).toThrow();
   });
 
-  test("kyb review maps accept onto the core decision", () => {
-    const mapped = toCoreKybDocumentReview({ decision: "ACCEPT", notes: "document is fine" });
+  test("kyb review maps accept onto the core decision and keeps the checklist", () => {
+    const checklist = ["DOCUMENT_IDENTITY_VERIFIED", "FILE_INTEGRITY_REVIEWED", "EXPIRY_REVIEWED", "DECISION_AUTHORITY_CONFIRMED"];
+    const mapped = toCoreKybDocumentReview({ decision: "ACCEPT", notes: "document is fine", checklist });
     expect(mapped.decision).toBe("ACCEPTED");
     expect(mapped.reasonCode).toBe("document is fine");
+    expect(mapped.checklist).toEqual(checklist);
   });
 
   test("merchant suspend keeps an unknown operator reason in the core notes", () => {

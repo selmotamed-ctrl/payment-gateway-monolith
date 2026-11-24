@@ -17,6 +17,7 @@ import { LedgerShardScalerWorker } from "../engine/workers/LedgerShardScalerWork
 import { clearShardWidthCache } from "../lib/storageEngine/shardRouting";
 import { emptyRepositories } from "./helpers/fakeRepositories";
 import { cleanupLedger, createPrisma, databaseIsReachable, seedGlAccount, uniqueId } from "./storage-engine/helpers/db";
+import { withAppendOnlyMaintenance } from "./helpers/appendOnlyMaintenance";
 
 const client = createPrisma({ max: 30 });
 const describeDb = databaseIsReachable ? describe : describe.skip;
@@ -26,9 +27,9 @@ const startedAt = new Date(Date.now() - 2_000);
 
 afterAll(async () => {
   if (created.length > 0) {
-    await client.operatorCase.deleteMany({
+    await withAppendOnlyMaintenance(client, (tx) => tx.operatorCase.deleteMany({
       where: { OR: created.map((id) => ({ subjectKey: { startsWith: `ledger.shard:${id}:` } })) },
-    });
+    }));
     await cleanupLedger(client, created, refPrefix);
   }
   await client.$disconnect();

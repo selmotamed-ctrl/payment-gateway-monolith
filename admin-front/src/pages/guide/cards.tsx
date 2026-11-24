@@ -33,6 +33,16 @@ export const AdminGuideCardsPage = defineComponent({
 
         const selectedId = computed(() => String(route.params.id ?? ""));
         const selected = computed(() => cards.value.find((card) => card.id === selectedId.value));
+        const linkCopied = ref(false);
+        const copyCardLink = async () => {
+            try {
+                await navigator.clipboard.writeText(window.location.href);
+                linkCopied.value = true;
+                window.setTimeout(() => (linkCopied.value = false), 2500);
+            } catch {
+                linkCopied.value = false;
+            }
+        };
 
         return () => (
             <ScreenContainer>
@@ -85,9 +95,14 @@ export const AdminGuideCardsPage = defineComponent({
                                                 <p class="guide-eyebrow">{selected.value.screen}</p>
                                                 <h2>{selected.value.title}</h2>
                                             </div>
-                                            <span class={`guide-risk-badge guide-risk-${selected.value.risk.toLowerCase()}`}>
-                                                {selected.value.risk}
-                                            </span>
+                                            <div class="guide-card-detail__actions">
+                                                <button type="button" class="guide-secondary-button" onClick={() => void copyCardLink()}>
+                                                    {linkCopied.value ? L("Link copied", "تم نسخ الرابط") : L("Copy link", "نسخ الرابط")}
+                                                </button>
+                                                <span class={`guide-risk-badge guide-risk-${selected.value.risk.toLowerCase()}`}>
+                                                    {selected.value.risk}
+                                                </span>
+                                            </div>
                                         </div>
                                         <MarkdownView source={selected.value.body} />
                                     </>

@@ -3,7 +3,7 @@ id: admin-ui.tables
 title: Tables Filters and Exports
 status: partial
 confidence: high
-last_verified: 2026-11-16
+last_verified: 2026-11-23
 verified_against: 53afea5+working-tree
 code:
   - admin-front/src/components/Table/**
@@ -312,3 +312,12 @@ No database is required for the unit/static compliance checks; the Playwright ge
 ## Registry slices (2026-11-06)
 
 `components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`.
+
+## Safeguard/export extension (2026-11-23)
+
+- **Summary exports added:** `GET /v1/admin/transactions/summary/export`, `/finance/journal-entries/summary/export`, `/gateway-inquiries/summary/export`, `/aml/incidents/summary/export`, `/aml/incidents/export` and `/academy/team/export` (the last is the first server-side Academy export; the old Academy CSV path remains client-side). The incidents export is capped at 5,000 rows and the UI warns when `truncated` is true.
+- **Checklists on list exports:** every audited list export now receives the checked keys as a comma-separated `checklist` query; the backend allow-lists and audits them. Summary export cards keep the same contract.
+- **Client-side exports/copies:** user access record, KYB review record, merchant execution history, report migration queue and sandbox summaries are generated client-side through the shared XLSX pipeline. Their checklists are UI-only and they write no server audit. Clipboard summaries mask email identifiers; object-storage copies omit the bucket/key path. These remain explicit residuals (GAP-073).
+- **Hidden mode:** `ADMIN_SHOW_CHECKLISTS=false` hides the checklists, forces completeness true and sends an empty/absent checklist; core accepts the action and records an empty list. Visibility is not authorization.
+
+- **Currency filters (2026-11-24).** Disputes/adjustments/cashouts summaries and finance profitability/liquidity accept `?currency=`. Reconciliation uploads send `currency`/`autoPost` and show the statement currency.

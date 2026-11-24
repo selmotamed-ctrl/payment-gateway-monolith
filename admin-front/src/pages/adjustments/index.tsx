@@ -96,6 +96,12 @@ type AdjustmentSummary = {
 type AdjustmentView = "open" | "executed" | "all";
 
 const ADJUSTMENT_TYPES = ["CHARGEBACK", "REFUND", "MANUAL_CREDIT", "MANUAL_DEBIT", "CORRECTION", "CASHOUT_SUBTRACTION"];
+const EXPORT_CHECKS = [
+    { key: "ADJUSTMENT_SCOPE_VERIFIED", label: "Adjustment scope verified" },
+    { key: "APPROVAL_STATE_REVIEWED", label: "Approval state and amounts reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
+
 const SUMMARY_EXPORT_CHECKS = [
     { key: "OPEN_SCOPE_VERIFIED", label: "Open adjustment scope verified" },
     { key: "AMOUNT_TOTALS_REVIEWED", label: "Amount totals reviewed" },
@@ -172,6 +178,9 @@ const AdjustmentsPage = dc(() => {
     const createError = ref("");
     const proposalChecklist = ref<Record<string, boolean>>({});
     const exportLoading = ref(false);
+    const exportOpen = ref(false);
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
     const summaryExportLoading = ref(false);
     const summaryExportChecklist = ref<Record<string, boolean>>({});
     const merchantOptions = ref<{ title: string; value: string; subtitle?: string }[]>([]);
@@ -241,14 +250,49 @@ const AdjustmentsPage = dc(() => {
         refreshHook.value?.reset();
     };
 
+    const copyAdjustmentSummary = async () => {
+        const row = selected.value;
+        if (!row) return;
+        const summary = {
+            id: row.id,
+            type: row.type,
+            state: row.state,
+            amount: row.amount,
+            currency: row.currency,
+            merchantId: row.merchantId,
+            merchantName: row.merchantName,
+            reason: row.reason,
+            sourceAttemptId: row.sourceAttemptId,
+            sourceAttemptReference: row.sourceAttemptReference,
+            disputeId: row.disputeId,
+            disputeReference: row.disputeReference,
+            approvalRequestId: row.approvalRequestId,
+            approvalState: row.approvalState,
+            journalEntryId: row.journalEntryId,
+            createdAt: row.createdAt,
+            executedAt: row.executedAt,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Adjustment summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const exportExcel = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const response = await api.get(urlsMap.adjustmentsExport, {
                 params: {
                     ...(search.value ? { search: search.value } : {}),
                     ...buildFilterQuery(filterDefinitions.value, filters.value),
+                    checklist: EXPORT_CHECKS.filter((check) => exportChecklist.value[check.key]).map((check) => check.key).join(","),
                 },
             });
             const payload = response.data?.data ?? response.data ?? {};
@@ -284,6 +328,8 @@ const AdjustmentsPage = dc(() => {
                 title: `adjustments-${new Date().toISOString().slice(0, 10)}.xlsx`,
                 lines,
             });
+            exportOpen.value = false;
+            exportChecklist.value = {};
             showSnackBar({
                 type: payload.truncated ? "warning" : "success",
                 message: payload.truncated
@@ -562,7 +608,7 @@ const AdjustmentsPage = dc(() => {
                     end={() => (
                         <ThemedView style={{ flexDirection: "row", gap: "8px", flexWrap: "wrap" }}>
                             <VBtn variant="tonal" prependIcon="mdi-refresh" onClick={refreshAll}>{t("Refresh")}</VBtn>
-                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportExcel()}>{t("Export Excel")}</VBtn>
+                            <VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => { exportChecklist.value = {}; exportOpen.value = true; }}>{t("Export Excel")}</VBtn>
                             <VBtn color="primary" prependIcon="mdi-plus" onClick={openCreate}>{t("Propose")}</VBtn>
                         </ThemedView>
                     )}
@@ -672,7 +718,10 @@ const AdjustmentsPage = dc(() => {
                 width={660}
                 v-slots={{
                     footer: () => (
-                        <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
+                        <>
+                            {selected.value && <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyAdjustmentSummary()}>{t("Copy summary")}</VBtn>}
+                            <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
+                        </>
                     ),
                 }}
             >
@@ -734,6 +783,27 @@ const AdjustmentsPage = dc(() => {
                     </>
                 )}
             </SlideOverDrawer>
+
+            <FormModal
+                modelValue={exportOpen.value}
+                onUpdate:modelValue={(value: boolean) => (exportOpen.value = value)}
+                title={t("Export adjustments")}
+                size="md"
+                loading={exportLoading.value}
+                submitLabel={t("Export")}
+                onSubmit={() => void exportExcel()}
+            >
+                <VAlert type="warning" variant="tonal">{t("The export contains adjustment amounts, approval states and dispute links. Handle it as confidential financial evidence.")}</VAlert>
+                <FormChecklist
+                    checks={[...EXPORT_CHECKS]}
+                    modelValue={exportChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (exportChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Adjustment export checklist")}
+                    complete={exportChecklistComplete.value}
+                    incompleteMessage={t("Complete all export checklist items before exporting")}
+                />
+            </FormModal>
 
             <FormModal
                 modelValue={createOpen.value}

@@ -30,6 +30,7 @@ import type { OperatorCaseDetail } from "./types";
 import { CASE_ACTION_LABELS, caseTypeMeta } from "./caseTypes";
 
 import { FormModal } from "@/components/ui/FormModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
 import { FormField } from "@/components/ui/FormField";
 import { SurfaceCard, SurfaceCardText } from "@/components/ui/SurfaceCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
@@ -106,6 +107,8 @@ const RESOLUTION_CODE_OPTIONS = [
 const OperatorCaseDetailPage = dc(() => {
     const { t } = useLocale();
     const showChecklists = areChecklistsVisible();
+    const inquiryOpen = ref(false);
+    const inquiryChecklist = ref<Record<string, boolean>>({});
     const route = useRoute();
     const router = useRouter();
 
@@ -311,10 +314,25 @@ const OperatorCaseDetailPage = dc(() => {
         }
     };
 
-    const inquire = async () => {
+    const inquiryChecks = [
+        { key: "ELIGIBILITY_REVIEWED", label: "Case inquiry eligibility reviewed" },
+        { key: "ATTEMPT_STATUS_VERIFIED", label: "Attempt status verified" },
+        { key: "GATEWAY_SUPPORT_CONFIRMED", label: "Gateway status inquiry support confirmed" },
+    ] as const;
+    const inquiryChecklistComplete = computed(() => !showChecklists || inquiryChecks.every((check) => inquiryChecklist.value[check.key] === true));
+    const openInquiry = () => {
+        inquiryChecklist.value = {};
+        inquiryOpen.value = true;
+    };
+    const submitInquiry = async () => {
+        if (!inquiryChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all inquiry checklist items before continuing") });
+            return;
+        }
         actionLoading.value = true;
         try {
-            const response = await api.post(urlsMap.operatorCasesBulkInquire, { caseIds: [caseId.value] });
+            const checklist = inquiryChecks.filter((check) => inquiryChecklist.value[check.key]).map((check) => check.key);
+            const response = await api.post(urlsMap.operatorCasesBulkInquire, { caseIds: [caseId.value], checklist });
             const payload = response.data?.data ?? response.data ?? {};
             const result = (payload.results ?? [])[0];
             showSnackBar({
@@ -324,6 +342,7 @@ const OperatorCaseDetailPage = dc(() => {
                         ? t("Gateway inquiry scheduled")
                         : t(result?.message ?? "Inquiry could not be scheduled"),
             });
+            inquiryOpen.value = false;
             await refreshAfterAction();
         } catch (e) {
             showSnackBar({ type: "error", message: extractApiErrorMessage(e) });
@@ -331,7 +350,6 @@ const OperatorCaseDetailPage = dc(() => {
             actionLoading.value = false;
         }
     };
-
     const resolutionChecks = computed(() => (isAttemptCase.value ? RESOLVE_CHECKS : OPERATIONAL_RESOLVE_CHECKS));
     const resolveChecklistComplete = computed(() => !showChecklists || resolutionChecks.value.every((check) => resolveChecklist.value[check.key] === true));
     const resolveSafeguard = useSafeguard("sg-resolve-unknown");
@@ -750,7 +768,7 @@ const OperatorCaseDetailPage = dc(() => {
                                             prependIcon="mdi-radar"
                                             loading={actionLoading.value}
                                             disabled={!inquiry.value?.eligible || !canInquire.value}
-                                            onClick={() => void inquire()}
+                                            onClick={openInquiry}
                                         >
                                             {t("Inquire Gateway Now")}
                                         </VBtn>
@@ -1144,6 +1162,25 @@ const OperatorCaseDetailPage = dc(() => {
                 )}
             </ThemedView>
 
+            <FormModal
+                modelValue={inquiryOpen.value}
+                onUpdate:modelValue={(value: boolean) => (inquiryOpen.value = value)}
+                title={t("Schedule gateway inquiry")}
+                size="md"
+                loading={actionLoading.value}
+                submitLabel={t("Inquire Gateway Now")}
+                onSubmit={() => void submitInquiry()}
+            >
+                <FormChecklist
+                    checks={[...inquiryChecks]}
+                    modelValue={inquiryChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (inquiryChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Inquiry checklist")}
+                    complete={inquiryChecklistComplete.value}
+                    incompleteMessage={t("Complete all inquiry checklist items before continuing")}
+                />
+            </FormModal>
             <FormModal
                 modelValue={resolveOpen.value}
                 onUpdate:modelValue={(value: boolean | null) => (resolveOpen.value = Boolean(value))}

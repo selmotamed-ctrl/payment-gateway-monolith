@@ -7,7 +7,6 @@ import {
   apiLogin,
   authHeaders,
   content,
-  escapeRegExp,
   getProgress,
   injectSession,
   normalise,
@@ -97,6 +96,8 @@ test.describe("academy foundation exam (live stack)", () => {
     const startButton = page.getByRole("button", { name: /^(Start exam|Resume exam)$/ });
     await expect(startButton).toBeDisabled();
     await page.getByRole("checkbox", { name: /I have read and I agree to this integrity statement/ }).check();
+    await page.getByRole("checkbox", { name: /I will complete this exam without outside help or notes/ }).check();
+    await page.getByRole("checkbox", { name: /I understand the time limit/ }).check();
     await expect(startButton).toBeEnabled();
 
     const startResponse = page.waitForResponse((r) => r.url().includes(`/academy/exams/${EXAM_ID}/start`) && r.request().method() === "POST");
@@ -159,7 +160,7 @@ test.describe("academy foundation exam (live stack)", () => {
     // --- certificate page renders and offers printing (the dialog itself is blocked in headless)
     await page.goto(`/academy/certificate/${result.badge!.id}`);
     await expect(page.getByRole("heading", { name: "Certificate of completion" })).toBeVisible();
-    await expect(page.getByText(new RegExp(`ID: ${escapeRegExp(result.badge!.id)}`))).toBeVisible();
+    await expect(page.getByText(/ID: PG-AC-[0-9A-F]{8}/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Print certificate" })).toBeEnabled();
   });
 });

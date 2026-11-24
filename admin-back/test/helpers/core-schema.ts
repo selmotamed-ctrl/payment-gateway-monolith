@@ -380,6 +380,7 @@ export const CORE_SCHEMAS: Record<string, z.ZodType> = {
       notes: z.string().max(2000).optional(),
       duplicateJustification: z.string().max(4000).optional(),
       expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      checklist: z.array(z.string().max(160)).max(50).optional(),
     })
     .strict(),
   "POST /kyb-documents/:id/request-replacement": z

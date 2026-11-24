@@ -10,6 +10,7 @@ import { StateView } from "@/components/StateView";
 import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
+import { showSnackBar } from "@/utils/snackBar";
 import { formatDateTime } from "@/components/ledger/format";
 import { flattenPayload } from "../payloadRows";
 import { PayloadRows, payloadPropsOfText } from "./PayloadRows";
@@ -82,6 +83,33 @@ export const InboundEventDrawer = defineComponent({
         const headerRows = computed(() => flattenPayload(detail.value?.redactedHeaders ?? {}));
         const bodyProps = computed(() => payloadPropsOfText(detail.value?.bodyPreview));
 
+        const copyDiagnostics = async () => {
+            const event = detail.value;
+            if (!event) return;
+            const diagnostics = {
+                eventId: event.id,
+                receivedAt: event.receivedAt,
+                gateway: `${event.gateway.code} · ${event.gateway.name}`,
+                channelId: event.channelId,
+                env: event.env,
+                sourceIp: event.sourceIp,
+                verified: event.verified,
+                verificationError: event.verificationError,
+                matchedAttemptId: event.attemptId,
+                processedAt: event.processedAt,
+                processingResult: event.processingResult,
+                dedupeKey: event.dedupeKey,
+                bodySize: event.bodySize,
+                bodySha256: event.bodySha256,
+            };
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+                showSnackBar({ type: "success", message: t("Inbound webhook diagnostics copied") });
+            } catch {
+                showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+            }
+        };
+
         const body = (): VNodeChild => {
             if (loading.value) return <StateView loading minHeight="200px" />;
             if (error.value) return <StateView error={error.value} minHeight="200px" onRetry={() => props.eventId && void load(props.eventId)} />;
@@ -140,6 +168,9 @@ export const InboundEventDrawer = defineComponent({
                         <>
                             {detail.value?.attemptId && (
                                 <VBtn variant="tonal" prependIcon="mdi-credit-card-outline" onClick={() => emit("openAttempt", detail.value!.attemptId)}>{t("Open attempt")}</VBtn>
+                            )}
+                            {detail.value && (
+                                <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyDiagnostics()}>{t("Copy diagnostics")}</VBtn>
                             )}
                             <VBtn variant="text" onClick={() => emit("close")}>{t("Close")}</VBtn>
                         </>

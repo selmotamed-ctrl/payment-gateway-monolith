@@ -11,6 +11,7 @@ import { kybScanBacklogCheck } from "../../engine/workers/platformMonitorChecks"
 import { KybScannerError, type KybScanner, type KybScanVerdict } from "../../lib/kybScanner";
 import { cleanupAutomationCatalog, createAutomationCatalog, type AutomationCatalog } from "../helpers/automationCatalog";
 import { createPrisma, databaseIsReachable } from "../storage-engine/helpers/db";
+import { deleteWithAppendOnlyMaintenance } from "../helpers/appendOnlyMaintenance";
 
 const client = createPrisma({ max: 10 });
 const describeDb = databaseIsReachable ? describe : describe.skip;
@@ -39,7 +40,7 @@ afterAll(async () => {
     await client.$executeRawUnsafe(`DELETE FROM kyb_documents WHERE merchant_id = $1::uuid`, catalog.merchantId);
   }
   await cleanupAutomationCatalog(client, catalogs);
-  await client.$executeRawUnsafe(`DELETE FROM operator_cases WHERE subject_key LIKE 'kyb-%'`).catch(() => undefined);
+  await deleteWithAppendOnlyMaintenance(client, `DELETE FROM operator_cases WHERE subject_key LIKE 'kyb-%'`).catch(() => undefined);
   await client.$disconnect();
 });
 

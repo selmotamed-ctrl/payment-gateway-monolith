@@ -61,6 +61,7 @@ import { publishRealtimePos, subscribeRealtimeAttempt, subscribeRealtimePos } fr
 import { writeAudit } from "../../lib/audit/writeAudit";
 import { getObjectStorageSdk } from "../../lib/objectStorageSdk/runtime";
 import { env } from "../../lib/env";
+import { resolveReportingCurrency } from "../../lib/reportingCurrency";
 import { WebhookEndpointService } from "../../engine/webhooks/WebhookEndpointService";
 import { WEBHOOK_EVENT_TYPES, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_MS } from "../../engine/webhooks/events";
 
@@ -879,6 +880,7 @@ router.post("/auth/accept-invitation", async (request: Request, response: Respon
     where: {
       invitationTokenHash: tokenHash,
       status: "INVITED",
+      merchantId: { not: null },
       invitationExpiresAt: { gt: new Date() },
     },
   });
@@ -1677,6 +1679,8 @@ router.get("/wallets/:id/statements", async (request: Request, response: Respons
   const attempts = await client.paymentAttempt.findMany({
     where: withAppScope(request, {
       merchantId,
+      currency: wallet.currency,
+      link: { walletId: wallet.id },
       createdAt: range
         ? { gte: range.from, lt: range.to }
         : { gte: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) },
@@ -1706,7 +1710,13 @@ router.get("/wallets/:id/statements/:month/export", async (request: Request, res
   // any older month came back empty or truncated.
   const range = monthRangeUtc(month);
   const attempts = await client.paymentAttempt.findMany({
-    where: withAppScope(request, { merchantId, status: "SUCCEEDED", currency: wallet.currency, createdAt: { gte: range.from, lt: range.to } }),
+    where: withAppScope(request, {
+      merchantId,
+      status: "SUCCEEDED",
+      currency: wallet.currency,
+      link: { walletId: wallet.id },
+      createdAt: { gte: range.from, lt: range.to },
+    }),
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 50_000,
     select: {
@@ -1959,6 +1969,14 @@ const createLink = async (
     : await client.wallet.findUnique({ where: { id: application.assignedWalletId } });
   if (!wallet) {
     throw new ApiError(404, "WALLET_NOT_FOUND", "The settlement wallet does not exist");
+  }
+  if (String(wallet.currency).trim().toUpperCase() !== body.currency.trim().toUpperCase()) {
+    throw new ApiError(
+      409,
+      "LINK_WALLET_CURRENCY_MISMATCH",
+      "The payment link currency must match its settlement wallet currency",
+      { linkCurrency: body.currency.toUpperCase(), walletCurrency: wallet.currency },
+    );
   }
   const merchant = await client.merchant.findUnique({ where: { id: merchantId } });
   if (!merchant) {
@@ -3448,18 +3466,22 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
   const now = new Date();
   const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
   const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const requestedCurrency = resolveReportingCurrency(request.query.currency);
+  const walletsForCurrency = await client.wallet.findMany({ where: { merchantId, currency: requestedCurrency }, select: { id: true } });
+  const walletIdsForCurrency = walletsForCurrency.map((wallet) => wallet.id);
 
   // Aggregated by PostgreSQL instead of loading every attempt of the window
   // (up to 90 days) and summing in JS. Same response contract.
   const [statusGroups, successGroups, recent, walletRows, pendingCashouts] = await Promise.all([
     client.paymentAttempt.groupBy({
-      by: ["status"],
+      by: ["status", "currency"],
       where: { merchantId, createdAt: { gte: since } },
       _count: { _all: true },
     }),
-    client.$queryRaw<Array<{ day: string; railCode: string | null; count: number; gross: string; commission: string; net: string }>>`
+    client.$queryRaw<Array<{ day: string; railCode: string | null; currency: string; count: number; gross: string; commission: string; net: string }>>`
       SELECT (pa.created_at)::date::text AS day,
              r.code AS "railCode",
+             pa.currency AS currency,
              COUNT(*)::int AS count,
              SUM(pa.total_charged_amount)::text AS gross,
              SUM(pa.platform_commission_amount)::text AS commission,
@@ -3469,10 +3491,10 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
       WHERE pa.merchant_id = ${merchantId}::uuid
         AND pa.status = 'SUCCEEDED'
         AND pa.created_at >= ${since}
-      GROUP BY 1, 2
+      GROUP BY 1, 2, 3
     `,
     client.paymentAttempt.findMany({
-      where: { merchantId, createdAt: { gte: since } },
+      where: { merchantId, createdAt: { gte: since }, currency: requestedCurrency },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 6,
       select: {
@@ -3485,8 +3507,14 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
         rail: { select: { code: true } },
       },
     }),
-    client.wallet.findMany({ where: { merchantId }, select: { currency: true, glAccountId: true } }),
-    client.cashoutRequest.count({ where: { merchantId, state: { in: ["PENDING", "PROCESSING"] } } }),
+    client.wallet.findMany({ where: { merchantId }, select: { id: true, currency: true, glAccountId: true } }),
+    client.cashoutRequest.count({
+      where: {
+        merchantId,
+        state: { in: ["PENDING", "PROCESSING"] },
+        ...(walletIdsForCurrency.length > 0 ? { walletId: { in: walletIdsForCurrency } } : { id: "__none__" }),
+      },
+    }),
   ]);
 
   let volume = decimal(0);
@@ -3495,17 +3523,30 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
   let todayVolume = decimal(0);
   const todayKey = startOfDay.toISOString().slice(0, 10);
   const byStatus: Record<string, number> = {};
+  const attemptsByCurrency = new Map<string, number>();
   let attemptCount = 0;
   for (const group of statusGroups) {
+    const currency = String(group.currency ?? "").trim() || "UNKNOWN";
+    attemptsByCurrency.set(currency, (attemptsByCurrency.get(currency) ?? 0) + group._count._all);
+    if (currency !== requestedCurrency) continue;
     byStatus[group.status] = group._count._all;
     attemptCount += group._count._all;
   }
   const dayTotals = new Map<string, { gross: ReturnType<typeof decimal>; commission: ReturnType<typeof decimal>; net: ReturnType<typeof decimal> }>();
   const railTotals = new Map<string, { gross: ReturnType<typeof decimal>; count: number }>();
+  const successByCurrency = new Map<string, { volume: ReturnType<typeof decimal>; commission: ReturnType<typeof decimal>; net: ReturnType<typeof decimal> }>();
   for (const group of successGroups) {
     const gross = decimal(group.gross ?? 0);
     const commissionAmount = decimal(group.commission ?? 0);
     const netAmount = decimal(group.net ?? 0);
+    const groupCurrency = String(group.currency ?? "").trim() || "UNKNOWN";
+    const currencyTotals = successByCurrency.get(groupCurrency) ?? { volume: decimal(0), commission: decimal(0), net: decimal(0) };
+    successByCurrency.set(groupCurrency, {
+      volume: currencyTotals.volume.plus(gross),
+      commission: currencyTotals.commission.plus(commissionAmount),
+      net: currencyTotals.net.plus(netAmount),
+    });
+    if (groupCurrency !== requestedCurrency) continue;
     volume = volume.plus(gross);
     commission = commission.plus(commissionAmount);
     net = net.plus(netAmount);
@@ -3527,9 +3568,16 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
   // previous code summed gl_accounts.checkpoint_balance only, which is stale
   // between checkpoints (and debit-positive).
   const liveBalances = await loadLiveAccountBalances(client as never, walletRows.map((wallet) => wallet.glAccountId));
-  const walletBalance = liveBalances.reduce((total, row) => total.plus(decimal(row.balance)), decimal(0));
+  const balanceByAccount = new Map(liveBalances.map((row) => [row.id, decimal(row.balance)]));
+  const walletRowsForCurrency = walletRows.filter((wallet) => wallet.currency === requestedCurrency);
+  const walletBalance = walletRowsForCurrency
+    .reduce((total, wallet) => total.plus(balanceByAccount.get(wallet.glAccountId) ?? decimal(0)), decimal(0));
+  const walletByCurrency = new Map<string, ReturnType<typeof decimal>>();
+  for (const wallet of walletRows) {
+    walletByCurrency.set(wallet.currency, (walletByCurrency.get(wallet.currency) ?? decimal(0)).plus(balanceByAccount.get(wallet.glAccountId) ?? decimal(0)));
+  }
   const attempts = { length: attemptCount };
-  const currency = walletRows[0]?.currency ?? recent[0]?.currency ?? "LYD";
+  const currency = requestedCurrency;
   const succeeded = byStatus.SUCCEEDED ?? 0;
   const successRate = attempts.length > 0 ? ((succeeded / attempts.length) * 100).toFixed(2) : "0.00";
 
@@ -3537,12 +3585,21 @@ router.get("/stats/overview", async (request: Request, response: Response) => {
     merchantId,
     period,
     windowDays: days,
+    currency,
+    mixedCurrency: [...new Set([...attemptsByCurrency.keys(), ...walletByCurrency.keys(), ...successByCurrency.keys()])].length > 1,
+    byCurrency: [...new Set([...attemptsByCurrency.keys(), ...walletByCurrency.keys(), ...successByCurrency.keys()])].sort().map((code) => ({
+      currency: code,
+      attempts: attemptsByCurrency.get(code) ?? 0,
+      volume: (successByCurrency.get(code)?.volume ?? decimal(0)).toFixed(4),
+      commission: (successByCurrency.get(code)?.commission ?? decimal(0)).toFixed(4),
+      netMerchantAmount: (successByCurrency.get(code)?.net ?? decimal(0)).toFixed(4),
+      walletBalance: (walletByCurrency.get(code) ?? decimal(0)).toFixed(4),
+    })),
     attempts: attempts.length,
     byStatus,
     volume: volume.toFixed(4),
     commission: commission.toFixed(4),
     netMerchantAmount: net.toFixed(4),
-    currency,
     walletBalance: walletBalance.toFixed(4),
     todayVolume: todayVolume.toFixed(4),
     successRate,

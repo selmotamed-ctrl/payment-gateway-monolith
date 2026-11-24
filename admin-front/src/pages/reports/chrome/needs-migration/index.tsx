@@ -3,6 +3,9 @@ import { computed, onMounted, ref } from "vue";
 import { useLocale } from "vuetify";
 import { useRouter } from "vue-router";
 import { VAlert, VBtn } from "vuetify/components";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { FormModal } from "@/components/ui/FormModal";
+import { areChecklistsVisible } from "@/constants/env";
 import ScreenContainer from "@/components/ScreenContainer";
 import { ThemedView } from "@/components/ThemedView";
 import { ApiTable } from "@/components/Table/ApiTable";
@@ -47,6 +50,12 @@ type RefreshHook = {
   refreshAsIs: () => void;
 };
 
+const RECONCILE_CHECKS = [
+  { key: "CHROME_SCOPE_VERIFIED", label: "Chrome default scope verified" },
+  { key: "IMPACTED_REPORTS_REVIEWED", label: "Impacted reports reviewed" },
+  { key: "AUTHORITY_CONFIRMED", label: "Reconciliation authority confirmed" },
+] as const;
+
 const Page = dc(() => {
   const { t } = useLocale();
   const router = useRouter();
@@ -54,6 +63,10 @@ const Page = dc(() => {
   const pageSize = ref(20);
   const refreshHook = ref<RefreshHook | null>(null);
   const busy = ref(false);
+  const showChecklists = areChecklistsVisible();
+  const reconcileOpen = ref(false);
+  const reconcileChecklist = ref<Record<string, boolean>>({});
+  const reconcileChecklistComplete = computed(() => !showChecklists || RECONCILE_CHECKS.every((check) => reconcileChecklist.value[check.key] === true));
   const canPrompt = computed(() =>
     hasOneOfAuthorities(["report_engine:author", "report:review", "report:approve", "security:write"]),
   );
@@ -127,9 +140,16 @@ const Page = dc(() => {
   };
 
   const reconcile = async () => {
+    if (!reconcileChecklistComplete.value) {
+      showSnackBar({ message: t("Complete all reconciliation checklist items before continuing"), type: "warning" });
+      return;
+    }
     busy.value = true;
     try {
-      await api.post(urlsMap.reportEngineChromeReconcile, {});
+      await api.post(urlsMap.reportEngineChromeReconcile, {
+        checklist: RECONCILE_CHECKS.filter((check) => reconcileChecklist.value[check.key]).map((check) => check.key),
+      });
+      reconcileOpen.value = false;
       showSnackBar({ message: t("Default reconciliation complete"), type: "success" });
       refreshAll();
     } catch (caught) {
@@ -233,7 +253,7 @@ const Page = dc(() => {
                 {t("Report migration")}
               </VBtn>
               {canReconcile.value && (
-                <VBtn variant="tonal" loading={busy.value} prependIcon="mdi-cog-refresh-outline" onClick={() => void reconcile()}>
+                <VBtn variant="tonal" loading={busy.value} prependIcon="mdi-cog-refresh-outline" onClick={() => { reconcileChecklist.value = {}; reconcileOpen.value = true; }}>
                   {t("Reconcile defaults")}
                 </VBtn>
               )}
@@ -269,6 +289,25 @@ const Page = dc(() => {
           }}
         />
       </ThemedView>
+      <FormModal
+        modelValue={reconcileOpen.value}
+        onUpdate:modelValue={(value: boolean) => (reconcileOpen.value = value)}
+        title={t("Reconcile chrome defaults")}
+        size="md"
+        loading={busy.value}
+        submitLabel={t("Reconcile")}
+        onSubmit={() => void reconcile()}
+      >
+        <FormChecklist
+          checks={[...RECONCILE_CHECKS]}
+          modelValue={reconcileChecklist.value}
+          onUpdate:modelValue={(value: Record<string, boolean>) => (reconcileChecklist.value = value)}
+          show={showChecklists}
+          title={t("Reconciliation checklist")}
+          complete={reconcileChecklistComplete.value}
+          incompleteMessage={t("Complete all reconciliation checklist items before continuing")}
+        />
+      </FormModal>
     </ScreenContainer>
   );
 });

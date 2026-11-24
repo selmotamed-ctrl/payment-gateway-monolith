@@ -210,6 +210,60 @@ describe("commission receivable balance after a merchant-direct refund", () => {
   });
 });
 
+describe("merchant-direct chargebacks", () => {
+  const seedChargeback = (fixture: ReturnType<typeof createGovernanceFixture>, id: string, status: string) => {
+    fakeTable("glAccount").push({ id: "acc-receivable", accountType: "COMMISSION_RECEIVABLE", currency: "LYD" });
+    const attempt = fakeTable("paymentAttempt").find((row) => row.id === "attempt-1")!;
+    attempt.settlementTarget = "MERCHANT_DIRECT";
+    fakeTable("dispute").push({ id: "dispute-1", attemptId: "attempt-1", status, amount: new Decimal(100), currency: "LYD" });
+    fixture.client.adjustment.create({
+      data: {
+        id,
+        type: "CHARGEBACK",
+        targetGlAccountId: "acc-wallet",
+        sourceAttemptId: "attempt-1",
+        disputeId: "dispute-1",
+        amount: new Decimal(100),
+        reason: "chargeback",
+        state: "PENDING_REVIEW",
+      },
+    });
+  };
+
+  test("a WON chargeback does not reverse the commission the platform earned", async () => {
+    const fixture = createGovernanceFixture();
+    seedChargeback(fixture, "chargeback-won-direct", "WON");
+    const result = await executeAdjustment(
+      { ...fixture.context, engine: merchantDirectEngine },
+      fixture.client as never,
+      { adjustmentId: "chargeback-won-direct", checkerUserId: "user-finance", checkerRole: "FINANCE", outcome: "WON" },
+    );
+    expect(result.status).toBe("EXECUTED");
+    expect(fakeTable("journalEntry").filter((row) => row.refId === "chargeback-won-direct")).toHaveLength(0);
+    const adjustment = fakeTable("adjustment").find((row) => row.id === "chargeback-won-direct");
+    expect(adjustment?.journalEntryId ?? null).toBeNull();
+  });
+
+  test("a LOST chargeback reverses only the platform commission", async () => {
+    const fixture = createGovernanceFixture();
+    seedChargeback(fixture, "chargeback-lost-direct", "LOST");
+    const result = await executeAdjustment(
+      { ...fixture.context, engine: merchantDirectEngine },
+      fixture.client as never,
+      { adjustmentId: "chargeback-lost-direct", checkerUserId: "user-finance", checkerRole: "FINANCE", outcome: "LOST" },
+    );
+    expect(result.status).toBe("EXECUTED");
+    const entry = fakeTable("journalEntry").find((row) => row.refType === "ADJUSTMENT" && row.refId === "chargeback-lost-direct");
+    const lines = fakeTable("journalLine")
+      .filter((line) => line.entryId === entry?.id)
+      .map((line) => ({ direction: String(line.direction), account: accountTypeOf(line.glAccountId), amount: new Decimal(String(line.amount)).toFixed(4) }));
+    expect(lines).toEqual([
+      { direction: "DEBIT", account: "PLATFORM_INCOME", amount: "3.0000" },
+      { direction: "CREDIT", account: "COMMISSION_RECEIVABLE", amount: "3.0000" },
+    ]);
+  });
+});
+
 describe("DynamicRailEngine.refund leaves the booking to the governance finalizer", () => {
   const refundStep = [{ id: "refund-step", type: "HTTP", side_effect: "MOVES_MONEY" }] as never;
   const run = async (ownershipMode: "MERCHANT_DIRECT" | "PLATFORM_CLEARING" | "INTERNAL", amount: string) => {

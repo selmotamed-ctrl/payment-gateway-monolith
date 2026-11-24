@@ -28,6 +28,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun scripts/project-design/build.ts --check
+      - run: bun scripts/project-design/check.ts
+      - run: git show --check --pretty=format: HEAD
 
   core-back:
     runs-on: ubuntu-latest
@@ -81,6 +83,8 @@ jobs:
           test "$version_num" -ge 180000
       - name: Apply migrations to the test database
         run: bun run migrate-deploy
+      - name: Guard SQL-only schema objects
+        run: bun run schema:sql-only-check
       - name: Typecheck
         run: bun run typecheck
       - name: Test
@@ -91,7 +95,7 @@ jobs:
       - name: Fail when any suite was skipped
         shell: bash
         run: |
-          if grep -Eq '^[[:space:]]*[0-9]+ skip' "$RUNNER_TEMP/core-back-test.log"; then
+          if grep -Eq '^[[:space:]]*[1-9][0-9]* skip' "$RUNNER_TEMP/core-back-test.log"; then
             echo "::error::bun reported skipped tests: a database or Redis suite did not run."
             grep -E '^[[:space:]]*[0-9]+ (pass|skip|fail)' "$RUNNER_TEMP/core-back-test.log"
             exit 1
@@ -122,6 +126,36 @@ jobs:
       - name: Test
         working-directory: ${{ matrix.workspace }}
         run: bun test
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace:
+          - admin-front
+          - merchant-front
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install (frozen lockfile)
+        working-directory: ${{ matrix.workspace }}
+        run: bun install --frozen-lockfile
+      - name: Unit and content tests
+        working-directory: ${{ matrix.workspace }}
+        run: bun run test:unit
+
+  tests-workspace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install (frozen lockfile)
+        working-directory: tests
+        run: bun install --frozen-lockfile
+      - name: Root Vitest suite
+        working-directory: tests
+        run: bun run test:unit
 
   frontend:
     runs-on: ubuntu-latest

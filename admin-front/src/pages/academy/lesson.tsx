@@ -16,6 +16,7 @@ import { useAcademyProgress } from "@/components/academy/useAcademyProgress";
 import { MarkdownView } from "@/components/guide/MarkdownView";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { showSnackBar } from "@/utils/snackBar";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { loadChecks, roleTrackFor, type Question } from "@/content/academy";
 import { loadArticles } from "@/content/guide";
@@ -82,6 +83,27 @@ export const AdminAcademyLessonPage = defineComponent({
             return nextStep({ track: preferred, modules: data.modules.value, lessons: data.lessons.value, labs: data.labs.value, progress: academy.progress.value });
         });
 
+        const copyLessonSummary = async () => {
+            const l = lesson.value;
+            if (!l) return;
+            const summary = {
+                lessonId: l.id,
+                title: l.title,
+                moduleId: l.module,
+                reading: `${readingCount.value}/${readingTotal.value}`,
+                checks: `${checksCount.value}/${checksTotal.value}`,
+                complete: isDone.value,
+                nextStep: upcoming.value ? { kind: upcoming.value.kind, id: upcoming.value.id, locked: upcoming.value.locked } : null,
+                url: window.location.href,
+            };
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+                showSnackBar({ type: "success", message: t("Lesson summary copied") });
+            } catch {
+                showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+            }
+        };
+
         const complete = async () => {
             if (!lesson.value || !data.meta.value) return;
             const score = lessonChecks.value.filter((c) => answered.value[c.id]).length as 0 | 1 | 2;
@@ -128,6 +150,11 @@ export const AdminAcademyLessonPage = defineComponent({
                     badge={l && finished ? "COMPLETED" : ""}
                     badgeLabel={t("Completed")}
                     badgeTone="success"
+                    end={() => (
+                        <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyLessonSummary()}>
+                            {t("Copy lesson summary")}
+                        </VBtn>
+                    )}
                 />
             );
 

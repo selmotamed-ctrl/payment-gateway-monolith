@@ -45,6 +45,17 @@ export const AdminGuideGlossaryPage = defineComponent({
         });
 
         const selectedSlug = computed(() => String(route.params.slug ?? ""));
+        const linkCopied = ref(false);
+        const copyTermLink = async () => {
+            try {
+                await navigator.clipboard.writeText(window.location.href);
+                linkCopied.value = true;
+                window.setTimeout(() => (linkCopied.value = false), 2500);
+            } catch {
+                linkCopied.value = false;
+            }
+        };
+
         const selected = computed(() =>
             terms.value.find((term) => term.slug === selectedSlug.value),
         );
@@ -111,7 +122,12 @@ export const AdminGuideGlossaryPage = defineComponent({
                                 {selected.value ? (
                                     <>
                                         <p class="guide-eyebrow">{L("Term", "مصطلح")}</p>
-                                        <h2>{selected.value.term}</h2>
+                                        <div class="guide-glossary-detail-heading">
+                                            <h2>{selected.value.term}</h2>
+                                            <button type="button" class="guide-secondary-button" onClick={() => void copyTermLink()}>
+                                                {linkCopied.value ? L("Link copied", "تم نسخ الرابط") : L("Copy link", "نسخ الرابط")}
+                                            </button>
+                                        </div>
                                         {selected.value.ar ? (
                                             <p class="guide-glossary-arabic" dir="rtl" lang="ar">{selected.value.ar}</p>
                                         ) : null}

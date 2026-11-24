@@ -4,7 +4,7 @@ import { zListQuery } from "../../lib/zReady";
 import { parseOrThrow } from "../../lib/error";
 import { zIdentifier, zPaginationQuery } from "../../lib/zReady";
 import { toCoreReconciliationSourceCreate, toCoreReconciliationUpload } from "../contract";
-import { coreForward, coreForwardRaw } from "../forward";
+import { coreForward, coreForwardRaw, summaryExportQuerySchema } from "../forward";
 import { forwardUpload, uploadGuards, uploadSingle } from "../upload";
 
 const router = express.Router();
@@ -23,6 +23,9 @@ export const sourceCreateSchema = z
     hasHeader: z.boolean().optional(),
     columnMapping: z.record(z.string().max(64), z.string().max(64)).optional(),
     dateFormat: z.string().max(64).optional(),
+    currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+    env: z.string().max(16).optional(),
+    credentialSetId: z.string().uuid().optional(),
     active: z.boolean().optional(),
     // core requires the transport of a statement source and the public API cannot express it.
     type: z.enum(["API", "SFTP", "UPLOAD"]).optional(),
@@ -115,7 +118,17 @@ router.post(
   ...uploadGuards,
   uploadSingle("statement"),
   async (req: Request, res: Response) => {
-    const metadata = parseOrThrow(uploadSchema, req.body ?? {});
+    // Multipart fields arrive as strings; the public contract sends the
+    // checklist as a JSON array string.
+    const raw = { ...(req.body ?? {}) } as Record<string, unknown>;
+    if (typeof raw.checklist === "string") {
+      try {
+        raw.checklist = JSON.parse(raw.checklist);
+      } catch {
+        // Leave the value untouched so the schema reports a validation error.
+      }
+    }
+    const metadata = parseOrThrow(uploadSchema, raw);
     const body = toCoreReconciliationUpload(metadata);
     // The statement file itself is forwarded as raw bytes so that `core-back`
     // can hash and parse the exact uploaded payload. The metadata travels in
@@ -143,6 +156,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/reconciliation/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -161,7 +175,7 @@ router.get(
     method: "GET",
     path: (context) => `/internal/admin/reconciliation/runs/${encodeURIComponent(context.params.id ?? "")}/export`,
     paramsSchema: z.object({ id: zIdentifier }).strict(),
-    querySchema: zListQuery,
+    querySchema: zListQuery.extend({ checklist: z.string().max(1000).optional() }),
   }),
 );
 

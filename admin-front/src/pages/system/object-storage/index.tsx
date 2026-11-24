@@ -15,6 +15,8 @@ import { SlideOverDrawer } from "@/components/ui/SlideOverDrawer";
 import { DescriptionList } from "@/components/ui/DescriptionList";
 import { MonoRef } from "@/components/ui/MonoRef";
 import { FormModal } from "@/components/ui/FormModal";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import { ApiTable } from "@/components/Table/ApiTable";
 import TableFilters from "@/components/Table/TableFilters";
 import { buildFilterQuery, type FilterValues, type TableFilter } from "@/components/Table/filters";
@@ -137,6 +139,18 @@ const BUCKETS = ["HOT", "COLD", "QUARANTINE"];
 const MAINTENANCE_JOBS = ["gc", "sweep", "scrub", "reconcile-locks", "rewrap", "av-scan"] as const;
 
 const filterOptions = (values: readonly string[]) => values.map((value) => ({ title: value, value }));
+const HOLD_CHECKS = [
+    { key: "OBJECT_SCOPE_VERIFIED", label: "Object and holder scope verified" },
+    { key: "LEGAL_RETENTION_CONFIRMED", label: "Legal retention basis confirmed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Legal-hold authority confirmed" },
+] as const;
+
+const MAINTENANCE_CHECKS = [
+    { key: "JOB_SCOPE_VERIFIED", label: "Maintenance job scope verified" },
+    { key: "VAULT_IMPACT_REVIEWED", label: "Shared-vault impact reviewed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Storage admin authority confirmed" },
+] as const;
+
 const objectFilters: TableFilter[] = [
   { key: "namespace", label: "Namespace", type: "data-autocomplete", options: filterOptions(NAMESPACES) },
   { key: "status", label: "Status", type: "data-autocomplete", options: filterOptions(STATUSES) },
@@ -204,6 +218,11 @@ const ObjectStoragePage = dc(() => {
   const holdReason = ref("");
   const holdError = ref("");
   const holdSaving = ref(false);
+  const showChecklists = areChecklistsVisible();
+  const holdChecklist = ref<Record<string, boolean>>({});
+  const holdChecklistComplete = computed(() => !showChecklists || HOLD_CHECKS.every((check) => holdChecklist.value[check.key] === true));
+  const maintenanceChecklist = ref<Record<string, boolean>>({});
+  const maintenanceChecklistComplete = computed(() => !showChecklists || MAINTENANCE_CHECKS.every((check) => maintenanceChecklist.value[check.key] === true));
   const maintenanceJob = ref<string | null>(null);
   const maintenanceConfirm = ref(false);
   const maintenanceBusy = ref<string | null>(null);
@@ -292,6 +311,7 @@ const ObjectStoragePage = dc(() => {
     holdMode.value = mode;
     holdReason.value = "";
     holdError.value = "";
+    holdChecklist.value = {};
   };
 
   const submitHold = async () => {
@@ -300,13 +320,25 @@ const ObjectStoragePage = dc(() => {
       holdError.value = t("Enter at least 5 characters");
       return;
     }
+    if (!holdChecklistComplete.value) {
+      holdError.value = t("Complete all legal-hold checklist items before submitting");
+      return;
+    }
     holdSaving.value = true;
     holdError.value = "";
     try {
       const url = urlsMap.objectStorageLegalHold(holdTarget.value.id);
       const response = holdMode.value === "place"
-        ? await api.post(url, { reason: holdReason.value.trim() })
-        : await api.delete(url, { data: { reason: holdReason.value.trim() } });
+        ? await api.post(url, {
+            reason: holdReason.value.trim(),
+            checklist: HOLD_CHECKS.filter((check) => holdChecklist.value[check.key]).map((check) => check.key),
+          })
+        : await api.delete(url, {
+            data: {
+              reason: holdReason.value.trim(),
+              checklist: HOLD_CHECKS.filter((check) => holdChecklist.value[check.key]).map((check) => check.key),
+            },
+          });
       const pendingApproval = holdMode.value === "lift" && response.status === 202;
       showSnackBar({
         message: pendingApproval
@@ -326,6 +358,7 @@ const ObjectStoragePage = dc(() => {
 
   const requestMaintenance = (job: string) => {
     maintenanceJob.value = job;
+    maintenanceChecklist.value = {};
     maintenanceConfirm.value = true;
     maintenanceResult.value = null;
   };
@@ -333,9 +366,15 @@ const ObjectStoragePage = dc(() => {
   const runMaintenance = async () => {
     const job = maintenanceJob.value;
     if (!job) return;
+    if (!maintenanceChecklistComplete.value) {
+      showSnackBar({ message: t("Complete all maintenance checklist items before running"), type: "warning" });
+      return;
+    }
     maintenanceBusy.value = job;
     try {
-      const response = await api.post(urlsMap.objectStorageMaintenance(job), {});
+      const response = await api.post(urlsMap.objectStorageMaintenance(job), {
+        checklist: MAINTENANCE_CHECKS.filter((check) => maintenanceChecklist.value[check.key]).map((check) => check.key),
+      });
       maintenanceResult.value = (response.data?.data ?? response.data)?.result ?? null;
       maintenanceConfirm.value = false;
       showSnackBar({ message: t("Maintenance job completed: {job}", { job: jobLabel(job, t) }), type: "success" });
@@ -477,6 +516,35 @@ const ObjectStoragePage = dc(() => {
     { key: "bytes", label: t("Bytes"), value: (row) => row.bytesServed ?? "—" },
     { key: "denial", label: t("Reason"), value: (row) => row.denialReason ?? (row.allowed ? t("Granted") : "—") },
   ]);
+
+  const copyObjectSummary = async () => {
+    const object = detail.value?.object;
+    if (!object) return;
+    const summary = {
+      id: object.id,
+      namespace: object.namespace,
+      status: object.status,
+      storageKeySuffix: object.storageKey.split("/").pop()?.slice(-12) ?? null,
+      detectedMimeType: object.detectedMimeType,
+      byteSize: object.byteSize,
+      sha256Hex: object.sha256Hex,
+      ownerMerchantId: object.ownerMerchantId,
+      confidentialityTier: object.confidentialityTier,
+      avScanStatus: object.avScanStatus,
+      legalHold: object.legalHold,
+      legalHoldReason: object.legalHoldReason,
+      retainUntil: object.retainUntil,
+      gcEligibleAt: object.gcEligibleAt,
+      scrubErrorCount: object.scrubErrorCount,
+      locks: detail.value?.locks.map((lock) => ({ holderType: lock.holderType, holderId: lock.holderId, active: !lock.releasedAt })),
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+      showSnackBar({ message: t("Object summary copied"), type: "success" });
+    } catch {
+      showSnackBar({ message: t("Could not copy to the clipboard"), type: "error" });
+    }
+  };
 
   const detailItems = computed(() => {
     const object = detail.value?.object;
@@ -675,7 +743,18 @@ const ObjectStoragePage = dc(() => {
             />
         )}
 
-        <SlideOverDrawer modelValue={drawerOpen.value} onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)} title={t("Storage object")} subtitle={detail.value?.object.id ?? ""} width={720}>
+        <SlideOverDrawer
+          modelValue={drawerOpen.value}
+          onUpdate:modelValue={(value: boolean) => (drawerOpen.value = value)}
+          title={t("Storage object")}
+          subtitle={detail.value?.object.id ?? ""}
+          width={720}
+          v-slots={{
+            footer: () => detail.value ? (
+              <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyObjectSummary()}>{t("Copy object summary")}</VBtn>
+            ) : null,
+          }}
+        >
           {detailLoading.value && <ThemedText>{t("Loading…")}</ThemedText>}
           {detail.value && !detailLoading.value && (
             <div class="d-flex flex-column ga-5">
@@ -723,10 +802,28 @@ const ObjectStoragePage = dc(() => {
         <FormModal modelValue={Boolean(holdTarget.value)} onUpdate:modelValue={(value: boolean) => { if (!value) holdTarget.value = null; }} title={holdMode.value === "place" ? t("Place a legal hold?") : t("Request a legal-hold lift?")} subtitle={holdTarget.value?.originalFilename ?? holdTarget.value?.id ?? ""} size="sm" submitLabel={holdMode.value === "place" ? t("Place hold") : t("Submit for approval")} loading={holdSaving.value} danger={holdMode.value === "place"} errorMessage={holdError.value} onSubmit={() => void submitHold()}>
           <VTextarea modelValue={holdReason.value} onUpdate:modelValue={(value: string) => { holdReason.value = value; holdError.value = ""; }} label={t("Hold reason (audit trail)")} rows={3} variant="outlined" autofocus />
           {holdMode.value === "lift" && <ThemedText class="text-medium-emphasis mt-2">{t("A different authorized checker must approve the lift.")}</ThemedText>}
+          <FormChecklist
+            checks={[...HOLD_CHECKS]}
+            modelValue={holdChecklist.value}
+            onUpdate:modelValue={(value: Record<string, boolean>) => (holdChecklist.value = value)}
+            show={showChecklists}
+            title={t("Legal-hold checklist")}
+            complete={holdChecklistComplete.value}
+            incompleteMessage={t("Complete all legal-hold checklist items before submitting")}
+          />
         </FormModal>
 
         <FormModal modelValue={maintenanceConfirm.value} onUpdate:modelValue={(value: boolean) => (maintenanceConfirm.value = value)} title={t("Run maintenance job?")} subtitle={maintenanceJob.value ? jobLabel(maintenanceJob.value, t) : ""} size="sm" submitLabel={t("Run")} loading={Boolean(maintenanceBusy.value)} danger={maintenanceJob.value === "gc" || maintenanceJob.value === "rewrap"} onSubmit={() => void runMaintenance()}>
           <ThemedText>{t("This operation runs against the shared vault and will be audited.")}</ThemedText>
+          <FormChecklist
+            checks={[...MAINTENANCE_CHECKS]}
+            modelValue={maintenanceChecklist.value}
+            onUpdate:modelValue={(value: Record<string, boolean>) => (maintenanceChecklist.value = value)}
+            show={showChecklists}
+            title={t("Maintenance checklist")}
+            complete={maintenanceChecklistComplete.value}
+            incompleteMessage={t("Complete all maintenance checklist items before running")}
+          />
         </FormModal>
       </ThemedView>
     </ScreenContainer>

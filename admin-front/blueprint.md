@@ -325,7 +325,7 @@ quarantine/AV queue; and the access audit trail. Authority-gated actions:
 
 ## Admin Route and Page Catalog
 
-> Status: `partial` · Last verified: 2026-11-16
+> Status: `partial` · Last verified: 2026-11-23
 
 ## 1. Purpose and scope
 
@@ -645,9 +645,23 @@ The table Health cell marks a forced route. Edit is now the overflow action.
 The Dashboard Route health card shows forced and conflict counts. See
 `core.route-health`.
 
+## Safeguard checklist and UX pass (2026-11-23)
+
+- **Login** adds “Resend code” with a 30-second cooldown (restarted on success or failure), a new challenge ID, and “Copy sign-in diagnostics”. Accept-invitation shows password visibility, the 12-character/phone/match readiness list, and the country-code hint.
+- **Approvals** links `WALLET` to the wallet page, `APPLICATION` to `Applications?open=<id>`, and `POS_TERMINAL` to `Applications?tab=pos&search=<id>`; the Applications page now watches `?tab` and seeds the POS search from `?search`. The maker name links to the user detail. The subject-type filter includes `BACKUP_POLICY`, `STORAGE_LEGAL_HOLD` and `GL_SHARD_REPAIR`.
+- **Exports and destructive actions** across users, merchants, AML, incidents, gateways/rails/routes, finance, reconciliation, disputes, adjustments, cash-outs, operator cases/inquiries, backups, object storage, settings, report engine, sandbox and academy use the shared `FormChecklist`; most also submit the checked keys for audit. The checklist is an advisory UI gate; `ADMIN_SHOW_CHECKLISTS=false` hides it and sends no keys.
+- **Copy summaries** were added across the same pages. Clipboard summaries mask email identifiers and omit object-storage bucket/key paths; they remain client-side actions (not server-audited).
+- **Incidents** gained audited list and summary exports (with the 5,000-row truncation warning) and transition/communication checklists.
+- **Report Catalog/Studio/Chrome** gained run, publish, reconcile and suspension checklists; version-row publish and chrome set/clear default open the publish checklist instead of bypassing it. The migration queue exports with a checklist.
+- **Academy** adds lab draft persistence (per user and lab, content-version checked, cleared on completion/reset), an exam briefing with three explicit acknowledgements, certificate copy ID/verification/share actions, a team progress export and copy summary. The certificate page fetches the opaque `publicId`/`displayId` issuance identifier from `GET /academy/certificates/:trackId/verification` and builds the public URL from `academyCertificateVerifyUrl`; Security Admins can revoke an issuance by its display ID from Team progress.
+- **Sandbox** reset, seed, scenario and transaction actions use checklists; the merchant reset requires `confirm: "RESET"`.
+- **Guide** adds a reading-progress bar, copy-link actions, version-aware read counts and edge-case deep-link scrolling.
+
+- **Currency selector (2026-11-24).** Dashboard and merchant 360 monetary cards follow the selected reporting currency; the dashboard sends `currency` to `/stats/overview` and `/stats/export`, and merchant 360 uses the stats response currency instead of the first wallet.
+
 ## Tables Filters and Exports
 
-> Status: `partial` · Last verified: 2026-11-16
+> Status: `partial` · Last verified: 2026-11-23
 
 ## 1. Purpose and scope
 
@@ -931,9 +945,18 @@ No database is required for the unit/static compliance checks; the Playwright ge
 
 `components/Table/tableRegistry.ts` (keyed by ROUTE NAME) now spreads three area slices, `registry/commerce.ts`, `registry/ledgerOps.ts` and `registry/forms.ts`, so independent areas add filter configs without editing one shared literal. The approvals subject-type filter lists the new `WALLET` and `POS_TERMINAL` subjects. Pages with several tables (Applications: applications / payment links / POS terminals; Transactions: attempts / inbound events; Jobs & Outbox) pass their filters explicitly to `ApiTable`.
 
+## Safeguard/export extension (2026-11-23)
+
+- **Summary exports added:** `GET /v1/admin/transactions/summary/export`, `/finance/journal-entries/summary/export`, `/gateway-inquiries/summary/export`, `/aml/incidents/summary/export`, `/aml/incidents/export` and `/academy/team/export` (the last is the first server-side Academy export; the old Academy CSV path remains client-side). The incidents export is capped at 5,000 rows and the UI warns when `truncated` is true.
+- **Checklists on list exports:** every audited list export now receives the checked keys as a comma-separated `checklist` query; the backend allow-lists and audits them. Summary export cards keep the same contract.
+- **Client-side exports/copies:** user access record, KYB review record, merchant execution history, report migration queue and sandbox summaries are generated client-side through the shared XLSX pipeline. Their checklists are UI-only and they write no server audit. Clipboard summaries mask email identifiers; object-storage copies omit the bucket/key path. These remain explicit residuals (GAP-073).
+- **Hidden mode:** `ADMIN_SHOW_CHECKLISTS=false` hides the checklists, forces completeness true and sends an empty/absent checklist; core accepts the action and records an empty list. Visibility is not authorization.
+
+- **Currency filters (2026-11-24).** Disputes/adjustments/cashouts summaries and finance profitability/liquidity accept `?currency=`. Reconciliation uploads send `currency`/`autoPost` and show the statement currency.
+
 ## Admin Guide and Academy
 
-> Status: `partial` · Last verified: 2026-11-16
+> Status: `partial` · Last verified: 2026-11-23
 
 ## 1. Purpose and scope
 
@@ -1203,6 +1226,13 @@ exam structure are unchanged (137 articles, 154 terms, 26 cards, 51 lessons,
 224 pool questions); the generated Guide/Academy and Companion snapshot were
 regenerated.
 
+## Certificate verification and lab drafts (2026-11-23)
+
+- **Lab drafts.** `LabRunner` persists `{stage,index,draft,submitted,checked,hintShown,version}` per user and lab in `localStorage` (`labDraftStore.ts`). The key is scoped by `userId`; drafts are skipped without a signed-in user. The task-id fingerprint is the version: an older/unknown fingerprint is discarded and loaded keys are filtered to the current lab, so removed tasks cannot inflate progress. Completion clears the draft; Reset suppresses the watcher and clears it through `nextTick`. Drafts remain browser-local and tamperable; they are convenience state, not evidence.
+- **Exam briefing.** Starting an exam requires three acknowledgements (integrity, no outside help, time limit) and sends `checklist` keys `EXAM_INTEGRITY_ACCEPTED`, `EXAM_NO_OUTSIDE_HELP`, `EXAM_TIME_LIMIT_ACKNOWLEDGED`; core audits `ACADEMY_EXAM_STARTED_WITH_CHECKLIST`. The keys remain advisory server-side.
+- **Certificate.** The page fetches `GET /academy/certificates/:trackId/verification`, which returns the issuance `publicId` and short `displayId`. The public verification URL is `academyCertificateVerifyUrl` (deploy writes the checkout public origin plus `/verify/certificate`). The public page is `checkout-front /verify/certificate/:publicId`; checkout-back calls `GET /internal/checkout/academy/certificates/:publicId`. Issuance is a durable `academy_certificates` row with an opaque `publicId`, unique per user/track/earnedAt; verification reads the row and the holder's live badge and returns `valid`, `expired` or `revoked` plus holder/track/badge/dates/content version. No email, role or employment status is returned. A new badge supersedes the previous issuance; `SECURITY_ADMIN` can revoke via `POST /academy/certificates/:identifier/revoke` (opaque `publicId` or short `displayId`) from Team progress. Disabled/deleted users do not expose a valid credential. No HMAC token or user UUID appears in the URL.
+- **Team export.** `GET /academy/team/export` requires `SECURITY_ADMIN`, accepts the three team checklist keys, and audits `ACADEMY_TEAM_EXPORTED`. The page-level XLSX export uses the shared pipeline; the in-table CSV and the new “Copy team summary” remain client-side (the copy masks emails).
+
 ## Contextual Help
 
 > Status: `implemented` · Last verified: 2026-11-04
@@ -1285,7 +1315,7 @@ The integration points are the 22 action areas named in the guide design: approv
 
 ## Backups Settings and Operations
 
-> Status: `partial` · Last verified: 2026-11-05
+> Status: `partial` · Last verified: 2026-11-23
 
 ## 1. Purpose and scope
 
@@ -1576,3 +1606,7 @@ The backup E2E suite requires the live stack; the core backup test requires Post
 ## Security hardening (2026-11-05)
 
 Backups page: actions are disabled unless backups are configured and the daemon is reachable; a full backup of all targets needs an extra confirmation; trigger and drill send an `Idempotency-Key` header (required by admin-back); policy form validation mirrors the edge rules (cron, minimum gaps, retention floors); server error text is sanitized and clipped.
+
+## Safeguard checklists (2026-11-23)
+
+Backup trigger, restore drill and policy changes now require the shared checklist before submission. Trigger keys: `BACKUP_TARGET_VERIFIED`, `LOAD_IMPACT_REVIEWED`, `AUTHORITY_CONFIRMED`; drill keys: `DRILL_SCOPE_VERIFIED`, `SCRATCH_ISOLATION_REVIEWED`, `AUTHORITY_CONFIRMED`; policy keys: `POLICY_SCOPE_REVIEWED`, `RETENTION_IMPACT_REVIEWED`, `APPROVAL_PATH_CONFIRMED`. The drill is now a checklist modal instead of an immediate confirm. Core filters the keys and records them in `BACKUP_TRIGGERED` / `BACKUP_DRILL_TRIGGERED` (including deduplicated retries) and the policy approval payload. Jobs/Outbox retries, notification retries, object-storage legal holds/maintenance, notification-template edits and settings/checkout-help exports use the same pattern. `ADMIN_SHOW_CHECKLISTS` hides the UI gate without changing the server path.

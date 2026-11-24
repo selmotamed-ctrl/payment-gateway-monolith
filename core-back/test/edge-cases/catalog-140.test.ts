@@ -70,6 +70,7 @@ import { createFakeCheckpointDb } from "../helpers/fakeCheckpointDb";
 import { InvariantVerifier } from "../../engine/ledger/InvariantVerifier";
 import { ApprovalService, SYSTEM_AUTOMATION } from "../../engine/governance/ApprovalService";
 import {
+  SYSTEM_AUTOMATION_EMAIL,
   SYSTEM_AUTOMATION_USER_ID,
   evaluateCommissionReceivableCeiling,
   executeAdjustment,
@@ -1109,7 +1110,9 @@ const checks: Record<string, Check> = {
     expect(adjustment?.state).toBe("PENDING_REVIEW");
     expect(adjustment?.draftedBySystem).toBe(true);
     const approval = fakeTable("approvalRequest").find((row) => row.id === result.approvalRequestId);
-    expect(approval?.makerUserId).toBe(SYSTEM_AUTOMATION_USER_ID);
+    expect(approval?.makerUserId).not.toBe(SYSTEM_AUTOMATION_USER_ID);
+    const systemMaker = fakeTable("user").find((row) => row.id === approval?.makerUserId);
+    expect(systemMaker?.email).toBe(SYSTEM_AUTOMATION_EMAIL);
     const reserve = fakeTable("journalEntry").find((row) => row.refType === "DISPUTE_OUTCOME" && row.refId === result.disputeId);
     expect(reserve).toBeDefined();
   },

@@ -46,8 +46,9 @@ export interface CommissionNettingWorkerDeps extends WorkerOptions {
   notify?: CommissionNotifyFn;
 }
 
-/** De-duplication key of the aged-receivable finance case (one open case per merchant). */
-export const commissionAgedCaseKey = (merchantId: string): string => `commission.receivable.aged:${merchantId}`;
+/** De-duplication key of the aged-receivable finance case (one open case per merchant and currency). */
+export const commissionAgedCaseKey = (merchantId: string, currency?: string | null): string =>
+  `commission.receivable.aged:${merchantId}${currency ? `:${currency}` : ""}`;
 
 interface DailyRun {
   date: string;
@@ -165,8 +166,8 @@ export class CommissionNettingWorker extends BaseWorker {
   private async processMerchant(run: DailyRun, merchantId: string, buckets: ReceivableBucket[], now: Date): Promise<void> {
     run.stats.merchants += 1;
     let proposed = new Decimal(0);
-    let aged = new Decimal(0);
-    let agedCurrency = buckets[0]?.currency ?? "";
+    const proposedByCurrency = new Map<string, Decimal>();
+    const agedByCurrency = new Map<string, Decimal>();
     for (const bucket of buckets) {
       let result: NetReceivableResult;
       try {
@@ -195,19 +196,20 @@ export class CommissionNettingWorker extends BaseWorker {
       } else if (result.status === "PROPOSED") {
         run.stats.proposed = run.stats.proposed.plus(result.amount);
         proposed = proposed.plus(result.amount);
+        proposedByCurrency.set(bucket.currency, (proposedByCurrency.get(bucket.currency) ?? new Decimal(0)).plus(result.amount));
       }
       // FIFO: what is still owed beyond the commission recognised inside the aging window is older than the window.
       const remaining = result.status === "ALREADY_NETTED" ? bucket.receivable : result.remainder;
       const bucketAged = Decimal.max(0, remaining.minus(bucket.recentRecognised));
-      if (bucketAged.gt(aged)) agedCurrency = bucket.currency;
-      aged = aged.plus(bucketAged);
+      agedByCurrency.set(bucket.currency, (agedByCurrency.get(bucket.currency) ?? new Decimal(0)).plus(bucketAged));
     }
 
-    if (aged.gt(0)) {
+    for (const [currency, aged] of agedByCurrency) {
+      if (!aged.gt(0)) continue;
       const raised = await this.raiseCase(this.db, {
-        subjectKey: commissionAgedCaseKey(merchantId),
+        subjectKey: commissionAgedCaseKey(merchantId, currency),
         notes:
-          `Merchant ${merchantId} owes ${aged.toFixed(4)} ${agedCurrency} of merchant-direct commission older than ${this.agingDays} days ` +
+          `Merchant ${merchantId} owes ${aged.toFixed(4)} ${currency} of merchant-direct commission older than ${this.agingDays} days ` +
           `that the wallet could not cover. Collect it from the merchant or decide a write-off.`,
         slaHours: this.agingCaseSlaHours,
         now,
@@ -217,29 +219,35 @@ export class CommissionNettingWorker extends BaseWorker {
 
     const merchant = await this.store.merchantCeiling(this.db, merchantId);
     if (!merchant || merchant.ceiling === null) return;
-    // In dry run nothing was posted: judge the ceiling on what the receivable WOULD be after the proposed netting.
-    const receivable = (await this.store.merchantReceivable(this.db, merchantId)).minus(this.dryRun ? proposed : 0);
-    if (!receivable.gt(merchant.ceiling)) return;
-    run.stats.overCeiling += 1;
-    await this.audit(this.db, {
-      action: "COMMISSION_RECEIVABLE_OVER_CEILING",
-      entityType: "MERCHANT",
-      entityId: merchantId,
-      after: {
-        receivable: receivable.toFixed(4),
-        ceiling: merchant.ceiling.toFixed(4),
-        runKey: run.runKey,
-        decision: "PAUSE",
-        dryRun: this.dryRun,
-      },
-    });
-    if (!this.dryRun) {
-      await this.notify(this.db, {
-        merchantId,
-        code: "COMMISSION_RECEIVABLE_SETTLEMENT_DUE",
-        payload: { receivable: receivable.toFixed(4), ceiling: merchant.ceiling.toFixed(4), currency: agedCurrency || buckets[0]?.currency || "" },
-        eventKey: `${merchantId}:${run.date}`,
+    const currencies = new Set(buckets.map((bucket) => bucket.currency));
+    for (const currency of currencies) {
+      // In dry run nothing was posted: judge the ceiling on what the receivable WOULD be after the proposed netting.
+      const proposedForCurrency = proposedByCurrency.get(currency) ?? new Decimal(0);
+      const receivable = (await this.store.merchantReceivable(this.db, merchantId, currency))
+        .minus(this.dryRun ? proposedForCurrency : 0);
+      if (!receivable.gt(merchant.ceiling)) continue;
+      run.stats.overCeiling += 1;
+      await this.audit(this.db, {
+        action: "COMMISSION_RECEIVABLE_OVER_CEILING",
+        entityType: "MERCHANT",
+        entityId: merchantId,
+        after: {
+          receivable: receivable.toFixed(4),
+          ceiling: merchant.ceiling.toFixed(4),
+          currency,
+          runKey: run.runKey,
+          decision: "PAUSE",
+          dryRun: this.dryRun,
+        },
       });
+      if (!this.dryRun) {
+        await this.notify(this.db, {
+          merchantId,
+          code: "COMMISSION_RECEIVABLE_SETTLEMENT_DUE",
+          payload: { receivable: receivable.toFixed(4), ceiling: merchant.ceiling.toFixed(4), currency },
+          eventKey: `${merchantId}:${run.date}:${currency}`,
+        });
+      }
     }
   }
 

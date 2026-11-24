@@ -168,12 +168,13 @@ export class PrismaRepositories implements Repositories {
       if (or.length === 0) return [];
       return rows<MerchantRow>(await model(tx, "merchant").findMany({ where: { ...where, OR: or } }));
     },
-    getWalletBalance: async (tx, merchantId) => {
+    getWalletBalance: async (tx, merchantId, currency) => {
       const result = await tx.$queryRaw`
         SELECT COALESCE(SUM(-s.current_balance), 0) AS balance
         FROM gl_account_shards s
         INNER JOIN gl_accounts a ON a.id = s.gl_account_id
         WHERE a.account_type = 'MERCHANT_WALLET' AND a.owner_id = ${merchantId}
+          AND (${currency ?? null}::text IS NULL OR a.currency = ${currency ?? null})
       `;
       const first = rows<Any>(result)[0];
       if (!first) return 0n;
@@ -184,7 +185,7 @@ export class PrismaRepositories implements Repositories {
       if (!merchant) return 0n;
       return moneyFromDecimal(merchant.negativeBalanceCeiling ?? 0);
     },
-    getCommissionReceivableBalance: async (tx, merchantId) => {
+    getCommissionReceivableBalance: async (tx, merchantId, currency) => {
       // COMMISSION_RECEIVABLE is a global ledger account, so the merchant's
       // share is resolved through the attempt referenced by each posting.
       if (typeof (tx as Any).$queryRaw === "function") {
@@ -213,6 +214,7 @@ export class PrismaRepositories implements Repositories {
               ON a.id = jl.gl_account_id
              AND a.account_type = 'COMMISSION_RECEIVABLE'
             WHERE pa.merchant_id = ${merchantId}::uuid
+              AND (${currency ?? null}::text IS NULL OR a.currency = ${currency ?? null})
             UNION ALL
             SELECT CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END AS delta
             FROM payment_attempts pa
@@ -228,6 +230,7 @@ export class PrismaRepositories implements Repositories {
               ON a.id = jl.gl_account_id
              AND a.account_type = 'COMMISSION_RECEIVABLE'
             WHERE pa.merchant_id = ${merchantId}::uuid
+              AND (${currency ?? null}::text IS NULL OR a.currency = ${currency ?? null})
             UNION ALL
             -- Merchant-level netting (AUTO-21, CommissionNettingWorker / cash-out): keyed 'netting:<merchantId>:...'.
             SELECT CASE WHEN jl.direction = 'DEBIT' THEN jl.amount ELSE -jl.amount END AS delta
@@ -241,6 +244,7 @@ export class PrismaRepositories implements Repositories {
              AND a.account_type = 'COMMISSION_RECEIVABLE'
             WHERE je.ref_type = 'COMMISSION_NETTING'
               AND starts_with(je.ref_id, ${`netting:${merchantId}:`})
+              AND (${currency ?? null}::text IS NULL OR a.currency = ${currency ?? null})
           ) movement
         `;
         const first = rows<Any>(result)[0];
@@ -249,7 +253,7 @@ export class PrismaRepositories implements Repositories {
 
       // In-memory transaction fallback (tests and non-SQL clients).
       const accounts = rows<Any>(await model(tx, "glAccount").findMany({
-        where: { accountType: "COMMISSION_RECEIVABLE" },
+        where: { accountType: "COMMISSION_RECEIVABLE", ...(currency ? { currency } : {}) },
       }));
       const accountIds = new Set(accounts.map((account) => String(account.id)));
       if (accountIds.size === 0) {
@@ -605,8 +609,9 @@ export class PrismaRepositories implements Repositories {
       if (filter.applicationId) subject.push(`application_id = ${placeholder(filter.applicationId, "::uuid")}`);
       if (filter.linkId) subject.push(`link_id = ${placeholder(filter.linkId, "::uuid")}`);
       if (filter.clientIp) subject.push(`client_ip = ${placeholder(filter.clientIp)}`);
+      const currencyPredicate = filter.currency ? ` AND currency = ${placeholder(filter.currency)}` : "";
       const where =
-        `created_at >= $1 AND status::text IN (${statusList}) AND (${subject.join(" OR ")})`;
+        `created_at >= $1 AND status::text IN (${statusList}) AND (${subject.join(" OR ")})${currencyPredicate}`;
       const amountSql = "COALESCE(total_charged_amount, requested_amount, 0)";
 
       const aggregate = rows<Any>(await tx.$queryRawUnsafe(

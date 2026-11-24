@@ -534,9 +534,20 @@ router.post("/wallets/:id/status", async (request: Request, response: Response) 
   requireAuthorities(request, ["merchant:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ status: z.enum(["FROZEN", "ACTIVE"]), reason: reasonSchema }).strict(),
+    z.object({
+      status: z.enum(["FROZEN", "ACTIVE"]),
+      reason: reasonSchema,
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
     request.body,
   );
+  const allowedChecklist = new Set([
+    "WALLET_SCOPE_VERIFIED",
+    "BALANCE_AND_CASHOUT_REVIEWED",
+    "REASON_CONFIRMED",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const actor = staffAudit(request);
   const wallet = await client.wallet.findUnique({
     where: { id },
@@ -564,7 +575,7 @@ router.post("/wallets/:id/status", async (request: Request, response: Response) 
           entityId: wallet.id,
           merchantId: wallet.merchantId,
           beforeJson: { status: "ACTIVE" },
-          afterJson: { status: "FROZEN", reason: body.reason },
+          afterJson: { status: "FROZEN", reason: body.reason, checklist },
         },
       });
       return tx.wallet.findUniqueOrThrow({ where: { id: wallet.id }, select: { id: true, merchantId: true, currency: true, status: true } });
@@ -592,7 +603,7 @@ router.post("/wallets/:id/status", async (request: Request, response: Response) 
     merchantId: wallet.merchantId,
     action: "WALLET_UNFREEZE",
     reason: body.reason,
-    payload: { fromStatus: wallet.status, toStatus: "ACTIVE" },
+    payload: { fromStatus: wallet.status, toStatus: "ACTIVE", checklist },
   });
   response.status(202).json({ approvalRequestId: approval.id, state: approval.state });
 });
@@ -795,10 +806,18 @@ router.patch("/applications/:id", async (request: Request, response: Response) =
         railWhitelist: z.array(z.string().trim().min(1).max(64)).max(200).nullable().optional(),
         redirectDomainAllowlist: z.array(z.string().trim().min(1).max(253)).max(100).optional(),
         reason: reasonSchema,
+        checklist: z.array(z.string().max(64)).max(10).optional(),
       })
       .strict(),
     request.body,
   );
+  const allowedChecklist = new Set([
+    "ENTITY_SCOPE_VERIFIED",
+    "ACCESS_IMPACT_REVIEWED",
+    "REASON_CONFIRMED",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const application = await client.application.findUnique({
     where: { id },
     select: {
@@ -865,7 +884,7 @@ router.patch("/applications/:id", async (request: Request, response: Response) =
           entityId: application.id,
           merchantId: application.merchantId,
           beforeJson: { status: "ACTIVE" },
-          afterJson: { status: "SUSPENDED", reason: body.reason },
+          afterJson: { status: "SUSPENDED", reason: body.reason, checklist },
         },
       });
       return tx.application.findUniqueOrThrow({
@@ -935,7 +954,7 @@ router.patch("/applications/:id", async (request: Request, response: Response) =
     merchantId: application.merchantId,
     action: statusChange === "REACTIVATE" ? "APPLICATION_REACTIVATE" : "APPLICATION_UPDATE",
     reason: body.reason,
-    payload: { fromStatus: application.status, baseUpdatedAt: application.updatedAt.toISOString(), ...changes },
+    payload: { fromStatus: application.status, baseUpdatedAt: application.updatedAt.toISOString(), ...changes, checklist },
   });
   response.status(202).json({ approvalRequestId: approval.id, state: approval.state });
 });
@@ -943,7 +962,20 @@ router.patch("/applications/:id", async (request: Request, response: Response) =
 router.post("/applications/:id/tokens/:tokenId/revoke", async (request: Request, response: Response) => {
   requireAuthorities(request, ["merchant:write"]);
   const params = parseOrThrow(z.object({ id: idParam, tokenId: idParam }).strict(), request.params);
-  const body = parseOrThrow(z.object({ reason: reasonSchema }).strict(), request.body);
+  const body = parseOrThrow(
+    z.object({
+      reason: reasonSchema,
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
+    request.body,
+  );
+  const allowedChecklist = new Set([
+    "ENTITY_SCOPE_VERIFIED",
+    "ACCESS_IMPACT_REVIEWED",
+    "REASON_CONFIRMED",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const actor = staffAudit(request);
   const token = await client.accessToken.findFirst({
     where: { id: params.tokenId, applicationId: params.id },
@@ -970,7 +1002,7 @@ router.post("/applications/:id/tokens/:tokenId/revoke", async (request: Request,
         entityId: token.id,
         merchantId: token.merchantId,
         beforeJson: { revokedAt: null, lastFour: token.lastFour },
-        afterJson: { revokedAt: revokedAt.toISOString(), applicationId: token.applicationId, reason: body.reason },
+        afterJson: { revokedAt: revokedAt.toISOString(), applicationId: token.applicationId, reason: body.reason, checklist },
       },
     });
   });
@@ -1056,7 +1088,21 @@ router.get("/payment-links", async (request: Request, response: Response) => {
 router.post("/payment-links/:id/state", async (request: Request, response: Response) => {
   requireAuthorities(request, ["merchant:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
-  const body = parseOrThrow(z.object({ state: z.literal("CANCELLED"), reason: reasonSchema }).strict(), request.body);
+  const body = parseOrThrow(
+    z.object({
+      state: z.literal("CANCELLED"),
+      reason: reasonSchema,
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
+    request.body,
+  );
+  const allowedChecklist = new Set([
+    "ENTITY_SCOPE_VERIFIED",
+    "ACCESS_IMPACT_REVIEWED",
+    "REASON_CONFIRMED",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const actor = staffAudit(request);
   const link = await client.paymentLink.findUnique({
     where: { id },
@@ -1082,7 +1128,7 @@ router.post("/payment-links/:id/state", async (request: Request, response: Respo
         entityId: link.id,
         merchantId: link.application.merchantId,
         beforeJson: { state: "PENDING" },
-        afterJson: { state: "CANCELLED", key: link.key, reason: body.reason },
+        afterJson: { state: "CANCELLED", key: link.key, reason: body.reason, checklist },
       },
     });
     return tx.paymentLink.findUniqueOrThrow({ where: { id: link.id }, select: paymentLinkSelect });
@@ -1158,9 +1204,20 @@ router.post("/pos-terminals/:id/status", async (request: Request, response: Resp
   requireAuthorities(request, ["merchant:write"]);
   const { id } = parseOrThrow(idSchema, request.params);
   const body = parseOrThrow(
-    z.object({ status: z.enum(["INACTIVE", "BLOCKED", "ACTIVE"]), reason: reasonSchema }).strict(),
+    z.object({
+      status: z.enum(["INACTIVE", "BLOCKED", "ACTIVE"]),
+      reason: reasonSchema,
+      checklist: z.array(z.string().max(64)).max(10).optional(),
+    }).strict(),
     request.body,
   );
+  const allowedChecklist = new Set([
+    "ENTITY_SCOPE_VERIFIED",
+    "ACCESS_IMPACT_REVIEWED",
+    "REASON_CONFIRMED",
+    "AUTHORITY_CONFIRMED",
+  ]);
+  const checklist = (body.checklist ?? []).filter((entry) => allowedChecklist.has(entry));
   const actor = staffAudit(request);
   const terminal = await client.posTerminal.findUnique({
     where: { id },
@@ -1186,7 +1243,7 @@ router.post("/pos-terminals/:id/status", async (request: Request, response: Resp
       merchantId: terminal.application.merchantId,
       action: "POS_TERMINAL_REACTIVATE",
       reason: body.reason,
-      payload: { fromStatus: terminal.status, toStatus: "ACTIVE" },
+      payload: { fromStatus: terminal.status, toStatus: "ACTIVE", checklist },
     });
     response.status(202).json({ approvalRequestId: approval.id, state: approval.state });
     return;
@@ -1213,7 +1270,7 @@ router.post("/pos-terminals/:id/status", async (request: Request, response: Resp
         entityId: terminal.id,
         merchantId: terminal.application.merchantId,
         beforeJson: { status: terminal.status },
-        afterJson: { status: body.status, reason: body.reason },
+        afterJson: { status: body.status, reason: body.reason, checklist },
       },
     });
     return tx.posTerminal.findUniqueOrThrow({ where: { id: terminal.id }, select: posTerminalSelect });

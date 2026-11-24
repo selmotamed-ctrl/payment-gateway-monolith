@@ -3,7 +3,7 @@ id: admin-ui.routes
 title: Admin Route and Page Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-16
+last_verified: 2026-11-23
 verified_against: 53afea5+working-tree
 code:
   - admin-front/src/pages/sandbox/**
@@ -365,3 +365,17 @@ or clear an override (second approval when the computed state is healthier).
 The table Health cell marks a forced route. Edit is now the overflow action.
 The Dashboard Route health card shows forced and conflict counts. See
 `core.route-health`.
+
+## Safeguard checklist and UX pass (2026-11-23)
+
+- **Login** adds “Resend code” with a 30-second cooldown (restarted on success or failure), a new challenge ID, and “Copy sign-in diagnostics”. Accept-invitation shows password visibility, the 12-character/phone/match readiness list, and the country-code hint.
+- **Approvals** links `WALLET` to the wallet page, `APPLICATION` to `Applications?open=<id>`, and `POS_TERMINAL` to `Applications?tab=pos&search=<id>`; the Applications page now watches `?tab` and seeds the POS search from `?search`. The maker name links to the user detail. The subject-type filter includes `BACKUP_POLICY`, `STORAGE_LEGAL_HOLD` and `GL_SHARD_REPAIR`.
+- **Exports and destructive actions** across users, merchants, AML, incidents, gateways/rails/routes, finance, reconciliation, disputes, adjustments, cash-outs, operator cases/inquiries, backups, object storage, settings, report engine, sandbox and academy use the shared `FormChecklist`; most also submit the checked keys for audit. The checklist is an advisory UI gate; `ADMIN_SHOW_CHECKLISTS=false` hides it and sends no keys.
+- **Copy summaries** were added across the same pages. Clipboard summaries mask email identifiers and omit object-storage bucket/key paths; they remain client-side actions (not server-audited).
+- **Incidents** gained audited list and summary exports (with the 5,000-row truncation warning) and transition/communication checklists.
+- **Report Catalog/Studio/Chrome** gained run, publish, reconcile and suspension checklists; version-row publish and chrome set/clear default open the publish checklist instead of bypassing it. The migration queue exports with a checklist.
+- **Academy** adds lab draft persistence (per user and lab, content-version checked, cleared on completion/reset), an exam briefing with three explicit acknowledgements, certificate copy ID/verification/share actions, a team progress export and copy summary. The certificate page fetches the opaque `publicId`/`displayId` issuance identifier from `GET /academy/certificates/:trackId/verification` and builds the public URL from `academyCertificateVerifyUrl`; Security Admins can revoke an issuance by its display ID from Team progress.
+- **Sandbox** reset, seed, scenario and transaction actions use checklists; the merchant reset requires `confirm: "RESET"`.
+- **Guide** adds a reading-progress bar, copy-link actions, version-aware read counts and edge-case deep-link scrolling.
+
+- **Currency selector (2026-11-24).** Dashboard and merchant 360 monetary cards follow the selected reporting currency; the dashboard sends `currency` to `/stats/overview` and `/stats/export`, and merchant 360 uses the stats response currency instead of the first wallet.

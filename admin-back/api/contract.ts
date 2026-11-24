@@ -846,6 +846,10 @@ export const toCoreKybDocumentReview = (body: unknown): JsonRecord => {
   if (duplicateJustification) result.duplicateJustification = clamp(duplicateJustification, 4000);
   const expiresOn = asString(source.expiresOn);
   if (expiresOn && DATE_PATTERN.test(expiresOn)) result.expiresOn = expiresOn;
+  const checklist = Array.isArray(source.checklist)
+    ? source.checklist.filter((entry): entry is string => typeof entry === "string").map((entry) => clamp(entry, 160)).slice(0, 50)
+    : [];
+  if (checklist.length > 0) result.checklist = checklist;
   return result;
 };
 
@@ -1219,6 +1223,9 @@ export const toCoreRailUpdate = (body: unknown): JsonRecord => {
   // null clears the logo, a uuid sets it (core verifies the asset exists)
   if (source.logoAssetId === null) result.logoAssetId = null;
   else if (typeof source.logoAssetId === "string" && source.logoAssetId.length > 0) result.logoAssetId = source.logoAssetId;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -1291,7 +1298,11 @@ export const toCoreRailFields = (body: unknown): JsonRecord => {
       if (options.length > 0) result.optionsJson = { options };
       return result;
     });
-  return { fields };
+  const result: JsonRecord = { fields };
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
+  return result;
 };
 
 /* ------------------------------------------------------------------------------- routes */
@@ -1338,6 +1349,9 @@ export const toCoreRouteUpdate = (body: unknown): JsonRecord => {
   }
   const limitAmount = asString(source.limitAmount);
   if (limitAmount && DECIMAL_PATTERN.test(limitAmount)) result.maxAmount = limitAmount;
+  if (Array.isArray(source.checklist)) {
+    result.checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+  }
   return result;
 };
 
@@ -1420,6 +1434,8 @@ const toCoreParserConfig = (source: JsonRecord): JsonRecord => {
   if (Object.keys(columnMapping).length > 0) config.columnMapping = columnMapping;
   const dateFormat = asString(source.dateFormat);
   if (dateFormat) config.dateFormat = dateFormat;
+  const currency = asString(source.currency);
+  if (currency) config.currency = currency.toUpperCase();
   return config;
 };
 
@@ -1436,6 +1452,12 @@ export const toCoreReconciliationSourceCreate = (body: unknown): JsonRecord => {
   if (settlementLagDays !== undefined) result.settlementLagDays = settlementLagDays;
   const dedupeKeyTemplate = asString(source.dedupeKeyTemplate);
   if (dedupeKeyTemplate) result.dedupeKeyTemplate = clamp(dedupeKeyTemplate, 200);
+  const currency = asString(source.currency);
+  if (currency) result.currency = currency.toUpperCase();
+  const env = asString(source.env);
+  if (env) result.env = clamp(env, 16);
+  const credentialSetId = asString(source.credentialSetId);
+  if (credentialSetId) result.credentialSetId = requireCanonical(credentialSetId, "credentialSetId");
   return result;
 };
 
@@ -1584,6 +1606,10 @@ export const toCoreCommissionProfileCreate = (body: unknown): JsonRecord => {
   if (merchantId) result.merchantId = merchantId;
   const applicationId = asString(source.applicationId);
   if (applicationId) result.applicationId = applicationId;
+  if (Array.isArray(source.checklist)) {
+    const checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+    if (checklist.length > 0) result.checklist = checklist;
+  }
   return result;
 };
 
@@ -1627,6 +1653,10 @@ export const toCoreVelocityRuleCreate = (body: unknown): JsonRecord => {
   const result: JsonRecord = { scopeType, windowSeconds, maxCount, action };
   const maxAmount = asString(source.maxAmount);
   if (maxAmount && DECIMAL_PATTERN.test(maxAmount)) result.maxAmount = maxAmount;
+  if (Array.isArray(source.checklist)) {
+    const checklist = source.checklist.filter((entry): entry is string => typeof entry === "string").slice(0, 10);
+    if (checklist.length > 0) result.checklist = checklist;
+  }
   return result;
 };
 

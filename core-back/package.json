@@ -32,7 +32,9 @@
     "seed-fake-rails": "bun ./prisma/seedFakeRails.ts",
     "seed-synthetic-history": "bun ./prisma/syntheticSeeder/index.ts",
     "backfill-operator-cases": "bun ./scripts/backfillOperatorCases.ts",
-    "seed-operator-case-showcase": "bun ./scripts/seedOperatorCaseShowcase.ts"
+    "seed-operator-case-showcase": "bun ./scripts/seedOperatorCaseShowcase.ts",
+    "legacy-evidence:check": "bun run scripts/checkLegacyEvidence.ts",
+    "schema:sql-only-check": "bun run scripts/checkSqlOnlyObjects.ts"
   },
   "peerDependencies": {
     "typescript": "^7"

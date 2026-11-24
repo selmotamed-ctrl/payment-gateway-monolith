@@ -3,7 +3,7 @@ id: core.foundations
 title: Core Foundations
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-23
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/index.ts
@@ -277,7 +277,7 @@ TCP + TLS 1.3 handshake (client cert required)
 1. Generate certs.
 2. Set `DATABASE_URL`.
 3. Apply migrations.
-4. Seed (this also checks schema version 11).
+4. Seed (this also checks schema version 44).
 5. `bun run start`.
 6. Probe `/health` over mTLS with a client cert.
 

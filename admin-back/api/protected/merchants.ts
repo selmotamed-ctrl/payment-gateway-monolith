@@ -9,7 +9,7 @@ import {
   toCoreMerchantSuspend,
   toCoreMerchantWithdraw,
 } from "../contract";
-import { coreForward } from "../forward";
+import { coreForward, summaryExportQuerySchema } from "../forward";
 import { encode, uuidParamsSchema } from "./mutationSchemas";
 
 const router = express.Router();
@@ -170,6 +170,7 @@ router.get(
   coreForward({
     method: "GET",
     path: () => "/internal/admin/merchants/summary/export",
+    querySchema: summaryExportQuerySchema,
   }),
 );
 
@@ -178,6 +179,7 @@ router.get(
   coreForward({
     method: "GET",
     path: (context) => `/internal/admin/merchants/${encodeURIComponent(context.params.id ?? "")}/summary/export`,
+    querySchema: summaryExportQuerySchema,
     paramsSchema: idParamsSchema,
   }),
 );

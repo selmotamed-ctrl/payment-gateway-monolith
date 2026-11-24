@@ -198,6 +198,21 @@ export const startTestCore = async (pki: TestPki): Promise<TestCore> => {
         response.end(JSON.stringify({ reference: "REF-RETURN-1", status: "SUCCEEDED" }));
         return;
       }
+      if (url.startsWith("/internal/checkout/academy/certificates/")) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          certificateId: "ABCDEF0123456789",
+          status: "valid",
+          holderName: "operator",
+          trackId: "FOUNDATION",
+          trackTitle: "Foundation",
+          badgeCode: "FOUNDATION_CERTIFIED",
+          earnedAt: "2026-11-23T07:00:00.000Z",
+          expiresAt: "2027-11-23T07:00:00.000Z",
+          contentVersion: "1.0.0",
+        }));
+        return;
+      }
       if (url.startsWith("/internal/checkout/pay/")) {
         const linkKey = url.split("/")[4] ?? "";
         if (linkKey === "LNKMISSING1") {

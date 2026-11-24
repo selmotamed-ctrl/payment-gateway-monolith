@@ -333,6 +333,12 @@ const ApprovalsPage = dc(() => {
                 return { name: "JoinRequestDetail", params: { id: row.subjectId } };
             case "OPERATOR_CASE":
                 return { name: "OperatorCaseDetail", params: { id: row.subjectId } };
+            case "WALLET":
+                return { name: "WalletDetail", params: { id: row.subjectId } };
+            case "APPLICATION":
+                return { name: "Applications", query: { open: row.subjectId } };
+            case "POS_TERMINAL":
+                return { name: "Applications", query: { tab: "pos", search: row.subjectId } };
             case "COMMISSION_PROFILE":
                 return { name: "PricingControls", query: { tab: "COMMISSION" } };
             case "VELOCITY_RULE":
@@ -376,6 +382,33 @@ const ApprovalsPage = dc(() => {
         const response = await api.get(urlsMap.approvalDetail(id));
         const payload = response.data?.data ?? response.data ?? {};
         return (payload.approval ?? payload) as ApprovalDetail;
+    };
+
+    const copyApprovalSummary = async () => {
+        const row = selected.value;
+        if (!row) return;
+        const summary = {
+            approvalRequestId: row.id,
+            subjectType: row.subjectType,
+            subjectId: row.subjectId,
+            domain: row.domain,
+            kind: row.kind,
+            state: row.state,
+            mode: row.mode,
+            baseVersion: row.baseVersion,
+            maker: row.makerName || row.makerUserId,
+            makerReason: row.makerReason,
+            createdAt: row.createdAt,
+            expiresAt: row.expiresAt,
+            expired: row.expired,
+            checkBlockedReason: row.checkBlockedReason,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Approval summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
     };
 
     const openDetails = async (row: ApprovalRow) => {
@@ -1004,7 +1037,14 @@ const ApprovalsPage = dc(() => {
                                             <DescriptionList
                                                 items={[
                                                     { label: t("Approval request ID"), value: <MonoRef value={selected.value.id} /> },
-                                                    { label: t("Maker"), value: selected.value.makerName || selected.value.makerUserId },
+                                                    {
+                                                        label: t("Maker"),
+                                                        value: (
+                                                            <VBtn size="x-small" variant="text" style={{ textTransform: "none", paddingInline: 0 }} onClick={() => void router.push({ name: "AdminUserDetail", params: { id: selected.value!.makerUserId } })}>
+                                                                {selected.value.makerName || selected.value.makerUserId}
+                                                            </VBtn>
+                                                        ),
+                                                    },
                                                     { label: t("Checker"), value: selected.value.checkerName || "—" },
                                                     { label: t("Created"), value: formatDateTime(selected.value.createdAt) },
                                                     { label: t("Expires"), value: selected.value.expired ? t("Expired") : formatDateTime(selected.value.expiresAt) },
@@ -1095,6 +1135,7 @@ const ApprovalsPage = dc(() => {
                                             >
                                                 {t("Reject")}
                                             </VBtn>
+                                            <VBtn variant="tonal" prependIcon="mdi-content-copy" onClick={() => void copyApprovalSummary()}>{t("Copy summary")}</VBtn>
                                             <VBtn variant="text" onClick={closeDetails}>{t("Close")}</VBtn>
                                         </ThemedView>
                                     </SurfaceCardText>

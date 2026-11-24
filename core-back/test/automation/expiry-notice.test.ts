@@ -9,6 +9,7 @@ import { ExpiryNoticeWorker, type CredentialVerifierPort } from "../../engine/wo
 import { cleanupAutomationCatalog, createAutomationCatalog, type AutomationCatalog } from "../helpers/automationCatalog";
 import { createFakeRepositories } from "../helpers/fakeRepositories";
 import { createPrisma, databaseIsReachable } from "../storage-engine/helpers/db";
+import { deleteWithAppendOnlyMaintenance } from "../helpers/appendOnlyMaintenance";
 
 const client = createPrisma({ max: 10 });
 const describeDb = databaseIsReachable ? describe : describe.skip;
@@ -27,7 +28,7 @@ afterAll(async () => {
     const ids = [...created.tokens, ...catalogs.map((entry) => entry.credentialSetId)];
     await client.$executeRawUnsafe(`DELETE FROM deadline_stages WHERE subject_id = ANY($1::text[])`, ids);
     await client.$executeRawUnsafe(`DELETE FROM notifications WHERE split_part(event_id, ':', 3) = ANY($1::text[]) OR recipient_user_id = ANY($2::uuid[])`, ids, created.users);
-    await client.$executeRawUnsafe(`DELETE FROM operator_cases WHERE subject_key ~ ANY($1::text[])`, ids.map((id) => `[:]${id}`));
+    await deleteWithAppendOnlyMaintenance(client, `DELETE FROM operator_cases WHERE subject_key ~ ANY($1::text[])`, ids.map((id) => `[:]${id}`));
     await client.$executeRawUnsafe(`DELETE FROM access_tokens WHERE id = ANY($1::uuid[])`, created.tokens);
     await disableStaff();
     await cleanupAutomationCatalog(client, catalogs);

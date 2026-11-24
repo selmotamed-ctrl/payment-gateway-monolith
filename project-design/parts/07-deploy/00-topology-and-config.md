@@ -3,7 +3,7 @@ id: deploy.topology
 title: Deploy Topology and Configuration
 status: partial
 confidence: high
-last_verified: 2026-11-13
+last_verified: 2026-11-23
 verified_against: 19d6a54+working-tree
 code:
   - deploy/test-matrix/topologies.ts
@@ -359,3 +359,7 @@ core receives `CLUSTER_CORE_NODE_COUNT` and the KEK keyring.
 New keys: `SANDBOX_ENABLED` (default false), `SANDBOX_NODE`, `SANDBOX_CORE_PORT` (4005), `SANDBOX_DB_NAME` (`payment_gateway_sandbox`), `SANDBOX_REMOTE_DIR`, `SANDBOX_CORE_BACK_URLS`, `FAKE_RAILS_CONTROL_TOKEN`. Validation requires Fake Rails, a distinct sandbox database/remote directory/port and HTTPS edge URLs.
 
 `sandboxDatabase()` derives `pgw_sandbox` (transaction) and `pgw_sandbox_session` (session) PgBouncer aliases; the PostgreSQL provisioner creates `payment_gateway_sandbox` and both aliases. `hostPlanner` emits a second core `ServicePlan` named `pg-core-sandbox` on `SANDBOX_NODE` (or the first core node) with its own release tree, sandbox `DATABASE_URL`/`LEADER_ELECTION_DATABASE_URL`, `EXECUTION_PLANE=SANDBOX`, Fake Rails enabled, backups removed from its env, a firewall rule on 4005 and a core certificate SAN that includes the sandbox IP. `deployService` migrates the sandbox database with the direct sandbox owner URL carrying `app.execution_plane=SANDBOX` (the pooler rejects custom startup options), then `db-seed` and `seed-fake-rails` when seeding is enabled. The seeder stamps an existing sandbox row only when the connected database name matches `SANDBOX_DB_NAME`. Edges receive `SANDBOX_CORE_BACK_URLS`; a sandbox pool failure never falls back to Live. Sandbox and Fake Rails data are deliberately not backup targets.
+
+## Backup and object-storage input hardening (2026-11-23)
+
+`BUN_VERSION` defaults to the tested 1.4.x line (1.4.4) because the committed lockfiles are version 2. `BACKUP_PRIMARY_S3_ENDPOINT` must be an http(s) URL without whitespace or shell metacharacters; `BACKUP_PRIMARY_S3_BUCKET` accepts an S3 bucket/path (optional `s3://`) using safe characters only; `BACKUP_MINIO_VERSION` and `BACKUP_MINIO_BINARY_URL` are restricted to safe tags/URLs; `BACKUP_MINIO_DATA_DIR` uses the safe absolute-path schema and rejects system directories. `BACKUP_ALLOW_INSECURE_HTTP` remains a documented availability option and is rejected only where the object-storage production guard applies. The object-storage and backup certificate directories must be separate and non-nested.

@@ -16,11 +16,26 @@ import { StateView } from "@/components/StateView";
 import { SandboxBanner } from "@/components/sandbox/SandboxBanner";
 import { FormModal } from "@/components/ui/FormModal";
 import { FormField } from "@/components/ui/FormField";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import { SectionFields } from "@/components/SectionFields";
 import { adminSandbox, sandboxPost, type AdminSandboxMerchantRow, type AdminSandboxOverview } from "@/api/sandbox";
 import { extractApiErrorMessage } from "@/utils/errors/extractor";
 import { showSnackBar } from "@/utils/snackBar";
 import { xlsxUIPipeline } from "@/utils/xlsx";
+
+const RESET_CHECKS = [
+    { key: "SANDBOX_SCOPE_VERIFIED", label: "Sandbox plane and scope verified" },
+    { key: "LIVE_ISOLATION_CONFIRMED", label: "Live data isolation confirmed" },
+    { key: "RESET_IMPACT_ACKNOWLEDGED", label: "Sandbox-only destructive impact acknowledged" },
+    { key: "AUTHORITY_CONFIRMED", label: "Sandbox admin authority confirmed" },
+] as const;
+
+const EXPORT_CHECKS = [
+    { key: "SANDBOX_SCOPE_VERIFIED", label: "Sandbox scope verified" },
+    { key: "HEALTH_AND_DATA_REVIEWED", label: "Health and sandbox data reviewed" },
+    { key: "EXPORT_APPROVAL_CONFIRMED", label: "Export approval confirmed" },
+] as const;
 
 const AdminSandboxOverviewPage = dc(() => {
     const { t } = useLocale();
@@ -33,6 +48,11 @@ const AdminSandboxOverviewPage = dc(() => {
     const resetOpen = ref(false);
     const resetConfirm = ref("");
     const exportLoading = ref(false);
+    const showChecklists = areChecklistsVisible();
+    const resetChecklist = ref<Record<string, boolean>>({});
+    const resetChecklistComplete = computed(() => !showChecklists || RESET_CHECKS.every((check) => resetChecklist.value[check.key] === true));
+    const exportChecklist = ref<Record<string, boolean>>({});
+    const exportChecklistComplete = computed(() => !showChecklists || EXPORT_CHECKS.every((check) => exportChecklist.value[check.key] === true));
 
     const load = async () => {
         loading.value = true;
@@ -52,11 +72,35 @@ const AdminSandboxOverviewPage = dc(() => {
     };
     void load();
 
+    const copySandboxSummary = async () => {
+        const data = overview.value;
+        if (!data) return;
+        const summary = {
+            sandbox: data.sandbox,
+            reference: data.reference,
+            merchants: merchants.value.map((row) => ({ id: row.id, name: row.tradeName || row.legalName, status: row.status, wallets: row.wallets, applications: row.applications, payments: row.payments, cashouts: row.cashouts })),
+            url: window.location.href,
+        };
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+            showSnackBar({ type: "success", message: t("Sandbox summary copied") });
+        } catch {
+            showSnackBar({ type: "error", message: t("Could not copy to the clipboard") });
+        }
+    };
+
     const resetAll = async () => {
         if (resetConfirm.value !== "RESET SANDBOX") return;
+        if (!resetChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all reset checklist items before continuing") });
+            return;
+        }
         busy.value = true;
         try {
-            await sandboxPost("/global-reset", { confirm: "RESET SANDBOX" });
+            await sandboxPost("/global-reset", {
+                confirm: "RESET SANDBOX",
+                checklist: RESET_CHECKS.filter((check) => resetChecklist.value[check.key]).map((check) => check.key),
+            });
             resetOpen.value = false;
             resetConfirm.value = "";
             showSnackBar({ type: "success", message: t("All sandbox workspaces reset") });
@@ -101,6 +145,10 @@ const AdminSandboxOverviewPage = dc(() => {
 
     const exportSummary = async () => {
         if (exportLoading.value) return;
+        if (!exportChecklistComplete.value) {
+            showSnackBar({ type: "warning", message: t("Complete all export checklist items before exporting") });
+            return;
+        }
         exportLoading.value = true;
         try {
             const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
@@ -115,12 +163,12 @@ const AdminSandboxOverviewPage = dc(() => {
 
     return () => (
         <ScreenContainer>
-            <PageHeader title={t("Sandbox & Fake Rails Health")} subtitle={t("Inspect the isolated sandbox plane, its reference catalog and recent merchant activity.")} badge="SANDBOX" badgeTone="warning" end={() => <div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn><VBtn variant="tonal" prependIcon="mdi-storefront-outline" onClick={() => void router.push("/sandbox/merchants")}>{t("Merchants")}</VBtn><VBtn variant="tonal" color="error" prependIcon="mdi-restore" onClick={() => { resetConfirm.value = ""; resetOpen.value = true; }}>{t("Reset all sandbox data")}</VBtn></div>} />
+            <PageHeader title={t("Sandbox & Fake Rails Health")} subtitle={t("Inspect the isolated sandbox plane, its reference catalog and recent merchant activity.")} badge="SANDBOX" badgeTone="warning" end={() => <div class="d-flex flex-wrap ga-2"><VBtn variant="tonal" prependIcon="mdi-refresh" onClick={() => void load()}>{t("Refresh")}</VBtn><VBtn variant="tonal" prependIcon="mdi-content-copy" disabled={!overview.value} onClick={() => void copySandboxSummary()}>{t("Copy summary")}</VBtn><VBtn variant="tonal" prependIcon="mdi-download" loading={exportLoading.value} onClick={() => void exportSummary()}>{t("Export summary")}</VBtn><VBtn variant="tonal" prependIcon="mdi-storefront-outline" onClick={() => void router.push("/sandbox/merchants")}>{t("Merchants")}</VBtn><VBtn variant="tonal" color="error" prependIcon="mdi-restore" onClick={() => { resetConfirm.value = ""; resetChecklist.value = {}; resetOpen.value = true; }}>{t("Reset all sandbox data")}</VBtn></div>} />
             <SandboxBanner />
             {error.value ? <VAlert type="error" variant="tonal" class="mb-4">{error.value}</VAlert> : null}
             <StateView loading={loading.value} minHeight="180px">
                 <div class="d-flex flex-column ga-4">
-                    <SummaryExportCard title={t("Sandbox plane health")} metrics={metrics.value} exportLoading={exportLoading.value} exportLabel={t("Export summary")} onExport={() => void exportSummary()} />
+                    <SummaryExportCard title={t("Sandbox plane health")} metrics={metrics.value} checks={[...EXPORT_CHECKS]} checklist={exportChecklist.value} onUpdate:checklist={(value: Record<string, boolean>) => (exportChecklist.value = value)} showChecklists={showChecklists} checklistComplete={exportChecklistComplete.value} exportLoading={exportLoading.value} exportDisabled={!exportChecklistComplete.value} exportLabel={t("Export summary")} onExport={() => void exportSummary()} />
                     <div class="d-flex flex-wrap ga-4 align-start">
                         <SurfaceCard title={t("Execution plane")} style={{ flex: "1 1 400px" }}>
                             <DescriptionList columns={2} items={[
@@ -152,6 +200,15 @@ const AdminSandboxOverviewPage = dc(() => {
                     </FormField>
                     <p class="text-caption text-medium-emphasis">{t("This deletes sandbox wallets, applications, links, payments, disputes and Fake Rails test accounts. Live data is never touched.")}</p>
                 </SectionFields>
+                <FormChecklist
+                    checks={[...RESET_CHECKS]}
+                    modelValue={resetChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (resetChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Reset sandbox checklist")}
+                    complete={resetChecklistComplete.value}
+                    incompleteMessage={t("Complete all reset checklist items before continuing")}
+                />
             </FormModal>
         </ScreenContainer>
     );

@@ -156,7 +156,59 @@ BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/prod"
 BACKUP_ENCRYPTION_KEY_HEX="9f3a7c1e5b2d84f06a1c3e7b9d2f4a8c5e0b6d1a3f7c9e2b4d8a0c6e1f5b3a79"
 `));
     expect(result.ok).toBe(false);
-    expect(result.problems.join(" ")).toContain("BACKUP_PRIMARY_S3_ENDPOINT must be an absolute http(s) URL");
+    expect(result.problems.join(" ")).toContain("BACKUP_PRIMARY_S3_ENDPOINT: must be empty or an http(s) URL");
+  });
+
+  test("backup S3 and MinIO inputs reject shell metacharacters", () => {
+    const badEndpoint = loadDeployConfig(withOverrides(`
+BACKUP_ENABLED="true"
+BACKUP_PRIMARY_S3_ENDPOINT="http://minio.local/$(id)"
+BACKUP_PRIMARY_S3_BUCKET="s3://payment-gateway-backups/prod"
+BACKUP_ENCRYPTION_KEY_HEX="9f3a7c1e5b2d84f06a1c3e7b9d2f4a8c5e0b6d1a3f7c9e2b4d8a0c6e1f5b3a79"
+`));
+    expect(badEndpoint.ok).toBe(false);
+    const badVersion = loadDeployConfig(withOverrides(`
+BACKUP_ENABLED="true"
+BACKUP_ENGINE_MODE="pg-native"
+BACKUP_MINIO_VERSION="latest;id"
+BACKUP_ENCRYPTION_KEY_HEX="9f3a7c1e5b2d84f06a1c3e7b9d2f4a8c5e0b6d1a3f7c9e2b4d8a0c6e1f5b3a79"
+`));
+    expect(badVersion.ok).toBe(false);
+  });
+
+  test("system paths with trailing slashes or dot segments are rejected", () => {
+    for (const dir of ["/etc/", "/etc/.", "/usr/", "/var/log"]) {
+      const result = loadDeployConfig(withOverrides(`
+BACKUP_ENABLED="true"
+BACKUP_S3_MODE="managed-minio"
+BACKUP_MINIO_DATA_DIR="${dir}"
+BACKUP_ENCRYPTION_KEY_HEX="9f3a7c1e5b2d84f06a1c3e7b9d2f4a8c5e0b6d1a3f7c9e2b4d8a0c6e1f5b3a79"
+`));
+      expect(result.ok).toBe(false);
+    }
+  });
+
+  test("insecure backup HTTP is rejected in production even without object storage", () => {
+    const result = loadDeployConfig(withOverrides(`
+DEPLOY_ENV="production"
+BACKUP_ENABLED="true"
+BACKUP_ALLOW_INSECURE_HTTP="true"
+BACKUP_ENCRYPTION_KEY_HEX="9f3a7c1e5b2d84f06a1c3e7b9d2f4a8c5e0b6d1a3f7c9e2b4d8a0c6e1f5b3a79"
+`));
+    expect(result.ok).toBe(false);
+    expect(result.problems.join(" ")).toContain("BACKUP_ALLOW_INSECURE_HTTP");
+  });
+
+  test("certificate directories are compared after normalization", () => {
+    const result = loadDeployConfig(withOverrides(`
+BACKUP_DAEMON_CERT_DIR="/var/lib/pg-backup/shared/./certs"
+OBJECT_STORAGE_DAEMON_CERT_DIR="/var/lib/pg-backup/shared/certs"
+`));
+    expect(result.ok).toBe(false);
+  });
+
+  test("the default Bun pin is a lockfile-compatible 1.4 release", () => {
+    expect(requireConfig(BASE).BUN_VERSION).toMatch(/^1\.4\./);
   });
 
   test("backup without an encryption key is always rejected; S3 is required only by the engines that need it", () => {

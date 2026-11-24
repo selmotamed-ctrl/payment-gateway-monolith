@@ -3,7 +3,7 @@ id: platform.overview
 title: Platform Overview
 status: partial
 confidence: high
-last_verified: 2026-11-05
+last_verified: 2026-11-24
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/index.ts
@@ -114,7 +114,7 @@ The product scope implemented in code includes:
 
 - Payment links with single-use and multi-use slots, link cancellation, visible rails and fee breakdowns.
 - A universal rail engine with seven runtime phases, a separate credential-check phase, 39 transforms, crypto profiles and a scoped SSRF guard.
-- A PostgreSQL 18 schema with 76 models and 105 enums at schema version 11, and eight migrations: baseline, storage engine, CQRS read models, storage hardening, DB read/write optimisation, MFA challenges, append-only ledger guards and statement source/file-hash uniqueness.
+- A PostgreSQL 18 schema with 119 models at schema version 44, and the full migration chain from the baseline through ledger sharding, automation, compliance reporting, object storage, route health and opaque Academy certificates.
 - A double-entry ledger, 17 `LedgerScenario` values and 11 GL account types, with sharded system GL accounts.
 - Merchant onboarding, KYB documents, beneficial owners, screening, AML rules/cases, regulatory reports, disputes, adjustments, cash-outs and reconciliation.
 - Admin and merchant authentication with password login, optional MFA challenge, session JWTs and merchant `pg_live_` API tokens.
@@ -140,7 +140,7 @@ The platform-level non-negotiables are:
 7. **Atomic critical writes.** The ledger, outbox and audit outbox are written in one transaction on the critical path; the storage engine's `UnitOfWork` owns the commit LSN.
 8. **Secrets and confidential data never reach logs.** Vault redaction covers sensitive field names, literal decrypted secrets and Luhn-valid PANs. Edge services never receive the KMS key or database credentials.
 9. **Bilingual catalogues stay in sync.** User-facing text is maintained in English and Arabic.
-10. **Deploy-time UI flags are runtime-controlled.** The deploy engine writes `showChecklists`/`showSnapshotExportChecklist` and `showHelpPanels` into the admin runtime config and injects the matching `VITE_*` build constants; source builds fall back to the documented defaults.
+10. **Deploy-time UI flags are runtime-controlled.** The deploy engine writes `showChecklists`/`showSnapshotExportChecklist`, `showHelpPanels` and the public `academyCertificateVerifyUrl` into the admin runtime config and injects the matching `VITE_*` build constants; source builds fall back to the documented defaults.
 
 ## 5. Data / API / config / deployment surface
 
@@ -187,7 +187,7 @@ Production operation uses `deploy/deploy.ts` with `deploy/deploy.env`. The engin
 ### Implemented
 
 - Seven-service split with database exclusivity and mTLS channel binding.
-- PostgreSQL 18 storage engine, schema version 11, migrations, replica reads, Redis cache/velocity, audit and log adapters.
+- PostgreSQL 18 storage engine, schema version 44, migrations, replica reads, Redis cache/velocity, audit and log adapters.
 - Dynamic rail engine, transform library, crypto profiles, visible-rails formula and the core API namespaces.
 - Merchant onboarding, KYB, AML, disputes, adjustments, cash-outs, reconciliation and ledger scenarios.
 - Admin back office and merchant portal foundations, hosted checkout, and optional Fake Rails.

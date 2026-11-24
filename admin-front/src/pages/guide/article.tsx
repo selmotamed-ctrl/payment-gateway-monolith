@@ -44,6 +44,7 @@ export const AdminGuideArticlePage = defineComponent({
         const loading = ref(true);
         const saving = ref(false);
         const copied = ref(false);
+        const linkCopied = ref(false);
         const startedAt = ref(Date.now());
         let autoMarked = false;
 
@@ -98,7 +99,7 @@ export const AdminGuideArticlePage = defineComponent({
                 .map((id) => articles.value.find((entry) => entry.id === id))
                 .filter((entry): entry is Article => Boolean(entry)),
         );
-        const read = computed(() => progress.isRead(articleId.value));
+        const read = computed(() => progress.isRead(articleId.value, contentVersion.value || undefined));
         const arabicReady = hasArabicArticles();
 
         watch(
@@ -131,6 +132,16 @@ export const AdminGuideArticlePage = defineComponent({
             if (!atBottom) return;
             autoMarked = true;
             void toggleRead(true);
+        };
+
+        const copyArticleLink = async () => {
+            try {
+                await navigator.clipboard.writeText(window.location.href);
+                linkCopied.value = true;
+                window.setTimeout(() => (linkCopied.value = false), 2500);
+            } catch {
+                linkCopied.value = false;
+            }
         };
 
         const reportProblem = async () => {
@@ -168,6 +179,9 @@ export const AdminGuideArticlePage = defineComponent({
                                     <span class="guide-content-version">
                                         {L("Version", "الإصدار")} {contentVersion.value}
                                     </span>
+                                    <button type="button" class="guide-secondary-button" onClick={() => void copyArticleLink()}>
+                                        {linkCopied.value ? L("Link copied", "تم نسخ الرابط") : L("Copy link", "نسخ الرابط")}
+                                    </button>
                                     <button type="button" class="guide-secondary-button" onClick={() => void reportProblem()}>
                                         {copied.value ? L("Copied", "تم النسخ") : L("Report a problem", "أبلغ عن مشكلة")}
                                     </button>
@@ -202,7 +216,7 @@ export const AdminGuideArticlePage = defineComponent({
                                     {bookArticles.value.map((entry) => (
                                         <li key={entry.id} class={entry.id === article.value?.id ? "is-current" : ""}>
                                             <RouterLink to={{ name: "AdminGuideArticle", params: { articleId: entry.id } }}>
-                                                {progress.isRead(entry.id) ? "✓ " : ""}
+                                                {progress.isRead(entry.id, contentVersion.value || undefined) ? "✓ " : ""}
                                                 {entry.title}
                                             </RouterLink>
                                         </li>

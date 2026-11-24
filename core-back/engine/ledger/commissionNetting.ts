@@ -63,8 +63,8 @@ export interface CommissionNettingStore {
   listReceivables(db: Any, input: { agingCutoff: Date; limit: number }): Promise<ReceivableBucket[]>;
   /** The receivable of one merchant on one receivable account, or on every account of `currency`. */
   receivablesOf(tx: Any, merchantId: string, filter: { receivableAccountId?: string; currency?: string }): Promise<Array<{ receivableAccountId: string; currency: string; receivable: Decimal }>>;
-  /** The merchant's total receivable (what the PAUSE guard compares with the ceiling). */
-  merchantReceivable(db: Any, merchantId: string): Promise<Decimal>;
+  /** The merchant's total receivable, optionally for one currency (what the PAUSE guard compares with the ceiling). */
+  merchantReceivable(db: Any, merchantId: string, currency?: string | null): Promise<Decimal>;
   merchantCeiling(db: Any, merchantId: string): Promise<{ ceiling: Decimal | null; status: string } | null>;
   /** The merchant's wallet in `currency` (the oldest one when several exist). */
   findWallet(tx: Any, merchantId: string, currency: string): Promise<NettingWallet | null>;
@@ -374,10 +374,14 @@ export const prismaCommissionNettingStore: CommissionNettingStore = {
     return rows.map((row) => ({ receivableAccountId: row.account_id, currency: String(row.currency).trim(), receivable: dec(row.receivable) }));
   },
 
-  async merchantReceivable(db, merchantId) {
+  async merchantReceivable(db, merchantId, currency) {
     const rows = (await db.$queryRawUnsafe(
-      `WITH movement AS (${movementSql("$1")}) SELECT COALESCE(SUM(delta), 0)::text AS receivable FROM movement`,
+      `WITH movement AS (${movementSql("$1")})
+       SELECT COALESCE(SUM(delta), 0)::text AS receivable
+       FROM movement
+       WHERE ($2::text IS NULL OR trim(currency) = $2::text)`,
       merchantId,
+      currency ?? null,
     )) as Array<{ receivable: string }>;
     return dec(rows[0]?.receivable);
   },

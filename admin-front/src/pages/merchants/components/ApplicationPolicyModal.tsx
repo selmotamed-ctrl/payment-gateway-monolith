@@ -5,6 +5,8 @@ import { api } from "@/state/api";
 import { urlsMap } from "@/constants/urlsMap";
 import { FormField } from "@/components/ui/FormField";
 import { MetaPill } from "@/components/ui/MetaPill";
+import { FormChecklist } from "@/components/ui/FormChecklist";
+import { areChecklistsVisible } from "@/constants/env";
 import { createOptionsLoader } from "@/components/Table/referenceOptions";
 import {
     addRedirectDomains,
@@ -34,6 +36,13 @@ type WalletChoice = { id: string; currency: string; status: string };
 
 const railOptions = createOptionsLoader("rails");
 
+const POLICY_CHECKS = [
+    { key: "ENTITY_SCOPE_VERIFIED", label: "Application and settlement wallet scope verified" },
+    { key: "ACCESS_IMPACT_REVIEWED", label: "Rail and redirect-domain impact reviewed" },
+    { key: "REASON_CONFIRMED", label: "Reason confirmed" },
+    { key: "AUTHORITY_CONFIRMED", label: "Authority to change access confirmed" },
+] as const;
+
 /**
  * Policy edit (rail whitelist, redirect domains, settlement wallet). Every
  * change here widens or alters what the application may accept, so it is ALWAYS
@@ -58,6 +67,9 @@ export const ApplicationPolicyModal = defineComponent({
         const wallets = ref<WalletChoice[]>([]);
         const submitting = ref(false);
         const errorMessage = ref("");
+        const showChecklists = areChecklistsVisible();
+        const policyChecklist = ref<Record<string, boolean>>({});
+        const policyChecklistComplete = computed(() => !showChecklists || POLICY_CHECKS.every((check) => policyChecklist.value[check.key] === true));
 
         const domainsRestricted = computed(() => props.application?.redactedFields.includes("redirectDomains") ?? false);
 
@@ -69,6 +81,7 @@ export const ApplicationPolicyModal = defineComponent({
             domainInput.value = "";
             domainErrors.value = [];
             errorMessage.value = "";
+            policyChecklist.value = {};
             rails.value = railChoices([], application.railWhitelist ?? []);
             wallets.value = [{ ...application.assignedWallet }];
             try {
@@ -124,11 +137,16 @@ export const ApplicationPolicyModal = defineComponent({
                 errorMessage.value = t(built.error);
                 return;
             }
+            if (!policyChecklistComplete.value) {
+                errorMessage.value = t("Complete all policy checklist items before submitting");
+                return;
+            }
             submitting.value = true;
             errorMessage.value = "";
             try {
                 const patch: PolicyPatch = built.patch;
-                const outcome = await runGoverned(() => api.patch(urlsMap.applicationDetail(application.id), { ...patch, reason }));
+                const checklist = POLICY_CHECKS.filter((check) => policyChecklist.value[check.key]).map((check) => check.key);
+                const outcome = await runGoverned(() => api.patch(urlsMap.applicationDetail(application.id), { ...patch, reason, checklist }));
                 notifyOutcome(outcome, "Application updated");
                 emit("update:modelValue", false);
                 emit("submitted", outcome);
@@ -151,6 +169,15 @@ export const ApplicationPolicyModal = defineComponent({
                 errorMessage={errorMessage.value}
                 onSubmit={(reason: string) => void submit(reason)}
             >
+                <FormChecklist
+                    checks={[...POLICY_CHECKS]}
+                    modelValue={policyChecklist.value}
+                    onUpdate:modelValue={(value: Record<string, boolean>) => (policyChecklist.value = value)}
+                    show={showChecklists}
+                    title={t("Application policy checklist")}
+                    complete={policyChecklistComplete.value}
+                    incompleteMessage={t("Complete all policy checklist items before submitting")}
+                />
                 <FormField label={t("Settlement wallet")} hint={t("Only active wallets of this merchant in the same currency.")}>
                     <VSelect
                         modelValue={walletId.value}
