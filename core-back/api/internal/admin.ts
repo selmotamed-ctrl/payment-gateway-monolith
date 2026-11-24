@@ -18846,6 +18846,11 @@ const buildProfitabilitySnapshot = async (rawQuery: Request["query"]) => {
       routeId: true,
     },
   });
+  const currencyAggregates = await client.paymentAttempt.groupBy({
+    by: ["currency"],
+    where: { createdAt: until ? { gte: since, lte: until } : { gte: since } },
+    _sum: { totalChargedAmount: true, platformCommissionAmount: true, gatewayFeeAmount: true, netMerchantAmount: true },
+  });
   const railCodes = new Map((await client.rail.findMany({ select: { id: true, code: true } })).map((rail) => [rail.id, rail.code]));
   const routeGateways = new Map(
     (await client.railRoute.findMany({ select: { id: true, gatewayId: true } })).map((route) => [route.id, route.gatewayId]),
@@ -18948,6 +18953,18 @@ const buildProfitabilitySnapshot = async (rawQuery: Request["query"]) => {
   return {
     period,
     currency: requestedCurrency,
+    byCurrency: currencyAggregates.map((row) => {
+      const volume = decimal(row._sum.totalChargedAmount ?? 0);
+      const gross = decimal(row._sum.platformCommissionAmount ?? 0);
+      const cost = decimal(row._sum.gatewayFeeAmount ?? 0);
+      return {
+        currency: row.currency,
+        volume: volume.toFixed(4),
+        grossCommissionRevenue: gross.toFixed(4),
+        gatewayCost: cost.toFixed(4),
+        netContribution: gross.minus(cost).toFixed(4),
+      };
+    }),
     windowDays,
     windowStart: since.toISOString(),
     windowEnd: windowEnd.toISOString(),
@@ -19082,10 +19099,31 @@ const buildLiquiditySnapshot = async (currency: string) => {
   const walletObligations = creditPositive("MERCHANT_WALLET");
   const coverRatio = clearing.isZero() ? decimal(1) : treasury.div(clearing);
 
-  const cashouts = await client.cashoutRequest.findMany({
-    where: { wallet: { currency } },
-    select: { state: true, amount: true, createdAt: true },
+  const allLive = await loadLiveAccountBalances(client as never);
+  const balanceByCurrency = new Map<string, { treasury: Decimal; clearing: Decimal; obligations: Decimal }>();
+  for (const row of allLive) {
+    const entry = balanceByCurrency.get(row.currency) ?? { treasury: decimal(0), clearing: decimal(0), obligations: decimal(0) };
+    if (row.accountType === "TREASURY") entry.treasury = entry.treasury.plus(decimal(row.balance));
+    if (row.accountType === "GATEWAY_CLEARING") entry.clearing = entry.clearing.plus(decimal(row.balance));
+    if (row.accountType === "MERCHANT_WALLET") entry.obligations = entry.obligations.plus(decimal(row.balance));
+    balanceByCurrency.set(row.currency, entry);
+  }
+  const allCashouts = await client.cashoutRequest.findMany({
+    select: { state: true, amount: true, createdAt: true, wallet: { select: { currency: true } } },
   });
+  const cashouts = allCashouts.filter((cashout) => cashout.wallet.currency === currency);
+  const cashoutByCurrency = new Map<string, { pending: number; processing: number; nextDayDemand: Decimal }>();
+  const tomorrowAll = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  for (const cashout of allCashouts) {
+    const code = cashout.wallet.currency;
+    const entry = cashoutByCurrency.get(code) ?? { pending: 0, processing: 0, nextDayDemand: decimal(0) };
+    if (cashout.state === "PENDING") entry.pending += 1;
+    if (cashout.state === "PROCESSING") entry.processing += 1;
+    if (cashout.createdAt <= tomorrowAll && (cashout.state === "PENDING" || cashout.state === "PROCESSING")) {
+      entry.nextDayDemand = entry.nextDayDemand.plus(decimal(cashout.amount));
+    }
+    cashoutByCurrency.set(code, entry);
+  }
   const pending = cashouts.filter((cashout) => cashout.state === "PENDING");
   const processing = cashouts.filter((cashout) => cashout.state === "PROCESSING");
   const completed = cashouts.filter((cashout) => cashout.state === "COMPLETE" || cashout.state === "SUBTRACTED");
@@ -19195,8 +19233,23 @@ const buildLiquiditySnapshot = async (currency: string) => {
     };
   };
 
+  const byCurrency = new Set([...balanceByCurrency.keys(), ...cashoutByCurrency.keys()]);
   return {
     currency,
+    byCurrency: [...byCurrency].sort().map((code) => {
+      const balance = balanceByCurrency.get(code) ?? { treasury: decimal(0), clearing: decimal(0), obligations: decimal(0) };
+      const queue = cashoutByCurrency.get(code) ?? { pending: 0, processing: 0, nextDayDemand: decimal(0) };
+      return {
+        currency: code,
+        treasuryBalance: balance.treasury.toFixed(4),
+        clearingBalances: balance.clearing.toFixed(4),
+        obligations: balance.obligations.toFixed(4),
+        coverRatio: balance.clearing.isZero() ? decimal(1).toFixed(4) : balance.treasury.div(balance.clearing).toFixed(4),
+        pending: queue.pending,
+        processing: queue.processing,
+        nextDayDemand: queue.nextDayDemand.toFixed(4),
+      };
+    }),
     checkedAt: new Date().toISOString(),
     treasuryBalance: treasury.toFixed(4),
     clearingBalances: clearing.toFixed(4),
