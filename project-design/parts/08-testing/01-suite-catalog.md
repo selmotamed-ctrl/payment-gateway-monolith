@@ -566,7 +566,7 @@ These are development/CI tests only; no production-time test job or test endpoin
 
 ## v39 Sandbox Studio and mirror suites (2026-11-13)
 
-- `core-back/test/sandboxPlane.test.ts` now runs the schema-local fence functions and passes on v39; `core-back/test/phase1-mtls-and-schema.test.ts` expects `20261124150000_currency_context_and_aggregates` as the newest migration and schema version 44.
+- `core-back/test/sandboxPlane.test.ts` now runs the schema-local fence functions and passes on v39; `core-back/test/phase1-mtls-and-schema.test.ts` expects `20261124170000_attempt_wallet_snapshot` as the newest migration and schema version 45.
 - `fake-rails-back/test/accountsAndInspector.test.ts` and `test/api.test.ts` cover merchant-owned account copies, daily business-date reset, hold expiry, capture variance guards, clearing references and statement inclusion.
 - `merchant-back/test/sandbox-proxy.test.ts` covers control routes (`overview`, `seed-demo`, `studio/*`, wallet/payment detail, refund, reconciliation), Live-router resource lists/creates, Fake Rails control routes and `pg_test_` external tokens. `merchant-back/test/sandbox-routing.test.ts` covers the fail-closed pool.
 - `admin-back/test/sandbox-routing.test.ts` also asserts the Studio path mapping for `/merchants`, `/merchants/summary`, merchant detail and `/audits` so the admin control center cannot silently fall back to the Live namespace.

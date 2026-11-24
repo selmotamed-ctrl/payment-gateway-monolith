@@ -2214,6 +2214,9 @@ model PaymentAttempt {
   netMerchantAmount        Decimal                @default(0) @map("net_merchant_amount") @db.Decimal(18, 4)
   feeBearer                FeeBearer              @map("fee_bearer")
   settlementTarget         SettlementTarget       @default(PLATFORM_CLEARING) @map("settlement_target")
+  /// The settlement wallet snapshotted at attempt creation. Historical attempts may be null.
+  walletId                 String?                @map("wallet_id") @db.Uuid
+  walletGlAccountId        String?                @map("wallet_gl_account_id") @db.Uuid
   currency                 String                 @db.Char(3)
   customerFieldsMasked     Json                   @map("customer_fields_masked")
   publicOutputs            Json?                  @map("public_outputs")
@@ -2260,6 +2263,7 @@ model PaymentAttempt {
   // merchantId lookups are served by [merchantId, createdAt]; the
   // single-column merchantId index was a redundant prefix and was dropped.
   @@index([status, nextCheckAt])
+  @@index([walletId])
   @@index([gatewayVersionId])
   // The daily volume aggregate of the rail resolution groups the succeeded
   // attempts by route, so the pair is indexed.

@@ -488,3 +488,7 @@ Every currency-scoped account resolution requires a currency. `LedgerPostContext
 ## 17. Posting context and currency (2026-11-24)
 
 Every currency-scoped account resolution requires a currency. `LedgerPostContext` carries `currency` plus, for a gateway clearing account, `gatewayId`/`env`/`credentialSetId`. Missing context is a hard failure when `LEDGER_STRICT_CONTEXT=true` (the deploy engine sets it); otherwise the legacy platform-wide fallback remains. Settlement sweeps and fee variances now pass the full attempt/source context, and a USD/EUR posting never silently uses the first-created LYD account. `CASHOUT` carries the wallet currency so the treasury leg is correct. The append-only `(ref_type, ref_id)` idempotency key is unchanged; only the ref scheme for grouped batches and per-run fee variances changed, with legacy detection.
+
+### 17.1 Attempt wallet snapshot (2026-11-24)
+
+`payment_attempts.wallet_id` and `wallet_gl_account_id` snapshot the link settlement wallet at creation and are backfilled from the link. Confirmation, refund and chargeback wallet selection use the snapshot when present, so a later wallet of the same currency cannot silently receive the booking. New links reject `LINK_WALLET_CURRENCY_MISMATCH`; historical links are not rewritten.

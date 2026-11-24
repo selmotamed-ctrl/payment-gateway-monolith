@@ -221,7 +221,7 @@ describe("prisma schema", () => {
     // The newest migration (schema version 43) adds the remaining append-only
     // guards for case events, shard repairs and storage histories. Version 42
     // added opaque Academy certificates and the report-run checklist.
-    expect(ordered.at(-1)).toBe("20261124150000_currency_context_and_aggregates");
+    expect(ordered.at(-1)).toBe("20261124170000_attempt_wallet_snapshot");
     expect(ordered).toContain("20261116130000_case_management_taxonomy");
     const caseTaxonomy = fs.readFileSync(path.join(migrationsDirectory, "20261116130000_case_management_taxonomy", "migration.sql"), "utf8");
     expect(caseTaxonomy).toContain('"operator_case_events"');
@@ -281,7 +281,7 @@ describe("prisma schema", () => {
     expect(guard).not.toContain("schema_versions");
     const newest = fs.readFileSync(path.join(migrationsDirectory, ordered.at(-1) as string, "migration.sql"), "utf8");
     expect(newest).toMatch(new RegExp(`UPDATE "schema_versions"\\s+SET "version" = ${REQUIRED_SCHEMA_VERSION}\\b`));
-    expect(REQUIRED_SCHEMA_VERSION).toBe(44);
+    expect(REQUIRED_SCHEMA_VERSION).toBe(45);
     for (const migration of postgresMigrations) {
       const sql = fs.readFileSync(
         path.join(migrationsDirectory, migration, "migration.sql"),

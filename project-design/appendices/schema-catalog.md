@@ -4,8 +4,8 @@
 
 - Models: **119**
 - Enums: **131**
-- Schema version: **44**
-- Migrations: **48**
+- Schema version: **45**
+- Migrations: **49**
 
 ## Models
 
@@ -313,3 +313,4 @@
 - `20261123100000_opaque_academy_certificates`
 - `20261124120000_append_only_case_and_storage_guards`
 - `20261124150000_currency_context_and_aggregates`
+- `20261124170000_attempt_wallet_snapshot`

@@ -35,6 +35,8 @@ export interface AttemptRow {
   routeId?: string;
   gatewayVersionId?: string;
   credentialSetId?: string;
+  walletId?: string | null;
+  walletGlAccountId?: string | null;
   commissionProfileId?: string;
   feeBearer?: string;
   gatewayId?: string;
@@ -140,6 +142,8 @@ const toAttempt = (row: AttemptRow): DynamicAttempt => {
     // has to carry it.
     gatewayId: row.gatewayVersion?.gateway?.id ?? row.gatewayId,
     credentialSetId: row.credentialSetId,
+    walletId: row.walletId ?? undefined,
+    walletGlAccountId: row.walletGlAccountId ?? undefined,
     commissionProfileId: row.commissionProfileId,
     feeBearer: row.feeBearer as DynamicAttempt["feeBearer"],
     platformCommissionAmount: row.platformCommissionAmount === undefined

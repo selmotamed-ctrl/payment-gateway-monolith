@@ -315,6 +315,8 @@ export interface PaymentAttemptRow {
   railId: string | null;
   routeId: string | null;
   credentialSetId: string | null;
+  walletId?: string | null;
+  walletGlAccountId?: string | null;
   gatewayVersionId: string | null;
   commissionProfileId: string | null;
   env: Environment;

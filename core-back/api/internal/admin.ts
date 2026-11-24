@@ -17377,8 +17377,9 @@ router.get("/disputes/export", async (request: Request, response: Response) => {
 const buildDisputeSummary = async (currency: string) => {
   const now = new Date();
   const soon = new Date(now.getTime() + 48 * 60 * 60 * 1000);
-  const [statusRows, openAggregate, overdue, dueSoon, earliestDue] = await Promise.all([
+  const [statusRows, currencyRows, openAggregate, overdue, dueSoon, earliestDue] = await Promise.all([
     client.dispute.groupBy({ by: ["status"], where: { currency }, _count: { _all: true } }),
+    client.dispute.groupBy({ by: ["currency"], _count: { _all: true }, _sum: { amount: true } }),
     client.dispute.aggregate({
       where: { currency, status: { in: [...DISPUTE_OPEN_STATUSES] as never } },
       _count: { _all: true },
@@ -17402,6 +17403,11 @@ const buildDisputeSummary = async (currency: string) => {
   const openAmount = (openAggregate._sum as { amount: unknown } | undefined)?.amount;
   return {
     currency,
+    byCurrency: currencyRows.map((row) => ({
+      currency: row.currency,
+      count: row._count._all,
+      amount: merchantMoney(row._sum.amount),
+    })),
     totalOpen: openCount,
     openAmount: merchantMoney(openAmount),
     byStatus,
@@ -17927,7 +17933,7 @@ router.get("/adjustments/export", async (request: Request, response: Response) =
 });
 
 const buildAdjustmentSummary = async (currency: string) => {
-  const [stateRows, typeRows, openAggregate, executedAggregate] = await Promise.all([
+  const [stateRows, typeRows, openAggregate, executedAggregate, currencyRows] = await Promise.all([
     client.adjustment.groupBy({ by: ["state"], where: { targetGlAccount: { currency } }, _count: { _all: true }, _sum: { amount: true } }),
     client.adjustment.groupBy({ by: ["type"], where: { targetGlAccount: { currency } }, _count: { _all: true }, _sum: { amount: true } }),
     client.adjustment.aggregate({
@@ -17940,6 +17946,16 @@ const buildAdjustmentSummary = async (currency: string) => {
       _count: { _all: true },
       _sum: { amount: true },
     }),
+    client.$queryRaw<Array<{ currency: string; count: number; amount: string }>>`
+      SELECT COALESCE(ga.currency, pa.currency)::text AS currency,
+             COUNT(*)::int AS count,
+             COALESCE(SUM(a.amount), 0)::text AS amount
+      FROM adjustments a
+      LEFT JOIN gl_accounts ga ON ga.id = a.target_gl_account_id
+      LEFT JOIN payment_attempts pa ON pa.id = a.source_attempt_id
+      GROUP BY 1
+      ORDER BY 1
+    `,
   ]);
   const byState: Record<string, number> = {};
   const amountByState: Record<string, string> = {};
@@ -17955,6 +17971,11 @@ const buildAdjustmentSummary = async (currency: string) => {
   }
   return {
     currency,
+    byCurrency: currencyRows.map((row) => ({
+      currency: row.currency,
+      count: Number(row.count),
+      amount: merchantMoney(row.amount),
+    })),
     totalOpen: (openAggregate._count as { _all: number })._all,
     openAmount: merchantMoney((openAggregate._sum as { amount?: unknown } | undefined)?.amount),
     executedCount: (executedAggregate._count as { _all: number })._all,
@@ -18219,8 +18240,15 @@ router.get("/cashouts/export", async (request: Request, response: Response) => {
 
 const buildCashoutSummary = async (currency: string) => {
   const now = new Date();
-  const [statusRows, openAggregate, oldestPending] = await Promise.all([
+  const [statusRows, currencyRows, openAggregate, oldestPending] = await Promise.all([
     client.cashoutRequest.groupBy({ by: ["state"], where: { wallet: { currency } }, _count: { _all: true }, _sum: { amount: true } }),
+    client.$queryRaw<Array<{ currency: string; count: number; amount: string }>>`
+      SELECT w.currency::text AS currency, COUNT(*)::int AS count, COALESCE(SUM(c.amount), 0)::text AS amount
+      FROM cashout_requests c
+      JOIN wallets w ON w.id = c.wallet_id
+      GROUP BY w.currency
+      ORDER BY w.currency
+    `,
     client.cashoutRequest.aggregate({
       where: { wallet: { currency }, state: { in: [...CASHOUT_OPEN_STATES] as never } },
       _count: { _all: true },
@@ -18240,6 +18268,11 @@ const buildCashoutSummary = async (currency: string) => {
   }
   return {
     currency,
+    byCurrency: currencyRows.map((row) => ({
+      currency: row.currency,
+      count: Number(row.count),
+      amount: merchantMoney(row.amount),
+    })),
     totalOpen: (openAggregate._count as { _all: number })._all,
     openAmount: merchantMoney((openAggregate._sum as { amount?: unknown } | undefined)?.amount),
     pendingCount: byState.PENDING ?? 0,

@@ -243,7 +243,7 @@ TCP + TLS 1.3 handshake (client cert required)
 1. Generate certs.
 2. Set `DATABASE_URL`.
 3. Apply migrations.
-4. Seed (this also checks schema version 44).
+4. Seed (this also checks schema version 45).
 5. `bun run start`.
 6. Probe `/health` over mTLS with a client cert.
 
@@ -1033,6 +1033,10 @@ Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/c
 
 Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/cashout summaries and route caps accept an optional `currency` (default `BASE_CURRENCY`, normally LYD). Existing scalar monetary fields mean the selected currency; responses add `currency`, `byCurrency` where the endpoint supports a breakdown, and `mixedCurrency`. A mixed total is never labelled as a single currency. Reconciliation source/upload accepts `currency`, `autoPost`, and optional source `env`/`credentialSetId`; upload metadata remains limited to checklist, period, currency and autoPost.
 
+### 20.1 Summary and sandbox currency breakdowns (2026-11-24)
+
+Dispute, adjustment and cash-out summaries return a `byCurrency` array in addition to selected-currency scalars. Sandbox overview, payments summary and links summary accept `currency` and return `byCurrency`; sandbox money is never a cross-currency scalar.
+
 ## Core Engine
 
 > Status: `partial` · Last verified: 2026-11-13
@@ -1676,6 +1680,8 @@ OD-10 and `resolveEnvironment(merchantStatus)` are removed. Checkout and merchan
 
 - **Link currency integrity (2026-11-24).** A new payment link is rejected with `LINK_WALLET_CURRENCY_MISMATCH` when its currency differs from the settlement wallet currency. Existing links are not rewritten; the attempt still resolves the wallet by merchant+currency, so a historical mismatch is a residual.
 
+- **Attempt wallet snapshot (2026-11-24).** Each attempt records the link wallet and its GL account; refunds/chargebacks use that snapshot. New links reject a wallet/currency mismatch.
+
 ## Double-Entry Ledger
 
 > Status: `partial` · Last verified: 2026-11-09
@@ -2103,6 +2109,10 @@ Every currency-scoped account resolution requires a currency. `LedgerPostContext
 ## 17. Posting context and currency (2026-11-24)
 
 Every currency-scoped account resolution requires a currency. `LedgerPostContext` carries `currency` plus, for a gateway clearing account, `gatewayId`/`env`/`credentialSetId`. Missing context is a hard failure when `LEDGER_STRICT_CONTEXT=true` (the deploy engine sets it); otherwise the legacy platform-wide fallback remains. Settlement sweeps and fee variances now pass the full attempt/source context, and a USD/EUR posting never silently uses the first-created LYD account. `CASHOUT` carries the wallet currency so the treasury leg is correct. The append-only `(ref_type, ref_id)` idempotency key is unchanged; only the ref scheme for grouped batches and per-run fee variances changed, with legacy detection.
+
+### 17.1 Attempt wallet snapshot (2026-11-24)
+
+`payment_attempts.wallet_id` and `wallet_gl_account_id` snapshot the link settlement wallet at creation and are backfilled from the link. Confirmation, refund and chargeback wallet selection use the snapshot when present, so a later wallet of the same currency cannot silently receive the booking. New links reject `LINK_WALLET_CURRENCY_MISMATCH`; historical links are not rewritten.
 
 ## Governance and Compliance
 
@@ -3006,6 +3016,10 @@ See `core.route-health`.
 
 `RECONCILIATION_RUN` persists the statement currency and `autoPost` flag and copies the matched attempt context (currency, gateway, env, credential set) onto each item. Settlement sweeps group by `(batch, gateway, env, credential set, currency)`, post with the full `LedgerPostContext`, and skip an unresolved item instead of choosing an arbitrary account. `autoPost=false` suppresses sweeps with an audit trail. Fee variances carry the attempt context and use a per-run ref when a run id is available, with legacy-key compatibility. Statement chargebacks use the item/attempt currency, never a hard-coded LYD.
 
+### 20.1 PSP-M currency grouping and historical audit (2026-11-24)
+
+PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and the XLSX sheets carry a Currency column. `bun run currency:mismatch-report` is read-only: it lists settlement/fee-variance/cash-out journal entries whose GL account currencies differ from the business object and never edits the append-only ledger. Corrections go through the approved adjustment workflow.
+
 ## Storage Engine
 
 > Status: `partial` · Last verified: 2026-11-13
@@ -3506,7 +3520,7 @@ It covers:
 
 - `core-back/prisma/schema.prisma` — 79 Prisma models and 105 enums;
 - `core-back/prisma/migrations/**` — the committed migration history (the generated migration catalog is authoritative);
-- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 44 and the seeders' version guard;
+- `core-back/prisma/schemaVersion.ts` and `core-back/prisma/client/index.ts` — schema version 45 and the seeders' version guard;
 - `core-back/prisma/migrateDev/index.ts` — the migration creation/adoption workflow;
 - `core-back/prisma/seed.ts`, `seedBlueprints.ts`, `seedGlAccounts.ts`, `seedGuides.ts` and `seedFakeRails.ts` — deterministic baseline data;
 - `core-back/prisma/syntheticSeeder/**` — the optional multi-year synthetic history (documented separately in `core.seeder`).
@@ -3527,7 +3541,7 @@ The historical design treats PostgreSQL 18 as the only runtime database and the 
 
 The blueprint's stale counts are corrected here:
 
-- the schema is not the historical 64 models and 100 enums; it is 119 models at schema version 44;
+- the schema is not the historical 64 models and 100 enums; it is 119 models at schema version 45;
 - the schema version is 44, not 5 or 6;
 - there is not one migration that creates shards, outboxes and all tables. The baseline creates the tables, the storage migration adds indexes, the CQRS migration adds read models, and the hardening migration adds partitions, checks and search indexes;
 - `rm_merchant_dashboard_stats` and `rm_wallet_statements` do not exist. The actual read models are `rm_merchant_daily_stats` and `rm_route_daily_volumes`.
@@ -3561,7 +3575,7 @@ The models are grouped by domain:
 
 ### 3.2 Schema version
 
-`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 44`.
+`core-back/prisma/schemaVersion.ts` exports `REQUIRED_SCHEMA_VERSION = 45`.
 
 `core-back/prisma/client/index.ts:17-37` implements `ensureSchemaVersion()`:
 
@@ -3582,7 +3596,7 @@ installs the two append-only guard triggers. See
 
 ### 3.3 Migration history
 
-The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261124150000_currency_context_and_aggregates`, schema version 44). The original four migrations are:
+The committed migration history is generated in `project-design/appendices/migration-catalog.md` (authoritative; it now ends with `20261124170000_attempt_wallet_snapshot`, schema version 45). The original four migrations are:
 
 | Migration | Purpose |
 | :--- | :--- |
@@ -3877,7 +3891,7 @@ The exhaustive schema suites require a reachable PostgreSQL test database (`data
 
 ## 11. Security hardening (2026-11-05)
 
-The current schema version is 44 (`REQUIRED_SCHEMA_VERSION = 44`; model count 119). The schema migrations since version 10 are:
+The current schema version is 44 (`REQUIRED_SCHEMA_VERSION = 45`; model count 119). The schema migrations since version 10 are:
 
 - `20261104120000_mfa_challenges` (version 10):
   - creates `mfa_challenges` (opaque UUID id, HMAC of the code, channel, attempt counter, expiry, single-use state);
@@ -3898,6 +3912,7 @@ The current schema version is 44 (`REQUIRED_SCHEMA_VERSION = 44`; model count 11
 - `20261116090000_merchant_chrome_tenant_integrity` (version 40, no new table; it runs before the version 41/42 migrations): (1) `merchant_report_chrome_specs` referenced an asset bundle by id only and its `merchant_id` was not a foreign key, the gap `20261111090000` closed for merchant report specs. It now has the composite foreign key `(asset_bundle_id, merchant_id)` onto `merchant_report_asset_bundles (id, merchant_id)` (`ON DELETE SET NULL (asset_bundle_id)`, MATCH SIMPLE) and `merchant_id` references `merchants`. (2) **One schema version after the branch merges.** The branches numbered their migrations independently: `20261111090000` = 34 and `20261112090000` = 35 (`claude-fixes`), `20261111120000` = 34 and `20261111130000` = 35 (plan branch), `20261112000000` = 36, `20261113090000` = 37, `20261113120000` = 38 and `20261114090000` = 39 (`master`). None is edited, because each may already be applied somewhere; `prisma migrate deploy` applies whatever is missing in name order, so the value they leave behind depends on which branch a database saw first (a database that followed `master` to 39 and then receives the `claude-fixes` migrations would be left at 35). This migration is new to every database, runs last and sets 40. It was first written as `20261112100000` with version 36 when only the plan branch had been merged; that name was never pushed or deployed and was renamed on 2026-11-16 so that it also runs after `master`'s migrations. Rehearsed through `prisma migrate deploy` on embedded PostgreSQL in three histories (fresh, `master` first, `claude-fixes` first) and applied from empty on PostgreSQL 18.6: each ends at 40 with the three foreign keys on the chrome table. It fails with a foreign-key error on a database where a merchant header or footer already uses another merchant's asset bundle: fix the row first.
 - `20261116120000_route_health_automation` (version 40, from `master`): route health and the circuit breaker: `rail_routes` health computed/override columns, first-terminal and first-unknown markers on `payment_attempts`, `route_health_events` and `route_health_probes`, a trigger that keeps the markers current, and a unique `(route_id, window_start)` on `gateway_health_samples`. Owned by `core.route-health`.
 - `20261116130000_schema_version_agreement` (version 41, no structure): the agreed version after both 40s. Runs last, so a database at 41 has both `20261116090000` and `20261116120000` applied.
+- `20261124170000_attempt_wallet_snapshot` (version 45): adds nullable `payment_attempts.wallet_id`/`wallet_gl_account_id`, backfills them from the link wallet, and uses the snapshot for confirmation/refund/chargeback wallet selection so a later same-currency wallet cannot silently take the booking.
 - `20261124150000_currency_context_and_aggregates` (version 44): adds nullable reconciliation context (`reconciliation_runs.currency/auto_post`, `reconciliation_items.currency/gateway_id/env/credential_set_id`, `statement_sources.currency/env/credential_set_id`) and backfills matched items from their attempts/routes. Settlement sweeps and fee variances post with the full currency/gateway/env/credential context; the ledger guard fails closed on a missing currency where enabled.
 - `20261124120000_append_only_case_and_storage_guards` (version 43): adds the remaining append-only history guards for `operator_case_events`, `gl_shard_repairs`, `storage_object_access_logs`, `audit_chain_anchors` and a TRUNCATE guard on `storage_objects`; the bypass requires both `pgw.append_only_maintenance` and a superuser/migration-role membership. See `core.governance` and `core.object-storage`.
 - `20261123100000_opaque_academy_certificates` (version 42): adds `AcademyCertificateStatus` and `academy_certificates` (opaque `public_id`, short `display_id`, user/track/badge snapshot, earned/expiry, content version, status, revocation fields; unique `(user_id, track_id, earned_at)`), backfills current per-user badges from `academy_progress_json`, adds `report_execution_audit.checklist_json`, and adds the partial MFA-notification suppression index. Public certificate verification reads this table; user deletion cascades, recertification supersedes, and revocation is explicit.
@@ -4754,7 +4769,7 @@ The scratch clusters use `--auth=trust` and listen only on loopback. The drill d
 - For a policy change, submit without an approval id, then have a different `security:write` user submit with the returned id.
 - Watch `archiveLagSeconds` against `BACKUP_ALERT_LAG_SECONDS`. A non-zero lag with a healthy bucket usually means archive_command, credentials or the archive process is failing.
 - Inspect `backup_catalog_runs` and `backup_restore_drills` for the local copy and the daemon catalog for the in-process view. A failed drill's three checks identify double-entry, parity or audit-chain failure.
-- After a real restore, verify schema version 44, the ledger invariant, shard parity and audit chain.
+- After a real restore, verify schema version 45, the ledger invariant, shard parity and audit chain.
 - Do not rely on policy `fullRetentionDays` for WAL-G pruning; WAL-G uses `BACKUP_RETENTION_FULL_COUNT` and Barman uses its server-side policy.
 
 ## 7. Status and deviations

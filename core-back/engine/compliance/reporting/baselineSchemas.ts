@@ -150,19 +150,19 @@ const pspM = xlsx([
   {
     name: "Refunds",
     order: 2,
-    columns: columns(["key", "State", "string", true], ["count", "Count", "number"], ["amount", "Amount", "string"]),
+    columns: columns(["key", "State", "string", true], ["currency", "Currency", "string"], ["count", "Count", "number"], ["amount", "Amount", "string"]),
     rows: { repeatOver: "aggregates.refundsRows" },
   },
   {
     name: "Disputes opened",
     order: 3,
-    columns: columns(["key", "Status", "string", true], ["count", "Count", "number"], ["amount", "Amount", "string"]),
+    columns: columns(["key", "Status", "string", true], ["currency", "Currency", "string"], ["count", "Count", "number"], ["amount", "Amount", "string"]),
     rows: { repeatOver: "aggregates.disputesOpenedRows" },
   },
   {
     name: "Cash-outs",
     order: 4,
-    columns: columns(["key", "State", "string", true], ["count", "Count", "number"], ["amount", "Amount", "string"]),
+    columns: columns(["key", "State", "string", true], ["currency", "Currency", "string"], ["count", "Count", "number"], ["amount", "Amount", "string"]),
     rows: { repeatOver: "aggregates.cashoutsRows" },
   },
   {

@@ -554,3 +554,7 @@ See `core.route-health`.
 ## 20. Reconciliation settlement context (2026-11-24)
 
 `RECONCILIATION_RUN` persists the statement currency and `autoPost` flag and copies the matched attempt context (currency, gateway, env, credential set) onto each item. Settlement sweeps group by `(batch, gateway, env, credential set, currency)`, post with the full `LedgerPostContext`, and skip an unresolved item instead of choosing an arbitrary account. `autoPost=false` suppresses sweeps with an audit trail. Fee variances carry the attempt context and use a per-run ref when a run id is available, with legacy-key compatibility. Statement chargebacks use the item/attempt currency, never a hard-coded LYD.
+
+### 20.1 PSP-M currency grouping and historical audit (2026-11-24)
+
+PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and the XLSX sheets carry a Currency column. `bun run currency:mismatch-report` is read-only: it lists settlement/fee-variance/cash-out journal entries whose GL account currencies differ from the business object and never edits the append-only ledger. Corrections go through the approved adjustment workflow.

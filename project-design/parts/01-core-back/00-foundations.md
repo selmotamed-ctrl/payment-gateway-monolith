@@ -277,7 +277,7 @@ TCP + TLS 1.3 handshake (client cert required)
 1. Generate certs.
 2. Set `DATABASE_URL`.
 3. Apply migrations.
-4. Seed (this also checks schema version 44).
+4. Seed (this also checks schema version 45).
 5. `bun run start`.
 6. Probe `/health` over mTLS with a client cert.
 

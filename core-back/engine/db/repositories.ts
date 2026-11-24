@@ -520,7 +520,27 @@ export class PrismaRepositories implements Repositories {
       return "PLATFORM_CLEARING";
     },
     createAttempt: async (tx, data) => {
-      const row = await model(tx, "paymentAttempt").create({ data }) as PaymentAttemptRow;
+      let walletId = (data as Any).walletId;
+      let walletGlAccountId = (data as Any).walletGlAccountId;
+      if (data.linkId && (!walletId || !walletGlAccountId)) {
+        try {
+          const link = await model(tx, "paymentLink").findUnique({ where: { id: data.linkId } }) as Any;
+          walletId = walletId ?? link?.walletId;
+          if (walletId) {
+            const wallet = await model(tx, "wallet").findUnique({ where: { id: walletId } }) as Any;
+            walletGlAccountId = walletGlAccountId ?? wallet?.glAccountId;
+          }
+        } catch {
+          // In-memory clients without the relations keep the historical null snapshot.
+        }
+      }
+      const row = await model(tx, "paymentAttempt").create({
+        data: {
+          ...data,
+          ...(walletId ? { walletId } : {}),
+          ...(walletGlAccountId ? { walletGlAccountId } : {}),
+        },
+      }) as PaymentAttemptRow;
       await enqueueOutboxEvent(tx as never, {
         topic: "attempt.transitioned",
         aggregateType: "PAYMENT_ATTEMPT",

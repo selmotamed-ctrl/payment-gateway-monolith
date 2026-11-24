@@ -1,6 +1,7 @@
 import { Router, type Request } from "express";
 import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
+import { resolveReportingCurrency } from "../../lib/reportingCurrency";
 import { client } from "../../prisma/client";
 import { requireAuthentication, principalOf, isStaffPrincipal } from "../middleware/authDoubleCheck";
 import { ApiError, parseOrThrow } from "../../lib/error";
@@ -1569,6 +1570,7 @@ const studioWalletRows = async (
 
 router.get("/merchant/studio/overview", async (request, response) => {
   const merchantId = resolveMerchantId(request);
+  const selectedCurrency = resolveReportingCurrency(request.query.currency);
   const merchant = await ensureSandboxMerchantEnvelope({
     merchantId,
     businessName: request.header("x-merchant-name"),
@@ -1576,17 +1578,23 @@ router.get("/merchant/studio/overview", async (request, response) => {
   });
   const now = new Date();
   const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const [wallets, applications, links, attempts, tokens, pendingCashouts, disputes, accounts, refs, recentPayments, syncAudits] = await Promise.all([
-    client.wallet.findMany({ where: { merchantId }, orderBy: { createdAt: "desc" } }),
-    client.application.findMany({ where: { merchantId }, select: { id: true } }),
-    client.paymentLink.findMany({ where: { application: { merchantId } }, select: { id: true } }),
-    client.paymentAttempt.findMany({
+  const [wallets, allWallets, currencyAggregates, applications, links, attempts, tokens, pendingCashouts, disputes, accounts, refs, recentPayments, syncAudits] = await Promise.all([
+    client.wallet.findMany({ where: { merchantId, currency: selectedCurrency }, orderBy: { createdAt: "desc" } }),
+    client.wallet.findMany({ where: { merchantId }, select: { id: true, currency: true, glAccountId: true } }),
+    client.paymentAttempt.groupBy({
+      by: ["currency"],
       where: { merchantId },
+      _sum: { totalChargedAmount: true, settledAmount: true, gatewayFeeAmount: true, platformCommissionAmount: true, netMerchantAmount: true },
+    }),
+    client.application.findMany({ where: { merchantId }, select: { id: true } }),
+    client.paymentLink.findMany({ where: { application: { merchantId }, wallet: { currency: selectedCurrency } }, select: { id: true } }),
+    client.paymentAttempt.findMany({
+      where: { merchantId, currency: selectedCurrency },
       select: { id: true, status: true, createdAt: true, totalChargedAmount: true, settledAmount: true, gatewayFeeAmount: true, platformCommissionAmount: true, netMerchantAmount: true },
     }),
     client.accessToken.count({ where: { merchantId, env: "SANDBOX", revokedAt: null } }),
-    client.cashoutRequest.count({ where: { merchantId, state: { in: ["PENDING", "PROCESSING"] } } }),
-    client.dispute.count({ where: { attempt: { merchantId }, status: { in: ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED"] } } }),
+    client.cashoutRequest.count({ where: { merchantId, wallet: { currency: selectedCurrency }, state: { in: ["PENDING", "PROCESSING"] } } }),
+    client.dispute.count({ where: { attempt: { merchantId, currency: selectedCurrency }, status: { in: ["OPENED", "EVIDENCE_REQUESTED", "EVIDENCE_SUBMITTED"] } } }),
     fakeRails.listAccounts({ merchantId }).catch(() => []),
     Promise.all([
       client.rail.count(),
@@ -1595,7 +1603,7 @@ router.get("/merchant/studio/overview", async (request, response) => {
       client.commissionProfile.count({ where: { merchantId: null, applicationId: null } }),
     ]),
     client.paymentAttempt.findMany({
-      where: { merchantId },
+      where: { merchantId, currency: selectedCurrency },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 8,
       include: { rail: { select: { code: true } }, link: { select: { key: true } } },
@@ -1603,6 +1611,23 @@ router.get("/merchant/studio/overview", async (request, response) => {
     client.sandboxSyncAudit.findMany({ where: { merchantId }, orderBy: { createdAt: "desc" }, take: 10 }),
   ]);
   const amounts = await walletAmounts(wallets);
+  const allAmounts = await walletAmounts(allWallets);
+  const allBalanceByWallet = new Map(allAmounts.map((row) => [row.walletId, row]));
+  const byCurrency = new Map<string, { currency: string; available: Prisma.Decimal; charged: Prisma.Decimal; settled: Prisma.Decimal; fees: Prisma.Decimal; commission: Prisma.Decimal; net: Prisma.Decimal }>();
+  for (const wallet of allWallets) {
+    const entry = byCurrency.get(wallet.currency) ?? { currency: wallet.currency, available: new Prisma.Decimal(0), charged: new Prisma.Decimal(0), settled: new Prisma.Decimal(0), fees: new Prisma.Decimal(0), commission: new Prisma.Decimal(0), net: new Prisma.Decimal(0) };
+    entry.available = entry.available.plus(allBalanceByWallet.get(wallet.id)?.availableBalance ?? 0);
+    byCurrency.set(wallet.currency, entry);
+  }
+  for (const row of currencyAggregates) {
+    const entry = byCurrency.get(row.currency) ?? { currency: row.currency, available: new Prisma.Decimal(0), charged: new Prisma.Decimal(0), settled: new Prisma.Decimal(0), fees: new Prisma.Decimal(0), commission: new Prisma.Decimal(0), net: new Prisma.Decimal(0) };
+    entry.charged = new Prisma.Decimal(row._sum.totalChargedAmount ?? 0);
+    entry.settled = new Prisma.Decimal(row._sum.settledAmount ?? 0);
+    entry.fees = new Prisma.Decimal(row._sum.gatewayFeeAmount ?? 0);
+    entry.commission = new Prisma.Decimal(row._sum.platformCommissionAmount ?? 0);
+    entry.net = new Prisma.Decimal(row._sum.netMerchantAmount ?? 0);
+    byCurrency.set(row.currency, entry);
+  }
   const balanceByWallet = new Map(amounts.map((row) => [row.walletId, row]));
   const sum = (values: unknown[]): Prisma.Decimal =>
     values.reduce<Prisma.Decimal>((total, value) => total.plus(new Prisma.Decimal(value as never)), new Prisma.Decimal(0));
@@ -1614,6 +1639,7 @@ router.get("/merchant/studio/overview", async (request, response) => {
   const [rails, gateways, routes, commissionProfiles] = refs;
   response.json({
     plane: "SANDBOX",
+    currency: selectedCurrency,
     merchantId,
     merchantName: merchant.tradeName,
     payoutBankDetails: merchant.payoutBankDetailsJson,
@@ -1629,6 +1655,15 @@ router.get("/merchant/studio/overview", async (request, response) => {
       activeTestTokens: tokens,
       fakeCustomerAccounts: Array.isArray(accounts) ? accounts.length : 0,
     },
+    byCurrency: [...byCurrency.values()].sort((a, b) => a.currency.localeCompare(b.currency)).map((entry) => ({
+      currency: entry.currency,
+      available: entry.available.toFixed(4),
+      charged: entry.charged.toFixed(4),
+      settled: entry.settled.toFixed(4),
+      fees: entry.fees.toFixed(4),
+      commission: entry.commission.toFixed(4),
+      net: entry.net.toFixed(4),
+    })),
     money: {
       available: sum(amounts.map((row) => row.availableBalance)).toFixed(4),
       checkpoint: sum(amounts.map((row) => row.checkpointBalance)).toFixed(4),
@@ -1789,9 +1824,12 @@ router.get("/merchant/studio/applications/:applicationId", async (request, respo
 
 router.get("/merchant/studio/links/summary", async (request, response) => {
   const merchantId = resolveMerchantId(request);
-  const groups = await client.paymentLink.groupBy({ by: ["state"], where: { application: { merchantId } }, _count: { _all: true } });
-  const aggregate = await client.paymentLink.aggregate({ where: { application: { merchantId } }, _sum: { amount: true, useCount: true, confirmedCount: true } });
-  response.json({ summary: { total: groups.reduce((sum, row) => sum + Number(row._count._all), 0), states: Object.fromEntries(groups.map((row) => [row.state, Number(row._count._all)])), amount: sandboxMoney(aggregate._sum.amount), uses: Number(aggregate._sum.useCount ?? 0), confirmed: Number(aggregate._sum.confirmedCount ?? 0) } });
+  const currency = resolveReportingCurrency(request.query.currency);
+  const where = { application: { merchantId }, wallet: { currency } };
+  const groups = await client.paymentLink.groupBy({ by: ["state"], where, _count: { _all: true } });
+  const aggregate = await client.paymentLink.aggregate({ where, _sum: { amount: true, useCount: true, confirmedCount: true } });
+  const currencyGroups = await client.paymentLink.groupBy({ by: ["currency"], where: { application: { merchantId } }, _count: { _all: true }, _sum: { amount: true } });
+  response.json({ currency, byCurrency: currencyGroups.map((row) => ({ currency: row.currency, count: row._count._all, amount: sandboxMoney(row._sum.amount) })), summary: { total: groups.reduce((sum, row) => sum + Number(row._count._all), 0), states: Object.fromEntries(groups.map((row) => [row.state, Number(row._count._all)])), amount: sandboxMoney(aggregate._sum.amount), uses: Number(aggregate._sum.useCount ?? 0), confirmed: Number(aggregate._sum.confirmedCount ?? 0) } });
 });
 
 router.get("/merchant/studio/links", async (request, response) => {
@@ -1826,11 +1864,17 @@ router.get("/merchant/studio/links/:linkId", async (request, response) => {
 
 router.get("/merchant/studio/payments/summary", async (request, response) => {
   const merchantId = resolveMerchantId(request);
-  const [groups, aggregate] = await Promise.all([
-    client.paymentAttempt.groupBy({ by: ["status"], where: { merchantId }, _count: { _all: true } }),
-    client.paymentAttempt.aggregate({ where: { merchantId }, _sum: { totalChargedAmount: true, settledAmount: true, gatewayFeeAmount: true, platformCommissionAmount: true, netMerchantAmount: true } }),
+  const currency = resolveReportingCurrency(request.query.currency);
+  const [groups, aggregate, currencyGroups] = await Promise.all([
+    client.paymentAttempt.groupBy({ by: ["status"], where: { merchantId, currency }, _count: { _all: true } }),
+    client.paymentAttempt.aggregate({ where: { merchantId, currency }, _sum: { totalChargedAmount: true, settledAmount: true, gatewayFeeAmount: true, platformCommissionAmount: true, netMerchantAmount: true } }),
+    client.paymentAttempt.groupBy({
+      by: ["currency"],
+      where: { merchantId },
+      _sum: { totalChargedAmount: true, settledAmount: true, gatewayFeeAmount: true, platformCommissionAmount: true, netMerchantAmount: true },
+    }),
   ]);
-  response.json({ summary: { total: groups.reduce((sum, row) => sum + Number(row._count._all), 0), status: Object.fromEntries(groups.map((row) => [row.status, Number(row._count._all)])), charged: sandboxMoney(aggregate._sum.totalChargedAmount), settled: sandboxMoney(aggregate._sum.settledAmount), fees: sandboxMoney(aggregate._sum.gatewayFeeAmount), commission: sandboxMoney(aggregate._sum.platformCommissionAmount), net: sandboxMoney(aggregate._sum.netMerchantAmount) } });
+  response.json({ currency, byCurrency: currencyGroups.map((row) => ({ currency: row.currency, charged: sandboxMoney(row._sum.totalChargedAmount), settled: sandboxMoney(row._sum.settledAmount), fees: sandboxMoney(row._sum.gatewayFeeAmount), commission: sandboxMoney(row._sum.platformCommissionAmount), net: sandboxMoney(row._sum.netMerchantAmount) })), summary: { total: groups.reduce((sum, row) => sum + Number(row._count._all), 0), status: Object.fromEntries(groups.map((row) => [row.status, Number(row._count._all)])), charged: sandboxMoney(aggregate._sum.totalChargedAmount), settled: sandboxMoney(aggregate._sum.settledAmount), fees: sandboxMoney(aggregate._sum.gatewayFeeAmount), commission: sandboxMoney(aggregate._sum.platformCommissionAmount), net: sandboxMoney(aggregate._sum.netMerchantAmount) } });
 });
 
 router.get("/merchant/studio/payments", async (request, response) => {

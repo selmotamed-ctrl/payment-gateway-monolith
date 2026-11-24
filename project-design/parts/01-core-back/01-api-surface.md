@@ -767,3 +767,7 @@ Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/c
 ## 20. Currency-aware aggregate responses (2026-11-24)
 
 Dashboard, merchant stats, finance profitability/liquidity, dispute/adjustment/cashout summaries and route caps accept an optional `currency` (default `BASE_CURRENCY`, normally LYD). Existing scalar monetary fields mean the selected currency; responses add `currency`, `byCurrency` where the endpoint supports a breakdown, and `mixedCurrency`. A mixed total is never labelled as a single currency. Reconciliation source/upload accepts `currency`, `autoPost`, and optional source `env`/`credentialSetId`; upload metadata remains limited to checklist, period, currency and autoPost.
+
+### 20.1 Summary and sandbox currency breakdowns (2026-11-24)
+
+Dispute, adjustment and cash-out summaries return a `byCurrency` array in addition to selected-currency scalars. Sandbox overview, payments summary and links summary accept `currency` and return `byCurrency`; sandbox money is never a cross-currency scalar.

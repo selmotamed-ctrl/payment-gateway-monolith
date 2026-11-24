@@ -220,8 +220,10 @@ export const buildCanonicalReportContext = async (
   const mapRows = (value: unknown): Array<Record<string, unknown>> =>
     Object.entries(asRecord(value)).map(([key, entry]) => {
       const row = asRecord(entry);
+      const [rawKey, keyCurrency] = key.split("::");
       return {
-        key,
+        key: rawKey ?? key,
+        currency: row.currency ?? keyCurrency ?? null,
         count: Number(row.count ?? 0),
         amount: row.amount !== undefined ? money(row.amount) : null,
       };

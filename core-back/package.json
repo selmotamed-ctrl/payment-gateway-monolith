@@ -34,7 +34,8 @@
     "backfill-operator-cases": "bun ./scripts/backfillOperatorCases.ts",
     "seed-operator-case-showcase": "bun ./scripts/seedOperatorCaseShowcase.ts",
     "legacy-evidence:check": "bun run scripts/checkLegacyEvidence.ts",
-    "schema:sql-only-check": "bun run scripts/checkSqlOnlyObjects.ts"
+    "schema:sql-only-check": "bun run scripts/checkSqlOnlyObjects.ts",
+    "currency:mismatch-report": "bun run scripts/auditCurrencyMismatches.ts"
   },
   "peerDependencies": {
     "typescript": "^7"

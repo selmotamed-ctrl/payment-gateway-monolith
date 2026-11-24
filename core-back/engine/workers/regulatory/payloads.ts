@@ -17,10 +17,12 @@ export interface PeriodRange {
 const rows = async (db: Any, sql: string, ...values: unknown[]): Promise<Array<Record<string, any>>> =>
   toCamelRows<Record<string, any>>(await db.$queryRawUnsafe(sql, ...values));
 
-const asCounts = (result: Array<Record<string, any>>, key: string): Record<string, { count: number; amount?: string }> => {
-  const out: Record<string, { count: number; amount?: string }> = {};
+const asCounts = (result: Array<Record<string, any>>, key: string): Record<string, { count: number; amount?: string; currency?: string | null }> => {
+  const out: Record<string, { count: number; amount?: string; currency?: string | null }> = {};
   for (const row of result) {
-    out[String(row[key])] = { count: Number(row.n), ...(row.amount !== undefined ? { amount: String(row.amount) } : {}) };
+    const currency = row.currency ? String(row.currency).trim() : null;
+    const objectKey = currency ? `${String(row[key])}::${currency}` : String(row[key]);
+    out[objectKey] = { count: Number(row.n), ...(row.amount !== undefined ? { amount: String(row.amount) } : {}), ...(currency ? { currency } : {}) };
   }
   return out;
 };
@@ -73,19 +75,24 @@ export const buildMonthlyPaymentReturn = async (db: Any, range: PeriodRange): Pr
   });
 
   const refunds = asCounts(
-    await rows(db, `SELECT state::text AS state, count(*)::int AS n, coalesce(sum(amount), 0)::text AS amount FROM adjustments WHERE type = 'REFUND' AND created_at >= $1 AND created_at < $2 GROUP BY state`, range.start, range.end),
+    await rows(db, `SELECT ca.state::text AS state, ga.currency, count(*)::int AS n, coalesce(sum(ca.amount), 0)::text AS amount
+     FROM adjustments ca LEFT JOIN gl_accounts ga ON ga.id = ca.target_gl_account_id
+     WHERE ca.type = 'REFUND' AND ca.created_at >= $1 AND ca.created_at < $2
+     GROUP BY ca.state, ga.currency`, range.start, range.end),
     "state",
   );
   const disputesOpened = asCounts(
-    await rows(db, `SELECT status::text AS status, count(*)::int AS n, coalesce(sum(amount), 0)::text AS amount FROM disputes WHERE opened_at >= $1 AND opened_at < $2 GROUP BY status`, range.start, range.end),
+    await rows(db, `SELECT d.status::text AS status, d.currency, count(*)::int AS n, coalesce(sum(d.amount), 0)::text AS amount FROM disputes d WHERE d.opened_at >= $1 AND d.opened_at < $2 GROUP BY d.status, d.currency`, range.start, range.end),
     "status",
   );
   const disputesDecided = asCounts(
-    await rows(db, `SELECT status::text AS status, count(*)::int AS n, coalesce(sum(amount), 0)::text AS amount FROM disputes WHERE outcome_at >= $1 AND outcome_at < $2 GROUP BY status`, range.start, range.end),
+    await rows(db, `SELECT d.status::text AS status, d.currency, count(*)::int AS n, coalesce(sum(d.amount), 0)::text AS amount FROM disputes d WHERE d.outcome_at >= $1 AND d.outcome_at < $2 GROUP BY d.status, d.currency`, range.start, range.end),
     "status",
   );
   const cashouts = asCounts(
-    await rows(db, `SELECT state::text AS state, count(*)::int AS n, coalesce(sum(amount), 0)::text AS amount FROM cashout_requests WHERE created_at >= $1 AND created_at < $2 GROUP BY state`, range.start, range.end),
+    await rows(db, `SELECT c.state::text AS state, w.currency, count(*)::int AS n, coalesce(sum(c.amount), 0)::text AS amount
+     FROM cashout_requests c JOIN wallets w ON w.id = c.wallet_id
+     WHERE c.created_at >= $1 AND c.created_at < $2 GROUP BY c.state, w.currency`, range.start, range.end),
     "state",
   );
   const merchantsNow = asCounts(await rows(db, `SELECT status::text AS status, count(*)::int AS n FROM merchants GROUP BY status`), "status");

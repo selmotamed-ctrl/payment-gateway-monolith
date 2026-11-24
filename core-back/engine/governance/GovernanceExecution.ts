@@ -2867,7 +2867,9 @@ export async function executeAdjustment(
   const targetAccount = await modelOf(tx, "glAccount").findUnique({ where: { id: String(adjustment.targetGlAccountId) } });
   const accounts = targetAccount?.accountType === "MERCHANT_WALLET"
     ? { MERCHANT_WALLET: String(adjustment.targetGlAccountId) }
-    : undefined;
+    : effectiveAttempt?.walletGlAccountId
+      ? { MERCHANT_WALLET: String(effectiveAttempt.walletGlAccountId) }
+      : undefined;
 
   let journal: JournalTemplate;
   let templateName: string;

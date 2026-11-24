@@ -20,6 +20,8 @@ export type DynamicAttempt = AdapterAttempt & {
   railId?: string;
   linkId?: string;
   credentialSetId?: string;
+  walletId?: string;
+  walletGlAccountId?: string;
   commissionProfileId?: string;
   ownershipMode?: "INTERNAL" | "PLATFORM_CLEARING" | "MERCHANT_DIRECT";
   feeBearer?: "MERCHANT_ABSORBS" | "PAYER_SURCHARGE" | "SPLIT";
@@ -1457,6 +1459,7 @@ export class DynamicRailEngine {
       credentialSetId: attempt.credentialSetId,
       env: attempt.env,
       currency: attempt.currency,
+      ...(attempt.walletGlAccountId ? { accounts: { MERCHANT_WALLET: attempt.walletGlAccountId } } : {}),
     };
   }
 
