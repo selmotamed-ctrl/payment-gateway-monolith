@@ -3,7 +3,7 @@ id: core.engine
 title: Core Engine
 status: partial
 confidence: high
-last_verified: 2026-11-13
+last_verified: 2026-11-25
 verified_against: 5a24f6f+working-tree
 code:
   - core-back/lib/commerceStatus.ts
@@ -705,3 +705,8 @@ OD-10 and `resolveEnvironment(merchantStatus)` are removed. Checkout and merchan
 - **Link currency integrity (2026-11-24).** A new payment link is rejected with `LINK_WALLET_CURRENCY_MISMATCH` when its currency differs from the settlement wallet currency. Existing links are not rewritten; the attempt still resolves the wallet by merchant+currency, so a historical mismatch is a residual.
 
 - **Attempt wallet snapshot (2026-11-24).** Each attempt records the link wallet and its GL account; refunds/chargebacks use that snapshot. New links reject a wallet/currency mismatch.
+
+## Accuracy remediation: OTP rendering and read-only inquiry (2026-11-25)
+
+- The checkout merges the gateway-specific OTP fields (`max_attempts`, `otp_length`, `resend_cooldown_seconds`, `expires_at`) from the fallback action when the declarative flow renders only `actionType`. A seeded OTP flow no longer shows hardcoded 3/60 limits instead of the gateway setting.
+- `StepExecutor` refuses a `MOVES_MONEY` step when the execution phase is `VERIFY` with `VERIFY_MONEY_STEP_FORBIDDEN`; the spec validator rejects such flows with the same code. Inquiry remains a status check even for a stored pre-validator flow.

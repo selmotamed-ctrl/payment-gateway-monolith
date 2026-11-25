@@ -446,3 +446,9 @@ A separate "Sandbox Studio (Testing & Training)" section adds `/sandbox/overview
 A "Sandbox Live Mirror" section reuses the Live pages under `/sandbox/mirror/*` (cash-outs, disputes, POS, credentials, team, webhooks, tokens, statements, reports). The Axios interceptor rewrites Live API paths to `/sandbox/mirror/*` and the router aliases Live navigation into the mirror; Exit sandbox removes `?live=1` and returns to Live. Wallet detail shows the sharded ledger, balance controller, pending cash-outs and a real sandbox cash-out; payment detail shows charged/settled/fee/commission/net, refundable amount, refund, dispute simulation/resolution, checkout inspector secrets and journal lines.
 
 - **Dashboard currency (2026-11-24).** The overview accepts `?currency=` and renders volume, commission, net and wallet totals for the selected currency; `byCurrency` carries the per-currency breakdown. Wallet statements are filtered by the link wallet as well as currency.
+
+## Accuracy remediation: applications, links and onboarding (2026-11-25)
+
+- A Live application created by an already-`ACTIVE` merchant is created `ACTIVE`. Existing `PENDING` applications are activated when the join request is approved. Before this, every new Live application stayed `PENDING` with no activation route.
+- `POST /links` rejects `409 LINK_WALLET_MUST_MATCH_APPLICATION` when the requested wallet differs from the application's assigned wallet; the link always settles to the application wallet.
+- The onboarding profile `PUT` refuses sensitive legal/tax/registration edits after activation (`MERCHANT_PROFILE_REQUIRES_APPROVAL`) and while a join request is under review (`JOIN_REQUEST_UNDER_REVIEW`). A new merchant withdraw route returns the join request to `DRAFT`; the onboarding page exposes **Withdraw application** and the normal submit flow can run again.

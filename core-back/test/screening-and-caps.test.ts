@@ -154,7 +154,7 @@ describe("L1 - the onboarding screening", () => {
     // blocked.
     expect(state.joinRequests[0]?.screeningId).toBe(outcome.screeningId);
     expect(state.joinRequests[0]?.status).toBe("REJECTED");
-    expect(state.joinRequests[0]?.decisionReasonCode).toBe("AML_CONFIRMED_MATCH");
+    expect(state.joinRequests[0]?.decisionReasonCode).toBe("POLICY");
     expect(merchant.status).toBe("REJECTED");
   });
 
@@ -295,7 +295,7 @@ describe("L2 - the periodic screening worker", () => {
     expect(state.cases[0]?.triggerReason).toBe("SCREENING_CONFIRMED_MATCH:SANCTIONS");
     expect(state.cases[0]?.subjectId).toBe("merchant-1");
     expect(merchant.status).toBe("SUSPENDED");
-    expect(merchant.suspensionReasonCode).toBe("AML_CONFIRMED_MATCH");
+    expect(merchant.suspensionReasonCode).toBe("AML");
     expect(state.auditLogs.some((entry) => entry.action === "AML_CASE_OPENED")).toBe(true);
   });
 

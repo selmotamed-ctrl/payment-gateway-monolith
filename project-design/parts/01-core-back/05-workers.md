@@ -3,7 +3,7 @@ id: core.workers
 title: Background Workers and Outboxes
 status: partial
 confidence: high
-last_verified: 2026-11-16
+last_verified: 2026-11-25
 verified_against: 53afea5+working-tree
 code:
   - deploy/provisioners/auditAndLogDbProvisioner.ts
@@ -558,3 +558,8 @@ See `core.route-health`.
 ### 20.1 PSP-M currency grouping and historical audit (2026-11-24)
 
 PSP-M refunds, disputes opened/decided and cash-outs are grouped by currency and the XLSX sheets carry a Currency column. `bun run currency:mismatch-report` is read-only: it lists settlement/fee-variance/cash-out journal entries whose GL account currencies differ from the business object and never edits the append-only ledger. Corrections go through the approved adjustment workflow.
+
+## 21. Accuracy remediation: periodic screening and settlement (2026-11-25)
+
+- `PeriodicScreeningWorker` continues to open the confirmed-match AML case once and suspend an active merchant. The merchant-visible `suspensionReasonCode` is now `AML` (inside the closed code set and the exact-match redaction rule); the detailed `SCREENING_CONFIRMED_MATCH` trigger stays in the AML case and the `MERCHANT_SUSPENDED` audit row.
+- Settlement sweeps now run from `BackgroundJobHandlers` only for attempts that used `GATEWAY_CLEARING` (fee accrual or payer surcharge/split). See `core.ledger` section 18.

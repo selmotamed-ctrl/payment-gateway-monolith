@@ -3,7 +3,7 @@ id: core.object-storage
 title: Shared Object & Asset Storage Engine
 status: implemented
 confidence: high
-last_verified: 2026-11-24
+last_verified: 2026-11-25
 verified_against: working-tree
 code:
   - core-back/lib/objectStorageSdk/**
@@ -296,3 +296,7 @@ Implemented end to end. Deviations recorded:
   owner for merchant bundles, and discard a content-addressed loser.
 - Added indexes for the object explorer and access-log filters, append-only
   access logs, immutable authorization/tenant columns and schema version 37.
+
+## Accuracy remediation: GC, locks and retention (2026-11-25)
+
+`runGcBatch` re-reads the candidate under a `SELECT ... FOR UPDATE` row lock, checks active locks, legal hold, retention and staging/GC eligibility again, and only then writes `gcClaimToken`. `bindInTx` also locks the object row before checking the claim, so a lock cannot be inserted after the GC re-check and before the blob moves. `placeLegalHold` locks the row and refuses `409 STORAGE_OBJECT_GC_IN_PROGRESS` when a claim is active. The blob still moves to `.trash` before the row becomes `PURGED`; the trash sweep keeps it for seven days, so the row status and the physical trash window are separate concepts. The Guide now documents both.

@@ -3,7 +3,7 @@ id: core.governance
 title: Governance and Compliance
 status: partial
 confidence: high
-last_verified: 2026-11-24
+last_verified: 2026-11-25
 verified_against: 53afea5+working-tree
 code:
   - core-back/engine/governance/ApprovalService.ts
@@ -506,3 +506,14 @@ The Reporting Studio now covers the full authoring and filing lane in addition t
 ## 19. Multi-currency ceilings and aggregate rules (2026-11-24)
 
 `commissionReceivableCeiling` and `negativeBalanceCeiling` are evaluated per posting currency; a scalar never mixes LYD/USD/EUR. The admission guard passes the link currency, `merchantOpenCashoutTotal` is wallet-currency scoped, the receivable SQL filters all three branches (attempt, adjustment, merchant-level netting), and the netting worker evaluates each currency bucket separately with per-currency aged cases and notices. The generic approval dispatcher now enforces domain checker roles; `approval:check` alone is insufficient.
+
+## 20. Accuracy remediation: AML and approval confidentiality (2026-11-25)
+
+- **Manual `TRUE_MATCH` disposition.** `POST /aml/matches/:id/disposition` now requires a written rationale, allows suppression only for a `FALSE_POSITIVE` with a future expiry, and on `TRUE_MATCH` opens a confidential AML case, blocks onboarding readiness, marks a beneficial owner `CONFIRMED_MATCH`, and suspends an active merchant with the closed `AML` reason code. The operation is idempotent per screening. The disposition response returns the `amlCaseId`.
+- **Screening outcome confidentiality.** Onboarding confirmed matches now store `decisionReasonCode: "POLICY"`. The merchant-facing join-request view maps legacy screening-related codes (`AML_CONFIRMED_MATCH`, `SCREENING_CONCERN`, sanctions/PEP/watchlist/adverse-media) to `POLICY` at read time. Periodic screening suspends with `AML`, keeping the detailed trigger in the AML case and audit row.
+- **Approval detail.** `GET /approvals/:id` now requires the confidential AML authority when the subject is `AML_CASE`, so Finance cannot read AML case metadata through `approval:read`. The helper is `approvalSubjectRequiresConfidentialAmlAccess`.
+- **Regulatory report gate.** `submitRegulatoryReport` rejects a missing reporting rule and requires either a `CONFIRMED` rule or at least one required output format with `CONFIRMED` schemas. A report with no rule and no outputs can no longer be filed.
+- **Backup policy checker.** `executeBackupPolicyApproval` enforces the `SECURITY_ADMIN`/`FINANCE` domain role in addition to `approval:check`; the seeded `SECURITY_ADMIN` now has `approval:read/check/write`.
+- **Cash-out AML stop.** `executeCashout` refuses with `409 CASHOUT_AML_HOLD` while a merchant AML case is `OPEN`, `IN_REVIEW`, `PENDING_CHECKER`, `FROZEN` or `ESCALATED_STR`.
+- **AML case reads.** `GET /aml/cases/:id` writes an `AML_CASE_VIEWED` audit row.
+- **Default roles.** `COMPLIANCE` now has merchant/KYB read-write, `OPERATOR` has merchant/KYB read and KYB write, and `MLRO` has merchant/KYB read, matching the documented onboarding workflows.

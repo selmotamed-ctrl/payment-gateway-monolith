@@ -3,7 +3,7 @@ id: core.ledger
 title: Double-Entry Ledger
 status: partial
 confidence: high
-last_verified: 2026-11-09
+last_verified: 2026-11-25
 verified_against: working-tree
 code:
   - core-back/engine/ledger/LedgerPoster.ts
@@ -492,3 +492,11 @@ Every currency-scoped account resolution requires a currency. `LedgerPostContext
 ### 17.1 Attempt wallet snapshot (2026-11-24)
 
 `payment_attempts.wallet_id` and `wallet_gl_account_id` snapshot the link settlement wallet at creation and are backfilled from the link. Confirmation, refund and chargeback wallet selection use the snapshot when present, so a later wallet of the same currency cannot silently receive the booking. New links reject `LINK_WALLET_CURRENCY_MISMATCH`; historical links are not rewritten.
+
+## 18. Accuracy remediation: refunds, disputes and settlement (2026-11-25)
+
+- **Refund ceiling.** `claimRefundAdjustment` now checks the merchant's `negativeBalanceCeiling` before the gateway refund call. A refund that would take the wallet below the ceiling is refused with `409 REFUND_NEGATIVE_BALANCE_CEILING_EXCEEDED`; nothing is sent to the partner and no ledger entry is posted.
+- **Dispute intake.** `openDisputeWithDraftedAdjustment` sets the attempt to `DISPUTED` for settled statuses. The intake reserve is posted only when it stays within the ceiling; otherwise a P1 `HELD` operator case is opened, `escrowed` stays false and the reservation is not booked. The later outcome path still checks the ceiling.
+- **Settlement sweeps.** `postSettlementSweeps` now sweeps only attempts whose confirmation used `GATEWAY_CLEARING`: payer-surcharge/split attempts and attempts whose route cost model has `accrue_fee_at_confirm=true`. Statement-only, merchant-direct, internal and fee-at-source attempts are skipped, because they never created a clearing balance. This also stops statement rows with no local attempt from being swept.
+- **Correction adjustments.** `CORRECTION` with a `MERCHANT_WALLET` target posts a deliberate treasury-to-wallet credit keyed by the adjustment. The legacy `GATEWAY_FEE_ACCRUAL` target still posts the fee true-up. Any other target is refused with `CORRECTION_TARGET_UNSUPPORTED`.
+- **Reconciliation label semantics.** The stored enum names are legacy and counter-intuitive: `MISSING_AT_GATEWAY` is a statement line with no local attempt, and `MISSING_LOCALLY` is a local attempt absent from the statement. The code and tests keep those values; the Guide now documents the real meaning instead of reversing it.

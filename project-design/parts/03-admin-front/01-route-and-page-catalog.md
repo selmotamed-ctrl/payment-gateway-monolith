@@ -3,7 +3,7 @@ id: admin-ui.routes
 title: Admin Route and Page Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-23
+last_verified: 2026-11-25
 verified_against: 53afea5+working-tree
 code:
   - admin-front/src/pages/sandbox/**
@@ -379,3 +379,10 @@ The Dashboard Route health card shows forced and conflict counts. See
 - **Guide** adds a reading-progress bar, copy-link actions, version-aware read counts and edge-case deep-link scrolling.
 
 - **Currency selector (2026-11-24).** Dashboard and merchant 360 monetary cards follow the selected reporting currency; the dashboard sends `currency` to `/stats/overview` and `/stats/export`, and merchant 360 uses the stats response currency instead of the first wallet.
+
+## Accuracy remediation: dashboard, adjustments and jobs (2026-11-25)
+
+- The Dashboard now renders the fifth metric tile **Webhook Inbox Lag** from `webhookInboxLagSeconds` (target under 30 s). The actual metric strip is Gross Volume, Success Rate, Open Action Queues, Unknown Backlog and Webhook Inbox Lag; the header pill is `Operational`.
+- The Adjustments page consumes `?attemptId=` and `?merchantId=` and pre-fills the create form, so **Create refund/adjustment** from the Transaction drawer no longer opens an empty page.
+- The Jobs & Outbox type filter includes `REFUND_INQUIRY`.
+- The Journal Entries unbalanced tile includes entries with zero lines, not only entries whose lines do not sum to zero.

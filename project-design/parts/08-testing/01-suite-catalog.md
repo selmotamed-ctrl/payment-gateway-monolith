@@ -3,7 +3,7 @@ id: testing.suites
 title: Test Suite Catalog
 status: partial
 confidence: high
-last_verified: 2026-11-24
+last_verified: 2026-11-25
 verified_against: 53afea5+working-tree
 code:
   - core-back/test/sandboxPlane.test.ts
@@ -617,3 +617,10 @@ The full core suite runs against PostgreSQL 18 + Redis (25,316 tests, 0 failures
 - `core-back/test/remediation-high.test.ts` now covers a USD settlement sweep, the USD account selection and `autoPost=false` suppressing the sweep.
 - `core-back/test/governance-execution.test.ts` covers per-currency commission-receivable filtering and domain checker roles.
 - `core-back/test/automation/commission-netting.test.ts` asserts per-currency aged cases.
+
+## Accuracy remediation tests (2026-11-25)
+
+- `core-back/test/approval-queue.test.ts` covers `approvalSubjectRequiresConfidentialAmlAccess` (AML_CASE only, aliases and null).
+- Existing targeted suites re-run for the changed paths: `governance-execution`, `approval-queue`, `onboarding-four-eyes`, `phase4-onboarding-aml-disputes-recon`, `reconciliation-follow-up`, `spec-validator`, `engine/step-executor`, `callback-inbound-handler`, `security-regressions/h8-webhook`, `refund-and-aml-guards`, `backup-admin`, `objectStorageOrphanSweepGuard`, `objectStorage`.
+- `merchant-back/test/core-forwarding.test.ts` covers the new `/onboarding/join-request/withdraw` forwarding.
+- The Guide/Academy extractor drift tests must be re-run after the content regeneration; live DB/Playwright runs remain environment-dependent.

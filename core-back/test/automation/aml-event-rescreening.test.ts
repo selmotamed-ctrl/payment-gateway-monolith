@@ -81,7 +81,7 @@ describeDb("list-update re-screening", () => {
     expect((await screenings(innocent.merchantId, "LIST_UPDATE"))[0]!.result).toBe("CLEAR");
     const merchant = await client.merchant.findUniqueOrThrow({ where: { id: listed.merchantId } });
     expect(merchant.status).toBe("SUSPENDED");
-    expect(merchant.suspensionReasonCode).toBe("AML_CONFIRMED_MATCH");
+    expect(merchant.suspensionReasonCode).toBe("AML");
     expect(await client.amlCase.count({ where: { subjectId: listed.merchantId, triggerReason: { startsWith: "SCREENING_CONFIRMED_MATCH" } } })).toBe(1);
     expect((await client.merchant.findUniqueOrThrow({ where: { id: innocent.merchantId } })).status).toBe("ACTIVE");
     // tipping-off: nothing reaches the merchant
